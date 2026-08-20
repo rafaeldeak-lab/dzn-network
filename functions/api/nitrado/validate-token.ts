@@ -9,6 +9,7 @@ import {
 } from "../../_lib/nitrado";
 import {
   ensureDraftLinkedServer,
+  LinkedServerAllowanceExceededError,
   normalizeTags,
   saveLinkedServerNitradoService,
   storePendingNitradoToken,
@@ -78,6 +79,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     await storePendingNitradoToken(env, user.id, linkedServerId, token);
     return json({ tokenValid: true, linkedServerId });
   } catch (error) {
+    if (error instanceof LinkedServerAllowanceExceededError) {
+      return json({ error: error.message }, { status: 402 });
+    }
     if (error instanceof NitradoServiceLookupError) {
       if (error.code === "invalid_token") return json({ error: "Invalid token", tokenValid: false }, { status: 400 });
       if (error.code === "service_not_found") return json({ error: "Service ID not found" }, { status: 404 });

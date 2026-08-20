@@ -1,76 +1,52 @@
-# DZN Owner Console Preview Workflow Size Handoff
+# DZN Billing Phase 1 Handoff
 
-## Root Cause
+## Completed Micro-Slice
 
-GitHub Support confirmed the `DZN Owner Console Preview` workflow was failing before job creation because `.github/workflows/dzn-owner-console-preview.yml` exceeded GitHub's 500 KB workflow file size limit on the dispatched branch/ref.
+Linked-server allowance reservation lifecycle across Nitrado validation, onboarding save, and service attachment.
 
-The default branch copy was not the failing version. The oversized workflow was confirmed on `feature/event-platform-performance-foundation`, which tracks `origin/feature/event-platform-performance-foundation`.
+## Implementation
 
-## Refactor
-
-- Reduced `.github/workflows/dzn-owner-console-preview.yml` from `515,947` bytes to `16,367` bytes.
-- Reduction: `96.83%`.
-- Extracted all 31 inline `run: |` script blocks into `scripts/github-actions/dzn-owner-console-preview/*.sh`.
-- Kept workflow dispatch inputs, permissions, job env, secrets/vars references, step ordering, `if:` expressions, artifact upload, preview deploy, and safety guards intact.
-- Updated workflow tests so existing assertions expand the extracted scripts before checking behavior.
+- Added additive reservation schema in `migrations/0057_billing_phase_1_integrity.sql`.
+- Added matching runtime schema helpers in `functions/_lib/onboarding.ts`:
+  - `linked_server_allowance_reservations` table creation.
+  - Active reservation expiry.
+  - Reservation acquisition with plan-aware allowance checks.
+  - Idempotent completion and release.
+  - Reservation-aware linked-server counting.
+- Updated Nitrado validation draft creation to reserve an allowance before creating/updating the pending draft and release on draft write failure.
+- Updated direct service attachment to complete the reservation after the linked-server service write succeeds, or release it on attachment failure / duplicate existing-service attachment.
+- Updated token storage failure handling to release the linked draft reservation when the Nitrado token write fails.
+- Updated onboarding save to reserve before new linked-server writes, complete after all required onboarding writes succeed, and release on failed/aborted write paths.
+- Added a narrow Nitrado validation 402 response for `LinkedServerAllowanceExceededError`.
+- Added `scripts/test-billing-integrity.ts` with in-memory SQLite/D1 coverage for active, expired, completed, released, duplicate/idempotent, plan-limit, validation, service attachment, and failed save paths.
 
 ## Validation
 
-- Lossless reconstruction check: passed. Re-expanding the extracted scripts matched the original workflow byte size and SHA-256 exactly.
-- Workflow expression check: passed. All 54 `${{ ... }}` expression lines match the original workflow.
-- YAML parse check with `js-yaml`: passed.
-- Extracted script path check: passed. All 31 workflow script references exist with exact case-sensitive spelling.
-- Line ending check: passed. Extracted scripts use LF.
-- Executable permission check: passed. All 31 extracted scripts are invoked with `bash -e <script>`, so no executable bit is required.
-- Shell syntax check with Git Bash `bash -n`: passed for all 31 scripts.
-- Embedded Node heredoc syntax check with `node --check`: passed for 34 `NODE` heredocs.
-- `npm run test:github-workflows`: passed.
-- `npm run test:performance-foundation`: passed.
-- `npm run lint`: passed with 12 existing warnings and 0 errors.
-- `npx tsc --noEmit --pretty false`: failed only on the known untouched `functions/api/onboarding/test.ts` `AdmImportJobProgressResult` property errors (`adm_file`, `id`, `line_start`, `line_end`).
-- Workflow-size staged `git diff --check`: passed.
-- Repository-wide `git diff --check`: passed on the final check after dispatch verification documentation.
+- `npx tsx scripts/test-billing-integrity.ts`: passed.
+- `npm run test:billing-plans`: passed.
+- `npm run lint`: passed with 12 existing warnings, 0 errors.
+- `npm run build`: passed.
+- `git diff --check`: passed.
+- `npx tsc --noEmit --pretty false`: failed only on pre-existing `functions/api/onboarding/test.ts` `AdmImportJobProgressResult` property errors (`adm_file`, `id`, `line_start`, `line_end`).
 
-## Remote Verification
+## Verified Behaviors
 
-Implementation commit: `d5501dde1501c70d6ccb93dca8942876892f0869`.
+- Runtime helper SQL and additive migration SQL agree.
+- Active unexpired reservations count toward allowance.
+- Expired, completed, and released reservations do not count.
+- Active reservations attached to already-committed linked-server rows do not double-count.
+- Reservation completion happens after the linked-server write succeeds.
+- Failed draft, token, service-attachment, and onboarding-save paths release the active reservation.
+- Expiry, completion, and release are idempotent.
+- Free, Starter, Pro, Premium, legacy Network, legacy Partner, and inactive paid statuses preserve expected allowance behavior.
+- The reservation lifecycle does not delete or reset existing player/profile/event/session/subscription data and does not touch production services, credentials, deployments, or live databases.
 
-Pushed branch: `origin/feature/event-platform-performance-foundation`.
+## Remaining Risks
 
-Remote verification after push:
+- `getOwnerBillingStatus` still uses its existing direct linked-server count and was not moved to the reservation-aware helper in this slice.
+- Existing duplicate-service behavior in `saveLinkedServerNitradoService` still contains the pre-existing draft cleanup path; this slice only wrapped reservation finalization around it.
+- The explicit `tsc --noEmit` failure remains outside this slice in `functions/api/onboarding/test.ts`.
 
-- Remote branch head after implementation push: `d5501dde1501c70d6ccb93dca8942876892f0869`.
-- Remote workflow size: `16,367` bytes.
-- Remote workflow SHA-256 matched the local reduced workflow.
-- Remote workflow is below GitHub's 500 KB workflow-file-size limit.
+## Next Incomplete Micro-Slice
 
-## Dispatch Verification
-
-- Dispatch method: GitHub REST API workflow-dispatch endpoint using the local git credential helper. The local `gh` CLI was not installed and `GH_TOKEN`/`GITHUB_TOKEN` were not present.
-- Workflow: `.github/workflows/dzn-owner-console-preview.yml`.
-- Ref: `feature/event-platform-performance-foundation`.
-- Inputs:
-  - `mode=event-platform-performance-preview`
-  - `confirm_preview_only=PREVIEW_ONLY`
-  - `preview_db_name_to_delete=`
-  - `cleanup_action=dry-run`
-  - `reviewed_preview_db_id_mask=`
-  - `confirm_preview_db_cleanup=`
-  - `rebind_action=dry-run`
-  - `confirm_preview_d1_rebind=`
-  - `repair_action=dry-run`
-  - `confirm_rebound_discord_preview_repair=`
-  - `confirm_existing_creator_governance_preview=`
-  - `confirm_event_platform_performance_preview=APPROVE_EVENT_PLATFORM_PERFORMANCE_PREVIEW`
-- Run ID: `32367531730`.
-- Run URL: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32367531730`.
-- Event: `workflow_dispatch`.
-- Branch: `feature/event-platform-performance-foundation`.
-- Head SHA: `d5501dde1501c70d6ccb93dca8942876892f0869`.
-- Created at: `2026-08-20T12:11:11Z`.
-- Job created: yes, `owner-console-preview` job ID `96420273448`.
-- Final run conclusion: `success`.
-- Artifact uploaded: `dzn-event-platform-performance-preview`, artifact ID `9405960687`, size `25,675` bytes.
-- Failed job/step: none.
-- Production deployment: none. The run used the guarded non-production Phase 2A preview path and deployed only the preview Pages project.
-- Manual action remaining for the workflow-size issue: none.
+Align billing status/dashboard allowance reporting with the reservation-aware count helper, without broad refactors to auth, Stripe webhook processing, Nitrado token handling, or linked-server ownership semantics.

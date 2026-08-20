@@ -4,12 +4,15 @@ import { json, methodNotAllowed, readJson } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { fetchMockNitradoServices, fetchNitradoServices } from "../../_lib/nitrado";
 import {
-  countLinkedServersForUser,
+  completeLinkedServerAllowanceReservation,
   findService,
-  getServerLinkLimitForUser,
+  getActiveLinkedServerAllowanceReservation,
   getLatestNitradoToken,
   linkLatestNitradoConnection,
+  linkedServerAllowanceLimitMessage,
   normalizeTags,
+  releaseLinkedServerAllowanceReservation,
+  reserveLinkedServerAllowance,
   uniquePublicSlug,
   validateServerType,
 } from "../../_lib/onboarding";
@@ -90,180 +93,221 @@ export const onRequest: PagesFunction = async ({ request, env, waitUntil }) => {
     )
     .bind(service.id)
     .first<{ id: string }>();
-  const existingDraft = existingSameService
-    ? null
-    : await db
-        .prepare(
-          `SELECT id
-           FROM linked_servers
-           WHERE user_id = ?
-             AND lower(COALESCE(status, 'pending')) = 'pending'
-             AND (nitrado_service_id IS NULL OR nitrado_service_id = '')
-           ORDER BY updated_at DESC, id DESC
-           LIMIT 1`,
-        )
-        .bind(userId)
-        .first<{ id: string }>();
+  const reusableDraft = await db
+    .prepare(
+      `SELECT id
+       FROM linked_servers
+       WHERE user_id = ?
+         AND lower(COALESCE(status, 'pending')) = 'pending'
+         AND (nitrado_service_id IS NULL OR nitrado_service_id = '')
+       ORDER BY updated_at DESC, id DESC
+       LIMIT 1`,
+    )
+    .bind(userId)
+    .first<{ id: string }>();
+  const existingDraft = existingSameService ? null : reusableDraft;
 
   let linkedServerId: string;
   let createdNewLinkedServer = false;
-  if (existingSameService || existingDraft) {
-    linkedServerId = (existingSameService ?? existingDraft)?.id ?? "";
-    const slug = await uniquePublicSlug(env, service.name, linkedServerId);
-    await db
-      .prepare(
-        `UPDATE linked_servers SET
-          user_id = ?,
-          guild_id = ?,
-          discord_guild_id = ?,
-          nitrado_service_id = ?,
-          nitrado_service_name = ?,
-          server_name = ?,
-          server_type = ?,
-          server_category = COALESCE(?, server_category),
-          tags_json = ?,
-          region = ?,
-          game = ?,
-          platform = ?,
-          ip_address = ?,
-          player_slots = ?,
-          geo_latitude = ?,
-          geo_longitude = ?,
-          geo_country = ?,
-          geo_region = ?,
-          geo_city = ?,
-          geo_timezone = ?,
-          geo_source = ?,
-          geo_last_checked_at = ?,
-          public_short_description = ?,
-          public_description = ?,
-          public_discord_invite = ?,
-          public_website_url = ?,
-          public_rules = ?,
-          public_language = ?,
-          public_region_label = ?,
-          public_listing_updated_at = ?,
-          status = CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN status ELSE 'pending' END,
-          public_slug = ?,
-          updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?`,
-      )
-      .bind(
+  let allowanceReservationId: string | null = null;
+  let allowanceReservationSuccessAction: "complete" | "release" | null = null;
+
+  try {
+    if (existingSameService || existingDraft) {
+      linkedServerId = (existingSameService ?? existingDraft)?.id ?? "";
+      if (existingDraft) {
+        const reservation = await reserveLinkedServerAllowance(env, {
+          userId,
+          discordUserId: user.discord_id,
+          linkedServerId: existingDraft.id,
+        });
+        if (!reservation.ok) {
+          return json({ error: linkedServerAllowanceLimitMessage(reservation.limit) }, { status: 402 });
+        }
+        allowanceReservationId = reservation.reservationId;
+        allowanceReservationSuccessAction = "complete";
+      } else if (reusableDraft) {
+        allowanceReservationId = (await getActiveLinkedServerAllowanceReservation(env, userId, reusableDraft.id))?.id ?? null;
+        allowanceReservationSuccessAction = allowanceReservationId ? "release" : null;
+      }
+      const slug = await uniquePublicSlug(env, service.name, linkedServerId);
+      await db
+        .prepare(
+          `UPDATE linked_servers SET
+            user_id = ?,
+            guild_id = ?,
+            discord_guild_id = ?,
+            nitrado_service_id = ?,
+            nitrado_service_name = ?,
+            server_name = ?,
+            server_type = ?,
+            server_category = COALESCE(?, server_category),
+            tags_json = ?,
+            region = ?,
+            game = ?,
+            platform = ?,
+            ip_address = ?,
+            player_slots = ?,
+            geo_latitude = ?,
+            geo_longitude = ?,
+            geo_country = ?,
+            geo_region = ?,
+            geo_city = ?,
+            geo_timezone = ?,
+            geo_source = ?,
+            geo_last_checked_at = ?,
+            public_short_description = ?,
+            public_description = ?,
+            public_discord_invite = ?,
+            public_website_url = ?,
+            public_rules = ?,
+            public_language = ?,
+            public_region_label = ?,
+            public_listing_updated_at = ?,
+            status = CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN status ELSE 'pending' END,
+            public_slug = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`,
+        )
+        .bind(
+          userId,
+          guild.guild_id,
+          guild.id,
+          service.id,
+          service.name,
+          service.name,
+          body.serverType,
+          serverCategory,
+          JSON.stringify(tags),
+          serviceRegion,
+          service.game ?? null,
+          service.platform ?? null,
+          service.ipAddress ?? null,
+          service.playerSlots ?? null,
+          geo?.latitude ?? null,
+          geo?.longitude ?? null,
+          geo?.country ?? null,
+          geo?.region ?? null,
+          geo?.city ?? null,
+          geo?.timezone ?? null,
+          geo?.source ?? null,
+          geo ? new Date().toISOString() : null,
+          publicListing.value.public_short_description,
+          publicListing.value.public_description,
+          publicListing.value.public_discord_invite,
+          publicListing.value.public_website_url,
+          publicListing.value.public_rules,
+          publicListing.value.public_language,
+          publicListing.value.public_region_label,
+          publicListingUpdatedAt,
+          slug,
+          linkedServerId,
+        )
+        .run();
+      if (geo) console.log("DZN SERVER GEO LOCATION UPDATED", { linkedServerId, source: geo.source, approximate: geo.approximate });
+    } else {
+      linkedServerId = crypto.randomUUID();
+      const reservation = await reserveLinkedServerAllowance(env, {
         userId,
-        guild.guild_id,
-        guild.id,
-        service.id,
-        service.name,
-        service.name,
-        body.serverType,
-        serverCategory,
-        JSON.stringify(tags),
-        serviceRegion,
-        service.game ?? null,
-        service.platform ?? null,
-        service.ipAddress ?? null,
-        service.playerSlots ?? null,
-        geo?.latitude ?? null,
-        geo?.longitude ?? null,
-        geo?.country ?? null,
-        geo?.region ?? null,
-        geo?.city ?? null,
-        geo?.timezone ?? null,
-        geo?.source ?? null,
-        geo ? new Date().toISOString() : null,
-        publicListing.value.public_short_description,
-        publicListing.value.public_description,
-        publicListing.value.public_discord_invite,
-        publicListing.value.public_website_url,
-        publicListing.value.public_rules,
-        publicListing.value.public_language,
-        publicListing.value.public_region_label,
-        publicListingUpdatedAt,
-        slug,
+        discordUserId: user.discord_id,
         linkedServerId,
-      )
-      .run();
-    if (geo) console.log("DZN SERVER GEO LOCATION UPDATED", { linkedServerId, source: geo.source, approximate: geo.approximate });
-  } else {
-    const limit = await getServerLinkLimitForUser(env, userId, user.discord_id);
-    const currentCount = await countLinkedServersForUser(env, userId);
-    if (typeof limit === "number" && currentCount >= limit) {
-      return json({ error: `Your current plan allows ${limit} linked server${limit === 1 ? "" : "s"}. Upgrade to add more.` }, { status: 402 });
+      });
+      if (!reservation.ok) {
+        return json({ error: linkedServerAllowanceLimitMessage(reservation.limit) }, { status: 402 });
+      }
+      allowanceReservationId = reservation.reservationId;
+      allowanceReservationSuccessAction = "complete";
+      createdNewLinkedServer = true;
+      const slug = await uniquePublicSlug(env, service.name, linkedServerId);
+      await db
+        .prepare(
+          `INSERT INTO linked_servers (
+            id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name,
+            server_name, server_type, server_category, tags_json, region, game, platform, ip_address, player_slots,
+            geo_latitude, geo_longitude, geo_country, geo_region, geo_city, geo_timezone, geo_source, geo_last_checked_at,
+            public_short_description, public_description, public_discord_invite, public_website_url, public_rules,
+            public_language, public_region_label, public_listing_updated_at,
+            status, public_slug, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        )
+        .bind(
+          linkedServerId,
+          userId,
+          guild.guild_id,
+          guild.id,
+          service.id,
+          service.name,
+          service.name,
+          body.serverType,
+          serverCategory,
+          JSON.stringify(tags),
+          serviceRegion,
+          service.game ?? null,
+          service.platform ?? null,
+          service.ipAddress ?? null,
+          service.playerSlots ?? null,
+          geo?.latitude ?? null,
+          geo?.longitude ?? null,
+          geo?.country ?? null,
+          geo?.region ?? null,
+          geo?.city ?? null,
+          geo?.timezone ?? null,
+          geo?.source ?? null,
+          geo ? new Date().toISOString() : null,
+          publicListing.value.public_short_description,
+          publicListing.value.public_description,
+          publicListing.value.public_discord_invite,
+          publicListing.value.public_website_url,
+          publicListing.value.public_rules,
+          publicListing.value.public_language,
+          publicListing.value.public_region_label,
+          publicListingUpdatedAt,
+          slug,
+        )
+        .run();
+      if (geo) console.log("DZN SERVER GEO LOCATION UPDATED", { linkedServerId, source: geo.source, approximate: geo.approximate });
     }
 
-    linkedServerId = crypto.randomUUID();
-    createdNewLinkedServer = true;
-    const slug = await uniquePublicSlug(env, service.name, linkedServerId);
-    await db
-      .prepare(
-        `INSERT INTO linked_servers (
-          id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name,
-          server_name, server_type, server_category, tags_json, region, game, platform, ip_address, player_slots,
-          geo_latitude, geo_longitude, geo_country, geo_region, geo_city, geo_timezone, geo_source, geo_last_checked_at,
-          public_short_description, public_description, public_discord_invite, public_website_url, public_rules,
-          public_language, public_region_label, public_listing_updated_at,
-          status, public_slug, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-      )
-      .bind(
-        linkedServerId,
-        userId,
-        guild.guild_id,
-        guild.id,
-        service.id,
-        service.name,
-        service.name,
-        body.serverType,
-        serverCategory,
-        JSON.stringify(tags),
-        serviceRegion,
-        service.game ?? null,
-        service.platform ?? null,
-        service.ipAddress ?? null,
-        service.playerSlots ?? null,
-        geo?.latitude ?? null,
-        geo?.longitude ?? null,
-        geo?.country ?? null,
-        geo?.region ?? null,
-        geo?.city ?? null,
-        geo?.timezone ?? null,
-        geo?.source ?? null,
-        geo ? new Date().toISOString() : null,
-        publicListing.value.public_short_description,
-        publicListing.value.public_description,
-        publicListing.value.public_discord_invite,
-        publicListing.value.public_website_url,
-        publicListing.value.public_rules,
-        publicListing.value.public_language,
-        publicListing.value.public_region_label,
-        publicListingUpdatedAt,
-        slug,
-      )
-      .run();
-    if (geo) console.log("DZN SERVER GEO LOCATION UPDATED", { linkedServerId, source: geo.source, approximate: geo.approximate });
-  }
+    await linkLatestNitradoConnection(env, userId, linkedServerId);
+    await saveBotOnboardingConfig(env, {
+      linkedServerId,
+      discordGuildId: guild.guild_id,
+      tournamentChannelId: body.tournamentChannelId,
+      botAccessToken: body.botAccessToken,
+    });
+    await ensureAutomationRowsForLinkedServers(env);
 
-  await linkLatestNitradoConnection(env, userId, linkedServerId);
-  await saveBotOnboardingConfig(env, {
-    linkedServerId,
-    discordGuildId: guild.guild_id,
-    tournamentChannelId: body.tournamentChannelId,
-    botAccessToken: body.botAccessToken,
-  });
-  await ensureAutomationRowsForLinkedServers(env);
-  if (createdNewLinkedServer) {
-    waitUntil(
-      recordDiscordServerAnnouncementEvent(env, {
-        eventType: "new_server",
-        serverId: linkedServerId,
-        reason: "onboarding_server_created",
-      }).catch((error) => {
-        console.warn("DZN Discord server announcement skipped", {
-          linkedServerId,
-          reason: error instanceof Error ? error.message : "unknown error",
-        });
-      }),
-    );
+    if (allowanceReservationId && allowanceReservationSuccessAction === "complete") {
+      await completeLinkedServerAllowanceReservation(env, allowanceReservationId, linkedServerId);
+    } else if (allowanceReservationId && allowanceReservationSuccessAction === "release") {
+      await releaseLinkedServerAllowanceReservation(env, {
+        reservationId: allowanceReservationId,
+        reason: "service_already_attached",
+      });
+    }
+
+    if (createdNewLinkedServer) {
+      waitUntil(
+        recordDiscordServerAnnouncementEvent(env, {
+          eventType: "new_server",
+          serverId: linkedServerId,
+          reason: "onboarding_server_created",
+        }).catch((error) => {
+          console.warn("DZN Discord server announcement skipped", {
+            linkedServerId,
+            reason: error instanceof Error ? error.message : "unknown error",
+          });
+        }),
+      );
+    }
+  } catch (error) {
+    if (allowanceReservationId) {
+      await releaseLinkedServerAllowanceReservation(env, {
+        reservationId: allowanceReservationId,
+        reason: "onboarding_save_failed",
+      }).catch(() => null);
+    }
+    throw error;
   }
   return json({ ok: true, linkedServerId });
 };
