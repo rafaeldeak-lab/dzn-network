@@ -39,6 +39,13 @@ type LinkedServerAllowanceReservationRow = {
   expires_at: string;
 };
 
+export type LinkedServerAllowanceUsage = {
+  limit: number;
+  used: number;
+  remaining: number;
+  canLinkMore: boolean;
+};
+
 export class LinkedServerAllowanceExceededError extends Error {
   readonly limit: number;
   readonly currentCount: number;
@@ -212,6 +219,28 @@ export async function countLinkedServersForUser(env: Env, userId: string, option
     countActiveLinkedServerAllowanceReservationsForUser(db, userId, nowIso),
   ]);
   return linkedServerCount + reservationCount;
+}
+
+export async function getLinkedServerAllowanceUsageForUser(
+  env: Env,
+  input: {
+    userId: string;
+    discordUserId?: string | null;
+    limit?: number;
+    now?: Date | string;
+  },
+): Promise<LinkedServerAllowanceUsage> {
+  const limit = clampAllowanceLimit(
+    typeof input.limit === "number" ? input.limit : await getServerLinkLimitForUser(env, input.userId, input.discordUserId),
+  );
+  const used = await countLinkedServersForUser(env, input.userId, { now: input.now });
+  const remaining = Math.max(0, limit - used);
+  return {
+    limit,
+    used,
+    remaining,
+    canLinkMore: remaining > 0,
+  };
 }
 
 export async function storePendingNitradoToken(env: Env, userId: string, linkedServerId: string, token: string) {
@@ -456,10 +485,13 @@ export async function reserveLinkedServerAllowance(
     }
   }
 
-  const limit = await getServerLinkLimitForUser(env, input.userId, input.discordUserId);
-  const currentCount = await countLinkedServersForUser(env, input.userId, { now: nowIso });
-  if (typeof limit === "number" && currentCount >= limit) {
-    return { ok: false, limit, currentCount };
+  const usage = await getLinkedServerAllowanceUsageForUser(env, {
+    userId: input.userId,
+    discordUserId: input.discordUserId,
+    now: nowIso,
+  });
+  if (!usage.canLinkMore) {
+    return { ok: false, limit: usage.limit, currentCount: usage.used };
   }
 
   const reservationId = crypto.randomUUID();
@@ -646,4 +678,8 @@ async function countActiveLinkedServerAllowanceReservationsForUser(db: D1Databas
 function toIsoString(value: Date | string | undefined) {
   if (typeof value === "string") return value;
   return (value ?? new Date()).toISOString();
+}
+
+function clampAllowanceLimit(value: number) {
+  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
 }

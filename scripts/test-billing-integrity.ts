@@ -11,13 +11,15 @@ import {
   ensureDraftLinkedServer,
   ensureLinkedServerAllowanceReservationSchema,
   expireLinkedServerAllowanceReservations,
+  getLinkedServerAllowanceUsageForUser,
   linkedServerAllowanceLimitMessage,
   releaseLinkedServerAllowanceReservation,
   reserveLinkedServerAllowance,
   saveLinkedServerNitradoService,
   storePendingNitradoToken,
 } from "../functions/_lib/onboarding";
-import { upsertOwnerEntitlements, type PlanKey } from "../functions/_lib/plans";
+import { getOwnerBillingStatus, upsertBillingAccount, upsertOwnerEntitlements, type PlanKey } from "../functions/_lib/plans";
+import { onRequest as billingStatusHandler } from "../functions/api/billing/status";
 import { onRequest as validateNitradoTokenHandler } from "../functions/api/nitrado/validate-token";
 import { onRequest as saveOnboardingHandler } from "../functions/api/onboarding/save";
 import type { Env, PagesFunction } from "../functions/_lib/types";
@@ -343,6 +345,230 @@ async function assertPlanLimits() {
   }
 }
 
+async function assertBillingStatusUsesReservationAwareAllowance() {
+  const { db, env } = createSqliteEnv();
+  await seedOwner(env, db, { userId: "status-user", discordUserId: "status-discord", planKey: "pro", status: "active" });
+  await upsertBillingAccount(env, {
+    discordUserId: "status-discord",
+    stripeCustomerId: "cus_status",
+    planKey: "pro",
+    planStatus: "active",
+    currentPeriodStart: "2026-08-01T00:00:00.000Z",
+    currentPeriodEnd: "2026-09-01T00:00:00.000Z",
+  });
+  await ensureLinkedServerAllowanceReservationSchema(env);
+
+  insertLinkedServer(db, { id: "status-committed-a", userId: "status-user", serviceId: "status-svc-a", status: "live" });
+  insertLinkedServer(db, { id: "status-committed-b", userId: "status-user", serviceId: "status-svc-b", status: "pending" });
+  db.sqlite
+    .prepare(
+      `INSERT INTO linked_server_allowance_reservations (
+        id, user_id, discord_user_id, linked_server_id, purpose, status, expires_at, created_at, updated_at
+      ) VALUES
+        ('status-active', 'status-user', 'status-discord', 'status-draft', 'onboarding', 'active', '2999-01-01T00:00:00.000Z', '2026-08-20T00:00:00.000Z', '2026-08-20T00:00:00.000Z'),
+        ('status-expired', 'status-user', 'status-discord', 'status-expired-draft', 'onboarding', 'active', '2000-01-01T00:00:00.000Z', '1999-12-31T00:00:00.000Z', '1999-12-31T00:00:00.000Z'),
+        ('status-released', 'status-user', 'status-discord', 'status-released-draft', 'onboarding', 'released', '2999-01-01T00:00:00.000Z', '2026-08-20T00:00:00.000Z', '2026-08-20T00:00:00.000Z'),
+        ('status-completed', 'status-user', 'status-discord', 'status-committed-a', 'onboarding', 'completed', '2999-01-01T00:00:00.000Z', '2026-08-20T00:00:00.000Z', '2026-08-20T00:00:00.000Z')`,
+    )
+    .run();
+
+  const status = await getOwnerBillingStatus(env, {
+    id: "status-user",
+    discord_id: "status-discord",
+    username: "Status",
+    avatar: null,
+  });
+  assert.equal(status.linked_server_count, 3, "Billing status should count committed linked servers plus one active reservation.");
+  assert.equal(status.entitlements.max_linked_servers, 3);
+  assert.equal(status.can_link_more_servers, false, "A fully consumed Pro allowance should report no remaining capacity.");
+  assert.equal(reservationStatus(db, "status-expired"), "expired", "Billing status should expire stale active reservations before reporting.");
+
+  const session = await createSession(env, "status-user");
+  const response = await billingStatusHandler(makeContext(
+    billingStatusHandler,
+    new Request("https://local.test/api/billing/status", {
+      headers: { cookie: `dzn_session=${session.token}` },
+    }),
+    env,
+  ));
+  assert.equal(response.status, 200);
+  const body = await response.json() as Record<string, unknown>;
+  assert.deepEqual(Object.keys(body).sort(), [
+    "can_link_more_servers",
+    "cancel_at_period_end",
+    "checkout_configured",
+    "current_period_end",
+    "current_period_end_label",
+    "current_period_start",
+    "entitlements",
+    "linked_server_count",
+    "plan_key",
+    "plan_status",
+    "stripe_customer_exists",
+  ].sort(), "Billing status API response shape should remain compatible.");
+  assert.equal(body.linked_server_count, 3);
+  assert.equal(JSON.stringify(body).includes("reservation"), false, "Billing status must not expose reservation internals.");
+}
+
+async function assertAllowanceUsageReportingEdges() {
+  const { db, env } = createSqliteEnv();
+  await seedOwner(env, db, { userId: "usage-user", discordUserId: "usage-discord", planKey: "pro", status: "active" });
+
+  insertLinkedServer(db, { id: "usage-no-reservation", userId: "usage-user", serviceId: "usage-svc-a", status: "live" });
+  assert.deepEqual(await getLinkedServerAllowanceUsageForUser(env, {
+    userId: "usage-user",
+    discordUserId: "usage-discord",
+    limit: 3,
+    now: "2026-08-20T00:00:00.000Z",
+  }), {
+    limit: 3,
+    used: 1,
+    remaining: 2,
+    canLinkMore: true,
+  }, "A linked server with no reservation should report normal committed usage.");
+
+  const activeReservation = await reserveLinkedServerAllowance(env, {
+    userId: "usage-user",
+    discordUserId: "usage-discord",
+    linkedServerId: "usage-active-draft",
+    now: "2026-08-20T00:00:00.000Z",
+  });
+  assert.equal(activeReservation.ok, true);
+  const activeUsage = await getLinkedServerAllowanceUsageForUser(env, {
+    userId: "usage-user",
+    discordUserId: "usage-discord",
+    limit: 3,
+    now: "2026-08-20T00:00:00.000Z",
+  });
+  assert.equal(activeUsage.used, 2, "An active unexpired reservation should consume reporting allowance.");
+  assert.equal(activeUsage.remaining, 1);
+
+  if (activeReservation.ok) {
+    await releaseLinkedServerAllowanceReservation(env, {
+      reservationId: activeReservation.reservationId,
+      reason: "reporting_edge_release",
+      now: "2026-08-20T00:05:00.000Z",
+    });
+  }
+  const releasedUsage = await getLinkedServerAllowanceUsageForUser(env, {
+    userId: "usage-user",
+    discordUserId: "usage-discord",
+    limit: 3,
+    now: "2026-08-20T00:05:00.000Z",
+  });
+  assert.equal(releasedUsage.used, 1, "Released reservations should not consume reporting allowance.");
+
+  const completedReservation = await reserveLinkedServerAllowance(env, {
+    userId: "usage-user",
+    discordUserId: "usage-discord",
+    linkedServerId: "usage-completed-row",
+    now: "2026-08-20T00:10:00.000Z",
+  });
+  assert.equal(completedReservation.ok, true);
+  insertLinkedServer(db, { id: "usage-completed-row", userId: "usage-user", serviceId: "usage-svc-completed", status: "live" });
+  if (completedReservation.ok) {
+    await completeLinkedServerAllowanceReservation(env, completedReservation.reservationId, "usage-completed-row", "2026-08-20T00:11:00.000Z");
+  }
+  const completedUsage = await getLinkedServerAllowanceUsageForUser(env, {
+    userId: "usage-user",
+    discordUserId: "usage-discord",
+    limit: 3,
+    now: "2026-08-20T00:12:00.000Z",
+  });
+  assert.equal(completedUsage.used, 2, "Completed reservations should not double-count beside their linked-server row.");
+
+  db.sqlite
+    .prepare(
+      `INSERT INTO linked_server_allowance_reservations (
+        id, user_id, discord_user_id, linked_server_id, purpose, status, expires_at, created_at, updated_at
+      ) VALUES ('usage-expired-active', 'usage-user', 'usage-discord', 'usage-expired-draft', 'onboarding', 'active', '2026-08-20T00:00:00.000Z', '2026-08-19T23:00:00.000Z', '2026-08-19T23:00:00.000Z')`,
+    )
+    .run();
+  const expiredUsage = await getLinkedServerAllowanceUsageForUser(env, {
+    userId: "usage-user",
+    discordUserId: "usage-discord",
+    limit: 3,
+    now: "2026-08-20T00:12:00.000Z",
+  });
+  assert.equal(expiredUsage.used, 2, "Expired reservations should not consume reporting allowance.");
+  assert.equal(reservationStatus(db, "usage-expired-active"), "expired");
+
+  insertLinkedServer(db, { id: "usage-overage", userId: "usage-user", serviceId: "usage-svc-overage", status: "live" });
+  const overageUsage = await getLinkedServerAllowanceUsageForUser(env, {
+    userId: "usage-user",
+    discordUserId: "usage-discord",
+    limit: 1,
+    now: "2026-08-20T00:13:00.000Z",
+  });
+  assert.equal(overageUsage.used, 3);
+  assert.equal(overageUsage.remaining, 0, "Remaining capacity must clamp to zero when usage exceeds the limit.");
+  assert.equal(overageUsage.canLinkMore, false);
+}
+
+async function assertBillingStatusPlanNormalization() {
+  const cases: Array<{
+    label: string;
+    accountPlanKey: PlanKey;
+    accountStatus: string;
+    legacyRawAccount?: boolean;
+    expectedPlanKey: PlanKey;
+    expectedLimit: number;
+  }> = [
+    { label: "free", accountPlanKey: "free", accountStatus: "free", expectedPlanKey: "free", expectedLimit: 1 },
+    { label: "starter-active", accountPlanKey: "starter", accountStatus: "active", expectedPlanKey: "starter", expectedLimit: 1 },
+    { label: "pro-trialing", accountPlanKey: "pro", accountStatus: "trialing", expectedPlanKey: "pro", expectedLimit: 3 },
+    { label: "premium-active", accountPlanKey: "premium", accountStatus: "active", expectedPlanKey: "premium", expectedLimit: 10 },
+    { label: "network-legacy", accountPlanKey: "network", accountStatus: "active", legacyRawAccount: true, expectedPlanKey: "premium", expectedLimit: 10 },
+    { label: "partner-legacy", accountPlanKey: "partner", accountStatus: "trialing", legacyRawAccount: true, expectedPlanKey: "premium", expectedLimit: 10 },
+    { label: "inactive-pro", accountPlanKey: "pro", accountStatus: "canceled", expectedPlanKey: "free", expectedLimit: 1 },
+  ];
+
+  for (const testCase of cases) {
+    const { db, env } = createSqliteEnv();
+    await seedOwner(env, db, {
+      userId: `${testCase.label}-user`,
+      discordUserId: `${testCase.label}-discord`,
+      planKey: "free",
+      status: "free",
+    });
+    if (testCase.legacyRawAccount) {
+      db.sqlite
+        .prepare(
+          `INSERT INTO owner_billing_accounts (
+            id, discord_user_id, stripe_customer_id, stripe_subscription_id, plan_key, plan_status,
+            current_period_start, current_period_end, cancel_at_period_end, created_at, updated_at
+          ) VALUES (?, ?, ?, NULL, ?, ?, NULL, NULL, 0, ?, ?)`,
+        )
+        .run(
+          `${testCase.label}-billing`,
+          `${testCase.label}-discord`,
+          `cus-${testCase.label}`,
+          testCase.accountPlanKey,
+          testCase.accountStatus,
+          "2026-08-20T00:00:00.000Z",
+          "2026-08-20T00:00:00.000Z",
+        );
+    } else {
+      await upsertBillingAccount(env, {
+        discordUserId: `${testCase.label}-discord`,
+        stripeCustomerId: `cus-${testCase.label}`,
+        planKey: testCase.accountPlanKey,
+        planStatus: testCase.accountStatus,
+      });
+    }
+    const status = await getOwnerBillingStatus(env, {
+      id: `${testCase.label}-user`,
+      discord_id: `${testCase.label}-discord`,
+      username: testCase.label,
+      avatar: null,
+    });
+    assert.equal(status.plan_key, testCase.expectedPlanKey, `${testCase.label} normalized plan`);
+    assert.equal(status.entitlements.max_linked_servers, testCase.expectedLimit, `${testCase.label} allowance limit`);
+    assert.equal(status.linked_server_count, 0, `${testCase.label} empty usage`);
+    assert.equal(status.can_link_more_servers, testCase.expectedLimit > 0, `${testCase.label} can link more`);
+  }
+}
+
 async function assertDraftAndServiceAttachmentLifecycle() {
   const { db, env } = createSqliteEnv();
   await seedOwner(env, db, { userId: "attach-user", discordUserId: "attach-discord", planKey: "pro", status: "active" });
@@ -514,6 +740,9 @@ async function run() {
   await assertMigrationMatchesRuntimeSchema();
   await assertReservationCounting();
   await assertPlanLimits();
+  await assertBillingStatusUsesReservationAwareAllowance();
+  await assertAllowanceUsageReportingEdges();
+  await assertBillingStatusPlanNormalization();
   await assertDraftAndServiceAttachmentLifecycle();
   await assertFailedServiceAttachmentReleasesReservation();
   await assertExpiredReservationLifecycle();

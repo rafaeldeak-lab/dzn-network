@@ -31,6 +31,7 @@ import {
   type NormalizedPlanKey,
   type PlanFeature,
 } from "../../lib/billing/plans";
+import { getLinkedServerAllowanceUsageForUser } from "./onboarding";
 
 export type PaidPlanKey = "starter" | "pro" | "premium";
 export type LegacyPaidPlanKey = "network" | "partner";
@@ -530,17 +531,11 @@ export async function getOwnerBillingStatus(env: Env, user: SessionUser): Promis
   const planKey = canonicalPlanKey(account?.plan_key);
   const planStatus = typeof account?.plan_status === "string" ? account.plan_status : planKey === "free" ? "free" : "unknown";
   const entitlements = await upsertOwnerEntitlements(env, user.discord_id, planKey, planStatus);
-  const countRow = await db
-    .prepare(
-      `SELECT COUNT(*) AS count
-       FROM linked_servers
-       WHERE user_id = ?
-         AND lower(COALESCE(status, 'pending')) NOT IN ('deleted', 'merged')
-         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')`,
-    )
-    .bind(user.id)
-    .first<{ count: number }>();
-  const linkedServerCount = Number(countRow?.count ?? 0);
+  const allowanceUsage = await getLinkedServerAllowanceUsageForUser(env, {
+    userId: user.id,
+    discordUserId: user.discord_id,
+    limit: entitlements.max_linked_servers,
+  });
   return {
     plan_key: entitlements.plan_key,
     plan_status: planStatus,
@@ -549,8 +544,8 @@ export async function getOwnerBillingStatus(env: Env, user: SessionUser): Promis
     current_period_end_label: formatBillingPeriodEndLabel(account?.current_period_end),
     cancel_at_period_end: Number(account?.cancel_at_period_end ?? 0) === 1,
     entitlements,
-    linked_server_count: linkedServerCount,
-    can_link_more_servers: linkedServerCount < entitlements.max_linked_servers,
+    linked_server_count: allowanceUsage.used,
+    can_link_more_servers: allowanceUsage.canLinkMore,
     stripe_customer_exists: Boolean(account?.stripe_customer_id),
     checkout_configured: getCheckoutConfigured(env),
   };
