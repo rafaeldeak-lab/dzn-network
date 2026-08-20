@@ -175,8 +175,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   });
 };
 
-function summarizeAdmBackfillForSetup(result: Awaited<ReturnType<typeof planAdmBackfillJobsForServer>>) {
-  const completedJob = (result.created_jobs ?? []).find((job) => /complete|caught_up/i.test(String(job.status ?? "")));
+export function summarizeAdmBackfillForSetup(result: Awaited<ReturnType<typeof planAdmBackfillJobsForServer>>) {
+  const createdJobs = result.created_jobs ?? [];
+  const completedJob = createdJobs.find(isCompletedAdmBackfillJobForSetup);
   return {
     ok: result.ok,
     status: result.status,
@@ -184,25 +185,39 @@ function summarizeAdmBackfillForSetup(result: Awaited<ReturnType<typeof planAdmB
     files_found: result.files_found,
     newest_available_adm_file: result.newest_available_adm_file ?? null,
     newest_readable_adm_file: result.newest_readable_adm_file ?? null,
-    latest_processed_adm_file: completedJob?.adm_file ?? null,
-    queued_files: (result.created_jobs ?? []).map((job) => job.adm_file),
-    created_jobs: (result.created_jobs ?? []).map((job) => ({
-      id: job.id,
-      adm_file: job.adm_file,
-      status: job.status,
-      line_start: job.line_start,
-      line_end: job.line_end,
-    })),
-    active_job: result.active_job
-      ? {
-          id: result.active_job.id,
-          adm_file: result.active_job.adm_file,
-          status: result.active_job.status,
-          line_start: result.active_job.line_start,
-          line_end: result.active_job.line_end,
-        }
-      : null,
+    latest_processed_adm_file: completedJob?.filename ?? result.completed_files[0] ?? null,
+    queued_files: result.queued_files,
+    created_jobs: createdJobs.map(summarizeAdmBackfillJobForSetup),
+    active_job: result.active_job ? summarizeAdmBackfillJobForSetup(result.active_job) : null,
   };
+}
+
+function summarizeAdmBackfillJobForSetup(job: Awaited<ReturnType<typeof planAdmBackfillJobsForServer>>["created_jobs"][number]) {
+  return {
+    id: job.job_id,
+    adm_file: job.filename,
+    status: job.status,
+    line_start: null,
+    line_end: null,
+    total_lines: job.total_lines,
+    current_line: job.current_line,
+    chunk_size: job.chunk_size,
+    total_chunks: job.total_chunks,
+    chunks_processed: job.chunks_processed,
+    display_current_chunk: job.display_current_chunk,
+    progress: job.progress,
+  };
+}
+
+function isCompletedAdmBackfillJobForSetup(job: Awaited<ReturnType<typeof planAdmBackfillJobsForServer>>["created_jobs"][number]) {
+  if (job.status === "completed" || job.status === "completed_with_warnings") return true;
+  const fileResultStatus = job.file_result?.status;
+  return Boolean(job.file_result?.ok && (
+    fileResultStatus === "imported"
+    || fileResultStatus === "completed_with_warnings"
+    || fileResultStatus === "completed_duplicate_only"
+    || fileResultStatus === "duplicate_only"
+  ));
 }
 
 async function verifyDiscordBotForSetup(env: Env, guildId: unknown) {

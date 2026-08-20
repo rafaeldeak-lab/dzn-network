@@ -78,6 +78,7 @@
     "seed:dzn-pulse-demo": "tsx scripts/seed-dzn-pulse-demo.ts",
     "test:public-profile-sync": "tsx scripts/test-public-profile-sync.ts",
     "test:billing-plans": "tsx scripts/test-billing-plans.ts",
+    "test:billing-integrity": "tsx scripts/test-billing-integrity.ts",
     "test:reputation-platform": "tsx scripts/test-reputation-platform.ts",
     "test:badge-visual-system": "tsx scripts/test-badge-visual-system.ts",
     "test:badge-awards": "tsx scripts/test-badge-awards.ts",

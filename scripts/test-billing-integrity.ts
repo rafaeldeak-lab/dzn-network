@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 
 import { createSession } from "../functions/_lib/db";
 import {
@@ -22,6 +23,8 @@ import { getOwnerBillingStatus, upsertBillingAccount, upsertOwnerEntitlements, t
 import { onRequest as billingStatusHandler } from "../functions/api/billing/status";
 import { onRequest as validateNitradoTokenHandler } from "../functions/api/nitrado/validate-token";
 import { onRequest as saveOnboardingHandler } from "../functions/api/onboarding/save";
+import { summarizeAdmBackfillForSetup } from "../functions/api/onboarding/test";
+import type { AdmBackfillPlanResult, AdmImportJobProgressResult } from "../functions/_lib/adm-sync";
 import type { Env, PagesFunction } from "../functions/_lib/types";
 
 type SqliteRunResult = { changes: number; lastInsertRowid: number | bigint };
@@ -246,8 +249,94 @@ function normalizeSql(value: string) {
     .toLowerCase();
 }
 
+const EVENT_SUGGESTIONS_MIGRATION = "0057_event_suggestions_phase_2a.sql";
+const BILLING_INTEGRITY_MIGRATION = "0058_billing_phase_1_integrity.sql";
+const STALE_BILLING_MIGRATION = ["0057", "billing_phase_1_integrity.sql"].join("_");
+
+function migrationFiles() {
+  return readdirSync("migrations")
+    .filter((name) => /^\d{4}_.+\.sql$/.test(name))
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function applyMigration(db: SqliteDatabase, migrationFile: string) {
+  db.exec(readFileSync(join("migrations", migrationFile), "utf8"));
+}
+
+function sqliteObjectExists(db: SqliteDatabase, name: string) {
+  return Boolean(db.prepare("SELECT name FROM sqlite_master WHERE name = ? LIMIT 1").get(name));
+}
+
+function walkTextFiles(root = ".") {
+  const ignoredDirectories = new Set([
+    ".git",
+    ".next",
+    ".wrangler",
+    "coverage",
+    "node_modules",
+    "out",
+  ]);
+  const files: string[] = [];
+  for (const entry of readdirSync(root)) {
+    if (ignoredDirectories.has(entry)) continue;
+    const path = join(root, entry);
+    const stat = statSync(path);
+    if (stat.isDirectory()) {
+      files.push(...walkTextFiles(path));
+    } else if (stat.isFile() && stat.size < 1_000_000) {
+      files.push(path);
+    }
+  }
+  return files;
+}
+
+async function assertMigrationNumberingAndApplication() {
+  const files = migrationFiles();
+  assert.equal(files.includes(EVENT_SUGGESTIONS_MIGRATION), true, "Event Suggestions must remain migration 0057.");
+  assert.equal(files.includes(BILLING_INTEGRITY_MIGRATION), true, "Billing Integrity must be migration 0058.");
+  assert.equal(files.includes(STALE_BILLING_MIGRATION), false, "Old duplicate Billing Integrity migration filename must not exist.");
+
+  const prefixes = new Map<string, string[]>();
+  for (const file of files) {
+    const prefix = file.slice(0, 4);
+    prefixes.set(prefix, [...(prefixes.get(prefix) ?? []), file]);
+  }
+  const duplicatePrefixes = [...prefixes.entries()]
+    .filter(([, names]) => names.length > 1)
+    .map(([prefix, names]) => `${prefix}: ${names.join(", ")}`);
+  assert.deepEqual(duplicatePrefixes, [], "Migration four-digit prefixes must be unique.");
+
+  const deterministicOrder = [...files].sort((left, right) => left.localeCompare(right));
+  assert.deepEqual(files, deterministicOrder, "Migration application order must be deterministic by filename.");
+  assert.equal(
+    deterministicOrder.indexOf(BILLING_INTEGRITY_MIGRATION) > deterministicOrder.indexOf(EVENT_SUGGESTIONS_MIGRATION),
+    true,
+    "Billing Integrity migration 0058 must apply after Event Suggestions 0057.",
+  );
+
+  const staleReferences = walkTextFiles()
+    .filter((path) => readFileSync(path, "utf8").includes(STALE_BILLING_MIGRATION));
+  assert.deepEqual(staleReferences, [], "No stale exact reference to the old Billing Integrity migration filename may remain.");
+
+  const freshDb = new SqliteD1Database();
+  applyMigration(freshDb.sqlite, EVENT_SUGGESTIONS_MIGRATION);
+  applyMigration(freshDb.sqlite, BILLING_INTEGRITY_MIGRATION);
+  assert.equal(sqliteObjectExists(freshDb.sqlite, "event_suggestions"), true, "Fresh local migration application must include Event Suggestions 0057.");
+  assert.equal(sqliteObjectExists(freshDb.sqlite, "linked_server_allowance_reservations"), true, "Fresh local migration application must include Billing Integrity 0058.");
+  freshDb.sqlite.close();
+
+  const upgradeDb = new SqliteD1Database();
+  applyMigration(upgradeDb.sqlite, EVENT_SUGGESTIONS_MIGRATION);
+  assert.equal(sqliteObjectExists(upgradeDb.sqlite, "event_suggestions"), true, "Pre-billing state should include Event Suggestions 0057.");
+  assert.equal(sqliteObjectExists(upgradeDb.sqlite, "linked_server_allowance_reservations"), false, "Pre-billing state should not include Billing Integrity.");
+  applyMigration(upgradeDb.sqlite, BILLING_INTEGRITY_MIGRATION);
+  assert.equal(sqliteObjectExists(upgradeDb.sqlite, "linked_server_allowance_reservations"), true, "Upgrade from pre-billing state must apply Billing Integrity 0058.");
+  assert.equal(sqliteObjectExists(upgradeDb.sqlite, "idx_lsar_active_linked_server"), true, "Billing Integrity 0058 indexes must apply on upgrade.");
+  upgradeDb.sqlite.close();
+}
+
 async function assertMigrationMatchesRuntimeSchema() {
-  const migration = readFileSync("migrations/0057_billing_phase_1_integrity.sql", "utf8");
+  const migration = readFileSync(join("migrations", BILLING_INTEGRITY_MIGRATION), "utf8");
   const normalizedMigration = normalizeSql(migration);
   assert.equal(
     normalizedMigration.includes(normalizeSql(LINKED_SERVER_ALLOWANCE_RESERVATIONS_TABLE_SQL)),
@@ -261,6 +350,202 @@ async function assertMigrationMatchesRuntimeSchema() {
       `Runtime reservation index SQL must appear in the additive migration: ${statement}`,
     );
   }
+}
+
+function makeAdmFileResult(input: {
+  filename: string;
+  status: NonNullable<AdmImportJobProgressResult["file_result"]>["status"];
+  jobId: string;
+}): NonNullable<AdmImportJobProgressResult["file_result"]> {
+  return {
+    ok: true,
+    filename: input.filename,
+    source: "scheduled_nitrado",
+    status: input.status,
+    job_id: input.jobId,
+    job_status: "completed",
+    chunks_processed: 4,
+    total_chunks: 4,
+    raw_lines: 100,
+    raw_kill_lines_found: 0,
+    parsed_kills: 0,
+    written_kills: 0,
+    deaths: 0,
+    joins: 0,
+    disconnects: 0,
+    playerlist_snapshots: 0,
+    suicides: 0,
+    uncredited_deaths: 0,
+    hit_lines: 0,
+    raw_events_stored: 0,
+    player_events_stored: 0,
+    duplicate_skips: 0,
+    failed_writes: 0,
+    public_cache_updated: false,
+    discord_jobs_queued: 0,
+    parser_warnings: [],
+    kill_previews: [],
+    import_report_id: null,
+    imported_at: "2026-08-20T00:00:00.000Z",
+  };
+}
+
+function makeAdmJob(overrides: Partial<AdmImportJobProgressResult> = {}): AdmImportJobProgressResult {
+  return {
+    ok: true,
+    job_id: "job-default",
+    filename: "default.ADM",
+    source: "scheduled_nitrado",
+    status: "queued",
+    total_lines: 100,
+    current_line: 0,
+    chunk_size: 25,
+    total_chunks: 4,
+    chunks_processed: 0,
+    display_current_chunk: 1,
+    progress: 0,
+    parsed_kills: 0,
+    written_kills: 0,
+    duplicate_skips: 0,
+    joins: 0,
+    disconnects: 0,
+    playerlist_snapshots: 0,
+    hit_lines: 0,
+    raw_events_stored: 0,
+    player_events_stored: 0,
+    public_cache_updated: false,
+    discord_jobs_queued: 0,
+    warnings: [],
+    file_result: null,
+    error_message: null,
+    created_at: "2026-08-20T00:00:00.000Z",
+    updated_at: "2026-08-20T00:00:00.000Z",
+    completed_at: null,
+    ...overrides,
+  };
+}
+
+function makeBackfillPlan(overrides: Partial<AdmBackfillPlanResult> = {}): AdmBackfillPlanResult {
+  return {
+    ok: true,
+    status: "adm_backfill_created",
+    message: "ADM backfill planned.",
+    plan_key: "free",
+    files_found: 0,
+    window_files: [],
+    missing_files: [],
+    queued_files: [],
+    created_jobs: [],
+    active_job: null,
+    completed_files: [],
+    skipped_already_imported: [],
+    unreadable_files: [],
+    oldest_missing_file: null,
+    newest_missing_file: null,
+    newest_available_adm_file: null,
+    newest_available_adm_timestamp: null,
+    newest_readable_adm_file: null,
+    newest_readable_adm_timestamp: null,
+    next_action: "none",
+    ...overrides,
+  };
+}
+
+function assertSetupAdmBackfillMapper() {
+  const completedJob = makeAdmJob({
+    job_id: "job-completed",
+    filename: "completed.ADM",
+    status: "completed",
+    current_line: 100,
+    chunks_processed: 4,
+    display_current_chunk: 4,
+    progress: 1,
+    completed_at: "2026-08-20T00:01:00.000Z",
+  });
+  const completedSummary = summarizeAdmBackfillForSetup(makeBackfillPlan({
+    files_found: 1,
+    newest_available_adm_file: "completed.ADM",
+    newest_readable_adm_file: "completed.ADM",
+    created_jobs: [completedJob],
+  }));
+  assert.equal(completedSummary.latest_processed_adm_file, "completed.ADM", "Completed setup job should report the processed filename.");
+  assert.equal(completedSummary.created_jobs[0]?.id, "job-completed", "Setup response should map job_id to legacy id.");
+  assert.equal(completedSummary.created_jobs[0]?.adm_file, "completed.ADM", "Setup response should map filename to legacy adm_file.");
+  assert.equal(completedSummary.created_jobs[0]?.line_start, null, "Unrepresentable legacy line_start should be null.");
+  assert.equal(completedSummary.created_jobs[0]?.line_end, null, "Unrepresentable legacy line_end should be null.");
+  assert.equal(completedSummary.created_jobs[0]?.current_line, 100);
+  assert.equal(completedSummary.created_jobs[0]?.total_lines, 100);
+  assert.equal(completedSummary.created_jobs[0]?.display_current_chunk, 4);
+  assert.equal(completedSummary.created_jobs[0]?.progress, 1);
+
+  const warningJob = makeAdmJob({
+    job_id: "job-warning",
+    filename: "warning.ADM",
+    status: "completed_with_warnings",
+    current_line: 80,
+    chunks_processed: 4,
+    display_current_chunk: 4,
+    progress: 0.8,
+  });
+  const warningSummary = summarizeAdmBackfillForSetup(makeBackfillPlan({ created_jobs: [warningJob] }));
+  assert.equal(warningSummary.latest_processed_adm_file, "warning.ADM", "Completed-with-warnings setup job should count as processed.");
+
+  const fileResultJob = makeAdmJob({
+    job_id: "job-file-result",
+    filename: "file-result.ADM",
+    status: "processing",
+    file_result: makeAdmFileResult({ filename: "file-result.ADM", status: "imported", jobId: "job-file-result" }),
+  });
+  const fileResultSummary = summarizeAdmBackfillForSetup(makeBackfillPlan({ created_jobs: [fileResultJob] }));
+  assert.equal(fileResultSummary.latest_processed_adm_file, "file-result.ADM", "File result completion should support processed-file reporting.");
+
+  const activeJob = makeAdmJob({
+    job_id: "job-active",
+    filename: "active.ADM",
+    status: "processing",
+    current_line: 50,
+    chunks_processed: 2,
+    display_current_chunk: 3,
+    progress: 0.5,
+  });
+  const activeSummary = summarizeAdmBackfillForSetup(makeBackfillPlan({ active_job: activeJob }));
+  assert.equal(activeSummary.latest_processed_adm_file, null, "Active processing job must not be claimed as completed.");
+  assert.equal(activeSummary.active_job?.id, "job-active");
+  assert.equal(activeSummary.active_job?.adm_file, "active.ADM");
+  assert.equal(activeSummary.active_job?.current_line, 50);
+  assert.equal(activeSummary.active_job?.chunks_processed, 2);
+
+  const queuedJob = makeAdmJob({
+    job_id: "job-queued",
+    filename: "queued.ADM",
+    status: "queued",
+  });
+  const queuedSummary = summarizeAdmBackfillForSetup(makeBackfillPlan({
+    queued_files: ["queued.ADM"],
+    created_jobs: [queuedJob],
+  }));
+  assert.equal(queuedSummary.latest_processed_adm_file, null, "Queued job must not be claimed as completed.");
+  assert.deepEqual(queuedSummary.queued_files, ["queued.ADM"]);
+  assert.equal(queuedSummary.created_jobs[0]?.id, "job-queued");
+  assert.equal(queuedSummary.created_jobs[0]?.adm_file, "queued.ADM");
+
+  const missingActiveSummary = summarizeAdmBackfillForSetup(makeBackfillPlan({
+    created_jobs: [makeAdmJob({ job_id: "job-created", filename: "created-only.ADM", status: "queued" })],
+    active_job: null,
+  }));
+  assert.equal(missingActiveSummary.active_job, null, "Missing active job should remain null.");
+
+  const emptySummary = summarizeAdmBackfillForSetup(makeBackfillPlan());
+  assert.deepEqual(emptySummary.created_jobs, [], "Empty created_jobs should stay empty.");
+  assert.deepEqual(emptySummary.queued_files, [], "Empty queued_files should stay empty.");
+  assert.equal(emptySummary.active_job, null);
+  assert.equal(emptySummary.latest_processed_adm_file, null);
+
+  const mapperSource = readFileSync("functions/api/onboarding/test.ts", "utf8");
+  assert.equal(mapperSource.includes("job.id"), false, "Setup mapper must not read nonexistent job.id.");
+  assert.equal(mapperSource.includes("job.adm_file"), false, "Setup mapper must not read nonexistent job.adm_file.");
+  assert.equal(mapperSource.includes(".line_start"), false, "Setup mapper must not read nonexistent line_start.");
+  assert.equal(mapperSource.includes(".line_end"), false, "Setup mapper must not read nonexistent line_end.");
 }
 
 async function assertReservationCounting() {
@@ -737,7 +1022,9 @@ function makeContext(handler: PagesFunction, request: Request, env: Env): Parame
 }
 
 async function run() {
+  await assertMigrationNumberingAndApplication();
   await assertMigrationMatchesRuntimeSchema();
+  assertSetupAdmBackfillMapper();
   await assertReservationCounting();
   await assertPlanLimits();
   await assertBillingStatusUsesReservationAwareAllowance();
