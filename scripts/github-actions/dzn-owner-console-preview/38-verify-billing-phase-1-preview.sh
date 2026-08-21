@@ -165,7 +165,7 @@ function checkRuntimeFailure(path, status, body, options = {}) {
   if (status === 404 && path.startsWith("/api/") && !options.allowApi404) {
     fail("BILLING_PREVIEW_PAGES_FUNCTIONS_WORKER_MISSING", `${path} returned 404, likely missing out/_worker.js.`);
   }
-  if (status === 500) fail("BILLING_PREVIEW_HTTP_500", `${path} returned HTTP 500.`);
+  if (status === 500 && !options.allowExpectedHttp500) fail("BILLING_PREVIEW_HTTP_500", `${path} returned HTTP 500.`);
   if (status === 503) fail("BILLING_PREVIEW_HTTP_503", `${path} returned HTTP 503.`);
   for (const marker of forbiddenRuntimeText) {
     if (body.includes(marker)) fail("BILLING_PREVIEW_RUNTIME_TEXT_FAILURE", `${path} returned forbidden runtime marker.`, { marker });
@@ -176,7 +176,10 @@ function checkRuntimeFailure(path, status, body, options = {}) {
 }
 async function expectStatus(base, path, expected, init = {}, label = path) {
   const expectedList = Array.isArray(expected) ? expected : [expected];
-  const result = await fetchWithRetry(base, path, init, { allowApi404: expectedList.includes(404) });
+  const result = await fetchWithRetry(base, path, init, {
+    allowApi404: expectedList.includes(404),
+    allowExpectedHttp500: expectedList.includes(500),
+  });
   if (!expectedList.includes(result.status)) {
     fail("BILLING_PREVIEW_UNEXPECTED_STATUS", `${label} returned HTTP ${result.status}, expected ${expectedList.join("/")}.`, {
       path,
