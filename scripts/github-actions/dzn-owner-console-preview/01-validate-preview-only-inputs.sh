@@ -43,8 +43,8 @@ case "${CANDIDATE_BRANCH}" in
     exit 1
     ;;
 esac
-if [ "${CANDIDATE_BRANCH}" = "feature/event-platform-performance-foundation" ] && [ "${MODE}" != "event-platform-performance-preview" ] && [ "${MODE}" != "billing-phase-1-preview" ]; then
-  echo "::error::feature/event-platform-performance-foundation may only run event-platform-performance-preview or billing-phase-1-preview mode."
+if [ "${CANDIDATE_BRANCH}" = "feature/event-platform-performance-foundation" ] && [ "${MODE}" != "event-platform-performance-preview" ] && [ "${MODE}" != "billing-phase-1-preview" ] && [ "${MODE}" != "audit-preview-d1-capacity" ]; then
+  echo "::error::feature/event-platform-performance-foundation may only run event-platform-performance-preview, billing-phase-1-preview, or audit-preview-d1-capacity mode."
   exit 1
 fi
 
@@ -103,9 +103,9 @@ if [ "${MODE}" = "activate-rebound-discord-preview" ]; then
 fi
 
 case "${MODE}" in
-  full-preview|cleanup-preview-d1|rebind-preview-d1|repair-rebound-discord-preview|verify-existing-creator-governance-preview|event-platform-performance-preview|billing-phase-1-preview) ;;
+  full-preview|cleanup-preview-d1|rebind-preview-d1|repair-rebound-discord-preview|verify-existing-creator-governance-preview|event-platform-performance-preview|billing-phase-1-preview|audit-preview-d1-capacity) ;;
   *)
-    echo "::error::Owner console preview only supports full-preview, cleanup-preview-d1, rebind-preview-d1, repair-rebound-discord-preview, verify-existing-creator-governance-preview, event-platform-performance-preview, or billing-phase-1-preview mode."
+    echo "::error::Owner console preview only supports full-preview, cleanup-preview-d1, rebind-preview-d1, repair-rebound-discord-preview, verify-existing-creator-governance-preview, event-platform-performance-preview, billing-phase-1-preview, or audit-preview-d1-capacity mode."
     exit 1
     ;;
 esac
@@ -251,6 +251,45 @@ if [ "${MODE}" = "billing-phase-1-preview" ]; then
   fi
   if [ "${PREVIEW_PROJECT_NAME}" = "${PRODUCTION_PAGES_PROJECT_NAME}" ]; then
     echo "::error::Refusing Billing Phase 1 preview for production Pages project."
+    exit 1
+  fi
+fi
+
+if [ "${MODE}" = "audit-preview-d1-capacity" ]; then
+  if [ "${CANDIDATE_REF}" != "refs/heads/feature/event-platform-performance-foundation" ]; then
+    echo "::error::audit-preview-d1-capacity mode may only run from refs/heads/feature/event-platform-performance-foundation."
+    exit 1
+  fi
+  if [ "${CANDIDATE_BRANCH}" != "feature/event-platform-performance-foundation" ]; then
+    echo "::error::audit-preview-d1-capacity mode may only run from feature/event-platform-performance-foundation."
+    exit 1
+  fi
+  if [ "${CONFIRM_PREVIEW_ONLY}" != "PREVIEW_ONLY" ]; then
+    echo "::error::confirm_preview_only must equal PREVIEW_ONLY for audit-preview-d1-capacity mode."
+    exit 1
+  fi
+  if [ "${CONFIRM_D1_CAPACITY_AUDIT}" != "APPROVE_D1_CAPACITY_AUDIT" ]; then
+    echo "::error::confirm_d1_capacity_audit must equal APPROVE_D1_CAPACITY_AUDIT for audit-preview-d1-capacity mode."
+    exit 1
+  fi
+  if [ -n "${PREVIEW_DB_NAME_TO_DELETE:-}" ] || [ -n "${REVIEWED_PREVIEW_DB_ID_MASK:-}" ] || [ -n "${CONFIRM_PREVIEW_DB_CLEANUP:-}" ]; then
+    echo "::error::audit-preview-d1-capacity rejects cleanup target, reviewed ID mask, and cleanup confirmation inputs."
+    exit 1
+  fi
+  if [ "${CLEANUP_ACTION:-dry-run}" = "delete" ]; then
+    echo "::error::audit-preview-d1-capacity rejects delete cleanup requests."
+    exit 1
+  fi
+  if [ "${REBIND_ACTION:-dry-run}" = "apply" ] || [ -n "${CONFIRM_PREVIEW_D1_REBIND:-}" ]; then
+    echo "::error::audit-preview-d1-capacity rejects rebind mutation inputs."
+    exit 1
+  fi
+  if [ "${REPAIR_ACTION:-dry-run}" = "apply" ] || [ -n "${CONFIRM_REBOUND_DISCORD_PREVIEW_REPAIR:-}" ]; then
+    echo "::error::audit-preview-d1-capacity rejects repair mutation inputs."
+    exit 1
+  fi
+  if [ -n "${CONFIRM_BILLING_PHASE_1_PREVIEW:-}" ]; then
+    echo "::error::audit-preview-d1-capacity must not be combined with Billing preview confirmation."
     exit 1
   fi
 fi
@@ -473,6 +512,7 @@ fs.appendFileSync(process.env.GITHUB_ENV, `OWNER_CONSOLE_PREVIEW_CREATOR_ID=${cr
 const source = fs.readFileSync("wrangler.toml", "utf8");
 const name = source.match(/database_name\s*=\s*"([^"]+)"/)?.[1] ?? "";
 const id = source.match(/database_id\s*=\s*"([^"]+)"/)?.[1] ?? "";
+const auditMode = process.env.MODE === "audit-preview-d1-capacity";
 function maskId(id) {
   return typeof id === "string" && id.length > 12 ? `${id.slice(0, 8)}...${id.slice(-4)}` : "unavailable";
 }
@@ -482,7 +522,9 @@ if (!name || !id) {
 }
 console.log(`::add-mask::${id}`);
 fs.appendFileSync(process.env.GITHUB_ENV, `DETECTED_PRODUCTION_D1_DATABASE_NAME=${name}\n`);
-fs.appendFileSync(process.env.GITHUB_ENV, `DETECTED_PRODUCTION_D1_DATABASE_ID=${id}\n`);
+if (!auditMode) {
+  fs.appendFileSync(process.env.GITHUB_ENV, `DETECTED_PRODUCTION_D1_DATABASE_ID=${id}\n`);
+}
 console.log(`Detected production D1 database name: ${name}`);
 console.log(`Detected production D1 database id: ${maskId(id)}`);
 NODE
@@ -552,6 +594,12 @@ NODE
     echo "- Billing Phase 1 preview confirmation accepted: true"
     echo "- Billing Phase 1 preview D1 name candidate-derived: true"
     echo "- Billing Phase 1 preview branch guard: feature/event-platform-performance-foundation"
+  fi
+  if [ "${MODE}" = "audit-preview-d1-capacity" ]; then
+    echo "- D1 capacity audit confirmation accepted: true"
+    echo "- D1 capacity audit branch guard: feature/event-platform-performance-foundation"
+    echo "- D1 capacity audit mutates resources: false"
+    echo "- D1 capacity audit exports D1 IDs: false"
   fi
   echo "- Production Pages project name: ${PRODUCTION_PAGES_PROJECT_NAME}"
   echo "- DZN_PLATFORM_OWNER_DISCORD_IDS configured: true"

@@ -17,6 +17,7 @@ on:
           - verify-existing-creator-governance-preview
           - event-platform-performance-preview
           - billing-phase-1-preview
+          - audit-preview-d1-capacity
       confirm_preview_only:
         description: Must equal PREVIEW_ONLY
         required: false
@@ -75,6 +76,10 @@ on:
         default: ""
       confirm_billing_phase_1_preview:
         description: Must equal APPROVE_BILLING_PHASE_1_PREVIEW for Billing Phase 1 preview mode
+        required: false
+        default: ""
+      confirm_d1_capacity_audit:
+        description: Must equal APPROVE_D1_CAPACITY_AUDIT for read-only D1 capacity audit mode
         required: false
         default: ""
 
@@ -138,6 +143,7 @@ jobs:
       EVENT_PLATFORM_PERFORMANCE_PREVIEW_CONFIRMATION: APPROVE_EVENT_PLATFORM_PERFORMANCE_PREVIEW
       EVENT_PLATFORM_PERFORMANCE_PREVIEW_SEED_PREFIX: phase2a-preview-
       CONFIRM_BILLING_PHASE_1_PREVIEW: ${{ inputs.confirm_billing_phase_1_preview }}
+      CONFIRM_D1_CAPACITY_AUDIT: ${{ inputs.confirm_d1_capacity_audit }}
       BILLING_PHASE_1_PREVIEW_PROJECT_NAME: dzn-network-owner-console-preview-billing-phase-1
       BILLING_PHASE_1_PREVIEW_DB_PREFIX: dzn_network_db_owner_console_preview_billing_phase_1_
       BILLING_PHASE_1_PREVIEW_CONFIRMATION: APPROVE_BILLING_PHASE_1_PREVIEW
@@ -228,8 +234,20 @@ jobs:
         run: bash -e scripts/github-actions/dzn-owner-console-preview/09-validate-branch.sh
 
       - name: Diagnose Cloudflare preview auth
-        if: ${{ inputs.mode == 'full-preview' || inputs.mode == 'billing-phase-1-preview' }}
+        if: ${{ inputs.mode == 'full-preview' || inputs.mode == 'billing-phase-1-preview' || inputs.mode == 'audit-preview-d1-capacity' }}
         run: bash -e scripts/github-actions/dzn-owner-console-preview/10-diagnose-cloudflare-preview-auth.sh
+
+      - name: Audit preview D1 capacity
+        if: ${{ inputs.mode == 'audit-preview-d1-capacity' }}
+        run: bash -e scripts/github-actions/dzn-owner-console-preview/39-audit-preview-d1-capacity.sh
+
+      - name: Upload preview D1 capacity audit artifact
+        if: ${{ always() && inputs.mode == 'audit-preview-d1-capacity' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dzn-preview-d1-capacity-audit
+          path: dzn-preview-d1-capacity-audit
+          if-no-files-found: warn
 
       - name: Guarded preview D1 cleanup
         if: ${{ inputs.mode == 'cleanup-preview-d1' }}

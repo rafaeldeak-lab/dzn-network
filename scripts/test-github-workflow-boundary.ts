@@ -771,6 +771,7 @@ function acceptsOwnerConsolePreviewRef(input: {
   remoteHead?: string;
   confirmPreviewOnly?: string;
   confirmBilling?: string;
+  confirmAudit?: string;
   previewProjectName?: string;
   previewDbName?: string;
 }) {
@@ -786,7 +787,7 @@ function acceptsOwnerConsolePreviewRef(input: {
   if (["main", "master", "production"].includes(input.refName)) return false;
   if (input.checkedOutSha && input.checkedOutSha !== sha) return false;
   if (input.remoteHead && input.remoteHead !== sha) return false;
-  if (input.refName === "feature/event-platform-performance-foundation" && !["event-platform-performance-preview", "billing-phase-1-preview"].includes(mode)) return false;
+  if (input.refName === "feature/event-platform-performance-foundation" && !["event-platform-performance-preview", "billing-phase-1-preview", "audit-preview-d1-capacity"].includes(mode)) return false;
   if (mode === "billing-phase-1-preview") {
     if (input.refName !== "feature/event-platform-performance-foundation") return false;
     if ((input.confirmPreviewOnly ?? "PREVIEW_ONLY") !== "PREVIEW_ONLY") return false;
@@ -795,6 +796,12 @@ function acceptsOwnerConsolePreviewRef(input: {
     if (previewProjectName !== "dzn-network-owner-console-preview-billing-phase-1") return false;
     if (previewDbName !== `dzn_network_db_owner_console_preview_billing_phase_1_${shortSha}`) return false;
     if (previewDbName === "dzn_network_db") return false;
+  }
+  if (mode === "audit-preview-d1-capacity") {
+    if (ref !== "refs/heads/feature/event-platform-performance-foundation") return false;
+    if (input.refName !== "feature/event-platform-performance-foundation") return false;
+    if ((input.confirmPreviewOnly ?? "PREVIEW_ONLY") !== "PREVIEW_ONLY") return false;
+    if ((input.confirmAudit ?? "APPROVE_D1_CAPACITY_AUDIT") !== "APPROVE_D1_CAPACITY_AUDIT") return false;
   }
   return /^[a-f0-9]{40}$/.test(sha);
 }
@@ -1059,6 +1066,9 @@ const ownerPreviewPhase2ADeployStart = indexOfOrFail(dznOwnerConsolePreviewWorkf
 const ownerPreviewPhase2AVerifyStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify Phase 2A performance preview");
 const ownerPreviewPhase2AArtifactStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Upload Phase 2A preview artifact");
 const ownerPreviewValidateBranchStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Validate branch");
+const ownerPreviewCloudflareAuthStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Diagnose Cloudflare preview auth");
+const ownerPreviewAuditD1CapacityStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Audit preview D1 capacity");
+const ownerPreviewAuditD1CapacityArtifactStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Upload preview D1 capacity audit artifact");
 const ownerPreviewCleanupStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Guarded preview D1 cleanup");
 const ownerPreviewRebindStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Guarded Discord preview D1 rebind");
 const ownerPreviewActivationStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Prepare pinned main runtime for Discord preview activation");
@@ -1447,6 +1457,84 @@ assert.equal(ownerPreviewPhase2ABuildStart < ownerPreviewPhase2ADeployStart, tru
 assert.equal(ownerPreviewPhase2ADeployStart < ownerPreviewPhase2AVerifyStart, true, "Phase 2A deploy must happen before verification.");
 assert.equal(ownerPreviewPhase2AVerifyStart < ownerPreviewPhase2AArtifactStart, true, "Phase 2A verification must happen before artifact upload.");
 assert.equal(ownerPreviewPhase2AArtifactStart < ownerPreviewValidateBranchStart, true, "Phase 2A preview path must stay separate from full-preview D1 creation.");
+function assertD1CapacityAuditWorkflowBoundary() {
+const auditScript = read("scripts/github-actions/dzn-owner-console-preview/39-audit-preview-d1-capacity.sh");
+const ownerPreviewAuditBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewAuditD1CapacityStart, ownerPreviewAuditD1CapacityArtifactStart);
+const ownerPreviewAuditArtifactBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewAuditD1CapacityArtifactStart, ownerPreviewCleanupStart);
+assert.equal(ownerPreviewDispatchBlock.includes("- audit-preview-d1-capacity"), true, "D1 capacity audit must be an explicit workflow-dispatch mode.");
+assert.equal(ownerPreviewDispatchBlock.includes("confirm_d1_capacity_audit:"), true, "D1 capacity audit must expose its own confirmation input.");
+assert.equal(ownerPreviewDispatchBlock.includes("Must equal APPROVE_D1_CAPACITY_AUDIT for read-only D1 capacity audit mode"), true, "D1 capacity audit input must document the exact confirmation.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("APPROVE_D1_CAPACITY_AUDIT"), true, "D1 capacity audit must require the exact approval phrase.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_preview_only must equal PREVIEW_ONLY for audit-preview-d1-capacity mode."), true, "D1 capacity audit must require PREVIEW_ONLY.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("confirm_d1_capacity_audit must equal APPROVE_D1_CAPACITY_AUDIT for audit-preview-d1-capacity mode."), true, "D1 capacity audit must require its exact confirmation in the central guard.");
+assert.equal(ownerPreviewValidateBlock.includes("feature/event-platform-performance-foundation"), true, "D1 capacity audit must be tied to the active feature branch.");
+assert.equal(ownerPreviewValidateBlock.includes("audit-preview-d1-capacity"), true, "Input validation must allow the read-only D1 capacity audit mode.");
+assert.equal(ownerPreviewValidateBlock.includes("audit-preview-d1-capacity mode may only run from refs/heads/feature/event-platform-performance-foundation."), true, "Audit mode must be tied to the exact active feature ref.");
+assert.equal(ownerPreviewValidateBlock.includes("audit-preview-d1-capacity rejects cleanup target, reviewed ID mask, and cleanup confirmation inputs."), true, "Audit mode must reject cleanup target inputs.");
+assert.equal(ownerPreviewValidateBlock.includes("audit-preview-d1-capacity rejects delete cleanup requests."), true, "Audit mode must reject deletion requests.");
+assert.equal(ownerPreviewValidateBlock.includes("audit-preview-d1-capacity rejects rebind mutation inputs."), true, "Audit mode must reject rebind mutation inputs.");
+assert.equal(ownerPreviewValidateBlock.includes("audit-preview-d1-capacity rejects repair mutation inputs."), true, "Audit mode must reject repair mutation inputs.");
+assert.equal(ownerPreviewValidateBlock.includes("audit-preview-d1-capacity must not be combined with Billing preview confirmation."), true, "Audit mode must reject Billing preview confirmation.");
+assert.equal(ownerPreviewValidateBlock.includes("auditMode = process.env.MODE === \"audit-preview-d1-capacity\""), true, "Audit mode must be detected before production D1 ID export.");
+assert.equal(ownerPreviewValidateBlock.includes("if (!auditMode)"), true, "Audit mode must not export any D1 ID through GITHUB_ENV.");
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/event-platform-performance-foundation", mode: "audit-preview-d1-capacity" }), true, "D1 capacity audit branch must be accepted.");
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "main", ref: "refs/heads/main", mode: "audit-preview-d1-capacity" }), false, "D1 capacity audit must reject main.");
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "master", ref: "refs/heads/master", mode: "audit-preview-d1-capacity" }), false, "D1 capacity audit must reject master.");
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "production", ref: "refs/heads/production", mode: "audit-preview-d1-capacity" }), false, "D1 capacity audit must reject production.");
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "v1.0.0", ref: "refs/tags/v1.0.0", mode: "audit-preview-d1-capacity" }), false, "D1 capacity audit must reject tags.");
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "123/merge", ref: "refs/pull/123/merge", mode: "audit-preview-d1-capacity" }), false, "D1 capacity audit must reject pull-request refs.");
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/event-platform-performance-foundation", mode: "audit-preview-d1-capacity", checkedOutSha: "284c0fe214810e2343abd7780b9e3e4f24945863" }), false, "D1 capacity audit must reject stale checked-out SHA.");
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/event-platform-performance-foundation", mode: "audit-preview-d1-capacity", remoteHead: "284c0fe214810e2343abd7780b9e3e4f24945863" }), false, "D1 capacity audit must reject remote-head mismatch.");
+assert.equal(ownerPreviewCloudflareAuthStart < ownerPreviewAuditD1CapacityStart, true, "Cloudflare auth diagnostic must run before the D1 capacity audit.");
+assert.equal(ownerPreviewAuditD1CapacityStart < ownerPreviewAuditD1CapacityArtifactStart, true, "D1 capacity audit must run before artifact upload.");
+assert.equal(ownerPreviewAuditD1CapacityArtifactStart < ownerPreviewCleanupStart, true, "D1 capacity audit artifact upload must precede cleanup steps.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Diagnose Cloudflare preview auth\n        if: ${{ inputs.mode == 'full-preview' || inputs.mode == 'billing-phase-1-preview' || inputs.mode == 'audit-preview-d1-capacity' }}"), true, "Audit mode must reuse the approved Cloudflare preview auth diagnostic.");
+assert.equal(dznOwnerConsolePreviewWorkflowSource.includes("scripts/github-actions/dzn-owner-console-preview/39-audit-preview-d1-capacity.sh"), true, "Audit mode must run script 39.");
+assert.equal(ownerPreviewAuditArtifactBlock.includes("actions/upload-artifact@v4"), true, "Audit mode must upload a sanitized artifact.");
+assert.equal(ownerPreviewAuditArtifactBlock.includes("always() && inputs.mode == 'audit-preview-d1-capacity'"), true, "Audit artifact upload must use always().");
+assert.equal(ownerPreviewAuditArtifactBlock.includes("name: dzn-preview-d1-capacity-audit"), true, "Audit artifact name must be fixed.");
+assert.equal(ownerPreviewAuditArtifactBlock.includes("path: dzn-preview-d1-capacity-audit"), true, "Audit artifact path must be fixed.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Guarded preview D1 cleanup\n        if: ${{ inputs.mode == 'cleanup-preview-d1' }}"), true, "Audit mode must not run the cleanup step.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Resolve or create preview D1 database\n        if: ${{ inputs.mode == 'full-preview' || inputs.mode == 'billing-phase-1-preview' }}"), true, "Audit mode must not run the D1 resolver.");
+assert.equal(ownerPreviewAuditBlock.includes("11-guarded-preview-d1-cleanup.sh"), false, "Audit mode must not reference script 11.");
+assert.equal(ownerPreviewAuditBlock.includes("23-resolve-or-create-preview-d1-database.sh"), false, "Audit mode must not reference script 23.");
+assert.equal(ownerPreviewAuditBlock.includes("wrangler d1 migrations apply"), false, "Audit mode must not apply migrations.");
+assert.equal(ownerPreviewAuditBlock.includes("wrangler d1 execute"), false, "Audit mode must not execute D1 SQL.");
+assert.equal(ownerPreviewAuditBlock.includes("Seed "), false, "Audit mode must not seed data.");
+assert.equal(ownerPreviewAuditBlock.includes("Configure "), false, "Audit mode must not configure Pages or secrets.");
+assert.equal(ownerPreviewAuditBlock.includes("wrangler pages secret put"), false, "Audit mode must not write Pages secrets.");
+assert.equal(ownerPreviewAuditBlock.includes("wrangler pages deploy"), false, "Audit mode must not deploy Pages.");
+assert.equal(auditScript.startsWith("set -euo pipefail"), true, "Script 39 must begin with set -euo pipefail.");
+assert.equal(auditScript.includes('if [ "${MODE:-}" != "audit-preview-d1-capacity" ]'), true, "Script 39 must self-gate on audit mode.");
+assert.equal(auditScript.includes('if [ "${CONFIRM_PREVIEW_ONLY:-}" != "PREVIEW_ONLY" ]'), true, "Script 39 must self-gate on PREVIEW_ONLY.");
+assert.equal(auditScript.includes('if [ "${CONFIRM_D1_CAPACITY_AUDIT:-}" != "APPROVE_D1_CAPACITY_AUDIT" ]'), true, "Script 39 must self-gate on exact audit confirmation.");
+assert.equal(auditScript.includes('method: "GET"'), true, "Script 39 must use explicit GET requests.");
+assert.equal(/method:\s*["'](?:POST|PATCH|PUT|DELETE)["']/i.test(auditScript), false, "Script 39 must not contain mutating HTTP methods.");
+assert.equal(/wrangler\s+d1\s+execute/i.test(auditScript), false, "Script 39 must not contain D1 SQL execution.");
+assert.equal(/wrangler\s+d1\s+migrations/i.test(auditScript), false, "Script 39 must not contain D1 migration commands.");
+assert.equal(/wrangler\s+pages\s+deploy/i.test(auditScript), false, "Script 39 must not contain Pages deployment commands.");
+assert.equal(/wrangler\s+pages\s+secret/i.test(auditScript), false, "Script 39 must not contain Pages secret commands.");
+assert.equal(auditScript.includes("cleanup-preview-d1"), false, "Script 39 must not invoke cleanup mode.");
+assert.equal(auditScript.includes("function maskId"), true, "Script 39 must mask D1 IDs.");
+assert.equal(auditScript.includes("ACTIVE_PAGES_BINDING"), true, "Script 39 must protect bound resources.");
+assert.equal(auditScript.includes("RECENT_PREVIEW_PROTECTED"), true, "Script 39 must protect recent resources.");
+assert.equal(auditScript.includes("UNKNOWN_PROTECTED"), true, "Script 39 must protect unknown resources.");
+assert.equal(auditScript.includes("STALE_PREVIEW_CANDIDATE"), true, "Script 39 must classify stale candidates only after checks.");
+assert.equal(auditScript.includes("const selected = staleCandidates[0] ?? null"), true, "Script 39 must select zero or one candidate.");
+assert.equal(auditScript.includes("candidate_selected: false"), true, "Script 39 must support zero-candidate results.");
+assert.equal(auditScript.includes("scanArtifacts"), true, "Script 39 must security-scan artifacts.");
+assert.equal(auditScript.includes("complete_uuid"), true, "Script 39 must scan artifacts for full UUID-shaped IDs.");
+assert.equal(auditScript.includes("bearer_value"), true, "Script 39 must scan artifacts for bearer values.");
+assert.equal(auditScript.includes("authorization_header"), true, "Script 39 must scan artifacts for authorization headers.");
+assert.equal(auditScript.includes("encrypted_token"), true, "Script 39 must scan artifacts for encrypted credential fields.");
+assert.equal(auditScript.includes("artifactFiles"), true, "Script 39 must constrain retained artifact files.");
+assert.equal(auditScript.includes("d1-inventory.json"), true, "Script 39 must write the D1 inventory artifact.");
+assert.equal(auditScript.includes("pages-bindings.json"), true, "Script 39 must write the Pages binding artifact.");
+assert.equal(auditScript.includes("workflow-reference-summary.json"), true, "Script 39 must write the workflow reference artifact.");
+assert.equal(auditScript.includes("protected-resources.json"), true, "Script 39 must write protected-resource reasons.");
+assert.equal(auditScript.includes("cleanup-candidate.json"), true, "Script 39 must write zero-or-one candidate evidence.");
+}
+assertD1CapacityAuditWorkflowBoundary();
 const ownerPreviewCleanupBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewCleanupStart, ownerPreviewRebindStart);
 assert.equal(ownerPreviewCleanupBlock.includes("cleanup-preview-d1"), true, "Cleanup step must be explicitly cleanup-mode gated.");
 assert.equal(ownerPreviewCleanupBlock.includes("npx wrangler d1 migrations apply"), false, "Cleanup mode must not run migrations.");
@@ -1739,7 +1827,7 @@ const billingPreviewScriptsBlock = [
 for (const scriptNumber of ["32", "33", "34", "35", "36", "37", "38"]) {
   assert.equal(dznOwnerConsolePreviewWorkflowSource.includes(`scripts/github-actions/dzn-owner-console-preview/${scriptNumber}-`), true, `Billing workflow must reference script ${scriptNumber}.`);
 }
-assert.equal(dznOwnerConsolePreviewWorkflow.includes("feature/event-platform-performance-foundation may only run event-platform-performance-preview or billing-phase-1-preview mode."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("feature/event-platform-performance-foundation may only run event-platform-performance-preview, billing-phase-1-preview, or audit-preview-d1-capacity mode."), true);
 assert.equal(ownerPreviewDispatchBlock.includes("- billing-phase-1-preview"), true, "Billing Phase 1 preview must be an explicit workflow mode choice.");
 assert.equal(ownerPreviewDispatchBlock.includes("confirm_billing_phase_1_preview:"), true, "Billing Phase 1 preview must require its own confirmation input.");
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("APPROVE_BILLING_PHASE_1_PREVIEW"), true, "Billing Phase 1 preview must require the exact approval phrase.");
