@@ -165,20 +165,23 @@ export async function getServerBadgeStatus(linkedServerId: string) {
   return request<ServerBadgeStatusResponse>(`/api/servers/${encodeURIComponent(linkedServerId)}/badges/status`, { cache: "no-store" });
 }
 
-export async function testOnboarding() {
+export async function testOnboarding(linkedServerId?: string) {
   return request<{
     ok: boolean;
     checks: OnboardingChecks;
-  }>("/api/onboarding/test", { method: "POST" });
+  }>("/api/onboarding/test", {
+    method: "POST",
+    body: linkedServerId ? JSON.stringify({ linkedServerId }) : undefined,
+  });
 }
 
-export async function testAdmPath(path: string) {
+export async function testAdmPath(path: string, linkedServerId?: string) {
   return request<{
     ok: boolean;
     checks: OnboardingChecks;
   }>("/api/nitrado/test-adm-path", {
     method: "POST",
-    body: JSON.stringify({ path }),
+    body: JSON.stringify(linkedServerId ? { path, linkedServerId } : { path }),
   });
 }
 

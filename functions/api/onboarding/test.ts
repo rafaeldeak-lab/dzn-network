@@ -1,12 +1,16 @@
-import { getCurrentLinkedServer, getSessionUser, requireDb, saveServerAdmPath } from "../../_lib/db";
+import { getCurrentLinkedServer, getLinkedServerForUserById, getSessionUser, requireDb, saveServerAdmPath } from "../../_lib/db";
 import { DiscordChannelFetchError, fetchDiscordPostingChannels } from "../../_lib/discord-posting";
-import { json, methodNotAllowed } from "../../_lib/http";
+import { json, methodNotAllowed, readBoundedJson } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { detectNitradoAdmLogs, getAdmLogStoragePath, mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
 import { getNitradoTokenForLinkedServer } from "../../_lib/onboarding";
 import { planAdmBackfillJobsForServer } from "../../_lib/adm-sync";
 import { refreshNitradoServerMetadata } from "../../_lib/server-metadata";
 import type { Env, PagesFunction } from "../../_lib/types";
+
+type OnboardingTestBody = {
+  linkedServerId?: unknown;
+};
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "POST") return methodNotAllowed();
@@ -15,7 +19,17 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   if (!user && !isMockAuth(env.MOCK_AUTH)) return json({ error: "Unauthorized" }, { status: 401 });
   if (!user) return json({ error: "Authenticated user is required" }, { status: 401 });
 
-  const linkedServer = await getCurrentLinkedServer(env, user.id, { includePrivateAdmPath: true });
+  const parsedBody = await readBoundedJson<OnboardingTestBody>(request, 1024);
+  if (!parsedBody.ok) {
+    return json({ error: parsedBody.message, error_code: parsedBody.error.toLowerCase() }, { status: parsedBody.status });
+  }
+  const requestedLinkedServerId = sanitizeRequestedLinkedServerId(parsedBody.value);
+  const linkedServer = requestedLinkedServerId.supplied
+    ? await getLinkedServerForUserById(env, user.id, requestedLinkedServerId.value ?? "", { includePrivateAdmPath: true })
+    : await getCurrentLinkedServer(env, user.id, { includePrivateAdmPath: true });
+  if (requestedLinkedServerId.supplied && (!requestedLinkedServerId.value || !linkedServer)) {
+    return json({ error: "Linked server not found", error_code: "linked_server_not_found" }, { status: 404 });
+  }
   if (!linkedServer || typeof linkedServer.id !== "string") {
     return json({ error: "No linked server found" }, { status: 400 });
   }
@@ -50,6 +64,8 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         linkedServerId: linkedServer.id,
         userId: user.id,
         force: true,
+        softFail: true,
+        skipPublicCacheSideEffects: true,
       }).catch(() => null)
     : null;
   const savedAdmPath = typeof linkedServer.adm_path === "string" ? linkedServer.adm_path : "";
@@ -174,6 +190,17 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     },
   });
 };
+
+function sanitizeRequestedLinkedServerId(body: OnboardingTestBody) {
+  if (!Object.prototype.hasOwnProperty.call(body, "linkedServerId")) {
+    return { supplied: false as const, value: null };
+  }
+  const id = typeof body.linkedServerId === "string" ? body.linkedServerId.trim() : "";
+  return {
+    supplied: true as const,
+    value: id && id.length <= 120 ? id : null,
+  };
+}
 
 export function summarizeAdmBackfillForSetup(result: Awaited<ReturnType<typeof planAdmBackfillJobsForServer>>) {
   const createdJobs = result.created_jobs ?? [];

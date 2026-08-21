@@ -1978,7 +1978,7 @@ function ServerDashboard({
     setCheckingLogs(true);
     setActionMessage("");
     try {
-      await testOnboarding();
+      await testOnboarding(server.id);
       await onRefresh();
       await refreshSyncData({ warnOnError: false, queueIfBusy: true });
       setActionMessage("Log check refreshed. Dashboard status is up to date.");

@@ -139,6 +139,7 @@ export function SetupWizard() {
   const [detectedServiceId, setDetectedServiceId] = useState("");
   const [validatedService, setValidatedService] = useState<NitradoService | null>(null);
   const [validatedLinkedServerId, setValidatedLinkedServerId] = useState("");
+  const [loadedLinkedServerContext, setLoadedLinkedServerContext] = useState<{ id: string; guildId: string } | null>(null);
   const [directServiceValidated, setDirectServiceValidated] = useState(false);
   const [selectedService, setSelectedService] = useState("");
   const [message, setMessage] = useState("");
@@ -176,6 +177,7 @@ export function SetupWizard() {
         if (linkedServer?.guild_id) {
           setSelectedGuild(linkedServer.guild_id);
           setValidatedLinkedServerId(linkedServer.id);
+          setLoadedLinkedServerContext({ id: linkedServer.id, guildId: linkedServer.guild_id });
         } else if (guildResult.guilds[0]) {
           setSelectedGuild(guildResult.guilds[0].guild_id);
         }
@@ -206,6 +208,7 @@ export function SetupWizard() {
       } catch {
         setAuthenticated(false);
         setValidatedLinkedServerId("");
+        setLoadedLinkedServerContext(null);
       } finally {
         setLoading(false);
       }
@@ -424,7 +427,9 @@ export function SetupWizard() {
         activeIndex: 4,
         completedCount: Math.max(current.completedCount, 4),
       }));
-      const result = await testOnboarding();
+      const linkedServerId = validatedLinkedServerId
+        || (loadedLinkedServerContext?.guildId === selectedGuild ? loadedLinkedServerContext.id : "");
+      const result = await testOnboarding(linkedServerId || undefined);
       const mergedChecks = mergeChecksWithBotStatus(result.checks, latestBotStatus, selectedGuild);
       setChecks(mergedChecks);
       setVerificationProgress({
@@ -451,7 +456,9 @@ export function SetupWizard() {
     setBusy(true);
     setMessage("");
     try {
-      const result = await testAdmPath(path);
+      const linkedServerId = validatedLinkedServerId
+        || (loadedLinkedServerContext?.guildId === selectedGuild ? loadedLinkedServerContext.id : "");
+      const result = await testAdmPath(path, linkedServerId || undefined);
       setChecks(result.checks);
       setVerificationProgress((current) => ({
         ...current,

@@ -208,6 +208,58 @@ export async function getCurrentLinkedServer(env: Env, userId: string, options: 
   return servers?.[0] ?? null;
 }
 
+export async function getLinkedServerForUserById(
+  env: Env,
+  userId: string,
+  linkedServerId: string,
+  options: { includePrivateAdmPath?: boolean } = {},
+) {
+  const normalizedLinkedServerId = linkedServerId.trim();
+  if (!normalizedLinkedServerId || !env.DB) return null;
+  await ensureLinkedServerMetadataColumns(env);
+  await ensureServerLogConfigTable(env);
+  const server = await env.DB
+    .prepare(
+      `SELECT
+        linked_servers.*,
+        discord_guilds.name AS guild_name,
+        discord_guilds.icon_url AS guild_icon_url,
+        server_log_config.adm_path AS adm_path,
+        onboarding_checks.adm_logs_found AS adm_logs_found,
+        onboarding_checks.last_tested_at AS adm_last_checked_at
+       FROM linked_servers
+       LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
+       LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
+       LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
+       WHERE linked_servers.id = ?
+         AND linked_servers.user_id = ?
+         AND lower(COALESCE(linked_servers.status, 'pending')) != 'deleted'
+         AND lower(COALESCE(linked_servers.status, 'pending')) != 'merged'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       LIMIT 1`,
+    )
+    .bind(normalizedLinkedServerId, userId)
+    .first<Record<string, unknown>>();
+
+  if (!server) return null;
+  const rawAdmPath = typeof server.adm_path === "string" ? server.adm_path : null;
+  server.adm_latest_file = rawAdmPath ? rawAdmPath.split("/").filter(Boolean).at(-1) ?? null : null;
+  server.adm_status = Number(server.adm_logs_found) === 1
+    ? "Connected"
+    : rawAdmPath
+      ? "Discovered, read pending"
+      : "Needs review";
+  if (!options.includePrivateAdmPath && rawAdmPath) {
+    server.adm_path = maskNitradoApiPath(rawAdmPath);
+  }
+  server.original_owner_is_current_user = true;
+  if (!options.includePrivateAdmPath) {
+    delete server.user_id;
+  }
+
+  return server;
+}
+
 export async function getLinkedServersForUserSummary(env: Env, userId: string) {
   if (!env.DB) return [];
   const result = await env.DB
