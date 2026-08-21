@@ -967,7 +967,8 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("Could not list Pages proje
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("method: \"DELETE\""), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("wrangler d1 delete"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("wrangler d1 create"), false);
-assert.equal(dznOwnerConsolePreviewWorkflow.includes("D1_ACCOUNT_DATABASE_LIMIT: \"10\""), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes('D1_ACCOUNT_DATABASE_LIMIT: "50000"'), true, "Billing/owner-console preview must use the Workers Paid D1 account limit.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes('D1_ACCOUNT_DATABASE_LIMIT: "10"'), false, "Billing/owner-console preview must not keep the stale Workers Free D1 account limit.");
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("PREVIEW_D1_CAPACITY_EXHAUSTED"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Requested preview D1 exists: ${database ? \"yes\" : \"no\"}"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("No preview migrations, seed, Pages configuration, deployment, or event creation were attempted."), true);
@@ -1915,6 +1916,8 @@ assert.equal(ownerPreviewValidateBlock.includes("billing-phase-1-preview mode ma
 assert.equal(ownerPreviewValidateBlock.includes("Owner console preview does not accept tag refs."), true, "Billing preview must inherit tag rejection.");
 assert.equal(ownerPreviewValidateBlock.includes("Owner console preview does not accept pull-request merge refs."), true, "Billing preview must inherit PR-ref rejection.");
 assert.equal(ownerPreviewResolveD1Block.includes("method: \"DELETE\""), false, "Preview D1 capacity stop must not delete any database.");
+assert.equal(ownerPreviewResolveD1Block.includes('process.env.D1_ACCOUNT_DATABASE_LIMIT || "10"'), false, "Preview D1 capacity path must not fall back to the stale 10-database guard.");
+assert.equal(ownerPreviewResolveD1Block.includes("D1_ACCOUNT_DATABASE_LIMIT must be configured."), true, "Preview D1 capacity path must consume the canonical workflow limit.");
 assert.equal(ownerPreviewResolveD1Block.includes("No preview migrations, seed, Pages configuration, deployment, or event creation were attempted."), true, "D1 capacity stop must fail before downstream remote actions.");
 const billingStepOrder = [
   ownerPreviewBillingPreflightStart,
@@ -1937,6 +1940,7 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Seed preview-only 
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Deploy preview Pages project\n        if: ${{ inputs.mode == 'full-preview' }}"), true, "Billing mode must not use the generic static deploy script.");
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Verify owner console preview\n        if: ${{ inputs.mode == 'full-preview' }}"), true, "Billing mode must not use the generic full-preview verifier.");
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Guarded preview D1 cleanup\n        if: ${{ inputs.mode == 'cleanup-preview-d1' }}"), true, "Billing mode must never invoke cleanup mode.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("inputs.mode == 'billing-phase-1-preview' || inputs.mode == 'cleanup-preview-d1'"), false, "Billing mode must not automatically enable cleanup mode.");
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("name: dzn-billing-phase-1-preview"), true, "Billing preview must upload a dedicated sanitized artifact.");
 assert.equal(billingPreviewScriptsBlock.includes("\"${MODE}\" != \"billing-phase-1-preview\""), true, "Billing scripts must self-gate on Billing mode.");
 assert.equal(billingPreviewScriptsBlock.includes("feature/event-platform-performance-foundation"), true, "Billing scripts must pin the active foundation branch.");
@@ -1946,6 +1950,10 @@ assert.equal(billingPreviewScriptsBlock.includes("dzn-network-owner-console-prev
 assert.equal(billingPreviewScriptsBlock.includes("dzn_network_db_owner_console_preview_billing_phase_1_"), true, "Billing scripts must use candidate-derived Billing D1 names.");
 assert.equal(billingPreviewScriptsBlock.includes("Refusing Billing Phase 1 preview for production D1 database name."), true, "Billing scripts must reject production D1 names.");
 assert.equal(billingPreviewScriptsBlock.includes("Refusing Billing Phase 1 preview for production Pages project."), true, "Billing scripts must reject production Pages project.");
+assert.equal(billingPreviewScriptsBlock.includes("method: \"DELETE\""), false, "Billing preview scripts must not delete D1 databases.");
+assert.equal(billingPreviewScriptsBlock.includes("wrangler d1 delete"), false, "Billing preview scripts must not shell-delete D1 databases.");
+assert.equal(billingPreviewScriptsBlock.includes("--project-name dzn-network"), false, "Billing preview scripts must not deploy to the production Pages project.");
+assert.equal(billingPreviewScriptsBlock.includes("dzn-pages-runtime-production-deploy"), false, "Billing preview scripts must not add a production deploy route.");
 assert.equal(billingPreviewScriptsBlock.includes("randomBytes(32).toString('base64url')"), true, "Billing preflight must generate an ephemeral TOKEN_ENCRYPTION_KEY.");
 assert.equal(billingPreviewScriptsBlock.includes("echo \"::add-mask::${TOKEN_ENCRYPTION_KEY}\""), true, "Billing preflight must mask the ephemeral encryption key immediately.");
 assert.equal(billingPreviewScriptsBlock.includes("printf \"TOKEN_ENCRYPTION_KEY=%s\\n\" \"${TOKEN_ENCRYPTION_KEY}\""), true, "Billing preflight must write the ephemeral key only through GITHUB_ENV.");

@@ -15,7 +15,11 @@ const token = process.env.OWNER_CONSOLE_CF_TOKEN;
 const previewName = process.env.PREVIEW_DB_NAME;
 const productionName = process.env.DETECTED_PRODUCTION_D1_DATABASE_NAME || process.env.PRODUCTION_D1_DATABASE_NAME;
 const productionId = process.env.DETECTED_PRODUCTION_D1_DATABASE_ID;
-const configuredLimit = Number(process.env.D1_ACCOUNT_DATABASE_LIMIT || "10");
+const configuredLimitValue = process.env.D1_ACCOUNT_DATABASE_LIMIT;
+if (!configuredLimitValue) {
+  throw new Error("D1_ACCOUNT_DATABASE_LIMIT must be configured.");
+}
+const configuredLimit = Number(configuredLimitValue);
 function maskId(id) {
   return typeof id === "string" && id.length > 12 ? `${id.slice(0, 8)}...${id.slice(-4)}` : "unavailable";
 }

@@ -150,7 +150,7 @@ jobs:
       BILLING_PHASE_1_PREVIEW_STABLE_URL: https://dzn-network-owner-console-preview-billing-phase-1.pages.dev
       PRODUCTION_PAGES_PROJECT_NAME: dzn-network
       PRODUCTION_D1_DATABASE_NAME: dzn_network_db
-      D1_ACCOUNT_DATABASE_LIMIT: "10"
+      D1_ACCOUNT_DATABASE_LIMIT: "50000"
       DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
       DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
       DZN_PULSE_ENABLED: "true"
