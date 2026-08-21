@@ -14,6 +14,129 @@ Phase 0 recovery then corrected repository blockers from an isolated clean workt
 
 The owner confirmed the Cloudflare account is already on Workers Paid. The stale preview D1 capacity guard that still used the Workers Free account limit was corrected from `10` to `50000` in `5615bbaafeb5016948ed25f5968afd6d70000218` (`fix(preview): use Workers Paid D1 capacity limit`). No Cloudflare plan audit, plan change, D1 deletion, cleanup, Stripe change, production deployment, or production migration was performed.
 
+## Billing Phase 1 Slice 4E Recovery Result
+
+Result: FAILED. Billing Phase 1 isolated preview is still incomplete.
+
+Recovery worktree and branch:
+
+- Worktree: `C:\Users\rafae\Desktop\DZN-Audits\worktrees\dzn-billing-merge-schema-20260821-221339`.
+- Local branch: `fix/billing-merge-schema-20260821-221339`.
+- Starting remote SHA: `fb478f46a49fa66323682b24b54151163e34f675`.
+- Migration repair ancestor: `5313c0c33379bc3598e6f986132bbd4237d40894`.
+- Starting worktree state: clean; no backup was needed.
+- Preserved older dirty worktree remained untouched: `C:\Users\rafae\OneDrive\Desktop\DZN-Network` on `feature/billing-phase-1-integrity` at `75d76f325521d33854974f1f71a07a4fe509bac6`.
+
+Verifier-contract diagnosis:
+
+- The final verifier contradicted the route contract by failing every HTTP 500 before the corrupted-credential scenario could validate its explicitly expected safe `500` response.
+- Local route reproduction with the same fixture corruption format (`not-valid-ciphertext`, `not-valid-iv`, `not-valid-tag`) initially returned HTTP `500` with `error_code=nitrado_token_unavailable`.
+- Application classifier correction was required and was limited to treating established base64/decode/invalid-character credential-decoding failures as `token_decrypt_failed`.
+- The safe route contract after correction is HTTP `500`, `error_code=token_decrypt_failed`, the existing safe user-facing message, and no plaintext token, encrypted token, IV, auth tag, encryption key name, exception class, or stack trace in the response.
+
+Committed fixes pushed to `origin/feature/event-platform-performance-foundation`:
+
+- `ba4a830dc0c42fc34148c72bb4b8e47b3b13d597` - `fix(onboarding): classify corrupted stored credentials safely`.
+- `1c30311a950a896368dec2353a6d027abb055d91` - `fix(preview): allow expected safe token-decrypt failure`.
+
+Verifier hardening retained:
+
+- `expectStatus` now passes `allowExpectedHttp500` only when the expected status list includes `500`.
+- Unexpected HTTP `500` still fails with `BILLING_PREVIEW_HTTP_500`.
+- Expected safe HTTP `500` responses still pass through JSON parsing, exact status validation, exact `error_code` validation, runtime marker checks, and leak checks.
+- HTTP `503`, Worker `Error 1102`, Worker resource-limit text, minified React errors, missing Pages Functions API `404` after retry exhaustion, and secret/credential leak markers remain fatal.
+- No broad workflow environment flag was added to disable HTTP `500` checking.
+
+Local validation before dispatch:
+
+- Bash syntax: `"C:\Program Files\Git\bin\bash.exe" -n scripts/github-actions/dzn-owner-console-preview/38-verify-billing-phase-1-preview.sh` passed.
+- `npm run test:billing-integrity` passed and includes the corrupted stored credential route regression.
+- `npm run test:github-workflows` passed and includes expected-500 boundary coverage.
+- `npm run test:billing-plans` passed.
+- `npx tsc --noEmit --pretty false` passed.
+- `npm run lint` passed with 0 errors and the existing 4 warnings.
+- `npm run build` passed and patched Cloudflare Pages function routes.
+- `npm test` passed; the optional latest ADM raw fixture self-skipped for the existing missing owner-supplied bundle reason.
+- `git diff --check` passed.
+
+Corrected preview dispatch:
+
+- Workflow: `.github/workflows/dzn-owner-console-preview.yml`.
+- Mode: `billing-phase-1-preview`.
+- Ref: `feature/event-platform-performance-foundation`.
+- Candidate SHA: `1c30311a950a896368dec2353a6d027abb055d91`.
+- Dispatch method: Git Credential Manager credential captured only in process memory through REST; no credential was printed or persisted.
+- Run URL: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32531896956`.
+- Run ID: `32531896956`; run number `65`; attempt `1`.
+- Created: `2026-08-21T22:11:16Z`; updated: `2026-08-21T22:13:42Z`.
+- Final conclusion: `failure`.
+
+Remote preview stages:
+
+- Resolve/create candidate-specific D1: passed.
+- Apply preview D1 migrations: passed.
+- Billing schema verification: passed.
+- Seed Billing Phase 1 preview fixtures: passed.
+- Resolve/create preview Pages project: passed.
+- Configure preview owner auth secrets: passed.
+- Configure Billing runtime: passed.
+- Build Billing runtime: passed.
+- Deploy Billing runtime: passed.
+- Verify Billing Phase 1 preview: failed.
+- Upload Billing artifact: passed.
+
+Preview evidence:
+
+- Candidate-specific preview D1 name: `dzn_network_db_owner_console_preview_billing_phase_1_1c30311`.
+- Masked preview D1 ID: `b8b466f9...d5c6`.
+- Stable URL: `https://dzn-network-owner-console-preview-billing-phase-1.pages.dev`.
+- Immutable URL: `https://1838c1e9.dzn-network-owner-console-preview-billing-phase-1.pages.dev`.
+- Artifact name: `dzn-billing-phase-1-preview`.
+- Artifact ID: `9464181795`.
+- Evidence path: `C:\Users\rafae\Desktop\DZN-Audits\preview-runs\billing-phase-1-1c30311-32531896956\artifact-9464181795`.
+- Log archive path: `C:\Users\rafae\Desktop\DZN-Audits\preview-runs\billing-phase-1-1c30311-32531896956\github-run-logs.zip`.
+- Artifact security scan: clean for GitHub credential markers, Cloudflare token markers, `TOKEN_ENCRYPTION_KEY`, `SESSION_SECRET`, session cookies/tokens, raw Nitrado token markers, encrypted credential fields/values, Authorization/Bearer markers, full D1 UUIDs, stack traces, and real foreign-owner identity.
+
+Billing verification matrix result:
+
+- Migrations through `0059_linked_server_merge_state.sql`: passed.
+- Schema verification: passed; reservation table/indexes, linked-server merge state, Nitrado linked-server credential column, active-service uniqueness, and final schema foreign key summary were clean at schema-verification time.
+- Fixtures: passed; `2` synthetic users, `2` sessions, `7` linked servers, `6` Nitrado connection rows, `5` reservations, and `5` active reservations were seeded with no plaintext token or encrypted credential values in the artifact.
+- Public/runtime health: passed on stable and immutable URLs.
+- Logged-out endpoint protection: passed.
+- Service discovery required `linked_server_id`: passed.
+- Owned linked-server discovery: passed with mock service IDs `900001`, `900002`, `900003`.
+- Foreign/nonexistent linked-server safe 404 checks: passed.
+- No-token exact credential protection: passed with `missing_nitrado_token`.
+- Corrupted-token safe classification: passed with HTTP `500` and `token_decrypt_failed`.
+- Cross-owner service conflict: passed with `409` and `nitrado_service_already_linked`.
+- Same-owner canonical reuse, merge-state, credential movement, reservation release, duplicate-server prevention, first-time claim, reservation completion, completed-hold accounting, and repeated-save idempotency all passed through verifier group `21`.
+- Failure occurred at verifier group `22`, `Mock onboarding test works`: `/api/onboarding/test` returned unexpected HTTP `500`.
+- Groups `23` through `30` did not run because the verifier stopped on the unexpected HTTP `500`.
+- Stable/immutable comparison, final foreign key check, final cross-owner transfer check, and final credential/session leakage group did not run.
+
+Current failure classification:
+
+- Type: new application/fixture/verifier investigation target, not the previous safe-500 verifier contradiction.
+- The safe corrupted-token verifier contradiction is resolved.
+- The next failure is an unexpected HTTP `500` from `/api/onboarding/test` after the first-time `900003` claim and repeated-save idempotency checks passed.
+- The next repair should reproduce `/api/onboarding/test` against the Billing Phase 1 fixture shape and determine whether the route, fixture, or verifier scenario needs the narrow correction.
+- Do not patch automatically from this failed run without a new authorised slice.
+
+Safety:
+
+- No production deployment occurred.
+- No production migration occurred.
+- No production D1 read or write was performed.
+- No D1 deletion, cleanup workflow, or candidate D1 mutation beyond the authorised candidate preview run occurred.
+- Existing failed-preview D1s for `5615bba`, `5313c0c`, `c2e685d`, `8899bfd`, `fb478f4`, and the new `1c30311` candidate were retained.
+- No Stripe product, price, billing, or webhook configuration was changed.
+- No Discord notification flag was enabled and no Discord message was sent.
+- `MOCK_AUTH=true`, `MOCK_NITRADO=true`, `DZN_DISCORD_NOTIFICATIONS_ENABLED=false`, and `DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false` were confirmed in the run/artifact.
+- No real Nitrado call was reached in the completed groups.
+- No main, Event release branch, or PR #15 change occurred.
+- No rebase, merge, cherry-pick, reset, stash, clean, force-push, or production action occurred.
+
 ## Completed Billing Work
 
 - Additive reservation schema for linked-server allowance holds.
@@ -476,4 +599,4 @@ Artifact and result:
 
 ## Next Authorised Slice
 
-Investigate and repair the Billing Phase 1 preview schema failure where `linked_servers.merged_into_server_id` is missing after migrations through `0058`, then rerun the guarded Billing Phase 1 preview. No D1 deletion, preview cleanup, production deployment, production migration, production D1 write, Stripe change, main change, Event release branch change, or PR #15 change.
+Investigate and repair the Billing Phase 1 preview `/api/onboarding/test` unexpected HTTP `500` after verifier groups `1` through `21` pass. Reproduce the failure against the Billing Phase 1 fixture shape, classify whether it is application, fixture, or verifier logic, make the narrowest tested correction, and rerun one guarded `billing-phase-1-preview` candidate. No D1 deletion, preview cleanup, production deployment, production migration, production D1 write, Stripe change, main change, Event release branch change, or PR #15 change.
