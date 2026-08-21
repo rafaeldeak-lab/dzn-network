@@ -184,6 +184,23 @@ async function listCloudflarePaginated(apiPath, keys, label, perPage = 100, maxP
   return items;
 }
 
+async function listPagesProjects() {
+  const first = await getJson(cloudflareUrl("/pages/projects"), cloudflareHeaders(), "cloudflare pages projects");
+  const items = itemsFromResult(first, ["projects"]);
+  const info = resultInfo(first);
+  const currentPage = Number(info.page ?? 1);
+  const totalPages = Number(info.total_pages ?? 1);
+  const returnedPerPage = Number(info.per_page ?? 0);
+  const safePerPage = returnedPerPage > 0 && returnedPerPage <= 20 ? returnedPerPage : 20;
+  if (totalPages > currentPage) {
+    for (let page = currentPage + 1; page <= totalPages && page <= 50; page += 1) {
+      const parsed = await getJson(cloudflareUrl(`/pages/projects?page=${page}&per_page=${safePerPage}`), cloudflareHeaders(), `cloudflare pages projects page ${page}`);
+      items.push(...itemsFromResult(parsed, ["projects"]));
+    }
+  }
+  return items;
+}
+
 async function listGithubPaginated(apiPath, key, label, maxPages = 10) {
   const items = [];
   for (let page = 1; page <= maxPages; page += 1) {
@@ -288,7 +305,7 @@ async function loadD1Inventory() {
 }
 
 async function loadPagesInventory(databaseNameById, databaseIdByName) {
-  const projects = await listCloudflarePaginated("/pages/projects", ["projects"], "cloudflare pages projects", 20);
+  const projects = await listPagesProjects();
   const projectSummaries = [];
   const allBindings = [];
   for (const project of projects) {

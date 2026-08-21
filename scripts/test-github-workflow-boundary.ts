@@ -1516,6 +1516,8 @@ assert.equal(/wrangler\s+pages\s+deploy/i.test(auditScript), false, "Script 39 m
 assert.equal(/wrangler\s+pages\s+secret/i.test(auditScript), false, "Script 39 must not contain Pages secret commands.");
 assert.equal(auditScript.includes("cleanup-preview-d1"), false, "Script 39 must not invoke cleanup mode.");
 assert.equal(auditScript.includes("function maskId"), true, "Script 39 must mask D1 IDs.");
+assert.equal(auditScript.includes("async function listPagesProjects()"), true, "Script 39 must use the endpoint-specific Pages project list helper.");
+assert.equal(auditScript.includes('cloudflareUrl("/pages/projects")'), true, "Script 39 must probe Pages projects with the bare endpoint first.");
 assert.equal(auditScript.includes("ACTIVE_PAGES_BINDING"), true, "Script 39 must protect bound resources.");
 assert.equal(auditScript.includes("RECENT_PREVIEW_PROTECTED"), true, "Script 39 must protect recent resources.");
 assert.equal(auditScript.includes("UNKNOWN_PROTECTED"), true, "Script 39 must protect unknown resources.");
