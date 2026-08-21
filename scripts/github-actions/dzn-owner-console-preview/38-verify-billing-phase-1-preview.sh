@@ -263,6 +263,15 @@ function firstCount(label, command, key = "count") {
 function singleRow(label, command) {
   return d1Read(label, command)[0] || null;
 }
+function assertNoSetupVerificationLeak(value, label) {
+  const text = JSON.stringify(value ?? {});
+  for (const field of ["encrypted_token", "token_iv", "token_auth_tag", "session_token_hash", "TOKEN_ENCRYPTION_KEY", "Authorization", "Bearer "]) {
+    if (text.includes(field)) fail("BILLING_PREVIEW_SECRET_LEAKAGE", `${label} exposed a forbidden credential field or marker.`, { field });
+  }
+  for (const marker of ["Error:", " at ", "stack", "Traceback"]) {
+    if (text.includes(marker)) fail("BILLING_PREVIEW_STACK_TRACE_LEAKAGE", `${label} exposed stack-trace text.`, { marker });
+  }
+}
 function writeArtifacts(ok) {
   endpointSummary.ok = ok;
   fs.writeFileSync(`${artifact}/endpoint-status-summary.json`, JSON.stringify(endpointSummary, null, 2));
@@ -389,7 +398,34 @@ void (async () => {
   if (service900003Count !== 1) fail("BILLING_PREVIEW_REPEATED_SAVE_DUPLICATED_SERVICE", "Repeated save created duplicate 900003 service rows.");
   recordGroup("21. Repeated first-time save is idempotent");
 
-  await postJson(stableUrl, "/api/onboarding/test", ownerACookie, 200, {}, "Mock onboarding test");
+  const setupTargetId = `${prefix}owner-a-source-new-900003`;
+  const preSetupChecks900001 = firstCount("pre-setup-checks-900001", `SELECT COUNT(*) AS count FROM onboarding_checks WHERE linked_server_id = '${prefix}owner-a-canonical-900001';`);
+  const preSetupChecks900002 = firstCount("pre-setup-checks-900002", `SELECT COUNT(*) AS count FROM onboarding_checks WHERE linked_server_id = '${prefix}owner-a-canonical-900002';`);
+  const setupVerification = await postJson(stableUrl, "/api/onboarding/test", ownerACookie, 200, {
+    linkedServerId: setupTargetId,
+  }, "Mock onboarding test");
+  if (setupVerification.json?.ok !== true || typeof setupVerification.json?.checks !== "object" || setupVerification.json?.checks === null) {
+    fail("BILLING_PREVIEW_ONBOARDING_TEST_BAD_BODY", "Setup verification did not return ok=true with checks.");
+  }
+  if (setupVerification.json.checks.tokenValid !== true) fail("BILLING_PREVIEW_ONBOARDING_TOKEN_INVALID", "Setup verification did not report tokenValid=true.");
+  if (setupVerification.json.checks.serviceAccess !== true) fail("BILLING_PREVIEW_ONBOARDING_SERVICE_ACCESS_FAILED", "Setup verification did not report serviceAccess=true.");
+  if (setupVerification.json.checks.admLogsFound !== true) fail("BILLING_PREVIEW_ONBOARDING_ADM_NOT_FOUND", "Setup verification did not report admLogsFound=true in mock mode.");
+  if (setupVerification.json.checks.dayzServiceDetected !== true) fail("BILLING_PREVIEW_ONBOARDING_DAYZ_NOT_DETECTED", "Setup verification did not report dayzServiceDetected=true.");
+  assertNoSetupVerificationLeak(setupVerification.json, "Setup verification response");
+  const setupChecks900003 = firstCount("setup-checks-900003", `SELECT COUNT(*) AS count FROM onboarding_checks WHERE linked_server_id = '${setupTargetId}' AND token_valid = 1 AND service_access = 1 AND adm_logs_found = 1 AND dayz_service_detected = 1;`);
+  if (setupChecks900003 !== 1) fail("BILLING_PREVIEW_ONBOARDING_CHECKS_WRONG_SERVER", "Setup verification did not write onboarding_checks for exact 900003 linked server.");
+  const setupLogConfig900003 = firstCount("setup-log-config-900003", `SELECT COUNT(*) AS count FROM server_log_config WHERE linked_server_id = '${setupTargetId}' AND COALESCE(adm_path, '') != '';`);
+  if (setupLogConfig900003 !== 1) fail("BILLING_PREVIEW_SERVER_LOG_CONFIG_WRONG_SERVER", "Setup verification did not write server_log_config for exact 900003 linked server.");
+  const postSetupChecks900001 = firstCount("post-setup-checks-900001", `SELECT COUNT(*) AS count FROM onboarding_checks WHERE linked_server_id = '${prefix}owner-a-canonical-900001';`);
+  const postSetupChecks900002 = firstCount("post-setup-checks-900002", `SELECT COUNT(*) AS count FROM onboarding_checks WHERE linked_server_id = '${prefix}owner-a-canonical-900002';`);
+  if (postSetupChecks900001 !== preSetupChecks900001 || postSetupChecks900002 !== preSetupChecks900002) {
+    fail("BILLING_PREVIEW_ONBOARDING_CHECKS_DRIFTED_SERVER", "Setup verification wrote onboarding_checks for a non-target linked server.");
+  }
+  ownershipSummary.checks.setupVerificationLinkedServer = {
+    linkedServerId: setupTargetId,
+    onboardingChecks: setupChecks900003,
+    serverLogConfig: setupLogConfig900003,
+  };
   recordGroup("22. Mock onboarding test works");
 
   await postJson(stableUrl, "/api/nitrado/test-adm-path", ownerACookie, 200, {

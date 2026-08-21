@@ -2065,6 +2065,12 @@ assert.equal(billingPreviewScriptsBlock.includes("allowExpectedHttp500: expected
 assert.equal(billingPreviewScriptsBlock.includes("BILLING_PREVIEW_ALLOW_HTTP_500"), false, "Billing verifier must not add a broad environment switch for HTTP 500 checking.");
 assert.equal(billingPreviewScriptsBlock.includes("ALLOW_HTTP_500"), false, "Billing verifier must not add a broad HTTP 500 bypass flag.");
 assert.equal(billingPreviewScriptsBlock.includes("expectJsonErrorCode(stableUrl, \"/api/onboarding/save\", 500, \"token_decrypt_failed\""), true, "Billing corrupted credential scenario must expect HTTP 500 token_decrypt_failed.");
+assert.equal(billingPreviewScriptsBlock.includes("const setupTargetId = `${prefix}owner-a-source-new-900003`;"), true, "Billing setup verification must target the exact first-time 900003 linked server.");
+assert.equal(billingPreviewScriptsBlock.includes("linkedServerId: setupTargetId"), true, "Billing setup verification must send linkedServerId in the request body.");
+assert.equal(billingPreviewScriptsBlock.includes("SELECT COUNT(*) AS count FROM onboarding_checks WHERE linked_server_id = '${setupTargetId}'"), true, "Billing setup verification must prove onboarding_checks were written for exact 900003.");
+assert.equal(billingPreviewScriptsBlock.includes("SELECT COUNT(*) AS count FROM server_log_config WHERE linked_server_id = '${setupTargetId}'"), true, "Billing setup verification must prove server_log_config was written for exact 900003.");
+assert.equal(billingPreviewScriptsBlock.includes("Setup verification wrote onboarding_checks for a non-target linked server."), true, "Billing setup verification must guard against writes to canonical 900001/900002.");
+assert.equal(billingPreviewScriptsBlock.includes("postJson(stableUrl, \"/api/onboarding/test\", ownerACookie, 200, {}, \"Mock onboarding test\")"), false, "Billing setup verification must not send an ambiguous empty body.");
 const billingRuntimeFailureStart = indexOfOrFail(billingPreviewScriptsBlock, "function checkRuntimeFailure");
 const billingExpectStatusStart = indexOfOrFail(billingPreviewScriptsBlock, "async function expectStatus");
 const billingRuntimeFailureBlock = billingPreviewScriptsBlock.slice(billingRuntimeFailureStart, billingExpectStatusStart);
