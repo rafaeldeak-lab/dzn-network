@@ -221,7 +221,7 @@ async function postJson(base, path, cookie, expected, payload, label) {
     redirect: "manual",
     headers: {
       "content-type": "application/json",
-      ...(cookie ? { cookie } : {}),
+      ...(cookie ? { Cookie: cookie } : {}),
     },
     body: JSON.stringify(payload),
   }, label);
@@ -284,12 +284,12 @@ void (async () => {
   recordGroup("2. Logged-out endpoint protection");
 
   await expectJsonErrorCode(stableUrl, "/api/nitrado/services", 400, "missing_linked_server_id", {
-    headers: { cookie: ownerACookie },
+    headers: { Cookie: ownerACookie },
   }, "Service discovery requires linked_server_id");
   recordGroup("3. Service discovery requires linked_server_id");
 
   const services = await jsonRequest(stableUrl, `/api/nitrado/services?linked_server_id=${prefix}owner-a-canonical-900001`, 200, {
-    headers: { cookie: ownerACookie },
+    headers: { Cookie: ownerACookie },
   }, "Owned linked-server service discovery");
   const serviceIds = new Set((services.json?.services || []).map((service) => String(service.id)));
   for (const serviceId of ["900001", "900002", "900003"]) {
@@ -299,33 +299,33 @@ void (async () => {
   recordGroup("4. Owned linked-server discovery succeeds");
 
   await expectJsonErrorCode(stableUrl, `/api/nitrado/services?linked_server_id=${prefix}owner-b-source-cross-900001`, 404, "linked_server_not_found", {
-    headers: { cookie: ownerACookie },
+    headers: { Cookie: ownerACookie },
   }, "Foreign linked-server ID protection");
   ownershipSummary.checks.foreignLinkedServerProtection = { status: 404, errorCode: "linked_server_not_found" };
   recordGroup("5. Foreign linked-server ID returns safe 404");
 
   await expectJsonErrorCode(stableUrl, `/api/nitrado/services?linked_server_id=${prefix}missing-linked-server`, 404, "linked_server_not_found", {
-    headers: { cookie: ownerACookie },
+    headers: { Cookie: ownerACookie },
   }, "Nonexistent linked-server ID protection");
   recordGroup("6. Nonexistent linked-server ID returns safe 404");
 
   await expectJsonErrorCode(stableUrl, "/api/onboarding/save", 400, "missing_nitrado_token", {
     method: "POST",
-    headers: { "content-type": "application/json", cookie: ownerACookie },
+    headers: { "content-type": "application/json", Cookie: ownerACookie },
     body: JSON.stringify(savePayload("owner-a-source-no-credential", "900002")),
   }, "No-token draft exact credential protection");
   recordGroup("7. No-token draft does not borrow another server's newer credential");
 
   await expectJsonErrorCode(stableUrl, "/api/onboarding/save", 500, "token_decrypt_failed", {
     method: "POST",
-    headers: { "content-type": "application/json", cookie: ownerACookie },
+    headers: { "content-type": "application/json", Cookie: ownerACookie },
     body: JSON.stringify(savePayload("owner-a-source-corrupted-credential", "900002")),
   }, "Corrupted credential classification");
   recordGroup("8. Corrupted exact credential returns safe classified decrypt failure");
 
   await expectJsonErrorCode(stableUrl, "/api/onboarding/save", 409, "nitrado_service_already_linked", {
     method: "POST",
-    headers: { "content-type": "application/json", cookie: ownerBCookie },
+    headers: { "content-type": "application/json", Cookie: ownerBCookie },
     body: JSON.stringify(savePayload("owner-b-source-cross-900001", "900001", "owner-b-draft")),
   }, "Cross-owner service conflict");
   ownershipSummary.checks.crossOwnerConflict = { status: 409, errorCode: "nitrado_service_already_linked" };
@@ -411,7 +411,7 @@ void (async () => {
   recordGroup("26. Notifications and server announcements remain false");
 
   for (const path of ["/", "/setup", "/dashboard", "/api/dzn-pulse/config", `/api/nitrado/services?linked_server_id=${prefix}owner-a-canonical-900001`]) {
-    const init = path.startsWith("/api/nitrado") ? { headers: { cookie: ownerACookie } } : {};
+    const init = path.startsWith("/api/nitrado") ? { headers: { Cookie: ownerACookie } } : {};
     const stableResult = await fetchWithRetry(stableUrl, path, init);
     const immutableResult = await fetchWithRetry(immutableUrl, path, init);
     compareSummary.comparedPaths.push({ path, stableStatus: stableResult.status, immutableStatus: immutableResult.status });
