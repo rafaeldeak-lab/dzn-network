@@ -267,6 +267,94 @@ Audit result and safety:
 - No Billing preview rerun occurred.
 - No production action occurred.
 
+## Corrected Read-Only D1 Capacity Audit Evidence
+
+Slice 4C3 result: BLOCKED - NO PROVABLY SAFE CANDIDATE.
+
+Implementation and validation:
+
+- Job-log redirect fix commit: `9bcddfba11de8de4c3f185694eeec9d9c48b6700` - `fix(preview): follow GitHub job-log redirects safely`.
+- New audit candidate SHA: `9bcddfba11de8de4c3f185694eeec9d9c48b6700`.
+- The corrected downloader requests the GitHub job-log API with `Accept: application/vnd.github+json`, uses manual redirect handling, validates the HTTPS redirect target, and downloads the signed log URL separately without Authorization or GitHub API headers.
+- Expired or unavailable old signed log URLs are retried once, then recorded as unavailable with safe status and reason fields.
+- Unavailable log evidence cannot support `STALE_PREVIEW_CANDIDATE`; incomplete workflow evidence remains fail-closed with `candidate_selected=false`.
+- Partial sanitized artifacts are initialized before long inventory/cross-reference operations and are updated progressively.
+- Local validation logs are retained outside the repository under `C:\Users\rafae\Desktop\DZN-Audits\logs\d1-job-log-download-20260821-165743`.
+- Validation passed: shell syntax for script 39, `npm run test:github-workflows`, `npm run test:billing-integrity`, `npm run test:billing-plans`, `npx tsc --noEmit --pretty false`, `npm run lint`, `npm run build`, `npm test`, and `git diff --check`.
+- Lint remained at 0 errors and the existing 4 warnings. `npm test` retained the documented optional raw ADM fixture skip: raw owner-supplied bundle is not present locally.
+
+Workflow run evidence:
+
+- Run URL: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32500704348`.
+- Run ID: `32500704348`; run number `59`; attempt `1`.
+- Event: `workflow_dispatch`.
+- Branch: `feature/event-platform-performance-foundation`.
+- Candidate SHA: `9bcddfba11de8de4c3f185694eeec9d9c48b6700`.
+- Created: `2026-08-21T16:00:56Z`.
+- Updated/completed: `2026-08-21T16:03:39Z`.
+- Final conclusion: `success`.
+- Failed steps: none.
+- Skipped steps were the non-audit preview, cleanup, rebind, repair, Billing preview, deploy, seed, migration, and production-adjacent preview steps gated off by `mode=audit-preview-d1-capacity`.
+- Secure dispatch method: Git Credential Manager credential captured only in process memory through Git Bash. No credential was printed or saved. A PowerShell 204-response handling exception occurred after the dispatch request, but exactly one run for the candidate SHA was created; no duplicate dispatch was made.
+
+Inventory and classification:
+
+- D1 count: `10`.
+- Pages projects checked: `8`.
+- Pages D1 bindings checked: `16` environment bindings across production and preview configs.
+- Workflow cross-reference checked `100` relevant runs and `106` jobs.
+- Job logs available: `72`.
+- Job logs unavailable: `34`, all recorded as `signed_status_404` after two bounded signed-download attempts.
+- No signed URL, Location header, raw log text, credential, Authorization value, or complete D1 ID was retained in the artifact.
+
+Inventoried databases:
+
+- `dzn_network_db_owner_console_preview_creator_governance_0919c46` - `f327c5b2...73a5`, created `2026-07-22T17:44:37.302Z`, latest use `2026-08-21T15:39:00.000Z`, `ACTIVE_PAGES_BINDING`, bound to `dzn-network-owner-console-preview`.
+- `dzn_network_db_owner_console_preview_creator_governance_51815be` - `efb4127c...30ff`, created `2026-07-20T09:17:52.473Z`, latest use `2026-08-21T15:39:00.000Z`, `HANDOFF_REFERENCED_PROTECTED`, referenced by current handoffs as evidence-relevant.
+- `dzn_network_db_discord_announcements_preview` - `f7d5eb47...fae6`, created `2026-07-08T13:39:03.983Z`, latest use `2026-08-21T15:39:00.000Z`, `ACTIVE_PAGES_BINDING`, bound to `dzn-network-discord-announcements-preview`.
+- `dzn_network_db_discord_phase_2a_preview` - `83e3b565...ffb5`, created `2026-07-04T13:05:48.512Z`, latest use `2026-08-21T15:39:00.000Z`, `ACTIVE_PAGES_BINDING`, bound to `dzn-network-discord-phase-2a-preview`.
+- `dzn_network_db_discord_control_preview` - `f6c76574...24d0`, created `2026-07-04T10:32:32.789Z`, latest use `2026-08-21T15:39:00.000Z`, `ACTIVE_PAGES_BINDING`, bound to `dzn-network-discord-control-preview`.
+- `dzn_network_db_owner_console_preview` - `8434d3d7...b81b`, created `2026-07-04T00:08:10.553Z`, latest use `2026-08-21T15:39:00.000Z`, `RECENT_PREVIEW_PROTECTED`, referenced by a successful preview workflow within 30 days.
+- `dzn_network_db_server_lifecycle_preview` - `692db1da...7ab4`, created `2026-07-02T01:59:34.911Z`, latest use `2026-08-21T15:39:00.000Z`, `ACTIVE_PAGES_BINDING`, bound to `dzn-network-server-lifecycle-preview`.
+- `dzn_network_db_server_advertising_preview` - `1c17f68f...148b`, created `2026-06-28T08:09:51.416Z`, latest use `2026-08-21T15:39:00.000Z`, `ACTIVE_PAGES_BINDING`, bound to `dzn-network-server-advertising-preview`.
+- `dzn_network_db_dzn_pulse_preview` - `e27a464f...d73a`, created `2026-06-26T06:42:45.776Z`, latest use `2026-08-21T15:39:00.000Z`, `ACTIVE_PAGES_BINDING`, bound to `dzn-network-pulse-preview`.
+- `dzn_network_db` - `37515c66...975e`, created `2026-05-13T23:07:28.622Z`, latest use `2026-08-21T15:59:21.129Z`, `PRODUCTION_PROTECTED`, bound to production Pages and protected by configured production name/ID.
+
+Pages binding evidence:
+
+- `dzn-network`, branch `main`, latest deployment `2026-08-21T15:59:21.129Z`, latest success `2026-08-21T15:41:31.753Z`, `production:DB` and `preview:DB` both bound to `dzn_network_db` (`37515c66...975e`).
+- `dzn-network-owner-console-preview`, branch `feature/creator-only-event-governance`, latest success `2026-08-20T12:13:47.105Z`, both environments bound to `dzn_network_db_owner_console_preview_creator_governance_0919c46` (`f327c5b2...73a5`).
+- `dzn-network-discord-announcements-preview`, branch `main`, latest success `2026-07-22T11:40:54.083Z`, both environments bound to `dzn_network_db_discord_announcements_preview` (`f7d5eb47...fae6`).
+- `dzn-network-discord-phase-2a-preview`, branch `feature/discord-control-phase-2a-ux`, latest success `2026-07-05T07:54:44.194Z`, both environments bound to `dzn_network_db_discord_phase_2a_preview` (`83e3b565...ffb5`).
+- `dzn-network-discord-control-preview`, branch `feature/discord-control-centre`, latest success `2026-07-04T11:42:18.128Z`, both environments bound to `dzn_network_db_discord_control_preview` (`f6c76574...24d0`).
+- `dzn-network-server-lifecycle-preview`, branch `feature/server-lifecycle-resource-control`, latest success `2026-07-02T20:01:06.620Z`, both environments bound to `dzn_network_db_server_lifecycle_preview` (`692db1da...7ab4`).
+- `dzn-network-server-advertising-preview`, branch `feature/server-advertising-system`, latest success `2026-06-28T11:35:31.741Z`, both environments bound to `dzn_network_db_server_advertising_preview` (`1c17f68f...148b`).
+- `dzn-network-pulse-preview`, branch `feature/dzn-pulse`, latest success `2026-06-27T11:09:23.845Z`, both environments bound to `dzn_network_db_dzn_pulse_preview` (`e27a464f...d73a`).
+
+Artifact and result:
+
+- Artifact name: `dzn-preview-d1-capacity-audit`.
+- Artifact ID: `9453443289`.
+- Artifact extraction path: `C:\Users\rafae\Desktop\DZN-Audits\d1-capacity-audits\github-read-only-32500704348\dzn-preview-d1-capacity-audit`.
+- External job log path: `C:\Users\rafae\Desktop\DZN-Audits\d1-capacity-audits\github-read-only-32500704348\job-96829464256.log`.
+- Artifact files reviewed: `audit-metadata.json`, `cleanup-candidate.json`, `d1-inventory.json`, `pages-bindings.json`, `protected-resources.json`, `summary.md`, `workflow-reference-summary.json`.
+- Artifact security scan result: clean for complete D1 UUIDs, 32-character hex IDs, bearer values, Authorization headers, credential names/values, signed URLs, Location headers, and raw log fields.
+- Job log review found only GitHub-masked `***` secret placeholders and no credential values or signed URLs.
+- `candidate_selected=false`.
+- No database satisfied every stale-candidate rule.
+- No safe cleanup candidate was selected.
+- No deletion occurred.
+- No D1 creation occurred.
+- No D1 SQL occurred.
+- No migration was applied.
+- No fixtures were seeded.
+- No Pages project was created or modified.
+- No Pages binding was changed.
+- No Pages secret was written or deleted.
+- No Pages deployment occurred.
+- No Billing preview rerun occurred.
+- No production action occurred.
+
 ## Next Authorised Slice
 
-Resolve the recorded read-only Cloudflare D1 capacity audit failure and rerun audit-preview-d1-capacity. No D1 deletion, production deployment or production migration.
+Resolve Cloudflare D1 capacity by increasing the account limit or making an explicit owner-approved decision about an unresolved preview resource. No D1 deletion is authorized from the current evidence.
