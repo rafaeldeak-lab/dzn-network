@@ -173,6 +173,10 @@ jobs:
         if: ${{ inputs.mode == 'full-preview' || inputs.mode == 'verify-existing-creator-governance-preview' || inputs.mode == 'event-platform-performance-preview' }}
         run: npm ci
 
+      - name: Preflight Billing Phase 1 preview
+        if: ${{ inputs.mode == 'billing-phase-1-preview' }}
+        run: bash -e scripts/github-actions/dzn-owner-console-preview/32-preflight-billing-phase-1-preview.sh
+
       - name: Verify existing creator-governance preview
         if: ${{ inputs.mode == 'verify-existing-creator-governance-preview' }}
         run: bash -e scripts/github-actions/dzn-owner-console-preview/02-verify-existing-creator-governance-preview.sh
@@ -224,7 +228,7 @@ jobs:
         run: bash -e scripts/github-actions/dzn-owner-console-preview/09-validate-branch.sh
 
       - name: Diagnose Cloudflare preview auth
-        if: ${{ inputs.mode == 'full-preview' }}
+        if: ${{ inputs.mode == 'full-preview' || inputs.mode == 'billing-phase-1-preview' }}
         run: bash -e scripts/github-actions/dzn-owner-console-preview/10-diagnose-cloudflare-preview-auth.sh
 
       - name: Guarded preview D1 cleanup
@@ -300,12 +304,20 @@ jobs:
         run: bash -e scripts/github-actions/dzn-owner-console-preview/22-verify-repaired-rebound-discord-preview.sh
 
       - name: Resolve or create preview D1 database
-        if: ${{ inputs.mode == 'full-preview' }}
+        if: ${{ inputs.mode == 'full-preview' || inputs.mode == 'billing-phase-1-preview' }}
         run: bash -e scripts/github-actions/dzn-owner-console-preview/23-resolve-or-create-preview-d1-database.sh
 
       - name: Apply preview D1 migrations
-        if: ${{ inputs.mode == 'full-preview' }}
+        if: ${{ inputs.mode == 'full-preview' || inputs.mode == 'billing-phase-1-preview' }}
         run: bash -e scripts/github-actions/dzn-owner-console-preview/24-apply-preview-d1-migrations.sh
+
+      - name: Verify Billing Phase 1 preview schema
+        if: ${{ inputs.mode == 'billing-phase-1-preview' }}
+        run: bash -e scripts/github-actions/dzn-owner-console-preview/33-verify-billing-phase-1-preview-schema.sh
+
+      - name: Seed Billing Phase 1 preview fixtures
+        if: ${{ inputs.mode == 'billing-phase-1-preview' }}
+        run: bash -e scripts/github-actions/dzn-owner-console-preview/34-seed-billing-phase-1-preview-fixtures.sh
 
       - name: Seed preview-only owner console data
         if: ${{ inputs.mode == 'full-preview' }}
@@ -316,12 +328,52 @@ jobs:
         run: bash -e scripts/github-actions/dzn-owner-console-preview/26-check-creator-governance-preview-test-event-fixture.sh
 
       - name: Resolve or create preview Pages project
-        if: ${{ inputs.mode == 'full-preview' }}
+        if: ${{ inputs.mode == 'full-preview' || inputs.mode == 'billing-phase-1-preview' }}
         run: bash -e scripts/github-actions/dzn-owner-console-preview/27-resolve-or-create-preview-pages-project.sh
 
       - name: Configure preview owner auth secrets
-        if: ${{ inputs.mode == 'full-preview' }}
+        if: ${{ inputs.mode == 'full-preview' || inputs.mode == 'billing-phase-1-preview' }}
         run: bash -e scripts/github-actions/dzn-owner-console-preview/28-configure-preview-owner-auth-secrets.sh
+
+      - name: Configure Billing Phase 1 preview runtime
+        if: ${{ inputs.mode == 'billing-phase-1-preview' }}
+        run: bash -e scripts/github-actions/dzn-owner-console-preview/35-configure-billing-phase-1-preview-runtime.sh
+
+      - name: Build Billing Phase 1 preview runtime
+        if: ${{ inputs.mode == 'billing-phase-1-preview' }}
+        env:
+          MOCK_AUTH: "true"
+          MOCK_NITRADO: "true"
+          DZN_PULSE_ENABLED: "true"
+          DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+          DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
+          DZN_APP_URL: https://dzn-network-owner-console-preview-billing-phase-1.pages.dev
+          NEXT_PUBLIC_APP_URL: https://dzn-network-owner-console-preview-billing-phase-1.pages.dev
+        run: bash -e scripts/github-actions/dzn-owner-console-preview/36-build-billing-phase-1-preview-runtime.sh
+
+      - name: Deploy Billing Phase 1 preview runtime
+        if: ${{ inputs.mode == 'billing-phase-1-preview' }}
+        env:
+          MOCK_AUTH: "true"
+          MOCK_NITRADO: "true"
+          DZN_PULSE_ENABLED: "true"
+          DZN_DISCORD_NOTIFICATIONS_ENABLED: "false"
+          DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: "false"
+          DZN_APP_URL: https://dzn-network-owner-console-preview-billing-phase-1.pages.dev
+          NEXT_PUBLIC_APP_URL: https://dzn-network-owner-console-preview-billing-phase-1.pages.dev
+        run: bash -e scripts/github-actions/dzn-owner-console-preview/37-deploy-billing-phase-1-preview-runtime.sh
+
+      - name: Verify Billing Phase 1 preview
+        if: ${{ inputs.mode == 'billing-phase-1-preview' }}
+        run: bash -e scripts/github-actions/dzn-owner-console-preview/38-verify-billing-phase-1-preview.sh
+
+      - name: Upload Billing Phase 1 preview artifact
+        if: ${{ always() && inputs.mode == 'billing-phase-1-preview' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dzn-billing-phase-1-preview
+          path: dzn-billing-phase-1-preview
+          if-no-files-found: warn
 
       - name: Deploy preview Pages project
         if: ${{ inputs.mode == 'full-preview' }}

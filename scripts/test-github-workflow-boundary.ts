@@ -139,7 +139,8 @@ const dznPulseProductionRolloutWorkflow = read(".github/workflows/dzn-pulse-prod
 const dznServerLifecyclePreviewWorkflow = read(".github/workflows/dzn-server-lifecycle-preview.yml");
 const dznServerLifecycleProductionRolloutWorkflow = read(".github/workflows/dzn-server-lifecycle-production-rollout.yml");
 const dznPagesRuntimeProductionDeployWorkflow = read(".github/workflows/dzn-pages-runtime-production-deploy.yml");
-const dznOwnerConsolePreviewWorkflow = expandOwnerConsolePreviewWorkflow(read(".github/workflows/dzn-owner-console-preview.yml"));
+const dznOwnerConsolePreviewWorkflowSource = read(".github/workflows/dzn-owner-console-preview.yml");
+const dznOwnerConsolePreviewWorkflow = expandOwnerConsolePreviewWorkflow(dznOwnerConsolePreviewWorkflowSource);
 const dznOwnerConsoleProductionRolloutWorkflow = read(".github/workflows/dzn-owner-console-production-rollout.yml");
 const dznDiscordControlPreviewWorkflow = read(".github/workflows/dzn-discord-control-preview.yml");
 const dznDiscordControlProductionRolloutWorkflow = read(".github/workflows/dzn-discord-control-production-rollout.yml");
@@ -776,6 +777,13 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("Refusing Billing Phase 1 p
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Refusing Billing Phase 1 preview for production Pages project."), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Install Billing preview dependencies"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.indexOf("- name: Install Billing preview dependencies") < dznOwnerConsolePreviewWorkflow.indexOf("- name: Validate preview-only inputs"), true, "Billing dependencies must install before Billing validation/preflight.");
+assert.equal(dznOwnerConsolePreviewWorkflowSource.includes("scripts/github-actions/dzn-owner-console-preview/32-preflight-billing-phase-1-preview.sh"), true);
+assert.equal(dznOwnerConsolePreviewWorkflowSource.includes("scripts/github-actions/dzn-owner-console-preview/33-verify-billing-phase-1-preview-schema.sh"), true);
+assert.equal(dznOwnerConsolePreviewWorkflowSource.includes("scripts/github-actions/dzn-owner-console-preview/34-seed-billing-phase-1-preview-fixtures.sh"), true);
+assert.equal(dznOwnerConsolePreviewWorkflowSource.includes("scripts/github-actions/dzn-owner-console-preview/35-configure-billing-phase-1-preview-runtime.sh"), true);
+assert.equal(dznOwnerConsolePreviewWorkflowSource.includes("scripts/github-actions/dzn-owner-console-preview/36-build-billing-phase-1-preview-runtime.sh"), true);
+assert.equal(dznOwnerConsolePreviewWorkflowSource.includes("scripts/github-actions/dzn-owner-console-preview/37-deploy-billing-phase-1-preview-runtime.sh"), true);
+assert.equal(dznOwnerConsolePreviewWorkflowSource.includes("scripts/github-actions/dzn-owner-console-preview/38-verify-billing-phase-1-preview.sh"), true);
 function acceptsOwnerConsolePreviewRef(input: {
   refName: string;
   ref?: string;
@@ -1075,6 +1083,7 @@ const ownerPreviewInstallStart = indexOfOrFail(
   dznOwnerConsolePreviewWorkflow,
   "- name: Install\n        if: ${{ inputs.mode == 'full-preview'",
 );
+const ownerPreviewBillingPreflightStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Preflight Billing Phase 1 preview");
 const ownerPreviewVerifyExistingStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify existing creator-governance preview");
 const ownerPreviewPhase2APreflightStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Preflight event platform performance preview");
 const ownerPreviewPhase2AMigrateStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Apply only Phase 2A migration 0057 to preview");
@@ -1084,6 +1093,7 @@ const ownerPreviewPhase2ADeployStart = indexOfOrFail(dznOwnerConsolePreviewWorkf
 const ownerPreviewPhase2AVerifyStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify Phase 2A performance preview");
 const ownerPreviewPhase2AArtifactStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Upload Phase 2A preview artifact");
 const ownerPreviewValidateBranchStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Validate branch");
+const ownerPreviewCloudflareAuthStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Diagnose Cloudflare preview auth");
 const ownerPreviewCleanupStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Guarded preview D1 cleanup");
 const ownerPreviewRebindStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Guarded Discord preview D1 rebind");
 const ownerPreviewActivationStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Prepare pinned main runtime for Discord preview activation");
@@ -1098,6 +1108,8 @@ const ownerPreviewRepairDeployStart = indexOfOrFail(dznOwnerConsolePreviewWorkfl
 const ownerPreviewRepairVerifyStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify repaired rebound Discord preview");
 const ownerPreviewResolveD1Start = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Resolve or create preview D1 database");
 const ownerPreviewMigrateStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Apply preview D1 migrations");
+const ownerPreviewBillingSchemaStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify Billing Phase 1 preview schema");
+const ownerPreviewBillingFixtureStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Seed Billing Phase 1 preview fixtures");
 const ownerPreviewConfigWrite =
   ownerPreviewResolveD1Start +
   indexOfOrFail(
@@ -1106,6 +1118,13 @@ const ownerPreviewConfigWrite =
   );
 const ownerPreviewSeedStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Seed preview-only owner console data");
 const ownerPreviewEventFixtureCheckStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Check creator-governance preview test event fixture");
+const ownerPreviewPagesProjectStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Resolve or create preview Pages project");
+const ownerPreviewAuthSecretsStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Configure preview owner auth secrets");
+const ownerPreviewBillingRuntimeConfigStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Configure Billing Phase 1 preview runtime");
+const ownerPreviewBillingRuntimeBuildStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Build Billing Phase 1 preview runtime");
+const ownerPreviewBillingRuntimeDeployStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Deploy Billing Phase 1 preview runtime");
+const ownerPreviewBillingRuntimeVerifyStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify Billing Phase 1 preview\n        if: ${{ inputs.mode == 'billing-phase-1-preview' }}");
+const ownerPreviewBillingArtifactStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Upload Billing Phase 1 preview artifact");
 const ownerPreviewDeployStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Deploy preview Pages project");
 const ownerPreviewVerifyStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify owner console preview");
 const ownerPreviewCreatorPost = indexOfOrFail(dznOwnerConsolePreviewWorkflow, 'await postJson("/api/owner/events", creatorCookie, 200, createPayload);');
@@ -1204,6 +1223,9 @@ assert.equal(
   true,
   "Owner preview session/Discord secrets must only be generated for full-preview and billing-phase-1-preview.",
 );
+assert.equal(ownerPreviewValidateBlock.includes("billing-phase-1-preview mode may only run from feature/event-platform-performance-foundation."), true, "Billing preview mode must be tied to the active foundation branch.");
+assert.equal(ownerPreviewValidateBlock.includes("Owner console preview does not accept tag refs."), true, "Billing preview must inherit tag rejection.");
+assert.equal(ownerPreviewValidateBlock.includes("Owner console preview does not accept pull-request merge refs."), true, "Billing preview must inherit PR-ref rejection.");
 assert.equal(ownerPreviewPhase2ABlock.includes("event-platform-performance-preview"), true, "Phase 2A preview steps must be explicitly mode-gated.");
 assert.equal(ownerPreviewPhase2ABlock.includes("dzn-network-owner-console-preview"), true, "Phase 2A preview must use the fixed owner-console preview project.");
 assert.equal(ownerPreviewPhase2ABlock.includes("dzn_network_db_owner_console_preview_creator_governance_0919c46"), true, "Phase 2A preview must use the fixed reusable preview D1.");
@@ -1730,6 +1752,8 @@ const ownerPreviewResolveD1Block = dznOwnerConsolePreviewWorkflow.slice(ownerPre
 const ownerPreviewCapacityCheck = indexOfOrFail(ownerPreviewResolveD1Block, "PREVIEW_D1_CAPACITY_EXHAUSTED");
 const ownerPreviewCreateCall = indexOfOrFail(ownerPreviewResolveD1Block, 'method: "POST"');
 assert.equal(ownerPreviewCapacityCheck < ownerPreviewCreateCall, true, "Capacity exhaustion must fail before D1 creation is attempted.");
+assert.equal(ownerPreviewResolveD1Block.includes("method: \"DELETE\""), false, "Preview D1 capacity stop must not delete any database.");
+assert.equal(ownerPreviewResolveD1Block.includes("No preview migrations, seed, Pages configuration, deployment, or event creation were attempted."), true, "D1 capacity stop must fail before downstream remote actions.");
 assert.equal(ownerPreviewConfigWrite > ownerPreviewResolveD1Start, true, "Preview Wrangler config must be generated in the D1 resolution step.");
 assert.equal(ownerPreviewMigrateStart > ownerPreviewConfigWrite, true, "Preview migrations must run after the preview Wrangler config is generated.");
 assert.equal(ownerPreviewSeedStart > ownerPreviewConfigWrite, true, "Preview seed must run after the preview Wrangler config is generated.");
@@ -1740,6 +1764,140 @@ assert.equal(ownerPreviewCreatorPost > ownerPreviewVerifyStart, true, "Creator P
 assert.equal(ownerPreviewRowVerifyStart > ownerPreviewCreatorPost, true, "D1 row verification must run only after the creator POST verification.");
 const ownerPreviewBeforeFullPreviewConfig = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewResolveD1Start, ownerPreviewConfigWrite);
 assert.equal(ownerPreviewBeforeFullPreviewConfig.includes("wrangler.owner-console-preview.toml"), false, "Full-preview D1 commands may not reference wrangler.owner-console-preview.toml before it is created.");
+const billingPreviewScriptsBlock = [
+  "32-preflight-billing-phase-1-preview.sh",
+  "33-verify-billing-phase-1-preview-schema.sh",
+  "34-seed-billing-phase-1-preview-fixtures.sh",
+  "35-configure-billing-phase-1-preview-runtime.sh",
+  "36-build-billing-phase-1-preview-runtime.sh",
+  "37-deploy-billing-phase-1-preview-runtime.sh",
+  "38-verify-billing-phase-1-preview.sh",
+].map((name) => read(`scripts/github-actions/dzn-owner-console-preview/${name}`)).join("\n");
+const billingStepOrder = [
+  ownerPreviewBillingPreflightStart,
+  ownerPreviewCloudflareAuthStart,
+  ownerPreviewResolveD1Start,
+  ownerPreviewMigrateStart,
+  ownerPreviewBillingSchemaStart,
+  ownerPreviewBillingFixtureStart,
+  ownerPreviewPagesProjectStart,
+  ownerPreviewAuthSecretsStart,
+  ownerPreviewBillingRuntimeConfigStart,
+  ownerPreviewBillingRuntimeBuildStart,
+  ownerPreviewBillingRuntimeDeployStart,
+  ownerPreviewBillingRuntimeVerifyStart,
+  ownerPreviewBillingArtifactStart,
+];
+assert.deepEqual([...billingStepOrder].sort((a, b) => a - b), billingStepOrder, "Billing Phase 1 preview workflow steps must run in the guarded order.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Preflight Billing Phase 1 preview\n        if: ${{ inputs.mode == 'billing-phase-1-preview' }}"), true, "Billing preflight must be Billing-mode gated.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Seed preview-only owner console data\n        if: ${{ inputs.mode == 'full-preview' }}"), true, "Billing mode must not run the generic full-preview fixture seed.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Deploy preview Pages project\n        if: ${{ inputs.mode == 'full-preview' }}"), true, "Billing mode must not use the generic static deploy script.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Verify owner console preview\n        if: ${{ inputs.mode == 'full-preview' }}"), true, "Billing mode must not use the generic full-preview verifier.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Guarded preview D1 cleanup\n        if: ${{ inputs.mode == 'cleanup-preview-d1' }}"), true, "Billing mode must never invoke cleanup mode.");
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("name: dzn-billing-phase-1-preview"), true, "Billing preview must upload a dedicated sanitized artifact.");
+assert.equal(billingPreviewScriptsBlock.includes("\"${MODE}\" != \"billing-phase-1-preview\""), true, "Billing scripts must self-gate on Billing mode.");
+assert.equal(billingPreviewScriptsBlock.includes("feature/event-platform-performance-foundation"), true, "Billing scripts must pin the active foundation branch.");
+assert.equal(billingPreviewScriptsBlock.includes("APPROVE_BILLING_PHASE_1_PREVIEW"), true, "Billing scripts must require exact Billing approval.");
+assert.equal(billingPreviewScriptsBlock.includes("PREVIEW_ONLY"), true, "Billing scripts must require PREVIEW_ONLY.");
+assert.equal(billingPreviewScriptsBlock.includes("dzn-network-owner-console-preview-billing-phase-1"), true, "Billing scripts must use the dedicated Billing Pages project.");
+assert.equal(billingPreviewScriptsBlock.includes("dzn_network_db_owner_console_preview_billing_phase_1_"), true, "Billing scripts must use candidate-derived Billing D1 names.");
+assert.equal(billingPreviewScriptsBlock.includes("Refusing Billing Phase 1 preview for production D1 database name."), true, "Billing scripts must reject production D1 names.");
+assert.equal(billingPreviewScriptsBlock.includes("Refusing Billing Phase 1 preview for production Pages project."), true, "Billing scripts must reject production Pages project.");
+assert.equal(billingPreviewScriptsBlock.includes("randomBytes(32).toString('base64url')"), true, "Billing preflight must generate an ephemeral TOKEN_ENCRYPTION_KEY.");
+assert.equal(billingPreviewScriptsBlock.includes("echo \"::add-mask::${TOKEN_ENCRYPTION_KEY}\""), true, "Billing preflight must mask the ephemeral encryption key immediately.");
+assert.equal(billingPreviewScriptsBlock.includes("printf \"TOKEN_ENCRYPTION_KEY=%s\\n\" \"${TOKEN_ENCRYPTION_KEY}\""), true, "Billing preflight must write the ephemeral key only through GITHUB_ENV.");
+assert.equal(billingPreviewScriptsBlock.includes("BILLING_OWNER_A_SESSION_TOKEN"), true, "Billing preflight must generate owner A session token.");
+assert.equal(billingPreviewScriptsBlock.includes("BILLING_OWNER_B_SESSION_TOKEN"), true, "Billing preflight must generate owner B session token.");
+assert.equal(billingPreviewScriptsBlock.includes("MOCK_AUTH=true"), true, "Billing preflight must force MOCK_AUTH=true.");
+assert.equal(billingPreviewScriptsBlock.includes("MOCK_NITRADO=true"), true, "Billing preflight must force MOCK_NITRADO=true.");
+assert.equal(billingPreviewScriptsBlock.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED=false"), true, "Billing preflight must force notifications false.");
+assert.equal(billingPreviewScriptsBlock.includes("DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false"), true, "Billing preflight must force server announcements false.");
+assert.equal(billingPreviewScriptsBlock.includes("0057_event_suggestions_phase_2a.sql"), true, "Billing schema verification must pin migration 0057.");
+assert.equal(billingPreviewScriptsBlock.includes("0058_billing_phase_1_integrity.sql"), true, "Billing schema verification must pin migration 0058.");
+assert.equal(billingPreviewScriptsBlock.includes("linked_server_allowance_reservations"), true, "Billing schema verification must check allowance reservations.");
+assert.equal(billingPreviewScriptsBlock.includes("idx_lsar_active_linked_server"), true, "Billing schema verification must check active reservation uniqueness.");
+assert.equal(billingPreviewScriptsBlock.includes("idx_linked_servers_active_service_id"), true, "Billing schema verification must check active Nitrado service uniqueness.");
+assert.equal(billingPreviewScriptsBlock.includes("billing-phase1-preview-"), true, "Billing fixtures must be prefix-scoped.");
+assert.equal(billingPreviewScriptsBlock.includes("900001"), true, "Billing fixtures must include mock service 900001.");
+assert.equal(billingPreviewScriptsBlock.includes("900002"), true, "Billing fixtures must include mock service 900002.");
+assert.equal(billingPreviewScriptsBlock.includes("900003"), true, "Billing fixtures must include mock service 900003.");
+assert.equal(billingPreviewScriptsBlock.includes("crypto.createHmac(\"sha256\", sessionSecret).update(value).digest(\"base64url\")"), true, "Billing sessions must store HMAC hashes.");
+assert.equal(billingPreviewScriptsBlock.includes("crypto.createCipheriv(\"aes-256-gcm\", key, iv)"), true, "Billing fixtures must use AES-GCM token representation.");
+assert.equal(billingPreviewScriptsBlock.includes("rm -f \"${SEED_SQL}\""), true, "Billing fixture SQL containing credentials must be removed immediately after use.");
+assert.equal(billingPreviewScriptsBlock.includes("DELETE FROM"), false, "Billing scripts must not issue broad DELETE statements.");
+assert.equal(billingPreviewScriptsBlock.includes("MOCK_AUTH: { type: \"plain_text\", value: \"true\" }"), true, "Billing runtime config must set MOCK_AUTH=true.");
+assert.equal(billingPreviewScriptsBlock.includes("MOCK_NITRADO: { type: \"plain_text\", value: \"true\" }"), true, "Billing runtime config must set MOCK_NITRADO=true.");
+assert.equal(billingPreviewScriptsBlock.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: \"plain_text\", value: \"false\" }"), true, "Billing runtime config must keep notifications false.");
+assert.equal(billingPreviewScriptsBlock.includes("DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: { type: \"plain_text\", value: \"false\" }"), true, "Billing runtime config must keep server announcements false.");
+assert.equal(billingPreviewScriptsBlock.includes("wrangler pages secret put TOKEN_ENCRYPTION_KEY"), true, "Billing runtime config must configure the ephemeral TOKEN_ENCRYPTION_KEY secret.");
+assert.equal(billingPreviewScriptsBlock.includes("wrangler pages secret put SESSION_SECRET"), true, "Billing runtime config must configure SESSION_SECRET for preview auth.");
+assert.equal(billingPreviewScriptsBlock.includes("wrangler pages secret put DISCORD_CLIENT_SECRET"), true, "Billing runtime config must configure the preview Discord client secret.");
+assert.equal(billingPreviewScriptsBlock.includes("wrangler pages secret put DISCORD_BOT_TOKEN"), false, "Billing runtime config must not configure a Discord bot token.");
+assert.equal(billingPreviewScriptsBlock.includes("secrets.NITRADO"), false, "Billing preview must not require a real Nitrado token from GitHub secrets.");
+assert.equal(billingPreviewScriptsBlock.includes("secrets.DISCORD_BOT_TOKEN"), false, "Billing preview must not require a Discord bot token from GitHub secrets.");
+assert.equal(billingPreviewScriptsBlock.includes("npm run test:billing-integrity"), true, "Billing runtime build must run billing integrity tests.");
+assert.equal(billingPreviewScriptsBlock.includes("npm run test:github-workflows"), true, "Billing runtime build must run workflow tests.");
+assert.equal(billingPreviewScriptsBlock.includes("npx tsc --noEmit --pretty false"), true, "Billing runtime build must run TypeScript.");
+assert.equal(billingPreviewScriptsBlock.includes("npm run lint"), true, "Billing runtime build must run lint.");
+assert.equal(billingPreviewScriptsBlock.includes("npm run build"), true, "Billing runtime build must run Next build.");
+assert.equal(billingPreviewScriptsBlock.includes("npx wrangler pages functions build functions"), true, "Billing runtime build must compile Pages Functions.");
+assert.equal(billingPreviewScriptsBlock.includes("--output-routes-path out/_routes.json"), true, "Billing runtime build must write out/_routes.json.");
+assert.equal(billingPreviewScriptsBlock.includes("cp .pages-functions/index.js out/_worker.js"), true, "Billing runtime build must copy the Functions worker.");
+assert.equal(billingPreviewScriptsBlock.includes("test -s out/_worker.js"), true, "Billing runtime build must require out/_worker.js.");
+assert.equal(billingPreviewScriptsBlock.includes("test -s out/_routes.json"), true, "Billing runtime build must require out/_routes.json.");
+assert.equal(billingPreviewScriptsBlock.includes("/api/nitrado/services"), true, "Billing runtime build must verify Nitrado services route coverage.");
+assert.equal(billingPreviewScriptsBlock.includes("/api/billing/status"), true, "Billing runtime build must verify billing status route coverage.");
+assert.equal(billingPreviewScriptsBlock.includes("projectName !== expectedProject"), true, "Billing deployment must reject project drift.");
+assert.equal(billingPreviewScriptsBlock.includes("branch !== \"feature/event-platform-performance-foundation\""), true, "Billing deployment must reject branch drift.");
+assert.equal(billingPreviewScriptsBlock.includes("Refusing to deploy Billing preview to production Pages project."), true, "Billing deployment must reject production Pages project.");
+assert.equal(billingPreviewScriptsBlock.includes("CANDIDATE_SHA"), true, "Billing deployment must pin candidate SHA.");
+assert.equal(billingPreviewScriptsBlock.includes("BILLING_PHASE_1_IMMUTABLE_PREVIEW_URL"), true, "Billing deployment must capture immutable preview URL.");
+assert.equal(billingPreviewScriptsBlock.includes("Verification groups: 30"), true, "Billing verifier must report the 30 required groups.");
+for (const requiredGroup of [
+  "1. Public/runtime health",
+  "2. Logged-out endpoint protection",
+  "3. Service discovery requires linked_server_id",
+  "4. Owned linked-server discovery succeeds",
+  "5. Foreign linked-server ID returns safe 404",
+  "6. Nonexistent linked-server ID returns safe 404",
+  "7. No-token draft does not borrow another server's newer credential",
+  "8. Corrupted exact credential returns safe classified decrypt failure",
+  "9. Cross-owner service attempt returns 409 nitrado_service_already_linked",
+  "10. Foreign owner row remains unchanged",
+  "11. Same-owner 900002 reuse returns existing canonical ID",
+  "12. Temporary source draft becomes merged",
+  "13. merged_into_server_id points at canonical",
+  "14. Same-owner credentials move safely",
+  "15. Duplicate reservation is released",
+  "16. No duplicate server",
+  "17. No second announcement",
+  "18. First-time 900003 claim succeeds",
+  "19. Correct reservation completes",
+  "20. Completed hold does not double-count",
+  "21. Repeated first-time save is idempotent",
+  "22. Mock onboarding test works",
+  "23. Mock ADM-path test works",
+  "24. No real Nitrado request",
+  "25. No Discord send",
+  "26. Notifications and server announcements remain false",
+  "27. Stable and immutable results are behaviourally consistent",
+  "28. Final foreign-key check returns zero rows",
+  "29. No cross-owner ownership transfer",
+  "30. No credential or session secret leakage",
+]) {
+  assert.equal(billingPreviewScriptsBlock.includes(requiredGroup), true, `Billing verifier must include group: ${requiredGroup}`);
+}
+assert.equal(billingPreviewScriptsBlock.includes("BILLING_PREVIEW_PAGES_FUNCTIONS_WORKER_MISSING"), true, "Billing verifier must fail on missing Functions route 404.");
+assert.equal(billingPreviewScriptsBlock.includes("BILLING_PREVIEW_HTTP_500"), true, "Billing verifier must fail on HTTP 500.");
+assert.equal(billingPreviewScriptsBlock.includes("BILLING_PREVIEW_HTTP_503"), true, "Billing verifier must fail on HTTP 503.");
+assert.equal(billingPreviewScriptsBlock.includes("Error 1102"), true, "Billing verifier must fail on Worker Error 1102.");
+assert.equal(billingPreviewScriptsBlock.includes("Worker exceeded resource limits"), true, "Billing verifier must fail on resource limits.");
+assert.equal(billingPreviewScriptsBlock.includes("Minified React error #"), true, "Billing verifier must fail on minified React errors.");
+assert.equal(billingPreviewScriptsBlock.includes("endpoint-status-summary.json"), true, "Billing artifact must include sanitized endpoint summary.");
+assert.equal(billingPreviewScriptsBlock.includes("ownership-integrity-summary.json"), true, "Billing artifact must include sanitized ownership summary.");
+assert.equal(billingPreviewScriptsBlock.includes("allowance-summary.json"), true, "Billing artifact must include sanitized allowance summary.");
+assert.equal(billingPreviewScriptsBlock.includes("stable-vs-immutable-summary.json"), true, "Billing artifact must include stable/immutable summary.");
+assert.equal(ownerPreviewBillingArtifactStart < ownerPreviewDeployStart, true, "Billing artifact upload must precede the generic full-preview deploy step in workflow order.");
 const ownerPreviewRowVerifyBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewRowVerifyStart);
 assert.equal(ownerPreviewRowVerifyBlock.includes("if: always()"), false, "Creator-governance row verification must not run after failed deployment/API verification.");
 assert.equal(ownerPreviewRowVerifyBlock.includes("--command \"${VERIFY_SQL}\""), true, "Creator-governance row verification must use --command.");
