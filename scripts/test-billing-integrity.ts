@@ -1075,6 +1075,58 @@ async function assertExactLinkedServerTokenIsolation() {
   );
 }
 
+async function assertCorruptedCredentialOnboardingRouteContract() {
+  const { db, env } = createSqliteEnv();
+  await seedOwner(env, db, { userId: "corrupt-route-owner", discordUserId: "corrupt-route-discord", planKey: "pro", status: "active" });
+  insertLinkedServer(db, { id: "corrupt-route-source", userId: "corrupt-route-owner", status: "pending" });
+  db.sqlite
+    .prepare(
+      `INSERT INTO nitrado_connections (
+        id, user_id, linked_server_id, encrypted_token, token_iv, token_auth_tag, created_at, updated_at
+      ) VALUES ('corrupt-route-token-row', 'corrupt-route-owner', 'corrupt-route-source', 'not-valid-ciphertext', 'not-valid-iv', 'not-valid-tag', datetime('now', '+1 second'), datetime('now', '+1 second'))`,
+    )
+    .run();
+  const session = await createSession(env, "corrupt-route-owner");
+  const response = await saveOnboardingHandler(makeContext(
+    saveOnboardingHandler,
+    new Request("https://local.test/api/onboarding/save", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `dzn_session=${session.token}`,
+      },
+      body: JSON.stringify({
+        linkedServerId: "corrupt-route-source",
+        discordGuildId: "corrupt-route-owner-guild",
+        nitradoServiceId: "900002",
+        serverType: "PVP",
+      }),
+    }),
+    env,
+  ));
+  const bodyText = await response.text();
+  const body = JSON.parse(bodyText) as { error?: string; error_code?: string };
+  assert.equal(response.status, 500, "Corrupted stored credentials must return the deliberate safe HTTP 500 contract.");
+  assert.equal(body.error_code, "token_decrypt_failed", "Corrupted stored credentials must be classified as token_decrypt_failed.");
+  assert.equal(body.error, "Your saved Nitrado token cannot be decrypted. Re-save your Nitrado long-life token.");
+  for (const forbidden of [
+    "not-valid-ciphertext",
+    "not-valid-iv",
+    "not-valid-tag",
+    "encrypted_token",
+    "token_iv",
+    "token_auth_tag",
+    "TOKEN_ENCRYPTION_KEY",
+    "InvalidCharacterError",
+    "OperationError",
+    "DOMException",
+    "Error:",
+    " at ",
+  ]) {
+    assert.equal(bodyText.includes(forbidden), false, `Corrupted credential response must not expose ${forbidden}.`);
+  }
+}
+
 async function assertCredentialReassociationIntegrity() {
   const { db, env } = createSqliteEnv();
   await seedOwner(env, db, { userId: "move-owner", discordUserId: "move-owner-discord", planKey: "pro", status: "active" });
@@ -1363,6 +1415,7 @@ async function run() {
   await assertDraftAndServiceAttachmentLifecycle();
   await assertFailedServiceAttachmentReleasesReservation();
   await assertExactLinkedServerTokenIsolation();
+  await assertCorruptedCredentialOnboardingRouteContract();
   await assertCredentialReassociationIntegrity();
   await assertCrossOwnerServiceConflictProtection();
   await assertSameOwnerCanonicalReuseIntegrity();

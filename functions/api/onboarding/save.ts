@@ -305,7 +305,7 @@ function classifyNitradoTokenError(error: unknown) {
       message: "Token encryption key is missing in production. Add TOKEN_ENCRYPTION_KEY in Cloudflare Pages and redeploy.",
     };
   }
-  if (/decrypt|operation|authentication|tag|cipher|iv|key/i.test(message)) {
+  if (/decrypt|operation|authentication|tag|cipher|iv|key|base64|decode|decoded|correctly encoded|invalid character|InvalidCharacterError/i.test(message)) {
     return {
       status: 500,
       code: "token_decrypt_failed",
