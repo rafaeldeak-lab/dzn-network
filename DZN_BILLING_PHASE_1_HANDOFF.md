@@ -12,6 +12,8 @@ Billing Phase 1 has completed three committed micro-slices on `feature/event-pla
 
 Phase 0 recovery then corrected repository blockers from an isolated clean worktree. Event Suggestions remains migration `0057_event_suggestions_phase_2a.sql`; Billing Integrity is now migration `0058_billing_phase_1_integrity.sql`.
 
+The owner confirmed the Cloudflare account is already on Workers Paid. The stale preview D1 capacity guard that still used the Workers Free account limit was corrected from `10` to `50000` in `5615bbaafeb5016948ed25f5968afd6d70000218` (`fix(preview): use Workers Paid D1 capacity limit`). No Cloudflare plan audit, plan change, D1 deletion, cleanup, Stripe change, production deployment, or production migration was performed.
+
 ## Completed Billing Work
 
 - Additive reservation schema for linked-server allowance holds.
@@ -126,7 +128,7 @@ No preview workflow, deployment, remote migration, production D1 access, product
 - `functions/_lib/plans.ts` imports the reservation-aware usage helper from `functions/_lib/onboarding.ts`; tests pass, but a future cleanup could extract allowance usage into a dedicated shared billing module to reduce coupling.
 - Production runtime health, Cloudflare Pages aliases, runtime secrets, and D1 state remain unverified in this slice.
 - Legacy global Nitrado helper definitions still exist for older code paths outside the targeted server-scoped routes; changing those broader paths should be a separately scoped review.
-- Preview verification for migrations 0057 and 0058 has not been run and is the next authorized slice below.
+- The paid-plan Billing preview rerun created the candidate-specific preview D1 and applied migrations through `0058`, then failed during Billing schema verification because `linked_servers.merged_into_server_id` was missing. The preview remains incomplete.
 
 ## Isolated Billing Preview Dispatch Evidence
 
@@ -203,6 +205,123 @@ Security and production-safety evidence:
 - Recent manual workflow-dispatch inspection after the run showed only this `DZN Owner Console Preview` dispatch at candidate `17b9535a695188218c10213d55265570cce15275`; no production Pages runtime workflow, production migration workflow, cleanup mode, advertising rollout, Discord production rollout, ADM production trigger, scheduler trigger, or cleanup dispatch was started by this slice.
 - The canonical worktree was clean before dispatch. The preserved older worktree and all named backups remained present and were not modified.
 - No workflow/script remediation commit was needed because the failure was an external Cloudflare D1 capacity precondition.
+
+## Paid D1 Capacity Guard Correction And Preview Rerun
+
+Slice 4D result: FAILED.
+
+Start state and capacity fix:
+
+- Fresh isolated worktree: `C:\Users\rafae\Desktop\DZN-Audits\worktrees\dzn-paid-d1-preview-20260821-192723`.
+- Local branch: `fix/paid-d1-capacity-and-preview-20260821-192723`.
+- Starting active remote SHA: `81f37431201a4b107648e92f654a968e7eecffea`.
+- Required ancestor check passed: `81f37431201a4b107648e92f654a968e7eecffea` was the active remote head and an ancestor of itself.
+- Billing preview implementation remained present: `6ca3afa2e081094285892e0b279e6abf4badd442`, `3d46b4f4908a062f3f622f3e792bf49773024323`, and later Billing preview test/fix commits were present in history.
+- Owner-confirmed Cloudflare Workers Paid status was treated as source of truth; no Cloudflare plan audit was run.
+- Stale guard found in `.github/workflows/dzn-owner-console-preview.yml` as `D1_ACCOUNT_DATABASE_LIMIT: "10"`.
+- Capacity fix commit: `5615bbaafeb5016948ed25f5968afd6d70000218` - `fix(preview): use Workers Paid D1 capacity limit`.
+- Changed files: `.github/workflows/dzn-owner-console-preview.yml`, `scripts/github-actions/dzn-owner-console-preview/23-resolve-or-create-preview-d1-database.sh`, `scripts/test-github-workflow-boundary.ts`.
+- Old limit: `10`.
+- New limit: `50000`.
+- Resolver now consumes the canonical workflow `D1_ACCOUNT_DATABASE_LIMIT` and no longer falls back to the stale `10` value.
+- Retained protections: exact candidate-specific preview D1 reuse only, production D1 name rejection, production D1 ID rejection, capacity stop before creation when actual count is at/above configured limit, no automatic deletion, masked cleanup candidates only, no unrelated preview rebind, and no production fallback.
+
+Local validation before push:
+
+- Shell syntax passed for scripts `01`, `23`, and `32` through `38`.
+- `npm run test:github-workflows`: passed.
+- `npm run test:billing-integrity`: passed.
+- `npm run test:billing-plans`: passed.
+- `npx tsc --noEmit --pretty false`: passed.
+- `npm run lint`: passed with 0 errors and the existing 4 warnings.
+- `npm run build`: passed.
+- `npm test`: passed. The optional latest ADM raw fixture self-skipped for the known missing owner-supplied bundle reason.
+- `git diff --check`: passed.
+
+Commit and push:
+
+- Capacity fix commit pushed as a fast-forward to `origin/feature/event-platform-performance-foundation`.
+- Candidate SHA for preview rerun: `5615bbaafeb5016948ed25f5968afd6d70000218`.
+- Local HEAD equaled remote active head after push.
+- Worktree was clean after push.
+
+Workflow run evidence:
+
+- Dispatched only `.github/workflows/dzn-owner-console-preview.yml`.
+- Dispatch mode: `billing-phase-1-preview`.
+- Dispatch ref: `feature/event-platform-performance-foundation`.
+- Required confirmations used: `confirm_preview_only=PREVIEW_ONLY`, `confirm_billing_phase_1_preview=APPROVE_BILLING_PHASE_1_PREVIEW`.
+- Secure dispatch method: Git Credential Manager credential captured only in process memory through Git Bash plus PowerShell REST. `gh` was not installed. No credential was printed or saved.
+- Run URL: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32513963281`.
+- Run ID: `32513963281`.
+- Run number: `60`.
+- Event: `workflow_dispatch`.
+- Branch: `feature/event-platform-performance-foundation`.
+- Candidate SHA: `5615bbaafeb5016948ed25f5968afd6d70000218`.
+- Created: `2026-08-21T18:33:33Z`.
+- Completed: `2026-08-21T18:34:31Z`.
+- Final conclusion: `failure`, classified as FAILED because the application Billing schema verification failed after preview D1 creation and migrations.
+- Failed step: `Verify Billing Phase 1 preview schema`.
+- Failure code: `BILLING_SCHEMA_REQUIRED_COLUMNS_MISSING`.
+- Failure detail: `linked_servers` missing required column `merged_into_server_id`.
+
+Isolated resource evidence:
+
+- Dedicated preview Pages project configured by the committed workflow: `dzn-network-owner-console-preview-billing-phase-1`.
+- Stable preview URL configured by the committed workflow: `https://dzn-network-owner-console-preview-billing-phase-1.pages.dev`.
+- Immutable preview URL: not produced because Pages deployment was skipped after schema verification failed.
+- D1 count before creation: `10`.
+- Configured D1 limit used by resolver: `50000`.
+- Requested preview D1 existed before resolver: `no`.
+- Candidate-specific preview D1 name: `dzn_network_db_owner_console_preview_billing_phase_1_5615bba`.
+- Masked preview D1 ID: `a9f3c3d7...5b34`.
+- Preview D1 creation/reuse result: created for this candidate.
+- Production mismatch: preview project did not equal `dzn-network`, preview D1 name did not equal `dzn_network_db`, and preview D1 ID was masked and checked against the detected production ID by the resolver.
+- Cleanup candidates were listed only with masked IDs; no cleanup mode was dispatched or triggered.
+
+Migration, schema, and Billing matrix status:
+
+- Billing preview preflight passed.
+- Cloudflare preview auth diagnostics passed.
+- D1 resolver passed and created the candidate-specific Billing D1.
+- Preview D1 migrations applied successfully through `0058_billing_phase_1_integrity.sql`.
+- Migration order reached `0057_event_suggestions_phase_2a.sql` then `0058_billing_phase_1_integrity.sql`; both were marked applied.
+- Generic owner-console D1 schema verification in the migration step passed.
+- Billing Phase 1 schema verification failed on missing `linked_servers.merged_into_server_id`.
+- Foreign-key check, reservation table/index checks, exact credential checks, cross-owner 409, same-owner canonical reuse, temporary draft merge, credential reassociation, first-time claim, repeated-save idempotency, allowance counts, reservation completion/release, announcement gating, onboarding test, ADM-path test, runtime route checks, stable-versus-immutable checks, HTTP 503 checks, Error 1102 checks, and Pages Functions worker checks did not run because the schema step failed first.
+- Synthetic Billing fixtures were skipped.
+- Dedicated Billing preview Pages project creation/configuration was skipped.
+- Pages Functions worker build was skipped.
+- Isolated Pages preview deployment was skipped.
+- Billing endpoint/runtime verification was skipped.
+
+Artifact and evidence:
+
+- Artifact name: `dzn-billing-phase-1-preview`.
+- Artifact ID: `9458079667`.
+- Evidence extraction path: `C:\Users\rafae\Desktop\DZN-Audits\evidence\billing-paid-d1-preview-32513963281\artifact-9458079667`.
+- Log archive path: `C:\Users\rafae\Desktop\DZN-Audits\evidence\billing-paid-d1-preview-32513963281\run-logs.zip`.
+- Artifact files reviewed: `candidate.json`, `schema-summary.json`, `summary.md`.
+- Artifact security scan found no Cloudflare API token value, GitHub token value, `TOKEN_ENCRYPTION_KEY` value, `SESSION_SECRET` value, session token value, cookie value, raw Nitrado token, encrypted token, token IV, token auth tag, Authorization header, complete D1 UUID, or foreign-owner identity. A descriptive sentence mentions masked owner session tokens but contains no token value.
+
+Security and production-safety evidence:
+
+- Preflight and artifact evidence confirmed `MOCK_AUTH=true`, `MOCK_NITRADO=true`, `DZN_DISCORD_NOTIFICATIONS_ENABLED=false`, and `DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false`.
+- No real Nitrado call occurred.
+- No Discord message occurred.
+- No Stripe path was changed or invoked.
+- No D1 deletion occurred.
+- No preview cleanup occurred.
+- No production D1 access/write occurred.
+- No production migration occurred.
+- No production deploy occurred.
+- No production Pages mutation occurred.
+- No production Worker mutation occurred.
+- No main change occurred.
+- No Event release branch change occurred.
+- No PR #15 change occurred.
+- No rebase, merge, cherry-pick, reset, stash, clean, or force-push occurred.
+- Older dirty worktree `C:\Users\rafae\OneDrive\Desktop\DZN-Network` was not modified; all named backups were retained.
 
 ## Read-Only D1 Capacity Audit Evidence
 
@@ -357,4 +476,4 @@ Artifact and result:
 
 ## Next Authorised Slice
 
-Resolve Cloudflare D1 capacity by increasing the account limit or making an explicit owner-approved decision about an unresolved preview resource. No D1 deletion is authorized from the current evidence.
+Investigate and repair the Billing Phase 1 preview schema failure where `linked_servers.merged_into_server_id` is missing after migrations through `0058`, then rerun the guarded Billing Phase 1 preview. No D1 deletion, preview cleanup, production deployment, production migration, production D1 write, Stripe change, main change, Event release branch change, or PR #15 change.
