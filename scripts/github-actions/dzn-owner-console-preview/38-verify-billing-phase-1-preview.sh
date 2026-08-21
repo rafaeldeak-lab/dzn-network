@@ -146,7 +146,8 @@ async function fetchWithRetry(base, path, init = {}, options = {}) {
       lastBody = body;
       endpointSummary.statuses[statusKey(base, path, method)] = response.status;
       endpointBodies.push(body.slice(0, 2000));
-      checkRuntimeFailure(path, response.status, body, options);
+      const shouldRetryTransient = transientStatuses.has(response.status) && attempt < attempts;
+      if (!shouldRetryTransient) checkRuntimeFailure(path, response.status, body, options);
       if (!transientStatuses.has(response.status) || attempt === attempts) {
         return { status: response.status, body };
       }
