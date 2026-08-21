@@ -1,6 +1,6 @@
 # DZN Master Handoff
 
-Last updated: 2026-08-20
+Last updated: 2026-08-21
 
 Repository: `rafaeldeak-lab/dzn-network`
 
@@ -21,6 +21,7 @@ Canonical clean worktree for this recovery:
 - Phase 0 recovery code commit: `96c40f7d648f0b16680dcb80b4d639c4c7157a2e`.
 - Phase 0 recovery handoff commit: this document commit.
 - Billing Phase 1 linked-server Nitrado integrity code commit: `a9fd8f7be01637fbcd6e6b1f06ffaf23886ceb02`.
+- Active remote SHA before Billing preview evidence documentation: `17b9535a695188218c10213d55265570cce15275`.
 
 Old chat transcripts, interrupted Codex edits, and dirty local worktrees are not Git truth. Use remote branch history and committed files as the source of truth.
 
@@ -53,6 +54,22 @@ Current billing state:
 - Billing Integrity is migration `0058_billing_phase_1_integrity.sql`.
 - `npm run test:billing-integrity` is the canonical focused billing integrity suite.
 
+Billing Phase 1 isolated preview result:
+
+- Result: BLOCKED.
+- Run URL: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32457796161`.
+- Run ID: `32457796161`; run number `56`; attempt `1`.
+- Candidate commit: `17b9535a695188218c10213d55265570cce15275`.
+- Isolated preview Pages project configured by the committed workflow: `dzn-network-owner-console-preview-billing-phase-1`.
+- Stable preview URL configured by the committed workflow: `https://dzn-network-owner-console-preview-billing-phase-1.pages.dev`.
+- Candidate-specific preview D1 name: `dzn_network_db_owner_console_preview_billing_phase_1_17b9535`.
+- Preview D1 status: not created or reused; the run stopped because the Cloudflare account had `10` D1 databases at the configured limit of `10` and the requested candidate-specific D1 did not exist.
+- Immutable preview URL: not produced because Pages deployment was skipped after the D1 capacity blocker.
+- Billing Phase 1 preview is not complete; migrations, schema verification, runtime deployment, endpoint verification, and Billing matrix checks did not run in this preview attempt.
+- Artifact: `dzn-billing-phase-1-preview`, ID `9437848736`, extracted under `C:\Users\rafae\Desktop\DZN-Audits\preview-runs\billing-phase-1-17b9535-32457796161\dzn-billing-phase-1-preview`.
+- Artifact secret scan was clean; no prohibited secret, credential, session, token, Authorization header, complete D1 UUID, or foreign-owner data was found.
+- No workflow remediation was made because the blocker is an external preview D1 capacity precondition.
+
 ## Phase 0 Recovery
 
 This Phase 0 recovery resolved:
@@ -72,7 +89,7 @@ Production Pages stable-alias and runtime health must be verified from the deplo
 
 ## Current Hard Blockers
 
-The repository blockers targeted by Phase 0 are resolved after validation and push. The linked-server Nitrado integrity slice is complete in code commit `a9fd8f7be01637fbcd6e6b1f06ffaf23886ceb02`; the remaining authorized work is the guarded isolated preview slice below.
+The repository blockers targeted by Phase 0 are resolved after validation and push. The linked-server Nitrado integrity slice is complete in code commit `a9fd8f7be01637fbcd6e6b1f06ffaf23886ceb02`. The guarded Billing Phase 1 isolated preview was dispatched and is currently blocked by Cloudflare D1 capacity before preview D1 creation.
 
 The canonical clean worktree remains authoritative:
 
@@ -83,12 +100,17 @@ The older dirty worktree and backups remain frozen and were not modified:
 - `C:\Users\rafae\OneDrive\Desktop\DZN-Network`
 - `C:\Users\rafae\Desktop\DZN-Audits\backups\phase0-dirty-backup-20260820-151344`
 - `C:\Users\rafae\Desktop\DZN-Audits\backups\phase1-linked-server-integrity-20260820-165515`
+- `C:\Users\rafae\Desktop\DZN-Audits\backups\billing-preview-4a-finalisation-20260821-013400`
 
 No preview, deployment, production workflow dispatch, remote migration, production D1 access/write, D1 bookmark, secret/env change, Stripe change, Discord flag/message, ADM trigger, Nitrado trigger, scheduler trigger, or advertising trigger occurred in the linked-server integrity slice.
 
+No production deployment, production migration, production D1 SQL read/write, production Pages mutation, production Worker mutation, production secret change, D1 deletion, preview cleanup, main change, Event release branch change, PR #15 change, rebase, merge, cherry-pick, reset, stash, clean, force-push, Stripe change, Discord flag enablement, Discord message, real Nitrado token use, real Nitrado call, ADM production trigger, scheduler trigger, advertising trigger, or protected-data deletion/reset occurred in the Billing preview dispatch slice.
+
+The canonical clean worktree remained authoritative and clean before the evidence documentation update. The older dirty worktree remained on `feature/billing-phase-1-integrity` at `75d76f325521d33854974f1f71a07a4fe509bac6` and was not modified.
+
 ## Next Authorised Slice
 
-Build and run a guarded Billing Phase 1 isolated preview covering migrations 0057 and 0058, exact linked-server Nitrado credential association, cross-owner conflict protection, same-owner canonical reuse, allowance integrity and onboarding verification. No production deployment or production migration.
+Resolve the recorded Billing Phase 1 isolated preview blocker or failure and rerun the guarded billing-phase-1-preview workflow. No production deployment or production migration.
 
 ## Deferred Areas
 
