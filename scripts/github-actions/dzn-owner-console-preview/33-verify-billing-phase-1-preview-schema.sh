@@ -40,6 +40,7 @@ run_d1_read "migration-ledger" "SELECT id, name FROM d1_migrations ORDER BY id;"
 run_d1_read "reservation-columns" "PRAGMA table_info(linked_server_allowance_reservations);" "billing-schema-reservation-columns.json"
 run_d1_read "reservation-indexes" "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'linked_server_allowance_reservations' ORDER BY name;" "billing-schema-reservation-indexes.json"
 run_d1_read "linked-server-columns" "PRAGMA table_info(linked_servers);" "billing-schema-linked-server-columns.json"
+run_d1_read "linked-server-merge-index" "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_linked_servers_merged_into_server_id';" "billing-schema-linked-server-merge-index.json"
 run_d1_read "nitrado-connection-columns" "PRAGMA table_info(nitrado_connections);" "billing-schema-nitrado-connection-columns.json"
 run_d1_read "active-service-unique-index" "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_linked_servers_active_service_id';" "billing-schema-active-service-index.json"
 run_d1_read "foreign-key-check" "PRAGMA foreign_key_check;" "billing-schema-foreign-key-check.json"
@@ -110,27 +111,34 @@ const migrations = rowsFromWranglerJson("billing-schema-migrations.json").map((r
   id: Number(row.id ?? index),
   name: String(row.name ?? ""),
 }));
-const expectedThrough0058 = fs.readdirSync("migrations")
-  .filter((name) => /^\d{4}_.+\.sql$/.test(name) && Number(name.slice(0, 4)) <= 58)
+const expectedThrough0059 = fs.readdirSync("migrations")
+  .filter((name) => /^\d{4}_.+\.sql$/.test(name) && Number(name.slice(0, 4)) <= 59)
   .sort();
 const migrationNames = migrations.map((row) => row.name);
-const missingMigrations = expectedThrough0058.filter((name) => !migrationNames.includes(name));
+const missingMigrations = expectedThrough0059.filter((name) => !migrationNames.includes(name));
 if (missingMigrations.length > 0) {
-  fail("BILLING_SCHEMA_MIGRATIONS_MISSING_THROUGH_0058", "Not all migrations through 0058 are applied.", {
+  fail("BILLING_SCHEMA_MIGRATIONS_MISSING_THROUGH_0059", "Not all migrations through 0059 are applied.", {
     missingCount: missingMigrations.length,
     firstMissing: missingMigrations[0],
   });
 }
 const migration0057 = migrations.filter((row) => row.name.startsWith("0057_"));
 const migration0058 = migrations.filter((row) => row.name.startsWith("0058_"));
+const migration0059 = migrations.filter((row) => row.name.startsWith("0059_"));
 if (migration0057.length !== 1 || migration0057[0].name !== "0057_event_suggestions_phase_2a.sql") {
   fail("BILLING_SCHEMA_0057_LEDGER_INVALID", "Migration 0057 ledger entry is missing or incorrect.");
 }
 if (migration0058.length !== 1 || migration0058[0].name !== "0058_billing_phase_1_integrity.sql") {
   fail("BILLING_SCHEMA_0058_LEDGER_INVALID", "Migration 0058 ledger entry is missing or incorrect.");
 }
+if (migration0059.length !== 1 || migration0059[0].name !== "0059_linked_server_merge_state.sql") {
+  fail("BILLING_SCHEMA_0059_LEDGER_INVALID", "Migration 0059 ledger entry is missing or incorrect.");
+}
 if (migrationNames.indexOf("0057_event_suggestions_phase_2a.sql") >= migrationNames.indexOf("0058_billing_phase_1_integrity.sql")) {
   fail("BILLING_SCHEMA_MIGRATION_ORDER_INVALID", "Migration 0057 must precede 0058.");
+}
+if (migrationNames.indexOf("0058_billing_phase_1_integrity.sql") >= migrationNames.indexOf("0059_linked_server_merge_state.sql")) {
+  fail("BILLING_SCHEMA_MIGRATION_ORDER_INVALID", "Migration 0058 must precede 0059.");
 }
 
 const reservationColumns = requireColumns("linked_server_allowance_reservations", rowsFromWranglerJson("billing-schema-reservation-columns.json"), [
@@ -174,6 +182,7 @@ const linkedServerColumns = requireColumns("linked_servers", rowsFromWranglerJso
   "server_type",
   "server_category",
   "merged_into_server_id",
+  "merged_at",
   "lifecycle_status",
   "lifecycle_reason",
   "lifecycle_updated_at",
@@ -182,6 +191,14 @@ const linkedServerColumns = requireColumns("linked_servers", rowsFromWranglerJso
   "latest_imported_event_at",
   "listing_visibility",
 ]);
+const linkedServerMergeIndexes = rowsFromWranglerJson("billing-schema-linked-server-merge-index.json");
+if (linkedServerMergeIndexes.length !== 1) {
+  fail("BILLING_SCHEMA_LINKED_SERVER_MERGE_INDEX_MISSING", "Linked-server merge-target lookup index is missing.");
+}
+const linkedServerMergeIndexSql = String(linkedServerMergeIndexes[0].sql || "");
+if (!/linked_servers/i.test(linkedServerMergeIndexSql) || !/merged_into_server_id/i.test(linkedServerMergeIndexSql)) {
+  fail("BILLING_SCHEMA_LINKED_SERVER_MERGE_INDEX_INVALID", "Linked-server merge-target lookup index is not valid.");
+}
 const nitradoColumns = requireColumns("nitrado_connections", rowsFromWranglerJson("billing-schema-nitrado-connection-columns.json"), [
   "id",
   "user_id",
@@ -207,11 +224,13 @@ if (foreignKeyRows.length > 0) {
 fs.writeFileSync(`${artifact}/migration-summary.json`, JSON.stringify({
   ok: true,
   migrationLedgerExists: true,
-  appliedThrough: "0058",
-  appliedMigrationCountThrough0058: expectedThrough0058.length,
+  appliedThrough: "0059",
+  appliedMigrationCountThrough0059: expectedThrough0059.length,
   migration0057: "0057_event_suggestions_phase_2a.sql",
   migration0058: "0058_billing_phase_1_integrity.sql",
+  migration0059: "0059_linked_server_merge_state.sql",
   migration0057Precedes0058: true,
+  migration0058Precedes0059: true,
 }, null, 2));
 fs.writeFileSync(`${artifact}/schema-summary.json`, JSON.stringify({
   ok: true,
@@ -222,6 +241,8 @@ fs.writeFileSync(`${artifact}/schema-summary.json`, JSON.stringify({
   reservationTableExists: true,
   reservationColumnsPresent: reservationColumns,
   reservationIndexesPresent: [...reservationIndexNames].sort(),
+  linkedServerMergeStateColumnsPresent: linkedServerColumns.filter((name) => ["merged_into_server_id", "merged_at"].includes(name)),
+  linkedServerMergeStateIndexesPresent: linkedServerMergeIndexes.map((row) => String(row.name || "")).sort(),
   linkedServerMergeLifecycleColumnsPresent: linkedServerColumns.filter((name) => /merged|lifecycle|owner_action|latest_imported|listing_visibility/.test(name)),
   nitradoConnectionColumnsPresent: nitradoColumns,
   activeNitradoServiceUniquenessProtection: "idx_linked_servers_active_service_id",

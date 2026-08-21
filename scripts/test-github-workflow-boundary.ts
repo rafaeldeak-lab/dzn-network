@@ -1883,6 +1883,8 @@ const billingPreviewScriptsBlock = [
   "37-deploy-billing-phase-1-preview-runtime.sh",
   "38-verify-billing-phase-1-preview.sh",
 ].map((name) => read(`scripts/github-actions/dzn-owner-console-preview/${name}`)).join("\n");
+const billingSchemaVerifierScript = read("scripts/github-actions/dzn-owner-console-preview/33-verify-billing-phase-1-preview-schema.sh");
+const billingIntegrityMigration = read("migrations/0058_billing_phase_1_integrity.sql");
 for (const scriptNumber of ["32", "33", "34", "35", "36", "37", "38"]) {
   assert.equal(dznOwnerConsolePreviewWorkflowSource.includes(`scripts/github-actions/dzn-owner-console-preview/${scriptNumber}-`), true, `Billing workflow must reference script ${scriptNumber}.`);
 }
@@ -1935,6 +1937,7 @@ const billingStepOrder = [
   ownerPreviewBillingArtifactStart,
 ];
 assert.deepEqual([...billingStepOrder].sort((a, b) => a - b), billingStepOrder, "Billing Phase 1 preview workflow steps must run in the guarded order.");
+assert.equal(ownerPreviewBillingSchemaStart < ownerPreviewBillingFixtureStart, true, "Billing schema verification must run before fixture seeding.");
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Preflight Billing Phase 1 preview\n        if: ${{ inputs.mode == 'billing-phase-1-preview' }}"), true, "Billing preflight must be Billing-mode gated.");
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Seed preview-only owner console data\n        if: ${{ inputs.mode == 'full-preview' }}"), true, "Billing mode must not run the generic full-preview fixture seed.");
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("- name: Deploy preview Pages project\n        if: ${{ inputs.mode == 'full-preview' }}"), true, "Billing mode must not use the generic static deploy script.");
@@ -1952,6 +1955,9 @@ assert.equal(billingPreviewScriptsBlock.includes("Refusing Billing Phase 1 previ
 assert.equal(billingPreviewScriptsBlock.includes("Refusing Billing Phase 1 preview for production Pages project."), true, "Billing scripts must reject production Pages project.");
 assert.equal(billingPreviewScriptsBlock.includes("method: \"DELETE\""), false, "Billing preview scripts must not delete D1 databases.");
 assert.equal(billingPreviewScriptsBlock.includes("wrangler d1 delete"), false, "Billing preview scripts must not shell-delete D1 databases.");
+assert.equal(billingPreviewScriptsBlock.includes("cleanup-preview-d1"), false, "Billing preview scripts must not introduce D1 cleanup mode.");
+assert.equal(billingPreviewScriptsBlock.includes("wrangler d1 migrations apply dzn_network_db"), false, "Billing preview scripts must not add a production D1 migration path.");
+assert.equal(billingPreviewScriptsBlock.includes("dzn_network_db --remote"), false, "Billing preview scripts must not execute against the production D1 binding by name.");
 assert.equal(billingPreviewScriptsBlock.includes("--project-name dzn-network"), false, "Billing preview scripts must not deploy to the production Pages project.");
 assert.equal(billingPreviewScriptsBlock.includes("dzn-pages-runtime-production-deploy"), false, "Billing preview scripts must not add a production deploy route.");
 assert.equal(billingPreviewScriptsBlock.includes("randomBytes(32).toString('base64url')"), true, "Billing preflight must generate an ephemeral TOKEN_ENCRYPTION_KEY.");
@@ -1965,6 +1971,19 @@ assert.equal(billingPreviewScriptsBlock.includes("DZN_DISCORD_NOTIFICATIONS_ENAB
 assert.equal(billingPreviewScriptsBlock.includes("DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false"), true, "Billing preflight must force server announcements false.");
 assert.equal(billingPreviewScriptsBlock.includes("0057_event_suggestions_phase_2a.sql"), true, "Billing schema verification must pin migration 0057.");
 assert.equal(billingPreviewScriptsBlock.includes("0058_billing_phase_1_integrity.sql"), true, "Billing schema verification must pin migration 0058.");
+assert.equal(billingPreviewScriptsBlock.includes("0059_linked_server_merge_state.sql"), true, "Billing schema verification must pin migration 0059.");
+assert.equal(billingSchemaVerifierScript.includes("expectedThrough0059"), true, "Billing schema verifier must verify all migrations through 0059.");
+assert.equal(billingSchemaVerifierScript.includes("BILLING_SCHEMA_MIGRATIONS_MISSING_THROUGH_0059"), true, "Billing schema verifier must fail safely when migrations through 0059 are missing.");
+assert.equal(billingSchemaVerifierScript.includes("migration0059.length !== 1"), true, "Billing schema verifier must require exactly one 0059 ledger entry.");
+assert.equal(billingSchemaVerifierScript.includes("Migration 0058 must precede 0059."), true, "Billing schema verifier must enforce 0058 before 0059.");
+assert.equal(billingSchemaVerifierScript.includes("migration0058Precedes0059: true"), true, "Billing schema verifier artifact must record 0058 before 0059.");
+assert.equal(billingSchemaVerifierScript.includes("merged_into_server_id"), true, "Billing schema verifier must require linked_servers.merged_into_server_id.");
+assert.equal(billingSchemaVerifierScript.includes("merged_at"), true, "Billing schema verifier must require linked_servers.merged_at.");
+assert.equal(billingSchemaVerifierScript.includes("idx_linked_servers_merged_into_server_id"), true, "Billing schema verifier must require the linked-server merge-target index.");
+assert.equal(billingIntegrityMigration.includes("linked_server_allowance_reservations"), true, "Billing Integrity migration 0058 must remain the reservation migration.");
+assert.equal(billingIntegrityMigration.includes("idx_lsar_active_linked_server"), true, "Billing Integrity migration 0058 must keep its active reservation index.");
+assert.equal(billingIntegrityMigration.includes("merged_into_server_id"), false, "Billing Integrity migration 0058 must not be modified to add merge-state columns.");
+assert.equal(billingIntegrityMigration.includes("merged_at"), false, "Billing Integrity migration 0058 must not be modified to add merge-state columns.");
 assert.equal(billingPreviewScriptsBlock.includes("linked_server_allowance_reservations"), true, "Billing schema verification must check allowance reservations.");
 assert.equal(billingPreviewScriptsBlock.includes("idx_lsar_active_linked_server"), true, "Billing schema verification must check active reservation uniqueness.");
 assert.equal(billingPreviewScriptsBlock.includes("idx_linked_servers_active_service_id"), true, "Billing schema verification must check active Nitrado service uniqueness.");

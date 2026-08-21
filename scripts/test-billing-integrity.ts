@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -264,7 +265,10 @@ function normalizeSql(value: string) {
 
 const EVENT_SUGGESTIONS_MIGRATION = "0057_event_suggestions_phase_2a.sql";
 const BILLING_INTEGRITY_MIGRATION = "0058_billing_phase_1_integrity.sql";
+const LINKED_SERVER_MERGE_STATE_MIGRATION = "0059_linked_server_merge_state.sql";
 const STALE_BILLING_MIGRATION = ["0057", "billing_phase_1_integrity.sql"].join("_");
+const BILLING_INTEGRITY_MIGRATION_SHA256 = "49bbc89c1d8d1e45e248638fe4797e8ce4cc1fcd41cd62de6ce2c2d40a319db0";
+const LINKED_SERVER_MERGE_COLUMNS = ["merged_into_server_id", "merged_at"] as const;
 
 function migrationFiles() {
   return readdirSync("migrations")
@@ -272,12 +276,48 @@ function migrationFiles() {
     .sort((left, right) => left.localeCompare(right));
 }
 
+function migrationFilesThrough(prefix: number) {
+  return migrationFiles().filter((name) => Number(name.slice(0, 4)) <= prefix);
+}
+
 function applyMigration(db: SqliteDatabase, migrationFile: string) {
   db.exec(readFileSync(join("migrations", migrationFile), "utf8"));
 }
 
+function applyMigrations(db: SqliteDatabase, migrations: string[]) {
+  for (const migration of migrations) applyMigration(db, migration);
+}
+
 function sqliteObjectExists(db: SqliteDatabase, name: string) {
   return Boolean(db.prepare("SELECT name FROM sqlite_master WHERE name = ? LIMIT 1").get(name));
+}
+
+function tableColumnNames(db: SqliteDatabase, tableName: string) {
+  return new Set(db.prepare(`PRAGMA table_info(${tableName})`).all().map((row) => String(row.name)));
+}
+
+function assertLinkedServerMergeStatePresent(db: SqliteDatabase, messagePrefix: string) {
+  const columns = tableColumnNames(db, "linked_servers");
+  for (const column of LINKED_SERVER_MERGE_COLUMNS) {
+    assert.equal(columns.has(column), true, `${messagePrefix} must include linked_servers.${column}.`);
+  }
+  assert.equal(
+    sqliteObjectExists(db, "idx_linked_servers_merged_into_server_id"),
+    true,
+    `${messagePrefix} must include idx_linked_servers_merged_into_server_id.`,
+  );
+}
+
+function assertLinkedServerMergeStateAbsent(db: SqliteDatabase, messagePrefix: string) {
+  const columns = tableColumnNames(db, "linked_servers");
+  for (const column of LINKED_SERVER_MERGE_COLUMNS) {
+    assert.equal(columns.has(column), false, `${messagePrefix} must not include linked_servers.${column} before 0059.`);
+  }
+  assert.equal(
+    sqliteObjectExists(db, "idx_linked_servers_merged_into_server_id"),
+    false,
+    `${messagePrefix} must not include idx_linked_servers_merged_into_server_id before 0059.`,
+  );
 }
 
 function walkTextFiles(root = ".") {
@@ -307,6 +347,7 @@ async function assertMigrationNumberingAndApplication() {
   const files = migrationFiles();
   assert.equal(files.includes(EVENT_SUGGESTIONS_MIGRATION), true, "Event Suggestions must remain migration 0057.");
   assert.equal(files.includes(BILLING_INTEGRITY_MIGRATION), true, "Billing Integrity must be migration 0058.");
+  assert.equal(files.includes(LINKED_SERVER_MERGE_STATE_MIGRATION), true, "Linked-server merge state must be migration 0059.");
   assert.equal(files.includes(STALE_BILLING_MIGRATION), false, "Old duplicate Billing Integrity migration filename must not exist.");
 
   const prefixes = new Map<string, string[]>();
@@ -326,25 +367,72 @@ async function assertMigrationNumberingAndApplication() {
     true,
     "Billing Integrity migration 0058 must apply after Event Suggestions 0057.",
   );
+  assert.equal(
+    deterministicOrder.indexOf(LINKED_SERVER_MERGE_STATE_MIGRATION) > deterministicOrder.indexOf(BILLING_INTEGRITY_MIGRATION),
+    true,
+    "Linked-server merge-state migration 0059 must apply after Billing Integrity 0058.",
+  );
 
   const staleReferences = walkTextFiles()
     .filter((path) => readFileSync(path, "utf8").includes(STALE_BILLING_MIGRATION));
   assert.deepEqual(staleReferences, [], "No stale exact reference to the old Billing Integrity migration filename may remain.");
 
+  const billingIntegrityHash = createHash("sha256")
+    .update(readFileSync(join("migrations", BILLING_INTEGRITY_MIGRATION)))
+    .digest("hex");
+  assert.equal(billingIntegrityHash, BILLING_INTEGRITY_MIGRATION_SHA256, "Billing Integrity migration 0058 must remain unchanged.");
+
   const freshDb = new SqliteD1Database();
-  applyMigration(freshDb.sqlite, EVENT_SUGGESTIONS_MIGRATION);
-  applyMigration(freshDb.sqlite, BILLING_INTEGRITY_MIGRATION);
+  applyMigrations(freshDb.sqlite, migrationFilesThrough(59));
   assert.equal(sqliteObjectExists(freshDb.sqlite, "event_suggestions"), true, "Fresh local migration application must include Event Suggestions 0057.");
   assert.equal(sqliteObjectExists(freshDb.sqlite, "linked_server_allowance_reservations"), true, "Fresh local migration application must include Billing Integrity 0058.");
+  assertLinkedServerMergeStatePresent(freshDb.sqlite, "Fresh local migration application through 0059");
   freshDb.sqlite.close();
 
   const upgradeDb = new SqliteD1Database();
-  applyMigration(upgradeDb.sqlite, EVENT_SUGGESTIONS_MIGRATION);
-  assert.equal(sqliteObjectExists(upgradeDb.sqlite, "event_suggestions"), true, "Pre-billing state should include Event Suggestions 0057.");
-  assert.equal(sqliteObjectExists(upgradeDb.sqlite, "linked_server_allowance_reservations"), false, "Pre-billing state should not include Billing Integrity.");
-  applyMigration(upgradeDb.sqlite, BILLING_INTEGRITY_MIGRATION);
-  assert.equal(sqliteObjectExists(upgradeDb.sqlite, "linked_server_allowance_reservations"), true, "Upgrade from pre-billing state must apply Billing Integrity 0058.");
-  assert.equal(sqliteObjectExists(upgradeDb.sqlite, "idx_lsar_active_linked_server"), true, "Billing Integrity 0058 indexes must apply on upgrade.");
+  applyMigrations(upgradeDb.sqlite, migrationFilesThrough(58));
+  assert.equal(sqliteObjectExists(upgradeDb.sqlite, "event_suggestions"), true, "Schema through 0058 should include Event Suggestions 0057.");
+  assert.equal(sqliteObjectExists(upgradeDb.sqlite, "linked_server_allowance_reservations"), true, "Schema through 0058 should include Billing Integrity.");
+  assert.equal(sqliteObjectExists(upgradeDb.sqlite, "idx_lsar_active_linked_server"), true, "Billing Integrity 0058 indexes must apply before the merge-state upgrade.");
+  assertLinkedServerMergeStateAbsent(upgradeDb.sqlite, "Schema through 0058");
+  upgradeDb.sqlite.exec(`
+    INSERT INTO users (id, discord_id, username, avatar, created_at, updated_at)
+    VALUES ('upgrade-owner', 'upgrade-owner-discord', 'Upgrade Owner', NULL, '2026-08-20T00:00:00.000Z', '2026-08-20T00:00:00.000Z');
+
+    INSERT INTO discord_guilds (id, guild_id, owner_user_id, name, permissions, is_owner, created_at, updated_at)
+    VALUES ('upgrade-guild-row', 'upgrade-guild', 'upgrade-owner', 'Upgrade Guild', '8', 1, '2026-08-20T00:00:00.000Z', '2026-08-20T00:00:00.000Z');
+
+    INSERT INTO linked_servers (
+      id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name,
+      server_name, server_type, tags_json, region, status, public_slug, created_at, updated_at
+    ) VALUES (
+      'upgrade-linked-server', 'upgrade-owner', 'upgrade-guild', 'upgrade-guild-row', 'upgrade-service',
+      'Upgrade Service', 'Upgrade Server', 'PVP', '[]', 'EU', 'live', 'upgrade-linked-server',
+      '2026-08-20T00:00:00.000Z', '2026-08-20T00:00:00.000Z'
+    );
+  `);
+  const rowBefore0059 = upgradeDb.sqlite.prepare(`
+    SELECT id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name,
+           server_name, server_type, tags_json, region, status, public_slug, created_at, updated_at
+    FROM linked_servers
+    WHERE id = 'upgrade-linked-server'
+  `).get();
+  applyMigration(upgradeDb.sqlite, LINKED_SERVER_MERGE_STATE_MIGRATION);
+  assertLinkedServerMergeStatePresent(upgradeDb.sqlite, "Upgrade from schema through 0058 to 0059");
+  const rowAfter0059 = upgradeDb.sqlite.prepare(`
+    SELECT id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name,
+           server_name, server_type, tags_json, region, status, public_slug, created_at, updated_at
+    FROM linked_servers
+    WHERE id = 'upgrade-linked-server'
+  `).get();
+  assert.deepEqual(rowAfter0059, rowBefore0059, "0058-to-0059 upgrade must preserve existing linked-server row values.");
+  const mergeStateAfter0059 = upgradeDb.sqlite.prepare(`
+    SELECT merged_into_server_id, merged_at
+    FROM linked_servers
+    WHERE id = 'upgrade-linked-server'
+  `).get();
+  assert.equal(mergeStateAfter0059?.merged_into_server_id, null, "0059 must not invent merge targets for existing rows.");
+  assert.equal(mergeStateAfter0059?.merged_at, null, "0059 must not invent merge timestamps for existing rows.");
   upgradeDb.sqlite.close();
 }
 
@@ -363,6 +451,25 @@ async function assertMigrationMatchesRuntimeSchema() {
       `Runtime reservation index SQL must appear in the additive migration: ${statement}`,
     );
   }
+  const mergeStateMigration = readFileSync(join("migrations", LINKED_SERVER_MERGE_STATE_MIGRATION), "utf8");
+  const dbSource = readFileSync("functions/_lib/db.ts", "utf8");
+  for (const column of LINKED_SERVER_MERGE_COLUMNS) {
+    assert.equal(
+      normalizeSql(mergeStateMigration).includes(normalizeSql(`ALTER TABLE linked_servers ADD COLUMN ${column} TEXT`)),
+      true,
+      `Merge-state migration 0059 must add linked_servers.${column}.`,
+    );
+    assert.equal(
+      dbSource.includes(`["${column}", "TEXT"]`),
+      true,
+      `Runtime metadata helper must keep parity for linked_servers.${column}.`,
+    );
+  }
+  assert.equal(
+    normalizeSql(mergeStateMigration).includes(normalizeSql("CREATE INDEX IF NOT EXISTS idx_linked_servers_merged_into_server_id ON linked_servers(merged_into_server_id)")),
+    true,
+    "Merge-state migration 0059 must add the merge-target lookup index.",
+  );
 }
 
 function makeAdmFileResult(input: {
