@@ -36,6 +36,10 @@ const candidateSha = requiredEnv("CANDIDATE_SHA");
 const currentRunId = String(process.env.GITHUB_RUN_ID ?? "");
 const now = Date.now();
 const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+const githubLogRedirectStatuses = new Set([301, 302, 303, 307, 308]);
+const safeUnavailableLogStatuses = new Set([403, 404, 410, 415, 422]);
+const retryableSignedLogStatuses = new Set([403, 404, 410]);
+const maxSignedLogAttempts = 2;
 
 const knownDatabaseNames = [
   "dzn_network_db",
@@ -67,6 +71,8 @@ const artifactFiles = [
   "protected-resources.json",
   "cleanup-candidate.json",
 ];
+
+let artifactInitialized = false;
 
 function requiredEnv(name) {
   const value = process.env[name];
@@ -104,6 +110,14 @@ function sanitizeText(value) {
     .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "[redacted-id]")
     .replace(/\b[0-9a-f]{32}\b/gi, "[redacted-id]")
     .replace(/[A-Za-z0-9_-]{48,}/g, "[redacted]");
+  text = text.replace(/https:\/\/[^\s"'<>]+/gi, (match) => {
+    try {
+      const parsed = new URL(match);
+      return parsed.search ? `${parsed.protocol}//${parsed.hostname}/[redacted-url]` : match;
+    } catch {
+      return "https://[redacted-url]";
+    }
+  });
   return text.slice(0, 1200);
 }
 
@@ -138,21 +152,168 @@ async function getJson(url, headers, label) {
   return parsed;
 }
 
-async function getText(url, headers, label) {
-  const response = await fetch(url, { method: "GET", headers });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`${label} failed status=${response.status}`);
-  }
-  return text;
-}
-
 function cloudflareUrl(apiPath) {
   return `https://api.cloudflare.com/client/v4/accounts/${accountId}${apiPath}`;
 }
 
 function githubUrl(apiPath) {
   return `https://api.github.com/repos/${repository}${apiPath}`;
+}
+
+function safeStatus(status) {
+  const value = Number(status);
+  return Number.isFinite(value) ? value : null;
+}
+
+function unavailableGithubJobLog(status, reason, extra = {}) {
+  return {
+    available: false,
+    status: safeStatus(status),
+    reason: String(reason || "unavailable"),
+    text: "",
+    ...extra,
+  };
+}
+
+function isLoopbackOrPrivateHost(hostname) {
+  const host = String(hostname ?? "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (!host) return true;
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (host === "::1" || host === "0:0:0:0:0:0:0:1") return true;
+  if (host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:")) return true;
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!ipv4) return false;
+  const parts = ipv4.slice(1).map((part) => Number(part));
+  if (parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  const [a, b] = parts;
+  return a === 0
+    || a === 10
+    || a === 127
+    || a === 169 && b === 254
+    || a === 172 && b >= 16 && b <= 31
+    || a === 192 && b === 168;
+}
+
+function validateSignedGithubLogLocation(location) {
+  let parsed;
+  try {
+    parsed = new URL(String(location ?? ""));
+  } catch {
+    return { ok: false, reason: "invalid_redirect_location" };
+  }
+  if (parsed.protocol !== "https:") {
+    return { ok: false, reason: "non_https_redirect_location" };
+  }
+  if (isLoopbackOrPrivateHost(parsed.hostname)) {
+    return { ok: false, reason: "local_or_private_redirect_location" };
+  }
+  return { ok: true };
+}
+
+async function requestGithubJobLogRedirect(jobId) {
+  const response = await fetch(githubUrl(`/actions/jobs/${jobId}/logs`), {
+    method: "GET",
+    headers: githubHeaders(),
+    redirect: "manual",
+  });
+  if (response.status === 200) {
+    return {
+      kind: "direct",
+      status: response.status,
+      text: await response.text(),
+    };
+  }
+  if (githubLogRedirectStatuses.has(response.status)) {
+    const location = response.headers.get("location");
+    if (!location) {
+      return {
+        kind: "unavailable",
+        result: unavailableGithubJobLog(response.status, "missing_redirect_location"),
+      };
+    }
+    const validation = validateSignedGithubLogLocation(location);
+    if (!validation.ok) {
+      return {
+        kind: "unavailable",
+        result: unavailableGithubJobLog(response.status, validation.reason),
+      };
+    }
+    return {
+      kind: "redirect",
+      status: response.status,
+      location,
+    };
+  }
+  if (safeUnavailableLogStatuses.has(response.status)) {
+    return {
+      kind: "unavailable",
+      result: unavailableGithubJobLog(response.status, `api_status_${response.status}`),
+    };
+  }
+  throw new Error(`github job log api failed status=${response.status}`);
+}
+
+async function downloadSignedGithubJobLog(location) {
+  const response = await fetch(location, {
+    method: "GET",
+    redirect: "follow",
+  });
+  if (response.ok) {
+    return {
+      available: true,
+      status: response.status,
+      reason: "signed_download_ok",
+      text: await response.text(),
+    };
+  }
+  if (safeUnavailableLogStatuses.has(response.status)) {
+    return unavailableGithubJobLog(response.status, `signed_status_${response.status}`);
+  }
+  throw new Error(`github signed job log download failed status=${response.status}`);
+}
+
+async function getGithubJobLog(jobId) {
+  let lastUnavailable = unavailableGithubJobLog(null, "not_attempted", { signed_attempts: 0 });
+  for (let signedAttempt = 1; signedAttempt <= maxSignedLogAttempts; signedAttempt += 1) {
+    try {
+      const redirect = await requestGithubJobLogRedirect(jobId);
+      if (redirect.kind === "direct") {
+        return {
+          available: true,
+          status: redirect.status,
+          reason: "api_status_200",
+          text: redirect.text,
+          signed_attempts: 0,
+        };
+      }
+      if (redirect.kind === "unavailable") {
+        return {
+          ...redirect.result,
+          signed_attempts: signedAttempt - 1,
+        };
+      }
+      const signedLog = await downloadSignedGithubJobLog(redirect.location);
+      if (signedLog.available) {
+        return {
+          ...signedLog,
+          signed_attempts: signedAttempt,
+        };
+      }
+      lastUnavailable = {
+        ...signedLog,
+        signed_attempts: signedAttempt,
+      };
+      if (!retryableSignedLogStatuses.has(signedLog.status) || signedAttempt === maxSignedLogAttempts) {
+        return lastUnavailable;
+      }
+    } catch (error) {
+      return unavailableGithubJobLog(null, "unexpected_log_error", {
+        safe_message: sanitizeText(error instanceof Error ? error.message : String(error)),
+        signed_attempts: signedAttempt - 1,
+      });
+    }
+  }
+  return lastUnavailable;
 }
 
 function itemsFromResult(parsed, keys) {
@@ -383,6 +544,37 @@ function extractDatabaseNames(text) {
   return [...found].sort();
 }
 
+function workflowSummarySnapshot(relevantWorkflows, runSummaries, databaseToRuns, logStats, status) {
+  return {
+    status,
+    current_run_id: currentRunId || null,
+    current_audit_run_skipped: Boolean(currentRunId),
+    workflows_searched: relevantWorkflows.map((workflow) => ({
+      name: workflow.name,
+      id: workflow.id,
+      path: workflow.path,
+      state: workflow.state,
+    })),
+    runs_scanned: runSummaries,
+    database_to_runs: Object.fromEntries([...databaseToRuns.entries()].sort(([a], [b]) => a.localeCompare(b))),
+    job_log_summary: {
+      jobs_checked: logStats.jobs_checked,
+      available_logs: logStats.available_logs,
+      unavailable_logs: logStats.unavailable_logs,
+      unavailable_log_records: logStats.unavailable_log_records,
+    },
+    workflow_log_evidence_incomplete: logStats.unavailable_logs > 0,
+  };
+}
+
+function writeWorkflowReferenceProgress(relevantWorkflows, runSummaries, databaseToRuns, logStats, status) {
+  const snapshot = workflowSummarySnapshot(relevantWorkflows, runSummaries, databaseToRuns, logStats, status);
+  if (artifactInitialized) {
+    writeJson("workflow-reference-summary.json", snapshot);
+  }
+  return snapshot;
+}
+
 async function loadWorkflowReferences() {
   const workflows = await listGithubPaginated("/actions/workflows?", "workflows", "github workflows", 2);
   const relevantWorkflows = workflows.filter(relevantWorkflow);
@@ -394,9 +586,17 @@ async function loadWorkflowReferences() {
     .slice(0, 100);
   const runSummaries = [];
   const databaseToRuns = new Map();
+  const logStats = {
+    jobs_checked: 0,
+    available_logs: 0,
+    unavailable_logs: 0,
+    unavailable_log_records: [],
+  };
+  writeWorkflowReferenceProgress(relevantWorkflows, runSummaries, databaseToRuns, logStats, "in_progress");
   for (const run of relevantRuns) {
     const jobs = await listGithubPaginated(`/actions/runs/${run.id}/jobs?`, "jobs", `github jobs ${run.id}`, 2);
     const jobStepEvidence = [];
+    const jobLogEvidence = [];
     const foundDatabases = new Set(extractDatabaseNames(JSON.stringify({
       name: run.name,
       path: run.path,
@@ -421,10 +621,30 @@ async function loadWorkflowReferences() {
         steps,
       }));
       for (const name of metadataNames) foundDatabases.add(name);
-      const logText = await getText(githubUrl(`/actions/jobs/${job.id}/logs`), githubHeaders("text/plain"), `github job log ${job.id}`);
-      for (const name of extractDatabaseNames(logText)) foundDatabases.add(name);
+      logStats.jobs_checked += 1;
+      const logResult = await getGithubJobLog(job.id);
+      const logRecord = {
+        job_id: job.id,
+        run_id: run.id,
+        log_available: logResult.available,
+        safe_status: logResult.status,
+        safe_reason: logResult.reason,
+        signed_attempts: logResult.signed_attempts ?? 0,
+      };
+      if (logResult.safe_message) {
+        logRecord.safe_message = logResult.safe_message;
+      }
+      jobLogEvidence.push(logRecord);
+      if (logResult.available) {
+        logStats.available_logs += 1;
+        for (const name of extractDatabaseNames(logResult.text)) foundDatabases.add(name);
+      } else {
+        logStats.unavailable_logs += 1;
+        logStats.unavailable_log_records.push(logRecord);
+      }
     }
     const databaseNames = [...foundDatabases].sort();
+    const unavailableJobLogs = jobLogEvidence.filter((entry) => !entry.log_available);
     const summary = {
       workflow_name: run.name ?? "unknown",
       workflow_id: run.workflow_id ?? null,
@@ -442,6 +662,13 @@ async function loadWorkflowReferences() {
       recent_successful_preview: run.conclusion === "success" && Date.parse(run.created_at ?? "") >= thirtyDaysAgo,
       failed_or_unresolved: run.conclusion && run.conclusion !== "success",
       step_summary: jobStepEvidence,
+      job_log_summary: {
+        jobs_checked: jobLogEvidence.length,
+        available_logs: jobLogEvidence.filter((entry) => entry.log_available).length,
+        unavailable_logs: unavailableJobLogs.length,
+        unavailable_log_records: unavailableJobLogs,
+      },
+      workflow_log_incomplete: unavailableJobLogs.length > 0,
     };
     runSummaries.push(summary);
     for (const name of databaseNames) {
@@ -460,19 +687,13 @@ async function loadWorkflowReferences() {
         queued_or_running: summary.queued_or_running,
         recent_successful_preview: summary.recent_successful_preview,
         failed_or_unresolved: summary.failed_or_unresolved,
+        workflow_log_incomplete: summary.workflow_log_incomplete,
+        unavailable_job_logs: unavailableJobLogs,
       });
     }
+    writeWorkflowReferenceProgress(relevantWorkflows, runSummaries, databaseToRuns, logStats, "in_progress");
   }
-  return {
-    workflows_searched: relevantWorkflows.map((workflow) => ({
-      name: workflow.name,
-      id: workflow.id,
-      path: workflow.path,
-      state: workflow.state,
-    })),
-    runs_scanned: runSummaries,
-    database_to_runs: Object.fromEntries([...databaseToRuns.entries()].sort(([a], [b]) => a.localeCompare(b))),
-  };
+  return writeWorkflowReferenceProgress(relevantWorkflows, runSummaries, databaseToRuns, logStats, "complete");
 }
 
 function loadProductionD1FromWrangler() {
@@ -546,7 +767,7 @@ function supersessionEvidence(database, d1Records, workflowReferences) {
   return null;
 }
 
-function classifyDatabase({ database, production, pageBindings, workflowReferences, handoffReferences, d1Records }) {
+function classifyDatabase({ database, production, pageBindings, workflowReferences, handoffReferences, d1Records, workflowEvidenceIncomplete }) {
   const latestUseAt = latestUseFor(database.name, pageBindings, workflowReferences);
   const isProduction = database.name === production.name || (production.id && database.full_id === production.id);
   const approvedPreview = approvedPreviewDatabaseName(database.name);
@@ -592,6 +813,13 @@ function classifyDatabase({ database, production, pageBindings, workflowReferenc
       classification: "HANDOFF_REFERENCED_PROTECTED",
       latest_use_at: latestUseAt,
       reason: "referenced by current DZN handoffs as retained, unresolved, blocked, or evidence-relevant",
+    };
+  }
+  if (workflowEvidenceIncomplete) {
+    return {
+      classification: "UNKNOWN_PROTECTED",
+      latest_use_at: latestUseAt,
+      reason: "workflow cross-reference evidence is incomplete because one or more job logs were unavailable",
     };
   }
   if (!approvedPreview) {
@@ -647,16 +875,151 @@ function writeJson(file, value) {
   fs.writeFileSync(path.join(artifactDir, file), `${JSON.stringify(value, null, 2)}\n`);
 }
 
+function baseAuditMetadata(overrides = {}) {
+  return {
+    status: "in_progress",
+    audit_started_at: startedAt,
+    audit_finished_at: null,
+    repository,
+    branch: candidateBranch,
+    ref: candidateRef,
+    candidate_sha: candidateSha,
+    github_run_id: currentRunId || null,
+    github_run_number: process.env.GITHUB_RUN_NUMBER ?? null,
+    github_run_attempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+    mode: process.env.MODE,
+    d1_database_count: 0,
+    pages_project_count: 0,
+    workflow_runs_scanned: 0,
+    cloudflare_d1_inventory_complete: false,
+    pages_binding_inventory_complete: false,
+    workflow_cross_reference_complete: false,
+    workflow_log_evidence_incomplete: false,
+    handoff_cross_reference_complete: false,
+    candidate_selected: false,
+    retained_full_d1_ids: false,
+    resource_mutation_performed: false,
+    artifact_security_scan: "pending",
+    ...overrides,
+  };
+}
+
+function readCurrentMetadata() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(artifactDir, "audit-metadata.json"), "utf8"));
+  } catch {
+    return baseAuditMetadata();
+  }
+}
+
+function updateAuditMetadata(fields) {
+  const metadata = {
+    ...readCurrentMetadata(),
+    ...fields,
+  };
+  writeJson("audit-metadata.json", metadata);
+  return metadata;
+}
+
+function writeStatusSummary(metadata, statusReason) {
+  const lines = [
+    "# DZN Preview D1 Capacity Audit",
+    "",
+    `- Status: ${metadata.status}`,
+    `- Status reason: ${sanitizeText(statusReason)}`,
+    `- Candidate branch: ${metadata.branch}`,
+    `- Candidate SHA: ${metadata.candidate_sha}`,
+    `- D1 databases inventoried: ${metadata.d1_database_count}`,
+    `- Pages projects checked: ${metadata.pages_project_count}`,
+    `- Workflow runs scanned: ${metadata.workflow_runs_scanned}`,
+    "- Resource mutation performed: false",
+    "",
+    "## Candidate",
+    "",
+    "- candidate_selected=false",
+  ];
+  fs.writeFileSync(path.join(artifactDir, "summary.md"), `${lines.join("\n")}\n`);
+}
+
+function initializeArtifacts() {
+  fs.rmSync(artifactDir, { recursive: true, force: true });
+  fs.mkdirSync(artifactDir, { recursive: true });
+  artifactInitialized = true;
+  const metadata = baseAuditMetadata();
+  writeJson("audit-metadata.json", metadata);
+  writeStatusSummary(metadata, "audit in progress");
+  writeJson("d1-inventory.json", { status: "pending", databases: [] });
+  writeJson("pages-bindings.json", { status: "pending", projects_checked: 0, projects: [], bound_resources: [] });
+  writeJson("workflow-reference-summary.json", {
+    status: "pending",
+    current_run_id: currentRunId || null,
+    current_audit_run_skipped: Boolean(currentRunId),
+    workflows_searched: [],
+    runs_scanned: [],
+    database_to_runs: {},
+    job_log_summary: {
+      jobs_checked: 0,
+      available_logs: 0,
+      unavailable_logs: 0,
+      unavailable_log_records: [],
+    },
+    workflow_log_evidence_incomplete: false,
+  });
+  writeJson("protected-resources.json", { status: "pending", resources: [] });
+  writeJson("cleanup-candidate.json", {
+    candidate_selected: false,
+    reason: "Audit is still in progress.",
+  });
+}
+
+function writeFailureArtifacts(error) {
+  try {
+    if (!artifactInitialized) {
+      fs.mkdirSync(artifactDir, { recursive: true });
+      artifactInitialized = true;
+    }
+    const reason = sanitizeText(error instanceof Error ? error.message : String(error));
+    const metadata = updateAuditMetadata({
+      status: "failed",
+      audit_finished_at: new Date().toISOString(),
+      failure_reason: reason,
+      candidate_selected: false,
+      artifact_security_scan: "not_completed",
+      resource_mutation_performed: false,
+    });
+    writeStatusSummary(metadata, reason);
+    const candidate = readCurrentCandidate();
+    writeJson("cleanup-candidate.json", {
+      ...candidate,
+      candidate_selected: false,
+      reason: "Audit failed before a safe cleanup candidate could be established.",
+      failure_reason: reason,
+    });
+  } catch (writeError) {
+    console.error(sanitizeText(writeError instanceof Error ? writeError.message : String(writeError)));
+  }
+}
+
+function readCurrentCandidate() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(artifactDir, "cleanup-candidate.json"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
 function writeSummary({ metadata, d1Inventory, pageProjects, workflowSummary, selectedCandidate }) {
   const lines = [
     "# DZN Preview D1 Capacity Audit",
     "",
+    `- Status: ${metadata.status ?? "completed"}`,
     `- Result: ${selectedCandidate ? "one stale preview candidate identified" : "no provably safe cleanup candidate"}`,
     `- Candidate branch: ${metadata.branch}`,
     `- Candidate SHA: ${metadata.candidate_sha}`,
     `- D1 databases inventoried: ${metadata.d1_database_count}`,
     `- Pages projects checked: ${metadata.pages_project_count}`,
     `- Workflow runs scanned: ${metadata.workflow_runs_scanned}`,
+    `- Workflow log evidence incomplete: ${metadata.workflow_log_evidence_incomplete ? "true" : "false"}`,
     `- Resource mutation performed: false`,
     "",
     "## D1 Classifications",
@@ -676,6 +1039,8 @@ function writeSummary({ metadata, d1Inventory, pageProjects, workflowSummary, se
   lines.push("", "## Workflow Cross-Reference", "");
   lines.push(`- Workflows searched: ${workflowSummary.workflows_searched.map((workflow) => workflow.name).join(", ") || "none"}`);
   lines.push(`- Database mappings found: ${Object.keys(workflowSummary.database_to_runs).length}`);
+  lines.push(`- Job logs available: ${workflowSummary.job_log_summary?.available_logs ?? 0}`);
+  lines.push(`- Job logs unavailable: ${workflowSummary.job_log_summary?.unavailable_logs ?? 0}`);
   lines.push("", "## Candidate", "");
   if (selectedCandidate) {
     lines.push(`- Selected: ${selectedCandidate.name} (${selectedCandidate.masked_id})`);
@@ -699,6 +1064,8 @@ function scanArtifacts() {
     ["complete_hex_identifier", /\b[0-9a-f]{32}\b/i],
     ["bearer_value", /Bearer\s+[A-Za-z0-9._~+/=-]+/i],
     ["authorization_header", /Authorization\s*[:=]/i],
+    ["signed_url", /https:\/\/[^\s"'<>]+\?(?:[^\s"'<>]*)(X-Amz-|Signature=|AWSAccessKeyId=|sig=|se=|sp=|sv=|spr=|sr=|skoid=|sktid=|skt=|ske=|sks=|skv=)/i],
+    ["location_header", /\blocation_header\b/i],
     ["cookie_value", /Cookie\s*[:=]/i],
     ["secret_field", /\b(TOKEN_ENCRYPTION_KEY|SESSION_SECRET|DISCORD_CLIENT_SECRET|DISCORD_BOT_TOKEN|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|encrypted_token|token_iv|token_auth_tag)\b/i],
     ["session_token", /\b(session_token|dzn_session)\b/i],
@@ -736,21 +1103,65 @@ function appendStepSummary(metadata, selectedCandidate) {
   }
 }
 
+function buildPagesBindingsArtifact(pages) {
+  return {
+    status: "complete",
+    projects_checked: pages.projects.length,
+    projects: pages.projects,
+    bound_resources: pages.bindings.map((binding) => ({
+      project_name: binding.project_name,
+      production_branch: binding.production_branch,
+      environment: binding.environment,
+      binding_name: binding.binding_name,
+      d1_database_name: binding.d1_database_name,
+      masked_d1_id: binding.masked_d1_id,
+      latest_deployment_at: binding.latest_deployment_at,
+      latest_successful_deployment_at: binding.latest_successful_deployment_at,
+      protected: true,
+    })),
+  };
+}
+
 async function main() {
+  initializeArtifacts();
   if (candidateRef !== "refs/heads/feature/event-platform-performance-foundation" || candidateBranch !== "feature/event-platform-performance-foundation") {
     throw new Error("Audit branch guard failed.");
   }
 
-  fs.rmSync(artifactDir, { recursive: true, force: true });
-  fs.mkdirSync(artifactDir, { recursive: true });
-
   const production = loadProductionD1FromWrangler();
   const d1Records = await loadD1Inventory();
+  updateAuditMetadata({
+    d1_database_count: d1Records.length,
+    cloudflare_d1_inventory_complete: true,
+  });
+  writeJson("d1-inventory.json", {
+    status: "inventory_complete_classification_pending",
+    databases: d1Records.map((database) => ({
+      name: database.name,
+      masked_id: database.masked_id,
+      created_at: database.created_at ?? "unknown",
+      database_version: database.database_version,
+    })),
+  });
   const databaseNameById = new Map(d1Records.map((database) => [database.full_id, database.name]));
   const databaseIdByName = new Map(d1Records.map((database) => [database.name, database.full_id]));
   const pages = await loadPagesInventory(databaseNameById, databaseIdByName);
+  updateAuditMetadata({
+    pages_project_count: pages.projects.length,
+    pages_binding_inventory_complete: true,
+  });
+  writeJson("pages-bindings.json", buildPagesBindingsArtifact(pages));
   const workflowSummary = await loadWorkflowReferences();
+  const workflowEvidenceIncomplete = Boolean(workflowSummary.workflow_log_evidence_incomplete);
+  updateAuditMetadata({
+    workflow_runs_scanned: workflowSummary.runs_scanned.length,
+    workflow_cross_reference_complete: true,
+    workflow_log_evidence_incomplete: workflowEvidenceIncomplete,
+  });
   const handoffReferences = loadHandoffReferences(d1Records.map((database) => database.name));
+  updateAuditMetadata({
+    handoff_cross_reference_complete: true,
+  });
 
   const pageBindingsByName = new Map();
   for (const binding of pages.bindings) {
@@ -769,6 +1180,7 @@ async function main() {
       workflowReferences,
       handoffReferences: handoffRefs,
       d1Records,
+      workflowEvidenceIncomplete: workflowEvidenceIncomplete || workflowReferences.some((run) => run.workflow_log_incomplete),
     });
     return {
       name: database.name,
@@ -790,6 +1202,8 @@ async function main() {
         status: run.status,
         created_at: run.created_at,
         updated_at: run.updated_at,
+        workflow_log_incomplete: run.workflow_log_incomplete,
+        unavailable_job_logs: run.unavailable_job_logs,
       })),
       handoff_references: handoffRefs,
       classification: classification.classification,
@@ -802,7 +1216,7 @@ async function main() {
     .filter((database) => database.classification === "STALE_PREVIEW_CANDIDATE")
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 
-  const selected = staleCandidates[0] ?? null;
+  const selected = staleCandidates.length === 1 ? staleCandidates[0] : null;
   const selectedCandidate = selected ? {
     candidate_selected: true,
     name: selected.name,
@@ -821,7 +1235,9 @@ async function main() {
     safety_justification: "All stale-preview rules passed: approved preview prefix, non-production name and ID, no Pages binding, no queued or running workflow, no recent successful workflow, no current handoff retention, identified workflow origin, known creation and latest-use timestamps, and supersession evidence.",
   } : {
     candidate_selected: false,
-    reason: "No database satisfied every stale-candidate rule.",
+    reason: staleCandidates.length > 1
+      ? "More than one database satisfied stale-candidate checks; no single cleanup candidate was selected."
+      : "No database satisfied every stale-candidate rule.",
     protected_plausible_candidates: d1Inventory
       .filter((database) => database.approved_preview_prefix && database.classification !== "PRODUCTION_PROTECTED")
       .map((database) => ({
@@ -832,29 +1248,22 @@ async function main() {
       })),
   };
 
-  const metadata = {
-    audit_started_at: startedAt,
+  const metadata = updateAuditMetadata({
+    status: "completed",
     audit_finished_at: new Date().toISOString(),
-    repository,
-    branch: candidateBranch,
-    ref: candidateRef,
-    candidate_sha: candidateSha,
-    github_run_id: currentRunId || null,
-    github_run_number: process.env.GITHUB_RUN_NUMBER ?? null,
-    github_run_attempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
-    mode: process.env.MODE,
     d1_database_count: d1Inventory.length,
     pages_project_count: pages.projects.length,
     workflow_runs_scanned: workflowSummary.runs_scanned.length,
     cloudflare_d1_inventory_complete: true,
     pages_binding_inventory_complete: true,
     workflow_cross_reference_complete: true,
+    workflow_log_evidence_incomplete: workflowEvidenceIncomplete,
     handoff_cross_reference_complete: true,
     candidate_selected: Boolean(selected),
     retained_full_d1_ids: false,
     resource_mutation_performed: false,
     artifact_security_scan: "pending",
-  };
+  });
 
   const protectedResources = {
     resources: d1Inventory
@@ -868,24 +1277,10 @@ async function main() {
       })),
   };
 
-  const pagesBindings = {
-    projects_checked: pages.projects.length,
-    projects: pages.projects,
-    bound_resources: pages.bindings.map((binding) => ({
-      project_name: binding.project_name,
-      production_branch: binding.production_branch,
-      environment: binding.environment,
-      binding_name: binding.binding_name,
-      d1_database_name: binding.d1_database_name,
-      masked_d1_id: binding.masked_d1_id,
-      latest_deployment_at: binding.latest_deployment_at,
-      latest_successful_deployment_at: binding.latest_successful_deployment_at,
-      protected: true,
-    })),
-  };
+  const pagesBindings = buildPagesBindingsArtifact(pages);
 
   writeJson("audit-metadata.json", metadata);
-  writeJson("d1-inventory.json", { databases: d1Inventory });
+  writeJson("d1-inventory.json", { status: "complete", databases: d1Inventory });
   writeJson("pages-bindings.json", pagesBindings);
   writeJson("workflow-reference-summary.json", workflowSummary);
   writeJson("protected-resources.json", protectedResources);
@@ -914,6 +1309,7 @@ async function main() {
 }
 
 main().catch((error) => {
+  writeFailureArtifacts(error);
   console.error(sanitizeText(error instanceof Error ? error.message : String(error)));
   process.exit(1);
 });
