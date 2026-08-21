@@ -958,7 +958,7 @@ async function assertExactLinkedServerTokenIsolation() {
     .prepare(
       `INSERT INTO nitrado_connections (
         id, user_id, linked_server_id, encrypted_token, token_iv, token_auth_tag, created_at, updated_at
-      ) VALUES ('bad-token-row', 'token-owner', 'token-server-a', 'not-valid-ciphertext', 'not-valid-iv', 'not-valid-tag', '2026-08-20T01:00:00.000Z', '2026-08-20T01:00:00.000Z')`,
+      ) VALUES ('bad-token-row', 'token-owner', 'token-server-a', 'not-valid-ciphertext', 'not-valid-iv', 'not-valid-tag', datetime('now', '+1 second'), datetime('now', '+1 second'))`,
     )
     .run();
   await assert.rejects(
