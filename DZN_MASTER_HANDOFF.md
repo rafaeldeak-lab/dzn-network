@@ -22,6 +22,7 @@ Canonical clean worktree for this recovery:
 - Phase 0 recovery handoff commit: this document commit.
 - Billing Phase 1 linked-server Nitrado integrity code commit: `a9fd8f7be01637fbcd6e6b1f06ffaf23886ceb02`.
 - Active remote SHA before Billing preview evidence documentation: `17b9535a695188218c10213d55265570cce15275`.
+- Active remote SHA after read-only D1 capacity audit implementation: `4ec2fabfed53587970120c6f37757df3b9c11278`.
 
 Old chat transcripts, interrupted Codex edits, and dirty local worktrees are not Git truth. Use remote branch history and committed files as the source of truth.
 
@@ -70,6 +71,22 @@ Billing Phase 1 isolated preview result:
 - Artifact secret scan was clean; no prohibited secret, credential, session, token, Authorization header, complete D1 UUID, or foreign-owner data was found.
 - No workflow remediation was made because the blocker is an external preview D1 capacity precondition.
 
+Billing Phase 1 read-only D1 capacity audit result:
+
+- Result: BLOCKED - GITHUB/CLOUDFLARE READ AUDIT FAILED.
+- Audit implementation checkpoint commit: `b7da60b20a75515c96e75f157524bc47fb2c35d4`.
+- Audit remediation commit and active branch SHA used by the final audit attempt: `4ec2fabfed53587970120c6f37757df3b9c11278`.
+- Attempt 1: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32498388093`, run number `57`, candidate SHA `b7da60b20a75515c96e75f157524bc47fb2c35d4`, failed because Cloudflare rejected paginated Pages project list options with code `8000024`.
+- Attempt 2: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32498659821`, run number `58`, candidate SHA `4ec2fabfed53587970120c6f37757df3b9c11278`, failed because GitHub job-log cross-reference returned HTTP `415`.
+- D1 count remained `10`. The requested Billing preview D1 `dzn_network_db_owner_console_preview_billing_phase_1_17b9535` was not observed in the diagnostic D1 list.
+- No retained audit artifact was produced by the final run; artifact count was `0`.
+- No safe cleanup candidate was selected.
+- Billing preview remains incomplete.
+- D1 capacity remains blocked pending a successful read-only audit or an explicit owner-approved capacity/resource decision.
+- Canonical worktree remains authoritative: `C:\Users\rafae\Desktop\DZN-Audits\worktrees\dzn-phase0-clean-20260820-155027`.
+- The preserved OneDrive worktree and named backups remain frozen.
+- No D1 deletion, D1 creation, D1 SQL, migration, Pages mutation, Pages deployment, Billing preview rerun, production D1 read/write, production Pages mutation, production Worker mutation, secret change, Stripe change, Discord send, real Nitrado call, ADM production trigger, scheduler trigger, advertising trigger, main change, Event release branch change, PR #15 change, rebase, merge, cherry-pick, reset, stash, clean, or force-push occurred.
+
 ## Phase 0 Recovery
 
 This Phase 0 recovery resolved:
@@ -110,7 +127,7 @@ The canonical clean worktree remained authoritative and clean before the evidenc
 
 ## Next Authorised Slice
 
-Resolve the recorded Billing Phase 1 isolated preview blocker or failure and rerun the guarded billing-phase-1-preview workflow. No production deployment or production migration.
+Resolve the recorded read-only Cloudflare D1 capacity audit failure and rerun audit-preview-d1-capacity. No D1 deletion, production deployment or production migration.
 
 ## Deferred Areas
 

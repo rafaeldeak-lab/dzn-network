@@ -204,6 +204,69 @@ Security and production-safety evidence:
 - The canonical worktree was clean before dispatch. The preserved older worktree and all named backups remained present and were not modified.
 - No workflow/script remediation commit was needed because the failure was an external Cloudflare D1 capacity precondition.
 
+## Read-Only D1 Capacity Audit Evidence
+
+Slice 4C2 result: BLOCKED - GITHUB/CLOUDFLARE READ AUDIT FAILED.
+
+Implementation and validation:
+
+- Audit implementation checkpoint commit: `b7da60b20a75515c96e75f157524bc47fb2c35d4` - `ci(preview): add read-only D1 capacity audit`.
+- Audit remediation commit: `4ec2fabfed53587970120c6f37757df3b9c11278` - `fix(preview): use safe Pages project audit listing`.
+- Active branch used by the final audit attempt: `feature/event-platform-performance-foundation` at `4ec2fabfed53587970120c6f37757df3b9c11278`.
+- Local validation logs are retained outside the repository under `C:\Users\rafae\Desktop\DZN-Audits\logs\d1-capacity-read-only-20260821-161950`.
+- Final validation after implementation passed: shell syntax for scripts 01 and 39, `npm run test:github-workflows`, `npm run test:billing-integrity`, `npm run test:billing-plans`, `npx tsc --noEmit --pretty false`, `npm run lint`, `npm run build`, `npm test`, and `git diff --check`.
+- Lint remained at 0 errors and the existing 4 warnings. `npm test` retained the documented optional raw ADM fixture skip: raw owner-supplied bundle is not present locally.
+
+Workflow attempts:
+
+- Attempt 1 run URL: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32498388093`.
+- Attempt 1 run ID: `32498388093`; run number `57`; attempt `1`; final conclusion `failure`.
+- Attempt 1 candidate SHA: `b7da60b20a75515c96e75f157524bc47fb2c35d4`.
+- Attempt 1 failure: script 39 used paginated query parameters on the Cloudflare Pages project list endpoint and Cloudflare returned code `8000024` invalid list options. This was an in-scope audit implementation defect.
+- Attempt 1 external evidence path: `C:\Users\rafae\Desktop\DZN-Audits\d1-capacity-audits\github-read-only-32498388093`.
+- Attempt 2 run URL: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32498659821`.
+- Attempt 2 run ID: `32498659821`; run number `58`; attempt `1`; final conclusion `failure`.
+- Attempt 2 candidate SHA: `4ec2fabfed53587970120c6f37757df3b9c11278`.
+- Attempt 2 created at `2026-08-21T15:38:07Z`; updated at `2026-08-21T15:39:00Z`.
+- Attempt 2 failure: script 39 reached the GitHub workflow-log cross-reference and failed while reading a prior job log because the job-log request returned HTTP `415`.
+- Attempt 2 external evidence path: `C:\Users\rafae\Desktop\DZN-Audits\d1-capacity-audits\github-read-only-32498659821`.
+- Maximum authorised audit dispatch attempts were used: two. No third audit dispatch was attempted.
+
+Observed D1 state from the successful Cloudflare auth diagnostic in attempt 2:
+
+- D1 count observed: `10`.
+- `dzn_network_db_owner_console_preview_creator_governance_0919c46` - `f327c5b2...73a5`.
+- `dzn_network_db_owner_console_preview_creator_governance_51815be` - `efb4127c...30ff`.
+- `dzn_network_db_discord_announcements_preview` - `f7d5eb47...fae6`.
+- `dzn_network_db_discord_phase_2a_preview` - `83e3b565...ffb5`.
+- `dzn_network_db_discord_control_preview` - `f6c76574...24d0`.
+- `dzn_network_db_owner_console_preview` - `8434d3d7...b81b`.
+- `dzn_network_db_server_lifecycle_preview` - `692db1da...7ab4`.
+- `dzn_network_db_server_advertising_preview` - `1c17f68f...148b`.
+- `dzn_network_db_dzn_pulse_preview` - `e27a464f...d73a`.
+- `dzn_network_db` - `37515c66...975e`.
+
+Audit result and safety:
+
+- The audit did not complete a retained D1 classification.
+- Pages projects checked count and bound/protected resources were not retained because the final run failed before artifact creation.
+- No safe cleanup candidate was selected.
+- Artifact name requested: `dzn-preview-d1-capacity-audit`.
+- Artifact ID: none. The final run had `total_count=0` artifacts because script 39 failed before writing retained artifact files.
+- Artifact extraction path: none.
+- Artifact security result: no artifact was available to scan; retained external run/job logs were stored outside the repository.
+- No deletion occurred.
+- No D1 creation occurred.
+- No D1 SQL occurred.
+- No migration was applied.
+- No fixtures were seeded.
+- No Pages project was created or modified.
+- No Pages binding was changed.
+- No Pages secret was written or deleted.
+- No Pages deployment occurred.
+- No Billing preview rerun occurred.
+- No production action occurred.
+
 ## Next Authorised Slice
 
-Resolve the recorded Billing Phase 1 isolated preview blocker or failure and rerun the guarded billing-phase-1-preview workflow. No production deployment or production migration.
+Resolve the recorded read-only Cloudflare D1 capacity audit failure and rerun audit-preview-d1-capacity. No D1 deletion, production deployment or production migration.
