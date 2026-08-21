@@ -244,7 +244,8 @@ fs.writeFileSync(`${artifact}/schema-summary.json`, JSON.stringify({
   linkedServerMergeStateColumnsPresent: linkedServerColumns.filter((name) => ["merged_into_server_id", "merged_at"].includes(name)),
   linkedServerMergeStateIndexesPresent: linkedServerMergeIndexes.map((row) => String(row.name || "")).sort(),
   linkedServerMergeLifecycleColumnsPresent: linkedServerColumns.filter((name) => /merged|lifecycle|owner_action|latest_imported|listing_visibility/.test(name)),
-  nitradoConnectionColumnsPresent: nitradoColumns,
+  nitradoConnectionLinkedServerIdPresent: nitradoColumns.includes("linked_server_id"),
+  nitradoConnectionCredentialColumnsRedacted: true,
   activeNitradoServiceUniquenessProtection: "idx_linked_servers_active_service_id",
   foreignKeyCheckRows: 0,
 }, null, 2));

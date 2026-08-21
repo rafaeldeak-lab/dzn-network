@@ -121,9 +121,11 @@ async function wait(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 async function fetchWithRetry(base, path, init = {}, options = {}) {
-  const attempts = options.attempts ?? 12;
+  const attempts = options.attempts ?? 36;
   const waitMs = options.waitMs ?? 5000;
   const method = String(init.method || "GET").toUpperCase();
+  const transientStatuses = new Set([522, 523, 524, 525, 526, 530]);
+  if (!options.allowApi404) transientStatuses.add(404);
   let lastError = null;
   let lastStatus = 0;
   let lastBody = "";
@@ -144,8 +146,8 @@ async function fetchWithRetry(base, path, init = {}, options = {}) {
       lastBody = body;
       endpointSummary.statuses[statusKey(base, path, method)] = response.status;
       endpointBodies.push(body.slice(0, 2000));
-      checkRuntimeFailure(path, response.status, body);
-      if (![404, 522, 523, 524, 525, 526, 530].includes(response.status) || attempt === attempts) {
+      checkRuntimeFailure(path, response.status, body, options);
+      if (!transientStatuses.has(response.status) || attempt === attempts) {
         return { status: response.status, body };
       }
     } catch (error) {
@@ -158,8 +160,8 @@ async function fetchWithRetry(base, path, init = {}, options = {}) {
   if (lastError) fail("BILLING_PREVIEW_FETCH_FAILED", `${path} failed after retries.`, { error: lastError instanceof Error ? lastError.message : String(lastError) });
   return { status: lastStatus, body: lastBody };
 }
-function checkRuntimeFailure(path, status, body) {
-  if (status === 404 && path.startsWith("/api/")) {
+function checkRuntimeFailure(path, status, body, options = {}) {
+  if (status === 404 && path.startsWith("/api/") && !options.allowApi404) {
     fail("BILLING_PREVIEW_PAGES_FUNCTIONS_WORKER_MISSING", `${path} returned 404, likely missing out/_worker.js.`);
   }
   if (status === 500) fail("BILLING_PREVIEW_HTTP_500", `${path} returned HTTP 500.`);
@@ -172,8 +174,8 @@ function checkRuntimeFailure(path, status, body) {
   }
 }
 async function expectStatus(base, path, expected, init = {}, label = path) {
-  const result = await fetchWithRetry(base, path, init);
   const expectedList = Array.isArray(expected) ? expected : [expected];
+  const result = await fetchWithRetry(base, path, init, { allowApi404: expectedList.includes(404) });
   if (!expectedList.includes(result.status)) {
     fail("BILLING_PREVIEW_UNEXPECTED_STATUS", `${label} returned HTTP ${result.status}, expected ${expectedList.join("/")}.`, {
       path,

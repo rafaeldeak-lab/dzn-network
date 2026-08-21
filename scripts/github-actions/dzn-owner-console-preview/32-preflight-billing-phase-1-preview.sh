@@ -120,7 +120,7 @@ const summary = {
   discordNotificationsEnabled: false,
   discordServerAnnouncementsEnabled: false,
   localSafetyTests: ["npm run test:github-workflows", "npm run test:billing-integrity"],
-  secretStrategy: "Ephemeral TOKEN_ENCRYPTION_KEY and owner session tokens are masked and scoped to this workflow environment only.",
+  secretStrategy: "Ephemeral preview-only secrets are masked and scoped to this workflow environment only.",
 };
 fs.writeFileSync(`${artifact}/candidate.json`, JSON.stringify(summary, null, 2));
 fs.writeFileSync(`${artifact}/summary.md`, [
