@@ -2,7 +2,7 @@
 
 ## Status
 
-Last updated: 2026-08-21
+Last updated: 2026-08-22
 
 Billing Phase 1 has completed three committed micro-slices on `feature/event-platform-performance-foundation`:
 
@@ -134,6 +134,132 @@ Safety:
 - No Discord notification flag was enabled and no Discord message was sent.
 - `MOCK_AUTH=true`, `MOCK_NITRADO=true`, `DZN_DISCORD_NOTIFICATIONS_ENABLED=false`, and `DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false` were confirmed in the run/artifact.
 - No real Nitrado call was reached in the completed groups.
+- No main, Event release branch, or PR #15 change occurred.
+- No rebase, merge, cherry-pick, reset, stash, clean, force-push, or production action occurred.
+
+## Billing Phase 1 Slice 4F-B Linked-Server-Scoped Preview Result
+
+Result: FAILED. Billing Phase 1 isolated preview is still incomplete.
+
+Repair commits verified on `feature/event-platform-performance-foundation`:
+
+- Application repair: `1d8049b99622a869627c23d3e6c161811643a470` - `fix(onboarding): scope setup verification to linked server`.
+- Preview verifier repair: `a3677461b9db7096562e3402b37cb34aa3ec3c54` - `fix(preview): target linked-server setup verification`.
+- The verifier repair is the child of the application repair, and both remained ancestors of the dispatched candidate.
+
+Dispatch worktree and branch:
+
+- Worktree: `C:\Users\rafae\Desktop\DZN-Audits\worktrees\dzn-onboarding-test-repair-20260821-233045`.
+- Local branch: `fix/billing-onboarding-test-20260821-233045`.
+- Starting remote SHA: `a3677461b9db7096562e3402b37cb34aa3ec3c54`.
+- Dispatched candidate SHA: `a3677461b9db7096562e3402b37cb34aa3ec3c54`.
+- Worktree was clean before dispatch.
+- Preserved older dirty worktree remained untouched: `C:\Users\rafae\OneDrive\Desktop\DZN-Network` on `feature/billing-phase-1-integrity` at `75d76f325521d33854974f1f71a07a4fe509bac6`.
+
+Local validation before dispatch:
+
+- `"C:\Program Files\Git\bin\bash.exe" -n scripts/github-actions/dzn-owner-console-preview/38-verify-billing-phase-1-preview.sh` passed.
+- `npm run test:onboarding-verification` passed and confirmed exact `900003` setup verification writes only to the scoped linked server.
+- `npm run test:billing-integrity` passed.
+- `npm run test:github-workflows` passed and confirmed group 22 sends `linkedServerId: setupTargetId`, no longer sends `{}`, keeps migration `0059` in chain, keeps `D1_ACCOUNT_DATABASE_LIMIT=50000`, and does not introduce Billing-mode cleanup/deletion.
+- `npx tsc --noEmit --pretty false` passed.
+- `npm run build` passed and patched Cloudflare Pages function routes.
+- `git diff --check` passed.
+- Source checks confirmed `/api/onboarding/test` returns safe `404` with `error_code=linked_server_not_found` for invalid supplied IDs, uses exact owned linked-server verification, and refreshes metadata with `softFail: true` and `skipPublicCacheSideEffects: true`.
+
+Workflow dispatch:
+
+- Workflow: `.github/workflows/dzn-owner-console-preview.yml`.
+- Mode: `billing-phase-1-preview`.
+- Ref: `feature/event-platform-performance-foundation`.
+- Required confirmations used: `confirm_preview_only=PREVIEW_ONLY`, `confirm_billing_phase_1_preview=APPROVE_BILLING_PHASE_1_PREVIEW`.
+- Dispatch method: `gh` was unavailable; Git Credential Manager credential was captured only in process memory for GitHub REST dispatch. No credential was printed or persisted.
+- Exactly one dispatch was attempted. PowerShell raised a local `Invoke-WebRequest` null-reference exception after the POST, consistent with the no-content response path, but the exact candidate workflow run was created. No duplicate dispatch was made.
+- Run URL: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32560877319`.
+- Run ID: `32560877319`; run number `66`; attempt `1`.
+- Event: `workflow_dispatch`.
+- Branch: `feature/event-platform-performance-foundation`.
+- Candidate SHA: `a3677461b9db7096562e3402b37cb34aa3ec3c54`.
+- Created: `2026-08-22T07:54:49Z`.
+- Final conclusion: `failure`.
+
+Remote preview stages:
+
+- Preview input guards: passed.
+- Billing preflight: passed.
+- Cloudflare preview authentication: passed.
+- Candidate-specific isolated D1 resolution/creation: passed.
+- Migrations through `0059`: passed.
+- Schema verification: passed.
+- Synthetic fixture seeding: passed.
+- Dedicated Pages project resolution: passed.
+- Preview-only secret/runtime configuration: passed.
+- Pages static and Functions worker build: passed.
+- Dedicated preview deployment: passed.
+- Billing preview matrix verification: failed.
+- Sanitized artifact upload: passed.
+
+Preview resources:
+
+- Candidate-specific preview D1 name: `dzn_network_db_owner_console_preview_billing_phase_1_a367746`.
+- Masked preview D1 ID: `dd833756...c9ee`.
+- Preview D1 status: created for the exact candidate after the resolver confirmed the requested preview D1 did not already exist; it was not a production-name or production-ID match.
+- Dedicated preview Pages project: `dzn-network-owner-console-preview-billing-phase-1`.
+- Stable URL: `https://dzn-network-owner-console-preview-billing-phase-1.pages.dev`.
+- Immutable URL: `https://45babe62.dzn-network-owner-console-preview-billing-phase-1.pages.dev`.
+- Older failed candidate D1s for `5615bba`, `5313c0c`, `c2e685d`, `8899bfd`, `fb478f4`, and `1c30311` were retained.
+
+Migration and schema evidence:
+
+- Migration ledger existed.
+- `0057_event_suggestions_phase_2a.sql`, `0058_billing_phase_1_integrity.sql`, and `0059_linked_server_merge_state.sql` were applied.
+- Ordering passed: `0057 < 0058 < 0059`.
+- `linked_server_allowance_reservations` table, reservation fields, and reservation indexes existed.
+- `linked_servers.merged_into_server_id`, `linked_servers.merged_at`, and `idx_linked_servers_merged_into_server_id` existed.
+- `nitrado_connections.linked_server_id` existed.
+- Active Nitrado-service uniqueness protection existed as `idx_linked_servers_active_service_id`.
+- `PRAGMA foreign_key_check` returned `0` rows.
+
+Billing verification matrix result:
+
+- Group `1. Public/runtime health`: passed on stable and immutable URLs for `/`, `/setup`, `/dashboard`, and `/api/dzn-pulse/config`.
+- Group `2. Logged-out endpoint protection`: passed; protected endpoints rejected logged-out requests safely.
+- Group `3. Service discovery requires linked_server_id`: passed with HTTP `400` and `missing_linked_server_id`.
+- Group `4. Owned linked-server discovery succeeds`: failed before it could be recorded as passed.
+- Failure code: `BILLING_PREVIEW_UNEXPECTED_STATUS`.
+- Failure detail: `GET /api/nitrado/services?linked_server_id=billing-phase1-preview-owner-a-canonical-900001` returned HTTP `401`, expected `200`.
+- Failure body preview: `{"error":"Authenticated user is required"}`.
+- Groups `5` through `30` did not run because group `4` failed.
+- Exact group-22 `900003` setup verification was not reached in this run.
+- ADM-path test, no-real-Nitrado assertion, no-Discord-send assertion, stable/immutable behavioral comparison, final ownership check, final foreign-key check, and final leakage checks were not reached.
+
+Artifact and evidence:
+
+- Artifact name: `dzn-billing-phase-1-preview`.
+- Artifact ID: `9472759931`.
+- Artifact digest: `sha256:ac54c19173ef7826ac382b30cd5cc21c83b502d3faf9ab9881d22de45c9495eb`.
+- Artifact extraction path: `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-phase-1-preview-32560877319\extracted`.
+- Job log path: `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-phase-1-preview-32560877319\job-97002107416.log`.
+- Artifact files reviewed: `summary.md`, `candidate.json`, `migration-summary.json`, `schema-summary.json`, `fixture-result-summary.json`, `endpoint-status-summary.json`, `ownership-integrity-summary.json`, `allowance-summary.json`, and `stable-vs-immutable-summary.json`.
+- Artifact security scan result: clean for GitHub credential markers, Cloudflare token markers, `TOKEN_ENCRYPTION_KEY`, `SESSION_SECRET`, session token/cookie markers, raw Nitrado token markers, encrypted credential values, token IV, token auth tag, Authorization/Bearer markers, complete D1 UUIDs, stack traces, foreign-owner identity, and signed download URLs.
+- Runtime flags remained preview safe: `MOCK_AUTH=true`, `MOCK_NITRADO=true`, `DZN_PULSE_ENABLED=true`, `DZN_DISCORD_NOTIFICATIONS_ENABLED=false`, and `DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false`.
+
+Current failure classification:
+
+- This is a new authenticated preview-session/service-discovery failure, not the previous group-22 `/api/onboarding/test` failure.
+- Because the failure is in an auth/session-protected endpoint, any repair is high risk and must preserve logged-out `401` behavior, foreign-owner `404` behavior, and existing 401/403 endpoint protection.
+- The next repair should reproduce the Billing preview mock Owner A session against `/api/nitrado/services?linked_server_id=billing-phase1-preview-owner-a-canonical-900001`, determine whether the issue is runtime mock-auth configuration, session fixture shape, cookie/header forwarding, or route session parsing, and make the narrowest tested correction.
+- Do not patch automatically from this failed run without a new authorised slice.
+
+Safety:
+
+- No production deployment occurred.
+- No production migration occurred.
+- No production D1 read or write was performed.
+- No D1 deletion, preview cleanup workflow, or previous candidate D1 mutation occurred.
+- No Stripe product, price, checkout, billing, subscription, or webhook configuration was changed.
+- No Discord notification flag was enabled and no Discord message was sent.
+- No real Nitrado request was reached before the verifier stopped.
 - No main, Event release branch, or PR #15 change occurred.
 - No rebase, merge, cherry-pick, reset, stash, clean, force-push, or production action occurred.
 
@@ -599,4 +725,4 @@ Artifact and result:
 
 ## Next Authorised Slice
 
-Investigate and repair the Billing Phase 1 preview `/api/onboarding/test` unexpected HTTP `500` after verifier groups `1` through `21` pass. Reproduce the failure against the Billing Phase 1 fixture shape, classify whether it is application, fixture, or verifier logic, make the narrowest tested correction, and rerun one guarded `billing-phase-1-preview` candidate. No D1 deletion, preview cleanup, production deployment, production migration, production D1 write, Stripe change, main change, Event release branch change, or PR #15 change.
+Investigate and repair the Billing Phase 1 preview authenticated Owner A service-discovery `401` in verifier group `4`, where `GET /api/nitrado/services?linked_server_id=billing-phase1-preview-owner-a-canonical-900001` returned `{"error":"Authenticated user is required"}` instead of the expected mock services. Treat auth/session changes as high risk, preserve logged-out `401`, foreign-owner `404`, and existing 401/403 endpoint protection, add focused API/preview coverage, then rerun one guarded `billing-phase-1-preview` candidate. No D1 deletion, preview cleanup, production deployment, production migration, production D1 write, Stripe change, main change, Event release branch change, or PR #15 change.
