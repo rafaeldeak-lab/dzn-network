@@ -2050,13 +2050,56 @@ for (const requiredGroup of [
   "24. No real Nitrado request",
   "25. No Discord send",
   "26. Notifications and server announcements remain false",
-  "27. Stable and immutable results are behaviourally consistent",
-  "28. Final foreign-key check returns zero rows",
-  "29. No cross-owner ownership transfer",
+  "27. Final foreign-key check returns zero rows",
+  "28. No cross-owner ownership transfer",
+  "29. Stable and immutable results are behaviourally consistent",
   "30. No credential or session secret leakage",
 ]) {
   assert.equal(billingPreviewScriptsBlock.includes(requiredGroup), true, `Billing verifier must include group: ${requiredGroup}`);
 }
+assert.equal(billingPreviewScriptsBlock.includes("expectedOwnerASessionId = `${prefix}owner-a-session`"), true, "Billing verifier must pin the exact Owner A synthetic session row.");
+assert.equal(billingPreviewScriptsBlock.includes("expectedOwnerBSessionId = `${prefix}owner-b-session`"), true, "Billing verifier must pin the exact Owner B synthetic session row.");
+assert.equal(billingPreviewScriptsBlock.includes("assertExpectedPreviewSessionRow(\"ownerA\", \"Owner A\", expectedOwnerASessionId, expectedOwnerAUserId);"), true, "Billing verifier must check the exact Owner A session row before HTTP readiness.");
+assert.equal(billingPreviewScriptsBlock.includes("assertExpectedPreviewSessionRow(\"ownerB\", \"Owner B\", expectedOwnerBSessionId, expectedOwnerBUserId);"), true, "Billing verifier must check the exact Owner B session row before HTTP readiness.");
+assert.equal(billingPreviewScriptsBlock.includes("CASE WHEN COALESCE(session_token_hash, '') != '' THEN 1 ELSE 0 END AS hash_present"), true, "Billing verifier must verify synthetic session hashes exist without selecting hash values.");
+const billingEndpointSummaryBlock = billingPreviewScriptsBlock.slice(
+  indexOfOrFail(billingPreviewScriptsBlock, "const endpointSummary = {"),
+  indexOfOrFail(billingPreviewScriptsBlock, "const ownershipSummary ="),
+);
+assert.equal(billingEndpointSummaryBlock.includes("ownerACookie"), false, "Billing endpoint artifact summary must not record Owner A cookie values.");
+assert.equal(billingEndpointSummaryBlock.includes("ownerBCookie"), false, "Billing endpoint artifact summary must not record Owner B cookie values.");
+assert.equal(billingEndpointSummaryBlock.includes("BILLING_OWNER_A_SESSION_TOKEN"), false, "Billing endpoint artifact summary must not record Owner A raw session tokens.");
+assert.equal(billingEndpointSummaryBlock.includes("BILLING_OWNER_B_SESSION_TOKEN"), false, "Billing endpoint artifact summary must not record Owner B raw session tokens.");
+assert.equal(billingEndpointSummaryBlock.includes("session_token_hash"), false, "Billing endpoint artifact summary must not record session-token hashes.");
+assert.equal(billingEndpointSummaryBlock.includes("hash_present"), false, "Billing endpoint artifact summary must not record session hash booleans.");
+assert.equal(billingEndpointSummaryBlock.includes("rowPresent"), true, "Billing endpoint artifact summary must include sanitized session-row presence.");
+assert.equal(billingEndpointSummaryBlock.includes("userIdMatched"), true, "Billing endpoint artifact summary must include sanitized session-row user match evidence.");
+assert.equal(billingEndpointSummaryBlock.includes("expiryValid"), true, "Billing endpoint artifact summary must include sanitized session-row expiry evidence.");
+assert.equal(billingPreviewScriptsBlock.includes("async function waitForExactPreviewSession"), true, "Billing verifier must define exact preview-session readiness.");
+assert.equal(billingPreviewScriptsBlock.includes("actualUserId === expectedUserId && !genericMockUserIds.has(actualUserId)"), true, "Billing readiness must require the exact synthetic user.id.");
+assert.equal(billingPreviewScriptsBlock.includes("const genericMockUserIds = new Set([\"mock-user\"]);"), true, "Billing readiness must not treat the generic MOCK_AUTH fallback as ready.");
+assert.equal(billingPreviewScriptsBlock.includes("attempts = 30, delayMs = 5000"), true, "Billing readiness must use a bounded retry window.");
+assert.equal(billingPreviewScriptsBlock.includes("const matrixUrl = immutableUrl;"), true, "Billing authenticated matrix must use the immutable candidate URL.");
+assert.equal(billingPreviewScriptsBlock.includes("endpointSummary.matrixUrlClassification = \"immutable\";"), true, "Billing artifact must record that the matrix URL classification is immutable.");
+assert.equal(/postJson\(stableUrl,\s*"\/api\/onboarding\/save"/.test(billingPreviewScriptsBlock), false, "Billing state-mutating onboarding save checks must not use the stable URL.");
+assert.equal(/expectJsonErrorCode\(stableUrl,\s*"\/api\/onboarding\/save"/.test(billingPreviewScriptsBlock), false, "Billing state-mutating onboarding save error checks must not use the stable URL.");
+assert.equal(/postJson\(stableUrl,\s*"\/api\/onboarding\/test"/.test(billingPreviewScriptsBlock), false, "Billing onboarding test mutation must not use the stable URL.");
+assert.equal(/postJson\(stableUrl,\s*"\/api\/nitrado\/test-adm-path"/.test(billingPreviewScriptsBlock), false, "Billing ADM-path mutation must not use the stable URL.");
+const immutableOwnerAReadiness = indexOfOrFail(billingPreviewScriptsBlock, "baseUrl: immutableUrl,\n    cookie: ownerACookie");
+const immutableOwnerBReadiness = indexOfOrFail(billingPreviewScriptsBlock, "baseUrl: immutableUrl,\n    cookie: ownerBCookie");
+const matrixUrlAssignment = indexOfOrFail(billingPreviewScriptsBlock, "const matrixUrl = immutableUrl;");
+assert.equal(immutableOwnerAReadiness < matrixUrlAssignment, true, "Owner A immutable readiness must pass before assigning the authenticated matrix URL.");
+assert.equal(immutableOwnerBReadiness < matrixUrlAssignment, true, "Owner B immutable readiness must pass before assigning the authenticated matrix URL.");
+const stableConvergenceStart = indexOfOrFail(billingPreviewScriptsBlock, "Stable owned linked-server service discovery after convergence");
+const finalD1OwnershipCheck = indexOfOrFail(billingPreviewScriptsBlock, "recordGroup(\"28. No cross-owner ownership transfer\")");
+assert.equal(finalD1OwnershipCheck < stableConvergenceStart, true, "Stable exact-session convergence must run after the immutable matrix and final D1 assertions.");
+assert.equal(billingPreviewScriptsBlock.includes("BILLING_PREVIEW_STABLE_ALIAS_NOT_CONVERGED"), true, "Billing verifier must fail if the stable alias does not converge.");
+assert.equal(billingPreviewScriptsBlock.includes("assertSafeMockServices(stableServices.json, \"Stable owned linked-server service discovery after convergence\")"), true, "Billing verifier must check owned stable service discovery after exact stable convergence.");
+assert.equal(billingPreviewScriptsBlock.includes("for (const base of [stableUrl, immutableUrl]) {\n    await expectStatus(base, `/api/nitrado/services?linked_server_id=${prefix}owner-a-canonical-900001`, 401"), true, "Billing verifier must keep logged-out 401 checks on both stable and immutable URLs.");
+assert.equal(billingPreviewScriptsBlock.includes("ALLOW_401"), false, "Billing verifier must not add a broad 401 bypass.");
+assert.equal(billingPreviewScriptsBlock.includes("ALLOW_AUTH"), false, "Billing verifier must not add a broad auth bypass.");
+assert.equal(billingPreviewScriptsBlock.includes("BILLING_PREVIEW_AUTHENTICATED_401"), true, "Billing verifier must fail unexpected authenticated 401 responses after readiness.");
+assert.equal(billingPreviewScriptsBlock.includes("status === 401 && options.authenticated && postReadinessAuthenticated.ready"), true, "Billing verifier must make post-readiness authenticated 401s fatal.");
 assert.equal(billingPreviewScriptsBlock.includes("BILLING_PREVIEW_PAGES_FUNCTIONS_WORKER_MISSING"), true, "Billing verifier must fail on missing Functions route 404.");
 assert.equal(billingPreviewScriptsBlock.includes("BILLING_PREVIEW_HTTP_500"), true, "Billing verifier must fail on HTTP 500.");
 assert.equal(billingPreviewScriptsBlock.includes("if (status === 500) fail(\"BILLING_PREVIEW_HTTP_500\""), false, "Billing verifier must not reject explicitly expected safe HTTP 500 responses before status/error-code checks.");
@@ -2064,7 +2107,7 @@ assert.equal(billingPreviewScriptsBlock.includes("if (status === 500 && !options
 assert.equal(billingPreviewScriptsBlock.includes("allowExpectedHttp500: expectedList.includes(500)"), true, "Billing verifier must allow only explicitly expected safe HTTP 500 responses through exact checks.");
 assert.equal(billingPreviewScriptsBlock.includes("BILLING_PREVIEW_ALLOW_HTTP_500"), false, "Billing verifier must not add a broad environment switch for HTTP 500 checking.");
 assert.equal(billingPreviewScriptsBlock.includes("ALLOW_HTTP_500"), false, "Billing verifier must not add a broad HTTP 500 bypass flag.");
-assert.equal(billingPreviewScriptsBlock.includes("expectJsonErrorCode(stableUrl, \"/api/onboarding/save\", 500, \"token_decrypt_failed\""), true, "Billing corrupted credential scenario must expect HTTP 500 token_decrypt_failed.");
+assert.equal(billingPreviewScriptsBlock.includes("expectJsonErrorCode(matrixUrl, \"/api/onboarding/save\", 500, \"token_decrypt_failed\""), true, "Billing corrupted credential scenario must expect HTTP 500 token_decrypt_failed on the immutable matrix URL.");
 assert.equal(billingPreviewScriptsBlock.includes("const setupTargetId = `${prefix}owner-a-source-new-900003`;"), true, "Billing setup verification must target the exact first-time 900003 linked server.");
 assert.equal(billingPreviewScriptsBlock.includes("linkedServerId: setupTargetId"), true, "Billing setup verification must send linkedServerId in the request body.");
 assert.equal(billingPreviewScriptsBlock.includes("SELECT COUNT(*) AS count FROM onboarding_checks WHERE linked_server_id = '${setupTargetId}'"), true, "Billing setup verification must prove onboarding_checks were written for exact 900003.");

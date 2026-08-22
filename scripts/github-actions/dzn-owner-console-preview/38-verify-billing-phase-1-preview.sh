@@ -31,6 +31,12 @@ const stableUrl = assertDedicatedUrl(process.env.BILLING_PHASE_1_STABLE_PREVIEW_
 const immutableUrl = assertDedicatedUrl(process.env.BILLING_PHASE_1_IMMUTABLE_PREVIEW_URL || readImmutableFromArtifact(), "immutable");
 const ownerACookie = process.env.BILLING_OWNER_A_COOKIE;
 const ownerBCookie = process.env.BILLING_OWNER_B_COOKIE;
+const expectedOwnerAUserId = `${prefix}owner-a`;
+const expectedOwnerBUserId = `${prefix}owner-b`;
+const expectedOwnerASessionId = `${prefix}owner-a-session`;
+const expectedOwnerBSessionId = `${prefix}owner-b-session`;
+const genericMockUserIds = new Set(["mock-user"]);
+const postReadinessAuthenticated = { ready: false };
 const forbiddenRuntimeText = [
   "Request failed: 503",
   "SERVER UNAVAILABLE",
@@ -63,6 +69,22 @@ const endpointSummary = {
   d1Id: maskId(process.env.PREVIEW_D1_DATABASE_ID || ""),
   stableUrl,
   immutableUrl,
+  expectedSyntheticUserIds: {
+    ownerA: expectedOwnerAUserId,
+    ownerB: expectedOwnerBUserId,
+  },
+  matrixUrlClassification: "pending",
+  sessionRowAssertions: {
+    ownerA: { rowPresent: false, userIdMatched: false, expiryValid: false },
+    ownerB: { rowPresent: false, userIdMatched: false, expiryValid: false },
+  },
+  sessionReadiness: {
+    immutableOwnerA: { result: "PENDING", attempts: 0, expectedUserId: expectedOwnerAUserId },
+    immutableOwnerB: { result: "PENDING", attempts: 0, expectedUserId: expectedOwnerBUserId },
+    stableOwnerA: { result: "PENDING", attempts: 0, expectedUserId: expectedOwnerAUserId },
+    stableOwnerB: { result: "PENDING", attempts: 0, expectedUserId: expectedOwnerBUserId },
+  },
+  finalStableConvergence: { result: "PENDING" },
 };
 const ownershipSummary = { ok: false, fixturePrefix: prefix, checks: {} };
 const allowanceSummary = { ok: false, fixturePrefix: prefix, counts: {} };
@@ -117,6 +139,22 @@ function statusKey(base, path, method) {
   const label = base === stableUrl ? "stable" : base === immutableUrl ? "immutable" : "preview";
   return `${label} ${method || "GET"} ${path}`;
 }
+function urlClass(base) {
+  if (base === immutableUrl) return "immutable";
+  if (base === stableUrl) return "stable";
+  return "preview";
+}
+function hasCookieHeader(init = {}) {
+  const headers = init.headers || {};
+  if (typeof Headers !== "undefined" && headers instanceof Headers) {
+    return Boolean(headers.get("cookie"));
+  }
+  return Object.entries(headers).some(([key, value]) => key.toLowerCase() === "cookie" && Boolean(value));
+}
+function readinessSummaryKey(base, label) {
+  const ownerKey = /owner b/i.test(label) ? "OwnerB" : "OwnerA";
+  return `${urlClass(base)}${ownerKey}`;
+}
 async function wait(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -165,6 +203,9 @@ function checkRuntimeFailure(path, status, body, options = {}) {
   if (status === 404 && path.startsWith("/api/") && !options.allowApi404) {
     fail("BILLING_PREVIEW_PAGES_FUNCTIONS_WORKER_MISSING", `${path} returned 404, likely missing out/_worker.js.`);
   }
+  if (status === 401 && options.authenticated && postReadinessAuthenticated.ready) {
+    fail("BILLING_PREVIEW_AUTHENTICATED_401", `${path} returned authenticated HTTP 401 after exact session readiness.`);
+  }
   if (status === 500 && !options.allowExpectedHttp500) fail("BILLING_PREVIEW_HTTP_500", `${path} returned HTTP 500.`);
   if (status === 503) fail("BILLING_PREVIEW_HTTP_503", `${path} returned HTTP 503.`);
   for (const marker of forbiddenRuntimeText) {
@@ -179,6 +220,7 @@ async function expectStatus(base, path, expected, init = {}, label = path) {
   const result = await fetchWithRetry(base, path, init, {
     allowApi404: expectedList.includes(404),
     allowExpectedHttp500: expectedList.includes(500),
+    authenticated: hasCookieHeader(init),
   });
   if (!expectedList.includes(result.status)) {
     fail("BILLING_PREVIEW_UNEXPECTED_STATUS", `${label} returned HTTP ${result.status}, expected ${expectedList.join("/")}.`, {
@@ -263,6 +305,123 @@ function firstCount(label, command, key = "count") {
 function singleRow(label, command) {
   return d1Read(label, command)[0] || null;
 }
+function sqlString(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+function assertExpectedPreviewSessionRow(ownerKey, ownerAlias, expectedSessionId, expectedUserId) {
+  const rows = d1Read(
+    `${ownerAlias.toLowerCase().replace(/\s+/g, "-")}-session-row`,
+    `SELECT id, user_id, expires_at, CASE WHEN COALESCE(session_token_hash, '') != '' THEN 1 ELSE 0 END AS hash_present
+     FROM sessions
+     WHERE id = ${sqlString(expectedSessionId)};`,
+  );
+  const row = rows.length === 1 ? rows[0] : null;
+  const evidence = {
+    rowPresent: rows.length === 1,
+    userIdMatched: row?.user_id === expectedUserId,
+    expiryValid: Boolean(row?.expires_at && Date.parse(String(row.expires_at)) > Date.now()),
+  };
+  endpointSummary.sessionRowAssertions[ownerKey] = evidence;
+  const hashPresent = Number(row?.hash_present || 0) === 1;
+  if (!evidence.rowPresent || !evidence.userIdMatched || !evidence.expiryValid || !hashPresent) {
+    fail("BILLING_PREVIEW_SESSION_ROW_ASSERTION_FAILED", `${ownerAlias} synthetic session row is not ready in D1.`, {
+      ownerAlias,
+      rowPresent: evidence.rowPresent,
+      userIdMatched: evidence.userIdMatched,
+      expiryValid: evidence.expiryValid,
+    });
+  }
+}
+function assertSafeReadinessBody(body, label) {
+  for (const marker of forbiddenLeakMarkers) {
+    if (marker && body.includes(marker)) fail("BILLING_PREVIEW_SECRET_LEAKAGE", `${label} leaked forbidden secret marker.`);
+  }
+  if (/dzn_session=/i.test(body)) fail("BILLING_PREVIEW_SECRET_LEAKAGE", `${label} leaked a session cookie marker.`);
+}
+async function waitForExactPreviewSession({ baseUrl, cookie, expectedUserId, label, attempts = 30, delayMs = 5000 }) {
+  const key = readinessSummaryKey(baseUrl, label);
+  const ownerAlias = label;
+  const summary = endpointSummary.sessionReadiness[key] || { result: "PENDING", attempts: 0, expectedUserId };
+  summary.result = "PENDING";
+  summary.attempts = 0;
+  summary.expectedUserId = expectedUserId;
+  endpointSummary.sessionReadiness[key] = summary;
+  let lastHttpStatus = 0;
+  let exactUserIdMatched = false;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    summary.attempts = attempt;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45000);
+    try {
+      const response = await fetch(`${baseUrl}/api/auth/me`, {
+        method: "GET",
+        signal: controller.signal,
+        headers: {
+          "cache-control": "no-cache",
+          Cookie: cookie,
+        },
+      });
+      const body = await response.text();
+      lastHttpStatus = response.status;
+      endpointSummary.statuses[statusKey(baseUrl, "/api/auth/me", "GET")] = response.status;
+      assertSafeReadinessBody(body, `${ownerAlias} ${urlClass(baseUrl)} session readiness`);
+
+      if (response.status === 200) {
+        let parsed = null;
+        try {
+          parsed = body ? JSON.parse(body) : null;
+        } catch {
+          parsed = null;
+        }
+        const actualUserId = typeof parsed?.user?.id === "string" ? parsed.user.id : "";
+        exactUserIdMatched = actualUserId === expectedUserId && !genericMockUserIds.has(actualUserId);
+        if (exactUserIdMatched) {
+          summary.result = "PASS";
+          summary.attempts = attempt;
+          return { attempts: attempt };
+        }
+      }
+    } catch {
+      lastHttpStatus = 0;
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (attempt < attempts) await wait(delayMs);
+  }
+
+  summary.result = "FAIL";
+  const code = baseUrl === stableUrl
+    ? "BILLING_PREVIEW_STABLE_ALIAS_NOT_CONVERGED"
+    : "BILLING_PREVIEW_SESSION_NOT_READY";
+  if (baseUrl === stableUrl) endpointSummary.finalStableConvergence = { result: "FAIL" };
+  fail(code, `${ownerAlias} exact preview session was not ready on ${urlClass(baseUrl)} URL.`, {
+    urlClass: urlClass(baseUrl),
+    ownerAlias,
+    attempts,
+    lastHttpStatus,
+    exactUserIdMatched,
+  });
+}
+function assertExactAuthMeUser(result, expectedUserId, label) {
+  const actualUserId = typeof result.json?.user?.id === "string" ? result.json.user.id : "";
+  if (actualUserId !== expectedUserId || genericMockUserIds.has(actualUserId)) {
+    fail("BILLING_PREVIEW_AUTH_ME_USER_MISMATCH", `${label} did not return the exact synthetic owner session.`, {
+      expectedUserId,
+      exactUserIdMatched: actualUserId === expectedUserId && !genericMockUserIds.has(actualUserId),
+    });
+  }
+}
+function assertSafeMockServices(jsonBody, label) {
+  const serviceIds = new Set((jsonBody?.services || []).map((service) => String(service.id)));
+  for (const serviceId of ["900001", "900002", "900003"]) {
+    if (!serviceIds.has(serviceId)) fail("BILLING_PREVIEW_MOCK_SERVICE_ID_MISSING", `${label} is missing a mock Nitrado service ID.`, { serviceId });
+  }
+  if (![...serviceIds].every((serviceId) => ["900001", "900002", "900003"].includes(serviceId))) {
+    fail("BILLING_PREVIEW_NON_MOCK_NITRADO_SERVICE_RETURNED", `${label} returned non-mock Nitrado service IDs.`);
+  }
+  return serviceIds;
+}
 function assertNoSetupVerificationLeak(value, label) {
   const text = JSON.stringify(value ?? {});
   for (const field of ["encrypted_token", "token_iv", "token_auth_tag", "session_token_hash", "TOKEN_ENCRYPTION_KEY", "Authorization", "Bearer "]) {
@@ -283,6 +442,29 @@ function writeArtifacts(ok) {
 void (async () => {
   if (!ownerACookie || !ownerBCookie) fail("BILLING_PREVIEW_SESSION_COOKIE_MISSING", "Billing preview owner session cookies are missing from workflow env.");
 
+  assertExpectedPreviewSessionRow("ownerA", "Owner A", expectedOwnerASessionId, expectedOwnerAUserId);
+  assertExpectedPreviewSessionRow("ownerB", "Owner B", expectedOwnerBSessionId, expectedOwnerBUserId);
+
+  await waitForExactPreviewSession({
+    baseUrl: immutableUrl,
+    cookie: ownerACookie,
+    expectedUserId: expectedOwnerAUserId,
+    label: "Owner A",
+    attempts: 30,
+    delayMs: 5000,
+  });
+  await waitForExactPreviewSession({
+    baseUrl: immutableUrl,
+    cookie: ownerBCookie,
+    expectedUserId: expectedOwnerBUserId,
+    label: "Owner B",
+    attempts: 30,
+    delayMs: 5000,
+  });
+  const matrixUrl = immutableUrl;
+  endpointSummary.matrixUrlClassification = "immutable";
+  postReadinessAuthenticated.ready = true;
+
   for (const base of [stableUrl, immutableUrl]) {
     await expectStatus(base, "/", 200, {}, "Public home health");
     await expectStatus(base, "/setup", 200, {}, "Setup page health");
@@ -291,52 +473,51 @@ void (async () => {
   }
   recordGroup("1. Public/runtime health");
 
-  await expectStatus(stableUrl, `/api/nitrado/services?linked_server_id=${prefix}owner-a-canonical-900001`, 401, { redirect: "manual" }, "Logged-out service discovery protection");
-  await postJson(stableUrl, "/api/nitrado/validate-token", "", 401, { token: "preview", discordGuildId: `${prefix}owner-a-draft-guild`, serverType: "PVP" }, "Logged-out token validation protection");
-  await postJson(stableUrl, "/api/onboarding/save", "", 401, savePayload("owner-a-source-new-900003", "900003"), "Logged-out onboarding save protection");
+  for (const base of [stableUrl, immutableUrl]) {
+    await expectStatus(base, `/api/nitrado/services?linked_server_id=${prefix}owner-a-canonical-900001`, 401, { redirect: "manual" }, "Logged-out service discovery protection");
+    await postJson(base, "/api/nitrado/validate-token", "", 401, { token: "preview", discordGuildId: `${prefix}owner-a-draft-guild`, serverType: "PVP" }, "Logged-out token validation protection");
+    await postJson(base, "/api/onboarding/save", "", 401, savePayload("owner-a-source-new-900003", "900003"), "Logged-out onboarding save protection");
+  }
   recordGroup("2. Logged-out endpoint protection");
 
-  await expectJsonErrorCode(stableUrl, "/api/nitrado/services", 400, "missing_linked_server_id", {
+  await expectJsonErrorCode(matrixUrl, "/api/nitrado/services", 400, "missing_linked_server_id", {
     headers: { Cookie: ownerACookie },
   }, "Service discovery requires linked_server_id");
   recordGroup("3. Service discovery requires linked_server_id");
 
-  const services = await jsonRequest(stableUrl, `/api/nitrado/services?linked_server_id=${prefix}owner-a-canonical-900001`, 200, {
+  const services = await jsonRequest(matrixUrl, `/api/nitrado/services?linked_server_id=${prefix}owner-a-canonical-900001`, 200, {
     headers: { Cookie: ownerACookie },
   }, "Owned linked-server service discovery");
-  const serviceIds = new Set((services.json?.services || []).map((service) => String(service.id)));
-  for (const serviceId of ["900001", "900002", "900003"]) {
-    if (!serviceIds.has(serviceId)) fail("BILLING_PREVIEW_MOCK_SERVICE_ID_MISSING", "Mock Nitrado service ID missing.", { serviceId });
-  }
+  const serviceIds = assertSafeMockServices(services.json, "Owned linked-server service discovery");
   ownershipSummary.checks.ownedLinkedServerDiscovery = { status: 200, serviceIds: ["900001", "900002", "900003"] };
   recordGroup("4. Owned linked-server discovery succeeds");
 
-  await expectJsonErrorCode(stableUrl, `/api/nitrado/services?linked_server_id=${prefix}owner-b-source-cross-900001`, 404, "linked_server_not_found", {
+  await expectJsonErrorCode(matrixUrl, `/api/nitrado/services?linked_server_id=${prefix}owner-b-source-cross-900001`, 404, "linked_server_not_found", {
     headers: { Cookie: ownerACookie },
   }, "Foreign linked-server ID protection");
   ownershipSummary.checks.foreignLinkedServerProtection = { status: 404, errorCode: "linked_server_not_found" };
   recordGroup("5. Foreign linked-server ID returns safe 404");
 
-  await expectJsonErrorCode(stableUrl, `/api/nitrado/services?linked_server_id=${prefix}missing-linked-server`, 404, "linked_server_not_found", {
+  await expectJsonErrorCode(matrixUrl, `/api/nitrado/services?linked_server_id=${prefix}missing-linked-server`, 404, "linked_server_not_found", {
     headers: { Cookie: ownerACookie },
   }, "Nonexistent linked-server ID protection");
   recordGroup("6. Nonexistent linked-server ID returns safe 404");
 
-  await expectJsonErrorCode(stableUrl, "/api/onboarding/save", 400, "missing_nitrado_token", {
+  await expectJsonErrorCode(matrixUrl, "/api/onboarding/save", 400, "missing_nitrado_token", {
     method: "POST",
     headers: { "content-type": "application/json", Cookie: ownerACookie },
     body: JSON.stringify(savePayload("owner-a-source-no-credential", "900002")),
   }, "No-token draft exact credential protection");
   recordGroup("7. No-token draft does not borrow another server's newer credential");
 
-  await expectJsonErrorCode(stableUrl, "/api/onboarding/save", 500, "token_decrypt_failed", {
+  await expectJsonErrorCode(matrixUrl, "/api/onboarding/save", 500, "token_decrypt_failed", {
     method: "POST",
     headers: { "content-type": "application/json", Cookie: ownerACookie },
     body: JSON.stringify(savePayload("owner-a-source-corrupted-credential", "900002")),
   }, "Corrupted credential classification");
   recordGroup("8. Corrupted exact credential returns safe classified decrypt failure");
 
-  await expectJsonErrorCode(stableUrl, "/api/onboarding/save", 409, "nitrado_service_already_linked", {
+  await expectJsonErrorCode(matrixUrl, "/api/onboarding/save", 409, "nitrado_service_already_linked", {
     method: "POST",
     headers: { "content-type": "application/json", Cookie: ownerBCookie },
     body: JSON.stringify(savePayload("owner-b-source-cross-900001", "900001", "owner-b-draft")),
@@ -350,7 +531,7 @@ void (async () => {
   }
   recordGroup("10. Foreign owner row remains unchanged");
 
-  const sameOwner = await postJson(stableUrl, "/api/onboarding/save", ownerACookie, 200, savePayload("owner-a-source-duplicate-900002", "900002"), "Same-owner canonical reuse");
+  const sameOwner = await postJson(matrixUrl, "/api/onboarding/save", ownerACookie, 200, savePayload("owner-a-source-duplicate-900002", "900002"), "Same-owner canonical reuse");
   if (sameOwner.json?.linkedServerId !== `${prefix}owner-a-canonical-900002`) fail("BILLING_PREVIEW_SAME_OWNER_REUSE_FAILED", "Same-owner reuse did not return existing canonical 900002.");
   recordGroup("11. Same-owner 900002 reuse returns existing canonical ID");
 
@@ -380,7 +561,7 @@ void (async () => {
   if (announcementCountBeforeNew !== 0) fail("BILLING_PREVIEW_UNEXPECTED_ANNOUNCEMENT_BEFORE_NEW", "Discord announcement row exists before new-server scenario.");
   recordGroup("17. No second announcement");
 
-  const firstClaim = await postJson(stableUrl, "/api/onboarding/save", ownerACookie, 200, savePayload("owner-a-source-new-900003", "900003"), "First-time service claim");
+  const firstClaim = await postJson(matrixUrl, "/api/onboarding/save", ownerACookie, 200, savePayload("owner-a-source-new-900003", "900003"), "First-time service claim");
   if (firstClaim.json?.linkedServerId !== `${prefix}owner-a-source-new-900003`) fail("BILLING_PREVIEW_FIRST_TIME_CLAIM_FAILED", "First-time service 900003 claim did not preserve the source linked-server ID.");
   recordGroup("18. First-time 900003 claim succeeds");
 
@@ -392,7 +573,7 @@ void (async () => {
   if (completedActiveHoldCount !== 0) fail("BILLING_PREVIEW_COMPLETED_HOLD_DOUBLE_COUNTS", "Completed reservation still counts as active.");
   recordGroup("20. Completed hold does not double-count");
 
-  const repeatedClaim = await postJson(stableUrl, "/api/onboarding/save", ownerACookie, 200, savePayload("owner-a-source-new-900003", "900003"), "Repeated first-time save");
+  const repeatedClaim = await postJson(matrixUrl, "/api/onboarding/save", ownerACookie, 200, savePayload("owner-a-source-new-900003", "900003"), "Repeated first-time save");
   if (repeatedClaim.json?.linkedServerId !== `${prefix}owner-a-source-new-900003`) fail("BILLING_PREVIEW_REPEATED_SAVE_IDEMPOTENCY_FAILED", "Repeated save did not remain idempotent.");
   const service900003Count = firstCount("service-900003-count", `SELECT COUNT(*) AS count FROM linked_servers WHERE nitrado_service_id = '900003' AND lower(COALESCE(status, 'pending')) NOT IN ('merged', 'deleted') AND (merged_into_server_id IS NULL OR merged_into_server_id = '');`);
   if (service900003Count !== 1) fail("BILLING_PREVIEW_REPEATED_SAVE_DUPLICATED_SERVICE", "Repeated save created duplicate 900003 service rows.");
@@ -401,7 +582,7 @@ void (async () => {
   const setupTargetId = `${prefix}owner-a-source-new-900003`;
   const preSetupChecks900001 = firstCount("pre-setup-checks-900001", `SELECT COUNT(*) AS count FROM onboarding_checks WHERE linked_server_id = '${prefix}owner-a-canonical-900001';`);
   const preSetupChecks900002 = firstCount("pre-setup-checks-900002", `SELECT COUNT(*) AS count FROM onboarding_checks WHERE linked_server_id = '${prefix}owner-a-canonical-900002';`);
-  const setupVerification = await postJson(stableUrl, "/api/onboarding/test", ownerACookie, 200, {
+  const setupVerification = await postJson(matrixUrl, "/api/onboarding/test", ownerACookie, 200, {
     linkedServerId: setupTargetId,
   }, "Mock onboarding test");
   if (setupVerification.json?.ok !== true || typeof setupVerification.json?.checks !== "object" || setupVerification.json?.checks === null) {
@@ -428,7 +609,7 @@ void (async () => {
   };
   recordGroup("22. Mock onboarding test works");
 
-  await postJson(stableUrl, "/api/nitrado/test-adm-path", ownerACookie, 200, {
+  await postJson(matrixUrl, "/api/nitrado/test-adm-path", ownerACookie, 200, {
     linkedServerId: `${prefix}owner-a-source-new-900003`,
     path: "/games/mock/noftp/adm/mock.ADM",
   }, "Mock ADM-path test");
@@ -443,32 +624,76 @@ void (async () => {
   if (announcementCountAfterNew !== 0) fail("BILLING_PREVIEW_DISCORD_SEND_RECORDED", "Discord announcement rows were recorded while announcements are disabled.");
   recordGroup("25. No Discord send");
 
-  const pulse = await jsonRequest(stableUrl, "/api/dzn-pulse/config", 200, {}, "Notifications disabled config");
+  const pulse = await jsonRequest(matrixUrl, "/api/dzn-pulse/config", 200, {}, "Notifications disabled config");
   if (pulse.json?.discordNotificationsEnabled !== false) fail("BILLING_PREVIEW_NOTIFICATIONS_ENABLED", "DZN Discord notifications flag is not false.");
   if (process.env.DZN_DISCORD_NOTIFICATIONS_ENABLED !== "false" || process.env.DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED !== "false") {
     fail("BILLING_PREVIEW_DISCORD_FLAGS_ENABLED", "Workflow Discord notification flags are not both false.");
   }
   recordGroup("26. Notifications and server announcements remain false");
 
-  for (const path of ["/", "/setup", "/dashboard", "/api/dzn-pulse/config", `/api/nitrado/services?linked_server_id=${prefix}owner-a-canonical-900001`]) {
-    const init = path.startsWith("/api/nitrado") ? { headers: { Cookie: ownerACookie } } : {};
-    const stableResult = await fetchWithRetry(stableUrl, path, init);
-    const immutableResult = await fetchWithRetry(immutableUrl, path, init);
-    compareSummary.comparedPaths.push({ path, stableStatus: stableResult.status, immutableStatus: immutableResult.status });
-    if (stableResult.status !== immutableResult.status) fail("BILLING_PREVIEW_STABLE_IMMUTABLE_MISMATCH", "Stable and immutable preview status mismatch.", { path, stableStatus: stableResult.status, immutableStatus: immutableResult.status });
-  }
-  compareSummary.ok = true;
-  recordGroup("27. Stable and immutable results are behaviourally consistent");
-
   const fkRows = d1Read("final-foreign-key-check", "PRAGMA foreign_key_check;");
   if (fkRows.length !== 0) fail("BILLING_PREVIEW_FINAL_FOREIGN_KEY_CHECK_FAILED", "Final foreign_key_check returned rows.", { count: fkRows.length });
-  recordGroup("28. Final foreign-key check returns zero rows");
+  recordGroup("27. Final foreign-key check returns zero rows");
 
   const crossOwnerTransferCount = firstCount("cross-owner-transfer-count", `SELECT COUNT(*) AS count FROM linked_servers WHERE id = '${prefix}owner-a-canonical-900001' AND user_id != '${prefix}owner-a';`);
   const foreignConnectionMoveCount = firstCount("foreign-credential-transfer-count", `SELECT COUNT(*) AS count FROM nitrado_connections WHERE user_id = '${prefix}owner-b' AND linked_server_id = '${prefix}owner-a-canonical-900001';`);
   if (crossOwnerTransferCount !== 0 || foreignConnectionMoveCount !== 0) fail("BILLING_PREVIEW_CROSS_OWNER_TRANSFER", "Cross-owner ownership or credential transfer occurred.");
   ownershipSummary.checks.noCrossOwnerOwnershipTransfer = true;
-  recordGroup("29. No cross-owner ownership transfer");
+  recordGroup("28. No cross-owner ownership transfer");
+
+  await waitForExactPreviewSession({
+    baseUrl: stableUrl,
+    cookie: ownerACookie,
+    expectedUserId: expectedOwnerAUserId,
+    label: "Owner A",
+    attempts: 30,
+    delayMs: 5000,
+  });
+  await waitForExactPreviewSession({
+    baseUrl: stableUrl,
+    cookie: ownerBCookie,
+    expectedUserId: expectedOwnerBUserId,
+    label: "Owner B",
+    attempts: 30,
+    delayMs: 5000,
+  });
+  endpointSummary.finalStableConvergence = { result: "FAIL" };
+  const stableServices = await jsonRequest(stableUrl, `/api/nitrado/services?linked_server_id=${prefix}owner-a-canonical-900001`, 200, {
+    headers: { Cookie: ownerACookie },
+  }, "Stable owned linked-server service discovery after convergence");
+  assertSafeMockServices(stableServices.json, "Stable owned linked-server service discovery after convergence");
+
+  for (const path of ["/", "/api/dzn-pulse/config"]) {
+    const stableResult = await fetchWithRetry(stableUrl, path, {}, { authenticated: false });
+    const immutableResult = await fetchWithRetry(immutableUrl, path, {}, { authenticated: false });
+    compareSummary.comparedPaths.push({ path, stableStatus: stableResult.status, immutableStatus: immutableResult.status });
+    if (stableResult.status !== immutableResult.status) fail("BILLING_PREVIEW_STABLE_ALIAS_NOT_CONVERGED", "Stable and immutable preview status mismatch after stable convergence.", { path, stableStatus: stableResult.status, immutableStatus: immutableResult.status });
+  }
+  const stableMe = await jsonRequest(stableUrl, "/api/auth/me", 200, {
+    headers: { Cookie: ownerACookie },
+  }, "Stable auth/me after convergence");
+  const immutableMe = await jsonRequest(immutableUrl, "/api/auth/me", 200, {
+    headers: { Cookie: ownerACookie },
+  }, "Immutable auth/me after convergence");
+  assertExactAuthMeUser(stableMe, expectedOwnerAUserId, "Stable auth/me after convergence");
+  assertExactAuthMeUser(immutableMe, expectedOwnerAUserId, "Immutable auth/me after convergence");
+  compareSummary.comparedPaths.push({ path: "/api/auth/me", stableStatus: stableMe.status, immutableStatus: immutableMe.status, exactOwnerA: true });
+
+  const stableOwned = await jsonRequest(stableUrl, `/api/nitrado/services?linked_server_id=${prefix}owner-a-canonical-900001`, 200, {
+    headers: { Cookie: ownerACookie },
+  }, "Stable owned linked-server service discovery comparison");
+  const immutableOwned = await jsonRequest(immutableUrl, `/api/nitrado/services?linked_server_id=${prefix}owner-a-canonical-900001`, 200, {
+    headers: { Cookie: ownerACookie },
+  }, "Immutable owned linked-server service discovery comparison");
+  const stableOwnedIds = [...assertSafeMockServices(stableOwned.json, "Stable owned linked-server service discovery comparison")].sort();
+  const immutableOwnedIds = [...assertSafeMockServices(immutableOwned.json, "Immutable owned linked-server service discovery comparison")].sort();
+  compareSummary.comparedPaths.push({ path: "/api/nitrado/services", stableStatus: stableOwned.status, immutableStatus: immutableOwned.status, serviceIdsMatched: JSON.stringify(stableOwnedIds) === JSON.stringify(immutableOwnedIds) });
+  if (JSON.stringify(stableOwnedIds) !== JSON.stringify(immutableOwnedIds)) {
+    fail("BILLING_PREVIEW_STABLE_ALIAS_NOT_CONVERGED", "Stable and immutable mock service discovery differed after stable convergence.");
+  }
+  compareSummary.ok = true;
+  endpointSummary.finalStableConvergence = { result: "PASS" };
+  recordGroup("29. Stable and immutable results are behaviourally consistent");
 
   const artifactText = [
     JSON.stringify(endpointSummary),
