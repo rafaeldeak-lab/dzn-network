@@ -911,6 +911,146 @@ Safety:
 - No main, Event release branch, or PR #15 change occurred.
 - No rebase, merge, cherry-pick, reset, stash, clean, force-push, or protected-data deletion/reset occurred.
 
+## Billing Phase 1 Slice 4J Repaired Preview Result
+
+Result: PREVIEW_FAILURE. Billing Phase 1 isolated preview remains incomplete for repaired candidate `fc3aedcfcd08ac47ac88d68d1212b0b6c81c2820`.
+
+Repaired candidate and audit start:
+
+- Expected candidate SHA: `fc3aedcfcd08ac47ac88d68d1212b0b6c81c2820`.
+- Active remote SHA before dispatch: `fc3aedcfcd08ac47ac88d68d1212b0b6c81c2820`.
+- Required ancestry present: `8cf00d2a4e0b7eca61851750607f013d1035d098`, `1cef8e339f105bf7ab1a96dd0a20b75bc6eee2f8`, and `fc3aedcfcd08ac47ac88d68d1212b0b6c81c2820`.
+- Repair commits covered by the run:
+  - `1cef8e339f105bf7ab1a96dd0a20b75bc6eee2f8` - `fix(onboarding): make exact linked-server lookup read-only`.
+  - `fc3aedcfcd08ac47ac88d68d1212b0b6c81c2820` - `fix(preview): verify exact linked-server lookup schema`.
+- Audit worktree: `C:\Users\rafae\Desktop\DZN-Audits\worktrees\dzn-billing-phase-1-final-preview-20260822-195421`.
+- Local audit branch: `audit/billing-phase-1-final-preview-20260822-195421`.
+- Starting worktree state: clean.
+- Existing old checkouts/worktrees were preserved and not cleaned, reset, stashed, or removed.
+
+Dispatch guard and workflow run:
+
+- Duplicate-run check time: `2026-08-22T18:56:33.3812935Z`.
+- Matching candidate workflow_dispatch runs before dispatch: `0`.
+- Dispatch was required and exactly one REST dispatch was made with `mode=billing-phase-1-preview`, `confirm_preview_only=PREVIEW_ONLY`, and `confirm_billing_phase_1_preview=APPROVE_BILLING_PHASE_1_PREVIEW`.
+- `gh` was not installed; Git Credential Manager supplied the GitHub credential only inside the PowerShell process. No credential, Authorization header, or signed download URL was printed or retained.
+- No rerun and no second dispatch occurred.
+- Workflow: `.github/workflows/dzn-owner-console-preview.yml`.
+- Run URL: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32592253403`.
+- Run ID: `32592253403`; run number `69`; attempt `1`.
+- Event: `workflow_dispatch`; branch: `feature/event-platform-performance-foundation`; head SHA: `fc3aedcfcd08ac47ac88d68d1212b0b6c81c2820`.
+- Created: `2026-08-22T18:56:58Z`; run started: `2026-08-22T18:56:58Z`; job started: `2026-08-22T18:57:02Z`; job completed: `2026-08-22T19:00:15Z`; run updated/completed: `2026-08-22T19:00:16Z`.
+- Final workflow conclusion: `failure`, classified as `PREVIEW_FAILURE`.
+- First failed job: `owner-console-preview`.
+- First failed step: `Verify Billing Phase 1 preview`.
+- First failed verifier group: `22. Mock onboarding test works`.
+- Failure code: `BILLING_PREVIEW_ONBOARDING_VERIFICATION_STAGE_FAILED`.
+- Safe failure stage: `linked_server_lookup`.
+
+Preview resources:
+
+- Candidate-specific preview D1 name: `dzn_network_db_owner_console_preview_billing_phase_1_fc3aedc`.
+- Masked preview D1 ID: `c828a191...ae56`.
+- Dedicated Pages project: `dzn-network-owner-console-preview-billing-phase-1`.
+- Stable URL: `https://dzn-network-owner-console-preview-billing-phase-1.pages.dev`.
+- Immutable URL: `https://b5fe5d38.dzn-network-owner-console-preview-billing-phase-1.pages.dev`.
+- Production D1 name/project appeared only as guarded detection or account inventory metadata with masked ID checks. No production D1 execute, migration, or production Pages deploy command was present in the retained log.
+- Old candidate D1 names `dzn_network_db_owner_console_preview_billing_phase_1_4511abd` and `dzn_network_db_owner_console_preview_billing_phase_1_0f18cbc` appeared only in D1 inventory/preview-cleanup-candidate diagnostics. No cleanup step ran and no old candidate D1 was selected or mutated.
+
+Migration, schema, and fixture evidence:
+
+- Migration ledger result: passed; ordered and complete through `0059`.
+- Applied migration evidence includes `0057_event_suggestions_phase_2a.sql`, `0058_billing_phase_1_integrity.sql`, and `0059_linked_server_merge_state.sql`.
+- Billing schema verification passed before fixture seeding.
+- Reservation table/index result: passed, including active reservation uniqueness protection.
+- Active-service uniqueness protection: `idx_linked_servers_active_service_id` present.
+- Linked-server merge columns/index result: passed, including `merged_into_server_id`, `merged_at`, and `idx_linked_servers_merged_into_server_id`.
+- Nitrado `linked_server_id` support: present.
+- Foreign-key check rows: `0`.
+- Exact linked-server lookup schema result: tables present, columns present, indexes present, and `migrationBacked=true`.
+- Exact lookup dependencies present:
+  - `linked_servers`: `id`, `user_id`, `guild_id`, `discord_guild_id`, `nitrado_service_id`, `status`, `merged_into_server_id`.
+  - `discord_guilds`: `id`, `name`, `icon_url`.
+  - `server_log_config`: `linked_server_id`, `adm_path`.
+  - `onboarding_checks`: `linked_server_id`, `adm_logs_found`, `last_tested_at`.
+  - Indexes: `idx_server_log_config_linked_server_id`, `idx_linked_servers_merged_into_server_id`.
+- Fixture result: passed with deterministic prefix `billing-phase1-preview-`, synthetic owners `owner-a` and `owner-b`, two synthetic sessions, and mock Nitrado service IDs `900001`, `900002`, and `900003`.
+- Fixture artifact retained no plaintext Nitrado token, session token, cookie, encrypted token ciphertext, IV, auth tag, real Discord identity, real Nitrado identity, or production user/server ID.
+
+Verifier evidence:
+
+- Endpoint summary result: `ok=false`.
+- Groups reached: `22`.
+- Groups passed: `21/30`.
+- Group results:
+  - `1. Public/runtime health`: PASS.
+  - `2. Logged-out endpoint protection`: PASS.
+  - `3. Service discovery requires linked_server_id`: PASS.
+  - `4. Owned linked-server discovery succeeds`: PASS.
+  - `5. Foreign linked-server ID returns safe 404`: PASS.
+  - `6. Nonexistent linked-server ID returns safe 404`: PASS.
+  - `7. No-token draft does not borrow another server's newer credential`: PASS.
+  - `8. Corrupted exact credential returns safe classified decrypt failure`: PASS.
+  - `9. Cross-owner service attempt returns 409 nitrado_service_already_linked`: PASS.
+  - `10. Foreign owner row remains unchanged`: PASS.
+  - `11. Same-owner 900002 reuse returns existing canonical ID`: PASS.
+  - `12. Temporary source draft becomes merged`: PASS.
+  - `13. merged_into_server_id points at canonical`: PASS.
+  - `14. Same-owner credentials move safely`: PASS.
+  - `15. Duplicate reservation is released`: PASS.
+  - `16. No duplicate server`: PASS.
+  - `17. No second announcement`: PASS.
+  - `18. First-time 900003 claim succeeds`: PASS.
+  - `19. Correct reservation completes`: PASS.
+  - `20. Completed hold does not double-count`: PASS.
+  - `21. Repeated first-time save is idempotent`: PASS.
+  - `22. Mock onboarding test works`: FAIL.
+- Groups `23` through `30` did not run after the fail-fast group `22` diagnostic exit.
+- Onboarding diagnostic state: `result=FAIL`, `failureStage=linked_server_lookup`.
+- Group `22` did not satisfy the repaired success contract; it produced controlled diagnostic failure `BILLING_PREVIEW_ONBOARDING_VERIFICATION_STAGE_FAILED` at `linked_server_lookup`.
+- Stable/immutable final convergence did not run; `stable-vs-immutable-summary.json` retained the stable and immutable URLs but `ok=false` with no compared paths.
+
+Ownership and allowance evidence reached before failure:
+
+- Owned linked-server discovery returned HTTP `200` with mock service IDs `900001`, `900002`, and `900003`.
+- Foreign linked-server protection returned safe HTTP `404` with `linked_server_not_found`.
+- Cross-owner service attempt returned HTTP `409` with `nitrado_service_already_linked`.
+- Source draft merge, canonical merge target, and same-owner credential movement checks passed before group `22`.
+- Duplicate reservation release, duplicate server prevention, announcement protection, first-time `900003` claim, reservation completion, completed-hold accounting, and repeated-save idempotency passed through groups `15` to `21`.
+- Final ownership, allowance, transfer, and leakage summaries did not reach `ok=true` because the verifier stopped at group `22`.
+
+Artifact, log, and security evidence:
+
+- Artifact name: `dzn-billing-phase-1-preview`.
+- Artifact ID: `9480663525`.
+- Artifact extraction path: `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-phase-1-final-preview-20260822-195421\run-32592253403\artifact`.
+- Complete combined workflow log: `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-phase-1-final-preview-20260822-195421\run-32592253403\workflow-run-32592253403.log`.
+- Sanitized run metadata: `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-phase-1-final-preview-20260822-195421\run-32592253403\run-metadata.json`.
+- Job step summary: `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-phase-1-final-preview-20260822-195421\run-32592253403\job-steps.json`.
+- Artifact validation summary: `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-phase-1-final-preview-20260822-195421\run-32592253403\artifact-validation-summary.json`.
+- Security scan summary: `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-phase-1-final-preview-20260822-195421\run-32592253403\security-scan-summary.json`.
+- SHA-256 hash manifest: `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-phase-1-final-preview-20260822-195421\run-32592253403\evidence-file-hashes.json`.
+- Artifact file count: exactly nine expected files: `candidate.json`, `summary.md`, `migration-summary.json`, `schema-summary.json`, `fixture-result-summary.json`, `endpoint-status-summary.json`, `ownership-integrity-summary.json`, `allowance-summary.json`, and `stable-vs-immutable-summary.json`.
+- JSON parse result: all eight JSON files parsed successfully; no zero-byte artifact file and no unexpected credential, SQL dump, secret-list, or raw-response file was present.
+- Security scan result: PASS. The retained artifact and complete workflow log contained no unmasked GitHub credential, `ghp_`/`github_pat_` token, Authorization/Bearer value, Cloudflare token value, `SESSION_SECRET` value, `TOKEN_ENCRYPTION_KEY` value, Discord/Stripe/Nitrado secret value, raw session token, `dzn_session` cookie value, `session_token_hash`, encrypted token material, complete D1 UUID, signed download URL, raw private ADM path, raw runtime SQL error, stack trace, raw internal exception, or real foreign-owner identity. Masked GitHub Actions environment displays appeared only as `***`.
+
+Safety:
+
+- Exactly one dispatch was made; no rerun occurred.
+- No preview cleanup/delete occurred.
+- No old candidate D1 was mutated.
+- No manual new candidate D1 mutation occurred.
+- No production D1 execute, write, migration, or content read occurred.
+- No production Pages or Worker deployment occurred.
+- No Stripe change occurred.
+- No Discord notification flag was enabled and no Discord message was sent.
+- No real Nitrado call occurred.
+- No main, `release/event-platform-phase-2a`, or PR #15 change occurred.
+- No merge, rebase, cherry-pick, reset, stash, clean, or force-push occurred.
+- No protected data was deleted or reset.
+- The only remote infrastructure effects were the single dedicated Billing preview workflow's candidate-specific preview D1 creation/resolution, preview migrations, deterministic synthetic fixture seed, dedicated Billing Pages configuration/deployment, and preview verification reads.
+- Only the two canonical handoff documents are authorised to change after the run evidence review.
+
 ## Next Authorised Slice
 
-Investigate and repair only the /api/onboarding/test `linked_server_lookup` stage identified by the isolated Billing Phase 1 diagnostic preview. Preserve all authentication, ownership, exact-token, allowance and logged-out protections. Do not rerun the Billing preview, deploy production, migrate production D1, change Stripe, delete D1 resources or alter main without separate explicit authorization.
+Investigate and repair only the newly proven failed preview boundary. Preserve all existing authentication, ownership, exact-token, allowance, logged-out and secret protections. Do not rerun before the repair is locally proven and separately authorised.
