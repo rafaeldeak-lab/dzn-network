@@ -33,6 +33,8 @@ Canonical clean worktree for this recovery:
 - Active remote SHA after onboarding failure-stage diagnostic implementation: `4511abd5639a6e88dfe75c47a8452d3ae37cff59`.
 - Active remote SHA after exact linked-server lookup read-only repair: `1cef8e339f105bf7ab1a96dd0a20b75bc6eee2f8`.
 - Active remote SHA after exact linked-server lookup schema verifier repair: `fc3aedcfcd08ac47ac88d68d1212b0b6c81c2820`.
+- Active remote SHA after exact linked-server returned-row handling repair: `8f3fa5d4da7836385e18ca9ecdee9098e3eddb9c`.
+- Active remote SHA after exact linked-server query preflight repair: `2db703cdb734fb09dcbdae38888dee25aebda150`.
 
 Old chat transcripts, interrupted Codex edits, and dirty local worktrees are not Git truth. Use remote branch history and committed files as the source of truth.
 
@@ -265,6 +267,44 @@ Billing Phase 1 Slice 4J repaired preview result:
 - Old candidate D1 names `dzn_network_db_owner_console_preview_billing_phase_1_4511abd` and `dzn_network_db_owner_console_preview_billing_phase_1_0f18cbc` appeared only in D1 inventory/preview-cleanup-candidate diagnostics. No cleanup step ran and no old candidate D1 was selected or mutated.
 - No production deployment, production migration, production D1 execute/write/content read, D1 deletion, preview cleanup, manual candidate D1 mutation, Stripe change, Discord enablement/message, real Nitrado call, main change, Event release branch change, PR #15 change, rebase, merge, cherry-pick, reset, stash, clean, force-push, or protected-data deletion/reset occurred.
 
+Billing Phase 1 Slice 4K-B hardened preview result:
+
+- Result: PREVIEW_FAILURE. Billing preview remains incomplete for hardened candidate `2db703cdb734fb09dcbdae38888dee25aebda150`.
+- Repair commits under test:
+  - `8f3fa5d4da7836385e18ca9ecdee9098e3eddb9c` - `fix(onboarding): harden exact linked-server row handling`.
+  - `2db703cdb734fb09dcbdae38888dee25aebda150` - `fix(preview): preflight exact linked-server query`.
+- Audit worktree: `C:\Users\rafae\Desktop\DZN-Audits\worktrees\dzn-billing-preview-2db703c-20260822-205934`, branch `audit/billing-preview-2db703c-20260822-205934`; clean before dispatch.
+- Starting remote SHA: `2db703cdb734fb09dcbdae38888dee25aebda150`; required ancestry present for `412a7a70468de6b0ffbbdbfb80b35b4649e07895`, `1cef8e339f105bf7ab1a96dd0a20b75bc6eee2f8`, `fc3aedcfcd08ac47ac88d68d1212b0b6c81c2820`, `8f3fa5d4da7836385e18ca9ecdee9098e3eddb9c`, and `2db703cdb734fb09dcbdae38888dee25aebda150`.
+- Local validation passed before dispatch: Billing verifier shell syntax, `npm run test:onboarding-verification`, `npm run test:github-workflows`, `npm run test:billing-integrity`, `npx tsc --noEmit --pretty false`, `npm run build`, and `git diff --check`.
+- Duplicate-run guard checked at `2026-08-22T20:01:59.3971319Z`: zero matching candidate workflow_dispatch runs existed, so exactly one dispatch was attempted. No rerun and no second dispatch occurred.
+- `gh` was unavailable; Git Credential Manager supplied the GitHub credential only inside the PowerShell REST process. No credential value, Authorization header, or signed download URL was printed or retained. A local PowerShell no-content `Invoke-WebRequest` null-reference occurred after the dispatch POST, but exactly one matching run appeared.
+- Workflow: `.github/workflows/dzn-owner-console-preview.yml`, mode `billing-phase-1-preview`, ref `feature/event-platform-performance-foundation`, confirmations `PREVIEW_ONLY` and `APPROVE_BILLING_PHASE_1_PREVIEW`.
+- Run URL: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32595504303`.
+- Run ID: `32595504303`; run number `70`; attempt `1`; event `workflow_dispatch`; final conclusion `failure`, classified as `PREVIEW_FAILURE`.
+- Created/run started `2026-08-22T20:02:26Z`; job started `2026-08-22T20:02:30Z`; job completed `2026-08-22T20:05:32Z`; run completed/updated `2026-08-22T20:05:33Z`.
+- First failed job: `owner-console-preview`; first failed step: `Verify Billing Phase 1 preview`; first failed verifier group: `22. Mock onboarding test works`.
+- Failure code: `BILLING_PREVIEW_ONBOARDING_VERIFICATION_STAGE_FAILED`; safe failure stage: `linked_server_lookup_execute`.
+- Preview D1: `dzn_network_db_owner_console_preview_billing_phase_1_2db703c`, masked ID `71261d11...0358`.
+- Preview D1 status: created for this candidate after resolver logged `Requested preview D1 exists: no`; old candidate D1s were retained and no cleanup step ran.
+- Dedicated Pages project: `dzn-network-owner-console-preview-billing-phase-1`.
+- Stable URL: `https://dzn-network-owner-console-preview-billing-phase-1.pages.dev`.
+- Immutable URL: `https://070bee62.dzn-network-owner-console-preview-billing-phase-1.pages.dev`.
+- Migration evidence passed: ordered ledger complete through `0059`, including `0057_event_suggestions_phase_2a.sql`, `0058_billing_phase_1_integrity.sql`, and `0059_linked_server_merge_state.sql`.
+- Schema evidence passed before fixture seeding: reservation table/indexes, active-service uniqueness, linked-server merge columns/index, Nitrado `linked_server_id`, foreign-key check rows `0`, and exact linked-server lookup `tablesPresent=true`, `columnsPresent=true`, `indexesPresent=true`, `migrationBacked=true`.
+- Fixture evidence passed with deterministic prefix `billing-phase1-preview-`, synthetic owners `owner-a` and `owner-b`, two synthetic sessions, seven linked servers, six Nitrado connection rows, five reservations, five active reservations, and mock service IDs `900001`, `900002`, and `900003`; no real identity, plaintext token, session token/cookie, or encrypted credential material was retained in the artifact.
+- Exact linked-server preflight passed immediately before group `22`: `rowFound=true`, `ownershipMatched=true`, `lifecycleAllowed=true`, and `joinsReadable=true`. The retained preflight object contains only sanitized booleans/result fields.
+- Billing matrix progress: groups `1` through `21` passed; group `22` failed; groups `23` through `30` did not run.
+- Group `22` targeted exact `900003` linked-server ID `billing-phase1-preview-owner-a-source-new-900003` but `/api/onboarding/test` returned HTTP `500`; diagnostic state was `result=FAIL`, `failureStage=linked_server_lookup_execute`.
+- Session-row assertions passed for Owner A and Owner B, immutable Owner A/B readiness passed with expected synthetic IDs, and `matrixUrlClassification=immutable`.
+- Stable Owner A/B readiness, final stable convergence, ADM-path testing, final no-real-Nitrado assertion, final no-Discord-send assertion, final ownership/allowance/stable-vs-immutable summaries, final foreign-key check, and final leakage checks were not reached after group `22`.
+- Artifact: `dzn-billing-phase-1-preview`, ID `9481461136`, extracted under `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-preview-2db703c-20260822-205934\run-32595504303\artifact`.
+- Job log retained at `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-preview-2db703c-20260822-205934\run-32595504303\job-97085641284.log`; complete combined workflow log retained at `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-preview-2db703c-20260822-205934\run-32595504303\workflow-run-32595504303.log`.
+- Artifact contained exactly the expected nine files; all eight JSON files parsed successfully; no zero-byte or unexpected credential, SQL dump, secret-list, or raw-response file was present.
+- External validation/security/hash files: `artifact-validation-summary.json`, `security-scan-summary.json`, and `evidence-file-hashes.json` under `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-preview-2db703c-20260822-205934\run-32595504303`.
+- Evidence hashes: `allowance-summary.json` `10AE6C750F932EB4305BF70338828260D912F82038AD34FC8EBB6793FE7FBE53`; `candidate.json` `39B471232FA19FAE4BFE4A55D4CE928A5E020AA113F3C75563716EA4BD9E9BBE`; `endpoint-status-summary.json` `63E42064BDE83A52C0BDE6B5682BE63058878CCF91219CB9A87FD3F7CF67B253`; `fixture-result-summary.json` `CD04D28A75AE80927CEEEB1CA8B670BAE3B647FAEFFF24725A426EB1837216E8`; `migration-summary.json` `32D90CC6A1FA00969AF6C1B06AA0EBB10989A729A674781C761F67D6834C964F`; `ownership-integrity-summary.json` `6FCBBD9B2ACBA8BD172E817D2E098A1FC920DD47FACDBA22660990BA51A71174`; `schema-summary.json` `8B5705B73A6FAE68D367BF2707B70FD9D5FDEF0D6B6B5294BB9972ED8443F12F`; `stable-vs-immutable-summary.json` `3C1B18EC67EEE9ACBB097A6F0AF620E66CA4F9BB5049378BFAE6404C2C9364C8`; `summary.md` `EAF652031ADD07C8464D95D6A28FCE7998EBBD895FB15465947A3A5E23964FF1`.
+- Security scan result: PASS for the retained artifact, job log, and complete workflow log. No unmasked GitHub credential, Cloudflare token, encryption/session/Discord/Stripe/Nitrado secret value, raw session cookie/token value, encrypted credential material, IV/auth tag, Authorization/Bearer value, complete D1 UUID, signed download URL, raw private ADM path, raw runtime SQL, stack trace, raw internal exception, or real foreign-owner identity was retained. UUID-like review hits were GitHub runner/temp IDs or synthetic test linked-server IDs; SQL-keyword review hits were Wrangler update-available notices.
+- No production deployment, production migration, production D1 execute/write/content read, D1 deletion, preview cleanup, manual candidate D1 mutation, Stripe change, Discord enablement/message, real Nitrado call, main change, Event release branch change, PR #15 change, rebase, merge, cherry-pick, reset, stash, clean, force-push, or protected-data deletion/reset occurred.
+
 Billing Phase 1 read-only D1 capacity audit result:
 
 - Previous attempts remain recorded in `DZN_BILLING_PHASE_1_HANDOFF.md`: run `32498388093` failed on Cloudflare Pages list pagination, and run `32498659821` failed on GitHub job-log HTTP `415`.
@@ -306,7 +346,7 @@ Production Pages stable-alias and runtime health must be verified from the deplo
 
 The repository blockers targeted by Phase 0 are resolved after validation and push. The linked-server Nitrado integrity slice is complete in code commit `a9fd8f7be01637fbcd6e6b1f06ffaf23886ceb02`. The stale Free-plan D1 guard was corrected for the owner-confirmed Workers Paid account in `5615bbaafeb5016948ed25f5968afd6d70000218`. The migration repair commit `5313c0c33379bc3598e6f986132bbd4237d40894` added `0059_linked_server_merge_state.sql`, and the Slice 4E commits `ba4a830dc0c42fc34148c72bb4b8e47b3b13d597` and `1c30311a950a896368dec2353a6d027abb055d91` resolved the corrupted-token safe HTTP `500` contract.
 
-The latest guarded Billing Phase 1 preview run for repaired candidate `fc3aedcfcd08ac47ac88d68d1212b0b6c81c2820` created the candidate-specific D1, applied migrations through `0059`, passed the expanded Billing schema verification including exact linked-server lookup `migrationBacked=true`, seeded fixtures, built and deployed the runtime, and passed verifier groups `1` through `21`. Billing preview remains incomplete because verifier group `22`, `Mock onboarding test works`, still failed with safe diagnostic stage `linked_server_lookup`.
+The latest guarded Billing Phase 1 preview run for hardened candidate `2db703cdb734fb09dcbdae38888dee25aebda150` created the candidate-specific D1, applied migrations through `0059`, passed the expanded Billing schema verification including exact linked-server lookup `migrationBacked=true`, seeded fixtures, built and deployed the runtime, and passed verifier groups `1` through `21`. The new exact linked-server preflight immediately before group `22` passed with `rowFound=true`, `ownershipMatched=true`, `lifecycleAllowed=true`, and `joinsReadable=true`. Billing preview remains incomplete because verifier group `22`, `Mock onboarding test works`, still failed with safe diagnostic stage `linked_server_lookup_execute`.
 
 The canonical clean worktree remains authoritative:
 
