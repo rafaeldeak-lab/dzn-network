@@ -56,6 +56,7 @@ function mergeConfig(config) {
       ...envVars(config),
       MOCK_AUTH: { type: "plain_text", value: "true" },
       MOCK_NITRADO: { type: "plain_text", value: "true" },
+      DZN_BILLING_PREVIEW_DIAGNOSTICS: { type: "plain_text", value: "true" },
       DZN_PULSE_ENABLED: { type: "plain_text", value: "true" },
       DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: "plain_text", value: "false" },
       DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: { type: "plain_text", value: "false" },
@@ -145,7 +146,7 @@ NODE
   echo "## Billing Phase 1 Runtime Configuration"
   echo ""
   echo "- Preview Pages project: ${PREVIEW_PROJECT_NAME}"
-  echo "- Plain-text flags: MOCK_AUTH=true, MOCK_NITRADO=true, DZN_PULSE_ENABLED=true"
+  echo "- Plain-text flags: MOCK_AUTH=true, MOCK_NITRADO=true, DZN_BILLING_PREVIEW_DIAGNOSTICS=true, DZN_PULSE_ENABLED=true"
   echo "- Discord notification flags: false"
   echo "- App URL: ${PREVIEW_BASE_URL}"
   echo "- Preview secret names verified: TOKEN_ENCRYPTION_KEY, SESSION_SECRET, DISCORD_CLIENT_SECRET"

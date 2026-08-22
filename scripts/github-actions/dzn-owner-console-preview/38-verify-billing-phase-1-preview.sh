@@ -36,6 +36,19 @@ const expectedOwnerBUserId = `${prefix}owner-b`;
 const expectedOwnerASessionId = `${prefix}owner-a-session`;
 const expectedOwnerBSessionId = `${prefix}owner-b-session`;
 const genericMockUserIds = new Set(["mock-user"]);
+const safeOnboardingVerificationStages = new Set([
+  "request_parse",
+  "linked_server_lookup",
+  "credential_resolution",
+  "metadata_refresh",
+  "adm_discovery",
+  "adm_path_persist",
+  "adm_backfill_plan",
+  "discord_verification",
+  "checks_read",
+  "checks_write",
+  "response_build",
+]);
 const postReadinessAuthenticated = { ready: false };
 const forbiddenRuntimeText = [
   "Request failed: 503",
@@ -85,6 +98,7 @@ const endpointSummary = {
     stableOwnerB: { result: "PENDING", attempts: 0, expectedUserId: expectedOwnerBUserId },
   },
   finalStableConvergence: { result: "PENDING" },
+  onboardingVerificationDiagnostic: { result: "PENDING", failureStage: null },
 };
 const ownershipSummary = { ok: false, fixturePrefix: prefix, checks: {} };
 const allowanceSummary = { ok: false, fixturePrefix: prefix, counts: {} };
@@ -272,6 +286,71 @@ async function postJson(base, path, cookie, expected, payload, label) {
     body: JSON.stringify(payload),
   }, label);
 }
+async function postOnboardingSetupVerification(base, cookie, payload) {
+  const path = "/api/onboarding/test";
+  const result = await fetchWithRetry(base, path, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      "content-type": "application/json",
+      Cookie: cookie,
+    },
+    body: JSON.stringify(payload),
+  }, {
+    allowExpectedHttp500: true,
+    authenticated: true,
+  });
+  if (![200, 500].includes(result.status)) {
+    fail("BILLING_PREVIEW_UNEXPECTED_STATUS", `Mock onboarding test returned HTTP ${result.status}, expected 200.`, {
+      path,
+      status: result.status,
+      bodyLength: result.body.length,
+      bodyPreview: sanitize(result.body),
+    });
+  }
+
+  let parsed = null;
+  try {
+    parsed = result.body ? JSON.parse(result.body) : null;
+  } catch {
+    fail("BILLING_PREVIEW_JSON_PARSE_FAILED", "Mock onboarding test did not return JSON.", { path, status: result.status });
+  }
+
+  if (result.status === 500) {
+    const failureStage = typeof parsed?.failure_stage === "string" ? parsed.failure_stage : "";
+    if (parsed?.error_code !== "onboarding_verification_failed") {
+      fail("BILLING_PREVIEW_ONBOARDING_VERIFICATION_DIAGNOSTIC_BAD_CODE", "Mock onboarding diagnostic 500 returned the wrong safe error code.", {
+        actualCode: parsed?.error_code,
+      });
+    }
+    if (!safeOnboardingVerificationStages.has(failureStage)) {
+      fail("BILLING_PREVIEW_ONBOARDING_VERIFICATION_DIAGNOSTIC_BAD_STAGE", "Mock onboarding diagnostic 500 returned an unrecognized failure stage.", {
+        failureStage,
+      });
+    }
+    if (parsed?.error !== "Setup verification failed") {
+      fail("BILLING_PREVIEW_ONBOARDING_VERIFICATION_DIAGNOSTIC_BAD_ERROR", "Mock onboarding diagnostic 500 returned an unexpected safe error string.");
+    }
+    assertNoSetupVerificationLeak(parsed, "Setup verification diagnostic response");
+    assertNoOnboardingDiagnosticInternals(parsed);
+    endpointSummary.onboardingVerificationDiagnostic = {
+      result: "FAIL",
+      failureStage,
+    };
+    recordGroup("22. Mock onboarding test works", "FAIL");
+    fail(
+      "BILLING_PREVIEW_ONBOARDING_VERIFICATION_STAGE_FAILED",
+      `Mock onboarding test failed at ${failureStage}.`,
+      { failureStage },
+    );
+  }
+
+  endpointSummary.onboardingVerificationDiagnostic = {
+    result: "PASS",
+    failureStage: null,
+  };
+  return { ...result, json: parsed };
+}
 function rowsFromWranglerJson(raw) {
   const text = raw.replace(/^\uFEFF/, "").trim();
   const start = text.search(/[\[{]/);
@@ -431,6 +510,16 @@ function assertNoSetupVerificationLeak(value, label) {
     if (text.includes(marker)) fail("BILLING_PREVIEW_STACK_TRACE_LEAKAGE", `${label} exposed stack-trace text.`, { marker });
   }
 }
+function assertNoOnboardingDiagnosticInternals(value) {
+  const text = JSON.stringify(value ?? {});
+  for (const marker of ["SELECT ", "INSERT INTO", "UPDATE ", "DELETE ", "server_log_config", "onboarding_checks", "/games/", ".ADM", "Exception", "TypeError", "SqliteError", "D1_ERROR"]) {
+    if (text.includes(marker)) {
+      fail("BILLING_PREVIEW_ONBOARDING_VERIFICATION_DIAGNOSTIC_LEAKAGE", "Mock onboarding diagnostic 500 exposed an internal marker.", {
+        marker,
+      });
+    }
+  }
+}
 function writeArtifacts(ok) {
   endpointSummary.ok = ok;
   fs.writeFileSync(`${artifact}/endpoint-status-summary.json`, JSON.stringify(endpointSummary, null, 2));
@@ -582,9 +671,9 @@ void (async () => {
   const setupTargetId = `${prefix}owner-a-source-new-900003`;
   const preSetupChecks900001 = firstCount("pre-setup-checks-900001", `SELECT COUNT(*) AS count FROM onboarding_checks WHERE linked_server_id = '${prefix}owner-a-canonical-900001';`);
   const preSetupChecks900002 = firstCount("pre-setup-checks-900002", `SELECT COUNT(*) AS count FROM onboarding_checks WHERE linked_server_id = '${prefix}owner-a-canonical-900002';`);
-  const setupVerification = await postJson(matrixUrl, "/api/onboarding/test", ownerACookie, 200, {
+  const setupVerification = await postOnboardingSetupVerification(matrixUrl, ownerACookie, {
     linkedServerId: setupTargetId,
-  }, "Mock onboarding test");
+  });
   if (setupVerification.json?.ok !== true || typeof setupVerification.json?.checks !== "object" || setupVerification.json?.checks === null) {
     fail("BILLING_PREVIEW_ONBOARDING_TEST_BAD_BODY", "Setup verification did not return ok=true with checks.");
   }

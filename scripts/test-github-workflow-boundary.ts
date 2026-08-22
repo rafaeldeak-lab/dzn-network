@@ -1883,6 +1883,16 @@ const billingPreviewScriptsBlock = [
   "37-deploy-billing-phase-1-preview-runtime.sh",
   "38-verify-billing-phase-1-preview.sh",
 ].map((name) => read(`scripts/github-actions/dzn-owner-console-preview/${name}`)).join("\n");
+const billingRuntimeConfigScript = read("scripts/github-actions/dzn-owner-console-preview/35-configure-billing-phase-1-preview-runtime.sh");
+const billingVerifierScript = read("scripts/github-actions/dzn-owner-console-preview/38-verify-billing-phase-1-preview.sh");
+const billingScriptsExceptRuntimeConfig = [
+  "32-preflight-billing-phase-1-preview.sh",
+  "33-verify-billing-phase-1-preview-schema.sh",
+  "34-seed-billing-phase-1-preview-fixtures.sh",
+  "36-build-billing-phase-1-preview-runtime.sh",
+  "37-deploy-billing-phase-1-preview-runtime.sh",
+  "38-verify-billing-phase-1-preview.sh",
+].map((name) => read(`scripts/github-actions/dzn-owner-console-preview/${name}`)).join("\n");
 const billingSchemaVerifierScript = read("scripts/github-actions/dzn-owner-console-preview/33-verify-billing-phase-1-preview-schema.sh");
 const billingIntegrityMigration = read("migrations/0058_billing_phase_1_integrity.sql");
 for (const scriptNumber of ["32", "33", "34", "35", "36", "37", "38"]) {
@@ -1997,6 +2007,15 @@ assert.equal(billingPreviewScriptsBlock.includes("rm -f \"${SEED_SQL}\""), true,
 assert.equal(billingPreviewScriptsBlock.includes("DELETE FROM"), false, "Billing scripts must not issue broad DELETE statements.");
 assert.equal(billingPreviewScriptsBlock.includes("MOCK_AUTH: { type: \"plain_text\", value: \"true\" }"), true, "Billing runtime config must set MOCK_AUTH=true.");
 assert.equal(billingPreviewScriptsBlock.includes("MOCK_NITRADO: { type: \"plain_text\", value: \"true\" }"), true, "Billing runtime config must set MOCK_NITRADO=true.");
+assert.equal(billingRuntimeConfigScript.includes("DZN_BILLING_PREVIEW_DIAGNOSTICS: { type: \"plain_text\", value: \"true\" }"), true, "Billing runtime config must enable preview-only onboarding diagnostics.");
+assert.equal(billingScriptsExceptRuntimeConfig.includes("DZN_BILLING_PREVIEW_DIAGNOSTICS: { type: \"plain_text\", value: \"true\" }"), false, "Only script 35 may configure the Billing preview diagnostics flag.");
+for (const [path, source] of [
+  [".github/workflows/dzn-owner-console-production-rollout.yml", dznOwnerConsoleProductionRolloutWorkflow],
+  [".github/workflows/dzn-pages-runtime-production-deploy.yml", dznPagesRuntimeProductionDeployWorkflow],
+  [".github/workflows/dzn-production-readonly-diagnostics.yml", dznProductionReadonlyDiagnosticsWorkflow],
+] as const) {
+  assert.equal(source.includes("DZN_BILLING_PREVIEW_DIAGNOSTICS"), false, `${path} must not configure Billing preview diagnostics.`);
+}
 assert.equal(billingPreviewScriptsBlock.includes("DZN_DISCORD_NOTIFICATIONS_ENABLED: { type: \"plain_text\", value: \"false\" }"), true, "Billing runtime config must keep notifications false.");
 assert.equal(billingPreviewScriptsBlock.includes("DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED: { type: \"plain_text\", value: \"false\" }"), true, "Billing runtime config must keep server announcements false.");
 assert.equal(billingPreviewScriptsBlock.includes("wrangler pages secret put TOKEN_ENCRYPTION_KEY"), true, "Billing runtime config must configure the ephemeral TOKEN_ENCRYPTION_KEY secret.");
@@ -2114,6 +2133,41 @@ assert.equal(billingPreviewScriptsBlock.includes("SELECT COUNT(*) AS count FROM 
 assert.equal(billingPreviewScriptsBlock.includes("SELECT COUNT(*) AS count FROM server_log_config WHERE linked_server_id = '${setupTargetId}'"), true, "Billing setup verification must prove server_log_config was written for exact 900003.");
 assert.equal(billingPreviewScriptsBlock.includes("Setup verification wrote onboarding_checks for a non-target linked server."), true, "Billing setup verification must guard against writes to canonical 900001/900002.");
 assert.equal(billingPreviewScriptsBlock.includes("postJson(stableUrl, \"/api/onboarding/test\", ownerACookie, 200, {}, \"Mock onboarding test\")"), false, "Billing setup verification must not send an ambiguous empty body.");
+assert.equal(billingVerifierScript.includes("async function postOnboardingSetupVerification"), true, "Group 22 must use a dedicated onboarding setup verifier.");
+assert.equal(billingVerifierScript.includes("safeOnboardingVerificationStages = new Set(["), true, "Group 22 diagnostic handling must use a committed safe-stage allowlist.");
+for (const stage of [
+  "request_parse",
+  "linked_server_lookup",
+  "credential_resolution",
+  "metadata_refresh",
+  "adm_discovery",
+  "adm_path_persist",
+  "adm_backfill_plan",
+  "discord_verification",
+  "checks_read",
+  "checks_write",
+  "response_build",
+]) {
+  assert.equal(billingVerifierScript.includes(`"${stage}"`), true, `Group 22 diagnostic allowlist must include ${stage}.`);
+}
+assert.equal(billingVerifierScript.includes("if (![200, 500].includes(result.status))"), true, "Group 22 must only special-case HTTP 200 and diagnostic HTTP 500.");
+assert.equal(billingVerifierScript.includes("if (result.status === 500)"), true, "Group 22 must inspect diagnostic HTTP 500 responses.");
+assert.equal(billingVerifierScript.includes("parsed?.error_code !== \"onboarding_verification_failed\""), true, "Group 22 diagnostic HTTP 500 must require the safe error code.");
+assert.equal(billingVerifierScript.includes("!safeOnboardingVerificationStages.has(failureStage)"), true, "Group 22 diagnostic HTTP 500 must reject uncommitted stages.");
+assert.equal(billingVerifierScript.includes("recordGroup(\"22. Mock onboarding test works\", \"FAIL\")"), true, "Group 22 diagnostic HTTP 500 must remain a failed group.");
+assert.equal(billingVerifierScript.includes("BILLING_PREVIEW_ONBOARDING_VERIFICATION_STAGE_FAILED"), true, "Group 22 diagnostic HTTP 500 must fail with the dedicated safe code.");
+assert.equal(billingVerifierScript.includes("endpointSummary.onboardingVerificationDiagnostic = {\n    result: \"PASS\""), true, "Group 22 must record PASS only after HTTP 200.");
+assert.equal(billingVerifierScript.includes("assertNoOnboardingDiagnosticInternals(parsed)"), true, "Group 22 diagnostic HTTP 500 must block raw internals.");
+const billingGroup22DiagnosticStart = indexOfOrFail(billingVerifierScript, "if (result.status === 500)");
+const billingGroup22PassStart = indexOfOrFail(billingVerifierScript, "endpointSummary.onboardingVerificationDiagnostic = {\n    result: \"PASS\"");
+const billingGroup22DiagnosticBlock = billingVerifierScript.slice(billingGroup22DiagnosticStart, billingGroup22PassStart);
+assert.equal(billingGroup22DiagnosticBlock.includes("bodyPreview"), false, "Group 22 diagnostic failure artifact must not include raw body previews.");
+assert.equal(billingGroup22DiagnosticBlock.includes("result.body"), false, "Group 22 diagnostic failure artifact must not store the raw response body.");
+assert.equal(billingGroup22DiagnosticBlock.includes("writeArtifacts(false)"), false, "Group 22 should flush through the central fail path after recording the safe stage.");
+const billingGroup22RecordFailure = indexOfOrFail(billingGroup22DiagnosticBlock, "recordGroup(\"22. Mock onboarding test works\", \"FAIL\")");
+const billingGroup22FailCall = indexOfOrFail(billingGroup22DiagnosticBlock, "BILLING_PREVIEW_ONBOARDING_VERIFICATION_STAGE_FAILED");
+assert.equal(billingGroup22RecordFailure < billingGroup22FailCall, true, "Group 22 must record the failed group before diagnostic workflow failure flushes the summary.");
+assert.equal(billingVerifierScript.includes("DZN_BILLING_PREVIEW_DIAGNOSTICS") && billingVerifierScript.includes("ALLOW_DIAGNOSTIC"), false, "Billing verifier must not add a broad diagnostic bypass flag.");
 const billingRuntimeFailureStart = indexOfOrFail(billingPreviewScriptsBlock, "function checkRuntimeFailure");
 const billingExpectStatusStart = indexOfOrFail(billingPreviewScriptsBlock, "async function expectStatus");
 const billingRuntimeFailureBlock = billingPreviewScriptsBlock.slice(billingRuntimeFailureStart, billingExpectStatusStart);
