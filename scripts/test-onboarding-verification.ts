@@ -6,7 +6,10 @@ import { join } from "node:path";
 import { createSession } from "../functions/_lib/db";
 import { storePendingNitradoToken } from "../functions/_lib/onboarding";
 import { onRequest as saveOnboardingHandler } from "../functions/api/onboarding/save";
-import { onRequest as testOnboardingHandler } from "../functions/api/onboarding/test";
+import {
+  ONBOARDING_VERIFICATION_STAGES,
+  onRequest as testOnboardingHandler,
+} from "../functions/api/onboarding/test";
 import type { Env, PagesFunction } from "../functions/_lib/types";
 
 type SqliteRunResult = { changes: number; lastInsertRowid: number | bigint };
@@ -29,8 +32,15 @@ type OperationCounts = {
   exec: number;
   batch: number;
 };
+type D1FailureOperation = Exclude<keyof OperationCounts, "prepare" | "batch">;
+type D1FailureRule = {
+  operation: D1FailureOperation;
+  pattern: RegExp;
+  error: Error;
+};
 type ApiJson = Record<string, unknown> & {
   error_code?: unknown;
+  failure_stage?: unknown;
   linkedServerId?: unknown;
   ok?: unknown;
   checks?: unknown;
@@ -70,6 +80,19 @@ const forbiddenSideEffectTables = [
   "promotion_clicks",
   "promotion_audit_log",
 ];
+const diagnosticPreviewBaseUrl = "https://443351c7.dzn-network-owner-console-preview-billing-phase-1.pages.dev";
+const diagnosticInternalErrorMessage = "forced internal setup verification failure with SQL stack credential marker";
+const diagnosticForbiddenResponseMarkers = [
+  ...forbiddenResponseMarkers,
+  diagnosticInternalErrorMessage,
+  "SELECT ",
+  "INSERT INTO",
+  "UPDATE onboarding_checks",
+  "server_log_config",
+  "/games/",
+  "mock.ADM",
+  "d1-diagnostic-id",
+];
 
 class InstrumentedSqliteD1Database {
   readonly sqlite: SqliteDatabase;
@@ -83,6 +106,7 @@ class InstrumentedSqliteD1Database {
     batch: 0,
   };
   readonly touchedSql: string[] = [];
+  private readonly failureRules: D1FailureRule[] = [];
 
   constructor() {
     this.sqlite = new DatabaseSync(":memory:");
@@ -102,6 +126,7 @@ class InstrumentedSqliteD1Database {
 
   async exec(query: string) {
     this.record("exec", query);
+    this.maybeFail("exec", query);
     this.sqlite.exec(query);
     return { success: true, meta: { count: 0, duration: 0 } };
   }
@@ -121,6 +146,19 @@ class InstrumentedSqliteD1Database {
   snapshotOperationCounts() {
     return { ...this.counts };
   }
+
+  failOnce(operation: D1FailureOperation, pattern: RegExp, message = diagnosticInternalErrorMessage) {
+    const error = new Error(message);
+    this.failureRules.push({ operation, pattern, error });
+    return error;
+  }
+
+  maybeFail(operation: D1FailureOperation, query: string) {
+    const index = this.failureRules.findIndex((rule) => rule.operation === operation && rule.pattern.test(query));
+    if (index < 0) return;
+    const [rule] = this.failureRules.splice(index, 1);
+    throw rule.error;
+  }
 }
 
 class InstrumentedSqliteD1PreparedStatement {
@@ -136,12 +174,14 @@ class InstrumentedSqliteD1PreparedStatement {
 
   async run() {
     this.db.record("run", this.query);
+    this.db.maybeFail("run", this.query);
     const result = this.db.sqlite.prepare(this.query).run(...this.bindings);
     return { success: true, meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } };
   }
 
   async first<T = Record<string, unknown>>(colName?: string) {
     this.db.record("first", this.query);
+    this.db.maybeFail("first", this.query);
     const row = this.db.sqlite.prepare(this.query).get(...this.bindings) ?? null;
     if (colName) return (row ? row[colName] ?? null : null) as T | null;
     return row as T | null;
@@ -149,6 +189,7 @@ class InstrumentedSqliteD1PreparedStatement {
 
   async all<T = Record<string, unknown>>() {
     this.db.record("all", this.query);
+    this.db.maybeFail("all", this.query);
     return {
       success: true,
       meta: {},
@@ -158,6 +199,7 @@ class InstrumentedSqliteD1PreparedStatement {
 
   async raw() {
     this.db.record("raw", this.query);
+    this.db.maybeFail("raw", this.query);
     return this.db.sqlite.prepare(this.query).all(...this.bindings).map((row) => Object.values(row));
   }
 }
@@ -408,6 +450,96 @@ async function assertForeignAndFallbackContracts(env: Env, db: InstrumentedSqlit
   assertNoSensitiveBody(fallback.text, "fallback setup verification");
 }
 
+async function createReadyBillingPreviewState(options: { diagnostics?: boolean } = {}) {
+  const { db, env } = await createMigratedEnv();
+  if (options.diagnostics) {
+    (env as unknown as Record<string, string>).DZN_BILLING_PREVIEW_DIAGNOSTICS = "true";
+  }
+  await seedBillingPreviewFixture(env, db);
+  const ownerASession = (await createSession(env, ownerA)).token;
+  const ownerBSession = (await createSession(env, ownerB)).token;
+  await runPreviewSaveSequence(env, db, ownerASession, ownerBSession);
+  return { db, env, ownerASession, ownerBSession };
+}
+
+async function assertDiagnosticFailureStage(input: {
+  label: string;
+  operation: D1FailureOperation;
+  pattern: RegExp;
+  expectedStage: typeof ONBOARDING_VERIFICATION_STAGES[number];
+  prepare?: (state: Awaited<ReturnType<typeof createReadyBillingPreviewState>>) => Promise<void>;
+}) {
+  const state = await createReadyBillingPreviewState({ diagnostics: true });
+  await input.prepare?.(state);
+  state.db.failOnce(input.operation, input.pattern);
+  const result = await postJson(
+    testOnboardingHandler,
+    state.env,
+    state.ownerASession,
+    "/api/onboarding/test",
+    { linkedServerId: target900003 },
+    diagnosticPreviewBaseUrl,
+  );
+  assert.equal(result.status, 500, `${input.label} should return diagnostic HTTP 500.`);
+  assert.equal(result.json.error_code, "onboarding_verification_failed");
+  assert.equal(result.json.failure_stage, input.expectedStage);
+  assert.equal(ONBOARDING_VERIFICATION_STAGES.includes(result.json.failure_stage as typeof ONBOARDING_VERIFICATION_STAGES[number]), true);
+  assertDiagnosticResponseSafe(result.text, input.label);
+}
+
+async function assertDiagnosticsDisabledRethrows() {
+  const state = await createReadyBillingPreviewState({ diagnostics: false });
+  const originalError = state.db.failOnce("run", /INSERT INTO server_log_config/i);
+  await assert.rejects(
+    () => postJson(
+      testOnboardingHandler,
+      state.env,
+      state.ownerASession,
+      "/api/onboarding/test",
+      { linkedServerId: target900003 },
+      diagnosticPreviewBaseUrl,
+    ),
+    (error) => error === originalError,
+    "Diagnostic flag off must rethrow the original setup verification exception.",
+  );
+}
+
+async function assertDiagnosticsHostGateRethrows() {
+  const state = await createReadyBillingPreviewState({ diagnostics: true });
+  const originalError = state.db.failOnce("run", /INSERT INTO server_log_config/i);
+  await assert.rejects(
+    () => postJson(
+      testOnboardingHandler,
+      state.env,
+      state.ownerASession,
+      "/api/onboarding/test",
+      { linkedServerId: target900003 },
+      "https://local.test",
+    ),
+    (error) => error === originalError,
+    "Diagnostic flag must not expose stages outside the dedicated Billing preview host.",
+  );
+}
+
+async function assertDiagnosticsDiscordFlagGateRethrows() {
+  const state = await createReadyBillingPreviewState({ diagnostics: true });
+  state.env.DZN_DISCORD_NOTIFICATIONS_ENABLED = "true";
+  const originalError = state.db.failOnce("run", /INSERT INTO server_log_config/i);
+  await assert.rejects(
+    () => postJson(
+      testOnboardingHandler,
+      state.env,
+      state.ownerASession,
+      "/api/onboarding/test",
+      { linkedServerId: target900003 },
+      diagnosticPreviewBaseUrl,
+    ),
+    (error) => error === originalError,
+    "Diagnostic flag must not expose stages when Discord notifications are enabled.",
+  );
+  state.env.DZN_DISCORD_NOTIFICATIONS_ENABLED = "false";
+}
+
 function savePayload(sourceAlias: string, serviceId: string, guildAlias = "owner-a-draft") {
   return {
     linkedServerId: id(sourceAlias),
@@ -420,8 +552,8 @@ function savePayload(sourceAlias: string, serviceId: string, guildAlias = "owner
   };
 }
 
-async function postJson(handler: PagesFunction, env: Env, sessionToken: string, path: string, payload: unknown) {
-  const request = new Request(`https://local.test${path}`, {
+async function postJson(handler: PagesFunction, env: Env, sessionToken: string, path: string, payload: unknown, baseUrl = "https://local.test") {
+  const request = new Request(`${baseUrl}${path}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -461,6 +593,12 @@ function assertNoSensitiveBody(text: string, label: string) {
   }
 }
 
+function assertDiagnosticResponseSafe(text: string, label: string) {
+  for (const marker of diagnosticForbiddenResponseMarkers) {
+    assert.equal(text.includes(marker), false, `${label} diagnostic response must not expose ${marker}.`);
+  }
+}
+
 function assertNoForbiddenSqlSideEffects(queries: string[]) {
   const touched = queries.join("\n").toLowerCase();
   for (const table of forbiddenSideEffectTables) {
@@ -494,13 +632,46 @@ async function run() {
   }) as typeof fetch;
 
   try {
-    const { db, env } = await createMigratedEnv();
-    await seedBillingPreviewFixture(env, db);
-    const ownerASession = (await createSession(env, ownerA)).token;
-    const ownerBSession = (await createSession(env, ownerB)).token;
-    await runPreviewSaveSequence(env, db, ownerASession, ownerBSession);
+    const { db, env, ownerASession } = await createReadyBillingPreviewState();
     const exactCounts = await assertExactSetupVerification(env, db, ownerASession);
     await assertForeignAndFallbackContracts(env, db, ownerASession);
+    await assertDiagnosticFailureStage({
+      label: "server_log_config persistence failure",
+      operation: "run",
+      pattern: /INSERT INTO server_log_config/i,
+      expectedStage: "adm_path_persist",
+    });
+    await assertDiagnosticFailureStage({
+      label: "onboarding_checks read failure",
+      operation: "first",
+      pattern: /FROM onboarding_checks WHERE linked_server_id = \? LIMIT 1/i,
+      expectedStage: "checks_read",
+    });
+    await assertDiagnosticFailureStage({
+      label: "onboarding_checks insert failure",
+      operation: "run",
+      pattern: /INSERT INTO onboarding_checks/i,
+      expectedStage: "checks_write",
+    });
+    await assertDiagnosticFailureStage({
+      label: "onboarding_checks update failure",
+      operation: "run",
+      pattern: /UPDATE onboarding_checks SET/i,
+      expectedStage: "checks_write",
+      prepare: async ({ env: preparedEnv, ownerASession: preparedOwnerASession }) => {
+        const first = await postJson(
+          testOnboardingHandler,
+          preparedEnv,
+          preparedOwnerASession,
+          "/api/onboarding/test",
+          { linkedServerId: target900003 },
+        );
+        assert.equal(first.status, 200, "Precondition setup verification should create onboarding_checks before update-failure test.");
+      },
+    });
+    await assertDiagnosticsDisabledRethrows();
+    await assertDiagnosticsHostGateRethrows();
+    await assertDiagnosticsDiscordFlagGateRethrows();
     assert.deepEqual(externalFetches.filter((url) => /nitrado|discord\.com/i.test(url)), [], "Setup verification must not make real Nitrado or Discord requests in mock mode.");
     console.log(`Onboarding verification tests passed. Exact operation count: ${JSON.stringify(exactCounts)}`);
   } finally {
