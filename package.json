@@ -79,6 +79,7 @@
     "test:public-profile-sync": "tsx scripts/test-public-profile-sync.ts",
     "test:billing-plans": "tsx scripts/test-billing-plans.ts",
     "test:billing-integrity": "tsx scripts/test-billing-integrity.ts",
+    "test:d1-exact-lookup-projection": "tsx scripts/test-d1-exact-lookup-projection.ts",
     "test:onboarding-verification": "tsx scripts/test-onboarding-verification.ts",
     "test:reputation-platform": "tsx scripts/test-reputation-platform.ts",
     "test:badge-visual-system": "tsx scripts/test-badge-visual-system.ts",

@@ -234,13 +234,68 @@ export class LinkedServerLookupError extends Error {
   }
 }
 
-const EXACT_LINKED_SERVER_LOOKUP_SQL = `SELECT
-        linked_servers.*,
-        discord_guilds.name AS guild_name,
-        discord_guilds.icon_url AS guild_icon_url,
-        server_log_config.adm_path AS adm_path,
-        onboarding_checks.adm_logs_found AS adm_logs_found,
-        onboarding_checks.last_tested_at AS adm_last_checked_at
+export const EXACT_LINKED_SERVER_LOOKUP_PROJECTION = [
+  "linked_servers.id AS id",
+  "linked_servers.user_id AS user_id",
+  "linked_servers.guild_id AS guild_id",
+  "linked_servers.discord_guild_id AS discord_guild_id",
+  "linked_servers.nitrado_service_id AS nitrado_service_id",
+  "linked_servers.nitrado_service_name AS nitrado_service_name",
+  "linked_servers.server_name AS server_name",
+  "linked_servers.server_type AS server_type",
+  "linked_servers.server_category AS server_category",
+  "linked_servers.tags_json AS tags_json",
+  "linked_servers.region AS region",
+  "linked_servers.game AS game",
+  "linked_servers.platform AS platform",
+  "linked_servers.ip_address AS ip_address",
+  "linked_servers.player_slots AS player_slots",
+  "linked_servers.status AS status",
+  "linked_servers.public_slug AS public_slug",
+  "linked_servers.listing_visibility AS listing_visibility",
+  "linked_servers.lifecycle_status AS lifecycle_status",
+  "linked_servers.merged_into_server_id AS merged_into_server_id",
+  "linked_servers.created_at AS created_at",
+  "linked_servers.updated_at AS updated_at",
+  "discord_guilds.name AS lookup_guild_name",
+  "discord_guilds.icon_url AS lookup_guild_icon_url",
+  "server_log_config.adm_path AS lookup_private_adm_path",
+  "onboarding_checks.adm_logs_found AS lookup_adm_logs_found",
+  "onboarding_checks.last_tested_at AS lookup_adm_last_checked_at",
+] as const;
+
+type ExactLinkedServerLookupRow = {
+  id: string;
+  user_id: string;
+  guild_id: string;
+  discord_guild_id: string;
+  nitrado_service_id: string | null;
+  nitrado_service_name: string | null;
+  server_name: string | null;
+  server_type: string | null;
+  server_category: string | null;
+  tags_json: string | null;
+  region: string | null;
+  game: string | null;
+  platform: string | null;
+  ip_address: string | null;
+  player_slots: number | null;
+  status: string | null;
+  public_slug: string | null;
+  listing_visibility: string | null;
+  lifecycle_status: string | null;
+  merged_into_server_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  lookup_guild_name: string | null;
+  lookup_guild_icon_url: string | null;
+  lookup_private_adm_path: string | null;
+  lookup_adm_logs_found: number | null;
+  lookup_adm_last_checked_at: string | null;
+};
+
+export const EXACT_LINKED_SERVER_LOOKUP_SQL = `SELECT
+        ${EXACT_LINKED_SERVER_LOOKUP_PROJECTION.join(",\n        ")}
        FROM linked_servers
        LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
        LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
@@ -275,9 +330,9 @@ export async function getLinkedServerForUserById(
     throw new LinkedServerLookupError("bind", { cause: error });
   }
 
-  let rawServer: Record<string, unknown> | null | undefined;
+  let rawServer: ExactLinkedServerLookupRow | null | undefined;
   try {
-    rawServer = await bound.first<Record<string, unknown>>();
+    rawServer = await bound.first<ExactLinkedServerLookupRow>();
   } catch (error) {
     throw new LinkedServerLookupError("execute", { cause: error });
   }
@@ -292,7 +347,17 @@ export async function getLinkedServerForUserById(
     server = {
       ...rawServer,
     };
-    const rawAdmPath = typeof server.adm_path === "string" ? server.adm_path : null;
+    const rawAdmPath = typeof server.lookup_private_adm_path === "string" ? server.lookup_private_adm_path : null;
+    server.guild_name = server.lookup_guild_name ?? null;
+    server.guild_icon_url = server.lookup_guild_icon_url ?? null;
+    server.adm_path = rawAdmPath;
+    server.adm_logs_found = server.lookup_adm_logs_found ?? null;
+    server.adm_last_checked_at = server.lookup_adm_last_checked_at ?? null;
+    delete server.lookup_guild_name;
+    delete server.lookup_guild_icon_url;
+    delete server.lookup_private_adm_path;
+    delete server.lookup_adm_logs_found;
+    delete server.lookup_adm_last_checked_at;
     const admSegments = rawAdmPath ? rawAdmPath.split("/").filter(Boolean) : [];
     server.adm_latest_file = admSegments.length > 0 ? admSegments[admSegments.length - 1] : null;
     server.adm_status = Number(server.adm_logs_found) === 1

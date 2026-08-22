@@ -3,7 +3,13 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
-import { createSession, getLinkedServerForUserById, LinkedServerLookupError } from "../functions/_lib/db";
+import {
+  createSession,
+  EXACT_LINKED_SERVER_LOOKUP_PROJECTION,
+  EXACT_LINKED_SERVER_LOOKUP_SQL,
+  getLinkedServerForUserById,
+  LinkedServerLookupError,
+} from "../functions/_lib/db";
 import { storePendingNitradoToken } from "../functions/_lib/onboarding";
 import { onRequest as saveOnboardingHandler } from "../functions/api/onboarding/save";
 import {
@@ -285,10 +291,12 @@ class InstrumentedSqliteD1PreparedStatement {
     };
   }
 
-  async raw() {
+  async raw(options: { columnNames?: boolean } = {}) {
     this.db.record("raw", this.query);
     this.db.maybeFail("raw", this.query);
-    return this.db.sqlite.prepare(this.query).all(...this.bindings).map((row) => Object.values(row));
+    const rows = this.db.sqlite.prepare(this.query).all(...this.bindings);
+    const values = rows.map((row) => Object.values(row));
+    return options.columnNames ? [Object.keys(rows[0] ?? {}), ...values] : values;
   }
 }
 
@@ -346,6 +354,79 @@ function assertExactLookupMigrationSchema(db: InstrumentedSqliteD1Database) {
   assertSqliteObjectExists(db, "idx_linked_servers_merged_into_server_id", "index");
   const foreignKeyRows = db.sqlite.prepare("PRAGMA foreign_key_check").all();
   assert.deepEqual(foreignKeyRows, [], "Fresh migrations through 0059 must pass foreign key checks.");
+}
+
+function assertExactLookupProjectionContract(db: InstrumentedSqliteD1Database) {
+  assert.doesNotMatch(EXACT_LINKED_SERVER_LOOKUP_SQL, /linked_servers\.\*/i, "Exact lookup SQL must not select linked_servers.*.");
+  assert.doesNotMatch(EXACT_LINKED_SERVER_LOOKUP_SQL, /(^|[\s,])\*(?=[\s,]|$)/, "Exact lookup SQL must not contain a bare wildcard.");
+  assert.equal(EXACT_LINKED_SERVER_LOOKUP_PROJECTION.length < 90, true, "Exact lookup projection must retain D1 column-limit headroom.");
+
+  const outputNames = exactLookupProjectionOutputNames();
+  assert.equal(outputNames.length, EXACT_LINKED_SERVER_LOOKUP_PROJECTION.length, "Every exact lookup expression must have a parseable output name.");
+  assert.deepEqual(duplicates(outputNames), [], "Exact lookup output names must be unique.");
+  for (const forbidden of [
+    "encrypted_token",
+    "token_iv",
+    "token_auth_tag",
+    "session_token_hash",
+    "bot_access_token",
+    "access_token",
+    "refresh_token",
+  ]) {
+    assert.equal(
+      EXACT_LINKED_SERVER_LOOKUP_PROJECTION.some((expression) => expression.toLowerCase().includes(forbidden)),
+      false,
+      `Exact lookup projection must not select ${forbidden}.`,
+    );
+  }
+
+  const linkedServerColumns = new Set(db.sqlite.prepare("PRAGMA table_info(linked_servers)").all().map((row) => String(row.name || "")));
+  for (const column of linkedServerProjectionColumns()) {
+    assert.equal(linkedServerColumns.has(column), true, `Exact lookup projected linked_servers.${column} must be migration-backed through 0059.`);
+  }
+
+  for (const required of [
+    "id",
+    "user_id",
+    "guild_id",
+    "discord_guild_id",
+    "nitrado_service_id",
+    "nitrado_service_name",
+    "server_name",
+    "server_type",
+    "server_category",
+    "status",
+    "merged_into_server_id",
+    "lifecycle_status",
+    "listing_visibility",
+    "created_at",
+    "updated_at",
+    "lookup_guild_name",
+    "lookup_guild_icon_url",
+    "lookup_private_adm_path",
+    "lookup_adm_logs_found",
+    "lookup_adm_last_checked_at",
+  ]) {
+    assert.equal(outputNames.includes(required), true, `Exact lookup projection must include audited caller field ${required}.`);
+  }
+}
+
+function exactLookupProjectionOutputNames() {
+  return EXACT_LINKED_SERVER_LOOKUP_PROJECTION.map((expression) => {
+    const alias = expression.match(/\s+AS\s+([a-zA-Z_][a-zA-Z0-9_]*)$/i)?.[1];
+    if (alias) return alias;
+    return expression.trim().split(".").at(-1)?.trim() ?? "";
+  });
+}
+
+function linkedServerProjectionColumns() {
+  return EXACT_LINKED_SERVER_LOOKUP_PROJECTION
+    .map((expression) => expression.match(/^linked_servers\.([a-zA-Z_][a-zA-Z0-9_]*)\s+AS\s+/i)?.[1])
+    .filter((column): column is string => Boolean(column));
+}
+
+function duplicates(values: readonly string[]) {
+  return [...new Set(values.filter((value, index) => values.indexOf(value) !== index))].sort();
 }
 
 function assertTableColumns(db: InstrumentedSqliteD1Database, table: string, required: string[]) {
@@ -582,6 +663,7 @@ async function assertExactSetupVerification(env: Env, db: InstrumentedSqliteD1Da
 async function assertExactLinkedServerLookupMigrationBackedAndReadOnly() {
   const { db, env } = await createMigratedEnv();
   assertExactLookupMigrationSchema(db);
+  assertExactLookupProjectionContract(db);
   await seedBillingPreviewFixture(env, db);
   const ownerASession = (await createSession(env, ownerA)).token;
   const ownerBSession = (await createSession(env, ownerB)).token;
@@ -612,6 +694,21 @@ async function assertExactLinkedServerLookupMigrationBackedAndReadOnly() {
   assert.equal(privateServer?.user_id, ownerA, "Private exact lookup may retain owner identity for server-side callers.");
   assert.equal(privateServer?.adm_path, "games/preview-private-server/noftp/adm/mock.ADM", "Private ADM path should be available only when explicitly requested.");
   assert.equal(privateServer?.adm_latest_file, "mock.ADM");
+  assert.equal(privateServer?.guild_name, "Billing Preview Owner A Drafts", "Exact lookup should map the internal guild-name alias to guild_name.");
+  assert.equal(privateServer?.adm_logs_found, 1, "Exact lookup should map the internal ADM check alias to adm_logs_found.");
+
+  const allResult = await env.DB
+    .prepare(EXACT_LINKED_SERVER_LOOKUP_SQL)
+    .bind(target900003, ownerA)
+    .all<Record<string, unknown>>();
+  assert.equal(allResult.results?.length, 1, "Exact lookup bounded projection should succeed through .all().");
+  const rawStatement = env.DB
+    .prepare(EXACT_LINKED_SERVER_LOOKUP_SQL)
+    .bind(target900003, ownerA) as unknown as {
+      raw(options: { columnNames: true }): Promise<unknown[][]>;
+    };
+  const rawRows = await rawStatement.raw({ columnNames: true });
+  assert.deepEqual(rawRows[0], exactLookupProjectionOutputNames(), "raw({ columnNames: true }) must report the exact unique projection output names.");
 
   db.resetOperationTracking();
   const publicServer = await getLinkedServerForUserById(env, ownerA, target900003);
@@ -685,7 +782,7 @@ async function assertExactLinkedServerLookupBoundaryErrors() {
     const { db, env } = await createLookupBoundaryState();
     db.transformFirstRowOnce(exactLinkedServerLookupPattern, (row) => ({
       ...row,
-      adm_logs_found: {
+      lookup_adm_logs_found: {
         valueOf() {
           throw new Error(diagnosticInternalErrorMessage);
         },
@@ -831,7 +928,7 @@ async function assertDiagnosticLookupPhases() {
     prepare: ({ db }) => {
       db.transformFirstRowOnce(exactLinkedServerLookupPattern, (row) => ({
         ...row,
-        adm_logs_found: {
+        lookup_adm_logs_found: {
           valueOf() {
             throw new Error(diagnosticInternalErrorMessage);
           },
