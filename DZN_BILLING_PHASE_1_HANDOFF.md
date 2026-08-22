@@ -804,6 +804,113 @@ Artifact and result:
 - No Billing preview rerun occurred.
 - No production action occurred.
 
+## Billing Phase 1 Slice 4H Onboarding Failure-Stage Diagnostic Result
+
+Result: DIAGNOSTIC_FAILURE. Billing Phase 1 isolated preview remains incomplete, but the failing `/api/onboarding/test` stage is now safely classified.
+
+Recovery worktree and branch:
+
+- Worktree: `C:\Users\rafae\Desktop\DZN-Audits\worktrees\dzn-onboarding-stage-diagnostic-20260822-184420`.
+- Local branch: `fix/onboarding-stage-diagnostic-20260822-184420`.
+- Starting remote SHA: `d37e06574964ff10b2c253ff7c8f165018946cbb`.
+- Starting HEAD: `d37e06574964ff10b2c253ff7c8f165018946cbb`.
+- Initial modified files recovered from disk: `functions/api/onboarding/test.ts`, `scripts/test-onboarding-verification.ts`, `scripts/github-actions/dzn-owner-console-preview/35-configure-billing-phase-1-preview-runtime.sh`, `scripts/github-actions/dzn-owner-console-preview/38-verify-billing-phase-1-preview.sh`, and `scripts/test-github-workflow-boundary.ts`.
+- The interrupted `npm test` result was unknown after the prior chat compaction failure; it was rerun from disk and passed.
+- Preserved dirty checkout `C:\Users\rafae\OneDrive\Desktop\DZN-Network` remained untouched.
+
+Implementation commits pushed to `origin/feature/event-platform-performance-foundation`:
+
+- `57179d0414d5b0574185d6fd4018c3f9709ad9d9` - `fix(onboarding): classify preview setup failure stage safely`.
+- `4511abd5639a6e88dfe75c47a8452d3ae37cff59` - `fix(preview): capture onboarding verification failure stage`.
+- Diagnostic candidate SHA: `4511abd5639a6e88dfe75c47a8452d3ae37cff59`.
+
+Diagnostic implementation:
+
+- Safe stage allowlist: `request_parse`, `linked_server_lookup`, `credential_resolution`, `metadata_refresh`, `adm_discovery`, `adm_path_persist`, `adm_backfill_plan`, `discord_verification`, `checks_read`, `checks_write`, and `response_build`.
+- The route diagnostic response is gated by `DZN_BILLING_PREVIEW_DIAGNOSTICS=true`, `MOCK_AUTH=true`, `MOCK_NITRADO=true`, Discord notification and server-announcement flags remaining false, and the dedicated Billing preview hostname family.
+- Outside that exact preview diagnostic gate, the original exception is rethrown and no `failure_stage` is exposed.
+- Diagnostic HTTP `500` response is limited to `error`, `error_code=onboarding_verification_failed`, and safe `failure_stage`.
+- The console marker contains only `billing_preview_onboarding_verification_failed` and the safe stage; it does not log the caught error object.
+- Route-level tests use the actual exported Pages Function handler and cover `adm_path_persist`, `checks_read`, `checks_write`, diagnostic response leakage protection, disabled-gate rethrow, exact mock success, foreign linked-server safe `404`, and no real Nitrado or Discord fetch in mock mode.
+- Script `35` sets `DZN_BILLING_PREVIEW_DIAGNOSTICS=true` only for `dzn-network-owner-console-preview-billing-phase-1`, while preserving `MOCK_AUTH=true`, `MOCK_NITRADO=true`, and Discord flags as false.
+- Script `38` special-cases controlled diagnostic HTTP `500` only in group `22`, records the safe stage into `endpoint-status-summary.json`, marks group `22` as failed, and exits with `BILLING_PREVIEW_ONBOARDING_VERIFICATION_STAGE_FAILED`.
+
+Local validation before push:
+
+- `"C:\Program Files\Git\bin\bash.exe" -n scripts/github-actions/dzn-owner-console-preview/35-configure-billing-phase-1-preview-runtime.sh`: passed.
+- `"C:\Program Files\Git\bin\bash.exe" -n scripts/github-actions/dzn-owner-console-preview/38-verify-billing-phase-1-preview.sh`: passed.
+- `npm run test:onboarding-verification`: passed.
+- `npm run test:billing-integrity`: passed.
+- `npm run test:github-workflows`: passed.
+- `npm run test:billing-plans`: passed.
+- `npm run test:nitrado-diagnostics`: passed.
+- `npm run test:owner-console`: passed.
+- `npm run test:public-access-gating`: passed.
+- `npx tsc --noEmit --pretty false`: passed.
+- `npm run lint`: passed with 0 errors and the existing 4 warnings unchanged.
+- `npm run build`: passed and patched Cloudflare Pages function routes.
+- `npm test`: passed before and after focused validation; the optional latest ADM raw fixture self-skipped for the known missing owner-supplied bundle reason.
+- `git diff --check`: passed.
+
+Diagnostic preview dispatch and run:
+
+- Workflow: `.github/workflows/dzn-owner-console-preview.yml`.
+- Mode: `billing-phase-1-preview`.
+- Ref: `feature/event-platform-performance-foundation`.
+- Required confirmations used: `confirm_preview_only=PREVIEW_ONLY`, `confirm_billing_phase_1_preview=APPROVE_BILLING_PHASE_1_PREVIEW`.
+- Secure dispatch method: Git Credential Manager credential captured only in process memory through Git Bash plus PowerShell REST. `gh` was not installed. No credential value was printed or stored.
+- Latest existing matching run before dispatch: none for candidate `4511abd5639a6e88dfe75c47a8452d3ae37cff59`.
+- Exactly one dispatch was made. No rerun and no second dispatch occurred.
+- Run URL: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32589846862`.
+- Run ID: `32589846862`; run number `68`; attempt `1`.
+- Event: `workflow_dispatch`; branch: `feature/event-platform-performance-foundation`.
+- Created: `2026-08-22T18:08:23Z`; completed: `2026-08-22T18:11:24Z`.
+- Final conclusion: `failure`, classified as `DIAGNOSTIC_FAILURE`.
+- First failed job: `owner-console-preview`.
+- First failed step: `Verify Billing Phase 1 preview`.
+- First failed verifier group: `22. Mock onboarding test works`.
+- Failure code: `BILLING_PREVIEW_ONBOARDING_VERIFICATION_STAGE_FAILED`.
+- Safe failure stage: `linked_server_lookup`.
+
+Preview evidence:
+
+- Candidate-specific preview D1 name: `dzn_network_db_owner_console_preview_billing_phase_1_4511abd`.
+- Masked preview D1 ID: `ce3057bf...291c`.
+- Dedicated Pages project: `dzn-network-owner-console-preview-billing-phase-1`.
+- Stable URL: `https://dzn-network-owner-console-preview-billing-phase-1.pages.dev`.
+- Immutable URL: `https://5bfbbddd.dzn-network-owner-console-preview-billing-phase-1.pages.dev`.
+- Migration result: passed; migration ledger existed and applied through `0059`, with `0057_event_suggestions_phase_2a.sql`, `0058_billing_phase_1_integrity.sql`, and `0059_linked_server_merge_state.sql` in order.
+- Schema result: passed; reservation table/indexes, linked-server merge columns/index, Nitrado linked-server column, active-service uniqueness, and foreign-key check were clean.
+- Fixtures result: passed; synthetic users, sessions, linked servers, Nitrado connections, and reservations were seeded with no plaintext token or encrypted credential values in the artifact.
+- Groups reached: groups `1` through `21` passed and group `22` failed with the safe diagnostic stage. Groups `23` through `30` did not run after the deliberate fail-fast diagnostic exit.
+- Artifact name: `dzn-billing-phase-1-preview`.
+- Artifact ID: `9480047759`.
+- Artifact file count: nine expected files.
+- Artifact files parsed: `candidate.json`, `summary.md`, `migration-summary.json`, `schema-summary.json`, `fixture-result-summary.json`, `endpoint-status-summary.json`, `ownership-integrity-summary.json`, `allowance-summary.json`, and `stable-vs-immutable-summary.json`.
+- External evidence extraction path: `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-phase-1-diagnostic-20260822-181251Z-run-32589846862\dzn-billing-phase-1-preview`.
+- Job log path: `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-phase-1-diagnostic-20260822-181251Z-run-32589846862\workflow-job-97071831107.log`.
+- JSON parse result: all eight JSON files parsed successfully.
+- Security scan result: passed for the artifact and downloaded job log after excluding literal `MOCK_NITRADO` flag names; no unmasked GitHub credential, Cloudflare token, session secret, token encryption key, cookie/session token, Nitrado token, encrypted credential, IV, auth tag, Authorization value, signed URL, complete D1 UUID, raw ADM path, SQL statement, stack trace, raw internal exception, or real foreign-owner identity was retained.
+
+Local direct old-candidate D1 inspection:
+
+- Result: `NOT_AVAILABLE_LOCALLY`.
+- Reason: Wrangler was unauthenticated locally and no approved local Cloudflare credential path was available.
+- Retained failed-run artifact evidence for run `32587679222` remained the source for the previous candidate's sanitized state.
+- No old candidate D1 was mutated. The old candidate D1 `dzn_network_db_owner_console_preview_billing_phase_1_0f18cbc` was not deleted, mutated, or inspected through unauthorized credential extraction.
+
+Safety:
+
+- No production deployment occurred.
+- No production migration occurred.
+- No production D1 read or write was performed.
+- No D1 deletion, preview cleanup workflow, or previous candidate D1 mutation occurred.
+- No Stripe product, price, checkout, billing, subscription, or webhook configuration was changed.
+- No Discord notification flag was enabled and no Discord message was sent.
+- No real Nitrado call was made.
+- No main, Event release branch, or PR #15 change occurred.
+- No rebase, merge, cherry-pick, reset, stash, clean, force-push, or protected-data deletion/reset occurred.
+
 ## Next Authorised Slice
 
-Investigate the Billing Phase 1 preview verifier group `22`, `Mock onboarding test works`, where `/api/onboarding/test` returned HTTP `500` in run `32587679222` for candidate `0f18cbc787f0473c46b9ebae23773931ef746b9d`. Determine whether the issue is route behavior, preview fixture shape, mock session handling, or verifier expectation, and prepare the narrowest tested correction only. Treat auth/session changes as high risk, preserve logged-out `401`, foreign-owner `404`, and existing 401/403 endpoint protection, and do not rerun a guarded `billing-phase-1-preview` until a separate explicit authorization. No D1 deletion, preview cleanup, production deployment, production migration, production D1 write, Stripe change, main change, Event release branch change, or PR #15 change.
+Investigate and repair only the /api/onboarding/test `linked_server_lookup` stage identified by the isolated Billing Phase 1 diagnostic preview. Preserve all authentication, ownership, exact-token, allowance and logged-out protections. Do not rerun the Billing preview, deploy production, migrate production D1, change Stripe, delete D1 resources or alter main without separate explicit authorization.

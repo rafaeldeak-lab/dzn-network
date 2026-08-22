@@ -30,6 +30,7 @@ Canonical clean worktree for this recovery:
 - Active remote SHA after linked-server-scoped setup verification repair: `1d8049b99622a869627c23d3e6c161811643a470`.
 - Active remote SHA after exact `900003` Billing preview verifier repair: `a3677461b9db7096562e3402b37cb34aa3ec3c54`.
 - Active remote SHA after Billing session-readiness repair: `0f18cbc787f0473c46b9ebae23773931ef746b9d`.
+- Active remote SHA after onboarding failure-stage diagnostic implementation: `4511abd5639a6e88dfe75c47a8452d3ae37cff59`.
 
 Old chat transcripts, interrupted Codex edits, and dirty local worktrees are not Git truth. Use remote branch history and committed files as the source of truth.
 
@@ -189,6 +190,43 @@ Billing Phase 1 Slice 4G-C final candidate preview result:
 - Older failed candidate D1s for `a367746`, `1c30311`, `fb478f4`, `8899bfd`, `c2e685d`, `5313c0c`, and `5615bba` were retained.
 - No production deployment, production migration, production D1 SQL read/write, D1 deletion, preview cleanup, Stripe change, Discord send, real Nitrado call marker, main change, Event release branch change, PR #15 change, rebase, merge, cherry-pick, reset, stash, clean, force-push, or implementation change occurred.
 
+Billing Phase 1 Slice 4H onboarding failure-stage diagnostic result:
+
+- Result: DIAGNOSTIC_FAILURE. Billing preview remains incomplete, but the group `22` `/api/onboarding/test` failure now exposes only a safe committed stage.
+- Recovery worktree: `C:\Users\rafae\Desktop\DZN-Audits\worktrees\dzn-onboarding-stage-diagnostic-20260822-184420`, branch `fix/onboarding-stage-diagnostic-20260822-184420`.
+- Starting remote and starting HEAD: `d37e06574964ff10b2c253ff7c8f165018946cbb`.
+- Implementation commits:
+  - `57179d0414d5b0574185d6fd4018c3f9709ad9d9` - `fix(onboarding): classify preview setup failure stage safely`.
+  - `4511abd5639a6e88dfe75c47a8452d3ae37cff59` - `fix(preview): capture onboarding verification failure stage`.
+- Diagnostic candidate SHA: `4511abd5639a6e88dfe75c47a8452d3ae37cff59`; pushed to `origin/feature/event-platform-performance-foundation` as a fast-forward before dispatch.
+- Local validation passed before push and dispatch: both Billing preview Bash syntax checks, `npm run test:onboarding-verification`, `npm run test:billing-integrity`, `npm run test:github-workflows`, `npm run test:billing-plans`, `npm run test:nitrado-diagnostics`, `npm run test:owner-console`, `npm run test:public-access-gating`, `npx tsc --noEmit --pretty false`, `npm run lint` with 0 errors and the existing 4 warnings, `npm run build`, `npm test`, and `git diff --check`.
+- The interrupted prior `npm test` result was unknown after chat compaction; the aggregate suite was rerun from disk and passed. The optional latest ADM raw fixture self-skipped for the known missing owner-supplied bundle reason.
+- Diagnostic stage allowlist: `request_parse`, `linked_server_lookup`, `credential_resolution`, `metadata_refresh`, `adm_discovery`, `adm_path_persist`, `adm_backfill_plan`, `discord_verification`, `checks_read`, `checks_write`, and `response_build`.
+- Diagnostic route gate requires the dedicated Billing preview hostname family, `DZN_BILLING_PREVIEW_DIAGNOSTICS=true`, `MOCK_AUTH=true`, `MOCK_NITRADO=true`, and Discord notification flags remaining false. Outside that gate, the original exception is rethrown and no `failure_stage` is exposed.
+- Runtime configuration adds `DZN_BILLING_PREVIEW_DIAGNOSTICS=true` only for `dzn-network-owner-console-preview-billing-phase-1`; production workflows and unrelated preview modes do not configure it.
+- Verifier group `22` is the only group allowed to inspect controlled diagnostic HTTP `500`; it records the safe stage, marks the group failed, flushes the sanitized summary, and exits with `BILLING_PREVIEW_ONBOARDING_VERIFICATION_STAGE_FAILED`.
+- Workflow: `.github/workflows/dzn-owner-console-preview.yml`, mode `billing-phase-1-preview`, ref `feature/event-platform-performance-foundation`, confirmations `PREVIEW_ONLY` and `APPROVE_BILLING_PHASE_1_PREVIEW`.
+- Secure dispatch method: Git Credential Manager credential captured only in process memory through Git Bash plus PowerShell REST. `gh` was not installed. No credential value was printed or saved.
+- Exactly one dispatch occurred. No rerun and no second dispatch occurred.
+- Run URL: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32589846862`.
+- Run ID: `32589846862`; run number `68`; attempt `1`; event `workflow_dispatch`; final conclusion `failure`, classified as `DIAGNOSTIC_FAILURE`.
+- First failed job: `owner-console-preview`; first failed step: `Verify Billing Phase 1 preview`; first failed verifier group: `22. Mock onboarding test works`.
+- Failure code: `BILLING_PREVIEW_ONBOARDING_VERIFICATION_STAGE_FAILED`; safe failure stage: `linked_server_lookup`.
+- Preview D1: `dzn_network_db_owner_console_preview_billing_phase_1_4511abd`, masked ID `ce3057bf...291c`.
+- Dedicated Pages project: `dzn-network-owner-console-preview-billing-phase-1`.
+- Stable URL: `https://dzn-network-owner-console-preview-billing-phase-1.pages.dev`.
+- Immutable URL: `https://5bfbbddd.dzn-network-owner-console-preview-billing-phase-1.pages.dev`.
+- Migration and schema evidence passed through `0059`; reservation table/indexes, linked-server merge state, Nitrado linked-server credential column, active-service uniqueness, and final schema foreign-key check were clean.
+- Billing matrix progress: groups `1` through `21` passed; group `22` failed with safe stage `linked_server_lookup`; groups `23` through `30` did not run after the fail-fast diagnostic exit.
+- Artifact: `dzn-billing-phase-1-preview`, ID `9480047759`, extracted under `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-phase-1-diagnostic-20260822-181251Z-run-32589846862\dzn-billing-phase-1-preview`.
+- Job log retained at `C:\Users\rafae\Desktop\DZN-Audits\artifacts\billing-phase-1-diagnostic-20260822-181251Z-run-32589846862\workflow-job-97071831107.log`.
+- Artifact contained the expected nine files; all eight JSON files parsed successfully.
+- Artifact and job-log security scan passed for unmasked GitHub credentials, Cloudflare tokens, encryption/session secret values, raw session cookies/tokens, raw or encrypted Nitrado credential material, IV/auth tags, Authorization values, signed URLs, complete D1 UUIDs, raw ADM paths, SQL statements, stack traces, raw internal exceptions, and real foreign-owner identity.
+- Local direct old-candidate D1 inspection result: `NOT_AVAILABLE_LOCALLY`; reason: Wrangler was unauthenticated locally and no approved local Cloudflare credential path was available.
+- The old candidate D1 `dzn_network_db_owner_console_preview_billing_phase_1_0f18cbc` was not mutated, deleted, or inspected through unauthorized credential extraction.
+- Preserved dirty checkout `C:\Users\rafae\OneDrive\Desktop\DZN-Network` remained untouched.
+- No production deployment, production migration, production D1 read/write, D1 deletion, preview cleanup, Stripe change, Discord send, real Nitrado call, main change, Event release branch change, PR #15 change, rebase, merge, cherry-pick, reset, stash, clean, force-push, or protected-data deletion/reset occurred.
+
 Billing Phase 1 read-only D1 capacity audit result:
 
 - Previous attempts remain recorded in `DZN_BILLING_PHASE_1_HANDOFF.md`: run `32498388093` failed on Cloudflare Pages list pagination, and run `32498659821` failed on GitHub job-log HTTP `415`.
@@ -230,7 +268,7 @@ Production Pages stable-alias and runtime health must be verified from the deplo
 
 The repository blockers targeted by Phase 0 are resolved after validation and push. The linked-server Nitrado integrity slice is complete in code commit `a9fd8f7be01637fbcd6e6b1f06ffaf23886ceb02`. The stale Free-plan D1 guard was corrected for the owner-confirmed Workers Paid account in `5615bbaafeb5016948ed25f5968afd6d70000218`. The migration repair commit `5313c0c33379bc3598e6f986132bbd4237d40894` added `0059_linked_server_merge_state.sql`, and the Slice 4E commits `ba4a830dc0c42fc34148c72bb4b8e47b3b13d597` and `1c30311a950a896368dec2353a6d027abb055d91` resolved the corrupted-token safe HTTP `500` contract.
 
-The latest guarded Billing Phase 1 preview run for candidate `0f18cbc787f0473c46b9ebae23773931ef746b9d` created the candidate-specific D1, applied migrations through `0059`, passed Billing schema verification, seeded fixtures, built and deployed the runtime, and passed verifier groups `1` through `21`. Billing preview remains incomplete because verifier group `22`, `Mock onboarding test works`, failed when `/api/onboarding/test` returned HTTP `500`.
+The latest guarded Billing Phase 1 preview run for diagnostic candidate `4511abd5639a6e88dfe75c47a8452d3ae37cff59` created the candidate-specific D1, applied migrations through `0059`, passed Billing schema verification, seeded fixtures, built and deployed the runtime, and passed verifier groups `1` through `21`. Billing preview remains incomplete because verifier group `22`, `Mock onboarding test works`, failed with safe diagnostic stage `linked_server_lookup`.
 
 The canonical clean worktree remains authoritative:
 
@@ -251,7 +289,7 @@ The canonical clean worktree remained authoritative and clean before the evidenc
 
 ## Next Authorised Slice
 
-Investigate the Billing Phase 1 preview verifier group `22`, `Mock onboarding test works`, where `/api/onboarding/test` returned HTTP `500` in run `32587679222` for candidate `0f18cbc787f0473c46b9ebae23773931ef746b9d`. Determine whether the issue is route behavior, preview fixture shape, mock session handling, or verifier expectation, and prepare the narrowest tested correction only. Treat auth/session changes as high risk, preserve logged-out `401`, foreign-owner `404`, and existing 401/403 endpoint protection, and do not rerun a guarded `billing-phase-1-preview` until a separate explicit authorization. No D1 deletion, preview cleanup, production deployment, production migration, production D1 write, Stripe change, main change, Event release branch change, or PR #15 change.
+Investigate and repair only the /api/onboarding/test `linked_server_lookup` stage identified by the isolated Billing Phase 1 diagnostic preview. Preserve all authentication, ownership, exact-token, allowance and logged-out protections. Do not rerun the Billing preview, deploy production, migrate production D1, change Stripe, delete D1 resources or alter main without separate explicit authorization.
 
 ## Deferred Areas
 
