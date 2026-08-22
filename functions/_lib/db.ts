@@ -216,8 +216,6 @@ export async function getLinkedServerForUserById(
 ) {
   const normalizedLinkedServerId = linkedServerId.trim();
   if (!normalizedLinkedServerId || !env.DB) return null;
-  await ensureLinkedServerMetadataColumns(env);
-  await ensureServerLogConfigTable(env);
   const server = await env.DB
     .prepare(
       `SELECT

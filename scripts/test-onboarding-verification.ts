@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
-import { createSession } from "../functions/_lib/db";
+import { createSession, getLinkedServerForUserById } from "../functions/_lib/db";
 import { storePendingNitradoToken } from "../functions/_lib/onboarding";
 import { onRequest as saveOnboardingHandler } from "../functions/api/onboarding/save";
 import {
@@ -65,11 +65,19 @@ const forbiddenResponseMarkers = [
   "SESSION_SECRET",
   "Authorization",
   "Bearer ",
+  "SELECT ",
+  "INSERT INTO",
+  "UPDATE ",
+  "DELETE ",
+  "ALTER TABLE",
+  "CREATE TABLE",
   "Error:",
   " at ",
   "stack",
   "Traceback",
 ];
+const readOnlyOperationClasses = new Set(["PRAGMA", "SELECT"]);
+const forbiddenExactLookupOperationClasses = new Set(["ALTER", "CREATE", "DROP", "DELETE", "UPDATE", "INSERT", "REPLACE"]);
 const forbiddenSideEffectTables = [
   "server_public_cache",
   "public_home_stats_cache",
@@ -107,6 +115,7 @@ class InstrumentedSqliteD1Database {
   };
   readonly touchedSql: string[] = [];
   private readonly failureRules: D1FailureRule[] = [];
+  private blockMutatingPreparedStatements = false;
 
   constructor() {
     this.sqlite = new DatabaseSync(":memory:");
@@ -114,6 +123,12 @@ class InstrumentedSqliteD1Database {
 
   prepare(query: string) {
     this.record("prepare", query);
+    if (this.blockMutatingPreparedStatements) {
+      const operationClass = sqlOperationClass(query);
+      if (forbiddenExactLookupOperationClasses.has(operationClass)) {
+        throw new Error(`Read-only D1 adapter blocked ${operationClass} statement during exact linked-server lookup test; observed_classes=${sqlOperationClasses(this.touchedSql).join(",")}`);
+      }
+    }
     return new InstrumentedSqliteD1PreparedStatement(this, query);
   }
 
@@ -141,6 +156,10 @@ class InstrumentedSqliteD1Database {
       this.counts[key] = 0;
     }
     this.touchedSql.length = 0;
+  }
+
+  setReadOnlyPreparedStatements(enabled: boolean) {
+    this.blockMutatingPreparedStatements = enabled;
   }
 
   snapshotOperationCounts() {
@@ -228,6 +247,48 @@ async function createMigratedEnv() {
     DZN_APP_URL: "https://local.test",
   } as Env;
   return { db, env };
+}
+
+function assertExactLookupMigrationSchema(db: InstrumentedSqliteD1Database) {
+  assertTableColumns(db, "linked_servers", [
+    "id",
+    "user_id",
+    "guild_id",
+    "discord_guild_id",
+    "nitrado_service_id",
+    "status",
+    "merged_into_server_id",
+  ]);
+  assertTableColumns(db, "discord_guilds", [
+    "id",
+    "name",
+    "icon_url",
+  ]);
+  assertTableColumns(db, "server_log_config", [
+    "linked_server_id",
+    "adm_path",
+  ]);
+  assertTableColumns(db, "onboarding_checks", [
+    "linked_server_id",
+    "adm_logs_found",
+    "last_tested_at",
+  ]);
+  assertSqliteObjectExists(db, "idx_server_log_config_linked_server_id", "index");
+  assertSqliteObjectExists(db, "idx_linked_servers_merged_into_server_id", "index");
+  const foreignKeyRows = db.sqlite.prepare("PRAGMA foreign_key_check").all();
+  assert.deepEqual(foreignKeyRows, [], "Fresh migrations through 0059 must pass foreign key checks.");
+}
+
+function assertTableColumns(db: InstrumentedSqliteD1Database, table: string, required: string[]) {
+  const columns = new Set(db.sqlite.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name || "")));
+  for (const column of required) {
+    assert.equal(columns.has(column), true, `Fresh migrations through 0059 must include ${table}.${column}.`);
+  }
+}
+
+function assertSqliteObjectExists(db: InstrumentedSqliteD1Database, name: string, type: "index" | "table") {
+  const row = db.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = ? AND name = ? LIMIT 1").get(type, name);
+  assert.equal(row?.name, name, `Fresh migrations through 0059 must include ${type} ${name}.`);
 }
 
 async function seedBillingPreviewFixture(env: Env, db: InstrumentedSqliteD1Database) {
@@ -318,7 +379,7 @@ async function insertLinkedServer(
     guildAlias: string;
     serviceId: string | null;
     serviceName: string;
-    status: "live" | "pending";
+    status: "live" | "pending" | "deleted";
   },
 ) {
   await db
@@ -350,6 +411,24 @@ async function insertLinkedServer(
       fixtureTime(),
       fixtureTime(),
     )
+    .run();
+}
+
+async function insertServerLogConfig(db: InstrumentedSqliteD1Database, linkedServerId: string, admPath: string) {
+  await db
+    .prepare("INSERT INTO server_log_config (id, linked_server_id, adm_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+    .bind(`${linkedServerId}-log-config`, linkedServerId, admPath, fixtureTime(), fixtureTime())
+    .run();
+}
+
+async function insertOnboardingCheck(db: InstrumentedSqliteD1Database, linkedServerId: string) {
+  await db
+    .prepare(
+      `INSERT INTO onboarding_checks (
+        id, linked_server_id, token_valid, service_access, adm_logs_found, dayz_service_detected, last_tested_at
+      ) VALUES (?, ?, 1, 1, 1, 1, ?)`,
+    )
+    .bind(`${linkedServerId}-onboarding-check`, linkedServerId, fixtureTime())
     .run();
 }
 
@@ -428,6 +507,59 @@ async function assertExactSetupVerification(env: Env, db: InstrumentedSqliteD1Da
 
   console.log(`Exact 900003 setup verification D1 operations: prepare=${exactCounts.prepare}, first=${exactCounts.first}, all=${exactCounts.all}, run=${exactCounts.run}, raw=${exactCounts.raw}, exec=${exactCounts.exec}, batch=${exactCounts.batch}`);
   return exactCounts;
+}
+
+async function assertExactLinkedServerLookupMigrationBackedAndReadOnly() {
+  const { db, env } = await createMigratedEnv();
+  assertExactLookupMigrationSchema(db);
+  await seedBillingPreviewFixture(env, db);
+  const ownerASession = (await createSession(env, ownerA)).token;
+  const ownerBSession = (await createSession(env, ownerB)).token;
+  await runPreviewSaveSequence(env, db, ownerASession, ownerBSession);
+  await insertServerLogConfig(db, target900003, "games/preview-private-server/noftp/adm/mock.ADM");
+  await insertOnboardingCheck(db, target900003);
+  await insertLinkedServer(db, {
+    alias: "owner-a-deleted-900004",
+    ownerAlias: "owner-a",
+    guildAlias: "owner-a-draft",
+    serviceId: "900004",
+    serviceName: "Owner A deleted 900004",
+    status: "deleted",
+  });
+
+  db.resetOperationTracking();
+  db.setReadOnlyPreparedStatements(true);
+  const privateServer = await getLinkedServerForUserById(env, ownerA, target900003, { includePrivateAdmPath: true });
+  const privateLookupClasses = assertExactLookupReadOnlySql(db.touchedSql, "private exact linked-server lookup");
+  assert.equal(privateServer?.id, target900003, "Exact Owner A 900003 lookup should return the requested linked server.");
+  assert.equal(privateServer?.user_id, ownerA, "Private exact lookup may retain owner identity for server-side callers.");
+  assert.equal(privateServer?.adm_path, "games/preview-private-server/noftp/adm/mock.ADM", "Private ADM path should be available only when explicitly requested.");
+  assert.equal(privateServer?.adm_latest_file, "mock.ADM");
+
+  db.resetOperationTracking();
+  const publicServer = await getLinkedServerForUserById(env, ownerA, target900003);
+  assertExactLookupReadOnlySql(db.touchedSql, "non-private exact linked-server lookup");
+  assert.equal(publicServer?.id, target900003, "Non-private exact lookup should still return the requested linked server.");
+  assert.equal(Object.prototype.hasOwnProperty.call(publicServer ?? {}, "user_id"), false, "Non-private exact lookup must not expose user_id.");
+  assert.equal(publicServer?.adm_path, "games/{gameserver-username}/noftp/adm/mock.ADM", "Non-private exact lookup should mask the ADM path.");
+
+  for (const [label, userId, linkedServerId] of [
+    ["foreign owner", ownerA, id("owner-b-source-cross-900001")],
+    ["nonexistent id", ownerA, id("does-not-exist")],
+    ["deleted row", ownerA, id("owner-a-deleted-900004")],
+    ["merged row", ownerA, id("owner-a-source-duplicate-900002")],
+  ] as const) {
+    db.resetOperationTracking();
+    const result = await getLinkedServerForUserById(env, userId, linkedServerId, { includePrivateAdmPath: true });
+    assert.equal(result, null, `Exact lookup should return null for ${label}.`);
+    assertExactLookupReadOnlySql(db.touchedSql, `${label} exact linked-server lookup`);
+  }
+  db.setReadOnlyPreparedStatements(false);
+
+  const foreignKeyRows = db.sqlite.prepare("PRAGMA foreign_key_check").all();
+  assert.deepEqual(foreignKeyRows, [], "Seeded exact lookup fixture must pass foreign key checks.");
+  console.log(`Exact linked-server lookup migration contract: tables=true columns=true indexes=true foreignKeys=true`);
+  console.log(`Exact linked-server lookup operation classes: ${privateLookupClasses.join(",")}`);
 }
 
 async function assertForeignAndFallbackContracts(env: Env, db: InstrumentedSqliteD1Database, ownerASession: string) {
@@ -606,6 +738,27 @@ function assertNoForbiddenSqlSideEffects(queries: string[]) {
   }
 }
 
+function assertExactLookupReadOnlySql(queries: string[], label: string) {
+  const operationClasses = sqlOperationClasses(queries);
+  const nonReadOperations = operationClasses.filter((operation) => !readOnlyOperationClasses.has(operation));
+  assert.deepEqual(nonReadOperations, [], `${label} must perform SELECT/PRAGMA operations only; observed classes=${operationClasses.join(",")}`);
+  const forbiddenOperations = operationClasses.filter((operation) => forbiddenExactLookupOperationClasses.has(operation));
+  assert.deepEqual(forbiddenOperations, [], `${label} must perform zero schema/write operations; observed classes=${operationClasses.join(",")}`);
+  return operationClasses;
+}
+
+function sqlOperationClasses(queries: string[]) {
+  return [...new Set(queries.map(sqlOperationClass))].filter(Boolean).sort();
+}
+
+function sqlOperationClass(query: string) {
+  const normalized = query
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/--.*$/gm, " ")
+    .trim();
+  return normalized.match(/^([A-Za-z]+)/)?.[1]?.toUpperCase() ?? "UNKNOWN";
+}
+
 function id(alias: string) {
   return `${prefix}${alias}`;
 }
@@ -624,14 +777,37 @@ function fixtureTime() {
 
 async function run() {
   const originalFetch = globalThis.fetch;
+  const originalConsoleLog = console.log;
   const externalFetches: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
     externalFetches.push(url);
     throw new Error(`Unexpected external fetch during onboarding verification test: ${url}`);
   }) as typeof fetch;
+  console.log = ((...values: unknown[]) => {
+    const first = values[0];
+    if (typeof first === "string" && (
+      first.startsWith("Exact linked-server lookup")
+      || first.startsWith("Exact 900003 setup verification")
+      || first.startsWith("Onboarding verification tests passed")
+    )) {
+      originalConsoleLog(...values);
+      return;
+    }
+    if (
+      typeof first === "object"
+      && first !== null
+      && (first as { event?: unknown }).event === "billing_preview_onboarding_verification_failed"
+    ) {
+      originalConsoleLog({
+        event: "billing_preview_onboarding_verification_failed",
+        stage: (first as { stage?: unknown }).stage,
+      });
+    }
+  }) as typeof console.log;
 
   try {
+    await assertExactLinkedServerLookupMigrationBackedAndReadOnly();
     const { db, env, ownerASession } = await createReadyBillingPreviewState();
     const exactCounts = await assertExactSetupVerification(env, db, ownerASession);
     await assertForeignAndFallbackContracts(env, db, ownerASession);
@@ -676,6 +852,7 @@ async function run() {
     console.log(`Onboarding verification tests passed. Exact operation count: ${JSON.stringify(exactCounts)}`);
   } finally {
     globalThis.fetch = originalFetch;
+    console.log = originalConsoleLog;
   }
 }
 
