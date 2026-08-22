@@ -1900,9 +1900,14 @@ const initialSchemaMigration = read("migrations/0001_initial_schema.sql");
 const serverLogConfigMigration = read("migrations/0002_server_log_config.sql");
 const linkedServerMergeMigration = read("migrations/0059_linked_server_merge_state.sql");
 const dbHelperSource = read("functions/_lib/db.ts");
+const onboardingTestRouteSource = read("functions/api/onboarding/test.ts");
 const exactLinkedServerLookupHelper = dbHelperSource.slice(
-  indexOfOrFail(dbHelperSource, "export async function getLinkedServerForUserById"),
+  indexOfOrFail(dbHelperSource, "const EXACT_LINKED_SERVER_LOOKUP_SQL"),
   indexOfOrFail(dbHelperSource, "export async function getLinkedServersForUserSummary"),
+);
+const exactLinkedServerPreflightBlock = billingVerifierScript.slice(
+  indexOfOrFail(billingVerifierScript, "function runExactLinkedServerLookupPreflight"),
+  indexOfOrFail(billingVerifierScript, "function sqlString"),
 );
 for (const scriptNumber of ["32", "33", "34", "35", "36", "37", "38"]) {
   assert.equal(dznOwnerConsolePreviewWorkflowSource.includes(`scripts/github-actions/dzn-owner-console-preview/${scriptNumber}-`), true, `Billing workflow must reference script ${scriptNumber}.`);
@@ -2002,6 +2007,23 @@ assert.equal(exactLinkedServerLookupHelper.includes("ensureServerLogConfigTable"
 assert.equal(exactLinkedServerLookupHelper.includes("linked_servers.id = ?"), true, "Exact linked-server lookup must remain constrained by linked-server ID.");
 assert.equal(exactLinkedServerLookupHelper.includes("linked_servers.user_id = ?"), true, "Exact linked-server lookup must remain constrained by owner ID.");
 assert.equal(exactLinkedServerLookupHelper.includes("merged_into_server_id"), true, "Exact linked-server lookup must keep merged-row exclusion.");
+assert.equal(dbHelperSource.includes("export type LinkedServerLookupPhase"), true, "Exact linked-server lookup must commit safe lookup phases.");
+assert.equal(dbHelperSource.includes("export class LinkedServerLookupError extends Error"), true, "Exact linked-server lookup must expose a safe phase error class.");
+for (const phase of ["prepare", "bind", "execute", "row_shape", "enrich"]) {
+  assert.equal(dbHelperSource.includes(`\"${phase}\"`), true, `Exact linked-server lookup phase must include ${phase}.`);
+}
+assert.equal(exactLinkedServerLookupHelper.includes("new LinkedServerLookupError(\"prepare\""), true, "Exact lookup prepare failures must be classified.");
+assert.equal(exactLinkedServerLookupHelper.includes("new LinkedServerLookupError(\"bind\""), true, "Exact lookup bind failures must be classified.");
+assert.equal(exactLinkedServerLookupHelper.includes("new LinkedServerLookupError(\"execute\""), true, "Exact lookup execute failures must be classified.");
+assert.equal(exactLinkedServerLookupHelper.includes("new LinkedServerLookupError(\"row_shape\""), true, "Exact lookup invalid row shapes must be classified.");
+assert.equal(exactLinkedServerLookupHelper.includes("new LinkedServerLookupError(\"enrich\""), true, "Exact lookup enrichment failures must be classified.");
+assert.equal(exactLinkedServerLookupHelper.includes("typeof rawServer !== \"object\""), true, "Exact lookup must validate the returned D1 row shape.");
+assert.equal(exactLinkedServerLookupHelper.includes("Array.isArray(rawServer)"), true, "Exact lookup must reject array rows.");
+assert.equal(exactLinkedServerLookupHelper.includes("server = {\n      ...rawServer,\n    };"), true, "Exact lookup must clone the D1 row before enrichment.");
+assert.equal(exactLinkedServerLookupHelper.includes("rawServer.adm_latest_file"), false, "Exact lookup must not enrich the raw D1 row.");
+assert.equal(exactLinkedServerLookupHelper.includes("rawServer.adm_status"), false, "Exact lookup must not mutate ADM status onto the raw D1 row.");
+assert.equal(exactLinkedServerLookupHelper.includes("rawServer.original_owner_is_current_user"), false, "Exact lookup must not mutate ownership flags onto the raw D1 row.");
+assert.equal(exactLinkedServerLookupHelper.includes("admSegments.length > 0 ? admSegments[admSegments.length - 1] : null"), true, "Exact lookup must use compatibility-safe ADM filename extraction.");
 assert.equal(billingSchemaVerifierScript.includes("merged_into_server_id"), true, "Billing schema verifier must require linked_servers.merged_into_server_id.");
 assert.equal(billingSchemaVerifierScript.includes("merged_at"), true, "Billing schema verifier must require linked_servers.merged_at.");
 assert.equal(billingSchemaVerifierScript.includes("idx_linked_servers_merged_into_server_id"), true, "Billing schema verifier must require the linked-server merge-target index.");
@@ -2171,6 +2193,35 @@ assert.equal(billingPreviewScriptsBlock.includes("BILLING_PREVIEW_ALLOW_HTTP_500
 assert.equal(billingPreviewScriptsBlock.includes("ALLOW_HTTP_500"), false, "Billing verifier must not add a broad HTTP 500 bypass flag.");
 assert.equal(billingPreviewScriptsBlock.includes("expectJsonErrorCode(matrixUrl, \"/api/onboarding/save\", 500, \"token_decrypt_failed\""), true, "Billing corrupted credential scenario must expect HTTP 500 token_decrypt_failed on the immutable matrix URL.");
 assert.equal(billingPreviewScriptsBlock.includes("const setupTargetId = `${prefix}owner-a-source-new-900003`;"), true, "Billing setup verification must target the exact first-time 900003 linked server.");
+assert.equal(billingVerifierScript.includes("function runExactLinkedServerLookupPreflight"), true, "Billing verifier must preflight the exact joined linked-server lookup before group 22.");
+assert.equal(billingVerifierScript.includes("exactLinkedServerLookupPreflight"), true, "Billing endpoint summary must include sanitized exact lookup preflight evidence.");
+assert.equal(billingVerifierScript.includes("BILLING_PREVIEW_EXACT_LINKED_SERVER_QUERY_FAILED"), true, "Billing verifier must fail safely when exact lookup preflight fails.");
+assert.equal(exactLinkedServerPreflightBlock.includes("const linkedServerIdSql = sqlString(linkedServerId);"), true, "Exact lookup preflight must parameterize the setup target ID.");
+assert.equal(exactLinkedServerPreflightBlock.includes("const ownerAUserIdSql = sqlString(expectedOwnerAUserId);"), true, "Exact lookup preflight must parameterize the expected Owner A ID.");
+assert.equal(exactLinkedServerPreflightBlock.includes("linked_servers.id = ${linkedServerIdSql}"), true, "Exact lookup preflight must target the supplied setup ID.");
+assert.equal(exactLinkedServerPreflightBlock.includes("linked_servers.user_id = ${ownerAUserIdSql}"), true, "Exact lookup preflight must require exact Owner A ownership.");
+assert.equal(exactLinkedServerPreflightBlock.includes("lower(COALESCE(linked_servers.status, 'pending')) != 'deleted'"), true, "Exact lookup preflight must keep deleted-row exclusion.");
+assert.equal(exactLinkedServerPreflightBlock.includes("lower(COALESCE(linked_servers.status, 'pending')) != 'merged'"), true, "Exact lookup preflight must keep merged-row exclusion.");
+assert.equal(exactLinkedServerPreflightBlock.includes("linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = ''"), true, "Exact lookup preflight must keep merge-target exclusion.");
+for (const join of [
+  "LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id",
+  "LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id",
+  "LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id",
+]) {
+  assert.equal(exactLinkedServerPreflightBlock.includes(join), true, `Exact lookup preflight must include join: ${join}`);
+}
+assert.equal(/\b(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE|VACUUM)\b/i.test(exactLinkedServerPreflightBlock), false, "Exact lookup preflight must be read-only.");
+for (const safeField of ["result", "rowFound", "ownershipMatched", "lifecycleAllowed", "joinsReadable"]) {
+  assert.equal(exactLinkedServerPreflightBlock.includes(safeField), true, `Exact lookup preflight artifact must include safe field ${safeField}.`);
+}
+for (const unsafeField of ["user_id:", "adm_path:", "guild_id:", "discord_guild_id:", "sql:", "command:", "stderr", "stdout", "error:"]) {
+  assert.equal(exactLinkedServerPreflightBlock.includes(unsafeField), false, `Exact lookup preflight artifact must not include unsafe field ${unsafeField}.`);
+}
+const billingPreflightCall = indexOfOrFail(billingVerifierScript, "runExactLinkedServerLookupPreflight(setupTargetId);");
+const billingGroup21Record = indexOfOrFail(billingVerifierScript, "recordGroup(\"21. Repeated first-time save is idempotent\")");
+const billingSetupVerificationCall = indexOfOrFail(billingVerifierScript, "const setupVerification = await postOnboardingSetupVerification");
+assert.equal(billingGroup21Record < billingPreflightCall, true, "Exact lookup preflight must run after group 21 state is ready.");
+assert.equal(billingPreflightCall < billingSetupVerificationCall, true, "Exact lookup preflight must run before group 22 calls the route.");
 assert.equal(billingPreviewScriptsBlock.includes("linkedServerId: setupTargetId"), true, "Billing setup verification must send linkedServerId in the request body.");
 assert.equal(billingPreviewScriptsBlock.includes("SELECT COUNT(*) AS count FROM onboarding_checks WHERE linked_server_id = '${setupTargetId}'"), true, "Billing setup verification must prove onboarding_checks were written for exact 900003.");
 assert.equal(billingPreviewScriptsBlock.includes("SELECT COUNT(*) AS count FROM server_log_config WHERE linked_server_id = '${setupTargetId}'"), true, "Billing setup verification must prove server_log_config was written for exact 900003.");
@@ -2181,6 +2232,11 @@ assert.equal(billingVerifierScript.includes("safeOnboardingVerificationStages = 
 for (const stage of [
   "request_parse",
   "linked_server_lookup",
+  "linked_server_lookup_prepare",
+  "linked_server_lookup_bind",
+  "linked_server_lookup_execute",
+  "linked_server_lookup_row_shape",
+  "linked_server_lookup_enrich",
   "credential_resolution",
   "metadata_refresh",
   "adm_discovery",
@@ -2192,6 +2248,17 @@ for (const stage of [
   "response_build",
 ]) {
   assert.equal(billingVerifierScript.includes(`"${stage}"`), true, `Group 22 diagnostic allowlist must include ${stage}.`);
+  assert.equal(onboardingTestRouteSource.includes(`"${stage}"`), true, `Onboarding route diagnostic allowlist must include ${stage}.`);
+}
+for (const [phase, stage] of [
+  ["prepare", "linked_server_lookup_prepare"],
+  ["bind", "linked_server_lookup_bind"],
+  ["execute", "linked_server_lookup_execute"],
+  ["row_shape", "linked_server_lookup_row_shape"],
+  ["enrich", "linked_server_lookup_enrich"],
+] as const) {
+  assert.equal(onboardingTestRouteSource.includes(`case \"${phase}\":`), true, `Onboarding route must map lookup phase ${phase}.`);
+  assert.equal(onboardingTestRouteSource.includes(`return \"${stage}\";`), true, `Onboarding route must map lookup phase ${phase} to ${stage}.`);
 }
 assert.equal(billingVerifierScript.includes("if (![200, 500].includes(result.status))"), true, "Group 22 must only special-case HTTP 200 and diagnostic HTTP 500.");
 assert.equal(billingVerifierScript.includes("if (result.status === 500)"), true, "Group 22 must inspect diagnostic HTTP 500 responses.");

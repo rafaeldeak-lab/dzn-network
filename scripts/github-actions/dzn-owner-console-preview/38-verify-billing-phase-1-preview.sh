@@ -39,6 +39,11 @@ const genericMockUserIds = new Set(["mock-user"]);
 const safeOnboardingVerificationStages = new Set([
   "request_parse",
   "linked_server_lookup",
+  "linked_server_lookup_prepare",
+  "linked_server_lookup_bind",
+  "linked_server_lookup_execute",
+  "linked_server_lookup_row_shape",
+  "linked_server_lookup_enrich",
   "credential_resolution",
   "metadata_refresh",
   "adm_discovery",
@@ -99,6 +104,13 @@ const endpointSummary = {
   },
   finalStableConvergence: { result: "PENDING" },
   onboardingVerificationDiagnostic: { result: "PENDING", failureStage: null },
+  exactLinkedServerLookupPreflight: {
+    result: "PENDING",
+    rowFound: false,
+    ownershipMatched: false,
+    lifecycleAllowed: false,
+    joinsReadable: false,
+  },
 };
 const ownershipSummary = { ok: false, fixturePrefix: prefix, checks: {} };
 const allowanceSummary = { ok: false, fixturePrefix: prefix, counts: {} };
@@ -383,6 +395,62 @@ function firstCount(label, command, key = "count") {
 }
 function singleRow(label, command) {
   return d1Read(label, command)[0] || null;
+}
+function runExactLinkedServerLookupPreflight(linkedServerId) {
+  const linkedServerIdSql = sqlString(linkedServerId);
+  const ownerAUserIdSql = sqlString(expectedOwnerAUserId);
+  let rows = [];
+  try {
+    rows = d1Read(
+      "exact-linked-server-lookup-preflight",
+      `SELECT
+         CASE WHEN linked_servers.user_id = ${ownerAUserIdSql} THEN 1 ELSE 0 END AS ownership_matched,
+         CASE
+           WHEN lower(COALESCE(linked_servers.status, 'pending')) != 'deleted'
+            AND lower(COALESCE(linked_servers.status, 'pending')) != 'merged'
+            AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           THEN 1 ELSE 0
+         END AS lifecycle_allowed,
+         CASE WHEN discord_guilds.id IS NULL OR discord_guilds.id IS NOT NULL THEN 1 ELSE 0 END AS discord_guild_join_readable,
+         CASE WHEN server_log_config.linked_server_id IS NULL OR server_log_config.linked_server_id IS NOT NULL THEN 1 ELSE 0 END AS server_log_config_join_readable,
+         CASE WHEN onboarding_checks.linked_server_id IS NULL OR onboarding_checks.linked_server_id IS NOT NULL THEN 1 ELSE 0 END AS onboarding_checks_join_readable
+       FROM linked_servers
+       LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
+       LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
+       LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
+       WHERE linked_servers.id = ${linkedServerIdSql}
+         AND linked_servers.user_id = ${ownerAUserIdSql}
+         AND lower(COALESCE(linked_servers.status, 'pending')) != 'deleted'
+         AND lower(COALESCE(linked_servers.status, 'pending')) != 'merged'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       LIMIT 1;`,
+    );
+  } catch {
+    endpointSummary.exactLinkedServerLookupPreflight = {
+      result: "FAIL",
+      rowFound: false,
+      ownershipMatched: false,
+      lifecycleAllowed: false,
+      joinsReadable: false,
+    };
+    fail("BILLING_PREVIEW_EXACT_LINKED_SERVER_QUERY_FAILED", "Exact linked-server lookup preflight query failed.");
+  }
+
+  const row = rows.length === 1 ? rows[0] : null;
+  const preflight = {
+    result: "FAIL",
+    rowFound: rows.length === 1,
+    ownershipMatched: Number(row?.ownership_matched || 0) === 1,
+    lifecycleAllowed: Number(row?.lifecycle_allowed || 0) === 1,
+    joinsReadable: Number(row?.discord_guild_join_readable || 0) === 1
+      && Number(row?.server_log_config_join_readable || 0) === 1
+      && Number(row?.onboarding_checks_join_readable || 0) === 1,
+  };
+  preflight.result = preflight.rowFound && preflight.ownershipMatched && preflight.lifecycleAllowed && preflight.joinsReadable ? "PASS" : "FAIL";
+  endpointSummary.exactLinkedServerLookupPreflight = preflight;
+  if (preflight.result !== "PASS") {
+    fail("BILLING_PREVIEW_EXACT_LINKED_SERVER_QUERY_FAILED", "Exact linked-server lookup preflight did not pass.");
+  }
 }
 function sqlString(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
@@ -669,6 +737,7 @@ void (async () => {
   recordGroup("21. Repeated first-time save is idempotent");
 
   const setupTargetId = `${prefix}owner-a-source-new-900003`;
+  runExactLinkedServerLookupPreflight(setupTargetId);
   const preSetupChecks900001 = firstCount("pre-setup-checks-900001", `SELECT COUNT(*) AS count FROM onboarding_checks WHERE linked_server_id = '${prefix}owner-a-canonical-900001';`);
   const preSetupChecks900002 = firstCount("pre-setup-checks-900002", `SELECT COUNT(*) AS count FROM onboarding_checks WHERE linked_server_id = '${prefix}owner-a-canonical-900002';`);
   const setupVerification = await postOnboardingSetupVerification(matrixUrl, ownerACookie, {
