@@ -1894,7 +1894,16 @@ const billingScriptsExceptRuntimeConfig = [
   "38-verify-billing-phase-1-preview.sh",
 ].map((name) => read(`scripts/github-actions/dzn-owner-console-preview/${name}`)).join("\n");
 const billingSchemaVerifierScript = read("scripts/github-actions/dzn-owner-console-preview/33-verify-billing-phase-1-preview-schema.sh");
+const billingSchemaVerifierRunD1Commands = [...billingSchemaVerifierScript.matchAll(/run_d1_read\s+"[^"]+"\s+"([^"]+)"/g)].map((match) => match[1]);
 const billingIntegrityMigration = read("migrations/0058_billing_phase_1_integrity.sql");
+const initialSchemaMigration = read("migrations/0001_initial_schema.sql");
+const serverLogConfigMigration = read("migrations/0002_server_log_config.sql");
+const linkedServerMergeMigration = read("migrations/0059_linked_server_merge_state.sql");
+const dbHelperSource = read("functions/_lib/db.ts");
+const exactLinkedServerLookupHelper = dbHelperSource.slice(
+  indexOfOrFail(dbHelperSource, "export async function getLinkedServerForUserById"),
+  indexOfOrFail(dbHelperSource, "export async function getLinkedServersForUserSummary"),
+);
 for (const scriptNumber of ["32", "33", "34", "35", "36", "37", "38"]) {
   assert.equal(dznOwnerConsolePreviewWorkflowSource.includes(`scripts/github-actions/dzn-owner-console-preview/${scriptNumber}-`), true, `Billing workflow must reference script ${scriptNumber}.`);
 }
@@ -1982,18 +1991,52 @@ assert.equal(billingPreviewScriptsBlock.includes("DZN_DISCORD_SERVER_ANNOUNCEMEN
 assert.equal(billingPreviewScriptsBlock.includes("0057_event_suggestions_phase_2a.sql"), true, "Billing schema verification must pin migration 0057.");
 assert.equal(billingPreviewScriptsBlock.includes("0058_billing_phase_1_integrity.sql"), true, "Billing schema verification must pin migration 0058.");
 assert.equal(billingPreviewScriptsBlock.includes("0059_linked_server_merge_state.sql"), true, "Billing schema verification must pin migration 0059.");
+assert.equal(ownerPreviewBillingSchemaStart < ownerPreviewBillingFixtureStart, true, "Billing schema verification must run before fixture seeding.");
 assert.equal(billingSchemaVerifierScript.includes("expectedThrough0059"), true, "Billing schema verifier must verify all migrations through 0059.");
 assert.equal(billingSchemaVerifierScript.includes("BILLING_SCHEMA_MIGRATIONS_MISSING_THROUGH_0059"), true, "Billing schema verifier must fail safely when migrations through 0059 are missing.");
 assert.equal(billingSchemaVerifierScript.includes("migration0059.length !== 1"), true, "Billing schema verifier must require exactly one 0059 ledger entry.");
 assert.equal(billingSchemaVerifierScript.includes("Migration 0058 must precede 0059."), true, "Billing schema verifier must enforce 0058 before 0059.");
 assert.equal(billingSchemaVerifierScript.includes("migration0058Precedes0059: true"), true, "Billing schema verifier artifact must record 0058 before 0059.");
+assert.equal(exactLinkedServerLookupHelper.includes("ensureLinkedServerMetadataColumns"), false, "Exact linked-server lookup helper must not run metadata schema repair.");
+assert.equal(exactLinkedServerLookupHelper.includes("ensureServerLogConfigTable"), false, "Exact linked-server lookup helper must not run server_log_config schema repair.");
+assert.equal(exactLinkedServerLookupHelper.includes("linked_servers.id = ?"), true, "Exact linked-server lookup must remain constrained by linked-server ID.");
+assert.equal(exactLinkedServerLookupHelper.includes("linked_servers.user_id = ?"), true, "Exact linked-server lookup must remain constrained by owner ID.");
+assert.equal(exactLinkedServerLookupHelper.includes("merged_into_server_id"), true, "Exact linked-server lookup must keep merged-row exclusion.");
 assert.equal(billingSchemaVerifierScript.includes("merged_into_server_id"), true, "Billing schema verifier must require linked_servers.merged_into_server_id.");
 assert.equal(billingSchemaVerifierScript.includes("merged_at"), true, "Billing schema verifier must require linked_servers.merged_at.");
 assert.equal(billingSchemaVerifierScript.includes("idx_linked_servers_merged_into_server_id"), true, "Billing schema verifier must require the linked-server merge-target index.");
+for (const requiredExactLookupDependency of [
+  "billing-schema-exact-lookup-tables.json",
+  "discord_guilds",
+  "server_log_config",
+  "onboarding_checks",
+  "guild_id",
+  "discord_guild_id",
+  "status",
+  "idx_server_log_config_linked_server_id",
+  "exactLinkedServerLookup",
+  "tablesPresent: true",
+  "columnsPresent: true",
+  "indexesPresent: true",
+  "migrationBacked: true",
+]) {
+  assert.equal(billingSchemaVerifierScript.includes(requiredExactLookupDependency), true, `Billing schema verifier must check exact lookup dependency: ${requiredExactLookupDependency}.`);
+}
+for (const command of billingSchemaVerifierRunD1Commands) {
+  assert.equal(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|VACUUM)\b/i.test(command), false, `Billing schema verifier D1 command must remain read-only: ${command}`);
+}
+assert.equal(/wrangler d1 execute[\s\S]*--file\b/i.test(billingSchemaVerifierScript), false, "Billing schema verifier must not execute D1 SQL files.");
 assert.equal(billingIntegrityMigration.includes("linked_server_allowance_reservations"), true, "Billing Integrity migration 0058 must remain the reservation migration.");
 assert.equal(billingIntegrityMigration.includes("idx_lsar_active_linked_server"), true, "Billing Integrity migration 0058 must keep its active reservation index.");
 assert.equal(billingIntegrityMigration.includes("merged_into_server_id"), false, "Billing Integrity migration 0058 must not be modified to add merge-state columns.");
 assert.equal(billingIntegrityMigration.includes("merged_at"), false, "Billing Integrity migration 0058 must not be modified to add merge-state columns.");
+assert.equal(initialSchemaMigration.includes("CREATE TABLE IF NOT EXISTS linked_servers"), true, "Initial migration must remain the linked_servers table source.");
+assert.equal(initialSchemaMigration.includes("CREATE TABLE IF NOT EXISTS discord_guilds"), true, "Initial migration must remain the discord_guilds table source.");
+assert.equal(initialSchemaMigration.includes("CREATE TABLE IF NOT EXISTS onboarding_checks"), true, "Initial migration must remain the onboarding_checks table source.");
+assert.equal(serverLogConfigMigration.includes("CREATE TABLE IF NOT EXISTS server_log_config"), true, "Migration 0002 must remain the server_log_config table source.");
+assert.equal(serverLogConfigMigration.includes("idx_server_log_config_linked_server_id"), true, "Migration 0002 must keep the server_log_config linked-server index.");
+assert.equal(linkedServerMergeMigration.includes("ADD COLUMN merged_into_server_id TEXT;"), true, "Migration 0059 must remain the merge target column source.");
+assert.equal(linkedServerMergeMigration.includes("idx_linked_servers_merged_into_server_id"), true, "Migration 0059 must keep the merge target index.");
 assert.equal(billingPreviewScriptsBlock.includes("linked_server_allowance_reservations"), true, "Billing schema verification must check allowance reservations.");
 assert.equal(billingPreviewScriptsBlock.includes("idx_lsar_active_linked_server"), true, "Billing schema verification must check active reservation uniqueness.");
 assert.equal(billingPreviewScriptsBlock.includes("idx_linked_servers_active_service_id"), true, "Billing schema verification must check active Nitrado service uniqueness.");

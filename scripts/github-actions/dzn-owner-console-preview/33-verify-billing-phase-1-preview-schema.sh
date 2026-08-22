@@ -39,8 +39,13 @@ run_d1_read "migration-ledger-exists" "SELECT name FROM sqlite_master WHERE type
 run_d1_read "migration-ledger" "SELECT id, name FROM d1_migrations ORDER BY id;" "billing-schema-migrations.json"
 run_d1_read "reservation-columns" "PRAGMA table_info(linked_server_allowance_reservations);" "billing-schema-reservation-columns.json"
 run_d1_read "reservation-indexes" "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'linked_server_allowance_reservations' ORDER BY name;" "billing-schema-reservation-indexes.json"
+run_d1_read "exact-linked-server-lookup-tables" "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('linked_servers','discord_guilds','server_log_config','onboarding_checks') ORDER BY name;" "billing-schema-exact-lookup-tables.json"
 run_d1_read "linked-server-columns" "PRAGMA table_info(linked_servers);" "billing-schema-linked-server-columns.json"
 run_d1_read "linked-server-merge-index" "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_linked_servers_merged_into_server_id';" "billing-schema-linked-server-merge-index.json"
+run_d1_read "discord-guild-columns" "PRAGMA table_info(discord_guilds);" "billing-schema-discord-guild-columns.json"
+run_d1_read "server-log-config-columns" "PRAGMA table_info(server_log_config);" "billing-schema-server-log-config-columns.json"
+run_d1_read "server-log-config-index" "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_server_log_config_linked_server_id';" "billing-schema-server-log-config-index.json"
+run_d1_read "onboarding-checks-columns" "PRAGMA table_info(onboarding_checks);" "billing-schema-onboarding-checks-columns.json"
 run_d1_read "nitrado-connection-columns" "PRAGMA table_info(nitrado_connections);" "billing-schema-nitrado-connection-columns.json"
 run_d1_read "active-service-unique-index" "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_linked_servers_active_service_id';" "billing-schema-active-service-index.json"
 run_d1_read "foreign-key-check" "PRAGMA foreign_key_check;" "billing-schema-foreign-key-check.json"
@@ -173,14 +178,24 @@ if (!/UNIQUE/i.test(String(activeReservationIndex?.sql || "")) || !/status\s*=\s
   fail("BILLING_SCHEMA_ACTIVE_RESERVATION_INDEX_INVALID", "Active reservation uniqueness index is not protected.");
 }
 
+const exactLookupTables = rowsFromWranglerJson("billing-schema-exact-lookup-tables.json");
+const exactLookupTableNames = new Set(exactLookupTables.map((row) => String(row.name || "")));
+for (const tableName of ["linked_servers", "discord_guilds", "server_log_config", "onboarding_checks"]) {
+  if (!exactLookupTableNames.has(tableName)) {
+    fail("BILLING_SCHEMA_EXACT_LOOKUP_TABLE_MISSING", "Exact linked-server lookup table missing.", { tableName });
+  }
+}
 const linkedServerColumns = requireColumns("linked_servers", rowsFromWranglerJson("billing-schema-linked-server-columns.json"), [
   "id",
   "user_id",
+  "guild_id",
+  "discord_guild_id",
   "nitrado_service_id",
   "nitrado_service_name",
   "server_name",
   "server_type",
   "server_category",
+  "status",
   "merged_into_server_id",
   "merged_at",
   "lifecycle_status",
@@ -198,6 +213,28 @@ if (linkedServerMergeIndexes.length !== 1) {
 const linkedServerMergeIndexSql = String(linkedServerMergeIndexes[0].sql || "");
 if (!/linked_servers/i.test(linkedServerMergeIndexSql) || !/merged_into_server_id/i.test(linkedServerMergeIndexSql)) {
   fail("BILLING_SCHEMA_LINKED_SERVER_MERGE_INDEX_INVALID", "Linked-server merge-target lookup index is not valid.");
+}
+const discordGuildColumns = requireColumns("discord_guilds", rowsFromWranglerJson("billing-schema-discord-guild-columns.json"), [
+  "id",
+  "name",
+  "icon_url",
+]);
+const serverLogConfigColumns = requireColumns("server_log_config", rowsFromWranglerJson("billing-schema-server-log-config-columns.json"), [
+  "linked_server_id",
+  "adm_path",
+]);
+const onboardingCheckColumns = requireColumns("onboarding_checks", rowsFromWranglerJson("billing-schema-onboarding-checks-columns.json"), [
+  "linked_server_id",
+  "adm_logs_found",
+  "last_tested_at",
+]);
+const serverLogConfigIndexes = rowsFromWranglerJson("billing-schema-server-log-config-index.json");
+if (serverLogConfigIndexes.length !== 1) {
+  fail("BILLING_SCHEMA_EXACT_LOOKUP_SERVER_LOG_CONFIG_INDEX_MISSING", "Exact linked-server lookup server_log_config index is missing.");
+}
+const serverLogConfigIndexSql = String(serverLogConfigIndexes[0].sql || "");
+if (!/server_log_config/i.test(serverLogConfigIndexSql) || !/linked_server_id/i.test(serverLogConfigIndexSql)) {
+  fail("BILLING_SCHEMA_EXACT_LOOKUP_SERVER_LOG_CONFIG_INDEX_INVALID", "Exact linked-server lookup server_log_config index is not valid.");
 }
 const nitradoColumns = requireColumns("nitrado_connections", rowsFromWranglerJson("billing-schema-nitrado-connection-columns.json"), [
   "id",
@@ -244,6 +281,23 @@ fs.writeFileSync(`${artifact}/schema-summary.json`, JSON.stringify({
   linkedServerMergeStateColumnsPresent: linkedServerColumns.filter((name) => ["merged_into_server_id", "merged_at"].includes(name)),
   linkedServerMergeStateIndexesPresent: linkedServerMergeIndexes.map((row) => String(row.name || "")).sort(),
   linkedServerMergeLifecycleColumnsPresent: linkedServerColumns.filter((name) => /merged|lifecycle|owner_action|latest_imported|listing_visibility/.test(name)),
+  exactLinkedServerLookup: {
+    tablesPresent: true,
+    columnsPresent: true,
+    indexesPresent: true,
+    migrationBacked: true,
+  },
+  exactLinkedServerLookupTablesPresent: [...exactLookupTableNames].sort(),
+  exactLinkedServerLookupColumnsPresent: {
+    linked_servers: linkedServerColumns.filter((name) => ["id", "user_id", "guild_id", "discord_guild_id", "nitrado_service_id", "status", "merged_into_server_id"].includes(name)),
+    discord_guilds: discordGuildColumns,
+    server_log_config: serverLogConfigColumns,
+    onboarding_checks: onboardingCheckColumns,
+  },
+  exactLinkedServerLookupIndexesPresent: [
+    ...linkedServerMergeIndexes.map((row) => String(row.name || "")),
+    ...serverLogConfigIndexes.map((row) => String(row.name || "")),
+  ].sort(),
   nitradoConnectionLinkedServerIdPresent: nitradoColumns.includes("linked_server_id"),
   nitradoConnectionCredentialColumnsRedacted: true,
   activeNitradoServiceUniquenessProtection: "idx_linked_servers_active_service_id",
