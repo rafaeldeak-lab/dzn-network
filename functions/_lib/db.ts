@@ -208,17 +208,33 @@ export async function getCurrentLinkedServer(env: Env, userId: string, options: 
   return servers?.[0] ?? null;
 }
 
-export async function getLinkedServerForUserById(
-  env: Env,
-  userId: string,
-  linkedServerId: string,
-  options: { includePrivateAdmPath?: boolean } = {},
-) {
-  const normalizedLinkedServerId = linkedServerId.trim();
-  if (!normalizedLinkedServerId || !env.DB) return null;
-  const server = await env.DB
-    .prepare(
-      `SELECT
+export type LinkedServerLookupPhase =
+  | "prepare"
+  | "bind"
+  | "execute"
+  | "row_shape"
+  | "enrich";
+
+export class LinkedServerLookupError extends Error {
+  readonly phase: LinkedServerLookupPhase;
+
+  constructor(phase: LinkedServerLookupPhase, options?: { cause?: unknown }) {
+    super("Exact linked-server lookup failed");
+    this.name = "LinkedServerLookupError";
+    this.phase = phase;
+
+    if (options && "cause" in options) {
+      Object.defineProperty(this, "cause", {
+        value: options.cause,
+        enumerable: false,
+        configurable: false,
+        writable: false,
+      });
+    }
+  }
+}
+
+const EXACT_LINKED_SERVER_LOOKUP_SQL = `SELECT
         linked_servers.*,
         discord_guilds.name AS guild_name,
         discord_guilds.icon_url AS guild_icon_url,
@@ -234,25 +250,65 @@ export async function getLinkedServerForUserById(
          AND lower(COALESCE(linked_servers.status, 'pending')) != 'deleted'
          AND lower(COALESCE(linked_servers.status, 'pending')) != 'merged'
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-       LIMIT 1`,
-    )
-    .bind(normalizedLinkedServerId, userId)
-    .first<Record<string, unknown>>();
+       LIMIT 1`;
 
-  if (!server) return null;
-  const rawAdmPath = typeof server.adm_path === "string" ? server.adm_path : null;
-  server.adm_latest_file = rawAdmPath ? rawAdmPath.split("/").filter(Boolean).at(-1) ?? null : null;
-  server.adm_status = Number(server.adm_logs_found) === 1
-    ? "Connected"
-    : rawAdmPath
-      ? "Discovered, read pending"
-      : "Needs review";
-  if (!options.includePrivateAdmPath && rawAdmPath) {
-    server.adm_path = maskNitradoApiPath(rawAdmPath);
+export async function getLinkedServerForUserById(
+  env: Env,
+  userId: string,
+  linkedServerId: string,
+  options: { includePrivateAdmPath?: boolean } = {},
+) {
+  const normalizedLinkedServerId = linkedServerId.trim();
+  if (!normalizedLinkedServerId || !env.DB) return null;
+
+  let statement: D1PreparedStatement;
+  try {
+    statement = env.DB.prepare(EXACT_LINKED_SERVER_LOOKUP_SQL);
+  } catch (error) {
+    throw new LinkedServerLookupError("prepare", { cause: error });
   }
-  server.original_owner_is_current_user = true;
-  if (!options.includePrivateAdmPath) {
-    delete server.user_id;
+
+  let bound: D1PreparedStatement;
+  try {
+    bound = statement.bind(normalizedLinkedServerId, userId);
+  } catch (error) {
+    throw new LinkedServerLookupError("bind", { cause: error });
+  }
+
+  let rawServer: Record<string, unknown> | null | undefined;
+  try {
+    rawServer = await bound.first<Record<string, unknown>>();
+  } catch (error) {
+    throw new LinkedServerLookupError("execute", { cause: error });
+  }
+
+  if (rawServer === null) return null;
+  if (typeof rawServer !== "object" || Array.isArray(rawServer)) {
+    throw new LinkedServerLookupError("row_shape");
+  }
+
+  let server: Record<string, unknown>;
+  try {
+    server = {
+      ...rawServer,
+    };
+    const rawAdmPath = typeof server.adm_path === "string" ? server.adm_path : null;
+    const admSegments = rawAdmPath ? rawAdmPath.split("/").filter(Boolean) : [];
+    server.adm_latest_file = admSegments.length > 0 ? admSegments[admSegments.length - 1] : null;
+    server.adm_status = Number(server.adm_logs_found) === 1
+      ? "Connected"
+      : rawAdmPath
+        ? "Discovered, read pending"
+        : "Needs review";
+    if (!options.includePrivateAdmPath && rawAdmPath) {
+      server.adm_path = maskNitradoApiPath(rawAdmPath);
+    }
+    server.original_owner_is_current_user = true;
+    if (!options.includePrivateAdmPath) {
+      delete server.user_id;
+    }
+  } catch (error) {
+    throw new LinkedServerLookupError("enrich", { cause: error });
   }
 
   return server;

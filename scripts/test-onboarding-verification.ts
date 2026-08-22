@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
-import { createSession, getLinkedServerForUserById } from "../functions/_lib/db";
+import { createSession, getLinkedServerForUserById, LinkedServerLookupError } from "../functions/_lib/db";
 import { storePendingNitradoToken } from "../functions/_lib/onboarding";
 import { onRequest as saveOnboardingHandler } from "../functions/api/onboarding/save";
 import {
@@ -25,6 +25,7 @@ type SqliteDatabase = {
 };
 type OperationCounts = {
   prepare: number;
+  bind: number;
   first: number;
   all: number;
   run: number;
@@ -32,11 +33,19 @@ type OperationCounts = {
   exec: number;
   batch: number;
 };
-type D1FailureOperation = Exclude<keyof OperationCounts, "prepare" | "batch">;
+type D1FailureOperation = Exclude<keyof OperationCounts, "batch">;
 type D1FailureRule = {
   operation: D1FailureOperation;
   pattern: RegExp;
   error: Error;
+};
+type FirstValueRule = {
+  pattern: RegExp;
+  value: unknown;
+};
+type FirstRowTransformRule = {
+  pattern: RegExp;
+  transform: (row: Record<string, unknown>) => Record<string, unknown>;
 };
 type ApiJson = Record<string, unknown> & {
   error_code?: unknown;
@@ -90,6 +99,7 @@ const forbiddenSideEffectTables = [
 ];
 const diagnosticPreviewBaseUrl = "https://443351c7.dzn-network-owner-console-preview-billing-phase-1.pages.dev";
 const diagnosticInternalErrorMessage = "forced internal setup verification failure with SQL stack credential marker";
+const exactLinkedServerLookupPattern = /FROM linked_servers[\s\S]*linked_servers\.id = \?[\s\S]*linked_servers\.user_id = \?/i;
 const diagnosticForbiddenResponseMarkers = [
   ...forbiddenResponseMarkers,
   diagnosticInternalErrorMessage,
@@ -106,6 +116,7 @@ class InstrumentedSqliteD1Database {
   readonly sqlite: SqliteDatabase;
   readonly counts: OperationCounts = {
     prepare: 0,
+    bind: 0,
     first: 0,
     all: 0,
     run: 0,
@@ -115,6 +126,10 @@ class InstrumentedSqliteD1Database {
   };
   readonly touchedSql: string[] = [];
   private readonly failureRules: D1FailureRule[] = [];
+  private readonly frozenFirstRowPatterns: RegExp[] = [];
+  private readonly firstValueRules: FirstValueRule[] = [];
+  private readonly firstRowTransformRules: FirstRowTransformRule[] = [];
+  private lastFrozenFirstRow: Record<string, unknown> | null = null;
   private blockMutatingPreparedStatements = false;
 
   constructor() {
@@ -123,6 +138,7 @@ class InstrumentedSqliteD1Database {
 
   prepare(query: string) {
     this.record("prepare", query);
+    this.maybeFail("prepare", query);
     if (this.blockMutatingPreparedStatements) {
       const operationClass = sqlOperationClass(query);
       if (forbiddenExactLookupOperationClasses.has(operationClass)) {
@@ -172,6 +188,48 @@ class InstrumentedSqliteD1Database {
     return error;
   }
 
+  freezeFirstRows(pattern: RegExp) {
+    this.frozenFirstRowPatterns.push(pattern);
+    this.lastFrozenFirstRow = null;
+  }
+
+  shouldFreezeFirstRow(query: string) {
+    return this.frozenFirstRowPatterns.some((pattern) => pattern.test(query));
+  }
+
+  recordFrozenFirstRow(row: Record<string, unknown>) {
+    this.lastFrozenFirstRow = row;
+  }
+
+  getLastFrozenFirstRow() {
+    return this.lastFrozenFirstRow;
+  }
+
+  returnFirstValueOnce(pattern: RegExp, value: unknown) {
+    this.firstValueRules.push({ pattern, value });
+  }
+
+  takeFirstValueOverride(query: string) {
+    const index = this.firstValueRules.findIndex((rule) => rule.pattern.test(query));
+    if (index < 0) return { matched: false as const, value: null };
+    const [rule] = this.firstValueRules.splice(index, 1);
+    return { matched: true as const, value: rule.value };
+  }
+
+  transformFirstRowOnce(pattern: RegExp, transform: FirstRowTransformRule["transform"]) {
+    this.firstRowTransformRules.push({ pattern, transform });
+  }
+
+  applyFirstRowTransforms(query: string, row: Record<string, unknown>) {
+    let transformed = row;
+    for (;;) {
+      const index = this.firstRowTransformRules.findIndex((rule) => rule.pattern.test(query));
+      if (index < 0) return transformed;
+      const [rule] = this.firstRowTransformRules.splice(index, 1);
+      transformed = rule.transform(transformed);
+    }
+  }
+
   maybeFail(operation: D1FailureOperation, query: string) {
     const index = this.failureRules.findIndex((rule) => rule.operation === operation && rule.pattern.test(query));
     if (index < 0) return;
@@ -188,6 +246,8 @@ class InstrumentedSqliteD1PreparedStatement {
   ) {}
 
   bind(...values: unknown[]) {
+    this.db.record("bind", this.query);
+    this.db.maybeFail("bind", this.query);
     return new InstrumentedSqliteD1PreparedStatement(this.db, this.query, values);
   }
 
@@ -201,8 +261,17 @@ class InstrumentedSqliteD1PreparedStatement {
   async first<T = Record<string, unknown>>(colName?: string) {
     this.db.record("first", this.query);
     this.db.maybeFail("first", this.query);
-    const row = this.db.sqlite.prepare(this.query).get(...this.bindings) ?? null;
+    const override = this.db.takeFirstValueOverride(this.query);
+    if (override.matched) return override.value as T | null;
+    let row = this.db.sqlite.prepare(this.query).get(...this.bindings) ?? null;
     if (colName) return (row ? row[colName] ?? null : null) as T | null;
+    if (row) {
+      row = this.db.applyFirstRowTransforms(this.query, row);
+    }
+    if (row && this.db.shouldFreezeFirstRow(this.query)) {
+      Object.freeze(row);
+      this.db.recordFrozenFirstRow(row);
+    }
     return row as T | null;
   }
 
@@ -486,6 +555,7 @@ async function assertExactSetupVerification(env: Env, db: InstrumentedSqliteD1Da
   const exactCounts = db.snapshotOperationCounts();
   assert.equal(exact.status, 200, "Exact 900003 setup verification should return HTTP 200.");
   assert.equal(exact.json.ok, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(exact.json, "failure_stage"), false, "Successful setup verification must not include a failure_stage.");
   assert.equal(typeof exact.json.checks, "object");
   assert.notEqual(exact.json.checks, null);
   const checks = exact.json.checks as Record<string, unknown>;
@@ -505,7 +575,7 @@ async function assertExactSetupVerification(env: Env, db: InstrumentedSqliteD1Da
   assert.equal(countRows(db, "server_log_config", `linked_server_id = '${target900003}'`), 1, "Repeated setup verification must update, not duplicate, server_log_config.");
   assertNoSensitiveBody(repeated.text, "repeated setup verification");
 
-  console.log(`Exact 900003 setup verification D1 operations: prepare=${exactCounts.prepare}, first=${exactCounts.first}, all=${exactCounts.all}, run=${exactCounts.run}, raw=${exactCounts.raw}, exec=${exactCounts.exec}, batch=${exactCounts.batch}`);
+  console.log(`Exact 900003 setup verification D1 operations: prepare=${exactCounts.prepare}, bind=${exactCounts.bind}, first=${exactCounts.first}, all=${exactCounts.all}, run=${exactCounts.run}, raw=${exactCounts.raw}, exec=${exactCounts.exec}, batch=${exactCounts.batch}`);
   return exactCounts;
 }
 
@@ -529,8 +599,15 @@ async function assertExactLinkedServerLookupMigrationBackedAndReadOnly() {
 
   db.resetOperationTracking();
   db.setReadOnlyPreparedStatements(true);
+  db.freezeFirstRows(exactLinkedServerLookupPattern);
   const privateServer = await getLinkedServerForUserById(env, ownerA, target900003, { includePrivateAdmPath: true });
   const privateLookupClasses = assertExactLookupReadOnlySql(db.touchedSql, "private exact linked-server lookup");
+  const frozenRow = db.getLastFrozenFirstRow();
+  assert.notEqual(frozenRow, null, "Exact lookup test must freeze the raw D1 row.");
+  assert.notStrictEqual(privateServer, frozenRow, "Exact lookup must return a clone, not the frozen D1 row.");
+  assert.equal(Object.prototype.hasOwnProperty.call(frozenRow ?? {}, "adm_latest_file"), false, "Frozen raw D1 row must not be enriched.");
+  assert.equal(Object.prototype.hasOwnProperty.call(frozenRow ?? {}, "adm_status"), false, "Frozen raw D1 row must not receive ADM status.");
+  assert.equal(Object.prototype.hasOwnProperty.call(frozenRow ?? {}, "original_owner_is_current_user"), false, "Frozen raw D1 row must not receive ownership enrichment.");
   assert.equal(privateServer?.id, target900003, "Exact Owner A 900003 lookup should return the requested linked server.");
   assert.equal(privateServer?.user_id, ownerA, "Private exact lookup may retain owner identity for server-side callers.");
   assert.equal(privateServer?.adm_path, "games/preview-private-server/noftp/adm/mock.ADM", "Private ADM path should be available only when explicitly requested.");
@@ -562,6 +639,79 @@ async function assertExactLinkedServerLookupMigrationBackedAndReadOnly() {
   console.log(`Exact linked-server lookup operation classes: ${privateLookupClasses.join(",")}`);
 }
 
+async function createLookupBoundaryState() {
+  const state = await createReadyBillingPreviewState();
+  await insertServerLogConfig(state.db, target900003, "games/preview-private-server/noftp/adm/mock.ADM");
+  await insertOnboardingCheck(state.db, target900003);
+  return state;
+}
+
+function assertSafeLinkedServerLookupError(error: unknown, phase: LinkedServerLookupError["phase"]) {
+  assert.equal(error instanceof LinkedServerLookupError, true, `Expected LinkedServerLookupError phase=${phase}.`);
+  const lookupError = error as LinkedServerLookupError;
+  assert.equal(lookupError.phase, phase);
+  assert.equal(lookupError.message, "Exact linked-server lookup failed");
+  assert.equal(Object.prototype.propertyIsEnumerable.call(lookupError, "cause"), false, "Lookup error cause must be non-enumerable.");
+  assert.doesNotMatch(lookupError.message, /SELECT|linked_servers|server_log_config|onboarding_checks|\/games\/|owner-a|d1|token|adm/i);
+  return true;
+}
+
+async function assertExactLinkedServerLookupBoundaryErrors() {
+  for (const [label, operation, phase] of [
+    ["prepare failure", "prepare", "prepare"],
+    ["bind failure", "bind", "bind"],
+    ["execute failure", "first", "execute"],
+  ] as const) {
+    const { db, env } = await createLookupBoundaryState();
+    db.failOnce(operation, exactLinkedServerLookupPattern);
+    await assert.rejects(
+      () => getLinkedServerForUserById(env, ownerA, target900003, { includePrivateAdmPath: true }),
+      (error) => assertSafeLinkedServerLookupError(error, phase),
+      `Exact lookup should classify ${label}.`,
+    );
+  }
+
+  {
+    const { db, env } = await createLookupBoundaryState();
+    db.returnFirstValueOnce(exactLinkedServerLookupPattern, "not-an-object");
+    await assert.rejects(
+      () => getLinkedServerForUserById(env, ownerA, target900003, { includePrivateAdmPath: true }),
+      (error) => assertSafeLinkedServerLookupError(error, "row_shape"),
+      "Exact lookup should classify a non-object D1 row as row_shape.",
+    );
+  }
+
+  {
+    const { db, env } = await createLookupBoundaryState();
+    db.transformFirstRowOnce(exactLinkedServerLookupPattern, (row) => ({
+      ...row,
+      adm_logs_found: {
+        valueOf() {
+          throw new Error(diagnosticInternalErrorMessage);
+        },
+      },
+    }));
+    await assert.rejects(
+      () => getLinkedServerForUserById(env, ownerA, target900003, { includePrivateAdmPath: true }),
+      (error) => assertSafeLinkedServerLookupError(error, "enrich"),
+      "Exact lookup should classify enrichment failures.",
+    );
+  }
+
+  {
+    const { db, env, ownerASession } = await createLookupBoundaryState();
+    db.returnFirstValueOnce(exactLinkedServerLookupPattern, null);
+    const missing = await getLinkedServerForUserById(env, ownerA, target900003, { includePrivateAdmPath: true });
+    assert.equal(missing, null, "Exact lookup must return null when D1 .first() returns null.");
+
+    db.returnFirstValueOnce(exactLinkedServerLookupPattern, null);
+    const routeMissing = await postJson(testOnboardingHandler, env, ownerASession, "/api/onboarding/test", { linkedServerId: target900003 });
+    assert.equal(routeMissing.status, 404, "Route must return safe 404 when exact lookup returns null for a supplied ID.");
+    assert.equal(routeMissing.json.error_code, "linked_server_not_found");
+    assertNoSensitiveBody(routeMissing.text, "null exact lookup route response");
+  }
+}
+
 async function assertForeignAndFallbackContracts(env: Env, db: InstrumentedSqliteD1Database, ownerASession: string) {
   const foreign = await postJson(testOnboardingHandler, env, ownerASession, "/api/onboarding/test", { linkedServerId: id("owner-b-source-cross-900001") });
   assert.equal(foreign.status, 404, "Foreign linkedServerId should return safe 404.");
@@ -572,6 +722,11 @@ async function assertForeignAndFallbackContracts(env: Env, db: InstrumentedSqlit
   const invalid = await postJson(testOnboardingHandler, env, ownerASession, "/api/onboarding/test", { linkedServerId: "   " });
   assert.equal(invalid.status, 404, "Invalid supplied linkedServerId must not fall back to current server.");
   assert.equal(invalid.json.error_code, "linked_server_not_found");
+
+  const missing = await postJson(testOnboardingHandler, env, ownerASession, "/api/onboarding/test", { linkedServerId: id("missing-linked-server") });
+  assert.equal(missing.status, 404, "Nonexistent supplied linkedServerId must return safe 404.");
+  assert.equal(missing.json.error_code, "linked_server_not_found");
+  assertNoSensitiveBody(missing.text, "nonexistent setup verification");
 
   const beforeForeignFallbackRows = countRows(db, "onboarding_checks", `linked_server_id = '${id("owner-b-source-cross-900001")}'`);
   const fallback = await postJson(testOnboardingHandler, env, ownerASession, "/api/onboarding/test", {});
@@ -617,6 +772,73 @@ async function assertDiagnosticFailureStage(input: {
   assert.equal(result.json.failure_stage, input.expectedStage);
   assert.equal(ONBOARDING_VERIFICATION_STAGES.includes(result.json.failure_stage as typeof ONBOARDING_VERIFICATION_STAGES[number]), true);
   assertDiagnosticResponseSafe(result.text, input.label);
+}
+
+async function assertDiagnosticLookupPhase(input: {
+  label: string;
+  expectedStage: typeof ONBOARDING_VERIFICATION_STAGES[number];
+  prepare: (state: Awaited<ReturnType<typeof createReadyBillingPreviewState>>) => Promise<void> | void;
+}) {
+  const state = await createReadyBillingPreviewState({ diagnostics: true });
+  await input.prepare(state);
+  const result = await postJson(
+    testOnboardingHandler,
+    state.env,
+    state.ownerASession,
+    "/api/onboarding/test",
+    { linkedServerId: target900003 },
+    diagnosticPreviewBaseUrl,
+  );
+  assert.equal(result.status, 500, `${input.label} should return diagnostic HTTP 500.`);
+  assert.equal(result.json.error_code, "onboarding_verification_failed");
+  assert.equal(result.json.failure_stage, input.expectedStage);
+  assert.equal(ONBOARDING_VERIFICATION_STAGES.includes(result.json.failure_stage as typeof ONBOARDING_VERIFICATION_STAGES[number]), true);
+  assertDiagnosticResponseSafe(result.text, input.label);
+}
+
+async function assertDiagnosticLookupPhases() {
+  await assertDiagnosticLookupPhase({
+    label: "linked-server lookup prepare failure",
+    expectedStage: "linked_server_lookup_prepare",
+    prepare: ({ db }) => {
+      db.failOnce("prepare", exactLinkedServerLookupPattern);
+    },
+  });
+  await assertDiagnosticLookupPhase({
+    label: "linked-server lookup bind failure",
+    expectedStage: "linked_server_lookup_bind",
+    prepare: ({ db }) => {
+      db.failOnce("bind", exactLinkedServerLookupPattern);
+    },
+  });
+  await assertDiagnosticLookupPhase({
+    label: "linked-server lookup execute failure",
+    expectedStage: "linked_server_lookup_execute",
+    prepare: ({ db }) => {
+      db.failOnce("first", exactLinkedServerLookupPattern);
+    },
+  });
+  await assertDiagnosticLookupPhase({
+    label: "linked-server lookup row-shape failure",
+    expectedStage: "linked_server_lookup_row_shape",
+    prepare: ({ db }) => {
+      db.returnFirstValueOnce(exactLinkedServerLookupPattern, 42);
+    },
+  });
+  await assertDiagnosticLookupPhase({
+    label: "linked-server lookup enrichment failure",
+    expectedStage: "linked_server_lookup_enrich",
+    prepare: ({ db }) => {
+      db.transformFirstRowOnce(exactLinkedServerLookupPattern, (row) => ({
+        ...row,
+        adm_logs_found: {
+          valueOf() {
+            throw new Error(diagnosticInternalErrorMessage);
+          },
+        },
+      }));
+    },
+  });
 }
 
 async function assertDiagnosticsDisabledRethrows() {
@@ -808,9 +1030,11 @@ async function run() {
 
   try {
     await assertExactLinkedServerLookupMigrationBackedAndReadOnly();
+    await assertExactLinkedServerLookupBoundaryErrors();
     const { db, env, ownerASession } = await createReadyBillingPreviewState();
     const exactCounts = await assertExactSetupVerification(env, db, ownerASession);
     await assertForeignAndFallbackContracts(env, db, ownerASession);
+    await assertDiagnosticLookupPhases();
     await assertDiagnosticFailureStage({
       label: "server_log_config persistence failure",
       operation: "run",

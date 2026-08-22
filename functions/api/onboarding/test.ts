@@ -1,4 +1,4 @@
-import { getCurrentLinkedServer, getLinkedServerForUserById, getSessionUser, requireDb, saveServerAdmPath } from "../../_lib/db";
+import { getCurrentLinkedServer, getLinkedServerForUserById, getSessionUser, LinkedServerLookupError, requireDb, saveServerAdmPath } from "../../_lib/db";
 import { DiscordChannelFetchError, fetchDiscordPostingChannels } from "../../_lib/discord-posting";
 import { json, methodNotAllowed, readBoundedJson } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
@@ -15,6 +15,11 @@ type OnboardingTestBody = {
 export const ONBOARDING_VERIFICATION_STAGES = [
   "request_parse",
   "linked_server_lookup",
+  "linked_server_lookup_prepare",
+  "linked_server_lookup_bind",
+  "linked_server_lookup_execute",
+  "linked_server_lookup_row_shape",
+  "linked_server_lookup_enrich",
   "credential_resolution",
   "metadata_refresh",
   "adm_discovery",
@@ -221,15 +226,16 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     });
   } catch (error) {
     if (shouldExposeBillingPreviewDiagnostics(env, request)) {
+      const failureStage = linkedServerLookupFailureStage(error, stage);
       console.log({
         event: "billing_preview_onboarding_verification_failed",
-        stage,
+        stage: failureStage,
       });
       return json(
         {
           error: "Setup verification failed",
           error_code: "onboarding_verification_failed",
-          failure_stage: stage,
+          failure_stage: failureStage,
         },
         { status: 500 },
       );
@@ -237,6 +243,26 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     throw error;
   }
 };
+
+function linkedServerLookupFailureStage(error: unknown, stage: OnboardingVerificationStage): OnboardingVerificationStage {
+  if (!(error instanceof LinkedServerLookupError) || stage !== "linked_server_lookup") {
+    return stage;
+  }
+
+  switch (error.phase) {
+    case "prepare":
+      return "linked_server_lookup_prepare";
+    case "bind":
+      return "linked_server_lookup_bind";
+    case "execute":
+      return "linked_server_lookup_execute";
+    case "row_shape":
+      return "linked_server_lookup_row_shape";
+    case "enrich":
+      return "linked_server_lookup_enrich";
+  }
+  return "linked_server_lookup";
+}
 
 function shouldExposeBillingPreviewDiagnostics(env: Env, request: Request) {
   const envRecord = env as unknown as Record<string, string | undefined>;
