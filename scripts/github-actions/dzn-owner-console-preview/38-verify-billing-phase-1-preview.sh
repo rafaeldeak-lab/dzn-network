@@ -22,6 +22,8 @@ mkdir -p "${BILLING_ARTIFACT_DIR}"
 
 node <<'NODE'
 const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 
 const artifact = process.env.BILLING_PHASE_1_PREVIEW_ARTIFACT_DIR || "dzn-billing-phase-1-preview";
@@ -54,6 +56,35 @@ const safeOnboardingVerificationStages = new Set([
   "checks_write",
   "response_build",
 ]);
+const exactLinkedServerLookupProjection = [
+  "linked_servers.id AS id",
+  "linked_servers.user_id AS user_id",
+  "linked_servers.guild_id AS guild_id",
+  "linked_servers.discord_guild_id AS discord_guild_id",
+  "linked_servers.nitrado_service_id AS nitrado_service_id",
+  "linked_servers.nitrado_service_name AS nitrado_service_name",
+  "linked_servers.server_name AS server_name",
+  "linked_servers.server_type AS server_type",
+  "linked_servers.server_category AS server_category",
+  "linked_servers.tags_json AS tags_json",
+  "linked_servers.region AS region",
+  "linked_servers.game AS game",
+  "linked_servers.platform AS platform",
+  "linked_servers.ip_address AS ip_address",
+  "linked_servers.player_slots AS player_slots",
+  "linked_servers.status AS status",
+  "linked_servers.public_slug AS public_slug",
+  "linked_servers.listing_visibility AS listing_visibility",
+  "linked_servers.lifecycle_status AS lifecycle_status",
+  "linked_servers.merged_into_server_id AS merged_into_server_id",
+  "linked_servers.created_at AS created_at",
+  "linked_servers.updated_at AS updated_at",
+  "discord_guilds.name AS lookup_guild_name",
+  "discord_guilds.icon_url AS lookup_guild_icon_url",
+  "server_log_config.adm_path AS lookup_private_adm_path",
+  "onboarding_checks.adm_logs_found AS lookup_adm_logs_found",
+  "onboarding_checks.last_tested_at AS lookup_adm_last_checked_at",
+];
 const postReadinessAuthenticated = { ready: false };
 const forbiddenRuntimeText = [
   "Request failed: 503",
@@ -110,6 +141,12 @@ const endpointSummary = {
     ownershipMatched: false,
     lifecycleAllowed: false,
     joinsReadable: false,
+  },
+  exactLinkedServerLookupProjection: {
+    result: "PENDING",
+    projectionCount: 0,
+    uniqueOutputNames: false,
+    firstRowReadable: false,
   },
 };
 const ownershipSummary = { ok: false, fixturePrefix: prefix, checks: {} };
@@ -389,6 +426,31 @@ function d1Read(label, command) {
   ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   return rowsFromWranglerJson(output);
 }
+function d1ReadTemporary(label, command) {
+  if (/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|VACUUM)\b/i.test(command)) {
+    fail("BILLING_PREVIEW_D1_READ_GUARD_FAILED", `Verifier query ${label} is not read-only.`);
+  }
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dzn-billing-exact-projection-"));
+  const tempFile = path.join(tempDir, "wrangler-output.json");
+  try {
+    const output = execFileSync(process.platform === "win32" ? "npx.cmd" : "npx", [
+      "wrangler",
+      "d1",
+      "execute",
+      "DB",
+      "--config",
+      "wrangler.owner-console-preview.toml",
+      "--remote",
+      "--json",
+      "--command",
+      command,
+    ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    fs.writeFileSync(tempFile, output);
+    return rowsFromWranglerJson(fs.readFileSync(tempFile, "utf8"));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
 function firstCount(label, command, key = "count") {
   const rows = d1Read(label, command);
   return Number(rows[0]?.[key] ?? 0);
@@ -399,6 +461,17 @@ function singleRow(label, command) {
 function runExactLinkedServerLookupPreflight(linkedServerId) {
   const linkedServerIdSql = sqlString(linkedServerId);
   const ownerAUserIdSql = sqlString(expectedOwnerAUserId);
+  const projectionOutputNames = exactLinkedServerLookupProjection.map(projectionOutputName);
+  const uniqueOutputNames = duplicateNames(projectionOutputNames).length === 0;
+  if (exactLinkedServerLookupProjection.length >= 90 || !uniqueOutputNames) {
+    endpointSummary.exactLinkedServerLookupProjection = {
+      result: "FAIL",
+      projectionCount: exactLinkedServerLookupProjection.length,
+      uniqueOutputNames,
+      firstRowReadable: false,
+    };
+    fail("BILLING_PREVIEW_EXACT_PROJECTION_EXECUTION_FAILED", "Exact linked-server lookup projection contract is unsafe.");
+  }
   let rows = [];
   try {
     rows = d1Read(
@@ -451,6 +524,50 @@ function runExactLinkedServerLookupPreflight(linkedServerId) {
   if (preflight.result !== "PASS") {
     fail("BILLING_PREVIEW_EXACT_LINKED_SERVER_QUERY_FAILED", "Exact linked-server lookup preflight did not pass.");
   }
+
+  let projectionRows = [];
+  try {
+    projectionRows = d1ReadTemporary(
+      "exact-linked-server-lookup-bounded-projection",
+      `SELECT
+         ${exactLinkedServerLookupProjection.join(",\n         ")}
+       FROM linked_servers
+       LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
+       LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
+       LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
+       WHERE linked_servers.id = ${linkedServerIdSql}
+         AND linked_servers.user_id = ${ownerAUserIdSql}
+         AND lower(COALESCE(linked_servers.status, 'pending')) != 'deleted'
+         AND lower(COALESCE(linked_servers.status, 'pending')) != 'merged'
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       LIMIT 1;`,
+    );
+  } catch {
+    endpointSummary.exactLinkedServerLookupProjection = {
+      result: "FAIL",
+      projectionCount: exactLinkedServerLookupProjection.length,
+      uniqueOutputNames,
+      firstRowReadable: false,
+    };
+    fail("BILLING_PREVIEW_EXACT_PROJECTION_EXECUTION_FAILED", "Exact linked-server lookup bounded projection execution failed.");
+  }
+  const firstRowReadable = projectionRows.length === 1 && projectionOutputNames.every((name) => Object.prototype.hasOwnProperty.call(projectionRows[0], name));
+  endpointSummary.exactLinkedServerLookupProjection = {
+    result: firstRowReadable ? "PASS" : "FAIL",
+    projectionCount: exactLinkedServerLookupProjection.length,
+    uniqueOutputNames,
+    firstRowReadable,
+  };
+  if (!firstRowReadable) {
+    fail("BILLING_PREVIEW_EXACT_PROJECTION_EXECUTION_FAILED", "Exact linked-server lookup bounded projection did not read exactly one row.");
+  }
+}
+function projectionOutputName(expression) {
+  const alias = expression.match(/\s+AS\s+([a-zA-Z_][a-zA-Z0-9_]*)$/i)?.[1];
+  return alias || expression.trim().split(".").pop();
+}
+function duplicateNames(values) {
+  return [...new Set(values.filter((value, index) => values.indexOf(value) !== index))].sort();
 }
 function sqlString(value) {
   return `'${String(value).replaceAll("'", "''")}'`;

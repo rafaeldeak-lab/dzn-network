@@ -102,6 +102,22 @@ function indexOfOrFail(source: string, snippet: string) {
   return index;
 }
 
+function extractStringArrayConst(source: string, constName: string) {
+  const match = source.match(new RegExp(`export const ${constName} = \\[([\\s\\S]*?)\\] as const;`));
+  assert.notEqual(match, null, `Expected ${constName} string array const.`);
+  return [...match![1].matchAll(/"([^"]+)"/g)].map((item) => item[1]);
+}
+
+function projectionOutputName(expression: string) {
+  const alias = expression.match(/\s+AS\s+([a-zA-Z_][a-zA-Z0-9_]*)$/i)?.[1];
+  if (alias) return alias;
+  return expression.trim().split(".").at(-1)?.trim() ?? "";
+}
+
+function duplicateNames(values: readonly string[]) {
+  return [...new Set(values.filter((value, index) => values.indexOf(value) !== index))].sort();
+}
+
 type AutoUpdateEventContext = {
   eventName: string;
   confirmProductionUpdates?: string;
@@ -1905,6 +1921,8 @@ const exactLinkedServerLookupHelper = dbHelperSource.slice(
   indexOfOrFail(dbHelperSource, "const EXACT_LINKED_SERVER_LOOKUP_SQL"),
   indexOfOrFail(dbHelperSource, "export async function getLinkedServersForUserSummary"),
 );
+const exactLinkedServerLookupProjection = extractStringArrayConst(dbHelperSource, "EXACT_LINKED_SERVER_LOOKUP_PROJECTION");
+const exactLinkedServerLookupOutputNames = exactLinkedServerLookupProjection.map(projectionOutputName);
 const exactLinkedServerPreflightBlock = billingVerifierScript.slice(
   indexOfOrFail(billingVerifierScript, "function runExactLinkedServerLookupPreflight"),
   indexOfOrFail(billingVerifierScript, "function sqlString"),
@@ -2002,6 +2020,29 @@ assert.equal(billingSchemaVerifierScript.includes("BILLING_SCHEMA_MIGRATIONS_MIS
 assert.equal(billingSchemaVerifierScript.includes("migration0059.length !== 1"), true, "Billing schema verifier must require exactly one 0059 ledger entry.");
 assert.equal(billingSchemaVerifierScript.includes("Migration 0058 must precede 0059."), true, "Billing schema verifier must enforce 0058 before 0059.");
 assert.equal(billingSchemaVerifierScript.includes("migration0058Precedes0059: true"), true, "Billing schema verifier artifact must record 0058 before 0059.");
+assert.equal(dbHelperSource.includes("export const EXACT_LINKED_SERVER_LOOKUP_PROJECTION"), true, "Exact linked-server lookup must expose a bounded projection contract.");
+assert.equal(/linked_servers\.\*/i.test(exactLinkedServerLookupHelper), false, "Exact linked-server lookup must not select linked_servers.*.");
+assert.equal(/(^|[\s,])\*(?=[\s,]|$)/.test(exactLinkedServerLookupHelper), false, "Exact linked-server lookup must not select a bare wildcard.");
+assert.equal(exactLinkedServerLookupProjection.length < 90, true, "Exact linked-server lookup projection must stay below 90 columns.");
+assert.deepEqual(duplicateNames(exactLinkedServerLookupOutputNames), [], "Exact linked-server lookup output names must be unique.");
+assert.equal(exactLinkedServerLookupProjection.includes("server_log_config.adm_path AS lookup_private_adm_path"), true, "Joined private ADM path must use an internal unique alias.");
+assert.equal(exactLinkedServerLookupProjection.includes("discord_guilds.name AS lookup_guild_name"), true, "Joined guild name must use an internal unique alias.");
+assert.equal(exactLinkedServerLookupProjection.includes("onboarding_checks.adm_logs_found AS lookup_adm_logs_found"), true, "Joined ADM check must use an internal unique alias.");
+for (const forbiddenProjectedField of [
+  "encrypted_token",
+  "token_iv",
+  "token_auth_tag",
+  "session_token_hash",
+  "bot_access_token",
+  "access_token",
+  "refresh_token",
+]) {
+  assert.equal(
+    exactLinkedServerLookupProjection.some((expression) => expression.toLowerCase().includes(forbiddenProjectedField)),
+    false,
+    `Exact linked-server lookup must not select credential field ${forbiddenProjectedField}.`,
+  );
+}
 assert.equal(exactLinkedServerLookupHelper.includes("ensureLinkedServerMetadataColumns"), false, "Exact linked-server lookup helper must not run metadata schema repair.");
 assert.equal(exactLinkedServerLookupHelper.includes("ensureServerLogConfigTable"), false, "Exact linked-server lookup helper must not run server_log_config schema repair.");
 assert.equal(exactLinkedServerLookupHelper.includes("linked_servers.id = ?"), true, "Exact linked-server lookup must remain constrained by linked-server ID.");
@@ -2041,6 +2082,11 @@ for (const requiredExactLookupDependency of [
   "columnsPresent: true",
   "indexesPresent: true",
   "migrationBacked: true",
+  "linkedServerTableColumnCount",
+  "exactProjectionColumnCount",
+  "d1ColumnLimit: 100",
+  "projectionWithinLimit",
+  "uniqueOutputNames",
 ]) {
   assert.equal(billingSchemaVerifierScript.includes(requiredExactLookupDependency), true, `Billing schema verifier must check exact lookup dependency: ${requiredExactLookupDependency}.`);
 }
@@ -2195,6 +2241,15 @@ assert.equal(billingPreviewScriptsBlock.includes("expectJsonErrorCode(matrixUrl,
 assert.equal(billingPreviewScriptsBlock.includes("const setupTargetId = `${prefix}owner-a-source-new-900003`;"), true, "Billing setup verification must target the exact first-time 900003 linked server.");
 assert.equal(billingVerifierScript.includes("function runExactLinkedServerLookupPreflight"), true, "Billing verifier must preflight the exact joined linked-server lookup before group 22.");
 assert.equal(billingVerifierScript.includes("exactLinkedServerLookupPreflight"), true, "Billing endpoint summary must include sanitized exact lookup preflight evidence.");
+assert.equal(billingVerifierScript.includes("exactLinkedServerLookupProjection"), true, "Billing verifier must execute the bounded exact lookup projection before group 22.");
+assert.equal(billingVerifierScript.includes("BILLING_PREVIEW_EXACT_PROJECTION_EXECUTION_FAILED"), true, "Billing verifier must fail safely when bounded exact projection execution fails.");
+assert.equal(billingVerifierScript.includes("function d1ReadTemporary"), true, "Billing verifier must isolate exact-projection row output in a temporary file.");
+assert.equal(billingVerifierScript.includes("fs.mkdtempSync(path.join(os.tmpdir(), \"dzn-billing-exact-projection-\"))"), true, "Exact-projection temporary output must be outside the Billing artifact.");
+assert.equal(billingVerifierScript.includes("fs.rmSync(tempDir, { recursive: true, force: true })"), true, "Exact-projection temporary output must be deleted.");
+assert.equal(billingEndpointSummaryBlock.includes("exactLinkedServerLookupProjection"), true, "Billing endpoint artifact must include only safe exact-projection summary evidence.");
+for (const safeProjectionField of ["result", "projectionCount", "uniqueOutputNames", "firstRowReadable"]) {
+  assert.equal(billingEndpointSummaryBlock.includes(safeProjectionField), true, `Exact-projection artifact summary must include safe field ${safeProjectionField}.`);
+}
 assert.equal(billingVerifierScript.includes("BILLING_PREVIEW_EXACT_LINKED_SERVER_QUERY_FAILED"), true, "Billing verifier must fail safely when exact lookup preflight fails.");
 assert.equal(exactLinkedServerPreflightBlock.includes("const linkedServerIdSql = sqlString(linkedServerId);"), true, "Exact lookup preflight must parameterize the setup target ID.");
 assert.equal(exactLinkedServerPreflightBlock.includes("const ownerAUserIdSql = sqlString(expectedOwnerAUserId);"), true, "Exact lookup preflight must parameterize the expected Owner A ID.");
@@ -2214,9 +2269,12 @@ assert.equal(/\b(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE|VACUUM)\b/i.test
 for (const safeField of ["result", "rowFound", "ownershipMatched", "lifecycleAllowed", "joinsReadable"]) {
   assert.equal(exactLinkedServerPreflightBlock.includes(safeField), true, `Exact lookup preflight artifact must include safe field ${safeField}.`);
 }
-for (const unsafeField of ["user_id:", "adm_path:", "guild_id:", "discord_guild_id:", "sql:", "command:", "stderr", "stdout", "error:"]) {
+for (const unsafeField of ["user_id:", "adm_path:", "guild_id:", "discord_guild_id:", "sql:", "command:", "stderr", "stdout", "error:", "lookup_private_adm_path:"]) {
   assert.equal(exactLinkedServerPreflightBlock.includes(unsafeField), false, `Exact lookup preflight artifact must not include unsafe field ${unsafeField}.`);
 }
+assert.equal(exactLinkedServerPreflightBlock.includes("exactLinkedServerLookupProjection.length >= 90"), true, "Exact projection preflight must enforce the bounded column count.");
+assert.equal(exactLinkedServerPreflightBlock.includes("uniqueOutputNames"), true, "Exact projection preflight must prove unique output aliases.");
+assert.equal(exactLinkedServerPreflightBlock.includes("d1ReadTemporary("), true, "Exact projection preflight must execute through the temporary-output D1 read.");
 const billingPreflightCall = indexOfOrFail(billingVerifierScript, "runExactLinkedServerLookupPreflight(setupTargetId);");
 const billingGroup21Record = indexOfOrFail(billingVerifierScript, "recordGroup(\"21. Repeated first-time save is idempotent\")");
 const billingSetupVerificationCall = indexOfOrFail(billingVerifierScript, "const setupVerification = await postOnboardingSetupVerification");

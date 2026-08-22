@@ -56,6 +56,35 @@ const artifact = process.env.BILLING_PHASE_1_PREVIEW_ARTIFACT_DIR || "dzn-billin
 const productionId = process.env.DETECTED_PRODUCTION_D1_DATABASE_ID || "";
 const previewId = process.env.PREVIEW_D1_DATABASE_ID || "";
 const previewIdMask = maskId(previewId);
+const exactLinkedServerLookupProjection = [
+  "linked_servers.id AS id",
+  "linked_servers.user_id AS user_id",
+  "linked_servers.guild_id AS guild_id",
+  "linked_servers.discord_guild_id AS discord_guild_id",
+  "linked_servers.nitrado_service_id AS nitrado_service_id",
+  "linked_servers.nitrado_service_name AS nitrado_service_name",
+  "linked_servers.server_name AS server_name",
+  "linked_servers.server_type AS server_type",
+  "linked_servers.server_category AS server_category",
+  "linked_servers.tags_json AS tags_json",
+  "linked_servers.region AS region",
+  "linked_servers.game AS game",
+  "linked_servers.platform AS platform",
+  "linked_servers.ip_address AS ip_address",
+  "linked_servers.player_slots AS player_slots",
+  "linked_servers.status AS status",
+  "linked_servers.public_slug AS public_slug",
+  "linked_servers.listing_visibility AS listing_visibility",
+  "linked_servers.lifecycle_status AS lifecycle_status",
+  "linked_servers.merged_into_server_id AS merged_into_server_id",
+  "linked_servers.created_at AS created_at",
+  "linked_servers.updated_at AS updated_at",
+  "discord_guilds.name AS lookup_guild_name",
+  "discord_guilds.icon_url AS lookup_guild_icon_url",
+  "server_log_config.adm_path AS lookup_private_adm_path",
+  "onboarding_checks.adm_logs_found AS lookup_adm_logs_found",
+  "onboarding_checks.last_tested_at AS lookup_adm_last_checked_at",
+];
 
 function fail(code, message, details = {}) {
   const safeDetails = Object.fromEntries(Object.entries(details).map(([key, value]) => [key, sanitize(value)]));
@@ -82,6 +111,13 @@ function sanitize(value) {
 }
 function maskId(id) {
   return typeof id === "string" && id.length > 12 ? `${id.slice(0, 8)}...${id.slice(-4)}` : "unavailable";
+}
+function projectionOutputName(expression) {
+  const alias = expression.match(/\s+AS\s+([a-zA-Z_][a-zA-Z0-9_]*)$/i)?.[1];
+  return alias || expression.trim().split(".").pop();
+}
+function duplicateNames(values) {
+  return [...new Set(values.filter((value, index) => values.indexOf(value) !== index))].sort();
 }
 function rowsFromWranglerJson(path) {
   const raw = fs.readFileSync(path, "utf8").replace(/^\uFEFF/, "").trim();
@@ -206,6 +242,16 @@ const linkedServerColumns = requireColumns("linked_servers", rowsFromWranglerJso
   "latest_imported_event_at",
   "listing_visibility",
 ]);
+const exactProjectionOutputNames = exactLinkedServerLookupProjection.map(projectionOutputName);
+const exactProjectionColumnCount = exactLinkedServerLookupProjection.length;
+const exactProjectionUniqueOutputNames = duplicateNames(exactProjectionOutputNames).length === 0;
+const exactProjectionWithinLimit = exactProjectionColumnCount < 90;
+if (!exactProjectionWithinLimit || !exactProjectionUniqueOutputNames) {
+  fail("BILLING_SCHEMA_EXACT_LOOKUP_PROJECTION_UNSAFE", "Exact linked-server lookup projection is not safely bounded.", {
+    exactProjectionColumnCount,
+    uniqueOutputNames: exactProjectionUniqueOutputNames,
+  });
+}
 const linkedServerMergeIndexes = rowsFromWranglerJson("billing-schema-linked-server-merge-index.json");
 if (linkedServerMergeIndexes.length !== 1) {
   fail("BILLING_SCHEMA_LINKED_SERVER_MERGE_INDEX_MISSING", "Linked-server merge-target lookup index is missing.");
@@ -286,6 +332,11 @@ fs.writeFileSync(`${artifact}/schema-summary.json`, JSON.stringify({
     columnsPresent: true,
     indexesPresent: true,
     migrationBacked: true,
+    linkedServerTableColumnCount: linkedServerColumns.length,
+    exactProjectionColumnCount,
+    d1ColumnLimit: 100,
+    projectionWithinLimit: exactProjectionWithinLimit,
+    uniqueOutputNames: exactProjectionUniqueOutputNames,
   },
   exactLinkedServerLookupTablesPresent: [...exactLookupTableNames].sort(),
   exactLinkedServerLookupColumnsPresent: {
