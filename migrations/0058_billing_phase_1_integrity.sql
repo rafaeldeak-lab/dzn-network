@@ -30,3 +30,11 @@ ON linked_server_allowance_reservations(discord_user_id, status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lsar_active_linked_server
 ON linked_server_allowance_reservations(linked_server_id)
 WHERE status = 'active' AND linked_server_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_nitrado_connections_user_linked_server_updated
+ON nitrado_connections(user_id, linked_server_id, updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_linked_servers_user_service_active
+ON linked_servers(user_id, nitrado_service_id)
+WHERE nitrado_service_id IS NOT NULL
+  AND lower(COALESCE(status, 'pending')) NOT IN ('merged', 'deleted');

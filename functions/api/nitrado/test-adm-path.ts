@@ -2,7 +2,7 @@ import { getCurrentLinkedServer, getSessionUser, saveServerAdmPath } from "../..
 import { json, methodNotAllowed, readJson } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { getAdmLogStoragePath, mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
-import { getLatestNitradoToken } from "../../_lib/onboarding";
+import { getNitradoTokenForLinkedServer } from "../../_lib/onboarding";
 import type { PagesFunction } from "../../_lib/types";
 
 type TestAdmPathBody = {
@@ -31,7 +31,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const admLog = isMockNitrado(env.MOCK_NITRADO)
     ? mockAdmLogDetection()
     : await testExactNitradoAdmPath(
-        (await getLatestNitradoToken(env, user.id)) ?? "",
+        (await getNitradoTokenForLinkedServer(env, user.id, linkedServer.id)) ?? "",
         linkedServer.nitrado_service_id,
         admPath,
       );

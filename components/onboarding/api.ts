@@ -77,8 +77,9 @@ export async function validateNitradoToken(data: {
   });
 }
 
-export async function getNitradoServices() {
-  return request<{ services: NitradoService[] }>("/api/nitrado/services");
+export async function getNitradoServices(linkedServerId?: string | null) {
+  const query = linkedServerId ? `?linked_server_id=${encodeURIComponent(linkedServerId)}` : "";
+  return request<{ services: NitradoService[] }>(`/api/nitrado/services${query}`);
 }
 
 export async function saveOnboarding(data: {
@@ -87,6 +88,7 @@ export async function saveOnboarding(data: {
   server_category?: string | null;
   tags: string[];
   nitradoServiceId: string;
+  linkedServerId?: string | null;
   public_short_description?: string | null;
   public_description?: string | null;
   public_discord_invite?: string | null;

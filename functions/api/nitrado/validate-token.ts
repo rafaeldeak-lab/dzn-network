@@ -9,7 +9,11 @@ import {
 } from "../../_lib/nitrado";
 import {
   ensureDraftLinkedServer,
+  isLocalDatabaseIntegrityConflict,
   LinkedServerAllowanceExceededError,
+  LinkedServerIntegrityConflictError,
+  LinkedServerOwnershipConflictError,
+  NitradoTokenAssociationError,
   normalizeTags,
   saveLinkedServerNitradoService,
   storePendingNitradoToken,
@@ -81,6 +85,18 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   } catch (error) {
     if (error instanceof LinkedServerAllowanceExceededError) {
       return json({ error: error.message }, { status: 402 });
+    }
+    if (error instanceof LinkedServerOwnershipConflictError) {
+      return json({ error: error.message, error_code: error.code }, { status: 409 });
+    }
+    if (error instanceof LinkedServerIntegrityConflictError || error instanceof NitradoTokenAssociationError) {
+      return json({ error: error.message, error_code: error.code }, { status: 409 });
+    }
+    if (isLocalDatabaseIntegrityConflict(error)) {
+      return json({
+        error: "Linked server state changed while validating. Refresh and try again.",
+        error_code: "linked_server_integrity_conflict",
+      }, { status: 409 });
     }
     if (error instanceof NitradoServiceLookupError) {
       if (error.code === "invalid_token") return json({ error: "Invalid token", tokenValid: false }, { status: 400 });

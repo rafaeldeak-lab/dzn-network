@@ -2,7 +2,7 @@ import { getSessionUser } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { fetchMockNitradoServices, fetchNitradoServices } from "../../_lib/nitrado";
-import { getLatestNitradoToken } from "../../_lib/onboarding";
+import { getLatestNitradoToken, getNitradoTokenForLinkedServer } from "../../_lib/onboarding";
 import type { PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -14,7 +14,14 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   const services = isMockNitrado(env.MOCK_NITRADO)
     ? await fetchMockNitradoServices()
-    : await fetchNitradoServices((await getLatestNitradoToken(env, user.id)) ?? "");
+    : await fetchNitradoServices(await resolveNitradoTokenForServices(env, request, user.id));
 
   return json({ services });
 };
+
+async function resolveNitradoTokenForServices(env: Parameters<PagesFunction>[0]["env"], request: Request, userId: string) {
+  const linkedServerId = new URL(request.url).searchParams.get("linked_server_id")?.trim() || null;
+  return linkedServerId
+    ? (await getNitradoTokenForLinkedServer(env, userId, linkedServerId)) ?? ""
+    : (await getLatestNitradoToken(env, userId)) ?? "";
+}

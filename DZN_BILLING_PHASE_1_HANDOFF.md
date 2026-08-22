@@ -1,76 +1,67 @@
-# DZN Billing Phase 1 Handoff
+# DZN Billing Phase 1 Integrity Handoff
 
-## Completed Micro-Slices
+## Completed Workflow-Size Incident
 
-1. Linked-server allowance reservation lifecycle across Nitrado validation, onboarding save, and service attachment.
-2. Billing status and dashboard allowance reporting aligned with reservation-aware enforcement.
+GitHub Support confirmed the `DZN Owner Console Preview` workflow was failing before job creation because `.github/workflows/dzn-owner-console-preview.yml` exceeded GitHub's 500 KB workflow file size limit on `feature/event-platform-performance-foundation`.
 
-## Latest Implementation
+- Original workflow size: `515,947` bytes.
+- Reduced workflow size: `16,367` bytes.
+- Reduction: `96.83%`.
+- Historical extraction: 31 inline script blocks were moved to `scripts/github-actions/dzn-owner-console-preview/*.sh`.
+- Lossless reconstruction passed at the time of the repair.
+- Successful non-production workflow run: `32367531730`.
+- Run URL: `https://github.com/rafaeldeak-lab/dzn-network/actions/runs/32367531730`.
+- Workflow-size implementation commit: `d5501dde1501c70d6ccb93dca8942876892f0869`.
+- Final workflow validation documentation commit: `4da95f39929062e2d03e3ddf4f345618f300dca5`.
+- Production deployment: none.
 
-Reporting alignment and handoff recording changed exactly these files:
+The current workflow may contain additional legitimate scripts after that incident; the historical extraction count remains 31.
 
-- `functions/_lib/onboarding.ts`
+## Billing Phase 1 Integrity Work
+
+### Completed Before This Continuation
+
+- `8db588f` `feat(billing): add linked server reservation lifecycle`
+  - Added additive linked-server allowance reservation schema.
+  - Added runtime reservation helpers.
+  - Wired Nitrado validation, onboarding save, direct service attachment, and token-write failure paths to acquire, complete, or release reservations.
+- `75d76f3` `fix(billing): align allowance reporting with reservations`
   - Added `getLinkedServerAllowanceUsageForUser`.
-  - Centralized allowance usage, remaining-capacity clamp, and `canLinkMore` calculation around the existing reservation-aware linked-server count.
-  - Updated reservation acquisition to use the same usage helper used by reporting.
-- `functions/_lib/plans.ts`
-  - Replaced the old direct `linked_servers` count in `getOwnerBillingStatus`.
-  - Billing status now reports `linked_server_count` and `can_link_more_servers` from the reservation-aware usage helper while preserving the existing response shape.
-- `scripts/test-billing-integrity.ts`
-  - Added regression coverage for billing status/API reporting with committed linked servers, active unexpired reservations, expired reservations, released reservations, completed reservations plus linked-server rows, fully consumed allowance, remaining-capacity clamping, current plans, legacy Network/Partner normalization, free/trial/inactive states, and response compatibility.
-- `DZN_BILLING_PHASE_1_HANDOFF.md`
-  - Recorded the reporting slice, validation results, compatibility review, remaining risks, and next incomplete slice.
+  - Updated billing status to report reservation-aware linked-server usage.
+  - Added coverage for active, expired, released, and completed reservation accounting.
 
-No dashboard component change was required: the dashboard already renders `linked_server_count / entitlements.max_linked_servers` from `/api/billing/status`, and that API now uses the reservation-aware source of truth.
+### Current Integrity Additions
 
-## Preserved Reservation Lifecycle Slice
+- Billing migration collision resolved by renaming the billing migration to `migrations/0058_billing_phase_1_integrity.sql`.
+- `migrations/0057_event_suggestions_phase_2a.sql` remains unchanged as migration `0057`.
+- Nitrado token writes now update the exact connection for a linked server instead of creating uncontrolled duplicate token rows for repeated validation.
+- Onboarding save resolves tokens by the validated linked server id and only uses a legacy fallback when exactly one candidate token/draft exists.
+- Same-owner repeated linking reuses the canonical service row and cleans up the request draft.
+- Cross-owner attempts to take over an already linked Nitrado service return a safe `409` conflict without exposing the other owner or token material.
+- Setup verification reads the token associated with the current linked server instead of the latest token for the user.
+- The `AdmImportJobProgressResult` setup summary now maps real fields: `job_id`, `filename`, line progress, chunks, status, and progress.
 
-- Additive reservation schema remains in `migrations/0057_billing_phase_1_integrity.sql`.
-- Runtime reservation schema helpers remain in `functions/_lib/onboarding.ts`.
-- Nitrado validation, onboarding save, direct service attachment, and pending token failure paths still acquire, complete, or release reservations.
-- The validated reservation-lifecycle slice was committed as `feat(billing): add linked server reservation lifecycle`.
+### Local Validation Status
 
-## Validation Results
+In progress for this continuation:
 
-- `git diff --check`: passed before the reservation-lifecycle commit and passed after the reporting slice.
-- `npx tsx scripts/test-billing-integrity.ts`: passed before the reservation-lifecycle commit and passed after the reporting slice.
-- `npm run test:billing-plans`: passed.
-- `npm run test:dashboard-loading`: passed.
-- `npm run test:dashboard-core-first-load`: passed.
-- `npm run test:owner-console`: passed.
-- `npm run lint`: passed with 12 existing warnings, 0 errors.
-- `npm run build`: passed.
-- `npx tsc --noEmit --pretty false`: failed only on the pre-existing `functions/api/onboarding/test.ts` `AdmImportJobProgressResult` property errors for `adm_file`, `id`, `line_start`, and `line_end`.
+- `npm run test:billing-integrity`
+- `npm run test:billing-plans`
+- `npm run test:github-workflows`
+- `npm run test:performance-foundation`
+- `npm run test:owner-console`
+- `npm run test:dashboard-loading`
+- `npm run test:dashboard-core-first-load`
+- `npm run lint`
+- `npx tsc --noEmit --pretty false`
+- `npm run build`
+- `git diff --check`
 
-## Verified Behaviors
+### Security And Compatibility Notes
 
-- Runtime helper SQL and additive migration SQL agree.
-- Active unexpired reservations count toward enforcement and billing status reporting.
-- Expired, released, and failed-path released reservations do not consume allowance.
-- Completed reservations do not double-count beside their linked-server row.
-- Billing status expires stale active reservations before reporting usage.
-- Remaining capacity is clamped to zero internally when usage exceeds the allowance.
-- Free, Starter, Pro, Premium, legacy Network, legacy Partner, trialing, free, and inactive paid states preserve expected allowance behavior.
-- `/api/billing/status` keeps its existing top-level response shape.
-- Dashboard billing cards continue to use the same public status fields.
-- Owner-console linked-server counts remain read-only operational inventory, not billing allowance usage.
-
-## Security And Compatibility Review
-
-- No Stripe webhook, checkout, subscription-transition, Discord OAuth, Nitrado credential, deployment, production service, or live database paths were changed.
-- No reservation IDs, tokens, release reasons, failure internals, secrets, or unnecessary billing internals are exposed to clients.
-- No destructive migration or data reset was added.
-- No `player_stats` table was created; `player_profiles` was not changed.
-- 401/403 endpoint protection was not weakened.
-- Cloudflare/GitHub workflow secret handling was not changed.
-- Same-category matchmaking was not changed.
-
-## Remaining Risks
-
-- `functions/_lib/plans.ts` now imports the reservation-aware usage helper from `functions/_lib/onboarding.ts`; tests pass, but a future cleanup could extract allowance usage into a dedicated shared billing module to reduce coupling.
-- Existing duplicate-service behavior in `saveLinkedServerNitradoService` still contains the pre-existing draft cleanup path; this work only preserves reservation finalization around it.
-- Full `npx tsc --noEmit --pretty false` remains blocked by the pre-existing `functions/api/onboarding/test.ts` `AdmImportJobProgressResult` type drift.
-
-## Next Incomplete Micro-Slice
-
-Resolve the pre-existing `functions/api/onboarding/test.ts` `AdmImportJobProgressResult` type drift so the repository-wide TypeScript check can pass, without changing reservation enforcement semantics, billing status response shape, Stripe flows, Discord OAuth, Nitrado token handling, production services, or live databases.
+- No Stripe checkout, webhook, subscription pricing, Discord OAuth, production credential, production service, or live database path is intentionally changed.
+- No destructive migration or data reset is added.
+- No `player_stats` table is created; `player_profiles` is untouched.
+- Endpoint authentication and authorization are not weakened.
+- Runtime token storage remains encrypted and token material is not returned in API errors.
+- Production activity remains blocked; preview work is guarded and non-production only.

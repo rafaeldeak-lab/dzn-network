@@ -14,7 +14,7 @@ if [ -z "${CANDIDATE_BRANCH:-}" ] || [ -z "${CANDIDATE_SHA:-}" ] || [ -z "${CAND
   exit 1
 fi
 case "${CANDIDATE_REF}" in
-  refs/heads/feature/owner-console|refs/heads/feature/creator-only-event-governance|refs/heads/feature/event-platform-performance-foundation) ;;
+  refs/heads/feature/owner-console|refs/heads/feature/creator-only-event-governance|refs/heads/feature/event-platform-performance-foundation|refs/heads/feature/billing-phase-1-integrity) ;;
   refs/heads/main|refs/heads/master|refs/heads/production)
     echo "::error::Owner console preview must never run from main, master, or production."
     exit 1
@@ -28,23 +28,27 @@ case "${CANDIDATE_REF}" in
     exit 1
     ;;
   *)
-    echo "::error::Owner console preview may only run from feature/owner-console, feature/creator-only-event-governance, or feature/event-platform-performance-foundation."
+    echo "::error::Owner console preview may only run from feature/owner-console, feature/creator-only-event-governance, feature/event-platform-performance-foundation, or feature/billing-phase-1-integrity."
     exit 1
     ;;
 esac
 case "${CANDIDATE_BRANCH}" in
-  feature/owner-console|feature/creator-only-event-governance|feature/event-platform-performance-foundation) ;;
+  feature/owner-console|feature/creator-only-event-governance|feature/event-platform-performance-foundation|feature/billing-phase-1-integrity) ;;
   main|master|production)
     echo "::error::Owner console preview must never run from main, master, or production."
     exit 1
     ;;
   *)
-    echo "::error::Owner console preview may only run from feature/owner-console, feature/creator-only-event-governance, or feature/event-platform-performance-foundation."
+    echo "::error::Owner console preview may only run from feature/owner-console, feature/creator-only-event-governance, feature/event-platform-performance-foundation, or feature/billing-phase-1-integrity."
     exit 1
     ;;
 esac
 if [ "${CANDIDATE_BRANCH}" = "feature/event-platform-performance-foundation" ] && [ "${MODE}" != "event-platform-performance-preview" ]; then
   echo "::error::feature/event-platform-performance-foundation may only run event-platform-performance-preview mode."
+  exit 1
+fi
+if [ "${CANDIDATE_BRANCH}" = "feature/billing-phase-1-integrity" ] && [ "${MODE}" != "full-preview" ]; then
+  echo "::error::feature/billing-phase-1-integrity may only run full-preview mode."
   exit 1
 fi
 

@@ -140,6 +140,7 @@ export function SetupWizard() {
   const [validatedService, setValidatedService] = useState<NitradoService | null>(null);
   const [directServiceValidated, setDirectServiceValidated] = useState(false);
   const [selectedService, setSelectedService] = useState("");
+  const [validatedLinkedServerId, setValidatedLinkedServerId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [checks, setChecks] = useState<OnboardingChecks | null>(null);
@@ -196,6 +197,7 @@ export function SetupWizard() {
           setServices([existingService]);
           setValidatedService(existingService);
           setSelectedService(existingService.id);
+          setValidatedLinkedServerId(linkedServer.id);
           setTokenValid(true);
           setDirectServiceValidated(true);
           setStep(5);
@@ -304,6 +306,7 @@ export function SetupWizard() {
       setTokenInput("");
       setTokenValid(true);
       setChecks(null);
+      setValidatedLinkedServerId(result.linkedServerId ?? null);
       setVerificationProgress((current) => ({
         ...current,
         lastCheckedAt: new Date().toISOString(),
@@ -326,7 +329,7 @@ export function SetupWizard() {
     setBusy(true);
     setMessage("");
     try {
-      await validateNitradoToken({
+      const result = await validateNitradoToken({
         token: tokenInput,
         discordGuildId: selectedGuild,
         serverType,
@@ -336,13 +339,14 @@ export function SetupWizard() {
       setTokenInput("");
       setTokenValid(true);
       setChecks(null);
+      setValidatedLinkedServerId(result.linkedServerId ?? null);
       setVerificationProgress((current) => ({
         ...current,
         lastCheckedAt: new Date().toISOString(),
       }));
       setDirectServiceValidated(false);
       setValidatedService(null);
-      const serviceResult = await getNitradoServices();
+      const serviceResult = await getNitradoServices(result.linkedServerId);
       setServices(serviceResult.services);
       if (serviceResult.services[0]) setSelectedService(serviceResult.services[0].id);
       setStep(4);
@@ -363,6 +367,7 @@ export function SetupWizard() {
         tags: selectedTags,
         ...publicListing,
         nitradoServiceId: selectedService,
+        linkedServerId: validatedLinkedServerId,
       });
       setChecks(null);
       setVerificationProgress(INITIAL_VERIFICATION_PROGRESS);

@@ -58,6 +58,49 @@ export class LinkedServerAllowanceExceededError extends Error {
   }
 }
 
+export class LinkedServerOwnershipConflictError extends Error {
+  readonly code = "nitrado_service_already_linked";
+
+  constructor() {
+    super("This Nitrado service is already linked to another DZN owner.");
+    this.name = "LinkedServerOwnershipConflictError";
+  }
+}
+
+export class LinkedServerIntegrityConflictError extends Error {
+  readonly code = "linked_server_integrity_conflict";
+
+  constructor(message = "Linked server state changed while saving. Refresh and try again.") {
+    super(message);
+    this.name = "LinkedServerIntegrityConflictError";
+  }
+}
+
+export class NitradoTokenAssociationError extends Error {
+  readonly code: "missing_nitrado_token" | "ambiguous_nitrado_token";
+
+  constructor(code: "missing_nitrado_token" | "ambiguous_nitrado_token", message: string) {
+    super(message);
+    this.name = "NitradoTokenAssociationError";
+    this.code = code;
+  }
+}
+
+export type ActiveNitradoServiceLinkedServerRow = {
+  id: string;
+  user_id: string;
+  guild_id: string | null;
+  discord_guild_id: string | null;
+  status: string | null;
+};
+
+type NitradoConnectionTokenRow = {
+  id: string;
+  encrypted_token: string;
+  token_iv: string;
+  token_auth_tag: string;
+};
+
 export const serverTypes: ServerType[] = ["PVP", "DEATHMATCH", "PVE", "PVP / PVE"];
 export const allowedTags = [
   "Raid Focused",
@@ -255,14 +298,34 @@ export async function storePendingNitradoToken(env: Env, userId: string, linkedS
   const encrypted = await encryptToken(token, env.TOKEN_ENCRYPTION_KEY);
   const db = requireDb(env);
   try {
+    const existingConnection = await getLatestNitradoConnectionForLinkedServer(env, userId, linkedServerId);
+    if (existingConnection) {
+      await db
+        .prepare(
+          `UPDATE nitrado_connections
+           SET encrypted_token = ?,
+               token_iv = ?,
+               token_auth_tag = ?,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?
+             AND user_id = ?
+             AND linked_server_id = ?`,
+        )
+        .bind(encrypted.encryptedToken, encrypted.iv, encrypted.authTag, existingConnection.id, userId, linkedServerId)
+        .run();
+      return existingConnection.id;
+    }
+
+    const connectionId = crypto.randomUUID();
     await db
       .prepare(
         `INSERT INTO nitrado_connections (
           id, user_id, linked_server_id, encrypted_token, token_iv, token_auth_tag, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       )
-      .bind(crypto.randomUUID(), userId, linkedServerId, encrypted.encryptedToken, encrypted.iv, encrypted.authTag)
+      .bind(connectionId, userId, linkedServerId, encrypted.encryptedToken, encrypted.iv, encrypted.authTag)
       .run();
+    return connectionId;
   } catch (error) {
     await releaseLinkedServerAllowanceReservation(env, {
       userId,
@@ -271,6 +334,27 @@ export async function storePendingNitradoToken(env: Env, userId: string, linkedS
     }).catch(() => null);
     throw error;
   }
+}
+
+export async function getNitradoTokenForLinkedServer(env: Env, userId: string, linkedServerId: string) {
+  if (!env.TOKEN_ENCRYPTION_KEY) throw new Error("TOKEN_ENCRYPTION_KEY is not configured");
+  const row = await getLatestNitradoConnectionForLinkedServer(env, userId, linkedServerId);
+  if (!row) return null;
+  return decryptToken(row.encrypted_token, row.token_iv, row.token_auth_tag, env.TOKEN_ENCRYPTION_KEY);
+}
+
+async function getLatestNitradoConnectionForLinkedServer(env: Env, userId: string, linkedServerId: string) {
+  return requireDb(env)
+    .prepare(
+      `SELECT id, encrypted_token, token_iv, token_auth_tag
+       FROM nitrado_connections
+       WHERE user_id = ?
+         AND linked_server_id = ?
+       ORDER BY updated_at DESC, id DESC
+       LIMIT 1`,
+    )
+    .bind(userId, linkedServerId)
+    .first<NitradoConnectionTokenRow>();
 }
 
 export async function getLatestNitradoToken(env: Env, userId: string) {
@@ -289,6 +373,28 @@ export async function getLatestNitradoToken(env: Env, userId: string) {
 
   if (!row) return null;
   return decryptToken(row.encrypted_token, row.token_iv, row.token_auth_tag, env.TOKEN_ENCRYPTION_KEY);
+}
+
+export async function linkNitradoConnectionToLinkedServer(env: Env, userId: string, fromLinkedServerId: string, toLinkedServerId: string) {
+  const connection = await getLatestNitradoConnectionForLinkedServer(env, userId, fromLinkedServerId);
+  if (!connection) {
+    throw new NitradoTokenAssociationError(
+      "missing_nitrado_token",
+      "No saved Nitrado token was found for this onboarding draft. Re-validate your Nitrado token and try again.",
+    );
+  }
+  if (fromLinkedServerId === toLinkedServerId) return connection.id;
+  await requireDb(env)
+    .prepare(
+      `UPDATE nitrado_connections
+       SET linked_server_id = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?
+         AND user_id = ?
+         AND linked_server_id = ?`,
+    )
+    .bind(toLinkedServerId, connection.id, userId, fromLinkedServerId)
+    .run();
+  return connection.id;
 }
 
 export async function linkLatestNitradoConnection(env: Env, userId: string, linkedServerId: string) {
@@ -310,6 +416,33 @@ export async function linkLatestNitradoConnection(env: Env, userId: string, link
 
 export function findService(services: NitradoService[], id: string) {
   return services.find((service) => service.id === id) ?? null;
+}
+
+export async function findActiveLinkedServerByNitradoService(
+  env: Env,
+  serviceId: string,
+  options: { excludeLinkedServerId?: string | null } = {},
+): Promise<ActiveNitradoServiceLinkedServerRow | null> {
+  const db = requireDb(env);
+  const exclude = options.excludeLinkedServerId ?? null;
+  return db
+    .prepare(
+      `SELECT id, user_id, guild_id, discord_guild_id, status
+       FROM linked_servers
+       WHERE nitrado_service_id = ?
+         AND (? IS NULL OR id != ?)
+         AND lower(COALESCE(status, 'pending')) != 'merged'
+         AND lower(COALESCE(status, 'pending')) != 'deleted'
+         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
+       ORDER BY
+         CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN 0 ELSE 1 END,
+         updated_at DESC,
+         created_at DESC,
+         id DESC
+       LIMIT 1`,
+    )
+    .bind(serviceId, exclude, exclude)
+    .first<ActiveNitradoServiceLinkedServerRow>();
 }
 
 export async function saveLinkedServerNitradoService(
@@ -339,22 +472,17 @@ export async function saveLinkedServerNitradoService(
     .first<{ id: string; user_id: string; guild_id: string; discord_guild_id: string; discord_id: string | null }>();
   if (!draft) throw new Error("Linked server draft not found");
 
-  const existingService = await db
-    .prepare(
-      `SELECT id
-       FROM linked_servers
-       WHERE nitrado_service_id = ?
-         AND id != ?
-         AND lower(COALESCE(status, 'pending')) != 'merged'
-         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
-       ORDER BY
-         CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN 0 ELSE 1 END,
-         updated_at DESC,
-         created_at DESC
-       LIMIT 1`,
-    )
-    .bind(service.id, linkedServerId)
-    .first<{ id: string }>();
+  const existingService = await findActiveLinkedServerByNitradoService(env, service.id, {
+    excludeLinkedServerId: linkedServerId,
+  });
+  if (existingService && existingService.user_id !== draft.user_id) {
+    await releaseLinkedServerAllowanceReservation(env, {
+      userId: draft.user_id,
+      linkedServerId,
+      reason: "cross_owner_service_conflict",
+    }).catch(() => null);
+    throw new LinkedServerOwnershipConflictError();
+  }
 
   const targetLinkedServerId = existingService?.id ?? linkedServerId;
   const slug = await uniquePublicSlug(env, service.name, targetLinkedServerId);
@@ -446,10 +574,22 @@ export async function saveLinkedServerNitradoService(
         reason: "service_attachment_failed",
       }).catch(() => null);
     }
+    if (isLocalDatabaseIntegrityConflict(error)) {
+      const canonical = await findActiveLinkedServerByNitradoService(env, service.id).catch(() => null);
+      if (canonical && canonical.user_id !== draft.user_id) throw new LinkedServerOwnershipConflictError();
+      if (canonical?.id) return canonical.id;
+      throw new LinkedServerIntegrityConflictError();
+    }
     throw error;
   }
 
   return targetLinkedServerId;
+}
+
+export function isLocalDatabaseIntegrityConflict(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /unique constraint|constraint failed|sqlite_constraint|d1_error/i.test(message)
+    && /linked_servers|nitrado_service_id|idx_linked_servers_active_service_id|nitrado_connections|linked_server_allowance_reservations|idx_lsar_active_linked_server/i.test(message);
 }
 
 export async function ensureLinkedServerAllowanceReservationSchema(env: Env) {

@@ -750,6 +750,7 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("INPUT_BRANCH"), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("feature/owner-console"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("feature/creator-only-event-governance"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("feature/event-platform-performance-foundation"), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("feature/billing-phase-1-integrity"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("CANDIDATE_BRANCH: ${{ github.ref_name }}"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("CANDIDATE_REF: ${{ github.ref }}"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("CANDIDATE_SHA: ${{ github.sha }}"), true);
@@ -762,18 +763,29 @@ assert.equal(dznOwnerConsolePreviewWorkflow.includes("Owner console preview does
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Owner console preview does not accept pull-request merge refs."), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("Owner console preview must never run from main, master, or production."), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("feature/event-platform-performance-foundation may only run event-platform-performance-preview mode."), true);
+assert.equal(dznOwnerConsolePreviewWorkflow.includes("feature/billing-phase-1-integrity may only run full-preview mode."), true);
 function acceptsOwnerConsolePreviewRef(input: { refName: string; ref?: string; sha?: string }) {
   const ref = input.ref ?? `refs/heads/${input.refName}`;
   const sha = input.sha ?? "184c0fe214810e2343abd7780b9e3e4f24945863";
   if (!input.refName || !sha) return false;
-  if (!["refs/heads/feature/owner-console", "refs/heads/feature/creator-only-event-governance", "refs/heads/feature/event-platform-performance-foundation"].includes(ref)) return false;
-  if (!["feature/owner-console", "feature/creator-only-event-governance", "feature/event-platform-performance-foundation"].includes(input.refName)) return false;
+  if (!["refs/heads/feature/owner-console", "refs/heads/feature/creator-only-event-governance", "refs/heads/feature/event-platform-performance-foundation", "refs/heads/feature/billing-phase-1-integrity"].includes(ref)) return false;
+  if (!["feature/owner-console", "feature/creator-only-event-governance", "feature/event-platform-performance-foundation", "feature/billing-phase-1-integrity"].includes(input.refName)) return false;
   if (["main", "master", "production"].includes(input.refName)) return false;
   return /^[a-f0-9]{40}$/.test(sha);
+}
+function acceptsOwnerConsolePreviewMode(input: { refName: string; mode: string }) {
+  if (!acceptsOwnerConsolePreviewRef({ refName: input.refName })) return false;
+  if (!["full-preview", "cleanup-preview-d1", "rebind-preview-d1", "repair-rebound-discord-preview", "verify-existing-creator-governance-preview", "event-platform-performance-preview"].includes(input.mode)) return false;
+  if (input.refName === "feature/event-platform-performance-foundation") return input.mode === "event-platform-performance-preview";
+  if (input.refName === "feature/billing-phase-1-integrity") return input.mode === "full-preview";
+  if (input.mode === "event-platform-performance-preview") return input.refName === "feature/event-platform-performance-foundation";
+  if (["rebind-preview-d1", "repair-rebound-discord-preview", "verify-existing-creator-governance-preview"].includes(input.mode)) return input.refName === "feature/creator-only-event-governance";
+  return true;
 }
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/creator-only-event-governance" }), true);
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/owner-console" }), true);
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/event-platform-performance-foundation" }), true);
+assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/billing-phase-1-integrity" }), true);
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "main", ref: "refs/heads/main" }), false);
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "master", ref: "refs/heads/master" }), false);
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "production", ref: "refs/heads/production" }), false);
@@ -781,6 +793,13 @@ assert.equal(acceptsOwnerConsolePreviewRef({ refName: "feature/other" }), false)
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "v1.0.0", ref: "refs/tags/v1.0.0" }), false);
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "123/merge", ref: "refs/pull/123/merge" }), false);
 assert.equal(acceptsOwnerConsolePreviewRef({ refName: "" }), false);
+assert.equal(acceptsOwnerConsolePreviewMode({ refName: "feature/billing-phase-1-integrity", mode: "full-preview" }), true);
+assert.equal(acceptsOwnerConsolePreviewMode({ refName: "feature/billing-phase-1-integrity", mode: "cleanup-preview-d1" }), false);
+assert.equal(acceptsOwnerConsolePreviewMode({ refName: "feature/billing-phase-1-integrity", mode: "rebind-preview-d1" }), false);
+assert.equal(acceptsOwnerConsolePreviewMode({ refName: "feature/billing-phase-1-integrity", mode: "repair-rebound-discord-preview" }), false);
+assert.equal(acceptsOwnerConsolePreviewMode({ refName: "feature/billing-phase-1-integrity", mode: "event-platform-performance-preview" }), false);
+assert.equal(acceptsOwnerConsolePreviewMode({ refName: "feature/event-platform-performance-foundation", mode: "event-platform-performance-preview" }), true);
+assert.equal(acceptsOwnerConsolePreviewMode({ refName: "feature/event-platform-performance-foundation", mode: "full-preview" }), false);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn_network_db_owner_console_preview_creator_governance_"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("dzn_network_db_owner_console_preview_creator_governance_${CANDIDATE_SHORT_SHA}"), true);
 assert.equal(dznOwnerConsolePreviewWorkflow.includes("PREVIEW_DB_NAME=%s"), true);
@@ -1043,6 +1062,7 @@ const ownerPreviewRepairDeployStart = indexOfOrFail(dznOwnerConsolePreviewWorkfl
 const ownerPreviewRepairVerifyStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify repaired rebound Discord preview");
 const ownerPreviewResolveD1Start = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Resolve or create preview D1 database");
 const ownerPreviewMigrateStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Apply preview D1 migrations");
+const ownerPreviewBillingVerifyStart = indexOfOrFail(dznOwnerConsolePreviewWorkflow, "- name: Verify billing integrity preview schema");
 const ownerPreviewConfigWrite =
   ownerPreviewResolveD1Start +
   indexOfOrFail(
@@ -1079,6 +1099,20 @@ assert.equal(ownerPreviewEventFixtureCheckBlock.includes("owner-console-creator-
 const ownerPreviewVerifyBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewVerifyStart, ownerPreviewRowVerifyStart);
 assert.equal(ownerPreviewVerifyBlock.includes('hosting_server_id: "owner-console-creator-host"'), true, "Full-preview creator event POST must use the creator-owned host fixture.");
 assert.equal(ownerPreviewVerifyBlock.includes('hosting_server_id: "owner-console-nuketown"'), false, "Full-preview creator event POST must not use another owner server as host.");
+const ownerPreviewBillingVerifyBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewBillingVerifyStart, ownerPreviewSeedStart);
+assert.equal(ownerPreviewBillingVerifyBlock.includes("github.ref_name == 'feature/billing-phase-1-integrity' && inputs.mode == 'full-preview'"), true, "Billing verification step must be branch and full-preview gated.");
+assert.equal(ownerPreviewBillingVerifyBlock.includes("32-verify-billing-integrity-preview.sh"), true, "Billing verification step must call the extracted script.");
+assert.equal(ownerPreviewBillingVerifyBlock.includes("SELECT name FROM d1_migrations ORDER BY id;"), true, "Billing verification must read the migration ledger.");
+assert.equal(ownerPreviewBillingVerifyBlock.includes("0057_event_suggestions_phase_2a.sql"), true, "Billing verification must assert migration 0057 remains event suggestions.");
+assert.equal(ownerPreviewBillingVerifyBlock.includes("0058_billing_phase_1_integrity.sql"), true, "Billing verification must assert billing migration 0058.");
+assert.equal(ownerPreviewBillingVerifyBlock.includes("0057_billing_phase_1_integrity.sql"), true, "Billing verification must reject stale 0057 billing ledger entries.");
+assert.equal(ownerPreviewBillingVerifyBlock.includes("linked_server_allowance_reservations"), true, "Billing verification must inspect the reservation table.");
+assert.equal(ownerPreviewBillingVerifyBlock.includes("idx_nitrado_connections_user_linked_server_updated"), true, "Billing verification must inspect exact-token lookup indexes.");
+assert.equal(ownerPreviewBillingVerifyBlock.includes("PRAGMA foreign_key_check;"), true, "Billing verification must run foreign_key_check read-only.");
+assert.equal(ownerPreviewBillingVerifyBlock.includes("INSERT INTO"), false, "Billing verification must not insert remote preview rows.");
+assert.equal(ownerPreviewBillingVerifyBlock.includes("UPDATE "), false, "Billing verification must not update remote preview rows.");
+assert.equal(ownerPreviewBillingVerifyBlock.includes("DELETE FROM"), false, "Billing verification must not delete remote preview rows.");
+assert.equal(ownerPreviewMigrateStart < ownerPreviewBillingVerifyStart && ownerPreviewBillingVerifyStart < ownerPreviewSeedStart, true, "Billing verification must run after migrations and before preview seed.");
 
 const ownerPreviewValidateBlock = dznOwnerConsolePreviewWorkflow.slice(ownerPreviewValidateInputsStart, ownerPreviewInstallStart);
 assert.equal(ownerPreviewValidateBlock.includes("wrangler.owner-console-preview.toml"), false, "Input validation must not require the generated preview Wrangler config.");

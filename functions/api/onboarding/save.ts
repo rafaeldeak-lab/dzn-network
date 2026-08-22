@@ -5,10 +5,15 @@ import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { fetchMockNitradoServices, fetchNitradoServices } from "../../_lib/nitrado";
 import {
   completeLinkedServerAllowanceReservation,
+  findActiveLinkedServerByNitradoService,
   findService,
   getActiveLinkedServerAllowanceReservation,
-  getLatestNitradoToken,
-  linkLatestNitradoConnection,
+  getNitradoTokenForLinkedServer,
+  isLocalDatabaseIntegrityConflict,
+  linkNitradoConnectionToLinkedServer,
+  LinkedServerIntegrityConflictError,
+  LinkedServerOwnershipConflictError,
+  NitradoTokenAssociationError,
   linkedServerAllowanceLimitMessage,
   normalizeTags,
   releaseLinkedServerAllowanceReservation,
@@ -21,7 +26,7 @@ import { recordDiscordServerAnnouncementEvent } from "../../_lib/discord-server-
 import { ensureAutomationRowsForLinkedServers } from "../../_lib/automation";
 import { saveBotOnboardingConfig } from "../../_lib/ctf-tournaments";
 import { normalizeServerCategory } from "../../_lib/server-categories";
-import type { PagesFunction } from "../../_lib/types";
+import type { Env, PagesFunction } from "../../_lib/types";
 
 type SaveBody = {
   discordGuildId?: string;
@@ -29,6 +34,7 @@ type SaveBody = {
   server_category?: string | null;
   tags?: string[];
   nitradoServiceId?: string;
+  linkedServerId?: string;
   tournamentChannelId?: string;
   botAccessToken?: string;
 } & PublicListingInput;
@@ -63,9 +69,28 @@ export const onRequest: PagesFunction = async ({ request, env, waitUntil }) => {
     .first<{ id: string; guild_id: string; name: string }>();
   if (!guild) return json({ error: "Discord guild not found" }, { status: 400 });
 
+  const requestedLinkedServerId = sanitizeLinkedServerId(body.linkedServerId);
+  let tokenContext: SaveTokenContext | null = null;
+  if (isMockNitrado(env.MOCK_NITRADO)) {
+    tokenContext = { linkedServerId: requestedLinkedServerId, token: "" };
+  } else {
+    try {
+      tokenContext = await resolveNitradoTokenForOnboardingSave(env, userId, requestedLinkedServerId);
+    } catch (error) {
+      if (error instanceof NitradoTokenAssociationError) {
+        return json({ error: error.message, error_code: error.code }, { status: 409 });
+      }
+      const tokenReadError = classifyNitradoTokenReadError(error);
+      if (tokenReadError) {
+        return json({ error: tokenReadError.message, error_code: tokenReadError.code }, { status: 500 });
+      }
+      throw error;
+    }
+  }
+
   const services = isMockNitrado(env.MOCK_NITRADO)
     ? await fetchMockNitradoServices()
-    : await fetchNitradoServices((await getLatestNitradoToken(env, userId)) ?? "");
+    : await fetchNitradoServices(tokenContext.token);
   const service = findService(services, body.nitradoServiceId);
   if (!service) return json({ error: "DayZ Nitrado service not found" }, { status: 400 });
 
@@ -78,34 +103,43 @@ export const onRequest: PagesFunction = async ({ request, env, waitUntil }) => {
     console.warn("DZN server GeoIP lookup skipped", error instanceof Error ? error.message : "unknown error");
     return null;
   });
-  const existingSameService = await db
-    .prepare(
-      `SELECT id
-       FROM linked_servers
-       WHERE nitrado_service_id = ?
-         AND lower(COALESCE(status, 'pending')) != 'merged'
-         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
-       ORDER BY
-         CASE WHEN lower(COALESCE(status, 'pending')) = 'live' THEN 0 ELSE 1 END,
-         updated_at DESC,
-         created_at DESC
-       LIMIT 1`,
-    )
-    .bind(service.id)
-    .first<{ id: string }>();
-  const reusableDraft = await db
-    .prepare(
-      `SELECT id
-       FROM linked_servers
-       WHERE user_id = ?
-         AND lower(COALESCE(status, 'pending')) = 'pending'
-         AND (nitrado_service_id IS NULL OR nitrado_service_id = '')
-       ORDER BY updated_at DESC, id DESC
-       LIMIT 1`,
-    )
-    .bind(userId)
-    .first<{ id: string }>();
+  const existingSameService = await findActiveLinkedServerByNitradoService(env, service.id);
+  if (existingSameService && existingSameService.user_id !== userId) {
+    if (tokenContext?.linkedServerId) {
+      await releaseLinkedServerAllowanceReservation(env, {
+        userId,
+        linkedServerId: tokenContext.linkedServerId,
+        reason: "cross_owner_service_conflict",
+      }).catch(() => null);
+    }
+    return json({
+      error: new LinkedServerOwnershipConflictError().message,
+      error_code: "nitrado_service_already_linked",
+    }, { status: 409 });
+  }
+  const exactDraft = tokenContext?.linkedServerId
+    ? await findReusableDraftById(env, userId, tokenContext.linkedServerId)
+    : null;
+  let fallbackDraft: { id: string } | null = null;
+  if (!tokenContext?.linkedServerId) {
+    try {
+      fallbackDraft = await findSingleReusableDraftForUser(env, userId);
+    } catch (error) {
+      if (error instanceof NitradoTokenAssociationError) {
+        return json({ error: error.message, error_code: error.code }, { status: 409 });
+      }
+      throw error;
+    }
+  }
+  const reusableDraft = exactDraft ?? fallbackDraft;
+  if (tokenContext?.linkedServerId && !exactDraft && !existingSameService) {
+    return json({
+      error: "The saved Nitrado token is not associated with this onboarding server. Re-validate the intended service and try again.",
+      error_code: "missing_nitrado_token",
+    }, { status: 409 });
+  }
   const existingDraft = existingSameService ? null : reusableDraft;
+  const draftToCleanupAfterSameOwnerReuse = existingSameService ? reusableDraft : null;
 
   let linkedServerId: string;
   let createdNewLinkedServer = false;
@@ -268,7 +302,21 @@ export const onRequest: PagesFunction = async ({ request, env, waitUntil }) => {
       if (geo) console.log("DZN SERVER GEO LOCATION UPDATED", { linkedServerId, source: geo.source, approximate: geo.approximate });
     }
 
-    await linkLatestNitradoConnection(env, userId, linkedServerId);
+    if (tokenContext?.linkedServerId) {
+      await linkNitradoConnectionToLinkedServer(env, userId, tokenContext.linkedServerId, linkedServerId);
+    }
+    if (draftToCleanupAfterSameOwnerReuse) {
+      await db
+        .prepare(
+          `DELETE FROM linked_servers
+           WHERE id = ?
+             AND user_id = ?
+             AND lower(COALESCE(status, 'pending')) = 'pending'
+             AND (nitrado_service_id IS NULL OR nitrado_service_id = '')`,
+        )
+        .bind(draftToCleanupAfterSameOwnerReuse.id, userId)
+        .run();
+    }
     await saveBotOnboardingConfig(env, {
       linkedServerId,
       discordGuildId: guild.guild_id,
@@ -307,10 +355,150 @@ export const onRequest: PagesFunction = async ({ request, env, waitUntil }) => {
         reason: "onboarding_save_failed",
       }).catch(() => null);
     }
+    if (error instanceof LinkedServerIntegrityConflictError || error instanceof NitradoTokenAssociationError) {
+      return json({ error: error.message, error_code: error.code }, { status: 409 });
+    }
+    if (error instanceof LinkedServerOwnershipConflictError) {
+      return json({ error: error.message, error_code: error.code }, { status: 409 });
+    }
+    if (isLocalDatabaseIntegrityConflict(error)) {
+      const canonical = await findActiveLinkedServerByNitradoService(env, service.id).catch(() => null);
+      if (canonical && canonical.user_id !== userId) {
+        return json({
+          error: new LinkedServerOwnershipConflictError().message,
+          error_code: "nitrado_service_already_linked",
+        }, { status: 409 });
+      }
+      if (canonical?.id) {
+        return json({ ok: true, linkedServerId: canonical.id });
+      }
+      return json({
+        error: "Linked server state changed while saving. Refresh and try again.",
+        error_code: "linked_server_integrity_conflict",
+      }, { status: 409 });
+    }
     throw error;
   }
   return json({ ok: true, linkedServerId });
 };
+
+type SaveTokenContext = {
+  linkedServerId: string | null;
+  token: string;
+};
+
+async function resolveNitradoTokenForOnboardingSave(env: Env, userId: string, requestedLinkedServerId: string | null): Promise<SaveTokenContext> {
+  if (requestedLinkedServerId) {
+    const token = await getNitradoTokenForLinkedServer(env, userId, requestedLinkedServerId);
+    if (!token) {
+      throw new NitradoTokenAssociationError(
+        "missing_nitrado_token",
+        "No saved Nitrado token was found for this onboarding server. Re-validate your Nitrado token and try again.",
+      );
+    }
+    return { linkedServerId: requestedLinkedServerId, token };
+  }
+
+  const candidates = await requireDb(env)
+    .prepare(
+      `SELECT nitrado_connections.linked_server_id
+       FROM nitrado_connections
+       INNER JOIN linked_servers ON linked_servers.id = nitrado_connections.linked_server_id
+       WHERE nitrado_connections.user_id = ?
+         AND linked_servers.user_id = ?
+         AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+       GROUP BY nitrado_connections.linked_server_id
+       ORDER BY MAX(nitrado_connections.updated_at) DESC, nitrado_connections.linked_server_id DESC
+       LIMIT 2`,
+    )
+    .bind(userId, userId)
+    .all<{ linked_server_id: string }>();
+  const linkedServerIds = (candidates.results ?? [])
+    .map((row) => sanitizeLinkedServerId(row.linked_server_id))
+    .filter((value): value is string => Boolean(value));
+  if (linkedServerIds.length === 0) {
+    throw new NitradoTokenAssociationError(
+      "missing_nitrado_token",
+      "No saved Nitrado token was found. Paste your Nitrado long-life token and validate this service again.",
+    );
+  }
+  if (linkedServerIds.length > 1) {
+    throw new NitradoTokenAssociationError(
+      "ambiguous_nitrado_token",
+      "Multiple onboarding tokens are active. Re-validate the intended service and try again.",
+    );
+  }
+  const token = await getNitradoTokenForLinkedServer(env, userId, linkedServerIds[0]);
+  if (!token) {
+    throw new NitradoTokenAssociationError(
+      "missing_nitrado_token",
+      "No saved Nitrado token was found for this onboarding server. Re-validate your Nitrado token and try again.",
+    );
+  }
+  return { linkedServerId: linkedServerIds[0], token };
+}
+
+async function findReusableDraftById(env: Env, userId: string, linkedServerId: string) {
+  return requireDb(env)
+    .prepare(
+      `SELECT id
+       FROM linked_servers
+       WHERE id = ?
+         AND user_id = ?
+         AND lower(COALESCE(status, 'pending')) = 'pending'
+         AND (nitrado_service_id IS NULL OR nitrado_service_id = '')
+       LIMIT 1`,
+    )
+    .bind(linkedServerId, userId)
+    .first<{ id: string }>();
+}
+
+async function findSingleReusableDraftForUser(env: Env, userId: string) {
+  const rows = await requireDb(env)
+    .prepare(
+      `SELECT id
+       FROM linked_servers
+       WHERE user_id = ?
+         AND lower(COALESCE(status, 'pending')) = 'pending'
+         AND (nitrado_service_id IS NULL OR nitrado_service_id = '')
+       ORDER BY updated_at DESC, id DESC
+       LIMIT 2`,
+    )
+    .bind(userId)
+    .all<{ id: string }>();
+  const drafts = rows.results ?? [];
+  if (drafts.length > 1) {
+    throw new NitradoTokenAssociationError(
+      "ambiguous_nitrado_token",
+      "Multiple onboarding drafts are active. Re-validate the intended service and try again.",
+    );
+  }
+  return drafts[0] ?? null;
+}
+
+function sanitizeLinkedServerId(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().replace(/[\u0000-\u001f]/g, "");
+  return trimmed && trimmed.length <= 128 ? trimmed : null;
+}
+
+function classifyNitradoTokenReadError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/TOKEN_ENCRYPTION_KEY is not configured/i.test(message)) {
+    return {
+      code: "missing_token_encryption_key",
+      message: "Token encryption key is missing in production. Add TOKEN_ENCRYPTION_KEY in Cloudflare Pages and redeploy.",
+    };
+  }
+  if (/decrypt|operation|authentication|tag|cipher|iv|key/i.test(message)) {
+    return {
+      code: "token_decrypt_failed",
+      message: "Your saved Nitrado token cannot be decrypted. Re-save your Nitrado long-life token.",
+    };
+  }
+  return null;
+}
 
 function publicRegionForService(region: string | null | undefined, ipAddress: string | null | undefined) {
   const trimmed = typeof region === "string" ? region.trim() : "";

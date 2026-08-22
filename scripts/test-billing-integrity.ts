@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { createRequire } from "node:module";
 
-import { createSession } from "../functions/_lib/db";
+import { createSession, ensureLinkedServerMetadataColumns } from "../functions/_lib/db";
 import {
   LINKED_SERVER_ALLOWANCE_RESERVATIONS_INDEX_SQL,
   LINKED_SERVER_ALLOWANCE_RESERVATIONS_TABLE_SQL,
@@ -11,8 +12,12 @@ import {
   ensureDraftLinkedServer,
   ensureLinkedServerAllowanceReservationSchema,
   expireLinkedServerAllowanceReservations,
+  findActiveLinkedServerByNitradoService,
   getLinkedServerAllowanceUsageForUser,
+  getNitradoTokenForLinkedServer,
+  linkNitradoConnectionToLinkedServer,
   linkedServerAllowanceLimitMessage,
+  LinkedServerOwnershipConflictError,
   releaseLinkedServerAllowanceReservation,
   reserveLinkedServerAllowance,
   saveLinkedServerNitradoService,
@@ -169,6 +174,11 @@ function createSqliteEnv(options: Partial<Env> = {}) {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE UNIQUE INDEX idx_linked_servers_active_service_id
+    ON linked_servers(nitrado_service_id)
+    WHERE nitrado_service_id IS NOT NULL
+      AND lower(COALESCE(status, 'pending')) NOT IN ('merged', 'deleted');
   `);
 
   const env = {
@@ -246,8 +256,143 @@ function normalizeSql(value: string) {
     .toLowerCase();
 }
 
+type MigrationFile = {
+  name: string;
+  prefix: number;
+  path: string;
+};
+
+const BILLING_MIGRATION = "0058_billing_phase_1_integrity.sql";
+const EVENT_SUGGESTIONS_MIGRATION = "0057_event_suggestions_phase_2a.sql";
+
+function listMigrationFiles() {
+  return readdirSync("migrations")
+    .filter((name) => /^\d{4}_.+\.sql$/.test(name))
+    .sort()
+    .map((name) => ({
+      name,
+      prefix: Number(name.slice(0, 4)),
+      path: join("migrations", name),
+    }));
+}
+
+function assertMigrationNumbering() {
+  const migrations = listMigrationFiles();
+  const seen = new Map<number, string>();
+  for (const migration of migrations) {
+    const existing = seen.get(migration.prefix);
+    assert.equal(existing, undefined, `Duplicate migration prefix ${String(migration.prefix).padStart(4, "0")} used by ${existing} and ${migration.name}.`);
+    seen.set(migration.prefix, migration.name);
+  }
+
+  const staleBillingMigrationPath = `migrations/0057_${"billing_phase_1_integrity"}.sql`;
+  assert.equal(existsSync(staleBillingMigrationPath), false, "Stale billing migration filename must not exist.");
+  assert.equal(existsSync(`migrations/${EVENT_SUGGESTIONS_MIGRATION}`), true, "Event suggestions must remain migration 0057.");
+  assert.equal(existsSync(`migrations/${BILLING_MIGRATION}`), true, "Billing integrity must use migration 0058.");
+  assert.equal(seen.get(57), EVENT_SUGGESTIONS_MIGRATION);
+  assert.equal(seen.get(58), BILLING_MIGRATION);
+
+  const expected = Array.from({ length: migrations.length }, (_value, index) => index + 1);
+  assert.deepEqual(migrations.map((migration) => migration.prefix), expected, "Migrations must remain sequential with no gaps.");
+  assert.equal(
+    migrations.map((migration) => migration.name).join("\n"),
+    [...migrations].sort((left, right) => left.name.localeCompare(right.name)).map((migration) => migration.name).join("\n"),
+    "Migration application order must be deterministic by filename.",
+  );
+  assertNoStaleBillingMigrationReferences();
+}
+
+function assertNoStaleBillingMigrationReferences() {
+  const staleReferences = findRepositoryTextMatches(`0057_${"billing_phase_1_integrity"}`)
+    .filter((path) => !path.includes(".git"));
+  assert.deepEqual(staleReferences, [], "No stale 0057 billing migration references may remain.");
+}
+
+function findRepositoryTextMatches(needle: string) {
+  const matches: string[] = [];
+  const ignored = new Set([".git", "node_modules", ".next", "out"]);
+  function visit(dir: string) {
+    for (const entry of readdirSync(dir)) {
+      if (ignored.has(entry)) continue;
+      const path = join(dir, entry);
+      const stat = statSync(path);
+      if (stat.isDirectory()) {
+        visit(path);
+        continue;
+      }
+      if (!/\.(?:ts|tsx|js|jsx|json|md|yml|yaml|sql|sh|toml)$/.test(path)) continue;
+      if (readFileSync(path, "utf8").includes(needle)) matches.push(path);
+    }
+  }
+  visit(".");
+  return matches.sort();
+}
+
+function applyMigrationFiles(db: SqliteD1Database, migrations: MigrationFile[]) {
+  db.sqlite.exec("PRAGMA foreign_keys = OFF;");
+  for (const migration of migrations) {
+    db.sqlite.exec(readFileSync(migration.path, "utf8"));
+  }
+}
+
+function assertFreshAndUpgradeMigrationApplication() {
+  const migrations = listMigrationFiles();
+
+  const fresh = new SqliteD1Database();
+  applyMigrationFiles(fresh, migrations);
+  assertBillingIntegritySchema(fresh);
+  fresh.sqlite.close();
+
+  const upgrade = new SqliteD1Database();
+  applyMigrationFiles(upgrade, migrations.filter((migration) => migration.prefix <= 57));
+  upgrade.sqlite.exec(`
+    INSERT INTO users (id, discord_id, username, avatar) VALUES ('legacy-owner', 'legacy-discord', 'Legacy', NULL);
+    INSERT INTO discord_guilds (id, guild_id, owner_user_id, name, permissions, is_owner) VALUES ('legacy-guild-row', 'legacy-guild', 'legacy-owner', 'Legacy Guild', '8', 1);
+    INSERT INTO linked_servers (id, user_id, guild_id, discord_guild_id, nitrado_service_id, nitrado_service_name, server_name, server_type, tags_json, region, status, public_slug)
+    VALUES ('legacy-live', 'legacy-owner', 'legacy-guild', 'legacy-guild-row', 'legacy-service', 'Legacy Service', 'Legacy Service', 'PVP', '[]', 'EU', 'live', 'legacy-live');
+    INSERT INTO nitrado_connections (id, user_id, linked_server_id, encrypted_token, token_iv, token_auth_tag)
+    VALUES ('legacy-token', 'legacy-owner', 'legacy-live', 'encrypted', 'iv', 'tag');
+  `);
+  applyMigrationFiles(upgrade, migrations.filter((migration) => migration.prefix === 58));
+  assertBillingIntegritySchema(upgrade);
+  assert.equal(
+    Number(upgrade.sqlite.prepare("SELECT COUNT(*) AS count FROM linked_servers WHERE id = 'legacy-live'").get()?.count ?? 0),
+    1,
+    "Legitimate linked server rows must survive the billing migration.",
+  );
+  assert.equal(
+    Number(upgrade.sqlite.prepare("SELECT COUNT(*) AS count FROM nitrado_connections WHERE id = 'legacy-token'").get()?.count ?? 0),
+    1,
+    "Legitimate Nitrado token rows must survive the billing migration.",
+  );
+  upgrade.sqlite.close();
+}
+
+function assertBillingIntegritySchema(db: SqliteD1Database) {
+  const reservationColumns = new Set(
+    db.sqlite.prepare("PRAGMA table_info(linked_server_allowance_reservations)").all().map((row) => row.name),
+  );
+  for (const column of ["id", "user_id", "discord_user_id", "linked_server_id", "status", "expires_at", "completed_at", "released_at", "expired_at", "release_reason"]) {
+    assert.equal(reservationColumns.has(column), true, `Reservation table should include ${column}.`);
+  }
+  const indexes = new Set(
+    db.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map((row) => row.name),
+  );
+  for (const index of [
+    "idx_lsar_user_status_expires",
+    "idx_lsar_linked_server_status",
+    "idx_lsar_discord_user_status",
+    "idx_lsar_active_linked_server",
+    "idx_nitrado_connections_user_linked_server_updated",
+    "idx_linked_servers_user_service_active",
+    "idx_linked_servers_active_service_id",
+  ]) {
+    assert.equal(indexes.has(index), true, `Expected integrity index ${index}.`);
+  }
+}
+
 async function assertMigrationMatchesRuntimeSchema() {
-  const migration = readFileSync("migrations/0057_billing_phase_1_integrity.sql", "utf8");
+  const migration = readFileSync(`migrations/${BILLING_MIGRATION}`, "utf8");
   const normalizedMigration = normalizeSql(migration);
   assert.equal(
     normalizedMigration.includes(normalizeSql(LINKED_SERVER_ALLOWANCE_RESERVATIONS_TABLE_SQL)),
@@ -664,6 +809,147 @@ async function assertTokenWriteFailureReleasesReservation() {
   assert.equal(reservationCount(db, "status = 'released' AND release_reason = 'missing_token_encryption_key'"), 1);
 }
 
+async function assertExactTokenConnectionAssociation() {
+  const { db, env } = createSqliteEnv();
+  await seedOwner(env, db, { userId: "exact-user", discordUserId: "exact-discord", planKey: "pro", status: "active" });
+  insertLinkedServer(db, { id: "exact-draft-a", userId: "exact-user", serviceId: null, status: "pending" });
+  insertLinkedServer(db, { id: "exact-draft-b", userId: "exact-user", serviceId: null, status: "pending" });
+
+  await storePendingNitradoToken(env, "exact-user", "exact-draft-a", "token-for-draft-a");
+  await storePendingNitradoToken(env, "exact-user", "exact-draft-b", "token-for-draft-b");
+  await storePendingNitradoToken(env, "exact-user", "exact-draft-a", "updated-token-for-draft-a");
+
+  assert.equal(await getNitradoTokenForLinkedServer(env, "exact-user", "exact-draft-a"), "updated-token-for-draft-a");
+  assert.equal(await getNitradoTokenForLinkedServer(env, "exact-user", "exact-draft-b"), "token-for-draft-b");
+  assert.equal(
+    Number(db.sqlite.prepare("SELECT COUNT(*) AS count FROM nitrado_connections WHERE user_id = 'exact-user' AND linked_server_id = 'exact-draft-a'").get()?.count ?? 0),
+    1,
+    "Repeated token validation for the same draft should update the exact connection instead of creating duplicates.",
+  );
+
+  await linkNitradoConnectionToLinkedServer(env, "exact-user", "exact-draft-a", "exact-canonical-a");
+  assert.equal(await getNitradoTokenForLinkedServer(env, "exact-user", "exact-canonical-a"), "updated-token-for-draft-a");
+  assert.equal(await getNitradoTokenForLinkedServer(env, "exact-user", "exact-draft-b"), "token-for-draft-b");
+}
+
+async function assertCrossOwnerServiceProtection() {
+  const { db, env } = createSqliteEnv();
+  await seedOwner(env, db, { userId: "owner-a", discordUserId: "owner-a-discord", planKey: "pro", status: "active" });
+  await seedOwner(env, db, { userId: "owner-b", discordUserId: "owner-b-discord", planKey: "pro", status: "active" });
+  insertLinkedServer(db, { id: "owner-a-live", userId: "owner-a", serviceId: "shared-service", status: "live" });
+  const ownerBDraft = await ensureDraftLinkedServer(env, "owner-b", "owner-b-guild", "PVP", [], "pvp");
+
+  await assert.rejects(
+    () => saveLinkedServerNitradoService(env, ownerBDraft, {
+      id: "shared-service",
+      name: "Shared Service",
+      game: "DayZ",
+    }, "PVP", [], "pvp"),
+    LinkedServerOwnershipConflictError,
+  );
+  assert.equal(
+    String(db.sqlite.prepare("SELECT user_id FROM linked_servers WHERE id = 'owner-a-live'").get()?.user_id),
+    "owner-a",
+    "Cross-owner validation must not transfer the canonical linked server.",
+  );
+  assert.equal(reservationCount(db, "user_id = 'owner-b' AND status = 'active'"), 0, "Cross-owner conflict should release the request reservation.");
+  assert.equal(reservationCount(db, "user_id = 'owner-b' AND status = 'released' AND release_reason = 'cross_owner_service_conflict'"), 1);
+}
+
+async function assertSameOwnerRepeatedLinkingIsIdempotent() {
+  const { db, env } = createSqliteEnv();
+  await seedOwner(env, db, { userId: "same-owner", discordUserId: "same-owner-discord", planKey: "pro", status: "active" });
+  const firstDraft = await ensureDraftLinkedServer(env, "same-owner", "same-owner-guild", "PVP", ["KOS"], "pvp");
+  const canonical = await saveLinkedServerNitradoService(env, firstDraft, {
+    id: "same-owner-service",
+    name: "Same Owner Service",
+    game: "DayZ",
+  }, "PVP", ["KOS"], "pvp");
+  const secondDraft = await ensureDraftLinkedServer(env, "same-owner", "same-owner-guild", "PVP", ["KOS"], "pvp");
+  const repeated = await saveLinkedServerNitradoService(env, secondDraft, {
+    id: "same-owner-service",
+    name: "Same Owner Service",
+    game: "DayZ",
+  }, "PVP", ["KOS"], "pvp");
+
+  assert.equal(repeated, canonical);
+  assert.equal((await findActiveLinkedServerByNitradoService(env, "same-owner-service"))?.id, canonical);
+  assert.equal(
+    Number(db.sqlite.prepare("SELECT COUNT(*) AS count FROM linked_servers WHERE user_id = 'same-owner' AND nitrado_service_id = 'same-owner-service'").get()?.count ?? 0),
+    1,
+    "Same-owner repeated linking must reuse the canonical service row.",
+  );
+  assert.equal(
+    Number(db.sqlite.prepare("SELECT COUNT(*) AS count FROM linked_servers WHERE user_id = 'same-owner' AND status = 'pending' AND nitrado_service_id IS NULL").get()?.count ?? 0),
+    0,
+    "Same-owner repeated linking must not leave duplicate active drafts.",
+  );
+  assert.equal(await countLinkedServersForUser(env, "same-owner", { now: "2026-08-20T00:00:00.000Z" }), 1);
+  assert.equal(reservationCount(db, "user_id = 'same-owner' AND status = 'active'"), 0);
+}
+
+async function assertValidateTokenApiCrossOwnerConflictIsSafe() {
+  const { db, env } = createSqliteEnv();
+  await seedOwner(env, db, { userId: "api-owner-a", discordUserId: "api-owner-a-discord", planKey: "pro", status: "active" });
+  await seedOwner(env, db, { userId: "api-owner-b", discordUserId: "api-owner-b-discord", planKey: "pro", status: "active" });
+  insertLinkedServer(db, { id: "api-owner-a-live", userId: "api-owner-a", serviceId: "900001", status: "live" });
+  const session = await createSession(env, "api-owner-b");
+  const response = await validateNitradoTokenHandler(makeContext(
+    validateNitradoTokenHandler,
+    new Request("https://local.test/api/nitrado/validate-token", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `dzn_session=${session.token}`,
+      },
+      body: JSON.stringify({
+        token: "long-enough-token",
+        discordGuildId: "api-owner-b-guild",
+        serverType: "PVP",
+        server_category: "pvp",
+        tags: [],
+        serviceId: "900001",
+      }),
+    }),
+    env,
+  ));
+  assert.equal(response.status, 409);
+  const text = await response.text();
+  assert.match(text, /nitrado_service_already_linked/);
+  assert.equal(/long-enough-token|encrypted_token|token_iv|token_auth_tag/i.test(text), false, "Conflict response must not expose token material.");
+  assert.equal(
+    String(db.sqlite.prepare("SELECT user_id FROM linked_servers WHERE id = 'api-owner-a-live'").get()?.user_id),
+    "api-owner-a",
+    "API conflict must not reassign the other owner's linked server.",
+  );
+}
+
+async function assertConcurrentDuplicateServiceLinkingConverges() {
+  const { db, env } = createSqliteEnv();
+  await seedOwner(env, db, { userId: "race-user", discordUserId: "race-discord", planKey: "pro", status: "active" });
+  await ensureLinkedServerMetadataColumns(env);
+  insertLinkedServer(db, { id: "race-draft-a", userId: "race-user", serviceId: null, status: "pending" });
+  insertLinkedServer(db, { id: "race-draft-b", userId: "race-user", serviceId: null, status: "pending" });
+
+  const service = {
+    id: "race-service",
+    name: "Race Service",
+    game: "DayZ",
+  };
+  const results = await Promise.all([
+    saveLinkedServerNitradoService(env, "race-draft-a", service, "PVP", [], "pvp"),
+    saveLinkedServerNitradoService(env, "race-draft-b", service, "PVP", [], "pvp"),
+  ]);
+  assert.equal(new Set(results).size, 1, "Concurrent same-owner duplicate requests should converge on one canonical linked server.");
+  assert.equal(
+    Number(db.sqlite.prepare("SELECT COUNT(*) AS count FROM linked_servers WHERE nitrado_service_id = 'race-service'").get()?.count ?? 0),
+    1,
+    "Concurrent duplicate requests must not create duplicate canonical active services.",
+  );
+  assert.equal(await countLinkedServersForUser(env, "race-user", { now: "2026-08-20T00:00:00.000Z" }), 1);
+  assert.equal(reservationCount(db, "user_id = 'race-user' AND status = 'active'"), 0);
+}
+
 async function assertOnboardingSaveFailureReleasesReservationWithoutDeletingServer() {
   const { db, env } = createSqliteEnv();
   await seedOwner(env, db, { userId: "save-user", discordUserId: "save-discord", planKey: "pro", status: "active" });
@@ -737,6 +1023,8 @@ function makeContext(handler: PagesFunction, request: Request, env: Env): Parame
 }
 
 async function run() {
+  assertMigrationNumbering();
+  assertFreshAndUpgradeMigrationApplication();
   await assertMigrationMatchesRuntimeSchema();
   await assertReservationCounting();
   await assertPlanLimits();
@@ -747,6 +1035,11 @@ async function run() {
   await assertFailedServiceAttachmentReleasesReservation();
   await assertExpiredReservationLifecycle();
   await assertTokenWriteFailureReleasesReservation();
+  await assertExactTokenConnectionAssociation();
+  await assertCrossOwnerServiceProtection();
+  await assertSameOwnerRepeatedLinkingIsIdempotent();
+  await assertValidateTokenApiCrossOwnerConflictIsSafe();
+  await assertConcurrentDuplicateServiceLinkingConverges();
   await assertOnboardingSaveFailureReleasesReservationWithoutDeletingServer();
   await assertNitradoValidationLimitFailure();
   console.log("Billing integrity reservation tests passed.");

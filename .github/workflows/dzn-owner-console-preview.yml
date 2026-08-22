@@ -293,6 +293,10 @@ jobs:
         if: ${{ inputs.mode == 'full-preview' }}
         run: bash -e scripts/github-actions/dzn-owner-console-preview/24-apply-preview-d1-migrations.sh
 
+      - name: Verify billing integrity preview schema
+        if: ${{ github.ref_name == 'feature/billing-phase-1-integrity' && inputs.mode == 'full-preview' }}
+        run: bash -e scripts/github-actions/dzn-owner-console-preview/32-verify-billing-integrity-preview.sh
+
       - name: Seed preview-only owner console data
         if: ${{ inputs.mode == 'full-preview' }}
         run: bash -e scripts/github-actions/dzn-owner-console-preview/25-seed-preview-only-owner-console-data.sh
