@@ -264,6 +264,7 @@ type MigrationFile = {
 
 const BILLING_MIGRATION = "0058_billing_phase_1_integrity.sql";
 const EVENT_SUGGESTIONS_MIGRATION = "0057_event_suggestions_phase_2a.sql";
+const STALE_BILLING_MIGRATION = ["0057", "billing_phase_1_integrity.sql"].join("_");
 
 function listMigrationFiles() {
   return readdirSync("migrations")
@@ -303,13 +304,33 @@ function assertMigrationNumbering() {
 }
 
 function assertNoStaleBillingMigrationReferences() {
-  const staleReferences = findRepositoryTextMatches(`0057_${"billing_phase_1_integrity"}`)
-    .filter((path) => !path.includes(".git"));
-  assert.deepEqual(staleReferences, [], "No stale 0057 billing migration references may remain.");
+  const staleReferences = findRepositoryTextMatches(STALE_BILLING_MIGRATION)
+    .filter(isForbiddenStaleBillingMigrationReference)
+    .map((match) => `${match.path}:${match.lineNumber}: ${match.line.trim()}`);
+  assert.deepEqual(staleReferences, [], "No executable stale 0057 billing migration references may remain.");
+}
+
+type RepositoryTextMatch = {
+  path: string;
+  lineNumber: number;
+  line: string;
+  context: string;
+};
+
+function isForbiddenStaleBillingMigrationReference(match: RepositoryTextMatch) {
+  const normalizedPath = match.path.replace(/\\/g, "/");
+  if (normalizedPath === `migrations/${STALE_BILLING_MIGRATION}`) return true;
+  if (normalizedPath.endsWith("/32-verify-billing-integrity-preview.sh")) {
+    return !/ledger\.includes\("0057_billing_phase_1_integrity\.sql"\)[\s\S]*Preview migration ledger contains stale 0057_billing_phase_1_integrity\.sql/.test(match.context);
+  }
+  if (normalizedPath.endsWith("/owner-console-preview.ts") || normalizedPath.endsWith("/test-github-workflow-boundary.ts")) {
+    return !/must reject stale 0057 billing ledger entries|negative assertion|reject.*0057_billing_phase_1_integrity\.sql/i.test(match.context);
+  }
+  return true;
 }
 
 function findRepositoryTextMatches(needle: string) {
-  const matches: string[] = [];
+  const matches: RepositoryTextMatch[] = [];
   const ignored = new Set([".git", "node_modules", ".next", "out"]);
   function visit(dir: string) {
     for (const entry of readdirSync(dir)) {
@@ -321,11 +342,20 @@ function findRepositoryTextMatches(needle: string) {
         continue;
       }
       if (!/\.(?:ts|tsx|js|jsx|json|md|yml|yaml|sql|sh|toml)$/.test(path)) continue;
-      if (readFileSync(path, "utf8").includes(needle)) matches.push(path);
+      const lines = readFileSync(path, "utf8").split(/\r?\n/);
+      lines.forEach((line, index) => {
+        if (!line.includes(needle)) return;
+        matches.push({
+          path,
+          lineNumber: index + 1,
+          line,
+          context: lines.slice(Math.max(0, index - 2), index + 3).join("\n"),
+        });
+      });
     }
   }
   visit(".");
-  return matches.sort();
+  return matches.sort((left, right) => left.path.localeCompare(right.path) || left.lineNumber - right.lineNumber);
 }
 
 function applyMigrationFiles(db: SqliteD1Database, migrations: MigrationFile[]) {
