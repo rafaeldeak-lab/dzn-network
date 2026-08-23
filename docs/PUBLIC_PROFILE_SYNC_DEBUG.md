@@ -1,12 +1,12 @@
 # Public Profile Sync Debug
 
-This file traces the current public profile path for:
+This file traces the current server profile data path for:
 
 `/servers/profile?slug=pandora-dayz`
 
 ## Route And Data Flow
 
-The public profile page is a client-rendered shell:
+The server profile page is a client-rendered app shell. Logged-out direct access to this page redirects to login; the read-only JSON API below remains public so the homepage and approved preview surfaces can render redacted discovery data.
 
 - `app/servers/profile/page.tsx` renders `PublicNetwork`.
 - `components/network/public-network.tsx` reads the `slug` query parameter and fetches:

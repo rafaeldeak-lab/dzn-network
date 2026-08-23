@@ -451,7 +451,7 @@ Auto-post limits:
 
 ## I. Public Profile Cache
 
-Public server profiles load data through `GET /api/public/servers?slug=...`.
+Server profile app pages load data through `GET /api/public/servers?slug=...`. Logged-out direct access to `/servers/profile?slug=...` redirects to login; the API remains public read-only for approved preview surfaces and redacts logged-out data.
 
 Public profile status fields read from `server_public_cache` first, then fall back to `linked_servers`:
 

@@ -1,7 +1,27 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 const routesPath = "out/_routes.json";
-const requiredIncludes = ["/api/*", "/owner", "/owner/*"];
+const requiredIncludes = [
+  "/api/*",
+  "/dashboard",
+  "/dashboard/*",
+  "/dzn-pulse",
+  "/dzn-pulse/*",
+  "/events",
+  "/events/*",
+  "/leaderboards",
+  "/leaderboards/*",
+  "/owner",
+  "/owner/*",
+  "/seasons",
+  "/seasons/*",
+  "/servers",
+  "/servers/*",
+  "/setup",
+  "/setup/*",
+  "/test",
+  "/test/*",
+];
 
 function unique(values) {
   return [...new Set(values.filter((value) => typeof value === "string" && value.trim()))];

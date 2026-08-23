@@ -5,7 +5,7 @@ const baseUrl = (process.env.DZN_APP_URL || config.productionUrl).replace(/\/$/,
 const cronSecret = process.env.DZN_CRON_SECRET || process.env.SYNC_CRON_SECRET || "";
 
 async function request(path: string, init?: RequestInit) {
-  let last: { ok: boolean; status: number; durationMs: number; body: string; fullBody: string; attempts: number } | null = null;
+  let last: { ok: boolean; status: number; durationMs: number; body: string; fullBody: string; attempts: number; headers: Record<string, string> } | null = null;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     const startedAt = Date.now();
     try {
@@ -17,10 +17,10 @@ async function request(path: string, init?: RequestInit) {
         },
       });
       const body = await response.text().catch(() => "");
-      last = { ok: true, status: response.status, durationMs: Date.now() - startedAt, body: body.slice(0, 2000), fullBody: body, attempts: attempt };
+      last = { ok: true, status: response.status, durationMs: Date.now() - startedAt, body: body.slice(0, 2000), fullBody: body, attempts: attempt, headers: Object.fromEntries(response.headers) };
     } catch (error) {
       const body = error instanceof Error ? error.message : String(error);
-      last = { ok: false, status: 0, durationMs: Date.now() - startedAt, body, fullBody: body, attempts: attempt };
+      last = { ok: false, status: 0, durationMs: Date.now() - startedAt, body, fullBody: body, attempts: attempt, headers: {} };
     }
     if (![0, 502, 503, 504].includes(last.status)) return last;
     if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
@@ -52,14 +52,20 @@ async function main() {
   const checks: AutoDevCheck[] = [];
   const routeScope: Record<string, "adm" | "sanity-out-of-scope"> = {
     "/": "adm",
-    "/dashboard": "adm",
-    "/events": "sanity-out-of-scope",
   };
   for (const path of Object.keys(routeScope)) {
     const result = await request(path);
     checks.push(result.ok && result.status === 200
       ? pass(`GET ${path}`, routeScope[path] === "adm" ? "ADM-facing route returned 200." : "Route sanity check returned 200; failures are out-of-scope unless caused by ADM shared code.", result)
       : fail(`GET ${path}`, routeScope[path] === "adm" ? `Expected 200, got ${result.status}.` : `Route sanity check failed with ${result.status}; mark out-of-scope unless tied to ADM code.`, result, routeScope[path] === "adm" ? "high" : "medium"));
+  }
+
+  for (const path of ["/dashboard", "/events", "/leaderboards", "/servers", "/setup", "/dzn-pulse", "/seasons"]) {
+    const result = await request(path);
+    const location = result.headers.location ?? "";
+    checks.push(result.ok && result.status === 302 && location.includes("/login")
+      ? pass(`GET ${path} unauthenticated`, "Protected app page redirected logged-out navigation to login.", { status: result.status, location })
+      : fail(`GET ${path} unauthenticated`, `Expected login redirect 302, got ${result.status}.`, result, "high"));
   }
 
   const home = await request("/");

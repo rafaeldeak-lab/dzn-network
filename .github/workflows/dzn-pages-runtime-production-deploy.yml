@@ -151,12 +151,38 @@ jobs:
           const fs = require("node:fs");
           const routes = JSON.parse(fs.readFileSync("out/_routes.json", "utf8"));
           const include = Array.isArray(routes.include) ? routes.include : [];
-          for (const route of ["/owner", "/api/owner/overview", "/api/owner/servers", "/api/owner/discord/options", "/api/owner/discord/channel-mappings"]) {
-            if (!include.includes(route) && !include.includes("/api/*")) {
+          const requiredFunctionRoutes = [
+            "/dashboard",
+            "/dashboard/*",
+            "/dzn-pulse",
+            "/dzn-pulse/*",
+            "/events",
+            "/events/*",
+            "/leaderboards",
+            "/leaderboards/*",
+            "/owner",
+            "/owner/*",
+            "/seasons",
+            "/seasons/*",
+            "/servers",
+            "/servers/*",
+            "/setup",
+            "/setup/*",
+            "/test",
+            "/test/*",
+            "/api/owner/overview",
+            "/api/owner/servers",
+            "/api/owner/discord/options",
+            "/api/owner/discord/channel-mappings",
+          ];
+          for (const route of requiredFunctionRoutes) {
+            const coveredByApiWildcard = route.startsWith("/api/") && include.includes("/api/*");
+            const coveredByGlobalWildcard = include.includes("/*");
+            if (!include.includes(route) && !coveredByApiWildcard && !coveredByGlobalWildcard) {
               throw new Error(`Missing Pages Functions route ${route}`);
             }
           }
-          console.log("Pages Functions worker and owner API routes verified.");
+          console.log("Pages Functions worker, protected app pages, and owner API routes verified.");
           NODE
           npm run test:server-lifecycle-resource-control
           npm run test:public-access-gating
@@ -233,7 +259,6 @@ jobs:
           const base = process.env.PRODUCTION_BASE_URL || "https://dzn-network.pages.dev";
           const paths = [
             "/",
-            "/servers",
             "/api/public/servers",
             "/api/public/home-stats",
             "/api/public/server-rail",
@@ -264,6 +289,27 @@ jobs:
             throw new Error(`${path} returned HTTP ${lastStatus}: ${lastText.slice(0, 160)}`);
           }
 
+          async function fetchProtectedPage(path) {
+            const url = `${base}${path}`;
+            let lastStatus = 0;
+            let lastText = "";
+            let lastLocation = "";
+            for (let attempt = 1; attempt <= 8; attempt += 1) {
+              const response = await fetch(url, {
+                redirect: "manual",
+                headers: { "cache-control": "no-cache" },
+              });
+              lastStatus = response.status;
+              lastLocation = response.headers.get("location") || "";
+              lastText = await response.text();
+              if (response.status === 302 && lastLocation.includes("/login")) {
+                return { status: response.status, location: lastLocation };
+              }
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+            }
+            throw new Error(`${path} expected login redirect, got HTTP ${lastStatus} location=${lastLocation}: ${lastText.slice(0, 160)}`);
+          }
+
           async function fetchProtectedOwnerApi(path) {
             const url = `${base}${path}`;
             let lastStatus = 0;
@@ -286,6 +332,11 @@ jobs:
           const results = {};
           for (const path of paths) {
             results[path] = await fetchWithRetry(path);
+          }
+
+          for (const path of ["/dashboard", "/events", "/leaderboards", "/servers", "/setup", "/dzn-pulse", "/seasons"]) {
+            const result = await fetchProtectedPage(path);
+            console.log(`${path}: logged-out redirect HTTP ${result.status} ${result.location}`);
           }
 
           for (const path of [
@@ -313,6 +364,7 @@ jobs:
 
           {
             echo "- Public route verification: passed"
+            echo "- Logged-out protected app page redirects: passed"
             echo "- Owner API protected route verification: passed"
             echo "- DZN Pulse enabled: true"
             echo "- DZN_DISCORD_NOTIFICATIONS_ENABLED: false"

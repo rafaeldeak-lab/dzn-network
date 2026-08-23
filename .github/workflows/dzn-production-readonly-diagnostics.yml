@@ -303,13 +303,15 @@ jobs:
           const deployments = pages.recentProductionDeployments ?? [];
           const requiredPaths = [
             { path: "/", expected: 200, important: false },
-            { path: "/owner", expected: 302, important: false },
+            { path: "/owner", expected: 302, redirectContains: "/login", important: false },
             { path: "/api/owner/overview", expected: 401, important: true },
             { path: "/api/owner/discord/overview", expected: 401, important: false },
             { path: "/api/owner/servers", expected: 401, important: false },
             { path: "/api/owner/audit-log", expected: 401, important: false },
-            { path: "/servers", expected: 200, important: false },
-            { path: "/dzn-pulse", expected: 200, important: false },
+            { path: "/servers", expected: 302, redirectContains: "/login", important: false },
+            { path: "/events", expected: 302, redirectContains: "/login", important: false },
+            { path: "/leaderboards", expected: 302, redirectContains: "/login", important: false },
+            { path: "/dzn-pulse", expected: 302, redirectContains: "/login", important: false },
             { path: "/api/public/servers", expected: 200, important: true },
             { path: "/api/public/home-stats", expected: 200, important: true },
             { path: "/api/public/leaderboards", expected: 200, important: true },
@@ -359,6 +361,8 @@ jobs:
             }
             const markers = forbidden.filter((marker) => body.includes(marker));
             const status = response?.status ?? 0;
+            const redirectLocation = sanitizeBody(response?.headers?.get("location") ?? "");
+            const redirectOk = !route.redirectContains || redirectLocation.includes(route.redirectContains);
             if (status === 503 && !markers.includes("status-503")) markers.push("status-503");
             return {
               baseUrl,
@@ -366,9 +370,10 @@ jobs:
               path: route.path,
               attempt,
               expected: route.expected,
+              redirectExpected: route.redirectContains ?? null,
               status,
-              ok: status === route.expected && markers.length === 0,
-              redirectLocation: sanitizeBody(response?.headers?.get("location") ?? ""),
+              ok: status === route.expected && redirectOk && markers.length === 0,
+              redirectLocation,
               responseTimeMs: Date.now() - started,
               cfRay: sanitizeBody(response?.headers?.get("cf-ray") ?? ""),
               server: sanitizeBody(response?.headers?.get("server") ?? ""),
@@ -633,7 +638,27 @@ jobs:
             return [...source.matchAll(/^\s*import\s+[\s\S]*?\s+from\s+["']([^"']+)["'];/gm)].map((match) => match[1]);
           }
           const routes = JSON.parse(readFileSync("out/_routes.json", "utf8"));
-          const requiredIncludes = ["/api/*", "/owner", "/owner/*"];
+          const requiredIncludes = [
+            "/api/*",
+            "/dashboard",
+            "/dashboard/*",
+            "/dzn-pulse",
+            "/dzn-pulse/*",
+            "/events",
+            "/events/*",
+            "/leaderboards",
+            "/leaderboards/*",
+            "/owner",
+            "/owner/*",
+            "/seasons",
+            "/seasons/*",
+            "/servers",
+            "/servers/*",
+            "/setup",
+            "/setup/*",
+            "/test",
+            "/test/*",
+          ];
           const includeWithWildcard = uniqueRoutes([...(routes.include ?? []), ...requiredIncludes]);
           const normalized = normalizeRoutes(includeWithWildcard);
           const functionFiles = walk("functions").filter((path) => path.endsWith(".ts"));
@@ -667,7 +692,8 @@ jobs:
             normalizedRoutesOverlapCount: overlaps(normalized.routes).length,
             normalizedRemovedRouteCount: normalized.removed.length,
             apiWildcardMakesAllApiFunctionsUseWorker: normalized.routes.includes("/api/*"),
-            staticPublicPagesExcludedFromFunctions: !normalized.routes.includes("/*") && !normalized.routes.includes("/servers") && !normalized.routes.includes("/dzn-pulse"),
+            protectedAppPagesIncludedInFunctions: normalized.routes.includes("/*") ||
+              ["/servers", "/events", "/leaderboards", "/dashboard", "/setup", "/dzn-pulse", "/seasons"].every((route) => normalized.routes.includes(route)),
             broadApiWildcardNecessary: "Intended production route coverage uses /api/* so all API functions enter the Pages Functions Worker; raw Wrangler output also lists individual API routes.",
             routeNormalizationCouldReduceRoutingOverhead: normalized.removed.length > 0,
             currentBundleNearCloudflareLimit: bundleBytes > 8 * 1024 * 1024,
