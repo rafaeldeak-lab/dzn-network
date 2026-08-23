@@ -2,9 +2,9 @@
 
 ## AutoDev scope
 
-DZN AutoDev is ADM-only. It exists to keep ADM tracking, Nitrado log reading, file-read diagnostics, import jobs, retry/backoff, Sync Health, and ADM production verification reliable.
+DZN AutoDev is platform-wide. It can investigate and prepare PR-only branch fixes for normal DZN systems when risk policy allows.
 
-It does not manage billing, user accounts, Discord OAuth, subscriptions, Stripe, unrelated server settings, unrelated Events/Tournaments, or public marketing features.
+ADM monitoring remains a specialist subsystem for ADM tracking, Nitrado log reading, file-read diagnostics, import jobs, retry/backoff, Sync Health, and ADM production verification.
 
 ## GitHub Actions secrets
 
@@ -18,9 +18,6 @@ Current allowed GitHub Actions secrets:
 - `SYNC_CRON_SECRET`
   Legacy/fallback cron secret for manual GitHub workflows.
 
-- `OPENAI_API_KEY`
-  Only if the ADM Codex Safe Fix workflow is explicitly enabled.
-
 - `CLOUDFLARE_API_TOKEN`
   Only for the manual `DZN Auto Update Worker Deploy` and `DZN ADM Worker Deploy` workflows. Scope it narrowly to deploy the intended Worker, manage that Worker's `DZN_CRON_SECRET`, list Worker secret names, and read Worker schedules.
 
@@ -31,6 +28,8 @@ Current allowed GitHub Actions secrets:
   Only for the manual `DZN Auto Update Worker Deploy`, `DZN ADM Worker Deploy`, and `DZN Pulse Preview` workflows. This may be a repository variable instead of a secret.
 
 Do not copy all Cloudflare runtime secrets into GitHub.
+
+Do not add OpenAI API credentials for AutoDev by default. Optional unattended 24/7 Codex/OpenAI execution is not enabled and requires a separate approved design.
 
 ## DZN Pulse preview workflow
 

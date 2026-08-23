@@ -5,14 +5,37 @@ import path from "node:path";
 export type AutoDevMode = "review_only" | "pr_only" | "auto_merge_low_risk" | "production_guarded";
 export type RiskLevel = "low" | "medium" | "high" | "blocked";
 export type CheckStatus = "pass" | "warn" | "fail" | "skip";
+export type AutoDevScope = "dzn_platform";
+export type ValidationProfileName =
+  | "docs"
+  | "ui"
+  | "general"
+  | "auth"
+  | "billing"
+  | "nitrado-adm"
+  | "events"
+  | "github-workflows"
+  | "autodev"
+  | "release-high-risk";
+
+export type AutomationPolicy = {
+  allowedToInvestigate: boolean;
+  allowedToImplementInBranch: boolean;
+  allowedToOpenPR: boolean;
+  allowedToAutoMerge: boolean;
+  allowedToDeployProduction: boolean;
+  requiresHumanReview: boolean;
+};
 
 export type AutoDevConfig = {
   mode: AutoDevMode;
-  scope?: "adm_tracking_only";
+  scope?: AutoDevScope;
   allowDirectMainPush: boolean;
   allowAutoMergeLowRisk: boolean;
   allowCodexSafeFixes?: boolean;
   allowCodexHighRiskFixes?: boolean;
+  allowAutomaticProductionDeploy?: boolean;
+  allowProductionMutations?: boolean;
   maxFixAttemptsPerRun: number;
   maxRuntimeMinutes: number;
   maxChangedFilesPerRun: number;
@@ -21,10 +44,19 @@ export type AutoDevConfig = {
   deployPreviewRequired: boolean;
   watchAdmCycles: boolean;
   watchMinutesAfterDeploy: number;
-  admOnly?: {
-    enabled: boolean;
-    allowedSystems: string[];
-    blockedSystems: string[];
+  automationPolicy?: Record<RiskLevel, AutomationPolicy>;
+  systems?: {
+    adm?: {
+      specialistSubsystem?: boolean;
+      primaryAutomaticRunner?: "cloudflare-worker" | string;
+      githubBackupRunner?: "manual-only" | string;
+      preserveCycleWatch?: boolean;
+      preserveProductionSmoke?: boolean;
+      preserveProtectedHealth?: boolean;
+      preserveWorkerHeartbeat?: boolean;
+      preserveNitradoDiagnostics?: boolean;
+      preserveRetryBackoff?: boolean;
+    };
   };
   codex?: {
     enabled: boolean;
@@ -33,8 +65,14 @@ export type AutoDevConfig = {
     openPullRequestOnly: boolean;
     directPushToMain: boolean;
     autoMerge: boolean;
+    paidGitHubActionEnabled?: boolean;
+    requiresOpenAiApiKey?: boolean;
   };
   riskGates: Record<string, boolean>;
+  validation?: {
+    defaultProfile: ValidationProfileName;
+    profiles: ValidationProfileName[];
+  };
 };
 
 export type AutoDevCheck = {

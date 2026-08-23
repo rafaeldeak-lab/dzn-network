@@ -1,15 +1,14 @@
-name: DZN ADM Codex Safe Fix
+name: DZN Codex Safe Fix
 
 on:
   workflow_dispatch:
 
 jobs:
-  adm-codex-safe-fix:
+  platform-codex-safe-fix:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       issues: read
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -17,52 +16,49 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Pick safe ADM issue
+      - name: Pick safe platform issue
         run: npm run autodev:pick-safe-issue
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-      - name: Write ADM-only Codex prompt
+      - name: Write platform Codex prompt
         run: |
           mkdir -p .autodev/reports
           cat > .autodev/reports/codex-safe-fix-prompt.md <<'PROMPT'
-          # DZN ADM Codex Safe Fix Prompt
+          # DZN Codex Safe Fix Prompt
 
-          You are only allowed to fix ADM tracking automation issues.
+          This workflow is a guarded issue-selector and prompt/report generator only. It does not run a paid Codex action, does not require OpenAI API credentials, and does not modify code by itself.
 
-          Allowed systems:
-          - ADM discovery
-          - ADM Worker cron status
-          - Nitrado ADM file read diagnostics
-          - unreadable retry/backoff
-          - ADM import jobs
-          - ADM sync health dashboard
-          - ADM production smoke
-          - ADM cycle watch
-          - ADM-only tests/docs
+          DZN AutoDev is platform-wide. Safe-fix work may cover low-risk docs, tests, UI, AutoDev, workflow-reporting, and other low-risk DZN platform issues when the issue passes labels and hard-block gates.
 
-          Forbidden systems:
-          - billing
-          - Stripe
-          - Discord OAuth
-          - sessions
-          - account management
-          - subscriptions
-          - unrelated Events/Tournaments
-          - server-owner private data
-          - token secrets
-          - destructive migrations
+          Required behavior:
+          - make the smallest coherent fix
+          - use an isolated branch and open a PR only
+          - never push main
+          - never auto-merge
+          - never deploy or mutate production
+          - select tests by subsystem and risk
+          - add or update regression tests for behavior changes
+          - preserve ADM specialist systems
+          - perform browser QA for user-facing changes
+          - perform security review for sensitive changes
 
-          If the selected issue requires forbidden systems:
-          - do not modify code
-          - comment that human review is required
-          - exit
+          Hard-blocked work:
+          - destructive migrations or protected data deletion/reset
+          - creating player_stats
+          - weakening authentication, authorization, or 401/403 protection
+          - removing same-category matchmaking guarantees
+          - exposing secrets, tokens, or credentials
+          - copying Cloudflare runtime secrets into GitHub
+          - making GitHub Actions the primary ADM auto-sync runner
+          - production Pages, Workers, D1, Stripe, Nitrado, Discord, or secret mutation
+          - paid 24/7 Codex/OpenAI execution
 
-          Codex must make the smallest ADM-only fix, add/update tests, never push main, open PR only, and never auto-merge.
+          High-risk work may be investigated and prepared in a PR only when explicitly assigned, but it must never be selected by this low-risk safe-fix workflow.
           PROMPT
-      - name: Upload ADM Codex prompt/report
+      - name: Upload platform Codex prompt/report
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: adm-codex-safe-fix-reports
+          name: dzn-codex-safe-fix-reports
           path: .autodev/reports
