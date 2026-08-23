@@ -9,6 +9,7 @@ import {
 } from "../../_lib/nitrado";
 import {
   ensureDraftLinkedServer,
+  findActiveLinkedServerByNitradoService,
   isLocalDatabaseIntegrityConflict,
   LinkedServerAllowanceExceededError,
   LinkedServerIntegrityConflictError,
@@ -64,6 +65,15 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
     const valid = service ? true : isMockNitrado(env.MOCK_NITRADO) ? true : await validateNitradoToken(token);
     if (!valid) return json({ error: "Invalid token", tokenValid: false }, { status: 400 });
+
+    if (service) {
+      const existingService = await findActiveLinkedServerByNitradoService(env, service.id);
+      if (existingService) {
+        if (existingService.user_id !== user.id) throw new LinkedServerOwnershipConflictError();
+        await storePendingNitradoToken(env, user.id, existingService.id, token);
+        return json({ tokenValid: true, linkedServerId: existingService.id, service });
+      }
+    }
 
     const linkedServerId = await ensureDraftLinkedServer(
       env,

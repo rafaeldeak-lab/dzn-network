@@ -438,6 +438,30 @@ async function assertMigrationMatchesRuntimeSchema() {
   }
 }
 
+function assertReservationCreationUsesAtomicCapacityGuard() {
+  const source = readFileSync("functions/_lib/onboarding.ts", "utf8");
+  const start = source.indexOf("export async function reserveLinkedServerAllowance");
+  const end = source.indexOf("export async function completeLinkedServerAllowanceReservation", start);
+  assert.notEqual(start, -1, "reserveLinkedServerAllowance must exist.");
+  assert.notEqual(end, -1, "reserveLinkedServerAllowance body must be bounded by the completion helper.");
+  const reserveSource = source.slice(start, end);
+  assert.match(
+    reserveSource,
+    /INSERT INTO linked_server_allowance_reservations[\s\S]*SELECT \?, \?, \?, \?, 'onboarding', 'active'/,
+    "Allowance reservations must be inserted with a conditional INSERT SELECT.",
+  );
+  assert.match(
+    reserveSource,
+    /WHERE \? > \([\s\S]*FROM linked_servers[\s\S]*FROM linked_server_allowance_reservations/,
+    "Allowance reservations must check committed and active reservation usage inside the insert statement.",
+  );
+  assert.equal(
+    /const usage = await getLinkedServerAllowanceUsageForUser/.test(reserveSource),
+    false,
+    "Reservation creation must not use a separate capacity read immediately before insert.",
+  );
+}
+
 async function assertReservationCounting() {
   const { db, env } = createSqliteEnv();
   await seedOwner(env, db, { userId: "count-user", discordUserId: "count-discord", planKey: "pro", status: "active" });
@@ -839,6 +863,64 @@ async function assertTokenWriteFailureReleasesReservation() {
   assert.equal(reservationCount(db, "status = 'released' AND release_reason = 'missing_token_encryption_key'"), 1);
 }
 
+async function assertServiceSpecificTokenFailureCanRecoverOnFullPlan() {
+  const { db, env } = createSqliteEnv({ TOKEN_ENCRYPTION_KEY: undefined });
+  await seedOwner(env, db, { userId: "recover-token-user", discordUserId: "recover-token-discord", planKey: "free", status: "free" });
+  const session = await createSession(env, "recover-token-user");
+  const requestBody = {
+    token: "long-enough-token",
+    discordGuildId: "recover-token-user-guild",
+    serverType: "PVP",
+    server_category: "pvp",
+    tags: [],
+    serviceId: "900001",
+  };
+
+  const firstResponse = await validateNitradoTokenHandler(makeContext(
+    validateNitradoTokenHandler,
+    new Request("https://local.test/api/nitrado/validate-token", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `dzn_session=${session.token}`,
+      },
+      body: JSON.stringify(requestBody),
+    }),
+    env,
+  ));
+  assert.equal(firstResponse.status, 500);
+  assert.match(await firstResponse.text(), /missing_token_encryption_key/);
+  const existingLinkedServerId = db.sqlite
+    .prepare("SELECT id FROM linked_servers WHERE user_id = 'recover-token-user' AND nitrado_service_id = '900001' LIMIT 1")
+    .get()?.id;
+  assert.equal(typeof existingLinkedServerId, "string", "The first service validation should attach the linked-server row before token persistence fails.");
+  assert.equal(reservationCount(db, "status = 'active'"), 0, "The failed token write must not leave an active reservation.");
+
+  env.TOKEN_ENCRYPTION_KEY = "0123456789abcdef0123456789abcdef";
+  const secondResponse = await validateNitradoTokenHandler(makeContext(
+    validateNitradoTokenHandler,
+    new Request("https://local.test/api/nitrado/validate-token", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `dzn_session=${session.token}`,
+      },
+      body: JSON.stringify(requestBody),
+    }),
+    env,
+  ));
+  const secondText = await secondResponse.text();
+  assert.equal(secondResponse.status, 200, secondText);
+  const payload = JSON.parse(secondText) as { linkedServerId: string };
+  assert.equal(payload.linkedServerId, existingLinkedServerId);
+  assert.equal(await getNitradoTokenForLinkedServer(env, "recover-token-user", payload.linkedServerId), "long-enough-token");
+  assert.equal(
+    Number(db.sqlite.prepare("SELECT COUNT(*) AS count FROM linked_servers WHERE user_id = 'recover-token-user' AND nitrado_service_id = '900001'").get()?.count ?? 0),
+    1,
+    "Recovery must update the canonical service row instead of creating a second linked server.",
+  );
+}
+
 async function assertExactTokenConnectionAssociation() {
   const { db, env } = createSqliteEnv();
   await seedOwner(env, db, { userId: "exact-user", discordUserId: "exact-discord", planKey: "pro", status: "active" });
@@ -1056,6 +1138,7 @@ async function run() {
   assertMigrationNumbering();
   assertFreshAndUpgradeMigrationApplication();
   await assertMigrationMatchesRuntimeSchema();
+  assertReservationCreationUsesAtomicCapacityGuard();
   await assertReservationCounting();
   await assertPlanLimits();
   await assertBillingStatusUsesReservationAwareAllowance();
@@ -1065,6 +1148,7 @@ async function run() {
   await assertFailedServiceAttachmentReleasesReservation();
   await assertExpiredReservationLifecycle();
   await assertTokenWriteFailureReleasesReservation();
+  await assertServiceSpecificTokenFailureCanRecoverOnFullPlan();
   await assertExactTokenConnectionAssociation();
   await assertCrossOwnerServiceProtection();
   await assertSameOwnerRepeatedLinkingIsIdempotent();

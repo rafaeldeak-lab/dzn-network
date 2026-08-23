@@ -625,26 +625,71 @@ export async function reserveLinkedServerAllowance(
     }
   }
 
-  const usage = await getLinkedServerAllowanceUsageForUser(env, {
-    userId: input.userId,
-    discordUserId: input.discordUserId,
-    now: nowIso,
-  });
-  if (!usage.canLinkMore) {
-    return { ok: false, limit: usage.limit, currentCount: usage.used };
-  }
-
+  const limit = clampAllowanceLimit(await getServerLinkLimitForUser(env, input.userId, input.discordUserId));
   const reservationId = crypto.randomUUID();
   const expiresAt = new Date(new Date(nowIso).getTime() + (input.ttlMs ?? LINKED_SERVER_ALLOWANCE_RESERVATION_TTL_MS)).toISOString();
-  await db
-    .prepare(
-      `INSERT INTO linked_server_allowance_reservations (
-        id, user_id, discord_user_id, linked_server_id, purpose, status, expires_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'onboarding', 'active', ?, ?, ?)`,
-    )
-    .bind(reservationId, input.userId, input.discordUserId ?? null, input.linkedServerId ?? null, expiresAt, nowIso, nowIso)
-    .run();
-  return { ok: true, reservationId, expiresAt, reused: false };
+  let insertResult: D1Result;
+  try {
+    insertResult = await db
+      .prepare(
+        `INSERT INTO linked_server_allowance_reservations (
+          id, user_id, discord_user_id, linked_server_id, purpose, status, expires_at, created_at, updated_at
+        )
+        SELECT ?, ?, ?, ?, 'onboarding', 'active', ?, ?, ?
+        WHERE ? > (
+          SELECT
+            (SELECT COUNT(*)
+             FROM linked_servers
+             WHERE user_id = ?
+               AND lower(COALESCE(status, 'pending')) NOT IN ('deleted', 'merged')
+               AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
+               AND nitrado_service_id IS NOT NULL
+               AND nitrado_service_id != '')
+            +
+            (SELECT COUNT(*)
+             FROM linked_server_allowance_reservations reservations
+             WHERE reservations.user_id = ?
+               AND reservations.status = 'active'
+               AND reservations.expires_at > ?
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM linked_servers
+                 WHERE linked_servers.id = reservations.linked_server_id
+                   AND linked_servers.user_id = reservations.user_id
+                   AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
+                   AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+                   AND linked_servers.nitrado_service_id IS NOT NULL
+                   AND linked_servers.nitrado_service_id != ''
+               ))
+        )`,
+      )
+      .bind(
+        reservationId,
+        input.userId,
+        input.discordUserId ?? null,
+        input.linkedServerId ?? null,
+        expiresAt,
+        nowIso,
+        nowIso,
+        limit,
+        input.userId,
+        input.userId,
+        nowIso,
+      )
+      .run();
+  } catch (error) {
+    if (input.linkedServerId && isLocalDatabaseIntegrityConflict(error)) {
+      const existing = await getActiveLinkedServerAllowanceReservation(env, input.userId, input.linkedServerId, nowIso);
+      if (existing) return { ok: true, reservationId: existing.id, expiresAt: existing.expires_at, reused: true };
+    }
+    throw error;
+  }
+  if (Number(insertResult.meta?.changes ?? 0) > 0) {
+    return { ok: true, reservationId, expiresAt, reused: false };
+  }
+
+  const currentCount = await countLinkedServersForUser(env, input.userId, { now: nowIso });
+  return { ok: false, limit, currentCount };
 }
 
 export async function completeLinkedServerAllowanceReservation(
