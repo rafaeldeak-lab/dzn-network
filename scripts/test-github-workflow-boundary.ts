@@ -6,6 +6,10 @@ function read(path: string) {
   return readFileSync(path, "utf8");
 }
 
+function countOccurrences(source: string, needle: string) {
+  return source.split(needle).length - 1;
+}
+
 function extractInsertColumns(source: string, table: string) {
   const match = source.match(new RegExp(`INSERT\\s+INTO\\s+${table}\\s*\\(([\\s\\S]*?)\\)\\s*VALUES`, "i"));
   assert.notEqual(match, null, `Expected lifecycle preview seed INSERT INTO ${table}.`);
@@ -1436,6 +1440,12 @@ assert.equal(protectedRouteAuthRepairWorkflow.includes("name: DZN Protected Rout
 assert.equal(protectedRouteAuthRepairWorkflow.includes("workflow_dispatch:"), true);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("confirm_protected_auth_repair"), true);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("run-dzn-protected-auth-repair"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("id: repair-guard"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("should_repair=false"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("Repair action: skipped"), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes("Skipping protected route auth repair because this push did not include the explicit repair marker."), true);
+assert.equal(protectedRouteAuthRepairWorkflow.includes('echo "should_repair=true" >> "$GITHUB_OUTPUT"'), true);
+assert.equal(countOccurrences(protectedRouteAuthRepairWorkflow, "if: steps.repair-guard.outputs.should_repair == 'true'"), 4);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("CRON_SECRET=\"${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}\""), true);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("DZN_CRON_SECRET present:"), true);
 assert.equal(protectedRouteAuthRepairWorkflow.includes("SYNC_CRON_SECRET present:"), true);
@@ -1463,6 +1473,12 @@ assert.equal(productionDiscordAuthRepairWorkflow.includes("name: DZN Production 
 assert.equal(productionDiscordAuthRepairWorkflow.includes("workflow_dispatch:"), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("confirm_discord_auth_repair"), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("run-dzn-production-discord-auth-repair"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("id: repair-guard"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("should_repair=false"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("Repair action: skipped"), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes("Skipping production Discord auth repair because this push did not include the explicit repair marker."), true);
+assert.equal(productionDiscordAuthRepairWorkflow.includes('echo "should_repair=true" >> "$GITHUB_OUTPUT"'), true);
+assert.equal(countOccurrences(productionDiscordAuthRepairWorkflow, "if: steps.repair-guard.outputs.should_repair == 'true'"), 5);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("Production Discord auth repair may only run on main."), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("DZN_PRODUCTION_DISCORD_CLIENT_ID: ${{ vars.DZN_PRODUCTION_DISCORD_CLIENT_ID }}"), true);
 assert.equal(productionDiscordAuthRepairWorkflow.includes("DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}"), true);
