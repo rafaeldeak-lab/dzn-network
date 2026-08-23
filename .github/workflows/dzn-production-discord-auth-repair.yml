@@ -38,10 +38,10 @@ jobs:
       PRODUCTION_DISCORD_REDIRECT_URI: https://dzn-network.pages.dev/api/auth/discord/callback
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Node setup
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm

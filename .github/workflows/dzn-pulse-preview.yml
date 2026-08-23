@@ -58,12 +58,12 @@ jobs:
       PRODUCTION_PAGES_PROJECT_NAME: dzn-network
     steps:
       - name: Checkout requested branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.branch }}
 
       - name: Node setup
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
