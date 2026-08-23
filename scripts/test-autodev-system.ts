@@ -26,6 +26,22 @@ assert.equal(config.systems.adm.primaryAutomaticRunner, "cloudflare-worker");
 assert.equal(config.systems.adm.githubBackupRunner, "manual-only");
 assert.equal(config.maxFixAttemptsPerRun, 3);
 assert.equal(config.maxChangedFilesPerRun <= 20, true);
+assert.equal(config.aiSpendPolicy.mode, "subscription_only");
+assert.equal(config.aiSpendPolicy.maxExtraMonthlySpendUsd, 0);
+assert.equal(config.aiSpendPolicy.chatGptBillingSettingsManagedOutsideRepo, true);
+assert.equal(config.aiSpendPolicy.forbidOpenAiApiKey, true);
+assert.equal(config.aiSpendPolicy.forbidPaidCodexGitHubAction, true);
+assert.equal(config.aiSpendPolicy.forbidUnattendedPaidCodexExecution, true);
+assert.equal(config.aiSpendPolicy.forbidAutomaticCreditsOrAutoTopUp, true);
+assert.equal(config.aiSpendPolicy.forbidMeteredAiProvidersByDefault, true);
+assert.equal(config.aiSpendPolicy.overrideRequires, "high_risk_human_approved_redesign");
+assert.equal(config.codex.unattendedPaidExecutionEnabled, false);
+assert.equal(config.codex.meteredAiProvidersEnabled, false);
+assert.equal(config.codex.assumesAutomaticCreditsOrAutoTopUp, false);
+assert.equal(config.riskGates.blockOpenAiApiKey, true);
+assert.equal(config.riskGates.blockUnattendedPaidAiExecution, true);
+assert.equal(config.riskGates.blockMeteredAiProviders, true);
+assert.equal(config.riskGates.blockAutomaticCreditsOrAutoTopUpAssumptions, true);
 
 assert.equal(classifyPath("docs/README.md", "Fix docs").risk, "low");
 assert.equal(classifyPath("components/home/Hero.tsx", "export function Hero() { return <div />; }").risk, "low");
@@ -37,7 +53,7 @@ assert.equal(classifyPath("functions/api/stripe/webhook.ts").risk, "high");
 assert.equal(classifyPath("functions/_lib/discord.ts", "discord oauth session cookie").risk, "high");
 assert.equal(classifyPath("functions/_lib/crypto.ts", "TOKEN_ENCRYPTION_KEY").risk, "high");
 assert.equal(classifyPath("migrations/9999_test.sql", "DROP TABLE player_profiles;").risk, "blocked");
-assert.equal(classifyPath("docs/CODEX_AUTODEV.md").risk, "medium");
+assert.equal(classifyPath("docs/CODEX_AUTODEV.md").risk, "high");
 assert.equal(classifyPath("scripts/test-nitrado-file-read-diagnostics.ts").risk, "low");
 assert.equal(classifyPath("functions/_lib/adm-sync.ts", "UPDATE player_profiles SET kills = kills + 1").risk, "high");
 assert.equal(classifyPath("migrations/9999_adm.sql", "ALTER TABLE adm_sync_file_state ADD COLUMN next_retry_at TEXT;").risk, "medium");
@@ -46,6 +62,13 @@ assert.equal(classifyPath("migrations/9999_events.sql", "ALTER TABLE competitive
 assert.equal(classifyPath("migrations/9999_player_stats.sql", "CREATE TABLE player_stats (id TEXT);").risk, "blocked");
 assert.equal(classifyPath("functions/_lib/events.ts", "remove same-category matchmaking enforcement").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/bad.yml", "env:\n  STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}").risk, "blocked");
+assert.equal(classifyPath(".github/workflows/paid-codex.yml", "uses: openai/codex-action@v1").risk, "blocked");
+assert.equal(classifyPath(".github/workflows/metered-ai.yml", "env:\n  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}").risk, "blocked");
+assert.equal(classifyPath("scripts/ai-runner.ts", "const key = process.env.GEMINI_API_KEY; runUnattendedAgent(key);").risk, "blocked");
+assert.equal(classifyPath("scripts/autodev/propose-fix.ts", "const key = process.env.OPENAI_API_KEY; runPaidAgent(key);").risk, "blocked");
+assert.equal(classifyPath("package.json", "{\"dependencies\":{\"@anthropic-ai/sdk\":\"latest\"}}").risk, "blocked");
+assert.equal(classifyPath("scripts/codex-runner.ts", "Use paid unattended Codex automation with automatic OpenAI credit auto-top-up.").risk, "blocked");
+assert.equal(classifyPath(".autodev/config.json", read(".autodev/config.json")).risk, "high");
 assert.equal(classifyPath("workers/adm-sync-worker.ts", "WORKER_SUBREQUEST_LIMIT").risk, "high");
 
 assert.deepEqual(detectDestructiveMigration("DROP TABLE player_profiles;", "migrations/9999.sql").length > 0, true);
@@ -121,7 +144,13 @@ const pickSafeIssue = read("scripts/autodev/pick-safe-issue.ts");
 assert.equal(pickSafeIssue.includes('"autodev-safe-fix"'), true);
 assert.equal(pickSafeIssue.includes('"billing"'), true);
 assert.equal(pickSafeIssue.includes('"discord-oauth"'), true);
+assert.equal(pickSafeIssue.includes('"ai-spend"'), true);
+assert.equal(pickSafeIssue.includes("metered AI provider credential request"), true);
 assert.equal(pickSafeIssue.includes("isSafePlatformIssue"), true);
+
+const autoDevAudit = read("scripts/autodev/audit.ts");
+assert.equal(autoDevAudit.includes("AI spend subscription-only mode"), true);
+assert.equal(autoDevAudit.includes("AI spend zero extra monthly cap"), true);
 
 const scripts = JSON.parse(read("package.json")).scripts;
 for (const script of ["autodev:audit", "autodev:quality", "autodev:production-smoke", "autodev:adm-watch", "autodev:create-issue", "autodev:risk", "autodev:pick-safe-issue", "verify:adm-live", "test:autodev", "test:autodev-codex"]) {

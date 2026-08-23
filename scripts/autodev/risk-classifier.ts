@@ -60,6 +60,50 @@ const AUTOMATION_POLICY: Record<RiskLevel, AutomationPolicy> = {
 
 const PROTECTED_DELETE_TABLES = ["player_profiles", "kills", "kill_events", "deaths", "player_events", "events", "competitive_events", "sessions", "subscriptions", "server_subscriptions", "servers", "linked_servers"];
 const RUNTIME_SECRETS_IN_GITHUB = ["DISCORD_BOT_TOKEN", "DISCORD_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "SESSION_SECRET", "TOKEN_ENCRYPTION_KEY", "MOCK_AUTH", "MOCK_NITRADO", "NEXT_PUBLIC_"];
+const METERED_AI_CREDENTIALS = [
+  "OPENAI_API_KEY",
+  "AZURE_OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "CLAUDE_API_KEY",
+  "GOOGLE_GENERATIVE_AI_API_KEY",
+  "GEMINI_API_KEY",
+  "MISTRAL_API_KEY",
+  "COHERE_API_KEY",
+  "PERPLEXITY_API_KEY",
+  "OPENROUTER_API_KEY",
+  "TOGETHER_API_KEY",
+  "FIREWORKS_API_KEY",
+  "GROQ_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "XAI_API_KEY",
+  "REPLICATE_API_TOKEN",
+  "HUGGINGFACE_API_KEY",
+  "HF_TOKEN",
+];
+const METERED_AI_PROVIDER_SOURCE = String.raw`\b(?:openai|anthropic|claude|gemini|google\s+(?:generative\s+)?ai|vertex\s+ai|mistral|cohere|perplexity|openrouter|together(?:\s+ai)?|fireworks(?:\s+ai)?|groq|deepseek|xai|replicate|hugging\s*face|bedrock)\b`;
+const METERED_AI_WIRING_SOURCE = String.raw`(?:api[_ -]?key|secret|token|credential|provider|sdk|client|runner|action|autonomous|unattended|execution)`;
+const METERED_AI_PROVIDER_WIRING = [
+  new RegExp(`${METERED_AI_PROVIDER_SOURCE}[\\s\\S]{0,140}${METERED_AI_WIRING_SOURCE}`, "i"),
+  new RegExp(`${METERED_AI_WIRING_SOURCE}[\\s\\S]{0,140}${METERED_AI_PROVIDER_SOURCE}`, "i"),
+];
+const METERED_AI_PACKAGES = [
+  "openai",
+  "@openai/agents",
+  "@anthropic-ai/sdk",
+  "@google/genai",
+  "@google/generative-ai",
+  "@mistralai/mistralai",
+  "cohere-ai",
+  "openrouter",
+  "groq-sdk",
+  "together-ai",
+  "replicate",
+  "@huggingface/inference",
+];
+const PAID_AI_ACTION_PATTERNS: Array<[RegExp, string]> = [
+  [/openai\/codex-action/i, "paid Codex GitHub Action detected"],
+  [/anthropic(?:s)?\/claude(?:-code)?-action/i, "metered Claude GitHub Action detected"],
+];
 const ADM_PATHS = [
   /^functions\/_lib\/adm-/,
   /^functions\/api\/sync\/adm(?:\/|$)/,
@@ -149,6 +193,10 @@ function classifyMigration(file: string, content: string, system: SystemCategory
 }
 
 function classifyRisk(file: string, content: string, system: SystemCategory, reasons: string[]): RiskLevel {
+  if (system !== "tests" && isAiSpendPolicyChange(file, content)) {
+    reasons.push("AI spend policy changes require high-risk human approval");
+    return "high";
+  }
   if (system === "docs" || system === "tests") return "low";
   if (system === "autodev") {
     reasons.push("AutoDev policy or tooling change");
@@ -213,22 +261,55 @@ function classifyRisk(file: string, content: string, system: SystemCategory, rea
 
 function detectHardBlockedContent(content: string, file: string) {
   if (/^scripts\/test-/.test(file)) return [];
-  if (/^scripts\/autodev\//.test(file)) return [];
+  const autoDevPolicyTool = /^scripts\/autodev\/(?:audit|pick-safe-issue|risk-classifier)\.ts$/.test(file);
   const findings = [...detectDestructiveMigration(content, file)];
   const text = content.replace(/--.*$/gm, "");
+  if (!isPolicyDocument(file) && !autoDevPolicyTool) findings.push(...detectMeteredAiSpendWiring(text, file));
   if (isGithubWorkflow(file)) {
     for (const secret of RUNTIME_SECRETS_IN_GITHUB) {
       const pattern = secret.endsWith("_") ? new RegExp(`secrets\\.${escapeRegExp(secret)}`, "i") : new RegExp(`secrets\\.${escapeRegExp(secret)}\\b`, "i");
       if (pattern.test(text)) findings.push(`GitHub workflow references runtime secret ${secret}`);
     }
-    if (/openai\/codex-action|OPENAI_API_KEY|sk-proj-|sk-[A-Za-z0-9]/i.test(text)) findings.push("paid OpenAI/Codex GitHub execution or API key reference detected");
   }
   if (!isPolicyDocument(file)) {
     if (/\b(disable|bypass|skip|remove|weaken)\b[\s\S]{0,120}\b(auth|authorization|requireCronSecret|isCronAuthorized|401|403|session)\b/i.test(text)) findings.push("auth or endpoint protection weakening detected");
     if (/\b(disable|bypass|skip|remove|weaken)\b[\s\S]{0,160}\b(same-category|same category|assertSameServerCategory|assertSameCategoryChallenge|matchmaking)\b/i.test(text) || /\bcross-category\b[\s\S]{0,120}\b(allow|allowed|match|matchmaking|compete)\b/i.test(text)) findings.push("same-category matchmaking enforcement removal detected");
     if (/\b(raw|plain(?:text)?)\b[\s\S]{0,80}\b(token|secret|STRIPE_SECRET_KEY|TOKEN_ENCRYPTION_KEY|SESSION_SECRET)\b/i.test(text) && /\b(log|console\.log|return|expose|artifact|summary)\b/i.test(text)) findings.push("secret or token exposure pattern detected");
   }
-  return findings;
+  return Array.from(new Set(findings));
+}
+
+function detectMeteredAiSpendWiring(content: string, file: string) {
+  const findings: string[] = [];
+  for (const credential of METERED_AI_CREDENTIALS) {
+    if (new RegExp(`\\b${escapeRegExp(credential)}\\b`, "i").test(content)) {
+      findings.push(`metered AI credential ${credential} detected`);
+    }
+  }
+  for (const [pattern, message] of PAID_AI_ACTION_PATTERNS) {
+    if (pattern.test(content)) findings.push(message);
+  }
+  if (/\bsk-proj-[A-Za-z0-9_-]{12,}\b|\bsk-[A-Za-z0-9]{20,}\b/i.test(content)) {
+    findings.push("raw OpenAI-style API key detected");
+  }
+  if (isGithubWorkflow(file)) return Array.from(new Set(findings));
+  if (file === "package.json") {
+    for (const packageName of METERED_AI_PACKAGES) {
+      if (new RegExp(`["']${escapeRegExp(packageName)}["']\\s*:`, "i").test(content)) {
+        findings.push(`metered AI provider package ${packageName} detected`);
+      }
+    }
+  }
+  if (METERED_AI_PROVIDER_WIRING.some((pattern) => pattern.test(content))) {
+    findings.push("metered AI provider wiring detected");
+  }
+  if (/\b(auto[-_\s]?top[-_\s]?up|automatic\s+(?:credit|credits|billing|charge|charges)|buy\s+credits?|purchase\s+credits?|prepaid\s+credits?)\b/i.test(content) && /\b(openai|codex|ai|api)\b/i.test(content)) {
+    findings.push("automatic AI credit or auto-top-up assumption detected");
+  }
+  if (/\b(?:paid|metered|billable)\b[\s\S]{0,100}\b(?:codex|openai|ai)\b[\s\S]{0,100}\b(?:runner|action|automation|execution|agent)\b/i.test(content)) {
+    findings.push("paid unattended AI execution path detected");
+  }
+  return Array.from(new Set(findings));
 }
 
 function inferSystem(file: string, content: string): SystemCategory {
@@ -288,12 +369,18 @@ function inferMigrationSystem(file: string, content: string, currentSystem: Syst
   return currentSystem === "database" ? "database" : currentSystem;
 }
 
+function isAiSpendPolicyChange(file: string, content: string) {
+  if (file === ".autodev/config.json" && /aiSpendPolicy|paidGitHubActionEnabled|requiresOpenAiApiKey|meteredAiProvidersEnabled|unattendedPaidExecutionEnabled|assumesAutomaticCreditsOrAutoTopUp/i.test(content)) return true;
+  return /\b(?:ai spend|subscription[-_\s]?only\s+(?:ai|codex|openai)|(?:ai|codex|openai)\s+subscription[-_\s]?only|maxExtraMonthlySpendUsd|metered\s+ai|unattended\s+paid\s+(?:ai|codex|openai)|OPENAI_API_KEY|openai\/codex-action|auto[-_\s]?top[-_\s]?up)\b/i.test(content);
+}
+
 function result(file: string, system: SystemCategory, risk: RiskLevel, reasons: string[], blockedReason?: string): RiskClassification {
   return { scope: SCOPE, system, file, risk, automationPolicy: AUTOMATION_POLICY[risk], suggestedValidationProfile: suggestedValidationProfile(system, risk), blockedReason, changedFiles: [file], admRelated: isAdmRelated(file, reasons.join("\n")), reasons };
 }
 
 function suggestedValidationProfile(system: SystemCategory, risk: RiskLevel): ValidationProfileName {
   if (risk === "blocked") return "release-high-risk";
+  if (risk === "high" && (system === "docs" || system === "tests")) return "autodev";
   if (system === "autodev") return "autodev";
   if (system === "github-actions") return "github-workflows";
   if (system === "auth") return "auth";

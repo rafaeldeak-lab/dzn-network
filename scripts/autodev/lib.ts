@@ -27,6 +27,18 @@ export type AutomationPolicy = {
   requiresHumanReview: boolean;
 };
 
+export type AiSpendPolicy = {
+  mode: "subscription_only";
+  maxExtraMonthlySpendUsd: number;
+  chatGptBillingSettingsManagedOutsideRepo: boolean;
+  forbidOpenAiApiKey: boolean;
+  forbidPaidCodexGitHubAction: boolean;
+  forbidUnattendedPaidCodexExecution: boolean;
+  forbidAutomaticCreditsOrAutoTopUp: boolean;
+  forbidMeteredAiProvidersByDefault: boolean;
+  overrideRequires: "high_risk_human_approved_redesign";
+};
+
 export type AutoDevConfig = {
   mode: AutoDevMode;
   scope?: AutoDevScope;
@@ -40,6 +52,7 @@ export type AutoDevConfig = {
   maxRuntimeMinutes: number;
   maxChangedFilesPerRun: number;
   maxTokensHint: string;
+  aiSpendPolicy?: AiSpendPolicy;
   productionUrl: string;
   deployPreviewRequired: boolean;
   watchAdmCycles: boolean;
@@ -67,6 +80,9 @@ export type AutoDevConfig = {
     autoMerge: boolean;
     paidGitHubActionEnabled?: boolean;
     requiresOpenAiApiKey?: boolean;
+    unattendedPaidExecutionEnabled?: boolean;
+    meteredAiProvidersEnabled?: boolean;
+    assumesAutomaticCreditsOrAutoTopUp?: boolean;
   };
   riskGates: Record<string, boolean>;
   validation?: {

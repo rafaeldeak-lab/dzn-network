@@ -1531,6 +1531,9 @@ assert.equal(secretsMatrix.includes("GitHub Actions is not the primary ADM auto-
 assert.equal(secretsMatrix.includes("DZN_CRON_SECRET"), true);
 assert.equal(secretsMatrix.includes("SYNC_CRON_SECRET"), true);
 assert.equal(secretsMatrix.includes("Do not copy all Cloudflare runtime secrets into GitHub."), true);
+assert.equal(secretsMatrix.includes("subscription-only and capped at `$0` extra monthly AI/API spend"), true);
+assert.equal(secretsMatrix.includes("Do not add metered AI provider credentials"), true);
+assert.equal(secretsMatrix.includes("auto top-up"), true);
 assert.equal(secretsMatrix.includes("TOKEN_ENCRYPTION_KEY"), true);
 assert.equal(secretsMatrix.includes("dzn-adm-sync-worker"), true);
 

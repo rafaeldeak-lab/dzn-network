@@ -231,6 +231,7 @@ function materialProfileNames(classifications: RiskClassification[]) {
 
 function profileForSystem(system: SystemCategory, risk: RiskClassification["risk"]): ValidationProfileName {
   if (risk === "blocked") return "release-high-risk";
+  if (risk === "high" && (system === "docs" || system === "tests")) return "autodev";
   if (system === "autodev") return "autodev";
   if (system === "github-actions") return "github-workflows";
   if (system === "auth") return "auth";

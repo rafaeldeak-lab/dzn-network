@@ -29,7 +29,11 @@ Current allowed GitHub Actions secrets:
 
 Do not copy all Cloudflare runtime secrets into GitHub.
 
-Do not add OpenAI API credentials for AutoDev by default. Optional unattended 24/7 Codex/OpenAI execution is not enabled and requires a separate approved design.
+Do not add OpenAI API credentials for AutoDev by default. DZN routine development is subscription-only and capped at `$0` extra monthly AI/API spend in `.autodev/config.json`.
+
+Do not add metered AI provider credentials, paid AI GitHub Actions, AI SDK credential wiring, or API-key-backed autonomous AI execution for AutoDev by default. This includes Anthropic, Gemini, Mistral, Cohere, Perplexity, OpenRouter, Together, Fireworks, Groq, DeepSeek, xAI, Replicate, Hugging Face, Bedrock, or similar separately billed AI providers.
+
+Do not assume OpenAI/Codex credits, prepaid balances, pay-as-you-go billing, or auto top-up are available for routine automation. Optional unattended API-key-backed execution is not enabled and requires a high-risk human-approved redesign.
 
 ## DZN Pulse preview workflow
 
