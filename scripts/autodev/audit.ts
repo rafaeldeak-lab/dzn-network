@@ -22,6 +22,15 @@ check(config.allowAutoMergeLowRisk === false, "auto-merge disabled", "Auto-merge
 check(config.allowCodexHighRiskFixes === false, "Codex high-risk disabled", "Codex high-risk fixes disabled.", "Codex high-risk fixes must be disabled.", "high");
 check(config.allowAutomaticProductionDeploy === false, "production auto-deploy disabled", "Automatic production deploy disabled.", "Automatic production deploy must be disabled.", "high");
 check(config.allowProductionMutations === false, "production mutation disabled", "Automatic production mutation disabled.", "Automatic production mutation must be disabled.", "high");
+check(config.aiSpendPolicy?.mode === "subscription_only", "AI spend subscription-only mode", "AI spend policy is subscription_only.", "AI spend policy must stay subscription_only by default.", "high");
+check(config.aiSpendPolicy?.maxExtraMonthlySpendUsd === 0, "AI spend zero extra monthly cap", "AI spend policy caps extra monthly spend at $0.", "AI spend policy must cap extra monthly spend at $0.", "high");
+check(config.aiSpendPolicy?.chatGptBillingSettingsManagedOutsideRepo === true, "ChatGPT billing external", "Config records that ChatGPT billing settings are managed outside this repo.", "Config must not imply repo code can control ChatGPT billing settings.", "high");
+check(config.aiSpendPolicy?.forbidOpenAiApiKey === true, "OpenAI API key forbidden", "OPENAI_API_KEY is forbidden by default.", "OPENAI_API_KEY must remain forbidden by default.", "high");
+check(config.aiSpendPolicy?.forbidPaidCodexGitHubAction === true, "paid Codex action forbidden", "Paid Codex GitHub Action is forbidden by default.", "Paid Codex GitHub Action must remain forbidden by default.", "high");
+check(config.aiSpendPolicy?.forbidUnattendedPaidCodexExecution === true, "paid unattended Codex forbidden", "Unattended paid Codex execution is forbidden by default.", "Unattended paid Codex execution must remain forbidden by default.", "high");
+check(config.aiSpendPolicy?.forbidAutomaticCreditsOrAutoTopUp === true, "AI auto top-up forbidden", "Automatic AI credit/auto-top-up assumptions are forbidden.", "Automatic AI credit/auto-top-up assumptions must be forbidden.", "high");
+check(config.aiSpendPolicy?.forbidMeteredAiProvidersByDefault === true, "metered AI providers forbidden", "Metered AI providers are forbidden by default.", "Metered AI providers must be forbidden by default.", "high");
+check(config.aiSpendPolicy?.overrideRequires === "high_risk_human_approved_redesign", "AI spend override gate", "AI spend override requires high-risk human-approved redesign.", "AI spend override must require high-risk human-approved redesign.", "high");
 check(config.automationPolicy?.low?.allowedToInvestigate === true, "low-risk investigate", "Low-risk investigation is allowed.", "Low-risk investigation policy missing.", "medium");
 check(config.automationPolicy?.low?.allowedToImplementInBranch === true, "low-risk branch implementation", "Low-risk branch implementation is allowed.", "Low-risk branch implementation policy missing.", "medium");
 check(config.automationPolicy?.low?.allowedToOpenPR === true, "low-risk PR allowed", "Low-risk PR creation is allowed.", "Low-risk PR policy missing.", "medium");
@@ -34,9 +43,15 @@ check(config.codex?.directPushToMain === false, "Codex direct main disabled", "C
 check(config.codex?.autoMerge === false, "Codex auto-merge disabled", "Codex auto-merge disabled.", "Codex auto-merge must be disabled.", "high");
 check(config.codex?.paidGitHubActionEnabled === false, "paid Codex action disabled", "Paid Codex GitHub Action disabled.", "Paid Codex GitHub Action must not be enabled.", "high");
 check(config.codex?.requiresOpenAiApiKey === false, "OpenAI API key not required", "OpenAI API key is not required by AutoDev.", "AutoDev must not require OPENAI_API_KEY.", "high");
+check(config.codex?.unattendedPaidExecutionEnabled === false, "paid unattended Codex disabled", "Paid unattended Codex execution disabled.", "Paid unattended Codex execution must not be enabled.", "high");
+check(config.codex?.meteredAiProvidersEnabled === false, "metered AI providers disabled", "Metered AI provider wiring disabled.", "Metered AI provider wiring must not be enabled.", "high");
+check(config.codex?.assumesAutomaticCreditsOrAutoTopUp === false, "AI auto top-up assumptions disabled", "AutoDev does not assume automatic credits or auto top-up.", "AutoDev must not assume automatic credits or auto top-up.", "high");
 check(config.systems?.adm?.specialistSubsystem === true, "ADM specialist subsystem", "ADM remains represented as a specialist subsystem.", "ADM specialist subsystem policy missing.", "high");
 check(config.systems?.adm?.primaryAutomaticRunner === "cloudflare-worker", "ADM primary runner", "Cloudflare Worker remains primary ADM runner.", "ADM primary runner must remain Cloudflare Worker.", "high");
 check(config.systems?.adm?.githubBackupRunner === "manual-only", "ADM GitHub backup runner", "GitHub ADM backup runner remains manual-only.", "GitHub ADM backup runner must be manual-only.", "high");
+for (const gate of ["blockPaidCodexGitHubAction", "blockOpenAiApiKey", "blockUnattendedPaidAiExecution", "blockMeteredAiProviders", "blockAutomaticCreditsOrAutoTopUpAssumptions"]) {
+  check(config.riskGates?.[gate] === true, `risk gate ${gate}`, `${gate} is enabled.`, `${gate} must remain enabled.`, "high");
+}
 
 for (const profile of ["docs", "ui", "general", "auth", "billing", "nitrado-adm", "events", "github-workflows", "autodev", "release-high-risk"] as ValidationProfileName[]) {
   check(profileNames().includes(profile), `validation profile ${profile}`, `${profile} validation profile exists.`, `${profile} validation profile missing.`, "high");
@@ -102,7 +117,7 @@ check(dirExists(".autodev/reports") || dirExists(".autodev"), "AutoDev reports d
 const report = makeReport("audit", checks, [
   "Review high-risk failures before making code changes.",
   "Keep GitHub ADM workflow manual-only; Cloudflare Worker remains primary auto-sync runner.",
-  "Keep paid OpenAI/Codex GitHub execution disabled unless explicitly approved later.",
+  "Keep subscription-only AI spend policy in force unless a high-risk human-approved redesign explicitly changes it.",
 ]);
 writeReport("audit", report);
 if (!report.ok) process.exit(1);

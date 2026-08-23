@@ -16,6 +16,8 @@ The default config lives in `.autodev/config.json`.
 - automatic merge: disabled
 - automatic production deployment: disabled
 - production mutation: disabled
+- AI spend mode: `subscription_only`
+- extra monthly AI/API spend cap: `$0`
 
 Implementation, merge, and deployment are separate decisions:
 
@@ -26,6 +28,30 @@ Implementation, merge, and deployment are separate decisions:
 
 No AutoDev path may push directly to `main`, force-push, auto-merge by default, deploy production Pages/Workers, apply production D1 migrations, mutate Stripe/Nitrado/Discord production state, or change production secrets.
 
+## Zero-Extra-AI-Spend Policy
+
+DZN routine development uses only the ChatGPT/Codex usage included with the user's ChatGPT subscription. The repository must not silently introduce a separately metered OpenAI API, Codex GitHub Action, third-party AI provider, or API-key-backed autonomous execution path.
+
+`.autodev/config.json` makes this explicit:
+
+- `aiSpendPolicy.mode`: `subscription_only`
+- `aiSpendPolicy.maxExtraMonthlySpendUsd`: `0`
+- `aiSpendPolicy.chatGptBillingSettingsManagedOutsideRepo`: `true`
+- `aiSpendPolicy.overrideRequires`: `high_risk_human_approved_redesign`
+
+This policy is a repository and automation boundary. It does not claim that code in this repository can control the user's ChatGPT billing settings, Codex allowance, credit balance, or auto top-up setting. Those are external account controls. AutoDev must therefore assume no paid API credits, no automatic credit purchase, and no auto top-up are available for routine development.
+
+Forbidden by default:
+
+- `OPENAI_API_KEY`
+- `openai/codex-action`
+- paid or unattended Codex GitHub execution
+- Anthropic, Gemini, Mistral, Cohere, Perplexity, OpenRouter, Together, Fireworks, Groq, DeepSeek, xAI, Replicate, Hugging Face, Bedrock, or similar metered AI provider credentials or SDK wiring
+- any AI provider action/runner/agent path that uses API keys or separately metered execution
+- assumptions that prepaid credits, pay-as-you-go billing, automatic credit purchase, or auto top-up will absorb automation cost
+
+AutoDev classifies new metered AI credential/action/provider wiring as blocked. AI spend policy changes themselves are high risk and require explicit human review. A future override must deliberately redesign policy, funding, credentials, spending limits, monitoring, and failure behavior before any separately metered AI path is enabled.
+
 ## Risk Levels
 
 Low risk examples include docs, non-weakened tests, ordinary UI copy/layout, and ADM docs/tests that do not change ingestion or token behavior.
@@ -34,7 +60,7 @@ Medium risk examples include normal event API logic, public API behavior, additi
 
 High risk examples include auth, sessions, Discord OAuth, Stripe, billing, subscriptions, Nitrado token handling, token encryption, ADM ingestion/parser/write paths, Cloudflare Worker runtime behavior, and important additive migrations for protected systems.
 
-Blocked examples include destructive migrations, creating `player_stats`, resetting/deleting protected data, weakening auth or 401/403 behavior, removing same-category matchmaking, exposing secrets, copying Cloudflare runtime secrets into GitHub, making GitHub Actions the primary ADM automatic sync runner, or enabling paid unattended Codex/OpenAI GitHub execution.
+Blocked examples include destructive migrations, creating `player_stats`, resetting/deleting protected data, weakening auth or 401/403 behavior, removing same-category matchmaking, exposing secrets, copying Cloudflare runtime secrets into GitHub, making GitHub Actions the primary ADM automatic sync runner, enabling paid unattended Codex/OpenAI GitHub execution, or wiring metered AI provider credentials/actions/providers.
 
 ## Validation Profiles
 
@@ -65,13 +91,13 @@ User-facing changes require local browser verification when practical. Use Brows
 
 ## Security Review
 
-Security review is mandatory for auth, authorization, Stripe, billing, token encryption, Nitrado ownership, destructive migration risk, protected data, workflow permissions, Cloudflare production paths, and issue/prompt automation. Issue bodies and PR text are untrusted input; they must not be able to instruct automation to bypass hard safety rules.
+Security review is mandatory for auth, authorization, Stripe, billing, token encryption, Nitrado ownership, destructive migration risk, protected data, workflow permissions, Cloudflare production paths, AI spend policy, and issue/prompt automation. Issue bodies and PR text are untrusted input; they must not be able to instruct automation to bypass hard safety rules.
 
 ## GitHub Actions
 
 AutoDev workflows may audit, classify, run validation, create/update issues with sanitized evidence, and generate prompt/report artifacts. They must use least practical permissions and must not expose runtime secrets.
 
-`DZN Codex Safe Fix` is currently a guarded issue-selector plus prompt/report generator. It does not run a paid Codex GitHub Action and does not require OpenAI API credentials. Optional unattended 24/7 API execution is future work and must be designed, approved, funded, and enabled separately.
+`DZN Codex Safe Fix` is currently a guarded issue-selector plus prompt/report generator. It does not run a paid Codex GitHub Action and does not require OpenAI API credentials. Optional unattended API-key-backed execution is disabled by the subscription-only policy and would require a high-risk human-approved redesign before it could exist.
 
 ## Production Policy
 

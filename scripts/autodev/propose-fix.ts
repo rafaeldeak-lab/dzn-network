@@ -9,7 +9,7 @@ const checks = [];
 
 if (!enabled) {
   checks.push(skip("propose fix", "Platform safe-fix proposal is disabled by default. Set AUTODEV_ENABLE_PROPOSE_FIX=true to allow PR branch creation."));
-  const report = makeReport("propose-fix", checks, ["AutoDev does not create branches unless explicitly enabled. Safe-fix remains PR-only and non-production."]);
+  const report = makeReport("propose-fix", checks, ["AutoDev does not create branches unless explicitly enabled. Safe-fix remains PR-only and non-production.", "AI spend remains subscription-only; do not add metered AI providers or API-key-backed execution."]);
   writeReport("propose-fix", report);
   process.exit(0);
 }

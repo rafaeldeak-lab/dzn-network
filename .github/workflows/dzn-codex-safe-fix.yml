@@ -29,6 +29,8 @@ jobs:
 
           This workflow is a guarded issue-selector and prompt/report generator only. It does not run a paid Codex action, does not require OpenAI API credentials, and does not modify code by itself.
 
+          DZN routine development is subscription-only AI work. Use only the ChatGPT/Codex usage included with the user's ChatGPT subscription, assume $0 extra monthly AI/API spend, and do not assume automatic credits or auto top-up are available.
+
           DZN AutoDev is platform-wide. Safe-fix work may cover low-risk docs, tests, UI, AutoDev, workflow-reporting, and other low-risk DZN platform issues when the issue passes labels and hard-block gates.
 
           Required behavior:
@@ -53,6 +55,8 @@ jobs:
           - making GitHub Actions the primary ADM auto-sync runner
           - production Pages, Workers, D1, Stripe, Nitrado, Discord, or secret mutation
           - paid 24/7 Codex/OpenAI execution
+          - any other metered AI provider, paid AI action, AI SDK credential, or API-key-backed autonomous execution path
+          - assumptions that automatic credits, prepaid balances, pay-as-you-go billing, or auto top-up will cover automation cost
 
           High-risk work may be investigated and prepared in a PR only when explicitly assigned, but it must never be selected by this low-risk safe-fix workflow.
           PROMPT

@@ -11,6 +11,17 @@
   "maxRuntimeMinutes": 45,
   "maxChangedFilesPerRun": 20,
   "maxTokensHint": "bounded",
+  "aiSpendPolicy": {
+    "mode": "subscription_only",
+    "maxExtraMonthlySpendUsd": 0,
+    "chatGptBillingSettingsManagedOutsideRepo": true,
+    "forbidOpenAiApiKey": true,
+    "forbidPaidCodexGitHubAction": true,
+    "forbidUnattendedPaidCodexExecution": true,
+    "forbidAutomaticCreditsOrAutoTopUp": true,
+    "forbidMeteredAiProvidersByDefault": true,
+    "overrideRequires": "high_risk_human_approved_redesign"
+  },
   "productionUrl": "https://dzn-network.pages.dev",
   "deployPreviewRequired": true,
   "watchAdmCycles": true,
@@ -87,7 +98,10 @@
     "directPushToMain": false,
     "autoMerge": false,
     "paidGitHubActionEnabled": false,
-    "requiresOpenAiApiKey": false
+    "requiresOpenAiApiKey": false,
+    "unattendedPaidExecutionEnabled": false,
+    "meteredAiProvidersEnabled": false,
+    "assumesAutomaticCreditsOrAutoTopUp": false
   },
   "riskGates": {
     "blockDestructiveMigrations": true,
@@ -98,7 +112,11 @@
     "blockSameCategoryMatchmakingRemoval": true,
     "blockCloudflareSecretsInGitHub": true,
     "blockGitHubPrimaryAdmRunner": true,
-    "blockPaidCodexGitHubAction": true
+    "blockPaidCodexGitHubAction": true,
+    "blockOpenAiApiKey": true,
+    "blockUnattendedPaidAiExecution": true,
+    "blockMeteredAiProviders": true,
+    "blockAutomaticCreditsOrAutoTopUpAssumptions": true
   },
   "validation": {
     "defaultProfile": "general",

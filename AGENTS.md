@@ -93,10 +93,28 @@ ADM monitoring remains a specialist subsystem. Do not genericize away or delete 
 - High risk: investigate and, when the fix is well understood, implement carefully in an isolated branch with specialist tests and security review. Open a PR for human review. Never auto-merge or production-deploy automatically.
 - Blocked: do not implement automatically. Create/report findings for human approval.
 
+## Zero-Extra-AI-Spend Policy
+
+DZN routine development is subscription-only by default. It may use the ChatGPT/Codex usage included with the user's ChatGPT subscription, but it must not introduce a separately metered AI/API spend path.
+
+The repository cannot control the user's ChatGPT billing settings, Codex credit balance, or auto top-up settings directly. AutoDev policy therefore treats those settings as external account controls and must not assume automatic credits, auto top-up, or pay-as-you-go API spend are available.
+
+Default AI spend policy:
+
+- `aiSpendPolicy.mode` must stay `subscription_only`.
+- `aiSpendPolicy.maxExtraMonthlySpendUsd` must stay `0`.
+- `OPENAI_API_KEY` is forbidden by default.
+- `openai/codex-action` and paid/unattended Codex GitHub execution are forbidden by default.
+- Other metered AI providers, AI SDK credentials, and API-key-backed autonomous execution paths are forbidden by default.
+- Automatic credit purchase, prepaid-credit availability, or auto-top-up assumptions are forbidden by default.
+
+Any future override must be a deliberate high-risk, human-approved redesign that changes policy, funding, credentials, failure modes, and spending limits explicitly. Normal feature approval, low-risk safe-fix labels, or a generic request for automation is not enough.
+
 Flag auth/session/Discord OAuth changes as high risk.
 Flag Stripe billing/subscription changes as high risk.
 Flag `TOKEN_ENCRYPTION_KEY` or Nitrado token handling changes as high risk.
 Flag important migrations as high risk unless clearly additive and isolated.
+Flag AI spend policy changes, metered AI provider wiring, AI credentials, or paid/unattended AI execution paths as high risk or blocked according to AutoDev policy.
 Flag any Worker change that may exceed Cloudflare subrequest limits as P1.
 Flag any workflow that copies Cloudflare runtime secrets into GitHub as P1.
 Flag any workflow that makes GitHub the primary ADM auto-sync runner as P1.
@@ -127,6 +145,8 @@ These are forbidden unless the user gives explicit, specific approval where appr
 - Introduce a paid OpenAI/Codex GitHub Action.
 - Add `OPENAI_API_KEY`.
 - Enable unattended 24/7 paid Codex execution.
+- Add other metered AI provider credentials, SDK wiring, paid AI GitHub Actions, or API-key-backed autonomous AI execution.
+- Assume OpenAI/Codex credits, prepaid balances, pay-as-you-go billing, or auto top-up will cover routine DZN development.
 
 Treat destructive migrations as P0. Treat any creation of `player_stats` as P0. Treat protected-data resets/deletes as P0. Treat any weakening of endpoint 401/403 protection as P0.
 

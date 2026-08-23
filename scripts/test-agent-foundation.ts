@@ -20,6 +20,10 @@ includesAll(rootAgents, [
   "Create a `player_stats` table. DZN uses `player_profiles`.",
   "Remove same-category matchmaking guarantees.",
   "Add `OPENAI_API_KEY`.",
+  "Zero-Extra-AI-Spend Policy",
+  "`aiSpendPolicy.mode` must stay `subscription_only`.",
+  "`aiSpendPolicy.maxExtraMonthlySpendUsd` must stay `0`.",
+  "Other metered AI providers, AI SDK credentials, and API-key-backed autonomous execution paths are forbidden by default.",
   "Never claim completion without validation evidence.",
 ]);
 
@@ -47,6 +51,15 @@ assert.equal(config.allowAutomaticProductionDeploy, false);
 assert.equal(config.allowProductionMutations, false);
 assert.equal(config.codex.paidGitHubActionEnabled, false);
 assert.equal(config.codex.requiresOpenAiApiKey, false);
+assert.equal(config.codex.unattendedPaidExecutionEnabled, false);
+assert.equal(config.codex.meteredAiProvidersEnabled, false);
+assert.equal(config.codex.assumesAutomaticCreditsOrAutoTopUp, false);
+assert.equal(config.aiSpendPolicy.mode, "subscription_only");
+assert.equal(config.aiSpendPolicy.maxExtraMonthlySpendUsd, 0);
+assert.equal(config.aiSpendPolicy.chatGptBillingSettingsManagedOutsideRepo, true);
+assert.equal(config.aiSpendPolicy.forbidOpenAiApiKey, true);
+assert.equal(config.aiSpendPolicy.forbidMeteredAiProvidersByDefault, true);
+assert.equal(config.aiSpendPolicy.overrideRequires, "high_risk_human_approved_redesign");
 assert.equal(config.systems.adm.primaryAutomaticRunner, "cloudflare-worker");
 assert.equal(config.systems.adm.githubBackupRunner, "manual-only");
 
@@ -55,8 +68,11 @@ assert.equal(isSafePlatformIssue({ number: 1, title: "Docs typo", body: "Fix bil
 assert.equal(isSafePlatformIssue({ number: 2, title: "Event UI copy", body: "Update events page empty-state copy.", labels: ["autodev", "autodev-safe-fix", "low-risk", "system:events"] }).ok, true);
 assert.equal(isSafePlatformIssue({ number: 3, title: "Billing checkout", body: "Fix checkout behavior.", labels: ["autodev", "autodev-safe-fix", "low-risk", "system:billing"] }).ok, false);
 assert.equal(isSafePlatformIssue({ number: 4, title: "Drop old profiles", body: "DROP TABLE player_profiles;", labels: ["autodev", "autodev-safe-fix", "low-risk"] }).ok, false);
+assert.equal(isSafePlatformIssue({ number: 5, title: "Add Anthropic key", body: "Wire ANTHROPIC_API_KEY for unattended AI fixes.", labels: ["autodev", "autodev-safe-fix", "low-risk"] }).ok, false);
+assert.equal(isSafePlatformIssue({ number: 6, title: "Enable AI spend override", body: "Change AI spend policy and enable auto top-up.", labels: ["autodev", "autodev-safe-fix", "low-risk"] }).ok, false);
 
 assert.equal(classifyPath("docs/README.md", "Fix typo").risk, "low");
+assert.equal(classifyPath("AGENTS.md", read("AGENTS.md")).risk, "high");
 assert.equal(classifyPath("components/home/Hero.tsx", "export function Hero() { return <div />; }").risk, "low");
 assert.equal(classifyPath("app/events/page.tsx", "export default function EventsPage() { return <main />; }").risk, "low");
 assert.equal(classifyPath("functions/api/events/create.ts", "export async function onRequestPost() {}").risk, "medium");
@@ -72,6 +88,11 @@ assert.equal(classifyPath("migrations/9999_reset.sql", "UPDATE player_profiles S
 assert.equal(classifyPath("functions/_lib/events.ts", "remove same-category matchmaking enforcement").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/bad.yml", "env:\n  TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/bad.yml", "uses: openai/codex-action@v1").risk, "blocked");
+assert.equal(classifyPath(".github/workflows/paid-ai.yml", "env:\n  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}").risk, "blocked");
+assert.equal(classifyPath("scripts/ai-runner.ts", "const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });").risk, "blocked");
+assert.equal(classifyPath("scripts/autodev/propose-fix.ts", "const key = process.env.OPENAI_API_KEY; runPaidAgent(key);").risk, "blocked");
+assert.equal(classifyPath("package.json", "{\"dependencies\":{\"openai\":\"latest\"}}").risk, "blocked");
+assert.equal(classifyPath(".autodev/config.json", read(".autodev/config.json")).risk, "high");
 assert.equal(classifyPath("workers/adm-sync-worker.ts", "WORKER_SUBREQUEST_LIMIT crons retry backoff").risk, "high");
 assert.equal(classifyPath("docs/ADM_SYNC_PLAN.md", "ADM docs update").risk, "low");
 assert.equal(classifyPath("scripts/test-adm-parser.ts", "ADM parser tests").risk, "low");
@@ -99,6 +120,7 @@ assert.equal(selectValidationProfile([classifyPath("functions/api/auth/me.ts", "
 assert.equal(selectValidationProfile([classifyPath("functions/api/billing/checkout.ts", "checkout")]).name, "billing");
 assert.equal(selectValidationProfile([classifyPath("functions/_lib/adm-sync.ts", "parseAdm")]).name, "nitrado-adm");
 assert.equal(selectValidationProfile([classifyPath(".github/workflows/dzn-codex-safe-fix.yml", read(".github/workflows/dzn-codex-safe-fix.yml"))]).name, "github-workflows");
+assert.equal(selectValidationProfile([classifyPath("AGENTS.md", read("AGENTS.md"))]).name, "autodev");
 
 const autoDevMedium = classifyPath("package.json", "{\"scripts\":{\"autodev:quality\":\"tsx scripts/autodev/quality-gate.ts\"},\"automation\":\"policy\"}");
 const authHigh = classifyPath("functions/api/auth/session.ts", "session cookie");
