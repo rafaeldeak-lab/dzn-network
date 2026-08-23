@@ -16,8 +16,7 @@ assert.equal(loadouts.includes("PublicServerVisualLoadoutFallback"), true, "Publ
 assert.equal(loadouts.includes("savedBadgeSelectionIsInvalid"), true, "Invalid saved badge selections should fall back safely.");
 assert.equal(loadouts.includes("publicFrameVisualsForPlan"), true, "Public frames should be plan validated.");
 assert.equal(loadouts.includes("publicThemeBannerVisualsForPlan"), true, "Public themes should be plan validated.");
-assert.equal(loadouts.includes('if (planKey === "premium") return Object.values(frames);'), true, "Premium should have premium visual access.");
-assert.equal(loadouts.includes("REPUTATION_FRAME_KEYS"), true, "Pro should use reputation frames.");
+assert.equal(loadouts.includes('if (plan === "premium" || plan === "pro") return Object.values(frames);'), true, "Pro and legacy Premium should have full visual access.");
 assert.equal(loadouts.includes("[DEFAULT_FRAME_KEY]"), true, "Starter should be limited to default frames.");
 assert.equal(loadouts.includes("[DEFAULT_THEME_KEY]"), true, "Starter should be limited to default themes.");
 assert.equal(loadouts.includes("limits.animationsAllowed"), true, "Animation output should be plan gated.");
@@ -48,7 +47,8 @@ for (const text of ["Plan Limits", "Badge Showcase Rules", "Frame Rules", "Theme
 }
 
 assert.equal(getVisualLoadoutPlanLimits("starter").maxShowcaseBadges, 3);
-assert.equal(getVisualLoadoutPlanLimits("pro").maxShowcaseBadges, 5);
+assert.equal(getVisualLoadoutPlanLimits("pro").maxShowcaseBadges, 8);
+assert.equal(getVisualLoadoutPlanLimits("pro").animationsAllowed, true);
 assert.equal(getVisualLoadoutPlanLimits("premium").maxShowcaseBadges, 8);
 assert.equal(getVisualLoadoutPlanLimits("network").maxShowcaseBadges, 8);
 assert.equal(getVisualLoadoutPlanLimits("partner").maxShowcaseBadges, 8);

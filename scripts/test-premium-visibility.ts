@@ -21,13 +21,14 @@ import { sortPublicServersForDiscovery } from "../functions/api/public/servers";
 import type { Env } from "../functions/_lib/types";
 
 assert.equal(getPlanVisibilityWeight("starter"), 1);
-assert.equal(getPlanVisibilityWeight("pro"), 2);
+assert.equal(getPlanVisibilityWeight("pro"), 4);
 assert.equal(getPlanVisibilityWeight("premium"), 4);
 assert.equal(getPlanVisibilityWeight("network"), 4);
 assert.equal(getPlanVisibilityWeight("partner"), 4);
 
 assert.equal(getServerVisibilityConfig({ planKey: "starter" }).isSpotlightEligible, false);
 assert.equal(getServerVisibilityConfig({ planKey: "pro" }).isFeaturedEligible, true);
+assert.equal(getServerVisibilityConfig({ planKey: "pro" }).isSpotlightEligible, true);
 assert.equal(getServerVisibilityConfig({ planKey: "premium" }).isSpotlightEligible, true);
 assert.equal(getServerVisibilityConfig({ planKey: "network" }).visibilityTier, "premium");
 assert.equal(getServerVisibilityConfig({ planKey: "partner" }).visibilityTier, "premium");
@@ -63,9 +64,9 @@ const candidates = [
   { id: "pro", planKey: "pro", rank: 2, score: 500, created_at: "2026-01-01T00:00:00.000Z" },
   { id: "premium", planKey: "premium", rank: 99, score: 10, created_at: "2026-01-01T00:00:00.000Z" },
 ];
-assert.deepEqual(getFeaturedServerCandidates({ servers: candidates }).map((server) => server.id), ["premium", "pro"]);
-assert.deepEqual(getSpotlightEligibleServers({ servers: candidates }).map((server) => server.id), ["premium"]);
-assert.equal(getRecommendedServers({ servers: candidates })[0].id, "premium");
+assert.deepEqual(getFeaturedServerCandidates({ servers: candidates }).map((server) => server.id), ["pro", "premium"]);
+assert.deepEqual(getSpotlightEligibleServers({ servers: candidates }).map((server) => server.id), ["pro", "premium"]);
+assert.equal(getRecommendedServers({ servers: candidates })[0].id, "pro");
 
 const sorted = sortPublicServersForDiscovery([
   { id: "competitive-rank-one", advertising: publicAdvertisingFromState(null), discoveryScore: 10, visibility_weight: 1, rank: 1, score: 900, created_at: "2026-01-01T00:00:00.000Z" },
@@ -77,10 +78,9 @@ assert.equal(sorted.find((server) => server.id === "competitive-rank-one")?.scor
 
 const explanation = explainServerVisibility({ planKey: "premium" });
 assert.match(explanation.fairness, /does not change competitive leaderboard rank/i);
-assert.equal(getVisibilityUpgradeBenefits("starter").some((benefit) => /Pro adds enhanced discovery/i.test(benefit)), true, "Starter should see Pro upgrade benefits.");
-assert.equal(getVisibilityUpgradeBenefits("starter").some((benefit) => /Premium adds premium discovery priority/i.test(benefit)), true, "Starter should see Premium upgrade benefits.");
-assert.equal(getVisibilityUpgradeBenefits("pro").some((benefit) => /spotlight eligibility/i.test(benefit)), true, "Pro should see Premium spotlight benefits.");
-assert.equal(getVisibilityUpgradeBenefits("pro").some((benefit) => /8 monthly promotion credits/i.test(benefit)), true, "Pro should see Premium promotion credit benefits.");
+assert.equal(getVisibilityUpgradeBenefits("starter").some((benefit) => /Pro adds full discovery priority/i.test(benefit)), true, "Starter should see Pro upgrade benefits.");
+assert.equal(getVisibilityUpgradeBenefits("starter").some((benefit) => /spotlight eligibility/i.test(benefit)), true, "Starter should see full Pro upgrade benefits.");
+assert.deepEqual(getVisibilityUpgradeBenefits("pro"), [], "Pro should not see an upgrade nag.");
 assert.deepEqual(getVisibilityUpgradeBenefits("premium"), [], "Premium should not see an upgrade nag.");
 
 const profileComplete = getProfileCompleteness({
@@ -113,7 +113,7 @@ assert.equal(getOwnerVisibilityRecommendedActions({
   visualLoadoutCompleteness: visualComplete,
   badgeShowcaseCompleteness: badgeComplete,
   isSpotlightEligible: true,
-}).some((action) => /Premium spotlight eligibility is active/i.test(action)), true, "Premium owners should see active spotlight confirmation.");
+}).some((action) => /Pro spotlight eligibility is active/i.test(action)), true, "Legacy Premium owners should see active Pro-equivalent spotlight confirmation.");
 
 const publicServers = readFileSync("functions/api/public/servers.ts", "utf8");
 const publicNetwork = readFileSync("components/network/public-network.tsx", "utf8");
@@ -180,7 +180,7 @@ for (const text of ["What It Affects", "What It Does Not Affect", "Spotlight Eli
 }
 
 const publicPlans = getBillingPlanSummaries({} as Env);
-assert.deepEqual(publicPlans.map((plan) => plan.plan_key), ["starter", "pro", "premium"]);
+assert.deepEqual(publicPlans.map((plan) => plan.plan_key), ["starter", "pro"]);
 assert.equal(publicPlans.some((plan) => /network|partner/i.test(`${plan.plan_key} ${plan.name} ${plan.price_label}`)), false);
 
 const visibilitySource = readFileSync("functions/_lib/server-visibility.ts", "utf8");

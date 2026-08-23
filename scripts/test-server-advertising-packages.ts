@@ -28,13 +28,14 @@ assert.deepEqual(PRO_GALLERY_ALLOWED_MIME_TYPES, ["image/jpeg"]);
 assert.equal(PRO_GALLERY_MAX_FILE_SIZE_BYTES, 2 * 1024 * 1024);
 
 assert.equal(normalizeListingPlanKey("free", "active"), "free");
-assert.equal(normalizeListingPlanKey("starter", "active"), "free");
+assert.equal(normalizeListingPlanKey("starter", "active"), "starter");
 assert.equal(normalizeListingPlanKey("pro", "active"), "pro");
 assert.equal(normalizeListingPlanKey("premium", "active"), "pro");
 assert.equal(normalizeListingPlanKey("partner", "trialing"), "pro");
 assert.equal(normalizeListingPlanKey("network", "active"), "pro");
 assert.equal(normalizeListingPlanKey("premium", "past_due"), "free");
 assert.equal(getListingLimits({ plan_key: "starter", subscription_status: "active" }).descriptionLimit, 500);
+assert.equal(getListingLimits({ plan_key: "starter", subscription_status: "active" }).publicLabel, "Starter Listing");
 assert.equal(getListingLimits({ plan_key: "network", subscription_status: "active" }).descriptionLimit, 2500);
 assert.equal(canUseProFeature({ plan_key: "free" }, "gallery_images"), false);
 assert.equal(canUseProFeature({ plan_key: "pro", subscription_status: "active" }, "gallery_images"), true);

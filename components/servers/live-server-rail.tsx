@@ -14,7 +14,7 @@ type RailItem = {
   maxPlayers: number | null;
   ratingAverage: number | null;
   reviewCount: number;
-  listingPlanKey: "free" | "pro";
+  listingPlanKey: "free" | "starter" | "pro";
   isPro: boolean;
 };
 

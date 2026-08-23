@@ -30,10 +30,10 @@ for (const exported of [
 }
 
 assert.equal(VISUAL_LOADOUT_PLAN_LIMITS.starter.maxShowcaseBadges, 3);
-assert.equal(VISUAL_LOADOUT_PLAN_LIMITS.pro.maxShowcaseBadges, 5);
+assert.equal(VISUAL_LOADOUT_PLAN_LIMITS.pro.maxShowcaseBadges, 8);
 assert.equal(VISUAL_LOADOUT_PLAN_LIMITS.premium.maxShowcaseBadges, 8);
 assert.equal(getVisualLoadoutPlanLimits("starter").animationsAllowed, false);
-assert.equal(getVisualLoadoutPlanLimits("pro").animationsAllowed, false);
+assert.equal(getVisualLoadoutPlanLimits("pro").animationsAllowed, true);
 assert.equal(getVisualLoadoutPlanLimits("premium").animationsAllowed, true);
 assert.equal(normalizePlanKey("network"), "premium");
 assert.equal(normalizePlanKey("partner"), "premium");
@@ -44,7 +44,7 @@ assert.equal(helper.includes("SHOWCASE_BADGE_LIMIT_EXCEEDED"), true, "Plan badge
 assert.equal(helper.includes("BADGE_NOT_EARNED"), true, "Unearned showcase badges should be rejected.");
 assert.equal(helper.includes("FRAME_NOT_AVAILABLE"), true, "Unavailable frames should be rejected.");
 assert.equal(helper.includes("THEME_NOT_AVAILABLE"), true, "Unavailable themes should be rejected.");
-assert.equal(helper.includes("ANIMATION_PLAN_REQUIRED"), true, "Premium-only animation selection should be enforced.");
+assert.equal(helper.includes("ANIMATION_PLAN_REQUIRED"), true, "Pro animation selection should be enforced.");
 assert.equal(helper.includes("defaultFrameKeyForPlan"), true, "Invalid saved frames should fall back safely.");
 assert.equal(helper.includes("defaultThemeKeyForPlan"), true, "Invalid saved themes should fall back safely.");
 assert.equal(helper.includes("parseSavedBadgeCodes"), true, "Invalid saved badge JSON should fall back safely.");

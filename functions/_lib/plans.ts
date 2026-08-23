@@ -18,6 +18,7 @@ import {
   getPlanVisibilityWeight as centralPlanVisibilityWeight,
   getPublicPublishIntervalMinutes as centralPublicPublishInterval,
   getServerStatusInterval as centralServerStatusInterval,
+  getSubscriptionPlanPublicContract,
   hasAutoPost as centralHasAutoPost,
   hasListingAutoPost as centralHasListingAutoPost,
   hasPlanFeature as centralHasPlanFeature,
@@ -30,6 +31,8 @@ import {
   type ListingPlanKey,
   type NormalizedPlanKey,
   type PlanFeature,
+  type PurchasablePlanKey,
+  type SubscriptionPlanPublicContract,
 } from "../../lib/billing/plans";
 import { getLinkedServerAllowanceUsageForUser } from "./onboarding";
 
@@ -74,14 +77,15 @@ export type BillingStatus = {
   linked_server_count: number;
   can_link_more_servers: boolean;
   stripe_customer_exists: boolean;
-  checkout_configured: Record<PaidPlanKey, boolean>;
+  checkout_configured: Record<PurchasablePlanKey, boolean>;
 };
 
 export type BillingPlanSummary = PlanEntitlements & {
-  plan_key: PaidPlanKey;
+  plan_key: PurchasablePlanKey;
   name: string;
   price_label: string;
   monthly_price_gbp: number;
+  public_contract: SubscriptionPlanPublicContract;
   configured: boolean;
   features: string[];
 };
@@ -93,7 +97,7 @@ export type BillingReadinessStatus = {
   stripeSecretConfigured: boolean;
   webhookSecretConfigured: boolean;
   activePlans: Array<{
-    plan_key: PaidPlanKey;
+    plan_key: PurchasablePlanKey;
     name: string;
     price_label: string;
     monthly_price_gbp: number;
@@ -126,10 +130,10 @@ export const PLAN_CONFIG: Record<NormalizedPlanKey, PlanEntitlements> = {
     can_use_reviews: true,
     can_use_public_listing: true,
     can_use_advanced_analytics: false,
-    can_join_events: false,
-    can_use_ad_bumps: false,
+    can_join_events: true,
+    can_use_ad_bumps: true,
     included_bumps_per_month: 0,
-    bump_cooldown_hours: 999,
+    bump_cooldown_hours: FREE_BUMP_COOLDOWN_DAYS * 24,
     can_use_featured_slots: false,
     stat_history_days: 30,
   },
@@ -142,28 +146,28 @@ export const PLAN_CONFIG: Record<NormalizedPlanKey, PlanEntitlements> = {
     can_use_advanced_analytics: true,
     can_join_events: true,
     can_use_ad_bumps: true,
-    included_bumps_per_month: 1,
+    included_bumps_per_month: 2,
     bump_cooldown_hours: PRO_BUMP_COOLDOWN_DAYS * 24,
-    can_use_featured_slots: false,
+    can_use_featured_slots: true,
     stat_history_days: 90,
   },
   premium: {
     plan_key: "premium",
     ...automationPlan("premium"),
-    max_linked_servers: 10,
+    max_linked_servers: 3,
     can_use_reviews: true,
     can_use_public_listing: true,
     can_use_advanced_analytics: true,
     can_join_events: true,
     can_use_ad_bumps: true,
-    included_bumps_per_month: 1,
+    included_bumps_per_month: 2,
     bump_cooldown_hours: PRO_BUMP_COOLDOWN_DAYS * 24,
     can_use_featured_slots: true,
-    stat_history_days: 365,
+    stat_history_days: 90,
   },
 };
 
-const PLAN_MARKETING: Record<PaidPlanKey, {
+const PLAN_MARKETING: Record<PurchasablePlanKey, {
   name: string;
   price_label: string;
   monthly_price_gbp: number;
@@ -171,46 +175,32 @@ const PLAN_MARKETING: Record<PaidPlanKey, {
 }> = {
   starter: {
     name: "Starter",
-    price_label: "£4.99/month",
-    monthly_price_gbp: 4.99,
+    price_label: "£0 today, then £2/month",
+    monthly_price_gbp: 2,
     features: [
-      "Best for new and small servers",
+      "2-day free trial",
+      "Then £2/month",
       "Standard listing",
-      "Basic leaderboard participation",
-      "Public updates every 24h",
+      "1 linked DayZ server",
+      "Public/advert publication every 72h",
       "Earned badges visible",
-      "3 showcase badges",
       "No monthly promotion credits",
+      "Cancel before trial expiry to pay nothing",
     ],
   },
   pro: {
     name: "Pro",
-    price_label: "£9.99/month",
-    monthly_price_gbp: 9.99,
+    price_label: "£10/month",
+    monthly_price_gbp: 10,
     features: [
-      "Best for growing communities",
-      "Public updates every 4h",
-      "Enhanced discovery",
-      "Featured rotation eligible",
+      "Full DZN Access",
+      "Charged immediately",
+      "Up to 3 linked DayZ servers",
+      "Public/advert publication every 24h",
+      "Enhanced discovery and profile tools",
+      "Featured and spotlight rotation eligible",
       "2 monthly promotion credits",
-      "5 showcase badges",
-      "Standard themes and reputation frames",
-    ],
-  },
-  premium: {
-    name: "Premium",
-    price_label: "£19.99/month",
-    monthly_price_gbp: 19.99,
-    features: [
-      "Best for serious servers wanting maximum exposure",
-      "Fastest/current publishing",
-      "Premium discovery priority",
-      "Premium Spotlight eligible",
-      "8 monthly promotion credits",
-      "Premium animated frames and themes",
       "8 showcase badges",
-      "Premium badge/status",
-      "Full visual loadout benefits",
     ],
   },
 };
@@ -223,9 +213,9 @@ export function normalizePlanKey(value: unknown): PlanKey {
   return canonicalPlanKey(value);
 }
 
-export function paidPlanKey(value: unknown): PaidPlanKey | null {
+export function paidPlanKey(value: unknown): PurchasablePlanKey | null {
   const key = typeof value === "string" ? value.trim().toLowerCase() : "";
-  return key === "starter" || key === "pro" || key === "premium" ? key : null;
+  return key === "starter" || key === "pro" ? key : null;
 }
 
 export function getPlanConfig(planKey: unknown): PlanEntitlements {
@@ -256,11 +246,10 @@ function getLegacyStripePriceIdForPlan(env: Env, planKey: LegacyPaidPlanKey) {
   return null;
 }
 
-export function getCheckoutConfigured(env: Env): Record<PaidPlanKey, boolean> {
+export function getCheckoutConfigured(env: Env): Record<PurchasablePlanKey, boolean> {
   return {
     starter: Boolean(getStripePriceIdForPlan(env, "starter")),
     pro: Boolean(getStripePriceIdForPlan(env, "pro")),
-    premium: Boolean(getStripePriceIdForPlan(env, "premium")),
   };
 }
 
@@ -270,6 +259,7 @@ export function getBillingPlanSummaries(env: Env): BillingPlanSummary[] {
     ...PLAN_CONFIG[planKey],
     ...PLAN_MARKETING[planKey],
     plan_key: planKey,
+    public_contract: getSubscriptionPlanPublicContract(planKey)!,
     configured: configured[planKey],
   }));
 }
@@ -291,7 +281,7 @@ export function getBillingReadinessStatus(env: Env): BillingReadinessStatus {
   return {
     starterConfigured: configured.starter,
     proConfigured: configured.pro,
-    premiumConfigured: configured.premium,
+    premiumConfigured: false,
     stripeSecretConfigured,
     webhookSecretConfigured,
     activePlans: getBillingPlanSummaries(env).map((plan) => ({
@@ -678,6 +668,7 @@ function boolInt(value: boolean) {
 
 function getDetectedLegacyStripeVars(env: Env) {
   const legacyVars: string[] = [];
+  if (cleanEnvString(env.STRIPE_PRICE_PREMIUM)) legacyVars.push("STRIPE_PRICE_PREMIUM");
   if (cleanEnvString(env.STRIPE_PRICE_NETWORK)) legacyVars.push("STRIPE_PRICE_NETWORK");
   if (cleanEnvString(env.STRIPE_PRICE_PARTNER)) legacyVars.push("STRIPE_PRICE_PARTNER");
   return legacyVars;

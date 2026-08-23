@@ -58,9 +58,9 @@ function run() {
   includes("components/onboarding/dashboard.tsx", "Rebuild Public Cache Now", "Dashboard should expose a manual public cache rebuild button.");
   includes("components/onboarding/dashboard.tsx", "Public profile cache is stale. Rebuild recommended.", "Dashboard should warn when public cache is stale.");
 
-  assert.equal(getServerStatusInterval("partner"), 1, "Legacy partner alias should receive Premium status cadence.");
-  assert.equal(getAdmDiscoveryIntervalMinutes("partner"), 3, "Legacy partner alias should receive Premium ADM discovery cadence.");
-  assert.equal(getAdmPullInterval("partner"), 10, "Legacy partner alias should receive Premium ADM processing cadence.");
+  assert.equal(getServerStatusInterval("partner"), 5, "Legacy partner alias should receive Pro-equivalent status cadence.");
+  assert.equal(getAdmDiscoveryIntervalMinutes("partner"), 10, "Legacy partner alias should receive Pro-equivalent ADM discovery cadence.");
+  assert.equal(getAdmPullInterval("partner"), 30, "Legacy partner alias should receive Pro-equivalent ADM processing cadence.");
 
   console.log("Public profile sync tests passed.");
   console.log("- Metadata sync updates server_public_cache.");

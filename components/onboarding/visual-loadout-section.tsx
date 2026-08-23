@@ -274,7 +274,7 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
                     </div>
                   </SelectorPanel>
 
-                  <SelectorPanel title="Theme selector" helper="Standard themes unlock on Pro. Premium unlocks all themes.">
+                  <SelectorPanel title="Theme selector" helper="Pro unlocks all themes.">
                     <div className="grid max-h-[210px] gap-2 overflow-y-auto pr-1">
                       {ALL_THEMES.map((theme) => {
                         const available = availableThemeKeys.has(theme.key);
@@ -294,7 +294,7 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
                   </SelectorPanel>
                 </div>
 
-                <SelectorPanel title="Animation level selector" helper="Animations respect reduced-motion preferences. Premium unlocks animated frames and visuals.">
+                <SelectorPanel title="Animation level selector" helper="Animations respect reduced-motion preferences. Pro unlocks animated frames and visuals.">
                   <div className="grid gap-2 sm:grid-cols-2">
                     <button type="button" onClick={() => setAnimationEnabled(false)} className={`rounded-lg border p-3 text-left ${!animationEnabled ? "border-cyan-300/45 bg-cyan-400/12" : "border-white/10 bg-black/24"}`}>
                       <span className="text-sm font-black text-white">Static</span>
@@ -302,7 +302,7 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
                     </button>
                     <button type="button" disabled={!limits.animationsAllowed} onClick={() => setAnimationEnabled(true)} className={`rounded-lg border p-3 text-left ${animationEnabled ? "border-violet-300/45 bg-violet-400/12" : "border-white/10 bg-black/24"} disabled:cursor-not-allowed disabled:opacity-50`}>
                       <span className="inline-flex items-center gap-2 text-sm font-black text-white">{!limits.animationsAllowed ? <LockKeyhole className="h-4 w-4" /> : null} Animated</span>
-                      <span className="mt-1 block text-xs leading-5 text-zinc-400">Premium animated frames, badge motion, and glow treatment.</span>
+                      <span className="mt-1 block text-xs leading-5 text-zinc-400">Pro animated frames, badge motion, and glow treatment.</span>
                     </button>
                   </div>
                 </SelectorPanel>
@@ -312,7 +312,7 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
             <div className="mt-4 flex flex-col gap-3 rounded-lg border border-white/10 bg-black/24 p-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="grid gap-1 text-sm font-bold text-zinc-300">
                 <span>{planLabel} can display {limits.maxShowcaseBadges} showcase badges. You are using {selectedCount} slot{selectedCount === 1 ? "" : "s"}.</span>
-                {limits.planKey !== "premium" ? <span className="text-amber-100">Premium unlocks 8 slots, animated frames, all theme banners, and full visual loadout benefits. Earned competitive badges still cannot be faked.</span> : <span className="text-cyan-100">Premium visual loadout unlocked: 8 slots, animations, premium frames, premium themes, and stronger public presentation.</span>}
+                {limits.animationsAllowed ? <span className="text-cyan-100">Pro visual loadout unlocked: 8 slots, animations, premium-style frames, premium-style themes, and stronger public presentation.</span> : <span className="text-amber-100">Pro unlocks 8 slots, animated frames, all theme banners, and full visual loadout benefits. Earned competitive badges still cannot be faked.</span>}
               </div>
               <SaveProgressButton
                 idleLabel="Save Visual Loadout"

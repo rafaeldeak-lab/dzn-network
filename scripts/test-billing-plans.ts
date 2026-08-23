@@ -8,31 +8,54 @@ import { onRequest as checkoutHandler } from "../functions/api/billing/create-ch
 import { onRequest as billingReadinessHandler } from "../functions/api/billing/readiness";
 import { onRequest as webhookHandler } from "../functions/api/stripe/webhook";
 import { sortPublicServersForDiscovery } from "../functions/api/public/servers";
-import { canUseProFeature, getBumpCooldownDays, getListingLimits, hasListingAutoPost, isProListing, normalizeListingPlanKey } from "../lib/billing/plans";
+import { canUseProFeature, getBumpCooldownDays, getListingLimits, getSubscriptionPlanPublicContract, getSubscriptionPlanPublicContracts, hasListingAutoPost, isProListing, normalizeListingPlanKey } from "../lib/billing/plans";
 import type { Env, PagesFunction } from "../functions/_lib/types";
 
 const starter = getPlanConfig("starter");
 const pro = getPlanConfig("pro");
 const premium = getPlanConfig("premium");
 
-assert.equal(starter.can_use_ad_bumps, false);
+assert.equal(starter.can_use_ad_bumps, true);
 assert.equal(pro.can_use_ad_bumps, true);
-assert.equal(pro.included_bumps_per_month, 1);
+assert.equal(pro.included_bumps_per_month, 2);
 assert.equal(pro.max_linked_servers, 3);
-assert.equal(premium.max_linked_servers, 10);
-assert.equal(premium.included_bumps_per_month, 1);
-assert.equal(premium.monthly_price, 19.99);
-assert.equal(Math.round(premium.monthly_price * 100), 1999);
+assert.equal(pro.monthly_price, 10);
+assert.equal(pro.visibility_weight, 4);
+assert.equal(pro.public_publish_interval_minutes, 1440);
+assert.equal(premium.max_linked_servers, 3);
+assert.equal(premium.included_bumps_per_month, 2);
+assert.equal(premium.monthly_price, 10);
+assert.equal(Math.round(premium.monthly_price * 100), 1000);
 assert.equal(premium.visibility_weight, 4);
-assert.equal(premium.public_publish_interval_minutes, 0);
+assert.equal(premium.public_publish_interval_minutes, 1440);
 assert.equal(getPlanConfig("free").max_linked_servers, 1);
 assert.equal(getPlanConfig("network").plan_key, "premium");
 assert.equal(getPlanConfig("partner").plan_key, "premium");
-assert.equal(getPlanConfig("network").monthly_price, 19.99);
-assert.equal(getPlanConfig("partner").monthly_price, 19.99);
+assert.equal(getPlanConfig("network").monthly_price, 10);
+assert.equal(getPlanConfig("partner").monthly_price, 10);
+
+const publicContracts = getSubscriptionPlanPublicContracts();
+assert.deepEqual(publicContracts.map((contract) => contract.key), ["starter", "pro"]);
+assert.deepEqual(publicContracts.map((contract) => contract.priceLabel), ["£0 today, then £2/month", "£10/month"]);
+assert.deepEqual(publicContracts.map((contract) => contract.trialDays), [2, 0]);
+assert.deepEqual(publicContracts.map((contract) => contract.publicPublishingIntervalMinutes), [4320, 1440]);
+assert.deepEqual(publicContracts.map((contract) => contract.visibilityWeight), [1, 4]);
+assert.deepEqual(publicContracts.map((contract) => contract.promotionCreditsPerMonth), [0, 2]);
+assert.deepEqual(publicContracts.map((contract) => contract.badgeShowcaseLimit), [3, 8]);
+assert.equal(getSubscriptionPlanPublicContract("premium")?.key, "pro");
+assert.equal(getSubscriptionPlanPublicContract("network")?.key, "pro");
+assert.equal(getSubscriptionPlanPublicContract("partner")?.key, "pro");
+assert.equal(getSubscriptionPlanPublicContract("free"), null);
+for (const contract of publicContracts) {
+  const fairness = contract.fairnessGuarantees.join(" ");
+  assert.match(fairness, /Does not change ADM data collection/i);
+  assert.match(fairness, /Does not change leaderboard rank/i);
+  assert.match(fairness, /Does not allow badges, crowns or seasonal wins to be bought/i);
+  assert.equal(/stripe|checkout|webhook|secret/i.test(JSON.stringify(contract)), false, "Public subscription contract must not expose billing implementation details.");
+}
 
 const now = new Date("2026-05-17T12:00:00.000Z");
-assert.deepEqual(evaluateBumpEligibility({ entitlements: starter, state: null, now }).code, "upgrade_required");
+assert.equal(evaluateBumpEligibility({ entitlements: starter, state: null, now }).ok, true);
 assert.equal(evaluateBumpEligibility({ entitlements: pro, state: null, now }).ok, true);
 assert.deepEqual(
   evaluateBumpEligibility({
@@ -58,7 +81,7 @@ assert.deepEqual(
 );
 
 assert.equal(normalizeListingPlanKey(null), "free");
-assert.equal(normalizeListingPlanKey("starter", "active"), "free");
+assert.equal(normalizeListingPlanKey("starter", "active"), "starter");
 assert.equal(normalizeListingPlanKey("pro", "active"), "pro");
 assert.equal(normalizeListingPlanKey("premium", "trialing"), "pro");
 assert.equal(normalizeListingPlanKey("partner", "active"), "pro");
@@ -67,6 +90,7 @@ assert.equal(normalizeListingPlanKey("pro", "past_due"), "free");
 assert.equal(isProListing({ plan_key: "premium", subscription_status: "active" }), true);
 assert.equal(isProListing({ plan_key: "pro", subscription_status: "canceled" }), false);
 assert.equal(getListingLimits({ plan_key: "free" }).descriptionLimit, 500);
+assert.equal(getListingLimits({ plan_key: "starter", subscription_status: "active" }).publicLabel, "Starter Listing");
 assert.equal(getListingLimits({ plan_key: "premium", subscription_status: "active" }).descriptionLimit, 2500);
 assert.equal(getListingLimits({ plan_key: "premium", subscription_status: "active" }).galleryLimit, 4);
 assert.equal(getListingLimits({ plan_key: "free" }).galleryLimit, 0);
@@ -116,7 +140,7 @@ assert.equal(getPlanFromStripePriceId(env, "price_premium"), "premium");
 assert.equal(getPlanFromStripePriceId(env, "price_network_legacy"), "premium");
 assert.equal(getPlanFromStripePriceId(env, "price_partner_legacy"), "premium");
 assert.equal(getPlanFromStripePriceId(env, "price_missing"), "free");
-assert.deepEqual(getCheckoutConfigured(env), { starter: true, pro: true, premium: true });
+assert.deepEqual(getCheckoutConfigured(env), { starter: true, pro: true });
 assert.equal(getPlanFromStripePriceId({
   NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID: "price_network_public_legacy",
   NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID: "price_partner_public_legacy",
@@ -130,17 +154,17 @@ const partialEnv = {
   NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID: "price_1TY4c6JPrnZ0cnkH7207aAi4",
   NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
 } as Env;
-assert.deepEqual(getCheckoutConfigured(partialEnv), { starter: true, pro: true, premium: false });
+assert.deepEqual(getCheckoutConfigured(partialEnv), { starter: true, pro: true });
 const planSummaries = getBillingPlanSummaries(partialEnv);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.configured, true);
-assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.configured, false);
-assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.monthly_price_gbp, 19.99);
-assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.price_label, "£19.99/month");
-assert.deepEqual(planSummaries.map((plan) => plan.name), ["Starter", "Pro", "Premium"]);
+assert.equal(planSummaries.some((plan) => String(plan.plan_key) === "premium"), false);
+assert.deepEqual(planSummaries.map((plan) => plan.name), ["Starter", "Pro"]);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.features.includes("No monthly promotion credits"), true);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "pro")?.features.includes("2 monthly promotion credits"), true);
-assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.features.includes("8 monthly promotion credits"), true);
-assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.features.includes("Premium animated frames and themes"), true);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.public_contract.promotionCreditsPerMonth, 0);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "pro")?.public_contract.promotionCreditsPerMonth, 2);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "pro")?.public_contract.discoveryTreatment, "full_dzn_access");
+assert.equal(planSummaries.every((plan) => plan.public_contract.trackingGuarantee.includes("All ADM tracking continues unchanged")), true);
 const planSummaryKeys = planSummaries.map((plan) => String(plan.plan_key));
 assert.equal(planSummaryKeys.includes("network"), false);
 assert.equal(planSummaryKeys.includes("partner"), false);
@@ -153,7 +177,7 @@ const missingPremiumReadiness = getBillingReadinessStatus({
   STRIPE_WEBHOOK_SECRET: "whsec_readiness",
 } as Env);
 assert.equal(missingPremiumReadiness.premiumConfigured, false);
-assert.equal(missingPremiumReadiness.missingRequiredVars.includes("STRIPE_PRICE_PREMIUM"), true);
+assert.equal(missingPremiumReadiness.missingRequiredVars.includes("STRIPE_PRICE_PREMIUM"), false);
 
 const completeReadiness = getBillingReadinessStatus({
   STRIPE_PRICE_STARTER: "price_starter",
@@ -165,52 +189,27 @@ const completeReadiness = getBillingReadinessStatus({
 } as Env);
 assert.equal(completeReadiness.starterConfigured, true);
 assert.equal(completeReadiness.proConfigured, true);
-assert.equal(completeReadiness.premiumConfigured, true);
-assert.deepEqual(completeReadiness.activePlans.map((plan) => plan.plan_key), ["starter", "pro", "premium"]);
+assert.equal(completeReadiness.premiumConfigured, false);
+assert.deepEqual(completeReadiness.activePlans.map((plan) => plan.plan_key), ["starter", "pro"]);
 assert.deepEqual(completeReadiness.missingRequiredVars, []);
-assert.deepEqual(completeReadiness.legacyVarsDetected, ["STRIPE_PRICE_NETWORK"]);
+assert.deepEqual(completeReadiness.legacyVarsDetected, ["STRIPE_PRICE_PREMIUM", "STRIPE_PRICE_NETWORK"]);
 assert.equal(completeReadiness.modeHint, "live");
 assert.equal(JSON.stringify(completeReadiness).includes("sk_live_secret_value_must_not_leak"), false);
 assert.equal(JSON.stringify(completeReadiness).includes("whsec_secret_value_must_not_leak"), false);
 assert.equal(JSON.stringify(completeReadiness).includes("price_premium"), false);
 
 const landingSource = readFileSync("components/dzn/dzn-landing-page.tsx", "utf8");
-const pricingSection = landingSource.slice(landingSource.indexOf("const publicPricingPlans"), landingSource.indexOf("function GameModeGrid"));
-/*
+const pricingSection = landingSource.slice(landingSource.indexOf("const pricingPlans"), landingSource.indexOf("function GameModeGrid"));
 for (const snippet of [
   "Starter",
   "Pro",
-  "Premium",
-  "£4.99/month",
-  "£9.99/month",
-  "£19.99/month",
-  "Public publishing interval",
-  "Visibility tier",
-  "Promotion credits",
-  "Featured eligibility",
-  "Spotlight eligibility",
-  "Showcase badge limit",
-  "Frames/themes",
-  "Animated visuals",
-  "Seasons access",
-  "Badge/reputation showcase",
-  "Best for",
-  "Premium is built for server owners who want maximum exposure, faster public updates, premium visuals, spotlight eligibility and monthly promotion credits.",
-  "Does Premium affect leaderboard rank?",
-  "What does Premium improve?",
-  "Do Starter servers still compete?",
-  "Can badges be bought?",
-  "Can seasons be won by paying?",
-]) {
-  assert.equal(pricingSection.includes(snippet), true, `Public pricing section should include ${snippet}.`);
-}
-assert.equal(/Network|Partner/.test(pricingSection), false, "Public pricing section must not show Network/Partner plans.");
-assert.equal(/paid leaderboard rank|leaderboard rank boost|improves leaderboard rank|buy better leaderboard/i.test(pricingSection), false, "Premium pricing copy must not claim paid leaderboard rank.");
-*/
-for (const snippet of [
-  "Free Listing",
-  "Pro Listing",
-  "Monthly paid package",
+  "£0 today, then £2/month",
+  "£10/month",
+  "2-day free trial",
+  "Cancel before trial expiry to pay nothing",
+  "Full DZN Access",
+  "Up to 3 linked DayZ servers",
+  "Payment method required",
   "Description limit",
   "Gallery images",
   "Custom banner",
@@ -220,21 +219,21 @@ for (const snippet of [
   "Embed design",
   "Owner announcement",
   "Event promotion",
-  "Featured rotation eligibility",
+  "Featured and spotlight eligibility",
   "Leaderboard/stat advantage",
   "Pro helps your server look better, advertise better and understand performance better.",
   "Does Pro affect leaderboard rank?",
   "What does Pro improve?",
-  "Do Free servers still compete?",
+  "Do Starter servers still compete?",
   "Can badges be bought?",
 ]) {
   assert.equal(pricingSection.includes(snippet), true, `Public pricing section should include ${snippet}.`);
 }
-assert.equal(/Starter|Premium|Network Listing|Partner Listing|Network plan|Partner plan/.test(pricingSection), false, "Public pricing section must only show Free/Pro plans.");
+assert.equal(/Premium|Network Listing|Partner Listing|Network plan|Partner plan/.test(pricingSection), false, "Public pricing section must only show Starter/Pro plans.");
 assert.equal(/paid leaderboard rank|leaderboard rank boost|improves leaderboard rank|buy better leaderboard/i.test(pricingSection), false, "Pro pricing copy must not claim paid leaderboard rank.");
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
-assert.equal(dashboardSource.includes("Custom advert visuals, weekly bumping, enhanced Discord posts, featured rotation eligibility, and listing analytics"), true, "Owner billing cards should explain Pro Listing value.");
+assert.equal(dashboardSource.includes("Full DZN Access, up to 3 linked servers, custom advert visuals, weekly bumping, enhanced Discord posts, featured and spotlight eligibility, and listing analytics"), true, "Owner billing cards should explain Pro value.");
 assert.equal(dashboardSource.includes("Upgrade to Premium"), false, "Owner billing and Discord fallback cards should not present Premium as an advertising upgrade.");
 assert.equal(dashboardSource.includes("Promo Credits"), true, "Owner dashboard billing summary should show promotion credit language.");
 assert.equal(dashboardSource.includes("Admin billing readiness warning"), true, "Owner dashboard should include an admin-only billing readiness warning.");
@@ -284,13 +283,15 @@ async function run() {
 
   const plansResponse = await billingPlansHandler(makeContext(billingPlansHandler, new Request("https://local.test/api/billing/plans"), partialEnv));
   assert.equal(plansResponse.status, 200);
-  const plansJson = (await plansResponse.json()) as { plans: Array<{ plan_key: string; configured: boolean; monthly_price_gbp: number; price_label: string }> };
+  const plansJson = (await plansResponse.json()) as { plans: Array<{ plan_key: string; configured: boolean; monthly_price_gbp: number; price_label: string; public_contract: { key: string; promotionCreditsPerMonth: number; badgeShowcaseLimit: number; fairnessGuarantees: string[] } }> };
+  assert.deepEqual(plansJson.plans.map((plan) => plan.plan_key), ["starter", "pro"]);
   assert.equal(plansJson.plans.find((plan) => plan.plan_key === "starter")?.configured, true);
-  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "premium")?.configured, false);
-  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "premium")?.monthly_price_gbp, 19.99);
-  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "premium")?.price_label, "£19.99/month");
+  assert.equal(plansJson.plans.some((plan) => plan.plan_key === "premium"), false);
   assert.equal(plansJson.plans.map((plan) => plan.plan_key).includes("network"), false);
   assert.equal(plansJson.plans.map((plan) => plan.plan_key).includes("partner"), false);
+  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "starter")?.public_contract.badgeShowcaseLimit, 3);
+  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "pro")?.public_contract.promotionCreditsPerMonth, 2);
+  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "pro")?.public_contract.fairnessGuarantees.some((item) => /seasonal wins/i.test(item)), true);
 
   const unauthReadiness = await billingReadinessHandler(makeContext(billingReadinessHandler, new Request("https://local.test/api/billing/readiness"), {} as Env));
   assert.equal(unauthReadiness.status, 401);
@@ -318,8 +319,8 @@ async function run() {
   assert.equal(readinessJson.starterConfigured, true);
   assert.equal(readinessJson.proConfigured, true);
   assert.equal(readinessJson.premiumConfigured, false);
-  assert.equal(readinessJson.missingRequiredVars.includes("STRIPE_PRICE_PREMIUM"), true);
-  assert.deepEqual(readinessJson.activePlans.map((plan) => plan.plan_key), ["starter", "pro", "premium"]);
+  assert.equal(readinessJson.missingRequiredVars.includes("STRIPE_PRICE_PREMIUM"), false);
+  assert.deepEqual(readinessJson.activePlans.map((plan) => plan.plan_key), ["starter", "pro"]);
   const readinessText = JSON.stringify(readinessJson);
   assert.equal(readinessText.includes("sk_test_endpoint_secret_must_not_leak"), false);
   assert.equal(readinessText.includes("whsec_endpoint_secret_must_not_leak"), false);
@@ -340,11 +341,23 @@ async function run() {
   assert.equal(invalidCheckout.status, 400);
   assert.match(await invalidCheckout.text(), /paid plan/i);
 
-  const missingPriceCheckout = await checkoutHandler(makeContext(
+  const legacyPremiumCheckout = await checkoutHandler(makeContext(
     checkoutHandler,
     new Request("https://local.test/api/billing/create-checkout-session", {
       method: "POST",
       body: JSON.stringify({ plan_key: "premium" }),
+      headers: { "content-type": "application/json" },
+    }),
+    { ...fakeEnv, MOCK_AUTH: "true" } as Env,
+  ));
+  assert.equal(legacyPremiumCheckout.status, 400);
+  assert.match(await legacyPremiumCheckout.text(), /paid plan/i);
+
+  const missingPriceCheckout = await checkoutHandler(makeContext(
+    checkoutHandler,
+    new Request("https://local.test/api/billing/create-checkout-session", {
+      method: "POST",
+      body: JSON.stringify({ plan_key: "pro" }),
       headers: { "content-type": "application/json" },
     }),
     { ...fakeEnv, MOCK_AUTH: "true" } as Env,
@@ -388,12 +401,10 @@ async function run() {
   const activeCheckoutPrices = {
     starter: "price_starter_active",
     pro: "price_pro_active",
-    premium: "price_premium_active",
   } as const;
   const capturedActiveCheckoutBodies: Record<keyof typeof activeCheckoutPrices, string> = {
     starter: "",
     pro: "",
-    premium: "",
   };
   globalThis.fetch = async (_input, init) => {
     const body = String(init?.body ?? "");
@@ -420,14 +431,18 @@ async function run() {
           STRIPE_SECRET_KEY: "sk_test_placeholder",
           STRIPE_PRICE_STARTER: activeCheckoutPrices.starter,
           STRIPE_PRICE_PRO: activeCheckoutPrices.pro,
-          STRIPE_PRICE_PREMIUM: activeCheckoutPrices.premium,
           NEXT_PUBLIC_APP_URL: "https://dzn-network.pages.dev",
         } as Env,
       ));
       assert.equal(checkoutResponse.status, 200);
       assert.match(capturedActiveCheckoutBodies[planKey], new RegExp(`line_items%5B0%5D%5Bprice%5D=${activeCheckoutPrices[planKey]}`));
       assert.match(capturedActiveCheckoutBodies[planKey], new RegExp(`metadata%5Bplan_key%5D=${planKey}`));
+      assert.match(capturedActiveCheckoutBodies[planKey], /payment_method_collection=always/);
+      assert.match(capturedActiveCheckoutBodies[planKey], /allow_promotion_codes=false/);
     }
+    assert.match(capturedActiveCheckoutBodies.starter, /subscription_data%5Btrial_period_days%5D=2/);
+    assert.match(capturedActiveCheckoutBodies.starter, /subscription_data%5Btrial_settings%5D%5Bend_behavior%5D%5Bmissing_payment_method%5D=cancel/);
+    assert.equal(capturedActiveCheckoutBodies.pro.includes("trial_period_days"), false);
   } finally {
     globalThis.fetch = originalFetch;
   }

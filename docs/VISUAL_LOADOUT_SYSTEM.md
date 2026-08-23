@@ -16,10 +16,9 @@ Public APIs resolve the saved loadout before rendering. If the saved value is mi
 ## Plan Limits
 
 - Starter: up to 3 showcase badges, default frame, default theme, static presentation.
-- Pro: up to 5 showcase badges, earned reputation frames, standard themes, static presentation.
-- Premium: up to 8 showcase badges, premium frames, premium themes, animated presentation.
+- Pro: up to 8 showcase badges, premium-style frames, premium-style themes, animated presentation.
 
-Legacy `network` and `partner` plan keys map to Premium for compatibility.
+Legacy `premium`, `network`, and `partner` plan keys map to effective Pro for compatibility.
 
 ## Badge Showcase Rules
 
@@ -32,8 +31,7 @@ If a saved badge list contains unearned or invalid badge codes, public rendering
 Frames are resolved through the plan-safe frame list:
 
 - Starter can use the default bronze frame.
-- Pro can use reputation frames that match earned reputation badges.
-- Premium can use all configured frames, including animated premium styles.
+- Pro can use all configured frames, including animated premium-style frames.
 
 If a saved frame is no longer available, public rendering uses the plan/reputation fallback frame.
 
@@ -42,14 +40,13 @@ If a saved frame is no longer available, public rendering uses the plan/reputati
 Themes are resolved through the plan-safe theme list:
 
 - Starter uses the default apocalypse theme.
-- Pro can use standard themes.
-- Premium can use all configured themes.
+- Pro can use all configured themes.
 
 If a saved theme is invalid or locked by plan, public rendering falls back to the automatic theme banner.
 
 ## Animation Rules
 
-Animations are allowed for Premium loadouts only. Badge and frame components also respect `prefers-reduced-motion`; users who prefer reduced motion receive static or heavily subdued visual treatment.
+Animations are allowed for Pro loadouts. Badge and frame components also respect `prefers-reduced-motion`; users who prefer reduced motion receive static or heavily subdued visual treatment.
 
 ## Public Display Behaviour
 
@@ -57,7 +54,7 @@ Public server cards show a compact version of the selected showcase, selected pr
 
 Public server profile headers show the selected theme banner, selected frame, and selected showcase first. The full earned badge collection remains available below where the profile already renders achievements.
 
-Premium visuals are presentation only. They must not alter kills, deaths, score, rank, leaderboard placement, ADM sync, or competitive scoring.
+Pro visuals are presentation only. They must not alter kills, deaths, score, rank, leaderboard placement, ADM sync, or competitive scoring.
 
 ## Owner Dashboard Behaviour
 
@@ -73,7 +70,7 @@ The Server Settings visual loadout section shows:
 - plan limits
 - save status
 
-Owners cannot grant protected badges, crowns, founder rewards, seasonal wins, premium visuals, or unavailable frames/themes through this UI.
+Owners cannot grant protected badges, crowns, founder rewards, seasonal wins, Pro visuals, or unavailable frames/themes through this UI.
 
 ## Fallback Behaviour
 
@@ -83,7 +80,7 @@ Fallbacks are intentionally conservative:
 - invalid badges: automatic strongest badges
 - unavailable frame: plan/reputation fallback frame
 - unavailable theme: automatic/default theme
-- non-Premium animation: static output
+- non-Pro animation: static output
 
 The public resolver reads saved loadouts without running schema changes on public list requests. If the loadout table is unavailable, public pages keep rendering with automatic visuals.
 

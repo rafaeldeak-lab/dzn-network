@@ -34,6 +34,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     "line_items[0][price]": priceId,
     "line_items[0][quantity]": 1,
     customer: account?.stripe_customer_id ?? undefined,
+    payment_method_collection: "always",
     client_reference_id: user.discord_id,
     success_url: billingRedirectUrl(env, request, body.returnTo ?? "/dashboard", "success"),
     cancel_url: billingRedirectUrl(env, request, body.returnTo ?? "/dashboard", "cancelled"),
@@ -43,7 +44,11 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     "subscription_data[metadata][discord_user_id]": user.discord_id,
     "subscription_data[metadata][plan_key]": planKey,
     "subscription_data[metadata][source]": "dzn-network",
-    allow_promotion_codes: true,
+    ...(planKey === "starter" ? {
+      "subscription_data[trial_period_days]": 2,
+      "subscription_data[trial_settings][end_behavior][missing_payment_method]": "cancel",
+    } : {}),
+    allow_promotion_codes: false,
   });
 
   if (!session.url) return json({ error: "Stripe checkout did not return a URL." }, { status: 502 });

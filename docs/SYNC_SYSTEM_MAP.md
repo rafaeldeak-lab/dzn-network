@@ -24,7 +24,8 @@ Plan intervals:
 | --- | --- |
 | Starter | Every 7 minutes |
 | Pro | Every 5 minutes |
-| Premium | Every 1 minute |
+
+Legacy Premium, Network, and Partner rows are treated as effective Pro.
 
 Hard floor:
 
@@ -124,7 +125,8 @@ Discovery intervals:
 | --- | --- |
 | Starter | Every 15 minutes |
 | Pro | Every 10 minutes |
-| Premium | Every 3 minutes |
+
+Legacy Premium, Network, and Partner rows are treated as effective Pro.
 
 Processing intervals:
 
@@ -132,7 +134,8 @@ Processing intervals:
 | --- | --- |
 | Starter | Every 60 minutes |
 | Pro | Every 30 minutes |
-| Premium | Every 10 minutes |
+
+Legacy Premium, Network, and Partner rows are treated as effective Pro.
 
 Hard floors:
 

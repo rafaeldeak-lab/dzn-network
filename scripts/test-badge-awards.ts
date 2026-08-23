@@ -90,7 +90,7 @@ const activePlans = getBillingPlanSummaries({
   STRIPE_PRICE_PRO: "price_pro",
   STRIPE_PRICE_PREMIUM: "price_premium",
 } as Env);
-assert.deepEqual(activePlans.map((plan) => plan.plan_key), ["starter", "pro", "premium"]);
+assert.deepEqual(activePlans.map((plan) => plan.plan_key), ["starter", "pro"]);
 assert.equal(JSON.stringify(activePlans).includes("Network"), false);
 assert.equal(JSON.stringify(activePlans).includes("Partner"), false);
 

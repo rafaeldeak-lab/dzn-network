@@ -1,6 +1,6 @@
-# DZN Premium Visibility System
+# DZN Pro Visibility System
 
-Premium visibility is a public discovery layer for DZN server listings. It helps higher-tier plans appear in discovery surfaces while keeping competitive leaderboards fair.
+Pro visibility is a public discovery layer for DZN server listings. It helps the full-access plan appear in discovery surfaces while keeping competitive leaderboards fair.
 
 ## What It Affects
 
@@ -8,7 +8,7 @@ Premium visibility is a public discovery layer for DZN server listings. It helps
 - featured server candidate groups
 - recommended server candidate groups
 - server spotlight eligibility
-- premium public visual treatment
+- premium-style public visual treatment
 
 ## What It Does Not Affect
 
@@ -30,10 +30,9 @@ Competitive leaderboard calculations remain based on gameplay/stat data only.
 | Plan | Visibility Weight | Discovery Behaviour | Spotlight |
 | --- | ---: | --- | --- |
 | Starter | 1 | Standard listing | Not eligible |
-| Pro | 2 | Enhanced discovery and featured rotation eligibility | Not eligible |
-| Premium | 4 | Premium discovery priority, featured priority, premium visuals | Eligible |
+| Pro | 4 | Full discovery priority, featured priority, premium-style visuals | Eligible |
 
-Legacy `network` and `partner` plan keys normalize to Premium for old rows and subscriptions. They must not appear as public plans.
+Legacy `premium`, `network`, and `partner` plan keys normalize to effective Pro for old rows and subscriptions. They must not appear as public plans.
 
 ## Discovery Score
 
@@ -51,7 +50,7 @@ It is separate from competitive score. Discovery score is safe for browsing, rec
 
 ## Spotlight Eligibility
 
-Premium servers are eligible for spotlight placement when public listing data is available. Starter and Pro servers remain professional in standard discovery and featured rotation, but they are not spotlight eligible.
+Pro servers are eligible for spotlight placement when public listing data is available. Starter servers remain in standard discovery and are not spotlight eligible.
 
 ## Fairness
 
@@ -59,4 +58,4 @@ Paid plans can improve visibility and presentation. They cannot buy better leade
 
 ## Why Competitive Leaderboards Remain Fair
 
-Competitive leaderboards continue to use gameplay/stat ranking inputs only. Premium visibility creates discovery and presentation placement, but it does not rewrite competitive scores or reorder ranked stat tables.
+Competitive leaderboards continue to use gameplay/stat ranking inputs only. Pro visibility creates discovery and presentation placement, but it does not rewrite competitive scores or reorder ranked stat tables.

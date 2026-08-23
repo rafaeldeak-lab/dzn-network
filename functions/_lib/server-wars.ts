@@ -337,8 +337,8 @@ export async function createServerWarChallenge(
       status: 403,
       error: "plan_locked",
       message: featured
-        ? "Premium is required to host featured Server Wars."
-        : "Pro or Premium is required to create Server VS Server challenges.",
+        ? "Pro is required to host featured Server Wars."
+        : "Pro is required to create Server VS Server challenges.",
       access: warAccess,
     };
   }
@@ -353,7 +353,7 @@ export async function createServerWarChallenge(
   const createdAt = now.toISOString();
   const categoryAtEntry = assertServerWarCategoryEligible(challenger, ruleset.key);
   const opponentCategory = assertServerWarCategoryEligible(opponent, ruleset.key);
-  const packageRequired = featured ? "premium" : ruleset.packageRequired;
+  const packageRequired = featured ? "pro" : ruleset.packageRequired;
 
   await db
     .prepare(
@@ -436,7 +436,6 @@ export function getServerWarsAccess(planKey: unknown, status: unknown): ServerWa
   const configuredPlan = toServerWarsPlan(normalizePlanKey(planKey));
   const effectivePlan = toServerWarsPlan(effectiveEntitlementPlan(configuredPlan, typeof status === "string" ? status : null));
   const proPlus = effectivePlan === "pro" || effectivePlan === "premium";
-  const premium = effectivePlan === "premium";
   return {
     configuredPlan,
     effectivePlan,
@@ -444,8 +443,8 @@ export function getServerWarsAccess(planKey: unknown, status: unknown): ServerWa
     canViewPublic: true,
     canParticipateOpen: true,
     canCreateChallenge: proPlus,
-    canCreateFeatured: premium,
-    lockedReason: proPlus ? null : "Pro or Premium is required to create Server VS Server challenges.",
+    canCreateFeatured: proPlus,
+    lockedReason: proPlus ? null : "Pro is required to create Server VS Server challenges.",
   };
 }
 

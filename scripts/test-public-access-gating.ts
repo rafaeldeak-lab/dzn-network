@@ -87,8 +87,8 @@ const baseServer = {
   isFeaturedEligible: true,
   isSpotlightEligible: true,
   visibilityExplanation: {
-    summary: "Premium visibility for discovery surfaces.",
-    factors: ["Premium discovery priority (weight 4)"],
+    summary: "Pro visibility for discovery surfaces.",
+    factors: ["Pro discovery priority (weight 4)"],
     fairness: "Visibility affects discovery only and does not change competitive leaderboard rank.",
   },
   reputation: {

@@ -292,9 +292,9 @@ export function getPlanVisualTreatment(planKey: unknown): PlanVisualTreatment {
   const pro = plan === "pro";
   return {
     planKey: plan,
-    label: plan === "premium" ? "Premium" : plan === "pro" ? "Pro" : plan === "starter" ? "Starter" : "Free",
+    label: plan === "premium" ? "Legacy Pro" : plan === "pro" ? "Pro" : plan === "starter" ? "Starter" : "Free",
     visibilityWeight: getPlanVisibilityWeight(plan),
-    publicPublishingLabel: plan === "premium" ? "near real time" : plan === "pro" ? "every 4 hours" : "every 24 hours",
+    publicPublishingLabel: plan === "premium" || plan === "pro" ? "every 24 hours" : plan === "starter" ? "every 72 hours" : "every 24 hours",
     cardTreatment: premium ? "premium" : pro ? "pro" : "standard",
     premiumBadgeEligible: premium,
     animatedFrameEligible: premium,
@@ -307,7 +307,7 @@ export function getServerProfileFrame(input: ServerVisualInput): ProfileFrameVis
   const preferred = input.preferredFrameKey ? FRAME_VISUALS[normalizeBadgeKey(input.preferredFrameKey)] : null;
   if (preferred) return preferred;
   const plan = normalizePlanKey(input.planKey);
-  if (plan === "premium") return FRAME_VISUALS.premium;
+  if (plan === "premium" || plan === "pro") return FRAME_VISUALS.premium;
   const tierKey = normalizeBadgeKey(input.reputationTier || "bronze");
   if (tierKey === "legendary") return FRAME_VISUALS.legendary;
   if (tierKey === "diamond") return FRAME_VISUALS.diamond;
@@ -323,7 +323,7 @@ export function getServerThemeBanner(input: ServerVisualInput): ServerThemeBanne
   const plan = normalizePlanKey(input.planKey);
   const map = String(input.mapName ?? "").toLowerCase();
   const category = String(input.category ?? "").toLowerCase();
-  if (plan === "premium") return THEME_BANNERS.space;
+  if (plan === "premium" || plan === "pro") return THEME_BANNERS.space;
   if (map.includes("chernarus")) return THEME_BANNERS.chernarus;
   if (map.includes("winter") || map.includes("sakhal")) return THEME_BANNERS.winter;
   if (category.includes("deathmatch")) return THEME_BANNERS.neon_city;

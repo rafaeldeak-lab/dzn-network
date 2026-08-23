@@ -303,7 +303,7 @@ function buildAnnouncementPayload(env: Partial<Env> | Record<string, unknown>, i
     },
     pro_showcase_thread: {
       title: `Pro showcase: ${serverName}`,
-      description: sanitizeDiscordAnnouncementText(server?.public_description ?? "A Pro/Premium DZN server showcase is ready.", 420),
+      description: sanitizeDiscordAnnouncementText(server?.public_description ?? "A Pro DZN server showcase is ready.", 420),
       color: 0xfacc15,
       fields: [...baseFields, { name: "Showcase", value: "Pro server presentation. Gameplay scoring is unchanged.", inline: false }],
     },

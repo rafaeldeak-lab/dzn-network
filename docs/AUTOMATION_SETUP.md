@@ -26,7 +26,7 @@ TOKEN_ENCRYPTION_KEY=the-pages-token-encryption-key
 DZN_CRON_SECRET=the-same-long-random-secret
 ```
 
-The ADM Worker runs every minute and executes ADM sync only with its own D1 binding and subrequest budget. The backend decides which servers are actually due, so Starter, Pro, and Premium servers are not pulled every minute.
+The ADM Worker runs every minute and executes ADM sync only with its own D1 binding and subrequest budget. The backend decides which servers are actually due, so Starter, Pro, and legacy subscriptions are not pulled every minute.
 
 Set these on the auto-update Cloudflare Worker:
 
@@ -72,12 +72,11 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_or_live_...
 STRIPE_PRICE_STARTER=price_...
 STRIPE_PRICE_PRO=price_...
-STRIPE_PRICE_PREMIUM=price_...
 ```
 
-Active public plans are Starter, Pro, and Premium only. Premium is £19.99/month. Network and Partner are legacy aliases only and must not appear in public billing UI, pricing cards, checkout options, or plan comparison pages.
+Active public checkout plans are Starter and Pro only. Starter is a 2-day free trial with payment method collection, then £2/month. Pro is £10/month and is the full DZN access tier.
 
-DZN Partner is archived in Stripe. Keep `STRIPE_PRICE_NETWORK` and `STRIPE_PRICE_PARTNER` only while existing legacy subscriptions can still emit Stripe webhook events using those archived Price IDs; they map to Premium for compatibility and are not used for new checkout. The old `NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID` and `NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID` variables are not needed by DZN and can be removed after this cleanup is deployed.
+DZN Premium, Network, and Partner are legacy-only. Keep `STRIPE_PRICE_PREMIUM`, `STRIPE_PRICE_NETWORK`, and `STRIPE_PRICE_PARTNER` only while existing legacy subscriptions can still emit Stripe webhook events using archived Price IDs; they map to effective Pro compatibility and are not used for new checkout. The old `NEXT_PUBLIC_STRIPE_PREMIUM_PRICE_ID`, `NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID`, and `NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID` variables are not needed by new DZN checkout.
 
 ## 5. Run the D1 migration after account access is fixed
 
@@ -114,8 +113,8 @@ Open Dashboard -> Automation Health.
 Confirm:
 
 - Latest source is `Cloudflare`
-- Premium server status interval is 1 minute
-- Premium ADM interval is 10 minutes
+- Pro server status interval is 5 minutes
+- Pro ADM processing interval is 30 minutes
 - No failed jobs are building up
 - Stuck locks are zero
 - Migration warning is gone after `npm run db:migrate:remote` succeeds

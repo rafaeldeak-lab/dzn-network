@@ -936,7 +936,7 @@ function boardFromTravelPlayers(metricKey: string, title: string, description: s
     category: "travel",
     packageRequired: "pro",
     locked,
-    lockedReason: locked ? "Pro or Premium is required for server Top 15 travel boards." : null,
+    lockedReason: locked ? "Pro is required for server Top 15 travel boards." : null,
     estimated: true,
     rows: locked ? [] : rows.slice(0, 15).map((row, index) => {
       const value = numberOrZero(row[valueKey]);
@@ -966,7 +966,7 @@ function boardFromExplorerPlayers(metricKey: string, title: string, description:
     category: "exploration",
     packageRequired: "pro",
     locked,
-    lockedReason: locked ? "Pro or Premium is required for server Top 15 explorer boards." : null,
+    lockedReason: locked ? "Pro is required for server Top 15 explorer boards." : null,
     estimated: true,
     rows: locked ? [] : rows,
   };

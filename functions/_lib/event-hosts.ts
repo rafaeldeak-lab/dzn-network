@@ -352,5 +352,5 @@ function invalidHostStatePayload() {
 }
 
 function planLockedPayload() {
-  return { ok: false as const, status: 403 as const, error: "PLAN_LOCKED", message: "Event creation is a Pro or Premium feature." };
+  return { ok: false as const, status: 403 as const, error: "PLAN_LOCKED", message: "Event creation is a Pro feature." };
 }

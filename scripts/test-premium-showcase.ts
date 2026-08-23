@@ -9,7 +9,8 @@ const activePro = getAdvancedShowcaseAccess("pro", "active");
 assert.equal(activePro.effectivePlan, "pro");
 assert.equal(activePro.dashboardAnalytics, true);
 assert.equal(activePro.publicServerTop15, true);
-assert.equal(activePro.globalPremiumShowcase, false);
+assert.equal(activePro.globalPremiumShowcase, true);
+assert.equal(activePro.publicMapOverlay, true);
 
 const trialingPremium = getAdvancedShowcaseAccess("premium", "trialing");
 assert.equal(trialingPremium.effectivePlan, "premium");
@@ -23,4 +24,4 @@ assert.equal(getAdvancedShowcaseAccess("network", "trialing").effectivePlan, "pr
 assert.equal(getAdvancedShowcaseAccess("partner", "unpaid").effectivePlan, "free");
 assert.equal(getAdvancedShowcaseAccess(null, null).dashboardAnalytics, false);
 
-console.log("Premium advanced showcase entitlement tests passed.");
+console.log("Pro advanced showcase entitlement tests passed.");

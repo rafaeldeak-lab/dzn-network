@@ -102,13 +102,11 @@ const DEFAULT_FRAME_KEY = "bronze";
 const DEFAULT_THEME_KEY = "apocalypse";
 const PREMIUM_DEFAULT_FRAME_KEY = "premium";
 const PREMIUM_DEFAULT_THEME_KEY = "space";
-const REPUTATION_FRAME_KEYS = ["bronze", "silver", "gold", "platinum", "diamond", "legendary"];
-const STANDARD_THEME_KEYS = ["apocalypse", "chernarus", "winter", "desert", "island", "military", "night_ops"];
 
 export const VISUAL_LOADOUT_PLAN_LIMITS: Record<NormalizedPlanKey, Omit<VisualLoadoutPlanLimits, "planKey">> = {
   free: { maxShowcaseBadges: 3, animationsAllowed: false },
   starter: { maxShowcaseBadges: 3, animationsAllowed: false },
-  pro: { maxShowcaseBadges: 5, animationsAllowed: false },
+  pro: { maxShowcaseBadges: 8, animationsAllowed: true },
   premium: { maxShowcaseBadges: 8, animationsAllowed: true },
 };
 
@@ -208,7 +206,7 @@ export async function resolvePublicServerVisualLoadout(
   const savedBadgeSelectionIsInvalid = Boolean(savedBadgeCodes?.length && !validSavedBadges?.length);
   const selectedBadges = savedBadgeCodes === null || savedBadgeSelectionIsInvalid ? fallback.showcaseBadges : validSavedBadges ?? [];
 
-  const frames = publicFrameVisualsForPlan(limits.planKey, earnedShowcaseBadges);
+  const frames = publicFrameVisualsForPlan(limits.planKey);
   const themes = publicThemeBannerVisualsForPlan(limits.planKey);
   const savedFrameKey = normalizeVisualKey(saved?.profile_frame_key);
   const savedThemeKey = normalizeVisualKey(saved?.theme_banner_key);
@@ -222,7 +220,7 @@ export async function resolvePublicServerVisualLoadout(
     profileFrame,
     themeBanner,
     animationEnabled,
-    cardStyle: fallback.cardStyle ?? (limits.planKey === "premium" ? "premium" : limits.planKey === "pro" ? "pro" : "standard"),
+    cardStyle: fallback.cardStyle ?? (limits.planKey === "premium" || limits.planKey === "pro" ? "premium" : "standard"),
     accentColour,
     source,
   };
@@ -267,7 +265,7 @@ export async function validateServerVisualLoadout(env: Env, serverId: string, in
 
   const requestedAnimation = input.animationEnabled === undefined ? saved?.animation_enabled !== 0 : parseBoolean(input.animationEnabled);
   if (requestedAnimation && !limits.animationsAllowed) {
-    throw new VisualLoadoutError("ANIMATION_PLAN_REQUIRED", "Animated loadouts require Premium.");
+    throw new VisualLoadoutError("ANIMATION_PLAN_REQUIRED", "Animated loadouts require Pro.");
   }
 
   return {
@@ -351,12 +349,7 @@ export async function getAvailableFramesForServer(env: Env, serverId: string): P
   const server = await findLinkedServer(env, serverId);
   const plan = getVisualLoadoutPlanLimits(server?.plan_key).planKey;
   const frames = getAvailableFrameVisuals();
-  if (plan === "premium") return Object.values(frames);
-  if (plan === "pro") {
-    const earnedReputation = await getEarnedReputationBadgeCodes(env, serverId);
-    const keys = REPUTATION_FRAME_KEYS.filter((key) => key === DEFAULT_FRAME_KEY || earnedReputation.has(key));
-    return keys.map((key) => frames[key]).filter(Boolean);
-  }
+  if (plan === "premium" || plan === "pro") return Object.values(frames);
   return [frames[DEFAULT_FRAME_KEY]].filter(Boolean);
 }
 
@@ -364,7 +357,7 @@ export async function getAvailableThemesForServer(env: Env, serverId: string): P
   const server = await findLinkedServer(env, serverId);
   const plan = getVisualLoadoutPlanLimits(server?.plan_key).planKey;
   const themes = getAvailableThemeBannerVisuals();
-  const keys = plan === "premium" ? Object.keys(themes) : plan === "pro" ? STANDARD_THEME_KEYS : [DEFAULT_THEME_KEY];
+  const keys = plan === "premium" || plan === "pro" ? Object.keys(themes) : [DEFAULT_THEME_KEY];
   return keys.map((key) => themes[key]).filter(Boolean);
 }
 
@@ -462,13 +455,6 @@ async function findLinkedServer(env: Env, rawServerId: unknown): Promise<OwnerVi
     .first<OwnerVisualLoadoutServer>();
 }
 
-async function getEarnedReputationBadgeCodes(env: Env, serverId: string) {
-  const awards = await getEarnedServerBadges(env, serverId).catch(() => []);
-  return new Set(awards
-    .map((award) => normalizeBadgeCode(award.badge_code))
-    .filter((code) => getBadgeRule(code)?.category === "reputation"));
-}
-
 function earnedAwardsToShowcaseBadges(awards: Array<{ badge_code: string; awarded_at?: string | null }>) {
   return awards
     .map((award) => {
@@ -489,22 +475,15 @@ function earnedAwardsToShowcaseBadges(awards: Array<{ badge_code: string; awarde
     .filter((badge): badge is VisualBadge => Boolean(badge && badge.isPublic && badge.isShowcaseBadge));
 }
 
-function publicFrameVisualsForPlan(planKey: NormalizedPlanKey, earnedShowcaseBadges: VisualBadge[]) {
+function publicFrameVisualsForPlan(planKey: NormalizedPlanKey) {
   const frames = getAvailableFrameVisuals();
-  if (planKey === "premium") return Object.values(frames);
-  if (planKey === "pro") {
-    const earnedReputation = new Set(earnedShowcaseBadges
-      .filter((badge) => badge.category === "reputation")
-      .map((badge) => normalizeVisualKey(badge.code)));
-    const keys = REPUTATION_FRAME_KEYS.filter((key) => key === DEFAULT_FRAME_KEY || earnedReputation.has(key));
-    return keys.map((key) => frames[key]).filter(Boolean);
-  }
+  if (planKey === "premium" || planKey === "pro") return Object.values(frames);
   return [frames[DEFAULT_FRAME_KEY]].filter(Boolean);
 }
 
 function publicThemeBannerVisualsForPlan(planKey: NormalizedPlanKey) {
   const themes = getAvailableThemeBannerVisuals();
-  const keys = planKey === "premium" ? Object.keys(themes) : planKey === "pro" ? STANDARD_THEME_KEYS : [DEFAULT_THEME_KEY];
+  const keys = planKey === "premium" || planKey === "pro" ? Object.keys(themes) : [DEFAULT_THEME_KEY];
   return keys.map((key) => themes[key]).filter(Boolean);
 }
 

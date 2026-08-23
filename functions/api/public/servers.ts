@@ -214,7 +214,7 @@ type SafePublicServer = {
   review_count: number;
   rating_breakdown: RatingBreakdown;
   advertising: PublicAdvertising;
-  plan_key: "free" | "pro";
+  plan_key: "free" | "starter" | "pro";
   premium_status: "standard" | "premium";
   visibility_weight: number;
   visibilityWeight: number;
@@ -1686,7 +1686,7 @@ export function sortPublicServersForDiscovery<T extends {
   return servers;
 }
 
-function publicPlanKey(value: unknown, subscriptionStatus?: unknown): "free" | "pro" {
+function publicPlanKey(value: unknown, subscriptionStatus?: unknown): "free" | "starter" | "pro" {
   return normalizeListingPlanKey(value, subscriptionStatus);
 }
 

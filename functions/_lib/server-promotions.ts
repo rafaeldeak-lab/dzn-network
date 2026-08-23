@@ -45,7 +45,7 @@ export type PromotionTypeStatus = {
 };
 
 export type PromotionConfig = {
-  planKey: "starter" | "pro" | "premium";
+  planKey: "starter" | "pro";
   monthlyCredits: number;
   allowedPromotionTypes: PromotionType[];
   lockedPromotionTypes: PromotionTypeStatus[];
@@ -94,12 +94,10 @@ const DURATION_HOURS: Record<PromotionType, number> = {
 
 export function getPromotionConfigForPlan(planKey: unknown): PromotionConfig {
   const normalized = promotionPlanKey(planKey);
-  const monthlyCredits = normalized === "premium" ? 8 : normalized === "pro" ? 2 : 0;
-  const allowedPromotionTypes: PromotionType[] = normalized === "premium"
+  const monthlyCredits = normalized === "pro" ? 2 : 0;
+  const allowedPromotionTypes: PromotionType[] = normalized === "pro"
     ? ["directory_bump", "featured_rotation", "spotlight_boost"]
-    : normalized === "pro"
-      ? ["directory_bump", "featured_rotation"]
-      : [];
+    : [];
   const availablePromotionTypes = allowedPromotionTypes.map((promotionType) => typeStatus(promotionType, true, null));
   const lockedPromotionTypes = PROMOTION_TYPES
     .filter((promotionType) => !allowedPromotionTypes.includes(promotionType))
@@ -363,25 +361,17 @@ export async function getPromotionAnalytics(env: Env, serverId: string) {
 
 export function explainPromotionBenefits(planKey: unknown) {
   const normalized = promotionPlanKey(planKey);
-  if (normalized === "premium") {
-    return [
-      "8 monthly promotion credits.",
-      "Directory bumps refresh discovery freshness.",
-      "Featured rotation bumps are priority eligible.",
-      "Spotlight boost eligibility is active for Premium exposure.",
-    ];
-  }
   if (normalized === "pro") {
     return [
       "2 monthly promotion credits.",
       "Directory bumps refresh discovery freshness.",
       "Featured rotation bumps are available.",
-      "Premium adds Spotlight boosts and more monthly promotion credits.",
+      "Spotlight boost eligibility is active for Pro exposure.",
     ];
   }
   return [
     "Promotion options are visible.",
-    "Upgrade to Pro for 2 monthly promotion credits or Premium for 8 credits and Spotlight boosts.",
+    "Upgrade to Pro for 2 monthly promotion credits, featured rotation bumps, and Spotlight boosts.",
   ];
 }
 
@@ -469,9 +459,9 @@ export async function ensurePromotionSchema(env: Env) {
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_promotion_clicks_promotion_time ON promotion_clicks(promotion_id, occurred_at)").run();
 }
 
-function promotionPlanKey(planKey: unknown): "starter" | "pro" | "premium" {
+function promotionPlanKey(planKey: unknown): "starter" | "pro" {
   const normalized = normalizePlanKey(planKey);
-  if (normalized === "premium" || normalized === "pro") return normalized;
+  if (normalized === "premium" || normalized === "pro") return "pro";
   return "starter";
 }
 
@@ -492,23 +482,20 @@ function promotionLabel(promotionType: PromotionType) {
   return "Seasonal push";
 }
 
-function lockedReason(planKey: "starter" | "pro" | "premium", promotionType: PromotionType) {
+function lockedReason(planKey: "starter" | "pro", promotionType: PromotionType) {
   if (promotionType === "seasonal_push") return "Reserved for future seasonal campaigns.";
-  if (planKey === "starter") return "Upgrade to Pro or Premium to use promotion credits.";
-  if (planKey === "pro" && promotionType === "spotlight_boost") return "Spotlight boost requires Premium.";
+  if (planKey === "starter") return "Upgrade to Pro to use promotion credits.";
   return "Not available on this plan.";
 }
 
-function promotionLockedMessage(planKey: "starter" | "pro" | "premium", promotionType: PromotionType) {
+function promotionLockedMessage(planKey: "starter" | "pro", promotionType: PromotionType) {
   return lockedReason(planKey, promotionType) ?? "Promotion type is not available on this plan.";
 }
 
-function promotionUpgradeBenefits(planKey: "starter" | "pro" | "premium") {
-  if (planKey === "premium") return [];
-  if (planKey === "pro") return ["Premium adds 8 monthly credits, Spotlight boosts, and premium discovery priority."];
+function promotionUpgradeBenefits(planKey: "starter" | "pro") {
+  if (planKey === "pro") return [];
   return [
-    "Pro adds 2 monthly promotion credits and featured rotation bumps.",
-    "Premium adds 8 monthly credits, priority featured rotation, premium discovery priority, and Spotlight boosts.",
+    "Pro adds 2 monthly promotion credits, featured rotation bumps, and spotlight boosts.",
   ];
 }
 

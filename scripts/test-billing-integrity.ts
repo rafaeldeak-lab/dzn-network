@@ -508,9 +508,9 @@ async function assertPlanLimits() {
     { label: "free", planKey: "free", status: "free", committedCount: 1, shouldAllow: false, expectedLimit: 1 },
     { label: "starter", planKey: "starter", status: "active", committedCount: 1, shouldAllow: false, expectedLimit: 1 },
     { label: "pro", planKey: "pro", status: "active", committedCount: 2, shouldAllow: true, expectedLimit: 3 },
-    { label: "premium", planKey: "premium", status: "active", committedCount: 9, shouldAllow: true, expectedLimit: 10 },
-    { label: "legacy-network", planKey: "network", status: "active", committedCount: 9, shouldAllow: true, expectedLimit: 10 },
-    { label: "legacy-partner", planKey: "partner", status: "trialing", committedCount: 9, shouldAllow: true, expectedLimit: 10 },
+    { label: "premium", planKey: "premium", status: "active", committedCount: 2, shouldAllow: true, expectedLimit: 3 },
+    { label: "legacy-network", planKey: "network", status: "active", committedCount: 2, shouldAllow: true, expectedLimit: 3 },
+    { label: "legacy-partner", planKey: "partner", status: "trialing", committedCount: 2, shouldAllow: true, expectedLimit: 3 },
     { label: "inactive-pro", planKey: "pro", status: "canceled", committedCount: 1, shouldAllow: false, expectedLimit: 1 },
   ];
 
@@ -716,9 +716,9 @@ async function assertBillingStatusPlanNormalization() {
     { label: "free", accountPlanKey: "free", accountStatus: "free", expectedPlanKey: "free", expectedLimit: 1 },
     { label: "starter-active", accountPlanKey: "starter", accountStatus: "active", expectedPlanKey: "starter", expectedLimit: 1 },
     { label: "pro-trialing", accountPlanKey: "pro", accountStatus: "trialing", expectedPlanKey: "pro", expectedLimit: 3 },
-    { label: "premium-active", accountPlanKey: "premium", accountStatus: "active", expectedPlanKey: "premium", expectedLimit: 10 },
-    { label: "network-legacy", accountPlanKey: "network", accountStatus: "active", legacyRawAccount: true, expectedPlanKey: "premium", expectedLimit: 10 },
-    { label: "partner-legacy", accountPlanKey: "partner", accountStatus: "trialing", legacyRawAccount: true, expectedPlanKey: "premium", expectedLimit: 10 },
+    { label: "premium-active", accountPlanKey: "premium", accountStatus: "active", expectedPlanKey: "premium", expectedLimit: 3 },
+    { label: "network-legacy", accountPlanKey: "network", accountStatus: "active", legacyRawAccount: true, expectedPlanKey: "premium", expectedLimit: 3 },
+    { label: "partner-legacy", accountPlanKey: "partner", accountStatus: "trialing", legacyRawAccount: true, expectedPlanKey: "premium", expectedLimit: 3 },
     { label: "inactive-pro", accountPlanKey: "pro", accountStatus: "canceled", expectedPlanKey: "free", expectedLimit: 1 },
   ];
 
