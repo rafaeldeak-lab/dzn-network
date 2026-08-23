@@ -561,6 +561,10 @@ const featureCardsCssBlock = globalsSource.slice(
   globalsSource.indexOf(".dzn-feature-grid"),
   globalsSource.indexOf(".dzn-top-servers-panel"),
 );
+const pricingModalCssBlock = globalsSource.slice(
+  globalsSource.indexOf(".dzn-pricing-modal-backdrop"),
+  globalsSource.indexOf(".dzn-home-bg-image"),
+);
 const buildImageAssets = [
   "public/dzn/build/full-walls.webp",
   "public/dzn/build/watchtower.webp",
@@ -632,6 +636,12 @@ assert.equal(pricingUpgradeBlock.includes("Open Pricing Comparison"), true);
 assert.equal(pricingUpgradeBlock.includes("role=\"dialog\""), true);
 assert.equal(pricingUpgradeBlock.includes("aria-modal=\"true\""), true);
 assert.equal(pricingUpgradeBlock.includes("Close pricing comparison"), true);
+assert.equal(pricingUpgradeBlock.includes("createPortal(pricingModal, document.body)"), true);
+assert.equal(pricingUpgradeBlock.includes("document.body.classList.add(\"dzn-pricing-modal-open\")"), true);
+assert.equal(globalsSource.includes("body.dzn-pricing-modal-open .dzn-beta-ticker"), true);
+assert.equal(pricingModalCssBlock.includes("z-index: 120;"), true);
+assert.equal(pricingModalCssBlock.includes("overscroll-behavior: contain;"), true);
+assert.equal(pricingModalCssBlock.includes("100dvh"), true);
 assert.equal(landingRenderBlock.includes("isPreviewMode ? ("), true);
 assert.equal(landingRenderBlock.includes("<NetworkOverview homeStats={displayHomeStats} dataPending={homeStatsPending} />"), true);
 assert.equal(landingRenderBlock.includes("unlockHomeStatsForLoggedIn"), true);

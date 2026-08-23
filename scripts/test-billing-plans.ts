@@ -217,6 +217,8 @@ for (const snippet of [
   "aria-modal=\"true\"",
   "Close pricing comparison",
   "dzn-pricing-modal",
+  "dzn-pricing-modal-open",
+  "createPortal(pricingModal, document.body)",
   "CheckCircle2",
   "XCircle",
   "Pro Launch Advantage",
@@ -243,6 +245,7 @@ for (const snippet of [
 }
 assert.equal(/Premium|Network Listing|Partner Listing|Network plan|Partner plan/.test(pricingSection), false, "Public pricing section must only show Starter/Pro plans.");
 assert.equal(/paid leaderboard rank|leaderboard rank boost|improves leaderboard rank|buy better leaderboard/i.test(pricingSection), false, "Pro pricing copy must not claim paid leaderboard rank.");
+assert.equal(landingSource.includes("import { createPortal } from \"react-dom\";"), true, "Pricing modal should portal to document.body instead of rendering inside the animated pricing section.");
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.equal(dashboardSource.includes("Full DZN Access, up to 3 linked servers, custom advert visuals, weekly bumping, enhanced Discord posts, featured and spotlight eligibility, and listing analytics"), true, "Owner billing cards should explain Pro value.");
