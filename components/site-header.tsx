@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 
 import { DznPulseBell, DznPulseProvider } from "@/components/dzn-pulse/dzn-pulse-provider";
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
@@ -16,6 +17,69 @@ type SiteHeaderProps = {
   returnTo?: string;
   showLogout?: boolean;
 };
+
+type SiteHeaderAuthStateProps = Pick<SiteHeaderProps, "authenticated" | "checkingAccount" | "returnTo">;
+
+const logoSources = {
+  webm: "/media/server-wars-logo/dzn-server-wars-logo-loop-v2.webm",
+  mp4: "/media/server-wars-logo/dzn-server-wars-logo-loop-v2.mp4",
+  poster: "/media/server-wars-logo/dzn-server-wars-logo-poster-v2.jpg",
+};
+
+const rootHeaderHiddenPrefixes = [
+  "/dashboard",
+  "/dzn-pulse",
+  "/login",
+  "/owner",
+  "/seasons",
+  "/setup",
+  "/signup",
+  "/test",
+];
+
+let pageHeaderAuthState: SiteHeaderAuthStateProps | null = null;
+const pageHeaderAuthListeners = new Set<() => void>();
+
+export function SiteHeaderAuthState({ authenticated, checkingAccount, returnTo }: SiteHeaderAuthStateProps) {
+  useEffect(() => {
+    pageHeaderAuthState = { authenticated, checkingAccount, returnTo };
+    notifyPageHeaderAuthListeners();
+
+    return () => {
+      pageHeaderAuthState = null;
+      notifyPageHeaderAuthListeners();
+    };
+  }, [authenticated, checkingAccount, returnTo]);
+
+  return null;
+}
+
+export function SiteHeaderRoot() {
+  const pathname = usePathname();
+  const [authState, setAuthState] = useState(pageHeaderAuthState);
+
+  useEffect(() => {
+    const listener = () => setAuthState(pageHeaderAuthState);
+    pageHeaderAuthListeners.add(listener);
+
+    return () => {
+      pageHeaderAuthListeners.delete(listener);
+    };
+  }, []);
+
+  if (rootHeaderHiddenPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
+    return null;
+  }
+
+  return (
+    <SiteHeader
+      active={activeFromPathname(pathname)}
+      authenticated={authState?.authenticated}
+      checkingAccount={authState?.checkingAccount}
+      returnTo={authState?.returnTo ?? pathname ?? "/"}
+    />
+  );
+}
 
 export function SiteHeader({
   active,
@@ -62,8 +126,7 @@ export function SiteHeader({
       <nav className="dzn-header-nav" aria-label="Main navigation">
         <Link href="/" className="dzn-header-logo" aria-label="DZN Network home">
           <span className="dzn-header-logo-frame">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/media/dzn-logo.png" alt="DZN Network" width={56} height={56} decoding="async" />
+            <HeaderLogoVideo />
           </span>
         </Link>
 
@@ -117,4 +180,96 @@ export function SiteHeader({
       </header>
     </DznPulseProvider>
   );
+}
+
+function HeaderLogoVideo() {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [useVideo, setUseVideo] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const syncMotionPreference = () => setUseVideo(!media.matches);
+
+    syncMotionPreference();
+    media.addEventListener("change", syncMotionPreference);
+
+    return () => {
+      media.removeEventListener("change", syncMotionPreference);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!useVideo) return;
+
+    const video = videoRef.current;
+    if (!video) return;
+
+    const play = () => {
+      video.play().catch(() => {
+        video.pause();
+        setUseVideo(false);
+      });
+    };
+    const syncVisibility = () => {
+      if (document.hidden) {
+        video.pause();
+        return;
+      }
+
+      play();
+    };
+
+    play();
+    document.addEventListener("visibilitychange", syncVisibility);
+
+    return () => {
+      document.removeEventListener("visibilitychange", syncVisibility);
+    };
+  }, [useVideo]);
+
+  if (!useVideo) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={logoSources.poster}
+        alt=""
+        aria-hidden="true"
+        className="dzn-header-logo-media dzn-header-logo-poster"
+        draggable={false}
+      />
+    );
+  }
+
+  return (
+    <video
+      ref={videoRef}
+      className="dzn-header-logo-media dzn-header-logo-video"
+      autoPlay
+      muted
+      loop
+      playsInline
+      disablePictureInPicture
+      preload="metadata"
+      poster={logoSources.poster}
+      aria-hidden="true"
+      tabIndex={-1}
+    >
+      <source src={logoSources.webm} type="video/webm" />
+      <source src={logoSources.mp4} type="video/mp4" />
+    </video>
+  );
+}
+
+function activeFromPathname(pathname: string): SiteHeaderActive | undefined {
+  if (pathname.startsWith("/leaderboards")) return "leaderboards";
+  if (pathname.startsWith("/servers")) return "servers";
+  if (pathname.startsWith("/events")) return "events";
+  if (pathname.startsWith("/dashboard")) return "dashboard";
+  return undefined;
+}
+
+function notifyPageHeaderAuthListeners() {
+  for (const listener of pageHeaderAuthListeners) {
+    listener();
+  }
 }

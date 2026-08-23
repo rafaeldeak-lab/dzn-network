@@ -5,7 +5,6 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { CalendarDays, Crown, RefreshCw, Shield, Swords, Trophy } from "lucide-react";
 
-import { SiteHeader } from "@/components/site-header";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
 
 type WarStanding = {
@@ -102,7 +101,6 @@ export function ServerWarsPage() {
 
   return (
     <div className="min-h-screen bg-[#02030a] text-white">
-      <SiteHeader active="events" returnTo="/events/server-wars" />
       <main className="mx-auto flex w-full max-w-[1500px] flex-col gap-6 px-4 pb-12 pt-4 sm:px-6">
         <ServerWarsHero />
         {error ? <SoftNotice message={error} /> : null}
@@ -162,7 +160,6 @@ export function ServerWarDetailPage({ eventId }: { eventId: string }) {
 
   return (
     <div className="min-h-screen bg-[#02030a] text-white">
-      <SiteHeader active="events" returnTo={`/events/server-wars/${eventId}`} />
       <main className="mx-auto flex w-full max-w-[1500px] flex-col gap-6 px-4 pb-12 pt-4 sm:px-6">
         <Link href="/events/server-wars" className="w-fit rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 hover:text-white">
           Server Wars
