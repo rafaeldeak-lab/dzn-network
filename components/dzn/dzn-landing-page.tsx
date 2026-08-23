@@ -3,8 +3,10 @@
 import {
   Activity,
   BarChart3,
+  CheckCircle2,
   ChevronRight,
   Crosshair,
+  Crown,
   Flag,
   Globe2,
   Hammer,
@@ -14,10 +16,13 @@ import {
   Server,
   Shield,
   Skull,
+  Sparkles,
   Swords,
   Trophy,
   Users,
   Wifi,
+  X,
+  XCircle,
   Timer,
   Zap,
 } from "lucide-react";
@@ -266,6 +271,12 @@ type ActivityPanelRow = {
   tone: string;
 };
 
+type PricingComparisonCell = {
+  text: string;
+  included: boolean;
+  note?: string;
+};
+
 const emptyHomeStats: HomeStats = {
   totals: {
     serversLinked: 0,
@@ -438,16 +449,22 @@ const pricingPlans = [
     key: "starter",
     name: "Starter",
     price: "£0 today, then £2/month",
+    badge: "Free trial",
     bestFor: "Best for starting out",
     summary: "Start with a 2-day free trial. After the trial, Starter keeps one DayZ server listed with a public profile, join link, ratings, reviews and basic network stats for £2/month.",
+    ctaLabel: "Start Starter trial",
+    ctaHref: "/login?returnTo=/setup",
     features: ["2-day free trial", "Payment method required", "Cancel before trial expiry to pay nothing", "1 linked DayZ server", "Public server profile", "Basic discovery", "Ratings and reviews", "One Discord auto-post channel", "Basic server advert posts", "One bump every 30 days", "No leaderboard/stat advantage"],
   },
   {
     key: "pro",
     name: "Pro",
     price: "£10/month",
+    badge: "Recommended",
     bestFor: "Best for full access",
     summary: "Pro is the full DZN experience: up to 3 linked DayZ servers, stronger profiles, custom visuals, promotion credits, advanced stats, Server Wars insights and all current premium-style tools.",
+    ctaLabel: "Unlock Pro",
+    ctaHref: "/login?returnTo=/setup",
     features: ["Full DZN Access", "Up to 3 linked DayZ servers", "2 promotion credits per billing period", "Enhanced public profile", "Custom advert banner", "Up to 4 JPEG gallery images", "Owner announcement", "Fresh wipe and event promo", "More Discord advert post types", "One bump every 7 days", "Featured and spotlight eligibility", "No leaderboard/stat advantage"],
   },
 ] as const;
@@ -455,25 +472,25 @@ const pricingPlans = [
 const publicPricingPlans = pricingPlans;
 
 const listingComparisonRows = [
-  { label: "Price", starter: "£0 today, then £2/month", pro: "£10/month" },
-  { label: "Trial", starter: "2 days", pro: "No trial" },
-  { label: "Linked DayZ servers", starter: "1", pro: "Up to 3" },
-  { label: "Public listing", starter: "Yes", pro: "Yes" },
-  { label: "Description limit", starter: "500 characters", pro: "2,500 characters" },
-  { label: "Gallery images", starter: "0", pro: "Up to 4 JPEG images" },
-  { label: "Custom banner", starter: "No", pro: "Yes" },
-  { label: "Bump cooldown", starter: "30 days", pro: "7 days" },
-  { label: "Ratings/reviews", starter: "Yes", pro: "Yes" },
-  { label: "Discord channels", starter: "1 channel", pro: "Multiple post-type channels" },
-  { label: "Discord auto posts", starter: "Basic advert, bump, review", pro: "Events, leaderboard, longest kill, recaps, milestones" },
-  { label: "Embed design", starter: "Standard DZN style", pro: "Enhanced Pro style" },
-  { label: "Analytics", starter: "Limited", pro: "Views, clicks, bumps, Discord activity where available" },
-  { label: "Owner announcement", starter: "No", pro: "Yes" },
-  { label: "Event promotion", starter: "Limited/locked", pro: "Yes" },
-  { label: "Featured and spotlight eligibility", starter: "Standard listing", pro: "Eligible, not guaranteed" },
-  { label: "Leaderboard/stat advantage", starter: "No", pro: "No" },
-  { label: "Review score advantage", starter: "No", pro: "No" },
-  { label: "Season/crown advantage", starter: "No", pro: "No" },
+  { label: "Price", starter: { text: "£0 today, then £2/month", included: true }, pro: { text: "£10/month", included: true } },
+  { label: "Trial", starter: { text: "2 days", included: true }, pro: { text: "No trial", included: false } },
+  { label: "Linked DayZ servers", starter: { text: "1", included: true }, pro: { text: "Up to 3", included: true } },
+  { label: "Public listing", starter: { text: "Included", included: true }, pro: { text: "Included", included: true } },
+  { label: "Description limit", starter: { text: "500 characters", included: true }, pro: { text: "2,500 characters", included: true } },
+  { label: "Gallery images", starter: { text: "Not included", included: false }, pro: { text: "Up to 4 JPEG images", included: true } },
+  { label: "Custom banner", starter: { text: "Not included", included: false }, pro: { text: "Included", included: true } },
+  { label: "Bump cooldown", starter: { text: "30 days", included: true }, pro: { text: "7 days", included: true } },
+  { label: "Ratings/reviews", starter: { text: "Included", included: true }, pro: { text: "Included", included: true } },
+  { label: "Discord channels", starter: { text: "1 channel", included: true }, pro: { text: "Multiple post-type channels", included: true } },
+  { label: "Discord auto posts", starter: { text: "Basic advert, bump, review", included: true }, pro: { text: "Events, leaderboard, longest kill, recaps, milestones", included: true } },
+  { label: "Embed design", starter: { text: "Standard DZN style", included: true }, pro: { text: "Enhanced Pro style", included: true } },
+  { label: "Analytics", starter: { text: "Limited", included: true }, pro: { text: "Views, clicks, bumps, Discord activity where available", included: true } },
+  { label: "Owner announcement", starter: { text: "Not included", included: false }, pro: { text: "Included", included: true } },
+  { label: "Event promotion", starter: { text: "Locked", included: false }, pro: { text: "Included", included: true } },
+  { label: "Featured and spotlight eligibility", starter: { text: "Standard listing", included: true }, pro: { text: "Eligible, not guaranteed", included: true } },
+  { label: "Leaderboard/stat advantage", starter: { text: "No paid advantage", included: false }, pro: { text: "No paid advantage", included: false } },
+  { label: "Review score advantage", starter: { text: "No paid advantage", included: false }, pro: { text: "No paid advantage", included: false } },
+  { label: "Season/crown advantage", starter: { text: "No paid advantage", included: false }, pro: { text: "No paid advantage", included: false } },
 ] as const;
 
 const listingPricingFaqs = [
@@ -1331,58 +1348,83 @@ function FeatureStrip({ className = "", locked }: { className?: string; locked: 
 }
 
 function PricingUpgradeSection() {
+  const [pricingModalOpen, setPricingModalOpen] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    const openFromHash = () => {
+      if (window.location.hash === "#pricing") setPricingModalOpen(true);
+    };
+
+    openFromHash();
+    window.addEventListener("hashchange", openFromHash);
+
+    return () => {
+      window.removeEventListener("hashchange", openFromHash);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pricingModalOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setPricingModalOpen(false);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [pricingModalOpen]);
+
   return (
     <motion.section
       variants={fadeUp}
       id="pricing"
-      className="scroll-mt-24 rounded-xl border border-white/10 bg-[#050914]/72 p-4 shadow-[0_18px_60px_rgba(0,0,0,0.32)] backdrop-blur-xl sm:p-5"
+      className="dzn-pricing-entry scroll-mt-24"
     >
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div className="max-w-3xl">
-          <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-cyan-200">Pricing</p>
-          <h2 className="mt-2 text-2xl font-black uppercase text-white sm:text-3xl">Upgrade the way players discover your server</h2>
-          <p className="mt-3 text-sm leading-6 text-zinc-300/86">
+      <div className="dzn-pricing-entry__copy">
+        <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-cyan-200">Pricing</p>
+        <h2 className="mt-2 text-2xl font-black uppercase text-white sm:text-3xl">Upgrade the way players discover your server</h2>
+        <p className="mt-3 text-sm leading-6 text-zinc-300/86">
             Starter and Pro keep competition fair while giving server owners clear options for trial access, public profiles, advertising tools, Discord promotion, and analytics.
-          </p>
+        </p>
+        <div className="dzn-pricing-entry__signals" aria-label="Pricing highlights">
+          <span>Starter trial available</span>
+          <span>Pro unlocks the premium profile tools</span>
+          <span>No paid leaderboard advantage</span>
         </div>
-        <a
-          href="/login?returnTo=/setup"
-          className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-200/35 bg-cyan-300/10 px-5 py-3 text-xs font-black uppercase tracking-[0.14em] text-cyan-100 transition duration-300 hover:-translate-y-0.5 hover:border-cyan-100/60 hover:bg-cyan-300/16 sm:w-auto"
-        >
-          Start Setup <ChevronRight className="h-4 w-4" />
-        </a>
       </div>
 
-      <div className="mt-5 grid gap-3 lg:grid-cols-2">
-        {publicPricingPlans.map((plan) => (
-          <article
-            key={plan.key}
-            className={`rounded-lg border p-4 ${
-              plan.key === "pro"
-                  ? "border-cyan-300/20 bg-cyan-300/[0.055]"
-                  : "border-white/10 bg-black/24"
-            }`}
+      <div className="dzn-pricing-entry__panel">
+        <div className="dzn-pricing-entry__pro-pulse" aria-hidden="true">
+          <Crown className="h-7 w-7" />
+        </div>
+        <p className="text-[0.64rem] font-black uppercase tracking-[0.2em] text-amber-100">Pro Launch Advantage</p>
+        <p className="mt-2 text-sm leading-6 text-zinc-200">
+          The modal breaks down what stays free/trial-safe and what makes Pro the serious owner upgrade.
+        </p>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => setPricingModalOpen(true)}
+            className="dzn-pricing-entry__button dzn-pricing-entry__button--primary"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-black uppercase text-white">{plan.name}</h3>
-                <p className="mt-1 text-2xl font-black text-white">{plan.price}</p>
-              </div>
-              <span className="rounded-md border border-white/10 bg-white/[0.05] px-2 py-1 text-[10px] font-black uppercase text-zinc-200">
-                {plan.bestFor.replace(/^Best for /i, "")}
-              </span>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-zinc-300">{plan.summary}</p>
-            <ul className="mt-4 grid gap-2 text-sm leading-6 text-zinc-200">
-              {plan.features.map((feature) => (
-                <li key={feature} className="flex gap-2">
-                  <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-cyan-200" />
-                  <span>{feature}</span>
-                </li>
-              ))}
-            </ul>
-          </article>
-        ))}
+            Open Pricing Comparison <ChevronRight className="h-4 w-4" />
+          </button>
+          <a
+            href="/login?returnTo=/setup"
+            className="dzn-pricing-entry__button"
+          >
+            Start Setup <ChevronRight className="h-4 w-4" />
+          </a>
+        </div>
       </div>
 
       <div className="mt-5 rounded-lg border border-amber-300/20 bg-amber-300/[0.065] p-4">
@@ -1395,28 +1437,7 @@ function PricingUpgradeSection() {
         </p>
       </div>
 
-      <div className="mt-5 overflow-x-auto rounded-lg border border-white/10 bg-black/24">
-        <table className="w-full min-w-[620px] border-collapse text-left text-sm">
-          <thead className="bg-white/[0.04] text-[10px] font-black uppercase tracking-[0.14em] text-zinc-400">
-            <tr>
-              <th className="px-4 py-3">Feature</th>
-              <th className="px-4 py-3">Starter</th>
-              <th className="px-4 py-3">Pro</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/8 text-zinc-300">
-            {listingComparisonRows.map((row) => (
-              <tr key={row.label}>
-                <th className="px-4 py-3 text-xs font-black uppercase text-zinc-200">{row.label}</th>
-                <td className="px-4 py-3">{row.starter}</td>
-                <td className="px-4 py-3">{row.pro}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {listingPricingFaqs.map((item) => (
           <article key={item.question} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
             <h3 className="text-sm font-black text-white">{item.question}</h3>
@@ -1424,7 +1445,136 @@ function PricingUpgradeSection() {
           </article>
         ))}
       </div>
+
+      <AnimatePresence>
+        {pricingModalOpen ? (
+          <motion.div
+            className="dzn-pricing-modal-backdrop"
+            role="presentation"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onMouseDown={() => setPricingModalOpen(false)}
+          >
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="dzn-pricing-modal-title"
+              className="dzn-pricing-modal"
+              initial={{ opacity: 0, y: 28, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 18, scale: 0.98 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <button
+                ref={closeButtonRef}
+                type="button"
+                className="dzn-pricing-modal__close"
+                onClick={() => setPricingModalOpen(false)}
+                aria-label="Close pricing comparison"
+                title="Close pricing comparison"
+              >
+                <X className="h-4 w-4" />
+              </button>
+
+              <div className="dzn-pricing-modal__hero">
+                <div>
+                  <p className="text-[0.66rem] font-black uppercase tracking-[0.2em] text-cyan-200">Plan comparison</p>
+                  <h2 id="dzn-pricing-modal-title" className="mt-2 text-2xl font-black uppercase text-white sm:text-4xl">
+                    Choose the free trial, then grow into Pro
+                  </h2>
+                  <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-300">
+                    Starter gets a server online with a short free trial. Pro is built to sell the server: stronger profile visuals, more automation, promotion credits, analytics, and premium Discord publishing.
+                  </p>
+                </div>
+                <div className="dzn-pricing-modal__meter" aria-hidden="true">
+                  <Sparkles className="h-5 w-5" />
+                  <span>Pro recommended</span>
+                </div>
+              </div>
+
+              <div className="dzn-pricing-modal__plans">
+                {publicPricingPlans.map((plan) => (
+                  <PricingPlanCard key={plan.key} plan={plan} />
+                ))}
+              </div>
+
+              <div className="dzn-pricing-compare" aria-label="Starter and Pro feature comparison">
+                <div className="dzn-pricing-compare__head">
+                  <span>Feature</span>
+                  <span>Starter trial</span>
+                  <span>Pro</span>
+                </div>
+                {listingComparisonRows.map((row) => (
+                  <div key={row.label} className="dzn-pricing-compare__row">
+                    <span className="dzn-pricing-compare__label">{row.label}</span>
+                    <ComparisonValue value={row.starter} />
+                    <ComparisonValue value={row.pro} pro />
+                  </div>
+                ))}
+              </div>
+
+              <div className="dzn-pricing-modal__footer">
+                <p>
+                  Pro is for server owners who want the strongest public presentation. Competition remains fair: paid plans never buy leaderboard rank, review score, crowns, or gameplay stats.
+                </p>
+                <a href="/login?returnTo=/setup" className="dzn-pricing-modal__cta">
+                  Start with Discord <ChevronRight className="h-4 w-4" />
+                </a>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </motion.section>
+  );
+}
+
+function PricingPlanCard({ plan }: { plan: (typeof publicPricingPlans)[number] }) {
+  const pro = plan.key === "pro";
+
+  return (
+    <motion.article
+      whileHover={{ y: -4 }}
+      className={`dzn-pricing-plan-card ${pro ? "dzn-pricing-plan-card--pro" : "dzn-pricing-plan-card--starter"}`}
+    >
+      <div className="dzn-pricing-plan-card__top">
+        <div>
+          <p className="dzn-pricing-plan-card__badge">{plan.badge}</p>
+          <h3>{plan.name}</h3>
+          <p className="dzn-pricing-plan-card__price">{plan.price}</p>
+        </div>
+        <span className="dzn-pricing-plan-card__icon" aria-hidden="true">
+          {pro ? <Crown className="h-5 w-5" /> : <Shield className="h-5 w-5" />}
+        </span>
+      </div>
+      <p className="dzn-pricing-plan-card__best">{plan.bestFor}</p>
+      <p className="dzn-pricing-plan-card__summary">{plan.summary}</p>
+      <ul className="dzn-pricing-plan-card__features">
+        {plan.features.slice(0, pro ? 8 : 7).map((feature) => (
+          <li key={feature}>
+            <CheckCircle2 className="h-4 w-4" />
+            <span>{feature}</span>
+          </li>
+        ))}
+      </ul>
+      <a href={plan.ctaHref} className="dzn-pricing-plan-card__cta">
+        {plan.ctaLabel} <ChevronRight className="h-4 w-4" />
+      </a>
+    </motion.article>
+  );
+}
+
+function ComparisonValue({ value, pro = false }: { value: PricingComparisonCell; pro?: boolean }) {
+  const Icon = value.included ? CheckCircle2 : XCircle;
+
+  return (
+    <span className={`dzn-pricing-compare__value ${value.included ? "dzn-pricing-compare__value--yes" : "dzn-pricing-compare__value--no"} ${pro ? "dzn-pricing-compare__value--pro" : ""}`}>
+      <Icon className="h-4 w-4" aria-hidden="true" />
+      <span>{value.text}</span>
+      {value.note ? <small>{value.note}</small> : null}
+    </span>
   );
 }
 

@@ -19,6 +19,11 @@ type SiteHeaderProps = {
 };
 
 type SiteHeaderAuthStateProps = Pick<SiteHeaderProps, "authenticated" | "checkingAccount" | "returnTo">;
+type HeaderNavLink = {
+  href: string;
+  label: string;
+  active?: SiteHeaderActive;
+};
 
 const logoSources = {
   webm: "/media/server-wars-logo/dzn-server-wars-logo-loop-v2.webm",
@@ -35,6 +40,20 @@ const rootHeaderHiddenPrefixes = [
   "/setup",
   "/signup",
   "/test",
+];
+
+const loggedOutHeaderLinks: HeaderNavLink[] = [
+  { href: "/#features", label: "Features", active: "features" },
+  { href: "/#pricing", label: "Pricing", active: "pricing" },
+];
+
+const authenticatedHeaderLinks: HeaderNavLink[] = [
+  { href: "/#features", label: "Features", active: "features" },
+  { href: "/leaderboards", label: "Leaderboards", active: "leaderboards" },
+  { href: "/servers", label: "Servers", active: "servers" },
+  { href: "/#pricing", label: "Pricing", active: "pricing" },
+  { href: "/#stats", label: "Stats", active: "stats" },
+  { href: "/events", label: "Events", active: "events" },
 ];
 
 let pageHeaderAuthState: SiteHeaderAuthStateProps | null = null;
@@ -117,13 +136,19 @@ export function SiteHeader({
     await logoutAndRedirect();
   }
 
-  const authLoading = checkingAccount || checking;
+  const authProbePending = checkingAccount || checking;
   const resolvedAuthenticated = authenticated ?? fetchedAuthenticated;
+  const navLinks = resolvedAuthenticated ? authenticatedHeaderLinks : loggedOutHeaderLinks;
 
   return (
     <DznPulseProvider>
       <header className="dzn-header-shell">
-      <nav className="dzn-header-nav" aria-label="Main navigation">
+      <nav
+        className={`dzn-header-nav ${resolvedAuthenticated ? "dzn-header-nav--authenticated" : "dzn-header-nav--logged-out"}`}
+        aria-label="Main navigation"
+        aria-busy={authProbePending}
+        data-auth-state={resolvedAuthenticated ? "authenticated" : authProbePending ? "checking-public" : "anonymous"}
+      >
         <Link href="/" className="dzn-header-logo" aria-label="DZN Network home">
           <span className="dzn-header-logo-frame">
             <HeaderLogoVideo />
@@ -131,24 +156,11 @@ export function SiteHeader({
         </Link>
 
         <div className="dzn-header-links">
-          <Link href="/#features" aria-current={active === "features" ? "page" : undefined}>
-            Features
-          </Link>
-          <Link href="/leaderboards" aria-current={active === "leaderboards" ? "page" : undefined}>
-            Leaderboards
-          </Link>
-          <Link href="/servers" aria-current={active === "servers" ? "page" : undefined}>
-            Servers
-          </Link>
-          <Link href="/#pricing" aria-current={active === "pricing" ? "page" : undefined}>
-            Pricing
-          </Link>
-          <Link href="/#stats" aria-current={active === "stats" ? "page" : undefined}>
-            Stats
-          </Link>
-          <Link href="/events" aria-current={active === "events" ? "page" : undefined}>
-            Events
-          </Link>
+          {navLinks.map((link) => (
+            <Link key={link.href} href={link.href} aria-current={active === link.active ? "page" : undefined}>
+              {link.label}
+            </Link>
+          ))}
         </div>
 
         <div className="dzn-header-actions">
@@ -156,17 +168,17 @@ export function SiteHeader({
           <a href={DZN_PUBLIC_DISCORD_INVITE_URL} target="_blank" rel="noopener noreferrer" className="dzn-header-action dzn-header-action--discord">
             Discord
           </a>
-          <Link href="/dashboard" className="dzn-header-action">
-            Dashboard
-          </Link>
-          <Link href="/setup" className="dzn-header-action dzn-header-action--primary">
-            Add Your Server
-          </Link>
-          {authLoading ? (
-            <span className="dzn-header-action dzn-header-action--logout" aria-live="polite">
-              Checking
-            </span>
-          ) : resolvedAuthenticated && showLogout ? (
+          {resolvedAuthenticated ? (
+            <>
+              <Link href="/dashboard" className="dzn-header-action">
+                Dashboard
+              </Link>
+              <Link href="/setup" className="dzn-header-action dzn-header-action--primary">
+                Add Your Server
+              </Link>
+            </>
+          ) : null}
+          {resolvedAuthenticated && showLogout ? (
             <button type="button" onClick={signOut} className="dzn-header-action dzn-header-action--logout">
               Logout
             </button>
