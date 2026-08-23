@@ -102,8 +102,18 @@ body.dzn-owner-console-active {
   padding-bottom: 0;
 }
 
+body.dzn-pricing-modal-open {
+  padding-bottom: 0;
+}
+
 body.dzn-owner-console-active .dzn-beta-ticker {
   display: none;
+}
+
+body.dzn-pricing-modal-open .dzn-beta-ticker {
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(100%);
 }
 
 .dzn-beta-ticker {
@@ -119,6 +129,9 @@ body.dzn-owner-console-active .dzn-beta-ticker {
   background: rgba(3, 6, 18, 0.9);
   box-shadow: 0 -14px 40px rgba(0, 0, 0, 0.38), 0 -1px 20px rgba(168, 85, 247, 0.14);
   backdrop-filter: blur(14px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
 }
 
 .dzn-beta-ticker::before {
@@ -3310,11 +3323,13 @@ button.dzn-header-action {
 .dzn-pricing-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 120;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: clamp(14px, 3vw, 34px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background:
     radial-gradient(circle at 50% 8%, rgba(168, 85, 247, 0.25), transparent 32%),
     rgba(2, 6, 23, 0.82);
@@ -3323,9 +3338,12 @@ button.dzn-header-action {
 
 .dzn-pricing-modal {
   position: relative;
+  isolation: isolate;
   width: min(1120px, 100%);
   max-height: min(92vh, 960px);
+  max-height: min(92dvh, 960px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: clamp(18px, 3vw, 30px);
   border: 1px solid rgba(125, 211, 252, 0.28);
   border-radius: 8px;
@@ -3673,11 +3691,12 @@ button.dzn-header-action {
 @media (max-width: 560px) {
   .dzn-pricing-modal-backdrop {
     align-items: stretch;
-    padding: 10px;
+    padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
   }
 
   .dzn-pricing-modal {
     max-height: calc(100vh - 20px);
+    max-height: calc(100dvh - 20px);
     padding: 16px;
   }
 

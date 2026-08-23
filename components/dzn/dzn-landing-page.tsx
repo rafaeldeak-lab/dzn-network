@@ -29,6 +29,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { createPortal } from "react-dom";
 import {
   AnimatePresence,
   MotionConfig,
@@ -1369,6 +1370,7 @@ function PricingUpgradeSection() {
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    document.body.classList.add("dzn-pricing-modal-open");
     closeButtonRef.current?.focus();
 
     function onKeyDown(event: KeyboardEvent) {
@@ -1379,155 +1381,161 @@ function PricingUpgradeSection() {
 
     return () => {
       document.body.style.overflow = previousOverflow;
+      document.body.classList.remove("dzn-pricing-modal-open");
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [pricingModalOpen]);
 
-  return (
-    <motion.section
-      variants={fadeUp}
-      id="pricing"
-      className="dzn-pricing-entry scroll-mt-24"
-    >
-      <div className="dzn-pricing-entry__copy">
-        <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-cyan-200">Pricing</p>
-        <h2 className="mt-2 text-2xl font-black uppercase text-white sm:text-3xl">Upgrade the way players discover your server</h2>
-        <p className="mt-3 text-sm leading-6 text-zinc-300/86">
-            Starter and Pro keep competition fair while giving server owners clear options for trial access, public profiles, advertising tools, Discord promotion, and analytics.
-        </p>
-        <div className="dzn-pricing-entry__signals" aria-label="Pricing highlights">
-          <span>Starter trial available</span>
-          <span>Pro unlocks the premium profile tools</span>
-          <span>No paid leaderboard advantage</span>
-        </div>
-      </div>
-
-      <div className="dzn-pricing-entry__panel">
-        <div className="dzn-pricing-entry__pro-pulse" aria-hidden="true">
-          <Crown className="h-7 w-7" />
-        </div>
-        <p className="text-[0.64rem] font-black uppercase tracking-[0.2em] text-amber-100">Pro Launch Advantage</p>
-        <p className="mt-2 text-sm leading-6 text-zinc-200">
-          The modal breaks down what stays free/trial-safe and what makes Pro the serious owner upgrade.
-        </p>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => setPricingModalOpen(true)}
-            className="dzn-pricing-entry__button dzn-pricing-entry__button--primary"
-          >
-            Open Pricing Comparison <ChevronRight className="h-4 w-4" />
-          </button>
-          <a
-            href="/login?returnTo=/setup"
-            className="dzn-pricing-entry__button"
-          >
-            Start Setup <ChevronRight className="h-4 w-4" />
-          </a>
-        </div>
-      </div>
-
-      <div className="mt-5 rounded-lg border border-amber-300/20 bg-amber-300/[0.065] p-4">
-        <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-100">Fair Pro advertising</p>
-        <p className="mt-2 max-w-4xl text-sm leading-6 text-amber-50">
-          Pro helps your server look better, advertise better and understand performance better. It does not affect review scores, leaderboard stats, kill stats, K/D, longest kill, crowns, season wins, or gameplay results.
-        </p>
-        <p className="mt-2 text-xs font-bold text-amber-100/82">
-          Featured and spotlight rotation are controlled visibility tools, not guaranteed permanent top rank.
-        </p>
-      </div>
-
-      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {listingPricingFaqs.map((item) => (
-          <article key={item.question} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-            <h3 className="text-sm font-black text-white">{item.question}</h3>
-            <p className="mt-2 text-xs leading-5 text-zinc-400">{item.answer}</p>
-          </article>
-        ))}
-      </div>
-
-      <AnimatePresence>
-        {pricingModalOpen ? (
+  const pricingModal = (
+    <AnimatePresence>
+      {pricingModalOpen ? (
+        <motion.div
+          className="dzn-pricing-modal-backdrop"
+          role="presentation"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onMouseDown={() => setPricingModalOpen(false)}
+        >
           <motion.div
-            className="dzn-pricing-modal-backdrop"
-            role="presentation"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onMouseDown={() => setPricingModalOpen(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dzn-pricing-modal-title"
+            className="dzn-pricing-modal"
+            initial={{ opacity: 0, y: 28, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 18, scale: 0.98 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+            onMouseDown={(event) => event.stopPropagation()}
           >
-            <motion.div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="dzn-pricing-modal-title"
-              className="dzn-pricing-modal"
-              initial={{ opacity: 0, y: 28, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 18, scale: 0.98 }}
-              transition={{ duration: 0.22, ease: "easeOut" }}
-              onMouseDown={(event) => event.stopPropagation()}
+            <button
+              ref={closeButtonRef}
+              type="button"
+              className="dzn-pricing-modal__close"
+              onClick={() => setPricingModalOpen(false)}
+              aria-label="Close pricing comparison"
+              title="Close pricing comparison"
             >
-              <button
-                ref={closeButtonRef}
-                type="button"
-                className="dzn-pricing-modal__close"
-                onClick={() => setPricingModalOpen(false)}
-                aria-label="Close pricing comparison"
-                title="Close pricing comparison"
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <X className="h-4 w-4" />
+            </button>
 
-              <div className="dzn-pricing-modal__hero">
-                <div>
-                  <p className="text-[0.66rem] font-black uppercase tracking-[0.2em] text-cyan-200">Plan comparison</p>
-                  <h2 id="dzn-pricing-modal-title" className="mt-2 text-2xl font-black uppercase text-white sm:text-4xl">
-                    Choose the free trial, then grow into Pro
-                  </h2>
-                  <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-300">
-                    Starter gets a server online with a short free trial. Pro is built to sell the server: stronger profile visuals, more automation, promotion credits, analytics, and premium Discord publishing.
-                  </p>
-                </div>
-                <div className="dzn-pricing-modal__meter" aria-hidden="true">
-                  <Sparkles className="h-5 w-5" />
-                  <span>Pro recommended</span>
-                </div>
-              </div>
-
-              <div className="dzn-pricing-modal__plans">
-                {publicPricingPlans.map((plan) => (
-                  <PricingPlanCard key={plan.key} plan={plan} />
-                ))}
-              </div>
-
-              <div className="dzn-pricing-compare" aria-label="Starter and Pro feature comparison">
-                <div className="dzn-pricing-compare__head">
-                  <span>Feature</span>
-                  <span>Starter trial</span>
-                  <span>Pro</span>
-                </div>
-                {listingComparisonRows.map((row) => (
-                  <div key={row.label} className="dzn-pricing-compare__row">
-                    <span className="dzn-pricing-compare__label">{row.label}</span>
-                    <ComparisonValue value={row.starter} />
-                    <ComparisonValue value={row.pro} pro />
-                  </div>
-                ))}
-              </div>
-
-              <div className="dzn-pricing-modal__footer">
-                <p>
-                  Pro is for server owners who want the strongest public presentation. Competition remains fair: paid plans never buy leaderboard rank, review score, crowns, or gameplay stats.
+            <div className="dzn-pricing-modal__hero">
+              <div>
+                <p className="text-[0.66rem] font-black uppercase tracking-[0.2em] text-cyan-200">Plan comparison</p>
+                <h2 id="dzn-pricing-modal-title" className="mt-2 text-2xl font-black uppercase text-white sm:text-4xl">
+                  Choose the free trial, then grow into Pro
+                </h2>
+                <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-300">
+                  Starter gets a server online with a short free trial. Pro is built to sell the server: stronger profile visuals, more automation, promotion credits, analytics, and premium Discord publishing.
                 </p>
-                <a href="/login?returnTo=/setup" className="dzn-pricing-modal__cta">
-                  Start with Discord <ChevronRight className="h-4 w-4" />
-                </a>
               </div>
-            </motion.div>
+              <div className="dzn-pricing-modal__meter" aria-hidden="true">
+                <Sparkles className="h-5 w-5" />
+                <span>Pro recommended</span>
+              </div>
+            </div>
+
+            <div className="dzn-pricing-modal__plans">
+              {publicPricingPlans.map((plan) => (
+                <PricingPlanCard key={plan.key} plan={plan} />
+              ))}
+            </div>
+
+            <div className="dzn-pricing-compare" aria-label="Starter and Pro feature comparison">
+              <div className="dzn-pricing-compare__head">
+                <span>Feature</span>
+                <span>Starter trial</span>
+                <span>Pro</span>
+              </div>
+              {listingComparisonRows.map((row) => (
+                <div key={row.label} className="dzn-pricing-compare__row">
+                  <span className="dzn-pricing-compare__label">{row.label}</span>
+                  <ComparisonValue value={row.starter} />
+                  <ComparisonValue value={row.pro} pro />
+                </div>
+              ))}
+            </div>
+
+            <div className="dzn-pricing-modal__footer">
+              <p>
+                Pro is for server owners who want the strongest public presentation. Competition remains fair: paid plans never buy leaderboard rank, review score, crowns, or gameplay stats.
+              </p>
+              <a href="/login?returnTo=/setup" className="dzn-pricing-modal__cta">
+                Start with Discord <ChevronRight className="h-4 w-4" />
+              </a>
+            </div>
           </motion.div>
-        ) : null}
-      </AnimatePresence>
-    </motion.section>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  );
+
+  return (
+    <>
+      <motion.section
+        variants={fadeUp}
+        id="pricing"
+        className="dzn-pricing-entry scroll-mt-24"
+      >
+        <div className="dzn-pricing-entry__copy">
+          <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-cyan-200">Pricing</p>
+          <h2 className="mt-2 text-2xl font-black uppercase text-white sm:text-3xl">Upgrade the way players discover your server</h2>
+          <p className="mt-3 text-sm leading-6 text-zinc-300/86">
+            Starter and Pro keep competition fair while giving server owners clear options for trial access, public profiles, advertising tools, Discord promotion, and analytics.
+          </p>
+          <div className="dzn-pricing-entry__signals" aria-label="Pricing highlights">
+            <span>Starter trial available</span>
+            <span>Pro unlocks the premium profile tools</span>
+            <span>No paid leaderboard advantage</span>
+          </div>
+        </div>
+
+        <div className="dzn-pricing-entry__panel">
+          <div className="dzn-pricing-entry__pro-pulse" aria-hidden="true">
+            <Crown className="h-7 w-7" />
+          </div>
+          <p className="text-[0.64rem] font-black uppercase tracking-[0.2em] text-amber-100">Pro Launch Advantage</p>
+          <p className="mt-2 text-sm leading-6 text-zinc-200">
+            The modal breaks down what stays free/trial-safe and what makes Pro the serious owner upgrade.
+          </p>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setPricingModalOpen(true)}
+              className="dzn-pricing-entry__button dzn-pricing-entry__button--primary"
+            >
+              Open Pricing Comparison <ChevronRight className="h-4 w-4" />
+            </button>
+            <a
+              href="/login?returnTo=/setup"
+              className="dzn-pricing-entry__button"
+            >
+              Start Setup <ChevronRight className="h-4 w-4" />
+            </a>
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-lg border border-amber-300/20 bg-amber-300/[0.065] p-4">
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-100">Fair Pro advertising</p>
+          <p className="mt-2 max-w-4xl text-sm leading-6 text-amber-50">
+            Pro helps your server look better, advertise better and understand performance better. It does not affect review scores, leaderboard stats, kill stats, K/D, longest kill, crowns, season wins, or gameplay results.
+          </p>
+          <p className="mt-2 text-xs font-bold text-amber-100/82">
+            Featured and spotlight rotation are controlled visibility tools, not guaranteed permanent top rank.
+          </p>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {listingPricingFaqs.map((item) => (
+            <article key={item.question} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              <h3 className="text-sm font-black text-white">{item.question}</h3>
+              <p className="mt-2 text-xs leading-5 text-zinc-400">{item.answer}</p>
+            </article>
+          ))}
+        </div>
+      </motion.section>
+      {typeof document !== "undefined" ? createPortal(pricingModal, document.body) : null}
+    </>
   );
 }
 
