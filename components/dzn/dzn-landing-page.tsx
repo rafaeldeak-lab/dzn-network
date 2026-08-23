@@ -494,24 +494,80 @@ const listingComparisonRows = [
   { label: "Season/crown advantage", starter: { text: "No paid advantage", included: false }, pro: { text: "No paid advantage", included: false } },
 ] as const;
 
+const pricingEntrySignals = [
+  { label: "Starter trial available", icon: Zap },
+  { label: "Pro unlocks premium tools", icon: Crown },
+  { label: "No paid leaderboard advantage", icon: Shield },
+] satisfies Array<{
+  label: string;
+  icon: LucideIcon;
+}>;
+
+const pricingValuePillars = [
+  { label: "Visibility", description: "Featured, spotlight and advert exposure.", icon: Radio },
+  { label: "Analytics", description: "Track growth, clicks and engagement.", icon: BarChart3 },
+  { label: "Control", description: "Manage your server presence.", icon: Crosshair },
+  { label: "Discounts", description: "Run promotions and seasonal discounts.", icon: Sparkles },
+  { label: "Profiles", description: "Unlock richer public profile styling.", icon: Users },
+  { label: "Tools", description: "Access exclusive owner utilities.", icon: Hammer },
+] satisfies Array<{
+  label: string;
+  description: string;
+  icon: LucideIcon;
+}>;
+
+const pricingTrustPills = [
+  { label: "Fair competition", description: "No pay-to-win advantages", icon: Shield },
+  { label: "Trial first", description: "Try Starter before you upgrade", icon: Lock },
+  { label: "Powerful tools", description: "Built for server owners", icon: BarChart3 },
+  { label: "Community driven", description: "Better servers. Better DayZ.", icon: Users },
+] satisfies Array<{
+  label: string;
+  description: string;
+  icon: LucideIcon;
+}>;
+
 const listingPricingFaqs = [
   {
     question: "Does Pro affect leaderboard rank?",
-    answer: "No. Pro improves presentation, advertising tools, Discord embeds, and analytics only. Competitive leaderboard rank remains based on gameplay and stored stats.",
+    answer: [
+      "No. Pro improves presentation, advertising tools, Discord embeds, and analytics only.",
+      "Leaderboard rankings remain 100% skill-based.",
+    ],
+    icon: Trophy,
+    tone: "violet",
   },
   {
     question: "What does Pro improve?",
-    answer: "Pro improves public adverts, weekly bumping, gallery images, custom banners, Discord promotion, owner announcements, and analytics.",
+    answer: [
+      "Pro unlocks advanced visibility, public profiles, weekly gallery images, custom banners, promotions, discounts, owner announcements, and deeper analytics.",
+    ],
+    icon: BarChart3,
+    tone: "blue",
   },
   {
     question: "Do Starter servers still compete?",
-    answer: "Yes. Starter listings get public profiles, ratings, reviews, join links, and fair competition. Paid presentation never changes gameplay results.",
+    answer: [
+      "Yes. Starter listings are included in public profiles, ratings, reviews, links, and fair competition.",
+      "Paid presentation never changes gameplay results.",
+    ],
+    icon: Swords,
+    tone: "cyan",
   },
   {
     question: "Can badges be bought?",
-    answer: "No. Earned badges, crowns, reputation awards, event badges, and seasonal badges must be earned before they can be showcased.",
+    answer: [
+      "No. Earned badges, crowns, reputation awards, event badges, and seasonal badges must be earned before they can be showcased.",
+    ],
+    icon: Shield,
+    tone: "gold",
   },
-] as const;
+] satisfies Array<{
+  question: string;
+  answer: readonly string[];
+  icon: LucideIcon;
+  tone: "violet" | "blue" | "cyan" | "gold";
+}>;
 
 function useHomeStats() {
   const [data, setData] = useState<HomeStats>(() => loadLastGoodHomeStats() ?? emptyHomeStats);
@@ -1477,61 +1533,134 @@ function PricingUpgradeSection() {
         id="pricing"
         className="dzn-pricing-entry scroll-mt-24"
       >
-        <div className="dzn-pricing-entry__copy">
-          <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-cyan-200">Pricing</p>
-          <h2 className="mt-2 text-2xl font-black uppercase text-white sm:text-3xl">Upgrade the way players discover your server</h2>
-          <p className="mt-3 text-sm leading-6 text-zinc-300/86">
-            Starter and Pro keep competition fair while giving server owners clear options for trial access, public profiles, advertising tools, Discord promotion, and analytics.
-          </p>
-          <div className="dzn-pricing-entry__signals" aria-label="Pricing highlights">
-            <span>Starter trial available</span>
-            <span>Pro unlocks the premium profile tools</span>
-            <span>No paid leaderboard advantage</span>
+        <div className="dzn-pricing-entry__hero">
+          <div className="dzn-pricing-entry__copy">
+            <p className="dzn-pricing-entry__eyebrow">
+              <Zap className="h-3.5 w-3.5" />
+              Pricing
+            </p>
+            <h2>
+              Upgrade the way players discover <span>your server</span>
+            </h2>
+            <p>
+              Starter and Pro keep competition fair while giving server owners clear options for trial access, public profiles, advertising tools, Discord promotion, and analytics.
+            </p>
+            <div className="dzn-pricing-entry__signals" aria-label="Pricing highlights">
+              {pricingEntrySignals.map((signal) => {
+                const Icon = signal.icon;
+                return (
+                  <span key={signal.label}>
+                    <Icon className="h-3.5 w-3.5" />
+                    {signal.label}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="dzn-pricing-entry__panel">
+            <div className="dzn-pricing-entry__pro-pulse" aria-hidden="true">
+              <Crown className="h-7 w-7" />
+            </div>
+            <p className="dzn-pricing-entry__panel-kicker">Pro Launch Advantage</p>
+            <p className="dzn-pricing-entry__panel-copy">
+              The modal breaks down what stays free/trial-safe and what makes Pro the serious owner upgrade.
+            </p>
+            <div className="dzn-pricing-entry__actions">
+              <button
+                type="button"
+                onClick={() => setPricingModalOpen(true)}
+                className="dzn-pricing-entry__button dzn-pricing-entry__button--primary"
+              >
+                <BarChart3 className="h-4 w-4" />
+                Open Pricing Comparison <ChevronRight className="h-4 w-4" />
+              </button>
+              <a
+                href="/login?returnTo=/setup"
+                className="dzn-pricing-entry__button dzn-pricing-entry__button--setup"
+              >
+                Start Setup <ChevronRight className="h-4 w-4" />
+              </a>
+            </div>
           </div>
         </div>
 
-        <div className="dzn-pricing-entry__panel">
-          <div className="dzn-pricing-entry__pro-pulse" aria-hidden="true">
-            <Crown className="h-7 w-7" />
-          </div>
-          <p className="text-[0.64rem] font-black uppercase tracking-[0.2em] text-amber-100">Pro Launch Advantage</p>
-          <p className="mt-2 text-sm leading-6 text-zinc-200">
-            The modal breaks down what stays free/trial-safe and what makes Pro the serious owner upgrade.
-          </p>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => setPricingModalOpen(true)}
-              className="dzn-pricing-entry__button dzn-pricing-entry__button--primary"
-            >
-              Open Pricing Comparison <ChevronRight className="h-4 w-4" />
-            </button>
-            <a
-              href="/login?returnTo=/setup"
-              className="dzn-pricing-entry__button"
-            >
-              Start Setup <ChevronRight className="h-4 w-4" />
-            </a>
-          </div>
+        <div className="dzn-pricing-entry__body">
+          <article className="dzn-pricing-value-card">
+            <div className="dzn-pricing-value-card__heading">
+              <span aria-hidden="true">
+                <Radio className="h-6 w-6" />
+              </span>
+              <div>
+                <p>Fair Pro Advertising</p>
+                <h3>Make the server look worth joining</h3>
+              </div>
+            </div>
+            <p className="dzn-pricing-value-card__copy">
+              Pro helps your server look better, advertise better and understand performance better. It does not affect review scores, leaderboard stats, kill stats, K/D, longest kill, crowns, season wins, or gameplay results.
+            </p>
+            <div className="dzn-pricing-value-card__note">
+              <Shield className="h-5 w-5" />
+              <span>Featured and spotlight rotation are controlled visibility tools, not guaranteed permanent top rank.</span>
+            </div>
+            <div className="dzn-pricing-value-card__pillars">
+              {pricingValuePillars.map((pillar) => {
+                const Icon = pillar.icon;
+                return (
+                  <div key={pillar.label} className="dzn-pricing-value-card__pillar">
+                    <span aria-hidden="true">
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <strong>{pillar.label}</strong>
+                    <small>{pillar.description}</small>
+                  </div>
+                );
+              })}
+            </div>
+          </article>
+
+          <aside className="dzn-pricing-quick-answers" aria-labelledby="dzn-pricing-quick-answers-title">
+            <div className="dzn-pricing-quick-answers__header">
+              <span aria-hidden="true">
+                <Sparkles className="h-5 w-5" />
+              </span>
+              <div>
+                <p>Quick Answers</p>
+                <h3 id="dzn-pricing-quick-answers-title">Clear answers about Starter and Pro</h3>
+              </div>
+            </div>
+            <div className="dzn-pricing-quick-answers__grid">
+              {listingPricingFaqs.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <article key={item.question} className={`dzn-pricing-answer-card dzn-pricing-answer-card--${item.tone}`}>
+                    <span className="dzn-pricing-answer-card__icon" aria-hidden="true">
+                      <Icon className="h-6 w-6" />
+                    </span>
+                    <h4>{item.question}</h4>
+                    {item.answer.map((line) => (
+                      <p key={line}>{line}</p>
+                    ))}
+                  </article>
+                );
+              })}
+            </div>
+          </aside>
         </div>
 
-        <div className="mt-5 rounded-lg border border-amber-300/20 bg-amber-300/[0.065] p-4">
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-100">Fair Pro advertising</p>
-          <p className="mt-2 max-w-4xl text-sm leading-6 text-amber-50">
-            Pro helps your server look better, advertise better and understand performance better. It does not affect review scores, leaderboard stats, kill stats, K/D, longest kill, crowns, season wins, or gameplay results.
-          </p>
-          <p className="mt-2 text-xs font-bold text-amber-100/82">
-            Featured and spotlight rotation are controlled visibility tools, not guaranteed permanent top rank.
-          </p>
-        </div>
-
-        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {listingPricingFaqs.map((item) => (
-            <article key={item.question} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-              <h3 className="text-sm font-black text-white">{item.question}</h3>
-              <p className="mt-2 text-xs leading-5 text-zinc-400">{item.answer}</p>
-            </article>
-          ))}
+        <div className="dzn-pricing-trust-strip" aria-label="Pricing trust guarantees">
+          {pricingTrustPills.map((item) => {
+            const Icon = item.icon;
+            return (
+              <div key={item.label}>
+                <Icon className="h-5 w-5" />
+                <span>
+                  <strong>{item.label}</strong>
+                  <small>{item.description}</small>
+                </span>
+              </div>
+            );
+          })}
         </div>
       </motion.section>
       {typeof document !== "undefined" ? createPortal(pricingModal, document.body) : null}

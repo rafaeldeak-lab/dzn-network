@@ -565,6 +565,10 @@ const pricingModalCssBlock = globalsSource.slice(
   globalsSource.indexOf(".dzn-pricing-modal-backdrop"),
   globalsSource.indexOf(".dzn-home-bg-image"),
 );
+const pricingEntryCssBlock = globalsSource.slice(
+  globalsSource.indexOf(".dzn-pricing-entry"),
+  globalsSource.indexOf(".dzn-pricing-modal-backdrop"),
+);
 const buildImageAssets = [
   "public/dzn/build/full-walls.webp",
   "public/dzn/build/watchtower.webp",
@@ -638,7 +642,22 @@ assert.equal(pricingUpgradeBlock.includes("aria-modal=\"true\""), true);
 assert.equal(pricingUpgradeBlock.includes("Close pricing comparison"), true);
 assert.equal(pricingUpgradeBlock.includes("createPortal(pricingModal, document.body)"), true);
 assert.equal(pricingUpgradeBlock.includes("document.body.classList.add(\"dzn-pricing-modal-open\")"), true);
+assert.equal(pricingUpgradeBlock.includes("pricingEntrySignals.map"), true);
+assert.equal(pricingUpgradeBlock.includes("pricingValuePillars.map"), true);
+assert.equal(pricingUpgradeBlock.includes("pricingTrustPills.map"), true);
+assert.equal(pricingUpgradeBlock.includes("dzn-pricing-entry__hero"), true);
+assert.equal(pricingUpgradeBlock.includes("dzn-pricing-value-card"), true);
+assert.equal(pricingUpgradeBlock.includes("dzn-pricing-quick-answers"), true);
+assert.equal(pricingUpgradeBlock.includes("dzn-pricing-quick-answers__grid"), true);
+assert.equal(pricingUpgradeBlock.includes("dzn-pricing-answer-card--${item.tone}"), true);
 assert.equal(globalsSource.includes("body.dzn-pricing-modal-open .dzn-beta-ticker"), true);
+assert.equal(pricingEntryCssBlock.includes("url(\"/media/dzn-cinematic-survivor.png\")"), true);
+assert.equal(pricingEntryCssBlock.includes("grid-template-columns: minmax(0, 1.12fr) minmax(360px, 0.88fr);"), true);
+assert.equal(pricingEntryCssBlock.includes(".dzn-pricing-quick-answers__grid"), true);
+assert.equal(pricingEntryCssBlock.includes("grid-template-columns: repeat(2, minmax(0, 1fr));"), true);
+assert.equal(pricingEntryCssBlock.includes("max-width: 860px;"), true);
+assert.equal(pricingEntryCssBlock.includes(".dzn-pricing-trust-strip"), true);
+assert.equal(pricingEntryCssBlock.includes(".dzn-pricing-answer-card--gold"), true);
 assert.equal(pricingModalCssBlock.includes("z-index: 120;"), true);
 assert.equal(pricingModalCssBlock.includes("overscroll-behavior: contain;"), true);
 assert.equal(pricingModalCssBlock.includes("100dvh"), true);
