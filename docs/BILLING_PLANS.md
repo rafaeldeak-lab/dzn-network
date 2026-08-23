@@ -22,6 +22,18 @@ Pro customer-facing copy must clearly say:
 - "£10/month."
 - "Charged immediately and renewed monthly until cancelled."
 
+## Starter Trial Abuse Protection
+
+Starter is a one-time trial, not a repeatable free plan.
+
+Before live billing is enabled, DZN must enforce one Starter trial claim per DZN Discord user and, when a Stripe customer is already known, one Starter trial claim per Stripe customer.
+
+The durable trial claim is stored in `owner_starter_trial_claims`. A Starter checkout attempt reserves the claim before creating a Stripe Checkout Session so concurrent requests cannot create multiple trial sessions for the same DZN user. After Stripe confirms checkout or subscription state, webhook handling attaches the Stripe customer, subscription, checkout session, and current status to the same claim.
+
+Cancelled, expired, failed, or completed Starter trials still count as used. A customer who has already claimed Starter should choose Pro or manage their existing billing account rather than starting another Starter trial.
+
+Trial enforcement is billing-sensitive. Applying the trial-claim migration, enabling live Stripe prices, changing checkout/webhook behavior, importing existing Stripe customers, or repairing production trial claims remains high-risk billing work requiring human review and explicit approval.
+
 ## Public Subscription Contract
 
 The active non-production-mutation contract is stored in `lib/billing/plans.ts` as `SUBSCRIPTION_PLAN_PUBLIC_CONTRACT`. It is safe public metadata for UI, docs, and tests. It does not create Stripe Prices, change live Stripe state, apply production migrations, or mutate production data.

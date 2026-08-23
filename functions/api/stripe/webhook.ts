@@ -3,6 +3,7 @@ import {
   findBillingAccountByCustomerOrSubscription,
   getPlanFromStripePriceId,
   normalizePlanKey,
+  upsertStarterTrialClaimFromStripe,
   upsertBillingAccount,
 } from "../../_lib/plans";
 import { syncServerSubscriptionsForOwner } from "../../_lib/automation";
@@ -56,6 +57,15 @@ async function handleCheckoutCompleted(env: Env, object: Record<string, unknown>
   const pricePlan = subscription ? getPlanFromStripePriceId(env, stripeSubscriptionPriceId(subscription)) : "free";
   const planKey = pricePlan === "free" ? normalizePlanKey(metadata.plan_key) : pricePlan;
   const customerId = stripeId(subscription?.customer) ?? stripeId(object.customer);
+  if (planKey === "starter") {
+    await upsertStarterTrialClaimFromStripe(env, {
+      discordUserId,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: subscriptionId,
+      checkoutSessionId: stripeId(object.id),
+      status: subscription?.status || "checkout_completed",
+    });
+  }
   await upsertBillingAccount(env, {
     discordUserId,
     stripeCustomerId: customerId,
@@ -96,6 +106,14 @@ async function handleSubscriptionLikeEvent(env: Env, object: Record<string, unkn
   const metadataPlan = normalizePlanKey(metadata.plan_key);
   const planKey = pricePlan === "free" ? metadataPlan : pricePlan;
   const status = eventType === "customer.subscription.deleted" ? "canceled" : subscription.status || "unknown";
+  if (planKey === "starter") {
+    await upsertStarterTrialClaimFromStripe(env, {
+      discordUserId,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: subscriptionId,
+      status,
+    });
+  }
   await upsertBillingAccount(env, {
     discordUserId,
     stripeCustomerId: customerId,
@@ -125,12 +143,21 @@ async function handleInvoiceEvent(env: Env, object: Record<string, unknown>, eve
   const discordUserId = stringOrNull(account?.discord_user_id);
   if (!discordUserId) return;
 
+  const planKey = normalizePlanKey(account?.plan_key);
   const nextStatus = eventType === "invoice.payment_failed" ? "past_due" : stringOrNull(account?.plan_status) ?? "active";
+  if (planKey === "starter") {
+    await upsertStarterTrialClaimFromStripe(env, {
+      discordUserId,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: subscriptionId,
+      status: nextStatus,
+    });
+  }
   await upsertBillingAccount(env, {
     discordUserId,
     stripeCustomerId: customerId,
     stripeSubscriptionId: subscriptionId,
-    planKey: normalizePlanKey(account?.plan_key),
+    planKey,
     planStatus: nextStatus,
     currentPeriodStart: stringOrNull(account?.current_period_start),
     currentPeriodEnd: stringOrNull(account?.current_period_end),
@@ -140,7 +167,7 @@ async function handleInvoiceEvent(env: Env, object: Record<string, unknown>, eve
     stripeCustomerId: customerId,
     stripeSubscriptionId: subscriptionId,
     stripePriceId: null,
-    planKey: normalizePlanKey(account?.plan_key),
+    planKey,
     status: nextStatus,
     currentPeriodStart: stringOrNull(account?.current_period_start),
     currentPeriodEnd: stringOrNull(account?.current_period_end),
