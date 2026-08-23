@@ -528,7 +528,19 @@ const featureCardsBlock = homepageSource.slice(
 );
 const featureStripBlock = homepageSource.slice(
   homepageSource.indexOf("function FeatureStrip"),
+  homepageSource.indexOf("function PricingUpgradeSection"),
+);
+const pricingUpgradeBlock = homepageSource.slice(
+  homepageSource.indexOf("function PricingUpgradeSection"),
   homepageSource.indexOf("function GameModeGrid"),
+);
+const loggedOutHeaderBlock = siteHeaderSource.slice(
+  siteHeaderSource.indexOf("const loggedOutHeaderLinks"),
+  siteHeaderSource.indexOf("const authenticatedHeaderLinks"),
+);
+const authenticatedHeaderBlock = siteHeaderSource.slice(
+  siteHeaderSource.indexOf("const authenticatedHeaderLinks"),
+  siteHeaderSource.indexOf("let pageHeaderAuthState"),
 );
 const globalsSource = readFileSync("app/globals.css", "utf8");
 const recentActivityCssBlock = globalsSource.slice(
@@ -572,10 +584,30 @@ assert.equal(loggedOutNavBlock.includes("Events"), false);
 assert.equal(homepageSource.includes("function Navbar"), false);
 assert.equal(landingRenderBlock.includes("authenticated={authState.status === \"logged_in\"}"), true);
 assert.equal(landingRenderBlock.includes("checkingAccount={authState.status === \"loading\"}"), true);
-assert.equal(siteHeaderSource.includes("Checking"), true);
+assert.equal(/>\s*Checking\s*</.test(siteHeaderSource), false);
 assert.equal(siteHeaderSource.includes("login?returnTo="), true);
 assert.equal(siteHeaderSource.includes("href=\"/setup\""), true);
 assert.equal((siteHeaderSource.match(/Add Your Server/g) ?? []).length, 1);
+assert.equal(loggedOutHeaderBlock.includes("Features"), true);
+assert.equal(loggedOutHeaderBlock.includes("Pricing"), true);
+assert.equal(loggedOutHeaderBlock.includes("Leaderboards"), false);
+assert.equal(loggedOutHeaderBlock.includes("Servers"), false);
+assert.equal(loggedOutHeaderBlock.includes("Stats"), false);
+assert.equal(loggedOutHeaderBlock.includes("Events"), false);
+assert.equal(loggedOutHeaderBlock.includes("Dashboard"), false);
+assert.equal(loggedOutHeaderBlock.includes("Add Your Server"), false);
+assert.equal(authenticatedHeaderBlock.includes("Leaderboards"), true);
+assert.equal(authenticatedHeaderBlock.includes("Servers"), true);
+assert.equal(authenticatedHeaderBlock.includes("Stats"), true);
+assert.equal(authenticatedHeaderBlock.includes("Events"), true);
+assert.equal(siteHeaderSource.includes("data-auth-state"), true);
+assert.equal(siteHeaderSource.includes("checking-public"), true);
+assert.equal(siteHeaderSource.includes("aria-busy={authProbePending}"), true);
+assert.equal(siteHeaderSource.includes("authProbePending ?"), true);
+assert.equal(pricingUpgradeBlock.includes("Open Pricing Comparison"), true);
+assert.equal(pricingUpgradeBlock.includes("role=\"dialog\""), true);
+assert.equal(pricingUpgradeBlock.includes("aria-modal=\"true\""), true);
+assert.equal(pricingUpgradeBlock.includes("Close pricing comparison"), true);
 assert.equal(landingRenderBlock.includes("isPreviewMode ? ("), true);
 assert.equal(landingRenderBlock.includes("<NetworkOverview homeStats={displayHomeStats} dataPending={homeStatsPending} />"), true);
 assert.equal(landingRenderBlock.includes("unlockHomeStatsForLoggedIn"), true);
