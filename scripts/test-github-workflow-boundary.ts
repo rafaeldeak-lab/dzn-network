@@ -1380,7 +1380,7 @@ assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("--outdir .pages-
 assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("apiWildcardMakesAllApiFunctionsUseWorker"), true);
 assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("normalizedRemovedRouteCount"), true);
 assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("currentBundleNearCloudflareLimit"), true);
-assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("actions/upload-artifact@v4"), true);
+assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("actions/upload-artifact@v7"), true);
 assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("name: dzn-production-readonly-diagnostics"), true);
 assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("no production deploy"), true);
 assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("no production migration"), true);

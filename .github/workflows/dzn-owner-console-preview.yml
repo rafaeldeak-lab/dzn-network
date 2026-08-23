@@ -142,12 +142,12 @@ jobs:
 
     steps:
       - name: Checkout dispatched commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
       - name: Node setup
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -199,7 +199,7 @@ jobs:
 
       - name: Upload Phase 2A preview artifact
         if: ${{ always() && inputs.mode == 'event-platform-performance-preview' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dzn-event-platform-performance-preview
           path: dzn-event-platform-performance-preview

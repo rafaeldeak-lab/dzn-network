@@ -766,7 +766,7 @@ export function runOwnerConsolePreviewWorkflowBoundaryAssertions() {
   assert.equal(ownerPreviewPhase2ABlock.includes("discord.com/api"), false, "Phase 2A preview mode must not call Discord.");
   assert.equal(ownerPreviewPhase2ABlock.includes("nitrado.net"), false, "Phase 2A preview mode must not call Nitrado.");
   assert.equal(ownerPreviewPhase2ABlock.includes("dzn-adm-sync-worker"), false, "Phase 2A preview mode must not trigger ADM sync.");
-  assert.equal(ownerPreviewPhase2ABlock.includes("actions/upload-artifact@v4"), true, "Phase 2A preview must upload a sanitized artifact.");
+  assert.equal(ownerPreviewPhase2ABlock.includes("actions/upload-artifact@v7"), true, "Phase 2A preview must upload a sanitized artifact.");
   assert.equal(ownerPreviewPhase2ABlock.includes("always() && inputs.mode == 'event-platform-performance-preview'"), true, "Phase 2A artifact upload must run even after verifier failure.");
   assert.equal(ownerPreviewPhase2APreflightStart < ownerPreviewPhase2AMigrateStart, true, "Phase 2A preflight must happen before migration.");
   assert.equal(ownerPreviewPhase2AMigrateStart < ownerPreviewPhase2ASeedStart, true, "Phase 2A migration must happen before seed.");

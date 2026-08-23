@@ -36,10 +36,10 @@ jobs:
       PRODUCTION_D1_DATABASE_ID: 37515c66-2787-49e4-8568-a461517e975e
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Node setup
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
