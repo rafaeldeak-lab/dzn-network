@@ -4,7 +4,7 @@
 
 - Runtime model: Next.js static export (`output: "export"`) deployed to Cloudflare Pages with Pages Functions for `/api/*`, `/owner`, and other dynamic routes.
 - Image model: `next/image` optimization is disabled for Cloudflare static compatibility. Image performance relies on explicit dimensions, responsive sizing, lazy loading, and safe fallbacks.
-- Public traffic model: public pages are static or client-hydrated from Pages Functions. Public APIs read stored D1 state and must not trigger ADM, Nitrado, scheduler, Discord, or tournament automation work.
+- Public traffic model: the homepage and approved preview surfaces are static or client-hydrated from Pages Functions. Direct app pages such as `/servers`, `/leaderboards`, and `/events` redirect logged-out visitors to login. Public APIs read stored D1 state and must not trigger ADM, Nitrado, scheduler, Discord, or tournament automation work.
 - Private traffic model: owner and authenticated APIs use session cookies and must always return `Cache-Control: private, no-store`.
 - Current hot public reads:
   - `/api/public/home-stats`

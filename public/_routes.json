@@ -1,5 +1,25 @@
 {
   "version": 1,
-  "include": ["/api/*"],
+  "include": [
+    "/api/*",
+    "/dashboard",
+    "/dashboard/*",
+    "/dzn-pulse",
+    "/dzn-pulse/*",
+    "/events",
+    "/events/*",
+    "/leaderboards",
+    "/leaderboards/*",
+    "/owner",
+    "/owner/*",
+    "/seasons",
+    "/seasons/*",
+    "/servers",
+    "/servers/*",
+    "/setup",
+    "/setup/*",
+    "/test",
+    "/test/*"
+  ],
   "exclude": []
 }

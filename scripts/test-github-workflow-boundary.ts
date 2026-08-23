@@ -704,7 +704,9 @@ assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("npm run lint"), t
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("npm run build"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("npx wrangler pages functions build functions"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("cp .pages-functions/index.js out/_worker.js"), true);
-assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("Pages Functions worker and owner API routes verified."), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("Pages Functions worker, protected app pages, and owner API routes verified."), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("fetchProtectedPage"), true);
+assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("Logged-out protected app page redirects: passed"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("/api/owner/overview"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("/api/owner/discord/options"), true);
 assert.equal(dznPagesRuntimeProductionDeployWorkflow.includes("fetchProtectedOwnerApi"), true);
@@ -1363,6 +1365,10 @@ assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("/api/owner/overv
 assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("/api/owner/discord/overview"), true);
 assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("/api/owner/servers"), true);
 assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("/api/owner/audit-log"), true);
+assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes('redirectContains: "/login"'), true);
+assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("const redirectOk = !route.redirectContains || redirectLocation.includes(route.redirectContains);"), true);
+assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("ok: status === route.expected && redirectOk && markers.length === 0"), true);
+assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("redirectExpected: route.redirectContains ?? null"), true);
 assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("/api/public/servers"), true);
 assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("/api/public/home-stats"), true);
 assert.equal(dznProductionReadonlyDiagnosticsWorkflow.includes("/api/public/leaderboards"), true);

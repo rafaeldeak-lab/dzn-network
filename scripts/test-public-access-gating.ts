@@ -548,6 +548,11 @@ const recentActivityCssBlock = globalsSource.slice(
   globalsSource.indexOf(".dzn-game-modes-section"),
 );
 const homeStatsSource = readFileSync("functions/api/public/home-stats.ts", "utf8");
+const pageMiddlewareSource = readFileSync("functions/_middleware.ts", "utf8");
+const routesPatchSource = readFileSync("scripts/patch-pages-routes.mjs", "utf8");
+const staticRoutesSource = readFileSync("public/_routes.json", "utf8");
+const productionSmokeSource = readFileSync("scripts/autodev/production-smoke.ts", "utf8");
+const publicAccessPolicyDoc = readFileSync("docs/PUBLIC_ACCESS_POLICY.md", "utf8");
 const buildLeaderboardCssBlock = globalsSource.slice(
   globalsSource.indexOf(".dzn-build-leaderboard"),
   globalsSource.indexOf(".dzn-game-modes-section"),
@@ -604,6 +609,25 @@ assert.equal(siteHeaderSource.includes("data-auth-state"), true);
 assert.equal(siteHeaderSource.includes("checking-public"), true);
 assert.equal(siteHeaderSource.includes("aria-busy={authProbePending}"), true);
 assert.equal(siteHeaderSource.includes("authProbePending ?"), true);
+for (const route of ["/dashboard", "/dzn-pulse", "/events", "/leaderboards", "/seasons", "/servers", "/setup", "/test"]) {
+  assert.equal(pageMiddlewareSource.includes(`"${route}"`), true, `Protected app page middleware must include ${route}.`);
+  assert.equal(routesPatchSource.includes(`"${route}"`), true, `Pages route patcher must include exact ${route}.`);
+  assert.equal(staticRoutesSource.includes(`"${route}"`), true, `Static routes file must include exact ${route}.`);
+  assert.equal(publicAccessPolicyDoc.includes(`\`${route}\``), true, `Public access policy doc must describe ${route}.`);
+}
+for (const route of ["/dashboard/*", "/dzn-pulse/*", "/events/*", "/leaderboards/*", "/seasons/*", "/servers/*", "/setup/*", "/test/*"]) {
+  assert.equal(routesPatchSource.includes(`"${route}"`), true, `Pages route patcher must include nested ${route}.`);
+  assert.equal(staticRoutesSource.includes(`"${route}"`), true, `Static routes file must include nested ${route}.`);
+}
+assert.equal(pageMiddlewareSource.includes("getSessionUser(env, request)"), true);
+assert.equal(pageMiddlewareSource.includes("loginUrl.searchParams.set(\"returnTo\", `${url.pathname}${url.search}`)"), true);
+assert.equal(pageMiddlewareSource.includes("return redirect(`${loginUrl.pathname}${loginUrl.search}`)"), true);
+assert.equal(pageMiddlewareSource.includes("isPageNavigationMethod(request.method)"), true);
+assert.equal(routesPatchSource.includes("\"/api/*\""), true);
+assert.equal(routesPatchSource.includes("\"/owner\""), true);
+assert.equal(routesPatchSource.includes("\"/owner/*\""), true);
+assert.equal(productionSmokeSource.includes("Protected app page redirected logged-out navigation to login."), true);
+assert.equal(productionSmokeSource.includes("[\"/dashboard\", \"/events\", \"/leaderboards\", \"/servers\", \"/setup\", \"/dzn-pulse\", \"/seasons\"]"), true);
 assert.equal(pricingUpgradeBlock.includes("Open Pricing Comparison"), true);
 assert.equal(pricingUpgradeBlock.includes("role=\"dialog\""), true);
 assert.equal(pricingUpgradeBlock.includes("aria-modal=\"true\""), true);

@@ -1427,7 +1427,7 @@ function assertSuggestionApis() {
   assertIncludes(helper, "lower(COALESCE(linked_servers.status, 'pending')) = 'live'", "public suggestion server projection must require a currently live server");
   assertIncludes(helper, "lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'", "public suggestion server projection must reject hidden servers");
   assertIncludes(helper, "trim(linked_servers.merged_into_server_id) = ''", "public suggestion server projection must reject merged servers");
-  assertIncludes(helper, "CASE\n    WHEN ${PUBLIC_SUGGESTION_SERVER_SQL_PREDICATE}", "public suggestion reads must redact server fields in SQL");
+  assert.match(helper, /CASE\r?\n\s+WHEN \$\{PUBLIC_SUGGESTION_SERVER_SQL_PREDICATE\}/, "public suggestion reads must redact server fields in SQL");
   assertIncludes(helper, "loadViewerVotesForSuggestions", "public suggestion list must hydrate verified viewer votes only after page rows are selected");
   assertIncludes(helper, "WHERE user_id = ?", "viewer vote hydration must be scoped to the verified viewer");
   assertIncludes(helper, "suggestion_id IN", "viewer vote hydration must be bounded to the current page's suggestion ids");
@@ -1587,7 +1587,7 @@ function assertLoadingUx() {
   assertIncludes(progress, "target.hasAttribute(\"download\")");
   assertIncludes(progress, "const currentHref = window.location.href;", "navigation progress must capture the current URL synchronously during the click");
   assertIncludes(progress, "const shouldStart = shouldStartNavigationProgress(navigationTarget, currentHref);", "navigation progress must evaluate intent before deferring");
-  assertIncludes(progress, "window.setTimeout(() => {\n        start();\n      }, 0);", "deferred navigation progress callback must only start progress");
+  assert.match(progress, /window\.setTimeout\(\(\) => \{\r?\n\s+start\(\);\r?\n\s+\}, 0\);/, "deferred navigation progress callback must only start progress");
   const onClickBlock = progress.slice(progress.indexOf("const onClick = (event: MouseEvent)"), progress.indexOf("const onPopState"));
   const deferredBlock = onClickBlock.slice(onClickBlock.indexOf("window.setTimeout"));
   assertNotIncludes(deferredBlock, "window.location.href", "deferred navigation progress callback must not reread the current URL");
@@ -1787,8 +1787,14 @@ function assertWorkflowBoundaries() {
 function assertRoutePatchNormalization() {
   const patcher = source("scripts/patch-pages-routes.mjs");
   assertIncludes(patcher, '"/api/*"');
+  assertIncludes(patcher, '"/dashboard"');
+  assertIncludes(patcher, '"/events"');
+  assertIncludes(patcher, '"/leaderboards"');
+  assertIncludes(patcher, '"/leaderboards/*"');
   assertIncludes(patcher, '"/owner"');
   assertIncludes(patcher, '"/owner/*"');
+  assertIncludes(patcher, '"/servers"');
+  assertIncludes(patcher, '"/setup"');
   assertIncludes(patcher, "function normalizeRoutes");
   assertIncludes(patcher, "route.startsWith(splatPrefix(splat))");
   assertIncludes(patcher, "normalizeRoutes([...(Array.isArray(routes.include) ? routes.include : []), ...requiredIncludes])");

@@ -281,6 +281,8 @@ assert.equal(liveCheckSource.includes("/api/sync/adm/run"), true);
 assert.equal(liveCheckSource.includes("/api/sync/discord-posts/run"), true);
 assert.equal(liveCheckSource.includes("/api/automation/health"), true);
 assert.equal(liveCheckSource.includes("Skipped because DZN_CRON_SECRET is not set"), true);
+assert.equal(liveCheckSource.includes("DZN_EXPECT_PROTECTED_APP_REDIRECTS"), true);
+assert.equal(liveCheckSource.includes("checkProtectedAppPage(\"/dashboard\""), true);
 const cronProductionCheckSource = readFileSync("scripts/check-cron-production.ts", "utf8");
 assert.equal(cronProductionCheckSource.includes("automation_cron_runs"), true);
 assert.equal(cronProductionCheckSource.includes("No cloudflare row in the last 5 minutes"), true);
@@ -291,7 +293,7 @@ assert.equal(serverDueStateSource.includes("pandora-dayz"), true);
 assert.equal(serverDueStateSource.includes("currently_syncing_adm"), true);
 
 const buttonMapDoc = readFileSync("docs/DASHBOARD_BUTTON_MAP.md", "utf8");
-assert.equal(buttonMapDoc.includes("View Public Page"), true);
+assert.equal(buttonMapDoc.includes("View Server Page"), true);
 assert.equal(buttonMapDoc.includes("Refresh Server Info"), true);
 assert.equal(buttonMapDoc.includes("Run Auto Post Dispatcher Now"), true);
 assert.equal(buttonMapDoc.includes("Remove Server From DZN"), true);

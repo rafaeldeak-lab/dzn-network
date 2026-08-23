@@ -6,13 +6,13 @@ This map documents the visible dashboard controls after the dashboard layout ref
 
 | Label | Location | Handler / link | API endpoint | Permission | What should happen | Success result | Failure result | Current status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| View Public Page | Overview hero | `publicServerProfileHref(server.public_slug)` | Public route `/servers/profile?slug=...` | Public | Opens the public server profile. | Public profile opens. | Hidden when no slug exists. | Working |
+| View Server Page | Overview hero | `publicServerProfileHref(server.public_slug)` | Authenticated app route `/servers/profile?slug=...` | Member+ | Opens the server profile page after login. | Server profile opens for logged-in users. | Hidden when no slug exists. Logged-out direct access redirects to login. | Working |
 | Server Settings | Overview hero | `setActiveTab("public-listing")` | None | Owner/Admin | Moves to the Public Listing editor tab. | Public Listing tab opens. | None expected. | Working |
 | View All | Recent Synced Events | `setActiveTab("sync-health")` | None | Owner/Admin | Moves to detailed Sync Health. | Sync Health tab opens. | None expected. | Working |
 | View Sync Details | Recent Synced Events | `setActiveTab("sync-health")` | None | Owner/Admin | Moves to detailed Sync Health. | Sync Health tab opens. | None expected. | Working |
 | View Setup Guide | Setup Progress | Link to `/setup#review-test` | Static app route | Owner/Admin | Opens setup guide/review test section. | Setup guide opens. | Route fallback if anchor changes. | Working |
 | Manage Billing | Current Plan | `openBillingPortal` | `POST /api/billing/create-portal-session` | Owner/Admin | Opens Stripe Billing Portal. | Browser navigates to Stripe portal. | Shows billing error message. | Working |
-| View Kill Feed | Quick Actions | Link to `/leaderboards` | Public route | Member+ | Opens leaderboards/kill-feed view. | Leaderboards page opens. | Public route error if unavailable. | Working |
+| View Kill Feed | Quick Actions | Link to `/leaderboards` | Authenticated app route | Member+ | Opens leaderboards/kill-feed view after login. | Leaderboards page opens for logged-in users. | Logged-out direct access redirects to login. | Working |
 | Edit Server | Quick Actions | `setActiveTab("public-listing")` | None | Owner/Admin | Opens Public Listing editor. | Public Listing tab opens. | None expected. | Working |
 | Refresh Server Info | Quick Actions | `refreshServerInfo` | `POST /api/servers/[serverId]/refresh-metadata` | Owner/Admin | Refreshes saved Nitrado metadata/player count for the selected server. | Dashboard state updates with latest metadata. | Shows clean error in action message. | Working |
 | Run Manual Sync | Quick Actions | `runSync` | `POST /api/sync/adm/run` | Owner/Admin | Runs manual ADM sync for selected server. | Sync state, events, and stats refresh. | Shows sync error/action message. | Working |
@@ -55,7 +55,7 @@ This map documents the visible dashboard controls after the dashboard layout ref
 | Label | Location | Handler / link | API endpoint | Permission | What should happen | Success result | Failure result | Current status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Save Public Listing | Public Listing tab | `saveListing` | `PATCH /api/servers/[serverId]/public-listing` | Owner/Admin | Saves tagline, description, links, rules, language, and region. | Save message and server state update. | Shows save error. | Working |
-| View Public Page | Public Listing preview | `publicServerProfileHref(slug)` | Public route `/servers/profile?slug=...` | Public | Opens public server profile. | Public profile opens. | Hidden when slug is missing. | Working |
+| View Server Page | Public Listing preview | `publicServerProfileHref(slug)` | Authenticated app route `/servers/profile?slug=...` | Member+ | Opens the server profile page after login. | Server profile opens for logged-in users. | Hidden when slug is missing. Logged-out direct access redirects to login. | Working |
 
 ## Billing & Boosts
 

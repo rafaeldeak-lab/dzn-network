@@ -11,6 +11,7 @@ type LiveCheck = {
 const checks: LiveCheck[] = [];
 const appUrl = normalizeAppUrl(process.env.DZN_APP_URL) ?? "https://dzn-network.pages.dev";
 const cronSecret = process.env.DZN_CRON_SECRET?.trim() ?? "";
+const expectProtectedAppRedirects = process.env.DZN_EXPECT_PROTECTED_APP_REDIRECTS === "1";
 
 function add(status: CheckStatus, title: string, detail: string) {
   checks.push({ status, title, detail });
@@ -94,6 +95,29 @@ async function checkPage(path: string, label: string) {
   }
   if ((result.response.status >= 200 && result.response.status < 400) || result.response.status === 401 || result.response.status === 403) {
     pass(label, `HTTP ${result.response.status}`);
+  } else {
+    fail(label, `Unexpected HTTP ${result.response.status}`);
+  }
+}
+
+async function checkProtectedAppPage(path: string, label: string) {
+  const result = await fetchStatus(path, { method: "GET" });
+  if (!result.ok || !result.response) {
+    fail(label, result.text);
+    return;
+  }
+  const location = result.response.headers.get("location") ?? "";
+  const redirectsToLogin = result.response.status === 302 && location.includes("/login");
+  if (redirectsToLogin) {
+    pass(label, `HTTP 302 to ${location}`);
+    return;
+  }
+  if (expectProtectedAppRedirects) {
+    fail(label, `Expected logged-out login redirect, got HTTP ${result.response.status}`);
+    return;
+  }
+  if (result.response.status >= 200 && result.response.status < 400) {
+    warn(label, `HTTP ${result.response.status}; strict post-merge redirect check not enabled.`);
   } else {
     fail(label, `Unexpected HTTP ${result.response.status}`);
   }
@@ -219,7 +243,7 @@ function printReport() {
 
 async function main() {
   await checkPage("/", "Production homepage");
-  await checkPage("/dashboard", "Production dashboard");
+  await checkProtectedAppPage("/dashboard", "Production dashboard access");
   await checkHomeStats();
   for (const endpoint of ["/api/sync/metadata/run", "/api/sync/adm/run", "/api/sync/discord-posts/run"]) {
     await checkProtectedCronEndpoint(endpoint);
