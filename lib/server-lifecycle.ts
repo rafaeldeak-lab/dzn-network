@@ -185,6 +185,43 @@ export function getServerLifecycleDisplay(status: ServerLifecycleStatus) {
   }
 }
 
+export function isPublicHistoricalServerLifecycle(status: ServerLifecycleStatus) {
+  return SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES.includes(status) && !SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES.includes(status);
+}
+
+export function getPublicServerLifecycleDisplay(status: ServerLifecycleStatus): { label: string; message: string; ownerAction: string | null } {
+  if (!isPublicHistoricalServerLifecycle(status)) {
+    const display = getServerLifecycleDisplay(status);
+    return {
+      label: display.label,
+      message: display.message,
+      ownerAction: null,
+    };
+  }
+
+  if (status === "token_needs_resave") {
+    return {
+      label: "Offline / Sync Paused",
+      message: "DZN is not showing this as an active live server. Historical stats are preserved while live verification is paused.",
+      ownerAction: null,
+    };
+  }
+
+  if (status === "expired_detected" || status === "deletion_imminent" || status === "final_sync_pending") {
+    return {
+      label: "No Longer Live",
+      message: "This server is not currently live on DZN. Historical stats are preserved while DZN finishes any bounded final sync.",
+      ownerAction: null,
+    };
+  }
+
+  return {
+    label: "Legacy / Offline",
+    message: "This server is no longer live on DZN. Historical stats are preserved.",
+    ownerAction: null,
+  };
+}
+
 export function canRunServerLifecycleTask(row: ServerLifecycleRow, task: ServerLifecycleTask, options: { now?: string | Date; manual?: boolean } = {}) {
   const status = normalizeServerLifecycleStatus(row);
   const manual = options.manual === true;

@@ -34,7 +34,8 @@ import { normalizeListingPlanKey } from "../../../lib/billing/plans";
 import {
   SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES,
   SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
-  getServerLifecycleDisplay,
+  getPublicServerLifecycleDisplay,
+  isPublicHistoricalServerLifecycle,
   normalizeServerLifecycleStatus,
   serverLifecycleInSql,
   serverLifecycleSqlExpression,
@@ -272,7 +273,7 @@ type SafePublicServer = {
     status: string;
     label: string;
     message: string;
-    owner_action: string;
+    owner_action: string | null;
     historical: boolean;
   };
   access_level?: "full" | "preview";
@@ -994,6 +995,15 @@ async function toSafePublicServer(
     score_label: ranking?.score_label ?? "Pending",
   };
   const planKey = publicPlanKey(row.plan_key, row.subscription_status);
+  const lifecycleStatus = normalizeServerLifecycleStatus({
+    lifecycle_status: row.lifecycle_status,
+    status: row.status,
+  });
+  const lifecycleDisplay = getPublicServerLifecycleDisplay(lifecycleStatus);
+  const historicalLifecycle = isPublicHistoricalServerLifecycle(lifecycleStatus);
+  const publicStatsActive = !historicalLifecycle && (ranking?.stats_sync_active ?? statsSync === "Active");
+  const publicIsOnline = !historicalLifecycle && Number(row.is_online) === 1;
+  const publicCurrentPlayers = historicalLifecycle ? null : row.current_players;
   const reputation = buildServerReputationSummary({
     planKey,
     createdAt: row.created_at,
@@ -1005,7 +1015,7 @@ async function toSafePublicServer(
     rank: stats.rank,
     score: stats.score,
     category: row.server_type,
-    active: statsSync === "Active",
+    active: publicStatsActive,
   });
   const achievementShowcase = buildAchievementShowcase({
     planKey,
@@ -1018,7 +1028,7 @@ async function toSafePublicServer(
     rank: stats.rank,
     score: stats.score,
     category: row.server_type,
-    active: statsSync === "Active",
+    active: publicStatsActive,
   });
   const advertising = publicAdvertisingFromState({
     last_bumped_at: row.last_bumped_at,
@@ -1029,13 +1039,7 @@ async function toSafePublicServer(
     featured_until: row.featured_until,
     featured_label: row.featured_label,
   });
-  const activePromotions = parsePublicPromotions(row.active_promotions_json);
-  const lifecycleStatus = normalizeServerLifecycleStatus({
-    lifecycle_status: row.lifecycle_status,
-    status: row.status,
-  });
-  const lifecycleDisplay = getServerLifecycleDisplay(lifecycleStatus);
-  const historicalLifecycle = lifecycleStatus === "legacy_offline" || lifecycleStatus === "final_sync_complete";
+  const activePromotions = historicalLifecycle ? [] : parsePublicPromotions(row.active_promotions_json);
   const visualShowcase = getServerVisualShowcase({
     planKey,
     reputationTier: reputation.tier,
@@ -1049,7 +1053,8 @@ async function toSafePublicServer(
     planKey,
     statsSync,
     awardData: badgeAwardData,
-    featured: advertising.is_featured,
+    publicLifecycleActive: !historicalLifecycle,
+    featured: !historicalLifecycle && advertising.is_featured,
   });
   const automaticShowcaseBadges = badgeCollection.showcaseBadges.length ? badgeCollection.showcaseBadges : visualShowcase.badges;
   const availableShowcaseBadges = badgeCollection.earnedBadges.filter((badge) => badge.isPublic && badge.isShowcaseBadge);
@@ -1068,10 +1073,10 @@ async function toSafePublicServer(
   );
   const visibilityInput = {
     planKey,
-    stats_sync: statsSync,
-    stats_sync_active: ranking?.stats_sync_active ?? statsSync === "Active",
-    is_online: Number(row.is_online) === 1,
-    current_players: row.current_players,
+    stats_sync: historicalLifecycle ? "Historical" : statsSync,
+    stats_sync_active: publicStatsActive,
+    is_online: publicIsOnline,
+    current_players: publicCurrentPlayers,
     total_joins: stats.total_joins,
     unique_players: stats.unique_players,
     last_sync_at: lastSyncAt,
@@ -1095,8 +1100,20 @@ async function toSafePublicServer(
       themeBannerKey: publicVisualLoadout.themeBanner.key,
     },
   };
-  const visibilityConfig = getServerVisibilityConfig(visibilityInput);
-  const discoveryScore = getServerDiscoveryScore(visibilityInput);
+  const baseVisibilityConfig = getServerVisibilityConfig(visibilityInput);
+  const visibilityConfig = historicalLifecycle
+    ? {
+        ...baseVisibilityConfig,
+        visibilityWeight: 0,
+        visibilityTier: "standard" as const,
+        isFeaturedEligible: false,
+        isSpotlightEligible: false,
+        isPriorityDiscovery: false,
+        label: "Historical profile",
+      }
+    : baseVisibilityConfig;
+  const discoveryScore = historicalLifecycle ? 0 : getServerDiscoveryScore(visibilityInput);
+  const visibilityExplanation = historicalLifecycle ? historicalVisibilityExplanation(lifecycleDisplay.label) : explainServerVisibility(visibilityInput);
   return {
     linked_server_id: row.id,
     public_slug: row.public_slug,
@@ -1104,7 +1121,7 @@ async function toSafePublicServer(
     server_type: row.server_type,
     tags_json: tagsJson,
     tags,
-    status: row.status,
+    status: historicalLifecycle ? "historical" : row.status,
     lifecycle: {
       status: lifecycleStatus,
       label: lifecycleDisplay.label,
@@ -1119,12 +1136,12 @@ async function toSafePublicServer(
     stats_sync: statsSync,
     player_slots: row.player_slots,
     max_players: row.max_players ?? row.player_slots,
-    current_players: row.current_players === null ? null : numberOrZero(row.current_players),
+    current_players: publicCurrentPlayers === null ? null : numberOrZero(publicCurrentPlayers),
     platform: row.platform,
     map_name: row.map_name,
     mission: row.mission,
     server_status: row.server_status,
-    is_online: Number(row.is_online) === 1,
+    is_online: publicIsOnline,
     last_sync_at: lastSyncAt,
     metadata_last_checked_at: row.metadata_last_checked_at,
     player_count_last_checked_at: row.player_count_last_checked_at,
@@ -1146,7 +1163,7 @@ async function toSafePublicServer(
     created_at: row.created_at,
     ...stats,
     score_breakdown: ranking?.score_breakdown ?? null,
-    stats_sync_active: ranking?.stats_sync_active ?? statsSync === "Active",
+    stats_sync_active: publicStatsActive,
     average_rating: reviewSummary.average_rating,
     review_count: reviewSummary.review_count,
     rating_breakdown: reviewSummary.rating_breakdown,
@@ -1159,7 +1176,7 @@ async function toSafePublicServer(
     visibilityTier: visibilityConfig.visibilityTier,
     isFeaturedEligible: visibilityConfig.isFeaturedEligible,
     isSpotlightEligible: visibilityConfig.isSpotlightEligible,
-    visibilityExplanation: explainServerVisibility(visibilityInput),
+    visibilityExplanation,
     activePromotions,
     reputation,
     achievement_showcase: achievementShowcase,
@@ -1239,6 +1256,15 @@ async function toSafePublicServerPreview(
     score_label: readable ? "ADM synced" : "Pending",
   };
   const planKey = publicPlanKey(row.plan_key, row.subscription_status);
+  const lifecycleStatus = normalizeServerLifecycleStatus({
+    lifecycle_status: row.lifecycle_status,
+    status: row.status,
+  });
+  const lifecycleDisplay = getPublicServerLifecycleDisplay(lifecycleStatus);
+  const historicalLifecycle = isPublicHistoricalServerLifecycle(lifecycleStatus);
+  const publicStatsActive = !historicalLifecycle && statsSync === "Active";
+  const publicIsOnline = !historicalLifecycle && Number(row.is_online) === 1;
+  const publicCurrentPlayers = historicalLifecycle ? null : row.current_players;
   const reputation = buildServerReputationSummary({
     planKey,
     createdAt: row.created_at,
@@ -1250,7 +1276,7 @@ async function toSafePublicServerPreview(
     rank: stats.rank,
     score: stats.score,
     category: row.server_type,
-    active: statsSync === "Active",
+    active: publicStatsActive,
   });
   const achievementShowcase = buildAchievementShowcase({
     planKey,
@@ -1263,7 +1289,7 @@ async function toSafePublicServerPreview(
     rank: stats.rank,
     score: stats.score,
     category: row.server_type,
-    active: statsSync === "Active",
+    active: publicStatsActive,
   });
   const visualShowcase = getServerVisualShowcase({
     planKey,
@@ -1281,14 +1307,15 @@ async function toSafePublicServerPreview(
     featured_until: row.featured_until,
     featured_label: row.featured_label,
   });
-  const activePromotions = parsePublicPromotions(row.active_promotions_json);
+  const activePromotions = historicalLifecycle ? [] : parsePublicPromotions(row.active_promotions_json);
   const badgeCollection = buildPublicBadgeCollection({
     row,
     stats,
     planKey,
     statsSync,
     awardData: badgeAwardData,
-    featured: advertising.is_featured,
+    publicLifecycleActive: !historicalLifecycle,
+    featured: !historicalLifecycle && advertising.is_featured,
   });
   const automaticShowcaseBadges = badgeCollection.showcaseBadges.length ? badgeCollection.showcaseBadges : visualShowcase.badges;
   const availableShowcaseBadges = badgeCollection.earnedBadges.filter((badge) => badge.isPublic && badge.isShowcaseBadge);
@@ -1307,10 +1334,10 @@ async function toSafePublicServerPreview(
   );
   const visibilityInput = {
     planKey,
-    stats_sync: statsSync,
-    stats_sync_active: statsSync === "Active",
-    is_online: Number(row.is_online) === 1,
-    current_players: row.current_players,
+    stats_sync: historicalLifecycle ? "Historical" : statsSync,
+    stats_sync_active: publicStatsActive,
+    is_online: publicIsOnline,
+    current_players: publicCurrentPlayers,
     total_joins: stats.total_joins,
     unique_players: stats.unique_players,
     last_sync_at: lastSyncAt,
@@ -1334,8 +1361,20 @@ async function toSafePublicServerPreview(
       themeBannerKey: publicVisualLoadout.themeBanner.key,
     },
   };
-  const visibilityConfig = getServerVisibilityConfig(visibilityInput);
-  const discoveryScore = getServerDiscoveryScore(visibilityInput);
+  const baseVisibilityConfig = getServerVisibilityConfig(visibilityInput);
+  const visibilityConfig = historicalLifecycle
+    ? {
+        ...baseVisibilityConfig,
+        visibilityWeight: 0,
+        visibilityTier: "standard" as const,
+        isFeaturedEligible: false,
+        isSpotlightEligible: false,
+        isPriorityDiscovery: false,
+        label: "Historical profile",
+      }
+    : baseVisibilityConfig;
+  const discoveryScore = historicalLifecycle ? 0 : getServerDiscoveryScore(visibilityInput);
+  const visibilityExplanation = historicalLifecycle ? historicalVisibilityExplanation(lifecycleDisplay.label) : explainServerVisibility(visibilityInput);
   return {
     linked_server_id: row.id,
     public_slug: row.public_slug,
@@ -1343,7 +1382,14 @@ async function toSafePublicServerPreview(
     server_type: row.server_type,
     tags_json: tagsJson,
     tags: parsePublicTags(tagsJson),
-    status: row.status,
+    status: historicalLifecycle ? "historical" : row.status,
+    lifecycle: {
+      status: lifecycleStatus,
+      label: lifecycleDisplay.label,
+      message: lifecycleDisplay.message,
+      owner_action: lifecycleDisplay.ownerAction,
+      historical: historicalLifecycle,
+    },
     nitrado_service_name: row.nitrado_service_name,
     guild_name: row.guild_name,
     guild_icon_url: row.guild_icon_url,
@@ -1351,12 +1397,12 @@ async function toSafePublicServerPreview(
     stats_sync: statsSync,
     player_slots: row.player_slots,
     max_players: row.max_players ?? row.player_slots,
-    current_players: row.current_players === null ? null : numberOrZero(row.current_players),
+    current_players: publicCurrentPlayers === null ? null : numberOrZero(publicCurrentPlayers),
     platform: row.platform,
     map_name: row.map_name,
     mission: row.mission,
     server_status: row.server_status,
-    is_online: Number(row.is_online) === 1,
+    is_online: publicIsOnline,
     last_sync_at: lastSyncAt,
     metadata_last_checked_at: row.metadata_last_checked_at,
     player_count_last_checked_at: row.player_count_last_checked_at,
@@ -1378,7 +1424,7 @@ async function toSafePublicServerPreview(
     created_at: row.created_at,
     ...stats,
     score_breakdown: null,
-    stats_sync_active: statsSync === "Active",
+    stats_sync_active: publicStatsActive,
     ...emptyPublicServerRatingSummary(),
     advertising,
     plan_key: planKey,
@@ -1389,7 +1435,7 @@ async function toSafePublicServerPreview(
     visibilityTier: visibilityConfig.visibilityTier,
     isFeaturedEligible: visibilityConfig.isFeaturedEligible,
     isSpotlightEligible: visibilityConfig.isSpotlightEligible,
-    visibilityExplanation: explainServerVisibility(visibilityInput),
+    visibilityExplanation,
     activePromotions,
     reputation,
     achievement_showcase: achievementShowcase,
@@ -1417,10 +1463,23 @@ async function toSafePublicServerPreview(
     network_status: {
       adm_status: admStatus,
       stats_sync: statsSync,
-      public_listing: "Active",
+      public_listing: historicalLifecycle ? "Historical" : "Active",
       last_sync_at: lastSyncAt,
     },
     recent_events: [],
+  };
+}
+
+function historicalVisibilityExplanation(lifecycleLabel: string): VisibilityExplanation {
+  return {
+    summary: "Historical profile retained for preserved stats.",
+    factors: [
+      lifecycleLabel,
+      "Not shown as an active live server",
+      "Live player counts and discovery boosts are paused",
+      "Historical stats remain available",
+    ],
+    fairness: "Historical status preserves earned stats and records without promoting the server as currently live.",
   };
 }
 
@@ -1439,6 +1498,7 @@ function buildPublicBadgeCollection(input: {
   planKey: string;
   statsSync: "Active" | "Pending" | "Not Started";
   awardData: { awards: ServerBadgeAwardRow[]; crownCodes: string[] } | null;
+  publicLifecycleActive: boolean;
   featured: boolean;
 }): ServerBadgeCollection {
   const awards = input.awardData?.awards ?? [];
@@ -1457,9 +1517,9 @@ function buildPublicBadgeCollection(input: {
     rank: input.stats.rank,
     score: input.stats.score,
     category: input.row.server_type,
-    active: input.statsSync === "Active",
-    verified: String(input.row.status ?? "").toLowerCase() === "live" || input.statsSync === "Active",
-    featured: input.featured,
+    active: input.publicLifecycleActive && input.statsSync === "Active",
+    verified: input.publicLifecycleActive && (String(input.row.status ?? "").toLowerCase() === "live" || input.statsSync === "Active"),
+    featured: input.publicLifecycleActive && input.featured,
     achievementCount: awardedBadgeCodes.length,
     awardedBadgeCodes,
     activeCrownCodes: input.awardData?.crownCodes ?? [],
