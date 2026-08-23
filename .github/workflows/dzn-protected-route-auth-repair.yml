@@ -48,6 +48,7 @@ jobs:
         run: npm ci
 
       - name: Validate protected auth repair guard
+        id: repair-guard
         run: |
           set -euo pipefail
 
@@ -58,8 +59,15 @@ jobs:
             fi
           else
             if ! echo "${{ github.event.head_commit.message }}" | grep -q "\[run-dzn-protected-auth-repair\]"; then
-              echo "::error::Push-triggered repair requires the explicit repair marker."
-              exit 1
+              echo "::notice::Skipping protected route auth repair because this push did not include the explicit repair marker."
+              echo "should_repair=false" >> "$GITHUB_OUTPUT"
+              {
+                echo "## DZN Protected Route Auth Repair"
+                echo "- Source commit: ${GITHUB_SHA}"
+                echo "- Repair action: skipped"
+                echo "- Reason: ordinary push did not include [run-dzn-protected-auth-repair]"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
             fi
           fi
 
@@ -88,6 +96,7 @@ jobs:
             echo "PROTECTED_CRON_SECRET_SOURCE=SYNC_CRON_SECRET" >> "$GITHUB_ENV"
           fi
           printf "PROTECTED_CRON_SECRET=%s\n" "${CRON_SECRET}" >> "$GITHUB_ENV"
+          echo "should_repair=true" >> "$GITHUB_OUTPUT"
 
           {
             echo "## DZN Protected Route Auth Repair"
@@ -101,6 +110,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Inspect current Pages secret names
+        if: steps.repair-guard.outputs.should_repair == 'true'
         run: |
           set -euo pipefail
           npx wrangler pages secret list --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" | tee pages-secrets-before.txt
@@ -113,6 +123,7 @@ jobs:
           echo "DZN_PLATFORM_CREATOR_DISCORD_ID listed before repair: true"
 
       - name: Provision production Pages cron secret
+        if: steps.repair-guard.outputs.should_repair == 'true'
         run: |
           set -euo pipefail
           printf "%s" "$PROTECTED_CRON_SECRET" |
@@ -135,6 +146,7 @@ jobs:
           echo "DZN_PLATFORM_CREATOR_DISCORD_ID listed after repair: true"
 
       - name: Redeploy production Pages with existing flags
+        if: steps.repair-guard.outputs.should_repair == 'true'
         run: |
           set -euo pipefail
 
@@ -164,6 +176,7 @@ jobs:
             | tee protected-auth-pages-deploy.txt
 
       - name: Verify protected route auth
+        if: steps.repair-guard.outputs.should_repair == 'true'
         run: |
           set -euo pipefail
 

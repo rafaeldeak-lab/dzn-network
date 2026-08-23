@@ -50,6 +50,7 @@ jobs:
         run: npm ci
 
       - name: Validate production Discord auth repair guard
+        id: repair-guard
         run: |
           set -euo pipefail
 
@@ -60,8 +61,15 @@ jobs:
             fi
           else
             if ! echo "${{ github.event.head_commit.message }}" | grep -q "\[run-dzn-production-discord-auth-repair\]"; then
-              echo "::error::Push-triggered repair requires the explicit Discord auth repair marker."
-              exit 1
+              echo "::notice::Skipping production Discord auth repair because this push did not include the explicit repair marker."
+              echo "should_repair=false" >> "$GITHUB_OUTPUT"
+              {
+                echo "## DZN Production Discord Auth Repair"
+                echo "- Source commit: ${GITHUB_SHA}"
+                echo "- Repair action: skipped"
+                echo "- Reason: ordinary push did not include [run-dzn-production-discord-auth-repair]"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
             fi
           fi
 
@@ -102,6 +110,7 @@ jobs:
             exit 1
           fi
           printf "PRODUCTION_DISCORD_CLIENT_ID=%s\n" "${DISCORD_CLIENT_ID}" >> "$GITHUB_ENV"
+          echo "should_repair=true" >> "$GITHUB_OUTPUT"
 
           node <<'NODE'
           const redirectUri = process.env.PRODUCTION_DISCORD_REDIRECT_URI;
@@ -129,6 +138,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify existing production auth secret names
+        if: steps.repair-guard.outputs.should_repair == 'true'
         run: |
           set -euo pipefail
           npx wrangler pages secret list --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" | tee pages-secrets-before.txt
@@ -143,6 +153,7 @@ jobs:
           done
 
       - name: Provision production Discord authorize bindings
+        if: steps.repair-guard.outputs.should_repair == 'true'
         run: |
           set -euo pipefail
 
@@ -169,6 +180,7 @@ jobs:
           done
 
       - name: Ensure Pages production branch is main
+        if: steps.repair-guard.outputs.should_repair == 'true'
         run: |
           set -euo pipefail
 
@@ -198,6 +210,7 @@ jobs:
           NODE
 
       - name: Redeploy production Pages with Discord auth bindings
+        if: steps.repair-guard.outputs.should_repair == 'true'
         run: |
           set -euo pipefail
 
@@ -227,6 +240,7 @@ jobs:
             | tee production-discord-auth-pages-deploy.txt
 
       - name: Verify production Discord authorize route
+        if: steps.repair-guard.outputs.should_repair == 'true'
         run: |
           set -euo pipefail
 
