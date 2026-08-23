@@ -108,6 +108,21 @@ export type BillingReadinessStatus = {
   modeHint: "test" | "live" | "unknown" | "not_configured";
 };
 
+export type StarterTrialClaim = {
+  id: string;
+  discord_user_id: string;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  checkout_session_id: string | null;
+  status: string;
+  claimed_at: string;
+  updated_at: string;
+};
+
+export type StarterTrialReservation =
+  | { reserved: true; claim: StarterTrialClaim }
+  | { reserved: false; claim: StarterTrialClaim | null };
+
 export const PLAN_CONFIG: Record<NormalizedPlanKey, PlanEntitlements> = {
   free: {
     plan_key: "free",
@@ -451,6 +466,171 @@ export async function ensureBillingSchema(env: Env) {
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_ad_bump_events_created_at ON server_ad_bump_events(created_at)").run();
 }
 
+export async function ensureStarterTrialClaimSchema(env: Env) {
+  const db = requireDb(env);
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS owner_starter_trial_claims (
+        id TEXT PRIMARY KEY,
+        discord_user_id TEXT NOT NULL,
+        stripe_customer_id TEXT,
+        stripe_subscription_id TEXT,
+        checkout_session_id TEXT,
+        status TEXT NOT NULL,
+        claimed_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+    )
+    .run();
+  await db
+    .prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_starter_trial_claims_discord_user_id ON owner_starter_trial_claims(discord_user_id)")
+    .run();
+  await db
+    .prepare(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_starter_trial_claims_stripe_customer_id
+       ON owner_starter_trial_claims(stripe_customer_id)
+       WHERE stripe_customer_id IS NOT NULL AND stripe_customer_id != ''`,
+    )
+    .run();
+  await db
+    .prepare("CREATE INDEX IF NOT EXISTS idx_owner_starter_trial_claims_stripe_subscription_id ON owner_starter_trial_claims(stripe_subscription_id)")
+    .run();
+  await db
+    .prepare("CREATE INDEX IF NOT EXISTS idx_owner_starter_trial_claims_checkout_session_id ON owner_starter_trial_claims(checkout_session_id)")
+    .run();
+}
+
+export async function findStarterTrialClaim(env: Env, input: { discordUserId: string; stripeCustomerId?: string | null }) {
+  await ensureStarterTrialClaimSchema(env);
+  const stripeCustomerId = cleanOptionalString(input.stripeCustomerId);
+  if (stripeCustomerId) {
+    return requireDb(env)
+      .prepare(
+        `SELECT * FROM owner_starter_trial_claims
+         WHERE discord_user_id = ? OR stripe_customer_id = ?
+         LIMIT 1`,
+      )
+      .bind(input.discordUserId, stripeCustomerId)
+      .first<StarterTrialClaim>();
+  }
+  return requireDb(env)
+    .prepare("SELECT * FROM owner_starter_trial_claims WHERE discord_user_id = ? LIMIT 1")
+    .bind(input.discordUserId)
+    .first<StarterTrialClaim>();
+}
+
+export async function reserveStarterTrialClaim(env: Env, input: { discordUserId: string; stripeCustomerId?: string | null }): Promise<StarterTrialReservation> {
+  await ensureStarterTrialClaimSchema(env);
+  const existing = await findStarterTrialClaim(env, input);
+  if (existing) return { reserved: false, claim: existing };
+
+  const now = new Date().toISOString();
+  const stripeCustomerId = cleanOptionalString(input.stripeCustomerId);
+  const claim: StarterTrialClaim = {
+    id: crypto.randomUUID(),
+    discord_user_id: input.discordUserId,
+    stripe_customer_id: stripeCustomerId,
+    stripe_subscription_id: null,
+    checkout_session_id: null,
+    status: "checkout_created",
+    claimed_at: now,
+    updated_at: now,
+  };
+  try {
+    await requireDb(env)
+      .prepare(
+        `INSERT INTO owner_starter_trial_claims (
+          id, discord_user_id, stripe_customer_id, stripe_subscription_id, checkout_session_id,
+          status, claimed_at, updated_at
+        ) VALUES (?, ?, ?, NULL, NULL, 'checkout_created', ?, ?)`,
+      )
+      .bind(claim.id, claim.discord_user_id, claim.stripe_customer_id, claim.claimed_at, claim.updated_at)
+      .run();
+  } catch {
+    return { reserved: false, claim: await findStarterTrialClaim(env, input) };
+  }
+
+  return { reserved: true, claim };
+}
+
+export async function attachStarterTrialCheckoutSession(env: Env, input: {
+  discordUserId: string;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+  checkoutSessionId?: string | null;
+  status?: string | null;
+}) {
+  await ensureStarterTrialClaimSchema(env);
+  await requireDb(env)
+    .prepare(
+      `UPDATE owner_starter_trial_claims
+       SET stripe_customer_id = COALESCE(?, stripe_customer_id),
+           stripe_subscription_id = COALESCE(?, stripe_subscription_id),
+           checkout_session_id = COALESCE(?, checkout_session_id),
+           status = COALESCE(?, status),
+           updated_at = ?
+       WHERE discord_user_id = ?`,
+    )
+    .bind(
+      cleanOptionalString(input.stripeCustomerId),
+      cleanOptionalString(input.stripeSubscriptionId),
+      cleanOptionalString(input.checkoutSessionId),
+      cleanOptionalString(input.status),
+      new Date().toISOString(),
+      input.discordUserId,
+    )
+    .run();
+}
+
+export async function releaseStarterTrialReservation(env: Env, input: { discordUserId: string }) {
+  await ensureStarterTrialClaimSchema(env);
+  await requireDb(env)
+    .prepare(
+      `DELETE FROM owner_starter_trial_claims
+       WHERE discord_user_id = ?
+         AND status = 'checkout_created'
+         AND checkout_session_id IS NULL
+         AND stripe_subscription_id IS NULL`,
+    )
+    .bind(input.discordUserId)
+    .run();
+}
+
+export async function upsertStarterTrialClaimFromStripe(env: Env, input: {
+  discordUserId: string;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+  checkoutSessionId?: string | null;
+  status: string;
+}) {
+  await ensureStarterTrialClaimSchema(env);
+  const now = new Date().toISOString();
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO owner_starter_trial_claims (
+        id, discord_user_id, stripe_customer_id, stripe_subscription_id, checkout_session_id,
+        status, claimed_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(discord_user_id) DO UPDATE SET
+        stripe_customer_id = COALESCE(excluded.stripe_customer_id, owner_starter_trial_claims.stripe_customer_id),
+        stripe_subscription_id = COALESCE(excluded.stripe_subscription_id, owner_starter_trial_claims.stripe_subscription_id),
+        checkout_session_id = COALESCE(excluded.checkout_session_id, owner_starter_trial_claims.checkout_session_id),
+        status = excluded.status,
+        updated_at = excluded.updated_at`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      input.discordUserId,
+      cleanOptionalString(input.stripeCustomerId),
+      cleanOptionalString(input.stripeSubscriptionId),
+      cleanOptionalString(input.checkoutSessionId),
+      cleanOptionalString(input.status) ?? "unknown",
+      now,
+      now,
+    )
+    .run();
+}
+
 export async function upsertOwnerEntitlements(env: Env, discordUserId: string, planKey: PlanKey, status: string) {
   await ensureBillingSchema(env);
   const effectivePlan = effectiveEntitlementPlan(planKey, status);
@@ -660,6 +840,10 @@ function numberOrDefault(value: unknown, fallback: number) {
 
 function stringOrNull(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function cleanOptionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function boolInt(value: boolean) {

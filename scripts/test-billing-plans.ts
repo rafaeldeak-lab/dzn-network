@@ -402,6 +402,12 @@ async function run() {
     starter: "price_starter_active",
     pro: "price_pro_active",
   } as const;
+  const activeCheckoutStatements: string[] = [];
+  const activeCheckoutBindings: unknown[][] = [];
+  const activeCheckoutEnv = createFakeEnv({
+    statements: activeCheckoutStatements,
+    bindings: activeCheckoutBindings,
+  }) as Env;
   const capturedActiveCheckoutBodies: Record<keyof typeof activeCheckoutPrices, string> = {
     starter: "",
     pro: "",
@@ -426,7 +432,7 @@ async function run() {
           headers: { "content-type": "application/json" },
         }),
         {
-          ...fakeEnv,
+          ...activeCheckoutEnv,
           MOCK_AUTH: "true",
           STRIPE_SECRET_KEY: "sk_test_placeholder",
           STRIPE_PRICE_STARTER: activeCheckoutPrices.starter,
@@ -443,6 +449,99 @@ async function run() {
     assert.match(capturedActiveCheckoutBodies.starter, /subscription_data%5Btrial_period_days%5D=2/);
     assert.match(capturedActiveCheckoutBodies.starter, /subscription_data%5Btrial_settings%5D%5Bend_behavior%5D%5Bmissing_payment_method%5D=cancel/);
     assert.equal(capturedActiveCheckoutBodies.pro.includes("trial_period_days"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(
+    activeCheckoutStatements.filter((statement) => /^\s*INSERT INTO owner_starter_trial_claims/i.test(statement)).length,
+    1,
+    "Only Starter checkout should reserve a trial claim.",
+  );
+  assert.equal(
+    activeCheckoutBindings.some((values) => values.includes("mock-discord-user") && values.includes("checkout_created")),
+    true,
+    "Starter checkout should reserve the claim before creating a Stripe session.",
+  );
+
+  let blockedStarterFetchCalled = false;
+  globalThis.fetch = async () => {
+    blockedStarterFetchCalled = true;
+    return new Response(JSON.stringify({ id: "cs_blocked", url: "https://checkout.stripe.test/blocked" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  try {
+    const blockedStarterResponse = await checkoutHandler(makeContext(
+      checkoutHandler,
+      new Request("https://local.test/api/billing/create-checkout-session", {
+        method: "POST",
+        body: JSON.stringify({ plan_key: "starter", returnTo: "/dashboard" }),
+        headers: { "content-type": "application/json" },
+      }),
+      {
+        ...createFakeEnv({
+          trialClaim: {
+            id: "claim-used",
+            discord_user_id: "mock-discord-user",
+            stripe_customer_id: null,
+            stripe_subscription_id: "sub_used",
+            checkout_session_id: "cs_used",
+            status: "canceled",
+            claimed_at: "2026-05-17T00:00:00.000Z",
+            updated_at: "2026-05-17T00:00:00.000Z",
+          },
+        }),
+        MOCK_AUTH: "true",
+        STRIPE_SECRET_KEY: "sk_test_placeholder",
+        STRIPE_PRICE_STARTER: activeCheckoutPrices.starter,
+      } as Env,
+    ));
+    assert.equal(blockedStarterResponse.status, 409);
+    assert.match(await blockedStarterResponse.text(), /Starter trial has already been used/i);
+    assert.equal(blockedStarterFetchCalled, false, "Used Starter trials must be blocked before calling Stripe.");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  let blockedCustomerFetchCalled = false;
+  globalThis.fetch = async () => {
+    blockedCustomerFetchCalled = true;
+    return new Response(JSON.stringify({ id: "cs_blocked_customer", url: "https://checkout.stripe.test/blocked-customer" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  try {
+    const blockedCustomerResponse = await checkoutHandler(makeContext(
+      checkoutHandler,
+      new Request("https://local.test/api/billing/create-checkout-session", {
+        method: "POST",
+        body: JSON.stringify({ plan_key: "starter", returnTo: "/dashboard" }),
+        headers: { "content-type": "application/json" },
+      }),
+      {
+        ...createFakeEnv({
+          account: { stripe_customer_id: "cus_existing" },
+          trialClaim: {
+            id: "claim-customer-used",
+            discord_user_id: "other-discord-user",
+            stripe_customer_id: "cus_existing",
+            stripe_subscription_id: "sub_existing",
+            checkout_session_id: "cs_existing",
+            status: "trialing",
+            claimed_at: "2026-05-17T00:00:00.000Z",
+            updated_at: "2026-05-17T00:00:00.000Z",
+          },
+        }),
+        MOCK_AUTH: "true",
+        STRIPE_SECRET_KEY: "sk_test_placeholder",
+        STRIPE_PRICE_STARTER: activeCheckoutPrices.starter,
+      } as Env,
+    ));
+    assert.equal(blockedCustomerResponse.status, 409);
+    assert.match(await blockedCustomerResponse.text(), /Stripe customer/i);
+    assert.equal(blockedCustomerFetchCalled, false, "Used Starter trials must also be blocked by known Stripe customer.");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -512,6 +611,69 @@ async function run() {
   }
   assert.equal(webhookBindings.some((values) => values.includes("discord-webhook") && values.includes("pro")), true);
   assert.equal(webhookBindings.some((values) => values.includes("2026-06-17T00:00:00.000Z")), true);
+
+  const starterWebhookPayload = JSON.stringify({
+    id: "evt_checkout_starter",
+    type: "checkout.session.completed",
+    data: {
+      object: {
+        id: "cs_starter",
+        customer: "cus_starter",
+        subscription: "sub_starter",
+        metadata: { discord_user_id: "discord-starter-webhook", plan_key: "starter" },
+      },
+    },
+  });
+  const starterWebhookBindings: unknown[][] = [];
+  const starterWebhookEnv = createFakeEnv({ bindings: starterWebhookBindings }) as Env;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    id: "sub_starter",
+    object: "subscription",
+    customer: "cus_starter",
+    status: "trialing",
+    cancel_at_period_end: false,
+    items: {
+      data: [{
+        current_period_start: checkoutPeriodStart,
+        current_period_end: checkoutPeriodEnd,
+        price: { id: "price_starter_webhook" },
+      }],
+    },
+  }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+  try {
+    const starterSignedWebhook = await webhookHandler(makeContext(
+      webhookHandler,
+      new Request("https://local.test/api/stripe/webhook", {
+        method: "POST",
+        body: starterWebhookPayload,
+        headers: { "stripe-signature": await stripeSignatureHeader(starterWebhookPayload, "whsec_test") },
+      }),
+      {
+        ...starterWebhookEnv,
+        STRIPE_SECRET_KEY: "sk_test_placeholder",
+        STRIPE_WEBHOOK_SECRET: "whsec_test",
+        STRIPE_PRICE_STARTER: "price_starter_webhook",
+      } as Env,
+    ));
+    assert.equal(starterSignedWebhook.status, 200);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(
+    starterWebhookBindings.some((values) =>
+      values.includes("discord-starter-webhook") &&
+      values.includes("cus_starter") &&
+      values.includes("sub_starter") &&
+      values.includes("cs_starter") &&
+      values.includes("trialing")
+    ),
+    true,
+    "Starter checkout webhooks should attach Stripe identifiers to the durable trial claim.",
+  );
+  assert.equal(starterWebhookBindings.some((values) => values.includes("discord-starter-webhook") && values.includes("starter")), true);
 
   const rootPeriodBindings: unknown[][] = [];
   const rootPeriodPayload = JSON.stringify({
@@ -654,6 +816,7 @@ void run();
 
 function createFakeEnv(options: {
   account?: Record<string, unknown>;
+  trialClaim?: Record<string, unknown>;
   statements?: string[];
   bindings?: unknown[][];
 } = {}) {
@@ -672,7 +835,8 @@ function createFakeEnv(options: {
             return { success: true, meta: {} };
           },
           async first() {
-            if (/SELECT \* FROM owner_billing_accounts/i.test(query) && options.account) return options.account;
+            if (/FROM owner_billing_accounts/i.test(query) && options.account) return options.account;
+            if (/FROM owner_starter_trial_claims/i.test(query) && options.trialClaim) return options.trialClaim;
             return null;
           },
           async all() {
