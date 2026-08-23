@@ -68,7 +68,7 @@ const activePlans = getBillingPlanSummaries({
   STRIPE_PRICE_PRO: "price_pro",
   STRIPE_PRICE_PREMIUM: "price_premium",
 } as Env);
-assert.deepEqual(activePlans.map((plan) => plan.plan_key), ["starter", "pro", "premium"], "Public billing plans should remain Starter, Pro, Premium.");
+assert.deepEqual(activePlans.map((plan) => plan.plan_key), ["starter", "pro"], "Public billing plans should remain Starter and Pro only.");
 assert.equal(JSON.stringify(activePlans).includes("Network"), false, "Network should not appear as a public billing plan.");
 assert.equal(JSON.stringify(activePlans).includes("Partner"), false, "Partner should not appear as a public billing plan.");
 

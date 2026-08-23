@@ -234,7 +234,7 @@ const POST_TYPES: Array<{ key: string; label: string; requiredDataSource: string
   { key: "tournament_created", label: "Tournament created", requiredDataSource: "tournament events" },
   { key: "milestone_reached", label: "Milestone reached", requiredDataSource: "stored achievement stats" },
   { key: "dzn_announcement", label: "DZN announcement", requiredDataSource: "owner-authored announcement" },
-  { key: "package_promotion", label: "Free/Pro/Premium promotion post", requiredDataSource: "billing package metadata" },
+  { key: "package_promotion", label: "Starter/Pro promotion post", requiredDataSource: "billing package metadata" },
 ];
 
 export const OWNER_DISCORD_CHANNEL_SLOTS: Array<{ slot: string; label: string; postTypes: string[] }> = [
@@ -260,7 +260,7 @@ export const OWNER_DISCORD_PREVIEW_OPTIONS: OwnerDiscordPreviewOption[] = [
   { type: "longest_kill", label: "Longest kill update", description: "Highlight a stored longest-kill stat without changing scoring.", networkWide: false, suggestedSlot: "leaderboard-updates" },
   { type: "milestone", label: "Milestone reached", description: "Preview a server or network milestone announcement.", networkWide: false, suggestedSlot: "owner-alerts" },
   { type: "dzn_announcement", label: "DZN announcement", description: "Owner-authored DZN network announcement preview.", networkWide: true, suggestedSlot: "announcements" },
-  { type: "package_promotion", label: "Free/Pro/Premium promotion post", description: "Preview package messaging while auto posting stays disabled.", networkWide: true, suggestedSlot: "announcements" },
+  { type: "package_promotion", label: "Starter/Pro promotion post", description: "Preview package messaging while auto posting stays disabled.", networkWide: true, suggestedSlot: "announcements" },
 ];
 
 export async function getOwnerDiscordOverview(env: Env): Promise<OwnerDiscordOverview> {
@@ -1118,7 +1118,7 @@ function getPreviewBase(type: OwnerDiscordPreviewType): Omit<OwnerDiscordPreview
       bannerUrl: null,
       fields: [
         { name: "Server", value: "Fresh DZN Beta Listing", inline: true },
-        { name: "Package", value: "Free Listing", inline: true },
+        { name: "Package", value: "Starter Listing", inline: true },
         { name: "Status", value: "Public profile created", inline: false },
       ],
       footer: "Preview only - not sent",
@@ -1264,14 +1264,14 @@ function getPreviewBase(type: OwnerDiscordPreviewType): Omit<OwnerDiscordPreview
   if (type === "package_promotion") {
     return {
       type,
-      title: "Free / Pro listing promotion",
+      title: "Starter / Pro listing promotion",
       description: "A package promotion preview that keeps paid visibility separate from competitive stats.",
       colorHex: "#a3e635",
       thumbnailUrl: null,
       bannerUrl: null,
       fields: [
-        { name: "Free Listing", value: "Useful public discovery basics", inline: true },
-        { name: "Pro Listing", value: "Enhanced presentation without stat advantage", inline: true },
+        { name: "Starter", value: "Useful public discovery basics after the trial starts", inline: true },
+        { name: "Pro", value: "Enhanced presentation without stat advantage", inline: true },
         { name: "Fairness", value: "No paid rank, K/D, score, review, crown or season-win advantage.", inline: false },
       ],
       footer: "Preview only - not sent",

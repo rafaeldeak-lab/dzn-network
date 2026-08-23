@@ -38,7 +38,6 @@ const REQUIRED_ENV = [
   "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
   "STRIPE_PRICE_STARTER",
   "STRIPE_PRICE_PRO",
-  "STRIPE_PRICE_PREMIUM",
   "TOKEN_ENCRYPTION_KEY",
 ] as const;
 
@@ -140,18 +139,18 @@ function auditBillingPlans() {
     if (plan.allowed_features.length > 0) pass(`Plan ${key} features`, `${plan.allowed_features.length} features configured.`);
     else fail(`Plan ${key} features`, "No allowed features configured.");
 
-    if (key === "starter" && plan.allowed_auto_posts.length === 1 && plan.allowed_auto_posts[0] === "basic_status_embed") {
-      pass("Starter auto-post limit", "Starter only allows Basic Server Status.");
+    if (key === "starter" && plan.allowed_auto_posts.every((postType) => ["server_advert", "bump_announcement", "rating_review", "basic_status_embed"].includes(postType))) {
+      pass("Starter auto-post limit", "Starter only allows basic listing auto-post types.");
     }
-    if (key === "premium" && AUTO_POST_TYPES.every((postType) => hasAutoPost("premium", postType))) {
-      pass("Premium auto-post limit", "Premium allows every configured auto-post type.");
+    if (key === "pro" && AUTO_POST_TYPES.every((postType) => hasAutoPost("pro", postType))) {
+      pass("Pro auto-post limit", "Pro allows every configured auto-post type.");
     }
   }
 
   const expectedIntervals = [
     ["starter", 7, 15, 60],
     ["pro", 5, 10, 30],
-    ["premium", 1, 3, 10],
+    ["premium", 5, 10, 30],
   ] as const;
   for (const [planKey, statusInterval, discoveryInterval, admInterval] of expectedIntervals) {
     if (getServerStatusInterval(planKey) === statusInterval) pass(`${planKey} status cadence`, `Status sync every ${statusInterval} minutes.`);

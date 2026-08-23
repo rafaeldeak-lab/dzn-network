@@ -594,7 +594,7 @@ function UpgradeAlert({ subscription }: { subscription: TournamentSubscription }
       <div className="flex items-start gap-3">
         <Lock className="mt-0.5 h-5 w-5" />
         <div>
-          <h2 className="font-black uppercase">Pro or Premium required</h2>
+          <h2 className="font-black uppercase">Pro required</h2>
           <p className="mt-1 text-sm text-amber-100/80">
             Cross-server matching and live tournament registration are reserved for active Pro and Premium subscriptions. Current plan: {subscription.plan_key.toUpperCase()} ({subscription.status}).
           </p>

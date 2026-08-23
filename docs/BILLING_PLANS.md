@@ -1,77 +1,72 @@
 # DZN Billing Plans
 
-## Active Public Plans
+## Active Purchasable Plans
 
-Only these plans are active and public:
+Only these plans may be shown as new customer-facing checkout options:
 
-| Plan | Price | Public publishing | Visibility weight |
-| --- | ---: | --- | ---: |
-| Starter | £4.99/month | Every 24 hours | 1 |
-| Pro | £9.99/month | Every 4 hours | 2 |
-| Premium | £19.99/month | Fastest/current publishing | 4 |
+| Plan | Public label | Price | Trial | Public/advert publication | Linked servers | Promotion credits |
+| --- | --- | ---: | --- | --- | ---: | ---: |
+| Starter | 2-day free trial | £0 today, then £2/month | 2 days | Every 72 hours after a successful publication | 1 | 0 |
+| Pro | Full DZN Access | £10/month | None | Every 24 hours after a successful publication | 3 | 2 per Stripe billing period |
 
-Premium uses plan key `premium`, price `19.99`, and derived Stripe minor units `1999`.
+Starter must not be described simply as free. Customer-facing copy must clearly say:
 
-## Issue #10 Public Subscription Contract
+- "Starter - 2-day free trial"
+- "£0 today, then £2/month."
+- "First payment: £2 after the two-day trial. Cancel before trial expiry to pay nothing."
+- "Charged automatically every month until cancelled."
 
-The active non-billing contract for issue #10 is stored in `lib/billing/plans.ts` as `SUBSCRIPTION_PLAN_PUBLIC_CONTRACT`. It is safe public metadata for UI, docs, and tests. It does not create Stripe Prices, change checkout behavior, apply migrations, or mutate production data.
+Pro customer-facing copy must clearly say:
 
-| Plan | Promotion credits | Badge showcase | Discovery treatment |
-| --- | ---: | ---: | --- |
-| Starter | 0/month | 3 badges | Standard listing and search placement |
-| Pro | 2/month | 5 badges | Featured rotation and enhanced discovery |
-| Premium | 8/month | 8 badges | Premium discovery, homepage placement, and spotlight eligibility |
+- "Pro - Full DZN Access"
+- "£10/month."
+- "Charged immediately and renewed monthly until cancelled."
 
-All three plans keep ADM tracking unchanged. Plan tier controls public publishing cadence, discovery visibility, and presentation benefits only.
+## Public Subscription Contract
 
-The public contract must keep these fairness guarantees:
+The active non-production-mutation contract is stored in `lib/billing/plans.ts` as `SUBSCRIPTION_PLAN_PUBLIC_CONTRACT`. It is safe public metadata for UI, docs, and tests. It does not create Stripe Prices, change live Stripe state, apply production migrations, or mutate production data.
 
-- paid plans do not change ADM ingestion, Nitrado reads, imported statistics, or sync workers
-- paid plans do not change leaderboard rank, kills, deaths, K/D, longest kill, crowns, tournament score, or season results
-- badges, crowns, founder rewards, seasonal trophies, and reputation tiers must be earned or admin-awarded through protected paths, not purchased through checkout
+| Plan | Discovery treatment | Badge showcase | Organic bump cooldown |
+| --- | --- | ---: | --- |
+| Starter | Standard listing and search placement | 3 badges | 30 days |
+| Pro | Full DZN Access, featured rotation, spotlight eligibility, advanced profile presentation | 8 badges | 7 days |
 
-Future Stripe changes remain high-risk. Creating or replacing live Stripe Prices, changing webhook behavior, changing checkout flows, or migrating live subscriptions requires a deliberate human-approved billing phase.
+## Legacy Plan Compatibility
 
-## Stripe Price Environment
+`premium`, `network`, and `partner` are legacy read/input compatibility values only.
 
-Required active checkout variables:
+They must not be purchasable through new checkout, billing cards, plan comparison pages, or `/api/billing/plans` output. Existing stored Premium, Network, and Partner values may still be read so old Stripe events, invoices, subscriptions, and database rows remain compatible.
+
+Legacy Premium, Network, and Partner subscriptions map to effective Pro capabilities. Do not delete or rewrite Stripe history. Do not expose legacy plans through new Checkout Sessions.
+
+Keep these server-only compatibility variables only while old active legacy subscriptions may still emit webhook events with archived Price IDs:
 
 ```text
-STRIPE_PRICE_STARTER
-STRIPE_PRICE_PRO
 STRIPE_PRICE_PREMIUM
-```
-
-`STRIPE_PRICE_PREMIUM` should point at the active Premium £19.99/month Price. In test mode this is currently:
-
-```text
-price_1TY4diJPrnZ0cnkHoqKk4pKc
-```
-
-Do not expose Stripe secret keys or webhook secrets in public code, logs, or docs.
-
-## Legacy Aliases
-
-`network` and `partner` are legacy aliases only. They must normalize to `premium` for old database rows and old Stripe subscriptions, but they must not appear in public billing UI, pricing cards, checkout buttons, plan comparison pages, or `/api/billing/plans` output.
-
-DZN Partner is archived in Stripe.
-
-Keep these Cloudflare variables only while old active legacy subscriptions may still emit webhook events with archived Price IDs:
-
-```text
 STRIPE_PRICE_NETWORK
 STRIPE_PRICE_PARTNER
 ```
 
-They are server-only compatibility variables for Stripe webhook plan mapping. They are not used for new checkout. Remove them only after confirming there are no active or trialing Stripe subscriptions on those archived Network/Partner Prices.
+They are not required for new checkout readiness.
 
-These old public variables are not needed and can be deleted after the cleanup deploy:
+## Fair Competition
 
-```text
-NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID
-NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID
-```
+Paid access must never alter competitive results. Starter, Pro, and legacy-mapped accounts must receive equal treatment for:
+
+- leaderboard calculations
+- server ranking calculations
+- player ranking calculations
+- kills, deaths, K/D, longest kill, and longest-lived statistics
+- ratings and reviews
+- event scoring
+- Server Wars scoring
+- season wins, crowns, and earned badges
+- ADM ingestion, statistics syncing, and leaderboard processing
+
+Pro purchases presentation, automation, promotion, analytics, additional server allowance, and advanced owner tools. It does not buy leaderboard rank, crowns, badges, reviews, or gameplay results.
 
 ## Protected Systems
 
 Billing plan cleanup must not change ADM ingestion, Nitrado integration, Worker sync logic, player profiles, kills, deaths, events, sessions, token handling, or auth/session security.
+
+Future live billing work remains high-risk. Creating or replacing live Stripe Prices, changing webhook behavior, changing checkout flows, adding trial ledgers, applying billing migrations, or migrating live subscriptions requires a deliberate human-approved billing phase.

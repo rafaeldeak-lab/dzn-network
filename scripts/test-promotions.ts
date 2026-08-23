@@ -17,9 +17,10 @@ import type { Env } from "../functions/_lib/types";
 
 assert.equal(getPromotionConfigForPlan("starter").monthlyCredits, 0);
 assert.equal(getPromotionConfigForPlan("pro").monthlyCredits, 2);
-assert.equal(getPromotionConfigForPlan("premium").monthlyCredits, 8);
-assert.equal(getPromotionConfigForPlan("network").monthlyCredits, 8);
-assert.equal(getPromotionConfigForPlan("partner").monthlyCredits, 8);
+assert.equal(getPromotionConfigForPlan("premium").monthlyCredits, 2);
+assert.equal(getPromotionConfigForPlan("premium").planKey, "pro");
+assert.equal(getPromotionConfigForPlan("network").monthlyCredits, 2);
+assert.equal(getPromotionConfigForPlan("partner").monthlyCredits, 2);
 assert.equal(hasActivePromotionSubscription("active"), true);
 assert.equal(hasActivePromotionSubscription("trialing"), true);
 for (const inactiveStatus of ["canceled", "cancelled", "past_due", "unpaid", "incomplete", "incomplete_expired", "paused", "expired", null, undefined]) {
@@ -27,23 +28,23 @@ for (const inactiveStatus of ["canceled", "cancelled", "past_due", "unpaid", "in
 }
 assert.equal(getPromotionConfigForSubscription("pro", "active").monthlyCredits, 2);
 assert.equal(getPromotionConfigForSubscription("pro", "trialing").monthlyCredits, 2);
-assert.equal(getPromotionConfigForSubscription("premium", "active").monthlyCredits, 8);
-assert.equal(getPromotionConfigForSubscription("premium", "trialing").monthlyCredits, 8);
-assert.equal(getPromotionConfigForSubscription("network", "active").monthlyCredits, 8);
-assert.equal(getPromotionConfigForSubscription("partner", "trialing").monthlyCredits, 8);
+assert.equal(getPromotionConfigForSubscription("premium", "active").monthlyCredits, 2);
+assert.equal(getPromotionConfigForSubscription("premium", "trialing").monthlyCredits, 2);
+assert.equal(getPromotionConfigForSubscription("network", "active").monthlyCredits, 2);
+assert.equal(getPromotionConfigForSubscription("partner", "trialing").monthlyCredits, 2);
 assert.equal(getPromotionConfigForSubscription("pro", "canceled").monthlyCredits, 0);
 assert.equal(getPromotionConfigForSubscription("premium", "past_due").monthlyCredits, 0);
 assert.equal(getPromotionConfigForSubscription("network", "unpaid").monthlyCredits, 0);
 assert.equal(getPromotionConfigForSubscription("partner", null).monthlyCredits, 0);
 
 assert.deepEqual(getPromotionConfigForPlan("starter").allowedPromotionTypes, []);
-assert.deepEqual(getPromotionConfigForPlan("pro").allowedPromotionTypes, ["directory_bump", "featured_rotation"]);
+assert.deepEqual(getPromotionConfigForPlan("pro").allowedPromotionTypes, ["directory_bump", "featured_rotation", "spotlight_boost"]);
 assert.deepEqual(getPromotionConfigForPlan("premium").allowedPromotionTypes, ["directory_bump", "featured_rotation", "spotlight_boost"]);
-assert.equal(getPromotionConfigForPlan("pro").lockedPromotionTypes.some((type) => type.promotionType === "spotlight_boost"), true);
+assert.equal(getPromotionConfigForPlan("pro").lockedPromotionTypes.some((type) => type.promotionType === "spotlight_boost"), false);
 assert.equal(getPromotionConfigForPlan("premium").lockedPromotionTypes.some((type) => type.promotionType === "seasonal_push"), true);
 assert.equal(explainPromotionBenefits("starter").some((line) => /upgrade/i.test(line)), true);
-assert.equal(explainPromotionBenefits("premium").some((line) => /8 monthly/i.test(line)), true);
-assert.equal(explainPromotionBenefits("pro").some((line) => /Premium adds Spotlight boosts/i.test(line)), true);
+assert.equal(explainPromotionBenefits("premium").some((line) => /2 monthly/i.test(line)), true);
+assert.equal(explainPromotionBenefits("pro").some((line) => /Spotlight boost eligibility is active/i.test(line)), true);
 
 const baseDiscovery = getServerDiscoveryScore({
   planKey: "pro",
@@ -59,14 +60,14 @@ const bumpedDiscovery = getServerDiscoveryScore({
   activePromotions: [{ promotionType: "directory_bump", status: "active", endsAt: "2099-01-01T00:00:00.000Z" }],
 });
 const spotlightDiscovery = getServerDiscoveryScore({
-  planKey: "premium",
+  planKey: "pro",
   stats_sync: "Active",
   total_joins: 100,
   unique_players: 30,
   activePromotions: [{ promotionType: "spotlight_boost", status: "active", endsAt: "2099-01-01T00:00:00.000Z" }],
 });
 assert.equal(bumpedDiscovery > baseDiscovery, true, "Active bump should affect discovery score.");
-assert.equal(spotlightDiscovery > bumpedDiscovery, true, "Premium spotlight boost should affect discovery score.");
+assert.equal(spotlightDiscovery > bumpedDiscovery, true, "Pro spotlight boost should affect discovery score.");
 
 const sorted = sortPublicServersForDiscovery([
   { id: "rank-one", advertising: publicAdvertisingFromState(null), discoveryScore: 10, visibility_weight: 1, rank: 1, score: 900, created_at: "2026-01-01T00:00:00.000Z" },
@@ -192,7 +193,7 @@ const trackingHelperSource = publicNetworkUi.slice(publicNetworkUi.indexOf("func
 assert.equal(/user|discord|session|cookie|ip|player_profiles|kill_events|player_events/i.test(trackingHelperSource), false, "Public tracking UI must not collect personal data or touch protected systems.");
 
 const publicPlans = getBillingPlanSummaries({} as Env);
-assert.deepEqual(publicPlans.map((plan) => plan.plan_key), ["starter", "pro", "premium"]);
+assert.deepEqual(publicPlans.map((plan) => plan.plan_key), ["starter", "pro"]);
 assert.equal(publicPlans.some((plan) => /network|partner/i.test(`${plan.plan_key} ${plan.name} ${plan.price_label}`)), false);
 
 console.log("Promotion credits backend tests passed.");

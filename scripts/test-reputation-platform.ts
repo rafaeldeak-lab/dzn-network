@@ -34,7 +34,7 @@ assert.deepEqual(getCheckoutConfigured({
   STRIPE_PRICE_STARTER: "price_starter",
   STRIPE_PRICE_PRO: "price_pro",
   STRIPE_PRICE_PREMIUM: "price_premium",
-} as Env), { starter: true, pro: true, premium: true });
+} as Env), { starter: true, pro: true });
 
 assert.equal(getPlanFromStripePriceId({
   STRIPE_PRICE_NETWORK: "price_network_legacy",
@@ -50,15 +50,13 @@ const summaries = getBillingPlanSummaries({
   STRIPE_PRICE_PRO: "price_pro",
   STRIPE_PRICE_PREMIUM: "price_premium",
 } as Env);
-assert.deepEqual(summaries.map((plan) => plan.plan_key), ["starter", "pro", "premium"]);
+assert.deepEqual(summaries.map((plan) => plan.plan_key), ["starter", "pro"]);
 assert.equal(summaries.find((plan) => plan.plan_key === "starter")?.visibility_weight, 1);
-assert.equal(summaries.find((plan) => plan.plan_key === "pro")?.visibility_weight, 2);
-assert.equal(summaries.find((plan) => plan.plan_key === "premium")?.visibility_weight, 4);
-assert.equal(summaries.find((plan) => plan.plan_key === "premium")?.monthly_price_gbp, 19.99);
-assert.equal(summaries.find((plan) => plan.plan_key === "premium")?.price_label, "£19.99/month");
-assert.equal(summaries.find((plan) => plan.plan_key === "starter")?.public_publish_interval_minutes, 1440);
-assert.equal(summaries.find((plan) => plan.plan_key === "pro")?.public_publish_interval_minutes, 240);
-assert.equal(summaries.find((plan) => plan.plan_key === "premium")?.public_publish_interval_minutes, 0);
+assert.equal(summaries.find((plan) => plan.plan_key === "pro")?.visibility_weight, 4);
+assert.equal(summaries.find((plan) => plan.plan_key === "pro")?.monthly_price_gbp, 10);
+assert.equal(summaries.find((plan) => plan.plan_key === "pro")?.price_label, "£10/month");
+assert.equal(summaries.find((plan) => plan.plan_key === "starter")?.public_publish_interval_minutes, 4320);
+assert.equal(summaries.find((plan) => plan.plan_key === "pro")?.public_publish_interval_minutes, 1440);
 const planSummaryKeys = summaries.map((plan) => String(plan.plan_key));
 assert.equal(planSummaryKeys.includes("network"), false);
 assert.equal(planSummaryKeys.includes("partner"), false);

@@ -494,7 +494,7 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
   } catch (error) {
     return eventCreateFailed("entitlement_lookup", requestId, error);
   }
-  if (!hasEntitlement) return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Event creation is a Pro or Premium feature." };
+  if (!hasEntitlement) return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Event creation is a Pro feature." };
 
   const name = sanitizePlainText(input.name, 90);
   if (name.length < 3) return { ok: false, status: 400, error: "INVALID_NAME", message: "Event name must be at least 3 characters." };
@@ -659,7 +659,7 @@ export async function joinCompetitiveEvent(env: Env, viewer: SessionUser | null,
   }
   const entitlement = serverHasEventEntitlement(server);
   if (event.premium_tier && event.premium_tier !== "free" && !entitlement) {
-    return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Unlock event registration with Pro or Premium." };
+    return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Unlock event registration with Pro." };
   }
   const existing = await db
     .prepare("SELECT id FROM competitive_event_servers WHERE event_id = ? AND server_id = ? LIMIT 1")
@@ -724,7 +724,7 @@ export async function createCategorySafeMatchmaking(env: Env, viewer: SessionUse
   const primary = await fetchOwnedServer(env, viewer, input.server_id);
   if (!primary) return { ok: false, status: 404, error: "SERVER_NOT_FOUND", message: "Server not found." };
   if (!serverHasEventEntitlement(primary)) {
-    return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Cross-server matchmaking is a Pro or Premium feature." };
+      return { ok: false, status: 403, error: "PLAN_LOCKED", message: "Cross-server matchmaking is a Pro feature." };
   }
   if (Number(primary.competitive_enabled ?? 0) !== 1) {
     return { ok: false, status: 409, error: "COMPETITIVE_DISABLED", message: "Enable competitive matchmaking for this server first." };

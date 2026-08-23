@@ -1,4 +1,5 @@
-export type PaidPlanKey = "starter" | "pro" | "premium";
+export type PurchasablePlanKey = "starter" | "pro";
+export type PaidPlanKey = PurchasablePlanKey | "premium";
 export type LegacyPaidPlanKey = "network" | "partner";
 export type NormalizedPlanKey = "free" | PaidPlanKey;
 export type PlanKey = NormalizedPlanKey | LegacyPaidPlanKey;
@@ -78,14 +79,24 @@ export type BillingPlanConfig = {
 };
 
 export type SubscriptionPlanPublicContract = {
-  key: PaidPlanKey;
+  key: PurchasablePlanKey;
   name: string;
+  marketingLabel: string;
+  ctaLabel: string;
   priceLabel: string;
   monthlyPriceGbp: number;
+  trialDays: number;
+  requiresPaymentMethod: boolean;
+  firstPaymentAmountGbp: number;
+  firstPaymentLabel: string;
+  autoRenewsMonthly: boolean;
+  linkedServerAllowance: number;
+  descriptionCharacterLimit: number;
+  organicBumpCooldownDays: number;
   publicPublishingLabel: string;
   publicPublishingIntervalMinutes: number;
   visibilityWeight: number;
-  discoveryTreatment: "standard_listing" | "featured_rotation" | "premium_discovery";
+  discoveryTreatment: "standard_listing" | "full_dzn_access";
   promotionCreditsPerMonth: number;
   badgeShowcaseLimit: number;
   profileBenefits: readonly string[];
@@ -94,7 +105,7 @@ export type SubscriptionPlanPublicContract = {
   trackingGuarantee: string;
 };
 
-export type ListingPlanKey = "free" | "pro";
+export type ListingPlanKey = "free" | "starter" | "pro";
 export type ListingFeatureKey =
   | "public_listing"
   | "basic_profile"
@@ -111,7 +122,7 @@ export type ListingFeatureKey =
 
 export type ListingLimits = {
   listingPlanKey: ListingPlanKey;
-  publicLabel: "Free Listing" | "Pro Listing";
+  publicLabel: "Free Listing" | "Starter Listing" | "Pro Listing";
   descriptionLimit: number;
   bumpCooldownDays: number;
   galleryLimit: number;
@@ -205,6 +216,24 @@ export const LISTING_LIMITS: Record<ListingPlanKey, ListingLimits> = {
     ownerAnnouncement: false,
     listingAnalytics: "limited",
   },
+  starter: {
+    listingPlanKey: "starter",
+    publicLabel: "Starter Listing",
+    descriptionLimit: FREE_DESCRIPTION_LIMIT,
+    bumpCooldownDays: FREE_BUMP_COOLDOWN_DAYS,
+    galleryLimit: FREE_GALLERY_LIMIT,
+    galleryAllowedMimeTypes: PRO_GALLERY_ALLOWED_MIME_TYPES,
+    galleryMaxFileSizeBytes: PRO_GALLERY_MAX_FILE_SIZE_BYTES,
+    galleryRecommendedWidth: PRO_GALLERY_RECOMMENDED_WIDTH,
+    galleryRecommendedHeight: PRO_GALLERY_RECOMMENDED_HEIGHT,
+    galleryAspectRatio: PRO_GALLERY_ASPECT_RATIO,
+    discordChannelLimit: 1,
+    allowedAutoPosts: FREE_LISTING_AUTO_POST_TYPES,
+    enhancedDiscordEmbeds: false,
+    customAdvertBanner: false,
+    ownerAnnouncement: false,
+    listingAnalytics: "limited",
+  },
   pro: {
     listingPlanKey: "pro",
     publicLabel: "Pro Listing",
@@ -244,13 +273,13 @@ export const BILLING_PLAN_CONFIG: Record<NormalizedPlanKey, BillingPlanConfig> =
   starter: {
     key: "starter",
     name: "Starter",
-    monthly_price: 4.99,
+    monthly_price: 2,
     stripe_price_env_key: "STRIPE_PRICE_STARTER",
     server_status_interval_minutes: 7,
     adm_discovery_interval_minutes: 15,
     adm_pull_interval_minutes: 60,
     manual_adm_refresh_cooldown_minutes: 60,
-    public_publish_interval_minutes: 1440,
+    public_publish_interval_minutes: 4320,
     visibility_weight: 1,
     allowed_features: [
       "server_profile",
@@ -267,14 +296,14 @@ export const BILLING_PLAN_CONFIG: Record<NormalizedPlanKey, BillingPlanConfig> =
   pro: {
     key: "pro",
     name: "Pro",
-    monthly_price: 9.99,
+    monthly_price: 10,
     stripe_price_env_key: "STRIPE_PRICE_PRO",
     server_status_interval_minutes: 5,
     adm_discovery_interval_minutes: 10,
     adm_pull_interval_minutes: 30,
     manual_adm_refresh_cooldown_minutes: 30,
-    public_publish_interval_minutes: 240,
-    visibility_weight: 2,
+    public_publish_interval_minutes: 1440,
+    visibility_weight: 4,
     allowed_features: [
       "server_profile",
       "basic_stats",
@@ -282,27 +311,42 @@ export const BILLING_PLAN_CONFIG: Record<NormalizedPlanKey, BillingPlanConfig> =
       "leaderboards",
       "advanced_stats",
       "server_visibility_boost",
+      "server_vs_server",
+      "event_leaderboards",
+      "network_rankings",
+      "public_network_listing",
+      "partner_placement",
+      "partner_badge",
+      "priority_visibility",
+      "priority_refresh",
+      "public_featured_listing",
       "achievement_participation",
       "seasonal_participation",
       "featured_rotation",
       "enhanced_discovery",
       "profile_customization",
       "enhanced_achievement_tracking",
+      "premium_badge",
+      "homepage_featured",
+      "priority_discovery",
+      "server_spotlight",
+      "premium_seasonal_rewards",
+      "premium_analytics",
       "billing_portal",
     ],
     allowed_auto_posts: [...PRO_LISTING_AUTO_POST_TYPES],
-    priority_level: 2,
+    priority_level: 4,
   },
   premium: {
     key: "premium",
-    name: "Premium",
-    monthly_price: 19.99,
+    name: "Legacy Premium",
+    monthly_price: 10,
     stripe_price_env_key: "STRIPE_PRICE_PREMIUM",
-    server_status_interval_minutes: 1,
-    adm_discovery_interval_minutes: 3,
-    adm_pull_interval_minutes: 10,
-    manual_adm_refresh_cooldown_minutes: 10,
-    public_publish_interval_minutes: 0,
+    server_status_interval_minutes: 5,
+    adm_discovery_interval_minutes: 10,
+    adm_pull_interval_minutes: 30,
+    manual_adm_refresh_cooldown_minutes: 30,
+    public_publish_interval_minutes: 1440,
     visibility_weight: 4,
     allowed_features: [
       "server_profile",
@@ -331,7 +375,6 @@ export const BILLING_PLAN_CONFIG: Record<NormalizedPlanKey, BillingPlanConfig> =
       "server_spotlight",
       "premium_seasonal_rewards",
       "premium_analytics",
-      "premium_reputation_multiplier",
       "billing_portal",
     ],
     allowed_auto_posts: [...PRO_LISTING_AUTO_POST_TYPES],
@@ -339,15 +382,25 @@ export const BILLING_PLAN_CONFIG: Record<NormalizedPlanKey, BillingPlanConfig> =
   },
 };
 
-export const PAID_PLAN_KEYS: PaidPlanKey[] = ["starter", "pro", "premium"];
+export const PAID_PLAN_KEYS: PurchasablePlanKey[] = ["starter", "pro"];
 export const LEGACY_PAID_PLAN_KEYS: LegacyPaidPlanKey[] = ["network", "partner"];
-export const SUBSCRIPTION_PLAN_PUBLIC_CONTRACT: Record<PaidPlanKey, SubscriptionPlanPublicContract> = {
+export const SUBSCRIPTION_PLAN_PUBLIC_CONTRACT: Record<PurchasablePlanKey, SubscriptionPlanPublicContract> = {
   starter: {
     key: "starter",
     name: BILLING_PLAN_CONFIG.starter.name,
-    priceLabel: "£4.99/month",
+    marketingLabel: "2-day free trial",
+    ctaLabel: "Start 2-day free trial — then £2/month",
+    priceLabel: "£0 today, then £2/month",
     monthlyPriceGbp: BILLING_PLAN_CONFIG.starter.monthly_price,
-    publicPublishingLabel: "Public stats, leaderboards and rankings every 24 hours",
+    trialDays: 2,
+    requiresPaymentMethod: true,
+    firstPaymentAmountGbp: 2,
+    firstPaymentLabel: "First payment is attempted after the two-day trial; cancel before trial expiry to pay nothing.",
+    autoRenewsMonthly: true,
+    linkedServerAllowance: 1,
+    descriptionCharacterLimit: FREE_DESCRIPTION_LIMIT,
+    organicBumpCooldownDays: FREE_BUMP_COOLDOWN_DAYS,
+    publicPublishingLabel: "One successful public/advert publication every 72 hours",
     publicPublishingIntervalMinutes: BILLING_PLAN_CONFIG.starter.public_publish_interval_minutes,
     visibilityWeight: BILLING_PLAN_CONFIG.starter.visibility_weight,
     discoveryTreatment: "standard_listing",
@@ -365,36 +418,26 @@ export const SUBSCRIPTION_PLAN_PUBLIC_CONTRACT: Record<PaidPlanKey, Subscription
   pro: {
     key: "pro",
     name: BILLING_PLAN_CONFIG.pro.name,
-    priceLabel: "£9.99/month",
+    marketingLabel: "Full DZN Access",
+    ctaLabel: "Go Pro — £10/month",
+    priceLabel: "£10/month",
     monthlyPriceGbp: BILLING_PLAN_CONFIG.pro.monthly_price,
-    publicPublishingLabel: "Public stats, leaderboards and rankings every 4 hours",
+    trialDays: 0,
+    requiresPaymentMethod: true,
+    firstPaymentAmountGbp: 10,
+    firstPaymentLabel: "Charged immediately and renewed monthly until cancelled.",
+    autoRenewsMonthly: true,
+    linkedServerAllowance: 3,
+    descriptionCharacterLimit: PRO_DESCRIPTION_LIMIT,
+    organicBumpCooldownDays: PRO_BUMP_COOLDOWN_DAYS,
+    publicPublishingLabel: "One successful public/advert publication every 24 hours",
     publicPublishingIntervalMinutes: BILLING_PLAN_CONFIG.pro.public_publish_interval_minutes,
     visibilityWeight: BILLING_PLAN_CONFIG.pro.visibility_weight,
-    discoveryTreatment: "featured_rotation",
+    discoveryTreatment: "full_dzn_access",
     promotionCreditsPerMonth: 2,
-    badgeShowcaseLimit: 5,
-    profileBenefits: ["Enhanced discovery placement", "Featured rotation eligibility", "Expanded profile and Discord listing tools"],
-    achievementBenefits: ["Earned badge showcase grows to 5 badges", "Standard reputation frames and themes can improve presentation"],
-    fairnessGuarantees: [
-      "Does not change ADM data collection or imported statistics",
-      "Does not change leaderboard rank, kills, deaths, K/D, longest kill, crowns, tournament score or season results",
-      "Does not allow badges, crowns or seasonal wins to be bought",
-    ],
-    trackingGuarantee: "All ADM tracking continues unchanged; plan tier controls public publishing cadence and visibility only.",
-  },
-  premium: {
-    key: "premium",
-    name: BILLING_PLAN_CONFIG.premium.name,
-    priceLabel: "£19.99/month",
-    monthlyPriceGbp: BILLING_PLAN_CONFIG.premium.monthly_price,
-    publicPublishingLabel: "Fastest public stats, leaderboard and ranking publishing",
-    publicPublishingIntervalMinutes: BILLING_PLAN_CONFIG.premium.public_publish_interval_minutes,
-    visibilityWeight: BILLING_PLAN_CONFIG.premium.visibility_weight,
-    discoveryTreatment: "premium_discovery",
-    promotionCreditsPerMonth: 8,
     badgeShowcaseLimit: 8,
-    profileBenefits: ["Premium discovery priority", "Homepage featured placement and spotlight eligibility", "Premium badge and animated visual treatment"],
-    achievementBenefits: ["Earned badge showcase grows to 8 badges", "Premium badge/status is public presentation only"],
+    profileBenefits: ["Full DZN Access", "Enhanced public profile, custom banner and gallery images", "Featured and spotlight rotation eligibility"],
+    achievementBenefits: ["Advanced Showcase access", "Earned badge showcase grows to 8 badges", "Premium-style status is public presentation only"],
     fairnessGuarantees: [
       "Does not change ADM data collection or imported statistics",
       "Does not change leaderboard rank, kills, deaths, K/D, longest kill, crowns, tournament score or season results",
@@ -431,10 +474,10 @@ export const AUTO_POST_TYPES: AutoPostType[] = [
 ];
 
 export const AUTO_POST_OPTIONS: AutoPostOption[] = [
-  { key: "server_advert", label: "Server Advert", group: "Basic", min_plan_key: "starter", upgrade_label: "Free Listing" },
-  { key: "bump_announcement", label: "Bump Announcement", group: "Basic", min_plan_key: "starter", upgrade_label: "Free Listing" },
-  { key: "rating_review", label: "Rating & Review", group: "Basic", min_plan_key: "starter", upgrade_label: "Free Listing" },
-  { key: "basic_status_embed", label: "Basic Server Status", group: "Basic", min_plan_key: "starter", upgrade_label: "Free Listing" },
+  { key: "server_advert", label: "Server Advert", group: "Basic", min_plan_key: "starter", upgrade_label: "Starter Listing" },
+  { key: "bump_announcement", label: "Bump Announcement", group: "Basic", min_plan_key: "starter", upgrade_label: "Starter Listing" },
+  { key: "rating_review", label: "Rating & Review", group: "Basic", min_plan_key: "starter", upgrade_label: "Starter Listing" },
+  { key: "basic_status_embed", label: "Basic Server Status", group: "Basic", min_plan_key: "starter", upgrade_label: "Starter Listing" },
   { key: "fresh_wipe", label: "Fresh Wipe", group: "Events", min_plan_key: "pro", upgrade_label: "Upgrade to Pro" },
   { key: "event_announcement", label: "Event Announcement", group: "Events", min_plan_key: "pro", upgrade_label: "Upgrade to Pro" },
   { key: "leaderboard_update", label: "Leaderboard Update", group: "Stats", min_plan_key: "pro", upgrade_label: "Upgrade to Pro" },
@@ -466,7 +509,7 @@ export function normalizePlanKey(value: unknown): NormalizedPlanKey {
 export function getSubscriptionPlanPublicContract(planKey: unknown): SubscriptionPlanPublicContract | null {
   const normalized = normalizePlanKey(planKey);
   if (normalized === "free") return null;
-  return SUBSCRIPTION_PLAN_PUBLIC_CONTRACT[normalized];
+  return SUBSCRIPTION_PLAN_PUBLIC_CONTRACT[normalized === "starter" ? "starter" : "pro"];
 }
 
 export function getSubscriptionPlanPublicContracts(): SubscriptionPlanPublicContract[] {
@@ -483,7 +526,9 @@ export function normalizeListingPlanKey(planOrSubscription: unknown, subscriptio
     : subscriptionStatus;
   const normalizedPlan = normalizePlanKey(rawPlan);
   const normalizedStatus = String(rawStatus ?? "").trim().toLowerCase();
-  const activePaid = normalizedPlan !== "free" && normalizedPlan !== "starter" && (normalizedStatus === "active" || normalizedStatus === "trialing");
+  const active = normalizedStatus === "active" || normalizedStatus === "trialing";
+  if (normalizedPlan === "starter" && active) return "starter";
+  const activePaid = normalizedPlan !== "free" && normalizedPlan !== "starter" && active;
   return activePaid ? "pro" : "free";
 }
 

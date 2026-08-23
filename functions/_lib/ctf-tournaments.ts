@@ -122,7 +122,7 @@ export async function processServerMatchmakingOptIn(env: Env, linkedServerId: st
       status: "plan_locked" as const,
       plan_key: planKey,
       subscription_status: row.status ?? "inactive",
-      reason: "Matchmaking requires an active Pro or Premium subscription.",
+      reason: "Matchmaking requires an active Pro subscription.",
     };
   }
 

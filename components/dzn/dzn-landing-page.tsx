@@ -435,43 +435,45 @@ const featureCards = [
 
 const pricingPlans = [
   {
-    key: "free",
-    name: "Free Listing",
-    price: "Free",
-    bestFor: "Best for getting listed",
-    summary: "List your DayZ server on DZN Network for free with a public profile, join link, ratings, reviews and basic network stats.",
-    features: ["Public server profile", "Basic discovery", "Ratings and reviews", "One Discord auto-post channel", "Basic server advert posts", "One bump every 30 days", "Standard listing visuals", "No leaderboard/stat advantage"],
+    key: "starter",
+    name: "Starter",
+    price: "£0 today, then £2/month",
+    bestFor: "Best for starting out",
+    summary: "Start with a 2-day free trial. After the trial, Starter keeps one DayZ server listed with a public profile, join link, ratings, reviews and basic network stats for £2/month.",
+    features: ["2-day free trial", "Payment method required", "Cancel before trial expiry to pay nothing", "1 linked DayZ server", "Public server profile", "Basic discovery", "Ratings and reviews", "One Discord auto-post channel", "Basic server advert posts", "One bump every 30 days", "No leaderboard/stat advantage"],
   },
   {
     key: "pro",
-    name: "Pro Listing",
-    price: "Monthly paid package",
-    bestFor: "Best for active advertising",
-    summary: "Upgrade your server advert with a longer description, custom banner, 4 gallery images, weekly bumping, enhanced Discord embeds, event promotion, profile styling and listing analytics.",
-    features: ["Enhanced public profile", "Custom advert banner", "Up to 4 JPEG gallery images", "Owner announcement", "Fresh wipe and event promo", "More Discord advert post types", "One bump every 7 days", "Featured rotation eligibility", "No leaderboard/stat advantage"],
+    name: "Pro",
+    price: "£10/month",
+    bestFor: "Best for full access",
+    summary: "Pro is the full DZN experience: up to 3 linked DayZ servers, stronger profiles, custom visuals, promotion credits, advanced stats, Server Wars insights and all current premium-style tools.",
+    features: ["Full DZN Access", "Up to 3 linked DayZ servers", "2 promotion credits per billing period", "Enhanced public profile", "Custom advert banner", "Up to 4 JPEG gallery images", "Owner announcement", "Fresh wipe and event promo", "More Discord advert post types", "One bump every 7 days", "Featured and spotlight eligibility", "No leaderboard/stat advantage"],
   },
 ] as const;
 
 const publicPricingPlans = pricingPlans;
 
 const listingComparisonRows = [
-  { label: "Price", free: "Free", pro: "Monthly paid package" },
-  { label: "Public listing", free: "Yes", pro: "Yes" },
-  { label: "Description limit", free: "500 characters", pro: "2,500 characters" },
-  { label: "Gallery images", free: "0", pro: "Up to 4 JPEG images" },
-  { label: "Custom banner", free: "No", pro: "Yes" },
-  { label: "Bump cooldown", free: "30 days", pro: "7 days" },
-  { label: "Ratings/reviews", free: "Yes", pro: "Yes" },
-  { label: "Discord channels", free: "1 channel", pro: "Multiple post-type channels" },
-  { label: "Discord auto posts", free: "Basic advert, bump, review", pro: "Events, leaderboard, longest kill, recaps, milestones" },
-  { label: "Embed design", free: "Standard DZN style", pro: "Enhanced Pro style" },
-  { label: "Analytics", free: "Limited", pro: "Views, clicks, bumps, Discord activity where available" },
-  { label: "Owner announcement", free: "No", pro: "Yes" },
-  { label: "Event promotion", free: "Limited/locked", pro: "Yes" },
-  { label: "Featured rotation eligibility", free: "Standard listing", pro: "Eligible, not guaranteed" },
-  { label: "Leaderboard/stat advantage", free: "No", pro: "No" },
-  { label: "Review score advantage", free: "No", pro: "No" },
-  { label: "Season/crown advantage", free: "No", pro: "No" },
+  { label: "Price", starter: "£0 today, then £2/month", pro: "£10/month" },
+  { label: "Trial", starter: "2 days", pro: "No trial" },
+  { label: "Linked DayZ servers", starter: "1", pro: "Up to 3" },
+  { label: "Public listing", starter: "Yes", pro: "Yes" },
+  { label: "Description limit", starter: "500 characters", pro: "2,500 characters" },
+  { label: "Gallery images", starter: "0", pro: "Up to 4 JPEG images" },
+  { label: "Custom banner", starter: "No", pro: "Yes" },
+  { label: "Bump cooldown", starter: "30 days", pro: "7 days" },
+  { label: "Ratings/reviews", starter: "Yes", pro: "Yes" },
+  { label: "Discord channels", starter: "1 channel", pro: "Multiple post-type channels" },
+  { label: "Discord auto posts", starter: "Basic advert, bump, review", pro: "Events, leaderboard, longest kill, recaps, milestones" },
+  { label: "Embed design", starter: "Standard DZN style", pro: "Enhanced Pro style" },
+  { label: "Analytics", starter: "Limited", pro: "Views, clicks, bumps, Discord activity where available" },
+  { label: "Owner announcement", starter: "No", pro: "Yes" },
+  { label: "Event promotion", starter: "Limited/locked", pro: "Yes" },
+  { label: "Featured and spotlight eligibility", starter: "Standard listing", pro: "Eligible, not guaranteed" },
+  { label: "Leaderboard/stat advantage", starter: "No", pro: "No" },
+  { label: "Review score advantage", starter: "No", pro: "No" },
+  { label: "Season/crown advantage", starter: "No", pro: "No" },
 ] as const;
 
 const listingPricingFaqs = [
@@ -484,8 +486,8 @@ const listingPricingFaqs = [
     answer: "Pro improves public adverts, weekly bumping, gallery images, custom banners, Discord promotion, owner announcements, and analytics.",
   },
   {
-    question: "Do Free servers still compete?",
-    answer: "Yes. Free listings get public profiles, ratings, reviews, join links, and fair competition. Paid presentation never changes gameplay results.",
+    question: "Do Starter servers still compete?",
+    answer: "Yes. Starter listings get public profiles, ratings, reviews, join links, and fair competition. Paid presentation never changes gameplay results.",
   },
   {
     question: "Can badges be bought?",
@@ -1340,7 +1342,7 @@ function PricingUpgradeSection() {
           <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-cyan-200">Pricing</p>
           <h2 className="mt-2 text-2xl font-black uppercase text-white sm:text-3xl">Upgrade the way players discover your server</h2>
           <p className="mt-3 text-sm leading-6 text-zinc-300/86">
-            Free Listing and Pro Listing keep competition fair while giving server owners clear options for public profiles, weekly advertising tools, Discord promotion, and analytics.
+            Starter and Pro keep competition fair while giving server owners clear options for trial access, public profiles, advertising tools, Discord promotion, and analytics.
           </p>
         </div>
         <a
@@ -1398,15 +1400,15 @@ function PricingUpgradeSection() {
           <thead className="bg-white/[0.04] text-[10px] font-black uppercase tracking-[0.14em] text-zinc-400">
             <tr>
               <th className="px-4 py-3">Feature</th>
-              <th className="px-4 py-3">Free Listing</th>
-              <th className="px-4 py-3">Pro Listing</th>
+              <th className="px-4 py-3">Starter</th>
+              <th className="px-4 py-3">Pro</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/8 text-zinc-300">
             {listingComparisonRows.map((row) => (
               <tr key={row.label}>
                 <th className="px-4 py-3 text-xs font-black uppercase text-zinc-200">{row.label}</th>
-                <td className="px-4 py-3">{row.free}</td>
+                <td className="px-4 py-3">{row.starter}</td>
                 <td className="px-4 py-3">{row.pro}</td>
               </tr>
             ))}

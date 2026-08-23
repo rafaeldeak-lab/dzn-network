@@ -12,9 +12,8 @@ Never expose `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRET` in public pages, cli
 
 Create these live-mode recurring monthly products in Stripe:
 
-- `DZN Starter` at GBP 4.99/month
-- `DZN Pro` at GBP 9.99/month
-- `DZN Premium` at GBP 19.99/month
+- `DZN Starter` at GBP 2/month, configured with a two-day trial in Checkout
+- `DZN Pro` at GBP 10/month
 
 Copy the live recurring Price ID for each product. Price IDs usually start with `price_`.
 
@@ -24,16 +23,16 @@ Set these Cloudflare production vars for the Pages project:
 
 - `STRIPE_PRICE_STARTER`
 - `STRIPE_PRICE_PRO`
-- `STRIPE_PRICE_PREMIUM`
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 
-Keep the legacy Network/Partner price variables only if needed for existing old subscriptions or historical Stripe mapping:
+Keep the legacy Premium/Network/Partner price variables only if needed for existing old subscriptions or historical Stripe mapping:
 
+- `STRIPE_PRICE_PREMIUM`
 - `STRIPE_PRICE_NETWORK`
 - `STRIPE_PRICE_PARTNER`
 
-Network and Partner must not be public checkout options. Legacy aliases map to Premium for old subscription compatibility only.
+Premium, Network, and Partner must not be public checkout options. Legacy aliases map to effective Pro compatibility only.
 
 ## Webhook
 

@@ -19,7 +19,7 @@ export type BillingReadinessResponse = {
   stripeSecretConfigured: boolean;
   webhookSecretConfigured: boolean;
   activePlans: Array<{
-    plan_key: "starter" | "pro" | "premium";
+    plan_key: "starter" | "pro";
     name: string;
     price_label: string;
     monthly_price_gbp: number;
@@ -447,11 +447,11 @@ export type BillingStatus = {
   linked_server_count: number;
   can_link_more_servers: boolean;
   stripe_customer_exists: boolean;
-  checkout_configured: Record<"starter" | "pro" | "premium", boolean>;
+  checkout_configured: Record<"starter" | "pro", boolean>;
 };
 
 export type BillingPlanSummary = {
-  plan_key: "starter" | "pro" | "premium";
+  plan_key: "starter" | "pro";
   name: string;
   price_label: string;
   monthly_price_gbp: number;

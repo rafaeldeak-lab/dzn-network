@@ -289,7 +289,7 @@ assert.match(ownerDiscordSource, /New server joined DZN/);
 assert.match(ownerDiscordSource, /Daily network recap/);
 assert.match(ownerDiscordSource, /Longest kill update/);
 assert.match(ownerDiscordSource, /Milestone reached/);
-assert.match(ownerDiscordSource, /Free\/Pro\/Premium promotion post/);
+assert.match(ownerDiscordSource, /Starter\/Pro promotion post/);
 assert.match(ownerDiscordSource, /Valid Discord Server ID is required/);
 assert.match(ownerDiscordSource, /saveOwnerDiscordChannelMapping/);
 assert.match(ownerDiscordSource, /runOwnerDiscordPermissionCheck/);

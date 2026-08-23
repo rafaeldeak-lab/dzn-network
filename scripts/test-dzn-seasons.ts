@@ -285,7 +285,7 @@ includesAll(serverSettingsPage, [
 ]);
 
 const publicPlans = getBillingPlanSummaries({} as Env);
-assert.deepEqual(publicPlans.map((plan) => plan.plan_key), ["starter", "pro", "premium"]);
+assert.deepEqual(publicPlans.map((plan) => plan.plan_key), ["starter", "pro"]);
 assert.equal(publicPlans.some((plan) => /network|partner/i.test(`${plan.plan_key} ${plan.name} ${plan.price_label}`)), false);
 
 async function runRefreshAutomationChecks() {

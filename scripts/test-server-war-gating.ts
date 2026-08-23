@@ -30,6 +30,7 @@ assert.equal(getServerWarsAccess("free", "active").canCreateChallenge, false);
 assert.equal(getServerWarsAccess("starter", "active").canCreateChallenge, false);
 assert.equal(getServerWarsAccess("pro", "active").canCreateChallenge, true);
 assert.equal(getServerWarsAccess("pro", "trialing").canCreateChallenge, true);
+assert.equal(getServerWarsAccess("pro", "active").canCreateFeatured, true);
 assert.equal(getServerWarsAccess("premium", "active").canCreateChallenge, true);
 assert.equal(getServerWarsAccess("premium", "active").canCreateFeatured, true);
 for (const inactiveStatus of ["canceled", "cancelled", "past_due", "unpaid", "incomplete", "incomplete_expired", "paused", "expired", null, undefined]) {

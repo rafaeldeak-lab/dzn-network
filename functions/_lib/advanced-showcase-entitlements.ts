@@ -17,7 +17,7 @@ export type AdvancedShowcaseAccess = {
   lockedModules: Array<{
     key: string;
     title: string;
-    requiredPlan: "pro" | "premium";
+    requiredPlan: "pro";
     reason: string;
   }>;
 };
@@ -46,7 +46,6 @@ export function getAdvancedShowcaseAccess(planKey: unknown, status: unknown): Ad
   const effectivePlan = advancedShowcasePlanFromSubscription(planKey, status);
   const planConfig = getPlanConfig(effectivePlan);
   const proPlus = effectivePlan === "pro" || effectivePlan === "premium";
-  const premium = effectivePlan === "premium";
 
   return {
     configuredPlan,
@@ -57,9 +56,9 @@ export function getAdvancedShowcaseAccess(planKey: unknown, status: unknown): Ad
     publicBuildShowcase: proPlus,
     publicTravelShowcase: proPlus,
     publicExplorationSummary: proPlus,
-    publicMapOverlay: premium,
-    globalAdvancedBoards: premium,
-    globalPremiumShowcase: premium,
+    publicMapOverlay: proPlus,
+    globalAdvancedBoards: proPlus,
+    globalPremiumShowcase: proPlus,
     lockedModules: buildLockedModules(effectivePlan),
   };
 }
@@ -88,18 +87,18 @@ function buildLockedModules(plan: AdvancedShowcasePlan): AdvancedShowcaseAccess[
       reason: "Pro unlocks public exploration percentage and aggregate explorer boards when supported map data exists.",
     });
   }
-  if (plan !== "premium") {
+  if (plan !== "pro" && plan !== "premium") {
     locks.push({
       key: "global_showcase",
-      title: "Global Premium Showcase",
-      requiredPlan: "premium",
-      reason: "Premium unlocks global advanced showcase eligibility, map overlays, travel boards, and premium public presentation.",
+      title: "Global Advanced Showcase",
+      requiredPlan: "pro",
+      reason: "Pro unlocks global advanced showcase eligibility, map overlays, travel boards, and full public presentation.",
     });
     locks.push({
       key: "map_overlay",
       title: "Public Map Overlay",
-      requiredPlan: "premium",
-      reason: "Premium unlocks aggregate fog-of-war style map overlays without exposing raw player routes.",
+      requiredPlan: "pro",
+      reason: "Pro unlocks aggregate fog-of-war style map overlays without exposing raw player routes.",
     });
   }
   return locks;

@@ -36,12 +36,12 @@ assert.equal(getServerStatusInterval("starter"), 7);
 assert.equal(getAdmPullInterval("starter"), 60);
 assert.equal(getServerStatusInterval("pro"), 5);
 assert.equal(getAdmPullInterval("pro"), 30);
-assert.equal(getServerStatusInterval("network"), 1);
-assert.equal(getAdmPullInterval("network"), 10);
-assert.equal(getServerStatusInterval("premium"), 1);
-assert.equal(getAdmPullInterval("premium"), 10);
-assert.equal(getServerStatusInterval("partner"), 1);
-assert.equal(getAdmPullInterval("partner"), 10);
+assert.equal(getServerStatusInterval("network"), 5);
+assert.equal(getAdmPullInterval("network"), 30);
+assert.equal(getServerStatusInterval("premium"), 5);
+assert.equal(getAdmPullInterval("premium"), 30);
+assert.equal(getServerStatusInterval("partner"), 5);
+assert.equal(getAdmPullInterval("partner"), 30);
 assert.equal(getServerStatusInterval("free") >= 1, true);
 assert.equal(getAdmPullInterval("free") >= 10, true);
 

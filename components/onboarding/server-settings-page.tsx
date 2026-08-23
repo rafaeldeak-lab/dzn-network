@@ -74,11 +74,11 @@ type SettingsResponse = {
     plan_key: string;
     subscription_status: string;
     policy_group: "trial_free" | "pro_premium";
-    listing_plan_key?: "free" | "pro";
+    listing_plan_key?: "free" | "starter" | "pro";
     listing_label?: string;
   };
   listing?: {
-    listingPlanKey: "free" | "pro";
+    listingPlanKey: "free" | "starter" | "pro";
     publicLabel: string;
     descriptionLimit: number;
     bumpCooldownDays: number;
@@ -1375,7 +1375,7 @@ export function ServerSettingsPage() {
             </Link>
             <div className="mt-5 rounded-lg border border-white/10 bg-black/24 p-3">
               <p className="text-xs font-black uppercase text-zinc-300">Plan Fairness</p>
-              <p className="mt-2 text-sm leading-6 text-zinc-400">Your plan controls server limits and premium listing tools. Category cooldowns protect fair competition and cannot be bypassed by upgrading.</p>
+                <p className="mt-2 text-sm leading-6 text-zinc-400">Your plan controls server limits and Pro listing tools. Category cooldowns protect fair competition and cannot be bypassed by upgrading.</p>
             </div>
           </div>
         </section>

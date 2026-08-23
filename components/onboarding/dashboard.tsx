@@ -4126,7 +4126,7 @@ function DashboardServerWarsPanel({ wars, loading, error }: {
       </div>
       {!canCreateChallenge ? (
         <div className="mt-4 rounded-lg border border-violet-300/20 bg-violet-400/10 p-4 text-sm font-bold leading-6 text-violet-50">
-          {wars?.access?.lockedReason ?? "Pro or Premium is required to create Server VS Server challenges."}
+          {wars?.access?.lockedReason ?? "Pro is required to create Server VS Server challenges."}
         </div>
       ) : (
         <form onSubmit={submitChallenge} className="mt-4 grid gap-3 rounded-lg border border-emerald-300/20 bg-emerald-400/10 p-4">
@@ -5068,9 +5068,8 @@ type DashboardReviewSummary = {
 };
 
 const billingPlans = [
-  { key: "starter", label: "Free Listing", price: "Free", detail: "Public profile, ratings and reviews, basic Discord advert posts, and one bump every 30 days" },
-  { key: "pro", label: "Pro Listing", price: "Monthly paid package", detail: "Custom advert visuals, weekly bumping, enhanced Discord posts, featured rotation eligibility, and listing analytics" },
-  { key: "premium", label: "Pro Listing", price: "Legacy paid access", detail: "Existing paid legacy access is treated as Pro Listing for advertising features" },
+  { key: "starter", label: "Starter", price: "£0 today, then £2/month", detail: "2-day free trial, one linked server, public profile, basic Discord advert posts, and one bump every 30 days" },
+  { key: "pro", label: "Pro", price: "£10/month", detail: "Full DZN Access, up to 3 linked servers, custom advert visuals, weekly bumping, enhanced Discord posts, featured and spotlight eligibility, and listing analytics" },
 ] as const;
 
 function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { billing: BillingStatus | null; plans: BillingPlanSummary[]; readiness: BillingReadinessResponse | null; message: string; onRefresh: () => Promise<void> }) {
@@ -5080,7 +5079,7 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
   const displayPlans = plans.length ? plans : billingPlans.map((plan) => fallbackBillingPlan(plan));
   const visiblePlans = displayPlans.filter((plan) => plan.plan_key === "pro" || plan.plan_key === planKey);
 
-  async function upgrade(planKey: "starter" | "pro" | "premium") {
+  async function upgrade(planKey: "starter" | "pro") {
     setBusyPlan(planKey);
     try {
       const session = await createCheckoutSession(planKey, "/dashboard");
@@ -5183,12 +5182,11 @@ function isBillingPlanPro(planKey: string) {
 }
 
 function billingPlanDisplayName(plan: BillingPlanSummary) {
-  return isBillingPlanPro(plan.plan_key) ? "Pro Listing" : "Free Listing";
+  return plan.name;
 }
 
 function billingPlanDisplayPrice(plan: BillingPlanSummary) {
-  if (!isBillingPlanPro(plan.plan_key)) return "Free";
-  return plan.plan_key === "premium" ? "Legacy paid access" : "Monthly paid package";
+  return plan.price_label;
 }
 
 function billingPlanDisplayFeatures(plan: BillingPlanSummary) {
@@ -8975,18 +8973,18 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
     starter: {
       max_linked_servers: 1,
       included_bumps_per_month: 0,
-      bump_cooldown_hours: 999,
+      bump_cooldown_hours: 720,
       stat_history_days: 30,
-      can_use_ad_bumps: false,
+      can_use_ad_bumps: true,
       can_use_advanced_analytics: false,
-      can_join_events: false,
+      can_join_events: true,
       can_use_featured_slots: false,
-      monthly_price_gbp: 4.99,
+      monthly_price_gbp: 2,
       server_status_interval_minutes: 7,
       adm_discovery_interval_minutes: 15,
       adm_pull_interval_minutes: 60,
       manual_adm_refresh_cooldown_minutes: 60,
-      public_publish_interval_minutes: 1440,
+      public_publish_interval_minutes: 4320,
       visibility_weight: 1,
       priority_level: 1,
       allowed_features: ["server_profile", "basic_stats", "basic_status", "leaderboards", "achievement_participation", "seasonal_participation", "billing_portal"],
@@ -9000,36 +8998,16 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
       can_use_ad_bumps: true,
       can_use_advanced_analytics: true,
       can_join_events: true,
-      can_use_featured_slots: false,
-      monthly_price_gbp: 9.99,
+      can_use_featured_slots: true,
+      monthly_price_gbp: 10,
       server_status_interval_minutes: 5,
       adm_discovery_interval_minutes: 10,
       adm_pull_interval_minutes: 30,
       manual_adm_refresh_cooldown_minutes: 30,
-      public_publish_interval_minutes: 240,
-      visibility_weight: 2,
-      priority_level: 2,
-      allowed_features: ["server_profile", "basic_stats", "basic_status", "leaderboards", "advanced_stats", "featured_rotation", "enhanced_discovery", "profile_customization", "enhanced_achievement_tracking", "billing_portal"],
-      allowed_auto_posts: ["basic_status_embed", "leaderboard_embed", "daily_summary_embed", "event_leaderboard_embed", "network_ranking_embed", "server_vs_server_embed"],
-    },
-    premium: {
-      max_linked_servers: 10,
-      included_bumps_per_month: 8,
-      bump_cooldown_hours: 6,
-      stat_history_days: 365,
-      can_use_ad_bumps: true,
-      can_use_advanced_analytics: true,
-      can_join_events: true,
-      can_use_featured_slots: true,
-      monthly_price_gbp: 19.99,
-      server_status_interval_minutes: 1,
-      adm_discovery_interval_minutes: 3,
-      adm_pull_interval_minutes: 10,
-      manual_adm_refresh_cooldown_minutes: 10,
-      public_publish_interval_minutes: 0,
+      public_publish_interval_minutes: 1440,
       visibility_weight: 4,
       priority_level: 4,
-      allowed_features: ["server_profile", "basic_stats", "basic_status", "leaderboards", "advanced_stats", "server_vs_server", "event_leaderboards", "network_rankings", "public_network_listing", "premium_badge", "homepage_featured", "priority_discovery", "server_spotlight", "premium_seasonal_rewards", "premium_analytics", "premium_reputation_multiplier", "billing_portal"],
+      allowed_features: ["server_profile", "basic_stats", "basic_status", "leaderboards", "advanced_stats", "server_vs_server", "event_leaderboards", "network_rankings", "public_network_listing", "partner_placement", "partner_badge", "priority_visibility", "priority_refresh", "public_featured_listing", "achievement_participation", "seasonal_participation", "featured_rotation", "enhanced_discovery", "profile_customization", "enhanced_achievement_tracking", "premium_badge", "homepage_featured", "priority_discovery", "server_spotlight", "premium_seasonal_rewards", "premium_analytics", "billing_portal"],
       allowed_auto_posts: ["basic_status_embed", "leaderboard_embed", "daily_summary_embed", "event_leaderboard_embed", "network_ranking_embed", "server_vs_server_embed", "killfeed_embed", "pve_feed_embed", "hit_feed_embed", "connection_feed_embed", "build_feed_embed", "admin_alerts_embed", "admin_logs_embed", "partner_featured_embed", "priority_status_embed"],
     },
   }[plan.key];

@@ -47,7 +47,7 @@ for (const snippet of [
   "dzn:lastGoodTournamentDashboard:",
   "/api/servers/${encodeURIComponent(serverId)}/ctf/dashboard",
   "/api/servers/${encodeURIComponent(serverId)}/ctf/roster",
-  "Pro or Premium required",
+  "Pro required",
   "Anti-alt policy",
   "case-sensitive",
 ]) {
