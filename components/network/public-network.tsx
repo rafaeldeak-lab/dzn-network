@@ -57,7 +57,7 @@ type PublicServer = {
     status: string;
     label: string;
     message: string;
-    owner_action?: string;
+    owner_action?: string | null;
     historical?: boolean;
   };
   nitrado_service_name: string | null;
@@ -168,6 +168,12 @@ type PublicServer = {
   recent_events: PublicRecentEvent[];
   top_players?: PublicLeaderboardPlayer[];
   pvp_leaderboard?: PublicLeaderboardPlayer[];
+  network_status?: {
+    adm_status: "Connected" | "Discovered" | "Needs Review";
+    stats_sync: "Active" | "Pending" | "Not Started";
+    public_listing: "Active" | "Historical";
+    last_sync_at: string | null;
+  };
   access_level?: "full" | "preview";
   is_locked?: boolean;
   locked_reason?: string | null;
@@ -1400,7 +1406,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
                 <StatusPill label="DZN Verified" tone="violet" />
                 <StatusPill label={server.server_type} tone="violet" />
                 <StatusPill label={server.adm_status === "Connected" ? "ADM Connected" : server.adm_status === "Discovered" ? "ADM Discovered" : "ADM Needs Review"} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
-                <StatusPill label={`Stats Sync ${server.stats_sync}`} tone={server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
+                <StatusPill label={historicalLifecycle ? "Stats Preserved" : `Stats Sync ${server.stats_sync}`} tone={historicalLifecycle ? "zinc" : server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
               </div>
               <ServerCardBadges badges={server.showcaseBadges ?? server.badges} max={8} className="mt-4" />
               <ServerReputationBadges server={server} />
@@ -2478,16 +2484,19 @@ function PlayerAvatar({ player }: { player: PublicLeaderboardPlayer }) {
 }
 
 function NetworkStatusPanel({ server }: { server: PublicServer }) {
+  const historicalLifecycle = Boolean(server.lifecycle?.historical);
+  const publicListing = server.network_status?.public_listing ?? (historicalLifecycle ? "Historical" : "Active");
+  const syncHealth = historicalLifecycle ? "Historical" : server.stats_sync === "Active" ? "Online" : "Watching";
   return (
     <GlassPanel title="Network Status" icon={BarChart3}>
       <div className="grid gap-2">
         <StatusRow label="ADM Status" value={server.adm_status} tone={server.adm_status === "Connected" ? "good" : server.adm_status === "Discovered" ? "warn" : "bad"} />
-        <StatusRow label="Stats Sync" value={server.stats_sync} tone={server.stats_sync === "Active" ? "good" : server.stats_sync === "Pending" ? "warn" : "bad"} />
+        <StatusRow label="Stats Sync" value={historicalLifecycle ? "Preserved" : server.stats_sync} tone={historicalLifecycle ? "neutral" : server.stats_sync === "Active" ? "good" : server.stats_sync === "Pending" ? "warn" : "bad"} />
         <StatusRow label="Total Joins" value={String(server.total_joins)} tone="neutral" />
         <StatusRow label="Unique Players" value={String(server.unique_players)} tone="neutral" />
-        <StatusRow label="Public Listing" value="Active" tone="good" />
+        <StatusRow label="Public Listing" value={publicListing} tone={publicListing === "Historical" ? "neutral" : "good"} />
         <StatusRow label="Last Sync" value={formatRelativeTime(server.last_sync_at ?? server.metadata_last_checked_at)} tone="neutral" />
-        <StatusRow label="Sync Health" value={server.stats_sync === "Active" ? "Online" : "Watching"} tone={server.stats_sync === "Active" ? "good" : "warn"} />
+        <StatusRow label="Sync Health" value={syncHealth} tone={historicalLifecycle ? "neutral" : server.stats_sync === "Active" ? "good" : "warn"} />
       </div>
     </GlassPanel>
   );
@@ -2891,6 +2900,7 @@ function scoreBreakdownTitle(breakdown: ScoreBreakdown | null) {
 }
 
 function formatPlayers(server: PublicServer) {
+  if (server.lifecycle?.historical) return "Offline";
   const current = typeof server.current_players === "number" ? server.current_players : null;
   const maxPlayers = server.max_players ?? server.player_slots;
   if (current !== null && maxPlayers) return `${current} / ${maxPlayers}`;

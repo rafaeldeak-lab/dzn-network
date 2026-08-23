@@ -8,6 +8,8 @@ import {
   SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
   canRunServerLifecycleTask,
   classifyServerLifecycleError,
+  getPublicServerLifecycleDisplay,
+  isPublicHistoricalServerLifecycle,
   normalizeServerLifecycleStatus,
 } from "../lib/server-lifecycle";
 
@@ -65,6 +67,18 @@ assert.equal(canRunServerLifecycleTask({ lifecycle_status: "final_sync_pending",
 assert.equal(classifyServerLifecycleError("Saved Nitrado token cannot be decrypted").status, "token_needs_resave");
 assert.equal(classifyServerLifecycleError("NITRADO_UPSTREAM_DOWN HTTP 503").status, "nitrado_upstream_down");
 assert.equal(classifyServerLifecycleError("service expired or deleted").status, "expired_detected");
+assert.equal(isPublicHistoricalServerLifecycle("token_needs_resave"), true);
+assert.equal(isPublicHistoricalServerLifecycle("expired_detected"), true);
+assert.equal(isPublicHistoricalServerLifecycle("final_sync_complete"), true);
+assert.equal(isPublicHistoricalServerLifecycle("active_live"), false);
+assert.equal(isPublicHistoricalServerLifecycle("stale_monitoring"), false);
+assert.deepEqual(getPublicServerLifecycleDisplay("token_needs_resave"), {
+  label: "Offline / Sync Paused",
+  message: "DZN is not showing this as an active live server. Historical stats are preserved while live verification is paused.",
+  ownerAction: null,
+});
+assert.equal(getPublicServerLifecycleDisplay("expired_detected").label, "No Longer Live");
+assert.equal(getPublicServerLifecycleDisplay("legacy_offline").label, "Legacy / Offline");
 
 const migration = readFileSync("migrations/0054_server_lifecycle_resource_control.sql", "utf8");
 for (const snippet of [
@@ -116,7 +130,7 @@ assert.equal(metadataSource.includes("serverLifecycleSqlExpression(\"linked_serv
 assert.equal(metadataSource.includes("next_retry_after"), true);
 
 for (const [file, snippets] of [
-  ["functions/api/public/servers.ts", ["SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES", "SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES", "serverLifecycleSqlExpression(\"linked_servers\")"]],
+  ["functions/api/public/servers.ts", ["SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES", "SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES", "serverLifecycleSqlExpression(\"linked_servers\")", "getPublicServerLifecycleDisplay", "isPublicHistoricalServerLifecycle", "historicalVisibilityExplanation", "status: historicalLifecycle ? \"historical\" : row.status"]],
   ["functions/api/public/server-rail.ts", ["SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES", "serverLifecycleSqlExpression(\"linked_servers\")"]],
   ["functions/api/public/home-stats.ts", ["PUBLIC_LINKED_SERVER_LIFECYCLE_SQL", "PUBLIC_HISTORICAL_LINKED_SERVER_LIFECYCLE_SQL", "PUBLIC_LIVE_KILL_SERVER_LIFECYCLE_SQL"]],
   ["functions/_lib/public-leaderboards.ts", ["PUBLIC_LIFECYCLE_SQL"]],
@@ -170,6 +184,9 @@ assert.equal(
 const publicNetwork = readFileSync("components/network/public-network.tsx", "utf8");
 for (const snippet of [
   "Legacy / Offline",
+  "Stats Preserved",
+  "Offline",
+  "server.network_status?.public_listing",
   "Historical stats are preserved",
   "server.lifecycle?.historical",
 ]) {
