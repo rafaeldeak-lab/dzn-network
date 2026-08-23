@@ -165,6 +165,14 @@ jobs:
           npm run test:server-advertising-packages
           git diff --check
 
+      - name: Verify production creator env readiness
+        run: |
+          set -euo pipefail
+
+          npx wrangler pages secret list --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" > pages-runtime-production-pages-secrets.txt
+          grep -q "DZN_PLATFORM_CREATOR_DISCORD_ID" pages-runtime-production-pages-secrets.txt
+          echo "DZN_PLATFORM_CREATOR_DISCORD_ID listed in production Pages secrets: true"
+
       - name: Ensure Pages production branch is main
         run: |
           set -euo pipefail

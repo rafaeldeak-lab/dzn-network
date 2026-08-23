@@ -434,6 +434,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          npx wrangler pages secret list --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" > server-advertising-production-pages-secrets.txt
+          grep -q "DZN_PLATFORM_CREATOR_DISCORD_ID" server-advertising-production-pages-secrets.txt
+          echo "DZN_PLATFORM_CREATOR_DISCORD_ID listed in production Pages secrets: true"
+
           npx wrangler pages deploy out \
             --project-name "${PRODUCTION_PAGES_PROJECT_NAME}" \
             --branch main \

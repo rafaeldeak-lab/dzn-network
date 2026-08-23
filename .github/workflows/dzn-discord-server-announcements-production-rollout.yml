@@ -402,6 +402,10 @@ jobs:
       - name: Deploy production Pages runtime from approved commit
         run: |
           set -euo pipefail
+          npx wrangler pages secret list --project-name "${{ inputs.production_pages_project_name }}" > discord-server-announcements-production-pages-secrets.txt
+          grep -q "DZN_PLATFORM_CREATOR_DISCORD_ID" discord-server-announcements-production-pages-secrets.txt
+          echo "DZN_PLATFORM_CREATOR_DISCORD_ID listed in production Pages secrets: true"
+
           DZN_PULSE_ENABLED=true DZN_DISCORD_NOTIFICATIONS_ENABLED=false DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED=false npm run build
           rm -rf .pages-functions
           mkdir -p .pages-functions

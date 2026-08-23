@@ -544,7 +544,7 @@ function NotificationCard({ notification, onClick }: { notification: PulseNotifi
     >
       {notification.image_url ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={notification.image_url} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover opacity-28 transition group-hover:opacity-34" />
+        <img src={notification.image_url} alt="" loading="lazy" decoding="async" width={640} height={360} className="absolute inset-0 h-full w-full object-cover opacity-28 transition group-hover:opacity-34" />
       ) : null}
       <span className="absolute inset-0 bg-[linear-gradient(90deg,rgba(5,8,18,0.96),rgba(5,8,18,0.78),rgba(5,8,18,0.92))]" />
       <span className="relative flex items-start gap-3">

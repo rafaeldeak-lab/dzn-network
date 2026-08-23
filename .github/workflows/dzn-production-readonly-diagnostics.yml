@@ -197,6 +197,7 @@ jobs:
             "DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED",
             "DZN_DISCORD_NOTIFICATIONS_ENABLED",
             "DZN_PLATFORM_OWNER_DISCORD_IDS",
+            "DZN_PLATFORM_CREATOR_DISCORD_ID",
             "SESSION_SECRET",
             "DISCORD_CLIENT_ID",
             "DISCORD_CLIENT_SECRET",
@@ -281,6 +282,9 @@ jobs:
             writeFileSync("diagnostics-artifact/pages.json", `${JSON.stringify(projectSummary, null, 2)}\n`);
             console.log(`Pages project inspected: ${projectSummary.projectName}`);
             console.log(`Latest production deployment: ${projectSummary.latestProductionDeployment.id ?? "unknown"}`);
+            if (!envPresence.DZN_PLATFORM_CREATOR_DISCORD_ID) {
+              throw new Error("Production creator access env is missing: DZN_PLATFORM_CREATOR_DISCORD_ID");
+            }
           })().catch((error) => {
             console.error(error.message);
             process.exit(1);
@@ -753,6 +757,7 @@ jobs:
           lines.push(`- DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED configured: ${statusFromBoolean(envPresence.DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED)}`);
           lines.push(`- DZN_DISCORD_NOTIFICATIONS_ENABLED configured: ${statusFromBoolean(envPresence.DZN_DISCORD_NOTIFICATIONS_ENABLED)}`);
           lines.push(`- DZN_PLATFORM_OWNER_DISCORD_IDS configured: ${statusFromBoolean(envPresence.DZN_PLATFORM_OWNER_DISCORD_IDS)}`);
+          lines.push(`- DZN_PLATFORM_CREATOR_DISCORD_ID configured: ${statusFromBoolean(envPresence.DZN_PLATFORM_CREATOR_DISCORD_ID)}`);
           lines.push(`- SESSION_SECRET configured: ${statusFromBoolean(envPresence.SESSION_SECRET)}`);
           lines.push(`- DISCORD_CLIENT_ID configured: ${statusFromBoolean(envPresence.DISCORD_CLIENT_ID)}`);
           lines.push(`- DISCORD_CLIENT_SECRET configured: ${statusFromBoolean(envPresence.DISCORD_CLIENT_SECRET)}`);

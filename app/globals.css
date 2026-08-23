@@ -36,6 +36,62 @@ body {
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
+.dzn-navigation-progress {
+  position: fixed;
+  z-index: 100;
+  inset: 0 0 auto;
+  height: 3px;
+  pointer-events: none;
+  transform-origin: left center;
+  background: linear-gradient(90deg, #22d3ee, #a78bfa, #facc15);
+  box-shadow: 0 0 22px rgba(34, 211, 238, 0.5);
+  transition: transform 180ms ease, opacity 180ms ease;
+  opacity: 0;
+}
+
+.dzn-navigation-progress[data-state="loading"],
+.dzn-navigation-progress[data-state="complete"] {
+  opacity: 1;
+}
+
+.dzn-skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dzn-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+  animation: dznSkeletonPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes dznSkeletonPulse {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .dzn-navigation-progress {
+    transition: opacity 120ms linear;
+  }
+
+  .dzn-skeleton::after,
+  .dzn-beta-ticker__track,
+  .dzn-live-server-rail__track {
+    animation: none;
+  }
+}
+
 html.dzn-owner-console-active,
 body.dzn-owner-console-active {
   height: 100%;

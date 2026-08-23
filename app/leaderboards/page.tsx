@@ -257,7 +257,7 @@ export default function LeaderboardsPage() {
     };
   }, []);
 
-  const totalKills = useMemo(() => payload.top_servers.reduce((total, server) => total + server.kills, 0), [payload.top_servers]);
+  const totalKills = useMemo(() => payload.top_servers.reduce((total: number, server) => total + server.kills, 0), [payload.top_servers]);
   const totalPlayers = payload.top_players.length;
   const longestKill = payload.best_overall_kill?.distance ?? payload.personal_best_kills[0]?.distance ?? 0;
   const initialError = loadState === "error_initial";

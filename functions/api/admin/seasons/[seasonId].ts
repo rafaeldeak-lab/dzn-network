@@ -1,11 +1,11 @@
-import { requireBadgeAdminUser } from "../../../_lib/badge-evaluation";
 import { DznSeasonError, updateAdminSeason } from "../../../_lib/dzn-seasons";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
+import { PLATFORM_CREATOR_EVENT_ADMIN_CAPABILITY, requirePlatformCreatorEventAdmin } from "../../../_lib/platform-creator";
 import type { PagesFunction } from "../../../_lib/types";
 
 export const onRequestPut: PagesFunction = async ({ request, env, params }) => {
-  const auth = await requireBadgeAdminUser(env, request);
-  if (!auth.ok) return json(auth.payload, { status: auth.status });
+  const auth = await requirePlatformCreatorEventAdmin(env, request);
+  if (!auth.ok) return auth.response;
 
   try {
     const seasonId = String(params?.seasonId ?? "").trim();
@@ -21,7 +21,7 @@ export const onRequestPut: PagesFunction = async ({ request, env, params }) => {
     const result = await updateAdminSeason(env, seasonId, body);
     return json({
       ok: true,
-      role: auth.role,
+      role: PLATFORM_CREATOR_EVENT_ADMIN_CAPABILITY,
       season: result.season,
       warnings: result.warnings,
     });

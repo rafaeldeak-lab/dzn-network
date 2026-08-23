@@ -9,6 +9,12 @@ import {
 } from "../../_lib/nitrado";
 import {
   ensureDraftLinkedServer,
+  findActiveLinkedServerByNitradoService,
+  isLocalDatabaseIntegrityConflict,
+  LinkedServerAllowanceExceededError,
+  LinkedServerIntegrityConflictError,
+  LinkedServerOwnershipConflictError,
+  NitradoTokenAssociationError,
   normalizeTags,
   saveLinkedServerNitradoService,
   storePendingNitradoToken,
@@ -60,6 +66,15 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     const valid = service ? true : isMockNitrado(env.MOCK_NITRADO) ? true : await validateNitradoToken(token);
     if (!valid) return json({ error: "Invalid token", tokenValid: false }, { status: 400 });
 
+    if (service) {
+      const existingService = await findActiveLinkedServerByNitradoService(env, service.id);
+      if (existingService) {
+        if (existingService.user_id !== user.id) throw new LinkedServerOwnershipConflictError();
+        await storePendingNitradoToken(env, user.id, existingService.id, token);
+        return json({ tokenValid: true, linkedServerId: existingService.id, service });
+      }
+    }
+
     const linkedServerId = await ensureDraftLinkedServer(
       env,
       user.id,
@@ -78,6 +93,21 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     await storePendingNitradoToken(env, user.id, linkedServerId, token);
     return json({ tokenValid: true, linkedServerId });
   } catch (error) {
+    if (error instanceof LinkedServerAllowanceExceededError) {
+      return json({ error: error.message }, { status: 402 });
+    }
+    if (error instanceof LinkedServerOwnershipConflictError) {
+      return json({ error: error.message, error_code: error.code }, { status: 409 });
+    }
+    if (error instanceof LinkedServerIntegrityConflictError || error instanceof NitradoTokenAssociationError) {
+      return json({ error: error.message, error_code: error.code }, { status: 409 });
+    }
+    if (isLocalDatabaseIntegrityConflict(error)) {
+      return json({
+        error: "Linked server state changed while validating. Refresh and try again.",
+        error_code: "linked_server_integrity_conflict",
+      }, { status: 409 });
+    }
     if (error instanceof NitradoServiceLookupError) {
       if (error.code === "invalid_token") return json({ error: "Invalid token", tokenValid: false }, { status: 400 });
       if (error.code === "service_not_found") return json({ error: "Service ID not found" }, { status: 404 });

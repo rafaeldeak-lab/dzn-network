@@ -1,15 +1,26 @@
-import { Suspense } from "react";
-
-import { EventCreatePage } from "@/components/events/events-platform";
+import Link from "next/link";
 
 export default function CreateEventRoute() {
   return (
-    <Suspense fallback={<EventsCreateFallback />}>
-      <EventCreatePage />
-    </Suspense>
+    <main className="min-h-screen bg-[#02030a] px-4 py-10 text-zinc-100">
+      <section className="mx-auto max-w-3xl rounded-lg border border-white/10 bg-white/[0.035] p-6 shadow-[0_30px_110px_rgba(0,0,0,0.34)]">
+        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-200">Official event governance</p>
+        <h1 className="mt-2 text-3xl font-black uppercase text-white">Official events are creator-managed</h1>
+        <p className="mt-4 text-sm leading-6 text-zinc-300">
+          Community competition suggestions are coming soon. Official DZN events are created and published by the DZN platform creator.
+        </p>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Link href="/events/suggest" className="rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 hover:bg-cyan-300/20">
+            Suggest a competition
+          </Link>
+          <Link href="/events" className="rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-xs font-black uppercase text-zinc-300 hover:text-white">
+            View events
+          </Link>
+          <Link href="/owner/events/create" className="rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-xs font-black uppercase text-zinc-300 hover:text-white">
+            Owner Event Control
+          </Link>
+        </div>
+      </section>
+    </main>
   );
-}
-
-function EventsCreateFallback() {
-  return <main className="min-h-screen bg-[#02030a]" />;
 }

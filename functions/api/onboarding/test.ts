@@ -3,8 +3,8 @@ import { DiscordChannelFetchError, fetchDiscordPostingChannels } from "../../_li
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { detectNitradoAdmLogs, getAdmLogStoragePath, mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
-import { getLatestNitradoToken } from "../../_lib/onboarding";
-import { planAdmBackfillJobsForServer } from "../../_lib/adm-sync";
+import { getNitradoTokenForLinkedServer } from "../../_lib/onboarding";
+import { planAdmBackfillJobsForServer, type AdmImportJobProgressResult } from "../../_lib/adm-sync";
 import { refreshNitradoServerMetadata } from "../../_lib/server-metadata";
 import type { Env, PagesFunction } from "../../_lib/types";
 
@@ -29,13 +29,13 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   let nitradoToken = "";
   if (!isMockNitrado(env.MOCK_NITRADO)) {
     try {
-      const latestToken = await getLatestNitradoToken(env, user.id);
-      if (!latestToken) {
+      const serverToken = await getNitradoTokenForLinkedServer(env, user.id, linkedServer.id);
+      if (!serverToken) {
         tokenValid = false;
         tokenErrorCode = "missing_nitrado_token";
         tokenErrorMessage = "No saved Nitrado token was found. Paste your Nitrado long-life token and validate this service again.";
       } else {
-        nitradoToken = latestToken;
+        nitradoToken = serverToken;
       }
     } catch (error) {
       tokenValid = false;
@@ -184,24 +184,23 @@ function summarizeAdmBackfillForSetup(result: Awaited<ReturnType<typeof planAdmB
     files_found: result.files_found,
     newest_available_adm_file: result.newest_available_adm_file ?? null,
     newest_readable_adm_file: result.newest_readable_adm_file ?? null,
-    latest_processed_adm_file: completedJob?.adm_file ?? null,
-    queued_files: (result.created_jobs ?? []).map((job) => job.adm_file),
-    created_jobs: (result.created_jobs ?? []).map((job) => ({
-      id: job.id,
-      adm_file: job.adm_file,
-      status: job.status,
-      line_start: job.line_start,
-      line_end: job.line_end,
-    })),
-    active_job: result.active_job
-      ? {
-          id: result.active_job.id,
-          adm_file: result.active_job.adm_file,
-          status: result.active_job.status,
-          line_start: result.active_job.line_start,
-          line_end: result.active_job.line_end,
-        }
-      : null,
+    latest_processed_adm_file: completedJob?.filename ?? null,
+    queued_files: (result.created_jobs ?? []).map((job) => job.filename),
+    created_jobs: (result.created_jobs ?? []).map(summarizeAdmImportJobForSetup),
+    active_job: result.active_job ? summarizeAdmImportJobForSetup(result.active_job) : null,
+  };
+}
+
+function summarizeAdmImportJobForSetup(job: AdmImportJobProgressResult) {
+  return {
+    job_id: job.job_id,
+    filename: job.filename,
+    status: job.status,
+    current_line: job.current_line,
+    total_lines: job.total_lines,
+    chunks_processed: job.chunks_processed,
+    total_chunks: job.total_chunks,
+    progress: job.progress,
   };
 }
 

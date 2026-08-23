@@ -14,6 +14,20 @@ import {
   buildOwnerDiscordPreviewEmbed,
   sanitizeOwnerDiscordChannelMappingInput,
 } from "../functions/_lib/owner-discord-control";
+import { hmacSha256 } from "../functions/_lib/crypto";
+import {
+  ensureEventHostSchema,
+  listAuthorizedEventCreationHosts,
+  resetEventHostSchemaReadinessForTests,
+  resolveAuthorizedEventCreationHost,
+} from "../functions/_lib/event-hosts";
+import { getOwnerEventControlPayload } from "../functions/_lib/owner-events";
+import { onRequest as onPublicEventsListRequest } from "../functions/api/events";
+import { onRequest as onPublicEventDetailRequest } from "../functions/api/events/[slug]";
+import { onRequestGet as onOwnerEventsApiGet, onRequestPost as onOwnerEventsApiPost } from "../functions/api/owner/events";
+import { onRequestGet as onOwnerDraftEventGet } from "../functions/api/owner/events/[slug]";
+import { onRequestGet as onOwnerEventReviewPageGet } from "../functions/owner/events/review";
+import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
 
 const ownerEnv = { DZN_PLATFORM_OWNER_DISCORD_IDS: "111111111111111111, 222222222222222222 , not-an-id" };
 
@@ -167,11 +181,35 @@ for (const file of [
   "functions/api/owner/servers.ts",
   "functions/api/owner/servers/[serverId].ts",
   "functions/api/owner/audit-log.ts",
+  "functions/api/owner/events.ts",
 ]) {
   const source = readFileSync(file, "utf8");
   assert.match(source, /requirePlatformOwner/, `${file} must require platform-owner auth`);
   assert.match(source, /onRequestGet/, `${file} must expose a read-only GET`);
-  assert.match(source, /methodNotAllowed/, `${file} must reject write methods`);
+}
+
+const ownerEventsSource = readFileSync("functions/api/owner/events.ts", "utf8");
+assert.match(ownerEventsSource, /onRequestPost/);
+assert.match(ownerEventsSource, /requirePlatformCreatorEventAdmin/);
+assert.match(ownerEventsSource, /privateNoStoreHeaders/, "Owner Event Control API must be private/no-store.");
+const ownerEventsPost = ownerEventsSource.slice(ownerEventsSource.indexOf("export const onRequestPost"));
+assert.equal(ownerEventsPost.indexOf("requirePlatformCreatorEventAdmin") < ownerEventsPost.indexOf("readJson"), true, "Owner event create must authorize before request body parsing.");
+assert.doesNotMatch(ownerEventsSource, /DISCORD_BOT_TOKEN|TOKEN_ENCRYPTION_KEY|SESSION_SECRET|encrypted_token|webhook/i);
+
+const ownerEventsHelperSource = readFileSync("functions/_lib/owner-events.ts", "utf8");
+assert.match(ownerEventsHelperSource, /listAuthorizedEventCreationHosts/, "Owner Event Control must use the shared event-host inventory helper.");
+assert.match(ownerEventsHelperSource, /hostInventoryAvailable/, "Owner Event Control must expose host inventory availability.");
+assert.match(ownerEventsHelperSource, /event_host_inventory_unavailable/, "Host inventory query failures must be explicit.");
+assert.doesNotMatch(ownerEventsHelperSource, /getLinkedServersForUserSummary/, "Owner Event Control must not depend on the generic dashboard server summary query.");
+
+for (const file of [
+  "functions/owner/events.ts",
+  "functions/owner/events/create.ts",
+]) {
+  const source = readFileSync(file, "utf8");
+  assert.match(source, /requirePlatformOwner/, `${file} must require platform-owner page auth.`);
+  assert.match(source, /mode:\s*"page"/, `${file} must use page-mode redirects.`);
+  assert.match(source, /methodNotAllowed/, `${file} must reject write methods.`);
 }
 
 const ownerAuditRouteSource = readFileSync("functions/api/owner/audit-log.ts", "utf8");
@@ -376,4 +414,702 @@ assert.match(routesPatch, /"\/owner"/, "Cloudflare Pages routes must include the
 assert.match(routesPatch, /"\/owner\/\*"/, "Cloudflare Pages routes must include nested owner routes.");
 assert.match(routesPatch, /"\/api\/\*"/, "Cloudflare Pages routes must preserve API function routing.");
 
-console.log("Owner console read-only access and data contract checks passed.");
+void assertOwnerPrivateDraftReviewRoutes()
+  .then(() => {
+    console.log("Owner console read-only access and data contract checks passed.");
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+
+async function assertOwnerPrivateDraftReviewRoutes() {
+  const publicEventDetailSource = readFileSync("functions/_lib/events.ts", "utf8");
+  assert.match(publicEventDetailSource, /WHERE slug = \?/);
+  assert.match(publicEventDetailSource, /visibility === "private" \|\| status === "draft"/, "Public event detail API must hide private or draft stored events before demo fallback.");
+  assert.match(publicEventDetailSource, /function eventNotFoundPayload\(\)/);
+  assert.doesNotMatch(publicEventDetailSource, /demoEvents\(\)\[0\]/, "Unknown event slugs must not fall back to the first demo event.");
+
+  const ownerDraftApiSource = readFileSync("functions/api/owner/events/[slug].ts", "utf8");
+  assert.match(ownerDraftApiSource, /requirePlatformCreatorEventAdmin/, "Private draft API must require creator event admin.");
+  assert.match(ownerDraftApiSource, /privateNoStoreHeaders/, "Private draft API must use private no-store headers.");
+  assert.doesNotMatch(ownerDraftApiSource, /SELECT\s+\*/i, "Private draft API must not use SELECT *.");
+
+  const ownerDraftHelperSource = readFileSync("functions/_lib/owner-events.ts", "utf8");
+  assert.match(ownerDraftHelperSource, /getOwnerEventDraftReviewPayload/);
+  assert.match(ownerDraftHelperSource, /competitive_events\.slug = \?/);
+  assert.doesNotMatch(ownerDraftHelperSource, /SELECT\s+\*/i);
+
+  const ownerReviewFunctionSource = readFileSync("functions/owner/events/review.ts", "utf8");
+  assert.match(ownerReviewFunctionSource, /requirePlatformCreatorEventAdmin\(env,\s*request,\s*\{\s*mode:\s*"page"\s*\}\)/);
+
+  const ownerReviewPageSource = readFileSync("app/owner/events/review/page.tsx", "utf8");
+  assert.match(ownerReviewPageSource, /OwnerEventDraftReviewPage/);
+
+  const ownerReviewComponentSource = readFileSync("components/owner/owner-event-draft-review-page.tsx", "utf8");
+  for (const label of ["Draft", "Private", "Creator review required", "Not publicly published"]) {
+    assert.match(ownerReviewComponentSource, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.doesNotMatch(ownerReviewComponentSource, /<button|onClick=|api\/owner\/events\/[^"']*publish|discord-posting|sendDiscord|createBracket|refresh-score|awardBadge/i, "Draft review page must not add publication, Discord, bracket, score or reward controls.");
+
+  const ownerEventsUiSource = readFileSync("components/owner/owner-events-page.tsx", "utf8");
+  assert.match(ownerEventsUiSource, /\/owner\/events\/review\?slug=/, "Owner UI must route private drafts to the creator review route.");
+  assert.match(ownerEventsUiSource, /createOfficialEventSuccessAction\(result,\s*form\)/, "Private official creation success must use the centralized success action.");
+  assert.match(ownerEventsUiSource, /owner_review_url/, "Owner UI must consume the owner review URL returned by event creation.");
+  assert.match(ownerEventsUiSource, /public_url/, "Owner UI must only consume public URLs explicitly returned as public-safe.");
+  assert.match(ownerEventsUiSource, /Review event/, "Private official creation success should label the CTA as an owner review action.");
+  assert.doesNotMatch(ownerEventsUiSource, /href:\s*`\/events\/\$\{result\.event_slug\}`/, "Private official creation success must not blindly point to public event detail.");
+  assert.match(ownerEventsUiSource, /Review converted draft/);
+  assert.doesNotMatch(ownerEventsUiSource, /`\/events\/\$\{suggestion\.convertedEventSlug\}`/, "Converted private draft links must not point to public event routes.");
+
+  const secret = "owner-console-test-session-secret";
+  const creatorToken = "creator-private-draft-token";
+  const ownerToken = "owner-private-draft-token";
+  const creatorHash = await hmacSha256(creatorToken, secret);
+  const ownerHash = await hmacSha256(ownerToken, secret);
+  const creatorUser: SessionUser = {
+    id: "creator-user",
+    discord_id: "999999999999999999",
+    username: "Creator",
+    avatar: null,
+  };
+  const ownerUser: SessionUser = {
+    id: "owner-user",
+    discord_id: "111111111111111111",
+    username: "Owner",
+    avatar: null,
+  };
+  const db = new OwnerDraftReviewDb(
+    new Map([
+      [creatorHash, creatorUser],
+      [ownerHash, ownerUser],
+    ]),
+  );
+  const env = {
+    DB: db as unknown as D1Database,
+    SESSION_SECRET: secret,
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: `${ownerUser.discord_id},${creatorUser.discord_id}`,
+  } as Env;
+
+  const anonymousPage = await onOwnerEventReviewPageGet(makeOwnerDraftReviewContext(env, "https://example.com/owner/events/review?slug=private-draft"));
+  assert.equal(anonymousPage.status, 302, "Anonymous owner draft review page requests must redirect to login.");
+  assert.match(anonymousPage.headers.get("location") ?? "", /^\/login\?returnTo=/);
+
+  const ownerPage = await onOwnerEventReviewPageGet(makeOwnerDraftReviewContext(env, "https://example.com/owner/events/review?slug=private-draft", `dzn_session=${ownerToken}`));
+  assert.equal(ownerPage.status, 403, "Non-creator owners must not reach private draft review pages.");
+
+  const creatorPage = await onOwnerEventReviewPageGet(makeOwnerDraftReviewContext(env, "https://example.com/owner/events/review?slug=private-draft", `dzn_session=${creatorToken}`));
+  assert.equal(creatorPage.status, 200, "Configured creator should reach the private draft review page.");
+  assert.equal(await creatorPage.text(), "draft review page");
+
+  const anonymousApi = await onOwnerDraftEventGet(makeOwnerDraftReviewContext(env, "https://example.com/api/owner/events/private-draft", undefined, "private-draft"));
+  assert.equal(anonymousApi.status, 401, "Anonymous owner draft API requests must return 401.");
+
+  const ownerApi = await onOwnerDraftEventGet(makeOwnerDraftReviewContext(env, "https://example.com/api/owner/events/private-draft", `dzn_session=${ownerToken}`, "private-draft"));
+  assert.equal(ownerApi.status, 403, "Non-creator owner draft API requests must return 403.");
+
+  const creatorApi = await onOwnerDraftEventGet(makeOwnerDraftReviewContext(env, "https://example.com/api/owner/events/private-draft", `dzn_session=${creatorToken}`, "private-draft"));
+  assert.equal(creatorApi.status, 200, "Configured creator should read private draft event details.");
+  assert.match(creatorApi.headers.get("cache-control") ?? "", /private,\s*no-store/);
+  assert.equal(creatorApi.headers.get("x-dzn-cache"), "BYPASS");
+  const creatorPayload = await creatorApi.json() as { ok: boolean; event?: { id: string; slug: string; status: string; visibility: string; registeredServers: number } };
+  assert.equal(creatorPayload.ok, true);
+  assert.equal(creatorPayload.event?.id, "private-draft-event");
+  assert.equal(creatorPayload.event?.slug, "private-draft");
+  assert.equal(creatorPayload.event?.status, "draft");
+  assert.equal(creatorPayload.event?.visibility, "private");
+  assert.equal(creatorPayload.event?.registeredServers, 0);
+
+  const missingApi = await onOwnerDraftEventGet(makeOwnerDraftReviewContext(env, "https://example.com/api/owner/events/missing", `dzn_session=${creatorToken}`, "missing"));
+  assert.equal(missingApi.status, 404, "Missing private draft lookup should return 404 to the authorized creator.");
+
+  const publicList = await publicEventsList(env);
+  assert.equal(publicList.status, 200, "Anonymous public event list should remain readable.");
+  assert.match(publicList.headers.get("cache-control") ?? "", /public,\s*max-age=15/, "Default anonymous event list should retain bounded public caching.");
+  assert.match(publicList.headers.get("vary") ?? "", /\bCookie\b/i, "Default anonymous event list must vary by Cookie.");
+  const publicListPayload = await publicList.json() as { full: boolean; events: Array<{ id: string; slug: string; status: string; visibility: string }>; statusFilters: Array<{ value: string }> };
+  assert.equal(publicListPayload.full, false);
+  assert.equal(publicListPayload.events.some((event) => event.status === "draft"), false, "Default public event list must not include drafts.");
+  assert.equal(publicListPayload.events.some((event) => event.id === "public-draft-event" || event.id === "unlisted-draft-event" || event.id === "private-draft-event"), false);
+  assert.equal(publicListPayload.events.some((event) => event.id === "public-live-event"), true);
+  assert.equal(publicListPayload.events.some((event) => event.id === "unlisted-live-event"), true, "Unlisted non-draft events may remain direct public list entries under the current contract.");
+  assert.equal(publicListPayload.statusFilters.some((filter) => filter.value === "draft"), false, "Public status filters must not advertise Draft.");
+
+  const publicAllList = await publicEventsList(env, "?status=all");
+  assert.equal(publicAllList.status, 200);
+  assert.equal(((await publicAllList.json()) as { events: Array<{ status: string }> }).events.some((event) => event.status === "draft"), false, "status=all must not include drafts.");
+
+  const publicFullList = await publicEventsList(env, "?full=true");
+  assert.equal(publicFullList.status, 200);
+  assert.match(publicFullList.headers.get("cache-control") ?? "", /private,\s*no-store/, "Anonymous full=true event list must be private/no-store.");
+  assert.equal(publicFullList.headers.get("x-dzn-cache"), "BYPASS");
+  assert.match(publicFullList.headers.get("vary") ?? "", /\bCookie\b/i);
+  assert.equal(((await publicFullList.json()) as { events: Array<{ status: string }> }).events.some((event) => event.status === "draft"), false, "full=true public event list must not include drafts.");
+
+  const creatorPublicList = await publicEventsList(env, "", `dzn_session=${creatorToken}`);
+  assert.equal(creatorPublicList.status, 200);
+  assert.match(creatorPublicList.headers.get("cache-control") ?? "", /private,\s*no-store/, "Authenticated public event list must be private/no-store.");
+  assert.equal(((await creatorPublicList.json()) as { events: Array<{ status: string }> }).events.some((event) => event.status === "draft"), false, "Creators must not see drafts through the public event list.");
+
+  const invalidCookieList = await publicEventsList(env, "", "dzn_session=expired-or-invalid");
+  assert.equal(invalidCookieList.status, 200);
+  assert.match(invalidCookieList.headers.get("cache-control") ?? "", /private,\s*no-store/, "Invalid session-cookie requests must not receive public cache headers.");
+  assert.equal(invalidCookieList.headers.get("x-dzn-cache"), "BYPASS");
+
+  const categoryFilteredList = await publicEventsList(env, "?category=deathmatch&type=community_cup");
+  assert.equal(categoryFilteredList.status, 200);
+  assert.equal(((await categoryFilteredList.json()) as { events: Array<{ status: string }> }).events.some((event) => event.status === "draft"), false, "Category/type filters must not reveal drafts.");
+
+  const draftList = await publicEventsList(env, "?status=draft");
+  assert.equal(draftList.status, 400, "status=draft must use the explicit invalid public status contract.");
+  assert.equal(draftList.headers.get("x-dzn-cache"), "BYPASS");
+  assert.match(draftList.headers.get("cache-control") ?? "", /no-store/);
+  const draftListPayload = await draftList.json() as { ok: boolean; errorCode: string; events: unknown[] };
+  assert.equal(draftListPayload.ok, false);
+  assert.equal(draftListPayload.errorCode, "INVALID_PUBLIC_EVENT_STATUS");
+  assert.deepEqual(draftListPayload.events, []);
+
+  const unknownStatusList = await publicEventsList(env, "?status=not-real");
+  assert.equal(unknownStatusList.status, 400, "Unknown public statuses must not fall back to a broad event list.");
+
+  const ownerInventory = await getOwnerEventControlPayload(env, creatorUser);
+  assert.equal(ownerInventory.events.some((event) => event.status === "draft" && event.id === "private-draft-event"), true, "Owner event inventory must still include drafts.");
+  assert.equal(ownerInventory.hostInventoryAvailable, true, "Creator host inventory should be available when the focused event-host query succeeds.");
+  assert.equal(ownerInventory.hostInventoryCount, 1, "Only one creator-owned eligible host should be listed.");
+  assert.deepEqual(ownerInventory.linkedServers.map((server) => server.id), ["creator-event-host"], "Owner Event Control must list only authorized event hosts.");
+  assert.equal(ownerInventory.linkedServers.some((server) => server.id === "foreign-event-host"), false, "Foreign-owned eligible hosts must not be listed.");
+  assert.equal(ownerInventory.linkedServers.some((server) => server.id.includes("free") || server.id.includes("inactive") || server.id.includes("hidden") || server.id.includes("archived") || server.id.includes("merged") || server.id.includes("ambiguous")), false, "Ineligible owned hosts must not be listed.");
+  for (const listed of ownerInventory.linkedServers) {
+    const resolved = await resolveAuthorizedEventCreationHost(env, creatorUser, listed.id);
+    assert.equal(resolved.ok, true, "Every listed host must be accepted by the direct event-create resolver.");
+  }
+  const directHostList = await listAuthorizedEventCreationHosts(env, creatorUser);
+  assert.equal(directHostList.ok, true, "The shared event-host list helper should return an explicit successful result.");
+  if (directHostList.ok) {
+    assert.deepEqual(directHostList.hosts.map((server) => server.id), ["creator-event-host"]);
+  }
+  for (const [serverId, expectedStatus, expectedError] of [
+    ["foreign-event-host", 404, "SERVER_NOT_FOUND"],
+    ["creator-free-host", 403, "PLAN_LOCKED"],
+    ["creator-inactive-host", 403, "PLAN_LOCKED"],
+    ["creator-hidden-host", 409, "INVALID_HOST_STATE"],
+    ["creator-archived-host", 409, "INVALID_HOST_STATE"],
+    ["creator-merged-host", 409, "INVALID_HOST_STATE"],
+    ["creator-ambiguous-host", 409, "INVALID_HOST_STATE"],
+  ] as const) {
+    const resolved = await resolveAuthorizedEventCreationHost(env, creatorUser, serverId);
+    assert.equal(resolved.ok, false, `${serverId} must be rejected by the direct event-create resolver.`);
+    if (!resolved.ok) {
+      assert.equal(resolved.status, expectedStatus, `${serverId} resolver status should match the safe host contract.`);
+      assert.equal(resolved.error, expectedError, `${serverId} resolver error should match the safe host contract.`);
+    }
+  }
+
+  const repairableDb = new OwnerDraftReviewDb(new Map([[creatorHash, creatorUser]]), { missingMergedIntoInitially: true });
+  const repairableEnv = {
+    DB: repairableDb as unknown as D1Database,
+    SESSION_SECRET: secret,
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: `${ownerUser.discord_id},${creatorUser.discord_id}`,
+  } as Env;
+  resetEventHostSchemaReadinessForTests(repairableEnv);
+  assert.equal(repairableDb.hasLinkedServerColumn("merged_into_server_id"), false, "The readiness fixture should start without the linked-server merge column.");
+  const repairedList = await listAuthorizedEventCreationHosts(repairableEnv, creatorUser);
+  assert.equal(repairedList.ok, true, "Event-host listing should invoke linked-server schema readiness before reading hosts.");
+  assert.equal(repairableDb.hasLinkedServerColumn("merged_into_server_id"), true, "Linked-server schema readiness should add the missing merge column.");
+  assert.equal(repairableDb.linkedServerAlterStatements.some((statement) => /merged_into_server_id/i.test(statement)), true, "The existing linked-server schema helper should be responsible for the missing merge column.");
+
+  const resolverRepairDb = new OwnerDraftReviewDb(new Map([[creatorHash, creatorUser]]), { missingMergedIntoInitially: true });
+  const resolverRepairEnv = {
+    DB: resolverRepairDb as unknown as D1Database,
+    SESSION_SECRET: secret,
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: `${ownerUser.discord_id},${creatorUser.discord_id}`,
+  } as Env;
+  resetEventHostSchemaReadinessForTests(resolverRepairEnv);
+  const repairedResolver = await resolveAuthorizedEventCreationHost(resolverRepairEnv, creatorUser, "creator-event-host");
+  assert.equal(repairedResolver.ok, true, "Direct event-host resolution should invoke schema readiness independently.");
+  assert.equal(resolverRepairDb.hasLinkedServerColumn("merged_into_server_id"), true);
+
+  const recoveringDb = new OwnerDraftReviewDb(new Map([[creatorHash, creatorUser]]), { missingCompetitiveEnabledInitially: true });
+  const recoveringEnv = {
+    DB: recoveringDb as unknown as D1Database,
+    SESSION_SECRET: secret,
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: `${ownerUser.discord_id},${creatorUser.discord_id}`,
+  } as Env;
+  resetEventHostSchemaReadinessForTests(recoveringEnv);
+  const firstReadiness = await ensureEventHostSchema(recoveringEnv);
+  assert.equal(firstReadiness.ok, false, "Missing event-host columns should produce a safe readiness failure.");
+  if (!firstReadiness.ok) {
+    assert.equal(firstReadiness.status, 503);
+    assert.equal(firstReadiness.error, "EVENT_HOST_SCHEMA_NOT_READY");
+  }
+  const failedList = await listAuthorizedEventCreationHosts(recoveringEnv, creatorUser);
+  assert.equal(failedList.ok, false, "A failed readiness result must not be reported as an empty host list.");
+  recoveringDb.addLinkedServerColumn("competitive_enabled");
+  const recoveredReadiness = await ensureEventHostSchema(recoveringEnv);
+  assert.equal(recoveredReadiness.ok, true, "Failed event-host readiness must be evicted so the same warm Env can recover.");
+  const linkedPragmaCallsAfterRecovery = recoveringDb.linkedServerPragmaCalls;
+  const cachedReadiness = await ensureEventHostSchema(recoveringEnv);
+  assert.equal(cachedReadiness.ok, true);
+  assert.equal(recoveringDb.linkedServerPragmaCalls, linkedPragmaCallsAfterRecovery, "Successful event-host readiness should remain cached.");
+
+  const concurrentDb = new OwnerDraftReviewDb(new Map([[creatorHash, creatorUser]]), { missingCompetitiveEnabledInitially: true });
+  const concurrentEnv = {
+    DB: concurrentDb as unknown as D1Database,
+    SESSION_SECRET: secret,
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: `${ownerUser.discord_id},${creatorUser.discord_id}`,
+  } as Env;
+  resetEventHostSchemaReadinessForTests(concurrentEnv);
+  const [concurrentA, concurrentB] = await Promise.all([ensureEventHostSchema(concurrentEnv), ensureEventHostSchema(concurrentEnv)]);
+  assert.equal(concurrentA.ok, false);
+  assert.equal(concurrentB.ok, false);
+  assert.equal(concurrentDb.linkedServerPragmaCalls, 2, "Concurrent event-host readiness calls should share one in-flight probe.");
+  concurrentDb.addLinkedServerColumn("competitive_enabled");
+  const retriedAfterConcurrentFailure = await ensureEventHostSchema(concurrentEnv);
+  assert.equal(retriedAfterConcurrentFailure.ok, true, "A settled failed shared readiness probe must not pin the warm process.");
+
+  const unavailableEnv = {
+    DB: new OwnerDraftReviewDb(new Map([[creatorHash, creatorUser]]), { failHostInventory: true }) as unknown as D1Database,
+    SESSION_SECRET: secret,
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: `${ownerUser.discord_id},${creatorUser.discord_id}`,
+  } as Env;
+  const unavailableInventory = await getOwnerEventControlPayload(unavailableEnv, creatorUser);
+  assert.equal(unavailableInventory.hostInventoryAvailable, false, "Event-host query failure must not be reported as a valid empty inventory.");
+  assert.deepEqual(unavailableInventory.linkedServers, []);
+  assert.equal(unavailableInventory.warnings.includes("event_host_inventory_unavailable"), true);
+
+  const ownerEventsGet = await onOwnerEventsApiGet(makeOwnerDraftReviewContext(env, "https://example.com/api/owner/events", `dzn_session=${creatorToken}`));
+  assert.equal(ownerEventsGet.status, 200, "Owner Event Control GET should remain available to the configured creator.");
+  assert.match(ownerEventsGet.headers.get("cache-control") ?? "", /private,\s*no-store/, "Owner Event Control GET must be private/no-store.");
+  assert.equal(ownerEventsGet.headers.get("x-dzn-cache"), "BYPASS");
+  assert.match(ownerEventsGet.headers.get("vary") ?? "", /\bCookie\b/i);
+  const anonymousOwnerPost = await onOwnerEventsApiPost(makeOwnerDraftReviewContext(env, "https://example.com/api/owner/events"));
+  assert.equal(anonymousOwnerPost.status, 401, "Owner Event Control POST must require creator authentication before reading a body.");
+  assert.match(anonymousOwnerPost.headers.get("cache-control") ?? "", /private,\s*no-store/, "Owner Event Control POST denials must be private/no-store.");
+  assert.equal(anonymousOwnerPost.headers.get("x-dzn-cache"), "BYPASS");
+  const unavailableHostSchemaEnv = {
+    DB: new OwnerDraftReviewDb(new Map([[creatorHash, creatorUser]]), { missingCompetitiveEnabledInitially: true }) as unknown as D1Database,
+    SESSION_SECRET: secret,
+    DZN_PLATFORM_CREATOR_DISCORD_ID: creatorUser.discord_id,
+    DZN_PLATFORM_OWNER_DISCORD_IDS: `${ownerUser.discord_id},${creatorUser.discord_id}`,
+  } as Env;
+  const unavailableHostSchemaInventory = await getOwnerEventControlPayload(unavailableHostSchemaEnv, creatorUser);
+  assert.equal(unavailableHostSchemaInventory.hostInventoryAvailable, false, "Owner Event Control must report unavailable host inventory on readiness failure.");
+  assert.deepEqual(unavailableHostSchemaInventory.linkedServers, []);
+  assert.equal(unavailableHostSchemaInventory.warnings.includes("event_host_inventory_unavailable"), true);
+  const unavailableHostSchemaPost = await onOwnerEventsApiPost(makeOwnerDraftReviewContext(
+    unavailableHostSchemaEnv,
+    "https://example.com/api/owner/events",
+    `dzn_session=${creatorToken}`,
+    "",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Unavailable Host Schema Event",
+        event_type: "community_cup",
+        hosting_server_id: "creator-event-host",
+        server_limit: 8,
+        team_limit: 8,
+        status: "registration_open",
+        visibility: "private",
+      }),
+    },
+  ));
+  assert.equal(unavailableHostSchemaPost.status, 503, "Owner Event Control POST must fail safely when event-host schema readiness fails.");
+  assert.match(unavailableHostSchemaPost.headers.get("cache-control") ?? "", /private,\s*no-store/);
+  assert.equal(unavailableHostSchemaPost.headers.get("x-dzn-cache"), "BYPASS");
+  const unavailableHostSchemaPayload = await unavailableHostSchemaPost.json() as { error: string; message: string; missingCount?: number };
+  assert.equal(unavailableHostSchemaPayload.error, "EVENT_HOST_SCHEMA_NOT_READY");
+  assert.equal(unavailableHostSchemaPayload.message, "Event host inventory is temporarily unavailable.");
+  assert.equal("missingCount" in unavailableHostSchemaPayload, false, "Owner POST host-schema failures must not expose schema detail counts.");
+
+  const publicEvent = await publicEventDetail(env, "public-live");
+  assert.equal(publicEvent.status, 200, "Stored public events should remain publicly readable.");
+  assert.match(publicEvent.headers.get("cache-control") ?? "", /public,\s*max-age=15/, "Public event 200 responses should retain public cache headers.");
+  assert.match(publicEvent.headers.get("vary") ?? "", /\bCookie\b/i, "Public event detail must vary by Cookie.");
+  const publicPayload = await publicEvent.json() as { ok: boolean; event?: { id: string; slug: string; visibility: string; status: string } };
+  assert.equal(publicPayload.ok, true);
+  assert.equal(publicPayload.event?.id, "public-live-event");
+  assert.equal(publicPayload.event?.slug, "public-live");
+  assert.equal(JSON.stringify(publicPayload).includes("\"full\":true"), false, "Default public event detail must not claim full entitlement access.");
+
+  const publicFullDetail = await publicEventDetail(env, "public-live", undefined, "?full=true");
+  assert.equal(publicFullDetail.status, 200);
+  assert.match(publicFullDetail.headers.get("cache-control") ?? "", /private,\s*no-store/, "Anonymous full=true event detail must be private/no-store.");
+  assert.equal(publicFullDetail.headers.get("x-dzn-cache"), "BYPASS");
+
+  const creatorPublicDetail = await publicEventDetail(env, "public-live", `dzn_session=${creatorToken}`);
+  assert.equal(creatorPublicDetail.status, 200);
+  assert.match(creatorPublicDetail.headers.get("cache-control") ?? "", /private,\s*no-store/, "Authenticated public event detail must be private/no-store.");
+
+  const invalidCookieDetail = await publicEventDetail(env, "public-live", "dzn_session=expired-or-invalid");
+  assert.equal(invalidCookieDetail.status, 200);
+  assert.match(invalidCookieDetail.headers.get("cache-control") ?? "", /private,\s*no-store/, "Invalid session-cookie detail requests must bypass public caches.");
+
+  const simulatedSharedCache = new Map<string, string>();
+  if (/public/i.test(publicFullDetail.headers.get("cache-control") ?? "")) {
+    simulatedSharedCache.set("/api/events/public-live?full=true", await publicFullDetail.clone().text());
+  }
+  const authenticatedAfterAnonFull = await publicEventDetail(env, "public-live", `dzn_session=${creatorToken}`, "?full=true");
+  assert.equal(authenticatedAfterAnonFull.status, 200);
+  assert.equal(simulatedSharedCache.has("/api/events/public-live?full=true"), false, "Anonymous full=true responses must be impossible to reuse from a shared public cache.");
+  assert.match(authenticatedAfterAnonFull.headers.get("cache-control") ?? "", /private,\s*no-store/);
+
+  const privateEvent = await publicEventDetail(env, "private-live");
+  const privateBody = await privateEvent.text();
+  assert.equal(privateEvent.status, 404, "Stored private events must return a generic public 404.");
+  assert.match(privateEvent.headers.get("cache-control") ?? "", /no-store/, "Public private-event 404 must be no-store.");
+  assert.doesNotMatch(privateBody, /private-live-event|private|draft|Secret rules|Hidden reward|creator-user/i, "Private event fields must not enter public JSON.");
+
+  const privateDraftEvent = await publicEventDetail(env, "private-draft");
+  assert.equal(privateDraftEvent.status, 404, "Stored draft/private events must return 404 publicly.");
+
+  const publicDraftEvent = await publicEventDetail(env, "public-draft");
+  assert.equal(publicDraftEvent.status, 404, "Stored draft/public events must return 404 publicly.");
+
+  const missingEvent = await publicEventDetail(env, "missing-event");
+  const missingBody = await missingEvent.text();
+  assert.equal(missingEvent.status, 404, "Missing arbitrary event slugs must return 404.");
+  assert.equal(privateBody, missingBody, "Private and missing public event details must have the same safe error shape.");
+  const missingPayload = JSON.parse(missingBody) as { ok: boolean; errorCode?: string; message?: string; source?: string; status?: number };
+  assert.deepEqual(missingPayload, {
+    ok: false,
+    status: 404,
+    error: "EVENT_NOT_FOUND",
+    errorCode: "EVENT_NOT_FOUND",
+    message: "Event not found.",
+    source: "not_found",
+  });
+
+  const creatorPublicPrivate = await publicEventDetail(env, "private-draft", `dzn_session=${creatorToken}`);
+  assert.equal(creatorPublicPrivate.status, 404, "Configured creators must still use owner-only review APIs for private drafts.");
+  assert.match(creatorPublicPrivate.headers.get("cache-control") ?? "", /private,\s*no-store/);
+
+  const knownDemo = await publicEventDetail(env, "weekly-warriors");
+  assert.equal(knownDemo.status, 200, "Known exact demo event slugs may still use the display fallback.");
+  const knownDemoPayload = await knownDemo.json() as { source: string; event?: { slug: string } };
+  assert.equal(knownDemoPayload.source, "display_fallback");
+  assert.equal(knownDemoPayload.event?.slug, "weekly-warriors");
+
+  const unknownDemo = await publicEventDetail(env, "not-a-demo-event");
+  assert.equal(unknownDemo.status, 404, "Unknown slugs must never receive demoEvents()[0].");
+  assert.doesNotMatch(await unknownDemo.text(), /dzn-season-1|weekly-warriors|pandora-showdown|spring-clash|legends-cup|summer-wars/);
+
+  const privateKnownDemoSlug = await publicEventDetail(env, "dzn-season-1");
+  assert.equal(privateKnownDemoSlug.status, 404, "A private stored event using a known demo slug must not fall through to demo content.");
+}
+
+function makeOwnerDraftReviewContext(env: Env, url: string, cookie?: string, slug = "", requestInit: RequestInit = {}): PagesContext {
+  const headers = new Headers(requestInit.headers);
+  if (cookie) headers.set("cookie", cookie);
+  return {
+    request: new Request(url, { ...requestInit, headers }),
+    env,
+    params: { slug },
+    waitUntil: () => undefined,
+    next: async () => new Response("draft review page", { status: 200 }),
+    data: {},
+  };
+}
+
+function publicEventsList(env: Env, search = "", cookie?: string) {
+  const headers = new Headers();
+  if (cookie) headers.set("cookie", cookie);
+  return onPublicEventsListRequest({
+    request: new Request(`https://example.com/api/events${search}`, { headers }),
+    env,
+    params: {},
+    waitUntil: () => undefined,
+    next: async () => new Response(null, { status: 404 }),
+    data: {},
+  });
+}
+
+function publicEventDetail(env: Env, slug: string, cookie?: string, search = "") {
+  const headers = new Headers();
+  if (cookie) headers.set("cookie", cookie);
+  return onPublicEventDetailRequest({
+    request: new Request(`https://example.com/api/events/${encodeURIComponent(slug)}${search}`, { headers }),
+    env,
+    params: { slug },
+    waitUntil: () => undefined,
+    next: async () => new Response(null, { status: 404 }),
+    data: {},
+  });
+}
+
+type OwnerDraftReviewDbOptions = {
+  failHostInventory?: boolean;
+  missingMergedIntoInitially?: boolean;
+  missingCompetitiveEnabledInitially?: boolean;
+};
+
+class OwnerDraftReviewDb {
+  private readonly hosts: Array<Record<string, unknown>>;
+  private readonly linkedServerColumns: Set<string>;
+  private readonly serverSubscriptionColumns = new Set(["guild_id", "plan_key", "status"]);
+  linkedServerPragmaCalls = 0;
+  serverSubscriptionPragmaCalls = 0;
+  readonly linkedServerAlterStatements: string[] = [];
+
+  constructor(private readonly sessionUsersByHash: Map<string, SessionUser>, private readonly options: OwnerDraftReviewDbOptions = {}) {
+    this.linkedServerColumns = new Set([
+      "id",
+      "user_id",
+      "guild_id",
+      "public_slug",
+      "display_name",
+      "hostname",
+      "server_name",
+      "nitrado_service_name",
+      "server_type",
+      "server_mode",
+      "server_category",
+      "competitive_enabled",
+      "verified_server",
+      "event_mmr",
+      "season_points",
+      "event_wins",
+      "event_losses",
+      "event_draws",
+      "last_event_at",
+      "current_players",
+      "max_players",
+      "status",
+      "listing_visibility",
+      "merged_into_server_id",
+      "updated_at",
+    ]);
+    if (options.missingMergedIntoInitially) this.linkedServerColumns.delete("merged_into_server_id");
+    if (options.missingCompetitiveEnabledInitially) this.linkedServerColumns.delete("competitive_enabled");
+    this.hosts = [
+      this.hostRow("creator-event-host", "creator-user", "guild-creator-event-host", "Creator Event Host", "live", "public", null, "deathmatch", "pro", "active", 1),
+      this.hostRow("foreign-event-host", "foreign-user", "guild-foreign-event-host", "Foreign Event Host", "live", "public", null, "deathmatch", "premium", "active", 1),
+      this.hostRow("creator-free-host", "creator-user", "guild-creator-free-host", "Creator Free Host", "live", "public", null, "deathmatch", "free", "active", 1),
+      this.hostRow("creator-inactive-host", "creator-user", "guild-creator-inactive-host", "Creator Inactive Host", "live", "public", null, "deathmatch", "pro", "inactive", 1),
+      this.hostRow("creator-hidden-host", "creator-user", "guild-creator-hidden-host", "Creator Hidden Host", "live", "hidden", null, "deathmatch", "pro", "active", 1),
+      this.hostRow("creator-archived-host", "creator-user", "guild-creator-archived-host", "Creator Archived Host", "archived", "public", null, "deathmatch", "pro", "active", 1),
+      this.hostRow("creator-merged-host", "creator-user", "guild-creator-merged-host", "Creator Merged Host", "merged", "public", "creator-event-host", "deathmatch", "pro", "active", 1),
+      this.hostRow("creator-ambiguous-host", "creator-user", "guild-creator-ambiguous-host", "Creator Ambiguous Host", "live", "public", null, "deathmatch", "pro", "active", 2),
+    ];
+  }
+
+  prepare(sql: string) {
+    return new OwnerDraftReviewStatement(this, sql);
+  }
+
+  sessionUser(tokenHash: string) {
+    return this.sessionUsersByHash.get(tokenHash) ?? null;
+  }
+
+  eventBySlug(slug: string) {
+    const events = new Map<string, Record<string, unknown>>([
+      ["public-live", this.eventRow("public-live-event", "Public Live Event", "public-live", "upcoming", "public")],
+      ["private-live", this.eventRow("private-live-event", "Private Live Event", "private-live", "upcoming", "private", "Secret rules", "Hidden reward")],
+      ["private-draft", this.eventRow("private-draft-event", "Private Draft Event", "private-draft", "draft", "private", "Rules are still under creator review.", "Rewards are not published.")],
+      ["public-draft", this.eventRow("public-draft-event", "Public Draft Event", "public-draft", "draft", "public", "Draft rules", "Draft rewards")],
+      ["unlisted-draft", this.eventRow("unlisted-draft-event", "Unlisted Draft Event", "unlisted-draft", "draft", "unlisted", "Unlisted draft rules", "Unlisted draft rewards")],
+      ["unlisted-live", this.eventRow("unlisted-live-event", "Unlisted Live Event", "unlisted-live", "upcoming", "unlisted")],
+      ["dzn-season-1", this.eventRow("private-demo-slug-event", "Private Demo Slug Event", "dzn-season-1", "upcoming", "private", "Private demo slug rules", "Private demo slug rewards")],
+    ]);
+    return events.get(slug) ?? null;
+  }
+
+  publicEventRows() {
+    return ["public-live", "unlisted-live"].map((slug) => this.eventBySlug(slug));
+  }
+
+  ownerEventRows() {
+    return ["public-live", "unlisted-live", "private-live", "private-draft", "public-draft", "unlisted-draft"].map((slug) => this.eventBySlug(slug));
+  }
+
+  eventHostRowsForUser(userId: string) {
+    if (this.options.failHostInventory) throw new Error("Injected host inventory query failure.");
+    return this.hosts
+      .filter((host) => host.user_id === userId)
+      .filter((host) => this.hostAuthorized(host))
+      .map((host) => ({ ...host }));
+  }
+
+  eventHostByIdForUser(id: string, userId: string) {
+    if (this.options.failHostInventory) throw new Error("Injected host inventory query failure.");
+    const host = this.hosts.find((row) => row.id === id && row.user_id === userId);
+    return host ? [{ ...host }] : [];
+  }
+
+  tableColumns(table: string) {
+    if (table === "linked_servers") {
+      this.linkedServerPragmaCalls += 1;
+      return [...this.linkedServerColumns].map((name) => ({ name }));
+    }
+    if (table === "server_subscriptions") {
+      this.serverSubscriptionPragmaCalls += 1;
+      return [...this.serverSubscriptionColumns].map((name) => ({ name }));
+    }
+    const columns: Record<string, string[]> = {
+      competitive_events: ["id", "name", "slug", "description", "category", "event_type", "status", "visibility", "starts_at", "ends_at", "created_at", "updated_at"],
+      competitive_event_servers: ["event_id", "server_id", "score", "wins", "losses", "draws"],
+      competitive_event_matches: ["event_id", "match_status"],
+      competitive_event_activity: ["event_id", "server_id", "activity_type", "message", "created_at"],
+    };
+    return (columns[table] ?? []).map((name) => ({ name }));
+  }
+
+  addLinkedServerColumn(name: string) {
+    this.linkedServerColumns.add(name);
+  }
+
+  hasLinkedServerColumn(name: string) {
+    return this.linkedServerColumns.has(name);
+  }
+
+  private eventRow(id: string, name: string, slug: string, status: string, visibility: string, rules = "Public rules", rewards = "Public rewards") {
+    return {
+      id,
+      name,
+      slug,
+      description: `${name} description.`,
+      status,
+      visibility,
+      category: "deathmatch",
+      event_type: "community_cup",
+      premium_tier: "free",
+      server_limit: 12,
+      team_limit: 12,
+      starts_at: null,
+      ends_at: null,
+      created_by: "creator-user",
+      banner_url: null,
+      rules,
+      rewards,
+      created_at: "2026-07-23T00:00:00.000Z",
+      updated_at: "2026-07-23T00:00:00.000Z",
+      registered_servers: 0,
+      total_score: 0,
+      match_count: 0,
+    };
+  }
+
+  private hostRow(
+    id: string,
+    userId: string,
+    guildId: string,
+    name: string,
+    status: string,
+    visibility: string,
+    mergedInto: string | null,
+    category: string | null,
+    planKey: string,
+    subscriptionStatus: string,
+    subscriptionRows: number,
+  ) {
+    const eligible = ["active", "trialing"].includes(subscriptionStatus) && ["pro", "premium", "network", "partner"].includes(planKey);
+    return {
+      id,
+      user_id: userId,
+      guild_id: guildId,
+      public_slug: id,
+      display_name: name,
+      hostname: name,
+      server_name: name,
+      nitrado_service_name: name,
+      server_type: category ? "DEATHMATCH" : null,
+      server_mode: null,
+      server_category: category,
+      competitive_enabled: 0,
+      verified_server: 1,
+      event_mmr: 1000,
+      season_points: 0,
+      event_wins: 0,
+      event_losses: 0,
+      event_draws: 0,
+      last_event_at: null,
+      current_players: 2,
+      max_players: 16,
+      status,
+      listing_visibility: visibility,
+      merged_into_server_id: mergedInto,
+      updated_at: "2026-07-23T00:00:00.000Z",
+      subscription_row_count: subscriptionRows,
+      eligible_subscription_count: eligible ? subscriptionRows : 0,
+      plan_key: planKey,
+      subscription_status: subscriptionStatus,
+    };
+  }
+
+  private hostAuthorized(host: Record<string, unknown>) {
+    const status = String(host.status ?? "pending").toLowerCase();
+    const visibility = String(host.listing_visibility ?? "public").toLowerCase();
+    return !["deleted", "merged", "archived"].includes(status)
+      && !String(host.merged_into_server_id ?? "")
+      && visibility !== "hidden"
+      && Number(host.subscription_row_count ?? 0) === 1
+      && Number(host.eligible_subscription_count ?? 0) === 1;
+  }
+}
+
+class OwnerDraftReviewStatement {
+  private values: unknown[] = [];
+
+  constructor(private readonly db: OwnerDraftReviewDb, private readonly sql: string) {}
+
+  bind(...values: unknown[]) {
+    this.values = values;
+    return this;
+  }
+
+  async first<T>() {
+    if (/FROM sessions\s+JOIN users/i.test(this.sql)) {
+      return this.db.sessionUser(String(this.values[0] ?? "")) as T | null;
+    }
+    if (/FROM server_subscriptions/i.test(this.sql)) {
+      return null;
+    }
+    if (/FROM competitive_events/i.test(this.sql) && /competitive_events\.slug = \?/i.test(this.sql)) {
+      return this.db.eventBySlug(String(this.values[0] ?? "")) as T | null;
+    }
+    if (/FROM competitive_events/i.test(this.sql) && /WHERE slug = \?/i.test(this.sql)) {
+      return this.db.eventBySlug(String(this.values[0] ?? "")) as T | null;
+    }
+    return null;
+  }
+
+  async all<T>() {
+    const pragmaMatch = this.sql.match(/PRAGMA table_info\(([^)]+)\)/i);
+    if (pragmaMatch) {
+      return { results: this.db.tableColumns(pragmaMatch[1]) as T[] };
+    }
+    if (/FROM competitive_events/i.test(this.sql) && /ORDER BY CASE status/i.test(this.sql)) {
+      return { results: this.db.publicEventRows() as T[] };
+    }
+    if (/FROM competitive_events/i.test(this.sql) && /ORDER BY datetime\(COALESCE\(competitive_events\.updated_at/i.test(this.sql)) {
+      return { results: this.db.ownerEventRows() as T[] };
+    }
+    if (/FROM linked_servers/i.test(this.sql) && /linked_servers\.id = \?/i.test(this.sql) && /linked_servers\.user_id = \?/i.test(this.sql)) {
+      return { results: this.db.eventHostByIdForUser(String(this.values[0] ?? ""), String(this.values[1] ?? "")) as T[] };
+    }
+    if (/FROM linked_servers/i.test(this.sql) && /linked_servers\.user_id = \?/i.test(this.sql)) {
+      return { results: this.db.eventHostRowsForUser(String(this.values[0] ?? "")) as T[] };
+    }
+    if (/FROM competitive_event_servers/i.test(this.sql) || /FROM competitive_event_matches/i.test(this.sql) || /FROM competitive_event_activity/i.test(this.sql)) {
+      return { results: [] as T[] };
+    }
+    return { results: [] as T[] };
+  }
+
+  async run() {
+    const linkedServerAlterMatch = this.sql.match(/ALTER\s+TABLE\s+linked_servers\s+ADD\s+COLUMN\s+([a-zA-Z_][a-zA-Z0-9_]*)/i);
+    if (linkedServerAlterMatch) {
+      this.db.addLinkedServerColumn(linkedServerAlterMatch[1]);
+      this.db.linkedServerAlterStatements.push(this.sql);
+      return { success: true };
+    }
+    return { success: true };
+  }
+}

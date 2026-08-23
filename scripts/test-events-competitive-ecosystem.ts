@@ -101,7 +101,9 @@ includesAll(matchmakingRoute, ["createCategorySafeMatchmaking", "opponent_server
 const eventsRoute = source("functions/api/events.ts");
 includesAll(eventsRoute, ["getEventsListPayload", "full", "category", "status", "type"]);
 const eventCreateRoute = source("functions/api/events/create.ts");
-includesAll(eventCreateRoute, ["createCompetitiveEvent", "getSessionUser", "hosting_server_id"]);
+includesAll(eventCreateRoute, ["createCompetitiveEvent", "requirePlatformCreatorEventAdmin", "hosting_server_id"]);
+const eventCreateHandler = eventCreateRoute.slice(eventCreateRoute.indexOf("export const onRequest"));
+assert.equal(eventCreateHandler.indexOf("requirePlatformCreatorEventAdmin") < eventCreateHandler.indexOf("readJson"), true, "Legacy event create API must authorize before reading the request body.");
 
 const eventHubLib = source("functions/_lib/event-hub.ts");
 includesAll(eventHubLib, [
@@ -224,16 +226,15 @@ includesAll(detailUi, [
   "SAME CATEGORY ONLY",
   "Cross-server matching is an exclusive Pro/Premium platform feature.",
   "EventCreatePage",
-  "CREATE EVENT",
-  "Set your server category before creating an event.",
-  "The event category is locked to the selected hosting server.",
-  "/api/events/create",
+  "OFFICIAL EVENTS",
+  "Official DZN events are creator-managed",
+  "/events/suggest",
   "eventMatchesStatusFilter",
   "Demo data shown until live events are created",
   "Deathmatch can only fight Deathmatch",
   "ServerCategoryBadge",
 ]);
-assert.equal(source("components/events/EventHero.tsx").includes('href="/events/create"'), true, "Create Event CTA must route to /events/create.");
+assert.equal(source("components/events/EventHero.tsx").includes('href="/events/suggest"'), true, "Public Events CTA must route to the suggestion board.");
 assert.equal(source("components/events/EventTabs.tsx").includes("/events/tournaments?status=active"), true, "Active tab must use the active status alias.");
 assert.equal(source("components/events/ChallengeBattleCard.tsx").includes("Cross-server matching is an exclusive Pro/Premium platform feature."), false, "Challenge cards should not repeat the full premium lock sentence.");
 assert.equal(source("components/events/PremiumLockedCard.tsx").includes("PRO / PREMIUM FEATURE"), true);
@@ -245,7 +246,7 @@ assert.equal(source("functions/api/leaderboards.ts").includes("./public/leaderbo
 assert.equal(source("components/site-header.tsx").includes('href="/events"'), true, "Top nav Events link must open the Events Hub.");
 assert.equal(source("components/onboarding/dashboard.tsx").includes("Set your server category to join events and matchmaking."), false, "Dashboard must not render the global category banner.");
 assert.equal(source("components/onboarding/dashboard.tsx").includes("Set your server category to enter category-matched events."), true, "Dashboard Event Hub must keep the contextual category warning.");
-assert.equal(source("components/onboarding/dashboard.tsx").includes('href="/events/create"'), true, "Dashboard must expose event creation after category selection.");
+assert.equal(source("components/onboarding/dashboard.tsx").includes('href="/events/suggest"'), true, "Dashboard must send server owners to the public-safe suggestion board.");
 assert.equal(source("components/onboarding/dashboard.tsx").includes("Open Event Hub"), true, "Dashboard must expose owner Event Hub.");
 assert.equal(source("components/onboarding/dashboard.tsx").includes("/dashboard/events"), true, "Dashboard Events link must open the owner Event Hub.");
 assert.equal(source("components/onboarding/setup-wizard.tsx").includes("Server Category"), true, "Onboarding must expose server category selection.");

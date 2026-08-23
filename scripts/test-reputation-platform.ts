@@ -16,6 +16,20 @@ import {
 } from "../functions/_lib/reputation";
 import type { Env } from "../functions/_lib/types";
 
+function withFixedNow<T>(iso: string, operation: () => T): T {
+  const fixedNow = Date.parse(iso);
+  assert.equal(Number.isFinite(fixedNow), true);
+
+  const originalDateNow = Date.now;
+  Date.now = () => fixedNow;
+
+  try {
+    return operation();
+  } finally {
+    Date.now = originalDateNow;
+  }
+}
+
 assert.deepEqual(getCheckoutConfigured({
   STRIPE_PRICE_STARTER: "price_starter",
   STRIPE_PRICE_PRO: "price_pro",
@@ -66,36 +80,43 @@ assert.deepEqual(CROWN_DEFINITIONS.map((crown) => crown.name), ["King of PvP", "
 assert.deepEqual(SEASONAL_REWARD_TEMPLATES, ["Spring Champion", "Summer Champion", "Autumn Champion", "Winter Champion"]);
 assert.deepEqual(FOUNDER_REWARD_KEYS, ["founder", "early_adopter", "beta_veteran", "legacy_server"]);
 
-const bronze = buildServerReputationSummary({ planKey: "starter", createdAt: "2026-05-01T00:00:00.000Z" });
-const diamond = buildServerReputationSummary({
-  planKey: "premium",
-  createdAt: "2024-01-01T00:00:00.000Z",
-  totalKills: 1000,
-  totalJoins: 2500,
-  totalDisconnects: 1800,
-  uniquePlayers: 500,
-  championshipWins: 6,
-  seasonalParticipationCount: 8,
-  achievementCount: 80,
-  communityGrowth: 100,
+const originalDateNow = Date.now;
+const { bronze, diamond, showcase } = withFixedNow("2026-06-01T00:00:00.000Z", () => {
+  const bronze = buildServerReputationSummary({ planKey: "starter", createdAt: "2026-05-01T00:00:00.000Z" });
+  const diamond = buildServerReputationSummary({
+    planKey: "premium",
+    createdAt: "2024-01-01T00:00:00.000Z",
+    totalKills: 1000,
+    totalJoins: 2500,
+    totalDisconnects: 1800,
+    uniquePlayers: 500,
+    championshipWins: 6,
+    seasonalParticipationCount: 8,
+    achievementCount: 80,
+    communityGrowth: 100,
+  });
+  const showcase = buildAchievementShowcase({
+    planKey: "premium",
+    createdAt: "2024-01-01T00:00:00.000Z",
+    totalKills: 500,
+    uniquePlayers: 100,
+    seasonalParticipationCount: 2,
+    rank: 1,
+    category: "pvp",
+    score: 1200,
+    active: true,
+  });
+
+  return { bronze, diamond, showcase };
 });
+assert.equal(Date.now, originalDateNow);
 assert.equal(REPUTATION_LEVELS[0].tier, "Bronze");
 assert.equal(bronze.tier, "Bronze");
+assert.equal(bronze.sources.serverAge, 49);
 assert.equal(["Diamond", "Legendary"].includes(diamond.tier), true);
 assert.equal(diamond.premiumStatus, "premium");
 assert.equal(diamond.visibilityWeight, 4);
 
-const showcase = buildAchievementShowcase({
-  planKey: "premium",
-  createdAt: "2024-01-01T00:00:00.000Z",
-  totalKills: 500,
-  uniquePlayers: 100,
-  seasonalParticipationCount: 2,
-  rank: 1,
-  category: "pvp",
-  score: 1200,
-  active: true,
-});
 assert.equal(showcase.topEarnedBadges.length > 0, true);
 assert.equal(showcase.crownBadges.some((badge) => badge.name === "King of PvP"), true);
 assert.equal(showcase.seasonalTrophies.length, 2);

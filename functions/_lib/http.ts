@@ -91,3 +91,33 @@ export async function readJson<T>(request: Request): Promise<T> {
     return {} as T;
   }
 }
+
+export type BoundedJsonResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; status: 400 | 413; error: string; message: string };
+
+export async function readBoundedJson<T>(request: Request, maxBytes: number): Promise<BoundedJsonResult<T>> {
+  const boundedMax = Math.max(1, Math.min(Math.trunc(maxBytes), 64 * 1024));
+  const contentLength = request.headers.get("content-length");
+  if (contentLength && Number.isFinite(Number(contentLength)) && Number(contentLength) > boundedMax) {
+    return { ok: false, status: 413, error: "REQUEST_TOO_LARGE", message: "Request body is too large." };
+  }
+
+  let text = "";
+  try {
+    text = await request.text();
+  } catch {
+    return { ok: false, status: 400, error: "INVALID_BODY", message: "Request body could not be read." };
+  }
+
+  if (new TextEncoder().encode(text).byteLength > boundedMax) {
+    return { ok: false, status: 413, error: "REQUEST_TOO_LARGE", message: "Request body is too large." };
+  }
+  if (!text.trim()) return { ok: true, value: {} as T };
+
+  try {
+    return { ok: true, value: JSON.parse(text) as T };
+  } catch {
+    return { ok: false, status: 400, error: "INVALID_JSON", message: "Request body must be valid JSON." };
+  }
+}

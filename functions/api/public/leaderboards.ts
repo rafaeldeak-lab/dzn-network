@@ -72,11 +72,15 @@ function parseLeaderboardOptions(params: URLSearchParams) {
     full,
     metric: params.get("metric"),
     page: numberParam(params.get("page"), 1),
-    pageSize: numberParam(params.get("page_size") ?? params.get("limit"), full ? 100 : 10),
+    pageSize: boundedNumberParam(params.get("page_size") ?? params.get("limit"), full ? 100 : 10, 100),
   };
 }
 
 function numberParam(value: string | null, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
+}
+
+function boundedNumberParam(value: string | null, fallback: number, max: number) {
+  return Math.max(1, Math.min(max, numberParam(value, fallback)));
 }
