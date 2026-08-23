@@ -4,42 +4,22 @@ import { pathToFileURL } from "node:url";
 const token = process.env.GITHUB_TOKEN || "";
 const repository = process.env.GITHUB_REPOSITORY || "";
 
-export const REQUIRED_SAFE_LABELS = ["autodev", "adm-tracking", "autodev-safe-fix", "low-risk"];
-export const BLOCKED_SAFE_LABELS = [
-  "billing",
-  "auth",
-  "stripe",
-  "discord-oauth",
-  "account-management",
-  "subscriptions",
-  "server-settings",
-  "events-unrelated",
-  "high-risk",
-  "needs-human-review",
-  "database-destructive",
-  "token-encryption",
-];
-
-export const BODY_KEYWORD_BLOCKLIST = [
-  "stripe",
-  "billing",
-  "checkout",
-  "subscription",
-  "invoice",
-  "discord oauth",
-  "session",
-  "login",
-  "password",
-  "token_encryption_key",
-  "secret",
-  "delete from",
-  "drop table",
-  "truncate",
-  "player_stats",
-  "reset stats",
-  "event matchmaking",
-  "ctf",
-  "tournament",
+export const REQUIRED_SAFE_LABELS = ["autodev", "autodev-safe-fix", "low-risk"];
+export const BLOCKED_SAFE_LABELS = ["blocked", "high-risk", "medium-risk", "needs-human-review", "security", "billing", "auth", "stripe", "discord-oauth", "account-management", "subscriptions", "server-settings-sensitive", "database-destructive", "token-encryption", "worker-cron-high-risk", "production-mutation"];
+export const HARD_BLOCK_PATTERNS: Array<[RegExp, string]> = [
+  [/\bDROP\s+TABLE\b/i, "destructive DROP TABLE request"],
+  [/\bTRUNCATE\b/i, "destructive TRUNCATE request"],
+  [/\bDELETE\s+FROM\s+(player_profiles|kills|kill_events|deaths|player_events|events|competitive_events|sessions|subscriptions|server_subscriptions|servers|linked_servers)\b/i, "protected data delete request"],
+  [/\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?player_stats\b/i, "player_stats creation request"],
+  [/\bcreate\b[\s\S]{0,40}\bplayer_stats\b/i, "player_stats creation request"],
+  [/\b(player_profiles|kills|deaths|events|sessions|subscriptions)\b[\s\S]{0,80}\b(reset|delete|wipe|purge|truncate)\b/i, "protected data reset/delete request"],
+  [/\bTOKEN_ENCRYPTION_KEY\b|encrypted_token|token_iv|token_auth_tag/i, "token encryption request"],
+  [/\bsecrets\.(DISCORD_BOT_TOKEN|DISCORD_CLIENT_SECRET|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SESSION_SECRET|TOKEN_ENCRYPTION_KEY|MOCK_AUTH|MOCK_NITRADO|OPENAI_API_KEY)\b/i, "runtime secret workflow request"],
+  [/\bOPENAI_API_KEY\b|openai\/codex-action|sk-proj-|sk-[A-Za-z0-9]/i, "paid OpenAI/Codex GitHub execution request"],
+  [/\b(disable|bypass|skip|remove|weaken)\b[\s\S]{0,120}\b(auth|authorization|requireCronSecret|isCronAuthorized|401|403|session)\b/i, "auth weakening request"],
+  [/\b(disable|bypass|skip|remove|weaken)\b[\s\S]{0,160}\b(same-category|same category|assertSameServerCategory|assertSameCategoryChallenge|matchmaking)\b/i, "same-category enforcement removal request"],
+  [/\bcross-category\b[\s\S]{0,120}\b(allow|allowed|match|matchmaking|compete)\b/i, "cross-category matchmaking request"],
+  [/\b(production|prod)\b[\s\S]{0,120}\b(deploy|migration|migrate|delete|refund|stripe|nitrado|discord message|secret)\b/i, "production mutation request"],
 ];
 
 export type CandidateIssue = {
@@ -49,7 +29,7 @@ export type CandidateIssue = {
   labels: Array<string | { name?: string | null }>;
 };
 
-export function isSafeAdmIssue(issue: CandidateIssue) {
+export function isSafePlatformIssue(issue: CandidateIssue) {
   const labels = normalizeLabels(issue.labels);
   const missing = REQUIRED_SAFE_LABELS.filter((label) => !labels.has(label));
   if (missing.length) return { ok: false, reason: `missing required labels: ${missing.join(", ")}` };
@@ -57,11 +37,14 @@ export function isSafeAdmIssue(issue: CandidateIssue) {
   const blockedLabel = BLOCKED_SAFE_LABELS.find((label) => labels.has(label));
   if (blockedLabel) return { ok: false, reason: `blocked label: ${blockedLabel}` };
 
-  const searchable = `${issue.title}\n${issue.body ?? ""}`.toLowerCase();
-  const blockedKeyword = BODY_KEYWORD_BLOCKLIST.find((keyword) => searchable.includes(keyword));
-  if (blockedKeyword) return { ok: false, reason: `blocked body keyword: ${blockedKeyword}` };
+  const blockedSystem = ["system:auth", "system:billing", "system:stripe", "system:nitrado", "system:onboarding", "system:cloudflare-worker", "system:release"].find((label) => labels.has(label));
+  if (blockedSystem) return { ok: false, reason: `blocked system label for safe-fix: ${blockedSystem}` };
 
-  return { ok: true, reason: "safe ADM tracking issue" };
+  const searchable = `${issue.title}\n${issue.body ?? ""}`;
+  const hardBlock = HARD_BLOCK_PATTERNS.find(([pattern]) => pattern.test(searchable));
+  if (hardBlock) return { ok: false, reason: hardBlock[1] };
+
+  return { ok: true, reason: "safe platform issue" };
 }
 
 async function main() {
@@ -71,24 +54,21 @@ async function main() {
     writeReport("pick-safe-issue", makeReport("pick-safe-issue", checks, ["Run inside GitHub Actions with issue read permissions."]));
     return;
   }
-
   const [owner, repo] = repository.split("/");
-  const query = encodeURIComponent(`repo:${owner}/${repo} is:issue is:open label:autodev label:adm-tracking label:autodev-safe-fix label:low-risk`);
+  const query = encodeURIComponent(`repo:${owner}/${repo} is:issue is:open label:autodev label:autodev-safe-fix label:low-risk`);
   const result = await github(`/search/issues?q=${query}`) as { items?: CandidateIssue[] };
   const candidates = result.items ?? [];
-
   for (const issue of candidates) {
-    const safe = isSafeAdmIssue(issue);
+    const safe = isSafePlatformIssue(issue);
     if (safe.ok) {
-      checks.push(pass("selected issue", `Selected ADM AutoDev issue #${issue.number}.`, { number: issue.number, title: issue.title }));
+      checks.push(pass("selected issue", `Selected platform AutoDev issue #${issue.number}.`, { number: issue.number, title: issue.title }));
       writeReport("pick-safe-issue", makeReport("pick-safe-issue", checks));
       console.log(`AUTODEV_ISSUE_NUMBER=${issue.number}`);
       return;
     }
     checks.push(skip(`issue #${issue.number}`, safe.reason, { title: issue.title }));
   }
-
-  checks.push(skip("selected issue", "No safe ADM-only issue matched the label and body gates."));
+  checks.push(skip("selected issue", "No safe platform issue matched the label and hard-block gates."));
   writeReport("pick-safe-issue", makeReport("pick-safe-issue", checks));
 }
 

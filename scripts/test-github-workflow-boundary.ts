@@ -83,6 +83,14 @@ function hasWorkflowTrigger(source: string, trigger: string) {
   return new RegExp(`^  ${trigger}:`, "m").test(topLevelBlock(source, "on"));
 }
 
+function workflowJobBlock(source: string, job: string) {
+  const match = source.match(new RegExp(`^  ${job}:\\r?\\n`, "m"));
+  assert.notEqual(match, null, `Expected workflow job ${job}.`);
+  const rest = source.slice(match!.index! + match![0].length);
+  const nextJob = rest.search(/^  \S/m);
+  return nextJob === -1 ? rest : rest.slice(0, nextJob);
+}
+
 type AutoUpdateEventContext = {
   eventName: string;
   confirmProductionUpdates?: string;
@@ -132,6 +140,7 @@ const protectedRouteAuthRepairWorkflow = read(".github/workflows/dzn-protected-r
 const productionDiscordAuthRepairWorkflow = read(".github/workflows/dzn-production-discord-auth-repair.yml");
 const autoUpdateWorkerConfig = read("wrangler.auto-update.toml");
 const admWorkerConfig = read("wrangler.adm-sync.toml");
+const autodevAuditWorkflow = read(".github/workflows/dzn-autodev-audit.yml");
 const workflows = [
   [".github/workflows/dzn-adm-sync.yml", admWorkflow],
   [".github/workflows/dzn-nitrado-diagnostics.yml", diagnosticsWorkflow],
@@ -140,6 +149,20 @@ const workflows = [
   [".github/workflows/dzn-adm-worker-deploy.yml", admWorkerDeployWorkflow],
   [".github/workflows/dzn-protected-route-auth-repair.yml", protectedRouteAuthRepairWorkflow],
 ] as const;
+
+assert.equal(autodevAuditWorkflow.includes("name: DZN ADM AutoDev Audit"), true);
+assert.equal(hasWorkflowTrigger(autodevAuditWorkflow, "workflow_dispatch"), true);
+assert.equal(hasWorkflowTrigger(autodevAuditWorkflow, "schedule"), true);
+assert.equal(autodevAuditWorkflow.includes("AUTODEV_VALIDATION_PROFILE: release-high-risk"), true);
+const autodevAuditJob = workflowJobBlock(autodevAuditWorkflow, "autodev-audit");
+assert.equal(autodevAuditJob.includes("permissions:"), true);
+assert.equal(autodevAuditJob.includes("contents: read"), true);
+assert.equal(autodevAuditJob.includes("issues: write"), true);
+assert.equal(autodevAuditJob.includes("contents: write"), false);
+assert.equal(autodevAuditJob.includes("actions: write"), false);
+assert.equal(autodevAuditJob.includes("deployments: write"), false);
+assert.equal(autodevAuditJob.includes("id-token: write"), false);
+assert.equal(autodevAuditJob.includes("pull-requests: write"), false);
 
 assert.equal(admWorkflow.includes("name: DZN ADM Worker Manual Trigger"), true);
 assert.equal(admWorkflow.includes("workflow_dispatch:"), true);

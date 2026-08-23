@@ -1,10 +1,12 @@
 {
   "mode": "pr_only",
-  "scope": "adm_tracking_only",
+  "scope": "dzn_platform",
   "allowDirectMainPush": false,
   "allowAutoMergeLowRisk": false,
   "allowCodexSafeFixes": true,
   "allowCodexHighRiskFixes": false,
+  "allowAutomaticProductionDeploy": false,
+  "allowProductionMutations": false,
   "maxFixAttemptsPerRun": 3,
   "maxRuntimeMinutes": 45,
   "maxChangedFilesPerRun": 20,
@@ -13,62 +15,104 @@
   "deployPreviewRequired": true,
   "watchAdmCycles": true,
   "watchMinutesAfterDeploy": 90,
-  "admOnly": {
-    "enabled": true,
-    "allowedSystems": [
-      "adm-sync-worker",
-      "nitrado-file-read",
-      "adm-diagnostics",
-      "adm-import-jobs",
-      "adm-sync-state",
-      "dashboard-sync-health",
-      "adm-production-smoke",
-      "adm-cycle-watch",
-      "manual-adm-import-support-only"
-    ],
-    "blockedSystems": [
-      "billing",
-      "stripe",
-      "discord-oauth",
-      "sessions",
-      "subscriptions",
-      "account-management",
-      "server-owner-private-settings",
-      "events-tournaments-unrelated",
-      "public-marketing-unrelated",
-      "payment-plans",
-      "role-permissions-unrelated"
-    ]
+  "automationPolicy": {
+    "low": {
+      "allowedToInvestigate": true,
+      "allowedToImplementInBranch": true,
+      "allowedToOpenPR": true,
+      "allowedToAutoMerge": false,
+      "allowedToDeployProduction": false,
+      "requiresHumanReview": false
+    },
+    "medium": {
+      "allowedToInvestigate": true,
+      "allowedToImplementInBranch": true,
+      "allowedToOpenPR": true,
+      "allowedToAutoMerge": false,
+      "allowedToDeployProduction": false,
+      "requiresHumanReview": true
+    },
+    "high": {
+      "allowedToInvestigate": true,
+      "allowedToImplementInBranch": true,
+      "allowedToOpenPR": true,
+      "allowedToAutoMerge": false,
+      "allowedToDeployProduction": false,
+      "requiresHumanReview": true
+    },
+    "blocked": {
+      "allowedToInvestigate": true,
+      "allowedToImplementInBranch": false,
+      "allowedToOpenPR": false,
+      "allowedToAutoMerge": false,
+      "allowedToDeployProduction": false,
+      "requiresHumanReview": true
+    }
+  },
+  "systems": {
+    "adm": {
+      "specialistSubsystem": true,
+      "primaryAutomaticRunner": "cloudflare-worker",
+      "githubBackupRunner": "manual-only",
+      "preserveCycleWatch": true,
+      "preserveProductionSmoke": true,
+      "preserveProtectedHealth": true,
+      "preserveWorkerHeartbeat": true,
+      "preserveNitradoDiagnostics": true,
+      "preserveRetryBackoff": true
+    }
   },
   "codex": {
     "enabled": true,
-    "issueLabelsRequired": ["autodev", "adm-tracking", "autodev-safe-fix", "low-risk"],
+    "issueLabelsRequired": ["autodev", "autodev-safe-fix", "low-risk"],
     "issueLabelsBlocked": [
+      "blocked",
       "high-risk",
+      "medium-risk",
       "needs-human-review",
       "security",
       "billing",
-      "auth",
       "stripe",
+      "auth",
       "discord-oauth",
       "database-destructive",
       "account-management",
       "subscriptions",
-      "server-settings",
-      "events-unrelated",
+      "server-settings-sensitive",
       "worker-cron-high-risk",
-      "token-encryption"
+      "token-encryption",
+      "production-mutation"
     ],
     "openPullRequestOnly": true,
     "directPushToMain": false,
-    "autoMerge": false
+    "autoMerge": false,
+    "paidGitHubActionEnabled": false,
+    "requiresOpenAiApiKey": false
   },
   "riskGates": {
-    "blockAuthChanges": true,
-    "blockBillingChanges": true,
     "blockDestructiveMigrations": true,
-    "blockSecretChanges": true,
-    "blockAdmParserRewrite": true,
-    "blockWorkerCronChanges": true
+    "blockProtectedDataDeletion": true,
+    "blockPlayerStatsCreation": true,
+    "blockSecretExposure": true,
+    "blockAuthWeakening": true,
+    "blockSameCategoryMatchmakingRemoval": true,
+    "blockCloudflareSecretsInGitHub": true,
+    "blockGitHubPrimaryAdmRunner": true,
+    "blockPaidCodexGitHubAction": true
+  },
+  "validation": {
+    "defaultProfile": "general",
+    "profiles": [
+      "docs",
+      "ui",
+      "general",
+      "auth",
+      "billing",
+      "nitrado-adm",
+      "events",
+      "github-workflows",
+      "autodev",
+      "release-high-risk"
+    ]
   }
 }

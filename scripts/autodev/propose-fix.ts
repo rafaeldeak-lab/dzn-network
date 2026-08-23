@@ -8,8 +8,8 @@ const enabled = process.env.AUTODEV_ENABLE_PROPOSE_FIX === "true";
 const checks = [];
 
 if (!enabled) {
-  checks.push(skip("propose fix", "Safe fix proposal is disabled by default. Set AUTODEV_ENABLE_PROPOSE_FIX=true to allow PR branch creation."));
-  const report = makeReport("propose-fix", checks, ["AutoDev does not create branches unless explicitly enabled."]);
+  checks.push(skip("propose fix", "Platform safe-fix proposal is disabled by default. Set AUTODEV_ENABLE_PROPOSE_FIX=true to allow PR branch creation."));
+  const report = makeReport("propose-fix", checks, ["AutoDev does not create branches unless explicitly enabled. Safe-fix remains PR-only and non-production."]);
   writeReport("propose-fix", report);
   process.exit(0);
 }
@@ -32,7 +32,7 @@ if (!reports.length) {
 
 const classifications = classifyChangedFiles(changed);
 if (classifications.some((item) => item.risk !== "low")) {
-  checks.push(fail("risk gate", "AutoDev can only propose deterministic low-risk fixes.", classifications, "high"));
+  checks.push(fail("risk gate", "AutoDev can only propose deterministic low-risk platform fixes.", classifications, "high"));
   const report = makeReport("propose-fix", checks, ["Create an issue and request human/Codex review."]);
   writeReport("propose-fix", report);
   process.exit(1);
@@ -41,7 +41,7 @@ if (classifications.some((item) => item.risk !== "low")) {
 const branch = `autodev/safe-fix-${Date.now()}`;
 execFileSync("git", ["checkout", "-b", branch], { stdio: "inherit" });
 checks.push(pass("branch", `Created branch ${branch}.`));
-checks.push(skip("fix application", "No deterministic low-risk fixer matched current reports. Issue creation should handle this failure."));
+checks.push(skip("fix application", "No deterministic low-risk platform fixer matched current reports. Issue creation should handle this failure."));
 
 const report = makeReport("propose-fix", checks, ["No code was changed because the failure was not safely auto-fixable."]);
 writeReport("propose-fix", report);
