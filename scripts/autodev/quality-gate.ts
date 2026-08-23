@@ -1,9 +1,8 @@
-import { existsSync, rmSync, statSync } from "node:fs";
 import { classifyChangedFiles } from "./risk-classifier";
 import { fail, gitChangedFiles, makeReport, pass, readText, runCommand, skip, warn, writeReport, type AutoDevCheck, type ValidationProfileName } from "./lib";
+import { removeTypeScriptBuildInfoCaches } from "./typecheck-cache";
 import { selectQualityGateProfile, type ValidationCommand } from "./validation-profiles";
 
-const TYPESCRIPT_BUILD_INFO_CACHES = ["tsconfig.tsbuildinfo", ".next/cache/.tsbuildinfo"];
 const packageJson = JSON.parse(readText("package.json") || "{}") as { scripts?: Record<string, string> };
 const scripts = packageJson.scripts ?? {};
 const changedFiles = gitChangedFiles();
@@ -67,9 +66,7 @@ function defaultTimeout(command: ValidationCommand) {
 
 function removeTypeScriptBuildInfoCache(command: ValidationCommand) {
   if (!usesTypeScriptBuildInfoCache(command)) return;
-  for (const cachePath of TYPESCRIPT_BUILD_INFO_CACHES) {
-    if (existsSync(cachePath) && statSync(cachePath).isFile()) rmSync(cachePath, { force: true });
-  }
+  removeTypeScriptBuildInfoCaches();
 }
 
 function usesTypeScriptBuildInfoCache(command: ValidationCommand) {

@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "tsx scripts/autodev/typecheck-cache.ts",
     "build": "next build && node scripts/patch-pages-routes.mjs",
     "start": "next start",
     "lint": "eslint",
