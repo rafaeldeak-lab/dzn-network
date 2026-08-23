@@ -161,7 +161,31 @@ assert.equal(previewServer.kd_label, "Login required");
 assert.equal(previewServer.recent_events.length, 0);
 assert.equal(previewServer.top_players?.length, 0);
 assert.equal(previewServer.pvp_leaderboard?.length, 0);
+assert.equal(previewServer.network_status?.public_listing, "Active");
 assert.equal(JSON.stringify(previewServer).includes("reviewer_discord_id"), false);
+
+const historicalPreviewServer = applyPublicServerAccess({
+  ...baseServer,
+  status: "historical",
+  lifecycle: {
+    status: "token_needs_resave",
+    label: "Offline / Sync Paused",
+    message: "DZN is not showing this as an active live server. Historical stats are preserved while live verification is paused.",
+    owner_action: null,
+    historical: true,
+  },
+  current_players: null,
+  is_online: false,
+  stats_sync_active: false,
+  network_status: {
+    adm_status: "Connected",
+    stats_sync: "Active",
+    public_listing: "Historical",
+    last_sync_at: null,
+  },
+}, false);
+assert.equal(historicalPreviewServer.network_status?.public_listing, "Historical");
+assert.equal(historicalPreviewServer.lifecycle?.owner_action, null);
 
 const fullServer = applyPublicServerAccess(baseServer, true);
 assert.equal(fullServer.is_locked, false);

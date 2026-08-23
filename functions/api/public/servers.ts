@@ -1715,6 +1715,7 @@ export function applyPublicServerAccess(server: SafePublicServer, viewerLoggedIn
   };
   const publicDescription = truncateText(server.public_description, 260);
   const tags = parsePublicTags(server.tags_json).slice(0, 3);
+  const historicalLifecycle = Boolean(server.lifecycle?.historical);
 
   return {
     ...server,
@@ -1735,7 +1736,7 @@ export function applyPublicServerAccess(server: SafePublicServer, viewerLoggedIn
     network_status: {
       adm_status: server.adm_status,
       stats_sync: server.stats_sync,
-      public_listing: "Active",
+      public_listing: historicalLifecycle ? "Historical" : "Active",
       last_sync_at: null,
     },
     access_level: "preview",
