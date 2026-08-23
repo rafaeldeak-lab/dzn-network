@@ -77,6 +77,23 @@ export type BillingPlanConfig = {
   priority_level: number;
 };
 
+export type SubscriptionPlanPublicContract = {
+  key: PaidPlanKey;
+  name: string;
+  priceLabel: string;
+  monthlyPriceGbp: number;
+  publicPublishingLabel: string;
+  publicPublishingIntervalMinutes: number;
+  visibilityWeight: number;
+  discoveryTreatment: "standard_listing" | "featured_rotation" | "premium_discovery";
+  promotionCreditsPerMonth: number;
+  badgeShowcaseLimit: number;
+  profileBenefits: readonly string[];
+  achievementBenefits: readonly string[];
+  fairnessGuarantees: readonly string[];
+  trackingGuarantee: string;
+};
+
 export type ListingPlanKey = "free" | "pro";
 export type ListingFeatureKey =
   | "public_listing"
@@ -324,6 +341,68 @@ export const BILLING_PLAN_CONFIG: Record<NormalizedPlanKey, BillingPlanConfig> =
 
 export const PAID_PLAN_KEYS: PaidPlanKey[] = ["starter", "pro", "premium"];
 export const LEGACY_PAID_PLAN_KEYS: LegacyPaidPlanKey[] = ["network", "partner"];
+export const SUBSCRIPTION_PLAN_PUBLIC_CONTRACT: Record<PaidPlanKey, SubscriptionPlanPublicContract> = {
+  starter: {
+    key: "starter",
+    name: BILLING_PLAN_CONFIG.starter.name,
+    priceLabel: "£4.99/month",
+    monthlyPriceGbp: BILLING_PLAN_CONFIG.starter.monthly_price,
+    publicPublishingLabel: "Public stats, leaderboards and rankings every 24 hours",
+    publicPublishingIntervalMinutes: BILLING_PLAN_CONFIG.starter.public_publish_interval_minutes,
+    visibilityWeight: BILLING_PLAN_CONFIG.starter.visibility_weight,
+    discoveryTreatment: "standard_listing",
+    promotionCreditsPerMonth: 0,
+    badgeShowcaseLimit: 3,
+    profileBenefits: ["Standard listing and search placement", "Public profile and basic stats", "Earned badge showcase"],
+    achievementBenefits: ["Combat, community, activity and founder badges can be earned", "Seasonal participation remains available when events allow"],
+    fairnessGuarantees: [
+      "Does not change ADM data collection or imported statistics",
+      "Does not change leaderboard rank, kills, deaths, K/D, longest kill, crowns, tournament score or season results",
+      "Does not allow badges, crowns or seasonal wins to be bought",
+    ],
+    trackingGuarantee: "All ADM tracking continues unchanged; plan tier controls public publishing cadence and visibility only.",
+  },
+  pro: {
+    key: "pro",
+    name: BILLING_PLAN_CONFIG.pro.name,
+    priceLabel: "£9.99/month",
+    monthlyPriceGbp: BILLING_PLAN_CONFIG.pro.monthly_price,
+    publicPublishingLabel: "Public stats, leaderboards and rankings every 4 hours",
+    publicPublishingIntervalMinutes: BILLING_PLAN_CONFIG.pro.public_publish_interval_minutes,
+    visibilityWeight: BILLING_PLAN_CONFIG.pro.visibility_weight,
+    discoveryTreatment: "featured_rotation",
+    promotionCreditsPerMonth: 2,
+    badgeShowcaseLimit: 5,
+    profileBenefits: ["Enhanced discovery placement", "Featured rotation eligibility", "Expanded profile and Discord listing tools"],
+    achievementBenefits: ["Earned badge showcase grows to 5 badges", "Standard reputation frames and themes can improve presentation"],
+    fairnessGuarantees: [
+      "Does not change ADM data collection or imported statistics",
+      "Does not change leaderboard rank, kills, deaths, K/D, longest kill, crowns, tournament score or season results",
+      "Does not allow badges, crowns or seasonal wins to be bought",
+    ],
+    trackingGuarantee: "All ADM tracking continues unchanged; plan tier controls public publishing cadence and visibility only.",
+  },
+  premium: {
+    key: "premium",
+    name: BILLING_PLAN_CONFIG.premium.name,
+    priceLabel: "£19.99/month",
+    monthlyPriceGbp: BILLING_PLAN_CONFIG.premium.monthly_price,
+    publicPublishingLabel: "Fastest public stats, leaderboard and ranking publishing",
+    publicPublishingIntervalMinutes: BILLING_PLAN_CONFIG.premium.public_publish_interval_minutes,
+    visibilityWeight: BILLING_PLAN_CONFIG.premium.visibility_weight,
+    discoveryTreatment: "premium_discovery",
+    promotionCreditsPerMonth: 8,
+    badgeShowcaseLimit: 8,
+    profileBenefits: ["Premium discovery priority", "Homepage featured placement and spotlight eligibility", "Premium badge and animated visual treatment"],
+    achievementBenefits: ["Earned badge showcase grows to 8 badges", "Premium badge/status is public presentation only"],
+    fairnessGuarantees: [
+      "Does not change ADM data collection or imported statistics",
+      "Does not change leaderboard rank, kills, deaths, K/D, longest kill, crowns, tournament score or season results",
+      "Does not allow badges, crowns or seasonal wins to be bought",
+    ],
+    trackingGuarantee: "All ADM tracking continues unchanged; plan tier controls public publishing cadence and visibility only.",
+  },
+};
 export const AUTO_POST_TYPES: AutoPostType[] = [
   "server_advert",
   "bump_announcement",
@@ -382,6 +461,16 @@ export function normalizePlanKey(value: unknown): NormalizedPlanKey {
   const key = typeof value === "string" ? value.toLowerCase() : "";
   if (key === "network" || key === "partner") return "premium";
   return key === "starter" || key === "pro" || key === "premium" ? key : "free";
+}
+
+export function getSubscriptionPlanPublicContract(planKey: unknown): SubscriptionPlanPublicContract | null {
+  const normalized = normalizePlanKey(planKey);
+  if (normalized === "free") return null;
+  return SUBSCRIPTION_PLAN_PUBLIC_CONTRACT[normalized];
+}
+
+export function getSubscriptionPlanPublicContracts(): SubscriptionPlanPublicContract[] {
+  return PAID_PLAN_KEYS.map((planKey) => SUBSCRIPTION_PLAN_PUBLIC_CONTRACT[planKey]);
 }
 
 export function normalizeListingPlanKey(planOrSubscription: unknown, subscriptionStatus?: unknown): ListingPlanKey {

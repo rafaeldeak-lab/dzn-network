@@ -8,7 +8,7 @@ import { onRequest as checkoutHandler } from "../functions/api/billing/create-ch
 import { onRequest as billingReadinessHandler } from "../functions/api/billing/readiness";
 import { onRequest as webhookHandler } from "../functions/api/stripe/webhook";
 import { sortPublicServersForDiscovery } from "../functions/api/public/servers";
-import { canUseProFeature, getBumpCooldownDays, getListingLimits, hasListingAutoPost, isProListing, normalizeListingPlanKey } from "../lib/billing/plans";
+import { canUseProFeature, getBumpCooldownDays, getListingLimits, getSubscriptionPlanPublicContract, getSubscriptionPlanPublicContracts, hasListingAutoPost, isProListing, normalizeListingPlanKey } from "../lib/billing/plans";
 import type { Env, PagesFunction } from "../functions/_lib/types";
 
 const starter = getPlanConfig("starter");
@@ -30,6 +30,23 @@ assert.equal(getPlanConfig("network").plan_key, "premium");
 assert.equal(getPlanConfig("partner").plan_key, "premium");
 assert.equal(getPlanConfig("network").monthly_price, 19.99);
 assert.equal(getPlanConfig("partner").monthly_price, 19.99);
+
+const publicContracts = getSubscriptionPlanPublicContracts();
+assert.deepEqual(publicContracts.map((contract) => contract.key), ["starter", "pro", "premium"]);
+assert.deepEqual(publicContracts.map((contract) => contract.publicPublishingIntervalMinutes), [1440, 240, 0]);
+assert.deepEqual(publicContracts.map((contract) => contract.visibilityWeight), [1, 2, 4]);
+assert.deepEqual(publicContracts.map((contract) => contract.promotionCreditsPerMonth), [0, 2, 8]);
+assert.deepEqual(publicContracts.map((contract) => contract.badgeShowcaseLimit), [3, 5, 8]);
+assert.equal(getSubscriptionPlanPublicContract("network")?.key, "premium");
+assert.equal(getSubscriptionPlanPublicContract("partner")?.key, "premium");
+assert.equal(getSubscriptionPlanPublicContract("free"), null);
+for (const contract of publicContracts) {
+  const fairness = contract.fairnessGuarantees.join(" ");
+  assert.match(fairness, /Does not change ADM data collection/i);
+  assert.match(fairness, /Does not change leaderboard rank/i);
+  assert.match(fairness, /Does not allow badges, crowns or seasonal wins to be bought/i);
+  assert.equal(/stripe|checkout|webhook|secret/i.test(JSON.stringify(contract)), false, "Public subscription contract must not expose billing implementation details.");
+}
 
 const now = new Date("2026-05-17T12:00:00.000Z");
 assert.deepEqual(evaluateBumpEligibility({ entitlements: starter, state: null, now }).code, "upgrade_required");
@@ -141,6 +158,11 @@ assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.features
 assert.equal(planSummaries.find((plan) => plan.plan_key === "pro")?.features.includes("2 monthly promotion credits"), true);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.features.includes("8 monthly promotion credits"), true);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.features.includes("Premium animated frames and themes"), true);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.public_contract.promotionCreditsPerMonth, 0);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "pro")?.public_contract.promotionCreditsPerMonth, 2);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.public_contract.promotionCreditsPerMonth, 8);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "premium")?.public_contract.discoveryTreatment, "premium_discovery");
+assert.equal(planSummaries.every((plan) => plan.public_contract.trackingGuarantee.includes("All ADM tracking continues unchanged")), true);
 const planSummaryKeys = planSummaries.map((plan) => String(plan.plan_key));
 assert.equal(planSummaryKeys.includes("network"), false);
 assert.equal(planSummaryKeys.includes("partner"), false);
@@ -284,13 +306,16 @@ async function run() {
 
   const plansResponse = await billingPlansHandler(makeContext(billingPlansHandler, new Request("https://local.test/api/billing/plans"), partialEnv));
   assert.equal(plansResponse.status, 200);
-  const plansJson = (await plansResponse.json()) as { plans: Array<{ plan_key: string; configured: boolean; monthly_price_gbp: number; price_label: string }> };
+  const plansJson = (await plansResponse.json()) as { plans: Array<{ plan_key: string; configured: boolean; monthly_price_gbp: number; price_label: string; public_contract: { key: string; promotionCreditsPerMonth: number; badgeShowcaseLimit: number; fairnessGuarantees: string[] } }> };
   assert.equal(plansJson.plans.find((plan) => plan.plan_key === "starter")?.configured, true);
   assert.equal(plansJson.plans.find((plan) => plan.plan_key === "premium")?.configured, false);
   assert.equal(plansJson.plans.find((plan) => plan.plan_key === "premium")?.monthly_price_gbp, 19.99);
   assert.equal(plansJson.plans.find((plan) => plan.plan_key === "premium")?.price_label, "£19.99/month");
   assert.equal(plansJson.plans.map((plan) => plan.plan_key).includes("network"), false);
   assert.equal(plansJson.plans.map((plan) => plan.plan_key).includes("partner"), false);
+  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "starter")?.public_contract.badgeShowcaseLimit, 3);
+  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "pro")?.public_contract.promotionCreditsPerMonth, 2);
+  assert.equal(plansJson.plans.find((plan) => plan.plan_key === "premium")?.public_contract.fairnessGuarantees.some((item) => /seasonal wins/i.test(item)), true);
 
   const unauthReadiness = await billingReadinessHandler(makeContext(billingReadinessHandler, new Request("https://local.test/api/billing/readiness"), {} as Env));
   assert.equal(unauthReadiness.status, 401);

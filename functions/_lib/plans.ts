@@ -18,6 +18,7 @@ import {
   getPlanVisibilityWeight as centralPlanVisibilityWeight,
   getPublicPublishIntervalMinutes as centralPublicPublishInterval,
   getServerStatusInterval as centralServerStatusInterval,
+  getSubscriptionPlanPublicContract,
   hasAutoPost as centralHasAutoPost,
   hasListingAutoPost as centralHasListingAutoPost,
   hasPlanFeature as centralHasPlanFeature,
@@ -30,6 +31,7 @@ import {
   type ListingPlanKey,
   type NormalizedPlanKey,
   type PlanFeature,
+  type SubscriptionPlanPublicContract,
 } from "../../lib/billing/plans";
 import { getLinkedServerAllowanceUsageForUser } from "./onboarding";
 
@@ -82,6 +84,7 @@ export type BillingPlanSummary = PlanEntitlements & {
   name: string;
   price_label: string;
   monthly_price_gbp: number;
+  public_contract: SubscriptionPlanPublicContract;
   configured: boolean;
   features: string[];
 };
@@ -270,6 +273,7 @@ export function getBillingPlanSummaries(env: Env): BillingPlanSummary[] {
     ...PLAN_CONFIG[planKey],
     ...PLAN_MARKETING[planKey],
     plan_key: planKey,
+    public_contract: getSubscriptionPlanPublicContract(planKey)!,
     configured: configured[planKey],
   }));
 }
