@@ -75,6 +75,22 @@ const ADM_PATHS = [
   /^docs\/ADM_/,
   /^\.github\/workflows\/dzn-(?:adm|nitrado|post-deploy|autodev)/,
 ];
+const AUTH_UI_PATHS = [
+  /^app\/(?:login|logout|auth|signin|sign-in|session|sessions)(?:\/|$)/,
+  /^components\/(?:auth|login|logout|oauth|session|sessions|discord-auth)(?:\/|$)/,
+];
+const ONBOARDING_UI_PATHS = [
+  /^app\/(?:setup|onboarding)(?:\/|$)/,
+  /^components\/onboarding(?:\/|$)/,
+];
+const BILLING_UI_PATHS = [
+  /^app\/(?:pricing|billing|subscribe|subscription|subscriptions|plans)(?:\/|$)/,
+  /^components\/(?:billing|pricing|subscription|subscriptions|plans)(?:\/|$)/,
+];
+const NITRADO_UI_PATHS = [
+  /^app\/(?:setup|onboarding|nitrado)(?:\/|$)/,
+  /^components\/(?:onboarding|nitrado)(?:\/|$)/,
+];
 
 export function classifyPath(file: string, content = readText(file)): RiskClassification {
   const normalized = normalizePath(file);
@@ -225,16 +241,35 @@ function inferSystem(file: string, content: string): SystemCategory {
   if (isMigration(file)) return "database";
   if (/^functions\/api\/auth\//.test(file) || /^functions\/_lib\/(?:oauth|public-auth|session|auth)\.ts$/.test(file) || /discord\s*oauth/i.test(content)) return "auth";
   if (/^functions\/api\/stripe\//.test(file) || /^functions\/api\/webhooks\/stripe/.test(file) || /^functions\/_lib\/stripe\.ts$/.test(file)) return "stripe";
-  if (/^functions\/api\/billing\//.test(file) || /^functions\/api\/(?:create-checkout|my-plan)/.test(file) || /^functions\/_lib\/(?:plans|billing)\.ts$/.test(file) || /^components\/billing\//.test(file) || /^app\/pricing\//.test(file)) return "billing";
+  if (/^functions\/api\/billing\//.test(file) || /^functions\/api\/(?:create-checkout|my-plan)/.test(file) || /^functions\/_lib\/(?:plans|billing)\.ts$/.test(file)) return "billing";
   if (/^functions\/api\/nitrado\//.test(file) || /^functions\/_lib\/nitrado/.test(file) || /TOKEN_ENCRYPTION_KEY|encrypted_token|token_iv|token_auth_tag/i.test(content)) return "nitrado";
   if (ADM_PATHS.some((pattern) => pattern.test(file))) return "adm";
   if (/^functions\/api\/onboarding\//.test(file) || /^functions\/_lib\/onboarding\.ts$/.test(file)) return "onboarding";
+  if (/^(app|components)\//.test(file)) {
+    const protectedUiSystem = inferProtectedUiSystem(file, content);
+    if (protectedUiSystem) return protectedUiSystem;
+  }
   if (/^functions\/api\/events\//.test(file) || /^functions\/api\/servers\/\[serverId\]\/ctf\//.test(file) || /^functions\/api\/seasons\//.test(file) || /^functions\/_lib\/(?:events|event-|ctf-|dzn-seasons|server-war)/.test(file) || /^(app|components)\/events\//.test(file)) return "events";
   if (/^functions\/api\/owner\//.test(file) || /^functions\/api\/admin\//.test(file)) return "owner-api";
   if (/^functions\/api\/public\//.test(file)) return "public-api";
   if (/^\.github\/workflows\/.*(?:production|rollout|deploy|release)/.test(file)) return "release";
   if (/^(app|components)\//.test(file)) return "ui";
   return inferContentSystem(content) ?? "unknown";
+}
+
+function inferProtectedUiSystem(file: string, content: string): SystemCategory | null {
+  if (AUTH_UI_PATHS.some((pattern) => pattern.test(file))) return "auth";
+  if (hasNitradoProtectedUiMarker(file, content)) return "nitrado";
+  if (ONBOARDING_UI_PATHS.some((pattern) => pattern.test(file))) return "onboarding";
+  if (BILLING_UI_PATHS.some((pattern) => pattern.test(file))) return "billing";
+  if (/\b(?:useAuth|useSession|requireSession|createSession|deleteSession|setSessionCookie|clearSessionCookie|signIn|signOut|oauthCallback|discordOAuth)\b|discord\s+oauth|session\s+cookie/i.test(content)) return "auth";
+  if (/\b(?:reserveAllowance|releaseAllowance|nitradoServiceId|linkedServer|serverLifecycle|claimServer|onboardingStep)\b|allowance reservation|server lifecycle|service association/i.test(content)) return "onboarding";
+  if (/\b(?:createCheckoutSession|billingPortal|manageSubscription|subscriptionStatus|planEntitlement|stripeCheckout)\b|checkout session|billing portal|manage subscription|plan entitlement/i.test(content)) return "billing";
+  return null;
+}
+
+function hasNitradoProtectedUiMarker(file: string, content: string) {
+  return NITRADO_UI_PATHS.some((pattern) => pattern.test(file)) && /\b(?:nitrado|serviceId|service_id|TOKEN_ENCRYPTION_KEY|encrypted_token|token_iv|token_auth_tag)\b/i.test(content);
 }
 
 function inferContentSystem(content: string): SystemCategory | null {

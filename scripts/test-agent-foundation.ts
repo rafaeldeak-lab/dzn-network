@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { classifyPath } from "./autodev/risk-classifier";
 import { isSafePlatformIssue, REQUIRED_SAFE_LABELS } from "./autodev/pick-safe-issue";
-import { profileNames, selectValidationProfile } from "./autodev/validation-profiles";
+import { profileNames, selectQualityGateProfile, selectValidationProfile } from "./autodev/validation-profiles";
 
 function read(path: string) {
   return readFileSync(path, "utf8");
@@ -77,11 +77,48 @@ assert.equal(classifyPath("docs/ADM_SYNC_PLAN.md", "ADM docs update").risk, "low
 assert.equal(classifyPath("scripts/test-adm-parser.ts", "ADM parser tests").risk, "low");
 assert.equal(classifyPath("functions/_lib/adm-sync.ts", "parseAdm processAdm writeKill UPDATE player_profiles SET kills = kills + 1").risk, "high");
 
+const loginUi = classifyPath("app/login/page.tsx", "export default function LoginPage() { return <a href=\"/api/auth/discord/start\">Continue with Discord</a>; }");
+assert.equal(loginUi.system, "auth");
+assert.equal(loginUi.risk, "high");
+assert.equal(loginUi.suggestedValidationProfile, "auth");
+
+const onboardingUi = classifyPath("components/onboarding/dashboard.tsx", "reserveAllowance({ planId }); render linked server billing plan status");
+assert.equal(onboardingUi.system, "onboarding");
+assert.equal(onboardingUi.risk, "high");
+
+const harmlessHeaderUi = classifyPath("components/site-header.tsx", "export function SiteHeader() { return <a href=\"/login\">Login</a>; }");
+assert.equal(harmlessHeaderUi.system, "ui");
+assert.equal(harmlessHeaderUi.risk, "low");
+
+const eventHeroUi = classifyPath("components/events/EventHero.tsx", "export function EventHero() { return <section>Upcoming tournament schedule</section>; }");
+assert.equal(eventHeroUi.system, "events");
+assert.equal(eventHeroUi.risk, "low");
+
 assert.equal(selectValidationProfile([classifyPath("docs/README.md", "Fix typo")]).name, "docs");
 assert.equal(selectValidationProfile([classifyPath("functions/api/auth/me.ts", "session cookie")]).name, "auth");
 assert.equal(selectValidationProfile([classifyPath("functions/api/billing/checkout.ts", "checkout")]).name, "billing");
 assert.equal(selectValidationProfile([classifyPath("functions/_lib/adm-sync.ts", "parseAdm")]).name, "nitrado-adm");
 assert.equal(selectValidationProfile([classifyPath(".github/workflows/dzn-codex-safe-fix.yml", read(".github/workflows/dzn-codex-safe-fix.yml"))]).name, "github-workflows");
+
+const autoDevMedium = classifyPath("package.json", "{\"scripts\":{\"autodev:quality\":\"tsx scripts/autodev/quality-gate.ts\"},\"automation\":\"policy\"}");
+const authHigh = classifyPath("functions/api/auth/session.ts", "session cookie");
+const billingHigh = classifyPath("functions/api/billing/checkout.ts", "checkout session");
+const ownerHigh = classifyPath("functions/api/owner/servers.ts", "export async function onRequestPost() {}");
+const docsLow = classifyPath("docs/README.md", "Fix typo");
+const workflowMedium = classifyPath(".github/workflows/dzn-autodev-audit.yml", "name: DZN ADM AutoDev Audit\non:\n  workflow_dispatch:\npermissions:\n  contents: read\njobs:\n  audit:\n    runs-on: ubuntu-latest\n");
+assert.equal(autoDevMedium.risk, "medium");
+assert.equal(workflowMedium.risk, "medium");
+assert.equal(selectValidationProfile([autoDevMedium, authHigh]).name, "auth");
+assert.equal(selectValidationProfile([autoDevMedium, billingHigh]).name, "billing");
+assert.equal(selectValidationProfile([harmlessHeaderUi, ownerHigh]).name, "release-high-risk");
+assert.equal(selectValidationProfile([authHigh, billingHigh]).name, "release-high-risk");
+assert.equal(selectValidationProfile([docsLow, harmlessHeaderUi]).name, "ui");
+assert.equal(selectValidationProfile([autoDevMedium]).name, "autodev");
+assert.equal(selectValidationProfile([workflowMedium]).name, "github-workflows");
+
+assert.equal(selectQualityGateProfile({ classifications: [], inGithubActions: true }).name, "release-high-risk");
+assert.equal(selectQualityGateProfile({ classifications: [], requestedProfile: "auth", inGithubActions: true }).name, "auth");
+assert.equal(selectQualityGateProfile({ classifications: [], inGithubActions: false }).name, "general");
 assert.deepEqual(profileNames().sort(), config.validation.profiles.slice().sort());
 
 const workflowText = readdirSync(".github/workflows").filter((name) => name.endsWith(".yml") || name.endsWith(".yaml")).map((name) => read(`.github/workflows/${name}`)).join("\n");

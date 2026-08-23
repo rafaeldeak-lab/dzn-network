@@ -25,6 +25,8 @@ jobs:
       - name: Run AutoDev quality gate
         id: quality
         continue-on-error: true
+        env:
+          AUTODEV_VALIDATION_PROFILE: release-high-risk
         run: npm run autodev:quality
       - name: Upload AutoDev reports
         uses: actions/upload-artifact@v4

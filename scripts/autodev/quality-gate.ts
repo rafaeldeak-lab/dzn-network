@@ -1,7 +1,7 @@
 import { existsSync, rmSync, statSync } from "node:fs";
 import { classifyChangedFiles } from "./risk-classifier";
 import { fail, gitChangedFiles, makeReport, pass, readText, runCommand, skip, warn, writeReport, type AutoDevCheck, type ValidationProfileName } from "./lib";
-import { selectValidationProfile, VALIDATION_PROFILES, type ValidationCommand } from "./validation-profiles";
+import { selectQualityGateProfile, type ValidationCommand } from "./validation-profiles";
 
 const TYPESCRIPT_BUILD_INFO_CACHES = ["tsconfig.tsbuildinfo", ".next/cache/.tsbuildinfo"];
 const packageJson = JSON.parse(readText("package.json") || "{}") as { scripts?: Record<string, string> };
@@ -43,8 +43,11 @@ if (!report.ok) process.exit(1);
 
 function chooseProfile() {
   const requested = process.env.AUTODEV_VALIDATION_PROFILE as ValidationProfileName | undefined;
-  if (requested && VALIDATION_PROFILES[requested]) return VALIDATION_PROFILES[requested];
-  return selectValidationProfile(classifications);
+  return selectQualityGateProfile({
+    classifications,
+    requestedProfile: requested,
+    inGithubActions: process.env.GITHUB_ACTIONS === "true",
+  });
 }
 
 function isAvailable(command: ValidationCommand) {
