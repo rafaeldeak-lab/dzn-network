@@ -9,6 +9,7 @@ Logged-out visitors may access:
 - `/`
 - `/#features`
 - `/#pricing`
+- `/pricing`
 - `/login`
 - `/signup`
 - the public Discord invite link
@@ -57,6 +58,7 @@ These APIs must keep their existing preview redaction and `Vary: Cookie` behavio
 Post-merge verification should expect:
 
 - `/` returns `200`.
+- `/pricing` returns `200` and opens the homepage pricing comparison.
 - Logged-out direct app pages such as `/events`, `/leaderboards`, `/servers`, `/dashboard`, `/setup`, `/dzn-pulse`, and `/seasons` return a login redirect.
 - Public APIs above return `200` and no unexpected 5xx.
 - Owner/protected APIs such as `/api/owner/events`, `/api/billing/status`, and `/api/nitrado/services` remain `401` without authentication.
