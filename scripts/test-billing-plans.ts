@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { evaluateBumpEligibility, publicAdvertisingFromState } from "../functions/_lib/advertising";
-import { getBillingPlanSummaries, getBillingReadinessStatus, getCheckoutConfigured, getOwnerBillingStatus, getPlanConfig, getPlanFromStripePriceId, upsertOwnerEntitlements } from "../functions/_lib/plans";
+import { getBillingPlanSummaries, getBillingReadinessStatus, getCheckoutConfigured, getCheckoutSafetyStatus, getOwnerBillingStatus, getPlanConfig, getPlanFromStripePriceId, upsertOwnerEntitlements } from "../functions/_lib/plans";
 import { onRequest as billingPlansHandler } from "../functions/api/billing/plans";
 import { onRequest as checkoutHandler } from "../functions/api/billing/create-checkout-session";
 import { onRequest as billingReadinessHandler } from "../functions/api/billing/readiness";
@@ -157,6 +157,8 @@ const partialEnv = {
 assert.deepEqual(getCheckoutConfigured(partialEnv), { starter: true, pro: true });
 const planSummaries = getBillingPlanSummaries(partialEnv);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.configured, true);
+assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.checkout_enabled, false);
+assert.match(planSummaries.find((plan) => plan.plan_key === "starter")?.checkout_blocked_reason ?? "", /not configured/i);
 assert.equal(planSummaries.some((plan) => String(plan.plan_key) === "premium"), false);
 assert.deepEqual(planSummaries.map((plan) => plan.name), ["Starter", "Pro"]);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.features.includes("No monthly promotion credits"), true);
@@ -169,6 +171,43 @@ const planSummaryKeys = planSummaries.map((plan) => String(plan.plan_key));
 assert.equal(planSummaryKeys.includes("network"), false);
 assert.equal(planSummaryKeys.includes("partner"), false);
 assert.equal(JSON.stringify(planSummaries).includes("sk_test"), false);
+
+const testCheckoutSafety = getCheckoutSafetyStatus({
+  STRIPE_PRICE_STARTER: "price_starter",
+  STRIPE_PRICE_PRO: "price_pro",
+  STRIPE_SECRET_KEY: "sk_test_checkout_safety",
+} as Env);
+assert.equal(testCheckoutSafety.checkoutSessionCreationAllowed, true);
+assert.equal(testCheckoutSafety.checkoutSafetyMode, "test_mode_allowed");
+
+const pausedLiveCheckoutSafety = getCheckoutSafetyStatus({
+  STRIPE_PRICE_STARTER: "price_starter",
+  STRIPE_PRICE_PRO: "price_pro",
+  STRIPE_SECRET_KEY: "sk_live_checkout_safety",
+} as Env);
+assert.equal(pausedLiveCheckoutSafety.checkoutSessionCreationAllowed, false);
+assert.equal(pausedLiveCheckoutSafety.checkoutSafetyMode, "live_checkout_paused");
+
+const enabledLiveCheckoutSafety = getCheckoutSafetyStatus({
+  STRIPE_PRICE_STARTER: "price_starter",
+  STRIPE_PRICE_PRO: "price_pro",
+  STRIPE_SECRET_KEY: "sk_live_checkout_safety",
+  STRIPE_WEBHOOK_SECRET: "whsec_live_checkout_safety",
+  DZN_APP_URL: "https://dayz-network.com",
+  DZN_LIVE_CHECKOUT_ENABLED: "true",
+} as Env);
+assert.equal(enabledLiveCheckoutSafety.checkoutSessionCreationAllowed, true);
+assert.equal(enabledLiveCheckoutSafety.checkoutSafetyMode, "live_checkout_enabled");
+
+const incompleteLiveCheckoutSafety = getCheckoutSafetyStatus({
+  NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID: "price_public_starter",
+  NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_public_pro",
+  STRIPE_SECRET_KEY: "sk_live_checkout_safety",
+  DZN_LIVE_CHECKOUT_ENABLED: "true",
+} as Env);
+assert.equal(incompleteLiveCheckoutSafety.checkoutSessionCreationAllowed, false);
+assert.equal(incompleteLiveCheckoutSafety.checkoutSafetyMode, "live_checkout_paused");
+assert.match(incompleteLiveCheckoutSafety.checkoutBlockedReason ?? "", /prerequisites/i);
 
 const missingPremiumReadiness = getBillingReadinessStatus({
   STRIPE_PRICE_STARTER: "price_starter",
@@ -194,6 +233,10 @@ assert.deepEqual(completeReadiness.activePlans.map((plan) => plan.plan_key), ["s
 assert.deepEqual(completeReadiness.missingRequiredVars, []);
 assert.deepEqual(completeReadiness.legacyVarsDetected, ["STRIPE_PRICE_PREMIUM", "STRIPE_PRICE_NETWORK"]);
 assert.equal(completeReadiness.modeHint, "live");
+assert.equal(completeReadiness.liveConfigurationReady, false, "Live app URL still controls live readiness.");
+assert.equal(completeReadiness.checkoutSessionCreationAllowed, false);
+assert.equal(completeReadiness.checkoutSafetyMode, "live_checkout_paused");
+assert.equal(completeReadiness.readinessChecks.some((check) => check.key === "live-checkout-enable-flag" && check.severity === "info" && check.ok === false), true);
 assert.equal(JSON.stringify(completeReadiness).includes("sk_live_secret_value_must_not_leak"), false);
 assert.equal(JSON.stringify(completeReadiness).includes("whsec_secret_value_must_not_leak"), false);
 assert.equal(JSON.stringify(completeReadiness).includes("price_premium"), false);
@@ -339,14 +382,19 @@ async function run() {
     starterConfigured: boolean;
     proConfigured: boolean;
     premiumConfigured: boolean;
+    checkoutSessionCreationAllowed: boolean;
+    checkoutSafetyMode: string;
     missingRequiredVars: string[];
-    activePlans: Array<{ plan_key: string }>;
+    activePlans: Array<{ plan_key: string; checkout_enabled: boolean; checkout_blocked_reason: string | null }>;
   };
   assert.equal(readinessJson.starterConfigured, true);
   assert.equal(readinessJson.proConfigured, true);
   assert.equal(readinessJson.premiumConfigured, false);
+  assert.equal(readinessJson.checkoutSessionCreationAllowed, true);
+  assert.equal(readinessJson.checkoutSafetyMode, "test_mode_allowed");
   assert.equal(readinessJson.missingRequiredVars.includes("STRIPE_PRICE_PREMIUM"), false);
   assert.deepEqual(readinessJson.activePlans.map((plan) => plan.plan_key), ["starter", "pro"]);
+  assert.equal(readinessJson.activePlans.every((plan) => plan.checkout_enabled), true);
   const readinessText = JSON.stringify(readinessJson);
   assert.equal(readinessText.includes("sk_test_endpoint_secret_must_not_leak"), false);
   assert.equal(readinessText.includes("whsec_endpoint_secret_must_not_leak"), false);
@@ -391,8 +439,49 @@ async function run() {
   assert.equal(missingPriceCheckout.status, 400);
   assert.match(await missingPriceCheckout.text(), /not configured/i);
 
-  let capturedStripeBody = "";
+  const liveBlockedStatements: string[] = [];
+  let liveBlockedFetchCalled = false;
   const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    liveBlockedFetchCalled = true;
+    return new Response(JSON.stringify({ id: "cs_live_blocked", url: "https://checkout.stripe.test/live-blocked" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  try {
+    const liveBlockedCheckout = await checkoutHandler(makeContext(
+      checkoutHandler,
+      new Request("https://local.test/api/billing/create-checkout-session", {
+        method: "POST",
+        body: JSON.stringify({ plan_key: "starter", returnTo: "/dashboard" }),
+        headers: { "content-type": "application/json" },
+      }),
+      {
+        ...createFakeEnv({ statements: liveBlockedStatements }),
+        MOCK_AUTH: "true",
+        STRIPE_SECRET_KEY: "sk_live_placeholder",
+        STRIPE_PRICE_STARTER: "price_live_starter",
+        STRIPE_PRICE_PRO: "price_live_pro",
+        DZN_APP_URL: "https://dayz-network.com",
+      } as Env,
+    ));
+    assert.equal(liveBlockedCheckout.status, 403);
+    const liveBlockedJson = await liveBlockedCheckout.json() as { errorCode?: string; checkoutSafetyMode?: string; error?: string };
+    assert.equal(liveBlockedJson.errorCode, "LIVE_CHECKOUT_PAUSED");
+    assert.equal(liveBlockedJson.checkoutSafetyMode, "live_checkout_paused");
+    assert.match(liveBlockedJson.error ?? "", /paused/i);
+    assert.equal(liveBlockedFetchCalled, false, "Paused live checkout must not call Stripe.");
+    assert.equal(
+      liveBlockedStatements.some((statement) => /owner_starter_trial_claims/i.test(statement)),
+      false,
+      "Paused live checkout must not reserve a Starter trial claim.",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  let capturedStripeBody = "";
   globalThis.fetch = async (_input, init) => {
     capturedStripeBody = String(init?.body ?? "");
     return new Response(JSON.stringify({ id: "cs_test", url: "https://checkout.stripe.test/session" }), {
@@ -420,6 +509,40 @@ async function run() {
     assert.match(capturedStripeBody, /line_items%5B0%5D%5Bprice%5D=price_1TY4dDJPrnZ0cnkH4OhfEHmW/);
     assert.match(capturedStripeBody, /metadata%5Bdiscord_user_id%5D=mock-discord-user/);
     assert.match(capturedStripeBody, /metadata%5Bplan_key%5D=pro/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  let capturedLiveEnabledBody = "";
+  globalThis.fetch = async (_input, init) => {
+    capturedLiveEnabledBody = String(init?.body ?? "");
+    return new Response(JSON.stringify({ id: "cs_live_enabled", url: "https://checkout.stripe.test/live-enabled" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  try {
+    const liveEnabledCheckout = await checkoutHandler(makeContext(
+      checkoutHandler,
+      new Request("https://local.test/api/billing/create-checkout-session", {
+        method: "POST",
+        body: JSON.stringify({ plan_key: "pro", returnTo: "/dashboard" }),
+        headers: { "content-type": "application/json" },
+      }),
+      {
+        ...fakeEnv,
+        MOCK_AUTH: "true",
+        STRIPE_SECRET_KEY: "sk_live_placeholder",
+        STRIPE_WEBHOOK_SECRET: "whsec_live_placeholder",
+        STRIPE_PRICE_STARTER: "price_live_starter_enabled",
+        STRIPE_PRICE_PRO: "price_live_pro_enabled",
+        DZN_LIVE_CHECKOUT_ENABLED: "true",
+        DZN_APP_URL: "https://dayz-network.com",
+      } as Env,
+    ));
+    assert.equal(liveEnabledCheckout.status, 200);
+    assert.match(capturedLiveEnabledBody, /line_items%5B0%5D%5Bprice%5D=price_live_pro_enabled/);
+    assert.match(capturedLiveEnabledBody, /metadata%5Bplan_key%5D=pro/);
   } finally {
     globalThis.fetch = originalFetch;
   }

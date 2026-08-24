@@ -37,6 +37,10 @@ export type BillingReadinessResponse = {
   stripeSecretConfigured: boolean;
   webhookSecretConfigured: boolean;
   liveConfigurationReady: boolean;
+  liveCheckoutEnabled: boolean;
+  checkoutSessionCreationAllowed: boolean;
+  checkoutSafetyMode: "not_configured" | "test_mode_allowed" | "live_checkout_paused" | "live_checkout_enabled" | "unknown";
+  checkoutBlockedReason: string | null;
   humanApprovalRequiredForLiveBilling: boolean;
   productionMutationAllowedByReadinessCheck: boolean;
   priceSources: Record<"starter" | "pro", {
@@ -52,6 +56,8 @@ export type BillingReadinessResponse = {
     price_label: string;
     monthly_price_gbp: number;
     configured: boolean;
+    checkout_enabled: boolean;
+    checkout_blocked_reason: string | null;
   }>;
   missingRequiredVars: string[];
   missingLiveRequiredVars: string[];
@@ -493,6 +499,8 @@ export type BillingPlanSummary = {
   price_label: string;
   monthly_price_gbp: number;
   configured: boolean;
+  checkout_enabled: boolean;
+  checkout_blocked_reason: string | null;
   features: string[];
   max_linked_servers: number;
   can_use_reviews: boolean;

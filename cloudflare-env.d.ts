@@ -50,6 +50,7 @@ interface CloudflareEnv {
   MOCK_NITRADO?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
+  DZN_LIVE_CHECKOUT_ENABLED?: string;
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_PRICE_STARTER?: string;
   STRIPE_PRICE_PRO?: string;

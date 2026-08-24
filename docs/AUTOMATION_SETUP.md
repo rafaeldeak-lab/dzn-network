@@ -76,6 +76,8 @@ STRIPE_PRICE_PRO=price_...
 
 Active public checkout plans are Starter and Pro only. Starter is a 2-day free trial with payment method collection, then £2/month. Pro is £10/month and is the full DZN access tier.
 
+Live checkout stays paused unless `DZN_LIVE_CHECKOUT_ENABLED=true` is set in a separate approved go-live step. Do not add that flag during sandbox/test readiness; test-mode checkout can be validated without it.
+
 DZN Premium, Network, and Partner are legacy-only. Keep `STRIPE_PRICE_PREMIUM`, `STRIPE_PRICE_NETWORK`, and `STRIPE_PRICE_PARTNER` only while existing legacy subscriptions can still emit Stripe webhook events using archived Price IDs; they map to effective Pro compatibility and are not used for new checkout. The old `NEXT_PUBLIC_STRIPE_PREMIUM_PRICE_ID`, `NEXT_PUBLIC_STRIPE_NETWORK_PRICE_ID`, and `NEXT_PUBLIC_STRIPE_PARTNER_PRICE_ID` variables are not needed by new DZN checkout.
 
 ## 5. Run the D1 migration after account access is fixed

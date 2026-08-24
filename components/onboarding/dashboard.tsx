@@ -5231,37 +5231,40 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
       <BillingReadinessWarning readiness={readiness} />
 
       <div className="mt-4 grid gap-2">
-        {visiblePlans.map((plan) => (
-          <div key={plan.plan_key} className="rounded-lg border border-white/10 bg-black/24 p-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-black uppercase text-white">{billingPlanDisplayName(plan)} <span className="text-violet-200">{billingPlanDisplayPrice(plan)}</span></p>
-                <p className="mt-1 text-xs leading-5 text-zinc-400">
-                  {billingPlanListingSummary(plan)}
-                </p>
-                <div className="mt-2 grid gap-1 text-[11px] leading-5 text-zinc-500">
-                  {billingPlanDisplayFeatures(plan).map((feature) => (
-                    <p key={feature}><span className="font-black uppercase text-zinc-400">Value:</span> {feature}</p>
-                  ))}
-                  <p><span className="font-black uppercase text-zinc-400">Tracking:</span> ADM ingestion and statistics collection continue normally on every plan.</p>
-                  <p><span className="font-black uppercase text-zinc-400">Fairness:</span> Pro never changes leaderboard rank, K/D, score, reviews, crowns, season wins, or gameplay results.</p>
-                  <p><span className="font-black uppercase text-zinc-400">Bumps:</span> {isBillingPlanPro(plan.plan_key) ? "one bump every 7 days" : "one bump every 30 days"}.</p>
+        {visiblePlans.map((plan) => {
+          const checkoutState = billingPlanCheckoutState(plan, readiness);
+          return (
+            <div key={plan.plan_key} className="rounded-lg border border-white/10 bg-black/24 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black uppercase text-white">{billingPlanDisplayName(plan)} <span className="text-violet-200">{billingPlanDisplayPrice(plan)}</span></p>
+                  <p className="mt-1 text-xs leading-5 text-zinc-400">
+                    {billingPlanListingSummary(plan)}
+                  </p>
+                  <div className="mt-2 grid gap-1 text-[11px] leading-5 text-zinc-500">
+                    {billingPlanDisplayFeatures(plan).map((feature) => (
+                      <p key={feature}><span className="font-black uppercase text-zinc-400">Value:</span> {feature}</p>
+                    ))}
+                    <p><span className="font-black uppercase text-zinc-400">Tracking:</span> ADM ingestion and statistics collection continue normally on every plan.</p>
+                    <p><span className="font-black uppercase text-zinc-400">Fairness:</span> Pro never changes leaderboard rank, K/D, score, reviews, crowns, season wins, or gameplay results.</p>
+                    <p><span className="font-black uppercase text-zinc-400">Bumps:</span> {isBillingPlanPro(plan.plan_key) ? "one bump every 7 days" : "one bump every 30 days"}.</p>
+                  </div>
+                  <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
+                    {checkoutState.statusLabel}
+                  </p>
                 </div>
-                <p className="mt-1 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">
-                  {plan.configured ? "Checkout configured" : "Checkout not configured"}
-                </p>
+                <button
+                  type="button"
+                  disabled={busyPlan !== null || plan.plan_key === planKey || !checkoutState.enabled}
+                  onClick={() => upgrade(plan.plan_key)}
+                  className="shrink-0 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {plan.plan_key === planKey ? "Current Plan" : !checkoutState.enabled ? checkoutState.buttonLabel : busyPlan === plan.plan_key ? "Opening..." : "Upgrade"}
+                </button>
               </div>
-              <button
-                type="button"
-                disabled={busyPlan !== null || plan.plan_key === planKey || !plan.configured}
-                onClick={() => upgrade(plan.plan_key)}
-                className="shrink-0 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {plan.plan_key === planKey ? "Current Plan" : !plan.configured ? "Not configured" : busyPlan === plan.plan_key ? "Opening..." : "Upgrade"}
-              </button>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <button
@@ -5315,12 +5318,39 @@ function billingPlanListingSummary(plan: BillingPlanSummary) {
     : "Public listing, basic discovery, reviews, and standard listing visuals";
 }
 
+function billingPlanCheckoutState(plan: BillingPlanSummary, readiness: BillingReadinessResponse | null) {
+  if (!plan.configured) {
+    return {
+      enabled: false,
+      statusLabel: "Checkout not configured",
+      buttonLabel: "Not configured",
+    };
+  }
+
+  const liveCheckoutPaused = readiness?.checkoutSafetyMode === "live_checkout_paused" || plan.checkout_blocked_reason?.toLowerCase().includes("live checkout is paused");
+  const checkoutEnabled = plan.checkout_enabled !== false && readiness?.checkoutSessionCreationAllowed !== false;
+  if (!checkoutEnabled) {
+    return {
+      enabled: false,
+      statusLabel: liveCheckoutPaused ? "Live checkout paused for sandbox testing" : "Checkout temporarily paused",
+      buttonLabel: "Paused",
+    };
+  }
+
+  return {
+    enabled: true,
+    statusLabel: "Checkout configured",
+    buttonLabel: "Upgrade",
+  };
+}
+
 function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessResponse | null }) {
   if (!readiness) return null;
   const failedChecks = readiness.readinessChecks?.filter((check) => !check.ok) ?? [];
   const missingRequiredVars = readiness.missingRequiredVars ?? [];
   const missingLiveRequiredVars = readiness.missingLiveRequiredVars ?? [];
-  const shouldShow = missingRequiredVars.length > 0 || missingLiveRequiredVars.length > 0 || failedChecks.length > 0 || readiness.liveConfigurationReady === false;
+  const liveCheckoutPaused = readiness.checkoutSafetyMode === "live_checkout_paused";
+  const shouldShow = missingRequiredVars.length > 0 || missingLiveRequiredVars.length > 0 || failedChecks.length > 0 || readiness.liveConfigurationReady === false || liveCheckoutPaused;
   if (!shouldShow) return null;
   const legacyCopy = readiness.legacyVarsDetected?.length
     ? ` Legacy vars detected: ${readiness.legacyVarsDetected.join(", ")}.`
@@ -5342,6 +5372,11 @@ function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessRes
           {missingLiveRequiredVars.length ? (
             <p className="mt-1 text-xs font-bold leading-5 text-amber-50">
               Live billing is not ready yet. Required live setup still needs: {missingLiveRequiredVars.join(", ")}.
+            </p>
+          ) : null}
+          {liveCheckoutPaused ? (
+            <p className="mt-1 text-xs font-bold leading-5 text-amber-50">
+              Live checkout is paused for sandbox verification. DZN_LIVE_CHECKOUT_ENABLED must stay unset until a separate approved go-live step.
             </p>
           ) : null}
           {failedChecks.length ? (
@@ -9244,6 +9279,8 @@ function fallbackBillingPlan(plan: typeof billingPlans[number]): BillingPlanSumm
     price_label: plan.price,
     monthly_price_gbp: base.monthly_price_gbp,
     configured: false,
+    checkout_enabled: false,
+    checkout_blocked_reason: "Plan checkout is not configured yet.",
     features: [plan.detail],
     max_linked_servers: base.max_linked_servers,
     can_use_reviews: true,

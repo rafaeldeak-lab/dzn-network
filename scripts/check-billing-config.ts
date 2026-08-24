@@ -15,6 +15,9 @@ console.log(`Stripe mode hint: ${readiness.modeHint}`);
 console.log(`Checkout configured for Starter? ${readiness.starterConfigured ? "yes" : "no"}`);
 console.log(`Checkout configured for Pro? ${readiness.proConfigured ? "yes" : "no"}`);
 console.log(`Live billing configuration ready? ${readiness.liveConfigurationReady ? "yes" : "no"}`);
+console.log(`Live checkout enabled? ${readiness.liveCheckoutEnabled ? "yes" : "no"}`);
+console.log(`Checkout session creation allowed? ${readiness.checkoutSessionCreationAllowed ? "yes" : "no"}`);
+console.log(`Checkout safety mode: ${readiness.checkoutSafetyMode}`);
 console.log("Readiness check is read-only; it does not create Stripe products, apply migrations, update secrets, or enable live billing.");
 
 if (readiness.missingRequiredVars.length) {

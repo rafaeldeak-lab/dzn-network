@@ -4,6 +4,7 @@ import { isMockAuth } from "../../_lib/mock";
 import {
   attachStarterTrialCheckoutSession,
   ensureBillingSchema,
+  getCheckoutSafetyStatus,
   getStripePriceIdForPlan,
   paidPlanKey,
   releaseStarterTrialReservation,
@@ -29,6 +30,15 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   const priceId = getStripePriceIdForPlan(env, planKey);
   if (!priceId) return json({ error: "Plan checkout is not configured yet." }, { status: 400 });
+
+  const checkoutSafety = getCheckoutSafetyStatus(env);
+  if (!checkoutSafety.checkoutSessionCreationAllowed) {
+    return json({
+      error: checkoutSafety.checkoutBlockedReason ?? "Checkout is not enabled yet.",
+      errorCode: checkoutSafety.checkoutSafetyMode === "live_checkout_paused" ? "LIVE_CHECKOUT_PAUSED" : "CHECKOUT_NOT_ENABLED",
+      checkoutSafetyMode: checkoutSafety.checkoutSafetyMode,
+    }, { status: 403 });
+  }
 
   await ensureBillingSchema(env);
   const account = await requireDb(env)
