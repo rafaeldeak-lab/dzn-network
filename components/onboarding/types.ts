@@ -8,6 +8,24 @@ export type AuthResponse = {
   };
   linkedServer?: LinkedServer | null;
   linkedServers?: LinkedServer[];
+  navigation?: AuthNavigationSummary;
+};
+
+export type AuthNavigationSummary = {
+  effective_plan_key: "free" | "starter" | "pro" | "premium";
+  stored_plan_key: "free" | "starter" | "pro" | "premium" | "network" | "partner";
+  plan_tier: "free" | "starter" | "pro";
+  plan_label: "Free" | "Starter" | "Starter Trial" | "Pro";
+  plan_status: string;
+  linked_server_count: number;
+  linked_server_limit: number;
+  can_link_more_servers: boolean;
+  can_use_pro_tools: boolean;
+  primary_action: {
+    label: "Start Trial" | "Upgrade to Pro" | "Pro Tools";
+    href: "/#pricing" | "/dashboard";
+    tone: "trial" | "upgrade" | "pro";
+  };
 };
 
 export type BillingReadinessResponse = {

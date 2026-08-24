@@ -1,7 +1,20 @@
 import { ensureMockUser, getLinkedServersForUserSummary, getSessionUser } from "../../_lib/db";
 import { json } from "../../_lib/http";
 import { isMockAuth } from "../../_lib/mock";
-import type { PagesFunction } from "../../_lib/types";
+import { effectiveEntitlementPlan, getPlanConfig, normalizePlanKey, type PlanKey } from "../../_lib/plans";
+import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
+
+type NavigationPlanTier = "free" | "starter" | "pro";
+type NavigationPrimaryAction = {
+  label: "Start Trial" | "Upgrade to Pro" | "Pro Tools";
+  href: "/#pricing" | "/dashboard";
+  tone: "trial" | "upgrade" | "pro";
+};
+
+type OwnerBillingNavigationRow = {
+  plan_key: string | null;
+  plan_status: string | null;
+};
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   let user = await getSessionUser(env, request);
@@ -22,9 +35,65 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   const linkedServers = await getLinkedServersForUserSummary(env, user.id);
   const linkedServer = linkedServers[0] ?? null;
-  return json({ authenticated: true, user, linkedServer, linkedServers }, {
+  const navigation = await getAuthNavigationSummary(env, user, linkedServers.length);
+  return json({ authenticated: true, user, linkedServer, linkedServers, navigation }, {
     headers: {
       "cache-control": "private, max-age=15",
     },
   });
 };
+
+async function getAuthNavigationSummary(env: Env, user: SessionUser, linkedServerCount: number) {
+  const account = await readOwnerBillingNavigationRow(env, user.discord_id);
+  const storedPlanKey = normalizePlanKey(account?.plan_key ?? "free");
+  const planStatus = stringOrDefault(account?.plan_status, storedPlanKey === "free" ? "free" : "unknown");
+  const effectivePlanKey = effectiveEntitlementPlan(storedPlanKey, planStatus);
+  const tier = navigationTierForPlan(effectivePlanKey);
+  const config = getPlanConfig(effectivePlanKey);
+  return {
+    effective_plan_key: effectivePlanKey,
+    stored_plan_key: storedPlanKey,
+    plan_tier: tier,
+    plan_label: navigationPlanLabel(effectivePlanKey, planStatus),
+    plan_status: planStatus,
+    linked_server_count: linkedServerCount,
+    linked_server_limit: config.max_linked_servers,
+    can_link_more_servers: linkedServerCount < config.max_linked_servers,
+    can_use_pro_tools: tier === "pro",
+    primary_action: navigationPrimaryActionForTier(tier),
+  };
+}
+
+async function readOwnerBillingNavigationRow(env: Env, discordUserId: string) {
+  if (!env.DB) return null;
+  try {
+    return await env.DB
+      .prepare("SELECT plan_key, plan_status FROM owner_billing_accounts WHERE discord_user_id = ? LIMIT 1")
+      .bind(discordUserId)
+      .first<OwnerBillingNavigationRow>();
+  } catch {
+    return null;
+  }
+}
+
+function navigationTierForPlan(planKey: PlanKey): NavigationPlanTier {
+  if (planKey === "starter") return "starter";
+  if (planKey === "pro" || planKey === "premium") return "pro";
+  return "free";
+}
+
+function navigationPlanLabel(planKey: PlanKey, planStatus: string) {
+  if (planKey === "starter") return planStatus.toLowerCase() === "trialing" ? "Starter Trial" : "Starter";
+  if (planKey === "pro" || planKey === "premium") return "Pro";
+  return "Free";
+}
+
+function navigationPrimaryActionForTier(tier: NavigationPlanTier): NavigationPrimaryAction {
+  if (tier === "pro") return { label: "Pro Tools", href: "/dashboard", tone: "pro" };
+  if (tier === "starter") return { label: "Upgrade to Pro", href: "/#pricing", tone: "upgrade" };
+  return { label: "Start Trial", href: "/#pricing", tone: "trial" };
+}
+
+function stringOrDefault(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}

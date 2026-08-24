@@ -244,11 +244,16 @@ assert.equal(existsSync("functions/api/servers/[serverId]/ctf/dashboard.ts"), tr
 assert.equal(existsSync("functions/api/servers/[serverId]/ctf/matchmaking.ts"), true, "Existing CTF matchmaking route must still exist.");
 assert.equal(source("functions/api/leaderboards.ts").includes("./public/leaderboards"), true, "Existing /api/leaderboards alias must still work.");
 const siteHeaderSource = source("components/site-header.tsx");
-const authenticatedHeaderBlock = siteHeaderSource.slice(
-  siteHeaderSource.indexOf("const authenticatedHeaderLinks"),
+const starterHeaderBlock = siteHeaderSource.slice(
+  siteHeaderSource.indexOf("const starterHeaderLinks"),
+  siteHeaderSource.indexOf("const proHeaderLinks"),
+);
+const proHeaderBlock = siteHeaderSource.slice(
+  siteHeaderSource.indexOf("const proHeaderLinks"),
   siteHeaderSource.indexOf("let pageHeaderAuthState"),
 );
-assert.equal(authenticatedHeaderBlock.includes('href: "/events"'), true, "Authenticated top nav Events link must open the Events Hub.");
+assert.equal(starterHeaderBlock.includes('href: "/events"'), true, "Starter top nav Events link must open the Events Hub.");
+assert.equal(proHeaderBlock.includes('href: "/events"'), true, "Pro top nav Events link must open the Events Hub.");
 assert.equal(source("components/onboarding/dashboard.tsx").includes("Set your server category to join events and matchmaking."), false, "Dashboard must not render the global category banner.");
 assert.equal(source("components/onboarding/dashboard.tsx").includes("Set your server category to enter category-matched events."), true, "Dashboard Event Hub must keep the contextual category warning.");
 assert.equal(source("components/onboarding/dashboard.tsx").includes('href="/events/suggest"'), true, "Dashboard must send server owners to the public-safe suggestion board.");

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { DznPulseBell, DznPulseProvider } from "@/components/dzn-pulse/dzn-pulse-provider";
 import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding/api";
+import type { AuthNavigationSummary } from "@/components/onboarding/types";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
 
 type SiteHeaderActive = "features" | "leaderboards" | "servers" | "pricing" | "stats" | "events" | "dashboard";
@@ -14,15 +15,26 @@ type SiteHeaderProps = {
   active?: SiteHeaderActive;
   authenticated?: boolean;
   checkingAccount?: boolean;
+  navigation?: AuthNavigationSummary | null;
   returnTo?: string;
   showLogout?: boolean;
 };
 
-type SiteHeaderAuthStateProps = Pick<SiteHeaderProps, "authenticated" | "checkingAccount" | "returnTo">;
+type SiteHeaderAuthStateProps = Pick<SiteHeaderProps, "authenticated" | "checkingAccount" | "navigation" | "returnTo">;
 type HeaderNavLink = {
   href: string;
   label: string;
   active?: SiteHeaderActive;
+};
+type HeaderAuthProbeState = {
+  authenticated: boolean;
+  navigation: AuthNavigationSummary | null;
+};
+type HeaderPlanTier = AuthNavigationSummary["plan_tier"];
+type HeaderPrimaryAction = AuthNavigationSummary["primary_action"];
+type AuthMeResponse = {
+  authenticated?: boolean;
+  navigation?: AuthNavigationSummary | null;
 };
 
 const logoSources = {
@@ -47,11 +59,17 @@ const loggedOutHeaderLinks: HeaderNavLink[] = [
   { href: "/#pricing", label: "Pricing", active: "pricing" },
 ];
 
-const authenticatedHeaderLinks: HeaderNavLink[] = [
+const starterHeaderLinks: HeaderNavLink[] = [
   { href: "/#features", label: "Features", active: "features" },
   { href: "/leaderboards", label: "Leaderboards", active: "leaderboards" },
   { href: "/servers", label: "Servers", active: "servers" },
-  { href: "/#pricing", label: "Pricing", active: "pricing" },
+  { href: "/events", label: "Events", active: "events" },
+];
+
+const proHeaderLinks: HeaderNavLink[] = [
+  { href: "/#features", label: "Features", active: "features" },
+  { href: "/leaderboards", label: "Leaderboards", active: "leaderboards" },
+  { href: "/servers", label: "Servers", active: "servers" },
   { href: "/#stats", label: "Stats", active: "stats" },
   { href: "/events", label: "Events", active: "events" },
 ];
@@ -59,16 +77,16 @@ const authenticatedHeaderLinks: HeaderNavLink[] = [
 let pageHeaderAuthState: SiteHeaderAuthStateProps | null = null;
 const pageHeaderAuthListeners = new Set<() => void>();
 
-export function SiteHeaderAuthState({ authenticated, checkingAccount, returnTo }: SiteHeaderAuthStateProps) {
+export function SiteHeaderAuthState({ authenticated, checkingAccount, navigation, returnTo }: SiteHeaderAuthStateProps) {
   useEffect(() => {
-    pageHeaderAuthState = { authenticated, checkingAccount, returnTo };
+    pageHeaderAuthState = { authenticated, checkingAccount, navigation, returnTo };
     notifyPageHeaderAuthListeners();
 
     return () => {
       pageHeaderAuthState = null;
       notifyPageHeaderAuthListeners();
     };
-  }, [authenticated, checkingAccount, returnTo]);
+  }, [authenticated, checkingAccount, navigation, returnTo]);
 
   return null;
 }
@@ -95,6 +113,7 @@ export function SiteHeaderRoot() {
       active={activeFromPathname(pathname)}
       authenticated={authState?.authenticated}
       checkingAccount={authState?.checkingAccount}
+      navigation={authState?.navigation}
       returnTo={authState?.returnTo ?? pathname ?? "/"}
     />
   );
@@ -104,10 +123,11 @@ export function SiteHeader({
   active,
   authenticated,
   checkingAccount = false,
+  navigation,
   returnTo = "/",
   showLogout = true,
 }: SiteHeaderProps) {
-  const [fetchedAuthenticated, setFetchedAuthenticated] = useState(false);
+  const [fetchedAuthState, setFetchedAuthState] = useState<HeaderAuthProbeState>({ authenticated: false, navigation: null });
   const [checking, setChecking] = useState(authenticated === undefined);
 
   useEffect(() => {
@@ -115,11 +135,21 @@ export function SiteHeader({
 
     let activeRequest = true;
     fetch("/api/auth/me", { cache: "no-store", credentials: "include" })
-      .then((response) => {
-        if (activeRequest) setFetchedAuthenticated(response.ok);
+      .then(async (response) => {
+        if (!activeRequest) return;
+        if (!response.ok) {
+          setFetchedAuthState({ authenticated: false, navigation: null });
+          return;
+        }
+
+        const payload = await response.json().catch(() => null) as AuthMeResponse | null;
+        setFetchedAuthState({
+          authenticated: Boolean(payload?.authenticated),
+          navigation: normalizeHeaderNavigation(payload?.navigation),
+        });
       })
       .catch(() => {
-        if (activeRequest) setFetchedAuthenticated(false);
+        if (activeRequest) setFetchedAuthState({ authenticated: false, navigation: null });
       })
       .finally(() => {
         if (activeRequest) setChecking(false);
@@ -132,13 +162,19 @@ export function SiteHeader({
 
   async function signOut() {
     clearClientAuthState();
-    setFetchedAuthenticated(false);
+    setFetchedAuthState({ authenticated: false, navigation: null });
     await logoutAndRedirect();
   }
 
   const authProbePending = checkingAccount || checking;
-  const resolvedAuthenticated = authenticated ?? fetchedAuthenticated;
-  const navLinks = resolvedAuthenticated ? authenticatedHeaderLinks : loggedOutHeaderLinks;
+  const resolvedAuthenticated = authenticated ?? fetchedAuthState.authenticated;
+  const resolvedNavigation = resolvedAuthenticated
+    ? normalizeHeaderNavigation(authenticated === undefined ? fetchedAuthState.navigation : navigation)
+    : null;
+  const planTier = resolvedNavigation?.plan_tier ?? "free";
+  const navLinks = resolvedAuthenticated ? authenticatedHeaderLinksForTier(planTier) : loggedOutHeaderLinks;
+  const primaryAction = resolvedNavigation?.primary_action ?? defaultPrimaryActionForTier(planTier);
+  const showAddServer = resolvedAuthenticated && (resolvedNavigation?.can_link_more_servers ?? true);
 
   return (
     <DznPulseProvider>
@@ -170,11 +206,22 @@ export function SiteHeader({
           </a>
           {resolvedAuthenticated ? (
             <>
-              <Link href="/dashboard" className="dzn-header-action">
-                Dashboard
-              </Link>
-              <Link href="/setup" className="dzn-header-action dzn-header-action--primary">
-                Add Your Server
+              <span className={`dzn-header-plan dzn-header-plan--${planTier}`} title={headerPlanTitle(resolvedNavigation)}>
+                <span>{resolvedNavigation?.plan_label ?? "Free"}</span>
+                <small>{headerPlanDetail(resolvedNavigation)}</small>
+              </span>
+              {primaryAction.href === "/dashboard" ? null : (
+                <Link href="/dashboard" className="dzn-header-action">
+                  Dashboard
+                </Link>
+              )}
+              {showAddServer ? (
+                <Link href="/setup" className="dzn-header-action dzn-header-action--primary">
+                  {planTier === "free" ? "Start Setup" : "Add Your Server"}
+                </Link>
+              ) : null}
+              <Link href={primaryAction.href} className={`dzn-header-action dzn-header-action--package dzn-header-action--package-${primaryAction.tone}`}>
+                {primaryAction.label}
               </Link>
             </>
           ) : null}
@@ -284,4 +331,35 @@ function notifyPageHeaderAuthListeners() {
   for (const listener of pageHeaderAuthListeners) {
     listener();
   }
+}
+
+function authenticatedHeaderLinksForTier(tier: HeaderPlanTier) {
+  if (tier === "pro") return proHeaderLinks;
+  return starterHeaderLinks;
+}
+
+function normalizeHeaderNavigation(value: unknown): AuthNavigationSummary | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Partial<AuthNavigationSummary>;
+  if (record.plan_tier !== "free" && record.plan_tier !== "starter" && record.plan_tier !== "pro") return null;
+  if (!record.primary_action || typeof record.primary_action !== "object") return null;
+  return record as AuthNavigationSummary;
+}
+
+function defaultPrimaryActionForTier(tier: HeaderPlanTier): HeaderPrimaryAction {
+  if (tier === "pro") return { label: "Pro Tools", href: "/dashboard", tone: "pro" };
+  if (tier === "starter") return { label: "Upgrade to Pro", href: "/#pricing", tone: "upgrade" };
+  return { label: "Start Trial", href: "/#pricing", tone: "trial" };
+}
+
+function headerPlanTitle(navigation: AuthNavigationSummary | null) {
+  if (!navigation) return "DZN account plan loading";
+  return `${navigation.plan_label} account - ${navigation.linked_server_count}/${navigation.linked_server_limit} server slots used`;
+}
+
+function headerPlanDetail(navigation: AuthNavigationSummary | null) {
+  if (!navigation) return "Account";
+  if (navigation.plan_tier === "pro") return "Pro tools";
+  if (navigation.plan_tier === "starter") return navigation.plan_status.toLowerCase() === "trialing" ? "Trial access" : "Starter access";
+  return "Trial ready";
 }

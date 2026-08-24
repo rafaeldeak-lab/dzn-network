@@ -239,6 +239,7 @@ type HomepageAuthState = {
   status: HomepageAuthStatus;
   sessionStatus: number | null;
   user: AuthResponse["user"] | null;
+  navigation: AuthResponse["navigation"] | null;
   manageableServersCount: number;
   selectedServerId: string | null;
 };
@@ -744,6 +745,7 @@ function useHomepageAuth(): HomepageAuthState {
     status: "loading",
     sessionStatus: null,
     user: null,
+    navigation: null,
     manageableServersCount: 0,
     selectedServerId: null,
   });
@@ -765,6 +767,7 @@ function useHomepageAuth(): HomepageAuthState {
             status: "logged_out",
             sessionStatus: response.status,
             user: null,
+            navigation: null,
             manageableServersCount: 0,
             selectedServerId: null,
           });
@@ -783,6 +786,7 @@ function useHomepageAuth(): HomepageAuthState {
           status: "logged_in",
           sessionStatus: response.status,
           user: payload.user,
+          navigation: payload.navigation ?? null,
           manageableServersCount: linkedServers.length || (payload.linkedServer ? 1 : 0),
           selectedServerId,
         });
@@ -792,6 +796,7 @@ function useHomepageAuth(): HomepageAuthState {
           status: "logged_out",
           sessionStatus: null,
           user: null,
+          navigation: null,
           manageableServersCount: 0,
           selectedServerId: null,
         });
@@ -875,6 +880,7 @@ export function DznLandingPage() {
         <SiteHeaderAuthState
           authenticated={authState.status === "logged_in"}
           checkingAccount={authState.status === "loading"}
+          navigation={authState.navigation}
           returnTo="/"
         />
         <motion.main

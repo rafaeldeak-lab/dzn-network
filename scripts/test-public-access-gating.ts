@@ -542,10 +542,14 @@ const pricingUpgradeBlock = homepageSource.slice(
 );
 const loggedOutHeaderBlock = siteHeaderSource.slice(
   siteHeaderSource.indexOf("const loggedOutHeaderLinks"),
-  siteHeaderSource.indexOf("const authenticatedHeaderLinks"),
+  siteHeaderSource.indexOf("const starterHeaderLinks"),
 );
-const authenticatedHeaderBlock = siteHeaderSource.slice(
-  siteHeaderSource.indexOf("const authenticatedHeaderLinks"),
+const starterHeaderBlock = siteHeaderSource.slice(
+  siteHeaderSource.indexOf("const starterHeaderLinks"),
+  siteHeaderSource.indexOf("const proHeaderLinks"),
+);
+const proHeaderBlock = siteHeaderSource.slice(
+  siteHeaderSource.indexOf("const proHeaderLinks"),
   siteHeaderSource.indexOf("let pageHeaderAuthState"),
 );
 const globalsSource = readFileSync("app/globals.css", "utf8");
@@ -621,10 +625,14 @@ assert.equal(loggedOutHeaderBlock.includes("Events"), false);
 assert.equal(loggedOutHeaderBlock.includes("Dashboard"), false);
 assert.equal(loggedOutHeaderBlock.includes("Add Your Server"), false);
 assert.equal(signupPageSource.includes("hideNavActions"), true, "Signup must use the simplified logged-out auth header.");
-assert.equal(authenticatedHeaderBlock.includes("Leaderboards"), true);
-assert.equal(authenticatedHeaderBlock.includes("Servers"), true);
-assert.equal(authenticatedHeaderBlock.includes("Stats"), true);
-assert.equal(authenticatedHeaderBlock.includes("Events"), true);
+assert.equal(starterHeaderBlock.includes("Leaderboards"), true);
+assert.equal(starterHeaderBlock.includes("Servers"), true);
+assert.equal(starterHeaderBlock.includes("Stats"), false);
+assert.equal(starterHeaderBlock.includes("Events"), true);
+assert.equal(proHeaderBlock.includes("Leaderboards"), true);
+assert.equal(proHeaderBlock.includes("Servers"), true);
+assert.equal(proHeaderBlock.includes("Stats"), true);
+assert.equal(proHeaderBlock.includes("Events"), true);
 assert.equal(siteHeaderSource.includes("data-auth-state"), true);
 assert.equal(siteHeaderSource.includes("checking-public"), true);
 assert.equal(siteHeaderSource.includes("aria-busy={authProbePending}"), true);
