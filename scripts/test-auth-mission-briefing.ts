@@ -11,7 +11,11 @@ assert.equal(authShellSource.includes("group-active:grid-rows-[1fr]"), true, "Mi
 assert.equal(authShellSource.includes("aria-expanded={isOpen}"), true, "Mission briefing cards should expose persistent tapped-open state to assistive tech.");
 assert.equal(authShellSource.includes("data-state={isOpen ? \"open\" : \"closed\"}"), true, "Mission briefing intel panels should expose stable open state for rendered checks.");
 assert.equal(authShellSource.includes("scroll-mb-28"), true, "Mission briefing cards should keep tapped details clear of the fixed beta ticker.");
-assert.equal(authShellSource.includes("window.innerWidth >= 768"), true, "Mission briefing click auto-scroll should stay limited to mobile-sized viewports.");
+assert.equal(authShellSource.includes("MOBILE_BRIEFING_BREAKPOINT_PX"), true, "Mission briefing click auto-scroll should stay limited to mobile-sized viewports.");
+assert.equal(authShellSource.includes("MOBILE_TICKER_CLEARANCE_PX"), true, "Mission briefing tap scrolling should include fixed beta ticker clearance.");
+assert.equal(authShellSource.includes("BRIEFING_EXPAND_SETTLE_MS"), true, "Mission briefing tap scrolling should recheck after the expansion transition settles.");
+assert.equal(authShellSource.includes("ensureBriefingDetailsClearOfTicker"), true, "Mission briefing tap scrolling should measure expanded details against the fixed beta ticker.");
+assert.equal(authShellSource.includes("document.querySelector<HTMLElement>(\".dzn-beta-ticker\")"), true, "Mission briefing tap scrolling should use the actual beta ticker position.");
 assert.equal(authShellSource.includes("prefers-reduced-motion: reduce"), true, "Mission briefing tap scrolling should respect reduced motion.");
 assert.equal(authShellSource.includes("focus-visible:ring-2"), true, "Mission briefing cards should keep a visible keyboard focus state.");
 assert.equal(authShellSource.includes("mission-briefing-intel-"), true, "Mission briefing details should have stable accessible IDs.");

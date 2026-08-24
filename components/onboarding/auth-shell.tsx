@@ -96,6 +96,10 @@ const rainStreaks = Array.from({ length: 18 }, (_, index) => ({
   duration: `${1.8 + (index % 5) * 0.18}s`,
 }));
 
+const MOBILE_BRIEFING_BREAKPOINT_PX = 768;
+const MOBILE_TICKER_CLEARANCE_PX = 18;
+const BRIEFING_EXPAND_SETTLE_MS = 360;
+
 export function AuthShell({
   title,
   description,
@@ -383,15 +387,14 @@ function BriefingCard({
     const target = event.currentTarget;
     onOpen();
 
-    if (typeof window === "undefined" || window.innerWidth >= 768) return;
+    if (typeof window === "undefined" || window.innerWidth >= MOBILE_BRIEFING_BREAKPOINT_PX) return;
 
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const behavior: ScrollBehavior = prefersReducedMotion ? "auto" : "smooth";
     window.requestAnimationFrame(() => {
-      target.scrollIntoView({
-        block: "center",
-        behavior: prefersReducedMotion ? "auto" : "smooth",
-      });
+      window.requestAnimationFrame(() => ensureBriefingDetailsClearOfTicker(target, detailsId, behavior));
     });
+    window.setTimeout(() => ensureBriefingDetailsClearOfTicker(target, detailsId, behavior), BRIEFING_EXPAND_SETTLE_MS);
   }
 
   return (
@@ -458,6 +461,24 @@ function BriefingCard({
       </div>
     </button>
   );
+}
+
+function ensureBriefingDetailsClearOfTicker(card: HTMLElement, detailsId: string, behavior: ScrollBehavior) {
+  const details = document.getElementById(detailsId);
+  const detailsRect = details?.getBoundingClientRect();
+  const cardRect = card.getBoundingClientRect();
+  const ticker = document.querySelector<HTMLElement>(".dzn-beta-ticker");
+  const tickerTop = ticker?.getBoundingClientRect().top ?? window.innerHeight;
+  const visibleBottom = Math.min(window.innerHeight, tickerTop) - MOBILE_TICKER_CLEARANCE_PX;
+
+  if (detailsRect && detailsRect.height > 0 && detailsRect.bottom > visibleBottom) {
+    window.scrollBy({ top: Math.ceil(detailsRect.bottom - visibleBottom), behavior });
+    return;
+  }
+
+  if (cardRect.top < MOBILE_TICKER_CLEARANCE_PX) {
+    window.scrollBy({ top: Math.floor(cardRect.top - MOBILE_TICKER_CLEARANCE_PX), behavior });
+  }
 }
 
 function TrustLabel({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
