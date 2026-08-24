@@ -36,6 +36,16 @@ export type BillingReadinessResponse = {
   premiumConfigured: boolean;
   stripeSecretConfigured: boolean;
   webhookSecretConfigured: boolean;
+  liveConfigurationReady: boolean;
+  humanApprovalRequiredForLiveBilling: boolean;
+  productionMutationAllowedByReadinessCheck: boolean;
+  priceSources: Record<"starter" | "pro", {
+    envVar: string;
+    publicFallbackEnvVar: string;
+    source: "server" | "public_fallback" | "missing";
+    configured: boolean;
+    liveReady: boolean;
+  }>;
   activePlans: Array<{
     plan_key: "starter" | "pro";
     name: string;
@@ -44,7 +54,16 @@ export type BillingReadinessResponse = {
     configured: boolean;
   }>;
   missingRequiredVars: string[];
+  missingLiveRequiredVars: string[];
   legacyVarsDetected: string[];
+  publicFallbackPriceVarsDetected: string[];
+  readinessChecks: Array<{
+    key: string;
+    label: string;
+    ok: boolean;
+    severity: "blocker" | "warning" | "info";
+    detail: string;
+  }>;
   modeHint?: "test" | "live" | "unknown" | "not_configured";
 };
 

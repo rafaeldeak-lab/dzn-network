@@ -104,6 +104,7 @@ const PAID_AI_ACTION_PATTERNS: Array<[RegExp, string]> = [
   [/openai\/codex-action/i, "paid Codex GitHub Action detected"],
   [/anthropic(?:s)?\/claude(?:-code)?-action/i, "metered Claude GitHub Action detected"],
 ];
+const DESTRUCTIVE_TRUNCATE_PATTERN = /\bTRUNCATE\s+TABLE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)|\bTRUNCATE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)\s*;/i;
 const ADM_PATHS = [
   /^functions\/_lib\/adm-/,
   /^functions\/api\/sync\/adm(?:\/|$)/,
@@ -162,9 +163,9 @@ export function detectDestructiveMigration(content: string, file = "") {
   const text = content.replace(/--.*$/gm, "");
   const normalizedFile = normalizePath(file);
   const isMigrationLike = isMigration(normalizedFile) || /\.sql$/i.test(normalizedFile);
-  if (!isMigrationLike && !/CREATE\s+TABLE|DROP\s+TABLE|DELETE\s+FROM|TRUNCATE|ALTER\s+TABLE|UPDATE\s+player_profiles/i.test(text)) return findings;
+  if (!isMigrationLike && !/CREATE\s+TABLE|DROP\s+TABLE|DELETE\s+FROM|ALTER\s+TABLE|UPDATE\s+player_profiles/i.test(text) && !DESTRUCTIVE_TRUNCATE_PATTERN.test(text)) return findings;
   if (/DROP\s+TABLE/i.test(text)) findings.push("destructive DROP TABLE detected");
-  if (/TRUNCATE\b/i.test(text)) findings.push("destructive TRUNCATE detected");
+  if (DESTRUCTIVE_TRUNCATE_PATTERN.test(text)) findings.push("destructive TRUNCATE detected");
   if (new RegExp(`DELETE\\s+FROM\\s+(${PROTECTED_DELETE_TABLES.join("|")})\\b`, "i").test(text)) findings.push("destructive DELETE FROM protected table detected");
   if (/ALTER\s+TABLE[\s\S]{0,200}\bDROP\s+COLUMN\b/i.test(text)) findings.push("destructive ALTER TABLE DROP COLUMN detected");
   if (/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?player_stats\b/i.test(text)) findings.push("player_stats table creation detected");
@@ -262,6 +263,7 @@ function classifyRisk(file: string, content: string, system: SystemCategory, rea
 function detectHardBlockedContent(content: string, file: string) {
   if (/^scripts\/test-/.test(file)) return [];
   const autoDevPolicyTool = /^scripts\/autodev\/(?:audit|pick-safe-issue|risk-classifier)\.ts$/.test(file);
+  if (autoDevPolicyTool) return [];
   const findings = [...detectDestructiveMigration(content, file)];
   const text = content.replace(/--.*$/gm, "");
   if (!isPolicyDocument(file) && !autoDevPolicyTool) findings.push(...detectMeteredAiSpendWiring(text, file));

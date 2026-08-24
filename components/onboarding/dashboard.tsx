@@ -5316,9 +5316,17 @@ function billingPlanListingSummary(plan: BillingPlanSummary) {
 }
 
 function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessResponse | null }) {
-  if (!readiness?.missingRequiredVars?.length) return null;
-  const legacyCopy = readiness.legacyVarsDetected.length
+  if (!readiness) return null;
+  const failedChecks = readiness.readinessChecks?.filter((check) => !check.ok) ?? [];
+  const missingRequiredVars = readiness.missingRequiredVars ?? [];
+  const missingLiveRequiredVars = readiness.missingLiveRequiredVars ?? [];
+  const shouldShow = missingRequiredVars.length > 0 || missingLiveRequiredVars.length > 0 || failedChecks.length > 0 || readiness.liveConfigurationReady === false;
+  if (!shouldShow) return null;
+  const legacyCopy = readiness.legacyVarsDetected?.length
     ? ` Legacy vars detected: ${readiness.legacyVarsDetected.join(", ")}.`
+    : "";
+  const publicFallbackCopy = readiness.publicFallbackPriceVarsDetected?.length
+    ? ` Public fallback aliases detected: ${readiness.publicFallbackPriceVarsDetected.join(", ")}.`
     : "";
   return (
     <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3">
@@ -5326,11 +5334,28 @@ function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessRes
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-100" />
         <div>
           <p className="text-xs font-black uppercase text-amber-100">Admin billing readiness warning</p>
-          <p className="mt-1 text-xs font-bold leading-5 text-amber-50">
-            Checkout is missing required Stripe configuration: {readiness.missingRequiredVars.join(", ")}.
-          </p>
+          {missingRequiredVars.length ? (
+            <p className="mt-1 text-xs font-bold leading-5 text-amber-50">
+              Checkout is missing required Stripe configuration: {missingRequiredVars.join(", ")}.
+            </p>
+          ) : null}
+          {missingLiveRequiredVars.length ? (
+            <p className="mt-1 text-xs font-bold leading-5 text-amber-50">
+              Live billing is not ready yet. Required live setup still needs: {missingLiveRequiredVars.join(", ")}.
+            </p>
+          ) : null}
+          {failedChecks.length ? (
+            <div className="mt-2 grid gap-1">
+              {failedChecks.slice(0, 4).map((check) => (
+                <p key={check.key} className="text-[11px] leading-5 text-amber-100/85">
+                  <span className="font-black uppercase text-amber-100">{check.label}:</span> {check.detail}
+                </p>
+              ))}
+            </div>
+          ) : null}
           <p className="mt-1 text-[11px] leading-5 text-amber-100/80">
-            Mode hint: {formatStripeModeHint(readiness.modeHint)}.{legacyCopy} Secret values are never shown here.
+            Mode hint: {formatStripeModeHint(readiness.modeHint)}.{legacyCopy}{publicFallbackCopy} Secret values and Price IDs are never shown here.
+            {readiness.humanApprovalRequiredForLiveBilling ? " Live Stripe changes still require explicit human approval." : ""}
           </p>
         </div>
       </div>
