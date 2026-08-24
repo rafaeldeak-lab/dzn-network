@@ -47,7 +47,11 @@ Live billing must not be enabled because the public pricing UI looks correct or 
 
 `NEXT_PUBLIC_STRIPE_*_PRICE_ID` variables are compatibility fallbacks only. They can keep old checkout paths working during rollout, but they are not valid evidence for live billing readiness.
 
-The readiness check is read-only. Live Stripe product/price creation, webhook endpoint changes, Cloudflare secret changes, D1 migration application, customer import, and payment enablement remain separate high-risk human-approved operations.
+`liveConfigurationReady: true` means the live configuration shape is ready for review. It does not mean real customer checkout is enabled.
+
+Live Stripe checkout is paused by default unless `DZN_LIVE_CHECKOUT_ENABLED=true` is deliberately set during a later approved go-live step. Test-mode Stripe checkout remains available for sandbox validation without that flag. In live mode, `/api/billing/create-checkout-session` must refuse checkout before reserving a Starter trial claim, writing D1, or calling Stripe when the flag is not enabled.
+
+The readiness check is read-only. Live Stripe product/price creation, webhook endpoint changes, Cloudflare secret changes, D1 migration application, customer import, checkout enablement, and payment enablement remain separate high-risk human-approved operations.
 
 Use `docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md` with Issue #46 before any future live billing activation. That checklist is a non-mutating human handoff; it is not an AutoDev activation script.
 

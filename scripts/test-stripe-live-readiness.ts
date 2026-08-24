@@ -24,6 +24,8 @@ assert.equal(fallbackOnly.publicFallbackPriceVarsDetected.includes("NEXT_PUBLIC_
 assert.equal(fallbackOnly.readinessChecks.some((check) => check.key === "human-approved-live-step" && check.severity === "info" && check.ok === false), true);
 assert.equal(fallbackOnly.productionMutationAllowedByReadinessCheck, false);
 assert.equal(fallbackOnly.humanApprovalRequiredForLiveBilling, true);
+assert.equal(fallbackOnly.checkoutSessionCreationAllowed, false);
+assert.equal(fallbackOnly.checkoutSafetyMode, "not_configured");
 
 const testMode = getBillingReadinessStatus({
   STRIPE_PRICE_STARTER: "price_server_starter",
@@ -39,6 +41,8 @@ assert.equal(testMode.modeHint, "test");
 assert.equal(testMode.liveConfigurationReady, false, "Test-mode Stripe secret must not pass live readiness.");
 assert.deepEqual(testMode.missingLiveRequiredVars, ["STRIPE_SECRET_KEY"]);
 assert.equal(testMode.readinessChecks.find((check) => check.key === "stripe-live-secret")?.ok, false);
+assert.equal(testMode.checkoutSessionCreationAllowed, true, "Test-mode Stripe checkout should stay usable for sandbox validation.");
+assert.equal(testMode.checkoutSafetyMode, "test_mode_allowed");
 
 const previewUrl = getBillingReadinessStatus({
   STRIPE_PRICE_STARTER: "price_server_starter",
@@ -64,6 +68,9 @@ const liveReady = getBillingReadinessStatus({
 } as Env);
 
 assert.equal(liveReady.liveConfigurationReady, true);
+assert.equal(liveReady.liveCheckoutEnabled, false);
+assert.equal(liveReady.checkoutSessionCreationAllowed, false, "Live checkout must stay paused until DZN_LIVE_CHECKOUT_ENABLED is explicitly set.");
+assert.equal(liveReady.checkoutSafetyMode, "live_checkout_paused");
 assert.equal(liveReady.priceSources.starter.source, "server");
 assert.equal(liveReady.priceSources.pro.source, "server");
 assert.deepEqual(liveReady.activePlans.map((plan) => plan.plan_key), ["starter", "pro"]);
@@ -72,9 +79,25 @@ assert.deepEqual(liveReady.missingRequiredVars, []);
 assert.deepEqual(liveReady.missingLiveRequiredVars, []);
 assert.deepEqual(liveReady.legacyVarsDetected, ["STRIPE_PRICE_PREMIUM", "STRIPE_PRICE_NETWORK", "STRIPE_PRICE_PARTNER"]);
 assert.equal(liveReady.readinessChecks.filter((check) => check.severity === "blocker").every((check) => check.ok), true);
+assert.equal(liveReady.readinessChecks.some((check) => check.key === "live-checkout-enable-flag" && check.severity === "info" && check.ok === false), true);
 assert.equal(liveReady.readinessChecks.find((check) => check.key === "human-approved-live-step")?.ok, false);
 
-for (const [label, payload] of Object.entries({ fallbackOnly, testMode, previewUrl, liveReady })) {
+const liveEnabled = getBillingReadinessStatus({
+  STRIPE_PRICE_STARTER: "price_server_starter",
+  STRIPE_PRICE_PRO: "price_server_pro",
+  STRIPE_SECRET_KEY: "sk_live_secret_value_must_not_leak",
+  STRIPE_WEBHOOK_SECRET: "whsec_live_value_must_not_leak",
+  DZN_APP_URL: "https://dayz-network.com",
+  DZN_LIVE_CHECKOUT_ENABLED: "true",
+} as Env);
+
+assert.equal(liveEnabled.liveConfigurationReady, true);
+assert.equal(liveEnabled.liveCheckoutEnabled, true);
+assert.equal(liveEnabled.checkoutSessionCreationAllowed, true);
+assert.equal(liveEnabled.checkoutSafetyMode, "live_checkout_enabled");
+assert.equal(liveEnabled.readinessChecks.find((check) => check.key === "live-checkout-enable-flag")?.ok, true);
+
+for (const [label, payload] of Object.entries({ fallbackOnly, testMode, previewUrl, liveReady, liveEnabled })) {
   const text = JSON.stringify(payload);
   assert.equal(/sk_(?:test|live)_secret_value_must_not_leak/.test(text), false, `${label} must not expose Stripe secret values.`);
   assert.equal(/whsec_(?:test|live|endpoint|readiness|value)_/.test(text), false, `${label} must not expose webhook secret values.`);
@@ -85,7 +108,9 @@ const stripeSetupDoc = readFileSync("docs/STRIPE_LIVE_SETUP.md", "utf8");
 for (const snippet of [
   "Live billing remains a high-risk human-approved operation.",
   "`NEXT_PUBLIC_STRIPE_*_PRICE_ID` values are compatibility fallbacks only",
+  "Do not set `DZN_LIVE_CHECKOUT_ENABLED=true` during sandbox/test readiness.",
   "liveConfigurationReady",
+  "`liveConfigurationReady` and `checkoutSessionCreationAllowed` are different checks.",
   "Creating live Stripe products, changing live Price IDs, changing webhook endpoints, setting production secrets, importing customers, applying D1 migrations, or enabling live payments still requires a separate explicit high-risk human approval",
   "npm run check:billing-config",
 ]) {
@@ -96,6 +121,7 @@ const billingPlansDoc = readFileSync("docs/BILLING_PLANS.md", "utf8");
 for (const snippet of [
   "Live Stripe Readiness",
   "`NEXT_PUBLIC_STRIPE_*_PRICE_ID` variables are compatibility fallbacks only",
+  "Live Stripe checkout is paused by default unless `DZN_LIVE_CHECKOUT_ENABLED=true`",
   "The readiness check is read-only.",
 ]) {
   assert.equal(billingPlansDoc.includes(snippet), true, `Billing plans doc should include: ${snippet}`);
@@ -104,6 +130,7 @@ for (const snippet of [
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 for (const snippet of [
   "Live billing is not ready yet.",
+  "Live checkout is paused for sandbox verification.",
   "Secret values and Price IDs are never shown here.",
   "Live Stripe changes still require explicit human approval.",
 ]) {
@@ -113,6 +140,8 @@ for (const snippet of [
 const configCheckSource = readFileSync("scripts/check-billing-config.ts", "utf8");
 for (const snippet of [
   "Live billing configuration ready?",
+  "Checkout session creation allowed?",
+  "Checkout safety mode:",
   "Readiness check is read-only",
   "Live setup missing:",
 ]) {

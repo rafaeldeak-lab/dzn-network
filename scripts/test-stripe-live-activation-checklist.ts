@@ -34,12 +34,14 @@ for (const snippet of [
   "Premium, Network, and Partner are historical compatibility values only.",
   "Plans must never change:",
   "Starter trial abuse protection is present and reviewed before live billing is enabled.",
+  "Live checkout remains paused until the final approved go-live step sets `DZN_LIVE_CHECKOUT_ENABLED=true`.",
   "`NEXT_PUBLIC_STRIPE_*_PRICE_ID` values are fallback compatibility aliases only.",
   "AutoDev must treat these as blocked",
   "`stripe products create`",
   "`stripe prices create`",
   "`wrangler pages secret put STRIPE_SECRET_KEY`",
   "`wrangler pages secret put STRIPE_WEBHOOK_SECRET`",
+  "`wrangler pages secret put DZN_LIVE_CHECKOUT_ENABLED`",
 ]) {
   assert.equal(activationDoc.includes(snippet), true, `Activation checklist should include: ${snippet}`);
 }
@@ -57,7 +59,7 @@ const billingPlansDoc = read("docs/BILLING_PLANS.md");
 for (const snippet of [
   "docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md",
   "Issue #46",
-  "Live Stripe product/price creation, webhook endpoint changes, Cloudflare secret changes, D1 migration application, customer import, and payment enablement remain separate high-risk human-approved operations.",
+  "Live Stripe product/price creation, webhook endpoint changes, Cloudflare secret changes, D1 migration application, customer import, checkout enablement, and payment enablement remain separate high-risk human-approved operations.",
 ]) {
   assert.equal(billingPlansDoc.includes(snippet), true, `Billing plans doc should include live activation boundary: ${snippet}`);
 }
@@ -75,6 +77,7 @@ assert.equal(classifyPath("scripts/stripe-live-activation.ts", "stripe products 
 assert.equal(classifyPath("scripts/stripe-live-prices.ts", "await execa('stripe', ['prices', 'create', '--unit-amount', '200']);").risk, "blocked");
 assert.equal(classifyPath("scripts/stripe-live-api.ts", "curl -X POST https://api.stripe.com/v1/products").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/stripe-secret.yml", "run: npx wrangler pages secret put STRIPE_SECRET_KEY --project-name dzn-network").risk, "blocked");
+assert.equal(classifyPath(".github/workflows/stripe-live-checkout.yml", "run: npx wrangler pages secret put DZN_LIVE_CHECKOUT_ENABLED --project-name dzn-network").risk, "blocked");
 assert.equal(classifyPath("docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md", activationDoc).risk, "low");
 
 const packageJson = JSON.parse(read("package.json")) as { scripts?: Record<string, string> };
@@ -103,7 +106,7 @@ const forbiddenAutomationPatterns: Array<[RegExp, string]> = [
   [/\bstripe["'`]\s*,\s*\[[\s\S]{0,160}["'`](?:products?|prices?|webhook_endpoints|customers?|subscriptions?)["'`]\s*,\s*["'`](?:create|update|delete)["'`]/i, "Stripe CLI mutation subprocess call"],
   [/\b(?:curl|fetch|Invoke-RestMethod|Invoke-WebRequest)\b[\s\S]{0,180}\bapi\.stripe\.com\/v1\/(?:products|prices|webhook_endpoints|customers|subscriptions)\b[\s\S]{0,180}\b(?:POST|PUT|PATCH|DELETE)\b/i, "direct Stripe API mutation call"],
   [/\b(?:curl|fetch|Invoke-RestMethod|Invoke-WebRequest)\b[\s\S]{0,180}\b(?:POST|PUT|PATCH|DELETE)\b[\s\S]{0,180}\bapi\.stripe\.com\/v1\/(?:products|prices|webhook_endpoints|customers|subscriptions)\b/i, "direct Stripe API mutation call"],
-  [/\b(?:npx\s+)?wrangler\s+pages\s+secret\s+put\s+(?:STRIPE_PRICE_STARTER|STRIPE_PRICE_PRO|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET)\b/i, "Stripe production secret mutation command"],
+  [/\b(?:npx\s+)?wrangler\s+pages\s+secret\s+put\s+(?:STRIPE_PRICE_STARTER|STRIPE_PRICE_PRO|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|DZN_LIVE_CHECKOUT_ENABLED)\b/i, "Stripe production secret mutation command"],
 ];
 
 for (const file of automationFiles) {

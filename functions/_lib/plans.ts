@@ -87,7 +87,23 @@ export type BillingPlanSummary = PlanEntitlements & {
   monthly_price_gbp: number;
   public_contract: SubscriptionPlanPublicContract;
   configured: boolean;
+  checkout_enabled: boolean;
+  checkout_blocked_reason: string | null;
   features: string[];
+};
+
+export type CheckoutSafetyMode =
+  | "not_configured"
+  | "test_mode_allowed"
+  | "live_checkout_paused"
+  | "live_checkout_enabled"
+  | "unknown";
+
+export type CheckoutSafetyStatus = {
+  liveCheckoutEnabled: boolean;
+  checkoutSessionCreationAllowed: boolean;
+  checkoutSafetyMode: CheckoutSafetyMode;
+  checkoutBlockedReason: string | null;
 };
 
 export type BillingReadinessStatus = {
@@ -97,6 +113,10 @@ export type BillingReadinessStatus = {
   stripeSecretConfigured: boolean;
   webhookSecretConfigured: boolean;
   liveConfigurationReady: boolean;
+  liveCheckoutEnabled: boolean;
+  checkoutSessionCreationAllowed: boolean;
+  checkoutSafetyMode: CheckoutSafetyMode;
+  checkoutBlockedReason: string | null;
   humanApprovalRequiredForLiveBilling: true;
   productionMutationAllowedByReadinessCheck: false;
   priceSources: Record<PurchasablePlanKey, {
@@ -112,6 +132,8 @@ export type BillingReadinessStatus = {
     price_label: string;
     monthly_price_gbp: number;
     configured: boolean;
+    checkout_enabled: boolean;
+    checkout_blocked_reason: string | null;
   }>;
   missingRequiredVars: string[];
   missingLiveRequiredVars: string[];
@@ -287,14 +309,77 @@ export function getCheckoutConfigured(env: Env): Record<PurchasablePlanKey, bool
   };
 }
 
+export function getCheckoutSafetyStatus(env: Env): CheckoutSafetyStatus {
+  const configured = getCheckoutConfigured(env);
+  const hasConfiguredPrice = configured.starter || configured.pro;
+  const modeHint = getStripeModeHint(env);
+  const liveCheckoutEnabled = isLiveCheckoutEnabled(env);
+
+  if (!hasConfiguredPrice || modeHint === "not_configured") {
+    return {
+      liveCheckoutEnabled,
+      checkoutSessionCreationAllowed: false,
+      checkoutSafetyMode: "not_configured",
+      checkoutBlockedReason: "Checkout is not configured yet.",
+    };
+  }
+
+  if (modeHint === "test") {
+    return {
+      liveCheckoutEnabled,
+      checkoutSessionCreationAllowed: true,
+      checkoutSafetyMode: "test_mode_allowed",
+      checkoutBlockedReason: null,
+    };
+  }
+
+  if (modeHint === "live") {
+    const livePrerequisitesReady = getLiveCheckoutPrerequisitesReady(env);
+    if (liveCheckoutEnabled) {
+      if (!livePrerequisitesReady) {
+        return {
+          liveCheckoutEnabled: true,
+          checkoutSessionCreationAllowed: false,
+          checkoutSafetyMode: "live_checkout_paused",
+          checkoutBlockedReason: "Live checkout enablement was requested, but live readiness prerequisites are still missing.",
+        };
+      }
+
+      return {
+        liveCheckoutEnabled: true,
+        checkoutSessionCreationAllowed: true,
+        checkoutSafetyMode: "live_checkout_enabled",
+        checkoutBlockedReason: null,
+      };
+    }
+
+    return {
+      liveCheckoutEnabled: false,
+      checkoutSessionCreationAllowed: false,
+      checkoutSafetyMode: "live_checkout_paused",
+      checkoutBlockedReason: "Live checkout is paused for sandbox verification. Set DZN_LIVE_CHECKOUT_ENABLED=true only in a later approved go-live step.",
+    };
+  }
+
+  return {
+    liveCheckoutEnabled,
+    checkoutSessionCreationAllowed: false,
+    checkoutSafetyMode: "unknown",
+    checkoutBlockedReason: "Stripe checkout mode is unknown, so checkout is disabled until the key is clearly test mode or explicitly approved live mode.",
+  };
+}
+
 export function getBillingPlanSummaries(env: Env): BillingPlanSummary[] {
   const configured = getCheckoutConfigured(env);
+  const checkoutSafety = getCheckoutSafetyStatus(env);
   return PAID_PLAN_KEYS.map((planKey) => ({
     ...PLAN_CONFIG[planKey],
     ...PLAN_MARKETING[planKey],
     plan_key: planKey,
     public_contract: getSubscriptionPlanPublicContract(planKey)!,
     configured: configured[planKey],
+    checkout_enabled: configured[planKey] && checkoutSafety.checkoutSessionCreationAllowed,
+    checkout_blocked_reason: configured[planKey] ? checkoutSafety.checkoutBlockedReason : "Plan checkout is not configured yet.",
   }));
 }
 
@@ -304,6 +389,7 @@ export function getBillingReadinessStatus(env: Env): BillingReadinessStatus {
   const stripeSecretConfigured = Boolean(cleanEnvString(env.STRIPE_SECRET_KEY));
   const webhookSecretConfigured = Boolean(cleanEnvString(env.STRIPE_WEBHOOK_SECRET));
   const modeHint = getStripeModeHint(env);
+  const checkoutSafety = getCheckoutSafetyStatus(env);
   const missingRequiredVars: string[] = [];
 
   for (const planKey of PAID_PLAN_KEYS) {
@@ -315,7 +401,7 @@ export function getBillingReadinessStatus(env: Env): BillingReadinessStatus {
   if (!webhookSecretConfigured) missingRequiredVars.push("STRIPE_WEBHOOK_SECRET");
 
   const missingLiveRequiredVars = getMissingLiveRequiredVars(env, priceSources);
-  const readinessChecks = buildBillingReadinessChecks(env, priceSources, modeHint, webhookSecretConfigured);
+  const readinessChecks = buildBillingReadinessChecks(env, priceSources, modeHint, webhookSecretConfigured, checkoutSafety);
   const liveConfigurationReady = readinessChecks.every((check) => check.severity !== "blocker" || check.ok);
 
   return {
@@ -325,6 +411,10 @@ export function getBillingReadinessStatus(env: Env): BillingReadinessStatus {
     stripeSecretConfigured,
     webhookSecretConfigured,
     liveConfigurationReady,
+    liveCheckoutEnabled: checkoutSafety.liveCheckoutEnabled,
+    checkoutSessionCreationAllowed: checkoutSafety.checkoutSessionCreationAllowed,
+    checkoutSafetyMode: checkoutSafety.checkoutSafetyMode,
+    checkoutBlockedReason: checkoutSafety.checkoutBlockedReason,
     humanApprovalRequiredForLiveBilling: true,
     productionMutationAllowedByReadinessCheck: false,
     priceSources,
@@ -334,6 +424,8 @@ export function getBillingReadinessStatus(env: Env): BillingReadinessStatus {
       price_label: plan.price_label,
       monthly_price_gbp: plan.monthly_price_gbp,
       configured: plan.configured,
+      checkout_enabled: plan.checkout_enabled,
+      checkout_blocked_reason: plan.checkout_blocked_reason,
     })),
     missingRequiredVars,
     missingLiveRequiredVars,
@@ -938,6 +1030,7 @@ function buildBillingReadinessChecks(
   priceSources: BillingReadinessStatus["priceSources"],
   modeHint: BillingReadinessStatus["modeHint"],
   webhookSecretConfigured: boolean,
+  checkoutSafety: CheckoutSafetyStatus,
 ): BillingReadinessStatus["readinessChecks"] {
   const publicFallbackVars = getDetectedPublicFallbackPriceVars(env);
   return [
@@ -984,6 +1077,15 @@ function buildBillingReadinessChecks(
       detail: "NEXT_PUBLIC_STRIPE_* price aliases are compatibility fallbacks only. They should not be the evidence used for live billing readiness.",
     },
     {
+      key: "live-checkout-enable-flag",
+      label: "Live checkout enable flag",
+      ok: modeHint !== "live" || checkoutSafety.liveCheckoutEnabled,
+      severity: "info",
+      detail: checkoutSafety.checkoutSafetyMode === "live_checkout_paused"
+        ? "Live checkout is intentionally paused until DZN_LIVE_CHECKOUT_ENABLED=true is set during a separate controlled go-live approval. Test-mode checkout can still be used for sandbox validation."
+        : "DZN_LIVE_CHECKOUT_ENABLED only controls whether live customer checkout may start; it does not create Stripe products, set secrets, apply migrations, or approve billing by itself.",
+    },
+    {
       key: "human-approved-live-step",
       label: "Human-approved live billing step",
       ok: false,
@@ -999,6 +1101,19 @@ function getStripeModeHint(env: Env): BillingReadinessStatus["modeHint"] {
   if (secret.startsWith("sk_live_")) return "live";
   if (secret.startsWith("sk_test_")) return "test";
   return "unknown";
+}
+
+function isLiveCheckoutEnabled(env: Env) {
+  const value = cleanEnvString(env.DZN_LIVE_CHECKOUT_ENABLED);
+  if (!value) return false;
+  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+}
+
+function getLiveCheckoutPrerequisitesReady(env: Env) {
+  const priceSources = getBillingPriceSources(env);
+  return PAID_PLAN_KEYS.every((planKey) => priceSources[planKey].liveReady)
+    && Boolean(cleanEnvString(env.STRIPE_WEBHOOK_SECRET))
+    && hasProductionAppUrl(env);
 }
 
 function hasProductionAppUrl(env: Env) {

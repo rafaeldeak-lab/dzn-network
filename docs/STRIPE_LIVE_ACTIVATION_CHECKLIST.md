@@ -49,6 +49,7 @@ Before any live activation is approved:
 - `/api/billing/readiness` never exposes secret values or Stripe Price IDs.
 - `npm run check:billing-config` remains read-only and prints variable names/status only.
 - `/api/billing/plans` publicly returns Starter and Pro only.
+- Live checkout remains paused until the final approved go-live step sets `DZN_LIVE_CHECKOUT_ENABLED=true`.
 - Starter trial abuse protection is present and reviewed before live billing is enabled.
 - No public copy advertises Premium, Network, or Partner as purchasable plans.
 - Any needed D1 migration has been separately approved, applied, and verified before live billing is enabled.
@@ -79,7 +80,9 @@ These steps are manual, deliberate production operations. They must not be conve
    - `DZN_APP_URL` or `NEXT_PUBLIC_APP_URL`
 10. Run the read-only readiness check as an authenticated admin/support/dev user.
 11. Confirm `liveConfigurationReady: true`, `humanApprovalRequiredForLiveBilling: true`, and `productionMutationAllowedByReadinessCheck: false`.
-12. Run read-only production smoke after activation.
+12. Keep `DZN_LIVE_CHECKOUT_ENABLED` unset while performing sandbox/test readiness. In this state, live checkout should report `checkoutSessionCreationAllowed: false`.
+13. Only after a separate explicit go-live approval, set `DZN_LIVE_CHECKOUT_ENABLED=true` to allow live customer checkout.
+14. Run read-only production smoke after activation.
 
 ## Evidence Rules
 
@@ -104,6 +107,7 @@ AutoDev must treat these as blocked unless a future high-risk human-approved red
 - `wrangler pages secret put STRIPE_PRICE_PRO`
 - `wrangler pages secret put STRIPE_SECRET_KEY`
 - `wrangler pages secret put STRIPE_WEBHOOK_SECRET`
+- `wrangler pages secret put DZN_LIVE_CHECKOUT_ENABLED`
 - unattended "go live" or "activate live billing" scripts
 
 Read-only checks remain allowed when they do not expose secret values, mutate production, or imply approval.

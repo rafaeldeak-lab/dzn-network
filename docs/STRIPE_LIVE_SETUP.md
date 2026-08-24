@@ -32,6 +32,8 @@ Set these Cloudflare production vars for the Pages project:
 
 For live billing readiness, Starter and Pro must use the server-side `STRIPE_PRICE_*` names above. `NEXT_PUBLIC_STRIPE_*_PRICE_ID` values are compatibility fallbacks only and must not be treated as proof that live billing is ready.
 
+Do not set `DZN_LIVE_CHECKOUT_ENABLED=true` during sandbox/test readiness. That flag is the final live checkout switch and should stay unset until a separate explicit go-live approval says real customer checkout may begin. Test-mode checkout can still be validated without setting it.
+
 Keep the legacy Premium/Network/Partner price variables only if needed for existing old subscriptions or historical Stripe mapping:
 
 - `STRIPE_PRICE_PREMIUM`
@@ -80,6 +82,8 @@ For live billing, `liveConfigurationReady` is only true when all blocker checks 
 - `DZN_APP_URL` or `NEXT_PUBLIC_APP_URL` points to the production DZN domain, not a preview deployment.
 
 Even when `liveConfigurationReady` is true, the endpoint is read-only. Creating live Stripe products, changing live Price IDs, changing webhook endpoints, setting production secrets, importing customers, applying D1 migrations, or enabling live payments still requires a separate explicit high-risk human approval.
+
+`liveConfigurationReady` and `checkoutSessionCreationAllowed` are different checks. Live setup can be configuration-ready while checkout remains paused. In live mode, checkout session creation is allowed only after `DZN_LIVE_CHECKOUT_ENABLED=true` is deliberately set in the later approved go-live step.
 
 Local devs can run:
 

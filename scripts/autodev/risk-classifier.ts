@@ -59,7 +59,7 @@ const AUTOMATION_POLICY: Record<RiskLevel, AutomationPolicy> = {
 };
 
 const PROTECTED_DELETE_TABLES = ["player_profiles", "kills", "kill_events", "deaths", "player_events", "events", "competitive_events", "sessions", "subscriptions", "server_subscriptions", "servers", "linked_servers"];
-const RUNTIME_SECRETS_IN_GITHUB = ["DISCORD_BOT_TOKEN", "DISCORD_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "SESSION_SECRET", "TOKEN_ENCRYPTION_KEY", "MOCK_AUTH", "MOCK_NITRADO", "NEXT_PUBLIC_"];
+const RUNTIME_SECRETS_IN_GITHUB = ["DISCORD_BOT_TOKEN", "DISCORD_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "DZN_LIVE_CHECKOUT_ENABLED", "SESSION_SECRET", "TOKEN_ENCRYPTION_KEY", "MOCK_AUTH", "MOCK_NITRADO", "NEXT_PUBLIC_"];
 const METERED_AI_CREDENTIALS = [
   "OPENAI_API_KEY",
   "AZURE_OPENAI_API_KEY",
@@ -109,7 +109,7 @@ const LIVE_BILLING_MUTATION_PATTERNS: Array<[RegExp, string]> = [
   [/\bstripe["'`]\s*,\s*\[[\s\S]{0,160}["'`](?:products?|prices?|webhook_endpoints|customers?|subscriptions?)["'`]\s*,\s*["'`](?:create|update|delete)["'`]/i, "automated live Stripe billing mutation command detected"],
   [/\b(?:curl|fetch|Invoke-RestMethod|Invoke-WebRequest)\b[\s\S]{0,180}\bapi\.stripe\.com\/v1\/(?:products|prices|webhook_endpoints|customers|subscriptions)\b[\s\S]{0,180}\b(?:POST|PUT|PATCH|DELETE)\b/i, "automated Stripe API mutation request detected"],
   [/\b(?:curl|fetch|Invoke-RestMethod|Invoke-WebRequest)\b[\s\S]{0,180}\b(?:POST|PUT|PATCH|DELETE)\b[\s\S]{0,180}\bapi\.stripe\.com\/v1\/(?:products|prices|webhook_endpoints|customers|subscriptions)\b/i, "automated Stripe API mutation request detected"],
-  [/\b(?:npx\s+)?wrangler\s+pages\s+secret\s+put\s+(?:STRIPE_PRICE_STARTER|STRIPE_PRICE_PRO|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET)\b/i, "automated Stripe production secret mutation command detected"],
+  [/\b(?:npx\s+)?wrangler\s+pages\s+secret\s+put\s+(?:STRIPE_PRICE_STARTER|STRIPE_PRICE_PRO|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|DZN_LIVE_CHECKOUT_ENABLED)\b/i, "automated Stripe production secret mutation command detected"],
   [/\b(?:enable|activate|turn\s+on|go\s+live)\b[\s\S]{0,100}\blive\s+billing\b[\s\S]{0,140}\b(?:script|workflow|automation|autodev|unattended)\b/i, "unattended live billing activation path detected"],
 ];
 const DESTRUCTIVE_TRUNCATE_PATTERN = /\bTRUNCATE\s+TABLE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)|\bTRUNCATE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)\s*;/i;
