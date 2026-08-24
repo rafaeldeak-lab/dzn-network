@@ -416,6 +416,7 @@ export function Dashboard() {
           server={server}
           servers={manageableServers}
           selectedServerId={server.id}
+          navigation={auth.navigation ?? null}
           onSelectServer={setSelectedServerId}
           onLogout={signOut}
           onRefresh={refreshAuthPreservingLastGood}
@@ -458,11 +459,24 @@ function EmptyDashboard() {
 }
 
 type DashboardTabKey = "overview" | "sync-health" | "public-listing" | "events" | "billing" | "discord-posts" | "settings-danger";
+type DashboardPackageTier = "free" | "starter" | "pro";
+type DashboardTabAccess = "trial_safe" | "mixed_pro" | "pro_tools" | "account";
+type DashboardPackageVisibility = {
+  tier: DashboardPackageTier;
+  label: string;
+  status: string;
+  loaded: boolean;
+  title: string;
+  detail: string;
+  included: string[];
+  proUpsell: string[];
+};
 
 function ServerDashboard({
   server: serverProp,
   servers,
   selectedServerId,
+  navigation,
   onSelectServer,
   onLogout,
   onRefresh,
@@ -470,6 +484,7 @@ function ServerDashboard({
   server: LinkedServer;
   servers: LinkedServer[];
   selectedServerId: string | null;
+  navigation: AuthResponse["navigation"] | null;
   onSelectServer: (serverId: string) => void;
   onLogout: () => void;
   onRefresh: () => Promise<void>;
@@ -3170,17 +3185,22 @@ function ServerDashboard({
     });
   }
 
-  const tabItems: Array<{ key: DashboardTabKey; label: string; icon: React.ReactNode }> = [
-    { key: "overview", label: "Overview", icon: <Server className="h-4 w-4" /> },
-    { key: "sync-health", label: "Sync Health", icon: <RefreshCw className="h-4 w-4" /> },
-    { key: "public-listing", label: "Public Listing", icon: <ExternalLink className="h-4 w-4" /> },
-    { key: "events", label: "Events", icon: <Flag className="h-4 w-4" /> },
-    { key: "billing", label: "Billing & Boosts", icon: <Gauge className="h-4 w-4" /> },
-    { key: "discord-posts", label: "Discord Posts", icon: <Bell className="h-4 w-4" /> },
-    { key: "settings-danger", label: "Settings & Danger", icon: <Settings className="h-4 w-4" /> },
-  ];
   const selectedServerLabel = serverDisplayName || server.guild_name || "DZN Server";
   const currentPlanName = effectivePlanLabel;
+  const dashboardPackage = getDashboardPackageVisibility({
+    navigation,
+    billing: effectiveBillingStatus,
+    fallbackPlanKey: effectiveDashboardHealth?.current_plan ?? null,
+  });
+  const tabItems: Array<{ key: DashboardTabKey; label: string; icon: React.ReactNode; detail: string; access: DashboardTabAccess }> = [
+    { key: "overview", label: "Overview", icon: <Server className="h-4 w-4" />, detail: "Live status, setup checks, and trial-safe stats.", access: "trial_safe" },
+    { key: "sync-health", label: "Sync Health", icon: <RefreshCw className="h-4 w-4" />, detail: "ADM health signals and read-only diagnostics.", access: "trial_safe" },
+    { key: "public-listing", label: "Public Listing", icon: <ExternalLink className="h-4 w-4" />, detail: "Profile, category, tags, reviews, and public page.", access: "trial_safe" },
+    { key: "events", label: "Events", icon: <Flag className="h-4 w-4" />, detail: "Eligible events show here; Pro-only entries stay locked.", access: "mixed_pro" },
+    { key: "billing", label: "Billing & Boosts", icon: <Gauge className="h-4 w-4" />, detail: "Compare Starter and Pro without changing live Stripe settings.", access: "account" },
+    { key: "discord-posts", label: "Discord Posts", icon: <Bell className="h-4 w-4" />, detail: "Starter posts stay available; Pro embeds are marked.", access: "mixed_pro" },
+    { key: "settings-danger", label: "Settings & Danger", icon: <Settings className="h-4 w-4" />, detail: "Account actions, exports, and protected removals.", access: "account" },
+  ];
   const nitradoLogSettingsComplete = isNitradoLogSettingsComplete(nitradoLogSettings);
   const logSettingsSourceLabel = getNitradoLogSettingsSourceLabel(nitradoLogSettings);
   const setupChecks = [
@@ -3214,16 +3234,27 @@ function ServerDashboard({
             {statsSyncActive ? "Synced" : formatServerStatus(server.status)}
           </div>
         </div>
+        <DashboardPackageGuide
+          packageState={dashboardPackage}
+          onBilling={() => setActiveTab("billing")}
+          onProTools={() => setActiveTab("discord-posts")}
+        />
         <nav className="mt-5 grid gap-2">
           {tabItems.map((item) => (
             <button
               key={item.key}
               type="button"
               onClick={() => setActiveTab(item.key)}
-              className={`flex items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm font-bold transition ${activeTab === item.key ? "border-violet-300/40 bg-violet-500/24 text-white shadow-[0_0_28px_rgba(139,92,246,0.18)]" : "border-transparent bg-transparent text-zinc-400 hover:border-white/10 hover:bg-white/[0.04] hover:text-white"}`}
+              className={`flex items-start gap-3 rounded-xl border px-3 py-3 text-left text-sm font-bold transition ${activeTab === item.key ? "border-violet-300/40 bg-violet-500/24 text-white shadow-[0_0_28px_rgba(139,92,246,0.18)]" : "border-transparent bg-transparent text-zinc-400 hover:border-white/10 hover:bg-white/[0.04] hover:text-white"}`}
             >
-              {item.icon}
-              {item.label}
+              <span className="mt-0.5 shrink-0">{item.icon}</span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-start justify-between gap-2">
+                  <span className="min-w-0 truncate">{item.label}</span>
+                  {renderDashboardTabAccessBadge(item.access, dashboardPackage.tier)}
+                </span>
+                <span className="mt-1 block text-[11px] font-bold leading-4 text-zinc-500">{item.detail}</span>
+              </span>
             </button>
           ))}
         </nav>
@@ -4032,6 +4063,79 @@ function DashboardPanel({ children, className = "" }: { children: React.ReactNod
       <div className="relative z-10">{children}</div>
     </section>
   );
+}
+
+function DashboardPackageGuide({
+  packageState,
+  onBilling,
+  onProTools,
+}: {
+  packageState: DashboardPackageVisibility;
+  onBilling: () => void;
+  onProTools: () => void;
+}) {
+  const isPro = packageState.tier === "pro";
+  const primaryAction = isPro ? "Open Pro tools" : packageState.tier === "free" ? "Start trial / Pro" : "Compare Pro";
+
+  return (
+    <section className={`mt-4 rounded-xl border p-3 ${isPro ? "border-emerald-300/25 bg-emerald-400/10" : "border-cyan-300/20 bg-cyan-400/8"}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-black uppercase text-zinc-400">Package visibility</p>
+          <p className="mt-1 text-sm font-black uppercase text-white">{packageState.title}</p>
+        </div>
+        <span className={`shrink-0 rounded-md border px-2 py-1 text-[9px] font-black uppercase ${isPro ? "border-emerald-300/35 bg-emerald-400/12 text-emerald-100" : "border-violet-300/30 bg-violet-400/12 text-violet-100"}`}>
+          {packageState.loaded ? packageState.label : "Checking"}
+        </span>
+      </div>
+      <p className="mt-3 text-xs font-bold leading-5 text-zinc-300">{packageState.detail}</p>
+      <div className="mt-3 grid gap-2">
+        {packageState.included.map((item) => (
+          <p key={item} className="rounded border border-white/10 bg-black/24 px-2.5 py-2 text-[11px] font-bold leading-4 text-zinc-300">
+            {item}
+          </p>
+        ))}
+      </div>
+      {!isPro ? (
+        <div className="mt-3 rounded-lg border border-violet-300/18 bg-violet-400/10 p-3">
+          <p className="text-[10px] font-black uppercase text-violet-100">Pro upgrade path</p>
+          <div className="mt-2 grid gap-1.5">
+            {packageState.proUpsell.map((item) => (
+              <p key={item} className="text-[11px] font-bold leading-4 text-violet-50">{item}</p>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <p className="mt-3 text-[11px] font-bold leading-5 text-zinc-500">
+        Pro locks do not affect leaderboard rank, K/D, score, badges, crowns, event outcomes, or gameplay results.
+      </p>
+      <button
+        type="button"
+        onClick={isPro ? onProTools : onBilling}
+        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400"
+      >
+        {primaryAction}
+        <ArrowRight className="h-3.5 w-3.5" />
+      </button>
+    </section>
+  );
+}
+
+function renderDashboardTabAccessBadge(access: DashboardTabAccess, tier: DashboardPackageTier) {
+  if (access === "account") {
+    return <span className="shrink-0 rounded border border-zinc-300/20 bg-zinc-400/10 px-1.5 py-0.5 text-[8px] font-black uppercase text-zinc-300">Account</span>;
+  }
+  if (access === "mixed_pro") {
+    return tier === "pro"
+      ? <span className="shrink-0 rounded border border-emerald-300/25 bg-emerald-400/10 px-1.5 py-0.5 text-[8px] font-black uppercase text-emerald-100">Pro active</span>
+      : <span className="shrink-0 rounded border border-violet-300/25 bg-violet-400/10 px-1.5 py-0.5 text-[8px] font-black uppercase text-violet-100">Pro locks</span>;
+  }
+  if (access === "pro_tools") {
+    return tier === "pro"
+      ? <span className="shrink-0 rounded border border-emerald-300/25 bg-emerald-400/10 px-1.5 py-0.5 text-[8px] font-black uppercase text-emerald-100">Pro</span>
+      : <span className="shrink-0 rounded border border-amber-300/25 bg-amber-400/10 px-1.5 py-0.5 text-[8px] font-black uppercase text-amber-100">Upgrade</span>;
+  }
+  return <span className="shrink-0 rounded border border-cyan-300/20 bg-cyan-400/10 px-1.5 py-0.5 text-[8px] font-black uppercase text-cyan-100">Trial-safe</span>;
 }
 
 function DashboardServerWarsPanel({ wars, loading, error }: {
@@ -5247,7 +5351,9 @@ function AdvertisingBoostPanel({
 }) {
   const [bumping, setBumping] = useState(false);
   const [error, setError] = useState("");
-  const isProListing = billing?.plan_status === "active" || billing?.plan_status === "trialing";
+  const listingTier = dashboardPackageTierFromPlanKey(billing?.plan_key ?? null, billing?.plan_status ?? null);
+  const isProListing = listingTier === "pro";
+  const listingLabel = isProListing ? "Pro Listing" : listingTier === "starter" ? "Starter Listing" : "Free Listing";
   const canBump = true;
   const proCheckoutConfigured = Boolean(billing?.checkout_configured?.pro);
   const cooldownDays = advertising?.bump_cooldown_days ?? (isProListing ? 7 : 30);
@@ -5283,7 +5389,7 @@ function AdvertisingBoostPanel({
             </div>
           ) : null}
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <MiniInfo label="Listing Plan" value={isProListing ? "Pro Listing" : "Free Listing"} />
+            <MiniInfo label="Listing Plan" value={listingLabel} />
             <MiniInfo label="Next Bump" value={nextAvailable} />
             <MiniInfo label="Last Bumped" value={advertising?.last_bumped_at ? formatRelativeTime(advertising.last_bumped_at) : "Never"} />
             <MiniInfo label="Cooldown" value={`${cooldownDays} days`} />
@@ -5298,7 +5404,7 @@ function AdvertisingBoostPanel({
             {bumping ? "Bumping..." : cooldownActive ? "Cooldown active" : "Bump Server"}
           </button>
           <p className="mt-3 text-xs leading-5 text-zinc-400">
-            Your free listing can be bumped once every 30 days. Upgrade to Pro to bump once every 7 days. Bumps are visibility only and do not change organic rank or score.
+            Free and Starter listings can be bumped once every 30 days. Upgrade to Pro to bump once every 7 days. Bumps are visibility only and do not change organic rank or score.
           </p>
         </>
       ) : (
@@ -8856,7 +8962,102 @@ function formatRelativeTime(value: string) {
 
 function planLabel(value: string) {
   if (value === "pro" || value === "premium" || value === "network" || value === "partner") return "Pro Listing";
+  if (value === "starter") return "Starter Listing";
   return "Free Listing";
+}
+
+function getDashboardPackageVisibility({
+  navigation,
+  billing,
+  fallbackPlanKey,
+}: {
+  navigation: AuthResponse["navigation"] | null;
+  billing: BillingStatus | null;
+  fallbackPlanKey: string | null;
+}): DashboardPackageVisibility {
+  const status = billing?.plan_status ?? navigation?.plan_status ?? "checking";
+  const tier = navigation?.plan_tier ?? dashboardPackageTierFromPlanKey(billing?.plan_key ?? fallbackPlanKey, status);
+  const loaded = Boolean(navigation || billing || fallbackPlanKey);
+  const label = navigation?.plan_label ?? dashboardPackageLabel(tier, status);
+
+  if (!loaded) {
+    return {
+      tier: "free",
+      label: "Checking package",
+      status,
+      loaded,
+      title: "Checking package",
+      detail: "DZN is loading your account package before deciding which dashboard tools should read as trial-safe, locked, or Pro.",
+      included: ["Setup and public status remain protected while the account check finishes."],
+      proUpsell: ["Pro comparison appears once package status is loaded."],
+    };
+  }
+
+  if (tier === "pro") {
+    return {
+      tier,
+      label,
+      status,
+      loaded,
+      title: "Pro tools active",
+      detail: "This server can use the Pro presentation and owner tools that are safe for the current package.",
+      included: [
+        "Weekly bumping, enhanced public profile tools, Pro Discord post types, and listing analytics are shown as active.",
+        "Advanced analytics and Server VS Server challenge hosting stay server-side gated and still require eligible server state.",
+      ],
+      proUpsell: [],
+    };
+  }
+
+  if (tier === "starter") {
+    return {
+      tier,
+      label,
+      status,
+      loaded,
+      title: status.toLowerCase() === "trialing" ? "Starter trial workspace" : "Starter workspace",
+      detail: "Starter keeps the server setup path clear without making Pro-only promotion or analytics look unlocked.",
+      included: [
+        "Trial-safe tools stay visible: setup, public listing, basic stats, reviews, events, and basic Discord advert posts.",
+        "Locked areas explain what Pro adds before checkout starts.",
+      ],
+      proUpsell: [
+        "Pro unlocks weekly bumping, richer public profile presentation, gallery/banner tools, and deeper listing analytics.",
+        "Pro also unlocks enhanced Discord posts and eligible Server VS Server hosting tools.",
+      ],
+    };
+  }
+
+  return {
+    tier,
+    label,
+    status,
+    loaded,
+    title: "Start with Starter",
+    detail: "This account can begin with the Starter trial before any Pro upgrade is offered.",
+    included: [
+      "Public setup, server linking, and the Starter trial path are the visible next steps.",
+      "Pro-only dashboard areas stay presented as upgrade previews until an active Pro package is confirmed.",
+    ],
+    proUpsell: [
+      "Pro is the paid upgrade for serious owners who want stronger presentation, promotion, and analytics.",
+    ],
+  };
+}
+
+function dashboardPackageTierFromPlanKey(planKey: string | null | undefined, status: string | null | undefined): DashboardPackageTier {
+  const normalized = String(planKey ?? "free").toLowerCase();
+  const normalizedStatus = String(status ?? "").toLowerCase();
+  if (["past_due", "canceled", "cancelled", "unpaid", "incomplete_expired", "expired"].includes(normalizedStatus)) return "free";
+  if (normalized === "pro" || normalized === "premium" || normalized === "network" || normalized === "partner") return "pro";
+  if (normalized === "starter") return "starter";
+  return "free";
+}
+
+function dashboardPackageLabel(tier: DashboardPackageTier, status: string) {
+  if (tier === "pro") return "Pro";
+  if (tier === "starter") return status.toLowerCase() === "trialing" ? "Starter Trial" : "Starter";
+  return "Free";
 }
 
 function inferDashboardReputationTier(score: number | null | undefined) {
