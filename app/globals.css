@@ -4346,17 +4346,27 @@ button.dzn-header-action {
   animation: dznHomeParticleFloat 15s linear infinite;
 }
 
+.dzn-home-hero-card {
+  isolation: isolate;
+  box-shadow:
+    0 28px 96px rgba(0, 0, 0, 0.48),
+    0 0 0 1px rgba(168, 85, 247, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 80px rgba(14, 165, 233, 0.08);
+}
+
 .dzn-home-hero-card::before {
   content: "";
   position: absolute;
   inset: 0;
   background-image: var(--dzn-home-bg, none);
   background-size: cover;
-  background-position: 62% 46%;
-  opacity: 0.68;
-  filter: saturate(1.16) contrast(1.12) brightness(0.82);
+  background-position: 64% 47%;
+  opacity: 0.76;
+  filter: saturate(1.24) contrast(1.16) brightness(0.88);
   transform-origin: 62% 46%;
   animation: dznHomeHeroBreathe 19s ease-in-out infinite alternate;
+  z-index: 0;
 }
 
 .dzn-home-hero-card::after {
@@ -4364,27 +4374,68 @@ button.dzn-header-action {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 65% 18%, rgba(103, 232, 249, 0.16), transparent 24%),
-    radial-gradient(circle at 74% 30%, rgba(168, 85, 247, 0.32), transparent 18%),
-    radial-gradient(circle at 28% 20%, rgba(139, 92, 246, 0.2), transparent 32%),
-    linear-gradient(90deg, rgba(2, 3, 10, 0.94), rgba(2, 3, 10, 0.58) 54%, rgba(2, 3, 10, 0.86));
+    radial-gradient(ellipse at 70% 33%, rgba(192, 132, 252, 0.28), transparent 25%),
+    radial-gradient(ellipse at 78% 12%, rgba(103, 232, 249, 0.2), transparent 20%),
+    radial-gradient(circle at 24% 20%, rgba(139, 92, 246, 0.24), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 20%, rgba(2, 3, 10, 0.22) 100%),
+    linear-gradient(90deg, rgba(2, 3, 10, 0.96), rgba(2, 3, 10, 0.72) 34%, rgba(6, 8, 22, 0.44) 58%, rgba(2, 3, 10, 0.84));
   pointer-events: none;
+  z-index: 0;
 }
 
 .dzn-home-energy-beam {
   position: absolute;
-  top: -10%;
-  bottom: -18%;
+  top: -18%;
+  bottom: -24%;
   left: 68%;
-  width: 4px;
-  background: linear-gradient(180deg, transparent, rgba(233, 213, 255, 0.95), rgba(124, 58, 237, 0.35), transparent);
+  width: 5px;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, transparent 2%, rgba(255, 255, 255, 0.98) 12%, rgba(216, 180, 254, 0.96) 25%, rgba(168, 85, 247, 0.78) 52%, rgba(56, 189, 248, 0.42) 74%, transparent 96%);
   box-shadow:
-    0 0 26px rgba(168, 85, 247, 0.9),
-    0 0 58px rgba(59, 130, 246, 0.42);
-  opacity: 0.76;
-  transform: rotate(1deg);
-  animation: dznHomeBeamPulse 4.8s ease-in-out infinite;
+    0 0 20px rgba(233, 213, 255, 0.9),
+    0 0 46px rgba(168, 85, 247, 0.82),
+    0 0 92px rgba(59, 130, 246, 0.36);
+  opacity: 0.86;
+  transform: rotate(0.75deg);
+  transform-origin: 50% 50%;
+  animation: dznHomeBeamPulse 7.2s ease-in-out infinite;
+  will-change: opacity, transform, filter;
   z-index: 1;
+}
+
+.dzn-home-energy-beam::before,
+.dzn-home-energy-beam::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  pointer-events: none;
+}
+
+.dzn-home-energy-beam::before {
+  top: 2%;
+  bottom: 4%;
+  width: 72px;
+  border-radius: 999px;
+  background:
+    radial-gradient(ellipse at center, rgba(216, 180, 254, 0.58), rgba(168, 85, 247, 0.2) 38%, transparent 68%);
+  filter: blur(10px);
+  opacity: 0.56;
+  transform: translateX(-50%) scaleX(0.7);
+  animation: dznHomeBeamAuraPulse 7.2s ease-in-out infinite;
+}
+
+.dzn-home-energy-beam::after {
+  top: 8%;
+  width: 128px;
+  height: 22%;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.64) 46%, rgba(168, 85, 247, 0.34) 58%, transparent);
+  filter: blur(9px);
+  opacity: 0;
+  transform: translateX(-50%) translateY(-24%) scaleY(0.76);
+  animation: dznHomeBeamScan 7.2s ease-in-out infinite;
 }
 
 .dzn-home-panel {
@@ -7210,12 +7261,54 @@ button.dzn-header-action {
 @keyframes dznHomeBeamPulse {
   0%,
   100% {
-    opacity: 0.42;
-    filter: blur(0);
+    opacity: 0.48;
+    filter: drop-shadow(0 0 12px rgba(168, 85, 247, 0.72)) saturate(1.05);
+    transform: rotate(0.75deg) scaleY(0.98);
+  }
+  42% {
+    opacity: 1;
+    filter: drop-shadow(0 0 28px rgba(216, 180, 254, 0.98)) saturate(1.36);
+    transform: rotate(0.75deg) scaleY(1.04);
+  }
+  68% {
+    opacity: 0.72;
+    filter: drop-shadow(0 0 18px rgba(59, 130, 246, 0.58)) saturate(1.2);
+    transform: rotate(0.75deg) scaleY(1.01);
+  }
+}
+
+@keyframes dznHomeBeamAuraPulse {
+  0%,
+  100% {
+    opacity: 0.28;
+    transform: translateX(-50%) scaleX(0.56);
   }
   45% {
-    opacity: 0.9;
-    filter: blur(0.5px);
+    opacity: 0.86;
+    transform: translateX(-50%) scaleX(1);
+  }
+  68% {
+    opacity: 0.52;
+    transform: translateX(-50%) scaleX(0.78);
+  }
+}
+
+@keyframes dznHomeBeamScan {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-24%) scaleY(0.76);
+  }
+  26% {
+    opacity: 0.58;
+  }
+  54% {
+    opacity: 0.86;
+    transform: translateX(-50%) translateY(310%) scaleY(1);
+  }
+  78% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(410%) scaleY(0.82);
   }
 }
 
@@ -7413,6 +7506,8 @@ button.dzn-header-action {
   .dzn-home-particle,
   .dzn-home-hero-card::before,
   .dzn-home-energy-beam,
+  .dzn-home-energy-beam::before,
+  .dzn-home-energy-beam::after,
   .dzn-operational-globe-stage::after,
   .dzn-operational-globe-floor-glow,
   .dzn-operational-globe-placeholder-sphere::after,
