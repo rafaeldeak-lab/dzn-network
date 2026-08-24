@@ -37,6 +37,10 @@ Starter trial and Pro behavior must continue to come from the billing/entitlemen
 
 Free or Starter/trial accounts should see trial-safe app navigation plus a clear Pro upgrade action. Pro-effective accounts should see Pro tools in the header. This header visibility is product guidance only; APIs and owner/product pages must continue enforcing access server-side.
 
+Dashboard package visibility must follow the same split. Starter/trial users may see the normal setup, public listing, basic stats, events, billing comparison, and basic Discord posting surfaces, but any Pro-only analytics, promotion, Server VS Server hosting, or enhanced Discord post controls must read as locked or upgrade-gated. Pro-effective users may see those tools as active, while server-side entitlement checks remain authoritative.
+
+Package copy must not imply a competitive advantage. Pro presentation, promotion, analytics, and owner tooling must not change leaderboard rank, K/D, score, reviews, crowns, badges, season wins, event outcomes, or gameplay results.
+
 ## Owner Pages
 
 `/owner` and nested owner pages remain stricter than normal logged-in pages. They must continue to require platform-owner or platform-creator authorization through the owner page functions.
@@ -65,6 +69,7 @@ Post-merge verification should expect:
 - `/pricing` returns `200` and opens the homepage pricing comparison.
 - Logged-out direct app pages such as `/events`, `/leaderboards`, `/servers`, `/dashboard`, `/setup`, `/dzn-pulse`, and `/seasons` return a login redirect.
 - Logged-out header/navigation does not expose app/product controls, while authenticated headers show package-appropriate Starter/Pro actions.
+- The dashboard sidebar shows package-aware guidance: trial-safe tools, Pro locks/upgrade prompts, or active Pro tools based on the authenticated account summary.
 - Public APIs above return `200` and no unexpected 5xx.
 - Owner/protected APIs such as `/api/owner/events`, `/api/billing/status`, and `/api/nitrado/services` remain `401` without authentication.
 - No production D1, Stripe, Nitrado, Discord, or secrets mutation is required for this policy.
