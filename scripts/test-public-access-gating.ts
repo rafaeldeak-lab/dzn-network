@@ -653,6 +653,7 @@ assert.equal(pricingUpgradeBlock.includes("role=\"dialog\""), true);
 assert.equal(pricingUpgradeBlock.includes("aria-modal=\"true\""), true);
 assert.equal(pricingPageSource.includes("window.location.replace(\"/#pricing\")"), true, "Direct /pricing must bridge into the homepage pricing section.");
 assert.equal(pricingPageSource.includes("Open Pricing Comparison"), true, "Direct /pricing must expose a manual pricing comparison fallback.");
+assert.equal(publicAccessPolicyDoc.includes("`/pricing`"), true, "Public access policy must register the direct pricing entry point.");
 assert.equal(pricingUpgradeBlock.includes("Close pricing comparison"), true);
 assert.equal(pricingUpgradeBlock.includes("createPortal(pricingModal, document.body)"), true);
 assert.equal(pricingUpgradeBlock.includes("document.body.classList.add(\"dzn-pricing-modal-open\")"), true);
