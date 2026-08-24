@@ -8,6 +8,11 @@ assert.equal(authShellSource.includes("data-briefing-intel={card.signal}"), true
 assert.equal(authShellSource.includes("group-hover:grid-rows-[1fr]"), true, "Mission briefing intel should reveal on desktop hover.");
 assert.equal(authShellSource.includes("group-focus:grid-rows-[1fr]"), true, "Mission briefing intel should reveal on keyboard focus or tap/click focus.");
 assert.equal(authShellSource.includes("group-active:grid-rows-[1fr]"), true, "Mission briefing intel should reveal immediately while tapping.");
+assert.equal(authShellSource.includes("aria-expanded={isOpen}"), true, "Mission briefing cards should expose persistent tapped-open state to assistive tech.");
+assert.equal(authShellSource.includes("data-state={isOpen ? \"open\" : \"closed\"}"), true, "Mission briefing intel panels should expose stable open state for rendered checks.");
+assert.equal(authShellSource.includes("scroll-mb-28"), true, "Mission briefing cards should keep tapped details clear of the fixed beta ticker.");
+assert.equal(authShellSource.includes("window.innerWidth >= 768"), true, "Mission briefing click auto-scroll should stay limited to mobile-sized viewports.");
+assert.equal(authShellSource.includes("prefers-reduced-motion: reduce"), true, "Mission briefing tap scrolling should respect reduced motion.");
 assert.equal(authShellSource.includes("focus-visible:ring-2"), true, "Mission briefing cards should keep a visible keyboard focus state.");
 assert.equal(authShellSource.includes("mission-briefing-intel-"), true, "Mission briefing details should have stable accessible IDs.");
 assert.equal(authShellSource.includes("useReducedMotion"), false, "Auth shell should not branch rendered background markup on client-only reduced motion.");
@@ -20,6 +25,7 @@ for (const expectedCopy of [
   "Use the exact Nitrado Service ID for the live DayZ service you want DZN to track.",
   "The token is encrypted before storage and cannot be viewed back in the dashboard.",
   "If access fails or the token is changed in Nitrado, replace it instead of sharing it in chat or Discord.",
+  "DZN prepares ADM syncing for player activity, kills, deaths, and rankings.",
   "ADM stats are evidence-based and can take time to appear.",
   "Rankings come from imported activity, not paid placement or manual score editing.",
 ]) {

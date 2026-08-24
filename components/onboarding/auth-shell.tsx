@@ -44,7 +44,7 @@ const briefingCards: BriefingCardInfo[] = [
   },
   {
     title: "Nitrado Secure Link",
-    text: "Connect your DayZ Nitrado service using Token + Service ID.",
+    text: "Connect the exact DayZ Nitrado service DZN should read.",
     icon: Server,
     signal: "Connection",
     intelTitle: "The service link is what proves DZN is reading the correct server.",
@@ -55,7 +55,7 @@ const briefingCards: BriefingCardInfo[] = [
   },
   {
     title: "Encrypted Vault",
-    text: "Your Nitrado token is encrypted server-side and never shown again.",
+    text: "Your Nitrado token is encrypted server-side and hidden after saving.",
     icon: LockKeyhole,
     signal: "Security",
     intelTitle: "DZN stores the token for syncing, not for display.",
@@ -66,7 +66,7 @@ const briefingCards: BriefingCardInfo[] = [
   },
   {
     title: "Live ADM Intelligence",
-    text: "DZN detects your DayZ admin logs and prepares the sync engine for player activity, kills, deaths, and rankings.",
+    text: "DZN prepares ADM syncing for player activity, kills, deaths, and rankings.",
     icon: Activity,
     signal: "Sync",
     intelTitle: "ADM stats are evidence-based and can take time to appear.",
@@ -194,40 +194,40 @@ export function AuthShell({
       <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 py-5 sm:px-7 lg:px-10">
         <AuthNav authenticated={Boolean(auth?.authenticated)} hideActions={hideNavActions} onLogout={signOut} />
 
-        <section className="grid flex-1 items-center gap-8 py-8 lg:grid-cols-[minmax(0,0.92fr)_minmax(440px,0.78fr)] lg:gap-12">
+        <section className="grid flex-1 items-center gap-6 py-5 sm:gap-8 sm:py-7 lg:grid-cols-[minmax(0,0.92fr)_minmax(440px,0.78fr)] lg:gap-12 lg:py-8">
           <motion.div
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, ease: "easeOut" }}
             className="max-w-2xl"
           >
-            <div className="mb-6 inline-flex items-center gap-3 text-xs font-black uppercase tracking-normal text-violet-200">
+            <div className="mb-5 inline-flex items-center gap-3 text-xs font-black uppercase tracking-normal text-violet-200 sm:mb-6">
               <ShieldCheck className="h-5 w-5" />
               Owner Verification
             </div>
             <h1 className="max-w-xl text-5xl font-black uppercase leading-[0.92] text-white drop-shadow-[0_0_30px_rgba(139,92,246,0.25)] sm:text-6xl lg:text-7xl">
               {title}
             </h1>
-            <p className="mt-6 max-w-xl text-base leading-7 text-zinc-300 sm:text-lg">
+            <p className="mt-5 max-w-xl text-base leading-7 text-zinc-300 sm:mt-6 sm:text-lg">
               {description}
             </p>
             <a
               href={startBaseHref}
               onClick={beginAuth}
-              className="group mt-8 inline-flex h-16 w-full max-w-sm items-center justify-center gap-4 rounded-lg border border-violet-200/40 bg-violet-500 px-6 text-sm font-black uppercase text-white shadow-[0_0_42px_rgba(139,92,246,0.62),inset_0_1px_0_rgba(255,255,255,0.25)] transition hover:border-cyan-200/45 hover:bg-violet-400 hover:shadow-[0_0_58px_rgba(139,92,246,0.82)] sm:w-auto"
+              className="group mt-6 inline-flex h-16 w-full max-w-sm items-center justify-center gap-4 rounded-lg border border-violet-200/40 bg-violet-500 px-6 text-sm font-black uppercase text-white shadow-[0_0_42px_rgba(139,92,246,0.62),inset_0_1px_0_rgba(255,255,255,0.25)] transition hover:border-cyan-200/45 hover:bg-violet-400 hover:shadow-[0_0_58px_rgba(139,92,246,0.82)] sm:mt-8 sm:w-auto"
             >
               <DiscordIcon />
               {actionLabel}
               <ChevronRight className="h-5 w-5 transition group-hover:translate-x-1" />
             </a>
 
-            <div className="mt-6 flex flex-wrap gap-4 text-[11px] font-black uppercase text-zinc-300">
+            <div className="mt-5 flex flex-wrap gap-4 text-[11px] font-black uppercase text-zinc-300 sm:mt-6">
               <TrustLabel icon={ShieldCheck} label="Secure" />
               <TrustLabel icon={LockKeyhole} label="Encrypted" />
               <TrustLabel icon={Zap} label="Built for DayZ" />
             </div>
 
-            <div className="mt-7 grid max-w-xl gap-3 text-[11px] font-black uppercase tracking-normal text-zinc-400 sm:grid-cols-2">
+            <div className="mt-5 grid max-w-xl gap-3 text-[11px] font-black uppercase tracking-normal text-zinc-400 sm:mt-7 sm:grid-cols-2">
               <StatusLine label="System Scan" value="Secure" />
               <StatusLine label="DZN Intel Systems" value="Online" />
             </div>
@@ -329,27 +329,35 @@ function AuthMissionBackground() {
 }
 
 function MissionBriefingPanel() {
+  const [openBriefingIndex, setOpenBriefingIndex] = useState<number | null>(null);
+
   return (
     <motion.aside
       initial={{ opacity: 0, y: 24 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.72, delay: 0.1, ease: "easeOut" }}
-      className="glass-surface animated-border rounded-xl p-5 shadow-[0_0_52px_rgba(139,92,246,0.26)] sm:p-6"
+      className="glass-surface animated-border rounded-xl p-4 shadow-[0_0_52px_rgba(139,92,246,0.26)] sm:p-6"
     >
       <div className="relative z-10">
-        <div className="mb-5 flex items-center gap-4">
+        <div className="mb-4 flex items-center gap-3 sm:mb-5 sm:gap-4">
           <span className="h-px flex-1 bg-gradient-to-r from-transparent via-violet-300/70 to-violet-300/15" />
           <h2 className="text-center text-lg font-black uppercase text-violet-200 drop-shadow-[0_0_16px_rgba(167,139,250,0.7)]">
             Mission Briefing
           </h2>
           <span className="h-px flex-1 bg-gradient-to-r from-violet-300/15 via-cyan-300/55 to-transparent" />
         </div>
-        <p className="mb-5 text-sm leading-6 text-zinc-300">
+        <p className="mb-4 text-[13px] leading-6 text-zinc-300 sm:mb-5 sm:text-sm">
           Your server is verified through Discord ownership, secured through Nitrado, and prepared for live ADM intelligence syncing.
         </p>
-        <div className="grid gap-3">
+        <div className="grid gap-2.5 sm:gap-3">
           {briefingCards.map((card, index) => (
-            <BriefingCard key={card.title} card={card} index={index + 1} />
+            <BriefingCard
+              key={card.title}
+              card={card}
+              index={index + 1}
+              isOpen={openBriefingIndex === index + 1}
+              onOpen={() => setOpenBriefingIndex(index + 1)}
+            />
           ))}
         </div>
       </div>
@@ -360,53 +368,87 @@ function MissionBriefingPanel() {
 function BriefingCard({
   card,
   index,
+  isOpen,
+  onOpen,
 }: {
   card: BriefingCardInfo;
   index: number;
+  isOpen: boolean;
+  onOpen: () => void;
 }) {
   const Icon = card.icon;
   const detailsId = `mission-briefing-intel-${index}`;
+
+  function handleCardClick(event: MouseEvent<HTMLButtonElement>) {
+    const target = event.currentTarget;
+    onOpen();
+
+    if (typeof window === "undefined" || window.innerWidth >= 768) return;
+
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.requestAnimationFrame(() => {
+      target.scrollIntoView({
+        block: "center",
+        behavior: prefersReducedMotion ? "auto" : "smooth",
+      });
+    });
+  }
 
   return (
     <button
       type="button"
       aria-describedby={detailsId}
-      className="group relative w-full rounded-lg border border-white/10 bg-black/28 p-4 text-left transition duration-300 hover:border-violet-300/45 hover:bg-violet-500/10 hover:shadow-[0_0_30px_rgba(139,92,246,0.18)] focus:border-violet-300/60 focus:bg-violet-500/12 focus:shadow-[0_0_34px_rgba(139,92,246,0.22)] focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200/60 active:border-cyan-200/55 active:bg-cyan-300/8"
+      aria-expanded={isOpen}
+      onClick={handleCardClick}
+      className={`group relative w-full scroll-mt-6 scroll-mb-28 rounded-lg p-3.5 text-left transition duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200/60 sm:p-4 ${
+        isOpen
+          ? "border border-violet-300/50 bg-violet-500/10 shadow-[0_0_30px_rgba(139,92,246,0.18)]"
+          : "border border-white/10 bg-black/28 hover:border-violet-300/45 hover:bg-violet-500/10 hover:shadow-[0_0_30px_rgba(139,92,246,0.18)] focus:border-violet-300/60 focus:bg-violet-500/12 focus:shadow-[0_0_34px_rgba(139,92,246,0.22)] active:border-cyan-200/55 active:bg-cyan-300/8"
+      }`}
     >
       <span
         aria-hidden="true"
-        className="absolute inset-y-3 right-2 w-1 rounded-full bg-violet-300/24 transition group-hover:bg-cyan-200 group-hover:shadow-[0_0_18px_rgba(103,232,249,0.7)] group-focus:bg-cyan-200 group-focus:shadow-[0_0_18px_rgba(103,232,249,0.7)] group-active:bg-cyan-200 group-active:shadow-[0_0_18px_rgba(103,232,249,0.7)]"
+        className={`absolute inset-y-3 right-2 w-1 rounded-full transition group-hover:bg-cyan-200 group-hover:shadow-[0_0_18px_rgba(103,232,249,0.7)] group-focus:bg-cyan-200 group-focus:shadow-[0_0_18px_rgba(103,232,249,0.7)] group-active:bg-cyan-200 group-active:shadow-[0_0_18px_rgba(103,232,249,0.7)] ${
+          isOpen ? "bg-cyan-200 shadow-[0_0_18px_rgba(103,232,249,0.7)]" : "bg-violet-300/24"
+        }`}
       />
-      <div className="flex items-center gap-4">
-        <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg border border-violet-300/30 bg-violet-500/14 text-violet-200 shadow-[0_0_24px_rgba(139,92,246,0.28)]">
-          <Icon className="h-7 w-7" />
+      <div className="flex items-center gap-3 sm:gap-4">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-violet-300/30 bg-violet-500/14 text-violet-200 shadow-[0_0_24px_rgba(139,92,246,0.28)] sm:h-14 sm:w-14">
+          <Icon className="h-5 w-5 sm:h-7 sm:w-7" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-black text-white">
-            {index}. {card.title}
+            <h3 className="text-[15px] font-black leading-snug text-white sm:text-base">
+              {index}. {card.title}
             </h3>
-            <span className="rounded-full border border-cyan-300/20 bg-cyan-300/8 px-2.5 py-1 text-[10px] font-black uppercase tracking-normal text-cyan-100">
+            <span className="rounded-full border border-cyan-300/20 bg-cyan-300/8 px-2 py-0.5 text-[9px] font-black uppercase tracking-normal text-cyan-100 sm:px-2.5 sm:py-1 sm:text-[10px]">
               {card.signal}
             </span>
           </div>
-          <p className="mt-1 text-sm leading-6 text-zinc-300">{card.text}</p>
+          <p className="mt-1 text-[13px] leading-5 text-zinc-300 sm:text-sm sm:leading-6">{card.text}</p>
         </div>
         <ChevronRight
-          className="h-5 w-5 text-violet-200/70 transition group-hover:rotate-90 group-hover:text-cyan-100 group-focus:rotate-90 group-focus:text-cyan-100 group-active:rotate-90 group-active:text-cyan-100"
+          className={`h-4 w-4 text-violet-200/70 transition group-hover:rotate-90 group-hover:text-cyan-100 group-focus:rotate-90 group-focus:text-cyan-100 group-active:rotate-90 group-active:text-cyan-100 sm:h-5 sm:w-5 ${
+            isOpen ? "rotate-90 text-cyan-100" : ""
+          }`}
         />
       </div>
       <div
         data-briefing-intel={card.signal}
-        className="grid grid-rows-[0fr] opacity-0 transition-all duration-300 group-hover:mt-4 group-hover:grid-rows-[1fr] group-hover:opacity-100 group-focus:mt-4 group-focus:grid-rows-[1fr] group-focus:opacity-100 group-active:mt-4 group-active:grid-rows-[1fr] group-active:opacity-100"
+        data-state={isOpen ? "open" : "closed"}
+        className={`grid transition-all duration-300 ${
+          isOpen
+            ? "mt-3 grid-rows-[1fr] opacity-100 sm:mt-4"
+            : "grid-rows-[0fr] opacity-0 group-hover:mt-3 group-hover:grid-rows-[1fr] group-hover:opacity-100 group-focus:mt-3 group-focus:grid-rows-[1fr] group-focus:opacity-100 group-active:mt-3 group-active:grid-rows-[1fr] group-active:opacity-100 sm:group-hover:mt-4 sm:group-focus:mt-4 sm:group-active:mt-4"
+        }`}
       >
         <div id={detailsId} className="overflow-hidden">
-          <div className="rounded-lg border border-cyan-300/15 bg-cyan-300/6 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-            <p className="text-xs font-black uppercase tracking-normal text-cyan-100">{card.intelTitle}</p>
-            <ul className="mt-2 space-y-2 text-xs leading-5 text-zinc-300">
+          <div className="rounded-lg border border-cyan-300/15 bg-cyan-300/6 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] sm:p-3">
+            <p className="text-[11px] font-black uppercase tracking-normal text-cyan-100 sm:text-xs">{card.intelTitle}</p>
+            <ul className="mt-2 space-y-1.5 text-[11px] leading-4 text-zinc-300 sm:space-y-2 sm:text-xs sm:leading-5">
               {card.intel.map((item) => (
                 <li key={item} className="flex gap-2">
-                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-300 shadow-[0_0_10px_rgba(196,181,253,0.7)]" />
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-300 shadow-[0_0_10px_rgba(196,181,253,0.7)] sm:mt-2" />
                   <span>{item}</span>
                 </li>
               ))}
