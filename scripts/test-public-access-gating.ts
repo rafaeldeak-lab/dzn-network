@@ -569,6 +569,11 @@ const pricingEntryCssBlock = globalsSource.slice(
   globalsSource.indexOf(".dzn-pricing-entry"),
   globalsSource.indexOf(".dzn-pricing-modal-backdrop"),
 );
+const heroCssBlock = globalsSource.slice(
+  globalsSource.indexOf(".dzn-home-hero-card"),
+  globalsSource.indexOf(".dzn-home-panel"),
+);
+const reducedMotionBlock = globalsSource.slice(globalsSource.indexOf("@media (prefers-reduced-motion: reduce)"));
 const buildImageAssets = [
   "public/dzn/build/full-walls.webp",
   "public/dzn/build/watchtower.webp",
@@ -661,6 +666,15 @@ assert.equal(pricingEntryCssBlock.includes(".dzn-pricing-answer-card--gold"), tr
 assert.equal(pricingModalCssBlock.includes("z-index: 120;"), true);
 assert.equal(pricingModalCssBlock.includes("overscroll-behavior: contain;"), true);
 assert.equal(pricingModalCssBlock.includes("100dvh"), true);
+assert.equal(heroBlock.includes("dzn-home-energy-beam"), true);
+assert.equal(heroCssBlock.includes("isolation: isolate;"), true);
+assert.equal(heroCssBlock.includes("animation: dznHomeBeamPulse 7.2s ease-in-out infinite;"), true);
+assert.equal(heroCssBlock.includes(".dzn-home-energy-beam::before"), true);
+assert.equal(heroCssBlock.includes(".dzn-home-energy-beam::after"), true);
+assert.equal(globalsSource.includes("@keyframes dznHomeBeamAuraPulse"), true);
+assert.equal(globalsSource.includes("@keyframes dznHomeBeamScan"), true);
+assert.equal(reducedMotionBlock.includes(".dzn-home-energy-beam::before"), true);
+assert.equal(reducedMotionBlock.includes(".dzn-home-energy-beam::after"), true);
 assert.equal(landingRenderBlock.includes("isPreviewMode ? ("), true);
 assert.equal(landingRenderBlock.includes("<NetworkOverview homeStats={displayHomeStats} dataPending={homeStatsPending} />"), true);
 assert.equal(landingRenderBlock.includes("unlockHomeStatsForLoggedIn"), true);
