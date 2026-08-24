@@ -14,6 +14,8 @@ Logged-out visitors may access:
 - `/signup`
 - the public Discord invite link
 
+Logged-out navigation must only expose the public funnel: homepage/features, pricing, Login/Signup, and Discord. It must not show dashboard, server browser, leaderboards, stats, events, owner tools, or add-server controls before a session is known.
+
 Logged-out visitors are redirected to `/login?returnTo=...` before app-page rendering for:
 
 - `/dashboard`
@@ -32,6 +34,8 @@ Nested routes under those paths follow the same rule. Examples include `/events/
 Logged-in visitors may open the authenticated app pages above. Page visibility inside those pages still depends on the existing server ownership, role, and package checks.
 
 Starter trial and Pro behavior must continue to come from the billing/entitlement helpers and API responses. A page redirect must not replace owner authorization, plan enforcement, Stripe webhook checks, Nitrado ownership checks, or protected API 401/403 behavior.
+
+Free or Starter/trial accounts should see trial-safe app navigation plus a clear Pro upgrade action. Pro-effective accounts should see Pro tools in the header. This header visibility is product guidance only; APIs and owner/product pages must continue enforcing access server-side.
 
 ## Owner Pages
 
@@ -60,6 +64,7 @@ Post-merge verification should expect:
 - `/` returns `200`.
 - `/pricing` returns `200` and opens the homepage pricing comparison.
 - Logged-out direct app pages such as `/events`, `/leaderboards`, `/servers`, `/dashboard`, `/setup`, `/dzn-pulse`, and `/seasons` return a login redirect.
+- Logged-out header/navigation does not expose app/product controls, while authenticated headers show package-appropriate Starter/Pro actions.
 - Public APIs above return `200` and no unexpected 5xx.
 - Owner/protected APIs such as `/api/owner/events`, `/api/billing/status`, and `/api/nitrado/services` remain `401` without authentication.
 - No production D1, Stripe, Nitrado, Discord, or secrets mutation is required for this policy.
