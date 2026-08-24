@@ -445,6 +445,46 @@ const featureCards = [
   accent: "purple" | "cyan" | "red" | "green" | "violet";
 }>;
 
+const previewConversionSteps = [
+  {
+    key: "setup",
+    label: "Start Setup",
+    title: "Claim your server slot",
+    text: "Connect Discord first, then start the Starter trial path for your public profile.",
+    href: "/login?returnTo=/setup",
+    icon: Server,
+    tone: "violet",
+  },
+  {
+    key: "pricing",
+    label: "Compare Plans",
+    title: "See Starter vs Pro",
+    text: "Open the pricing comparison before you commit so the upgrade choice is clear.",
+    href: "#pricing",
+    icon: Crown,
+    tone: "gold",
+  },
+  {
+    key: "community",
+    label: "Join Community",
+    title: "Meet the network",
+    text: "Join Discord for updates, feedback, server owners, and the DZN community.",
+    href: DZN_PUBLIC_DISCORD_INVITE_URL,
+    icon: Users,
+    tone: "cyan",
+    external: true,
+  },
+] satisfies Array<{
+  key: string;
+  label: string;
+  title: string;
+  text: string;
+  href: string;
+  icon: LucideIcon;
+  tone: "violet" | "gold" | "cyan";
+  external?: boolean;
+}>;
+
 const pricingPlans = [
   {
     key: "starter",
@@ -1121,15 +1161,47 @@ function HeroDashboard({
 
 function HomepagePreviewUnlock() {
   return (
-    <motion.section variants={fadeUp} className="rounded-xl border border-violet-300/22 bg-[#050815]/72 p-4 shadow-[0_18px_60px_rgba(0,0,0,0.32),0_0_28px_rgba(139,92,246,0.16)] backdrop-blur-xl">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div className="min-w-0">
-          <p className="text-xs font-black uppercase tracking-[0.2em] text-violet-100">Preview mode</p>
-          <h2 className="mt-1 text-xl font-black text-white">Limited public preview</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
-            Log in with Discord to unlock full network stats, server profiles, leaderboards, reviews, Discord invites, and activity. Use the Login button above to unlock full access.
-          </p>
+    <motion.section variants={fadeUp} className="dzn-preview-conversion" aria-labelledby="dzn-preview-conversion-title">
+      <div className="dzn-preview-conversion__copy">
+        <p className="dzn-preview-conversion__eyebrow">
+          <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+          Preview mode
+        </p>
+        <h2 id="dzn-preview-conversion-title">Build your DZN profile in minutes.</h2>
+        <p>
+          Public visitors can see the network pitch. Discord login unlocks the setup flow, full profiles, rankings, reviews, activity, events, and owner tools.
+        </p>
+        <div className="dzn-preview-conversion__badges" aria-label="Public setup highlights">
+          <span><CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> Starter trial available</span>
+          <span><Shield className="h-3.5 w-3.5" aria-hidden="true" /> Protected owner tools</span>
+          <span><Zap className="h-3.5 w-3.5" aria-hidden="true" /> Pro upgrade path</span>
         </div>
+      </div>
+      <div className="dzn-preview-conversion__steps">
+        {previewConversionSteps.map((step) => {
+          const Icon = step.icon;
+          return (
+            <a
+              key={step.key}
+              href={step.href}
+              target={step.external ? "_blank" : undefined}
+              rel={step.external ? "noopener noreferrer" : undefined}
+              className={`dzn-preview-conversion__step dzn-preview-conversion__step--${step.tone}`}
+            >
+              <span className="dzn-preview-conversion__step-icon" aria-hidden="true">
+                <Icon className="h-4 w-4" />
+              </span>
+              <span className="dzn-preview-conversion__step-copy">
+                <strong>{step.title}</strong>
+                <small>{step.text}</small>
+              </span>
+              <span className="dzn-preview-conversion__step-action">
+                {step.label}
+                <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+              </span>
+            </a>
+          );
+        })}
       </div>
     </motion.section>
   );

@@ -524,6 +524,10 @@ const buildLeaderboardBlock = homepageSource.slice(
 );
 const featureCardsBlock = homepageSource.slice(
   homepageSource.indexOf("const featureCards"),
+  homepageSource.indexOf("const previewConversionSteps"),
+);
+const previewConversionStepsBlock = homepageSource.slice(
+  homepageSource.indexOf("const previewConversionSteps"),
   homepageSource.indexOf("const pricingPlans"),
 );
 const featureStripBlock = homepageSource.slice(
@@ -699,6 +703,17 @@ assert.equal(heroBlock.includes("Login with Discord"), true);
 assert.equal(heroBlock.includes("Join DZN Discord"), true);
 assert.equal(heroBlock.includes("View Leaderboards"), true);
 assert.equal(heroBlock.includes("Add Your Server"), true);
+assert.equal(previewConversionStepsBlock.includes("Start Setup"), true);
+assert.equal(previewConversionStepsBlock.includes("Compare Plans"), true);
+assert.equal(previewConversionStepsBlock.includes("Join Community"), true);
+assert.equal(previewConversionStepsBlock.includes("href: \"/login?returnTo=/setup\""), true);
+assert.equal(previewConversionStepsBlock.includes("href: \"#pricing\""), true);
+assert.equal(previewConversionStepsBlock.includes("href: DZN_PUBLIC_DISCORD_INVITE_URL"), true);
+assert.equal(previewBannerBlock.includes("dzn-preview-conversion"), true);
+assert.equal(previewBannerBlock.includes("dzn-preview-conversion__steps"), true);
+assert.equal(previewBannerBlock.includes("previewConversionSteps.map"), true);
+assert.equal(previewBannerBlock.includes("Build your DZN profile in minutes."), true);
+assert.equal(previewBannerBlock.includes("Starter trial available"), true);
 assert.equal(previewBannerBlock.includes("Login with Discord"), false);
 assert.equal(previewBannerBlock.includes("href=\"/login?returnTo=/\""), false);
 assert.equal(lockedPreviewPanelBlock.includes("Login to unlock"), false);
@@ -744,6 +759,11 @@ assert.equal(featureCardsCssBlock.includes(".dzn-feature-card--red"), true);
 assert.equal(featureCardsCssBlock.includes(".dzn-feature-card--green"), true);
 assert.equal(featureCardsCssBlock.includes(".dzn-feature-card--violet"), true);
 assert.equal(featureCardsCssBlock.includes(".dzn-feature-card__locked"), true);
+assert.equal(featureCardsCssBlock.includes(".dzn-preview-conversion"), true);
+assert.equal(featureCardsCssBlock.includes("grid-template-columns: minmax(0, 0.9fr) minmax(460px, 1.1fr);"), true);
+assert.equal(featureCardsCssBlock.includes(".dzn-preview-conversion__steps"), true);
+assert.equal(featureCardsCssBlock.includes(".dzn-preview-conversion__step--gold"), true);
+assert.equal(featureCardsCssBlock.includes(".dzn-preview-conversion__step--cyan"), true);
 assert.equal(featureCardsCssBlock.includes("@media (max-width: 1180px)"), true);
 assert.equal(featureCardsCssBlock.includes("@media (max-width: 760px)"), true);
 assert.equal(homepageSource.includes("DZN BUILD IMAGE ASSET MISSING:"), true);
