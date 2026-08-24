@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties, type MouseEvent } from "react";
-import { motion, useReducedMotion } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   Activity,
   ChevronRight,
@@ -21,26 +21,59 @@ type AuthState = {
   authenticated: boolean;
 };
 
-const briefingCards: Array<{ title: string; text: string; icon: LucideIcon }> = [
+type BriefingCardInfo = {
+  title: string;
+  text: string;
+  icon: LucideIcon;
+  signal: string;
+  intelTitle: string;
+  intel: string[];
+};
+
+const briefingCards: BriefingCardInfo[] = [
   {
     title: "Command Authority",
     text: "Verify the Discord server owner/admin and lock access to the correct community.",
     icon: ShieldCheck,
+    signal: "Ownership",
+    intelTitle: "Only the right Discord authority should get control.",
+    intel: [
+      "Use the Discord community that actually owns the DayZ server.",
+      "Owner tools stay tied to that verified guild, which helps stop the wrong admin taking over a listing.",
+    ],
   },
   {
     title: "Nitrado Secure Link",
     text: "Connect your DayZ Nitrado service using Token + Service ID.",
     icon: Server,
+    signal: "Connection",
+    intelTitle: "The service link is what proves DZN is reading the correct server.",
+    intel: [
+      "Use the exact Nitrado Service ID for the live DayZ service you want DZN to track.",
+      "A long-life token keeps sync reliable; if you rotate it later, re-save the new token in DZN.",
+    ],
   },
   {
     title: "Encrypted Vault",
     text: "Your Nitrado token is encrypted server-side and never shown again.",
     icon: LockKeyhole,
+    signal: "Security",
+    intelTitle: "DZN stores the token for syncing, not for display.",
+    intel: [
+      "The token is encrypted before storage and cannot be viewed back in the dashboard.",
+      "If access fails or the token is changed in Nitrado, replace it instead of sharing it in chat or Discord.",
+    ],
   },
   {
     title: "Live ADM Intelligence",
     text: "DZN detects your DayZ admin logs and prepares the sync engine for player activity, kills, deaths, and rankings.",
     icon: Activity,
+    signal: "Sync",
+    intelTitle: "ADM stats are evidence-based and can take time to appear.",
+    intel: [
+      "After setup or restart, Nitrado can take several minutes to publish readable ADM logs.",
+      "Rankings come from imported activity, not paid placement or manual score editing.",
+    ],
   },
 ];
 
@@ -81,7 +114,6 @@ export function AuthShell({
   const [startBaseHref, setStartBaseHref] = useState(authStartHref);
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     console.log("DZN AUTH RETURN FLOW FIXED");
@@ -157,7 +189,7 @@ export function AuthShell({
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#02030a] text-white">
-      <AuthMissionBackground reduceMotion={Boolean(reduceMotion)} />
+      <AuthMissionBackground />
       <div className="pointer-events-none absolute inset-0 z-[1] border border-violet-400/25 shadow-[inset_0_0_42px_rgba(139,92,246,0.18)]" />
       <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 py-5 sm:px-7 lg:px-10">
         <AuthNav authenticated={Boolean(auth?.authenticated)} hideActions={hideNavActions} onLogout={signOut} />
@@ -251,14 +283,14 @@ function AuthNav({
   );
 }
 
-function AuthMissionBackground({ reduceMotion }: { reduceMotion: boolean }) {
+function AuthMissionBackground() {
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/media/dzn-cinematic-survivor.png"
         alt=""
-        className={`absolute inset-0 h-full w-full object-cover opacity-58 ${reduceMotion ? "" : "auth-hero-breathe"}`}
+        className="auth-hero-breathe absolute inset-0 h-full w-full object-cover opacity-58"
       />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_28%,rgba(139,92,246,0.18),transparent_25%),radial-gradient(circle_at_74%_42%,rgba(14,165,233,0.16),transparent_28%),linear-gradient(90deg,rgba(2,3,10,0.86)_0%,rgba(2,3,10,0.48)_47%,rgba(2,3,10,0.82)_100%),linear-gradient(180deg,rgba(2,3,10,0.24)_0%,rgba(2,3,10,0.88)_100%)]" />
       <div className="auth-hud-grid absolute inset-0 opacity-35" />
@@ -268,33 +300,29 @@ function AuthMissionBackground({ reduceMotion }: { reduceMotion: boolean }) {
       <span className="fog-layer fog-layer-three" />
       <span className="ambient-orb ambient-orb-violet left-[46%] top-[16%]" />
       <span className="ambient-orb ambient-orb-cyan bottom-[10%] right-[8%]" />
-      {!reduceMotion ? (
-        <>
-          {particles.map((particle) => (
-            <span
-              key={`${particle.left}-${particle.top}`}
-              className={`auth-spark auth-spark-${particle.color}`}
-              style={{
-                left: particle.left,
-                top: particle.top,
-                animationDelay: particle.delay,
-                animationDuration: particle.duration,
-              } as CSSProperties}
-            />
-          ))}
-          {rainStreaks.map((streak) => (
-            <span
-              key={`${streak.left}-${streak.delay}`}
-              className="auth-rain-streak"
-              style={{
-                left: streak.left,
-                animationDelay: streak.delay,
-                animationDuration: streak.duration,
-              } as CSSProperties}
-            />
-          ))}
-        </>
-      ) : null}
+      {particles.map((particle) => (
+        <span
+          key={`${particle.left}-${particle.top}`}
+          className={`auth-spark auth-spark-${particle.color}`}
+          style={{
+            left: particle.left,
+            top: particle.top,
+            animationDelay: particle.delay,
+            animationDuration: particle.duration,
+          } as CSSProperties}
+        />
+      ))}
+      {rainStreaks.map((streak) => (
+        <span
+          key={`${streak.left}-${streak.delay}`}
+          className="auth-rain-streak"
+          style={{
+            left: streak.left,
+            animationDelay: streak.delay,
+            animationDuration: streak.duration,
+          } as CSSProperties}
+        />
+      ))}
       <div className="auth-radar absolute bottom-[-8rem] left-1/2 h-72 w-72 -translate-x-1/2 rounded-full border border-cyan-300/20" />
     </div>
   );
@@ -329,23 +357,64 @@ function MissionBriefingPanel() {
   );
 }
 
-function BriefingCard({ card, index }: { card: { title: string; text: string; icon: LucideIcon }; index: number }) {
+function BriefingCard({
+  card,
+  index,
+}: {
+  card: BriefingCardInfo;
+  index: number;
+}) {
   const Icon = card.icon;
+  const detailsId = `mission-briefing-intel-${index}`;
+
   return (
-    <div className="group rounded-lg border border-white/10 bg-black/28 p-4 transition hover:border-violet-300/45 hover:bg-violet-500/10 hover:shadow-[0_0_30px_rgba(139,92,246,0.18)]">
+    <button
+      type="button"
+      aria-describedby={detailsId}
+      className="group relative w-full rounded-lg border border-white/10 bg-black/28 p-4 text-left transition duration-300 hover:border-violet-300/45 hover:bg-violet-500/10 hover:shadow-[0_0_30px_rgba(139,92,246,0.18)] focus:border-violet-300/60 focus:bg-violet-500/12 focus:shadow-[0_0_34px_rgba(139,92,246,0.22)] focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200/60 active:border-cyan-200/55 active:bg-cyan-300/8"
+    >
+      <span
+        aria-hidden="true"
+        className="absolute inset-y-3 right-2 w-1 rounded-full bg-violet-300/24 transition group-hover:bg-cyan-200 group-hover:shadow-[0_0_18px_rgba(103,232,249,0.7)] group-focus:bg-cyan-200 group-focus:shadow-[0_0_18px_rgba(103,232,249,0.7)] group-active:bg-cyan-200 group-active:shadow-[0_0_18px_rgba(103,232,249,0.7)]"
+      />
       <div className="flex items-center gap-4">
         <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg border border-violet-300/30 bg-violet-500/14 text-violet-200 shadow-[0_0_24px_rgba(139,92,246,0.28)]">
           <Icon className="h-7 w-7" />
         </span>
         <div className="min-w-0 flex-1">
-          <h3 className="text-base font-black text-white">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-base font-black text-white">
             {index}. {card.title}
-          </h3>
+            </h3>
+            <span className="rounded-full border border-cyan-300/20 bg-cyan-300/8 px-2.5 py-1 text-[10px] font-black uppercase tracking-normal text-cyan-100">
+              {card.signal}
+            </span>
+          </div>
           <p className="mt-1 text-sm leading-6 text-zinc-300">{card.text}</p>
         </div>
-        <ChevronRight className="h-5 w-5 text-violet-200/70 transition group-hover:translate-x-1 group-hover:text-cyan-100" />
+        <ChevronRight
+          className="h-5 w-5 text-violet-200/70 transition group-hover:rotate-90 group-hover:text-cyan-100 group-focus:rotate-90 group-focus:text-cyan-100 group-active:rotate-90 group-active:text-cyan-100"
+        />
       </div>
-    </div>
+      <div
+        data-briefing-intel={card.signal}
+        className="grid grid-rows-[0fr] opacity-0 transition-all duration-300 group-hover:mt-4 group-hover:grid-rows-[1fr] group-hover:opacity-100 group-focus:mt-4 group-focus:grid-rows-[1fr] group-focus:opacity-100 group-active:mt-4 group-active:grid-rows-[1fr] group-active:opacity-100"
+      >
+        <div id={detailsId} className="overflow-hidden">
+          <div className="rounded-lg border border-cyan-300/15 bg-cyan-300/6 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+            <p className="text-xs font-black uppercase tracking-normal text-cyan-100">{card.intelTitle}</p>
+            <ul className="mt-2 space-y-2 text-xs leading-5 text-zinc-300">
+              {card.intel.map((item) => (
+                <li key={item} className="flex gap-2">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-300 shadow-[0_0_10px_rgba(196,181,253,0.7)]" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </div>
+    </button>
   );
 }
 
