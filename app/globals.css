@@ -9106,3 +9106,126 @@ button.dzn-header-action {
     animation: none !important;
   }
 }
+
+.dzn-server-wars-shell {
+  position: relative;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 16% 10%, rgba(147, 51, 234, 0.18), transparent 30%),
+    radial-gradient(circle at 88% 18%, rgba(14, 165, 233, 0.16), transparent 34%),
+    #02030a;
+}
+
+.dzn-server-wars-hero,
+.dzn-server-wars-detail-hero,
+.dzn-server-wars-teaser {
+  position: relative;
+  isolation: isolate;
+  background:
+    linear-gradient(90deg, rgba(2, 6, 23, 0.9), rgba(2, 6, 23, 0.62) 48%, rgba(2, 6, 23, 0.78)),
+    url("/media/server-wars-showdown/server-wars-bg-layer.webp") center / cover no-repeat;
+}
+
+.dzn-server-wars-detail-hero {
+  min-height: 20rem;
+  display: flex;
+  align-items: flex-end;
+  background:
+    linear-gradient(90deg, rgba(2, 6, 23, 0.9), rgba(2, 6, 23, 0.54) 52%, rgba(2, 6, 23, 0.72)),
+    url("/media/server-wars-showdown/server-wars-banner-concept.webp") center / cover no-repeat;
+}
+
+.dzn-server-wars-hero::before,
+.dzn-server-wars-detail-hero::before,
+.dzn-server-wars-teaser::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background:
+    url("/media/server-wars-showdown/server-wars-fog-ember-overlay.webp") center / cover no-repeat;
+  opacity: 0.42;
+  mix-blend-mode: screen;
+  transform: scale(1.03);
+  animation: dznServerWarsEmberDrift 18s ease-in-out infinite alternate;
+}
+
+.dzn-server-wars-hero::after,
+.dzn-server-wars-detail-hero::after,
+.dzn-server-wars-teaser::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 32%),
+    linear-gradient(90deg, transparent, rgba(168, 85, 247, 0.28), rgba(34, 211, 238, 0.2), transparent);
+  opacity: 0.52;
+  pointer-events: none;
+}
+
+.dzn-server-wars-hero {
+  min-height: 24rem;
+  display: flex;
+  align-items: flex-end;
+}
+
+.dzn-server-wars-hero__content {
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 3px 26px rgba(0, 0, 0, 0.72);
+}
+
+.dzn-server-wars-teaser {
+  overflow: hidden;
+  box-shadow:
+    0 22px 70px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.dzn-server-wars-teaser > * {
+  position: relative;
+  z-index: 1;
+}
+
+.dzn-server-wars-teaser__copy {
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.74);
+}
+
+@keyframes dznServerWarsEmberDrift {
+  0% {
+    opacity: 0.32;
+    transform: translate3d(-0.45rem, -0.25rem, 0) scale(1.03);
+  }
+
+  50% {
+    opacity: 0.52;
+  }
+
+  100% {
+    opacity: 0.38;
+    transform: translate3d(0.45rem, 0.3rem, 0) scale(1.055);
+  }
+}
+
+@media (max-width: 760px) {
+  .dzn-server-wars-hero,
+  .dzn-server-wars-detail-hero {
+    min-height: 25rem;
+    background-position: center;
+  }
+
+  .dzn-server-wars-hero::before,
+  .dzn-server-wars-detail-hero::before,
+  .dzn-server-wars-teaser::before {
+    opacity: 0.34;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dzn-server-wars-hero::before,
+  .dzn-server-wars-detail-hero::before,
+  .dzn-server-wars-teaser::before {
+    animation: none !important;
+  }
+}

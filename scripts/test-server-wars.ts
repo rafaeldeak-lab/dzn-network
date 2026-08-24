@@ -42,6 +42,13 @@ for (const route of [
 ]) {
   assert.equal(existsSync(route), true, `Expected Server Wars route/component to exist: ${route}`);
 }
+for (const asset of [
+  "public/media/server-wars-showdown/server-wars-bg-layer.webp",
+  "public/media/server-wars-showdown/server-wars-fog-ember-overlay.webp",
+  "public/media/server-wars-showdown/server-wars-banner-concept.webp",
+]) {
+  assert.equal(existsSync(asset), true, `Expected optimized Server Wars media asset to exist: ${asset}`);
+}
 
 const schema = readFileSync("functions/_lib/server-war-schema.ts", "utf8");
 assert.match(schema, /ensureServerWarsSchema/);
@@ -112,7 +119,17 @@ assert.match(serverWarsUi, /Awaiting score snapshot/);
 assert.match(serverWarsUi, /Plans affect hosting/);
 assert.match(serverWarsUi, /useSearchParams/);
 assert.match(serverWarsUi, /event=\$\{encodeURIComponent\(event\.slug\)\}/);
+assert.match(serverWarsUi, /dzn-server-wars-hero/);
+assert.match(serverWarsUi, /dzn-server-wars-detail-hero/);
+assert.match(serverWarsUi, /dzn-server-wars-teaser/);
 assert.doesNotMatch(serverWarsUi, /position_x|position_y|raw coordinates/i);
+
+const globalCss = readFileSync("app/globals.css", "utf8");
+assert.match(globalCss, /server-wars-bg-layer\.webp/);
+assert.match(globalCss, /server-wars-fog-ember-overlay\.webp/);
+assert.match(globalCss, /server-wars-banner-concept\.webp/);
+assert.match(globalCss, /dznServerWarsEmberDrift/);
+assert.match(globalCss, /prefers-reduced-motion: reduce/);
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.match(dashboardSource, /challenge\.canRespond/);
