@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 
 const migration = readFileSync("migrations/0051_server_wars_mvp.sql", "utf8");
 for (const table of [
@@ -46,9 +46,13 @@ for (const asset of [
   "public/media/server-wars-showdown/server-wars-bg-layer.webp",
   "public/media/server-wars-showdown/server-wars-fog-ember-overlay.webp",
   "public/media/server-wars-showdown/server-wars-banner-concept.webp",
+  "public/media/server-wars-showdown/server-wars-showdown-loop.mp4",
+  "public/media/server-wars-showdown/server-wars-showdown-loop.webm",
 ]) {
   assert.equal(existsSync(asset), true, `Expected optimized Server Wars media asset to exist: ${asset}`);
 }
+assert.ok(statSync("public/media/server-wars-showdown/server-wars-showdown-loop.mp4").size < 750_000, "MP4 Server Wars loop should stay lightweight.");
+assert.ok(statSync("public/media/server-wars-showdown/server-wars-showdown-loop.webm").size < 1_250_000, "WebM Server Wars loop should stay lightweight.");
 
 const schema = readFileSync("functions/_lib/server-war-schema.ts", "utf8");
 assert.match(schema, /ensureServerWarsSchema/);
@@ -122,14 +126,22 @@ assert.match(serverWarsUi, /event=\$\{encodeURIComponent\(event\.slug\)\}/);
 assert.match(serverWarsUi, /dzn-server-wars-hero/);
 assert.match(serverWarsUi, /dzn-server-wars-detail-hero/);
 assert.match(serverWarsUi, /dzn-server-wars-teaser/);
+assert.match(serverWarsUi, /useAmbientMotionEnabled/);
+assert.match(serverWarsUi, /dzn-server-wars-hero__video/);
+assert.match(serverWarsUi, /server-wars-showdown-loop\.webm/);
+assert.match(serverWarsUi, /server-wars-showdown-loop\.mp4/);
+assert.match(serverWarsUi, /playsInline/);
+assert.match(serverWarsUi, /server-wars-banner-concept\.webp/);
 assert.doesNotMatch(serverWarsUi, /position_x|position_y|raw coordinates/i);
 
 const globalCss = readFileSync("app/globals.css", "utf8");
 assert.match(globalCss, /server-wars-bg-layer\.webp/);
 assert.match(globalCss, /server-wars-fog-ember-overlay\.webp/);
 assert.match(globalCss, /server-wars-banner-concept\.webp/);
+assert.match(globalCss, /dzn-server-wars-hero__video/);
 assert.match(globalCss, /dznServerWarsEmberDrift/);
 assert.match(globalCss, /prefers-reduced-motion: reduce/);
+assert.match(globalCss, /display: none !important/);
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.match(dashboardSource, /challenge\.canRespond/);
