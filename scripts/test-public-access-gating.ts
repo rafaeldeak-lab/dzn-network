@@ -486,6 +486,8 @@ const loggedOutNavBlock = homepageSource.slice(
   homepageSource.indexOf("const fallbackTopServers"),
 );
 const siteHeaderSource = readFileSync("components/site-header.tsx", "utf8");
+const signupPageSource = readFileSync("app/signup/page.tsx", "utf8");
+const pricingPageSource = readFileSync("app/pricing/page.tsx", "utf8");
 const landingRenderBlock = homepageSource.slice(
   homepageSource.indexOf("export function DznLandingPage"),
   homepageSource.indexOf("function HomeAliveBackground"),
@@ -618,6 +620,7 @@ assert.equal(loggedOutHeaderBlock.includes("Stats"), false);
 assert.equal(loggedOutHeaderBlock.includes("Events"), false);
 assert.equal(loggedOutHeaderBlock.includes("Dashboard"), false);
 assert.equal(loggedOutHeaderBlock.includes("Add Your Server"), false);
+assert.equal(signupPageSource.includes("hideNavActions"), true, "Signup must use the simplified logged-out auth header.");
 assert.equal(authenticatedHeaderBlock.includes("Leaderboards"), true);
 assert.equal(authenticatedHeaderBlock.includes("Servers"), true);
 assert.equal(authenticatedHeaderBlock.includes("Stats"), true);
@@ -648,6 +651,8 @@ assert.equal(productionSmokeSource.includes("[\"/dashboard\", \"/events\", \"/le
 assert.equal(pricingUpgradeBlock.includes("Open Pricing Comparison"), true);
 assert.equal(pricingUpgradeBlock.includes("role=\"dialog\""), true);
 assert.equal(pricingUpgradeBlock.includes("aria-modal=\"true\""), true);
+assert.equal(pricingPageSource.includes("window.location.replace(\"/#pricing\")"), true, "Direct /pricing must bridge into the homepage pricing section.");
+assert.equal(pricingPageSource.includes("Open Pricing Comparison"), true, "Direct /pricing must expose a manual pricing comparison fallback.");
 assert.equal(pricingUpgradeBlock.includes("Close pricing comparison"), true);
 assert.equal(pricingUpgradeBlock.includes("createPortal(pricingModal, document.body)"), true);
 assert.equal(pricingUpgradeBlock.includes("document.body.classList.add(\"dzn-pricing-modal-open\")"), true);
