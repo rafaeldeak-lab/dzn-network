@@ -49,6 +49,8 @@ Live billing must not be enabled because the public pricing UI looks correct or 
 
 The readiness check is read-only. Live Stripe product/price creation, webhook endpoint changes, Cloudflare secret changes, D1 migration application, customer import, and payment enablement remain separate high-risk human-approved operations.
 
+Use `docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md` with Issue #46 before any future live billing activation. That checklist is a non-mutating human handoff; it is not an AutoDev activation script.
+
 ## Public Subscription Contract
 
 The active non-production-mutation contract is stored in `lib/billing/plans.ts` as `SUBSCRIPTION_PLAN_PUBLIC_CONTRACT`. It is safe public metadata for UI, docs, and tests. It does not create Stripe Prices, change live Stripe state, apply production migrations, or mutate production data.

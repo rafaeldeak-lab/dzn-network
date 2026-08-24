@@ -1,4 +1,4 @@
-import { detectDestructiveMigration } from "./risk-classifier";
+import { classifyPath, detectDestructiveMigration } from "./risk-classifier";
 import { dirExists, fail, fileExists, listFiles, loadConfig, makeReport, pass, readText, writeReport, type AutoDevCheck, type ValidationProfileName } from "./lib";
 import { profileNames } from "./validation-profiles";
 
@@ -52,6 +52,20 @@ check(config.systems?.adm?.githubBackupRunner === "manual-only", "ADM GitHub bac
 for (const gate of ["blockPaidCodexGitHubAction", "blockOpenAiApiKey", "blockUnattendedPaidAiExecution", "blockMeteredAiProviders", "blockAutomaticCreditsOrAutoTopUpAssumptions"]) {
   check(config.riskGates?.[gate] === true, `risk gate ${gate}`, `${gate} is enabled.`, `${gate} must remain enabled.`, "high");
 }
+check(
+  classifyPath("scripts/stripe-live-activation.ts", "stripe products create --name 'DZN Starter'").risk === "blocked",
+  "live Stripe product automation blocked",
+  "AutoDev blocks automated live Stripe product/price setup.",
+  "AutoDev must block automated live Stripe product/price setup.",
+  "high",
+);
+check(
+  classifyPath(".github/workflows/stripe-live-secret.yml", "run: npx wrangler pages secret put STRIPE_SECRET_KEY --project-name dzn-network").risk === "blocked",
+  "live Stripe secret automation blocked",
+  "AutoDev blocks automated Stripe production secret setup.",
+  "AutoDev must block automated Stripe production secret setup.",
+  "high",
+);
 
 for (const profile of ["docs", "ui", "general", "auth", "billing", "nitrado-adm", "events", "github-workflows", "autodev", "release-high-risk"] as ValidationProfileName[]) {
   check(profileNames().includes(profile), `validation profile ${profile}`, `${profile} validation profile exists.`, `${profile} validation profile missing.`, "high");

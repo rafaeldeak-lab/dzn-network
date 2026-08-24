@@ -104,6 +104,14 @@ const PAID_AI_ACTION_PATTERNS: Array<[RegExp, string]> = [
   [/openai\/codex-action/i, "paid Codex GitHub Action detected"],
   [/anthropic(?:s)?\/claude(?:-code)?-action/i, "metered Claude GitHub Action detected"],
 ];
+const LIVE_BILLING_MUTATION_PATTERNS: Array<[RegExp, string]> = [
+  [/\bstripe\s+(?:products?|prices?|webhook(?:_endpoints)?|customers?|subscriptions?)\s+(?:create|update|delete)\b/i, "automated live Stripe billing mutation command detected"],
+  [/\bstripe["'`]\s*,\s*\[[\s\S]{0,160}["'`](?:products?|prices?|webhook_endpoints|customers?|subscriptions?)["'`]\s*,\s*["'`](?:create|update|delete)["'`]/i, "automated live Stripe billing mutation command detected"],
+  [/\b(?:curl|fetch|Invoke-RestMethod|Invoke-WebRequest)\b[\s\S]{0,180}\bapi\.stripe\.com\/v1\/(?:products|prices|webhook_endpoints|customers|subscriptions)\b[\s\S]{0,180}\b(?:POST|PUT|PATCH|DELETE)\b/i, "automated Stripe API mutation request detected"],
+  [/\b(?:curl|fetch|Invoke-RestMethod|Invoke-WebRequest)\b[\s\S]{0,180}\b(?:POST|PUT|PATCH|DELETE)\b[\s\S]{0,180}\bapi\.stripe\.com\/v1\/(?:products|prices|webhook_endpoints|customers|subscriptions)\b/i, "automated Stripe API mutation request detected"],
+  [/\b(?:npx\s+)?wrangler\s+pages\s+secret\s+put\s+(?:STRIPE_PRICE_STARTER|STRIPE_PRICE_PRO|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET)\b/i, "automated Stripe production secret mutation command detected"],
+  [/\b(?:enable|activate|turn\s+on|go\s+live)\b[\s\S]{0,100}\blive\s+billing\b[\s\S]{0,140}\b(?:script|workflow|automation|autodev|unattended)\b/i, "unattended live billing activation path detected"],
+];
 const DESTRUCTIVE_TRUNCATE_PATTERN = /\bTRUNCATE\s+TABLE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)|\bTRUNCATE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)\s*;/i;
 const ADM_PATHS = [
   /^functions\/_lib\/adm-/,
@@ -266,6 +274,7 @@ function detectHardBlockedContent(content: string, file: string) {
   if (autoDevPolicyTool) return [];
   const findings = [...detectDestructiveMigration(content, file)];
   const text = content.replace(/--.*$/gm, "");
+  findings.push(...detectLiveBillingProductionMutation(text, file));
   if (!isPolicyDocument(file) && !autoDevPolicyTool) findings.push(...detectMeteredAiSpendWiring(text, file));
   if (isGithubWorkflow(file)) {
     for (const secret of RUNTIME_SECRETS_IN_GITHUB) {
@@ -277,6 +286,15 @@ function detectHardBlockedContent(content: string, file: string) {
     if (/\b(disable|bypass|skip|remove|weaken)\b[\s\S]{0,120}\b(auth|authorization|requireCronSecret|isCronAuthorized|401|403|session)\b/i.test(text)) findings.push("auth or endpoint protection weakening detected");
     if (/\b(disable|bypass|skip|remove|weaken)\b[\s\S]{0,160}\b(same-category|same category|assertSameServerCategory|assertSameCategoryChallenge|matchmaking)\b/i.test(text) || /\bcross-category\b[\s\S]{0,120}\b(allow|allowed|match|matchmaking|compete)\b/i.test(text)) findings.push("same-category matchmaking enforcement removal detected");
     if (/\b(raw|plain(?:text)?)\b[\s\S]{0,80}\b(token|secret|STRIPE_SECRET_KEY|TOKEN_ENCRYPTION_KEY|SESSION_SECRET)\b/i.test(text) && /\b(log|console\.log|return|expose|artifact|summary)\b/i.test(text)) findings.push("secret or token exposure pattern detected");
+  }
+  return Array.from(new Set(findings));
+}
+
+function detectLiveBillingProductionMutation(content: string, file: string) {
+  if (isPolicyDocument(file) || /^scripts\/test-/.test(file)) return [];
+  const findings: string[] = [];
+  for (const [pattern, message] of LIVE_BILLING_MUTATION_PATTERNS) {
+    if (pattern.test(content)) findings.push(message);
   }
   return Array.from(new Set(findings));
 }

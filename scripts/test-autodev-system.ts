@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { classifyPath, detectDestructiveMigration, classifyRecoverableProductionStatus } from "./autodev/risk-classifier";
+import { isSafePlatformIssue } from "./autodev/pick-safe-issue";
 
 function read(path: string) {
   return readFileSync(path, "utf8");
@@ -65,6 +66,11 @@ assert.equal(classifyPath("migrations/9999_events.sql", "ALTER TABLE competitive
 assert.equal(classifyPath("migrations/9999_player_stats.sql", "CREATE TABLE player_stats (id TEXT);").risk, "blocked");
 assert.equal(classifyPath("functions/_lib/events.ts", "remove same-category matchmaking enforcement").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/bad.yml", "env:\n  STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}").risk, "blocked");
+assert.equal(classifyPath("scripts/stripe-live-activation.ts", "stripe products create --name 'DZN Starter'").risk, "blocked");
+assert.equal(classifyPath("scripts/stripe-live-prices.ts", "await execa('stripe', ['prices', 'create', '--unit-amount', '200']);").risk, "blocked");
+assert.equal(classifyPath("scripts/stripe-live-api.ts", "curl -X POST https://api.stripe.com/v1/products").risk, "blocked");
+assert.equal(classifyPath(".github/workflows/stripe-secrets.yml", "run: npx wrangler pages secret put STRIPE_SECRET_KEY --project-name dzn-network").risk, "blocked");
+assert.equal(classifyPath("scripts/test-stripe-live-readiness.ts", "stripe products create --name test fixture").risk, "low");
 assert.equal(classifyPath(".github/workflows/paid-codex.yml", "uses: openai/codex-action@v1").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/metered-ai.yml", "env:\n  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}").risk, "blocked");
 assert.equal(classifyPath("scripts/ai-runner.ts", "const key = process.env.GEMINI_API_KEY; runUnattendedAgent(key);").risk, "blocked");
@@ -149,7 +155,37 @@ assert.equal(pickSafeIssue.includes('"billing"'), true);
 assert.equal(pickSafeIssue.includes('"discord-oauth"'), true);
 assert.equal(pickSafeIssue.includes('"ai-spend"'), true);
 assert.equal(pickSafeIssue.includes("metered AI provider credential request"), true);
+assert.equal(pickSafeIssue.includes("live Stripe billing mutation request"), true);
+assert.equal(pickSafeIssue.includes("direct Stripe API mutation request"), true);
+assert.equal(pickSafeIssue.includes("Stripe production secret mutation request"), true);
 assert.equal(pickSafeIssue.includes("isSafePlatformIssue"), true);
+assert.equal(
+  isSafePlatformIssue({
+    number: 101,
+    title: "Create live Stripe products",
+    body: "Run stripe products create and stripe prices create for DZN billing.",
+    labels: ["autodev", "autodev-safe-fix", "low-risk"],
+  }).ok,
+  false,
+);
+assert.equal(
+  isSafePlatformIssue({
+    number: 102,
+    title: "Call Stripe API",
+    body: "Use curl -X POST https://api.stripe.com/v1/products to create live billing.",
+    labels: ["autodev", "autodev-safe-fix", "low-risk"],
+  }).ok,
+  false,
+);
+assert.equal(
+  isSafePlatformIssue({
+    number: 103,
+    title: "Set Stripe production secret",
+    body: "Run npx wrangler pages secret put STRIPE_WEBHOOK_SECRET for dzn-network.",
+    labels: ["autodev", "autodev-safe-fix", "low-risk"],
+  }).ok,
+  false,
+);
 
 const autoDevAudit = read("scripts/autodev/audit.ts");
 assert.equal(autoDevAudit.includes("AI spend subscription-only mode"), true);
