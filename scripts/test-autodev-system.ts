@@ -70,6 +70,8 @@ assert.equal(classifyPath("scripts/stripe-live-activation.ts", "stripe products 
 assert.equal(classifyPath("scripts/stripe-live-prices.ts", "await execa('stripe', ['prices', 'create', '--unit-amount', '200']);").risk, "blocked");
 assert.equal(classifyPath("scripts/stripe-live-api.ts", "curl -X POST https://api.stripe.com/v1/products").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/stripe-secrets.yml", "run: npx wrangler pages secret put STRIPE_SECRET_KEY --project-name dzn-network").risk, "blocked");
+assert.equal(classifyPath("wrangler.toml", "DZN_LIVE_CHECKOUT_ENABLED = \"true\"").risk, "blocked");
+assert.equal(classifyPath(".github/workflows/stripe-live-checkout.yml", "env:\n  DZN_LIVE_CHECKOUT_ENABLED: yes").risk, "blocked");
 assert.equal(classifyPath("scripts/test-stripe-live-readiness.ts", "stripe products create --name test fixture").risk, "low");
 assert.equal(classifyPath(".github/workflows/paid-codex.yml", "uses: openai/codex-action@v1").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/metered-ai.yml", "env:\n  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}").risk, "blocked");

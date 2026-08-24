@@ -110,6 +110,7 @@ const LIVE_BILLING_MUTATION_PATTERNS: Array<[RegExp, string]> = [
   [/\b(?:curl|fetch|Invoke-RestMethod|Invoke-WebRequest)\b[\s\S]{0,180}\bapi\.stripe\.com\/v1\/(?:products|prices|webhook_endpoints|customers|subscriptions)\b[\s\S]{0,180}\b(?:POST|PUT|PATCH|DELETE)\b/i, "automated Stripe API mutation request detected"],
   [/\b(?:curl|fetch|Invoke-RestMethod|Invoke-WebRequest)\b[\s\S]{0,180}\b(?:POST|PUT|PATCH|DELETE)\b[\s\S]{0,180}\bapi\.stripe\.com\/v1\/(?:products|prices|webhook_endpoints|customers|subscriptions)\b/i, "automated Stripe API mutation request detected"],
   [/\b(?:npx\s+)?wrangler\s+pages\s+secret\s+put\s+(?:STRIPE_PRICE_STARTER|STRIPE_PRICE_PRO|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|DZN_LIVE_CHECKOUT_ENABLED)\b/i, "automated Stripe production secret mutation command detected"],
+  [/\bDZN_LIVE_CHECKOUT_ENABLED\b\s*(?:=|:)\s*["'`]?(?:true|1|yes|on)["'`]?\b/i, "live checkout enablement flag assignment detected"],
   [/\b(?:enable|activate|turn\s+on|go\s+live)\b[\s\S]{0,100}\blive\s+billing\b[\s\S]{0,140}\b(?:script|workflow|automation|autodev|unattended)\b/i, "unattended live billing activation path detected"],
 ];
 const DESTRUCTIVE_TRUNCATE_PATTERN = /\bTRUNCATE\s+TABLE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)|\bTRUNCATE\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)\s*;/i;

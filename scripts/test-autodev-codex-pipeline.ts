@@ -26,6 +26,7 @@ for (const blocked of [
   { title: "enable Codex credit auto top-up", labels: ["autodev", "autodev-safe-fix", "low-risk"] },
   { title: "change AI spend policy", labels: ["autodev", "autodev-safe-fix", "low-risk"] },
   { title: "add Claude paid action", labels: ["autodev", "autodev-safe-fix", "low-risk"] },
+  { title: "Set DZN_LIVE_CHECKOUT_ENABLED=true in wrangler.toml", labels: ["autodev", "autodev-safe-fix", "low-risk"] },
   { title: "update docs", labels: ["autodev", "autodev-safe-fix", "low-risk", "ai-spend"] },
 ]) {
   assert.equal(isSafePlatformIssue({ number: 4, title: blocked.title, body: blocked.title, labels: blocked.labels }).ok, false, `${blocked.title} must be blocked`);

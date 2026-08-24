@@ -78,6 +78,7 @@ assert.equal(classifyPath("scripts/stripe-live-prices.ts", "await execa('stripe'
 assert.equal(classifyPath("scripts/stripe-live-api.ts", "curl -X POST https://api.stripe.com/v1/products").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/stripe-secret.yml", "run: npx wrangler pages secret put STRIPE_SECRET_KEY --project-name dzn-network").risk, "blocked");
 assert.equal(classifyPath(".github/workflows/stripe-live-checkout.yml", "run: npx wrangler pages secret put DZN_LIVE_CHECKOUT_ENABLED --project-name dzn-network").risk, "blocked");
+assert.equal(classifyPath("wrangler.toml", "DZN_LIVE_CHECKOUT_ENABLED=true").risk, "blocked");
 assert.equal(classifyPath("docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md", activationDoc).risk, "low");
 
 const packageJson = JSON.parse(read("package.json")) as { scripts?: Record<string, string> };
@@ -107,6 +108,7 @@ const forbiddenAutomationPatterns: Array<[RegExp, string]> = [
   [/\b(?:curl|fetch|Invoke-RestMethod|Invoke-WebRequest)\b[\s\S]{0,180}\bapi\.stripe\.com\/v1\/(?:products|prices|webhook_endpoints|customers|subscriptions)\b[\s\S]{0,180}\b(?:POST|PUT|PATCH|DELETE)\b/i, "direct Stripe API mutation call"],
   [/\b(?:curl|fetch|Invoke-RestMethod|Invoke-WebRequest)\b[\s\S]{0,180}\b(?:POST|PUT|PATCH|DELETE)\b[\s\S]{0,180}\bapi\.stripe\.com\/v1\/(?:products|prices|webhook_endpoints|customers|subscriptions)\b/i, "direct Stripe API mutation call"],
   [/\b(?:npx\s+)?wrangler\s+pages\s+secret\s+put\s+(?:STRIPE_PRICE_STARTER|STRIPE_PRICE_PRO|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|DZN_LIVE_CHECKOUT_ENABLED)\b/i, "Stripe production secret mutation command"],
+  [/\bDZN_LIVE_CHECKOUT_ENABLED\b\s*(?:=|:)\s*["'`]?(?:true|1|yes|on)["'`]?\b/i, "live checkout enablement flag assignment"],
 ];
 
 for (const file of automationFiles) {
