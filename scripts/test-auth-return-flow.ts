@@ -31,6 +31,7 @@ const authNavBlock = authShellSource.slice(
 );
 
 assert.equal(loginPageSource.includes("hideNavActions"), true);
+assert.equal(signupPageSource.includes("hideNavActions"), true);
 assert.equal(loginAuthShellBlock.includes("Servers"), false);
 assert.equal(loginAuthShellBlock.includes("Add Your Server"), false);
 assert.equal(authShellSource.includes("DZN LOGIN HEADER SIMPLIFIED"), true);
@@ -39,6 +40,5 @@ assert.equal(authShellSource.includes("url.searchParams.set(\"returnTo\", defaul
 assert.equal(authNavBlock.includes("{hideActions ? null : ("), true);
 assert.equal(authNavBlock.includes("Servers"), true);
 assert.equal(authNavBlock.includes("Add Your Server"), true);
-assert.equal(signupPageSource.includes("hideNavActions"), false);
 
 console.log("Auth return flow tests passed.");
