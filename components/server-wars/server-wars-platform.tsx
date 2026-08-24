@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { CalendarDays, Crown, RefreshCw, Shield, Swords, Trophy } from "lucide-react";
 
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
@@ -248,8 +248,25 @@ async function loadServerWars(limit = 12) {
 }
 
 function ServerWarsHero() {
+  const ambientMotionEnabled = useAmbientMotionEnabled();
+
   return (
     <section className="dzn-server-wars-hero overflow-hidden rounded-2xl border border-violet-300/20 bg-[radial-gradient(circle_at_20%_0%,rgba(168,85,247,0.24),transparent_34%),linear-gradient(135deg,rgba(5,8,20,0.96),rgba(2,6,23,0.9))] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.42)] sm:p-7">
+      {ambientMotionEnabled ? (
+        <video
+          aria-hidden="true"
+          className="dzn-server-wars-hero__video"
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="metadata"
+          poster="/media/server-wars-showdown/server-wars-banner-concept.webp"
+        >
+          <source src="/media/server-wars-showdown/server-wars-showdown-loop.webm" type="video/webm" />
+          <source src="/media/server-wars-showdown/server-wars-showdown-loop.mp4" type="video/mp4" />
+        </video>
+      ) : null}
       <div className="dzn-server-wars-hero__content max-w-4xl">
         <p className="inline-flex rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-cyan-100">
           DZN Server Wars
@@ -263,6 +280,32 @@ function ServerWarsHero() {
       </div>
     </section>
   );
+}
+
+function useAmbientMotionEnabled() {
+  return useSyncExternalStore(subscribeToMotionPreference, getMotionPreferenceSnapshot, getServerMotionPreferenceSnapshot);
+}
+
+function subscribeToMotionPreference(callback: () => void) {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return () => undefined;
+  }
+
+  const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+  media.addEventListener("change", callback);
+  return () => media.removeEventListener("change", callback);
+}
+
+function getMotionPreferenceSnapshot() {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+
+  return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function getServerMotionPreferenceSnapshot() {
+  return false;
 }
 
 function WarSummaryCard({ title, value, icon: Icon }: { title: string; value: string; icon: typeof Swords }) {
