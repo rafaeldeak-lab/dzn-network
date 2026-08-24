@@ -34,6 +34,21 @@ Cancelled, expired, failed, or completed Starter trials still count as used. A c
 
 Trial enforcement is billing-sensitive. Applying the trial-claim migration, enabling live Stripe prices, changing checkout/webhook behavior, importing existing Stripe customers, or repairing production trial claims remains high-risk billing work requiring human review and explicit approval.
 
+## Live Stripe Readiness
+
+Live billing must not be enabled because the public pricing UI looks correct or because test-mode checkout works. The readiness gate is:
+
+- Starter checkout uses `STRIPE_PRICE_STARTER` as a server-side Cloudflare Pages variable.
+- Pro checkout uses `STRIPE_PRICE_PRO` as a server-side Cloudflare Pages variable.
+- `STRIPE_SECRET_KEY` is live mode.
+- `STRIPE_WEBHOOK_SECRET` belongs to the live production webhook endpoint.
+- `DZN_APP_URL` or `NEXT_PUBLIC_APP_URL` points at the production DZN domain, not a preview URL.
+- `/api/billing/readiness` reports `liveConfigurationReady: true` without exposing secret values or Price IDs.
+
+`NEXT_PUBLIC_STRIPE_*_PRICE_ID` variables are compatibility fallbacks only. They can keep old checkout paths working during rollout, but they are not valid evidence for live billing readiness.
+
+The readiness check is read-only. Live Stripe product/price creation, webhook endpoint changes, Cloudflare secret changes, D1 migration application, customer import, and payment enablement remain separate high-risk human-approved operations.
+
 ## Public Subscription Contract
 
 The active non-production-mutation contract is stored in `lib/billing/plans.ts` as `SUBSCRIPTION_PLAN_PUBLIC_CONTRACT`. It is safe public metadata for UI, docs, and tests. It does not create Stripe Prices, change live Stripe state, apply production migrations, or mutate production data.

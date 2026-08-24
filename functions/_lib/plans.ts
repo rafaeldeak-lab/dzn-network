@@ -96,6 +96,16 @@ export type BillingReadinessStatus = {
   premiumConfigured: boolean;
   stripeSecretConfigured: boolean;
   webhookSecretConfigured: boolean;
+  liveConfigurationReady: boolean;
+  humanApprovalRequiredForLiveBilling: true;
+  productionMutationAllowedByReadinessCheck: false;
+  priceSources: Record<PurchasablePlanKey, {
+    envVar: string;
+    publicFallbackEnvVar: string;
+    source: "server" | "public_fallback" | "missing";
+    configured: boolean;
+    liveReady: boolean;
+  }>;
   activePlans: Array<{
     plan_key: PurchasablePlanKey;
     name: string;
@@ -104,7 +114,16 @@ export type BillingReadinessStatus = {
     configured: boolean;
   }>;
   missingRequiredVars: string[];
+  missingLiveRequiredVars: string[];
   legacyVarsDetected: string[];
+  publicFallbackPriceVarsDetected: string[];
+  readinessChecks: Array<{
+    key: string;
+    label: string;
+    ok: boolean;
+    severity: "blocker" | "warning" | "info";
+    detail: string;
+  }>;
   modeHint: "test" | "live" | "unknown" | "not_configured";
 };
 
@@ -281,8 +300,10 @@ export function getBillingPlanSummaries(env: Env): BillingPlanSummary[] {
 
 export function getBillingReadinessStatus(env: Env): BillingReadinessStatus {
   const configured = getCheckoutConfigured(env);
+  const priceSources = getBillingPriceSources(env);
   const stripeSecretConfigured = Boolean(cleanEnvString(env.STRIPE_SECRET_KEY));
   const webhookSecretConfigured = Boolean(cleanEnvString(env.STRIPE_WEBHOOK_SECRET));
+  const modeHint = getStripeModeHint(env);
   const missingRequiredVars: string[] = [];
 
   for (const planKey of PAID_PLAN_KEYS) {
@@ -293,12 +314,20 @@ export function getBillingReadinessStatus(env: Env): BillingReadinessStatus {
   if (!stripeSecretConfigured) missingRequiredVars.push("STRIPE_SECRET_KEY");
   if (!webhookSecretConfigured) missingRequiredVars.push("STRIPE_WEBHOOK_SECRET");
 
+  const missingLiveRequiredVars = getMissingLiveRequiredVars(env, priceSources);
+  const readinessChecks = buildBillingReadinessChecks(env, priceSources, modeHint, webhookSecretConfigured);
+  const liveConfigurationReady = readinessChecks.every((check) => check.severity !== "blocker" || check.ok);
+
   return {
     starterConfigured: configured.starter,
     proConfigured: configured.pro,
     premiumConfigured: false,
     stripeSecretConfigured,
     webhookSecretConfigured,
+    liveConfigurationReady,
+    humanApprovalRequiredForLiveBilling: true,
+    productionMutationAllowedByReadinessCheck: false,
+    priceSources,
     activePlans: getBillingPlanSummaries(env).map((plan) => ({
       plan_key: plan.plan_key,
       name: plan.name,
@@ -307,8 +336,11 @@ export function getBillingReadinessStatus(env: Env): BillingReadinessStatus {
       configured: plan.configured,
     })),
     missingRequiredVars,
+    missingLiveRequiredVars,
     legacyVarsDetected: getDetectedLegacyStripeVars(env),
-    modeHint: getStripeModeHint(env),
+    publicFallbackPriceVarsDetected: getDetectedPublicFallbackPriceVars(env),
+    readinessChecks,
+    modeHint,
   };
 }
 
@@ -858,12 +890,128 @@ function getDetectedLegacyStripeVars(env: Env) {
   return legacyVars;
 }
 
+function getBillingPriceSources(env: Env): BillingReadinessStatus["priceSources"] {
+  return {
+    starter: getBillingPriceSource(env, "STRIPE_PRICE_STARTER", "NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID"),
+    pro: getBillingPriceSource(env, "STRIPE_PRICE_PRO", "NEXT_PUBLIC_STRIPE_PRO_PRICE_ID"),
+  };
+}
+
+function getBillingPriceSource(
+  env: Env,
+  envVar: "STRIPE_PRICE_STARTER" | "STRIPE_PRICE_PRO",
+  publicFallbackEnvVar: "NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID" | "NEXT_PUBLIC_STRIPE_PRO_PRICE_ID",
+): BillingReadinessStatus["priceSources"][PurchasablePlanKey] {
+  const serverValue = cleanEnvString(env[envVar]);
+  const publicFallbackValue = cleanEnvString(env[publicFallbackEnvVar]);
+  if (serverValue) {
+    return { envVar, publicFallbackEnvVar, source: "server", configured: true, liveReady: true };
+  }
+  if (publicFallbackValue) {
+    return { envVar, publicFallbackEnvVar, source: "public_fallback", configured: true, liveReady: false };
+  }
+  return { envVar, publicFallbackEnvVar, source: "missing", configured: false, liveReady: false };
+}
+
+function getDetectedPublicFallbackPriceVars(env: Env) {
+  const vars: string[] = [];
+  if (cleanEnvString(env.NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID)) vars.push("NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID");
+  if (cleanEnvString(env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID)) vars.push("NEXT_PUBLIC_STRIPE_PRO_PRICE_ID");
+  if (cleanEnvString(env.NEXT_PUBLIC_STRIPE_PREMIUM_PRICE_ID)) vars.push("NEXT_PUBLIC_STRIPE_PREMIUM_PRICE_ID");
+  return vars;
+}
+
+function getMissingLiveRequiredVars(env: Env, priceSources: BillingReadinessStatus["priceSources"]) {
+  const missing = new Set<string>();
+  for (const planKey of PAID_PLAN_KEYS) {
+    const source = priceSources[planKey];
+    if (!source.liveReady) missing.add(source.envVar);
+  }
+  if (getStripeModeHint(env) !== "live") missing.add("STRIPE_SECRET_KEY");
+  if (!cleanEnvString(env.STRIPE_WEBHOOK_SECRET)) missing.add("STRIPE_WEBHOOK_SECRET");
+  if (!hasProductionAppUrl(env)) missing.add("DZN_APP_URL");
+  return [...missing];
+}
+
+function buildBillingReadinessChecks(
+  env: Env,
+  priceSources: BillingReadinessStatus["priceSources"],
+  modeHint: BillingReadinessStatus["modeHint"],
+  webhookSecretConfigured: boolean,
+): BillingReadinessStatus["readinessChecks"] {
+  const publicFallbackVars = getDetectedPublicFallbackPriceVars(env);
+  return [
+    {
+      key: "starter-server-price",
+      label: "Starter live price",
+      ok: priceSources.starter.source === "server",
+      severity: "blocker",
+      detail: "Live billing requires STRIPE_PRICE_STARTER as a server-side Cloudflare Pages variable. Public fallback aliases are not enough for live readiness.",
+    },
+    {
+      key: "pro-server-price",
+      label: "Pro live price",
+      ok: priceSources.pro.source === "server",
+      severity: "blocker",
+      detail: "Live billing requires STRIPE_PRICE_PRO as a server-side Cloudflare Pages variable. Public fallback aliases are not enough for live readiness.",
+    },
+    {
+      key: "stripe-live-secret",
+      label: "Live Stripe secret",
+      ok: modeHint === "live",
+      severity: "blocker",
+      detail: "Live billing requires a live-mode STRIPE_SECRET_KEY. Test keys can validate checkout flow but must not be used for real payments.",
+    },
+    {
+      key: "stripe-webhook-secret",
+      label: "Webhook signing secret",
+      ok: webhookSecretConfigured,
+      severity: "blocker",
+      detail: "Live billing requires STRIPE_WEBHOOK_SECRET from the live production webhook endpoint.",
+    },
+    {
+      key: "production-app-url",
+      label: "Production app URL",
+      ok: hasProductionAppUrl(env),
+      severity: "blocker",
+      detail: "Live checkout redirects must use the production DZN URL, not a preview deployment.",
+    },
+    {
+      key: "public-price-fallbacks",
+      label: "Public price alias cleanup",
+      ok: publicFallbackVars.length === 0,
+      severity: "warning",
+      detail: "NEXT_PUBLIC_STRIPE_* price aliases are compatibility fallbacks only. They should not be the evidence used for live billing readiness.",
+    },
+    {
+      key: "human-approved-live-step",
+      label: "Human-approved live billing step",
+      ok: false,
+      severity: "info",
+      detail: "This readiness report is read-only. Creating or changing live Stripe products, prices, webhooks, secrets, D1 data, or migrations remains a separate high-risk human-approved operation.",
+    },
+  ];
+}
+
 function getStripeModeHint(env: Env): BillingReadinessStatus["modeHint"] {
   const secret = cleanEnvString(env.STRIPE_SECRET_KEY);
   if (!secret) return "not_configured";
   if (secret.startsWith("sk_live_")) return "live";
   if (secret.startsWith("sk_test_")) return "test";
   return "unknown";
+}
+
+function hasProductionAppUrl(env: Env) {
+  const value = cleanEnvString(env.DZN_APP_URL) ?? cleanEnvString(env.NEXT_PUBLIC_APP_URL);
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return false;
+    if (url.hostname.endsWith(".pages.dev") && url.hostname !== "dzn-network.pages.dev") return false;
+    return url.hostname === "dzn-network.pages.dev" || url.hostname === "dayz-network.com" || url.hostname.endsWith(".dayz-network.com");
+  } catch {
+    return false;
+  }
 }
 
 function cleanEnvString(value: unknown) {
