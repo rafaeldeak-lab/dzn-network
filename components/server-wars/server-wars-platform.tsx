@@ -100,7 +100,7 @@ export function ServerWarsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#02030a] text-white">
+    <div className="dzn-server-wars-shell min-h-screen bg-[#02030a] text-white">
       <main className="mx-auto flex w-full max-w-[1500px] flex-col gap-6 px-4 pb-12 pt-4 sm:px-6">
         <ServerWarsHero />
         {error ? <SoftNotice message={error} /> : null}
@@ -168,15 +168,17 @@ export function ServerWarDetailPage({ eventId }: { eventId: string }) {
         {error ? <SoftNotice message={error} /> : null}
         {event ? (
           <>
-            <section className="overflow-hidden rounded-2xl border border-violet-300/20 bg-[#080b19] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.42)]">
-              <p className="text-xs font-black uppercase tracking-[0.22em] text-cyan-200">Server VS Server</p>
-              <h1 className="mt-3 text-4xl font-black uppercase leading-none text-white sm:text-6xl">{event.title}</h1>
-              <p className="mt-3 max-w-3xl text-sm font-bold leading-6 text-zinc-300">{event.description ?? "Event-window score snapshots from real ADM-derived activity."}</p>
-              <div className="mt-5 flex flex-wrap gap-2">
-                <Pill>{event.status}</Pill>
-                <Pill>{event.scoringRulesetTitle}</Pill>
-                <Pill>{event.eligibleCategories.join(" / ")}</Pill>
-                {event.awaitingSnapshot ? <Pill>Awaiting score snapshot</Pill> : null}
+            <section className="dzn-server-wars-detail-hero overflow-hidden rounded-2xl border border-violet-300/20 bg-[#080b19] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.42)]">
+              <div className="dzn-server-wars-hero__content">
+                <p className="text-xs font-black uppercase tracking-[0.22em] text-cyan-200">Server VS Server</p>
+                <h1 className="mt-3 text-4xl font-black uppercase leading-none text-white sm:text-6xl">{event.title}</h1>
+                <p className="mt-3 max-w-3xl text-sm font-bold leading-6 text-zinc-300">{event.description ?? "Event-window score snapshots from real ADM-derived activity."}</p>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <Pill>{event.status}</Pill>
+                  <Pill>{event.scoringRulesetTitle}</Pill>
+                  <Pill>{event.eligibleCategories.join(" / ")}</Pill>
+                  {event.awaitingSnapshot ? <Pill>Awaiting score snapshot</Pill> : null}
+                </div>
               </div>
             </section>
             <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -214,9 +216,9 @@ export function ServerWarsTeaser() {
   }, []);
   const events = payload.events ?? [];
   return (
-    <section className="rounded-xl border border-violet-300/20 bg-violet-500/[0.08] p-4">
+    <section className="dzn-server-wars-teaser rounded-xl border border-violet-300/20 bg-violet-500/[0.08] p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+        <div className="dzn-server-wars-teaser__copy">
           <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-200">Server Wars MVP</p>
           <h2 className="mt-1 text-xl font-black uppercase text-white">Server VS Server standings</h2>
         </div>
@@ -247,8 +249,8 @@ async function loadServerWars(limit = 12) {
 
 function ServerWarsHero() {
   return (
-    <section className="overflow-hidden rounded-2xl border border-violet-300/20 bg-[radial-gradient(circle_at_20%_0%,rgba(168,85,247,0.24),transparent_34%),linear-gradient(135deg,rgba(5,8,20,0.96),rgba(2,6,23,0.9))] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.42)] sm:p-7">
-      <div className="max-w-4xl">
+    <section className="dzn-server-wars-hero overflow-hidden rounded-2xl border border-violet-300/20 bg-[radial-gradient(circle_at_20%_0%,rgba(168,85,247,0.24),transparent_34%),linear-gradient(135deg,rgba(5,8,20,0.96),rgba(2,6,23,0.9))] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.42)] sm:p-7">
+      <div className="dzn-server-wars-hero__content max-w-4xl">
         <p className="inline-flex rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-cyan-100">
           DZN Server Wars
         </p>
