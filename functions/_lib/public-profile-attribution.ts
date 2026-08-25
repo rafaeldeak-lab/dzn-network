@@ -30,6 +30,7 @@ export type PublicProfileAppearancePlacement = {
     | "server_review_author_rows"
     | "event_suggestion_author_rows"
     | "public_event_creator_member_rows"
+    | "public_community_member_directory"
     | "ctf_event_presentation_roster_rows"
     | "player_challenge_rows"
     | "player_hub_challenge_rows"
@@ -49,7 +50,12 @@ export type PublicProfileAppearancePlacement = {
 };
 
 export type PublicProfileExcludedAttributionSurface = {
-  key: "ctf_event_scoring_rosters" | "event_roster_scoring_and_decision_rows" | "owner_admin_review_tools" | "owner_event_management";
+  key:
+    | "ctf_event_scoring_rosters"
+    | "event_roster_scoring_and_decision_rows"
+    | "community_member_owner_workflows"
+    | "owner_admin_review_tools"
+    | "owner_event_management";
   label: string;
   reason: string;
   public_profile_links_enabled: false;
@@ -173,6 +179,16 @@ export function buildPublicProfileAppearancePreview(
         requiresUniqueUserBridge: true,
       }),
       attributionPlacement({
+        key: "public_community_member_directory",
+        label: "Public community member directory",
+        description: "Read-only public community member rows can link only through the community_members trusted user bridge.",
+        href: "/servers",
+        publicSurface: true,
+        ready,
+        linkState: bridgeLinkState,
+        requiresUniqueUserBridge: true,
+      }),
+      attributionPlacement({
         key: "ctf_event_presentation_roster_rows",
         label: "CTF/event presentation roster rows",
         description: "Read-only roster display rows can link only through an exact server/player account bridge.",
@@ -239,6 +255,13 @@ export function buildPublicProfileAppearancePreview(
         key: "event_roster_scoring_and_decision_rows",
         label: "Event roster scoring and decision rows",
         reason: "Public profile links stay off rows that affect scoring, eligibility, approvals, brackets, owner actions, or event outcomes.",
+        public_profile_links_enabled: false,
+        affects_competition: false,
+      },
+      {
+        key: "community_member_owner_workflows",
+        label: "Community member owner workflows",
+        reason: "Membership source writes, owner management rows, approval decisions, and import controls stay excluded from public attribution.",
         public_profile_links_enabled: false,
         affects_competition: false,
       },

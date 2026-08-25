@@ -726,6 +726,40 @@ Mutation scope:
 
 Fairness remains unchanged: event host/member profile links are presentation-only and must not affect billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, owner decisions, event eligibility, CTF scoring, bracket outcomes, or competitive eligibility.
 
+## Public-Safe Community Member Directory Foundation Slice
+
+The public-safe community member directory foundation adds a dedicated read-only public community/player-member surface only after introducing a unique trusted DZN user bridge. It does not infer identity from Discord display names, player names, gamertags, review names, leaderboard names, or browser-supplied handles.
+
+The slice adds:
+
+- Additive `community_members` bridge table with unique `(community_guild_id, user_id)` membership, linked to `discord_guilds.id` and `users.id`.
+- `GET /api/public/servers/[serverId]/community-members` as a public-safe read-only directory payload scoped to a public linked server.
+- `/servers/[slug]/community` as the public community member page.
+- Public server card/profile links to the community member page.
+- A `profile_attribution` safeguards object with placement `public_community_member_directory`, `link_mode = presentation_only`, the trusted bridge, no gamertag or Discord-name matching, no private identifier exposure, and no scoring, owner-decision, approval, bracket, billing, ranking, review, badge, season, Server Wars, XP, calling-card, or competitive eligibility influence.
+- Private profile-attribution preview metadata showing the community directory as an allowed public placement only when the player has an opted-in generated public profile handle and a unique trusted bridge.
+
+Authorization and bridge rules:
+
+- The directory is public read-only, but it may show only users present in `community_members` with `public_member_enabled = 1`, `source = 'trusted_dzn_bridge'`, and a published generated profile handle.
+- `community_members.community_guild_id` must point to the linked server's `discord_guilds.id`; `community_members.user_id` must point to exactly one DZN `users.id` row.
+- Hidden, unpublished, malformed, missing, disabled, unconfigured, or ambiguous members render as absent. They must not become fallback text with a clickable profile link.
+- Payloads may expose only safe display name, role label, coarse member-since label, generated public handle, public profile href, and public profile API href.
+- Payloads must not expose raw `community_guild_id`, raw `user_id`, Discord IDs, Discord OAuth tokens, raw award evidence, server ownership state, billing state, approval state, scoring state, or owner workflow state.
+
+Still excluded:
+
+- CTF scoring rows, accepted CTF audit feeds, locked roster checks, point progression, flag raises, and score writes.
+- Owner workflow rows, community member source/import writes, approval decisions, moderation authority, Nitrado linking, Discord bot mutations, and bracket outcomes.
+- Billing, plan status, owner entitlement, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, Cloudflare secrets, production D1 writes, live checkout activation, and issue #49.
+
+Mutation scope:
+
+- This slice may read `linked_servers`, `discord_guilds`, `community_members`, `users`, and `player_profile_privacy_preferences`.
+- It must not add writes, background jobs, checkout sessions, profile handle generation, profile privacy updates, billing updates, server ownership changes, ranking updates, discovery score updates, review rating changes, event mutations, roster mutations, CTF scoring changes, badge awards, season changes, Server Wars score/result changes, XP awards, calling-card awards, Nitrado calls, Discord bot messages, Cloudflare secret changes, production D1 writes, live checkout activation, or issue #49 changes.
+
+Fairness remains unchanged: public community member profile links are presentation-only and must not affect CTF scoring rows, owner workflow rows, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -757,6 +791,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | Public profile attribution preview/control and safe event-suggestion author links | Public event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Player-owned visibility control; trusted user bridge required; roster scoring gates and owner mutations excluded |
 | CTF/event presentation roster profile links | 401/login boundary | Owner/admin dashboard access required | Own server dashboard read-only, if owner/admin checks pass | Own server dashboard read-only, if owner/admin checks pass | Exact roster server/player bridge; generated handle required; presentation-only; registration, scoring, eligibility, and owner decisions unaffected |
 | Public event host/member profile links | Published profiles only | Published profiles only | Published profiles only | Published profiles only | `competitive_events.created_by` trusted user bridge; presentation-only; event leaderboards, scoring rows, approvals, brackets, and owner workflows excluded |
+| Public community member directory profile links | Published profiles only | Published profiles only | Published profiles only | Published profiles only | `community_members.community_guild_id` plus `community_members.user_id` trusted bridge; presentation-only; CTF scoring rows, owner workflow rows, approvals, brackets, billing, rankings, discovery, reviews, badges, seasons, Server Wars, XP, calling cards, and eligibility unaffected |
 | `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award fact collection, retry, and award processing |
 | `/api/owner/progression/award-audit` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Owner entitlement/admin plus linked-server audit scope; read-only |
 | `/dashboard/progression-awards` and `/owner/progression-awards` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Same private audit API; status/adapter/linked-server/retry filters only |

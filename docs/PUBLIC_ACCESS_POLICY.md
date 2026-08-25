@@ -12,6 +12,7 @@ Logged-out visitors may access:
 - `/login`
 - `/signup`
 - `/players/[handle]` when the player has explicitly enabled public profile visibility
+- `/servers/[slug]/community` for the public-safe community member directory
 - the public Discord invite link
 
 Logged-out navigation must only expose the public funnel: homepage/features, pricing, Login/Signup, and Discord. It must not show dashboard, server browser, leaderboards, stats, events, owner tools, or add-server controls before a session is known.
@@ -28,7 +29,7 @@ Logged-out visitors are redirected to `/login?returnTo=...` before app-page rend
 - `/setup`
 - `/test`
 
-Nested routes under those paths follow the same rule. Examples include `/events/suggest`, `/events/server-wars`, `/servers/profile?slug=...`, `/servers/[slug]`, `/dashboard/events`, and `/setup/...`.
+Nested routes under those paths follow the same rule unless explicitly listed as a public-safe shell above. Examples include `/events/suggest`, `/events/server-wars`, `/servers/profile?slug=...`, `/servers/[slug]`, `/dashboard/events`, and `/setup/...`.
 
 ## Logged-In Players
 
@@ -87,6 +88,7 @@ The homepage and public preview surfaces still need public read-only JSON. These
 - `/api/public/leaderboards/advanced`
 - `/api/public/server-wars`
 - `/api/public/player-profiles/[handle]`
+- `/api/public/servers/[serverId]/community-members`
 - `/api/events`
 - `/api/events/suggestions?sort=newest&limit=5`
 - `/api/dzn-pulse/config`
@@ -116,6 +118,8 @@ The public profile attribution expansion and controls polish slice adds a privat
 The CTF/event roster attribution proof slice allows optional public profile links only on read-only CTF dashboard roster display rows. The trusted bridge is exact `ctf_tournament_rosters.linked_server_id` plus `ctf_tournament_rosters.player_id` to `player_profiles.discord_id`, then `users.discord_id`, then an opted-in `player_profile_privacy_preferences.public_handle`. The dashboard must not infer links from gamertags or display names, expose internal user IDs or Discord IDs, make roster data public, write roster rows, alter registration, update scoring, affect eligibility, change owner decisions, touch billing, update rankings/discovery/reviews/badges/seasons/events/Server Wars/progression awards, call Nitrado, mutate Discord resources, enable live checkout, or merge issue #49. CTF roster registration, CTF scoring gates, accepted audit feeds, event approval flows, owner management rows, and admin/moderation flows remain out of scope unless a later slice proves a separate presentation-only boundary.
 
 The event roster/member public-safe expansion slice adds opt-in public profile attribution only to public event host/member display rows backed by the trusted `competitive_events.created_by` to `users.id` bridge, exposed as `public_event_creator_member_rows`. The public events list, event detail hero, event cards, event tables, and public server event profile cards may show a generated-handle profile link when the creator has `public_profile_enabled = 1` and a valid `public_handle`. Hidden, unpublished, malformed, missing, or unconfigured event creators render without a profile link, and public payloads must not expose raw `created_by`, internal user IDs, Discord IDs, requested handles, or gamertag-derived identity. Registered server rows, event leaderboards, CTF scoring rows, owner workflow rows, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility remain isolated and cannot read or write this attribution state.
+
+The public-safe community member directory foundation adds `/servers/[slug]/community` and `GET /api/public/servers/[serverId]/community-members` as read-only public-safe surfaces. The trusted bridge is `community_members.community_guild_id` plus `community_members.user_id` to `users.id`, then an opted-in `player_profile_privacy_preferences.public_handle`. The route may show only members with `public_member_enabled = 1`, `source = 'trusted_dzn_bridge'`, and a published generated handle. It must not infer identity from Discord names, gamertags, review names, leaderboard names, or request-supplied handles, and it must not expose raw community guild IDs, raw user IDs, Discord IDs, OAuth tokens, server ownership state, billing state, approval state, scoring state, raw award evidence, or owner workflow state. CTF scoring rows, owner workflow rows, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility remain isolated and cannot read or write this directory state.
 
 `/api/cron/player-progression/awards` is not a public or player endpoint. It is a cron-secret-protected trusted job for converting verified activity facts into player XP and calling-card awards. It may accept only explicitly verified source facts, process pending verified source rows, update existing player challenge participation progress/completion, and insert idempotent player XP/calling-card rows. It must not accept normal session auth, owner entitlement, Starter, Pro, server ownership, Nitrado, Stripe, or Discord bot permissions as a substitute for the cron secret. Progression awards must remain player profile progression only and must not affect rankings, discovery score, billing, server ownership, reviews, review score, events, tournaments, Server Wars scoring, badges, seasons, or competitive eligibility.
 
@@ -147,6 +151,7 @@ Post-merge verification should expect:
 
 - `/` returns `200`.
 - `/pricing` returns `200` and opens the dedicated Starter/Pro pricing page.
+- `/servers/preview/community` returns `200` as the public-safe community member shell.
 - Logged-out direct app pages such as `/player`, `/events`, `/leaderboards`, `/servers`, `/dashboard`, `/setup`, `/dzn-pulse`, and `/seasons` return a login redirect.
 - Logged-in free players can open player surfaces such as `/player`, `/events`, `/leaderboards`, `/servers`, `/dzn-pulse`, and `/seasons` without payment.
 - Logged-in free players who open `/setup` or `/dashboard` are redirected to the dedicated owner pricing page.
