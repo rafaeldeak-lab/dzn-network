@@ -293,6 +293,39 @@ Mutation scope:
 
 Fairness remains unchanged: notification badges, status history, repeated report pattern summaries, owner replies, and admin bulk triage must not affect paid plans, rankings, discovery score, review averages, badges, seasons, events, Server Wars, challenges, XP, calling cards, or competitive eligibility.
 
+## Review Notification Read State And Delivery Audit Slice
+
+The review notification read-state slice makes review-related DZN Pulse alerts easier to distinguish and clear without changing the general Pulse inbox, review moderation outcomes, billing, checkout, discovery, ranking, or competitive systems.
+
+The slice adds:
+
+- Dedicated DZN Pulse review notification types for review moderation alerts, review queue updates, and repeated report triage.
+- A DZN Pulse `Reviews` filter/category so review alerts are visibly separate from news, events, scores, and achievement alerts.
+- `POST /api/reviews/moderation/notifications/read` for explicitly marking unread review alerts read from the owner dashboard or review moderation queue.
+- Owner dashboard and `/dashboard/reviews` controls labelled around review alerts rather than general alerts.
+- Focused tests proving review-alert read state remains private per owner/admin and does not affect paid plans, rankings, discovery score, review score, badges, seasons, events, Server Wars, challenges, XP, calling cards, or competitive eligibility.
+
+Authorization rules:
+
+- Normal Discord players cannot clear review moderation alerts.
+- Normal server owners must pass the canonical owner entitlement layer before clearing review alerts.
+- Configured DZN admins can clear their own review moderation alerts without requiring an owner plan.
+- The endpoint only updates `user_notifications` rows for the authenticated owner/admin user. It must not clear another owner/admin user's alert rows.
+- The endpoint must use private no-store responses and must not expose notification read state publicly.
+
+Mutation scope:
+
+- The read action may update `user_notifications.read_at` for unread, unexpired review-alert rows owned by the authenticated user.
+- The read action may count the same user's unread general Pulse rows and unread review Pulse rows after the update.
+- General DZN Pulse alerts remain unread unless the user uses the separate general Pulse read controls.
+- No `server_reviews`, `server_review_reports`, moderation-action rows, billing rows, ownership rows, ranking rows, discovery rows, badge rows, season rows, event rows, Server Wars rows, Nitrado resources, Discord resources, Cloudflare secrets, Stripe resources, production D1 rows, checkout activation, or issue #49 merge is part of this slice. issue #49 remains reserved for final live checkout activation.
+
+Delivery audit:
+
+- Review moderation notifications are internal DZN Pulse records unless a later explicit Discord delivery slice enables and audits delivery.
+- This slice must not call Discord bot send helpers, mutate Discord channels, mutate Nitrado, create checkout sessions, or enable live checkout.
+- Review notification delivery and read state must stay operational metadata only; they must not feed review score, discovery score, rank, competitive eligibility, or paid-plan status.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -321,6 +354,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/servers/[serverId]/reviews/[reviewId]/reply` | Login/pricing boundary | Owner plan required | Allowed, then ownership checks still apply | Allowed, then ownership checks still apply | Owner entitlement plus server owner/admin checks |
 | `/dashboard/reviews` and `/api/reviews/moderation` | Login/pricing boundary | Owner plan required | Allowed for own linked servers only | Allowed for own linked servers only | Owner entitlement plus per-review server ownership/admin checks |
 | `/api/reviews/moderation/bulk` | Login/pricing boundary | Denied | Denied unless configured DZN admin | Denied unless configured DZN admin | DZN admin-only repeated report pattern triage |
+| `/api/reviews/moderation/notifications/read` | 401 | Owner plan required | Marks own review-alert notifications read | Marks own review-alert notifications read | Owner entitlement or DZN admin; user-scoped `user_notifications.read_at` only |
 | `/owner/reviews` | Data denied by API | Own reviews only if entitled, or global if DZN admin | Own reviews only, or global if DZN admin | Own reviews only, or global if DZN admin | Same moderation API; per-review ownership/admin checks |
 | `/setup` | Login required | Redirect to owner pricing | Allowed | Allowed | Page auth plus owner entitlement |
 | `/dashboard` owner tools | Login required | Redirect to owner pricing | Allowed | Allowed | Page auth plus owner entitlement |

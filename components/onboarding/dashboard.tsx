@@ -602,6 +602,7 @@ function ServerDashboard({
   const [serverInfoOverride, setServerInfoOverride] = useState<{ serverId: string; patch: Partial<LinkedServer> } | null>(null);
   const [badgeStatus, setBadgeStatus] = useState<ServerBadgeStatusResponse | null>(null);
   const [reviewModerationSummary, setReviewModerationSummary] = useState<DashboardReviewModerationSummary>(() => emptyReviewModerationSummary("loading"));
+  const [reviewAlertsBusy, setReviewAlertsBusy] = useState(false);
   const [advancedStats, setAdvancedStats] = useState<DashboardAdvancedStatsResult | null>(null);
   const [advancedStatsError, setAdvancedStatsError] = useState("");
   const [advancedStatsLoading, setAdvancedStatsLoading] = useState(false);
@@ -675,6 +676,42 @@ function ServerDashboard({
       active = false;
     };
   }, [server.id]);
+
+  async function markReviewAlertsReadFromDashboard() {
+    if (reviewAlertsBusy) return;
+    setReviewAlertsBusy(true);
+    setActionMessage("Marking review alerts read.");
+    try {
+      const response = await fetch("/api/reviews/moderation/notifications/read", {
+        method: "POST",
+        credentials: "include",
+        headers: { accept: "application/json" },
+      });
+      const result = await response.json().catch(() => null) as Record<string, unknown> | null;
+      if (!response.ok || !result?.ok) {
+        throw new Error(typeof result?.message === "string" ? result.message : "Review alerts could not be marked read.");
+      }
+
+      const marked = numberField(result.marked);
+      const unreadTotal = numberField(result.unreadCount);
+      const reviewUnreadCount = numberField(result.reviewUnreadCount);
+      setReviewModerationSummary((current) => ({
+        ...current,
+        notificationCounts: {
+          ...current.notificationCounts,
+          unread_total: unreadTotal,
+          review_notifications: reviewUnreadCount,
+        },
+      }));
+      setActionMessage(marked > 0
+        ? `${marked} review ${marked === 1 ? "alert" : "alerts"} marked read. General DZN Pulse alerts were left alone.`
+        : "No unread review alerts needed clearing.");
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Review alerts could not be marked read.");
+    } finally {
+      setReviewAlertsBusy(false);
+    }
+  }
 
   function updateDashboardAction(patch: Partial<DashboardActionProgress>) {
     setDashboardAction((current) => {
@@ -3609,7 +3646,11 @@ function ServerDashboard({
           ) : null}
 
           {activeTab === "reviews" ? (
-            <ReviewQueueDashboardPanel summary={reviewModerationSummary} />
+            <ReviewQueueDashboardPanel
+              summary={reviewModerationSummary}
+              reviewAlertsBusy={reviewAlertsBusy}
+              onMarkReviewAlertsRead={markReviewAlertsReadFromDashboard}
+            />
           ) : null}
 
           {activeTab === "sync-health" && showInternalSyncSupportTools ? (
@@ -4129,10 +4170,19 @@ function DashboardPanel({ children, className = "" }: { children: React.ReactNod
   );
 }
 
-function ReviewQueueDashboardPanel({ summary }: { summary: DashboardReviewModerationSummary }) {
+function ReviewQueueDashboardPanel({
+  summary,
+  reviewAlertsBusy,
+  onMarkReviewAlertsRead,
+}: {
+  summary: DashboardReviewModerationSummary;
+  reviewAlertsBusy: boolean;
+  onMarkReviewAlertsRead: () => void;
+}) {
   const counts = summary.counts;
   const notifications = summary.notificationCounts;
   const unavailable = summary.status === "unavailable";
+  const canMarkReviewAlertsRead = summary.status === "ready" && notifications.review_notifications > 0;
 
   return (
     <DashboardPanel className="p-4">
@@ -4143,10 +4193,21 @@ function ReviewQueueDashboardPanel({ summary }: { summary: DashboardReviewModera
             Review reports, pending reviews, owner replies, and DZN Pulse alerts stay in the owner moderation workflow. They do not change rank, discovery score, badges, seasons, events, or billing.
           </p>
         </div>
-        <Link href="/dashboard/reviews" className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-xs font-black uppercase text-cyan-50">
-          Open review queue
-          <ArrowRight className="h-3.5 w-3.5" />
-        </Link>
+        <div className="flex flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
+          <button
+            type="button"
+            disabled={reviewAlertsBusy || !canMarkReviewAlertsRead}
+            onClick={onMarkReviewAlertsRead}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-rose-300/25 bg-rose-400/10 px-4 py-3 text-xs font-black uppercase text-rose-50 transition hover:border-rose-300/45 hover:bg-rose-400/16 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <CircleCheck className="h-3.5 w-3.5" />
+            {reviewAlertsBusy ? "Clearing" : "Mark review alerts read"}
+          </button>
+          <Link href="/dashboard/reviews" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-xs font-black uppercase text-cyan-50">
+            Open review queue
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
       </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -4160,7 +4221,7 @@ function ReviewQueueDashboardPanel({ summary }: { summary: DashboardReviewModera
         <div className="rounded-lg border border-white/10 bg-black/24 p-3">
           <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Review alerts</p>
           <p className="mt-2 text-2xl font-black text-white">{summary.status === "loading" ? "..." : formatDashboardBadgeCount(notifications.review_notifications)}</p>
-          <p className="mt-1 text-xs leading-5 text-zinc-500">Unread DZN Pulse entries that point back to the moderation queue.</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">Unread review-only DZN Pulse entries that point back to the moderation queue. Clearing them does not clear general alerts.</p>
         </div>
         <div className="rounded-lg border border-white/10 bg-black/24 p-3">
           <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Private scope</p>

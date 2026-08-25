@@ -8,6 +8,12 @@ export const PULSE_NO_STORE_HEADERS = {
   "cache-control": "private, no-store, no-cache, must-revalidate",
 };
 
+export const PULSE_REVIEW_NOTIFICATION_TYPES = [
+  "review_needs_moderation",
+  "review_moderation_alert",
+  "review_bulk_triage",
+] as const;
+
 export const PULSE_NOTIFICATION_TYPES = [
   "upcoming_event",
   "event_starting",
@@ -22,10 +28,11 @@ export const PULSE_NOTIFICATION_TYPES = [
   "prize_unlocked",
   "dzn_news",
   "dzn_announcement",
+  ...PULSE_REVIEW_NOTIFICATION_TYPES,
 ] as const;
 
 export type PulseNotificationType = typeof PULSE_NOTIFICATION_TYPES[number];
-export type PulseNotificationFilter = "all" | "events" | "scores" | "achievements" | "news";
+export type PulseNotificationFilter = "all" | "events" | "scores" | "achievements" | "reviews" | "news";
 
 export type PulseNotification = {
   id: string;
@@ -293,7 +300,10 @@ export async function listUserNotifications(env: Env, user: SessionUser, options
     "(user_notifications.expires_at IS NULL OR datetime(user_notifications.expires_at) > datetime('now'))",
   ];
 
-  if (filter !== "all") {
+  if (filter === "reviews") {
+    conditions.push(reviewNotificationConditionSql());
+    bindings.push(...PULSE_REVIEW_NOTIFICATION_TYPES);
+  } else if (filter !== "all") {
     conditions.push(`user_notifications.type IN (${notificationTypesForFilter(filter).map(() => "?").join(", ")})`);
     bindings.push(...notificationTypesForFilter(filter));
   }
@@ -347,6 +357,23 @@ export async function countUnreadNotifications(env: Env, user: SessionUser) {
   return Math.max(0, Number(row?.count ?? 0) || 0);
 }
 
+export async function countUnreadReviewNotifications(env: Env, user: SessionUser) {
+  if (!isDznPulseEnabled(env)) return 0;
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM user_notifications
+       WHERE user_id = ?
+         AND read_at IS NULL
+         AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
+         AND ${reviewNotificationConditionSql()}`,
+    )
+    .bind(user.id, ...PULSE_REVIEW_NOTIFICATION_TYPES)
+    .first<{ count: number | null }>()
+    .catch(() => ({ count: 0 }));
+  return Math.max(0, Number(row?.count ?? 0) || 0);
+}
+
 export async function markNotificationRead(env: Env, user: SessionUser, notificationId: string) {
   if (!isDznPulseEnabled(env)) return { status: 404, ...pulseFeatureDisabledPayload() };
   const id = sanitizeIdentifier(notificationId);
@@ -377,6 +404,30 @@ export async function markAllNotificationsRead(env: Env, user: SessionUser) {
     .bind(now, user.id)
     .run();
   return { ok: true, status: 200, read_at: now, unreadCount: 0 };
+}
+
+export async function markReviewNotificationsRead(env: Env, user: SessionUser) {
+  if (!isDznPulseEnabled(env)) return { status: 404, ...pulseFeatureDisabledPayload() };
+  const now = new Date().toISOString();
+  const result = await requireDb(env)
+    .prepare(
+      `UPDATE user_notifications
+       SET read_at = COALESCE(read_at, ?)
+       WHERE user_id = ?
+         AND read_at IS NULL
+         AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
+         AND ${reviewNotificationConditionSql()}`,
+    )
+    .bind(now, user.id, ...PULSE_REVIEW_NOTIFICATION_TYPES)
+    .run<{ changes?: number }>();
+  return {
+    ok: true,
+    status: 200,
+    read_at: now,
+    marked: Math.max(0, Number(result.meta?.changes ?? 0) || 0),
+    unreadCount: await countUnreadNotifications(env, user),
+    reviewUnreadCount: await countUnreadReviewNotifications(env, user),
+  };
 }
 
 export async function clearReadNotifications(env: Env, user: SessionUser) {
@@ -732,6 +783,12 @@ export function sanitizePulseActionUrl(value: string | null | undefined) {
   }
 }
 
+export function reviewNotificationConditionSql(alias = "user_notifications") {
+  const tableAlias = alias.replace(/[^a-zA-Z0-9_]/g, "") || "user_notifications";
+  const placeholders = PULSE_REVIEW_NOTIFICATION_TYPES.map(() => "?").join(", ");
+  return `(${tableAlias}.type IN (${placeholders}) OR ${tableAlias}.action_url LIKE '/dashboard/reviews%')`;
+}
+
 function emptyPulseList(): PulseListResult {
   return {
     ok: true,
@@ -1046,7 +1103,7 @@ function toPulseRankRow(row: RankedServer<PulseSummaryServerRow>): PulseSummaryR
 
 function toNotification(row: NotificationRow): PulseNotification {
   const type = normalizeNotificationType(row.type);
-  const category = categoryForNotificationType(type);
+  const category = isReviewNotificationRow(row, type) ? "reviews" : categoryForNotificationType(type);
   return {
     id: row.id,
     type,
@@ -1072,6 +1129,7 @@ function notificationTypesForFilter(filter: PulseNotificationFilter): PulseNotif
   if (filter === "events") return ["upcoming_event", "event_starting", "event_started", "event_countdown", "event_entry_confirmed", "event_result", "prize_unlocked"];
   if (filter === "scores") return ["event_score_update", "event_rank_update", "monthly_global_rank"];
   if (filter === "achievements") return ["achievement_unlocked"];
+  if (filter === "reviews") return [...PULSE_REVIEW_NOTIFICATION_TYPES];
   if (filter === "news") return ["dzn_news", "dzn_announcement"];
   return [...PULSE_NOTIFICATION_TYPES];
 }
@@ -1080,6 +1138,7 @@ function categoryForNotificationType(type: PulseNotificationType): PulseNotifica
   if (notificationTypesForFilter("events").includes(type)) return "events";
   if (notificationTypesForFilter("scores").includes(type)) return "scores";
   if (notificationTypesForFilter("achievements").includes(type)) return "achievements";
+  if (notificationTypesForFilter("reviews").includes(type)) return "reviews";
   if (notificationTypesForFilter("news").includes(type)) return "news";
   return "all";
 }
@@ -1088,18 +1147,24 @@ function categoryLabel(category: PulseNotificationFilter) {
   if (category === "events") return "Events";
   if (category === "scores") return "Scores";
   if (category === "achievements") return "Achievements";
+  if (category === "reviews") return "Reviews";
   if (category === "news") return "News";
   return "All";
 }
 
 function normalizeNotificationFilter(value: unknown): PulseNotificationFilter {
   const normalized = String(value ?? "all").trim().toLowerCase();
-  return normalized === "events" || normalized === "scores" || normalized === "achievements" || normalized === "news" ? normalized : "all";
+  return normalized === "events" || normalized === "scores" || normalized === "achievements" || normalized === "reviews" || normalized === "news" ? normalized : "all";
 }
 
 function normalizeNotificationType(value: unknown): PulseNotificationType {
   const normalized = String(value ?? "").trim().toLowerCase();
   return (PULSE_NOTIFICATION_TYPES as readonly string[]).includes(normalized) ? normalized as PulseNotificationType : "dzn_announcement";
+}
+
+function isReviewNotificationRow(row: NotificationRow, type: PulseNotificationType) {
+  return (PULSE_REVIEW_NOTIFICATION_TYPES as readonly string[]).includes(type) ||
+    String(row.action_url ?? "").startsWith("/dashboard/reviews");
 }
 
 function normalizeDismissMode(value: unknown) {

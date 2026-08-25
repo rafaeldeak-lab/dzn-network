@@ -10,6 +10,7 @@ import {
   CircleAlert,
   Clock,
   Crown,
+  MessageSquareReply,
   Radio,
   Sparkles,
   Trophy,
@@ -41,7 +42,7 @@ type PulseConfig = {
   discordNotificationsEnabled: boolean;
 };
 
-export type PulseFilter = "all" | "events" | "scores" | "achievements" | "news";
+export type PulseFilter = "all" | "events" | "scores" | "achievements" | "reviews" | "news";
 
 export type PulseNotification = {
   id: string;
@@ -516,6 +517,7 @@ function NotificationTabs() {
     { key: "events", label: "Events" },
     { key: "scores", label: "Scores" },
     { key: "achievements", label: "Achievements" },
+    { key: "reviews", label: "Reviews" },
     { key: "news", label: "News" },
   ];
   return (
@@ -536,6 +538,7 @@ function NotificationTabs() {
 
 function NotificationCard({ notification, onClick }: { notification: PulseNotification; onClick: () => void }) {
   const tone = toneForNotification(notification.category);
+  const reviewAlert = isReviewPulseNotification(notification);
   return (
     <button
       type="button"
@@ -555,6 +558,7 @@ function NotificationCard({ notification, onClick }: { notification: PulseNotifi
           <span className="flex items-center gap-2">
             {!notification.read_at ? <span className="h-2 w-2 shrink-0 rounded-full bg-fuchsia-300 shadow-[0_0_12px_rgba(217,70,239,0.85)]" /> : null}
             <span className={`text-[10px] font-black uppercase ${tone.label}`}>{notification.category_label}</span>
+            {reviewAlert ? <span className="rounded border border-rose-300/24 bg-rose-400/10 px-1.5 py-0.5 text-[9px] font-black uppercase text-rose-100">Owner review alert</span> : null}
           </span>
           <span className="mt-1 block text-sm font-black uppercase leading-5 text-white">{notification.title}</span>
           <span className="mt-1 block text-xs font-bold leading-5 text-zinc-300">{notification.body}</span>
@@ -854,6 +858,7 @@ function NotificationErrorState({ message, onRetry }: { message: string; onRetry
 }
 
 function NotificationIcon({ type, className }: { type: string; className: string }) {
+  if (type.includes("review")) return <MessageSquareReply className={className} />;
   if (type.includes("achievement") || type.includes("prize")) return <Trophy className={className} />;
   if (type.includes("rank") || type.includes("score")) return <Crown className={className} />;
   if (type.includes("news") || type.includes("announcement")) return <Radio className={className} />;
@@ -864,12 +869,19 @@ function NotificationIcon({ type, className }: { type: string; className: string
 function toneForNotification(category: PulseFilter) {
   if (category === "scores") return tone("border-cyan-300/24", "bg-cyan-400/8", "border-cyan-300/28", "bg-cyan-400/12", "text-cyan-100", "text-cyan-200");
   if (category === "achievements") return tone("border-amber-300/28", "bg-amber-400/8", "border-amber-300/30", "bg-amber-400/12", "text-amber-100", "text-amber-200");
+  if (category === "reviews") return tone("border-rose-300/30", "bg-rose-400/10", "border-rose-300/32", "bg-rose-400/14", "text-rose-100", "text-rose-200");
   if (category === "news") return tone("border-blue-300/24", "bg-blue-400/8", "border-blue-300/28", "bg-blue-400/12", "text-blue-100", "text-blue-200");
   return tone("border-violet-300/24", "bg-violet-400/8", "border-violet-300/28", "bg-violet-400/12", "text-violet-100", "text-violet-200");
 }
 
 function tone(border: string, bg: string, iconBorder: string, iconBg: string, icon: string, label: string) {
   return { border, bg, iconBorder, iconBg, icon, label };
+}
+
+function isReviewPulseNotification(notification: PulseNotification) {
+  return notification.category === "reviews" ||
+    notification.type.includes("review") ||
+    String(notification.action_url ?? "").startsWith("/dashboard/reviews");
 }
 
 function formatTimeAgo(value: string | null | undefined) {

@@ -92,6 +92,7 @@ export function ReviewModerationDashboard({ homeHref = "/dashboard" }: { homeHre
   const [message, setMessage] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [bulkBusyAction, setBulkBusyAction] = useState<string | null>(null);
+  const [reviewAlertsBusy, setReviewAlertsBusy] = useState(false);
   const [bulkReason, setBulkReason] = useState("Repeated report pattern reviewed by DZN moderation.");
   const [refreshKey, setRefreshKey] = useState(0);
   const [pricingUrl, setPricingUrl] = useState(DEFAULT_PRICING_URL);
@@ -210,6 +211,40 @@ export function ReviewModerationDashboard({ homeHref = "/dashboard" }: { homeHre
     }
   }
 
+  async function markReviewAlertsRead() {
+    if (reviewAlertsBusy) return;
+    setReviewAlertsBusy(true);
+    setMessage({ tone: "info", text: "Marking review alerts read." });
+    try {
+      const response = await fetch("/api/reviews/moderation/notifications/read", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", accept: "application/json" },
+      });
+      const result = await safeJson(response);
+      if (!response.ok || !result?.ok) throw new Error(apiMessage(result, "Review alerts could not be marked read."));
+      const marked = Math.max(0, Math.trunc(Number(result.marked ?? 0) || 0));
+      const unreadCount = Math.max(0, Math.trunc(Number(result.unreadCount ?? payload?.notification_counts.unread_total ?? 0) || 0));
+      const reviewUnreadCount = Math.max(0, Math.trunc(Number(result.reviewUnreadCount ?? 0) || 0));
+      setPayload((current) => current ? {
+        ...current,
+        notification_counts: {
+          ...current.notification_counts,
+          unread_total: unreadCount,
+          review_notifications: reviewUnreadCount,
+        },
+      } : current);
+      setMessage({
+        tone: "success",
+        text: marked > 0 ? `${marked} review ${marked === 1 ? "alert" : "alerts"} marked read.` : "No unread review alerts needed clearing.",
+      });
+    } catch (error) {
+      setMessage({ tone: "error", text: error instanceof Error ? error.message : "Review alerts could not be marked read." });
+    } finally {
+      setReviewAlertsBusy(false);
+    }
+  }
+
   return (
     <main className="min-h-screen overflow-hidden bg-[#02030a] text-zinc-100">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(34,211,238,0.12),transparent_30%),radial-gradient(circle_at_80%_0%,rgba(168,85,247,0.12),transparent_34%),linear-gradient(180deg,rgba(2,3,10,0),#02030a_76%)]" />
@@ -252,10 +287,19 @@ export function ReviewModerationDashboard({ homeHref = "/dashboard" }: { homeHre
             </div>
           ) : null}
           {payload ? (
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
               <BadgeMetric icon={<Bell />} label="Unread Pulse" value={payload.notification_counts.unread_total} tone="violet" />
-              <BadgeMetric icon={<Flag />} label="Review alerts" value={payload.notification_counts.review_notifications} tone="red" />
+              <BadgeMetric icon={<Flag />} label="Unread review alerts" value={payload.notification_counts.review_notifications} tone="red" />
               <BadgeMetric icon={<ShieldAlert />} label="Queue badge" value={payload.notification_counts.review_queue} tone="amber" />
+              <button
+                type="button"
+                disabled={reviewAlertsBusy || payload.notification_counts.review_notifications <= 0}
+                onClick={() => void markReviewAlertsRead()}
+                className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-rose-300/25 bg-rose-400/10 px-3 py-2 text-xs font-black uppercase text-rose-50 transition hover:bg-rose-400/16 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <CheckCircle2 className="h-4 w-4" aria-hidden />
+                {reviewAlertsBusy ? "Clearing" : "Mark review alerts read"}
+              </button>
             </div>
           ) : null}
         </header>
