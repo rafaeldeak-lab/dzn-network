@@ -359,6 +359,7 @@ const NAV_ITEMS = [
   "Discord Control",
   "Event Control",
   "Review Control",
+  "Progression Audit",
   "Audit Log",
   "Settings / Access",
 ] as const;
@@ -557,6 +558,7 @@ export function OwnerConsole() {
       {activeView === "Discord Control" && discordControl ? <DiscordControlPanel data={discordControl} /> : null}
       {activeView === "Event Control" && overview ? <EventControlPanel overview={overview} /> : null}
       {activeView === "Review Control" ? <ReviewControlPanel summary={reviewControlSummary} /> : null}
+      {activeView === "Progression Audit" ? <ProgressionAuditControlPanel /> : null}
       {activeView === "Audit Log" ? <AuditLogPanel auditLog={auditLog} /> : null}
       {activeView === "Settings / Access" && overview ? <SettingsPanel overview={overview} /> : null}
     </OwnerShell>
@@ -1549,6 +1551,28 @@ function ReviewControlPanel({ summary }: { summary: ReviewControlSummary }) {
         ) : null}
         <Link href="/owner/reviews" className="mt-5 inline-flex rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 hover:bg-cyan-300/20">
           Open Review Queue
+        </Link>
+      </section>
+    </div>
+  );
+}
+
+function ProgressionAuditControlPanel() {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto lg:overflow-hidden">
+      <PanelHeader eyebrow="Progression Audit" title="Award-source history" description="Owner/admin visibility for verified progression source facts, adapter status, and protected retry metadata." />
+      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          <StatusCard title="Source reads" value="Verified only" tone="good" />
+          <StatusCard title="Retry execution" value="Cron-secret only" tone="good" />
+          <StatusCard title="Owner scope" value="Own servers" tone="good" />
+          <StatusCard title="Competitive impact" value="None" tone="good" />
+        </div>
+        <p className="mt-5 max-w-3xl text-sm leading-6 text-zinc-400">
+          The audit page filters award-source rows by status, adapter, linked server, and retry state. It never grants XP, never retries from the browser, and never changes billing, ranking, discovery, review score, badges, seasons, events, Server Wars scoring, or competitive eligibility.
+        </p>
+        <Link href="/owner/progression-awards" className="mt-5 inline-flex rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 hover:bg-cyan-300/20">
+          Open Progression Audit
         </Link>
       </section>
     </div>

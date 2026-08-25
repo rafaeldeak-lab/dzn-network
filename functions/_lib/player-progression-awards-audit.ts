@@ -26,6 +26,15 @@ export type ProgressionAwardAuditStatus =
   | "failed"
   | "all";
 
+export type ProgressionAwardAuditRetryFilter = "available" | "not_available" | "all";
+
+export type ProgressionAwardAuditFilters = {
+  status: ProgressionAwardAuditStatus;
+  adapter_key: string | null;
+  linked_server_id: string | null;
+  retry: ProgressionAwardAuditRetryFilter;
+};
+
 export type ProgressionAwardAuditItem = {
   id: string;
   user_id: string;
@@ -75,6 +84,12 @@ const AUDIT_STATUSES = new Set<ProgressionAwardAuditStatus>([
   "all",
 ]);
 
+const RETRY_FILTERS = new Set<ProgressionAwardAuditRetryFilter>([
+  "available",
+  "not_available",
+  "all",
+]);
+
 export async function authorizeProgressionAwardAuditRequest(env: Env, request: Request): Promise<
   | { ok: true; actor: ProgressionAwardAuditActor }
   | { ok: false; response: Response }
@@ -108,13 +123,25 @@ export async function authorizeProgressionAwardAuditRequest(env: Env, request: R
 export async function listProgressionAwardAudit(
   env: Env,
   actor: ProgressionAwardAuditActor,
-  options: { status?: string | null; limit?: number | null } = {},
+  options: {
+    status?: string | null;
+    limit?: number | null;
+    adapterKey?: string | null;
+    linkedServerId?: string | null;
+    retry?: string | null;
+  } = {},
 ) {
   const db = requireDb(env);
   const status = normalizeAuditStatus(options.status);
+  const adapterKey = normalizeFilterValue(options.adapterKey);
+  const linkedServerId = normalizeFilterValue(options.linkedServerId);
+  const retry = normalizeRetryFilter(options.retry);
   const limit = clampAuditLimit(options.limit);
   const bindings: unknown[] = [];
   const conditions = scopedAuditConditions(actor, bindings);
+  applyAdapterFilter(adapterKey, conditions, bindings);
+  applyLinkedServerFilter(linkedServerId, conditions, bindings);
+  applyRetryFilter(retry, conditions);
   applyStatusFilter(status, conditions);
   bindings.push(limit);
 
@@ -159,11 +186,18 @@ export async function listProgressionAwardAudit(
     .bind(...bindings)
     .all<ProgressionAwardAuditRow>();
 
-  const counts = await readProgressionAwardAuditCounts(env, actor);
+  const filters: ProgressionAwardAuditFilters = {
+    status,
+    adapter_key: adapterKey,
+    linked_server_id: linkedServerId,
+    retry,
+  };
+  const counts = await readProgressionAwardAuditCounts(env, actor, filters);
   return {
     ok: true,
     role: actor.role,
     filter: status,
+    filters,
     count: rows.results?.length ?? 0,
     counts,
     retry: {
@@ -175,9 +209,16 @@ export async function listProgressionAwardAudit(
   };
 }
 
-async function readProgressionAwardAuditCounts(env: Env, actor: ProgressionAwardAuditActor) {
+async function readProgressionAwardAuditCounts(
+  env: Env,
+  actor: ProgressionAwardAuditActor,
+  filters: ProgressionAwardAuditFilters,
+) {
   const bindings: unknown[] = [];
   const conditions = scopedAuditConditions(actor, bindings);
+  applyAdapterFilter(filters.adapter_key, conditions, bindings);
+  applyLinkedServerFilter(filters.linked_server_id, conditions, bindings);
+  applyRetryFilter(filters.retry, conditions);
   const rows = await requireDb(env)
     .prepare(
       `SELECT result_status, COUNT(*) AS count
@@ -226,6 +267,32 @@ function applyStatusFilter(status: ProgressionAwardAuditStatus, conditions: stri
   conditions.push(`player_progression_award_sources.result_status = '${status}'`);
 }
 
+function applyAdapterFilter(adapterKey: string | null, conditions: string[], bindings: unknown[]) {
+  if (!adapterKey) return;
+  conditions.push("player_progression_award_sources.adapter_key = ?");
+  bindings.push(adapterKey);
+}
+
+function applyLinkedServerFilter(linkedServerId: string | null, conditions: string[], bindings: unknown[]) {
+  if (!linkedServerId) return;
+  if (linkedServerId === "__global__") {
+    conditions.push("player_progression_award_sources.linked_server_id IS NULL");
+    return;
+  }
+  conditions.push("player_progression_award_sources.linked_server_id = ?");
+  bindings.push(linkedServerId);
+}
+
+function applyRetryFilter(retry: ProgressionAwardAuditRetryFilter, conditions: string[]) {
+  if (retry === "available") {
+    conditions.push("player_progression_award_sources.result_status = 'failed'");
+    return;
+  }
+  if (retry === "not_available") {
+    conditions.push("player_progression_award_sources.result_status != 'failed'");
+  }
+}
+
 function toAuditItem(row: ProgressionAwardAuditRow): ProgressionAwardAuditItem {
   const resultStatus = normalizeResultStatus(row.result_status);
   return {
@@ -264,6 +331,20 @@ function normalizeAuditStatus(value: unknown): ProgressionAwardAuditStatus {
   return AUDIT_STATUSES.has(normalized as ProgressionAwardAuditStatus)
     ? normalized as ProgressionAwardAuditStatus
     : "finished";
+}
+
+function normalizeRetryFilter(value: unknown): ProgressionAwardAuditRetryFilter {
+  if (typeof value !== "string") return "all";
+  const normalized = value.trim().toLowerCase();
+  return RETRY_FILTERS.has(normalized as ProgressionAwardAuditRetryFilter)
+    ? normalized as ProgressionAwardAuditRetryFilter
+    : "all";
+}
+
+function normalizeFilterValue(value: unknown) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized.length > 0 && normalized.length <= 128 ? normalized : null;
 }
 
 function normalizeResultStatus(value: unknown): "pending" | "progressed" | "awarded" | "duplicate" | "skipped" | "failed" {

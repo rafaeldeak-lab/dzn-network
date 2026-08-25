@@ -412,6 +412,36 @@ Mutation scope:
 
 Fairness remains unchanged: verified activity adapters and their audit history are player-side progression plumbing only. They must not affect paid plans, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, server ownership, or competitive eligibility.
 
+## Progression Award Audit UI Slice
+
+The progression award audit UI slice surfaces owner/admin award-source history in dashboard views without creating a browser-side award or retry path.
+
+The slice adds:
+
+- A `Progression Audit` tab in the server owner dashboard.
+- Dedicated `/dashboard/progression-awards` and `/owner/progression-awards` audit pages.
+- Status, adapter, linked-server, and retry-state filters for `GET /api/owner/progression/award-audit`.
+- Dashboard copy must explicitly describe status, adapter, linked-server, and retry-state filters.
+- Owner/admin display of verified source rows, challenge names, player display names, linked servers, adapter keys, source tables, result status, attempt counts, retry counts, and timestamps.
+- Clear dashboard copy that retry execution remains cron-secret-only.
+
+Authorization rules:
+
+- Normal players remain free to read/join challenges through `/api/player/challenges` but cannot read owner audit history without owner entitlement or configured DZN admin access.
+- Normal owners must pass the canonical owner entitlement layer before reading audit history.
+- Normal owners can only read source rows tied to their own linked servers, even when using linked-server filters.
+- Configured DZN admins can read global audit history.
+- The browser UI must not call the cron award job, submit `retry_failed`, create source facts, or grant XP/calling cards.
+
+Mutation scope:
+
+- The UI and `GET /api/owner/progression/award-audit` route are read-only.
+- The audit route may read verified `player_progression_award_sources`, `users`, `player_challenges`, and `linked_servers` rows for display.
+- Retry execution remains limited to the cron-secret-protected `/api/cron/player-progression/awards` job.
+- No dashboard audit path may create checkout sessions, update owner billing, change server ownership, update rankings/leaderboards, modify discovery score, mutate reviews, award server badges, change seasons, modify events, alter Server Wars scoring/results, touch Nitrado, send Discord bot messages, change Cloudflare secrets, apply production migrations, merge issue #49, or enable live checkout.
+
+Fairness remains unchanged: audit visibility, source status, retry metadata, XP, and calling cards remain player-side progression and operational metadata only. They must not affect paid plans, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, server ownership, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -438,6 +468,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/player/challenges` | 401 | Allowed | Allowed | Allowed | Session auth, player participation only |
 | `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award fact collection, retry, and award processing |
 | `/api/owner/progression/award-audit` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Owner entitlement/admin plus linked-server audit scope; read-only |
+| `/dashboard/progression-awards` and `/owner/progression-awards` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Same private audit API; status/adapter/linked-server/retry filters only |
 | `/api/public/server-reviews` | Preview/locked summary | Allowed | Allowed | Allowed | Public/read with session-aware redaction |
 | `/api/public/server-reviews/[reviewId]/report` | 401 | Allowed | Allowed | Allowed | Session auth, report/moderation hook only |
 | `/api/servers/[serverId]/reviews/[reviewId]/reply` | Login/pricing boundary | Owner plan required | Allowed, then ownership checks still apply | Allowed, then ownership checks still apply | Owner entitlement plus server owner/admin checks |

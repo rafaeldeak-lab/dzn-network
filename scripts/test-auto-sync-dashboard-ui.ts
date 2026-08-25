@@ -78,7 +78,10 @@ assert.equal(dashboardSource.includes("ServerCategoryReminderBanner"), false, "D
 assert.equal(dashboardSource.includes("Set your server category to join events and matchmaking."), false, "Dashboard overview must not show the old global category warning.");
 assert.equal(dashboardSource.includes("Set your server category to enter category-matched events."), true, "Event Hub must keep its contextual category warning.");
 assert.equal(dashboardSource.includes('<SetupCheck label="Server Category"'), true, "Setup Progress must still show Server Category when missing.");
-assert.equal(dashboardSource.includes('activeTab === "discord-posts" || activeTab === "sync-health" ? "hidden"'), true);
+const hiddenAsideCondition = dashboardSource.match(/<aside className=\{activeTab === "discord-posts"[\s\S]{0,220}\? "hidden" : "grid content-start gap-5"\}/)?.[0] ?? "";
+for (const fullWidthTab of ["discord-posts", "sync-health", "reviews", "progression-audit"]) {
+  assert.equal(hiddenAsideCondition.includes(`activeTab === "${fullWidthTab}"`), true, `Dashboard side panel should stay hidden for ${fullWidthTab}.`);
+}
 
 assert.equal(healthApiSource.includes("autoSync"), true);
 assert.equal(healthApiSource.includes("manualActionRequired"), true);

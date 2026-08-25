@@ -11,6 +11,9 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const url = new URL(request.url);
     const payload = await listProgressionAwardAudit(env, auth.actor, {
       status: url.searchParams.get("status"),
+      adapterKey: url.searchParams.get("adapter_key") ?? url.searchParams.get("adapter"),
+      linkedServerId: url.searchParams.get("linked_server_id"),
+      retry: url.searchParams.get("retry"),
       limit: Number(url.searchParams.get("limit") ?? 50),
     });
     return json(payload, { headers: privateNoStoreHeaders() });

@@ -151,4 +151,4 @@ Run before PR handoff:
 
 ## Next Slice
 
-Next should be the progression award audit UI slice: surface the owner/admin award-source history in the owner dashboard with clear status, adapter, retry, and linked-server filters while keeping retries cron-secret-only and all progression outcomes isolated from live payments and competitive systems.
+The progression award audit UI slice is now stacked next. After that, the next recommended slice should be the player profile progression showcase: make earned XP, challenge progress, and calling cards more visible from the player profile/Player Hub, with privacy-aware display controls and tests proving profile progression remains earned/player-side only and separate from paid plans, rankings, discovery, reviews, badges, seasons, events, Server Wars scoring, and competitive eligibility.
