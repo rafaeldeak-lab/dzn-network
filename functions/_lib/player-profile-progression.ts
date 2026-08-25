@@ -6,6 +6,7 @@ import {
   type PlayerProgressSummary,
 } from "./player-progression";
 import { getPlayerProfilePrivacyPreferences, type PlayerProfilePrivacyPreferences } from "./player-profile-privacy";
+import { buildPublicProfileAppearancePreview, type PublicProfileAppearancePreview } from "./public-profile-attribution";
 import type { Env, SessionUser } from "./types";
 
 export type PlayerProfileProgressionPayload = {
@@ -40,6 +41,7 @@ export type PlayerProfileProgressionPayload = {
     controls: PlayerProfilePrivacyPreferences["controls"];
     public_safe_preview: PlayerProfilePrivacyPreferences["public_safe_preview"];
   };
+  profile_attribution: PublicProfileAppearancePreview;
   progression: {
     total_xp: number;
     available_challenges: number;
@@ -150,6 +152,7 @@ export async function getPlayerProfileProgressionPayload(
       controls: privacy.controls,
       public_safe_preview: privacy.public_safe_preview,
     },
+    profile_attribution: buildPublicProfileAppearancePreview(privacy),
     progression: {
       total_xp: totalXp,
       available_challenges: safeNumber(progress.available_challenges),

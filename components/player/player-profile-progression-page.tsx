@@ -9,7 +9,9 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  ExternalLink,
   Lock,
+  RadioTower,
   Save,
   ShieldCheck,
   Sparkles,
@@ -56,6 +58,54 @@ type ProgressionTimelineItem = {
   label: string;
   detail: string;
   occurred_at: string | null;
+};
+
+type ProfileAttributionLinkState =
+  | "visible_when_present"
+  | "eligible_when_unique_user_bridge"
+  | "hidden_until_public_profile"
+  | "hidden_until_generated_handle"
+  | "future_safe_extension";
+
+type ProfileAttributionPlacement = {
+  key: string;
+  label: string;
+  description: string;
+  href: string;
+  public_surface: boolean;
+  can_show_public_profile_link: boolean;
+  link_state: ProfileAttributionLinkState;
+  requires_generated_handle: boolean;
+  requires_unique_user_bridge: boolean;
+  controlled_by: "public_profile_visibility";
+  exposes_private_identifiers: boolean;
+  affects_competition: boolean;
+};
+
+type ProfileExcludedAttributionSurface = {
+  key: string;
+  label: string;
+  reason: string;
+  public_profile_links_enabled: boolean;
+  affects_competition: boolean;
+};
+
+type ProfileAttributionPreview = {
+  public_profile_enabled: boolean;
+  ready: boolean;
+  public_handle: string | null;
+  public_href: string | null;
+  public_api_href: string | null;
+  settings_href: string;
+  control?: {
+    key?: string;
+    label?: string;
+    settings_href?: string;
+    disables_all_public_attribution_links?: boolean;
+  };
+  placements: ProfileAttributionPlacement[];
+  excluded_surfaces: ProfileExcludedAttributionSurface[];
+  fairness?: Record<string, boolean>;
 };
 
 type PlayerProfilePayload = {
@@ -112,6 +162,7 @@ type PlayerProfilePayload = {
     timeline?: ProgressionTimelineItem[];
     challenges_href?: string;
   };
+  profile_attribution?: ProfileAttributionPreview;
   fairness?: Record<string, boolean>;
   fetched_at?: string;
 };
@@ -121,6 +172,7 @@ type ProfilePrivacyControlsPayload = NonNullable<NonNullable<PlayerProfilePayloa
 type ProfilePrivacySettingsResponse = {
   ok?: boolean;
   privacy?: PlayerProfilePayload["privacy"];
+  profile_attribution?: ProfileAttributionPreview;
   message?: string;
   fairness?: Record<string, boolean>;
 };
@@ -183,6 +235,7 @@ export function PlayerProfileProgressionPage() {
   const cards = progression.calling_cards ?? [];
   const challenges = progression.challenge_progress ?? [];
   const timeline = progression.timeline ?? [];
+  const profileAttribution = normalizeProfileAttributionPreview(profile.profile_attribution, profile.privacy);
   const publicMode = showcaseMode === "public";
   const hiddenMode = showcaseMode === "hidden";
   const canShowXp = showXp && !hiddenMode;
@@ -235,6 +288,7 @@ export function PlayerProfileProgressionPage() {
       setPayload((current) => normalizePayload({
         ...(current ?? {}),
         privacy: normalizedPrivacy,
+        profile_attribution: normalizeProfileAttributionPreview(response.profile_attribution, normalizedPrivacy),
       }));
       applyPrivacyState(normalizedPrivacy);
       setSavedPreferenceKey(preferenceKeyFromState(normalizedPrivacy));
@@ -362,6 +416,12 @@ export function PlayerProfileProgressionPage() {
               Public-safe display does not expose Discord IDs, user IDs, source IDs, raw evidence, source details, or exact award timestamps.
             </div>
           </section>
+
+          <PublicProfileAppearancePanel
+            preview={profileAttribution}
+            publicProfileEnabled={publicProfileEnabled}
+            onDisable={() => setPublicProfileEnabled(false)}
+          />
 
           <section className="rounded-lg border border-amber-300/25 bg-amber-400/10 p-4">
             <PanelHeader icon={<Lock className="h-5 w-5" />} title="Fair Progression Boundary" />
@@ -520,6 +580,99 @@ function PrivacyToggle({
   );
 }
 
+function PublicProfileAppearancePanel({
+  preview,
+  publicProfileEnabled,
+  onDisable,
+}: {
+  preview: ProfileAttributionPreview;
+  publicProfileEnabled: boolean;
+  onDisable: () => void;
+}) {
+  const livePlacements = preview.placements.filter((placement) => placement.can_show_public_profile_link);
+  return (
+    <section className="rounded-lg border border-cyan-300/20 bg-cyan-400/8 p-4">
+      <PanelHeader icon={<RadioTower className="h-5 w-5" />} title="Where My Public Profile Appears" />
+      <p className="mt-3 text-sm font-bold leading-6 text-zinc-300">
+        Public links appear only when profile visibility is on, a generated handle exists, and the row has a trusted user bridge. CTF/event scoring rosters and owner workflows stay excluded.
+      </p>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <span className={`rounded border px-2.5 py-1 text-[10px] font-black uppercase ${preview.ready ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" : "border-zinc-500/25 bg-zinc-500/10 text-zinc-400"}`}>
+          {preview.ready ? `${livePlacements.length} active link areas` : "Public links hidden"}
+        </span>
+        {preview.public_href ? (
+          <Link href={preview.public_href} className="inline-flex items-center gap-1 rounded border border-cyan-300/20 bg-black/20 px-2.5 py-1 text-[10px] font-black uppercase text-cyan-100 transition hover:border-cyan-200/45">
+            Open Public Profile
+            <ExternalLink className="h-3 w-3" />
+          </Link>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        disabled={!publicProfileEnabled}
+        onClick={onDisable}
+        className="mt-4 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded border border-rose-300/24 bg-rose-400/10 px-4 py-3 text-xs font-black uppercase text-rose-100 transition hover:bg-rose-400/16 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.04] disabled:text-zinc-500"
+      >
+        <EyeOff className="h-4 w-4" />
+        Hide All Public Links
+      </button>
+      <div className="mt-4 grid gap-2">
+        {preview.placements.map((placement) => (
+          <ProfileAppearanceRow key={placement.key} placement={placement} />
+        ))}
+      </div>
+      <div className="mt-4 rounded border border-white/10 bg-black/24 p-3">
+        <p className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">Excluded until dedicated proof</p>
+        <div className="mt-2 grid gap-2">
+          {preview.excluded_surfaces.map((surface) => (
+            <div key={surface.key} className="flex items-start gap-2 text-xs font-bold leading-5 text-zinc-400">
+              <EyeOff className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-200" />
+              <span>
+                <span className="font-black uppercase text-zinc-200">{surface.label}</span>: {surface.reason}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ProfileAppearanceRow({ placement }: { placement: ProfileAttributionPlacement }) {
+  return (
+    <div className="rounded border border-white/10 bg-black/24 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <span className="min-w-0">
+          <span className="block break-words text-xs font-black uppercase text-white [overflow-wrap:anywhere]">{placement.label}</span>
+          <span className="mt-1 block text-xs font-bold leading-5 text-zinc-400">{placement.description}</span>
+        </span>
+        <ProfileAppearanceState state={placement.link_state} active={placement.can_show_public_profile_link} />
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-black uppercase text-zinc-500">
+        <span>{placement.public_surface ? "Public surface" : "Private player preview"}</span>
+        <span>/</span>
+        <span>{placement.requires_unique_user_bridge ? "Trusted bridge required" : "Generated handle required"}</span>
+      </div>
+    </div>
+  );
+}
+
+function ProfileAppearanceState({ state, active }: { state: ProfileAttributionLinkState; active: boolean }) {
+  const label = active
+    ? "Can show"
+    : state === "future_safe_extension"
+      ? "Future slice"
+      : state === "hidden_until_generated_handle"
+        ? "Needs handle"
+        : "Hidden";
+  const classes = active
+    ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100"
+    : state === "future_safe_extension"
+      ? "border-amber-300/25 bg-amber-400/10 text-amber-100"
+      : "border-zinc-500/25 bg-zinc-500/10 text-zinc-400";
+  return <span className={`shrink-0 rounded border px-2 py-1 text-[10px] font-black uppercase ${classes}`}>{label}</span>;
+}
+
 function ProgressStat({ label, value, tone }: { label: string; value: number; tone: "amber" | "cyan" | "emerald" | "violet" }) {
   const toneClass = {
     amber: "border-amber-300/25 bg-amber-400/10 text-amber-50",
@@ -651,6 +804,7 @@ function NoticePanel({ title, message }: { title: string; message: string }) {
 
 function normalizePayload(value: PlayerProfilePayload | null): PlayerProfilePayload {
   if (!value || typeof value !== "object") {
+    const privacy = normalizePrivacy(null);
     return {
       ok: false,
       source: "unavailable",
@@ -668,15 +822,18 @@ function normalizePayload(value: PlayerProfilePayload | null): PlayerProfilePayl
         calling_card_count: 0,
         showcase_href: "/player/profile",
       },
-      privacy: normalizePrivacy(null),
+      privacy,
       progression: defaultProgression(),
+      profile_attribution: normalizeProfileAttributionPreview(null, privacy),
       fairness: {},
     };
   }
+  const privacy = normalizePrivacy(value.privacy);
   return {
     ...value,
-    privacy: normalizePrivacy(value.privacy),
+    privacy,
     progression: normalizeProgression(value.progression),
+    profile_attribution: normalizeProfileAttributionPreview(value.profile_attribution, privacy),
   };
 }
 
@@ -710,6 +867,135 @@ function normalizePrivacyControls(value: Partial<ProfilePrivacyControlsPayload> 
     show_discord_identity: false,
     show_source_details: false,
   };
+}
+
+function normalizeProfileAttributionPreview(
+  value: ProfileAttributionPreview | null | undefined,
+  privacy: PlayerProfilePayload["privacy"],
+): ProfileAttributionPreview {
+  const record = value && typeof value === "object" ? value : null;
+  const publicProfileEnabled = typeof record?.public_profile_enabled === "boolean"
+    ? record.public_profile_enabled
+    : Boolean(privacy?.public_profile_enabled);
+  const publicHandle = stringOrNull(record?.public_handle ?? privacy?.public_handle);
+  const publicHref = stringOrNull(record?.public_href ?? privacy?.public_href);
+  const publicApiHref = stringOrNull(record?.public_api_href ?? privacy?.public_api_href);
+  const settingsHref = stringOrNull(record?.settings_href ?? privacy?.settings_href) ?? "/api/player/profile-privacy";
+  const placements = Array.isArray(record?.placements)
+    ? record.placements.map(normalizeProfileAttributionPlacement).filter(Boolean) as ProfileAttributionPlacement[]
+    : [];
+  const excludedSurfaces = Array.isArray(record?.excluded_surfaces)
+    ? record.excluded_surfaces.map(normalizeProfileExcludedSurface).filter(Boolean) as ProfileExcludedAttributionSurface[]
+    : [];
+
+  return {
+    public_profile_enabled: publicProfileEnabled,
+    ready: Boolean(record?.ready && publicProfileEnabled && publicHandle && publicHref && publicApiHref),
+    public_handle: publicHandle,
+    public_href: publicHref,
+    public_api_href: publicApiHref,
+    settings_href: settingsHref,
+    control: record?.control,
+    placements: placements.length ? placements : defaultProfileAttributionPlacements(publicProfileEnabled, publicHref),
+    excluded_surfaces: excludedSurfaces.length ? excludedSurfaces : defaultExcludedAttributionSurfaces(),
+    fairness: record?.fairness && typeof record.fairness === "object" ? record.fairness : {},
+  };
+}
+
+function normalizeProfileAttributionPlacement(value: unknown): ProfileAttributionPlacement | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Partial<ProfileAttributionPlacement>;
+  return {
+    key: stringOrNull(record.key) ?? "unknown",
+    label: stringOrNull(record.label) ?? "Profile link area",
+    description: stringOrNull(record.description) ?? "Public profile attribution is controlled by your saved visibility setting.",
+    href: stringOrNull(record.href) ?? "/player/profile",
+    public_surface: Boolean(record.public_surface),
+    can_show_public_profile_link: Boolean(record.can_show_public_profile_link),
+    link_state: normalizeProfileAttributionLinkState(record.link_state),
+    requires_generated_handle: record.requires_generated_handle !== false,
+    requires_unique_user_bridge: Boolean(record.requires_unique_user_bridge),
+    controlled_by: "public_profile_visibility",
+    exposes_private_identifiers: false,
+    affects_competition: false,
+  };
+}
+
+function normalizeProfileExcludedSurface(value: unknown): ProfileExcludedAttributionSurface | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Partial<ProfileExcludedAttributionSurface>;
+  return {
+    key: stringOrNull(record.key) ?? "excluded_surface",
+    label: stringOrNull(record.label) ?? "Excluded surface",
+    reason: stringOrNull(record.reason) ?? "Excluded until a dedicated slice proves links are presentation-only.",
+    public_profile_links_enabled: false,
+    affects_competition: false,
+  };
+}
+
+function defaultProfileAttributionPlacements(publicProfileEnabled: boolean, publicHref: string | null): ProfileAttributionPlacement[] {
+  const ready = Boolean(publicProfileEnabled && publicHref);
+  const state: ProfileAttributionLinkState = ready ? "visible_when_present" : "hidden_until_public_profile";
+  return [
+    profileAttributionPlacement("public_profile_page", "Public profile page", publicHref ?? "/player/profile", true, ready, state, false),
+    profileAttributionPlacement("server_review_author_rows", "Review author rows", "/servers", true, ready, state, true),
+    profileAttributionPlacement("event_suggestion_author_rows", "Event suggestion author rows", "/events/suggest", true, ready, state, true),
+    profileAttributionPlacement("player_challenge_rows", "Challenge participation rows", "/events/challenges", false, ready, state, true),
+    profileAttributionPlacement("player_hub_challenge_rows", "Player Hub challenge rows", "/player", false, ready, state, true),
+    profileAttributionPlacement("safe_leaderboard_mentions", "Safe leaderboard mentions", "/leaderboards", true, ready, ready ? "eligible_when_unique_user_bridge" : state, true),
+  ];
+}
+
+function profileAttributionPlacement(
+  key: string,
+  label: string,
+  href: string,
+  publicSurface: boolean,
+  ready: boolean,
+  linkState: ProfileAttributionLinkState,
+  requiresUniqueUserBridge: boolean,
+): ProfileAttributionPlacement {
+  return {
+    key,
+    label,
+    description: "Public profile links appear only after profile visibility, generated handle, and trusted bridge checks pass.",
+    href,
+    public_surface: publicSurface,
+    can_show_public_profile_link: ready,
+    link_state: linkState,
+    requires_generated_handle: true,
+    requires_unique_user_bridge: requiresUniqueUserBridge,
+    controlled_by: "public_profile_visibility",
+    exposes_private_identifiers: false,
+    affects_competition: false,
+  };
+}
+
+function defaultExcludedAttributionSurfaces(): ProfileExcludedAttributionSurface[] {
+  return [
+    {
+      key: "ctf_event_scoring_rosters",
+      label: "CTF/event scoring rosters",
+      reason: "Excluded because scoring and owner workflow rows need dedicated proof.",
+      public_profile_links_enabled: false,
+      affects_competition: false,
+    },
+  ];
+}
+
+function normalizeProfileAttributionLinkState(value: unknown): ProfileAttributionLinkState {
+  return value === "visible_when_present"
+    || value === "eligible_when_unique_user_bridge"
+    || value === "hidden_until_public_profile"
+    || value === "hidden_until_generated_handle"
+    || value === "future_safe_extension"
+    ? value
+    : "hidden_until_public_profile";
+}
+
+function stringOrNull(value: unknown) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text || null;
 }
 
 function preferenceKeyFromState(privacy: PlayerProfilePayload["privacy"]) {

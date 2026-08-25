@@ -46,6 +46,34 @@ This follow-on slice adds:
 
 This follow-on slice must not infer profile links from gamertag/name matching, expose Discord IDs, expose internal user IDs, expose Discord avatar URLs, create handles, write privacy settings, mutate reviews, mutate leaderboard scores, update discovery scores, change billing or owner entitlement, award XP, award calling cards, touch Nitrado, mutate Discord resources, change Cloudflare secrets, apply production D1 writes, enable live checkout, or merge issue #49.
 
+## Follow-On Public Profile Attribution Expansion And Controls Polish
+
+The public profile attribution expansion and controls polish slice adds private profile-link preview controls for players and extends attribution only to newly touched public/player-safe rows that already have a trusted DZN user bridge.
+
+Branch details:
+
+- Branch: `codex/public-profile-attribution-expansion-controls-polish-20260825`
+- Base branch: `codex/public-profile-cross-surface-attribution-20260825`
+- Base commit: `6d0b45f709ac4a097aa23acab1c59875b8d4d804`
+
+This follow-on slice adds:
+
+- A shared `buildPublicProfileAppearancePreview` contract in the public profile attribution helper.
+- `profile_attribution` preview metadata on `GET /api/player/profile`, `GET /api/player/profile-privacy`, `PATCH /api/player/profile-privacy`, and `GET /api/player/hub`.
+- A private `/player/profile` panel named "Where My Public Profile Appears" with an explicit "Hide All Public Links" control tied to the existing `public_profile_enabled` setting.
+- A private Player Hub summary named "Where My Profile Appears".
+- Public event suggestion author links through `event_suggestions.submitted_by_user_id` only when the submitter resolves to an opted-in DZN user with a generated public handle.
+- Player Hub challenge-row preview attribution for the current player's own trusted `player_state.public_profile`.
+
+Still excluded:
+
+- CTF/event scoring rosters.
+- Event roster rows that touch scoring, eligibility, sign-up decisions, or owner workflow state.
+- Owner event management rows.
+- Owner/admin review tools and moderation queues.
+
+This slice does not add migrations, custom handle editing, checkout activation, owner entitlement changes, production D1 writes, Nitrado calls, Discord mutations, Stripe mutations, Cloudflare secret changes, issue #49 changes, XP/calling-card awards, ranking updates, discovery updates, review score changes, badge awards, season changes, Server Wars scoring changes, or event mutations.
+
 ## Branch And Base
 
 - Branch: `codex/public-profile-viewer-20260825`

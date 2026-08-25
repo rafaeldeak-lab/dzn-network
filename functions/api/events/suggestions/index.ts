@@ -14,7 +14,7 @@ export const onRequestGet: PagesFunction = async (context) => {
   return withPublicGetEdgeCache(context, {
     ttl: { maxAge: 15, staleWhileRevalidate: 45 },
     allowedParams: ["sort", "status", "limit", "cursor"],
-    cacheVersion: "event-suggestions-v3",
+    cacheVersion: "event-suggestions-v4",
     buildResponse: async () => {
       const url = new URL(request.url);
       const privateSignal = hasPrivateRequestSignal(request);

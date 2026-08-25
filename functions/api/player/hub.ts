@@ -3,6 +3,7 @@ import { json, methodNotAllowed } from "../../_lib/http";
 import { pricingUrlForOwnerAccess, getRequestSessionUser } from "../../_lib/owner-access";
 import { getPlayerChallengesPayload, type PlayerProgressSummary } from "../../_lib/player-progression";
 import { getPlayerProfilePrivacyPreferences, type PlayerProfilePrivacyPreferences } from "../../_lib/player-profile-privacy";
+import { buildPublicProfileAppearancePreview } from "../../_lib/public-profile-attribution";
 import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 import { getPlayerCommunitiesPayload, type PlayerCommunitySummary } from "./communities";
 
@@ -145,6 +146,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     suggested_events: suggestedEvents,
     player_progress: playerChallenges.player_progress,
     public_profile: toPublicProfileSummary(profilePrivacy),
+    profile_attribution: buildPublicProfileAppearancePreview(profilePrivacy),
     profile_entry_points: profileEntryPoints(profilePrivacy),
     fetched_at: new Date().toISOString(),
   });

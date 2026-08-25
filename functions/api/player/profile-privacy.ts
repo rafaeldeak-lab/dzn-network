@@ -6,6 +6,7 @@ import {
   savePlayerProfilePrivacyPreferences,
   type PlayerProfilePrivacyPreferencePatch,
 } from "../../_lib/player-profile-privacy";
+import { buildPublicProfileAppearancePreview } from "../../_lib/public-profile-attribution";
 import { privateNoStoreHeaders } from "../../_lib/performance";
 import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 
@@ -30,13 +31,18 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   }
 
   const result = await savePlayerProfilePrivacyPreferences(env, user, bodyResult.value);
-  return json(result.payload, { status: result.status, headers: privateNoStoreHeaders() });
+  return json({
+    ...result.payload,
+    profile_attribution: buildPublicProfileAppearancePreview(result.payload.privacy),
+  }, { status: result.status, headers: privateNoStoreHeaders() });
 };
 
 async function readPreferences(env: Env, user: SessionUser) {
+  const privacy = await getPlayerProfilePrivacyPreferences(env, user);
   return json({
     ok: true,
-    privacy: await getPlayerProfilePrivacyPreferences(env, user),
+    privacy,
+    profile_attribution: buildPublicProfileAppearancePreview(privacy),
     fairness: playerProfilePrivacyFairness(),
   }, {
     headers: privateNoStoreHeaders(),

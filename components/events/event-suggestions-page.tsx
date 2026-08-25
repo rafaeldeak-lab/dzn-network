@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, CheckCircle2, Flag, Lightbulb, Loader2, MessageSquareWarning, ShieldCheck } from "lucide-react";
+import { ArrowDown, ArrowUp, CheckCircle2, Flag, Lightbulb, Loader2, MessageSquareWarning, ShieldCheck, UserRound } from "lucide-react";
 
 import { fetchJsonWithRetry, FetchJsonError } from "@/lib/client-fetch";
 
@@ -26,7 +26,16 @@ type Suggestion = {
   totalVotes: number;
   userVote: -1 | 0 | 1;
   votePercentage: number | null;
+  authorName: string;
+  authorProfile?: PublicProfileAttribution | null;
   submittedAt: string;
+};
+
+type PublicProfileAttribution = {
+  display_name: string;
+  public_handle: string;
+  public_href: string;
+  public_api_href: string;
 };
 
 type SuggestionsPayload = {
@@ -645,6 +654,8 @@ function SuggestionCard({
   votePending: boolean;
   reportPending: boolean;
 }) {
+  const authorProfile = normalizePublicProfileAttribution(suggestion.authorProfile);
+  const authorName = authorProfile?.display_name ?? publicSuggestionAuthorName(suggestion.authorName);
   return (
     <article className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -652,6 +663,7 @@ function SuggestionCard({
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-md border border-cyan-300/25 bg-cyan-300/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-100">{formatLabel(suggestion.status)}</span>
             <span className="text-xs font-bold text-zinc-500">{new Date(suggestion.submittedAt).toLocaleDateString()}</span>
+            <AuthorBadge profile={authorProfile} name={authorName} />
           </div>
           <h3 className="mt-2 text-xl font-black text-white">{suggestion.title}</h3>
         </div>
@@ -696,6 +708,28 @@ function SuggestionCard({
         </div>
       ) : null}
     </article>
+  );
+}
+
+function AuthorBadge({ profile, name }: { profile: PublicProfileAttribution | null; name: string }) {
+  const label = `By ${profile?.display_name ?? name}`;
+  if (profile) {
+    return (
+      <Link
+        href={profile.public_href}
+        aria-label={`View ${profile.display_name}'s public DZN profile`}
+        className="inline-flex max-w-full items-center gap-1 rounded border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-100 transition hover:border-cyan-200/45 hover:bg-cyan-300/14"
+      >
+        <UserRound className="h-3 w-3 shrink-0" />
+        <span className="truncate">{label}</span>
+      </Link>
+    );
+  }
+  return (
+    <span className="inline-flex max-w-full items-center gap-1 rounded border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-black uppercase text-zinc-500">
+      <UserRound className="h-3 w-3 shrink-0" />
+      <span className="truncate">{label}</span>
+    </span>
   );
 }
 
@@ -767,6 +801,32 @@ function mergeSuggestions(current: Suggestion[], incoming: Suggestion[]) {
 
 function dedupeSuggestions(incoming: Suggestion[]) {
   return mergeSuggestions([], incoming);
+}
+
+function normalizePublicProfileAttribution(value: unknown): PublicProfileAttribution | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const publicHandle = normalizePublicProfileHandle(record.public_handle);
+  if (!publicHandle) return null;
+  const expectedHref = `/players/${publicHandle}`;
+  const expectedApiHref = `/api/public/player-profiles/${publicHandle}`;
+  if (!(record.public_href === expectedHref && record.public_api_href === expectedApiHref)) return null;
+  return {
+    display_name: publicSuggestionAuthorName(record.display_name),
+    public_handle: publicHandle,
+    public_href: expectedHref,
+    public_api_href: expectedApiHref,
+  };
+}
+
+function normalizePublicProfileHandle(value: unknown) {
+  const text = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return /^[a-z0-9](?:[a-z0-9-]{1,62}[a-z0-9])$/.test(text) ? text : null;
+}
+
+function publicSuggestionAuthorName(value: unknown) {
+  const text = typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+  return text.slice(0, 48) || "DZN player";
 }
 
 function applyOptimisticVote(suggestion: Suggestion, previousVote: -1 | 0 | 1, nextVote: -1 | 0 | 1): Suggestion {

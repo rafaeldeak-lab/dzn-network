@@ -75,6 +75,13 @@ type PlayerHubEntryPoint = {
   owner_entitlement_required?: boolean;
 };
 
+type PublicProfileAttribution = {
+  display_name: string;
+  public_handle: string;
+  public_href: string;
+  public_api_href: string;
+};
+
 type PlayerHubChallenge = {
   id: string;
   slug: string;
@@ -93,6 +100,7 @@ type PlayerHubChallenge = {
     progress_percent?: number;
     xp_awarded?: number;
     calling_card_awarded?: string | null;
+    public_profile?: PublicProfileAttribution | null;
   };
 };
 
@@ -121,6 +129,31 @@ type PlayerHubPublicProfile = {
   public_href?: string | null;
   public_api_href?: string | null;
   settings_href?: string;
+};
+
+type PlayerHubProfileAttributionPlacement = {
+  key: string;
+  label: string;
+  description?: string;
+  href?: string;
+  public_surface?: boolean;
+  can_show_public_profile_link?: boolean;
+  link_state?: string;
+  requires_generated_handle?: boolean;
+  requires_unique_user_bridge?: boolean;
+  exposes_private_identifiers?: boolean;
+  affects_competition?: boolean;
+};
+
+type PlayerHubProfileAttributionPreview = {
+  public_profile_enabled?: boolean;
+  ready?: boolean;
+  public_handle?: string | null;
+  public_href?: string | null;
+  public_api_href?: string | null;
+  settings_href?: string;
+  placements?: PlayerHubProfileAttributionPlacement[];
+  excluded_surfaces?: Array<{ key?: string; label?: string; reason?: string }>;
 };
 
 type PlayerHubPayload = {
@@ -157,6 +190,7 @@ type PlayerHubPayload = {
   };
   player_progress?: PlayerHubProgress;
   public_profile?: PlayerHubPublicProfile;
+  profile_attribution?: PlayerHubProfileAttributionPreview;
   profile_entry_points?: PlayerHubEntryPoint[];
   fetched_at?: string;
 };
@@ -224,6 +258,7 @@ export function PlayerHubPage() {
   const suggestedTournaments = hub.suggested_events?.tournaments ?? [];
   const playerProgress = normalizePlayerProgress(hub.player_progress);
   const publicProfile = normalizePublicProfile(hub.public_profile);
+  const profileAttribution = normalizeProfileAttributionPreview(hub.profile_attribution, publicProfile);
   const entryPoints = hub.profile_entry_points?.length ? hub.profile_entry_points : defaultEntryPoints;
   const ownerSetupHref = hub.access?.owner_setup_href ?? "/pricing?intent=owner_setup&returnTo=%2Fsetup";
 
@@ -335,6 +370,8 @@ export function PlayerHubPage() {
             publicHref={publicProfile.public_href}
             publicProfileEnabled={publicProfile.public_profile_enabled}
           />
+
+          <ProfileAppearanceSummary preview={profileAttribution} />
 
           <SectionPanel
             icon={CalendarDays}
@@ -593,6 +630,52 @@ function PlayerProfileShowcasePanel({ progress }: { progress: PlayerHubProgress 
   );
 }
 
+function ProfileAppearanceSummary({ preview }: { preview: PlayerHubProfileAttributionPreview }) {
+  const placements = Array.isArray(preview.placements) ? preview.placements : [];
+  const active = placements.filter((placement) => placement.can_show_public_profile_link).slice(0, 3);
+  const excluded = Array.isArray(preview.excluded_surfaces) ? preview.excluded_surfaces : [];
+  return (
+    <SectionPanel
+      icon={RadioTower}
+      title="Where My Profile Appears"
+      actionHref="/player/profile"
+      actionLabel="Manage"
+      emptyTitle=""
+      emptyText=""
+      hasItems
+    >
+      <div className="grid gap-3">
+        <div className="rounded border border-cyan-300/20 bg-cyan-400/10 p-3">
+          <p className="text-xs font-black uppercase text-cyan-50">
+            {preview.ready ? "Public attribution links enabled" : "Public attribution links hidden"}
+          </p>
+          <p className="mt-2 text-xs font-bold leading-5 text-cyan-50/75">
+            Links appear only from generated handles and trusted user bridges. CTF/event scoring rosters stay out until a dedicated scoring-safe slice.
+          </p>
+        </div>
+        <div className="grid gap-2">
+          {(active.length ? active : placements.slice(0, 3)).map((placement) => (
+            <div key={placement.key} className="flex items-start justify-between gap-3 rounded border border-white/10 bg-black/24 p-3">
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-black uppercase text-white">{placement.label}</span>
+                <span className="mt-1 block text-[10px] font-black uppercase text-zinc-500">{placement.public_surface ? "Public" : "Private player preview"}</span>
+              </span>
+              <span className={`shrink-0 rounded border px-2 py-1 text-[10px] font-black uppercase ${placement.can_show_public_profile_link ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100" : "border-zinc-500/25 bg-zinc-500/10 text-zinc-400"}`}>
+                {placement.can_show_public_profile_link ? "Can show" : "Hidden"}
+              </span>
+            </div>
+          ))}
+        </div>
+        {excluded.length ? (
+          <p className="text-xs font-bold leading-5 text-zinc-500">
+            Excluded: {excluded.map((surface) => surface.label || surface.key).filter(Boolean).join(", ")}.
+          </p>
+        ) : null}
+      </div>
+    </SectionPanel>
+  );
+}
+
 function ProgressMiniStat({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded border border-cyan-300/18 bg-cyan-400/8 p-3">
@@ -605,12 +688,19 @@ function ProgressMiniStat({ label, value }: { label: string; value: number }) {
 function ProgressChallengeRow({ challenge }: { challenge: PlayerHubChallenge }) {
   const state = challenge.player_state?.status ?? "not_joined";
   const percent = clampPercent(challenge.player_state?.progress_percent ?? 0);
+  const publicProfile = normalizePublicProfileAttribution(challenge.player_state?.public_profile);
   return (
     <Link href="/events/challenges" className="block rounded border border-white/10 bg-white/[0.045] p-3 transition hover:border-cyan-300/30 hover:bg-white/[0.07]">
       <div className="flex items-center justify-between gap-3">
         <span className="min-w-0">
           <span className="block truncate text-sm font-black uppercase text-white">{challenge.title}</span>
           <span className="mt-1 block truncate text-[10px] font-black uppercase text-zinc-500">{challenge.category} / {state.replace("_", " ")}</span>
+          {publicProfile ? (
+            <span className="mt-2 inline-flex max-w-full items-center gap-1 rounded border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-100">
+              <UserRound className="h-3 w-3 shrink-0" />
+              <span className="truncate">{publicProfile.display_name}</span>
+            </span>
+          ) : null}
         </span>
         <span className="shrink-0 text-xs font-black text-cyan-100">{percent}%</span>
       </div>
@@ -794,6 +884,7 @@ function normalizePayload(value: PlayerHubPayload | null): PlayerHubPayload {
     },
     player_progress: normalizePlayerProgress(value.player_progress),
     public_profile: normalizePublicProfile(value.public_profile),
+    profile_attribution: normalizeProfileAttributionPreview(value.profile_attribution, normalizePublicProfile(value.public_profile)),
     profile_entry_points: Array.isArray(value.profile_entry_points) ? value.profile_entry_points : defaultEntryPoints,
     access: {
       role: "player",
@@ -812,6 +903,66 @@ function normalizePublicProfile(value: PlayerHubPublicProfile | undefined): Requ
     public_api_href: typeof value?.public_api_href === "string" && value.public_api_href ? value.public_api_href : null,
     settings_href: typeof value?.settings_href === "string" && value.settings_href ? value.settings_href : "/api/player/profile-privacy",
   };
+}
+
+function normalizeProfileAttributionPreview(
+  value: PlayerHubProfileAttributionPreview | undefined,
+  publicProfile: Required<PlayerHubPublicProfile>,
+): Required<PlayerHubProfileAttributionPreview> {
+  return {
+    public_profile_enabled: typeof value?.public_profile_enabled === "boolean" ? value.public_profile_enabled : publicProfile.public_profile_enabled,
+    ready: Boolean(value?.ready && publicProfile.public_profile_enabled && publicProfile.public_href),
+    public_handle: nullableString(value?.public_handle ?? publicProfile.public_handle),
+    public_href: nullableString(value?.public_href ?? publicProfile.public_href),
+    public_api_href: nullableString(value?.public_api_href ?? publicProfile.public_api_href),
+    settings_href: nullableString(value?.settings_href ?? publicProfile.settings_href) ?? "/api/player/profile-privacy",
+    placements: Array.isArray(value?.placements) ? value.placements.map(normalizeProfileAttributionPlacement).filter(Boolean) as PlayerHubProfileAttributionPlacement[] : [],
+    excluded_surfaces: Array.isArray(value?.excluded_surfaces) ? value.excluded_surfaces : [],
+  };
+}
+
+function normalizeProfileAttributionPlacement(value: unknown): PlayerHubProfileAttributionPlacement | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as PlayerHubProfileAttributionPlacement;
+  return {
+    key: nullableString(record.key) ?? "profile_link_area",
+    label: nullableString(record.label) ?? "Profile link area",
+    description: nullableString(record.description) ?? undefined,
+    href: nullableString(record.href) ?? undefined,
+    public_surface: Boolean(record.public_surface),
+    can_show_public_profile_link: Boolean(record.can_show_public_profile_link),
+    link_state: nullableString(record.link_state) ?? "hidden_until_public_profile",
+    requires_generated_handle: record.requires_generated_handle !== false,
+    requires_unique_user_bridge: Boolean(record.requires_unique_user_bridge),
+    exposes_private_identifiers: false,
+    affects_competition: false,
+  };
+}
+
+function normalizePublicProfileAttribution(value: unknown): PublicProfileAttribution | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const publicHandle = normalizePublicProfileHandle(record.public_handle);
+  if (!publicHandle) return null;
+  const expectedHref = `/players/${publicHandle}`;
+  const expectedApiHref = `/api/public/player-profiles/${publicHandle}`;
+  if (!(record.public_href === expectedHref && record.public_api_href === expectedApiHref)) return null;
+  return {
+    display_name: displayNameOrDefault(record.display_name),
+    public_handle: publicHandle,
+    public_href: expectedHref,
+    public_api_href: expectedApiHref,
+  };
+}
+
+function normalizePublicProfileHandle(value: unknown) {
+  const text = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return /^[a-z0-9](?:[a-z0-9-]{1,62}[a-z0-9])$/.test(text) ? text : null;
+}
+
+function displayNameOrDefault(value: unknown) {
+  const text = typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+  return text.slice(0, 48) || "DZN Player";
 }
 
 function defaultPlayerProgress(): PlayerHubProgress {
@@ -854,6 +1005,11 @@ function formatDate(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Date pending";
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function nullableString(value: unknown) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text || null;
 }
 
 function safeNumber(value: unknown) {
