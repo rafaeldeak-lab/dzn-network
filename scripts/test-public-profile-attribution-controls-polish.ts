@@ -188,6 +188,8 @@ function assertAppearancePreviewContract() {
     assert.equal(placement.affects_competition, false);
     assert.equal(placement.controlled_by, "public_profile_visibility");
   }
+  assert.equal(ready.placements.some((placement) => placement.key === "public_event_creator_member_rows" && placement.can_show_public_profile_link), true);
+  assert.equal(ready.excluded_surfaces.some((surface) => surface.key === "event_roster_scoring_and_decision_rows" && surface.public_profile_links_enabled === false), true);
   for (const surface of ready.excluded_surfaces) {
     assert.equal(surface.public_profile_links_enabled, false);
     assert.equal(surface.affects_competition, false);
@@ -298,7 +300,6 @@ function assertProtectedSurfacesRemainExcluded() {
     "functions/_lib/badge-awards.ts",
     "functions/_lib/badge-evaluation.ts",
     "functions/_lib/dzn-seasons.ts",
-    "functions/_lib/events.ts",
     "functions/_lib/server-war-scoring.ts",
     "functions/api/cron/player-progression/awards.ts",
     "functions/api/servers/[serverId]/ctf/roster.ts",
@@ -314,6 +315,11 @@ function assertProtectedSurfacesRemainExcluded() {
   const ctfDashboard = read("functions/api/servers/[serverId]/ctf/dashboard.ts");
   assert.equal(ctfDashboard.includes("link_mode: \"presentation_only\""), true, "CTF dashboard attribution must stay presentation-only.");
   assert.doesNotMatch(ctfDashboard, /\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)\b/i, "CTF dashboard attribution must stay read-only.");
+
+  const events = read("functions/_lib/events.ts");
+  assert.equal(events.includes("public_event_creator_member_rows"), true, "Public event host/member attribution must be explicit.");
+  assert.equal(events.includes("creator_profile: creatorProfile"), true, "Public event host/member rows may carry creator profile metadata.");
+  assert.doesNotMatch(events, /readPublicProfileAttributionsByRosterPlayerKeys|publicProfileRosterPlayerKey/i, "Public event host/member links must not use CTF roster attribution.");
 }
 
 function createEventSuggestionDb() {

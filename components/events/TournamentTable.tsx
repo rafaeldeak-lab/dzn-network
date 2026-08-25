@@ -5,6 +5,7 @@ import type { CompetitiveEvent } from "./event-data";
 import { ClientTimeUntil } from "./ClientTimeUntil";
 import { formatDate } from "./event-format";
 import { EventStatusBadge } from "./EventStatusBadge";
+import { PublicEventProfileAttribution } from "./PublicEventProfileAttribution";
 import { ServerCategoryBadge } from "./ServerCategoryBadge";
 
 export function TournamentTable({ events }: { events: CompetitiveEvent[] }) {
@@ -28,6 +29,7 @@ export function TournamentTable({ events }: { events: CompetitiveEvent[] }) {
               <td className="px-4 py-4">
                 <div className="font-black uppercase text-white">{event.name}</div>
                 <div className="mt-1 text-xs text-zinc-500">{event.event_type_label}</div>
+                <PublicEventProfileAttribution profile={event.creator_profile} label="Event host" compact className="mt-2" />
               </td>
               <td className="px-4 py-4"><EventStatusBadge status={event.status} /></td>
               <td className="px-4 py-4"><ServerCategoryBadge category={event.category} label={event.category_label} compact /></td>

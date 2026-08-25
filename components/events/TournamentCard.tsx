@@ -5,6 +5,7 @@ import type { CompetitiveEvent } from "./event-data";
 import { ClientTimeUntil } from "./ClientTimeUntil";
 import { eventImageStyle, formatNumber } from "./event-format";
 import { EventStatusBadge } from "./EventStatusBadge";
+import { PublicEventProfileAttribution } from "./PublicEventProfileAttribution";
 import { ServerCategoryBadge } from "./ServerCategoryBadge";
 
 export function TournamentCard({ event, compact = false }: { event: CompetitiveEvent; compact?: boolean }) {
@@ -31,6 +32,7 @@ export function TournamentCard({ event, compact = false }: { event: CompetitiveE
       <div className="flex flex-1 flex-col p-4">
         <div className="text-[10px] font-black uppercase text-violet-200">{event.event_type_label}</div>
         <h3 className="mt-1 text-xl font-black uppercase tracking-normal text-white">{event.name}</h3>
+        <PublicEventProfileAttribution profile={event.creator_profile} label="Event host" compact className="mt-2" />
         <p className="mt-2 line-clamp-2 text-sm leading-6 text-zinc-400">{event.description}</p>
         <div className="mt-4 grid grid-cols-3 gap-2 text-[10px] uppercase text-zinc-500">
           <span className="rounded-md border border-white/8 bg-white/[0.03] p-2"><Users className="mb-1 h-3.5 w-3.5 text-cyan-200" />{formatNumber(event.registered_servers)} servers</span>

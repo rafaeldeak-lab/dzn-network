@@ -288,6 +288,23 @@ Still excluded:
 - Event roster approvals, eligibility, sign-up, matchmaking, bracket, owner decision, moderation, and admin workflow mutations.
 - Billing, owner entitlements, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, Nitrado, Discord bot mutations, Cloudflare secrets, production D1 writes, live checkout activation, and issue #49.
 
+## Follow-On Event Roster/Member Public-Safe Expansion
+
+Branch: `codex/event-roster-member-public-safe-expansion-20260825`
+
+Base branch: `codex/ctf-event-roster-attribution-proof-20260825`
+
+This slice adds opt-in public profile attribution to public event host/member display rows only. The trusted bridge is `competitive_events.created_by` to `users.id`, then an opted-in generated `player_profile_privacy_preferences.public_handle`.
+
+The public events list, event detail response, event cards, event table rows, and server event profile cards may include or render optional `creator_profile` metadata when the creator has published their profile. The event response also carries a `profile_attribution` safeguards object with placement `public_event_creator_member_rows`, `link_mode = presentation_only`, no gamertag matching, no private identifier exposure, and no scoring, eligibility, owner-decision, or billing influence.
+
+Still excluded:
+
+- Registered server rows, event leaderboards, match rows, CTF scoring rows, accepted CTF audit feeds, and bracket outcomes.
+- Event roster rows that touch scoring, eligibility, sign-up approvals, owner workflow state, moderation, or admin operations.
+- Raw `created_by`, internal user IDs, Discord IDs, browser-supplied public handles, and gamertag-derived identity.
+- Billing, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, Nitrado, Discord bot mutations, Cloudflare secrets, production D1 writes, live checkout activation, and issue #49.
+
 ## Next Recommended Slice
 
-Next should be the event roster/member public-safe expansion slice: find non-scoring, non-owner player/member rows on public event or community surfaces and add opt-in profile attribution only where a unique trusted user bridge exists. CTF scoring rows, owner workflow rows, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility must remain isolated.
+Next should be the public-safe community member directory foundation: add a dedicated read-only community/player-member surface only after the data model has a unique trusted DZN user bridge, then prove those links are presentation-only and still cannot affect CTF scoring rows, owner workflow rows, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.

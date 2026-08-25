@@ -582,7 +582,6 @@ function assertPublicProfilePreferencesAreNotProtectedSystemDependencies() {
     "functions/_lib/badge-awards.ts",
     "functions/_lib/badge-evaluation.ts",
     "functions/_lib/dzn-seasons.ts",
-    "functions/_lib/events.ts",
     "functions/_lib/server-war-scoring.ts",
     "functions/api/cron/player-progression/awards.ts",
     "functions/api/billing/create-checkout-session.ts",
@@ -595,6 +594,11 @@ function assertPublicProfilePreferencesAreNotProtectedSystemDependencies() {
       `${file} must not depend on public profile publishing preferences.`,
     );
   }
+
+  const events = read("functions/_lib/events.ts");
+  assert.equal(events.includes("public_event_creator_member_rows"), true, "Public events may expose the dedicated host/member profile attribution placement.");
+  assert.equal(events.includes("creator_profile: creatorProfile"), true, "Public event host/member attribution must stay projected metadata only.");
+  assert.doesNotMatch(events, /player_public_profile_handles|PublicPlayerProfile|\/players\/\[handle\]/i, "Public event attribution must not depend on the public profile viewer route internals.");
 }
 
 function publicHandleGenerationBlock(source: string) {

@@ -29,6 +29,7 @@ export type PublicProfileAppearancePlacement = {
     | "public_profile_page"
     | "server_review_author_rows"
     | "event_suggestion_author_rows"
+    | "public_event_creator_member_rows"
     | "ctf_event_presentation_roster_rows"
     | "player_challenge_rows"
     | "player_hub_challenge_rows"
@@ -48,7 +49,7 @@ export type PublicProfileAppearancePlacement = {
 };
 
 export type PublicProfileExcludedAttributionSurface = {
-  key: "ctf_event_scoring_rosters" | "owner_admin_review_tools" | "owner_event_management";
+  key: "ctf_event_scoring_rosters" | "event_roster_scoring_and_decision_rows" | "owner_admin_review_tools" | "owner_event_management";
   label: string;
   reason: string;
   public_profile_links_enabled: false;
@@ -162,6 +163,16 @@ export function buildPublicProfileAppearancePreview(
         requiresUniqueUserBridge: true,
       }),
       attributionPlacement({
+        key: "public_event_creator_member_rows",
+        label: "Public event host/member rows",
+        description: "Public event host/member badges can link only through competitive_events.created_by.",
+        href: "/events",
+        publicSurface: true,
+        ready,
+        linkState: bridgeLinkState,
+        requiresUniqueUserBridge: true,
+      }),
+      attributionPlacement({
         key: "ctf_event_presentation_roster_rows",
         label: "CTF/event presentation roster rows",
         description: "Read-only roster display rows can link only through an exact server/player account bridge.",
@@ -221,6 +232,13 @@ export function buildPublicProfileAppearancePreview(
         key: "ctf_event_scoring_rosters",
         label: "CTF/event scoring roster gates",
         reason: "Roster writes, scoring checks, eligibility gates, and accepted audit feeds stay excluded; only read-only presentation rows may carry links.",
+        public_profile_links_enabled: false,
+        affects_competition: false,
+      },
+      {
+        key: "event_roster_scoring_and_decision_rows",
+        label: "Event roster scoring and decision rows",
+        reason: "Public profile links stay off rows that affect scoring, eligibility, approvals, brackets, owner actions, or event outcomes.",
         public_profile_links_enabled: false,
         affects_competition: false,
       },

@@ -5,6 +5,7 @@ import type { CompetitiveEvent } from "./event-data";
 import { eventImageStyle, formatNumber } from "./event-format";
 import { CountdownTimer } from "./CountdownTimer";
 import { EventStatusBadge } from "./EventStatusBadge";
+import { PublicEventProfileAttribution } from "./PublicEventProfileAttribution";
 import { ServerCategoryBadge } from "./ServerCategoryBadge";
 
 export function EventHero({ event, detail = false }: { event?: CompetitiveEvent | null; detail?: boolean }) {
@@ -44,6 +45,7 @@ export function EventHero({ event, detail = false }: { event?: CompetitiveEvent 
           <div className="mt-5 flex flex-wrap gap-2">
             <EventStatusBadge status={event.status} />
             <ServerCategoryBadge category={event.category} label={event.category_label} />
+            <PublicEventProfileAttribution profile={event.creator_profile} label="Hosted by" />
           </div>
           <h1 className="mt-5 text-4xl font-black uppercase tracking-normal text-white sm:text-6xl">{event.name}</h1>
           <p className="mt-4 max-w-3xl text-sm leading-6 text-zinc-300">{event.description}</p>
