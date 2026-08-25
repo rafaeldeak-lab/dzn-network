@@ -53,7 +53,7 @@ Live Stripe checkout is paused by default unless `DZN_LIVE_CHECKOUT_ENABLED=true
 
 The readiness check is read-only. Live Stripe product/price creation, webhook endpoint changes, Cloudflare secret changes, D1 migration application, customer import, checkout enablement, and payment enablement remain separate high-risk human-approved operations.
 
-Use `docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md` with Issue #46 before any future live billing activation. That checklist is a non-mutating human handoff; it is not an AutoDev activation script.
+Use `docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md` with Issue #49 before any future live billing activation. That checklist is a non-mutating human handoff; it is not an AutoDev activation script.
 
 ## Public Subscription Contract
 

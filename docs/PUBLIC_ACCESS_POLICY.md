@@ -8,7 +8,6 @@ Logged-out visitors may access:
 
 - `/`
 - `/#features`
-- `/#pricing`
 - `/pricing`
 - `/login`
 - `/signup`
@@ -29,17 +28,46 @@ Logged-out visitors are redirected to `/login?returnTo=...` before app-page rend
 
 Nested routes under those paths follow the same rule. Examples include `/events/suggest`, `/events/server-wars`, `/servers/profile?slug=...`, `/servers/[slug]`, `/dashboard/events`, and `/setup/...`.
 
-## Logged-In Visitors
+## Logged-In Players
 
-Logged-in visitors may open the authenticated app pages above. Page visibility inside those pages still depends on the existing server ownership, role, and package checks.
+Logged-in Discord users are free DZN players by default. They may open player-facing authenticated app pages without choosing a paid owner plan:
+
+- `/dzn-pulse`
+- `/events`
+- `/leaderboards`
+- `/seasons`
+- `/servers`
+
+Player-facing and community surfaces may use the Discord OAuth `identify guilds` scope to match the player's Discord communities to DZN-connected servers. Player guild matching must not grant server-management rights and must not overwrite owner/admin guild records.
 
 Starter trial and Pro behavior must continue to come from the billing/entitlement helpers and API responses. A page redirect must not replace owner authorization, plan enforcement, Stripe webhook checks, Nitrado ownership checks, or protected API 401/403 behavior.
 
-Free or Starter/trial accounts should see trial-safe app navigation plus a clear Pro upgrade action. Pro-effective accounts should see Pro tools in the header. This header visibility is product guidance only; APIs and owner/product pages must continue enforcing access server-side.
+Free player accounts should see player navigation plus a clear owner-plan action. Starter/trial accounts should see trial-safe owner navigation plus a clear Pro upgrade action. Pro-effective accounts should see Pro tools in the header. This header visibility is product guidance only; APIs and owner/product pages must continue enforcing access server-side.
 
 Dashboard package visibility must follow the same split. Starter/trial users may see the normal setup, public listing, basic stats, events, billing comparison, and basic Discord posting surfaces, but any Pro-only analytics, promotion, Server VS Server hosting, or enhanced Discord post controls must read as locked or upgrade-gated. Pro-effective users may see those tools as active, while server-side entitlement checks remain authoritative.
 
 Package copy must not imply a competitive advantage. Pro presentation, promotion, analytics, and owner tooling must not change leaderboard rank, K/D, score, reviews, crowns, badges, season wins, event outcomes, or gameplay results.
+
+## Owner Setup And Server Management
+
+Owner/server-management actions require Discord login plus an active or trialing owner entitlement from the canonical billing layer. Free Discord players must be redirected to `/pricing?intent=owner_setup&returnTo=%2Fsetup` for setup/dashboard pages and must receive an owner-plan-required API error for direct owner API calls.
+
+Owner-gated pages include:
+
+- `/setup`
+- `/dashboard`
+
+Owner-gated APIs include:
+
+- `/api/onboarding/*`
+- `/api/nitrado/*`
+- `/api/server/*`
+- `/api/servers/[serverId]/*`
+- owner-triggered `/api/sync/*` calls, except cron-secret-authorized sync paths
+- `/api/events/[slug]/join` and `/api/events/matchmaking` when acting on an owned server
+- `/api/discord/bot-status`
+
+Existing ownership, role, Nitrado, Discord admin, and Pro-feature checks still apply after the owner entitlement gate passes. A paid plan does not make a user the owner of someone else's linked server.
 
 ## Owner Pages
 
@@ -59,6 +87,10 @@ The homepage and public preview surfaces still need public read-only JSON. These
 - `/api/events/suggestions?sort=newest&limit=5`
 - `/api/dzn-pulse/config`
 
+Authenticated player APIs such as `/api/player/communities` may require a session while remaining free of owner billing requirements.
+
+Event browsing, event detail pages, event suggestions, votes, and reports remain player/community surfaces. Registering or matching an owned server for an event is an owner action and must cross the billing entitlement boundary first.
+
 These APIs must keep their existing preview redaction and `Vary: Cookie` behavior where applicable. Public API availability does not mean the corresponding app page is public.
 
 ## Production Verification
@@ -66,10 +98,12 @@ These APIs must keep their existing preview redaction and `Vary: Cookie` behavio
 Post-merge verification should expect:
 
 - `/` returns `200`.
-- `/pricing` returns `200` and opens the homepage pricing comparison.
+- `/pricing` returns `200` and opens the dedicated Starter/Pro pricing page.
 - Logged-out direct app pages such as `/events`, `/leaderboards`, `/servers`, `/dashboard`, `/setup`, `/dzn-pulse`, and `/seasons` return a login redirect.
-- Logged-out header/navigation does not expose app/product controls, while authenticated headers show package-appropriate Starter/Pro actions.
+- Logged-in free players can open player surfaces such as `/events`, `/leaderboards`, `/servers`, `/dzn-pulse`, and `/seasons` without payment.
+- Logged-in free players who open `/setup` or `/dashboard` are redirected to the dedicated owner pricing page.
+- Logged-out header/navigation does not expose app/product controls, while authenticated headers show player/owner package-appropriate actions.
 - The dashboard sidebar shows package-aware guidance: trial-safe tools, Pro locks/upgrade prompts, or active Pro tools based on the authenticated account summary.
 - Public APIs above return `200` and no unexpected 5xx.
-- Owner/protected APIs such as `/api/owner/events`, `/api/billing/status`, and `/api/nitrado/services` remain `401` without authentication.
+- Owner/protected APIs such as `/api/owner/events`, `/api/billing/status`, and `/api/nitrado/services` remain `401` without authentication. Owner-management APIs return owner-plan-required errors for authenticated free players.
 - No production D1, Stripe, Nitrado, Discord, or secrets mutation is required for this policy.

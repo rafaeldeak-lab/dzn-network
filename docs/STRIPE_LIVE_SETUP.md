@@ -10,7 +10,7 @@ Never expose `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRET` in public pages, cli
 
 The repository can validate DZN's configuration shape, public plan contract, checkout/webhook code paths, and secret presence hints. It cannot create Stripe products, change Stripe billing mode, set Cloudflare secrets, apply production migrations, or decide that live billing is approved by itself. Live billing remains a high-risk human-approved operation.
 
-Use `docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md` with Issue #46 for the future deliberate live activation handoff. The checklist is documentation and regression-test input only; it is not approval to mutate production billing.
+Use `docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md` with Issue #49 for the future deliberate live activation handoff. The checklist is documentation and regression-test input only; it is not approval to mutate production billing.
 
 ## Live Products
 

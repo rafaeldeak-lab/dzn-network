@@ -6,8 +6,8 @@ import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 
 type NavigationPlanTier = "free" | "starter" | "pro";
 type NavigationPrimaryAction = {
-  label: "Start Trial" | "Upgrade to Pro" | "Pro Tools";
-  href: "/#pricing" | "/dashboard";
+  label: "Owner Plans" | "Upgrade to Pro" | "Owner Dashboard";
+  href: string;
   tone: "trial" | "upgrade" | "pro";
 };
 
@@ -15,6 +15,8 @@ type OwnerBillingNavigationRow = {
   plan_key: string | null;
   plan_status: string | null;
 };
+
+const OWNER_SETUP_PRICING_URL = "/pricing?intent=owner_setup&returnTo=%2Fsetup";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   let user = await getSessionUser(env, request);
@@ -50,15 +52,21 @@ async function getAuthNavigationSummary(env: Env, user: SessionUser, linkedServe
   const effectivePlanKey = effectiveEntitlementPlan(storedPlanKey, planStatus);
   const tier = navigationTierForPlan(effectivePlanKey);
   const config = getPlanConfig(effectivePlanKey);
+  const canUseOwnerTools = effectivePlanKey !== "free";
   return {
     effective_plan_key: effectivePlanKey,
     stored_plan_key: storedPlanKey,
     plan_tier: tier,
     plan_label: navigationPlanLabel(effectivePlanKey, planStatus),
     plan_status: planStatus,
+    role: canUseOwnerTools ? "owner" : "player",
+    can_use_player_surfaces: true,
+    can_use_owner_tools: canUseOwnerTools,
+    owner_action_required: canUseOwnerTools ? null : "choose_plan",
+    owner_pricing_url: OWNER_SETUP_PRICING_URL,
     linked_server_count: linkedServerCount,
-    linked_server_limit: config.max_linked_servers,
-    can_link_more_servers: linkedServerCount < config.max_linked_servers,
+    linked_server_limit: canUseOwnerTools ? config.max_linked_servers : 0,
+    can_link_more_servers: canUseOwnerTools && linkedServerCount < config.max_linked_servers,
     can_use_pro_tools: tier === "pro",
     primary_action: navigationPrimaryActionForTier(tier),
   };
@@ -89,9 +97,9 @@ function navigationPlanLabel(planKey: PlanKey, planStatus: string) {
 }
 
 function navigationPrimaryActionForTier(tier: NavigationPlanTier): NavigationPrimaryAction {
-  if (tier === "pro") return { label: "Pro Tools", href: "/dashboard", tone: "pro" };
-  if (tier === "starter") return { label: "Upgrade to Pro", href: "/#pricing", tone: "upgrade" };
-  return { label: "Start Trial", href: "/#pricing", tone: "trial" };
+  if (tier === "pro") return { label: "Owner Dashboard", href: "/dashboard", tone: "pro" };
+  if (tier === "starter") return { label: "Upgrade to Pro", href: "/pricing?intent=pro&returnTo=%2Fdashboard", tone: "upgrade" };
+  return { label: "Owner Plans", href: OWNER_SETUP_PRICING_URL, tone: "trial" };
 }
 
 function stringOrDefault(value: unknown, fallback: string) {

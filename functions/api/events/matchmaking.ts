@@ -1,6 +1,6 @@
-import { getSessionUser } from "../../_lib/db";
 import { createCategorySafeMatchmaking } from "../../_lib/events";
 import { json, methodNotAllowed, readJson } from "../../_lib/http";
+import { ownerAccessErrorResponse, requireOwnerRequestAccess } from "../../_lib/owner-access";
 import type { PagesFunction } from "../../_lib/types";
 
 type MatchmakingBody = {
@@ -13,7 +13,9 @@ type MatchmakingBody = {
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "POST") return methodNotAllowed();
-  const viewer = await getSessionUser(env, request);
+  const ownerAccess = await requireOwnerRequestAccess(env, request);
+  if (!ownerAccess.allowed) return ownerAccessErrorResponse(ownerAccess);
+  const viewer = ownerAccess.user;
   const body = await readJson<MatchmakingBody>(request);
   const result = await createCategorySafeMatchmaking(env, viewer, body);
   return json(result, { status: result.status });

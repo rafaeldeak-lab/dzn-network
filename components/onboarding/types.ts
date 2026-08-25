@@ -17,13 +17,18 @@ export type AuthNavigationSummary = {
   plan_tier: "free" | "starter" | "pro";
   plan_label: "Free" | "Starter" | "Starter Trial" | "Pro";
   plan_status: string;
+  role: "player" | "owner";
+  can_use_player_surfaces: boolean;
+  can_use_owner_tools: boolean;
+  owner_action_required: "choose_plan" | null;
+  owner_pricing_url: string;
   linked_server_count: number;
   linked_server_limit: number;
   can_link_more_servers: boolean;
   can_use_pro_tools: boolean;
   primary_action: {
-    label: "Start Trial" | "Upgrade to Pro" | "Pro Tools";
-    href: "/#pricing" | "/dashboard";
+    label: "Owner Plans" | "Upgrade to Pro" | "Owner Dashboard";
+    href: string;
     tone: "trial" | "upgrade" | "pro";
   };
 };
