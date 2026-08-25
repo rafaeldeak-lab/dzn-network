@@ -1004,6 +1004,13 @@ function DiscoveryServerCard({
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <SaveServerButton server={server} savedControls={savedControls} compact />
             <Link
+              href={publicServerCommunityHref(server.public_slug)}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-cyan-300/24 bg-cyan-300/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 transition hover:border-cyan-200/55 hover:bg-cyan-300/16"
+            >
+              <Users className="h-3.5 w-3.5" />
+              Members
+            </Link>
+            <Link
               href={publicServerProfileHref(server.public_slug)}
               onClick={() => trackPromotionEvent(server.linked_server_id, activePromotionId, "click", trackingSource)}
               className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400"
@@ -1195,6 +1202,10 @@ function ServerCard({ server, index, savedControls }: { server: PublicServer; in
           <p className="min-w-[180px] flex-1 text-xs font-bold uppercase text-zinc-500">{publicCardFooter(server)}</p>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <SaveServerButton server={server} savedControls={savedControls} />
+            <Link href={publicServerCommunityHref(server.public_slug)} className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/24 bg-cyan-300/10 px-4 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-200/55 hover:bg-cyan-300/16">
+              Members
+              <Users className="h-4 w-4" />
+            </Link>
             <Link href={publicServerProfileHref(server.public_slug)} className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.3)] transition hover:bg-violet-400">
               View Server
               <ArrowRight className="h-4 w-4" />
@@ -1567,6 +1578,10 @@ function ServerProfile({ server, savedControls }: { server: PublicServer; savedC
         <Link href="/servers" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white">
           <ArrowLeft className="h-4 w-4" />
           Back to servers
+        </Link>
+        <Link href={publicServerCommunityHref(server.public_slug)} className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-200/55 hover:bg-cyan-300/16">
+          <Users className="h-4 w-4" />
+          Community
         </Link>
         <SaveServerButton server={server} savedControls={savedControls} />
       </div>
@@ -2960,6 +2975,10 @@ function advertisingRank(server: PublicServer) {
 
 function publicServerProfileHref(slug: string) {
   return `/servers/profile?slug=${encodeURIComponent(slug)}`;
+}
+
+function publicServerCommunityHref(slug: string) {
+  return `/servers/${encodeURIComponent(slug)}/community`;
 }
 
 function serverSaveKey(server: PublicServer) {

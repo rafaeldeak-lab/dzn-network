@@ -305,6 +305,31 @@ Still excluded:
 - Raw `created_by`, internal user IDs, Discord IDs, browser-supplied public handles, and gamertag-derived identity.
 - Billing, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, Nitrado, Discord bot mutations, Cloudflare secrets, production D1 writes, live checkout activation, and issue #49.
 
+## Follow-On Public-Safe Community Member Directory Foundation
+
+Branch: `codex/community-member-directory-foundation-20260826`
+
+Base branch: `codex/event-roster-member-public-safe-expansion-20260825`
+
+This slice adds the first dedicated public-safe community/player-member directory. It introduces the additive `community_members` bridge so DZN can show public profile links only after there is a unique trusted DZN user bridge from a linked server community to `users.id`.
+
+This follow-on slice adds:
+
+- `migrations/0067_community_member_directory_foundation.sql` with unique `(community_guild_id, user_id)` membership tied to `discord_guilds.id` and `users.id`.
+- `GET /api/public/servers/[serverId]/community-members` as a public-safe, read-only directory payload.
+- `/servers/[slug]/community` as the public community member page, with a Pages shell for arbitrary server slugs.
+- Server card/profile navigation to the community member directory.
+- `public_community_member_directory` in the public profile attribution preview/control metadata.
+
+The trusted bridge is `community_members.community_guild_id` plus `community_members.user_id` to `users.id`, then an opted-in generated `player_profile_privacy_preferences.public_handle`. The page and API show only `public_member_enabled = 1`, `source = 'trusted_dzn_bridge'` members with valid generated public profile hrefs.
+
+Still excluded:
+
+- CTF scoring rows, accepted scoring feeds, locked roster checks, point progression, flag raises, and bracket outcomes.
+- Owner workflow rows, community-member source/import writes, approval decisions, moderation authority, Nitrado linking, and Discord bot mutations.
+- Raw community guild IDs, raw user IDs, Discord IDs, OAuth tokens, server ownership state, billing state, approval state, scoring state, raw award evidence, and owner workflow state.
+- Billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, Nitrado, Discord bot mutations, Cloudflare secrets, production D1 writes, live checkout activation, and issue #49.
+
 ## Next Recommended Slice
 
-Next should be the public-safe community member directory foundation: add a dedicated read-only community/player-member surface only after the data model has a unique trusted DZN user bridge, then prove those links are presentation-only and still cannot affect CTF scoring rows, owner workflow rows, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+Next should be trusted community member source management and audit: add owner/admin-only controls to review or import candidate community members into the `community_members` bridge, with explicit audit history, duplicate/ambiguous-user rejection, and tests proving those source-management actions cannot affect public profile visibility without the player's opt-in handle, CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.

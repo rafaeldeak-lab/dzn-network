@@ -45,6 +45,7 @@ export const onRequest: PagesFunction = async ({ request, env, next }) => {
 };
 
 export function isProtectedAppPagePath(pathname: string) {
+  if (isPublicSafeServerCommunityPath(pathname)) return false;
   return protectedAppPagePrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
@@ -54,4 +55,8 @@ export function isOwnerBillingPagePath(pathname: string) {
 
 function isPageNavigationMethod(method: string) {
   return method === "GET" || method === "HEAD";
+}
+
+function isPublicSafeServerCommunityPath(pathname: string) {
+  return /^\/servers\/[a-z0-9](?:[a-z0-9-]{0,94}[a-z0-9])?\/community$/.test(pathname);
 }
