@@ -5,6 +5,7 @@ import {
   type PlayerChallengeSummary,
   type PlayerProgressSummary,
 } from "./player-progression";
+import { getPlayerProfilePrivacyPreferences, type PlayerProfilePrivacyPreferences } from "./player-profile-privacy";
 import type { Env, SessionUser } from "./types";
 
 export type PlayerProfileProgressionPayload = {
@@ -29,23 +30,12 @@ export type PlayerProfileProgressionPayload = {
   };
   privacy: {
     mode: "private_viewer";
-    public_profile_enabled: false;
-    persistence: "local_preview_only";
-    controls: {
-      show_xp: boolean;
-      show_challenge_progress: boolean;
-      show_calling_cards: boolean;
-      show_award_dates: boolean;
-      show_discord_identity: boolean;
-      show_source_details: boolean;
-    };
-    public_safe_preview: {
-      exposes_discord_id: false;
-      exposes_user_id: false;
-      exposes_source_ids: false;
-      exposes_raw_evidence: false;
-      hides_exact_award_times: true;
-    };
+    public_profile_enabled: PlayerProfilePrivacyPreferences["public_profile_enabled"];
+    persistence: PlayerProfilePrivacyPreferences["persistence"];
+    settings_href: PlayerProfilePrivacyPreferences["settings_href"];
+    updated_at: PlayerProfilePrivacyPreferences["updated_at"];
+    controls: PlayerProfilePrivacyPreferences["controls"];
+    public_safe_preview: PlayerProfilePrivacyPreferences["public_safe_preview"];
   };
   progression: {
     total_xp: number;
@@ -66,6 +56,8 @@ export type PlayerProfileProgressionPayload = {
     season_influence: false;
     event_influence: false;
     server_wars_influence: false;
+    xp_award_influence: false;
+    calling_card_award_influence: false;
     competitive_eligibility_influence: false;
   };
   fetched_at: string;
@@ -113,7 +105,10 @@ export async function getPlayerProfileProgressionPayload(
   env: Env,
   user: SessionUser,
 ): Promise<PlayerProfileProgressionPayload> {
-  const payload = await getPlayerChallengesPayload(env, user);
+  const [payload, privacy] = await Promise.all([
+    getPlayerChallengesPayload(env, user),
+    getPlayerProfilePrivacyPreferences(env, user),
+  ]);
   const progress = normalizeProgress(payload.player_progress);
   const totalXp = safeNumber(progress.total_xp);
   const level = calculatePlayerProfileLevel(totalXp);
@@ -142,23 +137,12 @@ export async function getPlayerProfileProgressionPayload(
     },
     privacy: {
       mode: "private_viewer",
-      public_profile_enabled: false,
-      persistence: "local_preview_only",
-      controls: {
-        show_xp: true,
-        show_challenge_progress: true,
-        show_calling_cards: true,
-        show_award_dates: false,
-        show_discord_identity: false,
-        show_source_details: false,
-      },
-      public_safe_preview: {
-        exposes_discord_id: false,
-        exposes_user_id: false,
-        exposes_source_ids: false,
-        exposes_raw_evidence: false,
-        hides_exact_award_times: true,
-      },
+      public_profile_enabled: privacy.public_profile_enabled,
+      persistence: privacy.persistence,
+      settings_href: privacy.settings_href,
+      updated_at: privacy.updated_at,
+      controls: privacy.controls,
+      public_safe_preview: privacy.public_safe_preview,
     },
     progression: {
       total_xp: totalXp,
@@ -179,6 +163,8 @@ export async function getPlayerProfileProgressionPayload(
       season_influence: false,
       event_influence: false,
       server_wars_influence: false,
+      xp_award_influence: false,
+      calling_card_award_influence: false,
       competitive_eligibility_influence: false,
     },
     fetched_at: new Date().toISOString(),
