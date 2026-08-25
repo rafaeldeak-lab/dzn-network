@@ -655,7 +655,7 @@ function PlayerChallengeParticipationPanel({
           <PlayerChallengeStat label="Cards" value={formatNumber(progress.calling_cards.length)} />
         </div>
         <p className="mt-4 text-sm font-bold leading-6 text-zinc-300">
-          Player challenges are free to join. XP and calling cards are earned player-side only and do not change rankings, discovery, reviews, events, Server Wars scores, or eligibility.
+          Player challenges are free to join. XP and calling cards unlock only from verified DZN activity and do not change rankings, discovery, reviews, events, Server Wars scores, or eligibility.
         </p>
         {error ? (
           <p className="mt-3 rounded border border-amber-300/25 bg-amber-400/10 px-3 py-2 text-xs font-black uppercase text-amber-100">{error}</p>
@@ -713,7 +713,7 @@ function PlayerChallengeTrackCard({
       <div className="mt-4 grid gap-2 text-xs font-black uppercase text-zinc-300">
         <span className="inline-flex items-center gap-2">
           <Activity className="h-4 w-4 text-cyan-100" />
-          {formatNumber(challenge.reward?.xp ?? 0)} XP reward hook
+          {formatNumber(challenge.reward?.xp ?? 0)} verified XP reward
         </span>
         {card ? (
           <span className="inline-flex min-w-0 items-center gap-2">

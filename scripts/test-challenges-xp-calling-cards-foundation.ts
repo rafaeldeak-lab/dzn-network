@@ -45,7 +45,7 @@ async function main() {
   assert.doesNotMatch(progressionSource, /\brequireOwnerRequestAccess\b|\bownerAccessErrorResponse\b|\brequireActiveOwnerEntitlement\b/);
   assert.doesNotMatch(progressionSource, /\bowner_billing_accounts\b|\bserver_subscriptions\b|\bcreateCheckoutSession\b|\bDZN_LIVE_CHECKOUT_ENABLED\b/i);
   assert.doesNotMatch(progressionSource, /\bNITRADO_TOKEN\b|\bDISCORD_BOT_TOKEN\b|\bcanManageDiscordGuild\b|\bstoreGuilds\b/);
-  assertSourceMutationScope(progressionSource);
+  assertSourceMutationScope(functionBlock(progressionSource, "joinPlayerChallenge"));
 
   const playerHubApiSource = read("functions/api/player/hub.ts");
   assert.equal(playerHubApiSource.includes("getPlayerChallengesPayload"), true, "Player Hub API must include challenge progress.");
@@ -68,7 +68,7 @@ async function main() {
     "/api/player/challenges",
     "PlayerChallengeParticipationPanel",
     "Join Challenge",
-    "XP and calling cards are earned player-side only",
+    "XP and calling cards unlock only from verified DZN activity",
     "body: JSON.stringify({ action: \"join\", challenge_slug: challenge.slug })",
   ]) {
     assert.equal(eventsPlatformSource.includes(snippet), true, `Challenges page must include ${snippet}`);

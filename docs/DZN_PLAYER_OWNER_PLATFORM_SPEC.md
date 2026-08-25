@@ -354,6 +354,32 @@ Mutation scope:
 
 Fairness remains unchanged: player challenge participation, XP, and calling cards remain earned/player-side progression. They must not affect paid plans, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, server ownership, or competitive eligibility.
 
+## Authoritative Progression Awards Slice
+
+The authoritative progression awards slice connects XP and calling-card awards to trusted server-side evidence only. It keeps player progression free to join/read while ensuring rewards cannot be self-awarded by browser/client requests.
+
+The slice adds:
+
+- `/api/cron/player-progression/awards` as a protected server-side award job endpoint.
+- `player_progression_award_sources` as the verified source queue/audit table for progression facts.
+- `runPlayerProgressionAwardJob` as the canonical helper for accepting verified source facts, processing pending facts, and writing earned XP/calling-card awards.
+- Idempotency based on `UNIQUE(user_id, source_type, source_id)` for verified award facts and `challenge_completion` ledger/card source keys for one completion award per player challenge.
+- Player Hub and `/events/challenges` copy that explains XP and calling cards unlock from verified DZN activity only.
+
+Authorization rules:
+
+- Normal players can still read challenge/progression state and join challenges through `/api/player/challenges`.
+- Normal players must not be able to mark challenges complete, write XP, write calling-card awards, or submit trusted award evidence.
+- `/api/cron/player-progression/awards` must require the shared cron secret and must not accept session auth, owner entitlement, Starter, Pro, Nitrado, Stripe, or Discord bot permissions as substitutes.
+- Source facts accepted through the protected job must include `verified: true`, an allowed source type, a stable source id, a player id, and an active player challenge id or slug.
+
+Mutation scope:
+
+- The protected award job may write `player_progression_award_sources`, update the authenticated target player's existing `player_challenge_participations` row, and insert idempotent rows into `player_xp_ledger` and `player_calling_card_awards`.
+- The protected award job must not create checkout sessions, update owner billing, change server ownership, update rankings/leaderboards, modify discovery score, mutate reviews, award server badges, change seasons, modify events, alter Server Wars scoring/results, touch Nitrado, send Discord bot messages, change Cloudflare secrets, apply production migrations, merge issue #49, or enable live checkout.
+
+Fairness remains unchanged: XP and calling cards are earned player-side profile progression only. They must not affect paid plans, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, server ownership, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -378,6 +404,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/player/saved-servers` | 401 | Allowed | Allowed | Allowed | Session auth, player preference only |
 | `/api/player/reviews` | 401 | Allowed | Allowed | Allowed | Session auth, review mutation only |
 | `/api/player/challenges` | 401 | Allowed | Allowed | Allowed | Session auth, player participation only |
+| `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award facts |
 | `/api/public/server-reviews` | Preview/locked summary | Allowed | Allowed | Allowed | Public/read with session-aware redaction |
 | `/api/public/server-reviews/[reviewId]/report` | 401 | Allowed | Allowed | Allowed | Session auth, report/moderation hook only |
 | `/api/servers/[serverId]/reviews/[reviewId]/reply` | Login/pricing boundary | Owner plan required | Allowed, then ownership checks still apply | Allowed, then ownership checks still apply | Owner entitlement plus server owner/admin checks |

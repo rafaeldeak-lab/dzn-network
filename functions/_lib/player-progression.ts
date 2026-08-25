@@ -65,6 +65,81 @@ export type PlayerChallengeJoinInput = {
   action?: unknown;
 };
 
+export const TRUSTED_PROGRESSION_SOURCE_TYPES = [
+  "adm_gameplay",
+  "challenge_rule",
+  "community_activity",
+  "event_participation",
+  "verified_activity",
+] as const;
+
+export type TrustedProgressionSourceType = typeof TRUSTED_PROGRESSION_SOURCE_TYPES[number];
+
+export type TrustedProgressionAwardSourceInput = {
+  source_type?: unknown;
+  sourceType?: unknown;
+  source_id?: unknown;
+  sourceId?: unknown;
+  user_id?: unknown;
+  userId?: unknown;
+  challenge_id?: unknown;
+  challengeId?: unknown;
+  challenge_slug?: unknown;
+  challengeSlug?: unknown;
+  slug?: unknown;
+  progress_value?: unknown;
+  progressValue?: unknown;
+  verified?: unknown;
+  verified_at?: unknown;
+  verifiedAt?: unknown;
+  evidence?: unknown;
+  evidence_json?: unknown;
+};
+
+export type PlayerProgressionAwardJobOptions = {
+  limit?: number | null;
+  sources?: TrustedProgressionAwardSourceInput[] | null;
+  source?: string | null;
+  now?: string | null;
+};
+
+export type PlayerProgressionAwardOutcomeStatus = "accepted" | "progressed" | "awarded" | "duplicate" | "skipped" | "failed";
+
+export type PlayerProgressionAwardOutcome = {
+  status: PlayerProgressionAwardOutcomeStatus;
+  source_type: string | null;
+  source_id: string | null;
+  user_id: string | null;
+  challenge_id: string | null;
+  message: string;
+  progress_value?: number;
+  target_value?: number;
+  xp_awarded?: number;
+  calling_card_awarded?: string | null;
+};
+
+export type PlayerProgressionAwardJobResult = {
+  ok: boolean;
+  taskStatus: "success" | "no_op" | "warning" | "failed";
+  task_status: "success" | "no_op" | "warning" | "failed";
+  source: string;
+  acceptedSources: number;
+  accepted_sources: number;
+  duplicateSources: number;
+  duplicate_sources: number;
+  processed: number;
+  progressed: number;
+  awardedXp: number;
+  awarded_xp: number;
+  awardedCards: number;
+  awarded_cards: number;
+  completedChallenges: number;
+  completed_challenges: number;
+  skipped: PlayerProgressionAwardOutcome[];
+  failed: PlayerProgressionAwardOutcome[];
+  warnings: string[];
+};
+
 type PlayerChallengeRow = {
   id: string;
   slug: string;
@@ -108,7 +183,38 @@ type JoinTarget = {
   challengeSlug: string | null;
 };
 
+type NormalizedTrustedProgressionSource = {
+  sourceType: TrustedProgressionSourceType;
+  sourceId: string;
+  userId: string;
+  challengeId: string | null;
+  challengeSlug: string | null;
+  progressValue: number;
+  verifiedAt: string;
+  evidenceJson: string | null;
+};
+
+type PlayerProgressionAwardSourceRow = {
+  id: string;
+  user_id: string;
+  challenge_id: string;
+  source_type: TrustedProgressionSourceType | string;
+  source_id: string;
+  progress_value: number | null;
+  verification_status: string | null;
+  verified_at: string | null;
+  evidence_json: string | null;
+  processed_at: string | null;
+  result_status: string | null;
+  result_message: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
 const PROGRESS_HREF = "/events/challenges";
+const AWARD_JOB_DEFAULT_LIMIT = 10;
+const AWARD_JOB_MAX_LIMIT = 25;
+const CHALLENGE_COMPLETION_SOURCE_TYPE = "challenge_completion";
 
 const FOUNDATION_CHALLENGES: PlayerChallengeRow[] = [
   {
@@ -287,6 +393,275 @@ export async function joinPlayerChallenge(env: Env, user: SessionUser, input: Pl
   };
 }
 
+export async function runPlayerProgressionAwardJob(env: Env, options: PlayerProgressionAwardJobOptions = {}): Promise<PlayerProgressionAwardJobResult> {
+  if (!env.DB) {
+    return buildAwardJobResult({
+      source: awardJobSource(options.source),
+      failed: [
+        awardOutcome({
+          status: "failed",
+          message: "Player progression awards require the D1 database binding.",
+        }),
+      ],
+    });
+  }
+
+  const now = normalizeIsoDate(options.now) ?? new Date().toISOString();
+  const source = awardJobSource(options.source);
+  const limit = clampAwardLimit(options.limit);
+  const skipped: PlayerProgressionAwardOutcome[] = [];
+  const failed: PlayerProgressionAwardOutcome[] = [];
+  const warnings: string[] = [];
+  let acceptedSources = 0;
+  let duplicateSources = 0;
+
+  for (const input of trustedSourceInputs(options.sources, limit)) {
+    try {
+      const recorded = await recordVerifiedProgressionAwardSource(env, input, now);
+      if (recorded.status === "accepted") acceptedSources += 1;
+      if (recorded.status === "duplicate") duplicateSources += 1;
+      if (recorded.status === "skipped") skipped.push(recorded);
+    } catch (error) {
+      const outcome = awardOutcome({
+        status: "failed",
+        source_type: sourceTypeFromUnknown(input.source_type ?? input.sourceType),
+        source_id: cleanSourceId(input.source_id ?? input.sourceId),
+        user_id: cleanIdentifier(input.user_id ?? input.userId),
+        message: errorMessage(error, "Verified player progression source could not be recorded."),
+      });
+      failed.push(outcome);
+      warnings.push(outcome.message);
+    }
+  }
+
+  let pending: PlayerProgressionAwardSourceRow[] = [];
+  try {
+    pending = await readPendingVerifiedProgressionAwardSources(env, limit);
+  } catch (error) {
+    const message = errorMessage(error, "Verified player progression sources could not be loaded.");
+    failed.push(awardOutcome({ status: "failed", message }));
+    warnings.push(message);
+    return buildAwardJobResult({ source, acceptedSources, duplicateSources, skipped, failed, warnings });
+  }
+
+  let processed = 0;
+  let progressed = 0;
+  let awardedXp = 0;
+  let awardedCards = 0;
+  let completedChallenges = 0;
+
+  for (const row of pending) {
+    try {
+      const outcome = await processVerifiedProgressionAwardSource(env, row, now);
+      processed += 1;
+      if (outcome.status === "progressed") progressed += 1;
+      if (outcome.status === "awarded") completedChallenges += 1;
+      awardedXp += Math.max(0, Math.trunc(outcome.xp_awarded ?? 0));
+      if (outcome.calling_card_awarded) awardedCards += 1;
+      if (outcome.status === "skipped" || outcome.status === "duplicate") skipped.push(outcome);
+    } catch (error) {
+      const message = errorMessage(error, "Verified player progression source could not be processed.");
+      await markProgressionAwardSource(env, row, "failed", message, now).catch(() => undefined);
+      failed.push(sourceRowOutcome(row, "failed", message));
+      warnings.push(message);
+    }
+  }
+
+  return buildAwardJobResult({
+    source,
+    acceptedSources,
+    duplicateSources,
+    processed,
+    progressed,
+    awardedXp,
+    awardedCards,
+    completedChallenges,
+    skipped,
+    failed,
+    warnings,
+  });
+}
+
+async function recordVerifiedProgressionAwardSource(
+  env: Env,
+  input: TrustedProgressionAwardSourceInput,
+  now: string,
+): Promise<PlayerProgressionAwardOutcome> {
+  const normalized = normalizeTrustedProgressionSourceInput(input, now);
+  if (!normalized.ok) return normalized.outcome;
+
+  const challenge = await resolveJoinableChallenge(env, {
+    challengeId: normalized.value.challengeId,
+    challengeSlug: normalized.value.challengeSlug,
+  }, now);
+  if (!challenge) {
+    return awardOutcome({
+      status: "skipped",
+      source_type: normalized.value.sourceType,
+      source_id: normalized.value.sourceId,
+      user_id: normalized.value.userId,
+      message: "Verified source did not match an active DZN player challenge.",
+    });
+  }
+
+  const insert = await env.DB
+    .prepare(
+      `INSERT OR IGNORE INTO player_progression_award_sources (
+        id, user_id, challenge_id, source_type, source_id, progress_value,
+        verification_status, verified_at, evidence_json, processed_at,
+        result_status, result_message, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'verified', ?, ?, NULL, 'pending', NULL, ?, ?)`,
+    )
+    .bind(
+      randomProgressionId("pas"),
+      normalized.value.userId,
+      challenge.id,
+      normalized.value.sourceType,
+      normalized.value.sourceId,
+      normalized.value.progressValue,
+      normalized.value.verifiedAt,
+      normalized.value.evidenceJson,
+      now,
+      now,
+    )
+    .run();
+
+  const status = d1Changes(insert) > 0 ? "accepted" : "duplicate";
+  return awardOutcome({
+    status,
+    source_type: normalized.value.sourceType,
+    source_id: normalized.value.sourceId,
+    user_id: normalized.value.userId,
+    challenge_id: challenge.id,
+    message: status === "accepted"
+      ? "Verified source accepted for trusted progression processing."
+      : "Verified source was already recorded and will not be duplicated.",
+    progress_value: normalized.value.progressValue,
+    target_value: safeTargetValue(challenge.target_value),
+  });
+}
+
+async function readPendingVerifiedProgressionAwardSources(env: Env, limit: number) {
+  const rows = await env.DB
+    .prepare(
+      `SELECT
+         id,
+         user_id,
+         challenge_id,
+         source_type,
+         source_id,
+         progress_value,
+         verification_status,
+         verified_at,
+         evidence_json,
+         processed_at,
+         result_status,
+         result_message,
+         created_at,
+         updated_at
+       FROM player_progression_award_sources
+       WHERE verification_status = 'verified'
+         AND result_status = 'pending'
+       ORDER BY datetime(verified_at) ASC, datetime(created_at) ASC
+       LIMIT ?`,
+    )
+    .bind(clampAwardLimit(limit))
+    .all<PlayerProgressionAwardSourceRow>();
+  return rows.results ?? [];
+}
+
+async function processVerifiedProgressionAwardSource(
+  env: Env,
+  row: PlayerProgressionAwardSourceRow,
+  now: string,
+): Promise<PlayerProgressionAwardOutcome> {
+  if (row.verification_status !== "verified") {
+    const message = "Progression source is not verified.";
+    await markProgressionAwardSource(env, row, "skipped", message, now);
+    return sourceRowOutcome(row, "skipped", message);
+  }
+
+  const challenge = await resolveJoinableChallenge(env, { challengeId: row.challenge_id, challengeSlug: null }, now);
+  if (!challenge) {
+    const message = "Progression source challenge is not active.";
+    await markProgressionAwardSource(env, row, "skipped", message, now);
+    return sourceRowOutcome(row, "skipped", message);
+  }
+
+  const participation = await readPlayerChallengeParticipation(env, row.user_id, row.challenge_id);
+  if (!participation || normalizeParticipationStatus(participation.status) === "abandoned") {
+    const message = "Player has not joined this challenge.";
+    await markProgressionAwardSource(env, row, "skipped", message, now);
+    return sourceRowOutcome(row, "skipped", message, {
+      progress_value: Math.max(0, Math.trunc(numberOrZero(row.progress_value))),
+      target_value: safeTargetValue(challenge.target_value),
+    });
+  }
+
+  const targetValue = safeTargetValue(participation.target_value ?? challenge.target_value);
+  const progressValue = Math.max(
+    Math.max(0, Math.trunc(numberOrZero(participation.progress_value))),
+    Math.max(0, Math.trunc(numberOrZero(row.progress_value))),
+  );
+  const completed = progressValue >= targetValue;
+  if (!completed) {
+    await updatePlayerChallengeParticipationAwardState(env, {
+      userId: row.user_id,
+      challengeId: row.challenge_id,
+      status: normalizeParticipationStatus(participation.status) === "completed" ? "completed" : "joined",
+      progressValue,
+      targetValue,
+      xpAwarded: Math.max(0, Math.trunc(numberOrZero(participation.xp_awarded))),
+      callingCardAwarded: nullableString(participation.calling_card_awarded),
+      completedAt: nullableString(participation.completed_at),
+      now,
+    });
+    const message = "Verified source updated challenge progress but did not meet the target yet.";
+    await markProgressionAwardSource(env, row, "progressed", message, now);
+    return sourceRowOutcome(row, "progressed", message, { progress_value: progressValue, target_value: targetValue });
+  }
+
+  const rewardXp = Math.max(0, Math.trunc(numberOrZero(challenge.reward_xp)));
+  const completionSourceId = challenge.id;
+  const xpAwarded = rewardXp > 0
+    ? await insertPlayerChallengeXpAward(env, row.user_id, completionSourceId, rewardXp, challenge.title, now)
+    : 0;
+  const callingCardCode = nullableString(challenge.calling_card_code);
+  const hasCallingCardCatalogRow = Boolean(callingCardCode && challenge.calling_card_name);
+  const callingCardAwarded = hasCallingCardCatalogRow
+    ? await insertPlayerChallengeCallingCardAward(env, row.user_id, callingCardCode!, completionSourceId, now)
+    : null;
+  const participationXpAwarded = Math.max(
+    Math.max(0, Math.trunc(numberOrZero(participation.xp_awarded))),
+    rewardXp,
+  );
+  const participationCallingCard = nullableString(participation.calling_card_awarded) ?? (hasCallingCardCatalogRow ? callingCardCode : null);
+
+  await updatePlayerChallengeParticipationAwardState(env, {
+    userId: row.user_id,
+    challengeId: row.challenge_id,
+    status: "completed",
+    progressValue,
+    targetValue,
+    xpAwarded: participationXpAwarded,
+    callingCardAwarded: participationCallingCard,
+    completedAt: nullableString(participation.completed_at) ?? now,
+    now,
+  });
+
+  const status: "awarded" | "duplicate" = xpAwarded > 0 || Boolean(callingCardAwarded) ? "awarded" : "duplicate";
+  const message = status === "awarded"
+    ? "Verified source completed the challenge and wrote earned progression awards."
+    : "Challenge completion awards were already present and were not duplicated.";
+  await markProgressionAwardSource(env, row, status, message, now);
+  return sourceRowOutcome(row, status, message, {
+    progress_value: progressValue,
+    target_value: targetValue,
+    xp_awarded: xpAwarded,
+    calling_card_awarded: callingCardAwarded,
+  });
+}
+
 async function readActiveChallenges(env: Env) {
   const now = new Date().toISOString();
   const rows = await env.DB
@@ -343,6 +718,142 @@ async function readPlayerChallengeParticipations(env: Env, user: SessionUser) {
   return rows.results ?? [];
 }
 
+async function readPlayerChallengeParticipation(env: Env, userId: string, challengeId: string) {
+  return env.DB
+    .prepare(
+      `SELECT
+         challenge_id,
+         status,
+         progress_value,
+         target_value,
+         xp_awarded,
+         calling_card_awarded,
+         joined_at,
+         completed_at,
+         updated_at
+       FROM player_challenge_participations
+       WHERE user_id = ?
+         AND challenge_id = ?
+       LIMIT 1`,
+    )
+    .bind(userId, challengeId)
+    .first<PlayerChallengeParticipationRow>();
+}
+
+async function insertPlayerChallengeXpAward(
+  env: Env,
+  userId: string,
+  challengeId: string,
+  xpAmount: number,
+  challengeTitle: string | null,
+  now: string,
+) {
+  const insert = await env.DB
+    .prepare(
+      `INSERT OR IGNORE INTO player_xp_ledger (
+        id, user_id, source_type, source_id, xp_amount, reason, awarded_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      randomProgressionId("pxp"),
+      userId,
+      CHALLENGE_COMPLETION_SOURCE_TYPE,
+      challengeId,
+      Math.max(0, Math.trunc(xpAmount)),
+      `Completed ${stringOrDefault(challengeTitle, "DZN Challenge")}`,
+      now,
+    )
+    .run();
+  return d1Changes(insert) > 0 ? Math.max(0, Math.trunc(xpAmount)) : 0;
+}
+
+async function insertPlayerChallengeCallingCardAward(
+  env: Env,
+  userId: string,
+  callingCardCode: string,
+  challengeId: string,
+  now: string,
+) {
+  const insert = await env.DB
+    .prepare(
+      `INSERT OR IGNORE INTO player_calling_card_awards (
+        id, user_id, calling_card_code, source_type, source_id, awarded_at
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      randomProgressionId("pcc"),
+      userId,
+      callingCardCode,
+      CHALLENGE_COMPLETION_SOURCE_TYPE,
+      challengeId,
+      now,
+    )
+    .run();
+  return d1Changes(insert) > 0 ? callingCardCode : null;
+}
+
+async function updatePlayerChallengeParticipationAwardState(
+  env: Env,
+  input: {
+    userId: string;
+    challengeId: string;
+    status: "joined" | "completed" | "abandoned";
+    progressValue: number;
+    targetValue: number;
+    xpAwarded: number;
+    callingCardAwarded: string | null;
+    completedAt: string | null;
+    now: string;
+  },
+) {
+  await env.DB
+    .prepare(
+      `UPDATE player_challenge_participations
+       SET status = ?,
+           progress_value = ?,
+           target_value = ?,
+           xp_awarded = ?,
+           calling_card_awarded = ?,
+           completed_at = ?,
+           updated_at = ?
+       WHERE user_id = ?
+         AND challenge_id = ?
+         AND status <> 'abandoned'`,
+    )
+    .bind(
+      input.status,
+      Math.max(0, Math.trunc(input.progressValue)),
+      safeTargetValue(input.targetValue),
+      Math.max(0, Math.trunc(input.xpAwarded)),
+      input.callingCardAwarded,
+      input.completedAt,
+      input.now,
+      input.userId,
+      input.challengeId,
+    )
+    .run();
+}
+
+async function markProgressionAwardSource(
+  env: Env,
+  row: PlayerProgressionAwardSourceRow,
+  status: "progressed" | "awarded" | "duplicate" | "skipped" | "failed",
+  message: string,
+  now: string,
+) {
+  await env.DB
+    .prepare(
+      `UPDATE player_progression_award_sources
+       SET result_status = ?,
+           result_message = ?,
+           processed_at = ?,
+           updated_at = ?
+       WHERE id = ?`,
+    )
+    .bind(status, message.slice(0, 240), now, now, row.id)
+    .run();
+}
+
 async function readPlayerXpTotal(env: Env, user: SessionUser) {
   return env.DB
     .prepare(
@@ -374,7 +885,7 @@ async function readPlayerCallingCardAwards(env: Env, user: SessionUser) {
   return rows.results ?? [];
 }
 
-async function resolveJoinableChallenge(env: Env, target: JoinTarget): Promise<PlayerChallengeRow | null> {
+async function resolveJoinableChallenge(env: Env, target: JoinTarget, nowIso?: string): Promise<PlayerChallengeRow | null> {
   const clauses: string[] = [];
   const values: string[] = [];
   if (target.challengeId) {
@@ -387,7 +898,7 @@ async function resolveJoinableChallenge(env: Env, target: JoinTarget): Promise<P
   }
   if (!clauses.length) return null;
 
-  const now = new Date().toISOString();
+  const now = nowIso ?? new Date().toISOString();
   return env.DB
     .prepare(
       `SELECT
@@ -518,6 +1029,83 @@ function normalizeAction(value: unknown) {
   return action === "join" ? "join" : "unsupported";
 }
 
+function normalizeTrustedProgressionSourceInput(
+  input: TrustedProgressionAwardSourceInput,
+  now: string,
+): { ok: true; value: NormalizedTrustedProgressionSource } | { ok: false; outcome: PlayerProgressionAwardOutcome } {
+  const sourceType = sourceTypeFromUnknown(input.source_type ?? input.sourceType);
+  const sourceId = cleanSourceId(input.source_id ?? input.sourceId);
+  const userId = cleanIdentifier(input.user_id ?? input.userId);
+  const challengeId = cleanIdentifier(input.challenge_id ?? input.challengeId);
+  const challengeSlug = cleanSlug(input.challenge_slug ?? input.challengeSlug ?? input.slug);
+  const progressValue = safeProgressValue(input.progress_value ?? input.progressValue);
+
+  if (input.verified !== true) {
+    return {
+      ok: false,
+      outcome: awardOutcome({
+        status: "skipped",
+        source_type: sourceType,
+        source_id: sourceId,
+        user_id: userId,
+        challenge_id: challengeId,
+        message: "Progression award source must be explicitly verified by a trusted server-side rule.",
+      }),
+    };
+  }
+  if (!sourceType) {
+    return {
+      ok: false,
+      outcome: awardOutcome({
+        status: "skipped",
+        source_id: sourceId,
+        user_id: userId,
+        challenge_id: challengeId,
+        message: "Progression award source type is not trusted.",
+      }),
+    };
+  }
+  if (!sourceId || !userId || (!challengeId && !challengeSlug)) {
+    return {
+      ok: false,
+      outcome: awardOutcome({
+        status: "skipped",
+        source_type: sourceType,
+        source_id: sourceId,
+        user_id: userId,
+        challenge_id: challengeId,
+        message: "Progression award source must include source, player, and challenge identifiers.",
+      }),
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      sourceType,
+      sourceId,
+      userId,
+      challengeId,
+      challengeSlug,
+      progressValue,
+      verifiedAt: normalizeIsoDate(input.verified_at ?? input.verifiedAt) ?? now,
+      evidenceJson: safeEvidenceJson(input.evidence_json ?? input.evidence),
+    },
+  };
+}
+
+function sourceTypeFromUnknown(value: unknown): TrustedProgressionSourceType | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return (TRUSTED_PROGRESSION_SOURCE_TYPES as readonly string[]).includes(normalized)
+    ? normalized as TrustedProgressionSourceType
+    : null;
+}
+
+function trustedSourceInputs(value: TrustedProgressionAwardSourceInput[] | null | undefined, limit: number) {
+  return Array.isArray(value) ? value.filter((item) => item && typeof item === "object").slice(0, limit) : [];
+}
+
 function normalizeParticipationStatus(value: unknown): "not_joined" | "joined" | "completed" | "abandoned" {
   if (value === "joined" || value === "completed" || value === "abandoned") return value;
   return "not_joined";
@@ -535,9 +1123,20 @@ function cleanSlug(value: unknown) {
   return /^[a-z0-9][a-z0-9-]{1,95}$/.test(trimmed) ? trimmed : null;
 }
 
+function cleanSourceId(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return /^[a-zA-Z0-9][a-zA-Z0-9:_.-]{2,159}$/.test(trimmed) ? trimmed : null;
+}
+
 function safeTargetValue(value: unknown) {
   const parsed = Math.trunc(Number(value));
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function safeProgressValue(value: unknown) {
+  const parsed = Math.trunc(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 10_000) : 1;
 }
 
 function numberOrZero(value: unknown) {
@@ -564,6 +1163,117 @@ function titleFromCode(code: string) {
 function stringDateValue(value: string | null) {
   const parsed = value ? Date.parse(value) : 0;
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeIsoDate(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function safeEvidenceJson(value: unknown) {
+  if (value === null || value === undefined) return null;
+  try {
+    const json = typeof value === "string" ? value : JSON.stringify(value);
+    const trimmed = json.trim();
+    return trimmed ? trimmed.slice(0, 2048) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clampAwardLimit(value: unknown) {
+  const parsed = Math.trunc(Number(value));
+  return Number.isFinite(parsed)
+    ? Math.max(1, Math.min(parsed, AWARD_JOB_MAX_LIMIT))
+    : AWARD_JOB_DEFAULT_LIMIT;
+}
+
+function awardJobSource(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, 80) : "cron";
+}
+
+function d1Changes(result: unknown) {
+  const changes = Number((result as { meta?: { changes?: unknown } } | null)?.meta?.changes ?? 0);
+  return Number.isFinite(changes) ? changes : 0;
+}
+
+function buildAwardJobResult(input: Partial<PlayerProgressionAwardJobResult> & { source: string }): PlayerProgressionAwardJobResult {
+  const acceptedSources = Math.max(0, Math.trunc(input.acceptedSources ?? 0));
+  const duplicateSources = Math.max(0, Math.trunc(input.duplicateSources ?? 0));
+  const processed = Math.max(0, Math.trunc(input.processed ?? 0));
+  const progressed = Math.max(0, Math.trunc(input.progressed ?? 0));
+  const awardedXp = Math.max(0, Math.trunc(input.awardedXp ?? 0));
+  const awardedCards = Math.max(0, Math.trunc(input.awardedCards ?? 0));
+  const completedChallenges = Math.max(0, Math.trunc(input.completedChallenges ?? 0));
+  const skipped = input.skipped ?? [];
+  const failed = input.failed ?? [];
+  const warnings = input.warnings ?? [];
+  const taskStatus = failed.length
+    ? "failed"
+    : skipped.length || warnings.length
+      ? "warning"
+      : processed || acceptedSources || duplicateSources
+        ? "success"
+        : "no_op";
+
+  return {
+    ok: failed.length === 0,
+    taskStatus,
+    task_status: taskStatus,
+    source: input.source,
+    acceptedSources,
+    accepted_sources: acceptedSources,
+    duplicateSources,
+    duplicate_sources: duplicateSources,
+    processed,
+    progressed,
+    awardedXp,
+    awarded_xp: awardedXp,
+    awardedCards,
+    awarded_cards: awardedCards,
+    completedChallenges,
+    completed_challenges: completedChallenges,
+    skipped,
+    failed,
+    warnings,
+  };
+}
+
+function awardOutcome(input: Partial<PlayerProgressionAwardOutcome> & { status: PlayerProgressionAwardOutcomeStatus; message: string }): PlayerProgressionAwardOutcome {
+  return {
+    status: input.status,
+    source_type: input.source_type ?? null,
+    source_id: input.source_id ?? null,
+    user_id: input.user_id ?? null,
+    challenge_id: input.challenge_id ?? null,
+    message: input.message,
+    progress_value: input.progress_value,
+    target_value: input.target_value,
+    xp_awarded: input.xp_awarded,
+    calling_card_awarded: input.calling_card_awarded,
+  };
+}
+
+function sourceRowOutcome(
+  row: PlayerProgressionAwardSourceRow,
+  status: PlayerProgressionAwardOutcomeStatus,
+  message: string,
+  extras: Partial<PlayerProgressionAwardOutcome> = {},
+) {
+  return awardOutcome({
+    status,
+    source_type: row.source_type,
+    source_id: row.source_id,
+    user_id: row.user_id,
+    challenge_id: row.challenge_id,
+    message,
+    ...extras,
+  });
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message.slice(0, 240) : fallback;
 }
 
 function randomProgressionId(prefix: string) {

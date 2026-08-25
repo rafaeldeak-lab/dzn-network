@@ -478,7 +478,7 @@ function PlayerProgressPanel({ progress }: { progress: PlayerHubProgress }) {
             ))}
           </div>
         ) : (
-          <p className="mt-3 text-sm font-bold leading-6 text-zinc-400">Join a player challenge to start building XP and profile progress.</p>
+          <p className="mt-3 text-sm font-bold leading-6 text-zinc-400">Join a player challenge to start building verified XP and profile progress.</p>
         )}
       </div>
       <div className="rounded border border-white/10 bg-black/24 p-4">
@@ -493,7 +493,7 @@ function PlayerProgressPanel({ progress }: { progress: PlayerHubProgress }) {
             ))}
           </div>
         ) : (
-          <p className="mt-3 text-sm font-bold leading-6 text-zinc-400">Earned calling cards will appear here. Paid plans do not unlock competitive cards.</p>
+          <p className="mt-3 text-sm font-bold leading-6 text-zinc-400">Calling cards awarded from verified DZN activity will appear here. Paid plans do not unlock competitive cards.</p>
         )}
       </div>
     </div>
