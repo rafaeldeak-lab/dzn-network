@@ -2,11 +2,19 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { CheckCircle2, Clock3, Flag, MessageSquareReply, RefreshCcw, ShieldAlert, Star, Trash2, XCircle } from "lucide-react";
+import { Bell, CheckCircle2, Clock3, Flag, History, Layers3, MessageSquareReply, RefreshCcw, ShieldAlert, Star, Trash2, XCircle } from "lucide-react";
 
 type QueueFilter = "needs_review" | "pending" | "reported" | "approved" | "replied" | "all";
 type ModerationAction = "approve" | "hold" | "remove" | "dismiss_reports" | "reply" | "remove_reply";
+type BulkModerationAction = "hold" | "remove" | "dismiss_reports";
 type LoadState = "loading" | "ready" | "unauthorized" | "plan_required" | "forbidden" | "error";
+
+type ReviewModerationHistoryItem = {
+  action: string;
+  actor_role: string;
+  reason: string | null;
+  created_at: string;
+};
 
 type ReviewModerationItem = {
   id: string;
@@ -30,6 +38,15 @@ type ReviewModerationItem = {
   created_at: string;
   updated_at: string;
   last_edited_at: string | null;
+  status_history: ReviewModerationHistoryItem[];
+};
+
+type ReviewReportPattern = {
+  pattern_key: string;
+  reason: string;
+  review_count: number;
+  total_reports: number;
+  latest_report_at: string | null;
 };
 
 type QueuePayload = {
@@ -44,6 +61,12 @@ type QueuePayload = {
     approved: number;
     replied: number;
   };
+  notification_counts: {
+    unread_total: number;
+    review_notifications: number;
+    review_queue: number;
+  };
+  report_patterns: ReviewReportPattern[];
   items: ReviewModerationItem[];
   generated_at: string;
 };
@@ -68,6 +91,8 @@ export function ReviewModerationDashboard({ homeHref = "/dashboard" }: { homeHre
   const [drafts, setDrafts] = useState<DraftState>({});
   const [message, setMessage] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [bulkBusyAction, setBulkBusyAction] = useState<string | null>(null);
+  const [bulkReason, setBulkReason] = useState("Repeated report pattern reviewed by DZN moderation.");
   const [refreshKey, setRefreshKey] = useState(0);
   const [pricingUrl, setPricingUrl] = useState(DEFAULT_PRICING_URL);
   const [focusedReviewId] = useState<string | null>(() => {
@@ -156,6 +181,35 @@ export function ReviewModerationDashboard({ homeHref = "/dashboard" }: { homeHre
     }
   }
 
+  async function runBulkAction(pattern: ReviewReportPattern, action: BulkModerationAction) {
+    const busyKey = `${pattern.pattern_key}:${action}`;
+    setBulkBusyAction(busyKey);
+    setMessage({ tone: "info", text: "Running admin bulk triage." });
+    try {
+      const response = await fetch("/api/reviews/moderation/bulk", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({
+          action,
+          pattern_key: pattern.pattern_key,
+          reason: bulkReason,
+          min_report_count: 1,
+          limit: 25,
+        }),
+      });
+      const result = await safeJson(response);
+      if (!response.ok || !result?.ok) throw new Error(apiMessage(result, "Bulk review moderation failed."));
+      const updatedCount = Number(result.updated_count ?? 0);
+      setMessage({ tone: "success", text: `Bulk triage updated ${updatedCount} ${updatedCount === 1 ? "review" : "reviews"}.` });
+      setRefreshKey((value) => value + 1);
+    } catch (error) {
+      setMessage({ tone: "error", text: error instanceof Error ? error.message : "Bulk review moderation failed." });
+    } finally {
+      setBulkBusyAction(null);
+    }
+  }
+
   return (
     <main className="min-h-screen overflow-hidden bg-[#02030a] text-zinc-100">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(34,211,238,0.12),transparent_30%),radial-gradient(circle_at_80%_0%,rgba(168,85,247,0.12),transparent_34%),linear-gradient(180deg,rgba(2,3,10,0),#02030a_76%)]" />
@@ -197,6 +251,13 @@ export function ReviewModerationDashboard({ homeHref = "/dashboard" }: { homeHre
               <Metric label={payload.role === "admin" ? "Admin view" : "Owner view"} value={summary.total} tone="zinc" />
             </div>
           ) : null}
+          {payload ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <BadgeMetric icon={<Bell />} label="Unread Pulse" value={payload.notification_counts.unread_total} tone="violet" />
+              <BadgeMetric icon={<Flag />} label="Review alerts" value={payload.notification_counts.review_notifications} tone="red" />
+              <BadgeMetric icon={<ShieldAlert />} label="Queue badge" value={payload.notification_counts.review_queue} tone="amber" />
+            </div>
+          ) : null}
         </header>
 
         <div className="flex flex-wrap gap-2">
@@ -211,12 +272,22 @@ export function ReviewModerationDashboard({ homeHref = "/dashboard" }: { homeHre
                   : "border-white/10 bg-white/[0.035] text-zinc-400 hover:text-white"
               }`}
             >
-              {item.label}
+              <span>{item.label}</span>
+              {payload ? <span className="ml-2 rounded border border-white/10 bg-black/28 px-1.5 py-0.5 text-[10px] text-white">{filterCount(payload, item.value)}</span> : null}
             </button>
           ))}
         </div>
 
         {message ? <MessagePanel message={message} /> : null}
+        {state === "ready" && payload?.role === "admin" ? (
+          <AdminBulkTriagePanel
+            patterns={payload.report_patterns}
+            reason={bulkReason}
+            busyAction={bulkBusyAction}
+            onReasonChange={setBulkReason}
+            onBulkAction={runBulkAction}
+          />
+        ) : null}
         {state === "loading" ? <LoadingPanel /> : null}
         {state === "unauthorized" ? <AccessPanel title="Sign in required" body="Log in with Discord before opening the review moderation queue." actionHref="/login?returnTo=%2Fdashboard%2Freviews" actionLabel="Sign in with Discord" /> : null}
         {state === "plan_required" ? <AccessPanel title="Owner plan required" body="Review moderation is an owner server-management surface. Choose Starter or Pro before using owner tools." actionHref={pricingUrl} actionLabel="Open pricing" /> : null}
@@ -298,6 +369,7 @@ function ReviewCard({
           </div>
           {review.latest_report_reason ? <p className="mt-3 rounded border border-amber-300/20 bg-amber-300/[0.04] p-3 text-sm text-amber-50">{review.latest_report_reason}</p> : null}
           {review.moderation_reason ? <p className="mt-3 rounded border border-white/10 bg-black/25 p-3 text-sm text-zinc-300">{review.moderation_reason}</p> : null}
+          <ReviewStatusHistory history={review.status_history} createdAt={review.created_at} updatedAt={review.updated_at} />
         </div>
 
         <div className="grid gap-3">
@@ -336,6 +408,129 @@ function ReviewCard({
         </div>
       </div>
     </article>
+  );
+}
+
+function AdminBulkTriagePanel({
+  patterns,
+  reason,
+  busyAction,
+  onReasonChange,
+  onBulkAction,
+}: {
+  patterns: ReviewReportPattern[];
+  reason: string;
+  busyAction: string | null;
+  onReasonChange: (value: string) => void;
+  onBulkAction: (pattern: ReviewReportPattern, action: BulkModerationAction) => void;
+}) {
+  return (
+    <section className="rounded-lg border border-fuchsia-300/20 bg-fuchsia-300/[0.045] p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-fuchsia-200">
+            <Layers3 className="h-4 w-4" aria-hidden />
+            Admin bulk triage
+          </div>
+          <h2 className="mt-2 text-xl font-black text-white">Repeated report patterns</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-400">
+            Bulk actions are available only to DZN admins and only for repeated report reasons. They update review moderation state, audit history, and internal owner notifications only.
+          </p>
+        </div>
+        <label className="grid w-full gap-2 lg:max-w-md">
+          <span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Bulk reason</span>
+          <textarea
+            value={reason}
+            onChange={(event) => onReasonChange(event.target.value)}
+            maxLength={220}
+            className={`${inputClass()} min-h-20 resize-y`}
+          />
+        </label>
+      </div>
+
+      {patterns.length === 0 ? (
+        <p className="mt-4 rounded-lg border border-white/10 bg-black/25 p-3 text-sm font-bold text-zinc-400">No repeated report patterns need bulk triage.</p>
+      ) : (
+        <div className="mt-4 grid gap-3 xl:grid-cols-2">
+          {patterns.map((pattern) => (
+            <article key={pattern.pattern_key} className="rounded-lg border border-white/10 bg-black/25 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-black text-white">{pattern.reason}</h3>
+                  <p className="mt-1 text-xs font-bold text-zinc-500">
+                    {pattern.review_count} {pattern.review_count === 1 ? "review" : "reviews"} / {pattern.total_reports} reports
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-600">Latest {formatDate(pattern.latest_report_at)}</p>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <BulkButton action="dismiss_reports" label="Dismiss" tone="neutral" pattern={pattern} busyAction={busyAction} onBulkAction={onBulkAction} />
+                <BulkButton action="hold" label="Hold" tone="warn" pattern={pattern} busyAction={busyAction} onBulkAction={onBulkAction} />
+                <BulkButton action="remove" label="Remove" tone="danger" pattern={pattern} busyAction={busyAction} onBulkAction={onBulkAction} />
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function BulkButton({ action, label, tone, pattern, busyAction, onBulkAction }: {
+  action: BulkModerationAction;
+  label: string;
+  tone: "warn" | "danger" | "neutral";
+  pattern: ReviewReportPattern;
+  busyAction: string | null;
+  onBulkAction: (pattern: ReviewReportPattern, action: BulkModerationAction) => void;
+}) {
+  const busy = busyAction === `${pattern.pattern_key}:${action}`;
+  const classes = {
+    warn: "border-amber-300/25 bg-amber-300/[0.08] text-amber-50 hover:bg-amber-300/[0.14]",
+    danger: "border-red-300/25 bg-red-300/[0.08] text-red-50 hover:bg-red-300/[0.14]",
+    neutral: "border-white/10 bg-white/[0.04] text-zinc-300 hover:text-white",
+  }[tone];
+  return (
+    <button
+      type="button"
+      disabled={Boolean(busyAction)}
+      onClick={() => onBulkAction(pattern, action)}
+      className={`inline-flex min-h-10 items-center justify-center rounded-lg border px-2 py-2 text-[10px] font-black uppercase disabled:cursor-not-allowed disabled:opacity-45 ${classes}`}
+    >
+      {busy ? "Running" : label}
+    </button>
+  );
+}
+
+function ReviewStatusHistory({ history, createdAt, updatedAt }: { history: ReviewModerationHistoryItem[]; createdAt: string; updatedAt: string }) {
+  return (
+    <section className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="inline-flex items-center gap-2 text-sm font-black text-white">
+          <History className="h-4 w-4 text-cyan-200" aria-hidden />
+          Status history
+        </h3>
+        <span className="text-[10px] font-black uppercase text-zinc-600">Updated {formatDate(updatedAt)}</span>
+      </div>
+      <div className="mt-3 grid gap-2">
+        {history.length ? history.map((entry, index) => (
+          <div key={`${entry.action}-${entry.created_at}-${index}`} className="rounded border border-white/10 bg-white/[0.03] px-3 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-black uppercase text-zinc-100">{formatHistoryAction(entry.action)}</span>
+              <span className="text-[10px] font-black uppercase text-zinc-500">{entry.actor_role} / {formatDate(entry.created_at)}</span>
+            </div>
+            {entry.reason ? <p className="mt-1 text-xs leading-5 text-zinc-400">{entry.reason}</p> : null}
+          </div>
+        )) : (
+          <div className="rounded border border-white/10 bg-white/[0.03] px-3 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-black uppercase text-zinc-100">Review created</span>
+              <span className="text-[10px] font-black uppercase text-zinc-500">{formatDate(createdAt)}</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -382,6 +577,21 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: "a
       <div className="text-2xl font-black leading-none">{value}</div>
       <div className="mt-1 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">{label}</div>
     </div>
+  );
+}
+
+function BadgeMetric({ icon, label, value, tone }: { icon: ReactNode; label: string; value: number; tone: "amber" | "violet" | "red" }) {
+  const color = {
+    amber: "border-amber-300/25 bg-amber-300/[0.08] text-amber-50",
+    violet: "border-violet-300/25 bg-violet-300/[0.08] text-violet-50",
+    red: "border-red-300/25 bg-red-300/[0.08] text-red-50",
+  }[tone];
+  return (
+    <span className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-black uppercase ${color}`}>
+      <span className="[&>svg]:h-4 [&>svg]:w-4" aria-hidden>{icon}</span>
+      {label}
+      <span className="rounded bg-black/35 px-1.5 py-0.5 text-white">{formatBadgeCount(value)}</span>
+    </span>
   );
 }
 
@@ -497,6 +707,24 @@ function actionSuccessLabel(action: ModerationAction) {
   if (action === "dismiss_reports") return "Reports dismissed and review approved.";
   if (action === "reply") return "Owner reply saved.";
   return "Owner reply removed.";
+}
+
+function filterCount(payload: QueuePayload, filter: QueueFilter) {
+  if (filter === "all") return formatBadgeCount(payload.counts.total);
+  return formatBadgeCount(payload.counts[filter]);
+}
+
+function formatBadgeCount(value: number) {
+  const count = Math.max(0, Math.trunc(Number(value) || 0));
+  return count > 99 ? "99+" : String(count);
+}
+
+function formatHistoryAction(value: string) {
+  return value
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function formatDate(value?: string | null) {
