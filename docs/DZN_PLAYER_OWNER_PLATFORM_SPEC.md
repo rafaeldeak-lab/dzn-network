@@ -170,12 +170,13 @@ Future slices should build on this foundation in this order unless product prior
 7. Persistent player profile privacy preferences: save player-owned public profile visibility and per-section display settings through a private player settings API.
 8. Public profile publishing/viewer: publish opted-in public player profiles through a public-safe route/API that respects saved visibility preferences and hides private identifiers, source details, raw evidence, and exact award timestamps.
 9. Public profile attribution expansion and controls polish: private "where my public profile appears" controls, plus opt-in attribution only on newly exposed public/player-safe rows with trusted user bridges.
-10. Events and tournaments: join requests, approvals, teams, schedules, brackets, reminders, and player history.
-11. Check-ins, waitlists, and no-shows: event operations for communities and owners.
-12. Discord approval embeds: tick/X owner controls, join request approvals, event reminders, and moderation handoffs.
-13. Rich community systems: Discord community landing views, member matching, role-safe recommendations, and cross-server discovery.
-14. Cosmetics and supporter monetisation: non-competitive profile presentation and optional supporter items that never affect rank, stats, scoring, or earned competitive rewards.
-15. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+10. CTF/event roster attribution proof: add display-only public profile links on read-only roster/member rows only where a unique trusted server/player account bridge exists.
+11. Events and tournaments: join requests, approvals, teams, schedules, brackets, reminders, and player history.
+12. Check-ins, waitlists, and no-shows: event operations for communities and owners.
+13. Discord approval embeds: tick/X owner controls, join request approvals, event reminders, and moderation handoffs.
+14. Rich community systems: Discord community landing views, member matching, role-safe recommendations, and cross-server discovery.
+15. Cosmetics and supporter monetisation: non-competitive profile presentation and optional supporter items that never affect rank, stats, scoring, or earned competitive rewards.
+16. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 
@@ -646,9 +647,9 @@ Authorization and privacy rules:
 - DZN must not infer attribution from display names, gamertags, suggested titles, review names, leaderboard names, Discord names, request-body handles, or public handles supplied by the browser.
 - Attribution payloads may expose only display name, generated public handle, public profile href, and public profile API href.
 
-Excluded until a dedicated proof slice:
+Excluded unless a dedicated proof slice explicitly proves a read-only presentation use:
 
-- CTF/event scoring rosters.
+- CTF/event scoring rosters that perform roster writes, scoring gates, eligibility checks, accepted scoring feeds, and owner decision mutations.
 - Event roster rows that touch scoring, eligibility, sign-up decisions, or owner workflow state.
 - Owner event management rows.
 - Owner/admin review tools and moderation queues.
@@ -660,6 +661,39 @@ Mutation scope:
 - It must not add writes, background jobs, checkout sessions, profile handle generation outside the existing profile-privacy settings flow, billing updates, server ownership changes, ranking updates, discovery score updates, review rating changes, event mutations, CTF scoring changes, badge awards, season changes, Server Wars score/result changes, XP awards, calling-card awards, Nitrado calls, Discord bot messages, Cloudflare secret changes, production D1 writes, live checkout activation, or issue #49 changes.
 
 Fairness remains unchanged: attribution controls and public/player-safe links are presentation-only and must not affect billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+
+## CTF/Event Roster Attribution Proof Slice
+
+The CTF/event roster attribution proof slice permits public profile links only on read-only roster presentation rows after proving the links are metadata for display and cannot influence event operation or scoring.
+
+The slice adds:
+
+- A canonical `readPublicProfileAttributionsByRosterPlayerKeys` helper that resolves exact `(linked_server_id, player_id)` roster keys through `player_profiles.discord_id`, then `users.discord_id`, then `player_profile_privacy_preferences`.
+- Optional `public_profile` metadata on `GET /api/servers/[serverId]/ctf/dashboard` roster rows only.
+- A `profile_attribution` safeguards object on the CTF dashboard response documenting the trusted bridge, presentation-only link mode, no gamertag matching, no private identifier exposure, and no scoring, eligibility, owner-decision, or billing influence.
+- A `Roster Display` panel on the CTF dashboard that renders linked public profile badges only after exact generated-handle href validation.
+
+Authorization and bridge rules:
+
+- The CTF dashboard remains an owner/admin dashboard route. This slice does not make CTF roster data public.
+- Links may appear only when `ctf_tournament_rosters.linked_server_id` plus `ctf_tournament_rosters.player_id` resolves to exactly one `player_profiles` row with a Discord bridge to exactly one DZN `users` row.
+- The linked user must have `public_profile_enabled = 1` and a generated `public_handle`.
+- Hidden, unpublished, malformed, missing, cross-server, or ambiguous bridges render as plain roster names without profile links.
+- DZN must not infer CTF/event roster attribution from player name, gamertag casing, display name, Discord username, request-body handle, or public handle supplied by the browser.
+
+Still excluded:
+
+- `POST /api/servers/[serverId]/ctf/roster` registration and roster writes.
+- `isPlayerOnLockedRoster`, `evaluateCtfPointProgression`, `shouldCountBattleActiveEvent`, point increments, flag raising, and `ctf_event_audit` writes.
+- Accepted scoring feed rows and verified action feed decisions.
+- Event roster approval, eligibility, sign-up, matchmaking, bracket, owner decision, moderation, and admin workflow mutations.
+
+Mutation scope:
+
+- This slice may read `ctf_tournament_rosters`, `player_profiles`, `users`, and `player_profile_privacy_preferences` from the already-authorized dashboard read path.
+- It must not add writes, background jobs, checkout sessions, profile handle generation, profile privacy updates, billing updates, server ownership changes, ranking updates, discovery score updates, review rating changes, event mutations, CTF scoring changes, badge awards, season changes, Server Wars score/result changes, XP awards, calling-card awards, Nitrado calls, Discord bot messages, Cloudflare secret changes, production D1 writes, live checkout activation, or issue #49 changes.
+
+Fairness remains unchanged: CTF roster attribution links are presentation-only and must not affect billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, owner decisions, event eligibility, CTF scoring, or competitive eligibility.
 
 ## Pricing Visual Comparison Upgrade Slice
 
@@ -689,7 +723,8 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/player/profile-privacy` | 401 | Allowed | Allowed | Allowed | Private player-owned settings API; GET/PATCH only; writes only `player_profile_privacy_preferences` |
 | `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences |
 | Public profile attribution on reviews/challenges/leaderboards | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Read-only generated-handle attribution; no name-only matching; ambiguous/hidden/unpublished profiles are not linked |
-| Public profile attribution preview/control and safe event-suggestion author links | Public event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Player-owned visibility control; trusted user bridge required; CTF/event scoring rosters and owner workflows excluded |
+| Public profile attribution preview/control and safe event-suggestion author links | Public event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Player-owned visibility control; trusted user bridge required; roster scoring gates and owner mutations excluded |
+| CTF/event presentation roster profile links | 401/login boundary | Owner/admin dashboard access required | Own server dashboard read-only, if owner/admin checks pass | Own server dashboard read-only, if owner/admin checks pass | Exact roster server/player bridge; generated handle required; presentation-only; registration, scoring, eligibility, and owner decisions unaffected |
 | `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award fact collection, retry, and award processing |
 | `/api/owner/progression/award-audit` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Owner entitlement/admin plus linked-server audit scope; read-only |
 | `/dashboard/progression-awards` and `/owner/progression-awards` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Same private audit API; status/adapter/linked-server/retry filters only |

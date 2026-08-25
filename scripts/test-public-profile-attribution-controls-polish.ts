@@ -302,8 +302,6 @@ function assertProtectedSurfacesRemainExcluded() {
     "functions/_lib/server-war-scoring.ts",
     "functions/api/cron/player-progression/awards.ts",
     "functions/api/servers/[serverId]/ctf/roster.ts",
-    "functions/api/servers/[serverId]/ctf/dashboard.ts",
-    "components/events/tournament-dashboard.tsx",
   ]) {
     const source = read(file);
     assert.doesNotMatch(
@@ -312,6 +310,10 @@ function assertProtectedSurfacesRemainExcluded() {
       `${file} must not depend on public profile attribution state.`,
     );
   }
+
+  const ctfDashboard = read("functions/api/servers/[serverId]/ctf/dashboard.ts");
+  assert.equal(ctfDashboard.includes("link_mode: \"presentation_only\""), true, "CTF dashboard attribution must stay presentation-only.");
+  assert.doesNotMatch(ctfDashboard, /\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)\b/i, "CTF dashboard attribution must stay read-only.");
 }
 
 function createEventSuggestionDb() {

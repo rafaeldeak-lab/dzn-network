@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Clock3,
   Crosshair,
+  ExternalLink,
   Flag,
   Gauge,
   Loader2,
@@ -17,6 +18,7 @@ import {
   ShieldCheck,
   Trophy,
   UserPlus,
+  UserRound,
 } from "lucide-react";
 
 import { DznLogo } from "@/components/dzn/dzn-logo";
@@ -40,6 +42,28 @@ type TournamentSubscription = {
   status: string;
   can_use_cross_server_matching: boolean;
   required_plans: string[];
+};
+
+type PublicProfileAttribution = {
+  display_name: string;
+  public_handle: string;
+  public_href: string;
+  public_api_href: string;
+};
+
+type CtfProfileAttributionSafeguards = {
+  source: string;
+  link_mode: "presentation_only";
+  public_profile_required: boolean;
+  generated_handle_required: boolean;
+  unique_user_bridge_required: boolean;
+  uses_gamertag_matching: boolean;
+  exposes_user_id: boolean;
+  exposes_discord_id: boolean;
+  affects_scoring: boolean;
+  affects_eligibility: boolean;
+  affects_owner_decisions: boolean;
+  affects_billing: boolean;
 };
 
 type Tournament = {
@@ -80,6 +104,7 @@ type RosterEntry = {
   player_id: string;
   player_name: string;
   registered_at: string | null;
+  public_profile?: PublicProfileAttribution | null;
 };
 
 type VerifiedFeedEvent = {
@@ -109,6 +134,7 @@ type TournamentDashboardData = {
   roster: RosterEntry[];
   verified_feed: VerifiedFeedEvent[];
   completed_matches: CompletedMatch[];
+  profile_attribution?: CtfProfileAttributionSafeguards;
   safeguards: {
     aggregate_source: string;
     roster_source: string;
@@ -321,7 +347,7 @@ export function TournamentDashboard() {
       )}
 
       {visibleData ? (
-        <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
           <RosterRegistration
             tournament={activeTournament}
             serverId={serverId}
@@ -334,11 +360,13 @@ export function TournamentDashboard() {
             onPlayerIdChange={setPlayerId}
             onRegister={onRegister}
           />
-          <VerifiedActionFeed events={visibleData.verified_feed} />
+          <RosterPresentationPanel entries={visibleData.roster} safeguards={visibleData.profile_attribution} />
         </div>
       ) : (
         <LoadingGrid />
       )}
+
+      {visibleData ? <VerifiedActionFeed events={visibleData.verified_feed} /> : null}
 
       {visibleData ? <CompletedMatchHistory matches={visibleData.completed_matches} /> : null}
 
@@ -512,6 +540,67 @@ function RosterRegistration(props: {
   );
 }
 
+function RosterPresentationPanel({ entries, safeguards }: { entries: RosterEntry[]; safeguards?: CtfProfileAttributionSafeguards }) {
+  const linkedEntries = entries.filter((entry) => normalizePublicProfileAttribution(entry.public_profile));
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-lg font-black uppercase text-white">
+            <UserRound className="h-5 w-5 text-cyan-200" />
+            Roster Display
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-zinc-400">
+            Public profile links are display-only and appear only from a trusted server/player account bridge. Scoring still uses the locked roster ledger.
+          </p>
+        </div>
+        <StatusChip label={`${linkedEntries.length}/${entries.length} linked`} tone={linkedEntries.length ? "cyan" : "zinc"} icon={ShieldCheck} />
+      </div>
+
+      <div className="mt-4 rounded border border-cyan-300/20 bg-cyan-300/10 p-3 text-xs font-semibold leading-5 text-cyan-50/85">
+        {safeguards?.unique_user_bridge_required ? "Unique user bridge required" : "Profile bridge pending"} / {safeguards?.uses_gamertag_matching === false ? "no gamertag matching" : "no inferred matching"} / {safeguards?.affects_scoring === false ? "no scoring effect" : "presentation only"}
+      </div>
+
+      <div className="mt-4 max-h-96 space-y-3 overflow-y-auto pr-1">
+        {entries.length ? entries.map((entry) => (
+          <div key={`${entry.linked_server_id}:${entry.player_id}`} className="rounded border border-white/10 bg-black/25 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <RosterProfileName entry={entry} />
+              <span className="text-xs font-semibold text-zinc-500">{formatDate(entry.registered_at)}</span>
+            </div>
+            <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] text-zinc-500">{entry.server_name}</p>
+          </div>
+        )) : (
+          <EmptyNotice title="No Roster Entries Yet" detail="Presentation-only roster rows will appear here after verified players are locked for this event." compact />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function RosterProfileName({ entry }: { entry: RosterEntry }) {
+  const profile = normalizePublicProfileAttribution(entry.public_profile);
+  if (profile) {
+    return (
+      <Link
+        href={profile.public_href}
+        aria-label={`View ${profile.display_name}'s public DZN profile`}
+        className="inline-flex min-w-0 max-w-full items-center gap-2 rounded border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1.5 text-sm font-black text-cyan-50 transition hover:border-cyan-200/45 hover:bg-cyan-300/15"
+      >
+        <UserRound className="h-4 w-4 shrink-0" />
+        <span className="truncate">{profile.display_name}</span>
+        <ExternalLink className="h-3.5 w-3.5 shrink-0 text-cyan-100/70" />
+      </Link>
+    );
+  }
+  return (
+    <span className="inline-flex min-w-0 max-w-full items-center gap-2 text-sm font-semibold text-white">
+      <UserRound className="h-4 w-4 shrink-0 text-zinc-500" />
+      <span className="truncate">{entry.player_name || "Verified player"}</span>
+    </span>
+  );
+}
+
 function VerifiedActionFeed({ events }: { events: VerifiedFeedEvent[] }) {
   return (
     <section className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
@@ -658,6 +747,32 @@ function formatDate(value: string | null | undefined) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(time);
+}
+
+function normalizePublicProfileAttribution(value: unknown): PublicProfileAttribution | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const publicHandle = normalizePublicProfileHandle(record.public_handle);
+  if (!publicHandle) return null;
+  const expectedHref = `/players/${publicHandle}`;
+  const expectedApiHref = `/api/public/player-profiles/${publicHandle}`;
+  if (!(record.public_href === expectedHref && record.public_api_href === expectedApiHref)) return null;
+  return {
+    display_name: displayNameOrDefault(record.display_name),
+    public_handle: publicHandle,
+    public_href: expectedHref,
+    public_api_href: expectedApiHref,
+  };
+}
+
+function normalizePublicProfileHandle(value: unknown) {
+  const text = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return /^[a-z0-9](?:[a-z0-9-]{1,62}[a-z0-9])$/.test(text) ? text : null;
+}
+
+function displayNameOrDefault(value: unknown) {
+  const text = typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+  return text.slice(0, 48) || "DZN Player";
 }
 
 function lastGoodKey(serverId: string) {
