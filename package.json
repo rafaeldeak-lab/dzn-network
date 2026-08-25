@@ -85,6 +85,7 @@
     "test:nitrado-diagnostics": "tsx scripts/test-nitrado-file-read-diagnostics.ts",
     "seed:dzn-pulse-demo": "tsx scripts/seed-dzn-pulse-demo.ts",
     "test:public-profile-sync": "tsx scripts/test-public-profile-sync.ts",
+    "test:reviews-foundation": "tsx scripts/test-reviews-foundation.ts",
     "test:billing-plans": "tsx scripts/test-billing-plans.ts",
     "test:pricing-visual-upgrade": "tsx scripts/test-pricing-visual-upgrade.ts",
     "test:stripe-live-readiness": "tsx scripts/test-stripe-live-readiness.ts",

@@ -95,6 +95,14 @@ Authenticated player APIs such as `/api/player/hub` and `/api/player/communities
 
 `/api/player/saved-servers` is the free logged-in save/follow preference endpoint. `GET` returns only the current player's saved public servers. `POST` and `DELETE` may write only the current player's row in `player_saved_servers` after resolving the target as a visible public server. Saving a server must not affect rankings, discovery score, billing, server ownership, reviews, events, tournaments, Server Wars, badges, XP, challenge outcomes, or competitive eligibility.
 
+`/api/player/reviews` is the free logged-in review submission endpoint. It may create or update only the current player's review row in `server_reviews` for a visible public server, subject to review validation, moderation checks, owner self-review blocking, and cooldown rules. Review submission must not require Starter, Pro, owner entitlement, server ownership, Nitrado access, Stripe, Discord bot permissions, or billing state. Review submission must not affect rankings, discovery score, billing, server ownership, events, tournaments, Server Wars, badges, seasons, XP, challenge outcomes, calling cards, or competitive eligibility.
+
+`/api/public/server-reviews` remains the public/read path for review summaries and approved review bodies. Logged-out users can receive a locked preview summary; logged-in players can read approved reviews and see their own review state. Public review responses must not expose reviewer Discord IDs or owner reply author user IDs.
+
+`/api/public/server-reviews/[reviewId]/report` is a logged-in player moderation hook. It may write a report row, increment the reported review count, and move a repeatedly reported review to pending review. It must not write billing, ownership, ranking, discovery, badge, season, event, or competitive tables.
+
+Owner replies are server-management actions. `PUT`/`DELETE /api/servers/[serverId]/reviews/[reviewId]/reply` must stay behind the owner entitlement boundary and existing server owner/admin checks. Owner replies may be displayed publicly with approved reviews, but they must not change the review rating, review count, average, ranking, discovery score, badge eligibility, seasons, events, or competitive eligibility.
+
 Event browsing, event detail pages, event suggestions, votes, and reports remain player/community surfaces. Registering or matching an owned server for an event is an owner action and must cross the billing entitlement boundary first.
 
 These APIs must keep their existing preview redaction and `Vary: Cookie` behavior where applicable. Public API availability does not mean the corresponding app page is public.

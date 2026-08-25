@@ -12,6 +12,8 @@ export const REVIEW_MIN_CHARS = 20;
 export const REVIEW_MAX_WORDS = 250;
 export const REVIEW_MAX_CHARS = 1500;
 export const REVIEW_COOLDOWN_HOURS = 24;
+export const OWNER_REPLY_MIN_CHARS = 10;
+export const OWNER_REPLY_MAX_CHARS = 900;
 
 export type PublicListingInput = {
   public_short_description?: unknown;
@@ -39,11 +41,19 @@ export type ReviewInput = {
   body?: unknown;
 };
 
+export type OwnerReplyInput = {
+  body?: unknown;
+};
+
 export type ValidatedReview = {
   rating: number;
   title: string | null;
   body: string;
   status: "approved";
+};
+
+export type ValidatedOwnerReply = {
+  body: string;
 };
 
 type ValidationResult<T> = { ok: true; value: T } | { ok: false; error: string; reason?: string };
@@ -127,6 +137,19 @@ export function validateReviewInput(input: ReviewInput): ValidationResult<Valida
       status: "approved",
     },
   };
+}
+
+export function validateOwnerReplyInput(input: OwnerReplyInput): ValidationResult<ValidatedOwnerReply> {
+  const body = cleanRequiredText(input.body, OWNER_REPLY_MAX_CHARS, { rejectHtml: true });
+  if (!body.ok) return { ok: false, error: body.error, reason: body.reason };
+  if (body.value.length < OWNER_REPLY_MIN_CHARS) {
+    return { ok: false, error: `Reply must be at least ${OWNER_REPLY_MIN_CHARS} characters.`, reason: "too_short" };
+  }
+
+  const moderation = moderateReviewText(null, body.value);
+  if (!moderation.ok) return { ok: false, error: REVIEW_ERROR, reason: moderation.reason };
+
+  return { ok: true, value: { body: body.value } };
 }
 
 export function moderateReviewText(title: string | null, body: string): ValidationResult<{ status: "approved" }> {
