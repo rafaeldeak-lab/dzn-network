@@ -42,7 +42,7 @@ Saved/followed state must not affect:
 
 ## Future Pricing Redesign Note
 
-The dedicated `/pricing` page still needs a separate visual upgrade slice. That later slice should make the comparison much clearer with red X marks and green ticks, make Pro visibly richer than Starter, use bolder DZN-styled presentation, and add subtle slow pan/zoom background motion while respecting reduced-motion settings. This is intentionally not mixed into the saved-server interaction slice.
+The dedicated `/pricing` visual upgrade is intentionally handled in the next stacked slice, `codex/pricing-visual-upgrade-20260825`. That slice makes the comparison clearer with red X marks and green ticks, makes Pro visibly richer than Starter, uses bolder DZN-styled presentation, and adds subtle slow pan/zoom background motion while respecting reduced-motion settings. It remains separate from saved-server interaction behavior.
 
 ## Validation Checklist
 
