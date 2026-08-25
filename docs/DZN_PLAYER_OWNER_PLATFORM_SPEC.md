@@ -169,12 +169,13 @@ Future slices should build on this foundation in this order unless product prior
 6. Player profile progression showcase: make earned XP, challenge progress, and calling cards visible from `/player/profile` and the Player Hub with privacy-aware display controls.
 7. Persistent player profile privacy preferences: save player-owned public profile visibility and per-section display settings through a private player settings API.
 8. Public profile publishing/viewer: publish opted-in public player profiles through a public-safe route/API that respects saved visibility preferences and hides private identifiers, source details, raw evidence, and exact award timestamps.
-9. Events and tournaments: join requests, approvals, teams, schedules, brackets, reminders, and player history.
-10. Check-ins, waitlists, and no-shows: event operations for communities and owners.
-11. Discord approval embeds: tick/X owner controls, join request approvals, event reminders, and moderation handoffs.
-12. Rich community systems: Discord community landing views, member matching, role-safe recommendations, and cross-server discovery.
-13. Cosmetics and supporter monetisation: non-competitive profile presentation and optional supporter items that never affect rank, stats, scoring, or earned competitive rewards.
-14. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+9. Public profile attribution expansion and controls polish: private "where my public profile appears" controls, plus opt-in attribution only on newly exposed public/player-safe rows with trusted user bridges.
+10. Events and tournaments: join requests, approvals, teams, schedules, brackets, reminders, and player history.
+11. Check-ins, waitlists, and no-shows: event operations for communities and owners.
+12. Discord approval embeds: tick/X owner controls, join request approvals, event reminders, and moderation handoffs.
+13. Rich community systems: Discord community landing views, member matching, role-safe recommendations, and cross-server discovery.
+14. Cosmetics and supporter monetisation: non-competitive profile presentation and optional supporter items that never affect rank, stats, scoring, or earned competitive rewards.
+15. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 
@@ -623,6 +624,43 @@ Mutation scope:
 
 Fairness remains unchanged: public profile attribution links are presentation-only and must not affect billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
 
+## Public Profile Attribution Expansion And Controls Polish Slice
+
+The public profile attribution expansion and controls polish slice adds a private "where my public profile appears" preview/control surface for logged-in players, then extends opt-in attribution only where a newly exposed public/player-safe row has a unique trusted user bridge.
+
+The slice adds:
+
+- `profile_attribution` preview metadata from the canonical public profile attribution helper on `GET /api/player/profile`, `GET /api/player/profile-privacy`, `PATCH /api/player/profile-privacy`, and `GET /api/player/hub`.
+- A private `/player/profile` control panel named "Where My Public Profile Appears" that shows possible link placements, excluded surfaces, and a "Hide All Public Links" action backed by the existing `public_profile_enabled` preference.
+- A compact `/player` Player Hub summary named "Where My Profile Appears" that previews the same player-owned visibility state.
+- Public event suggestion author attribution on `event_suggestion_author_rows` by resolving `event_suggestions.submitted_by_user_id` through `player_profile_privacy_preferences` and `users`.
+- Player Hub challenge-row attribution for the current player's own `player_state.public_profile`, reusing the existing trusted session-owned player progression payload.
+- Exact client-side generated-handle href validation before rendering profile links on the newly touched UI surfaces.
+
+Authorization and privacy rules:
+
+- Normal Discord login remains enough for the private preview/control surfaces; Starter, Pro, owner entitlement, server ownership, Nitrado access, Stripe, Discord bot permissions, and billing state are not required.
+- The preview/control metadata is read-only on `GET` routes. The only allowed write remains the existing private player-owned `PATCH /api/player/profile-privacy`, and it may only update the current player's `player_profile_privacy_preferences`.
+- Event suggestion author links may be shown only when `event_suggestions.submitted_by_user_id` resolves to exactly one DZN user with `public_profile_enabled = 1` and a generated `public_handle`.
+- Hidden, unpublished, malformed, missing, or unconfigured author profiles must render as generic `DZN player` rows without public profile links.
+- DZN must not infer attribution from display names, gamertags, suggested titles, review names, leaderboard names, Discord names, request-body handles, or public handles supplied by the browser.
+- Attribution payloads may expose only display name, generated public handle, public profile href, and public profile API href.
+
+Excluded until a dedicated proof slice:
+
+- CTF/event scoring rosters.
+- Event roster rows that touch scoring, eligibility, sign-up decisions, or owner workflow state.
+- Owner event management rows.
+- Owner/admin review tools and moderation queues.
+- Any surface where a public profile link could be mistaken for scoring, eligibility, ownership, moderation authority, or paid-plan status.
+
+Mutation scope:
+
+- This slice may read `player_profile_privacy_preferences`, `users`, `event_suggestions`, public event suggestion vote state when already requested by the existing public suggestion route, and current-player challenge progress already returned by the player progression read model.
+- It must not add writes, background jobs, checkout sessions, profile handle generation outside the existing profile-privacy settings flow, billing updates, server ownership changes, ranking updates, discovery score updates, review rating changes, event mutations, CTF scoring changes, badge awards, season changes, Server Wars score/result changes, XP awards, calling-card awards, Nitrado calls, Discord bot messages, Cloudflare secret changes, production D1 writes, live checkout activation, or issue #49 changes.
+
+Fairness remains unchanged: attribution controls and public/player-safe links are presentation-only and must not affect billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -651,6 +689,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/player/profile-privacy` | 401 | Allowed | Allowed | Allowed | Private player-owned settings API; GET/PATCH only; writes only `player_profile_privacy_preferences` |
 | `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences |
 | Public profile attribution on reviews/challenges/leaderboards | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Read-only generated-handle attribution; no name-only matching; ambiguous/hidden/unpublished profiles are not linked |
+| Public profile attribution preview/control and safe event-suggestion author links | Public event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Player-owned visibility control; trusted user bridge required; CTF/event scoring rosters and owner workflows excluded |
 | `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award fact collection, retry, and award processing |
 | `/api/owner/progression/award-audit` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Owner entitlement/admin plus linked-server audit scope; read-only |
 | `/dashboard/progression-awards` and `/owner/progression-awards` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Same private audit API; status/adapter/linked-server/retry filters only |

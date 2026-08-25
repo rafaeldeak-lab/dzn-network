@@ -3,6 +3,7 @@ import {
   publicPlayerProfileApiHref,
   publicPlayerProfileHref,
   playerProfilePrivacyFairness,
+  type PlayerProfilePrivacyPreferences,
   type PlayerProfilePrivacyFairness,
 } from "./player-profile-privacy";
 import type { Env, SessionUser } from "./types";
@@ -16,6 +17,61 @@ export type PublicProfileAttribution = {
 
 export type PublicProfileAttributionFairness = PlayerProfilePrivacyFairness;
 
+export type PublicProfileAppearanceLinkState =
+  | "visible_when_present"
+  | "eligible_when_unique_user_bridge"
+  | "hidden_until_public_profile"
+  | "hidden_until_generated_handle"
+  | "future_safe_extension";
+
+export type PublicProfileAppearancePlacement = {
+  key:
+    | "public_profile_page"
+    | "server_review_author_rows"
+    | "event_suggestion_author_rows"
+    | "player_challenge_rows"
+    | "player_hub_challenge_rows"
+    | "safe_leaderboard_mentions"
+    | "future_player_safe_member_rosters";
+  label: string;
+  description: string;
+  href: string;
+  public_surface: boolean;
+  can_show_public_profile_link: boolean;
+  link_state: PublicProfileAppearanceLinkState;
+  requires_generated_handle: boolean;
+  requires_unique_user_bridge: boolean;
+  controlled_by: "public_profile_visibility";
+  exposes_private_identifiers: false;
+  affects_competition: false;
+};
+
+export type PublicProfileExcludedAttributionSurface = {
+  key: "ctf_event_scoring_rosters" | "owner_admin_review_tools" | "owner_event_management";
+  label: string;
+  reason: string;
+  public_profile_links_enabled: false;
+  affects_competition: false;
+};
+
+export type PublicProfileAppearancePreview = {
+  public_profile_enabled: boolean;
+  ready: boolean;
+  public_handle: string | null;
+  public_href: string | null;
+  public_api_href: string | null;
+  settings_href: string;
+  control: {
+    key: "public_profile_visibility";
+    label: "Allow public profile display";
+    settings_href: string;
+    disables_all_public_attribution_links: true;
+  };
+  placements: PublicProfileAppearancePlacement[];
+  excluded_surfaces: PublicProfileExcludedAttributionSurface[];
+  fairness: PublicProfileAttributionFairness;
+};
+
 type PublicProfileAttributionRow = {
   user_id?: string | null;
   discord_id?: string | null;
@@ -27,6 +83,142 @@ const MAX_ATTRIBUTION_LOOKUP_IDS = 100;
 
 export function publicProfileAttributionFairness(): PublicProfileAttributionFairness {
   return playerProfilePrivacyFairness();
+}
+
+export function buildPublicProfileAppearancePreview(
+  privacy: Pick<
+    PlayerProfilePrivacyPreferences,
+    "public_profile_enabled" | "public_handle" | "public_href" | "public_api_href" | "settings_href"
+  >,
+): PublicProfileAppearancePreview {
+  const publicHandle = normalizePublicProfileHandle(privacy.public_handle);
+  const publicHref = publicPlayerProfileHref(publicHandle);
+  const publicApiHref = publicPlayerProfileApiHref(publicHandle);
+  const hasGeneratedHandle = Boolean(publicHandle && publicHref && publicApiHref);
+  const ready = Boolean(privacy.public_profile_enabled && hasGeneratedHandle);
+  const publicProfileLinkState: PublicProfileAppearanceLinkState = ready
+    ? "visible_when_present"
+    : privacy.public_profile_enabled
+      ? "hidden_until_generated_handle"
+      : "hidden_until_public_profile";
+  const bridgeLinkState: PublicProfileAppearanceLinkState = ready
+    ? "eligible_when_unique_user_bridge"
+    : publicProfileLinkState;
+
+  return {
+    public_profile_enabled: Boolean(privacy.public_profile_enabled),
+    ready,
+    public_handle: publicHandle,
+    public_href: ready ? publicHref : null,
+    public_api_href: ready ? publicApiHref : null,
+    settings_href: privacy.settings_href,
+    control: {
+      key: "public_profile_visibility",
+      label: "Allow public profile display",
+      settings_href: privacy.settings_href,
+      disables_all_public_attribution_links: true,
+    },
+    placements: [
+      attributionPlacement({
+        key: "public_profile_page",
+        label: "Public profile page",
+        description: "Your generated DZN player profile route.",
+        href: publicHref ?? "/player/profile",
+        publicSurface: true,
+        ready,
+        linkState: publicProfileLinkState,
+        requiresUniqueUserBridge: false,
+      }),
+      attributionPlacement({
+        key: "server_review_author_rows",
+        label: "Review author rows",
+        description: "Approved public server reviews you wrote can link to your profile.",
+        href: "/servers",
+        publicSurface: true,
+        ready,
+        linkState: publicProfileLinkState,
+        requiresUniqueUserBridge: true,
+      }),
+      attributionPlacement({
+        key: "event_suggestion_author_rows",
+        label: "Event suggestion author rows",
+        description: "Public community event suggestions you submit can link to your profile.",
+        href: "/events/suggest",
+        publicSurface: true,
+        ready,
+        linkState: publicProfileLinkState,
+        requiresUniqueUserBridge: true,
+      }),
+      attributionPlacement({
+        key: "player_challenge_rows",
+        label: "Challenge participation rows",
+        description: "Player-facing challenge participation rows can point back to your profile.",
+        href: "/events/challenges",
+        publicSurface: false,
+        ready,
+        linkState: publicProfileLinkState,
+        requiresUniqueUserBridge: true,
+      }),
+      attributionPlacement({
+        key: "player_hub_challenge_rows",
+        label: "Player Hub challenge rows",
+        description: "Your private Player Hub challenge rows can preview the same public profile link.",
+        href: "/player",
+        publicSurface: false,
+        ready,
+        linkState: publicProfileLinkState,
+        requiresUniqueUserBridge: true,
+      }),
+      attributionPlacement({
+        key: "safe_leaderboard_mentions",
+        label: "Safe leaderboard mentions",
+        description: "Leaderboard player names can link only when DZN has one trusted user match.",
+        href: "/leaderboards",
+        publicSurface: true,
+        ready,
+        linkState: bridgeLinkState,
+        requiresUniqueUserBridge: true,
+      }),
+      {
+        key: "future_player_safe_member_rosters",
+        label: "Future player-safe member or roster rows",
+        description: "New member or roster rows stay off until they prove a unique trusted user bridge.",
+        href: "/player/profile",
+        public_surface: false,
+        can_show_public_profile_link: false,
+        link_state: "future_safe_extension",
+        requires_generated_handle: true,
+        requires_unique_user_bridge: true,
+        controlled_by: "public_profile_visibility",
+        exposes_private_identifiers: false,
+        affects_competition: false,
+      },
+    ],
+    excluded_surfaces: [
+      {
+        key: "ctf_event_scoring_rosters",
+        label: "CTF/event scoring rosters",
+        reason: "Excluded because these rows touch roster locks, scoring evidence, or owner workflows.",
+        public_profile_links_enabled: false,
+        affects_competition: false,
+      },
+      {
+        key: "owner_admin_review_tools",
+        label: "Owner/admin moderation tools",
+        reason: "Excluded from public attribution because these are private management views.",
+        public_profile_links_enabled: false,
+        affects_competition: false,
+      },
+      {
+        key: "owner_event_management",
+        label: "Owner event management",
+        reason: "Excluded until a dedicated slice proves links are presentation-only.",
+        public_profile_links_enabled: false,
+        affects_competition: false,
+      },
+    ],
+    fairness: publicProfileAttributionFairness(),
+  };
 }
 
 export async function readPublicProfileAttributionsByUserIds(
@@ -140,4 +332,30 @@ function uniqueNonEmptyStrings(values: Array<string | null | undefined>) {
 
 function placeholders(count: number) {
   return Array.from({ length: count }, () => "?").join(", ");
+}
+
+function attributionPlacement(input: {
+  key: PublicProfileAppearancePlacement["key"];
+  label: string;
+  description: string;
+  href: string;
+  publicSurface: boolean;
+  ready: boolean;
+  linkState: PublicProfileAppearanceLinkState;
+  requiresUniqueUserBridge: boolean;
+}): PublicProfileAppearancePlacement {
+  return {
+    key: input.key,
+    label: input.label,
+    description: input.description,
+    href: input.href,
+    public_surface: input.publicSurface,
+    can_show_public_profile_link: input.ready,
+    link_state: input.linkState,
+    requires_generated_handle: true,
+    requires_unique_user_bridge: input.requiresUniqueUserBridge,
+    controlled_by: "public_profile_visibility",
+    exposes_private_identifiers: false,
+    affects_competition: false,
+  };
 }

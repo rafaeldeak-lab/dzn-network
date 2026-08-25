@@ -459,7 +459,7 @@ async function assertSuggestionHeadRoute() {
     assert.equal(await coldHead.text(), "", "cold HEAD response body should be empty");
     assert.equal(coldHead.headers.get("x-dzn-cache"), "BYPASS", "cold HEAD should bypass instead of populating cache");
     assertIncludes(coldHead.headers.get("cache-control") ?? "", "no-store", "cold HEAD bypass should be no-store");
-    assert.equal(fakeCache.putsForVersion("event-suggestions-v3"), 0, "cold HEAD must not call Cache.put");
+    assert.equal(fakeCache.putsForVersion("event-suggestions-v4"), 0, "cold HEAD must not call Cache.put");
 
     const getAfterColdHead = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route), env, waitUntil));
     assert.equal(getAfterColdHead.status, 200, "GET after cold HEAD should return 200");
@@ -468,7 +468,7 @@ async function assertSuggestionHeadRoute() {
     assert.equal(getAfterColdHeadJson.ok, true, "GET after cold HEAD should return full JSON");
     assert.equal((getAfterColdHeadJson.suggestions ?? []).length, 1, "GET after cold HEAD should return suggestion rows");
     await Promise.all(waits.splice(0));
-    assert.equal(fakeCache.putsForVersion("event-suggestions-v3"), 1, "first GET should store a valid body");
+    assert.equal(fakeCache.putsForVersion("event-suggestions-v4"), 1, "first GET should store a valid body");
 
     const cachedGet = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route), env, waitUntil));
     assert.equal(cachedGet.headers.get("x-dzn-cache"), "HIT", "second GET should hit cached body");
@@ -478,7 +478,7 @@ async function assertSuggestionHeadRoute() {
     assert.equal(cachedHead.status, 200, "HEAD after cached GET should return 200");
     assert.equal(cachedHead.headers.get("x-dzn-cache"), "HIT", "HEAD after cached GET should report HIT");
     assert.equal(await cachedHead.text(), "", "HEAD after cached GET should return no body");
-    assert.equal(fakeCache.putsForVersion("event-suggestions-v3"), 1, "cached HEAD must not replace the cached body");
+    assert.equal(fakeCache.putsForVersion("event-suggestions-v4"), 1, "cached HEAD must not replace the cached body");
 
     const getAfterCachedHead = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route), env, waitUntil));
     assert.equal(getAfterCachedHead.status, 200, "GET after cached HEAD should still return 200");
@@ -493,7 +493,7 @@ async function assertSuggestionHeadRoute() {
 
     const malformedHead = await onSuggestionsRequestHead(makeSuggestionRouteContext(new Request(`${route}&cursor=${"x".repeat(2100)}`, { method: "HEAD" }), env, waitUntil));
     assert.equal(malformedHead.headers.get("x-dzn-cache"), "BYPASS", "malformed HEAD should bypass cache");
-    assert.equal(fakeCache.putsForVersion("event-suggestions-v3"), 1, "malformed HEAD must not populate cache");
+    assert.equal(fakeCache.putsForVersion("event-suggestions-v4"), 1, "malformed HEAD must not populate cache");
 
     const post = await onSuggestionsRequestPost(makeSuggestionRouteContext(new Request("https://example.test/api/events/suggestions", {
       method: "POST",
@@ -527,7 +527,7 @@ async function assertSuggestionViewerVoteHydration() {
     assert.equal(db.sessionQueries, 0, "anonymous suggestion list must not resolve session state");
     assert.equal(db.viewerVoteQueries, 0, "anonymous suggestion list must not query viewer votes");
     await Promise.all(waits.splice(0));
-    assert.equal(fakeCache.putsForVersion("event-suggestions-v3"), 1, "anonymous suggestion list may populate shared cache");
+    assert.equal(fakeCache.putsForVersion("event-suggestions-v4"), 1, "anonymous suggestion list may populate shared cache");
 
     const cachedAnonymous = await onSuggestionsRequestGet(makeSuggestionRouteContext(new Request(route), { DB: db as unknown as D1Database } as Env, waitUntil));
     assert.equal(cachedAnonymous.headers.get("x-dzn-cache"), "HIT", "anonymous suggestion list should reuse public cache");
@@ -1877,6 +1877,15 @@ class SuggestionRouteStatement {
           .map(([suggestion_id, vote_value]) => ({ suggestion_id, vote_value })),
       };
     }
+    if (/FROM\s+player_profile_privacy_preferences/i.test(this.sql) && /INNER\s+JOIN\s+users/i.test(this.sql)) {
+      return {
+        results: [{
+          user_id: "phase2a-member",
+          username: "Phase2A Member",
+          public_handle: "phase2a-member-a1b2c",
+        }],
+      };
+    }
     if (this.sql.includes("FROM event_suggestions")) {
       const limit = Number(this.bindings[this.bindings.length - 1] ?? 20);
       return { results: [suggestionRouteRow()].slice(0, limit) };
@@ -2652,6 +2661,7 @@ const SUGGESTION_ROUTE_COLUMNS: Record<string, string[]> = {
 function suggestionRouteRow() {
   return {
     id: "phase2a-route-head-test",
+    submitted_by_user_id: "phase2a-member",
     title: "Route HEAD Test Suggestion",
     description: "A route level suggestion row used to prove HEAD requests do not poison cached GET responses while preserving public projection privacy.",
     competition_format: "community_challenge",

@@ -1,5 +1,9 @@
 import { requireDb } from "./db";
 import { creatorEventAdminDeniedPayload, isPlatformCreatorEventAdmin } from "./platform-creator";
+import {
+  readPublicProfileAttributionsByUserIds,
+  type PublicProfileAttribution,
+} from "./public-profile-attribution";
 import type { Env, SessionUser } from "./types";
 
 export const SUGGESTION_PUBLIC_STATUSES = ["public_voting", "shortlisted", "accepted", "converted_to_event"] as const;
@@ -375,10 +379,13 @@ export async function listPublicEventSuggestions(
     .all<SuggestionRow>();
   const resultRows = rows.results ?? [];
   const pageRows = resultRows.slice(0, limit);
-  const viewerVotes = options.viewerUserId ? await loadViewerVotesForSuggestions(db, options.viewerUserId, pageRows.map((row) => row.id)) : new Map<string, -1 | 1>();
+  const [viewerVotes, authorProfiles] = await Promise.all([
+    options.viewerUserId ? loadViewerVotesForSuggestions(db, options.viewerUserId, pageRows.map((row) => row.id)) : Promise.resolve(new Map<string, -1 | 1>()),
+    readPublicProfileAttributionsByUserIds(env, pageRows.map((row) => row.submitted_by_user_id)),
+  ]);
   return {
     ok: true,
-    suggestions: pageRows.map((row) => toPublicSuggestion(row, viewerVotes.get(row.id) ?? 0)),
+    suggestions: pageRows.map((row) => toPublicSuggestion(row, viewerVotes.get(row.id) ?? 0, authorProfiles.get(row.submitted_by_user_id) ?? null)),
     nextCursor: resultRows.length > limit ? makeCursor(pageRows[pageRows.length - 1], sort, statusFilter) : null,
     generatedAt: new Date().toISOString(),
     source: "live",
@@ -1477,7 +1484,11 @@ function requiresReason(action: string) {
   return ["request_revision", "reject", "archive", "restore"].includes(action);
 }
 
-function toPublicSuggestion(row: SuggestionRow, userVote: -1 | 0 | 1 = 0) {
+function toPublicSuggestion(
+  row: SuggestionRow,
+  userVote: -1 | 0 | 1 = 0,
+  authorProfile: PublicProfileAttribution | null = null,
+) {
   const upvotes = Number(row.upvote_count ?? 0);
   const downvotes = Number(row.downvote_count ?? 0);
   const total = upvotes + downvotes;
@@ -1507,6 +1518,8 @@ function toPublicSuggestion(row: SuggestionRow, userVote: -1 | 0 | 1 = 0) {
     userVote,
     votePercentage: total ? Math.round((upvotes / total) * 100) : null,
     hotScore: Number(row.hot_score ?? 0),
+    authorName: authorProfile?.display_name ?? "DZN player",
+    authorProfile,
     submittedAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1530,8 +1543,11 @@ function toOwnerSuggestion(row: SuggestionRow) {
   };
 }
 
-export function projectSuggestionForPublicTest(overrides: Record<string, unknown>) {
-  return toPublicSuggestion(testSuggestionRow(overrides));
+export function projectSuggestionForPublicTest(
+  overrides: Record<string, unknown>,
+  authorProfile: PublicProfileAttribution | null = null,
+) {
+  return toPublicSuggestion(testSuggestionRow(overrides), 0, authorProfile);
 }
 
 export function projectSuggestionForOwnerTest(overrides: Record<string, unknown>) {
