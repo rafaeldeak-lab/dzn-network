@@ -35,6 +35,8 @@ type ProfileResponse = {
     mode?: string;
     public_profile_enabled?: boolean;
     persistence?: string;
+    settings_href?: string;
+    updated_at?: string | null;
     controls?: Record<string, boolean>;
     public_safe_preview?: Record<string, boolean>;
   };
@@ -74,7 +76,9 @@ function assertStaticContracts() {
   assert.equal(existsSync("app/player/profile/page.tsx"), true, "Player profile page route should exist.");
   assert.equal(existsSync("components/player/player-profile-progression-page.tsx"), true, "Player profile showcase component should exist.");
   assert.equal(existsSync("functions/api/player/profile.ts"), true, "Player profile API should exist.");
+  assert.equal(existsSync("functions/api/player/profile-privacy.ts"), true, "Player profile privacy settings API should exist.");
   assert.equal(existsSync("functions/_lib/player-profile-progression.ts"), true, "Player profile progression helper should exist.");
+  assert.equal(existsSync("functions/_lib/player-profile-privacy.ts"), true, "Player profile privacy helper should exist.");
   assert.equal(existsSync("docs/PLAYER_PROFILE_PROGRESSION_SHOWCASE_HANDOFF.md"), true, "Player profile progression handoff should exist.");
 
   const appPage = read("app/player/profile/page.tsx");
@@ -83,23 +87,27 @@ function assertStaticContracts() {
   const profileUi = read("components/player/player-profile-progression-page.tsx");
   for (const snippet of [
     "/api/player/profile",
+    "/api/player/profile-privacy",
     "/login?returnTo=",
     "Free player profile",
     "Progression Showcase",
     "Privacy Display Controls",
+    "Public profile visibility",
+    "Save Preferences",
     "Public Preview",
     "Hidden Preview",
     "Calling Card Showcase",
     "Challenge Progress",
     "Progression Timeline",
-    "Public profile publishing stays off",
+    "Saved display preferences belong to your player profile",
     "earned player-side only",
     "do not affect paid plans, rankings, discovery score, reviews, badges, seasons, events, Server Wars scoring, or competitive eligibility",
     "/pricing?intent=owner_setup&returnTo=%2Fsetup",
   ]) {
     assert.equal(profileUi.includes(snippet), true, `Player profile UI must include ${snippet}.`);
   }
-  assert.doesNotMatch(profileUi, /method\s*:\s*["'](?:POST|PATCH|PUT|DELETE)["']/i, "Profile UI must not perform browser mutations.");
+  assert.match(profileUi, /method:\s*"PATCH"/, "Profile UI should save settings through PATCH only.");
+  assert.doesNotMatch(profileUi, /method\s*:\s*["'](?:POST|PUT|DELETE)["']/i, "Profile UI must not perform unsafe browser mutations.");
   assert.doesNotMatch(profileUi, /dangerouslySetInnerHTML|createCheckoutSession|DZN_LIVE_CHECKOUT_ENABLED|STRIPE_SECRET_KEY|NITRADO_TOKEN|DISCORD_BOT_TOKEN/i, "Profile UI must not touch unsafe rendering, checkout, or raw secrets.");
 
   const profileApi = read("functions/api/player/profile.ts");
@@ -117,13 +125,10 @@ function assertStaticContracts() {
   const profileHelper = read("functions/_lib/player-profile-progression.ts");
   for (const snippet of [
     "getPlayerChallengesPayload",
+    "getPlayerProfilePrivacyPreferences",
     "PlayerProfileProgressionPayload",
-    "public_profile_enabled: false",
-    "persistence: \"local_preview_only\"",
-    "exposes_discord_id: false",
-    "exposes_user_id: false",
-    "exposes_source_ids: false",
-    "exposes_raw_evidence: false",
+    "public_profile_enabled: privacy.public_profile_enabled",
+    "settings_href: privacy.settings_href",
     "paid_plan_influence: false",
     "ranking_influence: false",
     "discovery_score_influence: false",
@@ -132,6 +137,8 @@ function assertStaticContracts() {
     "season_influence: false",
     "event_influence: false",
     "server_wars_influence: false",
+    "xp_award_influence: false",
+    "calling_card_award_influence: false",
     "competitive_eligibility_influence: false",
   ]) {
     assert.equal(profileHelper.includes(snippet), true, `Profile helper must include ${snippet}.`);
@@ -140,6 +147,16 @@ function assertStaticContracts() {
   assert.doesNotMatch(profileHelper, /\bowner_billing_accounts\b|\bserver_subscriptions\b|\bowner_plan_entitlements\b|\bserver_owners\b/i);
   assert.doesNotMatch(profileHelper, /\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)\b/i, "Profile helper must stay read-only.");
   assert.doesNotMatch(profileHelper, /createCheckoutSession|DZN_LIVE_CHECKOUT_ENABLED|stripe|NITRADO_TOKEN|DISCORD_BOT_TOKEN|fetchDiscordGuilds|canManageDiscordGuild|storeGuilds/i);
+
+  const privacyHelper = read("functions/_lib/player-profile-privacy.ts");
+  for (const snippet of [
+    "exposes_discord_id: false",
+    "exposes_user_id: false",
+    "exposes_source_ids: false",
+    "exposes_raw_evidence: false",
+  ]) {
+    assert.equal(privacyHelper.includes(snippet), true, `Profile privacy helper must include ${snippet}.`);
+  }
 
   const hubUi = read("components/player/player-hub-page.tsx");
   for (const snippet of [
@@ -172,7 +189,7 @@ function assertStaticContracts() {
     "`/player/profile` and `/api/player/profile`",
     "free logged-in player progression showcase surfaces",
     "Public profile publishing stays off",
-    "preview-only local UI state",
+    "hydrate saved display choices",
     "must not affect paid plans, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring",
   ]) {
     assert.equal(accessPolicy.includes(snippet), true, `Public access policy must include ${snippet}.`);
@@ -213,7 +230,8 @@ async function assertEndpointContracts() {
   assert.equal(noDbJson.profile?.total_xp, 0);
   assert.equal(noDbJson.privacy?.mode, "private_viewer");
   assert.equal(noDbJson.privacy?.public_profile_enabled, false);
-  assert.equal(noDbJson.privacy?.persistence, "local_preview_only");
+  assert.equal(noDbJson.privacy?.persistence, "unavailable");
+  assert.equal(noDbJson.privacy?.settings_href, "/api/player/profile-privacy");
   assert.equal(noDbJson.privacy?.controls?.show_xp, true);
   assert.equal(noDbJson.privacy?.controls?.show_challenge_progress, true);
   assert.equal(noDbJson.privacy?.controls?.show_calling_cards, true);
@@ -249,6 +267,16 @@ async function assertLivePayloadShape() {
   assert.equal(json.profile?.joined_challenges, 1);
   assert.equal(json.profile?.available_challenges, 1);
   assert.equal(json.profile?.calling_card_count, 1);
+  assert.equal(json.privacy?.public_profile_enabled, true);
+  assert.equal(json.privacy?.persistence, "saved");
+  assert.equal(json.privacy?.settings_href, "/api/player/profile-privacy");
+  assert.equal(json.privacy?.controls?.show_calling_cards, false);
+  assert.equal(json.privacy?.controls?.show_award_dates, true);
+  assert.equal(json.privacy?.controls?.show_discord_identity, false);
+  assert.equal(json.privacy?.controls?.show_source_details, false);
+  assert.equal(json.privacy?.public_safe_preview?.exposes_discord_id, false);
+  assert.equal(json.privacy?.public_safe_preview?.exposes_source_ids, false);
+  assert.equal(json.privacy?.public_safe_preview?.hides_exact_award_times, true);
   assert.equal(json.progression?.total_xp, 375);
   assert.equal(json.progression?.challenge_progress?.[0]?.status, "completed");
   assert.equal(json.progression?.challenge_progress?.[0]?.progress_percent, 100);
@@ -301,6 +329,7 @@ function statement(sql: string, bindings: unknown[], operations: FakeOperation[]
     },
     async first<T>() {
       operations.push({ kind: "first", sql, bindings });
+      if (/FROM\s+player_profile_privacy_preferences/i.test(sql)) return profilePrivacyPreferenceRow() as T;
       if (/SUM\(xp_amount\)/i.test(sql)) return { total_xp: 375 } as T;
       return null;
     },
@@ -355,14 +384,27 @@ function callingCardAwardRow() {
   };
 }
 
+function profilePrivacyPreferenceRow() {
+  return {
+    public_profile_enabled: 1,
+    show_xp: 1,
+    show_challenge_progress: 1,
+    show_calling_cards: 0,
+    show_award_dates: 1,
+    show_discord_identity: 1,
+    show_source_details: 1,
+    updated_at: "2026-08-25T10:35:00.000Z",
+  };
+}
+
 function assertProfileReadOperationsStayIsolated(operations: FakeOperation[]) {
-  assert.equal(operations.length, 4, "Profile endpoint should only perform the existing four progression reads.");
+  assert.equal(operations.length, 5, "Profile endpoint should only perform the existing progression reads plus one preference read.");
   for (const operation of operations) {
     assert.notEqual(operation.kind, "run");
     assert.doesNotMatch(operation.sql, forbiddenProtectedSurfacePattern());
     assert.match(
       operation.sql,
-      /\bplayer_challenges\b|\bplayer_challenge_participations\b|\bplayer_xp_ledger\b|\bplayer_calling_card_awards\b|\bplayer_calling_cards\b/i,
+      /\bplayer_profile_privacy_preferences\b|\bplayer_challenges\b|\bplayer_challenge_participations\b|\bplayer_xp_ledger\b|\bplayer_calling_card_awards\b|\bplayer_calling_cards\b/i,
       `Unexpected profile progression read: ${operation.sql}`,
     );
   }
@@ -378,6 +420,8 @@ function assertFairnessFlags(fairness: Record<string, boolean> | undefined) {
     "season_influence",
     "event_influence",
     "server_wars_influence",
+    "xp_award_influence",
+    "calling_card_award_influence",
     "competitive_eligibility_influence",
   ];
   for (const flag of flags) {
