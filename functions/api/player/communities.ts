@@ -29,70 +29,109 @@ type StoredDiscordToken = {
   expires_at: string | null;
 };
 
+export type SafeMatchedServer = ReturnType<typeof toSafeMatchedServer>;
+
+export type PlayerCommunitySummary = {
+  guild_id: string;
+  guild_name: string;
+  guild_icon_url: string | null;
+  matched_servers: SafeMatchedServer[];
+};
+
+export type PlayerCommunitiesPayload = {
+  ok: true;
+  communities: PlayerCommunitySummary[];
+  needs_discord_refresh: boolean;
+  matched_guild_count: number;
+  matched_server_count: number;
+  fetched_at: string;
+  error?: string;
+};
+
+export type PlayerCommunitiesResult = {
+  status: 200 | 401;
+  payload: PlayerCommunitiesPayload;
+};
+
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
 
   const user = await getRequestSessionUser(env, request);
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
 
+  const result = await getPlayerCommunitiesPayload(env, user);
+  return json(result.payload, { status: result.status });
+};
+
+export async function getPlayerCommunitiesPayload(env: Env, user: { id: string }): Promise<PlayerCommunitiesResult> {
   if (isMockAuth(env.MOCK_AUTH)) {
-    return json({
-      ok: true,
-      communities: mockGuilds.map((guild) => ({
-        guild_id: guild.id,
-        guild_name: guild.name,
-        guild_icon_url: guildIconUrl(guild),
-        matched_servers: [],
-      })),
-      needs_discord_refresh: false,
-      matched_guild_count: mockGuilds.length,
-      matched_server_count: 0,
-      fetched_at: new Date().toISOString(),
-    });
+    const communities = mockGuilds.map((guild) => ({
+      guild_id: guild.id,
+      guild_name: guild.name,
+      guild_icon_url: guildIconUrl(guild),
+      matched_servers: [],
+    }));
+    return {
+      status: 200,
+      payload: {
+        ok: true,
+        communities,
+        needs_discord_refresh: false,
+        matched_guild_count: mockGuilds.length,
+        matched_server_count: 0,
+        fetched_at: new Date().toISOString(),
+      },
+    };
   }
 
   const token = await readSavedAccessToken(env, user.id);
   if (!token) {
-    return json({
-      ok: true,
-      communities: [],
-      needs_discord_refresh: true,
-      matched_guild_count: 0,
-      matched_server_count: 0,
-      fetched_at: new Date().toISOString(),
-    });
+    return {
+      status: 200,
+      payload: emptyCommunitiesPayload(true),
+    };
   }
 
   let guilds: DiscordGuild[] = [];
   try {
     guilds = await fetchDiscordGuilds(token);
   } catch {
-    return json(
-      {
+    return {
+      status: 401,
+      payload: {
+        ...emptyCommunitiesPayload(true),
         error: "Discord guild permissions need refreshing. Log out and back in, then open your player communities again.",
-        communities: [],
-        needs_discord_refresh: true,
-        matched_guild_count: 0,
-        matched_server_count: 0,
-        fetched_at: new Date().toISOString(),
       },
-      { status: 401 },
-    );
+    };
   }
 
   const guildIds = uniqueGuildIds(guilds);
   const matchedRows = guildIds.length > 0 ? await findMatchedCommunities(env, guildIds) : [];
   const communities = groupCommunities(guilds, matchedRows);
 
-  return json({
+  return {
+    status: 200,
+    payload: {
+      ok: true,
+      communities,
+      needs_discord_refresh: false,
+      matched_guild_count: communities.length,
+      matched_server_count: matchedRows.length,
+      fetched_at: new Date().toISOString(),
+    },
+  };
+}
+
+function emptyCommunitiesPayload(needsDiscordRefresh: boolean): PlayerCommunitiesPayload {
+  return {
     ok: true,
-    communities,
-    needs_discord_refresh: false,
-    matched_guild_count: communities.length,
-    matched_server_count: matchedRows.length,
+    communities: [],
+    needs_discord_refresh: needsDiscordRefresh,
+    matched_guild_count: 0,
+    matched_server_count: 0,
     fetched_at: new Date().toISOString(),
-  });
-};
+  };
+}
 
 async function readSavedAccessToken(env: Env, userId: string) {
   if (!env.DB) return null;

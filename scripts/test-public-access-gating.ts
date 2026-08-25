@@ -629,21 +629,23 @@ assert.equal(starterHeaderBlock.includes("Leaderboards"), true);
 assert.equal(starterHeaderBlock.includes("Servers"), true);
 assert.equal(starterHeaderBlock.includes("Stats"), false);
 assert.equal(starterHeaderBlock.includes("Events"), true);
+assert.equal(starterHeaderBlock.includes("Player Hub"), true);
 assert.equal(proHeaderBlock.includes("Leaderboards"), true);
 assert.equal(proHeaderBlock.includes("Servers"), true);
 assert.equal(proHeaderBlock.includes("Stats"), true);
 assert.equal(proHeaderBlock.includes("Events"), true);
+assert.equal(proHeaderBlock.includes("Player Hub"), true);
 assert.equal(siteHeaderSource.includes("data-auth-state"), true);
 assert.equal(siteHeaderSource.includes("checking-public"), true);
 assert.equal(siteHeaderSource.includes("aria-busy={authProbePending}"), true);
 assert.equal(siteHeaderSource.includes("authProbePending ?"), true);
-for (const route of ["/dashboard", "/dzn-pulse", "/events", "/leaderboards", "/seasons", "/servers", "/setup", "/test"]) {
+for (const route of ["/dashboard", "/dzn-pulse", "/events", "/leaderboards", "/player", "/seasons", "/servers", "/setup", "/test"]) {
   assert.equal(pageMiddlewareSource.includes(`"${route}"`), true, `Protected app page middleware must include ${route}.`);
   assert.equal(routesPatchSource.includes(`"${route}"`), true, `Pages route patcher must include exact ${route}.`);
   assert.equal(staticRoutesSource.includes(`"${route}"`), true, `Static routes file must include exact ${route}.`);
   assert.equal(publicAccessPolicyDoc.includes(`\`${route}\``), true, `Public access policy doc must describe ${route}.`);
 }
-for (const route of ["/dashboard/*", "/dzn-pulse/*", "/events/*", "/leaderboards/*", "/seasons/*", "/servers/*", "/setup/*", "/test/*"]) {
+for (const route of ["/dashboard/*", "/dzn-pulse/*", "/events/*", "/leaderboards/*", "/player/*", "/seasons/*", "/servers/*", "/setup/*", "/test/*"]) {
   assert.equal(routesPatchSource.includes(`"${route}"`), true, `Pages route patcher must include nested ${route}.`);
   assert.equal(staticRoutesSource.includes(`"${route}"`), true, `Static routes file must include nested ${route}.`);
 }
@@ -655,7 +657,7 @@ assert.equal(routesPatchSource.includes("\"/api/*\""), true);
 assert.equal(routesPatchSource.includes("\"/owner\""), true);
 assert.equal(routesPatchSource.includes("\"/owner/*\""), true);
 assert.equal(productionSmokeSource.includes("Protected app page redirected logged-out navigation to login."), true);
-assert.equal(productionSmokeSource.includes("[\"/dashboard\", \"/events\", \"/leaderboards\", \"/servers\", \"/setup\", \"/dzn-pulse\", \"/seasons\"]"), true);
+assert.equal(productionSmokeSource.includes("[\"/dashboard\", \"/events\", \"/leaderboards\", \"/servers\", \"/setup\", \"/dzn-pulse\", \"/seasons\", \"/player\"]"), true);
 assert.equal(pricingUpgradeBlock.includes("View Pricing"), true);
 assert.equal(pricingUpgradeBlock.includes("Owner Setup"), true);
 assert.equal(pricingUpgradeBlock.includes("role=\"dialog\""), false, "Homepage pricing must stay a teaser, not a modal.");

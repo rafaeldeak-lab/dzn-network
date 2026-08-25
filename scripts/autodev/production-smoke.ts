@@ -60,7 +60,7 @@ async function main() {
       : fail(`GET ${path}`, routeScope[path] === "adm" ? `Expected 200, got ${result.status}.` : `Route sanity check failed with ${result.status}; mark out-of-scope unless tied to ADM code.`, result, routeScope[path] === "adm" ? "high" : "medium"));
   }
 
-  for (const path of ["/dashboard", "/events", "/leaderboards", "/servers", "/setup", "/dzn-pulse", "/seasons"]) {
+  for (const path of ["/dashboard", "/events", "/leaderboards", "/servers", "/setup", "/dzn-pulse", "/seasons", "/player"]) {
     const result = await request(path);
     const location = result.headers.location ?? "";
     checks.push(result.ok && result.status === 302 && location.includes("/login")

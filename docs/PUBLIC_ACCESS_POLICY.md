@@ -21,6 +21,7 @@ Logged-out visitors are redirected to `/login?returnTo=...` before app-page rend
 - `/dzn-pulse`
 - `/events`
 - `/leaderboards`
+- `/player`
 - `/seasons`
 - `/servers`
 - `/setup`
@@ -35,6 +36,7 @@ Logged-in Discord users are free DZN players by default. They may open player-fa
 - `/dzn-pulse`
 - `/events`
 - `/leaderboards`
+- `/player`
 - `/seasons`
 - `/servers`
 
@@ -87,7 +89,9 @@ The homepage and public preview surfaces still need public read-only JSON. These
 - `/api/events/suggestions?sort=newest&limit=5`
 - `/api/dzn-pulse/config`
 
-Authenticated player APIs such as `/api/player/communities` may require a session while remaining free of owner billing requirements.
+Authenticated player APIs such as `/api/player/hub` and `/api/player/communities` may require a session while remaining free of owner billing requirements.
+
+`/api/player/hub` is the free logged-in Player Hub payload. It may read matched Discord communities, saved/followed server preferences, public server suggestions, and public event/tournament suggestions. It must not create checkout sessions, call Nitrado, mutate Discord guild ownership, require owner entitlement, write billing state, or alter competitive/stat tables.
 
 Event browsing, event detail pages, event suggestions, votes, and reports remain player/community surfaces. Registering or matching an owned server for an event is an owner action and must cross the billing entitlement boundary first.
 
@@ -99,8 +103,8 @@ Post-merge verification should expect:
 
 - `/` returns `200`.
 - `/pricing` returns `200` and opens the dedicated Starter/Pro pricing page.
-- Logged-out direct app pages such as `/events`, `/leaderboards`, `/servers`, `/dashboard`, `/setup`, `/dzn-pulse`, and `/seasons` return a login redirect.
-- Logged-in free players can open player surfaces such as `/events`, `/leaderboards`, `/servers`, `/dzn-pulse`, and `/seasons` without payment.
+- Logged-out direct app pages such as `/player`, `/events`, `/leaderboards`, `/servers`, `/dashboard`, `/setup`, `/dzn-pulse`, and `/seasons` return a login redirect.
+- Logged-in free players can open player surfaces such as `/player`, `/events`, `/leaderboards`, `/servers`, `/dzn-pulse`, and `/seasons` without payment.
 - Logged-in free players who open `/setup` or `/dashboard` are redirected to the dedicated owner pricing page.
 - Logged-out header/navigation does not expose app/product controls, while authenticated headers show player/owner package-appropriate actions.
 - The dashboard sidebar shows package-aware guidance: trial-safe tools, Pro locks/upgrade prompts, or active Pro tools based on the authenticated account summary.

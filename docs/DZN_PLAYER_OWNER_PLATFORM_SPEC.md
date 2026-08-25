@@ -68,6 +68,7 @@ Login with Discord -> Player Hub / Servers / Events / Tournaments / Leaderboards
 
 Player access includes:
 
+- Player Hub home at `/player`.
 - Server listing and discovery pages.
 - Events and tournament browsing.
 - Leaderboards and public competitive views.
@@ -167,14 +168,34 @@ Future slices should build on this foundation in this order unless product prior
 8. Cosmetics and supporter monetisation: non-competitive profile presentation and optional supporter items that never affect rank, stats, scoring, or earned competitive rewards.
 9. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
+## Player Hub Foundation Slice
+
+The Player Hub foundation slice adds `/player` as the logged-in home for normal Discord users. It is a free player surface and must not require Starter, Pro, checkout, Nitrado access, server ownership, or owner billing state to render.
+
+The foundation hub shows:
+
+- Matched Discord communities from `/api/player/communities`.
+- Followed and saved server state, also referred to as saved/followed server state, backed by the additive `player_saved_servers` table.
+- Suggested public servers from safe linked-server discovery fields.
+- Suggested public events and tournaments from the existing public event payload.
+- Profile entry points for DZN Pulse, leaderboards, events, player-profile roadmap work, and owner setup.
+
+The hub keeps owner setup behind the same owner boundary:
+
+```text
+Player Hub -> Add Server -> /pricing?intent=owner_setup&returnTo=%2Fsetup -> guarded checkout -> entitlement -> /setup
+```
+
+The Player Hub API is `/api/player/hub`. It requires a logged-in Discord session, but it must not call `requireOwnerRequestAccess`, return owner-plan-required errors, mutate guild ownership, create checkout sessions, write Stripe state, call Nitrado, or modify competitive/stat tables. Saved/followed server storage is additive player preference state only and must not affect discovery rank, leaderboard score, event scoring, reviews, badges, XP, challenge outcomes, or competitive eligibility.
+
 ## Access Matrix
 
 | Surface | Visitor | Free Discord player | Starter trial/active | Pro active or legacy effective Pro | Enforcement |
 | --- | --- | --- | --- | --- | --- |
 | `/` homepage | Allowed | Allowed | Allowed | Allowed | Public page |
 | `/pricing` | Allowed | Allowed | Allowed | Allowed | Public page and checkout API |
-| `/servers`, `/events`, `/seasons`, `/leaderboards`, `/dzn-pulse` | Login required | Allowed | Allowed | Allowed | Page auth middleware |
-| Player/community matching API | Login required | Allowed | Allowed | Allowed | Session auth, no owner grant |
+| `/player`, `/servers`, `/events`, `/seasons`, `/leaderboards`, `/dzn-pulse` | Login required | Allowed | Allowed | Allowed | Page auth middleware |
+| Player Hub and community matching APIs | Login required | Allowed | Allowed | Allowed | Session auth, no owner grant |
 | `/setup` | Login required | Redirect to owner pricing | Allowed | Allowed | Page auth plus owner entitlement |
 | `/dashboard` owner tools | Login required | Redirect to owner pricing | Allowed | Allowed | Page auth plus owner entitlement |
 | `/api/onboarding/*` | 401 | 402 owner plan required | Allowed | Allowed | Owner entitlement middleware |
