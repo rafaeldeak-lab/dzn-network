@@ -57,7 +57,11 @@ export type ReviewModerationAction =
   | "review_reported"
   | "review_auto_pending"
   | "owner_reply_upserted"
-  | "owner_reply_removed";
+  | "owner_reply_removed"
+  | "review_moderation_approved"
+  | "review_moderation_pending"
+  | "review_moderation_removed"
+  | "review_reports_dismissed";
 
 export async function ensureServerReviewsSchema(env: Env) {
   const db = requireDb(env);

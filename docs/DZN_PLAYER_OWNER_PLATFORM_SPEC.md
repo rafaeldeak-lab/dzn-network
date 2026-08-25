@@ -232,6 +232,36 @@ Owner replies are owner tooling and must remain behind server owner/admin access
 
 For fairness, reviews remain separate from paid plans. Starter, Pro, and legacy effective-Pro status may improve owner tooling and presentation elsewhere, but they must not buy reviews, suppress reviews, boost review scores, alter rating averages, affect rankings, change discovery score, grant badges, change seasons, change events, or change competitive eligibility.
 
+## Reviews Moderation Dashboard Slice
+
+The Reviews moderation dashboard slice turns the review/report hooks into a proper owner/admin queue without changing review submission, pricing, checkout, rankings, discovery, or competitive systems.
+
+The slice adds:
+
+- `/dashboard/reviews` as the owner-facing moderation dashboard. This path inherits the existing `/dashboard` page owner entitlement boundary.
+- `/owner/reviews` as the DZN admin entry point. API authorization still decides what data and actions are allowed.
+- `GET /api/reviews/moderation` for a private no-store queue of pending, reported, approved, replied, or all reviews.
+- `POST /api/reviews/moderation/[reviewId]` for approve, hold, remove, dismiss-report, save-reply, and remove-reply actions.
+- Owner console navigation for Review Control.
+- DZN Pulse notification hooks when a review enters moderation through reports and when DZN admin moderation updates a server owner's queue.
+
+Authorization rules:
+
+- Normal Discord players cannot access the moderation queue.
+- Normal server owners must pass the canonical owner entitlement layer before using `/dashboard/reviews` or `/api/reviews/moderation`.
+- A paid/trialing owner can only moderate reviews for linked servers where `linked_servers.user_id` matches the session user.
+- Configured DZN admins can use `/owner/reviews` and the same moderation API across servers.
+- The action endpoint re-checks ownership/admin authority against the target review's linked server before every mutation.
+
+Mutation scope:
+
+- The queue may read `server_reviews`, `server_review_reports`, and `linked_servers`.
+- Moderation actions may update `server_reviews` and append `server_review_moderation_actions`.
+- Notification hooks may insert DZN Pulse rows into `user_notifications` only when DZN Pulse is enabled.
+- No Discord notification dispatch, bot send, Nitrado call, Stripe call, checkout session creation, Cloudflare secret update, or production D1 migration application is part of this slice.
+
+Fairness remains unchanged: reviews remain separate from paid plans, rankings, discovery score, badges, seasons, events, Server Wars, challenges, XP, calling cards, and competitive eligibility. Moderation state may hide, hold, or approve public review visibility, but it must not change rating formulas into competitive or discovery inputs.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -258,6 +288,8 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/public/server-reviews` | Preview/locked summary | Allowed | Allowed | Allowed | Public/read with session-aware redaction |
 | `/api/public/server-reviews/[reviewId]/report` | 401 | Allowed | Allowed | Allowed | Session auth, report/moderation hook only |
 | `/api/servers/[serverId]/reviews/[reviewId]/reply` | Login/pricing boundary | Owner plan required | Allowed, then ownership checks still apply | Allowed, then ownership checks still apply | Owner entitlement plus server owner/admin checks |
+| `/dashboard/reviews` and `/api/reviews/moderation` | Login/pricing boundary | Owner plan required | Allowed for own linked servers only | Allowed for own linked servers only | Owner entitlement plus per-review server ownership/admin checks |
+| `/owner/reviews` | Data denied by API | Own reviews only if entitled, or global if DZN admin | Own reviews only, or global if DZN admin | Own reviews only, or global if DZN admin | Same moderation API; per-review ownership/admin checks |
 | `/setup` | Login required | Redirect to owner pricing | Allowed | Allowed | Page auth plus owner entitlement |
 | `/dashboard` owner tools | Login required | Redirect to owner pricing | Allowed | Allowed | Page auth plus owner entitlement |
 | `/api/onboarding/*` | 401 | 402 owner plan required | Allowed | Allowed | Owner entitlement middleware |
