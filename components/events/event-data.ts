@@ -2,6 +2,26 @@ export type EventStatus = "live" | "upcoming" | "standby" | "ended" | "registrat
 export type ServerCategory = "deathmatch" | "pvp" | "pve" | "pvp_pve" | "hardcore" | "roleplay" | "faction_wars" | "vanilla" | "modded";
 export type EventType = "capture_the_flag" | "community_cup" | "bot_tournament" | "faction_wars" | "seasonal_wars" | "kill_race" | "survival_challenge";
 
+export type PublicProfileAttribution = {
+  display_name: string;
+  public_handle: string;
+  public_href: string;
+  public_api_href: string;
+};
+
+export type EventProfileAttributionSafeguards = {
+  placement: "public_event_creator_member_rows";
+  link_mode: "presentation_only";
+  trusted_user_bridge: string;
+  uses_gamertag_matching: false;
+  exposes_private_identifiers: false;
+  affects_scoring: false;
+  affects_eligibility: false;
+  affects_owner_decisions: false;
+  affects_billing: false;
+  fairness: Record<string, boolean>;
+};
+
 export type CompetitiveEvent = {
   id: string;
   name: string;
@@ -25,6 +45,7 @@ export type CompetitiveEvent = {
   banner_url: string | null;
   rules?: string | null;
   rewards?: string | null;
+  creator_profile?: PublicProfileAttribution | null;
 };
 
 export type EventServer = {
@@ -92,6 +113,7 @@ export type EventsPayload = {
     total_participants: number;
   };
   events: CompetitiveEvent[];
+  profile_attribution?: EventProfileAttributionSafeguards;
 };
 
 export type EventDetailPayload = {
@@ -105,6 +127,7 @@ export type EventDetailPayload = {
   activity_feed: EventActivity[];
   current_matches: EventMatch[];
   matches: EventMatch[];
+  profile_attribution?: EventProfileAttributionSafeguards;
 };
 
 export type ServerEventsPayload = {
@@ -131,6 +154,7 @@ export type ServerEventsPayload = {
   trophies: Array<{ label: string; value: string }>;
   recent_matches: EventMatch[];
   compatible_upcoming_events: CompetitiveEvent[];
+  profile_attribution?: EventProfileAttributionSafeguards;
 };
 
 const FALLBACK_NOW_MS = Date.UTC(2026, 5, 26, 12, 0, 0);
@@ -268,6 +292,7 @@ function event(slug: string, name: string, description: string, category: Server
     banner_url: banner,
     rules: "Only same-category servers can compete. Roster verification and DZN dedupe remain enforced.",
     rewards: "Champion badge, featured placement, premium leaderboard spotlight.",
+    creator_profile: null,
   };
 }
 

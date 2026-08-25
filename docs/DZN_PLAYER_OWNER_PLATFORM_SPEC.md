@@ -695,6 +695,37 @@ Mutation scope:
 
 Fairness remains unchanged: CTF roster attribution links are presentation-only and must not affect billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, owner decisions, event eligibility, CTF scoring, or competitive eligibility.
 
+## Event Roster/Member Public-Safe Expansion Slice
+
+The event roster/member public-safe expansion slice adds the first public event/community member attribution outside the suggestion board. Because the current public event detail surfaces expose server/team participants as scored event rows, those rows remain excluded. The safe expansion is the event host/member badge on public event summaries and details, backed by the trusted `competitive_events.created_by` to `users.id` bridge.
+
+The slice adds:
+
+- Optional `creator_profile` metadata on public event summary payloads from `GET /api/events`, `GET /api/events/[slug]`, and server event profile event-card payloads.
+- A `profile_attribution` safeguards object with placement `public_event_creator_member_rows`, `link_mode = presentation_only`, the trusted bridge, no gamertag matching, no private identifier exposure, and no scoring, eligibility, owner-decision, or billing influence.
+- A reusable public event attribution badge that validates generated public profile hrefs and API hrefs before rendering.
+- Event card, event table, and event detail hero display links only when the event creator has opted into public profile visibility and has a generated handle.
+
+Authorization and bridge rules:
+
+- Event host/member links may appear only when `competitive_events.created_by` resolves to a DZN `users.id` row whose saved `player_profile_privacy_preferences` has `public_profile_enabled = 1` and a valid generated `public_handle`.
+- Hidden, unpublished, malformed, missing, or unconfigured event creators render without a profile link.
+- Public event payloads must not expose raw `created_by`, internal user IDs, Discord IDs, public handles supplied by the browser, or any gamertag-derived identity.
+- DZN must not infer event member attribution from server names, player names, gamertags, event titles, Discord usernames, request-body handles, public handles supplied by clients, review names, or leaderboard names.
+
+Still excluded:
+
+- Registered server rows, event leaderboards, match rows, CTF scoring rows, accepted CTF audit feeds, and bracket outcomes.
+- Event roster rows that touch scoring, eligibility, sign-up/approval decisions, owner workflows, moderation, or admin operations.
+- Billing, plan status, owner entitlement, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, Nitrado, Discord bot mutations, Cloudflare secrets, production D1 writes, live checkout activation, and issue #49.
+
+Mutation scope:
+
+- This slice may read `competitive_events.created_by`, `users`, and `player_profile_privacy_preferences` from public event read paths.
+- It must not add writes, background jobs, checkout sessions, profile handle generation, billing updates, server ownership changes, ranking updates, discovery score updates, review rating changes, event mutations, roster mutations, CTF scoring changes, badge awards, season changes, Server Wars score/result changes, XP awards, calling-card awards, Nitrado calls, Discord bot messages, Cloudflare secret changes, production D1 writes, live checkout activation, or issue #49 changes.
+
+Fairness remains unchanged: event host/member profile links are presentation-only and must not affect billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, owner decisions, event eligibility, CTF scoring, bracket outcomes, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -725,6 +756,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | Public profile attribution on reviews/challenges/leaderboards | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Read-only generated-handle attribution; no name-only matching; ambiguous/hidden/unpublished profiles are not linked |
 | Public profile attribution preview/control and safe event-suggestion author links | Public event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Player-owned visibility control; trusted user bridge required; roster scoring gates and owner mutations excluded |
 | CTF/event presentation roster profile links | 401/login boundary | Owner/admin dashboard access required | Own server dashboard read-only, if owner/admin checks pass | Own server dashboard read-only, if owner/admin checks pass | Exact roster server/player bridge; generated handle required; presentation-only; registration, scoring, eligibility, and owner decisions unaffected |
+| Public event host/member profile links | Published profiles only | Published profiles only | Published profiles only | Published profiles only | `competitive_events.created_by` trusted user bridge; presentation-only; event leaderboards, scoring rows, approvals, brackets, and owner workflows excluded |
 | `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award fact collection, retry, and award processing |
 | `/api/owner/progression/award-audit` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Owner entitlement/admin plus linked-server audit scope; read-only |
 | `/dashboard/progression-awards` and `/owner/progression-awards` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Same private audit API; status/adapter/linked-server/retry filters only |

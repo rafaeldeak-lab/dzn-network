@@ -498,7 +498,6 @@ function assertPrivacyPreferencesAreNotProtectedSystemDependencies() {
     "functions/_lib/badge-awards.ts",
     "functions/_lib/badge-evaluation.ts",
     "functions/_lib/dzn-seasons.ts",
-    "functions/_lib/events.ts",
     "functions/_lib/server-war-scoring.ts",
     "functions/_lib/player-progression.ts",
     "functions/api/cron/player-progression/awards.ts",
@@ -512,6 +511,11 @@ function assertPrivacyPreferencesAreNotProtectedSystemDependencies() {
       `${file} must not depend on player profile privacy preferences.`,
     );
   }
+
+  const events = read("functions/_lib/events.ts");
+  assert.equal(events.includes("public_event_creator_member_rows"), true, "Public events may use the dedicated host/member public profile placement.");
+  assert.equal(events.includes("creator_profile: creatorProfile"), true, "Public event attribution must stay projected display metadata.");
+  assert.doesNotMatch(events, /\/api\/player\/profile-privacy|PlayerProfilePrivacy/i, "Public events must not depend on the private profile-privacy API or UI types.");
 }
 
 function forbiddenProtectedSystemPattern() {

@@ -11,6 +11,11 @@ import {
   type ServerCategory,
 } from "./server-categories";
 import { creatorEventAdminDeniedPayload, isPlatformCreatorEventAdmin } from "./platform-creator";
+import {
+  publicProfileAttributionFairness,
+  readPublicProfileAttributionsByUserIds,
+  type PublicProfileAttribution,
+} from "./public-profile-attribution";
 import type { Env, SessionUser } from "./types";
 
 export const EVENT_STATUSES = ["draft", "live", "upcoming", "standby", "ended", "registration_open", "full"] as const;
@@ -393,7 +398,7 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
     )
     .bind(...bindings, limit)
     .all<EventRow>();
-  const events = (result.results ?? []).map(toEventSummary);
+  const events = await withEventCreatorProfiles(env, result.results ?? []);
   const visibleEvents = events.length ? events : filterDemoEvents(options, limit);
   return {
     ok: true,
@@ -404,6 +409,7 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
     categoryFilters: SERVER_CATEGORIES.map((value) => ({ value, label: getServerCategoryLabel(value) })),
     statusFilters: PUBLIC_EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
     typeFilters: EVENT_TYPES.map((value) => ({ value, label: eventTypeLabel(value) })),
+    profile_attribution: publicEventCreatorAttributionSafeguards(),
     summary: summarizeEvents(visibleEvents),
     events: visibleEvents,
   };
@@ -435,18 +441,20 @@ export async function getEventDetailPayload(env: Env, viewer: SessionUser | null
     if (visibility === "private" || status === "draft") return eventNotFoundPayload();
   }
   if (!event) return demoEventDetailPayload(normalizedSlug, entitlement) ?? eventNotFoundPayload();
-  const [servers, matches, activity] = await Promise.all([
+  const [servers, matches, activity, creatorProfiles] = await Promise.all([
     fetchEventServers(env, event.id, full ? 100 : 10),
     fetchEventMatches(env, event.id),
     fetchEventActivity(env, event.id, full ? 50 : 12),
+    readPublicProfileAttributionsByUserIds(env, [event.created_by]),
   ]);
-  const normalizedEvent = toEventSummary(event);
+  const normalizedEvent = toEventSummary(event, event.created_by ? creatorProfiles.get(event.created_by) ?? null : null);
   return {
     ok: true,
     generated_at: new Date().toISOString(),
     source: "live",
     premiumLocked: !full,
     teaserMode: !full,
+    profile_attribution: publicEventCreatorAttributionSafeguards(),
     event: normalizedEvent,
     registered_servers: servers,
     leaderboard: servers
@@ -829,6 +837,7 @@ export async function getServerEventsProfilePayload(env: Env, serverIdOrSlug: st
       event_draws: Number(server.event_draws ?? 0),
       last_event_at: server.last_event_at,
     },
+    profile_attribution: publicEventCreatorAttributionSafeguards(),
     current_events: current,
     upcoming_events: current.filter((event) => event.status !== "live"),
     event_history: history,
@@ -1041,7 +1050,7 @@ async function fetchServerRegisteredEvents(env: Env, serverId: string, statuses:
     )
     .bind(serverId, ...statuses)
     .all<EventRow>();
-  return (result.results ?? []).map(toEventSummary);
+  return withEventCreatorProfiles(env, result.results ?? []);
 }
 
 async function fetchCompatibleEvents(env: Env, category: ServerCategory) {
@@ -1060,7 +1069,7 @@ async function fetchCompatibleEvents(env: Env, category: ServerCategory) {
     )
     .bind(category)
     .all<EventRow>();
-  return (result.results ?? []).map(toEventSummary);
+  return withEventCreatorProfiles(env, result.results ?? []);
 }
 
 async function fetchServerMatches(env: Env, serverId: string) {
@@ -1214,7 +1223,12 @@ function makeEventCreateRequestId() {
   }
 }
 
-function toEventSummary(row: EventRow) {
+async function withEventCreatorProfiles(env: Env, rows: EventRow[]) {
+  const profiles = await readPublicProfileAttributionsByUserIds(env, rows.map((row) => row.created_by));
+  return rows.map((row) => toEventSummary(row, row.created_by ? profiles.get(row.created_by) ?? null : null));
+}
+
+function toEventSummary(row: EventRow, creatorProfile: PublicProfileAttribution | null = null) {
   const category = normalizeServerCategory(row.category) ?? "modded";
   const eventType = normalizeEventType(row.event_type) ?? "community_cup";
   const status = normalizeEventStatus(row.status) ?? "upcoming";
@@ -1245,9 +1259,60 @@ function toEventSummary(row: EventRow) {
     banner_url: row.banner_url,
     rules: row.rules,
     rewards: row.rewards,
+    creator_profile: creatorProfile,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+function publicEventCreatorAttributionSafeguards() {
+  return {
+    placement: "public_event_creator_member_rows" as const,
+    link_mode: "presentation_only" as const,
+    trusted_user_bridge: "competitive_events.created_by -> users.id -> player_profile_privacy_preferences.public_handle" as const,
+    uses_gamertag_matching: false,
+    exposes_private_identifiers: false,
+    affects_scoring: false,
+    affects_eligibility: false,
+    affects_owner_decisions: false,
+    affects_billing: false,
+    fairness: publicProfileAttributionFairness(),
+  };
+}
+
+export function projectEventSummaryForPublicTest(
+  overrides: Record<string, unknown>,
+  creatorProfile: PublicProfileAttribution | null = null,
+) {
+  return toEventSummary(testEventRow(overrides), creatorProfile);
+}
+
+function testEventRow(overrides: Record<string, unknown>): EventRow {
+  return {
+    id: "event-test",
+    name: "Community Fight Night",
+    slug: "community-fight-night",
+    description: "A public-safe community event row used to prove creator attribution stays presentation-only.",
+    category: "deathmatch",
+    event_type: "community_cup",
+    status: "registration_open",
+    visibility: "public",
+    premium_tier: "free",
+    server_limit: 16,
+    team_limit: 16,
+    starts_at: "2026-08-26T20:00:00.000Z",
+    ends_at: "2026-08-26T22:00:00.000Z",
+    created_by: "user-test",
+    banner_url: null,
+    rules: "Same-category only.",
+    rewards: "Community spotlight.",
+    created_at: "2026-08-25T12:00:00.000Z",
+    updated_at: "2026-08-25T12:00:00.000Z",
+    registered_servers: 4,
+    total_score: 0,
+    match_count: 2,
+    ...overrides,
+  } as EventRow;
 }
 
 function toEventServer(row: EventServerRow) {
@@ -1336,7 +1401,7 @@ function buildTrophies(server: ServerRow) {
   ];
 }
 
-function summarizeEvents(events: ReturnType<typeof toEventSummary>[]) {
+function summarizeEvents(events: Array<{ status: string; registered_servers: number; total_participants: number }>) {
   return {
     active_events: events.filter((event) => event.status === "live").length,
     upcoming_events: events.filter((event) => ["upcoming", "registration_open", "standby"].includes(event.status)).length,

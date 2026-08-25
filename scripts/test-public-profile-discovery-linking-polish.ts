@@ -197,7 +197,6 @@ function assertPublicProfileLinkingDoesNotInfluenceProtectedSystems() {
     "functions/_lib/badge-awards.ts",
     "functions/_lib/badge-evaluation.ts",
     "functions/_lib/dzn-seasons.ts",
-    "functions/_lib/events.ts",
     "functions/_lib/server-war-scoring.ts",
     "functions/api/cron/player-progression/awards.ts",
   ]) {
@@ -208,6 +207,11 @@ function assertPublicProfileLinkingDoesNotInfluenceProtectedSystems() {
       `${file} must not depend on public profile discovery/linking state.`,
     );
   }
+
+  const events = read("functions/_lib/events.ts");
+  assert.equal(events.includes("public_event_creator_member_rows"), true, "Public events may carry the dedicated event host/member attribution placement.");
+  assert.equal(events.includes("creator_profile: creatorProfile"), true, "Public event profile links must remain projected display metadata.");
+  assert.doesNotMatch(events, /PublicProfileSharePanel|\/players\/\[handle\]/i, "Public events must not depend on profile owner share controls or viewer route internals.");
 }
 
 function createPlayerHubDb() {

@@ -59,6 +59,7 @@ function assertStaticContracts() {
     "functions/_lib/server-reviews.ts",
     "functions/_lib/public-leaderboards.ts",
     "functions/_lib/player-progression.ts",
+    "functions/_lib/events.ts",
     "components/network/public-network.tsx",
     "components/events/events-platform.tsx",
     "app/leaderboards/page.tsx",
@@ -152,6 +153,21 @@ function assertStaticContracts() {
 
   const packageJson = read("package.json");
   assert.equal(packageJson.includes("test:public-profile-cross-surface-attribution"), true, "Focused attribution test must be wired into package scripts.");
+
+  const publicEvents = read("functions/_lib/events.ts");
+  for (const snippet of [
+    "public_event_creator_member_rows",
+    "creator_profile: creatorProfile",
+    "link_mode: \"presentation_only\"",
+    "uses_gamertag_matching: false",
+    "affects_scoring: false",
+    "affects_eligibility: false",
+    "affects_owner_decisions: false",
+    "affects_billing: false",
+  ]) {
+    assert.equal(publicEvents.includes(snippet), true, `Public event attribution must include ${snippet}.`);
+  }
+  assert.doesNotMatch(publicEvents, /readPublicProfileAttributionsByRosterPlayerKeys|publicProfileRosterPlayerKey/i, "Public event creator attribution must not use CTF roster bridges.");
 
   const platformSpec = read("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md");
   assert.equal(platformSpec.includes("Public Profile Cross-Surface Attribution Slice"), true, "Master spec must cover this slice.");
@@ -308,7 +324,6 @@ function assertProtectedSystemsRemainIndependent() {
     "functions/_lib/badge-awards.ts",
     "functions/_lib/badge-evaluation.ts",
     "functions/_lib/dzn-seasons.ts",
-    "functions/_lib/events.ts",
     "functions/_lib/server-war-scoring.ts",
     "functions/api/cron/player-progression/awards.ts",
   ]) {
