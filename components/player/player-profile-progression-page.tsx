@@ -78,6 +78,9 @@ type PlayerProfilePayload = {
     showcase_href?: string;
   };
   privacy?: {
+    public_handle?: string | null;
+    public_href?: string | null;
+    public_api_href?: string | null;
     public_profile_enabled?: boolean;
     persistence?: string;
     settings_href?: string;
@@ -305,6 +308,16 @@ export function PlayerProfileProgressionPage() {
               <p className="mt-1 text-xs font-bold leading-5 text-cyan-50/75">
                 Source: {privacySourceLabel(profile.privacy?.persistence)}{profile.privacy?.updated_at ? ` / saved ${formatDateTime(profile.privacy.updated_at)}` : ""}
               </p>
+              {publicProfileEnabled && profile.privacy?.public_href ? (
+                <Link href={profile.privacy.public_href} className="mt-3 inline-flex min-h-9 items-center justify-center gap-2 rounded bg-cyan-300 px-3 py-2 text-[10px] font-black uppercase text-slate-950 transition hover:bg-cyan-200">
+                  View Public Profile
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              ) : publicProfileEnabled ? (
+                <p className="mt-3 text-xs font-bold leading-5 text-cyan-50/80">
+                  Save preferences to create your public profile link.
+                </p>
+              ) : null}
             </div>
             <div className="mt-4 grid gap-2">
               {SHOWCASE_MODES.map((mode) => (
@@ -668,6 +681,9 @@ function normalizePayload(value: PlayerProfilePayload | null): PlayerProfilePayl
 function normalizePrivacy(value: PlayerProfilePayload["privacy"] | null): NonNullable<PlayerProfilePayload["privacy"]> {
   const controls = normalizePrivacyControls(value?.controls);
   return {
+    public_handle: typeof value?.public_handle === "string" && value.public_handle ? value.public_handle : null,
+    public_href: typeof value?.public_href === "string" && value.public_href ? value.public_href : null,
+    public_api_href: typeof value?.public_api_href === "string" && value.public_api_href ? value.public_api_href : null,
     public_profile_enabled: Boolean(value?.public_profile_enabled),
     persistence: typeof value?.persistence === "string" && value.persistence ? value.persistence : "unavailable",
     settings_href: typeof value?.settings_href === "string" && value.settings_href ? value.settings_href : "/api/player/profile-privacy",

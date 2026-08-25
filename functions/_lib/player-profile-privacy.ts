@@ -1,6 +1,8 @@
 import type { Env, SessionUser } from "./types";
 
 export const PLAYER_PROFILE_PRIVACY_SETTINGS_HREF = "/api/player/profile-privacy";
+export const PLAYER_PUBLIC_PROFILE_HREF_PREFIX = "/players";
+export const PLAYER_PUBLIC_PROFILE_API_HREF_PREFIX = "/api/public/player-profiles";
 
 export type PlayerProfilePrivacyPersistence = "saved" | "default" | "not_configured" | "unavailable";
 
@@ -14,6 +16,9 @@ export type PlayerProfilePrivacyControls = {
 };
 
 export type PlayerProfilePrivacyPreferences = {
+  public_handle: string | null;
+  public_href: string | null;
+  public_api_href: string | null;
   public_profile_enabled: boolean;
   persistence: PlayerProfilePrivacyPersistence;
   settings_href: string;
@@ -37,11 +42,13 @@ export type PlayerProfilePrivacyPreferencePatch = {
   show_award_dates?: unknown;
   show_discord_identity?: unknown;
   show_source_details?: unknown;
+  public_handle?: unknown;
   user_id?: unknown;
   discord_id?: unknown;
 };
 
 type PlayerProfilePrivacyPreferenceRow = {
+  public_handle?: string | null;
   public_profile_enabled: number | boolean | null;
   show_xp: number | boolean | null;
   show_challenge_progress: number | boolean | null;
@@ -109,23 +116,7 @@ export async function getPlayerProfilePrivacyPreferences(
   if (!env.DB) return defaultPlayerProfilePrivacyPreferences("unavailable");
 
   try {
-    const row = await env.DB
-      .prepare(
-        `SELECT
-           public_profile_enabled,
-           show_xp,
-           show_challenge_progress,
-           show_calling_cards,
-           show_award_dates,
-           show_discord_identity,
-           show_source_details,
-           updated_at
-         FROM player_profile_privacy_preferences
-         WHERE user_id = ?
-         LIMIT 1`,
-      )
-      .bind(user.id)
-      .first<PlayerProfilePrivacyPreferenceRow>();
+    const row = await readPlayerProfilePrivacyPreferenceRow(env, user.id);
 
     if (!row) return defaultPlayerProfilePrivacyPreferences("default");
     return preferencesFromRow(row);
@@ -141,7 +132,7 @@ export async function savePlayerProfilePrivacyPreferences(
 ): Promise<SavePlayerProfilePrivacyPreferencesResult> {
   const current = await getPlayerProfilePrivacyPreferences(env, user);
   const safePatch = normalizePreferencePatch(patch);
-  const next = mergePlayerProfilePrivacyPreferences(current, safePatch);
+  let next = mergePlayerProfilePrivacyPreferences(current, safePatch);
 
   if (!env.DB) {
     return {
@@ -158,10 +149,15 @@ export async function savePlayerProfilePrivacyPreferences(
 
   const now = new Date().toISOString();
   try {
+    if (next.public_profile_enabled && !next.public_handle) {
+      next = withPublicProfileHandle(next, await createUniquePublicProfileHandle(env, user));
+    }
+
     await env.DB
       .prepare(
         `INSERT INTO player_profile_privacy_preferences (
            user_id,
+           public_handle,
            public_profile_enabled,
            show_xp,
            show_challenge_progress,
@@ -172,8 +168,9 @@ export async function savePlayerProfilePrivacyPreferences(
            created_at,
            updated_at
          )
-         VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
          ON CONFLICT(user_id) DO UPDATE SET
+           public_handle = COALESCE(player_profile_privacy_preferences.public_handle, excluded.public_handle),
            public_profile_enabled = excluded.public_profile_enabled,
            show_xp = excluded.show_xp,
            show_challenge_progress = excluded.show_challenge_progress,
@@ -185,6 +182,7 @@ export async function savePlayerProfilePrivacyPreferences(
       )
       .bind(
         user.id,
+        next.public_handle,
         boolToDb(next.public_profile_enabled),
         boolToDb(next.controls.show_xp),
         boolToDb(next.controls.show_challenge_progress),
@@ -225,6 +223,9 @@ export function defaultPlayerProfilePrivacyPreferences(
   persistence: PlayerProfilePrivacyPersistence = "default",
 ): PlayerProfilePrivacyPreferences {
   return {
+    public_handle: null,
+    public_href: null,
+    public_api_href: null,
     public_profile_enabled: false,
     persistence,
     settings_href: PLAYER_PROFILE_PRIVACY_SETTINGS_HREF,
@@ -232,6 +233,63 @@ export function defaultPlayerProfilePrivacyPreferences(
     controls: { ...DEFAULT_CONTROLS },
     public_safe_preview: publicSafePreview(DEFAULT_CONTROLS),
   };
+}
+
+export function normalizePublicProfileHandle(value: unknown) {
+  if (typeof value !== "string") return null;
+  const text = value.trim().toLowerCase();
+  return /^[a-z0-9](?:[a-z0-9-]{1,62}[a-z0-9])$/.test(text) ? text : null;
+}
+
+export function publicPlayerProfileHref(handle: unknown) {
+  const safeHandle = normalizePublicProfileHandle(handle);
+  return safeHandle ? `${PLAYER_PUBLIC_PROFILE_HREF_PREFIX}/${encodeURIComponent(safeHandle)}` : null;
+}
+
+export function publicPlayerProfileApiHref(handle: unknown) {
+  const safeHandle = normalizePublicProfileHandle(handle);
+  return safeHandle ? `${PLAYER_PUBLIC_PROFILE_API_HREF_PREFIX}/${encodeURIComponent(safeHandle)}` : null;
+}
+
+async function readPlayerProfilePrivacyPreferenceRow(env: Env, userId: string) {
+  try {
+    return await env.DB
+      ?.prepare(
+        `SELECT
+           public_handle,
+           public_profile_enabled,
+           show_xp,
+           show_challenge_progress,
+           show_calling_cards,
+           show_award_dates,
+           show_discord_identity,
+           show_source_details,
+           updated_at
+         FROM player_profile_privacy_preferences
+         WHERE user_id = ?
+         LIMIT 1`,
+      )
+      .bind(userId)
+      .first<PlayerProfilePrivacyPreferenceRow>();
+  } catch {
+    return env.DB
+      ?.prepare(
+        `SELECT
+           public_profile_enabled,
+           show_xp,
+           show_challenge_progress,
+           show_calling_cards,
+           show_award_dates,
+           show_discord_identity,
+           show_source_details,
+           updated_at
+         FROM player_profile_privacy_preferences
+         WHERE user_id = ?
+         LIMIT 1`,
+      )
+      .bind(userId)
+      .first<PlayerProfilePrivacyPreferenceRow>();
+  }
 }
 
 function preferencesFromRow(row: PlayerProfilePrivacyPreferenceRow): PlayerProfilePrivacyPreferences {
@@ -243,8 +301,12 @@ function preferencesFromRow(row: PlayerProfilePrivacyPreferenceRow): PlayerProfi
     show_discord_identity: false,
     show_source_details: false,
   } satisfies PlayerProfilePrivacyControls;
+  const publicHandle = normalizePublicProfileHandle(row.public_handle);
 
   return {
+    public_handle: publicHandle,
+    public_href: publicPlayerProfileHref(publicHandle),
+    public_api_href: publicPlayerProfileApiHref(publicHandle),
     public_profile_enabled: dbBool(row.public_profile_enabled, false),
     persistence: "saved",
     settings_href: PLAYER_PROFILE_PRIVACY_SETTINGS_HREF,
@@ -280,6 +342,9 @@ function mergePlayerProfilePrivacyPreferences(
   } satisfies PlayerProfilePrivacyControls;
 
   return {
+    public_handle: current.public_handle,
+    public_href: current.public_href,
+    public_api_href: current.public_api_href,
     public_profile_enabled: patchedBoolean(patch.public_profile_enabled, current.public_profile_enabled),
     persistence: current.persistence,
     settings_href: PLAYER_PROFILE_PRIVACY_SETTINGS_HREF,
@@ -287,6 +352,54 @@ function mergePlayerProfilePrivacyPreferences(
     controls,
     public_safe_preview: publicSafePreview(controls),
   };
+}
+
+function withPublicProfileHandle(
+  preferences: PlayerProfilePrivacyPreferences,
+  publicHandle: string,
+): PlayerProfilePrivacyPreferences {
+  return {
+    ...preferences,
+    public_handle: publicHandle,
+    public_href: publicPlayerProfileHref(publicHandle),
+    public_api_href: publicPlayerProfileApiHref(publicHandle),
+  };
+}
+
+async function createUniquePublicProfileHandle(env: Env, user: SessionUser) {
+  const base = publicProfileHandleBase(user.username);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const candidate = normalizePublicProfileHandle(`${base}-${randomHandleSuffix(attempt === 0 ? 5 : 7)}`);
+    if (!candidate) continue;
+    const existing = await env.DB
+      ?.prepare("SELECT user_id FROM player_profile_privacy_preferences WHERE public_handle = ? LIMIT 1")
+      .bind(candidate)
+      .first<{ user_id: string }>();
+    if (!existing || existing.user_id === user.id) return candidate;
+  }
+  return normalizePublicProfileHandle(`dzn-player-${randomHandleSuffix(12)}`) ?? `dzn-player-${Date.now().toString(36)}`;
+}
+
+function publicProfileHandleBase(value: unknown) {
+  const base = typeof value === "string"
+    ? value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+    : "";
+  const clipped = (base || "dzn-player").slice(0, 40).replace(/^-+|-+$/g, "");
+  return normalizePublicProfileHandle(clipped.length >= 3 ? clipped : "dzn-player") ?? "dzn-player";
+}
+
+function randomHandleSuffix(length: number) {
+  const boundedLength = Math.max(4, Math.min(Math.trunc(length), 16));
+  const bytes = new Uint8Array(boundedLength);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => (byte % 36).toString(36)).join("");
+  }
+  return Math.random().toString(36).slice(2, 2 + boundedLength).padEnd(boundedLength, "0");
 }
 
 function publicSafePreview(controls: PlayerProfilePrivacyControls): PlayerProfilePrivacyPreferences["public_safe_preview"] {
