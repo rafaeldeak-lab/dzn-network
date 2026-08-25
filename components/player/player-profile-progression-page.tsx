@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { FetchJsonError, fetchJsonWithRetry } from "@/lib/client-fetch";
+import { PublicProfileSharePanel } from "@/components/player/public-profile-share-panel";
 
 type ShowcaseMode = "private" | "public" | "hidden";
 type PreferencesSaveState = "idle" | "saving" | "saved" | "error";
@@ -309,10 +310,11 @@ export function PlayerProfileProgressionPage() {
                 Source: {privacySourceLabel(profile.privacy?.persistence)}{profile.privacy?.updated_at ? ` / saved ${formatDateTime(profile.privacy.updated_at)}` : ""}
               </p>
               {publicProfileEnabled && profile.privacy?.public_href ? (
-                <Link href={profile.privacy.public_href} className="mt-3 inline-flex min-h-9 items-center justify-center gap-2 rounded bg-cyan-300 px-3 py-2 text-[10px] font-black uppercase text-slate-950 transition hover:bg-cyan-200">
-                  View Public Profile
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
+                <PublicProfileSharePanel
+                  publicHref={profile.privacy.public_href}
+                  publicProfileEnabled={publicProfileEnabled}
+                  className="mt-3"
+                />
               ) : publicProfileEnabled ? (
                 <p className="mt-3 text-xs font-bold leading-5 text-cyan-50/80">
                   Save preferences to create your public profile link.

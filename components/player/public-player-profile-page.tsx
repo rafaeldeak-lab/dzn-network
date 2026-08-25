@@ -250,7 +250,14 @@ export function PublicPlayerProfilePage({ handle }: { handle: string }) {
                 <ProgressStat label="XP To Next" value={xp.xp_to_next_level ?? 0} tone="emerald" />
               </div>
             </section>
-          ) : null}
+          ) : state === "loading" ? null : (
+            <PublicSectionState
+              icon={<Zap className="h-5 w-5" />}
+              title={visibility.xp ? "XP Not Earned Yet" : "XP Hidden"}
+              body={visibility.xp ? "This player has not published earned XP totals yet." : "This player keeps earned XP totals private on their public DZN profile."}
+              hidden={!visibility.xp}
+            />
+          )}
 
           {visibility.calling_cards ? (
             <section className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
@@ -262,10 +269,17 @@ export function PublicPlayerProfilePage({ handle }: { handle: string }) {
                   ))}
                 </div>
               ) : (
-                <EmptyState title="No public calling cards yet" body="Calling cards appear here only after verified DZN activity awards them and this player keeps the section visible." />
+                <EmptyState title="No Public Calling Cards Yet" body="Verified calling cards will appear here when this player earns one and keeps the section visible." />
               )}
             </section>
-          ) : null}
+          ) : state === "loading" ? null : (
+            <PublicSectionState
+              icon={<Sparkles className="h-5 w-5" />}
+              title="Calling Cards Hidden"
+              body="This player keeps earned calling cards private on their public DZN profile."
+              hidden
+            />
+          )}
 
           {visibility.challenge_progress ? (
             <section className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
@@ -277,10 +291,17 @@ export function PublicPlayerProfilePage({ handle }: { handle: string }) {
                   ))}
                 </div>
               ) : (
-                <EmptyState title="No public challenge progress yet" body="Joined and completed challenge progress appears here only when the player keeps the section visible." />
+                <EmptyState title="No Public Challenge Progress Yet" body="Joined and completed challenge progress will appear here when this player earns visible progress." />
               )}
             </section>
-          ) : null}
+          ) : state === "loading" ? null : (
+            <PublicSectionState
+              icon={<Trophy className="h-5 w-5" />}
+              title="Challenge Progress Hidden"
+              body="This player keeps joined and completed challenge progress private on their public DZN profile."
+              hidden
+            />
+          )}
 
           {timeline.length ? (
             <section className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
@@ -291,7 +312,14 @@ export function PublicPlayerProfilePage({ handle }: { handle: string }) {
                 ))}
               </div>
             </section>
-          ) : null}
+          ) : state === "loading" ? null : (
+            <PublicSectionState
+              icon={<CalendarDays className="h-5 w-5" />}
+              title="Timeline Pending"
+              body="The public timeline fills in after this player has visible earned XP, challenges, or calling cards."
+              hidden={false}
+            />
+          )}
         </div>
       </section>
     </PublicProfileShell>
@@ -411,6 +439,25 @@ function EmptyState({ title, body }: { title: string; body: string }) {
       <p className="text-sm font-black uppercase text-white">{title}</p>
       <p className="mt-2 text-sm font-bold leading-6 text-zinc-400">{body}</p>
     </div>
+  );
+}
+
+function PublicSectionState({ icon, title, body, hidden }: { icon: ReactNode; title: string; body: string; hidden: boolean }) {
+  return (
+    <section className={`rounded-lg border p-4 ${hidden ? "border-rose-300/18 bg-rose-400/8" : "border-white/10 bg-white/[0.045]"}`}>
+      <PanelHeader icon={hidden ? <EyeOff className="h-5 w-5" /> : icon} title={title} />
+      <p className={`mt-4 text-sm font-bold leading-6 ${hidden ? "text-rose-50/78" : "text-zinc-400"}`}>{body}</p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Link href="/player" className="inline-flex min-h-10 items-center justify-center gap-2 rounded border border-white/12 bg-white/8 px-3 py-2 text-xs font-black uppercase text-white transition hover:bg-white/12">
+          Player Hub
+          <ArrowRight className="h-4 w-4" />
+        </Link>
+        <Link href="/events/challenges" className="inline-flex min-h-10 items-center justify-center gap-2 rounded border border-cyan-300/25 bg-cyan-400/12 px-3 py-2 text-xs font-black uppercase text-cyan-50 transition hover:bg-cyan-400/18">
+          Challenges
+          <Swords className="h-4 w-4" />
+        </Link>
+      </div>
+    </section>
   );
 }
 

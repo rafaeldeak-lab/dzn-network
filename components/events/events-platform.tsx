@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   Swords,
   Trophy,
+  UserRound,
 } from "lucide-react";
 
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
@@ -586,7 +587,7 @@ export function EventsChallengesPage() {
   const playerChallenges = usePlayerChallenges();
   return (
     <EventsShell>
-      <HeaderLine title="CHALLENGES" subtitle="Connected-node battles, kill races, survival ladders, and premium top-10 teasers." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">All Events</EventActionLink><EventActionLink href="/events/suggest">Suggest Competition</EventActionLink></div>} />
+      <HeaderLine title="CHALLENGES" subtitle="Connected-node battles, kill races, survival ladders, and premium top-10 teasers." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">All Events</EventActionLink><EventActionLink href="/player/profile">Player Profile</EventActionLink><EventActionLink href="/events/suggest">Suggest Competition</EventActionLink></div>} />
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <main className="space-y-5">
@@ -646,6 +647,10 @@ function PlayerChallengeParticipationPanel({
           <Link href="/player" className="inline-flex items-center gap-2 rounded border border-white/12 bg-white/8 px-3 py-2 text-[10px] font-black uppercase text-zinc-100 transition hover:bg-white/12">
             Player Hub
             <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+          <Link href="/player/profile" className="inline-flex items-center gap-2 rounded border border-cyan-300/25 bg-cyan-400/12 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 transition hover:bg-cyan-400/18">
+            Profile
+            <UserRound className="h-3.5 w-3.5" />
           </Link>
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-4">

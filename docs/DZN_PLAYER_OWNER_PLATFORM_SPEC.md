@@ -555,6 +555,40 @@ Mutation scope:
 
 Fairness remains unchanged: Public profile display choices must not affect billing, rankings, discovery, reviews, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
 
+## Public Profile Discovery and Linking Polish Slice
+
+The public profile discovery/linking polish slice makes the existing published profile easier for players to find and share without turning public profiles into a ranking, billing, ownership, award, moderation, or competitive input.
+
+The slice adds:
+
+- Public profile entry links from `/player`, `/player/profile`, `/events/challenges`, and DZN Pulse.
+- A `public_profile` summary on `GET /api/player/hub` sourced from the authenticated player's saved profile privacy preferences.
+- Copy/share controls for the profile owner on private player surfaces when a generated public profile link exists.
+- Clear private-player settings links when a public profile has not been published yet.
+- Richer public viewer empty states for sections that are hidden by privacy settings or not yet earned.
+
+Authorization rules:
+
+- Normal Discord login remains enough to open the Player Hub, private profile, challenges, and DZN Pulse profile entry points.
+- Copy/share controls are private player UI only; they use the saved public href already returned for the authenticated player.
+- Public `/players/[handle]` viewing remains unauthenticated only for published handles and still reads through `GET /api/public/player-profiles/[handle]`.
+- Owner setup remains separate through `/pricing?intent=owner_setup&returnTo=%2Fsetup`.
+- The slice must not require Starter, Pro, owner entitlement, server ownership, Nitrado access, Stripe, Discord bot permissions, or billing state for player profile links.
+
+Privacy rules:
+
+- Public profile links may expose only the generated public handle URL.
+- Private profile share controls must not expose Discord IDs, internal user IDs, avatar hashes, source IDs, source tables, raw award evidence, exact award timestamps, billing rows, owner account state, Nitrado tokens, Discord bot tokens, Stripe state, or Cloudflare secrets.
+- Hidden public sections must render as hidden/pending states rather than revealing private profile evidence.
+
+Mutation scope:
+
+- `GET /api/player/hub` may read the current player's profile privacy row to show public profile link state, but it must not write profile privacy, create handles, award XP, award calling cards, alter challenge progress, create checkout sessions, update owner billing, change server ownership, update rankings/leaderboards, modify discovery score, mutate reviews, award server badges, change seasons, modify events, alter Server Wars scoring/results, touch Nitrado, send Discord bot messages, change Cloudflare secrets, apply production migrations, merge issue #49, or enable live checkout.
+- Copy/share controls may only copy to the local clipboard or invoke the browser share sheet.
+- Public profiles remain read-only.
+
+Fairness remains unchanged: public profile discovery links, copy/share controls, hidden section empty states, and pending section empty states must not affect billing, rankings, discovery score, reviews, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.

@@ -188,8 +188,11 @@ function assertStaticContracts() {
   assert.doesNotMatch(publicUi, /dangerouslySetInnerHTML|method\s*:\s*["'](?:POST|PATCH|PUT|DELETE)["']|createCheckoutSession|DZN_LIVE_CHECKOUT_ENABLED|STRIPE_SECRET_KEY|NITRADO_TOKEN|DISCORD_BOT_TOKEN/i);
 
   const privateUi = read("components/player/player-profile-progression-page.tsx");
-  assert.equal(privateUi.includes("View Public Profile"), true, "Private profile page should surface the generated public profile link.");
+  assert.equal(privateUi.includes("PublicProfileSharePanel"), true, "Private profile page should surface the generated public profile link controls.");
   assert.equal(privateUi.includes("Save preferences to create your public profile link."), true);
+  const sharePanel = read("components/player/public-profile-share-panel.tsx");
+  assert.equal(sharePanel.includes("Public Profile Link"), true, "Public profile share controls should show the generated public profile link.");
+  assert.equal(sharePanel.includes("navigator.clipboard.writeText"), true, "Public profile share controls should support copying the generated link.");
 
   const profileHelper = read("functions/_lib/player-profile-progression.ts");
   for (const snippet of [

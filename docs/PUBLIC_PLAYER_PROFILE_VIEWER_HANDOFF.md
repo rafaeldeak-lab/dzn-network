@@ -6,6 +6,26 @@ This slice publishes a public-safe player profile reader for opted-in players. I
 
 This is not an owner monetisation slice, not a public write slice, not a custom handle editor, and not a competitive progression-award slice.
 
+## Follow-On Public Profile Discovery And Linking Polish
+
+The follow-on public profile discovery/linking polish slice makes the published profile easier for players to find and share while keeping the public route read-only.
+
+Branch details:
+
+- Branch: `codex/public-profile-discovery-linking-polish-20260825`
+- Base branch: `codex/public-profile-viewer-20260825`
+- Base commit: `70d2d2294de40ea911c4466f25bf266cf5398cdc`
+
+This follow-on slice adds:
+
+- A private `public_profile` summary on `GET /api/player/hub`, sourced from the authenticated player's saved profile privacy preferences.
+- Player-facing profile entry points from `/player`, `/player/profile`, `/events/challenges`, and DZN Pulse.
+- Copy/share controls for the profile owner on private player surfaces when a generated public profile link exists.
+- Clear settings entry states when the player has not published a public profile yet.
+- Public-safe hidden/pending empty states on `/players/[handle]` for XP, challenge progress, calling cards, and timeline sections.
+
+The follow-on slice does not add migrations, public write APIs, custom handle editing, checkout activation, owner entitlement changes, production D1 writes, Nitrado calls, Discord mutations, Stripe mutations, Cloudflare secret changes, or issue #49 changes.
+
 ## Branch And Base
 
 - Branch: `codex/public-profile-viewer-20260825`
@@ -146,6 +166,26 @@ Codex Security diff scan `8302d1da-18b0-42b5-991d-cbbbf9329995` completed with z
 
 Rendered local browser verification was attempted against `/players/rafaeldeak-a1b2c`, but the browser URL policy blocked localhost navigation. No screenshot evidence was captured. API/viewer behavior is covered by the focused route/helper tests and the production build.
 
+Completed on branch `codex/public-profile-discovery-linking-polish-20260825`:
+
+- `npm run test:public-profile-discovery-linking-polish` passed.
+- `npm run test:player-hub-foundation` passed.
+- `npm run test:player-profile-privacy-preferences` passed.
+- `npm run test:public-player-profile-viewer` passed.
+- `npm run test:challenges-xp-calling-cards-foundation` passed.
+- `npm run test:dzn-pulse` passed.
+- `npm run test:billing-plans` passed using mocked/local checkout/webhook tests only.
+- `npm run test:stripe-live-readiness` passed.
+- `npm run test:stripe-live-activation-checklist` passed.
+- `npm run check:billing-config` passed and reported live checkout disabled/not configured.
+- `npx tsc --noEmit --incremental false` passed.
+- `npm run lint` passed with four existing warnings outside this slice.
+- `npm test` passed on the final tree. The optional latest ADM raw fixture check skipped because the owner-supplied raw bundle is not present locally.
+- `git diff --check` passed.
+- `npm run build` passed and exported `/player`, `/player/profile`, `/players/preview`, `/events/challenges`, and `/dzn-pulse`.
+- Local route smoke returned `200` for `/player`, `/player/profile`, `/players/preview`, `/events/challenges`, and `/dzn-pulse`.
+- Codex Security diff scan `baf6b4df-7cba-477c-9032-b0b7798eab00` completed with zero findings for the changed runtime/test files. TAC status could not be verified because the Codex Security Access connector is not connected.
+
 ## Next Recommended Slice
 
-Next should be the public profile discovery/linking polish slice: add profile entry links from relevant player-facing surfaces, copy/share affordances for the owner of a public player profile, and richer public profile empty states, while keeping public profiles read-only and isolated from billing, rankings, discovery score, reviews, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility.
+Next should be public profile cross-surface attribution: add opt-in public profile links to review author rows, eligible player-facing challenge/member rows, and safe leaderboard/player mentions only when a generated public profile handle exists, while keeping hidden players anonymous and proving public profile linking still cannot affect billing, rankings, discovery score, reviews, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
