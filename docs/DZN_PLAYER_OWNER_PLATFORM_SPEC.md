@@ -41,9 +41,12 @@ The dedicated `/pricing` page is the complete owner-plan and payment page:
 - Starter: 2-day free trial, then £2/month.
 - Pro: £10/month.
 - Side-by-side feature comparison.
+- Clear green ticks for included features and clear red X marks for unavailable features.
 - Clear Starter and Pro owner checkout actions.
 - Answers for fairness, bought badges, Starter server competition, and what Pro improves.
 - Clear copy that payment improves owner tools, presentation, publishing, promotion, analytics, and automation, not competitive results.
+- A visibly stronger Pro column/list than Starter, with more owner features and a bolder custom DZN presentation that makes the upgrade path obvious without claiming a competitive advantage.
+- A future visual pass should use DZN-themed background art with subtle slow pan/zoom motion so the pricing page feels alive, while respecting reduced-motion users.
 
 ## Identity And Roles
 
@@ -159,14 +162,16 @@ Manageable/admin guild filtering remains useful for owner setup. Player guild ma
 Future slices should build on this foundation in this order unless product priorities change:
 
 1. Player Hub: player home, followed communities, suggested servers/events, saved servers, profile entry points.
-2. Reviews: player reviews, owner replies, reporting/moderation, review fairness controls.
-3. Challenges, XP, calling cards: earned progression, challenge participation, cosmetics, and fair unlock rules.
-4. Events and tournaments: join requests, approvals, teams, schedules, brackets, reminders, and player history.
-5. Check-ins, waitlists, and no-shows: event operations for communities and owners.
-6. Discord approval embeds: tick/X owner controls, join request approvals, event reminders, and moderation handoffs.
-7. Rich community systems: Discord community landing views, member matching, role-safe recommendations, and cross-server discovery.
-8. Cosmetics and supporter monetisation: non-competitive profile presentation and optional supporter items that never affect rank, stats, scoring, or earned competitive rewards.
-9. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+2. Saved/followed server interaction: `POST`/`DELETE /api/player/saved-servers`, save/follow buttons on public cards and profiles, and tests proving saved state is a private player preference only.
+3. Pricing page visual/comparison upgrade: dedicated pricing page with red X and green tick comparison, stronger Pro feature depth, bolder DZN styling, and subtle animated background treatment that respects reduced motion.
+4. Reviews: player reviews, owner replies, reporting/moderation, review fairness controls.
+5. Challenges, XP, calling cards: earned progression, challenge participation, cosmetics, and fair unlock rules.
+6. Events and tournaments: join requests, approvals, teams, schedules, brackets, reminders, and player history.
+7. Check-ins, waitlists, and no-shows: event operations for communities and owners.
+8. Discord approval embeds: tick/X owner controls, join request approvals, event reminders, and moderation handoffs.
+9. Rich community systems: Discord community landing views, member matching, role-safe recommendations, and cross-server discovery.
+10. Cosmetics and supporter monetisation: non-competitive profile presentation and optional supporter items that never affect rank, stats, scoring, or earned competitive rewards.
+11. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 
@@ -188,6 +193,27 @@ Player Hub -> Add Server -> /pricing?intent=owner_setup&returnTo=%2Fsetup -> gua
 
 The Player Hub API is `/api/player/hub`. It requires a logged-in Discord session, but it must not call `requireOwnerRequestAccess`, return owner-plan-required errors, mutate guild ownership, create checkout sessions, write Stripe state, call Nitrado, or modify competitive/stat tables. Saved/followed server storage is additive player preference state only and must not affect discovery rank, leaderboard score, event scoring, reviews, badges, XP, challenge outcomes, or competitive eligibility.
 
+## Saved/Followed Server Interaction Slice
+
+The saved/followed server interaction slice turns the additive `player_saved_servers` table into a real player action. It remains a free logged-in player feature and is not an owner capability.
+
+The slice adds:
+
+- `GET /api/player/saved-servers` to return the current player's saved public servers.
+- `POST /api/player/saved-servers` to save/follow a visible public server for the current player.
+- `DELETE /api/player/saved-servers` to remove the current player's saved preference.
+- Save/follow buttons on public server cards, discovery cards, and public server profiles.
+
+The endpoint must require a normal Discord session through `getRequestSessionUser`. It must not require `requireOwnerRequestAccess`, Starter, Pro, server ownership, Nitrado access, or billing state.
+
+Saved server state is private preference data:
+
+- It writes only to `player_saved_servers`.
+- It may read `linked_servers` to confirm the target is a visible public server.
+- It must not write or recalculate rankings, discovery score, billing, server ownership, reviews, events, tournaments, Server Wars, badges, XP, challenge results, or competitive eligibility.
+- Public discovery and leaderboard APIs must not consume `player_saved_servers` as a ranking input.
+- Saving a server must not make the player an owner/manager of that server.
+
 ## Access Matrix
 
 | Surface | Visitor | Free Discord player | Starter trial/active | Pro active or legacy effective Pro | Enforcement |
@@ -196,6 +222,7 @@ The Player Hub API is `/api/player/hub`. It requires a logged-in Discord session
 | `/pricing` | Allowed | Allowed | Allowed | Allowed | Public page and checkout API |
 | `/player`, `/servers`, `/events`, `/seasons`, `/leaderboards`, `/dzn-pulse` | Login required | Allowed | Allowed | Allowed | Page auth middleware |
 | Player Hub and community matching APIs | Login required | Allowed | Allowed | Allowed | Session auth, no owner grant |
+| `/api/player/saved-servers` | 401 | Allowed | Allowed | Allowed | Session auth, player preference only |
 | `/setup` | Login required | Redirect to owner pricing | Allowed | Allowed | Page auth plus owner entitlement |
 | `/dashboard` owner tools | Login required | Redirect to owner pricing | Allowed | Allowed | Page auth plus owner entitlement |
 | `/api/onboarding/*` | 401 | 402 owner plan required | Allowed | Allowed | Owner entitlement middleware |

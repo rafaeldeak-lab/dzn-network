@@ -93,6 +93,8 @@ Authenticated player APIs such as `/api/player/hub` and `/api/player/communities
 
 `/api/player/hub` is the free logged-in Player Hub payload. It may read matched Discord communities, saved/followed server preferences, public server suggestions, and public event/tournament suggestions. It must not create checkout sessions, call Nitrado, mutate Discord guild ownership, require owner entitlement, write billing state, or alter competitive/stat tables.
 
+`/api/player/saved-servers` is the free logged-in save/follow preference endpoint. `GET` returns only the current player's saved public servers. `POST` and `DELETE` may write only the current player's row in `player_saved_servers` after resolving the target as a visible public server. Saving a server must not affect rankings, discovery score, billing, server ownership, reviews, events, tournaments, Server Wars, badges, XP, challenge outcomes, or competitive eligibility.
+
 Event browsing, event detail pages, event suggestions, votes, and reports remain player/community surfaces. Registering or matching an owned server for an event is an owner action and must cross the billing entitlement boundary first.
 
 These APIs must keep their existing preview redaction and `Vary: Cookie` behavior where applicable. Public API availability does not mean the corresponding app page is public.
