@@ -9,7 +9,7 @@ import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding
 import type { AuthNavigationSummary } from "@/components/onboarding/types";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
 
-type SiteHeaderActive = "features" | "leaderboards" | "servers" | "pricing" | "stats" | "events" | "dashboard";
+type SiteHeaderActive = "features" | "player" | "leaderboards" | "servers" | "pricing" | "stats" | "events" | "dashboard";
 
 type SiteHeaderProps = {
   active?: SiteHeaderActive;
@@ -61,6 +61,7 @@ const loggedOutHeaderLinks: HeaderNavLink[] = [
 
 const starterHeaderLinks: HeaderNavLink[] = [
   { href: "/#features", label: "Features", active: "features" },
+  { href: "/player", label: "Player Hub", active: "player" },
   { href: "/leaderboards", label: "Leaderboards", active: "leaderboards" },
   { href: "/servers", label: "Servers", active: "servers" },
   { href: "/events", label: "Events", active: "events" },
@@ -68,6 +69,7 @@ const starterHeaderLinks: HeaderNavLink[] = [
 
 const proHeaderLinks: HeaderNavLink[] = [
   { href: "/#features", label: "Features", active: "features" },
+  { href: "/player", label: "Player Hub", active: "player" },
   { href: "/leaderboards", label: "Leaderboards", active: "leaderboards" },
   { href: "/servers", label: "Servers", active: "servers" },
   { href: "/#stats", label: "Stats", active: "stats" },
@@ -322,6 +324,7 @@ function HeaderLogoVideo() {
 }
 
 function activeFromPathname(pathname: string): SiteHeaderActive | undefined {
+  if (pathname.startsWith("/player")) return "player";
   if (pathname.startsWith("/leaderboards")) return "leaderboards";
   if (pathname.startsWith("/servers")) return "servers";
   if (pathname.startsWith("/pricing")) return "pricing";

@@ -8,6 +8,7 @@ const protectedAppPagePrefixes = [
   "/dzn-pulse",
   "/events",
   "/leaderboards",
+  "/player",
   "/seasons",
   "/servers",
   "/setup",

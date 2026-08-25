@@ -11,6 +11,8 @@ const requiredIncludes = [
   "/events/*",
   "/leaderboards",
   "/leaderboards/*",
+  "/player",
+  "/player/*",
   "/owner",
   "/owner/*",
   "/seasons",
