@@ -1,4 +1,8 @@
 import { requireDb } from "./db";
+import {
+  readPublicProfileAttributionsByDiscordIds,
+  type PublicProfileAttribution,
+} from "./public-profile-attribution";
 import { reviewCooldownUntil } from "./review-moderation";
 import type { Env, SessionUser } from "./types";
 
@@ -35,6 +39,7 @@ export type PublicReview = {
   id: string;
   reviewer_name: string | null;
   reviewer_avatar_url: string | null;
+  reviewer_profile: PublicProfileAttribution | null;
   rating: number;
   title: string | null;
   body: string;
@@ -168,10 +173,19 @@ export async function getApprovedReviewSummary(env: Env, linkedServerId: string,
     .bind(linkedServerId)
     .all<ServerReviewRow>();
 
-  return buildPublicReviewSummary(result.results ?? [], viewer?.discord_id ?? null);
+  const rows = result.results ?? [];
+  const reviewerProfiles = await readPublicProfileAttributionsByDiscordIds(
+    env,
+    rows.map((row) => row.reviewer_discord_id),
+  );
+  return buildPublicReviewSummary(rows, viewer?.discord_id ?? null, reviewerProfiles);
 }
 
-export function buildPublicReviewSummary(rows: ServerReviewRow[], viewerDiscordId?: string | null): PublicReviewSummary {
+export function buildPublicReviewSummary(
+  rows: ServerReviewRow[],
+  viewerDiscordId?: string | null,
+  reviewerProfiles: Map<string, PublicProfileAttribution> = new Map(),
+): PublicReviewSummary {
   const approved = rows.filter((row) => row.status === "approved");
   const breakdown: Record<1 | 2 | 3 | 4 | 5, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   let ratingTotal = 0;
@@ -186,18 +200,27 @@ export function buildPublicReviewSummary(rows: ServerReviewRow[], viewerDiscordI
     average_rating: approved.length ? Math.round((ratingTotal / approved.length) * 10) / 10 : 0,
     review_count: approved.length,
     rating_breakdown: breakdown,
-    reviews: approved.map((row) => ({
-      id: row.id,
-      reviewer_name: row.reviewer_name,
-      reviewer_avatar_url: row.reviewer_avatar_url,
-      rating: clampRating(row.rating),
-      title: row.title,
-      body: row.body,
-      owner_reply: publicOwnerReply(row),
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      is_own_review: Boolean(viewerDiscordId && row.reviewer_discord_id === viewerDiscordId),
-    })),
+    reviews: approved.map((row) => publicReview(row, viewerDiscordId, reviewerProfiles.get(row.reviewer_discord_id) ?? null)),
+  };
+}
+
+function publicReview(
+  row: ServerReviewRow,
+  viewerDiscordId: string | null | undefined,
+  reviewerProfile: PublicProfileAttribution | null,
+): PublicReview {
+  return {
+    id: row.id,
+    reviewer_name: reviewerProfile?.display_name ?? "DZN player",
+    reviewer_avatar_url: null,
+    reviewer_profile: reviewerProfile,
+    rating: clampRating(row.rating),
+    title: row.title,
+    body: row.body,
+    owner_reply: publicOwnerReply(row),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    is_own_review: Boolean(viewerDiscordId && row.reviewer_discord_id === viewerDiscordId),
   };
 }
 

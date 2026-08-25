@@ -64,6 +64,13 @@ import {
 type LoadState = "loading" | "loaded" | "stale";
 type TournamentStatusFilter = "all" | "upcoming" | "active" | "completed" | string;
 
+type PublicProfileAttribution = {
+  display_name: string;
+  public_handle: string;
+  public_href: string;
+  public_api_href?: string;
+};
+
 type PlayerChallengeClient = {
   id: string;
   slug: string;
@@ -84,6 +91,7 @@ type PlayerChallengeClient = {
     progress_percent: number;
     xp_awarded: number;
     calling_card_awarded: string | null;
+    public_profile?: PublicProfileAttribution | null;
   };
 };
 
@@ -97,6 +105,7 @@ type PlayerChallengesClientPayload = {
     joined_challenges?: number;
     completed_challenges?: number;
     calling_cards?: Array<{ code: string; name: string; rarity: string; awarded_at: string }>;
+    public_profile?: PublicProfileAttribution | null;
     href?: string;
   };
 };
@@ -636,6 +645,7 @@ function PlayerChallengeParticipationPanel({
 }) {
   const challenges = Array.isArray(payload.challenges) ? payload.challenges : [];
   const progress = normalizePlayerChallengeProgress(payload.player_progress);
+  const publicProfile = normalizePublicProfileAttribution(progress.public_profile);
   return (
     <section className="overflow-hidden rounded-lg border border-cyan-300/18 bg-[radial-gradient(circle_at_18%_0%,rgba(34,211,238,0.18),transparent_34%),radial-gradient(circle_at_82%_8%,rgba(139,92,246,0.18),transparent_34%),rgba(3,7,18,0.88)]">
       <div className="border-b border-white/10 p-4 sm:p-5">
@@ -652,6 +662,12 @@ function PlayerChallengeParticipationPanel({
             Profile
             <UserRound className="h-3.5 w-3.5" />
           </Link>
+          {publicProfile ? (
+            <Link href={publicProfile.public_href} className="inline-flex items-center gap-2 rounded border border-emerald-300/25 bg-emerald-400/12 px-3 py-2 text-[10px] font-black uppercase text-emerald-50 transition hover:bg-emerald-400/18" aria-label={`View ${publicProfile.display_name}'s public DZN profile`}>
+              Public profile
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          ) : null}
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-4">
           <PlayerChallengeStat label="XP" value={formatNumber(progress.total_xp)} />
@@ -702,6 +718,7 @@ function PlayerChallengeTrackCard({
   const joined = state === "joined" || state === "completed";
   const percent = clampPercent(challenge.player_state?.progress_percent ?? 0);
   const card = challenge.reward?.calling_card;
+  const publicProfile = joined ? normalizePublicProfileAttribution(challenge.player_state?.public_profile) : null;
   return (
     <article className="flex min-h-[260px] flex-col rounded border border-white/10 bg-black/28 p-4 transition hover:border-cyan-300/30 hover:bg-black/36">
       <div className="flex items-start justify-between gap-3">
@@ -711,6 +728,12 @@ function PlayerChallengeTrackCard({
         </span>
         <span className="rounded border border-white/10 bg-white/[0.06] px-2.5 py-1 text-[10px] font-black uppercase text-zinc-300">{state.replace("_", " ")}</span>
       </div>
+      {publicProfile ? (
+        <Link href={publicProfile.public_href} className="mt-3 inline-flex max-w-full items-center gap-2 self-start rounded border border-emerald-300/20 bg-emerald-400/10 px-2.5 py-1.5 text-[10px] font-black uppercase text-emerald-50 transition hover:bg-emerald-400/16" aria-label={`View ${publicProfile.display_name}'s public DZN profile`}>
+          <UserRound className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">Public profile</span>
+        </Link>
+      ) : null}
       <h3 className="mt-4 break-words text-lg font-black uppercase leading-tight text-white [overflow-wrap:anywhere]">{challenge.title}</h3>
       {challenge.description ? (
         <p className="mt-3 line-clamp-3 text-sm font-bold leading-6 text-zinc-300">{challenge.description}</p>
@@ -840,6 +863,7 @@ function fallbackPlayerChallengesPayload(): PlayerChallengesClientPayload {
       joined_challenges: 0,
       completed_challenges: 0,
       calling_cards: [],
+      public_profile: null,
       href: "/events/challenges",
     },
   };
@@ -849,8 +873,18 @@ function normalizePlayerChallengesPayload(value: PlayerChallengesClientPayload):
   return {
     ...fallbackPlayerChallengesPayload(),
     ...value,
-    challenges: Array.isArray(value.challenges) ? value.challenges : [],
+    challenges: Array.isArray(value.challenges) ? value.challenges.map(normalizePlayerChallenge) : [],
     player_progress: normalizePlayerChallengeProgress(value.player_progress),
+  };
+}
+
+function normalizePlayerChallenge(value: PlayerChallengeClient): PlayerChallengeClient {
+  return {
+    ...value,
+    player_state: {
+      ...value.player_state,
+      public_profile: normalizePublicProfileAttribution(value.player_state?.public_profile),
+    },
   };
 }
 
@@ -861,8 +895,37 @@ function normalizePlayerChallengeProgress(value: PlayerChallengesClientPayload["
     joined_challenges: safeNumber(value?.joined_challenges),
     completed_challenges: safeNumber(value?.completed_challenges),
     calling_cards: Array.isArray(value?.calling_cards) ? value.calling_cards : [],
+    public_profile: normalizePublicProfileAttribution(value?.public_profile),
     href: typeof value?.href === "string" && value.href ? value.href : "/events/challenges",
   };
+}
+
+function normalizePublicProfileAttribution(value: unknown): PublicProfileAttribution | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const publicHandle = typeof record.public_handle === "string"
+    ? normalizePublicProfileHandle(record.public_handle)
+    : null;
+  const expectedHref = publicHandle ? `/players/${encodeURIComponent(publicHandle)}` : null;
+  const expectedApiHref = publicHandle ? `/api/public/player-profiles/${encodeURIComponent(publicHandle)}` : null;
+  const publicHref = typeof record.public_href === "string" && record.public_href === expectedHref
+    ? record.public_href
+    : null;
+  if (!publicHref || !publicHandle) return null;
+  return {
+    display_name: typeof record.display_name === "string" && record.display_name.trim() ? record.display_name.trim() : "DZN Player",
+    public_handle: publicHandle,
+    public_href: publicHref,
+    public_api_href: typeof record.public_api_href === "string" && record.public_api_href === expectedApiHref
+      ? record.public_api_href
+      : undefined,
+  };
+}
+
+function normalizePublicProfileHandle(value: unknown) {
+  if (typeof value !== "string") return null;
+  const text = value.trim().toLowerCase();
+  return /^[a-z0-9](?:[a-z0-9-]{1,62}[a-z0-9])$/.test(text) ? text : null;
 }
 
 function safeNumber(value: unknown) {

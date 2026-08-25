@@ -200,6 +200,7 @@ function normalizeProgress(progress: PlayerProgressSummary): PlayerProgressSumma
     completed_challenges: safeNumber(progress.completed_challenges),
     calling_cards: Array.isArray(progress.calling_cards) ? progress.calling_cards : [],
     recent_challenges: Array.isArray(progress.recent_challenges) ? progress.recent_challenges : [],
+    public_profile: progress.public_profile ?? null,
     href: typeof progress.href === "string" && progress.href ? progress.href : CHALLENGES_HREF,
   };
 }

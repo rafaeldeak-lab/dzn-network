@@ -430,6 +430,7 @@ function emptyPlayerProgress(source: PlayerProgressSummary["source"]): PlayerPro
     completed_challenges: 0,
     calling_cards: [],
     recent_challenges: [],
+    public_profile: null,
     href: "/events/challenges",
   };
 }

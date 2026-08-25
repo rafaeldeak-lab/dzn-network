@@ -356,6 +356,13 @@ type PublicRecentEvent = {
   created_at: string | null;
 };
 
+type PublicProfileAttribution = {
+  display_name: string;
+  public_handle: string;
+  public_href: string;
+  public_api_href?: string;
+};
+
 type PublicLeaderboardPlayer = {
   rank: number;
   player_name: string;
@@ -368,6 +375,7 @@ type PublicLeaderboardPlayer = {
   kd_label: string;
   longest_kill: number;
   last_seen: string | null;
+  public_profile?: PublicProfileAttribution | null;
 };
 
 type PublicStats = {
@@ -422,6 +430,7 @@ type PublicReview = {
   id: string;
   reviewer_name: string | null;
   reviewer_avatar_url: string | null;
+  reviewer_profile?: PublicProfileAttribution | null;
   rating: number;
   title: string | null;
   body: string;
@@ -2416,6 +2425,8 @@ function ReviewsPanel({ server }: { server: PublicServer }) {
 function ReviewCard({ review, onReported }: { review: PublicReview; onReported: () => void }) {
   const [reporting, setReporting] = useState(false);
   const [reported, setReported] = useState(false);
+  const reviewerProfile = normalizePublicProfileAttribution(review.reviewer_profile);
+  const reviewerName = reviewerProfile?.display_name ?? (review.reviewer_name?.trim() || "DZN player");
 
   async function reportReview() {
     setReporting(true);
@@ -2440,14 +2451,22 @@ function ReviewCard({ review, onReported }: { review: PublicReview; onReported: 
     <article className="rounded-xl border border-white/10 bg-black/24 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 gap-3">
-          {review.reviewer_avatar_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={review.reviewer_avatar_url} alt="" className="h-10 w-10 rounded-full object-cover" />
+          {reviewerProfile ? (
+            <Link href={reviewerProfile.public_href} aria-label={`View ${reviewerName}'s public DZN profile`} className="grid h-10 w-10 shrink-0 rounded-full border border-cyan-300/25 bg-cyan-500/15 place-items-center text-sm font-black text-cyan-100 transition hover:border-cyan-200/50">
+              {(reviewerName ?? "P")[0]}
+            </Link>
           ) : (
-            <span className="grid h-10 w-10 rounded-full border border-violet-300/25 bg-violet-500/15 place-items-center text-sm font-black text-violet-100">{(review.reviewer_name ?? "P")[0]}</span>
+            <span className="grid h-10 w-10 rounded-full border border-violet-300/25 bg-violet-500/15 place-items-center text-sm font-black text-violet-100">{reviewerName[0]}</span>
           )}
           <div className="min-w-0">
-            <p className="break-words text-sm font-black text-white">{review.reviewer_name ?? "DZN player"}</p>
+            {reviewerProfile ? (
+              <Link href={reviewerProfile.public_href} className="inline-flex max-w-full items-center gap-1 break-words text-sm font-black text-cyan-50 transition hover:text-white [overflow-wrap:anywhere]" aria-label={`View ${reviewerName}'s public DZN profile`}>
+                {reviewerName}
+                <ArrowRight className="h-3 w-3 shrink-0" />
+              </Link>
+            ) : (
+              <p className="break-words text-sm font-black text-white">{reviewerName}</p>
+            )}
             <p className="mt-1 text-[10px] font-black uppercase text-zinc-500">{formatRelativeTime(review.created_at)}</p>
           </div>
         </div>
@@ -2552,7 +2571,9 @@ function PvpLeaderboardPanel({ players }: { players: PublicLeaderboardPlayer[] }
                 {players.slice(0, 6).map((player) => (
                   <tr key={`pvp-${player.rank}-${player.player_name}`} className="bg-black/24">
                     <td className="rounded-l-lg border-y border-l border-white/10 px-2 py-2 text-sm font-black text-violet-200">#{player.rank}</td>
-                    <td className="border-y border-white/10 px-2 py-2 text-sm font-black text-white">{player.player_name}</td>
+                    <td className="border-y border-white/10 px-2 py-2 text-sm font-black text-white">
+                      <PlayerProfileName player={player} />
+                    </td>
                     <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-zinc-200">{player.kills}</td>
                     <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-zinc-300">{player.deaths}</td>
                     <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-cyan-100">{formatKdLabel(player)}</td>
@@ -2639,7 +2660,7 @@ function TopPlayersPanel({ players }: { players: PublicLeaderboardPlayer[] }) {
               <PlayerAvatar player={player} />
               <div className="min-w-0">
                 <p className="text-[10px] font-black uppercase text-violet-200">#{player.rank}</p>
-                <p className="mt-1 break-words text-sm font-black text-white [overflow-wrap:anywhere]">{player.player_name}</p>
+                <PlayerProfileName player={player} className="mt-1 break-words text-sm font-black text-white [overflow-wrap:anywhere]" />
               </div>
             </div>
             <span className="rounded-md border border-emerald-300/20 bg-emerald-400/10 px-2 py-1 text-xs font-black text-emerald-100">
@@ -2654,6 +2675,18 @@ function TopPlayersPanel({ players }: { players: PublicLeaderboardPlayer[] }) {
         </div>
       ))}
     </div>
+  );
+}
+
+function PlayerProfileName({ player, className = "" }: { player: PublicLeaderboardPlayer; className?: string }) {
+  const profile = normalizePublicProfileAttribution(player.public_profile);
+  const fallback = className ? <span className={className}>{player.player_name}</span> : <>{player.player_name}</>;
+  if (!profile?.public_href) return fallback;
+  return (
+    <Link href={profile.public_href} className={`inline-flex max-w-full items-center gap-1 text-cyan-50 transition hover:text-white ${className}`} aria-label={`View ${profile.display_name}'s public DZN profile`}>
+      <span className="min-w-0 truncate">{player.player_name}</span>
+      <ArrowRight className="h-3 w-3 shrink-0" />
+    </Link>
   );
 }
 
@@ -2798,6 +2831,34 @@ function toneClass(tone: string) {
   if (tone === "orange") return "text-orange-200";
   if (tone === "red") return "text-red-200";
   return "text-violet-200";
+}
+
+function normalizePublicProfileAttribution(value: unknown): PublicProfileAttribution | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const publicHandle = typeof record.public_handle === "string"
+    ? normalizePublicProfileHandle(record.public_handle)
+    : null;
+  const expectedHref = publicHandle ? `/players/${encodeURIComponent(publicHandle)}` : null;
+  const expectedApiHref = publicHandle ? `/api/public/player-profiles/${encodeURIComponent(publicHandle)}` : null;
+  const publicHref = typeof record.public_href === "string" && record.public_href === expectedHref
+    ? record.public_href
+    : null;
+  if (!publicHref || !publicHandle) return null;
+  return {
+    display_name: typeof record.display_name === "string" && record.display_name.trim() ? record.display_name.trim() : "DZN Player",
+    public_handle: publicHandle,
+    public_href: publicHref,
+    public_api_href: typeof record.public_api_href === "string" && record.public_api_href === expectedApiHref
+      ? record.public_api_href
+      : undefined,
+  };
+}
+
+function normalizePublicProfileHandle(value: unknown) {
+  if (typeof value !== "string") return null;
+  const text = value.trim().toLowerCase();
+  return /^[a-z0-9](?:[a-z0-9-]{1,62}[a-z0-9])$/.test(text) ? text : null;
 }
 
 function parseTags(value: string) {

@@ -398,13 +398,13 @@ function profilePrivacyPreferenceRow() {
 }
 
 function assertProfileReadOperationsStayIsolated(operations: FakeOperation[]) {
-  assert.equal(operations.length, 5, "Profile endpoint should only perform the existing progression reads plus one preference read.");
+  assert.equal(operations.length, 6, "Profile endpoint should only perform the existing progression reads plus preference and attribution reads.");
   for (const operation of operations) {
     assert.notEqual(operation.kind, "run");
     assert.doesNotMatch(operation.sql, forbiddenProtectedSurfacePattern());
     assert.match(
       operation.sql,
-      /\bplayer_profile_privacy_preferences\b|\bplayer_challenges\b|\bplayer_challenge_participations\b|\bplayer_xp_ledger\b|\bplayer_calling_card_awards\b|\bplayer_calling_cards\b/i,
+      /\bplayer_profile_privacy_preferences\b|\busers\b|\bplayer_challenges\b|\bplayer_challenge_participations\b|\bplayer_xp_ledger\b|\bplayer_calling_card_awards\b|\bplayer_calling_cards\b/i,
       `Unexpected profile progression read: ${operation.sql}`,
     );
   }

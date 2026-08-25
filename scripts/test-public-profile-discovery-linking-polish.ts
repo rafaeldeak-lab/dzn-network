@@ -192,16 +192,13 @@ function assertPublicProfileLinkingDoesNotInfluenceProtectedSystems() {
     "functions/api/billing/create-checkout-session.ts",
     "functions/api/billing/status.ts",
     "functions/_lib/server-ranking.ts",
-    "functions/_lib/public-leaderboards.ts",
     "functions/api/public/leaderboards.ts",
     "functions/_lib/advanced-leaderboards.ts",
-    "functions/_lib/server-reviews.ts",
     "functions/_lib/badge-awards.ts",
     "functions/_lib/badge-evaluation.ts",
     "functions/_lib/dzn-seasons.ts",
     "functions/_lib/events.ts",
     "functions/_lib/server-war-scoring.ts",
-    "functions/_lib/player-progression.ts",
     "functions/api/cron/player-progression/awards.ts",
   ]) {
     const source = read(file);

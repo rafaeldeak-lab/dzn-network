@@ -26,6 +26,26 @@ This follow-on slice adds:
 
 The follow-on slice does not add migrations, public write APIs, custom handle editing, checkout activation, owner entitlement changes, production D1 writes, Nitrado calls, Discord mutations, Stripe mutations, Cloudflare secret changes, or issue #49 changes.
 
+## Follow-On Public Profile Cross-Surface Attribution
+
+The public profile cross-surface attribution slice makes opted-in public profile links available on existing public/player surfaces without making public profiles an input to ranking, billing, discovery, moderation, progression awards, or competitive eligibility.
+
+Branch details:
+
+- Branch: `codex/public-profile-cross-surface-attribution-20260825`
+- Base branch: `codex/public-profile-discovery-linking-polish-20260825`
+- Base commit: `02a2a46bb10a06dfc99b64eff74b02fe50c1f706`
+
+This follow-on slice adds:
+
+- A shared read-only attribution helper sourced from `player_profile_privacy_preferences` and `users`.
+- Public review author links only when `server_reviews.reviewer_discord_id` resolves to an opted-in DZN user with a generated `public_handle`.
+- Current-player challenge-row attribution only when the logged-in player has already published a generated public handle.
+- Leaderboard player links only where the row already has a unique trusted account bridge through `player_profiles.discord_id`, `kill_events.killer_profile_id`, or `kill_events.victim_profile_id`; ambiguous aggregates and conflicting kill/death bindings render as plain names.
+- Client-side link validation so only exact generated-handle `/players/...` public profile hrefs are rendered.
+
+This follow-on slice must not infer profile links from gamertag/name matching, expose Discord IDs, expose internal user IDs, expose Discord avatar URLs, create handles, write privacy settings, mutate reviews, mutate leaderboard scores, update discovery scores, change billing or owner entitlement, award XP, award calling cards, touch Nitrado, mutate Discord resources, change Cloudflare secrets, apply production D1 writes, enable live checkout, or merge issue #49.
+
 ## Branch And Base
 
 - Branch: `codex/public-profile-viewer-20260825`
@@ -137,6 +157,41 @@ Issue #49 remains reserved for final live checkout activation.
 
 ## Validation Evidence
 
+Completed on branch `codex/public-profile-cross-surface-attribution-20260825`:
+
+- `npm run test:public-profile-cross-surface-attribution` passed.
+- `npm run test:public-profile-discovery-linking-polish` passed.
+- `npm run test:public-player-profile-viewer` passed.
+- `npm run test:public-listing-reviews` passed.
+- `npm run test:public-leaderboards` passed.
+- `npm run test:reviews-foundation` passed.
+- `npm run test:reviews-moderation-dashboard` passed.
+- `npm run test:reviews-moderation-workflow-polish` passed.
+- `npm run test:review-notification-read-state` passed.
+- `npm run test:player-hub-foundation` passed.
+- `npm run test:player-saved-servers` passed.
+- `npm run test:challenges-xp-calling-cards-foundation` passed.
+- `npm run test:progression-awards-foundation` passed.
+- `npm run test:progression-award-source-adapters-audit` passed.
+- `npm run test:player-profile-progression-showcase` passed.
+- `npm run test:player-profile-privacy-preferences` passed.
+- `npm run test:public-access-gating` passed.
+- `npm run test:player-owner-access-foundation` passed.
+- `npm run test:events` passed.
+- `npm run test:server-war-scoring` passed.
+- `npm run test:server-war-gating` passed.
+- `npm run test:dzn-seasons` passed.
+- `npm run test:billing-plans` passed using mocked/local checkout/webhook tests only.
+- `npm run test:stripe-live-readiness` passed.
+- `npm run test:stripe-live-activation-checklist` passed.
+- `npm run check:billing-config` passed and reported live checkout disabled/not configured.
+- `npx tsc --noEmit --incremental false` passed.
+- `npm run lint` passed with four existing warnings outside this slice.
+- `npm test` passed on the final tree. The optional latest ADM raw fixture check skipped because the owner-supplied raw bundle is not present locally.
+- `git diff --check` passed.
+- `npm run build` passed and exported `/leaderboards`, `/events/challenges`, `/servers/[slug]`, `/players/[handle]`, and the existing player/owner/public routes.
+- Codex Security diff scan completed with zero findings. TAC status could not be verified because the Codex Security Access connector is not connected.
+
 Completed on branch `codex/public-profile-viewer-20260825`:
 
 - `npm run test:public-player-profile-viewer` passed.
@@ -188,4 +243,4 @@ Completed on branch `codex/public-profile-discovery-linking-polish-20260825`:
 
 ## Next Recommended Slice
 
-Next should be public profile cross-surface attribution: add opt-in public profile links to review author rows, eligible player-facing challenge/member rows, and safe leaderboard/player mentions only when a generated public profile handle exists, while keeping hidden players anonymous and proving public profile linking still cannot affect billing, rankings, discovery score, reviews, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+Next should be public profile attribution expansion and controls polish: add a private "where my public profile appears" preview/control surface for players, then extend opt-in attribution to any newly exposed public/player-safe member or roster rows only where a unique trusted user bridge exists. CTF/event roster rows that participate in scoring or owner workflows should stay untouched until a dedicated slice proves links are presentation-only and still cannot affect billing, rankings, discovery score, reviews, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.

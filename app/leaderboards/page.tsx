@@ -37,6 +37,13 @@ type ScoreBreakdown = {
   final_score: number;
 };
 
+type PublicProfileAttribution = {
+  display_name: string;
+  public_handle: string;
+  public_href: string;
+  public_api_href?: string;
+};
+
 type LeaderboardPlayer = {
   rank: number;
   player_name: string;
@@ -49,6 +56,7 @@ type LeaderboardPlayer = {
   kd_label: string;
   longest_kill: number;
   last_seen: string | null;
+  public_profile?: PublicProfileAttribution | null;
 };
 
 type LongestKill = {
@@ -60,6 +68,8 @@ type LongestKill = {
   weapon: string;
   distance: number;
   occurred_at: string | null;
+  player_profile?: PublicProfileAttribution | null;
+  victim_profile?: PublicProfileAttribution | null;
 };
 
 type LeaderboardsPayload = {
@@ -274,7 +284,7 @@ export default function LeaderboardsPage() {
       headers={["Rank", "Player", "Server", "Kills", "Deaths", "K/D", "Longest"]}
       rows={payload.top_players.map((player, index) => [
         `#${player.rank}`,
-        <PlayerName key="player" name={player.player_name} index={index} />,
+        <PlayerName key="player" name={player.player_name} index={index} profile={player.public_profile} />,
         <ServerLink key="server" slug={player.server_slug} label={player.server_name} />,
         formatNumber(player.kills),
         formatNumber(player.deaths),
@@ -551,9 +561,11 @@ function PersonalBestTable({ personalBests }: { personalBests: LongestKill[] }) 
                       <span className={`leaderboard-ref-rank dzn-rank-badge dzn-rank-badge--${rankTone(index)}`}>#{kill.rank}</span>
                     </td>
                     <td className="border-y border-white/10 px-3 py-2 text-sm font-black text-white">
-                      <PlayerName name={kill.player_name} index={index} />
+                      <PlayerName name={kill.player_name} index={index} profile={kill.player_profile} />
                     </td>
-                    <td className="border-y border-white/10 px-3 py-2 text-sm font-bold text-zinc-200">{kill.victim_name}</td>
+                    <td className="border-y border-white/10 px-3 py-2 text-sm font-bold text-zinc-200">
+                      <PlayerName name={kill.victim_name} index={index} profile={kill.victim_profile} />
+                    </td>
                     <td className="border-y border-white/10 px-3 py-2 text-sm font-bold text-zinc-200">
                       <ServerLink slug={kill.server_slug} label={kill.server_name} />
                     </td>
@@ -604,7 +616,7 @@ function KillHighlightCard({
           <>
             <p className="mt-1 text-2xl font-black text-white">{formatDistance(kill.distance)}</p>
             <p className="mt-1 max-w-[58%] text-[11px] font-bold leading-4 text-zinc-100">
-              {kill.player_name} eliminated {kill.victim_name} with {kill.weapon}
+              <PlayerInlineMention name={kill.player_name} profile={kill.player_profile} /> eliminated <PlayerInlineMention name={kill.victim_name} profile={kill.victim_profile} /> with {kill.weapon}
             </p>
             <div className="mt-2 flex max-w-[64%] flex-wrap items-center gap-2 text-[10px] font-bold text-zinc-300">
               <ServerLink slug={kill.server_slug} label={kill.server_name} />
@@ -727,14 +739,30 @@ function StatCard({ icon: Icon, label, value, tone }: { icon: typeof Activity; l
   );
 }
 
-function PlayerName({ name, index }: { name: string; index: number }) {
-  return (
+function PlayerName({ name, index, profile }: { name: string; index: number; profile?: PublicProfileAttribution | null }) {
+  const content = (
     <span className="leaderboard-ref-player leaderboard-reference-player inline-flex items-center gap-2">
       <span className={`leaderboard-reference-avatar leaderboard-reference-avatar--${rankTone(index)}`} aria-hidden="true">
         {name.slice(0, 1).toUpperCase()}
       </span>
       <span>{name}</span>
     </span>
+  );
+  if (!profile?.public_href) return content;
+  return (
+    <Link href={profile.public_href} className="inline-flex items-center gap-1 text-cyan-50 transition hover:text-white" aria-label={`View ${profile.display_name}'s public DZN profile`}>
+      {content}
+      <ArrowRight className="h-3 w-3" />
+    </Link>
+  );
+}
+
+function PlayerInlineMention({ name, profile }: { name: string; profile?: PublicProfileAttribution | null }) {
+  if (!profile?.public_href) return <>{name}</>;
+  return (
+    <Link href={profile.public_href} className="font-black text-cyan-50 underline decoration-cyan-300/35 underline-offset-2 transition hover:text-white" aria-label={`View ${profile.display_name}'s public DZN profile`}>
+      {name}
+    </Link>
   );
 }
 
@@ -865,6 +893,7 @@ function normalizePlayer(player: LeaderboardPlayer): LeaderboardPlayer {
     kd_label: player.kd_label || "Awaiting data",
     longest_kill: numberOrZero(player.longest_kill),
     last_seen: player.last_seen ?? null,
+    public_profile: normalizePublicProfileAttribution(player.public_profile),
   };
 }
 
@@ -878,6 +907,8 @@ function normalizeLongestKill(kill: LongestKill): LongestKill {
     weapon: kill.weapon || "Unknown weapon",
     distance: numberOrZero(kill.distance),
     occurred_at: kill.occurred_at ?? null,
+    player_profile: normalizePublicProfileAttribution(kill.player_profile),
+    victim_profile: normalizePublicProfileAttribution(kill.victim_profile),
   };
 }
 
@@ -890,6 +921,8 @@ function normalizeKillHighlight(kill: Omit<LongestKill, "rank">): Omit<LongestKi
     weapon: kill.weapon || "Unknown weapon",
     distance: numberOrZero(kill.distance),
     occurred_at: kill.occurred_at ?? null,
+    player_profile: normalizePublicProfileAttribution(kill.player_profile),
+    victim_profile: normalizePublicProfileAttribution(kill.victim_profile),
   };
 }
 
@@ -926,6 +959,34 @@ function formatCategory(value: string) {
 
 function isScoreBreakdown(value: unknown): value is ScoreBreakdown {
   return Boolean(value && typeof value === "object" && "final_score" in value);
+}
+
+function normalizePublicProfileAttribution(value: unknown): PublicProfileAttribution | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const publicHandle = typeof record.public_handle === "string"
+    ? normalizePublicProfileHandle(record.public_handle)
+    : null;
+  const expectedHref = publicHandle ? `/players/${encodeURIComponent(publicHandle)}` : null;
+  const expectedApiHref = publicHandle ? `/api/public/player-profiles/${encodeURIComponent(publicHandle)}` : null;
+  const publicHref = typeof record.public_href === "string" && record.public_href === expectedHref
+    ? record.public_href
+    : null;
+  if (!publicHref || !publicHandle) return null;
+  return {
+    display_name: typeof record.display_name === "string" && record.display_name.trim() ? record.display_name.trim() : "DZN Player",
+    public_handle: publicHandle,
+    public_href: publicHref,
+    public_api_href: typeof record.public_api_href === "string" && record.public_api_href === expectedApiHref
+      ? record.public_api_href
+      : undefined,
+  };
+}
+
+function normalizePublicProfileHandle(value: unknown) {
+  if (typeof value !== "string") return null;
+  const text = value.trim().toLowerCase();
+  return /^[a-z0-9](?:[a-z0-9-]{1,62}[a-z0-9])$/.test(text) ? text : null;
 }
 
 function scoreBreakdownTitle(breakdown: ScoreBreakdown | null) {

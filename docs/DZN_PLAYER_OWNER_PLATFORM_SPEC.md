@@ -589,6 +589,40 @@ Mutation scope:
 
 Fairness remains unchanged: public profile discovery links, copy/share controls, hidden section empty states, and pending section empty states must not affect billing, rankings, discovery score, reviews, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
 
+## Public Profile Cross-Surface Attribution Slice
+
+The public profile cross-surface attribution slice lets published player profiles appear beside player mentions on existing public/player surfaces, but only when DZN can prove the mention belongs to a logged-in DZN user who has opted into a generated public profile handle.
+
+The slice adds:
+
+- A shared read-only `PublicProfileAttribution` helper for generated public profile handles.
+- Optional public profile links on public server review author rows.
+- Optional current-player profile attribution on player-facing challenge participation rows.
+- Optional profile links on safe leaderboard player mentions when a unique trusted `users.id` bridge exists through `player_profiles.discord_id`, `kill_events.killer_profile_id`, or `kill_events.victim_profile_id`.
+- Client-side validation that only exact generated-handle `/players/...` public profile hrefs and `/api/public/player-profiles/...` API hrefs are rendered.
+
+Authorization rules:
+
+- Public profile attribution is read-only and must never create handles. Handle creation remains private player-owned behavior on `/api/player/profile-privacy`.
+- Review author links may be shown only when `server_reviews.reviewer_discord_id` resolves to a DZN user with `public_profile_enabled = 1` and a generated `public_handle`.
+- Player challenge/member attribution may be shown only on player-facing challenge rows tied to the current authenticated player's session and saved public profile handle.
+- Leaderboard mentions may be linked only when a trusted account binding already exists and the aggregate resolves to exactly one DZN user. Ambiguous aggregates or kill/death rows with conflicting user bindings must render as plain names. DZN must not infer profile ownership by matching display names, gamertags, review text, leaderboard names, Discord names, or public handles supplied by a request body.
+- Hidden, unpublished, malformed, missing, or unconfigured profiles must render without public profile links. Public review authors without a published profile must remain generic DZN player rows.
+
+Privacy rules:
+
+- Attribution payloads may expose only a display name, generated `public_handle`, public profile href, and public profile API href.
+- Attribution payloads must not expose Discord IDs, internal user IDs, Discord avatar hashes or derived avatar URLs, source IDs, source tables, raw award evidence, ADM rows, billing rows, owner account state, Nitrado tokens, Discord bot tokens, Stripe state, or Cloudflare secrets.
+- Review author rows must not expose reviewer Discord IDs or cached Discord avatar URLs through the public review UI.
+- Raw ADM leaderboard player names can remain competitive/stat display text, but they must not become clickable profile links without the trusted account bridge and saved public handle.
+
+Mutation scope:
+
+- Cross-surface attribution may read `player_profile_privacy_preferences` and `users`, plus the existing source tables needed by the already-rendered surface.
+- The slice must not add writes, background jobs, checkout sessions, profile handle generation, profile privacy updates, billing updates, server ownership changes, ranking updates, discovery score updates, review rating changes, event mutations, badge awards, season changes, Server Wars score/result changes, XP awards, calling-card awards, Nitrado calls, Discord bot messages, Cloudflare secret changes, production D1 writes, live checkout activation, or issue #49 changes.
+
+Fairness remains unchanged: public profile attribution links are presentation-only and must not affect billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -616,6 +650,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/player/profile` and `/api/player/profile` | 401/login redirect | Allowed | Allowed | Allowed | Session auth, private no-store profile progression showcase, read-only |
 | `/api/player/profile-privacy` | 401 | Allowed | Allowed | Allowed | Private player-owned settings API; GET/PATCH only; writes only `player_profile_privacy_preferences` |
 | `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences |
+| Public profile attribution on reviews/challenges/leaderboards | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Read-only generated-handle attribution; no name-only matching; ambiguous/hidden/unpublished profiles are not linked |
 | `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award fact collection, retry, and award processing |
 | `/api/owner/progression/award-audit` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Owner entitlement/admin plus linked-server audit scope; read-only |
 | `/dashboard/progression-awards` and `/owner/progression-awards` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Same private audit API; status/adapter/linked-server/retry filters only |

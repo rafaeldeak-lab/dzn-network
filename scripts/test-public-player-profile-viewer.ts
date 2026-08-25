@@ -523,7 +523,7 @@ function assertPublishedPayload(json: PublicProfileResponse) {
 
 function assertReadScope(operations: FakeOperation[]) {
   assert.equal(operations.some((operation) => operation.kind === "run"), false, "Public profile GET must be read-only.");
-  assert.equal(operations.length, 6, "Public profile GET should perform one publish lookup plus existing profile progression reads.");
+  assert.equal(operations.length, 7, "Public profile GET should perform one publish lookup plus profile progression and attribution reads.");
   assert.match(operations[0].sql, /\bplayer_profile_privacy_preferences\b/i);
   assert.match(operations[0].sql, /\bINNER\s+JOIN\s+users\b/i);
   assert.deepEqual(operations[0].bindings, [PUBLIC_HANDLE]);
@@ -579,13 +579,11 @@ function assertPublicProfilePreferencesAreNotProtectedSystemDependencies() {
     "functions/_lib/server-ranking.ts",
     "functions/api/public/leaderboards.ts",
     "functions/_lib/advanced-leaderboards.ts",
-    "functions/_lib/server-reviews.ts",
     "functions/_lib/badge-awards.ts",
     "functions/_lib/badge-evaluation.ts",
     "functions/_lib/dzn-seasons.ts",
     "functions/_lib/events.ts",
     "functions/_lib/server-war-scoring.ts",
-    "functions/_lib/player-progression.ts",
     "functions/api/cron/player-progression/awards.ts",
     "functions/api/billing/create-checkout-session.ts",
     "functions/api/billing/status.ts",

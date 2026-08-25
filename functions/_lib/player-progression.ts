@@ -1,3 +1,7 @@
+import {
+  readPublicProfileAttributionForSessionUser,
+  type PublicProfileAttribution,
+} from "./public-profile-attribution";
 import type { Env, SessionUser } from "./types";
 
 export type PlayerChallengeSource = "live" | "catalog_fallback" | "display_fallback" | "not_configured";
@@ -28,6 +32,7 @@ export type PlayerChallengeSummary = {
     progress_percent: number;
     xp_awarded: number;
     calling_card_awarded: string | null;
+    public_profile: PublicProfileAttribution | null;
   };
 };
 
@@ -47,6 +52,7 @@ export type PlayerProgressSummary = {
   completed_challenges: number;
   calling_cards: PlayerCallingCardAwardSummary[];
   recent_challenges: PlayerChallengeSummary[];
+  public_profile: PublicProfileAttribution | null;
   href: string;
 };
 
@@ -333,11 +339,12 @@ export async function getPlayerChallengesPayload(env: Env, user: SessionUser): P
   if (!env.DB) return buildPayload("display_fallback", FOUNDATION_CHALLENGES, [], [], 0);
 
   try {
-    const [challengeRows, participationRows, xpRow, callingCardRows] = await Promise.all([
+    const [challengeRows, participationRows, xpRow, callingCardRows, publicProfileAttribution] = await Promise.all([
       readActiveChallenges(env),
       readPlayerChallengeParticipations(env, user),
       readPlayerXpTotal(env, user),
       readPlayerCallingCardAwards(env, user),
+      readPublicProfileAttributionForSessionUser(env, user),
     ]);
     const source: PlayerChallengeSource = challengeRows.length ? "live" : "catalog_fallback";
     return buildPayload(
@@ -346,6 +353,7 @@ export async function getPlayerChallengesPayload(env: Env, user: SessionUser): P
       participationRows,
       callingCardRows,
       numberOrZero(xpRow?.total_xp),
+      publicProfileAttribution,
     );
   } catch {
     return buildPayload("not_configured", FOUNDATION_CHALLENGES, [], [], 0);
@@ -1393,11 +1401,12 @@ function buildPayload(
   participationRows: PlayerChallengeParticipationRow[],
   callingCardRows: PlayerCallingCardAwardRow[],
   totalXp: number,
+  publicProfileAttribution: PublicProfileAttribution | null = null,
 ): PlayerChallengesPayload {
   const participationByChallenge = new Map(
     participationRows.map((row) => [row.challenge_id, row] as const),
   );
-  const challenges = challengeRows.map((row) => toChallengeSummary(row, participationByChallenge.get(row.id) ?? null));
+  const challenges = challengeRows.map((row) => toChallengeSummary(row, participationByChallenge.get(row.id) ?? null, publicProfileAttribution));
   const joinedChallenges = participationRows.filter((row) => ["joined", "completed"].includes(normalizeParticipationStatus(row.status))).length;
   const completedChallenges = participationRows.filter((row) => normalizeParticipationStatus(row.status) === "completed").length;
   const recentChallenges = challenges
@@ -1417,13 +1426,18 @@ function buildPayload(
       completed_challenges: completedChallenges,
       calling_cards: callingCardRows.map(toCallingCardAward),
       recent_challenges: recentChallenges,
+      public_profile: publicProfileAttribution,
       href: PROGRESS_HREF,
     },
     fetched_at: new Date().toISOString(),
   };
 }
 
-function toChallengeSummary(row: PlayerChallengeRow, participation: PlayerChallengeParticipationRow | null): PlayerChallengeSummary {
+function toChallengeSummary(
+  row: PlayerChallengeRow,
+  participation: PlayerChallengeParticipationRow | null,
+  publicProfileAttribution: PublicProfileAttribution | null = null,
+): PlayerChallengeSummary {
   const targetValue = safeTargetValue(participation?.target_value ?? row.target_value);
   const progressValue = Math.max(0, Math.trunc(numberOrZero(participation?.progress_value)));
   const status = normalizeParticipationStatus(participation?.status);
@@ -1460,6 +1474,7 @@ function toChallengeSummary(row: PlayerChallengeRow, participation: PlayerChalle
       progress_percent: progressPercent,
       xp_awarded: Math.max(0, Math.trunc(numberOrZero(participation?.xp_awarded))),
       calling_card_awarded: nullableString(participation?.calling_card_awarded),
+      public_profile: participation ? publicProfileAttribution : null,
     },
   };
 }
