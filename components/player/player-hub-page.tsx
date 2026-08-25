@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 
 import { FetchJsonError, fetchJsonWithRetry } from "@/lib/client-fetch";
+import { PublicProfileSharePanel } from "@/components/player/public-profile-share-panel";
 
 type PlayerHubServer = {
   linked_server_id: string;
@@ -114,6 +115,14 @@ type PlayerHubProgress = {
   href?: string;
 };
 
+type PlayerHubPublicProfile = {
+  public_profile_enabled?: boolean;
+  public_handle?: string | null;
+  public_href?: string | null;
+  public_api_href?: string | null;
+  settings_href?: string;
+};
+
 type PlayerHubPayload = {
   ok?: boolean;
   user?: {
@@ -147,6 +156,7 @@ type PlayerHubPayload = {
     tournaments?: PlayerHubEvent[];
   };
   player_progress?: PlayerHubProgress;
+  public_profile?: PlayerHubPublicProfile;
   profile_entry_points?: PlayerHubEntryPoint[];
   fetched_at?: string;
 };
@@ -213,6 +223,7 @@ export function PlayerHubPage() {
   const suggestedEvents = hub.suggested_events?.events ?? [];
   const suggestedTournaments = hub.suggested_events?.tournaments ?? [];
   const playerProgress = normalizePlayerProgress(hub.player_progress);
+  const publicProfile = normalizePublicProfile(hub.public_profile);
   const entryPoints = hub.profile_entry_points?.length ? hub.profile_entry_points : defaultEntryPoints;
   const ownerSetupHref = hub.access?.owner_setup_href ?? "/pricing?intent=owner_setup&returnTo=%2Fsetup";
 
@@ -319,6 +330,12 @@ export function PlayerHubPage() {
         </div>
 
         <aside className="grid min-w-0 content-start gap-5">
+          <PublicProfileSharePanel
+            context="hub"
+            publicHref={publicProfile.public_href}
+            publicProfileEnabled={publicProfile.public_profile_enabled}
+          />
+
           <SectionPanel
             icon={CalendarDays}
             title="Suggested Events"
@@ -776,6 +793,7 @@ function normalizePayload(value: PlayerHubPayload | null): PlayerHubPayload {
       tournaments: Array.isArray(value.suggested_events?.tournaments) ? value.suggested_events.tournaments : [],
     },
     player_progress: normalizePlayerProgress(value.player_progress),
+    public_profile: normalizePublicProfile(value.public_profile),
     profile_entry_points: Array.isArray(value.profile_entry_points) ? value.profile_entry_points : defaultEntryPoints,
     access: {
       role: "player",
@@ -783,6 +801,16 @@ function normalizePayload(value: PlayerHubPayload | null): PlayerHubPayload {
       owner_setup_href: value.access?.owner_setup_href ?? "/pricing?intent=owner_setup&returnTo=%2Fsetup",
       owner_setup_requires_entitlement: true,
     },
+  };
+}
+
+function normalizePublicProfile(value: PlayerHubPublicProfile | undefined): Required<PlayerHubPublicProfile> {
+  return {
+    public_profile_enabled: Boolean(value?.public_profile_enabled),
+    public_handle: typeof value?.public_handle === "string" && value.public_handle ? value.public_handle : null,
+    public_href: typeof value?.public_href === "string" && value.public_href ? value.public_href : null,
+    public_api_href: typeof value?.public_api_href === "string" && value.public_api_href ? value.public_api_href : null,
+    settings_href: typeof value?.settings_href === "string" && value.settings_href ? value.settings_href : "/api/player/profile-privacy",
   };
 }
 

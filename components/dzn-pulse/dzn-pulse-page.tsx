@@ -16,6 +16,7 @@ import {
   Sparkles,
   Swords,
   Trophy,
+  UserRound,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -249,6 +250,8 @@ function PulseSidebar() {
     { href: "/events", label: "Events", icon: Flag },
     { href: "/events/tournaments", label: "CTF Tournaments", icon: Trophy },
     { href: "/events/challenges", label: "Challenges", icon: Swords },
+    { href: "/player", label: "Player Hub", icon: Users },
+    { href: "/player/profile", label: "Player Profile", icon: UserRound },
     { href: "/dzn-pulse", label: "DZN Pulse", icon: Activity, badge: "NEW" },
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   ];

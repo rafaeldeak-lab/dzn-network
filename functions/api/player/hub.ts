@@ -2,6 +2,7 @@ import { getEventsListPayload } from "../../_lib/events";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { pricingUrlForOwnerAccess, getRequestSessionUser } from "../../_lib/owner-access";
 import { getPlayerChallengesPayload, type PlayerProgressSummary } from "../../_lib/player-progression";
+import { getPlayerProfilePrivacyPreferences, type PlayerProfilePrivacyPreferences } from "../../_lib/player-profile-privacy";
 import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 import { getPlayerCommunitiesPayload, type PlayerCommunitySummary } from "./communities";
 
@@ -81,6 +82,14 @@ type SuggestedEventSection = {
   tournaments: PlayerHubEventSummary[];
 };
 
+type PlayerHubPublicProfileSummary = {
+  public_profile_enabled: boolean;
+  public_handle: string | null;
+  public_href: string | null;
+  public_api_href: string | null;
+  settings_href: string;
+};
+
 const OWNER_SETUP_RETURN_TO = "/setup";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -89,7 +98,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const user = await getRequestSessionUser(env, request);
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
 
-  const [communitiesResult, savedServers, suggestedServers, suggestedEvents, playerChallenges] = await Promise.all([
+  const [communitiesResult, savedServers, suggestedServers, suggestedEvents, playerChallenges, profilePrivacy] = await Promise.all([
     getPlayerCommunitiesPayload(env, user).catch(() => ({
       status: 200 as const,
       payload: {
@@ -112,6 +121,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       player_progress: emptyPlayerProgress("not_configured"),
       fetched_at: new Date().toISOString(),
     })),
+    getPlayerProfilePrivacyPreferences(env, user),
   ]);
 
   return json({
@@ -134,7 +144,8 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     suggested_servers: suggestedServers,
     suggested_events: suggestedEvents,
     player_progress: playerChallenges.player_progress,
-    profile_entry_points: profileEntryPoints(),
+    public_profile: toPublicProfileSummary(profilePrivacy),
+    profile_entry_points: profileEntryPoints(profilePrivacy),
     fetched_at: new Date().toISOString(),
   });
 };
@@ -351,7 +362,18 @@ function isTournamentLikeEvent(event: PlayerHubEventSummary) {
     || haystack.includes("season");
 }
 
-function profileEntryPoints() {
+function toPublicProfileSummary(privacy: PlayerProfilePrivacyPreferences): PlayerHubPublicProfileSummary {
+  return {
+    public_profile_enabled: privacy.public_profile_enabled,
+    public_handle: privacy.public_handle,
+    public_href: privacy.public_href,
+    public_api_href: privacy.public_api_href,
+    settings_href: privacy.settings_href,
+  };
+}
+
+function profileEntryPoints(privacy: PlayerProfilePrivacyPreferences) {
+  const publicProfileReady = privacy.public_profile_enabled && privacy.public_href;
   return [
     {
       key: "activity",
@@ -382,6 +404,12 @@ function profileEntryPoints() {
       label: "Player Profile",
       href: "/player/profile",
       description: "Profile, calling cards and earned progression entry point.",
+    },
+    {
+      key: "public_profile",
+      label: publicProfileReady ? "Public Profile" : "Public Profile Settings",
+      href: publicProfileReady ? privacy.public_href! : "/player/profile",
+      description: publicProfileReady ? "Open and share your published DZN player profile." : "Choose which player profile sections can be public.",
     },
     {
       key: "owner_setup",
