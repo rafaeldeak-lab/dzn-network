@@ -166,12 +166,13 @@ Future slices should build on this foundation in this order unless product prior
 3. Pricing page visual/comparison upgrade: delivered as its own slice with red X and green tick comparison, stronger Pro feature depth, bolder DZN styling, and subtle animated background treatment that respects reduced motion.
 4. Reviews: player reviews, owner replies, reporting/moderation, review fairness controls.
 5. Challenges, XP, calling cards: earned progression, challenge participation, cosmetics, and fair unlock rules.
-6. Events and tournaments: join requests, approvals, teams, schedules, brackets, reminders, and player history.
-7. Check-ins, waitlists, and no-shows: event operations for communities and owners.
-8. Discord approval embeds: tick/X owner controls, join request approvals, event reminders, and moderation handoffs.
-9. Rich community systems: Discord community landing views, member matching, role-safe recommendations, and cross-server discovery.
-10. Cosmetics and supporter monetisation: non-competitive profile presentation and optional supporter items that never affect rank, stats, scoring, or earned competitive rewards.
-11. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+6. Player profile progression showcase: make earned XP, challenge progress, and calling cards visible from `/player/profile` and the Player Hub with privacy-aware display controls.
+7. Events and tournaments: join requests, approvals, teams, schedules, brackets, reminders, and player history.
+8. Check-ins, waitlists, and no-shows: event operations for communities and owners.
+9. Discord approval embeds: tick/X owner controls, join request approvals, event reminders, and moderation handoffs.
+10. Rich community systems: Discord community landing views, member matching, role-safe recommendations, and cross-server discovery.
+11. Cosmetics and supporter monetisation: non-competitive profile presentation and optional supporter items that never affect rank, stats, scoring, or earned competitive rewards.
+12. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 
@@ -442,6 +443,40 @@ Mutation scope:
 
 Fairness remains unchanged: audit visibility, source status, retry metadata, XP, and calling cards remain player-side progression and operational metadata only. They must not affect paid plans, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, server ownership, or competitive eligibility.
 
+## Player Profile Progression Showcase Slice
+
+The player profile progression showcase slice makes earned progression easier to see without creating a public publishing system yet. It adds `/player/profile` as a free logged-in player profile page and `/api/player/profile` as the private no-store profile progression payload.
+
+The slice adds:
+
+- A dedicated `/player/profile` page for earned XP, challenge progress, calling cards, and a short progression timeline.
+- A prominent Player Profile Progression Showcase panel on `/player`.
+- Privacy display controls for private view, public-safe preview, and hidden preview.
+- Local preview toggles for showing XP, challenge progress, and calling cards.
+- A profile payload derived from the existing player challenge/progression read model rather than a new award path.
+
+Authorization rules:
+
+- Normal Discord login is enough to open `/player/profile` and read `/api/player/profile`.
+- The API must use `getRequestSessionUser`, private no-store responses, and `GET` only.
+- It must not require Starter, Pro, owner entitlement, server ownership, Nitrado access, Stripe, Discord bot permissions, or billing state.
+- Owner setup remains separate: `/player/profile` may link to `/pricing?intent=owner_setup&returnTo=%2Fsetup`, but the profile page is not an owner setup gate.
+
+Privacy rules:
+
+- Public profile publishing is off in this slice.
+- Privacy controls are preview-only and persist as local UI state until a later profile settings slice adds saved preferences.
+- The private payload may include display name, avatar URL, XP totals, challenge progress, calling-card summaries, and coarse profile timeline rows for the authenticated viewer.
+- It must not expose Discord IDs, internal user IDs, source IDs, raw evidence blobs, ADM source rows, billing state, owner account state, Nitrado tokens, Discord bot tokens, Stripe state, or exact award timestamps in public-safe preview mode.
+
+Mutation scope:
+
+- `GET /api/player/profile` is read-only.
+- The helper may read the existing player progression summary through `getPlayerChallengesPayload`.
+- The slice must not add browser actions that award XP, award calling cards, mark source facts verified, retry source rows, create checkout sessions, update owner billing, change server ownership, update rankings/leaderboards, modify discovery score, mutate reviews, award server badges, change seasons, modify events, alter Server Wars scoring/results, touch Nitrado, send Discord bot messages, change Cloudflare secrets, apply production migrations, merge issue #49, or enable live checkout.
+
+Fairness remains unchanged: profile progression showcase visibility, privacy preview mode, XP, challenge progress, timeline rows, and calling cards remain earned player-side display only. They must not affect paid plans, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, server ownership, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -466,6 +501,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/player/saved-servers` | 401 | Allowed | Allowed | Allowed | Session auth, player preference only |
 | `/api/player/reviews` | 401 | Allowed | Allowed | Allowed | Session auth, review mutation only |
 | `/api/player/challenges` | 401 | Allowed | Allowed | Allowed | Session auth, player participation only |
+| `/player/profile` and `/api/player/profile` | 401/login redirect | Allowed | Allowed | Allowed | Session auth, private no-store profile progression showcase, read-only |
 | `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award fact collection, retry, and award processing |
 | `/api/owner/progression/award-audit` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Owner entitlement/admin plus linked-server audit scope; read-only |
 | `/dashboard/progression-awards` and `/owner/progression-awards` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Same private audit API; status/adapter/linked-server/retry filters only |

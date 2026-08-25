@@ -380,7 +380,7 @@ function profileEntryPoints() {
     {
       key: "profile",
       label: "Player Profile",
-      href: "/dzn-pulse",
+      href: "/player/profile",
       description: "Profile, calling cards and earned progression entry point.",
     },
     {

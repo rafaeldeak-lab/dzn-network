@@ -156,6 +156,7 @@ const defaultEntryPoints: PlayerHubEntryPoint[] = [
   { key: "events", label: "Events", href: "/events", description: "Find events and tournaments." },
   { key: "leaderboards", label: "Leaderboards", href: "/leaderboards", description: "Track competitive records." },
   { key: "challenges", label: "Challenges", href: "/events/challenges", description: "Join challenges and track earned XP." },
+  { key: "profile", label: "Player Profile", href: "/player/profile", description: "Show earned XP, challenge progress, calling cards and privacy display controls." },
   { key: "pulse", label: "DZN Pulse", href: "/dzn-pulse", description: "Open player notifications." },
   {
     key: "owner_setup",
@@ -259,11 +260,23 @@ export function PlayerHubPage() {
       </section>
 
       <section className="mx-auto grid max-w-7xl gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[1.15fr_0.85fr] lg:px-8">
-        <div className="grid gap-5">
+        <div className="grid min-w-0 gap-5">
           {error ? <HubNotice title="Player Hub data needs attention" message={error} /> : null}
           {hub.communities_status?.error ? (
             <HubNotice title="Discord refresh needed" message={hub.communities_status.error} />
           ) : null}
+          <SectionPanel
+            icon={UserRound}
+            title="Player Profile Progression Showcase"
+            actionHref="/player/profile"
+            actionLabel="Open profile"
+            emptyTitle=""
+            emptyText=""
+            hasItems
+          >
+            <PlayerProfileShowcasePanel progress={playerProgress} />
+          </SectionPanel>
+
           <SectionPanel
             icon={Users}
             title="Matched Discord Communities"
@@ -305,7 +318,7 @@ export function PlayerHubPage() {
           </SectionPanel>
         </div>
 
-        <aside className="grid content-start gap-5">
+        <aside className="grid min-w-0 content-start gap-5">
           <SectionPanel
             icon={CalendarDays}
             title="Suggested Events"
@@ -427,13 +440,13 @@ function SectionPanel({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.045] p-4 shadow-[0_20px_70px_rgba(0,0,0,0.25)]">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+    <section className="min-w-0 rounded-lg border border-white/10 bg-white/[0.045] p-4 shadow-[0_20px_70px_rgba(0,0,0,0.25)]">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded border border-white/10 bg-black/24">
             <Icon className="h-5 w-5 text-cyan-100" />
           </span>
-          <h2 className="text-lg font-black uppercase tracking-normal text-white">{title}</h2>
+          <h2 className="min-w-0 break-words text-lg font-black uppercase tracking-normal text-white [overflow-wrap:anywhere]">{title}</h2>
         </div>
         {actionHref && actionLabel ? (
           <Link href={actionHref} className="inline-flex items-center gap-2 rounded border border-white/12 bg-white/8 px-3 py-2 text-[10px] font-black uppercase text-zinc-100 transition hover:bg-white/12">
@@ -495,6 +508,69 @@ function PlayerProgressPanel({ progress }: { progress: PlayerHubProgress }) {
         ) : (
           <p className="mt-3 text-sm font-bold leading-6 text-zinc-400">Calling cards awarded from verified DZN activity will appear here. Paid plans do not unlock competitive cards.</p>
         )}
+      </div>
+    </div>
+  );
+}
+
+function PlayerProfileShowcasePanel({ progress }: { progress: PlayerHubProgress }) {
+  const callingCards = progress.calling_cards ?? [];
+  const recentChallenges = progress.recent_challenges ?? [];
+  const featuredCards = callingCards.slice(0, 4);
+  const featuredChallenges = recentChallenges.slice(0, 2);
+  return (
+    <div className="grid min-w-0 gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+      <div className="min-w-0 rounded-lg border border-cyan-300/20 bg-[radial-gradient(circle_at_0%_0%,rgba(34,211,238,0.18),transparent_38%),rgba(0,0,0,0.26)] p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-100">Earned profile</p>
+            <p className="mt-2 break-words text-2xl font-black uppercase leading-tight text-white [overflow-wrap:anywhere]">
+              XP, cards and challenge progress
+            </p>
+          </div>
+          <UserRound className="h-7 w-7 shrink-0 text-cyan-100" />
+        </div>
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <ProgressMiniStat label="XP" value={progress.total_xp ?? 0} />
+          <ProgressMiniStat label="Complete" value={progress.completed_challenges ?? 0} />
+          <ProgressMiniStat label="Cards" value={callingCards.length} />
+        </div>
+        <p className="mt-4 text-sm font-bold leading-6 text-zinc-300">
+          The profile view adds privacy display controls for XP, challenge progress and calling cards. Profile progression is earned player-side only and paid plans do not improve it.
+        </p>
+        <Link href="/player/profile" className="mt-4 inline-flex items-center gap-2 rounded bg-cyan-400 px-3 py-2 text-xs font-black uppercase text-slate-950 transition hover:bg-cyan-300">
+          View Showcase
+          <ArrowRight className="h-4 w-4" />
+        </Link>
+      </div>
+      <div className="grid min-w-0 gap-3">
+        <div className="min-w-0 rounded border border-white/10 bg-black/24 p-4">
+          <p className="text-sm font-black uppercase text-white">Featured Calling Cards</p>
+          {featuredCards.length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {featuredCards.map((card) => (
+                <span key={card.code} className="inline-flex max-w-full items-center gap-1.5 rounded border border-violet-300/25 bg-violet-400/10 px-2.5 py-1.5 text-[10px] font-black uppercase text-violet-50">
+                  <Sparkles className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{card.name}</span>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm font-bold leading-6 text-zinc-400">Calling cards appear here after trusted DZN activity awards them.</p>
+          )}
+        </div>
+        <div className="min-w-0 rounded border border-white/10 bg-black/24 p-4">
+          <p className="text-sm font-black uppercase text-white">Recent Challenge Progress</p>
+          {featuredChallenges.length ? (
+            <div className="mt-3 grid gap-2">
+              {featuredChallenges.map((challenge) => (
+                <ProgressChallengeRow key={challenge.id} challenge={challenge} />
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm font-bold leading-6 text-zinc-400">Join free player challenges to build progress for this showcase.</p>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -627,14 +703,14 @@ function EventList({ events }: { events: PlayerHubEvent[] }) {
 function EntryPointLink({ entry }: { entry: PlayerHubEntryPoint }) {
   const Icon = entry.owner_entitlement_required ? Crown : entry.key === "leaderboards" ? Trophy : entry.key === "events" ? CalendarDays : entry.key === "activity" ? Sparkles : UserRound;
   return (
-    <Link href={entry.href} className="group flex items-center justify-between gap-3 rounded border border-white/10 bg-black/24 p-3 transition hover:border-cyan-300/30 hover:bg-white/[0.07]">
-      <span className="flex min-w-0 items-center gap-3">
+    <Link href={entry.href} className="group flex min-w-0 items-center justify-between gap-3 rounded border border-white/10 bg-black/24 p-3 transition hover:border-cyan-300/30 hover:bg-white/[0.07]">
+      <span className="flex min-w-0 flex-1 items-center gap-3">
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded border border-white/10 bg-white/8">
           <Icon className="h-4 w-4 text-cyan-100" />
         </span>
         <span className="min-w-0">
-          <span className="block truncate text-sm font-black uppercase text-white">{entry.label}</span>
-          <span className="mt-1 block truncate text-xs font-bold text-zinc-400">{entry.description}</span>
+          <span className="block break-words text-sm font-black uppercase text-white [overflow-wrap:anywhere]">{entry.label}</span>
+          <span className="mt-1 block break-words text-xs font-bold text-zinc-400 [overflow-wrap:anywhere]">{entry.description}</span>
         </span>
       </span>
       {entry.href.startsWith("http") ? <ExternalLink className="h-4 w-4 shrink-0 text-zinc-300" /> : <ArrowRight className="h-4 w-4 shrink-0 text-zinc-300 transition group-hover:text-white" />}
