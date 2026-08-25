@@ -269,6 +269,25 @@ Completed on branch `codex/public-profile-discovery-linking-polish-20260825`:
 - Local route smoke returned `200` for `/player`, `/player/profile`, `/players/preview`, `/events/challenges`, and `/dzn-pulse`.
 - Codex Security diff scan `baf6b4df-7cba-477c-9032-b0b7798eab00` completed with zero findings for the changed runtime/test files. TAC status could not be verified because the Codex Security Access connector is not connected.
 
+## Follow-On CTF/Event Roster Attribution Proof
+
+Branch: `codex/ctf-event-roster-attribution-proof-20260825`
+
+Base branch: `codex/public-profile-attribution-expansion-controls-polish-20260825`
+
+Base commit: `4b78c73 Add public profile attribution controls polish`
+
+This slice adds optional public profile attribution to read-only CTF dashboard roster display rows only. The trusted bridge is exact `ctf_tournament_rosters.linked_server_id` plus `ctf_tournament_rosters.player_id` to `player_profiles.discord_id`, then `users.discord_id`, then an opted-in generated `player_profile_privacy_preferences.public_handle`.
+
+The CTF dashboard response may include optional `public_profile` metadata on roster rows and a `profile_attribution` safeguards object for the UI. The dashboard stays owner/admin-authorized; this slice does not publish CTF roster data to public users.
+
+Still excluded:
+
+- `POST /api/servers/[serverId]/ctf/roster` registration and roster writes.
+- CTF scoring helpers, locked-roster checks, flag/point increments, and accepted scoring feed decisions.
+- Event roster approvals, eligibility, sign-up, matchmaking, bracket, owner decision, moderation, and admin workflow mutations.
+- Billing, owner entitlements, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, Nitrado, Discord bot mutations, Cloudflare secrets, production D1 writes, live checkout activation, and issue #49.
+
 ## Next Recommended Slice
 
-Next should be public profile attribution expansion and controls polish: add a private "where my public profile appears" preview/control surface for players, then extend opt-in attribution to any newly exposed public/player-safe member or roster rows only where a unique trusted user bridge exists. CTF/event roster rows that participate in scoring or owner workflows should stay untouched until a dedicated slice proves links are presentation-only and still cannot affect billing, rankings, discovery score, reviews, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+Next should be the event roster/member public-safe expansion slice: find non-scoring, non-owner player/member rows on public event or community surfaces and add opt-in profile attribution only where a unique trusted user bridge exists. CTF scoring rows, owner workflow rows, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility must remain isolated.

@@ -2,8 +2,12 @@ import { getSessionUser, requireDb } from "../../../../_lib/db";
 import { ensureCtfTournamentSchema } from "../../../../_lib/ctf-tournaments";
 import { json, methodNotAllowed } from "../../../../_lib/http";
 import { normalizePlanKey } from "../../../../_lib/plans";
+import {
+  publicProfileRosterPlayerKey,
+  readPublicProfileAttributionsByRosterPlayerKeys,
+} from "../../../../_lib/public-profile-attribution";
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
-import type { PagesFunction } from "../../../../_lib/types";
+import type { Env, PagesFunction } from "../../../../_lib/types";
 
 type ServerRow = {
   id: string;
@@ -139,7 +143,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
 
   const [participants, roster, feed, completedMatches] = await Promise.all([
     activeTournament ? fetchParticipants(db, activeTournament.id, activeTournament) : Promise.resolve([]),
-    activeTournament ? fetchRoster(db, activeTournament.id) : Promise.resolve([]),
+    activeTournament ? fetchRoster(env, db, activeTournament.id) : Promise.resolve([]),
     activeTournament ? fetchVerifiedFeed(db, activeTournament.id) : Promise.resolve([]),
     fetchCompletedMatches(db, linkedServerId),
   ]);
@@ -166,6 +170,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
         roster,
         verified_feed: feed,
         completed_matches: completedMatches,
+        profile_attribution: ctfRosterProfileAttributionSafeguards(),
         safeguards: {
           aggregate_source: "ctf_match_participants",
           roster_source: "ctf_tournament_rosters",
@@ -204,7 +209,7 @@ async function fetchParticipants(db: D1Database, tournamentId: string, tournamen
   return (rows.results ?? []).map((row) => normalizeParticipant(row, tournament));
 }
 
-async function fetchRoster(db: D1Database, tournamentId: string) {
+async function fetchRoster(env: Env, db: D1Database, tournamentId: string) {
   const rows = await db
     .prepare(
       `SELECT ctf_tournament_rosters.linked_server_id, ctf_tournament_rosters.player_id,
@@ -219,13 +224,22 @@ async function fetchRoster(db: D1Database, tournamentId: string) {
     )
     .bind(tournamentId)
     .all<RosterRow>();
-  return (rows.results ?? []).map((row) => ({
+  const rosterRows = rows.results ?? [];
+  const profiles = await readPublicProfileAttributionsByRosterPlayerKeys(env, rosterRows.map((row) => ({
     linked_server_id: row.linked_server_id,
-    server_name: displayName(row),
     player_id: row.player_id,
-    player_name: row.player_name,
-    registered_at: row.registered_at,
-  }));
+  })));
+  return rosterRows.map((row) => {
+    const profileKey = publicProfileRosterPlayerKey(row);
+    return {
+      linked_server_id: row.linked_server_id,
+      server_name: displayName(row),
+      player_id: row.player_id,
+      player_name: row.player_name,
+      registered_at: row.registered_at,
+      public_profile: profileKey ? profiles.get(profileKey) ?? null : null,
+    };
+  });
 }
 
 async function fetchVerifiedFeed(db: D1Database, tournamentId: string) {
@@ -343,6 +357,36 @@ function normalizeParticipant(row: ParticipantRow, tournament: TournamentRow) {
     updated_at: row.updated_at,
     dynamic_visibility_score: numberOrZero(row.dynamic_visibility_score),
     status_marker: normalizePhase(tournament.current_phase),
+  };
+}
+
+function ctfRosterProfileAttributionSafeguards() {
+  return {
+    source: "ctf_tournament_rosters.linked_server_id+player_id -> player_profiles.discord_id -> users.discord_id",
+    link_mode: "presentation_only",
+    public_profile_required: true,
+    generated_handle_required: true,
+    unique_user_bridge_required: true,
+    uses_gamertag_matching: false,
+    exposes_user_id: false,
+    exposes_discord_id: false,
+    affects_scoring: false,
+    affects_eligibility: false,
+    affects_owner_decisions: false,
+    affects_billing: false,
+  } satisfies {
+    source: string;
+    link_mode: "presentation_only";
+    public_profile_required: true;
+    generated_handle_required: true;
+    unique_user_bridge_required: true;
+    uses_gamertag_matching: false;
+    exposes_user_id: false;
+    exposes_discord_id: false;
+    affects_scoring: false;
+    affects_eligibility: false;
+    affects_owner_decisions: false;
+    affects_billing: false;
   };
 }
 

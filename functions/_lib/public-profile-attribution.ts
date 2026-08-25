@@ -29,6 +29,7 @@ export type PublicProfileAppearancePlacement = {
     | "public_profile_page"
     | "server_review_author_rows"
     | "event_suggestion_author_rows"
+    | "ctf_event_presentation_roster_rows"
     | "player_challenge_rows"
     | "player_hub_challenge_rows"
     | "safe_leaderboard_mentions"
@@ -77,6 +78,17 @@ type PublicProfileAttributionRow = {
   discord_id?: string | null;
   username?: string | null;
   public_handle?: string | null;
+};
+
+type PublicProfileRosterAttributionRow = PublicProfileAttributionRow & {
+  linked_server_id?: string | null;
+  player_id?: string | null;
+  matched_user_count?: number | null;
+};
+
+export type PublicProfileRosterPlayerKey = {
+  linked_server_id?: string | null;
+  player_id?: string | null;
 };
 
 const MAX_ATTRIBUTION_LOOKUP_IDS = 100;
@@ -150,6 +162,16 @@ export function buildPublicProfileAppearancePreview(
         requiresUniqueUserBridge: true,
       }),
       attributionPlacement({
+        key: "ctf_event_presentation_roster_rows",
+        label: "CTF/event presentation roster rows",
+        description: "Read-only roster display rows can link only through an exact server/player account bridge.",
+        href: "/dashboard/register-event",
+        publicSurface: false,
+        ready,
+        linkState: bridgeLinkState,
+        requiresUniqueUserBridge: true,
+      }),
+      attributionPlacement({
         key: "player_challenge_rows",
         label: "Challenge participation rows",
         description: "Player-facing challenge participation rows can point back to your profile.",
@@ -197,8 +219,8 @@ export function buildPublicProfileAppearancePreview(
     excluded_surfaces: [
       {
         key: "ctf_event_scoring_rosters",
-        label: "CTF/event scoring rosters",
-        reason: "Excluded because these rows touch roster locks, scoring evidence, or owner workflows.",
+        label: "CTF/event scoring roster gates",
+        reason: "Roster writes, scoring checks, eligibility gates, and accepted audit feeds stay excluded; only read-only presentation rows may carry links.",
         public_profile_links_enabled: false,
         affects_competition: false,
       },
@@ -279,6 +301,45 @@ export async function readPublicProfileAttributionsByDiscordIds(
   }
 }
 
+export async function readPublicProfileAttributionsByRosterPlayerKeys(
+  env: Env,
+  rosterKeys: PublicProfileRosterPlayerKey[],
+): Promise<Map<string, PublicProfileAttribution>> {
+  if (!env.DB) return new Map();
+  const keys = uniqueRosterPlayerKeys(rosterKeys).slice(0, MAX_ATTRIBUTION_LOOKUP_IDS);
+  if (!keys.length) return new Map();
+  const requested = new Set(keys.map((item) => item.key));
+  const where = keys.map(() => "(player_profiles.linked_server_id = ? AND player_profiles.player_id = ?)").join(" OR ");
+  const bindings = keys.flatMap((item) => [item.linkedServerId, item.playerId]);
+
+  try {
+    const rows = await env.DB
+      .prepare(
+        `SELECT
+           player_profiles.linked_server_id,
+           player_profiles.player_id,
+           users.username,
+           player_profile_privacy_preferences.public_handle,
+           COUNT(DISTINCT users.id) AS matched_user_count
+         FROM player_profiles
+         INNER JOIN users ON users.discord_id = player_profiles.discord_id
+         INNER JOIN player_profile_privacy_preferences ON player_profile_privacy_preferences.user_id = users.id
+         WHERE (${where})
+           AND player_profiles.discord_id IS NOT NULL
+           AND player_profiles.discord_id != ''
+           AND player_profile_privacy_preferences.public_profile_enabled = 1
+           AND player_profile_privacy_preferences.public_handle IS NOT NULL
+         GROUP BY player_profiles.linked_server_id, player_profiles.player_id
+         HAVING COUNT(DISTINCT users.id) = 1`,
+      )
+      .bind(...bindings)
+      .all<PublicProfileRosterAttributionRow>();
+    return rowsToRosterAttributionMap(rows.results ?? [], requested);
+  } catch {
+    return new Map();
+  }
+}
+
 export async function readPublicProfileAttributionForSessionUser(
   env: Env,
   user: SessionUser,
@@ -308,6 +369,12 @@ export function publicAttributionDisplayName(value: unknown) {
   return displayName.slice(0, 48) || "DZN Player";
 }
 
+export function publicProfileRosterPlayerKey(value: PublicProfileRosterPlayerKey) {
+  const linkedServerId = cleanRosterLookupText(value.linked_server_id);
+  const playerId = cleanRosterLookupText(value.player_id);
+  return linkedServerId && playerId ? JSON.stringify([linkedServerId, playerId]) : null;
+}
+
 function rowsToAttributionMap(
   rows: PublicProfileAttributionRow[],
   key: "user_id" | "discord_id",
@@ -322,12 +389,44 @@ function rowsToAttributionMap(
   return map;
 }
 
+function rowsToRosterAttributionMap(
+  rows: PublicProfileRosterAttributionRow[],
+  requested: Set<string>,
+) {
+  const map = new Map<string, PublicProfileAttribution>();
+  for (const row of rows) {
+    if (Number(row.matched_user_count ?? 1) !== 1) continue;
+    const key = publicProfileRosterPlayerKey(row);
+    if (!key || !requested.has(key)) continue;
+    const attribution = publicProfileAttributionFromRow(row);
+    if (attribution) map.set(key, attribution);
+  }
+  return map;
+}
+
 function uniqueNonEmptyStrings(values: Array<string | null | undefined>) {
   return Array.from(new Set(
     values
       .map((value) => (typeof value === "string" ? value.trim() : ""))
       .filter(Boolean),
   ));
+}
+
+function uniqueRosterPlayerKeys(values: PublicProfileRosterPlayerKey[]) {
+  const map = new Map<string, { key: string; linkedServerId: string; playerId: string }>();
+  for (const value of values) {
+    const linkedServerId = cleanRosterLookupText(value.linked_server_id);
+    const playerId = cleanRosterLookupText(value.player_id);
+    if (!linkedServerId || !playerId) continue;
+    const key = publicProfileRosterPlayerKey({ linked_server_id: linkedServerId, player_id: playerId });
+    if (key && !map.has(key)) map.set(key, { key, linkedServerId, playerId });
+  }
+  return [...map.values()];
+}
+
+function cleanRosterLookupText(value: unknown) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text || null;
 }
 
 function placeholders(count: number) {
