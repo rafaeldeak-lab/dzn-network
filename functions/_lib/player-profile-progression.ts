@@ -30,6 +30,9 @@ export type PlayerProfileProgressionPayload = {
   };
   privacy: {
     mode: "private_viewer";
+    public_handle: PlayerProfilePrivacyPreferences["public_handle"];
+    public_href: PlayerProfilePrivacyPreferences["public_href"];
+    public_api_href: PlayerProfilePrivacyPreferences["public_api_href"];
     public_profile_enabled: PlayerProfilePrivacyPreferences["public_profile_enabled"];
     persistence: PlayerProfilePrivacyPreferences["persistence"];
     settings_href: PlayerProfilePrivacyPreferences["settings_href"];
@@ -137,6 +140,9 @@ export async function getPlayerProfileProgressionPayload(
     },
     privacy: {
       mode: "private_viewer",
+      public_handle: privacy.public_handle,
+      public_href: privacy.public_href,
+      public_api_href: privacy.public_api_href,
       public_profile_enabled: privacy.public_profile_enabled,
       persistence: privacy.persistence,
       settings_href: privacy.settings_href,

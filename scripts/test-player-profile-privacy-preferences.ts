@@ -22,6 +22,9 @@ type PrivacyResponse = {
   error?: string;
   message?: string;
   privacy?: {
+    public_handle?: string | null;
+    public_href?: string | null;
+    public_api_href?: string | null;
     public_profile_enabled?: boolean;
     persistence?: string;
     settings_href?: string;
@@ -33,6 +36,7 @@ type PrivacyResponse = {
 };
 
 type PrivacyRow = {
+  public_handle: string | null;
   public_profile_enabled: number;
   show_xp: number;
   show_challenge_progress: number;
@@ -107,7 +111,7 @@ function assertStaticContracts() {
     "PLAYER_PROFILE_PRIVACY_SETTINGS_HREF",
     "player_profile_privacy_preferences",
     "WHERE user_id = ?",
-    ".bind(user.id)",
+    "readPlayerProfilePrivacyPreferenceRow(env, user.id)",
     "ON CONFLICT(user_id) DO UPDATE",
     "show_discord_identity = 0",
     "show_source_details = 0",
@@ -130,6 +134,9 @@ function assertStaticContracts() {
     "public_profile_enabled: privacy.public_profile_enabled",
     "persistence: privacy.persistence",
     "settings_href: privacy.settings_href",
+    "public_handle: privacy.public_handle",
+    "public_href: privacy.public_href",
+    "public_api_href: privacy.public_api_href",
     "updated_at: privacy.updated_at",
     "controls: privacy.controls",
   ]) {
@@ -256,6 +263,9 @@ async function assertEndpointContracts() {
   assert.equal(readResponse.status, 200);
   const readJson = await readResponse.json() as PrivacyResponse;
   assert.equal(readJson.privacy?.persistence, "saved");
+  assert.equal(readJson.privacy?.public_handle, "rafaeldeak-a1b2c");
+  assert.equal(readJson.privacy?.public_href, "/players/rafaeldeak-a1b2c");
+  assert.equal(readJson.privacy?.public_api_href, "/api/public/player-profiles/rafaeldeak-a1b2c");
   assert.equal(readJson.privacy?.public_profile_enabled, true);
   assert.equal(readJson.privacy?.settings_href, "/api/player/profile-privacy");
   assert.equal(readJson.privacy?.controls?.show_xp, false);
@@ -287,6 +297,9 @@ async function assertEndpointContracts() {
   const patchJson = await patchResponse.json() as PrivacyResponse;
   assert.equal(patchJson.ok, true);
   assert.equal(patchJson.privacy?.persistence, "saved");
+  assert.match(patchJson.privacy?.public_handle ?? "", /^rafaeldeak-[a-z0-9]{5,7}$/);
+  assert.equal(patchJson.privacy?.public_href, `/players/${patchJson.privacy?.public_handle}`);
+  assert.equal(patchJson.privacy?.public_api_href, `/api/public/player-profiles/${patchJson.privacy?.public_handle}`);
   assert.equal(patchJson.privacy?.public_profile_enabled, true);
   assert.equal(patchJson.privacy?.controls?.show_xp, false);
   assert.equal(patchJson.privacy?.controls?.show_challenge_progress, false);
@@ -299,7 +312,7 @@ async function assertEndpointContracts() {
   assert.equal(patchJson.privacy?.public_safe_preview?.hides_exact_award_times, true);
   assertFairnessFlags(patchJson.fairness);
   assertNoPrivateFields(patchJson);
-  assertPrivacyWriteScope(patchDb.operations);
+  assertPrivacyWriteScope(patchDb.operations, { generatedHandle: true });
 }
 
 async function assertHelperContracts() {
@@ -376,6 +389,7 @@ function createPrivacyDb(row: PrivacyRow | null = null) {
 
 function existingPrivacyRow(): PrivacyRow {
   return {
+    public_handle: "rafaeldeak-a1b2c",
     public_profile_enabled: 1,
     show_xp: 0,
     show_challenge_progress: 1,
@@ -397,6 +411,9 @@ function mockSessionUser() {
 }
 
 function assertDefaultPrivacy(response: PrivacyResponse) {
+  assert.equal(response.privacy?.public_handle, null);
+  assert.equal(response.privacy?.public_href, null);
+  assert.equal(response.privacy?.public_api_href, null);
   assert.equal(response.privacy?.public_profile_enabled, false);
   assert.equal(response.privacy?.settings_href, "/api/player/profile-privacy");
   assert.equal(response.privacy?.controls?.show_xp, true);
@@ -412,17 +429,22 @@ function assertDefaultPrivacy(response: PrivacyResponse) {
   assert.equal(response.privacy?.public_safe_preview?.hides_exact_award_times, true);
 }
 
-function assertPrivacyWriteScope(operations: FakeOperation[]) {
+function assertPrivacyWriteScope(operations: FakeOperation[], options: { generatedHandle?: boolean } = {}) {
   const reads = operations.filter((operation) => operation.kind === "first");
-  assert.equal(reads.length, 1, "PATCH should read the current preference row once.");
+  assert.equal(reads.length, options.generatedHandle ? 2 : 1, "PATCH should read the current preference row and only check handle collisions when publishing needs a handle.");
   assert.match(reads[0].sql, /\bFROM\s+player_profile_privacy_preferences\b/i);
   assert.deepEqual(reads[0].bindings, [MOCK_USER_ID]);
+  if (options.generatedHandle) {
+    assert.match(reads[1].sql, /\bpublic_handle\s+=\s+\?/i, "Publishing should only check the generated public handle for collisions.");
+    assert.match(String(reads[1].bindings[0] ?? ""), /^rafaeldeak-[a-z0-9]{5,7}$/);
+  }
 
   const writes = operations.filter((operation) => operation.kind === "run");
   assert.equal(writes.length, 1, "PATCH should write one preference row.");
   assert.match(writes[0].sql, /\bINSERT\s+INTO\s+player_profile_privacy_preferences\b/i);
   assert.match(writes[0].sql, /\bON\s+CONFLICT\(user_id\)\s+DO\s+UPDATE\b/i);
   assert.equal(writes[0].bindings[0], MOCK_USER_ID);
+  if (options.generatedHandle) assert.match(String(writes[0].bindings[1] ?? ""), /^rafaeldeak-[a-z0-9]{5,7}$/);
   assert.equal(writes[0].bindings.includes("attacker-user"), false);
   assert.equal(writes[0].bindings.includes("attacker-discord"), false);
   assert.doesNotMatch(writes[0].sql, forbiddenProtectedSystemPattern());

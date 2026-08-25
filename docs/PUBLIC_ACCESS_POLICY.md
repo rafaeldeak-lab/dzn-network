@@ -11,6 +11,7 @@ Logged-out visitors may access:
 - `/pricing`
 - `/login`
 - `/signup`
+- `/players/[handle]` when the player has explicitly enabled public profile visibility
 - the public Discord invite link
 
 Logged-out navigation must only expose the public funnel: homepage/features, pricing, Login/Signup, and Discord. It must not show dashboard, server browser, leaderboards, stats, events, owner tools, or add-server controls before a session is known.
@@ -85,6 +86,7 @@ The homepage and public preview surfaces still need public read-only JSON. These
 - `/api/public/leaderboards`
 - `/api/public/leaderboards/advanced`
 - `/api/public/server-wars`
+- `/api/public/player-profiles/[handle]`
 - `/api/events`
 - `/api/events/suggestions?sort=newest&limit=5`
 - `/api/dzn-pulse/config`
@@ -102,6 +104,8 @@ Authenticated player APIs such as `/api/player/hub` and `/api/player/communities
 `/player/profile` and `/api/player/profile` are free logged-in player progression showcase surfaces. The page shows earned XP, challenge progress, calling cards, and a progression timeline from the existing player progression read model, with privacy display controls for private view, public-safe preview, and hidden preview. Public profile publishing stays off. The API must be `GET` only, private/no-store, session-scoped through `getRequestSessionUser`, and read-only. It may hydrate saved display choices from the current player's private profile privacy preferences. It must not require Starter, Pro, owner entitlement, server ownership, Nitrado access, Stripe, Discord bot permissions, or billing state, and must not expose Discord IDs, internal user IDs, source IDs, raw evidence blobs, billing rows, Nitrado tokens, Discord bot tokens, or Stripe state. Profile progression showcase visibility must not affect paid plans, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, server ownership, XP awards, calling-card awards, or competitive eligibility.
 
 `/api/player/profile-privacy` is the private player-owned settings API for persistent profile visibility preferences. `GET` returns only the current player's saved privacy settings or safe defaults, and `PATCH` may write only the current player's row in `player_profile_privacy_preferences`. The endpoint must use `getRequestSessionUser`, private/no-store responses, bounded JSON parsing, and session-owned user binding. It must reject logged-out visitors, reject non-`GET`/`PATCH` methods, ignore body-supplied `user_id` or `discord_id` values, and must not require Starter, Pro, owner entitlement, server ownership, Nitrado access, Stripe, Discord bot permissions, or billing state. No public profile reader route is introduced by this settings API. Display preferences must not affect billing, rankings, discovery, reviews, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+
+`/players/[handle]` and `/api/public/player-profiles/[handle]` are the public-safe player profile viewer surfaces. They return only opted-in profiles where the player has enabled public profile visibility and saved a generated `public_handle`. The Cloudflare Pages route for `/players/[handle]` serves the exported viewer shell for arbitrary generated handles, and the public API remains the `GET`-only, read-only privacy boundary. It may read `player_profile_privacy_preferences`, `users`, and existing player progression summary tables to display only sections the player has approved: XP, joined/completed challenge progress, calling cards, and optional month/year award labels. Private identifiers, Discord IDs, internal user IDs, source IDs, raw award evidence, and exact award timestamps stay hidden. Public profile display choices must not affect billing, rankings, discovery, reviews, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
 
 `/api/cron/player-progression/awards` is not a public or player endpoint. It is a cron-secret-protected trusted job for converting verified activity facts into player XP and calling-card awards. It may accept only explicitly verified source facts, process pending verified source rows, update existing player challenge participation progress/completion, and insert idempotent player XP/calling-card rows. It must not accept normal session auth, owner entitlement, Starter, Pro, server ownership, Nitrado, Stripe, or Discord bot permissions as a substitute for the cron secret. Progression awards must remain player profile progression only and must not affect rankings, discovery score, billing, server ownership, reviews, review score, events, tournaments, Server Wars scoring, badges, seasons, or competitive eligibility.
 
