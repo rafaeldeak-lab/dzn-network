@@ -75,11 +75,26 @@ export const TRUSTED_PROGRESSION_SOURCE_TYPES = [
 
 export type TrustedProgressionSourceType = typeof TRUSTED_PROGRESSION_SOURCE_TYPES[number];
 
+export const TRUSTED_PROGRESSION_SOURCE_ADAPTERS = [
+  "adm_player_event",
+  "adm_kill_event",
+  "event_entry",
+  "approved_review",
+] as const;
+
+export type TrustedProgressionSourceAdapter = typeof TRUSTED_PROGRESSION_SOURCE_ADAPTERS[number];
+
 export type TrustedProgressionAwardSourceInput = {
   source_type?: unknown;
   sourceType?: unknown;
   source_id?: unknown;
   sourceId?: unknown;
+  linked_server_id?: unknown;
+  linkedServerId?: unknown;
+  source_table?: unknown;
+  sourceTable?: unknown;
+  adapter_key?: unknown;
+  adapterKey?: unknown;
   user_id?: unknown;
   userId?: unknown;
   challenge_id?: unknown;
@@ -99,6 +114,9 @@ export type TrustedProgressionAwardSourceInput = {
 export type PlayerProgressionAwardJobOptions = {
   limit?: number | null;
   sources?: TrustedProgressionAwardSourceInput[] | null;
+  collectSources?: boolean | null;
+  adapters?: Array<TrustedProgressionSourceAdapter | string> | null;
+  retryFailed?: boolean | null;
   source?: string | null;
   now?: string | null;
 };
@@ -127,6 +145,10 @@ export type PlayerProgressionAwardJobResult = {
   accepted_sources: number;
   duplicateSources: number;
   duplicate_sources: number;
+  collectedSources: number;
+  collected_sources: number;
+  retriedSources: number;
+  retried_sources: number;
   processed: number;
   progressed: number;
   awardedXp: number;
@@ -189,6 +211,9 @@ type NormalizedTrustedProgressionSource = {
   userId: string;
   challengeId: string | null;
   challengeSlug: string | null;
+  linkedServerId: string | null;
+  sourceTable: string | null;
+  adapterKey: TrustedProgressionSourceAdapter | null;
   progressValue: number;
   verifiedAt: string;
   evidenceJson: string | null;
@@ -198,8 +223,11 @@ type PlayerProgressionAwardSourceRow = {
   id: string;
   user_id: string;
   challenge_id: string;
+  linked_server_id: string | null;
   source_type: TrustedProgressionSourceType | string;
   source_id: string;
+  source_table: string | null;
+  adapter_key: TrustedProgressionSourceAdapter | string | null;
   progress_value: number | null;
   verification_status: string | null;
   verified_at: string | null;
@@ -207,14 +235,45 @@ type PlayerProgressionAwardSourceRow = {
   processed_at: string | null;
   result_status: string | null;
   result_message: string | null;
+  attempt_count: number | null;
+  last_attempted_at: string | null;
+  retry_count: number | null;
+  last_retried_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+};
+
+type ProgressionAdapterSourceCandidate = {
+  sourceType: TrustedProgressionSourceType;
+  sourceId: string;
+  sourceTable: string;
+  adapterKey: TrustedProgressionSourceAdapter;
+  userId: string;
+  linkedServerId: string | null;
+  challengeSlug: string;
+  progressValue: number;
+  verifiedAt: string | null;
+  evidence: Record<string, unknown>;
+};
+
+type ProgressionAdapterSourceResult = {
+  acceptedSources: number;
+  duplicateSources: number;
+  skipped: PlayerProgressionAwardOutcome[];
+  failed: PlayerProgressionAwardOutcome[];
+  warnings: string[];
 };
 
 const PROGRESS_HREF = "/events/challenges";
 const AWARD_JOB_DEFAULT_LIMIT = 10;
 const AWARD_JOB_MAX_LIMIT = 25;
 const CHALLENGE_COMPLETION_SOURCE_TYPE = "challenge_completion";
+const DEFAULT_AWARD_ADAPTERS: TrustedProgressionSourceAdapter[] = [
+  "adm_player_event",
+  "adm_kill_event",
+  "event_entry",
+  "approved_review",
+];
 
 const FOUNDATION_CHALLENGES: PlayerChallengeRow[] = [
   {
@@ -414,6 +473,32 @@ export async function runPlayerProgressionAwardJob(env: Env, options: PlayerProg
   const warnings: string[] = [];
   let acceptedSources = 0;
   let duplicateSources = 0;
+  let collectedSources = 0;
+  let retriedSources = 0;
+
+  if (options.retryFailed) {
+    try {
+      retriedSources = await retryFailedProgressionAwardSources(env, limit, now);
+    } catch (error) {
+      const message = errorMessage(error, "Failed progression sources could not be scheduled for retry.");
+      failed.push(awardOutcome({ status: "failed", message }));
+      warnings.push(message);
+    }
+  }
+
+  if (options.collectSources) {
+    const collected = await collectVerifiedProgressionAwardSources(env, {
+      adapters: options.adapters,
+      limit,
+      now,
+    });
+    acceptedSources += collected.acceptedSources;
+    duplicateSources += collected.duplicateSources;
+    collectedSources += collected.acceptedSources + collected.duplicateSources;
+    skipped.push(...collected.skipped);
+    failed.push(...collected.failed);
+    warnings.push(...collected.warnings);
+  }
 
   for (const input of trustedSourceInputs(options.sources, limit)) {
     try {
@@ -452,6 +537,7 @@ export async function runPlayerProgressionAwardJob(env: Env, options: PlayerProg
 
   for (const row of pending) {
     try {
+      await markProgressionAwardSourceAttempt(env, row, now);
       const outcome = await processVerifiedProgressionAwardSource(env, row, now);
       processed += 1;
       if (outcome.status === "progressed") progressed += 1;
@@ -471,6 +557,8 @@ export async function runPlayerProgressionAwardJob(env: Env, options: PlayerProg
     source,
     acceptedSources,
     duplicateSources,
+    collectedSources,
+    retriedSources,
     processed,
     progressed,
     awardedXp,
@@ -480,6 +568,328 @@ export async function runPlayerProgressionAwardJob(env: Env, options: PlayerProg
     failed,
     warnings,
   });
+}
+
+export async function collectVerifiedProgressionAwardSources(
+  env: Env,
+  options: {
+    adapters?: Array<TrustedProgressionSourceAdapter | string> | null;
+    limit?: number | null;
+    now?: string | null;
+  } = {},
+): Promise<ProgressionAdapterSourceResult> {
+  if (!env.DB) {
+    return {
+      acceptedSources: 0,
+      duplicateSources: 0,
+      skipped: [],
+      failed: [awardOutcome({ status: "failed", message: "Player progression awards require the D1 database binding." })],
+      warnings: ["Player progression awards require the D1 database binding."],
+    };
+  }
+
+  const now = normalizeIsoDate(options.now) ?? new Date().toISOString();
+  const limit = clampAwardLimit(options.limit);
+  const adapterKeys = normalizeAwardAdapters(options.adapters);
+  const result: ProgressionAdapterSourceResult = {
+    acceptedSources: 0,
+    duplicateSources: 0,
+    skipped: [],
+    failed: [],
+    warnings: [],
+  };
+
+  for (const adapterKey of adapterKeys) {
+    let candidates: ProgressionAdapterSourceCandidate[] = [];
+    try {
+      candidates = await readProgressionAdapterSources(env, adapterKey, limit);
+    } catch (error) {
+      const message = errorMessage(error, `Progression adapter ${adapterKey} could not read trusted sources.`);
+      result.failed.push(awardOutcome({ status: "failed", message }));
+      result.warnings.push(message);
+      continue;
+    }
+
+    for (const candidate of candidates.slice(0, limit)) {
+      try {
+        const recorded = await recordVerifiedProgressionAwardSource(env, adapterCandidateToInput(candidate, now), now);
+        if (recorded.status === "accepted") result.acceptedSources += 1;
+        if (recorded.status === "duplicate") result.duplicateSources += 1;
+        if (recorded.status === "skipped") result.skipped.push(recorded);
+      } catch (error) {
+        const message = errorMessage(error, `Progression adapter ${adapterKey} could not record a trusted source.`);
+        result.failed.push(awardOutcome({
+          status: "failed",
+          source_type: candidate.sourceType,
+          source_id: candidate.sourceId,
+          user_id: candidate.userId,
+          message,
+        }));
+        result.warnings.push(message);
+      }
+    }
+  }
+
+  return result;
+}
+
+async function readProgressionAdapterSources(
+  env: Env,
+  adapterKey: TrustedProgressionSourceAdapter,
+  limit: number,
+): Promise<ProgressionAdapterSourceCandidate[]> {
+  if (adapterKey === "adm_player_event") return readAdmPlayerEventAwardSources(env, limit);
+  if (adapterKey === "adm_kill_event") return readAdmKillEventAwardSources(env, limit);
+  if (adapterKey === "event_entry") return readEventEntryAwardSources(env, limit);
+  return readApprovedReviewAwardSources(env, limit);
+}
+
+async function readAdmPlayerEventAwardSources(env: Env, limit: number): Promise<ProgressionAdapterSourceCandidate[]> {
+  const rows = await env.DB
+    .prepare(
+      `SELECT
+         users.id AS user_id,
+         player_events.id AS source_row_id,
+         player_events.linked_server_id,
+         player_events.event_type,
+         player_events.player_name,
+         player_events.player_id,
+         player_events.source_service_id,
+         player_events.source_adm_file,
+         player_events.source_line_number,
+         player_events.occurred_at,
+         player_events.created_at
+       FROM player_events
+       INNER JOIN player_profiles ON player_profiles.id = player_events.player_profile_id
+       INNER JOIN users ON users.discord_id = player_profiles.discord_id
+       WHERE player_profiles.discord_id IS NOT NULL
+         AND player_profiles.discord_id != ''
+         AND player_events.event_type IN ('player_connected', 'playerlist_entry', 'plain_player_state')
+       ORDER BY datetime(COALESCE(player_events.occurred_at, player_events.created_at)) DESC
+       LIMIT ?`,
+    )
+    .bind(clampAwardLimit(limit))
+    .all<{
+      user_id: string;
+      source_row_id: string;
+      linked_server_id: string | null;
+      event_type: string | null;
+      player_name: string | null;
+      player_id: string | null;
+      source_service_id: string | null;
+      source_adm_file: string | null;
+      source_line_number: number | null;
+      occurred_at: string | null;
+      created_at: string | null;
+    }>();
+
+  return (rows.results ?? []).map((row) => ({
+    sourceType: "adm_gameplay",
+    sourceId: `adm:player_events:${row.source_row_id}`,
+    sourceTable: "player_events",
+    adapterKey: "adm_player_event",
+    userId: row.user_id,
+    linkedServerId: nullableString(row.linked_server_id),
+    challengeSlug: "survivor-spark",
+    progressValue: 1,
+    verifiedAt: row.occurred_at ?? row.created_at,
+    evidence: {
+      adapter: "adm_player_event",
+      event_type: row.event_type,
+      player_name: row.player_name,
+      player_id: row.player_id,
+      source_service_id: row.source_service_id,
+      source_adm_file: row.source_adm_file,
+      source_line_number: row.source_line_number,
+    },
+  }));
+}
+
+async function readAdmKillEventAwardSources(env: Env, limit: number): Promise<ProgressionAdapterSourceCandidate[]> {
+  const rows = await env.DB
+    .prepare(
+      `SELECT
+         users.id AS user_id,
+         kill_events.id AS source_row_id,
+         kill_events.linked_server_id,
+         kill_events.killer_name,
+         kill_events.killer_id,
+         kill_events.victim_name,
+         kill_events.weapon,
+         kill_events.distance,
+         kill_events.source_service_id,
+         kill_events.source_adm_file,
+         kill_events.source_line_number,
+         kill_events.occurred_at,
+         kill_events.created_at
+       FROM kill_events
+       INNER JOIN player_profiles ON player_profiles.id = kill_events.killer_profile_id
+       INNER JOIN users ON users.discord_id = player_profiles.discord_id
+       WHERE player_profiles.discord_id IS NOT NULL
+         AND player_profiles.discord_id != ''
+       ORDER BY datetime(COALESCE(kill_events.occurred_at, kill_events.created_at)) DESC
+       LIMIT ?`,
+    )
+    .bind(clampAwardLimit(limit))
+    .all<{
+      user_id: string;
+      source_row_id: string;
+      linked_server_id: string | null;
+      killer_name: string | null;
+      killer_id: string | null;
+      victim_name: string | null;
+      weapon: string | null;
+      distance: number | null;
+      source_service_id: string | null;
+      source_adm_file: string | null;
+      source_line_number: number | null;
+      occurred_at: string | null;
+      created_at: string | null;
+    }>();
+
+  return (rows.results ?? []).map((row) => ({
+    sourceType: "adm_gameplay",
+    sourceId: `adm:kill_events:${row.source_row_id}`,
+    sourceTable: "kill_events",
+    adapterKey: "adm_kill_event",
+    userId: row.user_id,
+    linkedServerId: nullableString(row.linked_server_id),
+    challengeSlug: "arena-rookie",
+    progressValue: 1,
+    verifiedAt: row.occurred_at ?? row.created_at,
+    evidence: {
+      adapter: "adm_kill_event",
+      killer_name: row.killer_name,
+      killer_id: row.killer_id,
+      victim_name: row.victim_name,
+      weapon: row.weapon,
+      distance: row.distance,
+      source_service_id: row.source_service_id,
+      source_adm_file: row.source_adm_file,
+      source_line_number: row.source_line_number,
+    },
+  }));
+}
+
+async function readEventEntryAwardSources(env: Env, limit: number): Promise<ProgressionAdapterSourceCandidate[]> {
+  const rows = await env.DB
+    .prepare(
+      `SELECT
+         users.id AS user_id,
+         server_event_entries.id AS source_row_id,
+         server_event_entries.linked_server_id,
+         server_event_entries.event_id,
+         server_event_entries.status,
+         server_event_entries.entered_at,
+         server_event_entries.completed_at,
+         competitive_events.slug AS event_slug,
+         competitive_events.name AS event_name
+       FROM server_event_entries
+       INNER JOIN users ON users.id = server_event_entries.owner_user_id
+       LEFT JOIN competitive_events ON competitive_events.id = server_event_entries.event_id
+       WHERE server_event_entries.owner_user_id IS NOT NULL
+         AND server_event_entries.status IN ('entered', 'completed')
+       ORDER BY datetime(COALESCE(server_event_entries.completed_at, server_event_entries.entered_at, server_event_entries.created_at)) DESC
+       LIMIT ?`,
+    )
+    .bind(clampAwardLimit(limit))
+    .all<{
+      user_id: string;
+      source_row_id: string;
+      linked_server_id: string | null;
+      event_id: string | null;
+      status: string | null;
+      entered_at: string | null;
+      completed_at: string | null;
+      event_slug: string | null;
+      event_name: string | null;
+    }>();
+
+  return (rows.results ?? []).map((row) => ({
+    sourceType: "event_participation",
+    sourceId: `event:server_event_entries:${row.source_row_id}`,
+    sourceTable: "server_event_entries",
+    adapterKey: "event_entry",
+    userId: row.user_id,
+    linkedServerId: nullableString(row.linked_server_id),
+    challengeSlug: "community-scout",
+    progressValue: 1,
+    verifiedAt: row.completed_at ?? row.entered_at,
+    evidence: {
+      adapter: "event_entry",
+      event_id: row.event_id,
+      event_slug: row.event_slug,
+      event_name: row.event_name,
+      entry_status: row.status,
+    },
+  }));
+}
+
+async function readApprovedReviewAwardSources(env: Env, limit: number): Promise<ProgressionAdapterSourceCandidate[]> {
+  const rows = await env.DB
+    .prepare(
+      `SELECT
+         users.id AS user_id,
+         server_reviews.id AS source_row_id,
+         server_reviews.linked_server_id,
+         server_reviews.rating,
+         server_reviews.title,
+         server_reviews.created_at,
+         server_reviews.updated_at
+       FROM server_reviews
+       INNER JOIN users ON users.discord_id = server_reviews.reviewer_discord_id
+       WHERE server_reviews.status = 'approved'
+       ORDER BY datetime(COALESCE(server_reviews.last_edited_at, server_reviews.updated_at, server_reviews.created_at)) DESC
+       LIMIT ?`,
+    )
+    .bind(clampAwardLimit(limit))
+    .all<{
+      user_id: string;
+      source_row_id: string;
+      linked_server_id: string | null;
+      rating: number | null;
+      title: string | null;
+      created_at: string | null;
+      updated_at: string | null;
+    }>();
+
+  return (rows.results ?? []).map((row) => ({
+    sourceType: "community_activity",
+    sourceId: `community:server_reviews:${row.source_row_id}`,
+    sourceTable: "server_reviews",
+    adapterKey: "approved_review",
+    userId: row.user_id,
+    linkedServerId: nullableString(row.linked_server_id),
+    challengeSlug: "community-scout",
+    progressValue: 1,
+    verifiedAt: row.updated_at ?? row.created_at,
+    evidence: {
+      adapter: "approved_review",
+      review_id: row.source_row_id,
+      rating: row.rating,
+      title: row.title,
+      moderation_status: "approved",
+    },
+  }));
+}
+
+function adapterCandidateToInput(
+  candidate: ProgressionAdapterSourceCandidate,
+  now: string,
+): TrustedProgressionAwardSourceInput {
+  return {
+    source_type: candidate.sourceType,
+    source_id: candidate.sourceId,
+    linked_server_id: candidate.linkedServerId,
+    source_table: candidate.sourceTable,
+    adapter_key: candidate.adapterKey,
+    user_id: candidate.userId,
+    challenge_slug: candidate.challengeSlug,
+    progress_value: candidate.progressValue,
+    verified: true,
+    verified_at: candidate.verifiedAt ?? now,
+    evidence: candidate.evidence,
+  };
 }
 
 async function recordVerifiedProgressionAwardSource(
@@ -507,17 +917,20 @@ async function recordVerifiedProgressionAwardSource(
   const insert = await env.DB
     .prepare(
       `INSERT OR IGNORE INTO player_progression_award_sources (
-        id, user_id, challenge_id, source_type, source_id, progress_value,
-        verification_status, verified_at, evidence_json, processed_at,
-        result_status, result_message, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'verified', ?, ?, NULL, 'pending', NULL, ?, ?)`,
+        id, user_id, challenge_id, linked_server_id, source_type, source_id,
+        source_table, adapter_key, progress_value, verification_status, verified_at,
+        evidence_json, processed_at, result_status, result_message, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'verified', ?, ?, NULL, 'pending', NULL, ?, ?)`,
     )
     .bind(
       randomProgressionId("pas"),
       normalized.value.userId,
       challenge.id,
+      normalized.value.linkedServerId,
       normalized.value.sourceType,
       normalized.value.sourceId,
+      normalized.value.sourceTable,
+      normalized.value.adapterKey,
       normalized.value.progressValue,
       normalized.value.verifiedAt,
       normalized.value.evidenceJson,
@@ -548,8 +961,11 @@ async function readPendingVerifiedProgressionAwardSources(env: Env, limit: numbe
          id,
          user_id,
          challenge_id,
+         linked_server_id,
          source_type,
          source_id,
+         source_table,
+         adapter_key,
          progress_value,
          verification_status,
          verified_at,
@@ -557,6 +973,10 @@ async function readPendingVerifiedProgressionAwardSources(env: Env, limit: numbe
          processed_at,
          result_status,
          result_message,
+         attempt_count,
+         last_attempted_at,
+         retry_count,
+         last_retried_at,
          created_at,
          updated_at
        FROM player_progression_award_sources
@@ -834,6 +1254,44 @@ async function updatePlayerChallengeParticipationAwardState(
     .run();
 }
 
+async function retryFailedProgressionAwardSources(env: Env, limit: number, now: string) {
+  const result = await env.DB
+    .prepare(
+      `UPDATE player_progression_award_sources
+       SET result_status = 'pending',
+           result_message = 'Retry scheduled by protected progression award job.',
+           processed_at = NULL,
+           retry_count = COALESCE(retry_count, 0) + 1,
+           last_retried_at = ?,
+           updated_at = ?
+       WHERE id IN (
+         SELECT id
+         FROM player_progression_award_sources
+         WHERE verification_status = 'verified'
+           AND result_status = 'failed'
+         ORDER BY datetime(COALESCE(processed_at, updated_at, created_at)) ASC
+         LIMIT ?
+       )`,
+    )
+    .bind(now, now, clampAwardLimit(limit))
+    .run();
+  return d1Changes(result);
+}
+
+async function markProgressionAwardSourceAttempt(env: Env, row: PlayerProgressionAwardSourceRow, now: string) {
+  await env.DB
+    .prepare(
+      `UPDATE player_progression_award_sources
+       SET attempt_count = COALESCE(attempt_count, 0) + 1,
+           last_attempted_at = ?,
+           updated_at = ?
+       WHERE id = ?
+         AND result_status = 'pending'`,
+    )
+    .bind(now, now, row.id)
+    .run();
+}
+
 async function markProgressionAwardSource(
   env: Env,
   row: PlayerProgressionAwardSourceRow,
@@ -1035,6 +1493,9 @@ function normalizeTrustedProgressionSourceInput(
 ): { ok: true; value: NormalizedTrustedProgressionSource } | { ok: false; outcome: PlayerProgressionAwardOutcome } {
   const sourceType = sourceTypeFromUnknown(input.source_type ?? input.sourceType);
   const sourceId = cleanSourceId(input.source_id ?? input.sourceId);
+  const linkedServerId = cleanIdentifier(input.linked_server_id ?? input.linkedServerId);
+  const sourceTable = cleanSourceTable(input.source_table ?? input.sourceTable);
+  const adapterKey = adapterKeyFromUnknown(input.adapter_key ?? input.adapterKey);
   const userId = cleanIdentifier(input.user_id ?? input.userId);
   const challengeId = cleanIdentifier(input.challenge_id ?? input.challengeId);
   const challengeSlug = cleanSlug(input.challenge_slug ?? input.challengeSlug ?? input.slug);
@@ -1087,6 +1548,9 @@ function normalizeTrustedProgressionSourceInput(
       userId,
       challengeId,
       challengeSlug,
+      linkedServerId,
+      sourceTable,
+      adapterKey,
       progressValue,
       verifiedAt: normalizeIsoDate(input.verified_at ?? input.verifiedAt) ?? now,
       evidenceJson: safeEvidenceJson(input.evidence_json ?? input.evidence),
@@ -1100,6 +1564,21 @@ function sourceTypeFromUnknown(value: unknown): TrustedProgressionSourceType | n
   return (TRUSTED_PROGRESSION_SOURCE_TYPES as readonly string[]).includes(normalized)
     ? normalized as TrustedProgressionSourceType
     : null;
+}
+
+function adapterKeyFromUnknown(value: unknown): TrustedProgressionSourceAdapter | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return (TRUSTED_PROGRESSION_SOURCE_ADAPTERS as readonly string[]).includes(normalized)
+    ? normalized as TrustedProgressionSourceAdapter
+    : null;
+}
+
+function normalizeAwardAdapters(value: Array<TrustedProgressionSourceAdapter | string> | null | undefined) {
+  const keys = Array.isArray(value)
+    ? value.map(adapterKeyFromUnknown).filter((key): key is TrustedProgressionSourceAdapter => Boolean(key))
+    : DEFAULT_AWARD_ADAPTERS;
+  return keys.length ? [...new Set(keys)].slice(0, DEFAULT_AWARD_ADAPTERS.length) : DEFAULT_AWARD_ADAPTERS;
 }
 
 function trustedSourceInputs(value: TrustedProgressionAwardSourceInput[] | null | undefined, limit: number) {
@@ -1127,6 +1606,12 @@ function cleanSourceId(value: unknown) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return /^[a-zA-Z0-9][a-zA-Z0-9:_.-]{2,159}$/.test(trimmed) ? trimmed : null;
+}
+
+function cleanSourceTable(value: unknown) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  return /^[a-z][a-z0-9_]{1,63}$/.test(trimmed) ? trimmed : null;
 }
 
 function safeTargetValue(value: unknown) {
@@ -1201,6 +1686,8 @@ function d1Changes(result: unknown) {
 function buildAwardJobResult(input: Partial<PlayerProgressionAwardJobResult> & { source: string }): PlayerProgressionAwardJobResult {
   const acceptedSources = Math.max(0, Math.trunc(input.acceptedSources ?? 0));
   const duplicateSources = Math.max(0, Math.trunc(input.duplicateSources ?? 0));
+  const collectedSources = Math.max(0, Math.trunc(input.collectedSources ?? 0));
+  const retriedSources = Math.max(0, Math.trunc(input.retriedSources ?? 0));
   const processed = Math.max(0, Math.trunc(input.processed ?? 0));
   const progressed = Math.max(0, Math.trunc(input.progressed ?? 0));
   const awardedXp = Math.max(0, Math.trunc(input.awardedXp ?? 0));
@@ -1213,7 +1700,7 @@ function buildAwardJobResult(input: Partial<PlayerProgressionAwardJobResult> & {
     ? "failed"
     : skipped.length || warnings.length
       ? "warning"
-      : processed || acceptedSources || duplicateSources
+      : processed || acceptedSources || duplicateSources || collectedSources || retriedSources
         ? "success"
         : "no_op";
 
@@ -1226,6 +1713,10 @@ function buildAwardJobResult(input: Partial<PlayerProgressionAwardJobResult> & {
     accepted_sources: acceptedSources,
     duplicateSources,
     duplicate_sources: duplicateSources,
+    collectedSources,
+    collected_sources: collectedSources,
+    retriedSources,
+    retried_sources: retriedSources,
     processed,
     progressed,
     awardedXp,

@@ -380,6 +380,38 @@ Mutation scope:
 
 Fairness remains unchanged: XP and calling cards are earned player-side profile progression only. They must not affect paid plans, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, server ownership, or competitive eligibility.
 
+## Verified Activity Source Adapters And Award Audit Slice
+
+The verified activity-source adapters slice connects specific trusted DZN activity producers into the authoritative progression award queue without creating any player/browser self-award path.
+
+The slice adds:
+
+- Adapter collection for ADM-derived player activity through `player_events`.
+- Adapter collection for ADM-derived combat activity through `kill_events`.
+- Adapter collection for owned-server event participation through `server_event_entries`.
+- Adapter collection for approved community activity through approved `server_reviews`.
+- Provenance metadata on `player_progression_award_sources`: linked server, source table, adapter key, processing attempts, retry count, last attempt timestamp, and last retry timestamp.
+- `/api/owner/progression/award-audit` as an owner/admin-readable, read-only audit route for awarded, skipped, failed, pending, progressed, and duplicate source facts.
+- Failed-row retry scheduling through the existing cron-secret-protected `/api/cron/player-progression/awards` job with `retry_failed: true`.
+
+Authorization rules:
+
+- Adapter collection and failed-row retry can run only from the cron-secret-protected award job.
+- Normal players can still read/join challenges but cannot collect source facts, mark facts verified, retry failed rows, or award themselves XP/calling cards.
+- Owners can read audit history only after the canonical owner entitlement gate passes, and only for source facts tied to their own linked servers.
+- Configured DZN admins can read global source audit history.
+- The audit route must not accept write methods and must return private no-store responses.
+
+Mutation scope:
+
+- Adapter collection may read `player_events`, `kill_events`, `server_event_entries`, `competitive_events`, `server_reviews`, `player_profiles`, `users`, and `linked_servers` only as trusted activity context.
+- Adapter collection and retry may write only `player_progression_award_sources`.
+- Award processing may continue to update only `player_challenge_participations` and insert idempotent rows into `player_xp_ledger` and `player_calling_card_awards`.
+- The audit route is read-only and must not expose raw evidence blobs, Discord IDs, billing state, Nitrado tokens, Discord bot tokens, Stripe secrets, or checkout configuration.
+- No adapter, retry, or audit path may create checkout sessions, update owner billing, change server ownership, update rankings/leaderboards, modify discovery score, mutate reviews, award server badges, change seasons, modify events, alter Server Wars scoring/results, touch Nitrado, send Discord bot messages, change Cloudflare secrets, apply production migrations, merge issue #49, or enable live checkout.
+
+Fairness remains unchanged: verified activity adapters and their audit history are player-side progression plumbing only. They must not affect paid plans, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, server ownership, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -404,7 +436,8 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/player/saved-servers` | 401 | Allowed | Allowed | Allowed | Session auth, player preference only |
 | `/api/player/reviews` | 401 | Allowed | Allowed | Allowed | Session auth, review mutation only |
 | `/api/player/challenges` | 401 | Allowed | Allowed | Allowed | Session auth, player participation only |
-| `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award facts |
+| `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award fact collection, retry, and award processing |
+| `/api/owner/progression/award-audit` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Owner entitlement/admin plus linked-server audit scope; read-only |
 | `/api/public/server-reviews` | Preview/locked summary | Allowed | Allowed | Allowed | Public/read with session-aware redaction |
 | `/api/public/server-reviews/[reviewId]/report` | 401 | Allowed | Allowed | Allowed | Session auth, report/moderation hook only |
 | `/api/servers/[serverId]/reviews/[reviewId]/reply` | Login/pricing boundary | Owner plan required | Allowed, then ownership checks still apply | Allowed, then ownership checks still apply | Owner entitlement plus server owner/admin checks |

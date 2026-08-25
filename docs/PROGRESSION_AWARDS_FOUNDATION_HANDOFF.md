@@ -121,4 +121,6 @@ Run before PR handoff:
 
 ## Next Slice
 
-Next should be the verified source integration slice: connect real trusted activity producers such as ADM-derived gameplay milestones, event participation confirmations, and community activity checks into `player_progression_award_sources`, while keeping all award execution cron-secret-protected and all player progression separate from billing and competitive systems.
+The verified source integration slice is implemented on `codex/verified-activity-adapters-audit-20260825` and documented in `docs/PROGRESSION_AWARD_SOURCE_ADAPTERS_AUDIT_HANDOFF.md`.
+
+Next should be the progression award audit UI slice: surface the owner/admin award-source history in the owner dashboard with clear status, adapter, retry, and linked-server filters while keeping retries cron-secret-only and all progression outcomes isolated from live payments and competitive systems.
