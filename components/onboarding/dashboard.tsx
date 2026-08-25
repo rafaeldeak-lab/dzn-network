@@ -21,6 +21,7 @@ import {
   LifeBuoy,
   ListChecks,
   LogOut,
+  MessageSquareReply,
   RefreshCw,
   Route,
   Server,
@@ -458,7 +459,7 @@ function EmptyDashboard() {
   );
 }
 
-type DashboardTabKey = "overview" | "sync-health" | "public-listing" | "events" | "billing" | "discord-posts" | "settings-danger";
+type DashboardTabKey = "overview" | "sync-health" | "public-listing" | "events" | "reviews" | "billing" | "discord-posts" | "settings-danger";
 type DashboardPackageTier = "free" | "starter" | "pro";
 type DashboardTabAccess = "trial_safe" | "mixed_pro" | "pro_tools" | "account";
 type DashboardPackageVisibility = {
@@ -470,6 +471,25 @@ type DashboardPackageVisibility = {
   detail: string;
   included: string[];
   proUpsell: string[];
+};
+type DashboardReviewModerationCounts = {
+  total: number;
+  needs_review: number;
+  pending: number;
+  reported: number;
+  approved: number;
+  replied: number;
+};
+type DashboardReviewNotificationCounts = {
+  unread_total: number;
+  review_notifications: number;
+  review_queue: number;
+};
+type DashboardReviewModerationSummary = {
+  status: "loading" | "ready" | "unavailable";
+  counts: DashboardReviewModerationCounts;
+  notificationCounts: DashboardReviewNotificationCounts;
+  generatedAt: string | null;
 };
 
 function ServerDashboard({
@@ -581,6 +601,7 @@ function ServerDashboard({
   const [dashboardAction, setDashboardAction] = useState<DashboardActionProgress | null>(() => loadDashboardActionState(serverProp.id));
   const [serverInfoOverride, setServerInfoOverride] = useState<{ serverId: string; patch: Partial<LinkedServer> } | null>(null);
   const [badgeStatus, setBadgeStatus] = useState<ServerBadgeStatusResponse | null>(null);
+  const [reviewModerationSummary, setReviewModerationSummary] = useState<DashboardReviewModerationSummary>(() => emptyReviewModerationSummary("loading"));
   const [advancedStats, setAdvancedStats] = useState<DashboardAdvancedStatsResult | null>(null);
   const [advancedStatsError, setAdvancedStatsError] = useState("");
   const [advancedStatsLoading, setAdvancedStatsLoading] = useState(false);
@@ -628,6 +649,32 @@ function ServerDashboard({
   );
   const normalizedServerCategory = getServerCategoryOption(server.server_category)?.value ?? null;
   const serverCategoryLabel = getServerCategoryOption(normalizedServerCategory)?.label ?? "Not set";
+
+  useEffect(() => {
+    let active = true;
+
+    fetch("/api/reviews/moderation?status=needs_review&limit=1", {
+      cache: "no-store",
+      credentials: "include",
+      headers: { accept: "application/json" },
+    })
+      .then(async (response) => {
+        const result = await response.json().catch(() => null) as Record<string, unknown> | null;
+        if (!active) return;
+        if (!response.ok || !result?.ok) {
+          setReviewModerationSummary(emptyReviewModerationSummary("unavailable"));
+          return;
+        }
+        setReviewModerationSummary(normalizeReviewModerationSummary(result));
+      })
+      .catch(() => {
+        if (active) setReviewModerationSummary(emptyReviewModerationSummary("unavailable"));
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [server.id]);
 
   function updateDashboardAction(patch: Partial<DashboardActionProgress>) {
     setDashboardAction((current) => {
@@ -3192,11 +3239,19 @@ function ServerDashboard({
     billing: effectiveBillingStatus,
     fallbackPlanKey: effectiveDashboardHealth?.current_plan ?? null,
   });
+  const reviewQueueBadgeCount = reviewModerationSummary.status === "ready" ? reviewModerationSummary.counts.needs_review : 0;
   const tabItems: Array<{ key: DashboardTabKey; label: string; icon: React.ReactNode; detail: string; access: DashboardTabAccess }> = [
     { key: "overview", label: "Overview", icon: <Server className="h-4 w-4" />, detail: "Live status, setup checks, and trial-safe stats.", access: "trial_safe" },
     { key: "sync-health", label: "Sync Health", icon: <RefreshCw className="h-4 w-4" />, detail: "ADM health signals and read-only diagnostics.", access: "trial_safe" },
     { key: "public-listing", label: "Public Listing", icon: <ExternalLink className="h-4 w-4" />, detail: "Profile, category, tags, reviews, and public page.", access: "trial_safe" },
     { key: "events", label: "Events", icon: <Flag className="h-4 w-4" />, detail: "Eligible events show here; Pro-only entries stay locked.", access: "mixed_pro" },
+    {
+      key: "reviews",
+      label: "Reviews",
+      icon: <MessageSquareReply className="h-4 w-4" />,
+      detail: reviewModerationSummary.status === "ready" ? `${reviewQueueBadgeCount} need owner review.` : "Owner replies, reports, and queue alerts.",
+      access: "trial_safe",
+    },
     { key: "billing", label: "Billing & Boosts", icon: <Gauge className="h-4 w-4" />, detail: "Compare Starter and Pro without changing live Stripe settings.", access: "account" },
     { key: "discord-posts", label: "Discord Posts", icon: <Bell className="h-4 w-4" />, detail: "Starter posts stay available; Pro embeds are marked.", access: "mixed_pro" },
     { key: "settings-danger", label: "Settings & Danger", icon: <Settings className="h-4 w-4" />, detail: "Account actions, exports, and protected removals.", access: "account" },
@@ -3254,6 +3309,11 @@ function ServerDashboard({
                   {renderDashboardTabAccessBadge(item.access, dashboardPackage.tier)}
                 </span>
                 <span className="mt-1 block text-[11px] font-bold leading-4 text-zinc-500">{item.detail}</span>
+                {item.key === "reviews" && reviewQueueBadgeCount > 0 ? (
+                  <span className="mt-2 inline-flex rounded border border-amber-300/25 bg-amber-400/10 px-2 py-1 text-[9px] font-black uppercase text-amber-100">
+                    {formatDashboardBadgeCount(reviewQueueBadgeCount)} queue alerts
+                  </span>
+                ) : null}
               </span>
             </button>
           ))}
@@ -3546,6 +3606,10 @@ function ServerDashboard({
             publicProfileHref={server.public_slug ? publicServerProfileHref(server.public_slug) : null}
             onOpenSettings={() => { window.location.href = serverSettingsHref(server.id); }}
           />
+          ) : null}
+
+          {activeTab === "reviews" ? (
+            <ReviewQueueDashboardPanel summary={reviewModerationSummary} />
           ) : null}
 
           {activeTab === "sync-health" && showInternalSyncSupportTools ? (
@@ -3950,7 +4014,7 @@ function ServerDashboard({
           ) : null}
         </div>
 
-        <aside className={activeTab === "discord-posts" || activeTab === "sync-health" ? "hidden" : "grid content-start gap-5"}>
+        <aside className={activeTab === "discord-posts" || activeTab === "sync-health" || activeTab === "reviews" ? "hidden" : "grid content-start gap-5"}>
           {activeTab === "billing" ? (
           <BillingPlanPanel billing={effectiveBillingStatus} plans={billingPlans} readiness={billingReadiness} message={billingMessage} onRefresh={refreshBillingWithAction} />
           ) : null}
@@ -4062,6 +4126,75 @@ function DashboardPanel({ children, className = "" }: { children: React.ReactNod
     <section className={`glass-surface animated-border rounded-lg ${className}`}>
       <div className="relative z-10">{children}</div>
     </section>
+  );
+}
+
+function ReviewQueueDashboardPanel({ summary }: { summary: DashboardReviewModerationSummary }) {
+  const counts = summary.counts;
+  const notifications = summary.notificationCounts;
+  const unavailable = summary.status === "unavailable";
+
+  return (
+    <DashboardPanel className="p-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <PanelHeader icon={<MessageSquareReply className="h-5 w-5" />} title="Review queue" />
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-400">
+            Review reports, pending reviews, owner replies, and DZN Pulse alerts stay in the owner moderation workflow. They do not change rank, discovery score, badges, seasons, events, or billing.
+          </p>
+        </div>
+        <Link href="/dashboard/reviews" className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-xs font-black uppercase text-cyan-50">
+          Open review queue
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <ReviewQueueStat label="Needs review" value={counts.needs_review} tone="amber" loading={summary.status === "loading"} />
+        <ReviewQueueStat label="Reported" value={counts.reported} tone="red" loading={summary.status === "loading"} />
+        <ReviewQueueStat label="Owner replies" value={counts.replied} tone="cyan" loading={summary.status === "loading"} />
+        <ReviewQueueStat label="Unread Pulse" value={notifications.unread_total} tone="violet" loading={summary.status === "loading"} />
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        <div className="rounded-lg border border-white/10 bg-black/24 p-3">
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Review alerts</p>
+          <p className="mt-2 text-2xl font-black text-white">{summary.status === "loading" ? "..." : formatDashboardBadgeCount(notifications.review_notifications)}</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">Unread DZN Pulse entries that point back to the moderation queue.</p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-black/24 p-3">
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Private scope</p>
+          <p className="mt-2 text-sm font-black uppercase text-emerald-100">Owner-only</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">The API returns only reviews for linked servers this owner can manage.</p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-black/24 p-3">
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Competitive impact</p>
+          <p className="mt-2 text-sm font-black uppercase text-emerald-100">None</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">Moderation can hide or approve a review, but it cannot alter competitive formulas.</p>
+        </div>
+      </div>
+
+      {unavailable ? (
+        <p className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-sm font-bold text-amber-100">
+          Review queue counts are not available for this session. The full queue still performs server-side entitlement and ownership checks.
+        </p>
+      ) : null}
+    </DashboardPanel>
+  );
+}
+
+function ReviewQueueStat({ label, value, tone, loading }: { label: string; value: number; tone: "amber" | "red" | "cyan" | "violet"; loading: boolean }) {
+  const color = {
+    amber: "border-amber-300/25 bg-amber-400/10 text-amber-100",
+    red: "border-red-300/25 bg-red-400/10 text-red-100",
+    cyan: "border-cyan-300/25 bg-cyan-400/10 text-cyan-100",
+    violet: "border-violet-300/25 bg-violet-400/10 text-violet-100",
+  }[tone];
+  return (
+    <div className={`rounded-lg border p-3 ${color}`}>
+      <p className="text-3xl font-black leading-none">{loading ? "..." : formatDashboardBadgeCount(value)}</p>
+      <p className="mt-2 text-[10px] font-black uppercase tracking-[0.16em] text-zinc-400">{label}</p>
+    </div>
   );
 }
 
@@ -10574,6 +10707,62 @@ function formatDuration(value: number | null) {
   if (value === null || !Number.isFinite(value)) return "Not recorded";
   if (value < 1000) return `${Math.max(0, Math.round(value))}ms`;
   return `${(value / 1000).toFixed(1)}s`;
+}
+
+function emptyReviewModerationSummary(status: DashboardReviewModerationSummary["status"]): DashboardReviewModerationSummary {
+  return {
+    status,
+    counts: {
+      total: 0,
+      needs_review: 0,
+      pending: 0,
+      reported: 0,
+      approved: 0,
+      replied: 0,
+    },
+    notificationCounts: {
+      unread_total: 0,
+      review_notifications: 0,
+      review_queue: 0,
+    },
+    generatedAt: null,
+  };
+}
+
+function normalizeReviewModerationSummary(payload: Record<string, unknown>): DashboardReviewModerationSummary {
+  const counts = objectValue(payload.counts);
+  const notificationCounts = objectValue(payload.notification_counts);
+  return {
+    status: "ready",
+    counts: {
+      total: numberField(counts.total),
+      needs_review: numberField(counts.needs_review),
+      pending: numberField(counts.pending),
+      reported: numberField(counts.reported),
+      approved: numberField(counts.approved),
+      replied: numberField(counts.replied),
+    },
+    notificationCounts: {
+      unread_total: numberField(notificationCounts.unread_total),
+      review_notifications: numberField(notificationCounts.review_notifications),
+      review_queue: numberField(notificationCounts.review_queue),
+    },
+    generatedAt: typeof payload.generated_at === "string" ? payload.generated_at : null,
+  };
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function numberField(value: unknown) {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? Math.max(0, Math.trunc(numeric)) : 0;
+}
+
+function formatDashboardBadgeCount(value: number) {
+  const count = Math.max(0, Math.trunc(Number(value) || 0));
+  return count > 99 ? "99+" : String(count);
 }
 
 function formatCompactDate(value: string | null) {

@@ -262,6 +262,37 @@ Mutation scope:
 
 Fairness remains unchanged: reviews remain separate from paid plans, rankings, discovery score, badges, seasons, events, Server Wars, challenges, XP, calling cards, and competitive eligibility. Moderation state may hide, hold, or approve public review visibility, but it must not change rating formulas into competitive or discovery inputs.
 
+## Reviews Notification And Workflow Polish Slice
+
+This follow-on slice improves the owner/admin moderation workflow without changing the Reviews foundation contract, billing, checkout, discovery, or competitive systems.
+
+The slice adds:
+
+- Queue-wide counts from the protected moderation API so `/dashboard/reviews`, `/dashboard`, and `/owner` can show review badges without using public data.
+- DZN Pulse unread/review-notification counts in the owner review workflow. These are read-only badge values; queue reads do not create notifications.
+- Clear per-review `status_history` based on `server_review_moderation_actions`, returned without actor user IDs or actor Discord IDs.
+- `POST /api/reviews/moderation/bulk` for DZN admin-only bulk triage of repeated report patterns.
+- Admin-only repeated report pattern summaries on the review moderation dashboard.
+- Owner dashboard and owner command-centre badges that degrade to unavailable states without bypassing the server-side API gates.
+
+Authorization rules:
+
+- Normal Discord players still cannot access review moderation APIs.
+- Normal server owners must pass the canonical owner entitlement layer before reading counts, badges, history, or queue data.
+- Normal owners can only see or act on reviews for linked servers where `linked_servers.user_id` matches the session user.
+- Configured DZN admins can see repeated report patterns and use bulk triage across servers.
+- Bulk triage is denied for non-admin owners even if they have an active Starter/Pro owner entitlement.
+- Bulk triage only accepts repeated report patterns, not arbitrary review searches.
+
+Mutation scope:
+
+- Queue/count/history reads may read `server_reviews`, `server_review_reports`, `server_review_moderation_actions`, `linked_servers`, and `user_notifications`.
+- Single-review moderation actions may update `server_reviews` and append `server_review_moderation_actions`.
+- Admin bulk triage may update matching `server_reviews`, append `server_review_moderation_actions`, and create internal DZN Pulse rows in `user_notifications` when DZN Pulse is enabled.
+- No Stripe product/price mutation, checkout activation, Cloudflare secret update, production D1 migration application, Nitrado call, Discord bot send, or issue #49 merge is part of this slice.
+
+Fairness remains unchanged: notification badges, status history, repeated report pattern summaries, owner replies, and admin bulk triage must not affect paid plans, rankings, discovery score, review averages, badges, seasons, events, Server Wars, challenges, XP, calling cards, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -289,6 +320,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/public/server-reviews/[reviewId]/report` | 401 | Allowed | Allowed | Allowed | Session auth, report/moderation hook only |
 | `/api/servers/[serverId]/reviews/[reviewId]/reply` | Login/pricing boundary | Owner plan required | Allowed, then ownership checks still apply | Allowed, then ownership checks still apply | Owner entitlement plus server owner/admin checks |
 | `/dashboard/reviews` and `/api/reviews/moderation` | Login/pricing boundary | Owner plan required | Allowed for own linked servers only | Allowed for own linked servers only | Owner entitlement plus per-review server ownership/admin checks |
+| `/api/reviews/moderation/bulk` | Login/pricing boundary | Denied | Denied unless configured DZN admin | Denied unless configured DZN admin | DZN admin-only repeated report pattern triage |
 | `/owner/reviews` | Data denied by API | Own reviews only if entitled, or global if DZN admin | Own reviews only, or global if DZN admin | Own reviews only, or global if DZN admin | Same moderation API; per-review ownership/admin checks |
 | `/setup` | Login required | Redirect to owner pricing | Allowed | Allowed | Page auth plus owner entitlement |
 | `/dashboard` owner tools | Login required | Redirect to owner pricing | Allowed | Allowed | Page auth plus owner entitlement |

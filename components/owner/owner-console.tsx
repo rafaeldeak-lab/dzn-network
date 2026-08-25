@@ -105,6 +105,25 @@ type OwnerOverview = {
   generatedAt: string;
 };
 
+type ReviewControlSummary = {
+  status: "loading" | "ready" | "unavailable";
+  role: "owner" | "admin" | null;
+  counts: {
+    total: number;
+    needs_review: number;
+    pending: number;
+    reported: number;
+    approved: number;
+    replied: number;
+  };
+  notificationCounts: {
+    unread_total: number;
+    review_notifications: number;
+    review_queue: number;
+  };
+  reportPatternCount: number;
+};
+
 type KnownServerSummary = {
   name: string;
   lifecycleStatus: LifecycleStatus;
@@ -352,8 +371,34 @@ export function OwnerConsole() {
   const [servers, setServers] = useState<OwnerServer[]>([]);
   const [auditLog, setAuditLog] = useState<AuditLog | null>(null);
   const [discordControl, setDiscordControl] = useState<DiscordControlData | null>(null);
+  const [reviewControlSummary, setReviewControlSummary] = useState<ReviewControlSummary>(() => emptyReviewControlSummary("loading"));
   const [status, setStatus] = useState<"loading" | "ready" | "unauthorized" | "forbidden" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/reviews/moderation?status=needs_review&limit=1", {
+      cache: "no-store",
+      credentials: "include",
+      headers: { accept: "application/json" },
+    })
+      .then(async (response) => {
+        const result = await response.json().catch(() => null) as Record<string, unknown> | null;
+        if (!active) return;
+        if (!response.ok || !result?.ok) {
+          setReviewControlSummary(emptyReviewControlSummary("unavailable"));
+          return;
+        }
+        setReviewControlSummary(normalizeReviewControlSummary(result));
+      })
+      .catch(() => {
+        if (active) setReviewControlSummary(emptyReviewControlSummary("unavailable"));
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -477,12 +522,12 @@ export function OwnerConsole() {
   }, [overview]);
 
   if (status === "loading") {
-    return <OwnerShell activeView={activeView} setActiveView={setActiveView}><LoadingPanel /></OwnerShell>;
+    return <OwnerShell activeView={activeView} setActiveView={setActiveView} reviewSummary={reviewControlSummary}><LoadingPanel /></OwnerShell>;
   }
 
   if (status === "unauthorized" || status === "forbidden") {
     return (
-      <OwnerShell activeView={activeView} setActiveView={setActiveView}>
+      <OwnerShell activeView={activeView} setActiveView={setActiveView} reviewSummary={reviewControlSummary}>
         <section className="rounded-lg border border-red-400/20 bg-red-950/20 p-8 shadow-[0_0_40px_rgba(239,68,68,0.12)]">
           <p className="text-xs font-black uppercase tracking-[0.24em] text-red-200">Owner access required</p>
           <h1 className="mt-3 text-3xl font-black text-white">{status === "unauthorized" ? "Sign in required" : "403 - platform owner only"}</h1>
@@ -500,27 +545,28 @@ export function OwnerConsole() {
   }
 
   if (status === "error") {
-    return <OwnerShell activeView={activeView} setActiveView={setActiveView}><ErrorPanel message={error ?? "Unknown owner console error."} /></OwnerShell>;
+    return <OwnerShell activeView={activeView} setActiveView={setActiveView} reviewSummary={reviewControlSummary}><ErrorPanel message={error ?? "Unknown owner console error."} /></OwnerShell>;
   }
 
   return (
-    <OwnerShell activeView={activeView} setActiveView={setActiveView}>
+    <OwnerShell activeView={activeView} setActiveView={setActiveView} reviewSummary={reviewControlSummary}>
       {activeView === "Overview" && overview ? <OverviewPanel overview={overview} lifecycleCounts={lifecycleCounts} /> : null}
       {activeView === "Servers" ? <ServersPanel servers={servers} /> : null}
       {activeView === "Lifecycle" ? <LifecyclePanel lifecycleCounts={lifecycleCounts} /> : null}
       {activeView === "Resource Control" ? <ResourceControlPanel servers={servers} /> : null}
       {activeView === "Discord Control" && discordControl ? <DiscordControlPanel data={discordControl} /> : null}
       {activeView === "Event Control" && overview ? <EventControlPanel overview={overview} /> : null}
-      {activeView === "Review Control" ? <ReviewControlPanel /> : null}
+      {activeView === "Review Control" ? <ReviewControlPanel summary={reviewControlSummary} /> : null}
       {activeView === "Audit Log" ? <AuditLogPanel auditLog={auditLog} /> : null}
       {activeView === "Settings / Access" && overview ? <SettingsPanel overview={overview} /> : null}
     </OwnerShell>
   );
 }
 
-function OwnerShell({ activeView, setActiveView, children }: {
+function OwnerShell({ activeView, setActiveView, reviewSummary, children }: {
   activeView: NavItem;
   setActiveView: (view: NavItem) => void;
+  reviewSummary?: ReviewControlSummary;
   children: ReactNode;
 }) {
   useEffect(() => {
@@ -554,7 +600,14 @@ function OwnerShell({ activeView, setActiveView, children }: {
                     : "border-white/10 bg-white/[0.03] text-zinc-400 hover:border-white/20 hover:text-white"
                 }`}
               >
-                {item}
+                <span className="flex min-w-0 items-center justify-between gap-2">
+                  <span className="truncate">{item}</span>
+                  {item === "Review Control" && ownerReviewBadgeCount(reviewSummary) > 0 ? (
+                    <span className="shrink-0 rounded border border-amber-300/25 bg-amber-300/10 px-1.5 py-0.5 text-[9px] font-black uppercase text-amber-100">
+                      {formatOwnerConsoleCount(ownerReviewBadgeCount(reviewSummary))}
+                    </span>
+                  ) : null}
+                </span>
               </button>
             ))}
           </nav>
@@ -1469,23 +1522,44 @@ function DiscordEmbedPreview({ preview }: { preview: DiscordPreviewEmbed | null 
   );
 }
 
-function ReviewControlPanel() {
+function ReviewControlPanel({ summary }: { summary: ReviewControlSummary }) {
+  const queueCount = ownerReviewBadgeCount(summary);
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto lg:overflow-hidden">
       <PanelHeader eyebrow="Review Control" title="Owner review moderation" description="Reported reviews, pending reviews, owner replies and report triage are handled in the dedicated moderation queue." />
       <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-4">
           <StatusCard title="Review submission" value="Free player feature" tone="good" />
           <StatusCard title="Owner replies" value="Owner gated" tone="good" />
           <StatusCard title="Competitive impact" value="None" tone="good" />
+          <StatusCard title="Queue alerts" value={summary.status === "loading" ? "Checking" : formatOwnerConsoleCount(queueCount)} tone={queueCount > 0 ? "warn" : "good"} />
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <ReviewControlMiniMetric label="Unread Pulse" value={summary.notificationCounts.unread_total} loading={summary.status === "loading"} />
+          <ReviewControlMiniMetric label="Review notifications" value={summary.notificationCounts.review_notifications} loading={summary.status === "loading"} />
+          <ReviewControlMiniMetric label="Admin report patterns" value={summary.reportPatternCount} loading={summary.status === "loading"} />
         </div>
         <p className="mt-5 max-w-3xl text-sm leading-6 text-zinc-400">
           The queue stores moderation state and owner reply text only. It does not change leaderboard rank, discovery score, badges, seasons, event results, billing, or competitive eligibility.
         </p>
+        {summary.status === "unavailable" ? (
+          <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.04] px-3 py-2 text-xs font-bold text-amber-100">
+            Review queue badges are unavailable for this session. The queue page still performs its own entitlement and ownership checks.
+          </p>
+        ) : null}
         <Link href="/owner/reviews" className="mt-5 inline-flex rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 hover:bg-cyan-300/20">
           Open Review Queue
         </Link>
       </section>
+    </div>
+  );
+}
+
+function ReviewControlMiniMetric({ label, value, loading }: { label: string; value: number; loading: boolean }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/25 p-3">
+      <p className="text-xl font-black leading-none text-white">{loading ? "..." : formatOwnerConsoleCount(value)}</p>
+      <p className="mt-1 text-[10px] font-black uppercase tracking-[0.14em] text-zinc-500">{label}</p>
     </div>
   );
 }
@@ -1820,6 +1894,71 @@ function summarizePostTypes(postTypes: string[]) {
   if (postTypes.length === 0) return "No post types mapped";
   if (postTypes.length <= 2) return postTypes.join(", ");
   return `${postTypes.slice(0, 2).join(", ")} +${postTypes.length - 2}`;
+}
+
+function emptyReviewControlSummary(status: ReviewControlSummary["status"]): ReviewControlSummary {
+  return {
+    status,
+    role: null,
+    counts: {
+      total: 0,
+      needs_review: 0,
+      pending: 0,
+      reported: 0,
+      approved: 0,
+      replied: 0,
+    },
+    notificationCounts: {
+      unread_total: 0,
+      review_notifications: 0,
+      review_queue: 0,
+    },
+    reportPatternCount: 0,
+  };
+}
+
+function normalizeReviewControlSummary(payload: Record<string, unknown>): ReviewControlSummary {
+  const counts = ownerObjectValue(payload.counts);
+  const notificationCounts = ownerObjectValue(payload.notification_counts);
+  const reportPatterns = Array.isArray(payload.report_patterns) ? payload.report_patterns : [];
+  const role = payload.role === "owner" || payload.role === "admin" ? payload.role : null;
+  return {
+    status: "ready",
+    role,
+    counts: {
+      total: ownerNumberValue(counts.total),
+      needs_review: ownerNumberValue(counts.needs_review),
+      pending: ownerNumberValue(counts.pending),
+      reported: ownerNumberValue(counts.reported),
+      approved: ownerNumberValue(counts.approved),
+      replied: ownerNumberValue(counts.replied),
+    },
+    notificationCounts: {
+      unread_total: ownerNumberValue(notificationCounts.unread_total),
+      review_notifications: ownerNumberValue(notificationCounts.review_notifications),
+      review_queue: ownerNumberValue(notificationCounts.review_queue),
+    },
+    reportPatternCount: reportPatterns.length,
+  };
+}
+
+function ownerReviewBadgeCount(summary: ReviewControlSummary | undefined) {
+  if (!summary || summary.status !== "ready") return 0;
+  return Math.max(summary.counts.needs_review, summary.notificationCounts.review_notifications, summary.notificationCounts.review_queue);
+}
+
+function ownerObjectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function ownerNumberValue(value: unknown) {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? Math.max(0, Math.trunc(numeric)) : 0;
+}
+
+function formatOwnerConsoleCount(value: number) {
+  const count = Math.max(0, Math.trunc(Number(value) || 0));
+  return count > 99 ? "99+" : String(count);
 }
 
 function formatDate(value?: string | null) {
