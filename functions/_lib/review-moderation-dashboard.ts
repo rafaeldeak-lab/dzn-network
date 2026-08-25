@@ -1,6 +1,6 @@
 import { isDznAdminDiscordId } from "./admin";
 import { requireDb } from "./db";
-import { countUnreadNotifications, createNotification } from "./dzn-pulse";
+import { countUnreadNotifications, countUnreadReviewNotifications, createNotification } from "./dzn-pulse";
 import { json } from "./http";
 import {
   getRequestSessionUser,
@@ -504,7 +504,7 @@ export async function notifyReviewModerationOwner(env: Env, input: {
     return await createNotification(env, {
       userId: input.ownerUserId,
       serverId: input.linkedServerId,
-      type: "dzn_announcement",
+      type: reviewPulseNotificationType(input.kind),
       title: input.title,
       body: input.body,
       actionUrl: `/dashboard/reviews?review=${encodeURIComponent(input.reviewId)}`,
@@ -657,23 +657,10 @@ async function readModerationNotificationCounts(
   actor: ReviewModerationActor,
   counts: ReviewModerationCounts,
 ): Promise<ReviewModerationNotificationCounts> {
-  const unreadTotal = await countUnreadNotifications(env, actor.user).catch(() => 0);
-  let reviewNotifications = 0;
-  if (unreadTotal > 0) {
-    const row = await requireDb(env)
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM user_notifications
-         WHERE user_id = ?
-           AND read_at IS NULL
-           AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
-           AND action_url LIKE '/dashboard/reviews%'`,
-      )
-      .bind(actor.user.id)
-      .first<{ count: number | null }>()
-      .catch(() => null);
-    reviewNotifications = countValue(row?.count);
-  }
+  const [unreadTotal, reviewNotifications] = await Promise.all([
+    countUnreadNotifications(env, actor.user).catch(() => 0),
+    countUnreadReviewNotifications(env, actor.user).catch(() => 0),
+  ]);
 
   return {
     unread_total: countValue(unreadTotal),
@@ -811,6 +798,13 @@ function scopedReviewConditions(actor: ReviewModerationActor, bindings: unknown[
 
 function reportPatternExpression() {
   return "COALESCE(NULLIF(LOWER(TRIM(server_review_reports.reason)), ''), 'no_reason')";
+}
+
+function reviewPulseNotificationType(kind: string) {
+  const normalized = kind.trim().toLowerCase();
+  if (normalized.startsWith("bulk_")) return "review_bulk_triage";
+  if (normalized.includes("pending") || normalized.includes("report")) return "review_needs_moderation";
+  return "review_moderation_alert";
 }
 
 function countValue(value: unknown) {
