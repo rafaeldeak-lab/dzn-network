@@ -40,7 +40,7 @@ The hub shows:
 - The hub endpoint reuses `getPlayerCommunitiesPayload` and normalizes matched community servers into safe player links.
 - Saved/followed server preference storage is additive in `migrations/0060_player_hub_foundation.sql` as `player_saved_servers`.
 - Saved/followed state is player preference data only. It must not affect leaderboard rank, server score, event scoring, badges, XP, reviews, or matchmaking outcomes.
-- The hub endpoint is read-only in this slice; save/follow mutation controls are intentionally reserved for a later player-preference slice.
+- The hub endpoint remains read-only. The stacked Player Saved Servers slice adds the separate `/api/player/saved-servers` preference endpoint and public save/follow buttons without changing hub scoring or owner access.
 
 ## Production Safety
 

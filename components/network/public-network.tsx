@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   ArrowRight,
   BarChart3,
+  Bookmark,
   CheckCircle2,
   Clock3,
   Compass,
@@ -177,6 +178,31 @@ type PublicServer = {
   access_level?: "full" | "preview";
   is_locked?: boolean;
   locked_reason?: string | null;
+};
+
+type SavedServerPreference = {
+  linked_server_id: string;
+  public_slug: string | null;
+  server_name?: string | null;
+  saved_at?: string | null;
+  updated_at?: string | null;
+  source?: string | null;
+};
+
+type SavedServersResponse = {
+  ok?: boolean;
+  source?: "saved" | "not_configured" | "unavailable";
+  saved_servers?: SavedServerPreference[];
+  saved_server_ids?: string[];
+  saved_server_slugs?: string[];
+  error?: string;
+  message?: string;
+};
+
+type SavedServerControls = {
+  savedServerIds: ReadonlySet<string>;
+  saveBusyIds: ReadonlySet<string>;
+  onToggleSavedServer: (server: PublicServer) => void;
 };
 
 type AdvancedBoardRow = {
@@ -446,6 +472,8 @@ export function PublicNetwork() {
   const [loadState, setLoadState] = useState<PublicLoadState>(() => initialCache ? "loaded" : "loading_initial");
   const [error, setError] = useState("");
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [savedServerIds, setSavedServerIds] = useState<Set<string>>(() => new Set());
+  const [saveBusyIds, setSaveBusyIds] = useState<Set<string>>(() => new Set());
   const visibleDataRef = useRef(Boolean(initialCache));
 
   useEffect(() => {
@@ -559,12 +587,105 @@ export function PublicNetwork() {
     return () => controller.abort();
   }, [reloadNonce, slug]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadSavedServers() {
+      try {
+        const response = await fetch("/api/player/saved-servers", {
+          cache: "no-store",
+          credentials: "include",
+          headers: { accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        if (response.status === 401 || response.status === 403) {
+          setSavedServerIds(new Set());
+          return;
+        }
+        if (!response.ok) return;
+        const data = await response.json() as SavedServersResponse;
+        const nextIds = new Set<string>();
+        for (const id of data.saved_server_ids ?? []) {
+          if (typeof id === "string" && id.trim()) nextIds.add(id);
+        }
+        for (const item of data.saved_servers ?? []) {
+          if (item.linked_server_id) nextIds.add(item.linked_server_id);
+        }
+        setSavedServerIds(nextIds);
+      } catch {
+        if (!controller.signal.aborted) setSavedServerIds(new Set());
+      }
+    }
+
+    loadSavedServers();
+    return () => controller.abort();
+  }, []);
+
+  const handleToggleSavedServer = useCallback(async (targetServer: PublicServer) => {
+    const saveKey = serverSaveKey(targetServer);
+    if (!saveKey || saveBusyIds.has(saveKey)) return;
+
+    const currentlySaved = savedServerIds.has(saveKey);
+    setSaveBusyIds((current) => {
+      const next = new Set(current);
+      next.add(saveKey);
+      return next;
+    });
+
+    try {
+      const response = await fetch("/api/player/saved-servers", {
+        method: currentlySaved ? "DELETE" : "POST",
+        credentials: "include",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          linked_server_id: targetServer.linked_server_id,
+          public_slug: targetServer.public_slug,
+        }),
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        const returnTo = `${window.location.pathname}${window.location.search}`;
+        window.location.href = `/login?returnTo=${encodeURIComponent(returnTo)}`;
+        return;
+      }
+
+      const payload = await response.json().catch(() => ({} as SavedServersResponse));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.message ?? "Saved server preference could not be updated.");
+      }
+
+      setSavedServerIds((current) => {
+        const next = new Set(current);
+        if (currentlySaved) next.delete(saveKey);
+        else next.add(saveKey);
+        return next;
+      });
+    } catch (saveError) {
+      console.warn("DZN PLAYER SAVED SERVER UPDATE FAILED", saveError);
+    } finally {
+      setSaveBusyIds((current) => {
+        const next = new Set(current);
+        next.delete(saveKey);
+        return next;
+      });
+    }
+  }, [saveBusyIds, savedServerIds]);
+
   const sortedServers = useMemo(() => [...servers].sort((a, b) => serverSortRank(a) - serverSortRank(b)), [servers]);
   const filteredServers = useMemo(
     () => (filter === "All" ? sortedServers : sortedServers.filter((item) => item.server_type === filter)),
     [filter, sortedServers],
   );
   const calculatedStats = useMemo(() => stats ?? buildStats(servers), [stats, servers]);
+  const savedControls = useMemo<SavedServerControls>(() => ({
+    savedServerIds,
+    saveBusyIds,
+    onToggleSavedServer: handleToggleSavedServer,
+  }), [handleToggleSavedServer, saveBusyIds, savedServerIds]);
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#02030a] text-white">
@@ -572,9 +693,9 @@ export function PublicNetwork() {
       <div className="relative z-10 flex min-h-screen flex-col">
         <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-5 py-6 sm:px-6 lg:px-8">
           {slug ? (
-            <ServerProfileShell server={server} loading={loading} error={error} loadState={loadState} onRetry={() => setReloadNonce((value) => value + 1)} />
+            <ServerProfileShell server={server} loading={loading} error={error} loadState={loadState} onRetry={() => setReloadNonce((value) => value + 1)} savedControls={savedControls} />
           ) : (
-            <ServerBrowser servers={filteredServers} allServers={servers} groups={serverGroups} stats={calculatedStats} filter={filter} setFilter={setFilter} loading={loading} loadState={loadState} error={error} onRetry={() => setReloadNonce((value) => value + 1)} />
+            <ServerBrowser servers={filteredServers} allServers={servers} groups={serverGroups} stats={calculatedStats} filter={filter} setFilter={setFilter} loading={loading} loadState={loadState} error={error} onRetry={() => setReloadNonce((value) => value + 1)} savedControls={savedControls} />
           )}
         </div>
       </div>
@@ -593,6 +714,7 @@ function ServerBrowser({
   loadState,
   error,
   onRetry,
+  savedControls,
 }: {
   servers: PublicServer[];
   allServers: PublicServer[];
@@ -604,6 +726,7 @@ function ServerBrowser({
   loadState: PublicLoadState;
   error: string;
   onRetry: () => void;
+  savedControls: SavedServerControls;
 }) {
   const isPreview = allServers.some((server) => server.is_locked);
   const initialError = loadState === "error_initial";
@@ -671,7 +794,7 @@ function ServerBrowser({
         {error ? <MessagePanel message={error} onRetry={onRetry} /> : null}
         {loading ? <ServerSkeletonGrid /> : null}
         {!loading && !error && realEmpty && servers.length === 0 ? <EmptyPublicState /> : null}
-        {!loading && !error && !realEmpty ? <VisibilityDiscoverySections groups={visibleGroups} /> : null}
+        {!loading && !error && !realEmpty ? <VisibilityDiscoverySections groups={visibleGroups} savedControls={savedControls} /> : null}
         {!loading && servers.length > 0 ? (
           <section className="mt-8" aria-label="Standard server directory">
             <VisibilitySectionHeader
@@ -683,7 +806,7 @@ function ServerBrowser({
             />
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
               {servers.map((item, index) => (
-                <ServerCard key={item.public_slug} server={item} index={index} />
+                <ServerCard key={item.public_slug} server={item} index={index} savedControls={savedControls} />
               ))}
             </div>
           </section>
@@ -693,7 +816,7 @@ function ServerBrowser({
   );
 }
 
-function VisibilityDiscoverySections({ groups }: { groups: PublicServerGroups }) {
+function VisibilityDiscoverySections({ groups, savedControls }: { groups: PublicServerGroups; savedControls: SavedServerControls }) {
   const spotlightServers = groups.spotlightServers.slice(0, 3);
   const spotlightIds = new Set(spotlightServers.map((server) => server.linked_server_id));
   const featuredServers = groups.featuredServers.filter((server) => !spotlightIds.has(server.linked_server_id)).slice(0, 4);
@@ -716,7 +839,7 @@ function VisibilityDiscoverySections({ groups }: { groups: PublicServerGroups })
           />
           <div className="mt-4 grid gap-4 xl:grid-cols-3">
             {spotlightServers.map((server, index) => (
-              <DiscoveryServerCard key={`spotlight-${server.linked_server_id}`} server={server} index={index} variant="spotlight" />
+              <DiscoveryServerCard key={`spotlight-${server.linked_server_id}`} server={server} index={index} variant="spotlight" savedControls={savedControls} />
             ))}
           </div>
         </section>
@@ -733,7 +856,7 @@ function VisibilityDiscoverySections({ groups }: { groups: PublicServerGroups })
           />
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             {featuredServers.map((server, index) => (
-              <DiscoveryServerCard key={`featured-${server.linked_server_id}`} server={server} index={index} variant="featured" />
+              <DiscoveryServerCard key={`featured-${server.linked_server_id}`} server={server} index={index} variant="featured" savedControls={savedControls} />
             ))}
           </div>
         </section>
@@ -750,7 +873,7 @@ function VisibilityDiscoverySections({ groups }: { groups: PublicServerGroups })
           />
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {recommendedServers.map((server, index) => (
-              <DiscoveryServerCard key={`recommended-${server.linked_server_id}`} server={server} index={index} variant="recommended" />
+              <DiscoveryServerCard key={`recommended-${server.linked_server_id}`} server={server} index={index} variant="recommended" savedControls={savedControls} />
             ))}
           </div>
         </section>
@@ -795,7 +918,17 @@ function VisibilitySectionHeader({
   );
 }
 
-function DiscoveryServerCard({ server, index, variant }: { server: PublicServer; index: number; variant: "spotlight" | "featured" | "recommended" }) {
+function DiscoveryServerCard({
+  server,
+  index,
+  variant,
+  savedControls,
+}: {
+  server: PublicServer;
+  index: number;
+  variant: "spotlight" | "featured" | "recommended";
+  savedControls: SavedServerControls;
+}) {
   const visualCardStyle = server.cardStyle ?? server.visualLoadout?.cardStyle ?? server.planVisualTreatment?.cardTreatment ?? "standard";
   const visualAccent = server.accentColour ?? server.visualLoadout?.accentColour ?? server.profileFrame?.glowColour ?? null;
   const cardAccentStyle: VisualAccentStyle | undefined = visualAccent ? { "--dzn-card-accent": visualAccent } : undefined;
@@ -851,16 +984,19 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
           </div>
         ) : null}
 
-        <div className="mt-auto flex items-center justify-between gap-3 border-t border-white/10 pt-3">
-          <p className="min-w-0 truncate text-[10px] font-bold uppercase text-zinc-500">{formatPublicVisibilitySummary(server.visibilityExplanation?.summary) ?? "Discovery placement"}</p>
-          <Link
-            href={publicServerProfileHref(server.public_slug)}
-            onClick={() => trackPromotionEvent(server.linked_server_id, activePromotionId, "click", trackingSource)}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400"
-          >
-            View
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+        <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-3">
+          <p className="min-w-0 flex-1 truncate text-[10px] font-bold uppercase text-zinc-500">{formatPublicVisibilitySummary(server.visibilityExplanation?.summary) ?? "Discovery placement"}</p>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <SaveServerButton server={server} savedControls={savedControls} compact />
+            <Link
+              href={publicServerProfileHref(server.public_slug)}
+              onClick={() => trackPromotionEvent(server.linked_server_id, activePromotionId, "click", trackingSource)}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400"
+            >
+              View
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
         </div>
       </div>
     </motion.article>
@@ -967,7 +1103,7 @@ function LoginToUnlockBanner({
   );
 }
 
-function ServerCard({ server, index }: { server: PublicServer; index: number }) {
+function ServerCard({ server, index, savedControls }: { server: PublicServer; index: number; savedControls: SavedServerControls }) {
   const tags = parseTags(server.tags_json);
   const scoreTitle = scoreBreakdownTitle(server.score_breakdown);
   const isLocked = Boolean(server.is_locked);
@@ -1040,15 +1176,51 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
           {tags.length ? tags.map((tag) => <span key={tag} className="rounded-md border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-bold text-cyan-100">{tag}</span>) : <span className="text-sm text-zinc-500">No tags listed</span>}
         </div>
 
-        <div className="mt-6 flex items-center justify-between border-t border-white/10 pt-4">
-          <p className="text-xs font-bold uppercase text-zinc-500">{publicCardFooter(server)}</p>
-          <Link href={publicServerProfileHref(server.public_slug)} className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.3)] transition hover:bg-violet-400">
-            View Server
-            <ArrowRight className="h-4 w-4" />
-          </Link>
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
+          <p className="min-w-[180px] flex-1 text-xs font-bold uppercase text-zinc-500">{publicCardFooter(server)}</p>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <SaveServerButton server={server} savedControls={savedControls} />
+            <Link href={publicServerProfileHref(server.public_slug)} className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.3)] transition hover:bg-violet-400">
+              View Server
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
         </div>
       </div>
     </motion.article>
+  );
+}
+
+function SaveServerButton({
+  server,
+  savedControls,
+  compact = false,
+}: {
+  server: PublicServer;
+  savedControls: SavedServerControls;
+  compact?: boolean;
+}) {
+  const saveKey = serverSaveKey(server);
+  const isSaved = saveKey ? savedControls.savedServerIds.has(saveKey) : false;
+  const busy = saveKey ? savedControls.saveBusyIds.has(saveKey) : false;
+  const label = busy ? "Saving..." : compact ? (isSaved ? "Saved" : "Save") : (isSaved ? "Saved Server" : "Save Server");
+
+  return (
+    <button
+      type="button"
+      disabled={!saveKey || busy}
+      aria-pressed={isSaved}
+      aria-label={`${isSaved ? "Remove saved server" : "Save server"}: ${server.server_name}`}
+      onClick={() => savedControls.onToggleSavedServer(server)}
+      className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-[10px] font-black uppercase transition disabled:cursor-not-allowed disabled:opacity-60 ${
+        isSaved
+          ? "border-emerald-300/40 bg-emerald-400/14 text-emerald-50 shadow-[0_0_18px_rgba(52,211,153,0.16)] hover:border-emerald-200/70"
+          : "border-cyan-300/24 bg-cyan-300/10 text-cyan-50 hover:border-cyan-200/55 hover:bg-cyan-300/16"
+      }`}
+    >
+      {isSaved ? <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> : <Bookmark className="h-3.5 w-3.5" aria-hidden="true" />}
+      {label}
+    </button>
   );
 }
 
@@ -1259,12 +1431,14 @@ function ServerProfileShell({
   error,
   loadState,
   onRetry,
+  savedControls,
 }: {
   server: PublicServer | null;
   loading: boolean;
   error: string;
   loadState: PublicLoadState;
   onRetry: () => void;
+  savedControls: SavedServerControls;
 }) {
   if (loading) {
     return (
@@ -1284,12 +1458,12 @@ function ServerProfileShell({
   return (
     <>
       {loadState === "refresh_failed" && error ? <MessagePanel message={error} onRetry={onRetry} /> : null}
-      <ServerProfile server={server} />
+      <ServerProfile server={server} savedControls={savedControls} />
     </>
   );
 }
 
-function ServerProfile({ server }: { server: PublicServer }) {
+function ServerProfile({ server, savedControls }: { server: PublicServer; savedControls: SavedServerControls }) {
   const tags = parseTags(server.tags_json);
   const isLocked = Boolean(server.is_locked);
   const statsPending = server.stats_sync === "Pending";
@@ -1374,10 +1548,13 @@ function ServerProfile({ server }: { server: PublicServer }) {
   return (
     <div className="relative pb-12 pt-6">
       <div className="pointer-events-none absolute inset-x-[-12vw] top-10 -z-10 h-[520px] bg-[radial-gradient(circle_at_18%_18%,rgba(139,92,246,0.28),transparent_34%),radial-gradient(circle_at_88%_12%,rgba(34,211,238,0.16),transparent_28%)] blur-2xl" />
-      <Link href="/servers" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white">
-        <ArrowLeft className="h-4 w-4" />
-        Back to servers
-      </Link>
+      <div className="flex flex-wrap items-center gap-3">
+        <Link href="/servers" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white">
+          <ArrowLeft className="h-4 w-4" />
+          Back to servers
+        </Link>
+        <SaveServerButton server={server} savedControls={savedControls} />
+      </div>
 
       <motion.header initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.42 }} className={`relative mt-5 overflow-hidden rounded-xl border border-white/10 bg-[#050815]/78 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl ${visualCardStyle !== "standard" ? `dzn-profile-header--visual-${visualCardStyle}` : ""}`} style={profileAccentStyle}>
         <ServerThemeBanner theme={server.themeBanner} overlay />
@@ -2707,6 +2884,10 @@ function advertisingRank(server: PublicServer) {
 
 function publicServerProfileHref(slug: string) {
   return `/servers/profile?slug=${encodeURIComponent(slug)}`;
+}
+
+function serverSaveKey(server: PublicServer) {
+  return server.linked_server_id || server.public_slug || "";
 }
 
 function trackPromotionEvent(serverId: string, promotionId: string | null, eventType: "impression" | "click", source: string) {
