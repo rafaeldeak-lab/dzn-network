@@ -46,7 +46,7 @@ The dedicated `/pricing` page is the complete owner-plan and payment page:
 - Answers for fairness, bought badges, Starter server competition, and what Pro improves.
 - Clear copy that payment improves owner tools, presentation, publishing, promotion, analytics, and automation, not competitive results.
 - A visibly stronger Pro column/list than Starter, with more owner features and a bolder custom DZN presentation that makes the upgrade path obvious without claiming a competitive advantage.
-- A future visual pass should use DZN-themed background art with subtle slow pan/zoom motion so the pricing page feels alive, while respecting reduced-motion users.
+- A DZN-themed animated background treatment using subtle slow pan/zoom motion so the pricing page feels alive, while respecting reduced-motion users.
 
 ## Identity And Roles
 
@@ -163,7 +163,7 @@ Future slices should build on this foundation in this order unless product prior
 
 1. Player Hub: player home, followed communities, suggested servers/events, saved servers, profile entry points.
 2. Saved/followed server interaction: `POST`/`DELETE /api/player/saved-servers`, save/follow buttons on public cards and profiles, and tests proving saved state is a private player preference only.
-3. Pricing page visual/comparison upgrade: dedicated pricing page with red X and green tick comparison, stronger Pro feature depth, bolder DZN styling, and subtle animated background treatment that respects reduced motion.
+3. Pricing page visual/comparison upgrade: delivered as its own slice with red X and green tick comparison, stronger Pro feature depth, bolder DZN styling, and subtle animated background treatment that respects reduced motion.
 4. Reviews: player reviews, owner replies, reporting/moderation, review fairness controls.
 5. Challenges, XP, calling cards: earned progression, challenge participation, cosmetics, and fair unlock rules.
 6. Events and tournaments: join requests, approvals, teams, schedules, brackets, reminders, and player history.
@@ -213,6 +213,19 @@ Saved server state is private preference data:
 - It must not write or recalculate rankings, discovery score, billing, server ownership, reviews, events, tournaments, Server Wars, badges, XP, challenge results, or competitive eligibility.
 - Public discovery and leaderboard APIs must not consume `player_saved_servers` as a ranking input.
 - Saving a server must not make the player an owner/manager of that server.
+
+## Pricing Visual Comparison Upgrade Slice
+
+The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
+
+The slice adds:
+
+- Clear green ticks and red X marks for the Starter vs Pro comparison table.
+- A visibly richer Pro plan list than Starter, focused on owner tooling, presentation, publishing cadence, promotion, analytics, Discord destinations, visual treatment, and upgrade paths.
+- DZN-specific card artwork and a DZN-themed animated background using slow pan/zoom motion with reduced-motion fallback.
+- Fairness rows that make paid leaderboard, review-score, and season/crown boosts explicitly unavailable on both plans.
+
+Live checkout remains disabled by default. The page may explain that a later approved go-live can enable `DZN_LIVE_CHECKOUT_ENABLED=true`, but this slice must not assign that value, mutate Stripe, update Cloudflare secrets, write production D1, call Nitrado, change Discord resources, or merge the live-payment activation path. Issue #49 remains reserved for final live checkout activation.
 
 ## Access Matrix
 

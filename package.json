@@ -86,6 +86,7 @@
     "seed:dzn-pulse-demo": "tsx scripts/seed-dzn-pulse-demo.ts",
     "test:public-profile-sync": "tsx scripts/test-public-profile-sync.ts",
     "test:billing-plans": "tsx scripts/test-billing-plans.ts",
+    "test:pricing-visual-upgrade": "tsx scripts/test-pricing-visual-upgrade.ts",
     "test:stripe-live-readiness": "tsx scripts/test-stripe-live-readiness.ts",
     "test:stripe-live-activation-checklist": "tsx scripts/test-stripe-live-activation-checklist.ts",
     "test:billing-integrity": "tsx scripts/test-billing-integrity.ts",

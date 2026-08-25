@@ -9350,3 +9350,66 @@ button.dzn-header-action {
     animation: none !important;
   }
 }
+
+.dzn-pricing-bg-layer {
+  opacity: 0.64;
+  filter: saturate(1.16) contrast(1.08) brightness(0.62);
+  transform: translate3d(-0.5rem, -0.35rem, 0) scale(1.045);
+  transform-origin: center;
+  animation: dzn-pricing-bg-drift 28s ease-in-out infinite alternate;
+}
+
+.dzn-pricing-fog-layer {
+  opacity: 0.58;
+  filter: saturate(1.2) contrast(1.08) brightness(0.82);
+  mix-blend-mode: screen;
+  transform: translate3d(0.4rem, 0.35rem, 0) scale(1.075);
+  transform-origin: center;
+  animation: dzn-pricing-fog-drift 36s ease-in-out infinite alternate;
+}
+
+@keyframes dzn-pricing-bg-drift {
+  0% {
+    transform: translate3d(-0.75rem, -0.45rem, 0) scale(1.045);
+  }
+
+  50% {
+    transform: translate3d(0.35rem, 0.15rem, 0) scale(1.072);
+  }
+
+  100% {
+    transform: translate3d(0.85rem, 0.45rem, 0) scale(1.058);
+  }
+}
+
+@keyframes dzn-pricing-fog-drift {
+  0% {
+    opacity: 0.46;
+    transform: translate3d(0.55rem, 0.25rem, 0) scale(1.075);
+  }
+
+  45% {
+    opacity: 0.66;
+  }
+
+  100% {
+    opacity: 0.54;
+    transform: translate3d(-0.85rem, -0.45rem, 0) scale(1.108);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dzn-pricing-bg-layer,
+  .dzn-pricing-fog-layer {
+    animation: none !important;
+  }
+
+  .dzn-pricing-bg-layer {
+    transform: scale(1.045);
+  }
+
+  .dzn-pricing-fog-layer {
+    opacity: 0.46;
+    transform: scale(1.075);
+  }
+}
