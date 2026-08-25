@@ -52,8 +52,11 @@ type FakeAwardSource = {
   id: string;
   user_id: string;
   challenge_id: string;
+  linked_server_id: string | null;
   source_type: string;
   source_id: string;
+  source_table: string | null;
+  adapter_key: string | null;
   progress_value: number;
   verification_status: string;
   verified_at: string;
@@ -61,6 +64,10 @@ type FakeAwardSource = {
   processed_at: string | null;
   result_status: string;
   result_message: string | null;
+  attempt_count: number;
+  last_attempted_at: string | null;
+  retry_count: number;
+  last_retried_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -282,7 +289,7 @@ function assertStaticContract() {
   const platformSpec = read("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md");
   assert.equal(platformSpec.includes("Authoritative Progression Awards Slice"), true);
   assert.equal(platformSpec.includes("`/api/cron/player-progression/awards`"), true);
-  assert.equal(platformSpec.includes("Cron secret only, verified award facts"), true);
+  assert.equal(platformSpec.includes("Cron secret only, verified award fact collection, retry, and award processing"), true);
 
   const publicPolicy = read("docs/PUBLIC_ACCESS_POLICY.md");
   assert.equal(publicPolicy.includes("`/api/cron/player-progression/awards` is not a public or player endpoint"), true);
@@ -449,6 +456,30 @@ class FakeProgressionStatement {
       return result<T>(duplicate ? 0 : 1);
     }
     if (normalized.startsWith("update player_progression_award_sources")) {
+      if (normalized.includes("retry_count = coalesce")) {
+        const [retriedAt, updatedAt] = this.bindings;
+        let changed = 0;
+        for (const row of this.db.awardSources.filter((item) => item.verification_status === "verified" && item.result_status === "failed")) {
+          row.result_status = "pending";
+          row.result_message = "Retry scheduled by protected progression award job.";
+          row.processed_at = null;
+          row.retry_count += 1;
+          row.last_retried_at = String(retriedAt);
+          row.updated_at = String(updatedAt);
+          changed += 1;
+        }
+        return result<T>(changed);
+      }
+      if (normalized.includes("attempt_count = coalesce")) {
+        const [attemptedAt, updatedAt, id] = this.bindings;
+        const row = this.db.awardSources.find((item) => item.id === String(id) && item.result_status === "pending");
+        if (row) {
+          row.attempt_count += 1;
+          row.last_attempted_at = String(attemptedAt);
+          row.updated_at = String(updatedAt);
+        }
+        return result<T>(row ? 1 : 0);
+      }
       const [status, message, processedAt, updatedAt, id] = this.bindings;
       const row = this.db.awardSources.find((item) => item.id === String(id));
       if (row) {
@@ -588,13 +619,30 @@ function challengeRows(): FakeChallenge[] {
 }
 
 function sourceRowFromBindings(bindings: unknown[]): FakeAwardSource {
-  const [id, userId, challengeId, sourceType, sourceId, progressValue, verifiedAt, evidenceJson, createdAt, updatedAt] = bindings;
+  const [
+    id,
+    userId,
+    challengeId,
+    linkedServerId,
+    sourceType,
+    sourceId,
+    sourceTable,
+    adapterKey,
+    progressValue,
+    verifiedAt,
+    evidenceJson,
+    createdAt,
+    updatedAt,
+  ] = bindings;
   return {
     id: String(id),
     user_id: String(userId),
     challenge_id: String(challengeId),
+    linked_server_id: linkedServerId === null || linkedServerId === undefined ? null : String(linkedServerId),
     source_type: String(sourceType),
     source_id: String(sourceId),
+    source_table: sourceTable === null || sourceTable === undefined ? null : String(sourceTable),
+    adapter_key: adapterKey === null || adapterKey === undefined ? null : String(adapterKey),
     progress_value: Number(progressValue),
     verification_status: "verified",
     verified_at: String(verifiedAt),
@@ -602,6 +650,10 @@ function sourceRowFromBindings(bindings: unknown[]): FakeAwardSource {
     processed_at: null,
     result_status: "pending",
     result_message: null,
+    attempt_count: 0,
+    last_attempted_at: null,
+    retry_count: 0,
+    last_retried_at: null,
     created_at: String(createdAt),
     updated_at: String(updatedAt),
   };
