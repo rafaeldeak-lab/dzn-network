@@ -1,9 +1,10 @@
-import { getSessionUser, requireDb } from "../../_lib/db";
+import { requireDb } from "../../_lib/db";
 import { canManageDiscordGuild } from "../../_lib/discord";
 import { DiscordChannelFetchError, fetchDiscordPostingChannels } from "../../_lib/discord-posting";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, mockGuilds } from "../../_lib/mock";
-import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
+import { ownerAccessErrorResponse, requireOwnerRequestAccess } from "../../_lib/owner-access";
+import type { Env, PagesFunction } from "../../_lib/types";
 
 type ManagedGuild = {
   guild_id: string;
@@ -15,8 +16,9 @@ type ManagedGuild = {
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
 
-  const user = await resolveUser(env, request);
-  if (!user) return json({ error: "Unauthorized", error_code: "not_authorized" }, { status: 401 });
+  const ownerAccess = await requireOwnerRequestAccess(env, request);
+  if (!ownerAccess.allowed) return ownerAccessErrorResponse(ownerAccess);
+  const user = ownerAccess.user!;
 
   const url = new URL(request.url);
   const guildId = normalizeDiscordId(url.searchParams.get("guild_id"));
@@ -116,17 +118,6 @@ async function requireManagedGuild(env: Env, userId: string, guildId: string): P
   const owner = Boolean(guild.is_owner);
   const permissions = typeof guild.permissions === "string" ? guild.permissions : String(guild.permissions ?? "0");
   return canManageDiscordGuild({ owner, permissions }) ? guild : null;
-}
-
-async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {
-  const user = await getSessionUser(env, request);
-  if (user || !isMockAuth(env.MOCK_AUTH)) return user;
-  return {
-    id: "mock-user",
-    discord_id: "mock-discord-user",
-    username: "RafaelDeak",
-    avatar: null,
-  };
 }
 
 function botStatusResponse(input: {

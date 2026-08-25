@@ -56,7 +56,7 @@ const rootHeaderHiddenPrefixes = [
 
 const loggedOutHeaderLinks: HeaderNavLink[] = [
   { href: "/#features", label: "Features", active: "features" },
-  { href: "/#pricing", label: "Pricing", active: "pricing" },
+  { href: "/pricing", label: "Pricing", active: "pricing" },
 ];
 
 const starterHeaderLinks: HeaderNavLink[] = [
@@ -174,7 +174,9 @@ export function SiteHeader({
   const planTier = resolvedNavigation?.plan_tier ?? "free";
   const navLinks = resolvedAuthenticated ? authenticatedHeaderLinksForTier(planTier) : loggedOutHeaderLinks;
   const primaryAction = resolvedNavigation?.primary_action ?? defaultPrimaryActionForTier(planTier);
-  const showAddServer = resolvedAuthenticated && (resolvedNavigation?.can_link_more_servers ?? true);
+  const canUseOwnerTools = Boolean(resolvedNavigation?.can_use_owner_tools);
+  const showOwnerDashboard = resolvedAuthenticated && canUseOwnerTools && primaryAction.href !== "/dashboard";
+  const showAddServer = resolvedAuthenticated && canUseOwnerTools && Boolean(resolvedNavigation?.can_link_more_servers);
 
   return (
     <DznPulseProvider>
@@ -210,14 +212,14 @@ export function SiteHeader({
                 <span>{resolvedNavigation?.plan_label ?? "Free"}</span>
                 <small>{headerPlanDetail(resolvedNavigation)}</small>
               </span>
-              {primaryAction.href === "/dashboard" ? null : (
+              {showOwnerDashboard ? (
                 <Link href="/dashboard" className="dzn-header-action">
                   Dashboard
                 </Link>
-              )}
+              ) : null}
               {showAddServer ? (
                 <Link href="/setup" className="dzn-header-action dzn-header-action--primary">
-                  {planTier === "free" ? "Start Setup" : "Add Your Server"}
+                  Add Your Server
                 </Link>
               ) : null}
               <Link href={primaryAction.href} className={`dzn-header-action dzn-header-action--package dzn-header-action--package-${primaryAction.tone}`}>
@@ -322,6 +324,7 @@ function HeaderLogoVideo() {
 function activeFromPathname(pathname: string): SiteHeaderActive | undefined {
   if (pathname.startsWith("/leaderboards")) return "leaderboards";
   if (pathname.startsWith("/servers")) return "servers";
+  if (pathname.startsWith("/pricing")) return "pricing";
   if (pathname.startsWith("/events")) return "events";
   if (pathname.startsWith("/dashboard")) return "dashboard";
   return undefined;
@@ -347,13 +350,14 @@ function normalizeHeaderNavigation(value: unknown): AuthNavigationSummary | null
 }
 
 function defaultPrimaryActionForTier(tier: HeaderPlanTier): HeaderPrimaryAction {
-  if (tier === "pro") return { label: "Pro Tools", href: "/dashboard", tone: "pro" };
-  if (tier === "starter") return { label: "Upgrade to Pro", href: "/#pricing", tone: "upgrade" };
-  return { label: "Start Trial", href: "/#pricing", tone: "trial" };
+  if (tier === "pro") return { label: "Owner Dashboard", href: "/dashboard", tone: "pro" };
+  if (tier === "starter") return { label: "Upgrade to Pro", href: "/pricing?intent=pro&returnTo=%2Fdashboard", tone: "upgrade" };
+  return { label: "Owner Plans", href: "/pricing?intent=owner_setup&returnTo=%2Fsetup", tone: "trial" };
 }
 
 function headerPlanTitle(navigation: AuthNavigationSummary | null) {
   if (!navigation) return "DZN account plan loading";
+  if (!navigation.can_use_owner_tools) return `${navigation.plan_label} player account - owner plan required for setup`;
   return `${navigation.plan_label} account - ${navigation.linked_server_count}/${navigation.linked_server_limit} server slots used`;
 }
 
@@ -361,5 +365,5 @@ function headerPlanDetail(navigation: AuthNavigationSummary | null) {
   if (!navigation) return "Account";
   if (navigation.plan_tier === "pro") return "Pro tools";
   if (navigation.plan_tier === "starter") return navigation.plan_status.toLowerCase() === "trialing" ? "Trial access" : "Starter access";
-  return "Trial ready";
+  return "Player access";
 }

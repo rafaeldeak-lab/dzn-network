@@ -15,7 +15,7 @@ const headerActionBlock = sourceBlock(siteHeaderSource, "<div className=\"dzn-he
 
 assert.equal(loggedOutHeaderBlock.includes("Features"), true);
 assert.equal(loggedOutHeaderBlock.includes("Pricing"), true);
-for (const privateLabel of ["Leaderboards", "Servers", "Stats", "Events", "Dashboard", "Add Your Server", "Start Setup", "Upgrade to Pro", "Pro Tools"]) {
+for (const privateLabel of ["Leaderboards", "Servers", "Stats", "Events", "Dashboard", "Add Your Server", "Start Setup", "Upgrade to Pro", "Owner Dashboard"]) {
   assert.equal(loggedOutHeaderBlock.includes(privateLabel), false, `Logged-out header links must not include ${privateLabel}.`);
 }
 
@@ -45,14 +45,17 @@ assert.equal(globalsSource.includes("grid-template-columns: 1fr;"), true, "Small
 
 assert.equal(headerActionBlock.includes("DznPulseBell"), true);
 assert.equal(headerActionBlock.includes("dzn-header-plan--${planTier}"), true);
-assert.equal(headerActionBlock.includes("primaryAction.href === \"/dashboard\" ? null"), true);
-assert.equal(headerActionBlock.includes("planTier === \"free\" ? \"Start Setup\" : \"Add Your Server\""), true);
+assert.equal(siteHeaderSource.includes("const canUseOwnerTools = Boolean(resolvedNavigation?.can_use_owner_tools)"), true);
+assert.equal(siteHeaderSource.includes("const showOwnerDashboard = resolvedAuthenticated && canUseOwnerTools"), true);
+assert.equal(siteHeaderSource.includes("const showAddServer = resolvedAuthenticated && canUseOwnerTools"), true);
+assert.equal(headerActionBlock.includes("showOwnerDashboard ? ("), true);
+assert.equal(headerActionBlock.includes("planTier === \"free\" ? \"Start Setup\" : \"Add Your Server\""), false);
 assert.equal(headerActionBlock.includes("dzn-header-action--package-${primaryAction.tone}"), true);
 
 for (const action of [
-  "{ label: \"Start Trial\", href: \"/#pricing\", tone: \"trial\" }",
-  "{ label: \"Upgrade to Pro\", href: \"/#pricing\", tone: \"upgrade\" }",
-  "{ label: \"Pro Tools\", href: \"/dashboard\", tone: \"pro\" }",
+  "{ label: \"Owner Plans\", href: \"/pricing?intent=owner_setup&returnTo=%2Fsetup\", tone: \"trial\" }",
+  "{ label: \"Upgrade to Pro\", href: \"/pricing?intent=pro&returnTo=%2Fdashboard\", tone: \"upgrade\" }",
+  "{ label: \"Owner Dashboard\", href: \"/dashboard\", tone: \"pro\" }",
 ]) {
   assert.equal(siteHeaderSource.includes(action), true, `Header must define package action: ${action}`);
 }
@@ -64,12 +67,21 @@ assert.equal(homepageSource.includes("navigation={authState.navigation}"), true)
 assert.equal(authTypesSource.includes("export type AuthNavigationSummary"), true);
 assert.equal(authTypesSource.includes("navigation?: AuthNavigationSummary;"), true);
 assert.equal(authTypesSource.includes("plan_tier: \"free\" | \"starter\" | \"pro\""), true);
-assert.equal(authTypesSource.includes("label: \"Start Trial\" | \"Upgrade to Pro\" | \"Pro Tools\""), true);
+assert.equal(authTypesSource.includes("role: \"player\" | \"owner\""), true);
+assert.equal(authTypesSource.includes("can_use_player_surfaces: boolean"), true);
+assert.equal(authTypesSource.includes("can_use_owner_tools: boolean"), true);
+assert.equal(authTypesSource.includes("owner_action_required: \"choose_plan\" | null"), true);
+assert.equal(authTypesSource.includes("owner_pricing_url: string"), true);
+assert.equal(authTypesSource.includes("label: \"Owner Plans\" | \"Upgrade to Pro\" | \"Owner Dashboard\""), true);
 
 assert.equal(authMeSource.includes("SELECT plan_key, plan_status FROM owner_billing_accounts"), true);
 assert.equal(authMeSource.includes("effectiveEntitlementPlan(storedPlanKey, planStatus)"), true);
 assert.equal(authMeSource.includes("getPlanConfig(effectivePlanKey)"), true);
 assert.equal(authMeSource.includes("plan_tier: tier"), true);
+assert.equal(authMeSource.includes("role: canUseOwnerTools ? \"owner\" : \"player\""), true);
+assert.equal(authMeSource.includes("can_use_player_surfaces: true"), true);
+assert.equal(authMeSource.includes("can_use_owner_tools: canUseOwnerTools"), true);
+assert.equal(authMeSource.includes("owner_action_required: canUseOwnerTools ? null : \"choose_plan\""), true);
 assert.equal(authMeSource.includes("can_use_pro_tools: tier === \"pro\""), true);
 assert.equal(authMeSource.includes("primary_action: navigationPrimaryActionForTier(tier)"), true);
 assert.equal(authMeSource.includes("getOwnerBillingStatus"), false, "Auth summary must not call the billing status helper because that upserts entitlements.");
@@ -89,7 +101,8 @@ for (const className of [
 
 for (const expectedPolicy of [
   "Logged-out navigation must only expose the public funnel",
-  "Free or Starter/trial accounts should see trial-safe app navigation plus a clear Pro upgrade action.",
+  "Free player accounts should see player navigation plus a clear owner-plan action.",
+  "Starter/trial accounts should see trial-safe owner navigation plus a clear Pro upgrade action.",
   "Pro-effective accounts should see Pro tools in the header.",
 ]) {
   assert.equal(publicAccessPolicyDoc.includes(expectedPolicy), true, `Public access policy must document: ${expectedPolicy}`);

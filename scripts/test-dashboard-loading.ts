@@ -400,7 +400,7 @@ includesAll(siteHeader, [
   "/#features",
   "/leaderboards",
   "/servers",
-  "/#pricing",
+  "/pricing",
   "/#stats",
   "/events",
   "/dashboard",

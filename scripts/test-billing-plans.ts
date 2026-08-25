@@ -242,7 +242,8 @@ assert.equal(JSON.stringify(completeReadiness).includes("whsec_secret_value_must
 assert.equal(JSON.stringify(completeReadiness).includes("price_premium"), false);
 
 const landingSource = readFileSync("components/dzn/dzn-landing-page.tsx", "utf8");
-const pricingSection = landingSource.slice(landingSource.indexOf("const pricingPlans"), landingSource.indexOf("function GameModeGrid"));
+const pricingPageSource = readFileSync("app/pricing/page.tsx", "utf8");
+const pricingTeaserSection = landingSource.slice(landingSource.indexOf("function PricingUpgradeSection"), landingSource.indexOf("function GameModeGrid"));
 for (const snippet of [
   "Starter",
   "Pro",
@@ -251,21 +252,12 @@ for (const snippet of [
   "2-day free trial",
   "Cancel before trial expiry to pay nothing",
   "Start Starter trial",
-  "Unlock Pro",
+  "Go Pro",
   "Full DZN Access",
   "Up to 3 linked DayZ servers",
   "Payment method required",
-  "Open Pricing Comparison",
-  "role=\"dialog\"",
-  "aria-modal=\"true\"",
-  "Close pricing comparison",
-  "dzn-pricing-modal",
-  "dzn-pricing-modal-open",
-  "createPortal(pricingModal, document.body)",
   "CheckCircle2",
   "XCircle",
-  "Pro Launch Advantage",
-  "Pro recommended",
   "Description limit",
   "Gallery images",
   "Custom banner",
@@ -278,28 +270,25 @@ for (const snippet of [
   "Featured and spotlight eligibility",
   "Leaderboard/stat advantage",
   "No paid advantage",
-  "Pro helps your server look better, advertise better and understand performance better.",
-  "Make the server look worth joining",
-  "Quick Answers",
-  "Clear answers about Starter and Pro",
-  "pricingEntrySignals",
-  "pricingValuePillars",
-  "pricingTrustPills",
   "Fair competition",
-  "Trial first",
-  "Powerful tools",
-  "Community driven",
-  "Leaderboard rankings remain 100% skill-based.",
   "Does Pro affect leaderboard rank?",
   "What does Pro improve?",
   "Do Starter servers still compete?",
   "Can badges be bought?",
 ]) {
-  assert.equal(pricingSection.includes(snippet), true, `Public pricing section should include ${snippet}.`);
+  assert.equal(pricingPageSource.includes(snippet), true, `Dedicated pricing page should include ${snippet}.`);
 }
-assert.equal(/Premium|Network Listing|Partner Listing|Network plan|Partner plan/.test(pricingSection), false, "Public pricing section must only show Starter/Pro plans.");
-assert.equal(/paid leaderboard rank|leaderboard rank boost|improves leaderboard rank|buy better leaderboard/i.test(pricingSection), false, "Pro pricing copy must not claim paid leaderboard rank.");
-assert.equal(landingSource.includes("import { createPortal } from \"react-dom\";"), true, "Pricing modal should portal to document.body instead of rendering inside the animated pricing section.");
+assert.equal(pricingPageSource.includes("createCheckoutSession(planKey, returnTo)"), true, "Dedicated pricing page should use the guarded checkout API.");
+assert.equal(pricingPageSource.includes("DZN_LIVE_CHECKOUT_ENABLED=true"), true, "Dedicated pricing page should keep live checkout activation visibly approval-gated.");
+assert.equal(pricingTeaserSection.includes("View Pricing"), true, "Homepage should link to the dedicated pricing page.");
+assert.equal(pricingTeaserSection.includes("Owner Setup"), true, "Homepage owner setup CTA should route through pricing.");
+assert.equal(pricingTeaserSection.includes("role=\"dialog\""), false, "Homepage pricing section must not own the full plan modal.");
+assert.equal(pricingTeaserSection.includes("createPortal(pricingModal, document.body)"), false, "Homepage pricing section must not render a modal.");
+assert.equal(pricingTeaserSection.includes("Description limit"), false, "Homepage must not carry the full pricing comparison.");
+assert.equal(pricingTeaserSection.includes("Does Pro affect leaderboard rank?"), false, "Homepage must not carry pricing FAQ content.");
+assert.equal(/Premium|Network Listing|Partner Listing|Network plan|Partner plan/.test(pricingPageSource), false, "Public pricing page must only show Starter/Pro plans.");
+assert.equal(/paid leaderboard rank|leaderboard rank boost|improves leaderboard rank|buy better leaderboard/i.test(pricingPageSource), false, "Pro pricing copy must not claim paid leaderboard rank.");
+assert.equal(landingSource.includes("import { createPortal } from \"react-dom\";"), false, "Homepage pricing should no longer portal a pricing modal.");
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
 assert.equal(dashboardSource.includes("Full DZN Access, up to 3 linked servers, custom advert visuals, weekly bumping, enhanced Discord posts, featured and spotlight eligibility, and listing analytics"), true, "Owner billing cards should explain Pro value.");

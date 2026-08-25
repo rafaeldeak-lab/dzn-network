@@ -25,7 +25,7 @@ function walk(dir: string, matcher: (path: string) => boolean): string[] {
 
 const activationDoc = read("docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md");
 for (const snippet of [
-  "Issue #46",
+  "Issue #49",
   "does not approve live billing",
   "Live billing activation is high-risk billing and production-mutation work.",
   "Generic messages such as \"next\", \"continue\", \"fix billing\", or \"set up Stripe\" are not enough.",
@@ -50,7 +50,7 @@ const stripeSetupDoc = read("docs/STRIPE_LIVE_SETUP.md");
 for (const snippet of [
   "Live billing remains a high-risk human-approved operation.",
   "docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md",
-  "Issue #46",
+  "Issue #49",
 ]) {
   assert.equal(stripeSetupDoc.includes(snippet), true, `Stripe live setup doc should link checklist: ${snippet}`);
 }
@@ -58,7 +58,7 @@ for (const snippet of [
 const billingPlansDoc = read("docs/BILLING_PLANS.md");
 for (const snippet of [
   "docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md",
-  "Issue #46",
+  "Issue #49",
   "Live Stripe product/price creation, webhook endpoint changes, Cloudflare secret changes, D1 migration application, customer import, checkout enablement, and payment enablement remain separate high-risk human-approved operations.",
 ]) {
   assert.equal(billingPlansDoc.includes(snippet), true, `Billing plans doc should include live activation boundary: ${snippet}`);

@@ -1,6 +1,6 @@
 # Stripe Live Activation Checklist
 
-Issue #46 tracks the future human-approved Stripe live billing activation for DZN. This document is the safe handoff checklist only. It does not approve live billing, create Stripe products, set Cloudflare secrets, apply D1 migrations, deploy production, or change payment state.
+Issue #49 tracks the future human-approved Stripe live billing activation for DZN. This document is the safe handoff checklist only. It does not approve live billing, create Stripe products, set Cloudflare secrets, apply D1 migrations, deploy production, or change payment state.
 
 ## Activation Boundary
 
