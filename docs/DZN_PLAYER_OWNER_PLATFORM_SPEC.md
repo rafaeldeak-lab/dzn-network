@@ -326,6 +326,34 @@ Delivery audit:
 - This slice must not call Discord bot send helpers, mutate Discord channels, mutate Nitrado, create checkout sessions, or enable live checkout.
 - Review notification delivery and read state must stay operational metadata only; they must not feed review score, discovery score, rank, competitive eligibility, or paid-plan status.
 
+## Challenges / XP / Calling Cards Foundation Slice
+
+The Challenges / XP / Calling Cards foundation slice turns player progression into a real free logged-in player surface without connecting it to owner monetisation or competitive systems.
+
+The slice adds:
+
+- `/api/player/challenges` as the free logged-in player challenge payload and participation endpoint.
+- Additive `player_challenges`, `player_challenge_participations`, `player_xp_ledger`, `player_calling_cards`, and `player_calling_card_awards` tables.
+- Foundation challenge catalog rows for survival, community, and combat player tracks.
+- Join buttons and private joined-state display on `/events/challenges`.
+- Player Hub progress entry points showing earned XP, joined/completed challenge counts, recent challenge state, and earned calling cards.
+
+Authorization rules:
+
+- Normal Discord login is enough to read the player challenge payload and join a player challenge.
+- The endpoint must use the player session layer through `getRequestSessionUser`.
+- It must not require Starter, Pro, owner entitlement, server ownership, Nitrado access, Stripe, Discord bot permissions, or billing state.
+- Owner setup remains separate: owner actions still flow through `/pricing?intent=owner_setup&returnTo=%2Fsetup` and the canonical owner entitlement gate.
+
+Mutation scope:
+
+- `GET /api/player/challenges` is read-only.
+- `POST /api/player/challenges` may create only the authenticated player's row in `player_challenge_participations`.
+- The self-join action must not self-award XP or calling cards; XP ledger rows and calling-card awards are hooks for later verified progression/rule engines.
+- No checkout session, Stripe mutation, Cloudflare secret update, production D1 migration application, Nitrado call, Discord bot send, issue #49 merge, or live payment activation is part of this slice.
+
+Fairness remains unchanged: player challenge participation, XP, and calling cards remain earned/player-side progression. They must not affect paid plans, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, server ownership, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -349,6 +377,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | Player Hub and community matching APIs | Login required | Allowed | Allowed | Allowed | Session auth, no owner grant |
 | `/api/player/saved-servers` | 401 | Allowed | Allowed | Allowed | Session auth, player preference only |
 | `/api/player/reviews` | 401 | Allowed | Allowed | Allowed | Session auth, review mutation only |
+| `/api/player/challenges` | 401 | Allowed | Allowed | Allowed | Session auth, player participation only |
 | `/api/public/server-reviews` | Preview/locked summary | Allowed | Allowed | Allowed | Public/read with session-aware redaction |
 | `/api/public/server-reviews/[reviewId]/report` | 401 | Allowed | Allowed | Allowed | Session auth, report/moderation hook only |
 | `/api/servers/[serverId]/reviews/[reviewId]/reply` | Login/pricing boundary | Owner plan required | Allowed, then ownership checks still apply | Allowed, then ownership checks still apply | Owner entitlement plus server owner/admin checks |

@@ -14,6 +14,7 @@ import {
   RadioTower,
   ShieldCheck,
   Sparkles,
+  Swords,
   Trophy,
   UserRound,
   Users,
@@ -73,6 +74,46 @@ type PlayerHubEntryPoint = {
   owner_entitlement_required?: boolean;
 };
 
+type PlayerHubChallenge = {
+  id: string;
+  slug: string;
+  title: string;
+  category: string;
+  reward?: {
+    xp?: number;
+    calling_card?: {
+      code: string;
+      name: string;
+      rarity: string;
+    } | null;
+  };
+  player_state?: {
+    status?: "not_joined" | "joined" | "completed" | "abandoned";
+    progress_percent?: number;
+    xp_awarded?: number;
+    calling_card_awarded?: string | null;
+  };
+};
+
+type PlayerHubCallingCard = {
+  code: string;
+  name: string;
+  description: string | null;
+  rarity: string;
+  awarded_at: string;
+};
+
+type PlayerHubProgress = {
+  source?: string;
+  total_xp?: number;
+  available_challenges?: number;
+  joined_challenges?: number;
+  completed_challenges?: number;
+  calling_cards?: PlayerHubCallingCard[];
+  recent_challenges?: PlayerHubChallenge[];
+  href?: string;
+};
+
 type PlayerHubPayload = {
   ok?: boolean;
   user?: {
@@ -105,6 +146,7 @@ type PlayerHubPayload = {
     events?: PlayerHubEvent[];
     tournaments?: PlayerHubEvent[];
   };
+  player_progress?: PlayerHubProgress;
   profile_entry_points?: PlayerHubEntryPoint[];
   fetched_at?: string;
 };
@@ -113,6 +155,7 @@ const defaultEntryPoints: PlayerHubEntryPoint[] = [
   { key: "servers", label: "Servers", href: "/servers", description: "Browse connected communities." },
   { key: "events", label: "Events", href: "/events", description: "Find events and tournaments." },
   { key: "leaderboards", label: "Leaderboards", href: "/leaderboards", description: "Track competitive records." },
+  { key: "challenges", label: "Challenges", href: "/events/challenges", description: "Join challenges and track earned XP." },
   { key: "pulse", label: "DZN Pulse", href: "/dzn-pulse", description: "Open player notifications." },
   {
     key: "owner_setup",
@@ -168,6 +211,7 @@ export function PlayerHubPage() {
   const suggestedServers = hub.suggested_servers?.servers ?? [];
   const suggestedEvents = hub.suggested_events?.events ?? [];
   const suggestedTournaments = hub.suggested_events?.tournaments ?? [];
+  const playerProgress = normalizePlayerProgress(hub.player_progress);
   const entryPoints = hub.profile_entry_points?.length ? hub.profile_entry_points : defaultEntryPoints;
   const ownerSetupHref = hub.access?.owner_setup_href ?? "/pricing?intent=owner_setup&returnTo=%2Fsetup";
 
@@ -208,6 +252,8 @@ export function PlayerHubPage() {
             <HubMetric icon={Bookmark} label="Saved Servers" value={savedServers.length} tone="emerald" />
             <HubMetric icon={CalendarDays} label="Suggested Events" value={suggestedEvents.length} tone="amber" />
             <HubMetric icon={Trophy} label="Tournaments" value={suggestedTournaments.length} tone="rose" />
+            <HubMetric icon={Sparkles} label="Earned XP" value={playerProgress.total_xp ?? 0} tone="amber" />
+            <HubMetric icon={Swords} label="Challenges" value={playerProgress.joined_challenges ?? 0} tone="cyan" />
           </div>
         </div>
       </section>
@@ -285,6 +331,18 @@ export function PlayerHubPage() {
           </SectionPanel>
 
           <SectionPanel
+            icon={Swords}
+            title="Challenges And Progress"
+            actionHref={playerProgress.href ?? "/events/challenges"}
+            actionLabel="Open challenges"
+            emptyTitle=""
+            emptyText=""
+            hasItems
+          >
+            <PlayerProgressPanel progress={playerProgress} />
+          </SectionPanel>
+
+          <SectionPanel
             icon={UserRound}
             title="Profile Entry Points"
             emptyTitle=""
@@ -359,7 +417,7 @@ function SectionPanel({
   hasItems,
   children,
 }: {
-  icon: typeof Users;
+  icon: LucideIcon;
   title: string;
   actionHref?: string;
   actionLabel?: string;
@@ -395,6 +453,78 @@ function SectionPanel({
         )}
       </div>
     </section>
+  );
+}
+
+function PlayerProgressPanel({ progress }: { progress: PlayerHubProgress }) {
+  const recentChallenges = progress.recent_challenges ?? [];
+  const callingCards = progress.calling_cards ?? [];
+  return (
+    <div className="grid gap-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <ProgressMiniStat label="XP" value={progress.total_xp ?? 0} />
+        <ProgressMiniStat label="Joined" value={progress.joined_challenges ?? 0} />
+        <ProgressMiniStat label="Cards" value={callingCards.length} />
+      </div>
+      <div className="rounded border border-white/10 bg-black/24 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-black uppercase text-white">Recent Challenges</p>
+          <span className="text-[10px] font-black uppercase text-cyan-100">{progress.completed_challenges ?? 0} complete</span>
+        </div>
+        {recentChallenges.length ? (
+          <div className="mt-3 grid gap-2">
+            {recentChallenges.map((challenge) => (
+              <ProgressChallengeRow key={challenge.id} challenge={challenge} />
+            ))}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm font-bold leading-6 text-zinc-400">Join a player challenge to start building XP and profile progress.</p>
+        )}
+      </div>
+      <div className="rounded border border-white/10 bg-black/24 p-4">
+        <p className="text-sm font-black uppercase text-white">Calling Cards</p>
+        {callingCards.length ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {callingCards.slice(0, 6).map((card) => (
+              <span key={card.code} className="inline-flex max-w-full items-center gap-1.5 rounded border border-violet-300/25 bg-violet-400/10 px-2.5 py-1.5 text-[10px] font-black uppercase text-violet-50">
+                <Sparkles className="h-3 w-3 shrink-0" />
+                <span className="truncate">{card.name}</span>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm font-bold leading-6 text-zinc-400">Earned calling cards will appear here. Paid plans do not unlock competitive cards.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProgressMiniStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded border border-cyan-300/18 bg-cyan-400/8 p-3">
+      <p className="font-mono text-2xl font-black text-cyan-50">{value}</p>
+      <p className="mt-1 text-[10px] font-black uppercase tracking-[0.12em] text-cyan-100/80">{label}</p>
+    </div>
+  );
+}
+
+function ProgressChallengeRow({ challenge }: { challenge: PlayerHubChallenge }) {
+  const state = challenge.player_state?.status ?? "not_joined";
+  const percent = clampPercent(challenge.player_state?.progress_percent ?? 0);
+  return (
+    <Link href="/events/challenges" className="block rounded border border-white/10 bg-white/[0.045] p-3 transition hover:border-cyan-300/30 hover:bg-white/[0.07]">
+      <div className="flex items-center justify-between gap-3">
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-black uppercase text-white">{challenge.title}</span>
+          <span className="mt-1 block truncate text-[10px] font-black uppercase text-zinc-500">{challenge.category} / {state.replace("_", " ")}</span>
+        </span>
+        <span className="shrink-0 text-xs font-black text-cyan-100">{percent}%</span>
+      </div>
+      <div className="mt-3 h-1.5 overflow-hidden rounded bg-white/10">
+        <span className="block h-full rounded bg-cyan-300" style={{ width: `${percent}%` }} />
+      </div>
+    </Link>
   );
 }
 
@@ -543,6 +673,7 @@ function normalizePayload(value: PlayerHubPayload | null): PlayerHubPayload {
       saved_servers: { source: "unavailable", servers: [] },
       suggested_servers: { source: "unavailable", servers: [] },
       suggested_events: { source: "unavailable", events: [], tournaments: [] },
+      player_progress: defaultPlayerProgress(),
       profile_entry_points: defaultEntryPoints,
       access: {
         role: "player",
@@ -568,6 +699,7 @@ function normalizePayload(value: PlayerHubPayload | null): PlayerHubPayload {
       events: Array.isArray(value.suggested_events?.events) ? value.suggested_events.events : [],
       tournaments: Array.isArray(value.suggested_events?.tournaments) ? value.suggested_events.tournaments : [],
     },
+    player_progress: normalizePlayerProgress(value.player_progress),
     profile_entry_points: Array.isArray(value.profile_entry_points) ? value.profile_entry_points : defaultEntryPoints,
     access: {
       role: "player",
@@ -575,6 +707,33 @@ function normalizePayload(value: PlayerHubPayload | null): PlayerHubPayload {
       owner_setup_href: value.access?.owner_setup_href ?? "/pricing?intent=owner_setup&returnTo=%2Fsetup",
       owner_setup_requires_entitlement: true,
     },
+  };
+}
+
+function defaultPlayerProgress(): PlayerHubProgress {
+  return {
+    source: "unavailable",
+    total_xp: 0,
+    available_challenges: 0,
+    joined_challenges: 0,
+    completed_challenges: 0,
+    calling_cards: [],
+    recent_challenges: [],
+    href: "/events/challenges",
+  };
+}
+
+function normalizePlayerProgress(value: PlayerHubProgress | undefined): PlayerHubProgress {
+  return {
+    ...defaultPlayerProgress(),
+    ...value,
+    total_xp: safeNumber(value?.total_xp),
+    available_challenges: safeNumber(value?.available_challenges),
+    joined_challenges: safeNumber(value?.joined_challenges),
+    completed_challenges: safeNumber(value?.completed_challenges),
+    calling_cards: Array.isArray(value?.calling_cards) ? value.calling_cards : [],
+    recent_challenges: Array.isArray(value?.recent_challenges) ? value.recent_challenges : [],
+    href: typeof value?.href === "string" && value.href ? value.href : "/events/challenges",
   };
 }
 
@@ -591,4 +750,14 @@ function formatDate(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Date pending";
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function safeNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : 0;
+}
+
+function clampPercent(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : 0;
 }
