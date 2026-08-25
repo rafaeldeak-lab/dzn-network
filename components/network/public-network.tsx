@@ -425,6 +425,12 @@ type PublicReview = {
   rating: number;
   title: string | null;
   body: string;
+  owner_reply: {
+    body: string;
+    author_name: string | null;
+    created_at: string;
+    updated_at: string;
+  } | null;
   created_at: string;
   updated_at: string;
   is_own_review?: boolean;
@@ -2314,12 +2320,12 @@ function ReviewsPanel({ server }: { server: PublicServer }) {
     }
     setSubmitting(true);
     try {
-      const response = await fetch(`/api/servers/${encodeURIComponent(server.linked_server_id)}/reviews`, {
+      const response = await fetch("/api/player/reviews", {
         method: "POST",
         cache: "no-store",
         credentials: "include",
         headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ rating, title, body }),
+        body: JSON.stringify({ linked_server_id: server.linked_server_id, rating, title, body }),
       });
       const payload = (await response.json().catch(() => ({}))) as ReviewsResponse & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Could not submit review.");
@@ -2449,6 +2455,15 @@ function ReviewCard({ review, onReported }: { review: PublicReview; onReported: 
       </div>
       {review.title ? <h3 className="mt-3 break-words text-sm font-black text-white">{review.title}</h3> : null}
       <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-300">{review.body}</p>
+      {review.owner_reply ? (
+        <div className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-400/[0.06] p-3">
+          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-cyan-100">
+            Owner reply{review.owner_reply.author_name ? ` from ${review.owner_reply.author_name}` : ""}
+          </p>
+          <p className="mt-2 whitespace-pre-line text-sm font-semibold leading-6 text-cyan-50">{review.owner_reply.body}</p>
+          <p className="mt-2 text-[10px] font-black uppercase text-cyan-100/65">{formatRelativeTime(review.owner_reply.updated_at)}</p>
+        </div>
+      ) : null}
       {!review.is_own_review ? (
         <button type="button" disabled={reporting || reported} onClick={reportReview} className="mt-3 text-[10px] font-black uppercase text-zinc-500 transition hover:text-orange-200 disabled:opacity-50">
           {reported ? "Reported" : reporting ? "Reporting..." : "Report"}

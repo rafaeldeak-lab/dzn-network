@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 
 import {
+  OWNER_REPLY_MAX_CHARS,
+  OWNER_REPLY_MIN_CHARS,
   REVIEW_COOLDOWN_HOURS,
   moderateReviewText,
   reviewCooldownUntil,
+  validateOwnerReplyInput,
   validatePublicListingInput,
   validateReviewInput,
 } from "../functions/_lib/review-moderation";
@@ -47,6 +50,10 @@ assert.equal(validateReviewInput({ rating: 5, body: "<script>alert(1)</script> C
 assert.equal(validateReviewInput({ rating: 5, body: "AAAAAAA this is repeated character spam and should not be accepted." }).ok, false);
 assert.equal(validateReviewInput({ rating: 5, body: "CHECK THIS CHECK THIS CHECK THIS CHECK THIS CHECK THIS CHECK THIS" }).ok, false);
 assert.equal(moderateReviewText(null, "This review has unsafe sexual abuse wording and should be rejected.").ok, false);
+assert.equal(validateOwnerReplyInput({ body: "Thanks for the fair review. We have adjusted raid timers." }).ok, true);
+assert.equal(validateOwnerReplyInput({ body: "Too short" }).ok, false);
+assert.equal(validateOwnerReplyInput({ body: "x".repeat(OWNER_REPLY_MAX_CHARS + 1) }).ok, false);
+assert.equal(OWNER_REPLY_MIN_CHARS, 10);
 
 const now = new Date("2026-05-16T12:00:00.000Z");
 const recentUpdate = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
@@ -64,7 +71,9 @@ const pandoraSummary = buildPublicReviewSummary(rows.filter((row) => row.linked_
 assert.equal(pandoraSummary.review_count, 1);
 assert.equal(pandoraSummary.average_rating, 5);
 assert.equal(pandoraSummary.reviews[0].is_own_review, true);
+assert.equal(pandoraSummary.reviews[0].owner_reply?.body, "Thanks for the fair review.");
 assert.equal(JSON.stringify(pandoraSummary).includes("reviewer_discord_id"), false);
+assert.equal(JSON.stringify(pandoraSummary).includes("owner_reply_author_user_id"), false);
 assert.equal(pandoraSummary.reviews.some((review) => review.id === "nuketown-approved"), false);
 
 const listingRatingRows: ReviewAggregateRow[] = [
@@ -122,6 +131,11 @@ function reviewRow(options: {
     status: options.status,
     moderation_reason: null,
     report_count: 0,
+    owner_reply_body: options.id === "pandora-approved" ? "Thanks for the fair review." : null,
+    owner_reply_author_user_id: options.id === "pandora-approved" ? "owner-user" : null,
+    owner_reply_author_name: options.id === "pandora-approved" ? "Server Owner" : null,
+    owner_reply_created_at: options.id === "pandora-approved" ? "2026-05-16T11:00:00.000Z" : null,
+    owner_reply_updated_at: options.id === "pandora-approved" ? "2026-05-16T11:30:00.000Z" : null,
     created_at: "2026-05-16T10:00:00.000Z",
     updated_at: options.updatedAt ?? "2026-05-16T10:00:00.000Z",
     last_edited_at: null,

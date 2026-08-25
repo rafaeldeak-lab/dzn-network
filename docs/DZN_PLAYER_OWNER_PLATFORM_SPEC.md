@@ -214,6 +214,24 @@ Saved server state is private preference data:
 - Public discovery and leaderboard APIs must not consume `player_saved_servers` as a ranking input.
 - Saving a server must not make the player an owner/manager of that server.
 
+## Reviews Foundation Slice
+
+The Reviews foundation slice makes reviews a free logged-in player feature with owner reply and moderation hooks. It builds on the existing `server_reviews` and `server_review_reports` tables, then adds owner reply fields and a `server_review_moderation_actions` audit table.
+
+The slice adds:
+
+- `POST /api/player/reviews` for free logged-in player review submission and updates.
+- `/api/public/server-reviews?slug=...` as the public read path for approved review summaries.
+- `POST /api/public/server-reviews/[reviewId]/report` as the logged-in player report hook.
+- `PUT`/`DELETE /api/servers/[serverId]/reviews/[reviewId]/reply` as the owner/admin reply hook behind existing server-management access.
+- Public display of safe owner replies without exposing owner user IDs or Discord IDs.
+
+Review submission must require a normal Discord session through the player access layer. It must not require Starter, Pro, owner entitlement, server ownership, Stripe, Nitrado, Discord bot permissions, or billing state.
+
+Owner replies are owner tooling and must remain behind server owner/admin access. A reply can be stored and displayed with an approved review, but it must not change the review rating, review count, leaderboard score, discovery sort, badge eligibility, season result, event outcome, Server Wars score, challenge outcome, XP, or competitive eligibility.
+
+For fairness, reviews remain separate from paid plans. Starter, Pro, and legacy effective-Pro status may improve owner tooling and presentation elsewhere, but they must not buy reviews, suppress reviews, boost review scores, alter rating averages, affect rankings, change discovery score, grant badges, change seasons, change events, or change competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -236,6 +254,10 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/player`, `/servers`, `/events`, `/seasons`, `/leaderboards`, `/dzn-pulse` | Login required | Allowed | Allowed | Allowed | Page auth middleware |
 | Player Hub and community matching APIs | Login required | Allowed | Allowed | Allowed | Session auth, no owner grant |
 | `/api/player/saved-servers` | 401 | Allowed | Allowed | Allowed | Session auth, player preference only |
+| `/api/player/reviews` | 401 | Allowed | Allowed | Allowed | Session auth, review mutation only |
+| `/api/public/server-reviews` | Preview/locked summary | Allowed | Allowed | Allowed | Public/read with session-aware redaction |
+| `/api/public/server-reviews/[reviewId]/report` | 401 | Allowed | Allowed | Allowed | Session auth, report/moderation hook only |
+| `/api/servers/[serverId]/reviews/[reviewId]/reply` | Login/pricing boundary | Owner plan required | Allowed, then ownership checks still apply | Allowed, then ownership checks still apply | Owner entitlement plus server owner/admin checks |
 | `/setup` | Login required | Redirect to owner pricing | Allowed | Allowed | Page auth plus owner entitlement |
 | `/dashboard` owner tools | Login required | Redirect to owner pricing | Allowed | Allowed | Page auth plus owner entitlement |
 | `/api/onboarding/*` | 401 | 402 owner plan required | Allowed | Allowed | Owner entitlement middleware |

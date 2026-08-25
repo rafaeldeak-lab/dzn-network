@@ -2,7 +2,7 @@ import { ensureMockUser, getSessionUser, requireDb } from "../../../../_lib/db";
 import { json, methodNotAllowed, readJson } from "../../../../_lib/http";
 import { isMockAuth } from "../../../../_lib/mock";
 import { validateReportReason } from "../../../../_lib/review-moderation";
-import { ensureServerReviewsSchema } from "../../../../_lib/server-reviews";
+import { ensureServerReviewsSchema, recordReviewModerationAction } from "../../../../_lib/server-reviews";
 import type { Env, PagesFunction, SessionUser } from "../../../../_lib/types";
 
 type ReportBody = {
@@ -21,17 +21,18 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   await ensureServerReviewsSchema(env);
   const db = requireDb(env);
   const review = await db
-    .prepare("SELECT id, report_count FROM server_reviews WHERE id = ? AND status != 'deleted' LIMIT 1")
+    .prepare("SELECT id, linked_server_id, report_count FROM server_reviews WHERE id = ? AND status != 'deleted' LIMIT 1")
     .bind(reviewId)
-    .first<{ id: string; report_count: number }>();
+    .first<{ id: string; linked_server_id: string; report_count: number }>();
   if (!review) return json({ error: "Review not found." }, { status: 404 });
 
   const body = await readJson<ReportBody>(request);
+  const reason = validateReportReason(body.reason);
   const now = new Date().toISOString();
   try {
     await db
       .prepare("INSERT INTO server_review_reports (id, review_id, reporter_discord_id, reason, created_at) VALUES (?, ?, ?, ?, ?)")
-      .bind(crypto.randomUUID(), reviewId, user.discord_id, validateReportReason(body.reason), now)
+      .bind(crypto.randomUUID(), reviewId, user.discord_id, reason, now)
       .run();
   } catch {
     return json({ error: "You have already reported this review." }, { status: 409 });
@@ -42,6 +43,26 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
     .prepare("UPDATE server_reviews SET report_count = ?, status = CASE WHEN ? >= 3 THEN 'pending' ELSE status END, updated_at = ? WHERE id = ?")
     .bind(nextReportCount, nextReportCount, now, reviewId)
     .run();
+  await recordReviewModerationAction(env, {
+    reviewId,
+    linkedServerId: review.linked_server_id,
+    actor: user,
+    actorRole: "player",
+    action: "review_reported",
+    reason,
+    createdAt: now,
+  });
+  if (nextReportCount >= 3) {
+    await recordReviewModerationAction(env, {
+      reviewId,
+      linkedServerId: review.linked_server_id,
+      actor: null,
+      actorRole: "system",
+      action: "review_auto_pending",
+      reason: "Report threshold reached.",
+      createdAt: now,
+    });
+  }
 
   return json({ ok: true, report_count: nextReportCount });
 };

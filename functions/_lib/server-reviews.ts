@@ -14,6 +14,11 @@ export type ServerReviewRow = {
   status: string;
   moderation_reason: string | null;
   report_count: number;
+  owner_reply_body: string | null;
+  owner_reply_author_user_id: string | null;
+  owner_reply_author_name: string | null;
+  owner_reply_created_at: string | null;
+  owner_reply_updated_at: string | null;
   created_at: string;
   updated_at: string;
   last_edited_at: string | null;
@@ -33,10 +38,26 @@ export type PublicReview = {
   rating: number;
   title: string | null;
   body: string;
+  owner_reply: PublicOwnerReviewReply | null;
   created_at: string;
   updated_at: string;
   is_own_review?: boolean;
 };
+
+export type PublicOwnerReviewReply = {
+  body: string;
+  author_name: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReviewModerationAction =
+  | "player_review_created"
+  | "player_review_updated"
+  | "review_reported"
+  | "review_auto_pending"
+  | "owner_reply_upserted"
+  | "owner_reply_removed";
 
 export async function ensureServerReviewsSchema(env: Env) {
   const db = requireDb(env);
@@ -54,6 +75,11 @@ export async function ensureServerReviewsSchema(env: Env) {
         status TEXT NOT NULL DEFAULT 'approved',
         moderation_reason TEXT,
         report_count INTEGER NOT NULL DEFAULT 0,
+        owner_reply_body TEXT,
+        owner_reply_author_user_id TEXT,
+        owner_reply_author_name TEXT,
+        owner_reply_created_at TEXT,
+        owner_reply_updated_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         last_edited_at TEXT,
@@ -61,6 +87,11 @@ export async function ensureServerReviewsSchema(env: Env) {
       )`,
     )
     .run();
+  await ensureServerReviewsColumn(env, "owner_reply_body", "TEXT");
+  await ensureServerReviewsColumn(env, "owner_reply_author_user_id", "TEXT");
+  await ensureServerReviewsColumn(env, "owner_reply_author_name", "TEXT");
+  await ensureServerReviewsColumn(env, "owner_reply_created_at", "TEXT");
+  await ensureServerReviewsColumn(env, "owner_reply_updated_at", "TEXT");
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_reviews_linked_server_id ON server_reviews(linked_server_id)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_reviews_reviewer_discord_id ON server_reviews(reviewer_discord_id)").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_reviews_status ON server_reviews(status)").run();
@@ -92,6 +123,27 @@ export async function ensureServerReviewsSchema(env: Env) {
     )
     .run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_review_reports_review_id ON server_review_reports(review_id)").run();
+
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS server_review_moderation_actions (
+        id TEXT PRIMARY KEY,
+        review_id TEXT NOT NULL,
+        linked_server_id TEXT NOT NULL,
+        actor_user_id TEXT,
+        actor_discord_id TEXT,
+        actor_role TEXT NOT NULL,
+        action TEXT NOT NULL,
+        reason TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(review_id) REFERENCES server_reviews(id),
+        FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id)
+      )`,
+    )
+    .run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_review_moderation_actions_review_id ON server_review_moderation_actions(review_id)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_review_moderation_actions_linked_server_id ON server_review_moderation_actions(linked_server_id)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_server_review_moderation_actions_created_at ON server_review_moderation_actions(created_at)").run();
 }
 
 export async function getApprovedReviewSummary(env: Env, linkedServerId: string, viewer?: SessionUser | null): Promise<PublicReviewSummary> {
@@ -100,7 +152,9 @@ export async function getApprovedReviewSummary(env: Env, linkedServerId: string,
   const result = await db
     .prepare(
       `SELECT id, linked_server_id, reviewer_discord_id, reviewer_name, reviewer_avatar_url, rating,
-              title, body, status, moderation_reason, report_count, created_at, updated_at, last_edited_at
+              title, body, status, moderation_reason, report_count,
+              owner_reply_body, owner_reply_author_user_id, owner_reply_author_name, owner_reply_created_at, owner_reply_updated_at,
+              created_at, updated_at, last_edited_at
        FROM server_reviews
        WHERE linked_server_id = ?
          AND status = 'approved'
@@ -135,6 +189,7 @@ export function buildPublicReviewSummary(rows: ServerReviewRow[], viewerDiscordI
       rating: clampRating(row.rating),
       title: row.title,
       body: row.body,
+      owner_reply: publicOwnerReply(row),
       created_at: row.created_at,
       updated_at: row.updated_at,
       is_own_review: Boolean(viewerDiscordId && row.reviewer_discord_id === viewerDiscordId),
@@ -148,7 +203,9 @@ export async function getExistingActiveReview(env: Env, linkedServerId: string, 
   return db
     .prepare(
       `SELECT id, linked_server_id, reviewer_discord_id, reviewer_name, reviewer_avatar_url, rating,
-              title, body, status, moderation_reason, report_count, created_at, updated_at, last_edited_at
+              title, body, status, moderation_reason, report_count,
+              owner_reply_body, owner_reply_author_user_id, owner_reply_author_name, owner_reply_created_at, owner_reply_updated_at,
+              created_at, updated_at, last_edited_at
        FROM server_reviews
        WHERE linked_server_id = ?
          AND reviewer_discord_id = ?
@@ -176,6 +233,55 @@ export function viewerReviewState(options: {
     return { authenticated: true, can_review: false, reason: "cooldown" as const, cooldown_until: cooldownUntil, existing_review_id: options.existingReview?.id ?? null };
   }
   return { authenticated: true, can_review: true, reason: null, cooldown_until: null, existing_review_id: options.existingReview?.id ?? null };
+}
+
+export async function recordReviewModerationAction(env: Env, input: {
+  reviewId: string;
+  linkedServerId: string;
+  actor: SessionUser | null;
+  actorRole: "player" | "owner" | "admin" | "system";
+  action: ReviewModerationAction;
+  reason?: string | null;
+  createdAt?: string;
+}) {
+  await ensureServerReviewsSchema(env);
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO server_review_moderation_actions (
+        id, review_id, linked_server_id, actor_user_id, actor_discord_id, actor_role, action, reason, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      input.reviewId,
+      input.linkedServerId,
+      input.actor?.id ?? null,
+      input.actor?.discord_id ?? null,
+      input.actorRole,
+      input.action,
+      input.reason ?? null,
+      input.createdAt ?? new Date().toISOString(),
+    )
+    .run();
+}
+
+async function ensureServerReviewsColumn(env: Env, columnName: string, definition: string) {
+  const db = requireDb(env);
+  const result = await db.prepare("PRAGMA table_info(server_reviews)").all<{ name: string }>();
+  const existing = new Set((result.results ?? []).map((row) => row.name));
+  if (!existing.has(columnName)) {
+    await db.prepare(`ALTER TABLE server_reviews ADD COLUMN ${columnName} ${definition}`).run();
+  }
+}
+
+function publicOwnerReply(row: ServerReviewRow): PublicOwnerReviewReply | null {
+  if (!row.owner_reply_body || !row.owner_reply_created_at || !row.owner_reply_updated_at) return null;
+  return {
+    body: row.owner_reply_body,
+    author_name: row.owner_reply_author_name,
+    created_at: row.owner_reply_created_at,
+    updated_at: row.owner_reply_updated_at,
+  };
 }
 
 function clampRating(value: number): 1 | 2 | 3 | 4 | 5 {
