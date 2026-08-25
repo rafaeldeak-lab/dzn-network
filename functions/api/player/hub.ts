@@ -1,6 +1,7 @@
 import { getEventsListPayload } from "../../_lib/events";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { pricingUrlForOwnerAccess, getRequestSessionUser } from "../../_lib/owner-access";
+import { getPlayerChallengesPayload, type PlayerProgressSummary } from "../../_lib/player-progression";
 import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 import { getPlayerCommunitiesPayload, type PlayerCommunitySummary } from "./communities";
 
@@ -88,7 +89,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const user = await getRequestSessionUser(env, request);
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
 
-  const [communitiesResult, savedServers, suggestedServers, suggestedEvents] = await Promise.all([
+  const [communitiesResult, savedServers, suggestedServers, suggestedEvents, playerChallenges] = await Promise.all([
     getPlayerCommunitiesPayload(env, user).catch(() => ({
       status: 200 as const,
       payload: {
@@ -104,6 +105,13 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     readSavedServers(env, user),
     readSuggestedServers(env),
     readSuggestedEvents(env, user),
+    getPlayerChallengesPayload(env, user).catch(() => ({
+      ok: true as const,
+      source: "not_configured" as const,
+      challenges: [],
+      player_progress: emptyPlayerProgress("not_configured"),
+      fetched_at: new Date().toISOString(),
+    })),
   ]);
 
   return json({
@@ -125,6 +133,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     saved_servers: savedServers,
     suggested_servers: suggestedServers,
     suggested_events: suggestedEvents,
+    player_progress: playerChallenges.player_progress,
     profile_entry_points: profileEntryPoints(),
     fetched_at: new Date().toISOString(),
   });
@@ -363,6 +372,12 @@ function profileEntryPoints() {
       description: "Tournaments, brackets and community event discovery.",
     },
     {
+      key: "challenges",
+      label: "Challenges",
+      href: "/events/challenges",
+      description: "Challenge participation, XP and calling cards.",
+    },
+    {
       key: "profile",
       label: "Player Profile",
       href: "/dzn-pulse",
@@ -376,6 +391,19 @@ function profileEntryPoints() {
       owner_entitlement_required: true,
     },
   ];
+}
+
+function emptyPlayerProgress(source: PlayerProgressSummary["source"]): PlayerProgressSummary {
+  return {
+    source,
+    total_xp: 0,
+    available_challenges: 0,
+    joined_challenges: 0,
+    completed_challenges: 0,
+    calling_cards: [],
+    recent_challenges: [],
+    href: "/events/challenges",
+  };
 }
 
 function demoSuggestedServers(): PlayerHubServerSummary[] {

@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   Activity,
+  ArrowRight,
   BarChart3,
   CalendarDays,
   CheckCircle2,
@@ -61,6 +62,43 @@ import {
 
 type LoadState = "loading" | "loaded" | "stale";
 type TournamentStatusFilter = "all" | "upcoming" | "active" | "completed" | string;
+
+type PlayerChallengeClient = {
+  id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  category: string;
+  reward: {
+    xp: number;
+    calling_card: {
+      code: string;
+      name: string;
+      description: string | null;
+      rarity: string;
+    } | null;
+  };
+  player_state: {
+    status: "not_joined" | "joined" | "completed" | "abandoned";
+    progress_percent: number;
+    xp_awarded: number;
+    calling_card_awarded: string | null;
+  };
+};
+
+type PlayerChallengesClientPayload = {
+  ok?: boolean;
+  source?: string;
+  challenges?: PlayerChallengeClient[];
+  player_progress?: {
+    total_xp?: number;
+    available_challenges?: number;
+    joined_challenges?: number;
+    completed_challenges?: number;
+    calling_cards?: Array<{ code: string; name: string; rarity: string; awarded_at: string }>;
+    href?: string;
+  };
+};
 
 type AuthServer = {
   id: string;
@@ -545,12 +583,20 @@ export function EventBracketPage({ slug: slugProp }: { slug?: string } = {}) {
 export function EventsChallengesPage() {
   const fallback = useMemo(() => fallbackEventsPayload(), []);
   const { data, loadState } = useEventsPayload("/api/events?type=kill_race&limit=24", fallback);
+  const playerChallenges = usePlayerChallenges();
   return (
     <EventsShell>
       <HeaderLine title="CHALLENGES" subtitle="Connected-node battles, kill races, survival ladders, and premium top-10 teasers." action={<div className="flex flex-wrap gap-2"><EventActionLink href="/events">All Events</EventActionLink><EventActionLink href="/events/suggest">Suggest Competition</EventActionLink></div>} />
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <main className="space-y-5">
+          <PlayerChallengeParticipationPanel
+            payload={playerChallenges.data}
+            loadState={playerChallenges.loadState}
+            error={playerChallenges.error}
+            busyId={playerChallenges.busyId}
+            onJoin={playerChallenges.joinChallenge}
+          />
           <PulseFeaturedMatchup match={fallbackMatches[0] ?? null} />
           <div className="grid gap-4 lg:grid-cols-2">
             {fallbackMatches.slice(0, 4).map((match) => <ChallengeBattleCard key={match.id} match={match} locked={data.teaserMode} />)}
@@ -572,6 +618,256 @@ export function EventsChallengesPage() {
       </div>
     </EventsShell>
   );
+}
+
+function PlayerChallengeParticipationPanel({
+  payload,
+  loadState,
+  error,
+  busyId,
+  onJoin,
+}: {
+  payload: PlayerChallengesClientPayload;
+  loadState: LoadState;
+  error: string;
+  busyId: string | null;
+  onJoin: (challenge: PlayerChallengeClient) => Promise<void>;
+}) {
+  const challenges = Array.isArray(payload.challenges) ? payload.challenges : [];
+  const progress = normalizePlayerChallengeProgress(payload.player_progress);
+  return (
+    <section className="overflow-hidden rounded-lg border border-cyan-300/18 bg-[radial-gradient(circle_at_18%_0%,rgba(34,211,238,0.18),transparent_34%),radial-gradient(circle_at_82%_8%,rgba(139,92,246,0.18),transparent_34%),rgba(3,7,18,0.88)]">
+      <div className="border-b border-white/10 p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-cyan-100">Free player progression</p>
+            <h2 className="mt-2 text-2xl font-black uppercase text-white">Challenges / XP / Calling Cards</h2>
+          </div>
+          <Link href="/player" className="inline-flex items-center gap-2 rounded border border-white/12 bg-white/8 px-3 py-2 text-[10px] font-black uppercase text-zinc-100 transition hover:bg-white/12">
+            Player Hub
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-4">
+          <PlayerChallengeStat label="XP" value={formatNumber(progress.total_xp)} />
+          <PlayerChallengeStat label="Joined" value={formatNumber(progress.joined_challenges)} />
+          <PlayerChallengeStat label="Complete" value={formatNumber(progress.completed_challenges)} />
+          <PlayerChallengeStat label="Cards" value={formatNumber(progress.calling_cards.length)} />
+        </div>
+        <p className="mt-4 text-sm font-bold leading-6 text-zinc-300">
+          Player challenges are free to join. XP and calling cards are earned player-side only and do not change rankings, discovery, reviews, events, Server Wars scores, or eligibility.
+        </p>
+        {error ? (
+          <p className="mt-3 rounded border border-amber-300/25 bg-amber-400/10 px-3 py-2 text-xs font-black uppercase text-amber-100">{error}</p>
+        ) : null}
+      </div>
+      <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-3">
+        {challenges.length ? (
+          challenges.map((challenge) => (
+            <PlayerChallengeTrackCard
+              key={challenge.id}
+              challenge={challenge}
+              busy={busyId === challenge.id}
+              disabled={loadState === "loading"}
+              onJoin={onJoin}
+            />
+          ))
+        ) : (
+          <div className="rounded border border-white/10 bg-black/24 p-4 text-sm font-bold text-zinc-400 lg:col-span-3">
+            DZN player challenges are loading. Public challenge cards below remain available while the player track refreshes.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function PlayerChallengeTrackCard({
+  challenge,
+  busy,
+  disabled,
+  onJoin,
+}: {
+  challenge: PlayerChallengeClient;
+  busy: boolean;
+  disabled: boolean;
+  onJoin: (challenge: PlayerChallengeClient) => Promise<void>;
+}) {
+  const state = challenge.player_state?.status ?? "not_joined";
+  const joined = state === "joined" || state === "completed";
+  const percent = clampPercent(challenge.player_state?.progress_percent ?? 0);
+  const card = challenge.reward?.calling_card;
+  return (
+    <article className="flex min-h-[260px] flex-col rounded border border-white/10 bg-black/28 p-4 transition hover:border-cyan-300/30 hover:bg-black/36">
+      <div className="flex items-start justify-between gap-3">
+        <span className="inline-flex max-w-full items-center gap-1.5 rounded border border-cyan-300/25 bg-cyan-400/10 px-2.5 py-1 text-[10px] font-black uppercase text-cyan-100">
+          <Swords className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{challenge.category}</span>
+        </span>
+        <span className="rounded border border-white/10 bg-white/[0.06] px-2.5 py-1 text-[10px] font-black uppercase text-zinc-300">{state.replace("_", " ")}</span>
+      </div>
+      <h3 className="mt-4 break-words text-lg font-black uppercase leading-tight text-white [overflow-wrap:anywhere]">{challenge.title}</h3>
+      {challenge.description ? (
+        <p className="mt-3 line-clamp-3 text-sm font-bold leading-6 text-zinc-300">{challenge.description}</p>
+      ) : null}
+      <div className="mt-4 grid gap-2 text-xs font-black uppercase text-zinc-300">
+        <span className="inline-flex items-center gap-2">
+          <Activity className="h-4 w-4 text-cyan-100" />
+          {formatNumber(challenge.reward?.xp ?? 0)} XP reward hook
+        </span>
+        {card ? (
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <Trophy className="h-4 w-4 shrink-0 text-violet-100" />
+            <span className="truncate">{card.name} calling card</span>
+          </span>
+        ) : null}
+      </div>
+      <div className="mt-auto pt-5">
+        <div className="h-1.5 overflow-hidden rounded bg-white/10">
+          <span className="block h-full rounded bg-[linear-gradient(90deg,#22d3ee,#8b5cf6)]" style={{ width: `${percent}%` }} />
+        </div>
+        <button
+          type="button"
+          disabled={disabled || busy || joined}
+          onClick={() => {
+            void onJoin(challenge);
+          }}
+          className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded border border-cyan-300/25 bg-cyan-400/12 px-3 py-3 text-xs font-black uppercase text-cyan-50 transition hover:bg-cyan-400/18 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.06] disabled:text-zinc-500"
+        >
+          {joined ? <CheckCircle2 className="h-4 w-4" /> : <Swords className="h-4 w-4" />}
+          {busy ? "Joining..." : joined ? state === "completed" ? "Completed" : "Joined" : "Join Challenge"}
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function PlayerChallengeStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded border border-white/10 bg-black/24 p-3">
+      <p className="font-mono text-2xl font-black text-cyan-50">{value}</p>
+      <p className="mt-1 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-400">{label}</p>
+    </div>
+  );
+}
+
+function usePlayerChallenges() {
+  const [data, setData] = useState<PlayerChallengesClientPayload>(fallbackPlayerChallengesPayload());
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const latest = useRef(0);
+
+  const refresh = useCallback(async () => {
+    const requestId = latest.current + 1;
+    latest.current = requestId;
+    try {
+      const payload = await fetchJsonWithRetry<PlayerChallengesClientPayload>("/api/player/challenges", {
+        cache: "no-store",
+        credentials: "include",
+        headers: { accept: "application/json" },
+        timeoutMs: 12_000,
+      });
+      if (latest.current !== requestId) return;
+      setData(normalizePlayerChallengesPayload(payload));
+      setLoadState("loaded");
+      setError("");
+    } catch (loadError) {
+      if (latest.current !== requestId) return;
+      setLoadState("stale");
+      setError(loadError instanceof Error ? loadError.message : "Player challenges could not be loaded right now.");
+    }
+  }, []);
+
+  useEffect(() => {
+    const requestId = latest.current + 1;
+    latest.current = requestId;
+    fetchJsonWithRetry<PlayerChallengesClientPayload>("/api/player/challenges", {
+      cache: "no-store",
+      credentials: "include",
+      headers: { accept: "application/json" },
+      timeoutMs: 12_000,
+    })
+      .then((payload) => {
+        if (latest.current !== requestId) return;
+        setData(normalizePlayerChallengesPayload(payload));
+        setLoadState("loaded");
+        setError("");
+      })
+      .catch((loadError) => {
+        if (latest.current !== requestId) return;
+        setLoadState("stale");
+        setError(loadError instanceof Error ? loadError.message : "Player challenges could not be loaded right now.");
+      });
+  }, []);
+
+  const joinChallenge = useCallback(async (challenge: PlayerChallengeClient) => {
+    setBusyId(challenge.id);
+    try {
+      await fetchJsonWithRetry("/api/player/challenges", {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ action: "join", challenge_slug: challenge.slug }),
+        timeoutMs: 12_000,
+      });
+      await refresh();
+      setError("");
+    } catch (joinError) {
+      setError(joinError instanceof Error ? joinError.message : "Challenge join could not be saved right now.");
+    } finally {
+      setBusyId(null);
+    }
+  }, [refresh]);
+
+  return { data, loadState, error, busyId, joinChallenge };
+}
+
+function fallbackPlayerChallengesPayload(): PlayerChallengesClientPayload {
+  return {
+    ok: true,
+    source: "display_fallback",
+    challenges: [],
+    player_progress: {
+      total_xp: 0,
+      available_challenges: 0,
+      joined_challenges: 0,
+      completed_challenges: 0,
+      calling_cards: [],
+      href: "/events/challenges",
+    },
+  };
+}
+
+function normalizePlayerChallengesPayload(value: PlayerChallengesClientPayload): PlayerChallengesClientPayload {
+  return {
+    ...fallbackPlayerChallengesPayload(),
+    ...value,
+    challenges: Array.isArray(value.challenges) ? value.challenges : [],
+    player_progress: normalizePlayerChallengeProgress(value.player_progress),
+  };
+}
+
+function normalizePlayerChallengeProgress(value: PlayerChallengesClientPayload["player_progress"]) {
+  return {
+    total_xp: safeNumber(value?.total_xp),
+    available_challenges: safeNumber(value?.available_challenges),
+    joined_challenges: safeNumber(value?.joined_challenges),
+    completed_challenges: safeNumber(value?.completed_challenges),
+    calling_cards: Array.isArray(value?.calling_cards) ? value.calling_cards : [],
+    href: typeof value?.href === "string" && value.href ? value.href : "/events/challenges",
+  };
+}
+
+function safeNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : 0;
+}
+
+function clampPercent(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : 0;
 }
 
 export function ServerEventsPage({ slug: slugProp }: { slug?: string } = {}) {
