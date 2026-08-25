@@ -1,7 +1,8 @@
 import { ensureMockUser, getSessionUser, requireDb } from "../../../../_lib/db";
-import { json, methodNotAllowed, readJson } from "../../../../_lib/http";
+import { json, methodNotAllowed, readBoundedJson } from "../../../../_lib/http";
 import { isMockAuth } from "../../../../_lib/mock";
 import { validateReportReason } from "../../../../_lib/review-moderation";
+import { notifyReviewModerationOwner } from "../../../../_lib/review-moderation-dashboard";
 import { ensureServerReviewsSchema, recordReviewModerationAction } from "../../../../_lib/server-reviews";
 import type { Env, PagesFunction, SessionUser } from "../../../../_lib/types";
 
@@ -21,13 +22,26 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   await ensureServerReviewsSchema(env);
   const db = requireDb(env);
   const review = await db
-    .prepare("SELECT id, linked_server_id, report_count FROM server_reviews WHERE id = ? AND status != 'deleted' LIMIT 1")
+    .prepare(
+      `SELECT
+         server_reviews.id,
+         server_reviews.linked_server_id,
+         server_reviews.report_count,
+         linked_servers.user_id AS owner_user_id,
+         COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name, 'DZN Server') AS server_name
+       FROM server_reviews
+       INNER JOIN linked_servers ON linked_servers.id = server_reviews.linked_server_id
+       WHERE server_reviews.id = ?
+         AND server_reviews.status != 'deleted'
+       LIMIT 1`,
+    )
     .bind(reviewId)
-    .first<{ id: string; linked_server_id: string; report_count: number }>();
+    .first<{ id: string; linked_server_id: string; report_count: number; owner_user_id: string | null; server_name: string | null }>();
   if (!review) return json({ error: "Review not found." }, { status: 404 });
 
-  const body = await readJson<ReportBody>(request);
-  const reason = validateReportReason(body.reason);
+  const body = await readBoundedJson<ReportBody>(request, 2048);
+  if (!body.ok) return json({ error: body.error, message: body.message }, { status: body.status });
+  const reason = validateReportReason(body.value.reason);
   const now = new Date().toISOString();
   try {
     await db
@@ -60,6 +74,16 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
       actorRole: "system",
       action: "review_auto_pending",
       reason: "Report threshold reached.",
+      createdAt: now,
+    });
+    await notifyReviewModerationOwner(env, {
+      ownerUserId: review.owner_user_id,
+      linkedServerId: review.linked_server_id,
+      reviewId,
+      serverName: review.server_name,
+      kind: "review_auto_pending",
+      title: "Review needs moderation",
+      body: `${review.server_name ?? "Your server"} has a review in the moderation queue after multiple reports.`,
       createdAt: now,
     });
   }

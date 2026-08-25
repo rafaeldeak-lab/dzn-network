@@ -103,6 +103,8 @@ Authenticated player APIs such as `/api/player/hub` and `/api/player/communities
 
 Owner replies are server-management actions. `PUT`/`DELETE /api/servers/[serverId]/reviews/[reviewId]/reply` must stay behind the owner entitlement boundary and existing server owner/admin checks. Owner replies may be displayed publicly with approved reviews, but they must not change the review rating, review count, average, ranking, discovery score, badge eligibility, seasons, events, or competitive eligibility.
 
+`/dashboard/reviews`, `/owner/reviews`, and `/api/reviews/moderation` are private moderation surfaces. Normal owners must pass the canonical owner entitlement boundary and can only see or act on reviews for their own linked servers. Configured DZN admins can triage across servers through the same API. Moderation may approve, hold, remove, dismiss reports, save owner replies, remove owner replies, and create internal DZN Pulse notification rows. It must not change ratings, rankings, discovery score, billing, server ownership, badges, seasons, events, Server Wars, challenge outcomes, XP, calling cards, or competitive eligibility.
+
 Event browsing, event detail pages, event suggestions, votes, and reports remain player/community surfaces. Registering or matching an owned server for an event is an owner action and must cross the billing entitlement boundary first.
 
 These APIs must keep their existing preview redaction and `Vary: Cookie` behavior where applicable. Public API availability does not mean the corresponding app page is public.

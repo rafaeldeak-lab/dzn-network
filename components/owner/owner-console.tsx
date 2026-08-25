@@ -339,6 +339,7 @@ const NAV_ITEMS = [
   "Resource Control",
   "Discord Control",
   "Event Control",
+  "Review Control",
   "Audit Log",
   "Settings / Access",
 ] as const;
@@ -510,6 +511,7 @@ export function OwnerConsole() {
       {activeView === "Resource Control" ? <ResourceControlPanel servers={servers} /> : null}
       {activeView === "Discord Control" && discordControl ? <DiscordControlPanel data={discordControl} /> : null}
       {activeView === "Event Control" && overview ? <EventControlPanel overview={overview} /> : null}
+      {activeView === "Review Control" ? <ReviewControlPanel /> : null}
       {activeView === "Audit Log" ? <AuditLogPanel auditLog={auditLog} /> : null}
       {activeView === "Settings / Access" && overview ? <SettingsPanel overview={overview} /> : null}
     </OwnerShell>
@@ -1463,6 +1465,27 @@ function DiscordEmbedPreview({ preview }: { preview: DiscordPreviewEmbed | null 
         ) : null}
         <div className="mt-3 text-[11px] text-[#949ba4]">{preview.footer} - {formatDate(preview.timestamp)}</div>
       </div>
+    </div>
+  );
+}
+
+function ReviewControlPanel() {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto lg:overflow-hidden">
+      <PanelHeader eyebrow="Review Control" title="Owner review moderation" description="Reported reviews, pending reviews, owner replies and report triage are handled in the dedicated moderation queue." />
+      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+        <div className="grid gap-3 md:grid-cols-3">
+          <StatusCard title="Review submission" value="Free player feature" tone="good" />
+          <StatusCard title="Owner replies" value="Owner gated" tone="good" />
+          <StatusCard title="Competitive impact" value="None" tone="good" />
+        </div>
+        <p className="mt-5 max-w-3xl text-sm leading-6 text-zinc-400">
+          The queue stores moderation state and owner reply text only. It does not change leaderboard rank, discovery score, badges, seasons, event results, billing, or competitive eligibility.
+        </p>
+        <Link href="/owner/reviews" className="mt-5 inline-flex rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 hover:bg-cyan-300/20">
+          Open Review Queue
+        </Link>
+      </section>
     </div>
   );
 }
