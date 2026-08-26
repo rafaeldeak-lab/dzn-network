@@ -129,4 +129,6 @@ Run a security diff review before PR handoff. No merge or deployment is included
 
 ## Next Recommended Slice
 
-Next should be community member directory discovery/search polish for public visitors: add richer public sorting/grouping and server/community context cards for already-visible members only, while continuing to keep hidden players private, owner/admin import controls gated, retained exports blocked unless separately approved, live checkout disabled, and all scoring, billing, rankings, reviews, badges, seasons, Server Wars, XP, calling-card awards, and competitive eligibility isolated.
+Delivered next as the Public Community Directory Discovery Polish Slice: richer public sorting, grouping, and safe context cards for already-visible opted-in members only.
+
+Next should be public community member card preview polish: add richer, public-safe preview metadata from each member's already-published profile sections, only when those sections are visible under the player's profile privacy settings, while keeping hidden profile sections private and preserving the same presentation-only isolation from billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP, calling-card awards, and competitive eligibility.

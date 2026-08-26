@@ -361,3 +361,32 @@ Still excluded:
 ## Next Recommended Slice
 
 Next should be community member directory discovery/search polish for public visitors: add richer public sorting/grouping and server/community context cards for already-visible members only, while continuing to keep hidden players private, owner/admin import controls gated, retained exports blocked unless separately approved, live checkout disabled, and all scoring, billing, rankings, reviews, badges, seasons, Server Wars, XP, calling-card awards, and competitive eligibility isolated.
+
+## Follow-On Public Community Directory Discovery Polish
+
+Branch: `codex/public-community-directory-discovery-polish-20260826`
+
+Base branch: `codex/community-member-directory-player-hub-polish-20260826`
+
+This slice polishes the public community member directory as a discovery surface without changing public profile publication, retained exports, owner/admin import controls, billing, checkout, scoring, or ranking behavior.
+
+The slice adds:
+
+- public sort controls for featured order, name, role label, and newest public month;
+- grouping controls for role groups, joined month, or no grouping;
+- safe context cards showing visible profile count, public role group count, newest visible month, and no-influence status;
+- richer public member cards using only public display names, public role labels, generated public handles, public profile hrefs, and month-level member-since labels;
+- `discovery_polish_presentation_only` and `sorts_and_groups_public_rows_only` safeguards.
+
+Still excluded:
+
+- Hidden players, raw Discord IDs, raw DZN user IDs, raw linked-server IDs, raw community guild IDs, OAuth tokens, Nitrado tokens, Stripe state or secrets, source candidate rows, owner/admin import rows, private profile settings, raw award evidence, scoring state, approval state, owner workflow state, and billing state.
+- Retained export files, export-history rows, sharing links, storage bindings, retention write APIs, retained-export migrations, owner/admin import workflow changes, community member source-management writes, live checkout activation, Stripe product/price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord mutations, and issue #49.
+- Public profile visibility without the player's opt-in generated handle.
+- CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility.
+
+Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
+
+## Next Recommended Slice
+
+Next should be public community member card preview polish: add richer, public-safe preview metadata from each member's already-published profile sections, only when those sections are visible under the player's profile privacy settings, while keeping hidden profile sections private and preserving the same presentation-only isolation from billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP, calling-card awards, and competitive eligibility.

@@ -147,6 +147,8 @@ export function publicCommunityMemberDirectorySafeguards() {
   return {
     placement: "public_community_member_directory" as const,
     link_mode: "presentation_only" as const,
+    discovery_polish_presentation_only: true,
+    sorts_and_groups_public_rows_only: true,
     trusted_user_bridge: "community_members.community_guild_id + community_members.user_id -> users.id -> player_profile_privacy_preferences.public_handle",
     uses_gamertag_matching: false,
     uses_discord_name_matching: false,
