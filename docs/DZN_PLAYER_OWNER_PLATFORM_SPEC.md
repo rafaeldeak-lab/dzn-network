@@ -760,6 +760,46 @@ Mutation scope:
 
 Fairness remains unchanged: public community member profile links are presentation-only and must not affect CTF scoring rows, owner workflow rows, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
 
+## Trusted Community Member Source Management and Audit Slice
+
+The trusted community member source management and audit slice adds the private owner/admin workflow that can review candidate members and import them into the existing presentation-only `community_members` bridge. It does not make community member directories an owner-controlled public profile system. A player still appears publicly only when the player has opted into a generated public profile handle through the player-owned profile privacy settings.
+
+The slice adds:
+
+- Additive `community_member_candidates` rows for owner/admin-reviewed community member source candidates.
+- Additive `community_member_source_audit` rows for candidate creation, import, rejection, duplicate rejection, ambiguous-user rejection, and no-match outcomes.
+- `GET /api/owner/community-members` to list scoped servers, candidates, counts, safeguards, and audit history.
+- `POST /api/owner/community-members` to save a candidate after resolving whether a unique trusted DZN user bridge exists.
+- `POST /api/owner/community-members/[candidateId]` to import or reject a candidate.
+- `/dashboard/community-members` and `/owner/community-members` as private owner/admin source-management pages.
+- A dashboard `Community Members` tab alongside review moderation and progression audit.
+
+Authorization and source rules:
+
+- Normal owners must pass the canonical owner entitlement boundary and may manage only their own linked servers.
+- Configured DZN admins may review candidate sources across linked servers.
+- Candidate imports require either an exact Discord ID or an exact DZN user ID that resolves to exactly one existing `users` row.
+- Discord display names, DZN display names, gamertags, review names, leaderboard names, and request-supplied public profile handles are not trusted identity bridges.
+- Duplicate `community_members` rows for the same `(community_guild_id, user_id)` are rejected and recorded in the audit history.
+- Ambiguous user bridges are rejected and recorded in the audit history.
+- A successful import may write only a `community_members` row with `source = 'trusted_dzn_bridge'`; it may not write profile privacy preferences or generate a public profile handle.
+- Public visibility still requires `community_members.public_member_enabled = 1`, `source = 'trusted_dzn_bridge'`, and the player's own opted-in generated `player_profile_privacy_preferences.public_handle`.
+
+Still excluded:
+
+- Public profile visibility without the player's opt-in generated handle.
+- CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, event eligibility, scoring feeds, and accepted audit feeds.
+- Billing, plan status, owner entitlement mutation, rankings, discovery score, reviews, review score, badges, seasons, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility.
+- Stripe checkout activation, Stripe product/price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord resource mutation, and issue #49.
+
+Mutation scope:
+
+- This slice may read `linked_servers`, `discord_guilds`, `users`, `community_members`, `community_member_candidates`, `community_member_source_audit`, and `player_profile_privacy_preferences`.
+- This slice may write only `community_member_candidates`, `community_member_source_audit`, and imported `community_members` rows after a unique trusted DZN user bridge is confirmed.
+- It must not add background jobs, checkout sessions, profile handle generation, profile privacy updates, billing updates, server ownership changes, ranking updates, discovery score updates, review rating changes, event mutations, roster mutations, CTF scoring changes, badge awards, season changes, Server Wars score/result changes, XP awards, calling-card awards, Nitrado calls, Discord bot messages, Cloudflare secret changes, production D1 writes, live checkout activation, or issue #49 changes.
+
+Fairness remains unchanged: source-management controls are owner/admin tools for presentation bridge review only. They cannot make a player publicly visible without the player's opt-in generated handle and must not affect CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -792,6 +832,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | CTF/event presentation roster profile links | 401/login boundary | Owner/admin dashboard access required | Own server dashboard read-only, if owner/admin checks pass | Own server dashboard read-only, if owner/admin checks pass | Exact roster server/player bridge; generated handle required; presentation-only; registration, scoring, eligibility, and owner decisions unaffected |
 | Public event host/member profile links | Published profiles only | Published profiles only | Published profiles only | Published profiles only | `competitive_events.created_by` trusted user bridge; presentation-only; event leaderboards, scoring rows, approvals, brackets, and owner workflows excluded |
 | Public community member directory profile links | Published profiles only | Published profiles only | Published profiles only | Published profiles only | `community_members.community_guild_id` plus `community_members.user_id` trusted bridge; presentation-only; CTF scoring rows, owner workflow rows, approvals, brackets, billing, rankings, discovery, reviews, badges, seasons, Server Wars, XP, calling cards, and eligibility unaffected |
+| `/api/owner/community-members`, `/dashboard/community-members`, and `/owner/community-members` | Login/pricing boundary | Owner plan required | Own linked-server source management | Own linked-server source management, or global if DZN admin | Owner entitlement/admin plus linked-server scope; writes only candidates, source audit, and imported `community_members`; duplicate and ambiguous user bridges are rejected; cannot make a player publicly visible without the player's opt-in generated handle |
 | `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award fact collection, retry, and award processing |
 | `/api/owner/progression/award-audit` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Owner entitlement/admin plus linked-server audit scope; read-only |
 | `/dashboard/progression-awards` and `/owner/progression-awards` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Same private audit API; status/adapter/linked-server/retry filters only |
