@@ -259,12 +259,58 @@ export type CommunityMemberSourceExportPolicy = {
   rules: string[];
 };
 
+export type CommunityMemberRetainedExportApprovalDesign = {
+  status: "design_only_not_approved";
+  implementation_blocked: true;
+  approval_authority: {
+    required_approver_role: "dzn_platform_owner";
+    required_review_roles: string[];
+    approval_record: "dedicated_retained_export_approval_issue_or_pr";
+    issue_49_reserved_for_live_checkout: true;
+    owner_self_approval_allowed: false;
+    admin_ui_toggle_allowed: false;
+  };
+  migration_shape: {
+    status: "design_only_not_applied";
+    proposed_filename: "future_retained_community_member_audit_exports.sql";
+    tables: Array<{
+      name: string;
+      purpose: string;
+      columns: string[];
+      constraints: string[];
+      indexes: string[];
+    }>;
+    prohibited_without_approval: string[];
+  };
+  expiry_model: {
+    default_retention_days: 7;
+    max_retention_days: 30;
+    expires_at_required: true;
+    expired_downloads_denied: true;
+    deletion_job_auth: "cron_secret_only";
+    tombstone_on_delete: true;
+  };
+  storage_plan: {
+    provider: "cloudflare_r2_private_bucket";
+    binding_name: "COMMUNITY_MEMBER_EXPORTS_BUCKET";
+    public_urls_enabled: false;
+    signed_downloads_require_owner_admin_auth: true;
+    object_key_strategy: string;
+    persisted_payload: "export_safe_csv_only";
+    forbidden_payloads: string[];
+  };
+  security_review_checklist: string[];
+  rollback_rules: string[];
+  proof_requirements: string[];
+};
+
 export type CommunityMemberSourceExportPolicyReview = {
   admin_only: true;
   owner_scope_review: "all_owner_scopes";
   current_defaults_confirmed: true;
   retention_work_status: "blocked_until_approved";
   approval_required_before_retained_export_work: true;
+  retained_export_approval_design: CommunityMemberRetainedExportApprovalDesign;
   required_approval_gates: string[];
   checked_defaults: Array<{
     key: string;
@@ -1153,6 +1199,14 @@ export function communityMemberSourceManagementSafeguards() {
     future_retained_export_work_requires_expiry_model: true,
     future_retained_export_work_requires_storage_plan: true,
     future_retained_export_work_requires_security_review: true,
+    retained_export_approval_design_only: true,
+    retained_export_design_requires_platform_owner_approval: true,
+    retained_export_design_requires_security_review_before_build: true,
+    retained_export_design_has_no_migration_side_effect: true,
+    retained_export_design_has_no_storage_side_effect: true,
+    retained_export_design_has_no_write_api: true,
+    retained_export_design_blocks_implementation_until_approved: true,
+    retained_export_design_keeps_issue_49_reserved: true,
     admin_repeated_source_filters: true,
     owner_importable_notification_hook: true,
     notification_hook_dzn_pulse_only: true,
@@ -1201,6 +1255,152 @@ export function communityMemberSourceExportPolicyReview(): CommunityMemberSource
     current_defaults_confirmed: true,
     retention_work_status: "blocked_until_approved",
     approval_required_before_retained_export_work: true,
+    retained_export_approval_design: {
+      status: "design_only_not_approved",
+      implementation_blocked: true,
+      approval_authority: {
+        required_approver_role: "dzn_platform_owner",
+        required_review_roles: ["security_reviewer", "data_retention_owner"],
+        approval_record: "dedicated_retained_export_approval_issue_or_pr",
+        issue_49_reserved_for_live_checkout: true,
+        owner_self_approval_allowed: false,
+        admin_ui_toggle_allowed: false,
+      },
+      migration_shape: {
+        status: "design_only_not_applied",
+        proposed_filename: "future_retained_community_member_audit_exports.sql",
+        tables: [
+          {
+            name: "community_member_retained_export_policies",
+            purpose: "Owner/admin-scoped retained export policy approvals and disabled-by-default configuration.",
+            columns: [
+              "id",
+              "scope_type",
+              "scope_owner_user_id",
+              "approved_by_user_id",
+              "approval_record_ref",
+              "retention_days",
+              "enabled",
+              "created_at",
+              "updated_at",
+              "disabled_at",
+            ],
+            constraints: [
+              "retention_days must be between 1 and 30",
+              "enabled policies require approved_by_user_id and approval_record_ref",
+              "scope_owner_user_id must be present for owner-scoped policies",
+            ],
+            indexes: ["scope_type and scope_owner_user_id", "enabled", "approval_record_ref"],
+          },
+          {
+            name: "community_member_retained_exports",
+            purpose: "Private metadata for approved retained export files, never public profile or scoring state.",
+            columns: [
+              "id",
+              "policy_id",
+              "actor_user_id",
+              "scope_type",
+              "scope_owner_user_id",
+              "filters_json",
+              "row_count",
+              "object_key",
+              "object_sha256",
+              "content_type",
+              "created_at",
+              "expires_at",
+              "deleted_at",
+              "delete_reason",
+            ],
+            constraints: [
+              "expires_at is required",
+              "object_key is unique",
+              "row_count must not exceed the export row cap",
+              "deleted_at rows cannot be downloaded",
+            ],
+            indexes: ["scope_type and scope_owner_user_id", "actor_user_id", "expires_at", "deleted_at"],
+          },
+          {
+            name: "community_member_retained_export_access_audit",
+            purpose: "Private owner/admin audit trail for retained export creation, download, expiry, deletion, and denial events.",
+            columns: [
+              "id",
+              "retained_export_id",
+              "actor_user_id",
+              "actor_role",
+              "scope_type",
+              "scope_owner_user_id",
+              "action",
+              "result_status",
+              "reason",
+              "created_at",
+            ],
+            constraints: [
+              "action is limited to create, download, expire, delete, deny, disable",
+              "result_status is limited to accepted, rejected, skipped, failed",
+              "retained_export_id is required unless action is a denied pre-export request",
+            ],
+            indexes: ["retained_export_id", "actor_user_id", "action and result_status", "created_at"],
+          },
+        ],
+        prohibited_without_approval: [
+          "retained export migration file",
+          "export-history rows",
+          "stored export files",
+          "sharing links",
+          "retention setting write APIs",
+        ],
+      },
+      expiry_model: {
+        default_retention_days: 7,
+        max_retention_days: 30,
+        expires_at_required: true,
+        expired_downloads_denied: true,
+        deletion_job_auth: "cron_secret_only",
+        tombstone_on_delete: true,
+      },
+      storage_plan: {
+        provider: "cloudflare_r2_private_bucket",
+        binding_name: "COMMUNITY_MEMBER_EXPORTS_BUCKET",
+        public_urls_enabled: false,
+        signed_downloads_require_owner_admin_auth: true,
+        object_key_strategy: "random_export_id_with_owner_or_admin_scope_prefix",
+        persisted_payload: "export_safe_csv_only",
+        forbidden_payloads: [
+          "raw Discord IDs",
+          "raw DZN user IDs",
+          "raw linked-server IDs",
+          "raw community guild IDs",
+          "OAuth tokens",
+          "Nitrado tokens",
+          "Stripe secrets",
+          "raw award evidence",
+        ],
+      },
+      security_review_checklist: [
+        "Owner/admin scope is enforced before export creation, listing, download, expiry, or deletion.",
+        "Cross-owner access denial is tested for retained export metadata and object downloads.",
+        "Retained payloads contain export-safe CSV rows only and no raw Discord/user/server/guild identifiers.",
+        "No public URLs or unauthenticated sharing links are generated.",
+        "Retained export creation cannot write billing, ranking, review, profile visibility, scoring, award, season, badge, event, or eligibility state.",
+        "Expiry, deletion, and tombstone behavior are covered by server-side tests.",
+        "Storage uses a private R2 binding only, with no Cloudflare secret or production D1 mutation during review.",
+      ],
+      rollback_rules: [
+        "Disable retained export creation before any data rollback.",
+        "Keep the current download-only export path available as the fallback.",
+        "Deny downloads for disabled, deleted, expired, or out-of-scope retained exports.",
+        "Delete retained export objects before removing storage bindings.",
+        "Tombstone deleted export metadata for audit without preserving downloadable files.",
+        "Rollback must prove no public profile, scoring, billing, ranking, review, badge, season, event, Server Wars, XP, calling-card, or eligibility state changed.",
+      ],
+      proof_requirements: [
+        "Dedicated approval record names the DZN platform owner approver and security reviewer.",
+        "Migration review proves exact table shape, indexes, foreign keys, expiry fields, and rollback path before apply.",
+        "Storage review proves private R2 only, no public bucket, no public URL, and no unauthenticated sharing link.",
+        "API tests prove owner/admin scope, cross-owner denial, expired-download denial, and admin-only policy visibility.",
+        "Mutation scans prove no retained export files, export-history rows, sharing links, retention write APIs, live checkout activation, Stripe product or price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord mutation, or reserved live-checkout issue merge.",
+      ],
+    },
     required_approval_gates: requiredApprovalGates,
     checked_defaults: [
       {

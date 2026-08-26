@@ -185,12 +185,58 @@ type ExportPolicy = {
   rules: string[];
 };
 
+type RetainedExportApprovalDesign = {
+  status: "design_only_not_approved";
+  implementation_blocked: true;
+  approval_authority: {
+    required_approver_role: "dzn_platform_owner";
+    required_review_roles: string[];
+    approval_record: "dedicated_retained_export_approval_issue_or_pr";
+    issue_49_reserved_for_live_checkout: true;
+    owner_self_approval_allowed: false;
+    admin_ui_toggle_allowed: false;
+  };
+  migration_shape: {
+    status: "design_only_not_applied";
+    proposed_filename: "future_retained_community_member_audit_exports.sql";
+    tables: Array<{
+      name: string;
+      purpose: string;
+      columns: string[];
+      constraints: string[];
+      indexes: string[];
+    }>;
+    prohibited_without_approval: string[];
+  };
+  expiry_model: {
+    default_retention_days: 7;
+    max_retention_days: 30;
+    expires_at_required: true;
+    expired_downloads_denied: true;
+    deletion_job_auth: "cron_secret_only";
+    tombstone_on_delete: true;
+  };
+  storage_plan: {
+    provider: "cloudflare_r2_private_bucket";
+    binding_name: "COMMUNITY_MEMBER_EXPORTS_BUCKET";
+    public_urls_enabled: false;
+    signed_downloads_require_owner_admin_auth: true;
+    object_key_strategy: string;
+    persisted_payload: "export_safe_csv_only";
+    forbidden_payloads: string[];
+  };
+  security_review_checklist: string[];
+  rollback_rules: string[];
+  proof_requirements: string[];
+};
+
 type ExportPolicyReview = {
   admin_only: true;
   owner_scope_review: "all_owner_scopes";
   current_defaults_confirmed: true;
   retention_work_status: "blocked_until_approved";
   approval_required_before_retained_export_work: true;
+  retained_export_approval_design: RetainedExportApprovalDesign;
   required_approval_gates: string[];
   checked_defaults: Array<{
     key: string;
@@ -285,6 +331,14 @@ type Payload = {
     future_retained_export_work_requires_expiry_model: boolean;
     future_retained_export_work_requires_storage_plan: boolean;
     future_retained_export_work_requires_security_review: boolean;
+    retained_export_approval_design_only: boolean;
+    retained_export_design_requires_platform_owner_approval: boolean;
+    retained_export_design_requires_security_review_before_build: boolean;
+    retained_export_design_has_no_migration_side_effect: boolean;
+    retained_export_design_has_no_storage_side_effect: boolean;
+    retained_export_design_has_no_write_api: boolean;
+    retained_export_design_blocks_implementation_until_approved: boolean;
+    retained_export_design_keeps_issue_49_reserved: boolean;
     admin_repeated_source_filters: boolean;
     owner_importable_notification_hook: boolean;
     notification_hook_dzn_pulse_only: boolean;
@@ -404,6 +458,84 @@ const DEFAULT_EXPORT_POLICY_REVIEW: ExportPolicyReview = {
   current_defaults_confirmed: true,
   retention_work_status: "blocked_until_approved",
   approval_required_before_retained_export_work: true,
+  retained_export_approval_design: {
+    status: "design_only_not_approved",
+    implementation_blocked: true,
+    approval_authority: {
+      required_approver_role: "dzn_platform_owner",
+      required_review_roles: ["security_reviewer", "data_retention_owner"],
+      approval_record: "dedicated_retained_export_approval_issue_or_pr",
+      issue_49_reserved_for_live_checkout: true,
+      owner_self_approval_allowed: false,
+      admin_ui_toggle_allowed: false,
+    },
+    migration_shape: {
+      status: "design_only_not_applied",
+      proposed_filename: "future_retained_community_member_audit_exports.sql",
+      tables: [
+        {
+          name: "community_member_retained_export_policies",
+          purpose: "Owner/admin-scoped approval and disabled-by-default policy configuration.",
+          columns: ["id", "scope_type", "scope_owner_user_id", "approved_by_user_id", "approval_record_ref", "retention_days", "enabled", "created_at", "updated_at", "disabled_at"],
+          constraints: ["retention_days must be between 1 and 30", "enabled policies require approver and approval record"],
+          indexes: ["scope_type and scope_owner_user_id", "enabled", "approval_record_ref"],
+        },
+        {
+          name: "community_member_retained_exports",
+          purpose: "Private metadata for approved retained export files.",
+          columns: ["id", "policy_id", "actor_user_id", "scope_type", "scope_owner_user_id", "filters_json", "row_count", "object_key", "object_sha256", "created_at", "expires_at", "deleted_at"],
+          constraints: ["expires_at is required", "deleted rows cannot be downloaded"],
+          indexes: ["scope_type and scope_owner_user_id", "actor_user_id", "expires_at", "deleted_at"],
+        },
+        {
+          name: "community_member_retained_export_access_audit",
+          purpose: "Private owner/admin audit trail for retained export lifecycle decisions.",
+          columns: ["id", "retained_export_id", "actor_user_id", "actor_role", "scope_type", "scope_owner_user_id", "action", "result_status", "reason", "created_at"],
+          constraints: ["limited action and result values", "retained_export_id required after creation"],
+          indexes: ["retained_export_id", "actor_user_id", "action and result_status", "created_at"],
+        },
+      ],
+      prohibited_without_approval: ["retained export migration file", "export-history rows", "stored export files", "sharing links", "retention setting write APIs"],
+    },
+    expiry_model: {
+      default_retention_days: 7,
+      max_retention_days: 30,
+      expires_at_required: true,
+      expired_downloads_denied: true,
+      deletion_job_auth: "cron_secret_only",
+      tombstone_on_delete: true,
+    },
+    storage_plan: {
+      provider: "cloudflare_r2_private_bucket",
+      binding_name: "COMMUNITY_MEMBER_EXPORTS_BUCKET",
+      public_urls_enabled: false,
+      signed_downloads_require_owner_admin_auth: true,
+      object_key_strategy: "random_export_id_with_owner_or_admin_scope_prefix",
+      persisted_payload: "export_safe_csv_only",
+      forbidden_payloads: ["raw Discord IDs", "raw DZN user IDs", "raw linked-server IDs", "raw community guild IDs", "OAuth tokens", "Nitrado tokens", "payment processor secrets", "raw award evidence"],
+    },
+    security_review_checklist: [
+      "Owner/admin scope before creation, listing, download, expiry, or deletion.",
+      "Cross-owner denial for retained metadata and object downloads.",
+      "Export-safe CSV rows only, with no raw Discord/user/server/guild identifiers.",
+      "No public URLs or unauthenticated sharing links.",
+      "No billing, ranking, review, profile visibility, scoring, award, season, badge, event, or eligibility writes.",
+    ],
+    rollback_rules: [
+      "Disable retained export creation before data rollback.",
+      "Keep download-only export as the fallback.",
+      "Deny disabled, deleted, expired, or out-of-scope retained downloads.",
+      "Delete retained objects before removing storage bindings.",
+      "Tombstone deleted metadata without preserving downloadable files.",
+    ],
+    proof_requirements: [
+      "Dedicated approval record names platform owner and security reviewer.",
+      "Migration review proves table shape, indexes, expiry fields, and rollback.",
+      "Storage review proves private R2 only with no public URL or sharing link.",
+      "Tests prove owner/admin scope, cross-owner denial, expired-download denial, and admin-only visibility.",
+      "Mutation scans prove no storage, history rows, write APIs, live checkout, external mutation, or issue #49 merge.",
+    ],
+  },
   required_approval_gates: [
     "Dedicated approval required",
     "Migration required",
@@ -524,6 +656,7 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   const servers = payload?.servers ?? [];
   const exportPolicy = payload?.export_policy ?? DEFAULT_EXPORT_POLICY;
   const exportPolicyReview = payload?.role === "admin" ? payload.export_policy_review ?? DEFAULT_EXPORT_POLICY_REVIEW : null;
+  const retainedExportApprovalDesign = exportPolicyReview?.retained_export_approval_design ?? null;
   const selectableCandidateIds = candidates.filter((candidate) => candidate.status === "pending").map((candidate) => candidate.id);
   const selectedCandidateSet = new Set(selectedCandidateIds);
   const selectedPendingCandidateIds = selectableCandidateIds.filter((id) => selectedCandidateSet.has(id));
@@ -834,6 +967,7 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
             {payload?.role === "admin" ? <StatusLine label="admin policy review" ok={payload?.safeguards.export_policy_review_admin_only ?? true} /> : null}
             {payload?.role === "admin" ? <StatusLine label="all owner-scope defaults" ok={payload?.safeguards.export_policy_review_confirms_all_owner_scope_defaults ?? true} /> : null}
             <StatusLine label="future retention blocked" ok={payload?.safeguards.future_retained_export_work_blocked_until_dedicated_approval ?? true} />
+            {payload?.role === "admin" ? <StatusLine label="retained-export design only" ok={payload?.safeguards.retained_export_approval_design_only ?? true} /> : null}
             <StatusLine label="private import alert reads" ok={payload?.safeguards.community_import_alert_read_state_private_per_owner ?? true} />
             <StatusLine label="CTF scoring rows" ok={!(payload?.safeguards.affects_ctf_scoring_rows ?? false)} />
             <StatusLine label="Billing and rankings" ok={!((payload?.safeguards.affects_billing ?? false) || (payload?.safeguards.affects_rankings ?? false))} />
@@ -1183,6 +1317,77 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
                     </div>
                   </div>
                 </div>
+                {retainedExportApprovalDesign ? (
+                  <div className="mt-4 rounded border border-white/10 bg-black/28 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <PanelTitle icon={<FileText className="h-4 w-4" />} title="Retained-export approval design" />
+                      <span className="rounded border border-rose-300/18 bg-rose-400/10 px-3 py-2 text-[10px] font-black uppercase text-rose-100">
+                        Design only, not approved
+                      </span>
+                    </div>
+                    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="rounded border border-cyan-300/14 bg-cyan-400/7 p-3">
+                        <p className="text-[10px] font-black uppercase text-cyan-100">DZN platform owner</p>
+                        <p className="mt-1 text-xs font-bold text-zinc-300">Required approver, with security and data-retention review.</p>
+                      </div>
+                      <div className="rounded border border-amber-300/14 bg-amber-400/7 p-3">
+                        <p className="text-[10px] font-black uppercase text-amber-100">Dedicated issue/PR</p>
+                        <p className="mt-1 text-xs font-bold text-zinc-300">Separate approval record. Issue #49 stays reserved for live checkout.</p>
+                      </div>
+                      <div className="rounded border border-rose-300/14 bg-rose-400/7 p-3">
+                        <p className="text-[10px] font-black uppercase text-rose-100">Design only, not applied</p>
+                        <p className="mt-1 text-xs font-bold text-zinc-300">{retainedExportApprovalDesign.migration_shape.proposed_filename}</p>
+                      </div>
+                      <div className="rounded border border-emerald-300/14 bg-emerald-400/7 p-3">
+                        <p className="text-[10px] font-black uppercase text-emerald-100">7-day default</p>
+                        <p className="mt-1 text-xs font-bold text-zinc-300">30-day maximum, `expires_at` required, cron-secret-only deletion.</p>
+                      </div>
+                      <div className="rounded border border-cyan-300/14 bg-cyan-400/7 p-3">
+                        <p className="text-[10px] font-black uppercase text-cyan-100">Private R2 only</p>
+                        <p className="mt-1 text-xs font-bold text-zinc-300">No public URLs. Owner/admin auth required before any signed download.</p>
+                      </div>
+                      <div className="rounded border border-zinc-500/18 bg-white/[0.03] p-3">
+                        <p className="text-[10px] font-black uppercase text-zinc-300">No admin toggle</p>
+                        <p className="mt-1 text-xs font-bold text-zinc-400">Owners cannot self-approve and this dashboard cannot enable retention.</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                      <div className="rounded border border-white/10 bg-black/24 p-3">
+                        <p className="text-[10px] font-black uppercase text-white">Security review checklist</p>
+                        <div className="mt-3 grid gap-2">
+                          {retainedExportApprovalDesign.security_review_checklist.slice(0, 5).map((item) => (
+                            <span key={item} className="inline-flex items-start gap-2 text-xs font-bold leading-5 text-zinc-300">
+                              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" />
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="rounded border border-white/10 bg-black/24 p-3">
+                        <p className="text-[10px] font-black uppercase text-white">Proof requirements</p>
+                        <div className="mt-3 grid gap-2">
+                          {retainedExportApprovalDesign.proof_requirements.slice(0, 5).map((item) => (
+                            <span key={item} className="inline-flex items-start gap-2 text-xs font-bold leading-5 text-zinc-300">
+                              <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-300" />
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="rounded border border-white/10 bg-black/24 p-3">
+                        <p className="text-[10px] font-black uppercase text-white">Rollback rules</p>
+                        <div className="mt-3 grid gap-2">
+                          {retainedExportApprovalDesign.rollback_rules.slice(0, 5).map((item) => (
+                            <span key={item} className="inline-flex items-start gap-2 text-xs font-bold leading-5 text-zinc-300">
+                              <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-300" />
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
             <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
