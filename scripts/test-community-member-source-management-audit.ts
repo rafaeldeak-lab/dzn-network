@@ -171,7 +171,8 @@ async function main() {
   await assertWorkflowExecutionPolishBulkAndReadState();
   await assertAuditHistoryPolishSummariesAndExportSafeViews();
   await assertExportWorkflowPolishDownload();
-  console.log("Community member source management, import usability, workflow execution, audit-history, and export workflow polish tests passed.");
+  await assertExportUxRetentionControls();
+  console.log("Community member source management, import usability, workflow execution, audit-history, export workflow, and export UX/retention control tests passed.");
 }
 
 function assertStaticContracts() {
@@ -194,6 +195,7 @@ function assertStaticContracts() {
     "docs/COMMUNITY_MEMBER_IMPORT_WORKFLOW_EXECUTION_POLISH_HANDOFF.md",
     "docs/COMMUNITY_MEMBER_IMPORT_AUDIT_HISTORY_POLISH_HANDOFF.md",
     "docs/COMMUNITY_MEMBER_IMPORT_EXPORT_WORKFLOW_POLISH_HANDOFF.md",
+    "docs/COMMUNITY_MEMBER_EXPORT_UX_RETENTION_CONTROLS_HANDOFF.md",
   ]) {
     assert.equal(existsSync(path), true, `${path} should exist.`);
   }
@@ -256,12 +258,14 @@ function assertStaticContracts() {
     "CommunityMemberSourceExportSafeAuditItem",
     "CommunityMemberSourceAuditExport",
     "CommunityMemberSourceAuditExportFilters",
+    "CommunityMemberSourceAuditExportRetention",
     "MAX_BULK_ACTION_CANDIDATES",
     "MAX_EXPORT_LIMIT",
     "execution_summaries",
     "audit_groups",
     "export_safe_audit",
     "exportCommunityMemberSourceAudit",
+    "communityMemberSourceAuditExportRetention",
     "buildCommunityMemberSourceAuditCsv",
     "cleanAuditExportDateBoundary",
     "clampExportLimit",
@@ -291,6 +295,10 @@ function assertStaticContracts() {
     "export_download_private_owner_admin_only: true",
     "export_filters_action_result_date: true",
     "export_uses_export_safe_audit_rows: true",
+    "export_history_affordance_client_only: true",
+    "export_download_non_persistent_by_default: true",
+    "export_private_artifact_notice: true",
+    "export_retention_controls: true",
     "rejects_duplicate_members: true",
     "rejects_ambiguous_user_bridge: true",
     "normalizeAuditActionFilter",
@@ -384,6 +392,11 @@ function assertStaticContracts() {
     "\"content-disposition\"",
     "result.content_type",
     "\"x-dzn-export-safe\"",
+    "\"x-dzn-export-generated-at\"",
+    "\"x-dzn-export-artifact\"",
+    "\"x-dzn-export-retention\"",
+    "\"x-dzn-export-persisted-by-dzn\"",
+    "\"x-dzn-export-dashboard-history\"",
     "methodNotAllowed",
   ]) {
     assert.equal(exportRoute.includes(snippet), true, `Owner community member export route must include ${snippet}.`);
@@ -429,12 +442,23 @@ function assertStaticContracts() {
     "downloadAuditExport",
     "/api/owner/community-members/export",
     "Download audit CSV",
+    "Private export",
+    "Recent exports",
+    "Clear local history",
+    "Owner/admin artifact",
+    "Download-only by default",
+    "Not persisted by DZN",
+    "Client-session history only",
     "Export from",
     "Export to",
     "Export rows",
+    "buildExportFilterSummary",
+    "parseHeaderNumber",
     "action, result, date filters",
     "bounded export downloads",
     "export action/result/date filters",
+    "client-only export history",
+    "non-persistent exports",
     "filenameFromContentDisposition",
     "public profile opt-in handle",
     "CTF scoring rows",
@@ -445,6 +469,7 @@ function assertStaticContracts() {
     assert.equal(ui.includes(snippet), true, `Source dashboard UI must include ${snippet}.`);
   }
   assert.doesNotMatch(ui, /dangerouslySetInnerHTML|DZN_LIVE_CHECKOUT_ENABLED|createCheckoutSession|stripe|NITRADO_TOKEN|DISCORD_BOT_TOKEN|fetchNitrado|fetchDiscord/i, "UI must not touch checkout, secrets, or external services.");
+  assert.doesNotMatch(ui, /localStorage|sessionStorage|indexedDB|community_member_export_history/i, "Export UX history must stay client-session-only and non-persistent by default.");
 
   const dashboard = read("components/onboarding/dashboard.tsx");
   for (const snippet of [
@@ -480,6 +505,7 @@ function assertStaticContracts() {
   assert.equal(packageJson.includes("test:community-member-import-workflow-execution-polish"), true, "Focused import workflow execution polish test must be wired into package scripts.");
   assert.equal(packageJson.includes("test:community-member-import-audit-history-polish"), true, "Focused import audit-history polish test must be wired into package scripts.");
   assert.equal(packageJson.includes("test:community-member-import-export-workflow-polish"), true, "Focused import export workflow polish test must be wired into package scripts.");
+  assert.equal(packageJson.includes("test:community-member-export-ux-retention-controls"), true, "Focused export UX and retention controls test must be wired into package scripts.");
 
   const platformSpec = read("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md");
   for (const snippet of [
@@ -488,6 +514,7 @@ function assertStaticContracts() {
     "Community Member Import Workflow Execution Polish Slice",
     "Community Member Import Audit-History Polish Slice",
     "Community Member Import Export Workflow Polish Slice",
+    "Community Member Export UX and Retention Controls Slice",
     "`community_member_candidates`",
     "`community_member_source_audit`",
     "`community_member_source_snapshots`",
@@ -503,6 +530,9 @@ function assertStaticContracts() {
     "filterable bulk action audit grouping",
     "export-safe audit view",
     "bounded downloadable export action",
+    "client-session-only recent export history",
+    "downloaded file is a private owner/admin artifact",
+    "non-persistent by default",
     "`/api/owner/community-members/export`",
     "`date_from`",
     "`date_to`",
@@ -528,6 +558,9 @@ function assertStaticContracts() {
     "`/api/owner/community-members/notifications/read`",
     "bounded downloadable export action",
     "date/action/result filters",
+    "client-session-only recent export history",
+    "private owner/admin artifact",
+    "non-persistent by default",
     "Public profile visibility still requires the player's opt-in generated handle",
   ]) {
     assert.equal(accessPolicy.includes(snippet), true, `Public access policy must document ${snippet}.`);
@@ -584,6 +617,21 @@ function assertStaticContracts() {
   ]) {
     assert.equal(exportHandoff.includes(snippet), true, `Export workflow polish handoff must document ${snippet}.`);
   }
+
+  const retentionHandoff = read("docs/COMMUNITY_MEMBER_EXPORT_UX_RETENTION_CONTROLS_HANDOFF.md");
+  for (const snippet of [
+    "Community Member Export UX and Retention Controls",
+    "client-session-only recent export history",
+    "private owner/admin artifact",
+    "download-only retention",
+    "non-persistent by default",
+    "`x-dzn-export-generated-at`",
+    "`x-dzn-export-retention`",
+    "No production D1 migration was applied",
+    "DZN_LIVE_CHECKOUT_ENABLED remains disabled",
+  ]) {
+    assert.equal(retentionHandoff.includes(snippet), true, `Export UX retention handoff must document ${snippet}.`);
+  }
 }
 
 function assertSafeguards() {
@@ -602,6 +650,10 @@ function assertSafeguards() {
   assert.equal(safeguards.export_download_private_owner_admin_only, true);
   assert.equal(safeguards.export_filters_action_result_date, true);
   assert.equal(safeguards.export_uses_export_safe_audit_rows, true);
+  assert.equal(safeguards.export_history_affordance_client_only, true);
+  assert.equal(safeguards.export_download_non_persistent_by_default, true);
+  assert.equal(safeguards.export_private_artifact_notice, true);
+  assert.equal(safeguards.export_retention_controls, true);
   assert.equal(safeguards.admin_repeated_source_filters, true);
   assert.equal(safeguards.owner_importable_notification_hook, true);
   assert.equal(safeguards.notification_hook_dzn_pulse_only, true);
@@ -982,7 +1034,15 @@ async function assertExportWorkflowPolishDownload() {
   assert.equal(exportResult.row_count, 1);
   assert.equal(exportResult.truncated, true, "Export must fetch one extra row and report server-side truncation.");
   assert.equal(exportResult.export_safe, true);
+  assert.equal(exportResult.retention.mode, "download_only");
+  assert.equal(exportResult.retention.persisted_by_dzn, false);
+  assert.equal(exportResult.retention.dashboard_history, "client_session_only");
+  assert.equal(exportResult.retention.private_artifact, true);
   assert.equal(exportResult.safeguards.bounded_export_downloads, true);
+  assert.equal(exportResult.safeguards.export_history_affordance_client_only, true);
+  assert.equal(exportResult.safeguards.export_download_non_persistent_by_default, true);
+  assert.equal(exportResult.safeguards.export_private_artifact_notice, true);
+  assert.equal(exportResult.safeguards.export_retention_controls, true);
   assert.match(exportResult.body, /^exported_at,export_safe,filter_linked_server_ref,filter_audit_action,filter_audit_result,filter_date_from,filter_date_to,audit_ref,/);
   assert.match(exportResult.body, /candidate_imported/);
   assert.doesNotMatch(exportResult.body, /candidate_no_match|Other Owner Server/);
@@ -1021,6 +1081,11 @@ async function assertExportWorkflowPolishDownload() {
   assert.equal(routeResponse.headers.get("x-dzn-export-row-count"), "2");
   assert.equal(routeResponse.headers.get("x-dzn-export-limit"), "2");
   assert.equal(routeResponse.headers.get("x-dzn-export-truncated"), "false");
+  assert.match(routeResponse.headers.get("x-dzn-export-generated-at") ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(routeResponse.headers.get("x-dzn-export-artifact"), "private-owner-admin");
+  assert.equal(routeResponse.headers.get("x-dzn-export-retention"), "download_only");
+  assert.equal(routeResponse.headers.get("x-dzn-export-persisted-by-dzn"), "false");
+  assert.equal(routeResponse.headers.get("x-dzn-export-dashboard-history"), "client_session_only");
   const routeCsv = await routeResponse.text();
   assert.match(routeCsv, /candidate_imported/);
   assert.doesNotMatch(routeCsv, /Other Owner Server|candidate_no_match/);
@@ -1029,6 +1094,49 @@ async function assertExportWorkflowPolishDownload() {
   assert.equal(state.privacy.find((item) => item.user_id === "player-1")?.public_profile_enabled, 0);
   assert.equal(state.communityMembers.length, 0, "Audit export must not import or alter presentation bridge rows.");
   assertNoForbiddenSqlWrites(state.operations);
+}
+
+async function assertExportUxRetentionControls() {
+  const state = createFakeState();
+  state.audit.push(
+    makeAudit("audit-retention-a", "server-1", "guild-row-1", "retention-candidate", "member-retention-a", "candidate_imported", "accepted", "Export retention row should stay private.", "2026-08-26T12:00:00.000Z"),
+  );
+  const env = { DB: createFakeDb(state), DZN_PULSE_ENABLED: "true" } as Env;
+  const ownerActor = { user: OWNER_USER, role: "owner" as const };
+  const exportResult = await exportCommunityMemberSourceAudit(env, ownerActor, {
+    linkedServerId: "server-1",
+    auditAction: "candidate_imported",
+    auditResult: "accepted",
+    dateFrom: "2026-08-26",
+    dateTo: "2026-08-26",
+    limit: 100,
+  });
+  assert.equal(exportResult.ok, true);
+  if (!exportResult.ok) assert.fail("Export retention helper must return an export-safe payload.");
+  assert.equal(exportResult.retention.mode, "download_only");
+  assert.equal(exportResult.retention.persisted_by_dzn, false);
+  assert.equal(exportResult.retention.dashboard_history, "client_session_only");
+  assert.equal(exportResult.retention.private_artifact, true);
+  assert.equal(exportResult.safeguards.export_history_affordance_client_only, true);
+  assert.equal(exportResult.safeguards.export_download_non_persistent_by_default, true);
+  assert.equal(exportResult.safeguards.export_private_artifact_notice, true);
+  assert.equal(exportResult.safeguards.export_retention_controls, true);
+  assert.equal(state.communityMembers.length, 0, "Export UX/retention controls must not import or alter presentation bridge rows.");
+  assert.equal(state.privacy.find((item) => item.user_id === "player-1")?.public_profile_enabled, 0);
+  assertNoForbiddenSqlWrites(state.operations);
+
+  const helper = read("functions/_lib/community-member-source-management.ts");
+  const route = read("functions/api/owner/community-members/export.ts");
+  const ui = read("components/community/community-member-source-dashboard.tsx");
+  const combined = `${helper}\n${route}\n${ui}`;
+  assert.doesNotMatch(combined, /community_member_export_history|export_history_records|INSERT INTO\s+community_member_source_exports|UPDATE\s+player_profile_privacy_preferences/i, "Export UX retention controls must not add persistent export logs or profile visibility mutations.");
+  assert.doesNotMatch(ui, /localStorage|sessionStorage|indexedDB/i, "Recent export history must stay in component state only.");
+  assert.match(ui, /setRecentAuditExports/);
+  assert.match(ui, /slice\(0,\s*5\)/, "Recent export affordance should stay bounded in the dashboard.");
+  assert.match(ui, /Clear local history/);
+  assert.match(ui, /Not persisted by DZN/);
+  assert.match(route, /x-dzn-export-retention/);
+  assert.match(route, /x-dzn-export-persisted-by-dzn/);
 }
 
 function makeCandidate(

@@ -231,6 +231,13 @@ export type CommunityMemberSourceAuditExportFilters = {
   limit: number;
 };
 
+export type CommunityMemberSourceAuditExportRetention = {
+  mode: "download_only";
+  persisted_by_dzn: false;
+  dashboard_history: "client_session_only";
+  private_artifact: true;
+};
+
 export type CommunityMemberSourceAuditExport = {
   ok: true;
   status: 200;
@@ -240,6 +247,7 @@ export type CommunityMemberSourceAuditExport = {
   row_count: number;
   truncated: boolean;
   filters: CommunityMemberSourceAuditExportFilters;
+  retention: CommunityMemberSourceAuditExportRetention;
   safeguards: ReturnType<typeof communityMemberSourceManagementSafeguards>;
   generated_at: string;
   export_safe: true;
@@ -493,6 +501,7 @@ export async function exportCommunityMemberSourceAudit(
     row_count: exportRows.length,
     truncated: audit.length > limit,
     filters,
+    retention: communityMemberSourceAuditExportRetention(),
     safeguards: communityMemberSourceManagementSafeguards(),
     generated_at: generatedAt,
     export_safe: true,
@@ -1079,6 +1088,10 @@ export function communityMemberSourceManagementSafeguards() {
     export_download_private_owner_admin_only: true,
     export_filters_action_result_date: true,
     export_uses_export_safe_audit_rows: true,
+    export_history_affordance_client_only: true,
+    export_download_non_persistent_by_default: true,
+    export_private_artifact_notice: true,
+    export_retention_controls: true,
     admin_repeated_source_filters: true,
     owner_importable_notification_hook: true,
     notification_hook_dzn_pulse_only: true,
@@ -1110,6 +1123,15 @@ export function communityMemberSourceManagementSafeguards() {
     affects_calling_card_awards: false,
     affects_competitive_eligibility: false,
     fairness: playerProfilePrivacyFairness(),
+  };
+}
+
+export function communityMemberSourceAuditExportRetention(): CommunityMemberSourceAuditExportRetention {
+  return {
+    mode: "download_only",
+    persisted_by_dzn: false,
+    dashboard_history: "client_session_only",
+    private_artifact: true,
   };
 }
 

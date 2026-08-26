@@ -36,6 +36,11 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       "x-dzn-export-row-count": String(result.row_count),
       "x-dzn-export-limit": String(result.filters.limit),
       "x-dzn-export-truncated": String(result.truncated),
+      "x-dzn-export-generated-at": result.generated_at,
+      "x-dzn-export-artifact": "private-owner-admin",
+      "x-dzn-export-retention": result.retention.mode,
+      "x-dzn-export-persisted-by-dzn": String(result.retention.persisted_by_dzn),
+      "x-dzn-export-dashboard-history": result.retention.dashboard_history,
     });
 
     return new Response(result.body, { status: result.status, headers });
