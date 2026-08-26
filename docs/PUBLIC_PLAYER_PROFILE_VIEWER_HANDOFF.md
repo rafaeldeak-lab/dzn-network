@@ -473,6 +473,27 @@ Still excluded:
 
 Live checkout remains disabled, retained exports remain blocked unless separately approved, and Issue #49 remains reserved for final live payment activation.
 
-## Next Recommended Slice
+## Prior Next Recommended Slice
 
 Next should be public profile share analytics/audit-free UX polish: add lightweight client-only feedback that shows players when they last copied/opened/shared their public link during the current page session, without storing share history, creating tracking events, adding analytics calls, or changing profile privacy settings, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility.
+
+## Follow-On Public Profile Share Session Feedback
+
+Branch: `codex/public-profile-share-session-feedback-20260826`
+
+Base branch: `codex/public-profile-owner-preview-share-polish-20260826`
+
+This slice adds the private, analytics-free, audit-free "This Page Session" feedback panel to the logged-in `/player/profile` public-profile share controls. It records only in component state for the mounted page and shows the last public page open, public link copy, public handle copy, or browser share-sheet open in the current tab.
+
+Still excluded:
+
+- Stored share history, analytics events, tracking events, audit-log calls, beacons, cookies, `localStorage`, `sessionStorage`, IndexedDB, public-profile fetches, new privacy writes, retained export records, sharing links, storage bindings, and migrations.
+- Public profile API changes, profile handle generation changes, profile privacy model changes, owner/admin import writes, retained export files, and retained export write APIs.
+- Stripe checkout activation, Stripe product/price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord mutations, and issue #49.
+- Billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, and competitive eligibility influence.
+
+Live checkout remains disabled, retained exports remain blocked unless separately approved, and Issue #49 remains reserved for final live payment activation.
+
+## Next Recommended Slice
+
+Next should be public profile share accessibility/fallback polish: improve keyboard and screen-reader affordances around copy/open/share states, make unavailable clipboard or browser-share fallbacks clearer, and keep proving those fallback controls do not store share history, create tracking events, call analytics, write profile privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or affect competitive eligibility.
