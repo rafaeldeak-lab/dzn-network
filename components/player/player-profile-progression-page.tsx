@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 
 import { FetchJsonError, fetchJsonWithRetry } from "@/lib/client-fetch";
-import { PublicProfileSharePanel } from "@/components/player/public-profile-share-panel";
+import { PublicProfileSharePanel, type PublicProfileOwnerPreview } from "@/components/player/public-profile-share-panel";
 
 type ShowcaseMode = "private" | "public" | "hidden";
 type PreferencesSaveState = "idle" | "saving" | "saved" | "error";
@@ -249,6 +249,20 @@ export function PlayerProfileProgressionPage() {
     showCards,
     showAwardDates,
   }) !== savedPreferenceKey;
+  const ownerPublicPreview = buildPublicProfileOwnerPreview({
+    displayName,
+    publicProfileEnabled,
+    publicHandle: profile.privacy?.public_handle ?? null,
+    publicHref: profile.privacy?.public_href ?? null,
+    controls: {
+      showXp,
+      showChallenges,
+      showCards,
+      showAwardDates,
+    },
+    progression,
+    preferencesDirty,
+  });
 
   function applyPrivacyState(privacy: PlayerProfilePayload["privacy"]) {
     const controls = normalizePrivacyControls(privacy?.controls);
@@ -367,6 +381,7 @@ export function PlayerProfileProgressionPage() {
                 <PublicProfileSharePanel
                   publicHref={profile.privacy.public_href}
                   publicProfileEnabled={publicProfileEnabled}
+                  preview={ownerPublicPreview}
                   className="mt-3"
                 />
               ) : publicProfileEnabled ? (
@@ -493,6 +508,101 @@ export function PlayerProfileProgressionPage() {
       </section>
     </main>
   );
+}
+
+function buildPublicProfileOwnerPreview({
+  displayName,
+  publicProfileEnabled,
+  publicHandle,
+  publicHref,
+  controls,
+  progression,
+  preferencesDirty,
+}: {
+  displayName: string;
+  publicProfileEnabled: boolean;
+  publicHandle: string | null;
+  publicHref: string | null;
+  controls: {
+    showXp: boolean;
+    showChallenges: boolean;
+    showCards: boolean;
+    showAwardDates: boolean;
+  };
+  progression: ReturnType<typeof normalizeProgression>;
+  preferencesDirty: boolean;
+}): PublicProfileOwnerPreview {
+  const ready = Boolean(publicProfileEnabled && publicHref);
+  const visibleXp = ready && controls.showXp;
+  const visibleChallenges = ready && controls.showChallenges;
+  const visibleCards = ready && controls.showCards;
+  const visibleAwardDates = ready && controls.showAwardDates;
+  const warnings = [
+    !publicProfileEnabled ? "Public profile display is off, so visitors cannot view this profile." : "",
+    publicProfileEnabled && !publicHref ? "Save preferences to generate the visitor link before sharing." : "",
+    preferencesDirty ? "Unsaved changes are a local preview only until you save preferences." : "",
+    !controls.showXp ? "XP totals are hidden from the public page." : "",
+    !controls.showChallenges ? "Challenge progress is hidden from the public page." : "",
+    !controls.showCards ? "Calling cards are hidden from the public page." : "",
+    !controls.showAwardDates ? "Award dates stay hidden from the public page. Exact award times stay hidden." : "Only month-level award labels are shown; exact award times stay hidden.",
+  ].filter(Boolean);
+  const visibleSectionCount = [visibleXp, visibleChallenges, visibleCards, visibleAwardDates].filter(Boolean).length;
+
+  return {
+    displayName,
+    avatarUrl: null,
+    avatarInitial: displayName.slice(0, 1).toUpperCase() || "D",
+    publicHandle,
+    publicHref,
+    statusLabel: !publicProfileEnabled
+      ? "Hidden from visitors"
+      : !publicHref
+        ? "Needs saved handle"
+        : preferencesDirty
+          ? "Unsaved preview"
+          : "Visitor view mirror",
+    statusDetail: ready
+      ? "This private owner preview mirrors the public-safe profile sections visitors can open from the generated DZN profile link."
+      : "This private owner preview shows what the public-safe layout will contain after public profile display is enabled and saved.",
+    unsavedChanges: preferencesDirty,
+    visibleSectionCount,
+    sections: [
+      {
+        key: "xp",
+        label: "XP Section",
+        visible: visibleXp,
+        detail: visibleXp ? `${formatNumber(progression.total_xp)} earned XP` : controls.showXp ? "Waiting for a published visitor link" : "Hidden by your setting",
+      },
+      {
+        key: "challenge_progress",
+        label: "Challenge Progress",
+        visible: visibleChallenges,
+        detail: visibleChallenges
+          ? `${formatNumber(progression.completed_challenges)} complete / ${formatNumber(progression.joined_challenges)} joined`
+          : controls.showChallenges
+            ? "Waiting for a published visitor link"
+            : "Hidden by your setting",
+      },
+      {
+        key: "calling_cards",
+        label: "Calling Cards",
+        visible: visibleCards,
+        detail: visibleCards ? `${formatNumber(progression.calling_cards.length)} public-safe cards` : controls.showCards ? "Waiting for a published visitor link" : "Hidden by your setting",
+      },
+      {
+        key: "award_dates",
+        label: "Award Dates",
+        visible: visibleAwardDates,
+        detail: visibleAwardDates ? "Month labels only" : controls.showAwardDates ? "Waiting for a published visitor link" : "Exact times hidden",
+      },
+    ],
+    stats: [
+      { key: "xp", label: "XP", value: formatNumber(progression.total_xp), visible: visibleXp },
+      { key: "completed", label: "Complete", value: formatNumber(progression.completed_challenges), visible: visibleChallenges },
+      { key: "cards", label: "Cards", value: formatNumber(progression.calling_cards.length), visible: visibleCards },
+    ],
+    warnings,
+  };
 }
 
 function ProfileCard({

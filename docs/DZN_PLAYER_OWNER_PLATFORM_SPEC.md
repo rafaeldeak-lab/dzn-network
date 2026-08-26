@@ -1246,6 +1246,37 @@ Privacy controls remain authoritative. Hidden profile sections stay hidden, priv
 
 Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
 
+## Public Profile Owner Preview and Share Polish Slice
+
+This slice improves the private `/player/profile` public-profile owner experience after `/players/[handle]` has received the richer DZN-branded viewer treatment. It is a presentation-only slice for logged-in players who own their profile. It does not change the public profile API, profile privacy persistence model, public handle generation, progression award model, billing gates, scoring systems, or owner/admin workflows.
+
+The slice adds:
+
+- A private owner preview card labelled "How My Public Profile Looks" inside the existing `PublicProfileSharePanel`.
+- A public-safe preview projection built from the player profile payload already loaded by `/player/profile` and the current local visibility controls.
+- Clear hidden-section and unsaved-change warnings so players understand what visitors can see now versus what is only a local preview until they press Save Preferences.
+- Improved copy/share controls: open public page, copy public link, copy public handle, and use the browser share sheet where available.
+- DZN-branded owner-preview styling that matches the public profile visual system without creating a new API route or storage model.
+- `test:public-profile-owner-preview-share-polish` to prove the preview/share UI remains local browser presentation and does not become a dependency of protected influence systems.
+
+Authorization and privacy rules:
+
+- Normal Discord login remains enough to open `/player/profile`; Starter, Pro, server ownership, Nitrado access, Stripe, Discord bot permissions, and billing state are not required.
+- The private owner preview may show only public-safe labels and counts that the player can already see in their private profile payload: display name, generated public handle when present, public href when present, XP total, joined/completed challenge counts, calling-card count, visible/hidden section states, and month-level award-date messaging.
+- The private owner preview must not expose Discord IDs, internal user IDs, Discord avatar hashes or derived public avatar URLs, source IDs, source tables, raw award evidence, ADM source rows, billing rows, owner account state, Nitrado tokens, Discord bot tokens, Stripe state, Cloudflare secrets, retained export artifacts, or exact award timestamps.
+- If local toggles are dirty, the preview must explain that unsaved changes are local only until the existing Save Preferences action writes the player's privacy row.
+- Opening the public page remains the exact visitor-view check when a saved public href exists.
+
+Mutation scope:
+
+- Copy/share controls may only copy to the local clipboard, copy the generated handle, navigate to the existing public href, or invoke the browser share sheet.
+- The owner preview/share component must not fetch data, create handles, write profile privacy settings, award XP, award calling cards, alter challenge progress, create checkout sessions, update owner billing, change server ownership, update rankings or leaderboards, modify discovery score, mutate reviews, award badges, change seasons, modify events, alter CTF or Server Wars scoring/results, touch retained exports, call Nitrado, mutate Discord resources, change Cloudflare secrets, apply production migrations, enable live checkout, or merge issue #49.
+- The only write on `/player/profile` remains the existing explicit Save Preferences action against `/api/player/profile-privacy`.
+
+Fairness remains unchanged: owner preview/share UI and copy/share controls cannot affect profile privacy settings, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility.
+
+Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -1270,7 +1301,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/player/saved-servers` | 401 | Allowed | Allowed | Allowed | Session auth, player preference only |
 | `/api/player/reviews` | 401 | Allowed | Allowed | Allowed | Session auth, review mutation only |
 | `/api/player/challenges` | 401 | Allowed | Allowed | Allowed | Session auth, player participation only |
-| `/player/profile` and `/api/player/profile` | 401/login redirect | Allowed | Allowed | Allowed | Session auth, private no-store profile progression showcase, read-only |
+| `/player/profile` and `/api/player/profile` | 401/login redirect | Allowed | Allowed | Allowed | Session auth, private no-store profile progression showcase, read-only; public-profile owner preview/share UI is local presentation only |
 | `/api/player/profile-privacy` | 401 | Allowed | Allowed | Allowed | Private player-owned settings API; GET/PATCH only; writes only `player_profile_privacy_preferences` |
 | `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences; DZN-branded visual shell is presentation-only and does not change the public API, privacy writes, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, or competitive eligibility |
 | Public profile attribution on reviews/challenges/leaderboards | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Read-only generated-handle attribution; no name-only matching; ambiguous/hidden/unpublished profiles are not linked |

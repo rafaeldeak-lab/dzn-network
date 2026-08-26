@@ -9531,6 +9531,43 @@ button.dzn-header-action {
     rgba(0, 0, 0, 0.28);
 }
 
+.dzn-public-profile-owner-share-panel,
+.dzn-public-profile-owner-preview {
+  position: relative;
+  isolation: isolate;
+}
+
+.dzn-public-profile-owner-share-panel::before,
+.dzn-public-profile-owner-preview::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.dzn-public-profile-owner-share-panel::before {
+  background:
+    radial-gradient(circle at 14% 0%, rgba(34, 211, 238, 0.14), transparent 38%),
+    radial-gradient(circle at 86% 12%, rgba(168, 85, 247, 0.13), transparent 35%);
+  opacity: 0.9;
+}
+
+.dzn-public-profile-owner-preview::before {
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 56px),
+    linear-gradient(135deg, rgba(34, 211, 238, 0.12), transparent 42%, rgba(168, 85, 247, 0.12));
+  opacity: 0.46;
+}
+
+.dzn-public-profile-owner-section-row {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.dzn-public-profile-owner-share-actions {
+  grid-template-columns: repeat(auto-fit, minmax(8.75rem, 1fr));
+}
+
 @keyframes dzn-public-profile-bg-drift {
   0% {
     transform: translate3d(-0.7rem, -0.4rem, 0) scale(1.045);
