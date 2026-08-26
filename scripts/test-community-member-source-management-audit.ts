@@ -134,6 +134,18 @@ type FakeState = {
   notifications: FakeNotification[];
 };
 
+const AUDIT_ACTION_VALUES = [
+  "candidate_created",
+  "candidate_rejected",
+  "candidate_imported",
+  "candidate_preview_refreshed",
+  "candidate_importable",
+  "candidate_no_match",
+  "duplicate_rejected",
+  "ambiguous_rejected",
+] as const;
+const AUDIT_RESULT_VALUES = ["accepted", "rejected", "skipped", "failed"] as const;
+
 const OWNER_USER: SessionUser = {
   id: "owner-user",
   discord_id: "owner-discord",
@@ -155,7 +167,8 @@ async function main() {
   await assertOwnerScopeAndAmbiguousRejection();
   await assertImportPreviewPolishAndNotifications();
   await assertWorkflowExecutionPolishBulkAndReadState();
-  console.log("Community member source management, import usability, and workflow execution polish tests passed.");
+  await assertAuditHistoryPolishSummariesAndExportSafeViews();
+  console.log("Community member source management, import usability, workflow execution, and audit-history polish tests passed.");
 }
 
 function assertStaticContracts() {
@@ -175,6 +188,7 @@ function assertStaticContracts() {
     "docs/PUBLIC_ACCESS_POLICY.md",
     "docs/COMMUNITY_MEMBER_SOURCE_MANAGEMENT_AUDIT_HANDOFF.md",
     "docs/COMMUNITY_MEMBER_IMPORT_WORKFLOW_EXECUTION_POLISH_HANDOFF.md",
+    "docs/COMMUNITY_MEMBER_IMPORT_AUDIT_HISTORY_POLISH_HANDOFF.md",
   ]) {
     assert.equal(existsSync(path), true, `${path} should exist.`);
   }
@@ -231,7 +245,14 @@ function assertStaticContracts() {
     "player_profile_privacy_preferences",
     "bulkActOnCommunityMemberCandidates",
     "CommunityMemberBulkCandidateActionInput",
+    "CommunityMemberBulkCandidateExecutionSummary",
+    "CommunityMemberBulkActionSummary",
+    "CommunityMemberSourceAuditGroup",
+    "CommunityMemberSourceExportSafeAuditItem",
     "MAX_BULK_ACTION_CANDIDATES",
+    "execution_summaries",
+    "audit_groups",
+    "export_safe_audit",
     "candidate_preview_refreshed",
     "candidate_importable",
     "\"refresh_preview\"",
@@ -251,8 +272,15 @@ function assertStaticContracts() {
     "notification_hook_dzn_pulse_only: true",
     "notification_read_state_private_per_owner: true",
     "community_import_alert_read_state_private_per_owner: true",
+    "bulk_partial_success_execution_summaries: true",
+    "filterable_bulk_action_audit_groups: true",
+    "export_safe_audit_views: true",
     "rejects_duplicate_members: true",
     "rejects_ambiguous_user_bridge: true",
+    "normalizeAuditActionFilter",
+    "normalizeAuditResultFilter",
+    "buildCommunityMemberSourceAuditGroups",
+    "buildExportSafeCommunityMemberSourceAuditRows",
     "affects_ctf_scoring_rows: false",
     "affects_owner_workflow_decisions: false",
     "affects_approval_decisions: false",
@@ -292,6 +320,8 @@ function assertStaticContracts() {
     "listCommunityMemberSourceManagement",
     "createCommunityMemberCandidate",
     "readBoundedJson<CommunityMemberCandidateInput>",
+    "auditAction: url.searchParams.get(\"audit_action\")",
+    "auditResult: url.searchParams.get(\"audit_result\")",
     "privateNoStoreHeaders",
     "methodNotAllowed",
   ]) {
@@ -350,11 +380,17 @@ function assertStaticContracts() {
     "Bulk import selected",
     "Bulk reject selected",
     "Each selected row is rechecked server-side",
+    "Bulk action summaries",
+    "execution_summaries",
     "Mark import alerts read",
     "/api/owner/community-members/bulk",
     "/api/owner/community-members/notifications/read",
     "Repeated no-match",
     "Repeated duplicate",
+    "Audit action",
+    "Audit result",
+    "Filterable bulk action audit grouping",
+    "Export-safe audit view",
     "public profile opt-in handle",
     "CTF scoring rows",
     "Hidden until player opt-in",
@@ -397,12 +433,14 @@ function assertStaticContracts() {
   assert.equal(packageJson.includes("test:community-member-source-management-audit"), true, "Focused source management audit test must be wired into package scripts.");
   assert.equal(packageJson.includes("test:community-member-import-usability-polish"), true, "Focused import usability polish test must be wired into package scripts.");
   assert.equal(packageJson.includes("test:community-member-import-workflow-execution-polish"), true, "Focused import workflow execution polish test must be wired into package scripts.");
+  assert.equal(packageJson.includes("test:community-member-import-audit-history-polish"), true, "Focused import audit-history polish test must be wired into package scripts.");
 
   const platformSpec = read("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md");
   for (const snippet of [
     "Trusted Community Member Source Management and Audit Slice",
     "Community Member Import Usability Polish Slice",
     "Community Member Import Workflow Execution Polish Slice",
+    "Community Member Import Audit-History Polish Slice",
     "`community_member_candidates`",
     "`community_member_source_audit`",
     "`community_member_source_snapshots`",
@@ -414,6 +452,9 @@ function assertStaticContracts() {
     "repeated no-match",
     "community_member_candidate_importable",
     "selected-row bulk",
+    "per-candidate execution summaries",
+    "filterable bulk action audit grouping",
+    "export-safe audit view",
     "bulkActOnCommunityMemberCandidates",
     "cannot make a player publicly visible without the player's opt-in generated handle",
   ]) {
@@ -428,6 +469,9 @@ function assertStaticContracts() {
     "trusted Discord/guild snapshot previews",
     "community_member_candidate_importable",
     "Selected-row bulk import/reject actions",
+    "Per-candidate bulk execution summaries",
+    "filterable audit action/result grouping",
+    "export-safe owner/admin audit view",
     "`/api/owner/community-members/bulk`",
     "`/api/owner/community-members/notifications/read`",
     "Public profile visibility still requires the player's opt-in generated handle",
@@ -450,6 +494,24 @@ function assertStaticContracts() {
   ]) {
     assert.equal(workflowHandoff.includes(snippet), true, `Workflow execution handoff must document ${snippet}.`);
   }
+
+  const auditHistoryHandoff = read("docs/COMMUNITY_MEMBER_IMPORT_AUDIT_HISTORY_POLISH_HANDOFF.md");
+  for (const snippet of [
+    "Community Member Import Audit-History Polish",
+    "per-candidate execution summaries",
+    "partial success",
+    "filterable bulk action audit grouping",
+    "export-safe owner/admin audit views",
+    "`audit_action`",
+    "`audit_result`",
+    "`execution_summaries`",
+    "`audit_groups`",
+    "`export_safe_audit`",
+    "No production D1 migration was applied",
+    "DZN_LIVE_CHECKOUT_ENABLED remains disabled",
+  ]) {
+    assert.equal(auditHistoryHandoff.includes(snippet), true, `Audit-history polish handoff must document ${snippet}.`);
+  }
 }
 
 function assertSafeguards() {
@@ -461,6 +523,9 @@ function assertSafeguards() {
   assert.equal(safeguards.import_previews_from_trusted_snapshots_where_available, true);
   assert.equal(safeguards.selected_row_bulk_actions, true);
   assert.equal(safeguards.bulk_actions_recheck_server_side, true);
+  assert.equal(safeguards.bulk_partial_success_execution_summaries, true);
+  assert.equal(safeguards.filterable_bulk_action_audit_groups, true);
+  assert.equal(safeguards.export_safe_audit_views, true);
   assert.equal(safeguards.admin_repeated_source_filters, true);
   assert.equal(safeguards.owner_importable_notification_hook, true);
   assert.equal(safeguards.notification_hook_dzn_pulse_only, true);
@@ -723,6 +788,81 @@ async function assertWorkflowExecutionPolishBulkAndReadState() {
   assertNoForbiddenSqlWrites(crossOwnerState.operations);
 }
 
+async function assertAuditHistoryPolishSummariesAndExportSafeViews() {
+  const state = createFakeState();
+  state.candidates.push(makeCandidate("partial-import-ready", "111122223333444455", "matched", "pending", "player-1"));
+  state.candidates.push(makeCandidate("partial-import-no-match", "222233334444555566", "no_match", "pending"));
+  const env = { DB: createFakeDb(state), DZN_PULSE_ENABLED: "true" } as Env;
+  const ownerActor = { user: OWNER_USER, role: "owner" as const };
+
+  const partialResult = await bulkActOnCommunityMemberCandidates(env, ownerActor, {
+    action: "import",
+    candidate_ids: ["partial-import-ready", "partial-import-no-match"],
+    reason: "Mixed bulk execution should expose per-candidate summaries for player-1 and 111122223333444455.",
+  });
+
+  assert.equal(partialResult.ok, false);
+  assert.equal(partialResult.status, 207);
+  if (!("execution_summaries" in partialResult)) assert.fail("Bulk partial success must return execution_summaries.");
+  if (!("summary" in partialResult)) assert.fail("Bulk partial success must return a summary object.");
+  assert.equal(partialResult.summary.partial_success, true);
+  assert.equal(partialResult.summary.imported_count, 1);
+  assert.equal(partialResult.summary.blocked_count, 1);
+  assert.equal(partialResult.imported_count, 1);
+  assert.equal(partialResult.blocked_count, 1);
+  assert.match(partialResult.message, /1 imported, 0 rejected, 1 blocked, 0 failed/);
+
+  const importedSummary = partialResult.execution_summaries.find((item) => item.candidate_id === "partial-import-ready");
+  const blockedSummary = partialResult.execution_summaries.find((item) => item.candidate_id === "partial-import-no-match");
+  assert.ok(importedSummary, "Imported row should have a per-candidate execution summary.");
+  assert.ok(blockedSummary, "Blocked row should have a per-candidate execution summary.");
+  assert.equal(importedSummary.outcome, "imported");
+  assert.equal(importedSummary.result_status, "accepted");
+  assert.equal(importedSummary.export_safe, true);
+  assert.equal(blockedSummary.outcome, "blocked");
+  assert.equal(blockedSummary.result_status, "skipped");
+  assert.equal(blockedSummary.error, "NO_TRUSTED_USER_BRIDGE");
+  assert.equal(blockedSummary.export_safe, true);
+  assertNoSensitiveExportIdentifiers(partialResult.execution_summaries, "Bulk execution summaries");
+
+  const importedAudit = await listCommunityMemberSourceManagement(env, ownerActor, {
+    status: "all",
+    auditAction: "candidate_imported",
+    auditResult: "accepted",
+    limit: 80,
+  });
+  assert.equal(importedAudit.filters.audit_action, "candidate_imported");
+  assert.equal(importedAudit.filters.audit_result, "accepted");
+  assert.equal(importedAudit.audit.length, 1);
+  assert.equal(importedAudit.audit[0]?.action, "candidate_imported");
+  assert.equal(importedAudit.audit[0]?.result_status, "accepted");
+  assert.equal(importedAudit.audit_groups.length, 1);
+  assert.equal(importedAudit.audit_groups[0]?.action, "candidate_imported");
+  assert.equal(importedAudit.audit_groups[0]?.result_status, "accepted");
+  assert.equal(importedAudit.audit_groups[0]?.accepted_count, 1);
+  assert.equal(importedAudit.audit_groups[0]?.export_safe, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(importedAudit.audit_groups[0], "linked_server_id"), false);
+  assertNoSensitiveExportIdentifiers(importedAudit.audit_groups, "Audit groups");
+  assert.equal(importedAudit.export_safe_audit.length, 1);
+  assert.equal(Object.prototype.hasOwnProperty.call(importedAudit.export_safe_audit[0], "actor_user_id"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(importedAudit.export_safe_audit[0], "community_guild_id"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(importedAudit.export_safe_audit[0], "linked_server_id"), false);
+  assertNoSensitiveExportIdentifiers(importedAudit.export_safe_audit, "Export-safe audit rows");
+
+  const skippedAudit = await listCommunityMemberSourceManagement(env, ownerActor, {
+    status: "all",
+    auditAction: "candidate_no_match",
+    auditResult: "skipped",
+    limit: 80,
+  });
+  assert.equal(skippedAudit.audit.length, 1);
+  assert.equal(skippedAudit.audit_groups[0]?.skipped_count, 1);
+  assert.equal(state.communityMembers.length, 1, "Only the importable candidate should create a presentation bridge row.");
+  assert.equal(state.candidates.find((candidate) => candidate.id === "partial-import-no-match")?.status, "pending");
+  assert.equal(state.privacy.find((item) => item.user_id === "player-1")?.public_profile_enabled, 0);
+  assertNoForbiddenSqlWrites(state.operations);
+}
+
 function makeCandidate(
   id: string,
   candidateDiscordId: string,
@@ -852,8 +992,16 @@ function selectAll(state: FakeState, sql: string, bindings: unknown[]) {
       .map((candidate) => candidateRow(state, candidate));
   }
   if (sql.includes("FROM community_member_source_audit")) {
+    const actionFilter = sql.includes("community_member_source_audit.action = ?")
+      ? bindings.find((value): value is typeof AUDIT_ACTION_VALUES[number] => typeof value === "string" && AUDIT_ACTION_VALUES.includes(value as typeof AUDIT_ACTION_VALUES[number]))
+      : null;
+    const resultFilter = sql.includes("community_member_source_audit.result_status = ?")
+      ? bindings.find((value): value is typeof AUDIT_RESULT_VALUES[number] => typeof value === "string" && AUDIT_RESULT_VALUES.includes(value as typeof AUDIT_RESULT_VALUES[number]))
+      : null;
     return state.audit
       .filter((audit) => scopedAudit(state, audit, bindings))
+      .filter((audit) => !actionFilter || audit.action === actionFilter)
+      .filter((audit) => !resultFilter || audit.result_status === resultFilter)
       .map((audit) => auditRow(state, audit));
   }
   if (sql.includes("GROUP BY community_member_candidates.status")) {
@@ -1155,6 +1303,22 @@ function notificationIsActive(notification: FakeNotification) {
 function assertNoForbiddenSqlWrites(operations: CapturedOperation[]) {
   for (const operation of operations.filter((item) => item.kind === "run")) {
     assertNoForbiddenMutationTargets(operation.sql, "Executed SQL");
+  }
+}
+
+function assertNoSensitiveExportIdentifiers(value: unknown, label: string) {
+  const serialized = JSON.stringify(value);
+  for (const forbidden of [
+    OWNER_USER.id,
+    OWNER_USER.discord_id,
+    OTHER_OWNER_USER.id,
+    OTHER_OWNER_USER.discord_id,
+    "player-1",
+    "player-2",
+    "111122223333444455",
+    "222233334444555566",
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, `${label} must not expose ${forbidden}.`);
   }
 }
 

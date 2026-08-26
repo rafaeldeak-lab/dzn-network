@@ -35,8 +35,11 @@ export type CommunityMemberSourceAuditAction =
 export type CommunityMemberSourceAuditResult = "accepted" | "rejected" | "skipped" | "failed";
 export type CommunityMemberSourceManagementFilter = CommunityMemberCandidateStatus | "all";
 export type CommunityMemberSourceIssueFilter = "all" | "importable" | "repeated_no_match" | "repeated_duplicate";
+export type CommunityMemberSourceAuditActionFilter = CommunityMemberSourceAuditAction | "all";
+export type CommunityMemberSourceAuditResultFilter = CommunityMemberSourceAuditResult | "all";
 export type CommunityMemberCandidateAction = "import" | "reject" | "refresh_preview";
 export type CommunityMemberBulkCandidateAction = "import" | "reject";
+export type CommunityMemberBulkCandidateOutcome = "imported" | "rejected" | "blocked" | "failed";
 export type CommunityMemberImportPreviewStatus =
   | "ready"
   | "blocked_no_match"
@@ -90,6 +93,36 @@ export type CommunityMemberBulkCandidateActionInput = {
   candidate_ids?: unknown;
   reason?: unknown;
   public_member_enabled?: unknown;
+};
+
+export type CommunityMemberBulkCandidateExecutionSummary = {
+  candidate_id: string;
+  candidate_label: string;
+  candidate_ref: string;
+  server_name: string | null;
+  community_name: string | null;
+  action: CommunityMemberBulkCandidateAction;
+  outcome: CommunityMemberBulkCandidateOutcome;
+  result_status: CommunityMemberSourceAuditResult;
+  ok: boolean;
+  status: number;
+  error: string | null;
+  message: string;
+  imported_member_ref: string | null;
+  public_profile_linkable: boolean | null;
+  export_safe: true;
+};
+
+export type CommunityMemberBulkActionSummary = {
+  action: CommunityMemberBulkCandidateAction;
+  requested_count: number;
+  processed_count: number;
+  imported_count: number;
+  rejected_count: number;
+  blocked_count: number;
+  failed_count: number;
+  partial_success: boolean;
+  export_safe: true;
 };
 
 export type CommunityMemberImportNotificationCounts = {
@@ -154,6 +187,39 @@ export type CommunityMemberSourceAuditItem = {
   result_status: CommunityMemberSourceAuditResult;
   reason: string | null;
   created_at: string | null;
+};
+
+export type CommunityMemberSourceAuditGroup = {
+  key: string;
+  label: string;
+  linked_server_ref: string;
+  server_name: string;
+  community_name: string;
+  action: CommunityMemberSourceAuditAction;
+  result_status: CommunityMemberSourceAuditResult;
+  row_count: number;
+  accepted_count: number;
+  rejected_count: number;
+  skipped_count: number;
+  failed_count: number;
+  first_at: string | null;
+  last_at: string | null;
+  export_safe: true;
+};
+
+export type CommunityMemberSourceExportSafeAuditItem = {
+  id_ref: string;
+  candidate_ref: string | null;
+  community_member_ref: string | null;
+  server_name: string;
+  public_slug: string | null;
+  community_name: string;
+  actor_role: CommunityMemberSourceRole;
+  action: CommunityMemberSourceAuditAction;
+  result_status: CommunityMemberSourceAuditResult;
+  reason: string | null;
+  created_at: string | null;
+  export_safe: true;
 };
 
 type CommunityMemberSourceServerRow = {
@@ -250,7 +316,7 @@ const CANDIDATE_ISSUE_FILTERS = new Set<CommunityMemberSourceIssueFilter>([
   "repeated_duplicate",
 ]);
 const MATCH_STATUSES = new Set<CommunityMemberMatchStatus>(["pending", "matched", "no_match", "duplicate", "ambiguous"]);
-const AUDIT_ACTIONS = new Set<CommunityMemberSourceAuditAction>([
+const AUDIT_ACTION_VALUES: CommunityMemberSourceAuditAction[] = [
   "candidate_created",
   "candidate_rejected",
   "candidate_imported",
@@ -259,8 +325,12 @@ const AUDIT_ACTIONS = new Set<CommunityMemberSourceAuditAction>([
   "candidate_no_match",
   "duplicate_rejected",
   "ambiguous_rejected",
-]);
-const AUDIT_RESULTS = new Set<CommunityMemberSourceAuditResult>(["accepted", "rejected", "skipped", "failed"]);
+];
+const AUDIT_RESULT_VALUES: CommunityMemberSourceAuditResult[] = ["accepted", "rejected", "skipped", "failed"];
+const AUDIT_ACTIONS = new Set<CommunityMemberSourceAuditAction>(AUDIT_ACTION_VALUES);
+const AUDIT_RESULTS = new Set<CommunityMemberSourceAuditResult>(AUDIT_RESULT_VALUES);
+const AUDIT_ACTION_FILTERS = new Set<CommunityMemberSourceAuditActionFilter>(["all", ...AUDIT_ACTION_VALUES]);
+const AUDIT_RESULT_FILTERS = new Set<CommunityMemberSourceAuditResultFilter>(["all", ...AUDIT_RESULT_VALUES]);
 const CANDIDATE_SOURCES = new Set(["owner_import", "admin_import", "discord_guild_snapshot", "manual_review"]);
 const DEFAULT_LIMIT = 80;
 const MAX_LIMIT = 160;
@@ -299,17 +369,26 @@ export async function authorizeCommunityMemberSourceRequest(env: Env, request: R
 export async function listCommunityMemberSourceManagement(
   env: Env,
   actor: CommunityMemberSourceActor,
-  options: { status?: string | null; issue?: string | null; linkedServerId?: string | null; limit?: number | null } = {},
+  options: {
+    status?: string | null;
+    issue?: string | null;
+    linkedServerId?: string | null;
+    auditAction?: string | null;
+    auditResult?: string | null;
+    limit?: number | null;
+  } = {},
 ) {
   const db = requireDb(env);
   const filter = normalizeCandidateStatusFilter(options.status);
   const issueFilter = normalizeIssueFilter(options.issue);
+  const auditActionFilter = normalizeAuditActionFilter(options.auditAction);
+  const auditResultFilter = normalizeAuditResultFilter(options.auditResult);
   const linkedServerId = cleanIdentifier(options.linkedServerId, 96);
   const limit = clampLimit(options.limit);
   const [servers, candidates, audit, counts, notificationCounts] = await Promise.all([
     readCommunityMemberSourceServerOptions(db, actor),
     readCommunityMemberCandidates(db, actor, { status: filter, issue: issueFilter, linkedServerId, limit }),
-    readCommunityMemberSourceAudit(db, actor, { linkedServerId, limit }),
+    readCommunityMemberSourceAudit(db, actor, { linkedServerId, action: auditActionFilter, result: auditResultFilter, limit }),
     readCommunityMemberSourceCounts(db, actor, linkedServerId),
     readCommunityMemberSourceNotificationCounts(env, actor),
   ]);
@@ -321,12 +400,16 @@ export async function listCommunityMemberSourceManagement(
       status: filter,
       issue: issueFilter,
       linked_server_id: linkedServerId,
+      audit_action: auditActionFilter,
+      audit_result: auditResultFilter,
     },
     counts,
     notification_counts: notificationCounts,
     servers,
     candidates,
     audit,
+    audit_groups: buildCommunityMemberSourceAuditGroups(audit),
+    export_safe_audit: buildExportSafeCommunityMemberSourceAuditRows(audit),
     safeguards: communityMemberSourceManagementSafeguards(),
     generated_at: new Date().toISOString(),
   };
@@ -699,6 +782,7 @@ export async function bulkActOnCommunityMemberCandidates(
   );
 
   const results = [];
+  const executionSummaries: CommunityMemberBulkCandidateExecutionSummary[] = [];
   for (const candidateId of candidateIds) {
     const result = await actOnCommunityMemberCandidate(env, actor, candidateId, {
       action,
@@ -706,6 +790,7 @@ export async function bulkActOnCommunityMemberCandidates(
       public_member_enabled: input.public_member_enabled,
     });
     const ok = result.ok === true;
+    executionSummaries.push(toBulkCandidateExecutionSummary(candidateId, action, result));
     results.push({
       candidate_id: candidateId,
       action,
@@ -722,6 +807,17 @@ export async function bulkActOnCommunityMemberCandidates(
   const blockedCount = results.filter((item) => !item.ok && item.status >= 400 && item.status < 500).length;
   const failedCount = results.filter((item) => !item.ok && item.status >= 500).length;
   const allSucceeded = results.every((item) => item.ok);
+  const summary: CommunityMemberBulkActionSummary = {
+    action,
+    requested_count: candidateIds.length,
+    processed_count: results.length,
+    imported_count: importedCount,
+    rejected_count: rejectedCount,
+    blocked_count: blockedCount,
+    failed_count: failedCount,
+    partial_success: !allSucceeded && results.some((item) => item.ok),
+    export_safe: true,
+  };
 
   return {
     ok: allSucceeded,
@@ -735,8 +831,10 @@ export async function bulkActOnCommunityMemberCandidates(
     failed_count: failedCount,
     message: allSucceeded
       ? `${results.length} selected community member candidate${results.length === 1 ? "" : "s"} ${action === "import" ? "imported" : "rejected"} after server-side recheck.`
-      : "Some selected community member candidates could not be processed after server-side recheck.",
+      : `Processed ${results.length} selected community member candidate${results.length === 1 ? "" : "s"}: ${importedCount} imported, ${rejectedCount} rejected, ${blockedCount} blocked, ${failedCount} failed after server-side recheck.`,
+    summary,
     results,
+    execution_summaries: executionSummaries,
     safeguards: communityMemberSourceManagementSafeguards(),
   };
 }
@@ -890,6 +988,9 @@ export function communityMemberSourceManagementSafeguards() {
     import_previews_from_trusted_snapshots_where_available: true,
     selected_row_bulk_actions: true,
     bulk_actions_recheck_server_side: true,
+    bulk_partial_success_execution_summaries: true,
+    filterable_bulk_action_audit_groups: true,
+    export_safe_audit_views: true,
     admin_repeated_source_filters: true,
     owner_importable_notification_hook: true,
     notification_hook_dzn_pulse_only: true,
@@ -1049,13 +1150,26 @@ async function readCommunityMemberCandidates(
 async function readCommunityMemberSourceAudit(
   db: D1Database,
   actor: CommunityMemberSourceActor,
-  options: { linkedServerId: string | null; limit: number },
+  options: {
+    linkedServerId: string | null;
+    action: CommunityMemberSourceAuditActionFilter;
+    result: CommunityMemberSourceAuditResultFilter;
+    limit: number;
+  },
 ) {
   const bindings: unknown[] = [];
   const conditions = scopedAuditConditions(actor, bindings);
   if (options.linkedServerId) {
     conditions.push("community_member_source_audit.linked_server_id = ?");
     bindings.push(options.linkedServerId);
+  }
+  if (options.action !== "all") {
+    conditions.push("community_member_source_audit.action = ?");
+    bindings.push(options.action);
+  }
+  if (options.result !== "all") {
+    conditions.push("community_member_source_audit.result_status = ?");
+    bindings.push(options.result);
   }
   bindings.push(options.limit);
 
@@ -1590,6 +1704,129 @@ function toAuditItem(row: CommunityMemberSourceAuditRow): CommunityMemberSourceA
   };
 }
 
+function buildCommunityMemberSourceAuditGroups(audit: CommunityMemberSourceAuditItem[]): CommunityMemberSourceAuditGroup[] {
+  const groups = new Map<string, CommunityMemberSourceAuditGroup>();
+  for (const item of audit) {
+    const windowKey = auditGroupWindowKey(item.created_at);
+    const key = [
+      item.linked_server_id,
+      item.action,
+      item.result_status,
+      windowKey,
+    ].join(":");
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, {
+        key,
+        label: `${exportSafeText(item.server_name, 96) ?? "DZN Server"} / ${exportSafeText(item.community_name, 96) ?? "DZN Community"} / ${item.action.replaceAll("_", " ")} / ${item.result_status}`,
+        linked_server_ref: exportSafeRef(item.linked_server_id) ?? "server",
+        server_name: exportSafeText(item.server_name, 96) ?? "DZN Server",
+        community_name: exportSafeText(item.community_name, 96) ?? "DZN Community",
+        action: item.action,
+        result_status: item.result_status,
+        row_count: 1,
+        accepted_count: item.result_status === "accepted" ? 1 : 0,
+        rejected_count: item.result_status === "rejected" ? 1 : 0,
+        skipped_count: item.result_status === "skipped" ? 1 : 0,
+        failed_count: item.result_status === "failed" ? 1 : 0,
+        first_at: item.created_at,
+        last_at: item.created_at,
+        export_safe: true,
+      });
+      continue;
+    }
+    existing.row_count += 1;
+    existing.accepted_count += item.result_status === "accepted" ? 1 : 0;
+    existing.rejected_count += item.result_status === "rejected" ? 1 : 0;
+    existing.skipped_count += item.result_status === "skipped" ? 1 : 0;
+    existing.failed_count += item.result_status === "failed" ? 1 : 0;
+    if (!existing.first_at || (item.created_at && item.created_at < existing.first_at)) existing.first_at = item.created_at;
+    if (!existing.last_at || (item.created_at && item.created_at > existing.last_at)) existing.last_at = item.created_at;
+  }
+
+  return Array.from(groups.values()).sort((left, right) => {
+    const timeSort = String(right.last_at ?? "").localeCompare(String(left.last_at ?? ""));
+    if (timeSort !== 0) return timeSort;
+    return right.row_count - left.row_count;
+  });
+}
+
+function buildExportSafeCommunityMemberSourceAuditRows(audit: CommunityMemberSourceAuditItem[]): CommunityMemberSourceExportSafeAuditItem[] {
+  return audit.map((item) => ({
+    id_ref: exportSafeRef(item.id) ?? "audit",
+    candidate_ref: exportSafeRef(item.candidate_id),
+    community_member_ref: exportSafeRef(item.community_member_id),
+    server_name: exportSafeText(item.server_name, 96) ?? "DZN Server",
+    public_slug: item.public_slug,
+    community_name: exportSafeText(item.community_name, 96) ?? "DZN Community",
+    actor_role: item.actor_role,
+    action: item.action,
+    result_status: item.result_status,
+    reason: exportSafeText(item.reason, 220),
+    created_at: item.created_at,
+    export_safe: true,
+  }));
+}
+
+function auditGroupWindowKey(value: string | null) {
+  const text = cleanDisplayText(value, 64);
+  return text ? text.slice(0, 16) : "unknown";
+}
+
+function toBulkCandidateExecutionSummary(
+  candidateId: string,
+  action: CommunityMemberBulkCandidateAction,
+  result: Awaited<ReturnType<typeof actOnCommunityMemberCandidate>>,
+): CommunityMemberBulkCandidateExecutionSummary {
+  const candidate = "candidate" in result ? result.candidate : null;
+  const memberId = result.ok === true && "member" in result ? result.member?.id ?? null : null;
+  const status = typeof result.status === "number" ? result.status : 500;
+  const outcome = result.ok === true
+    ? action === "import" ? "imported" : "rejected"
+    : status >= 500 ? "failed" : "blocked";
+  const resultStatus: CommunityMemberSourceAuditResult = result.ok === true
+    ? action === "import" ? "accepted" : "rejected"
+    : status >= 500 ? "failed" : "skipped";
+  return {
+    candidate_id: candidateId,
+    candidate_label: candidateExecutionLabel(candidate, candidateId),
+    candidate_ref: exportSafeRef(candidateId) ?? "candidate",
+    server_name: exportSafeText(candidate?.server_name, 96),
+    community_name: exportSafeText(candidate?.community_name, 96),
+    action,
+    outcome,
+    result_status: resultStatus,
+    ok: result.ok === true,
+    status,
+    error: result.ok === true ? null : result.error,
+    message: exportSafeText(result.message, 220) ?? "Selected community member candidate was processed.",
+    imported_member_ref: exportSafeRef(memberId),
+    public_profile_linkable: candidate ? candidate.public_profile_linkable : null,
+    export_safe: true,
+  };
+}
+
+function candidateExecutionLabel(candidate: CommunityMemberCandidateItem | null, candidateId: string) {
+  return exportSafeText(candidate?.candidate_display_name, 96) ??
+    exportSafeText(candidate?.candidate_username, 64) ??
+    exportSafeText(candidate?.matched_username, 64) ??
+    `Candidate ${exportSafeRef(candidateId) ?? "row"}`;
+}
+
+function exportSafeText(value: unknown, maxLength: number) {
+  const text = cleanDisplayText(value, maxLength);
+  if (!text) return null;
+  return text
+    .replace(/\b\d{5,32}\b/g, "[discord-id]")
+    .replace(/\b(?:admin|owner|player|user|usr)[_-][a-z0-9][a-z0-9_-]*\b/gi, "[user-id]");
+}
+
+function exportSafeRef(value: string | null | undefined) {
+  const id = cleanDisplayText(value, 96);
+  if (!id) return null;
+  return id.length > 16 ? `${id.slice(0, 8)}...${id.slice(-4)}` : id;
+}
+
 function normalizeCandidateStatus(value: unknown): CommunityMemberCandidateStatus {
   return CANDIDATE_STATUSES.has(value as CommunityMemberCandidateStatus) ? value as CommunityMemberCandidateStatus : "pending";
 }
@@ -1600,6 +1837,14 @@ function normalizeCandidateStatusFilter(value: unknown): CommunityMemberSourceMa
 
 function normalizeIssueFilter(value: unknown): CommunityMemberSourceIssueFilter {
   return CANDIDATE_ISSUE_FILTERS.has(value as CommunityMemberSourceIssueFilter) ? value as CommunityMemberSourceIssueFilter : "all";
+}
+
+function normalizeAuditActionFilter(value: unknown): CommunityMemberSourceAuditActionFilter {
+  return AUDIT_ACTION_FILTERS.has(value as CommunityMemberSourceAuditActionFilter) ? value as CommunityMemberSourceAuditActionFilter : "all";
+}
+
+function normalizeAuditResultFilter(value: unknown): CommunityMemberSourceAuditResultFilter {
+  return AUDIT_RESULT_FILTERS.has(value as CommunityMemberSourceAuditResultFilter) ? value as CommunityMemberSourceAuditResultFilter : "all";
 }
 
 function normalizeMatchStatus(value: unknown): CommunityMemberMatchStatus {
