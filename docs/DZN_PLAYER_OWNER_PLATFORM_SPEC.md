@@ -800,6 +800,44 @@ Mutation scope:
 
 Fairness remains unchanged: source-management controls are owner/admin tools for presentation bridge review only. They cannot make a player publicly visible without the player's opt-in generated handle and must not affect CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
 
+## Community Member Import Usability Polish Slice
+
+The community member source import usability polish slice builds on the owner/admin source-management queue with safer import previews, trusted Discord/guild snapshot context where available, repeated no-match and repeated duplicate filters, and a private owner notification hook when a candidate becomes importable. It remains a presentation-only source review workflow. It does not publish a player profile, create a public profile handle, change source authority, or alter competitive systems.
+
+The slice adds:
+
+- Additive `community_member_source_snapshots` rows for trusted Discord/guild snapshot preview context. These rows are read as import preview evidence only and are not identity bridges by themselves.
+- A refreshed import preview state for each `community_member_candidates` row that explains whether import is ready, blocked by no-match, blocked by duplicate state, blocked by ambiguity, already imported, or rejected.
+- `refresh_preview` support on `POST /api/owner/community-members/[candidateId]` so owners/admins can re-check a stored candidate when a player later logs in and creates a unique DZN user bridge.
+- Admin queue filters for `importable`, repeated no-match, and repeated duplicate source rows.
+- `community_member_candidate_importable` DZN Pulse notifications written to `user_notifications` for the linked-server owner only when a previously blocked/pending candidate becomes importable.
+- Dashboard UI for safer import previews, trusted snapshot details, refresh action, repeated no-match filtering, repeated duplicate filtering, and importable filtering.
+
+Authorization and source rules:
+
+- Normal owners must still pass the canonical owner entitlement boundary and may manage only their own linked servers.
+- Configured DZN admins may still review global candidate source rows.
+- Import readiness still requires exactly one trusted DZN user bridge and no existing `community_members` duplicate for `(community_guild_id, user_id)`.
+- A trusted Discord/guild snapshot may improve owner/admin review context, but it cannot import a candidate without an exact DZN user bridge.
+- Notification hooks are private DZN Pulse records only. They do not send Discord messages, mutate Discord guilds, or expose candidate Discord IDs to another owner.
+- Notification read state remains private per owner/admin user and must not affect importability, public profile visibility, review state, billing, rankings, discovery, or progression.
+
+Still excluded:
+
+- Public profile visibility without the player's opt-in generated handle.
+- Public profile handle creation, profile privacy updates, or player-owned display preference changes.
+- CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, event eligibility, scoring feeds, and accepted audit feeds.
+- Billing, plan status, owner entitlement mutation, rankings, discovery score, reviews, review score, badges, seasons, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility.
+- Stripe checkout activation, Stripe product/price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord resource mutation, and issue #49.
+
+Mutation scope:
+
+- This slice may read `linked_servers`, `discord_guilds`, `users`, `community_members`, `community_member_candidates`, `community_member_source_audit`, `community_member_source_snapshots`, `player_profile_privacy_preferences`, and `user_notifications`.
+- This slice may write only `community_member_source_snapshots` schema, `community_member_candidates` preview refresh fields, `community_member_source_audit` audit rows, imported `community_members` rows after a unique trusted DZN user bridge is confirmed, and private `user_notifications` rows for `community_member_candidate_importable`.
+- It must not add checkout sessions, profile handle generation, profile privacy updates, billing updates, server ownership changes, ranking updates, discovery score updates, review rating changes, event mutations, roster mutations, CTF scoring changes, badge awards, season changes, Server Wars score/result changes, XP awards, calling-card awards, Nitrado calls, Discord bot messages, Cloudflare secret changes, production D1 writes, live checkout activation, or issue #49 changes.
+
+Fairness remains unchanged: safer import previews, repeated source filters, and owner notification hooks are presentation workflow aids only. They cannot make a player publicly visible without the player's opt-in generated handle and must not affect CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -832,7 +870,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | CTF/event presentation roster profile links | 401/login boundary | Owner/admin dashboard access required | Own server dashboard read-only, if owner/admin checks pass | Own server dashboard read-only, if owner/admin checks pass | Exact roster server/player bridge; generated handle required; presentation-only; registration, scoring, eligibility, and owner decisions unaffected |
 | Public event host/member profile links | Published profiles only | Published profiles only | Published profiles only | Published profiles only | `competitive_events.created_by` trusted user bridge; presentation-only; event leaderboards, scoring rows, approvals, brackets, and owner workflows excluded |
 | Public community member directory profile links | Published profiles only | Published profiles only | Published profiles only | Published profiles only | `community_members.community_guild_id` plus `community_members.user_id` trusted bridge; presentation-only; CTF scoring rows, owner workflow rows, approvals, brackets, billing, rankings, discovery, reviews, badges, seasons, Server Wars, XP, calling cards, and eligibility unaffected |
-| `/api/owner/community-members`, `/dashboard/community-members`, and `/owner/community-members` | Login/pricing boundary | Owner plan required | Own linked-server source management | Own linked-server source management, or global if DZN admin | Owner entitlement/admin plus linked-server scope; writes only candidates, source audit, and imported `community_members`; duplicate and ambiguous user bridges are rejected; cannot make a player publicly visible without the player's opt-in generated handle |
+| `/api/owner/community-members`, `/dashboard/community-members`, and `/owner/community-members` | Login/pricing boundary | Owner plan required | Own linked-server source management | Own linked-server source management, or global if DZN admin | Owner entitlement/admin plus linked-server scope; writes only candidates, source audit, trusted snapshot previews, private importable notifications, and imported `community_members`; duplicate and ambiguous user bridges are rejected; repeated no-match/duplicate filters are review-only; cannot make a player publicly visible without the player's opt-in generated handle |
 | `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award fact collection, retry, and award processing |
 | `/api/owner/progression/award-audit` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Owner entitlement/admin plus linked-server audit scope; read-only |
 | `/dashboard/progression-awards` and `/owner/progression-awards` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Same private audit API; status/adapter/linked-server/retry filters only |

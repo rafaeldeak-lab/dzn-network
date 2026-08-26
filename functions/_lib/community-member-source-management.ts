@@ -13,6 +13,7 @@ import {
   publicPlayerProfileApiHref,
   publicPlayerProfileHref,
 } from "./player-profile-privacy";
+import { createNotification } from "./dzn-pulse";
 import type { Env, SessionUser } from "./types";
 
 export type CommunityMemberSourceRole = "owner" | "admin";
@@ -22,12 +23,39 @@ export type CommunityMemberSourceAuditAction =
   | "candidate_created"
   | "candidate_rejected"
   | "candidate_imported"
+  | "candidate_preview_refreshed"
+  | "candidate_importable"
   | "candidate_no_match"
   | "duplicate_rejected"
   | "ambiguous_rejected";
 export type CommunityMemberSourceAuditResult = "accepted" | "rejected" | "skipped" | "failed";
 export type CommunityMemberSourceManagementFilter = CommunityMemberCandidateStatus | "all";
-export type CommunityMemberCandidateAction = "import" | "reject";
+export type CommunityMemberSourceIssueFilter = "all" | "importable" | "repeated_no_match" | "repeated_duplicate";
+export type CommunityMemberCandidateAction = "import" | "reject" | "refresh_preview";
+export type CommunityMemberImportPreviewStatus =
+  | "ready"
+  | "blocked_no_match"
+  | "blocked_duplicate"
+  | "blocked_ambiguous"
+  | "already_imported"
+  | "rejected";
+export type CommunityMemberImportSnapshotPreview = {
+  available: boolean;
+  source: string | null;
+  trust_status: string | null;
+  captured_at: string | null;
+  username: string | null;
+  display_name: string | null;
+  role_label: string | null;
+};
+export type CommunityMemberImportPreview = {
+  status: CommunityMemberImportPreviewStatus;
+  can_import: boolean;
+  source_trust: "trusted_snapshot" | "manual_or_unknown";
+  summary: string;
+  warnings: string[];
+  snapshot: CommunityMemberImportSnapshotPreview | null;
+};
 
 export type CommunityMemberSourceActor = {
   user: SessionUser;
@@ -63,6 +91,7 @@ export type CommunityMemberSourceServerOption = {
 export type CommunityMemberCandidateItem = {
   id: string;
   linked_server_id: string;
+  owner_user_id: string | null;
   server_name: string;
   public_slug: string | null;
   community_guild_id: string;
@@ -90,6 +119,7 @@ export type CommunityMemberCandidateItem = {
     public_href: string;
     public_api_href: string;
   } | null;
+  import_preview: CommunityMemberImportPreview;
 };
 
 export type CommunityMemberSourceAuditItem = {
@@ -121,6 +151,7 @@ type CommunityMemberSourceServerRow = {
 type CommunityMemberCandidateRow = {
   id: string;
   linked_server_id: string;
+  owner_user_id: string | null;
   server_name: string | null;
   public_slug: string | null;
   community_guild_id: string;
@@ -144,6 +175,12 @@ type CommunityMemberCandidateRow = {
   updated_at: string | null;
   public_profile_enabled: number | null;
   public_handle: string | null;
+  snapshot_source: string | null;
+  snapshot_trust_status: string | null;
+  snapshot_captured_at: string | null;
+  snapshot_username: string | null;
+  snapshot_display_name: string | null;
+  snapshot_role_label: string | null;
 };
 
 type CommunityMemberSourceAuditRow = {
@@ -189,11 +226,19 @@ const CANDIDATE_STATUS_FILTERS = new Set<CommunityMemberSourceManagementFilter>(
   "ambiguous",
   "all",
 ]);
+const CANDIDATE_ISSUE_FILTERS = new Set<CommunityMemberSourceIssueFilter>([
+  "all",
+  "importable",
+  "repeated_no_match",
+  "repeated_duplicate",
+]);
 const MATCH_STATUSES = new Set<CommunityMemberMatchStatus>(["pending", "matched", "no_match", "duplicate", "ambiguous"]);
 const AUDIT_ACTIONS = new Set<CommunityMemberSourceAuditAction>([
   "candidate_created",
   "candidate_rejected",
   "candidate_imported",
+  "candidate_preview_refreshed",
+  "candidate_importable",
   "candidate_no_match",
   "duplicate_rejected",
   "ambiguous_rejected",
@@ -236,15 +281,16 @@ export async function authorizeCommunityMemberSourceRequest(env: Env, request: R
 export async function listCommunityMemberSourceManagement(
   env: Env,
   actor: CommunityMemberSourceActor,
-  options: { status?: string | null; linkedServerId?: string | null; limit?: number | null } = {},
+  options: { status?: string | null; issue?: string | null; linkedServerId?: string | null; limit?: number | null } = {},
 ) {
   const db = requireDb(env);
   const filter = normalizeCandidateStatusFilter(options.status);
+  const issueFilter = normalizeIssueFilter(options.issue);
   const linkedServerId = cleanIdentifier(options.linkedServerId, 96);
   const limit = clampLimit(options.limit);
   const [servers, candidates, audit, counts] = await Promise.all([
     readCommunityMemberSourceServerOptions(db, actor),
-    readCommunityMemberCandidates(db, actor, { status: filter, linkedServerId, limit }),
+    readCommunityMemberCandidates(db, actor, { status: filter, issue: issueFilter, linkedServerId, limit }),
     readCommunityMemberSourceAudit(db, actor, { linkedServerId, limit }),
     readCommunityMemberSourceCounts(db, actor, linkedServerId),
   ]);
@@ -254,6 +300,7 @@ export async function listCommunityMemberSourceManagement(
     role: actor.role,
     filters: {
       status: filter,
+      issue: issueFilter,
       linked_server_id: linkedServerId,
     },
     counts,
@@ -382,9 +429,31 @@ export async function createCommunityMemberCandidate(
       resultStatus: "rejected",
       reason: "The supplied source resolved to more than one DZN user.",
     });
+  } else if (matchStatus === "no_match") {
+    await writeCommunityMemberSourceAudit(db, actor, {
+      candidateId,
+      communityMemberId: null,
+      linkedServerId: server.id,
+      communityGuildId: server.community_guild_id,
+      action: "candidate_no_match",
+      resultStatus: "skipped",
+      reason: "No unique trusted DZN user bridge exists yet.",
+    });
   }
 
   const candidate = await readCommunityMemberCandidateById(db, actor, candidateId);
+  if (candidate?.import_preview.can_import) {
+    await writeCommunityMemberSourceAudit(db, actor, {
+      candidateId,
+      communityMemberId: null,
+      linkedServerId: server.id,
+      communityGuildId: server.community_guild_id,
+      action: "candidate_importable",
+      resultStatus: "accepted",
+      reason: "Owner notified that this candidate is ready to import.",
+    });
+    await maybeNotifyCommunityMemberImportable(env, actor, candidate, "candidate_created");
+  }
   return {
     ok: true as const,
     status: 201 as const,
@@ -417,6 +486,10 @@ export async function actOnCommunityMemberCandidate(
   }
 
   const reason = cleanReason(input.reason);
+  if (action === "refresh_preview") {
+    return refreshCommunityMemberCandidatePreview(env, db, actor, candidate, reason);
+  }
+
   if (action === "reject") {
     await db
       .prepare(
@@ -578,14 +651,157 @@ export async function actOnCommunityMemberCandidate(
   };
 }
 
+async function refreshCommunityMemberCandidatePreview(
+  env: Env,
+  db: D1Database,
+  actor: CommunityMemberSourceActor,
+  candidate: CommunityMemberCandidateItem,
+  reason: string | null,
+) {
+  if (candidate.status === "imported") {
+    return errorResult(409, "CANDIDATE_ALREADY_IMPORTED", "Imported candidates already have a community member bridge.");
+  }
+  if (candidate.status === "rejected") {
+    return errorResult(409, "CANDIDATE_REJECTED", "Rejected candidates must be recreated before preview refresh.");
+  }
+
+  const wasImportable = candidate.import_preview.can_import;
+  const candidateDiscordId = candidate.candidate_discord_id_masked ? await readPrivateCandidateDiscordId(db, candidate.id) : null;
+  const bridge = candidate.matched_user_id
+    ? await resolveTrustedUserBridge(db, { userId: candidate.matched_user_id, discordId: candidateDiscordId })
+    : await resolveTrustedUserBridge(db, { userId: null, discordId: candidateDiscordId });
+
+  let nextStatus: CommunityMemberCandidateStatus = "pending";
+  let nextMatchStatus: CommunityMemberMatchStatus = "no_match";
+  let nextMatchedUserId: string | null = null;
+  let nextImportedMemberId: string | null = null;
+  let resultStatus: CommunityMemberSourceAuditResult = "skipped";
+  let auditReason = reason ?? "Preview refreshed; no unique trusted DZN user bridge exists yet.";
+
+  if (bridge.status === "ambiguous") {
+    nextStatus = "ambiguous";
+    nextMatchStatus = "ambiguous";
+    resultStatus = "rejected";
+    auditReason = reason ?? "Preview refreshed; source still resolves to more than one DZN user.";
+  } else if (bridge.status === "matched") {
+    const duplicateMemberId = await readExistingCommunityMemberId(db, candidate.community_guild_id, bridge.user.id);
+    nextMatchedUserId = bridge.user.id;
+    if (duplicateMemberId) {
+      nextStatus = "duplicate";
+      nextMatchStatus = "duplicate";
+      nextImportedMemberId = duplicateMemberId;
+      auditReason = reason ?? "Preview refreshed; community member bridge already exists.";
+    } else {
+      nextMatchStatus = "matched";
+      resultStatus = "accepted";
+      auditReason = reason ?? "Preview refreshed; candidate is ready for owner/admin import.";
+    }
+  }
+
+  await db
+    .prepare(
+      `UPDATE community_member_candidates
+       SET status = ?,
+           match_status = ?,
+           matched_user_id = ?,
+           imported_member_id = ?,
+           reviewed_by_user_id = ?,
+           reviewed_at = CURRENT_TIMESTAMP,
+           reason = COALESCE(?, reason),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+    )
+    .bind(nextStatus, nextMatchStatus, nextMatchedUserId, nextImportedMemberId, actor.user.id, reason, candidate.id)
+    .run();
+  await writeCommunityMemberSourceAudit(db, actor, {
+    candidateId: candidate.id,
+    communityMemberId: nextImportedMemberId,
+    linkedServerId: candidate.linked_server_id,
+    communityGuildId: candidate.community_guild_id,
+    action: "candidate_preview_refreshed",
+    resultStatus,
+    reason: auditReason,
+  });
+
+  const refreshedCandidate = await readCommunityMemberCandidateById(db, actor, candidate.id);
+  let notification = null;
+  if (!wasImportable && refreshedCandidate?.import_preview.can_import) {
+    await writeCommunityMemberSourceAudit(db, actor, {
+      candidateId: candidate.id,
+      communityMemberId: null,
+      linkedServerId: candidate.linked_server_id,
+      communityGuildId: candidate.community_guild_id,
+      action: "candidate_importable",
+      resultStatus: "accepted",
+      reason: "Owner notified that this candidate is ready to import.",
+    });
+    notification = await maybeNotifyCommunityMemberImportable(env, actor, refreshedCandidate, "preview_refresh");
+  }
+
+  return {
+    ok: true as const,
+    status: 200 as const,
+    message: refreshedCandidate?.import_preview.can_import
+      ? "Import preview refreshed. Candidate is ready to import."
+      : "Import preview refreshed. Candidate is still blocked.",
+    candidate: refreshedCandidate,
+    notification,
+    safeguards: communityMemberSourceManagementSafeguards(),
+  };
+}
+
+async function maybeNotifyCommunityMemberImportable(
+  env: Env,
+  actor: CommunityMemberSourceActor,
+  candidate: CommunityMemberCandidateItem | null,
+  trigger: "candidate_created" | "preview_refresh",
+) {
+  if (!candidate?.import_preview.can_import || !candidate.owner_user_id) return null;
+  try {
+    const memberName = candidate.candidate_display_name ?? candidate.candidate_username ?? candidate.matched_username ?? "Community member";
+    const actionUrl = `/dashboard/community-members?status=pending&issue=importable&linked_server_id=${encodeURIComponent(candidate.linked_server_id)}`;
+    return await createNotification(env, {
+      userId: candidate.owner_user_id,
+      serverId: candidate.linked_server_id,
+      type: "community_member_candidate_importable",
+      title: "Community member ready to import",
+      body: `${memberName} has a unique trusted DZN user bridge for ${candidate.community_name}.`,
+      actionUrl,
+      dedupeKey: `community-member-importable:${candidate.id}`,
+      priority: 58,
+      metadata: {
+        candidate_id: candidate.id,
+        trigger,
+        actor_role: actor.role,
+        server_name: candidate.server_name,
+        community_name: candidate.community_name,
+        snapshot_available: Boolean(candidate.import_preview.snapshot?.available),
+        presentation_only: true,
+      },
+    });
+  } catch (error) {
+    console.warn("DZN community member importable notification skipped", {
+      error: error instanceof Error ? error.message : "unknown",
+      candidate_id: candidate.id,
+    });
+    return null;
+  }
+}
+
 export function communityMemberSourceManagementSafeguards() {
   return {
     placement: "community_member_source_management" as const,
     access: "owner_admin_only" as const,
-    writes: ["community_member_candidates", "community_member_source_audit", "community_members"] as const,
+    writes: ["community_member_candidates", "community_member_source_audit", "community_members", "user_notifications"] as const,
     public_visibility_controlled_by_player: true,
     public_profile_link_requires_player_opt_in_handle: true,
     trusted_dzn_user_bridge_required: true,
+    import_preview_requires_trusted_bridge: true,
+    import_previews_from_trusted_snapshots_where_available: true,
+    admin_repeated_source_filters: true,
+    owner_importable_notification_hook: true,
+    notification_hook_dzn_pulse_only: true,
+    notification_read_state_private_per_owner: true,
     rejects_duplicate_members: true,
     rejects_ambiguous_user_bridge: true,
     exposes_private_identifiers_publicly: false,
@@ -617,7 +833,7 @@ export function communityMemberSourceManagementSafeguards() {
 
 export function isCommunityMemberSourceSchemaError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return /no such table:\s*(community_member_candidates|community_member_source_audit|community_members|player_profile_privacy_preferences)|community_member_candidates.*does not exist|community_member_source_audit.*does not exist|no such column:\s*(community_member_candidates|community_member_source_audit|player_profile_privacy_preferences)/i.test(message);
+  return /no such table:\s*(community_member_candidates|community_member_source_audit|community_member_source_snapshots|community_members|player_profile_privacy_preferences|user_notifications)|community_member_candidates.*does not exist|community_member_source_audit.*does not exist|community_member_source_snapshots.*does not exist|no such column:\s*(community_member_candidates|community_member_source_audit|community_member_source_snapshots|player_profile_privacy_preferences|user_notifications)/i.test(message);
 }
 
 export function communityMemberSourceSchemaErrorResponse() {
@@ -666,7 +882,7 @@ async function readCommunityMemberSourceServerOptions(db: D1Database, actor: Com
 async function readCommunityMemberCandidates(
   db: D1Database,
   actor: CommunityMemberSourceActor,
-  options: { status: CommunityMemberSourceManagementFilter; linkedServerId: string | null; limit: number },
+  options: { status: CommunityMemberSourceManagementFilter; issue: CommunityMemberSourceIssueFilter; linkedServerId: string | null; limit: number },
 ) {
   const bindings: unknown[] = [];
   const conditions = scopedCandidateConditions(actor, bindings);
@@ -678,12 +894,14 @@ async function readCommunityMemberCandidates(
     conditions.push("community_member_candidates.linked_server_id = ?");
     bindings.push(options.linkedServerId);
   }
+  appendCandidateIssueFilter(conditions, options.issue);
   bindings.push(options.limit);
 
   const rows = await db
     .prepare(
       `SELECT community_member_candidates.id,
               community_member_candidates.linked_server_id,
+              linked_servers.user_id AS owner_user_id,
               COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name, 'DZN Server') AS server_name,
               linked_servers.public_slug,
               community_member_candidates.community_guild_id,
@@ -706,7 +924,8 @@ async function readCommunityMemberCandidates(
               community_member_candidates.created_at,
               community_member_candidates.updated_at,
               profile_privacy.public_profile_enabled,
-              profile_privacy.public_handle
+              profile_privacy.public_handle,
+              ${candidateSnapshotSelectSql()}
        FROM community_member_candidates
        INNER JOIN linked_servers ON linked_servers.id = community_member_candidates.linked_server_id
        INNER JOIN discord_guilds ON discord_guilds.id = community_member_candidates.community_guild_id
@@ -843,6 +1062,7 @@ async function readCommunityMemberCandidateById(db: D1Database, actor: Community
     .prepare(
       `SELECT community_member_candidates.id,
               community_member_candidates.linked_server_id,
+              linked_servers.user_id AS owner_user_id,
               COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name, 'DZN Server') AS server_name,
               linked_servers.public_slug,
               community_member_candidates.community_guild_id,
@@ -865,7 +1085,8 @@ async function readCommunityMemberCandidateById(db: D1Database, actor: Community
               community_member_candidates.created_at,
               community_member_candidates.updated_at,
               profile_privacy.public_profile_enabled,
-              profile_privacy.public_handle
+              profile_privacy.public_handle,
+              ${candidateSnapshotSelectSql()}
        FROM community_member_candidates
        INNER JOIN linked_servers ON linked_servers.id = community_member_candidates.linked_server_id
        INNER JOIN discord_guilds ON discord_guilds.id = community_member_candidates.community_guild_id
@@ -1016,6 +1237,63 @@ async function writeCommunityMemberSourceAudit(
     .run();
 }
 
+function appendCandidateIssueFilter(conditions: string[], issue: CommunityMemberSourceIssueFilter) {
+  if (issue === "importable") {
+    conditions.push("community_member_candidates.status = 'pending'");
+    conditions.push("community_member_candidates.match_status = 'matched'");
+    conditions.push("existing_members.id IS NULL");
+    return;
+  }
+
+  if (issue === "repeated_no_match") {
+    conditions.push("community_member_candidates.match_status = 'no_match'");
+    conditions.push("community_member_candidates.candidate_discord_id IS NOT NULL");
+    conditions.push(
+      `EXISTS (
+         SELECT 1
+         FROM community_member_candidates repeated_candidates
+         WHERE repeated_candidates.id <> community_member_candidates.id
+           AND repeated_candidates.community_guild_id = community_member_candidates.community_guild_id
+           AND repeated_candidates.candidate_discord_id = community_member_candidates.candidate_discord_id
+           AND repeated_candidates.match_status = 'no_match'
+       )`,
+    );
+    return;
+  }
+
+  if (issue === "repeated_duplicate") {
+    conditions.push("community_member_candidates.match_status = 'duplicate'");
+    conditions.push(
+      `EXISTS (
+         SELECT 1
+         FROM community_member_candidates repeated_candidates
+         WHERE repeated_candidates.id <> community_member_candidates.id
+           AND repeated_candidates.community_guild_id = community_member_candidates.community_guild_id
+           AND repeated_candidates.match_status = 'duplicate'
+           AND (
+             (community_member_candidates.matched_user_id IS NOT NULL AND repeated_candidates.matched_user_id = community_member_candidates.matched_user_id)
+             OR (community_member_candidates.candidate_discord_id IS NOT NULL AND repeated_candidates.candidate_discord_id = community_member_candidates.candidate_discord_id)
+           )
+       )`,
+    );
+  }
+}
+
+function candidateSnapshotSelectSql(candidateAlias = "community_member_candidates") {
+  const alias = candidateAlias.replace(/[^a-zA-Z0-9_]/g, "") || "community_member_candidates";
+  const where = `snapshots.linked_server_id = ${alias}.linked_server_id
+                 AND snapshots.community_guild_id = ${alias}.community_guild_id
+                 AND snapshots.candidate_discord_id = ${alias}.candidate_discord_id
+                 AND snapshots.trust_status = 'trusted'`;
+  const order = "datetime(COALESCE(snapshots.captured_at, snapshots.created_at)) DESC, snapshots.id DESC";
+  return `(SELECT snapshots.source FROM community_member_source_snapshots snapshots WHERE ${where} ORDER BY ${order} LIMIT 1) AS snapshot_source,
+              (SELECT snapshots.trust_status FROM community_member_source_snapshots snapshots WHERE ${where} ORDER BY ${order} LIMIT 1) AS snapshot_trust_status,
+              (SELECT snapshots.captured_at FROM community_member_source_snapshots snapshots WHERE ${where} ORDER BY ${order} LIMIT 1) AS snapshot_captured_at,
+              (SELECT snapshots.candidate_username FROM community_member_source_snapshots snapshots WHERE ${where} ORDER BY ${order} LIMIT 1) AS snapshot_username,
+              (SELECT snapshots.candidate_display_name FROM community_member_source_snapshots snapshots WHERE ${where} ORDER BY ${order} LIMIT 1) AS snapshot_display_name,
+              (SELECT snapshots.role_label FROM community_member_source_snapshots snapshots WHERE ${where} ORDER BY ${order} LIMIT 1) AS snapshot_role_label`;
+}
+
 function scopedLinkedServerConditions(actor: CommunityMemberSourceActor, bindings: unknown[]) {
   const conditions = ["lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')"];
   if (actor.role !== "admin") {
@@ -1048,9 +1326,14 @@ function toCandidateItem(row: CommunityMemberCandidateRow): CommunityMemberCandi
   const publicHref = publicPlayerProfileHref(handle);
   const publicApiHref = publicPlayerProfileApiHref(handle);
   const publicProfileLinkable = Boolean(Number(row.public_profile_enabled ?? 0) === 1 && handle && publicHref && publicApiHref);
+  const status = normalizeCandidateStatus(row.status);
+  const matchStatus = normalizeMatchStatus(row.match_status);
+  const snapshot = toSnapshotPreview(row);
+  const candidateName = cleanDisplayText(row.candidate_display_name, 96) ?? cleanDisplayText(row.candidate_username, 64) ?? cleanDisplayText(row.matched_username, 64);
   return {
     id: row.id,
     linked_server_id: row.linked_server_id,
+    owner_user_id: cleanDisplayText(row.owner_user_id, 96),
     server_name: cleanDisplayText(row.server_name, 96) ?? "DZN Server",
     public_slug: cleanDisplayText(row.public_slug, 96),
     community_guild_id: row.community_guild_id,
@@ -1060,8 +1343,8 @@ function toCandidateItem(row: CommunityMemberCandidateRow): CommunityMemberCandi
     candidate_display_name: cleanDisplayText(row.candidate_display_name, 96),
     role_label: cleanRoleLabel(row.role_label),
     source: cleanCandidateSource(row.source, "owner"),
-    status: normalizeCandidateStatus(row.status),
-    match_status: normalizeMatchStatus(row.match_status),
+    status,
+    match_status: matchStatus,
     matched_user_id: cleanDisplayText(row.matched_user_id, 96),
     matched_username: cleanDisplayText(row.matched_username, 64),
     imported_member_id: cleanDisplayText(row.imported_member_id, 96),
@@ -1080,6 +1363,104 @@ function toCandidateItem(row: CommunityMemberCandidateRow): CommunityMemberCandi
           public_api_href: publicApiHref,
         }
       : null,
+    import_preview: buildImportPreview(status, matchStatus, {
+      candidateName,
+      existingMemberId: cleanDisplayText(row.existing_member_id, 96),
+      snapshot,
+    }),
+  };
+}
+
+function toSnapshotPreview(row: CommunityMemberCandidateRow): CommunityMemberImportSnapshotPreview | null {
+  const source = cleanDisplayText(row.snapshot_source, 64);
+  if (!source) return null;
+  return {
+    available: true,
+    source,
+    trust_status: cleanDisplayText(row.snapshot_trust_status, 32) ?? "trusted",
+    captured_at: cleanDisplayText(row.snapshot_captured_at, 64),
+    username: cleanDisplayText(row.snapshot_username, 64),
+    display_name: cleanDisplayText(row.snapshot_display_name, 96),
+    role_label: cleanRoleLabel(row.snapshot_role_label),
+  };
+}
+
+function buildImportPreview(
+  status: CommunityMemberCandidateStatus,
+  matchStatus: CommunityMemberMatchStatus,
+  context: {
+    candidateName: string | null;
+    existingMemberId: string | null;
+    snapshot: CommunityMemberImportSnapshotPreview | null;
+  },
+): CommunityMemberImportPreview {
+  const warnings: string[] = [];
+  if (!context.snapshot) {
+    warnings.push("No trusted Discord/guild snapshot is attached to this candidate yet.");
+  }
+
+  const name = context.candidateName ?? "This candidate";
+  if (status === "imported") {
+    return {
+      status: "already_imported",
+      can_import: false,
+      source_trust: context.snapshot ? "trusted_snapshot" : "manual_or_unknown",
+      summary: `${name} is already in the presentation-only community member bridge.`,
+      warnings,
+      snapshot: context.snapshot,
+    };
+  }
+  if (status === "rejected") {
+    return {
+      status: "rejected",
+      can_import: false,
+      source_trust: context.snapshot ? "trusted_snapshot" : "manual_or_unknown",
+      summary: `${name} was rejected and must be recreated before import.`,
+      warnings,
+      snapshot: context.snapshot,
+    };
+  }
+  if (matchStatus === "duplicate" || context.existingMemberId) {
+    return {
+      status: "blocked_duplicate",
+      can_import: false,
+      source_trust: context.snapshot ? "trusted_snapshot" : "manual_or_unknown",
+      summary: `${name} already has a community member bridge for this Discord community.`,
+      warnings,
+      snapshot: context.snapshot,
+    };
+  }
+  if (matchStatus === "ambiguous") {
+    return {
+      status: "blocked_ambiguous",
+      can_import: false,
+      source_trust: context.snapshot ? "trusted_snapshot" : "manual_or_unknown",
+      summary: `${name} resolves to more than one DZN user and cannot be imported.`,
+      warnings,
+      snapshot: context.snapshot,
+    };
+  }
+  if (matchStatus === "matched") {
+    if (!context.snapshot) {
+      warnings.push("Preview is importable from the DZN user bridge, but owner/admin should verify the source before import.");
+    }
+    return {
+      status: "ready",
+      can_import: true,
+      source_trust: context.snapshot ? "trusted_snapshot" : "manual_or_unknown",
+      summary: `${name} has a unique trusted DZN user bridge and can be imported.`,
+      warnings,
+      snapshot: context.snapshot,
+    };
+  }
+
+  return {
+    status: "blocked_no_match",
+    can_import: false,
+    source_trust: context.snapshot ? "trusted_snapshot" : "manual_or_unknown",
+    summary: `${name} does not resolve to a unique DZN user yet.`,
+    warnings,
+    snapshot: context.snapshot,
   };
 }
 
@@ -1110,12 +1491,16 @@ function normalizeCandidateStatusFilter(value: unknown): CommunityMemberSourceMa
   return CANDIDATE_STATUS_FILTERS.has(value as CommunityMemberSourceManagementFilter) ? value as CommunityMemberSourceManagementFilter : "pending";
 }
 
+function normalizeIssueFilter(value: unknown): CommunityMemberSourceIssueFilter {
+  return CANDIDATE_ISSUE_FILTERS.has(value as CommunityMemberSourceIssueFilter) ? value as CommunityMemberSourceIssueFilter : "all";
+}
+
 function normalizeMatchStatus(value: unknown): CommunityMemberMatchStatus {
   return MATCH_STATUSES.has(value as CommunityMemberMatchStatus) ? value as CommunityMemberMatchStatus : "pending";
 }
 
 function cleanCandidateAction(value: unknown): CommunityMemberCandidateAction | null {
-  return value === "import" || value === "reject" ? value : null;
+  return value === "import" || value === "reject" || value === "refresh_preview" ? value : null;
 }
 
 function cleanCandidateSource(value: unknown, actorRole: CommunityMemberSourceRole) {
