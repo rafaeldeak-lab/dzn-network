@@ -157,6 +157,31 @@ This supports:
 
 Manageable/admin guild filtering remains useful for owner setup. Player guild matching must not turn ordinary membership into server ownership, must not overwrite stored owner-guild rows, and must not grant management rights.
 
+## Global / Group Chat And Support Bot Roadmap
+
+DZN should eventually include chat as a community/support layer, not as a competitive or billing system.
+
+Future chat surfaces should include:
+
+- A site-wide support chat available from most pages for setup help, account guidance, and public DZN feature questions.
+- A global community chat for logged-in DZN players.
+- Private group chat for approved communities, teams, event groups, or server-linked groups where the membership bridge is trusted.
+- An automated support bot that can answer only from public DZN website content, setup/help copy, product documentation, public pricing copy, and public support policy.
+- Clear escalation or fallback messaging when the bot cannot answer from approved public DZN information.
+- Profanity filtering, warning, and timed-mute controls, plus timeout, report, and moderation hooks for community chat.
+- Admin/owner moderation review surfaces for abuse handling, with cross-owner boundaries where chats are server/community scoped.
+
+Rules:
+
+- Chat must be logged-in for player/community participation, while support entry points may appear on public pages.
+- Private group membership must come from a trusted DZN user/community/server bridge, not display-name matching.
+- Moderation actions must be auditable, scoped, and reversible where practical.
+- The AI support bot must not answer from private player data, private owner data, raw Discord IDs, Nitrado tokens, billing secrets, production D1 internals, retained export artifacts, raw award evidence, or hidden profile sections.
+- The bot must not create checkout sessions, mutate billing, change owner entitlements, call Nitrado, mutate Discord resources, award XP/calling cards, change rankings, alter reviews, alter events, change Server Wars/CTF scoring, or affect competitive eligibility.
+- No AI provider credential, paid API key, metered model call, vector store, training/eval job, or automated spend path may be added until a dedicated support-bot architecture slice explicitly approves the provider, cost controls, data boundary, prompt/source policy, abuse controls, logging policy, and rollback plan.
+
+This roadmap item is not implemented by the public profile social-preview validation package slice.
+
 ## Roadmap
 
 Future slices should build on this foundation in this order unless product priorities change:
@@ -176,7 +201,8 @@ Future slices should build on this foundation in this order unless product prior
 13. Discord approval embeds: tick/X owner controls, join request approvals, event reminders, and moderation handoffs.
 14. Rich community systems: Discord community landing views, member matching, role-safe recommendations, and cross-server discovery.
 15. Cosmetics and supporter monetisation: non-competitive profile presentation and optional supporter items that never affect rank, stats, scoring, or earned competitive rewards.
-16. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+16. Global/group chat and support bot architecture preflight: site-wide support chat, global player chat, private group chat, moderation/profanity warning/timeouts, and AI support limited to public DZN/help content only, with explicit zero-surprise spend and data-boundary review before any provider wiring.
+17. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 
@@ -1430,6 +1456,32 @@ Fairness remains unchanged: public profile share-card crawler visual QA is prese
 
 Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
 
+## Public Profile Social Preview Validation Package Slice
+
+This slice creates a durable local reviewer artifact for the `/players/[handle]` social preview contract. It does not change runtime public profile behavior, metadata generation, the profile data model, image assets, or any live service integration.
+
+The slice adds:
+
+- A deterministic package generator/test that reuses the local share-card crawler visual QA render path.
+- Sanitized rendered head/card snapshots for published, hidden, invalid, unavailable, and fallback-image states.
+- A committed JSON artifact at `docs/artifacts/public-profile-social-preview-validation-package/public-profile-social-preview-validation-package.json`.
+- A committed static HTML reviewer artifact at `docs/artifacts/public-profile-social-preview-validation-package/index.html`.
+- Checks that the package can be regenerated locally without production services and without timestamp churn.
+- Checks that every packaged state includes the final crawler image URL and public-safe image alt text.
+- Checks that hidden profile sections, private identifiers, raw award evidence, private settings, owner/admin rows, retained export references, billing state, scoring rows, review internals, event internals, CTF scoring, and Server Wars scoring do not appear in the packaged JSON or HTML.
+- Static dependency checks proving the package path does not become an input to protected billing, scoring, ranking, discovery, review, badge, season, Server Wars, XP, calling-card, event, CTF, community-member, Nitrado, Discord, checkout, Cloudflare secret, production D1, retained-export, analytics, tracking, or share-history paths.
+
+Rules:
+
+- The artifact may contain sanitized final `<head>` HTML, sanitized metadata fields, deterministic Open Graph/Twitter card preview fields, reviewer notes, local image preview references, and explicit false safety flags.
+- The artifact must remain bounded and deterministic.
+- The artifact must not contain scripts, forms, remote asset loaders, browser storage, beacons, analytics calls, tracking calls, audit-share calls, API write methods, checkout creation paths, live-service token names, raw SQL write operations, or production mutation commands.
+- The artifact must not require production D1, Cloudflare secrets, Stripe, Nitrado, Discord, retained export storage, deployment, or issue #49.
+
+Fairness remains unchanged: social preview validation packaging is review evidence only with no hidden sections, no analytics/tracking calls, no stored share history, no privacy writes, and no billing, scoring, ranking, discovery, review, badge, season, Server Wars, XP/calling-card award, event, or competitive eligibility impact.
+
+Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -1456,7 +1508,8 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/player/challenges` | 401 | Allowed | Allowed | Allowed | Session auth, player participation only |
 | `/player/profile` and `/api/player/profile` | 401/login redirect | Allowed | Allowed | Allowed | Session auth, private no-store profile progression showcase, read-only; public-profile owner preview/share UI, share session feedback, and share accessibility/fallback guidance are local presentation only |
 | `/api/player/profile-privacy` | 401 | Allowed | Allowed | Allowed | Private player-owned settings API; GET/PATCH only; writes only `player_profile_privacy_preferences` |
-| `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences; DZN-branded visual shell and Open Graph/Twitter share-preview metadata are presentation-only; per-handle metadata uses only the already-filtered public payload; crawler QA snapshots published, hidden, invalid, and unavailable route states; share-card image QA validates `PUBLIC_PLAYER_PROFILE_SHARE_PREVIEW_IMAGE_CARDS`, `/media/dzn-cinematic-survivor.png`, static/exported asset presence, dimensions, alt text, and fallback behavior for future card references; share-card crawler visual QA renders published, hidden, invalid, unavailable, and fallback-image final head states into deterministic social-card previews and proves the correct image URL and alt text remain public-safe; metadata, image/card, and visual QA polish cannot expose hidden sections, store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility |
+| `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences; DZN-branded visual shell and Open Graph/Twitter share-preview metadata are presentation-only; per-handle metadata uses only the already-filtered public payload; crawler QA snapshots published, hidden, invalid, and unavailable route states; share-card image QA validates `PUBLIC_PLAYER_PROFILE_SHARE_PREVIEW_IMAGE_CARDS`, `/media/dzn-cinematic-survivor.png`, static/exported asset presence, dimensions, alt text, and fallback behavior for future card references; share-card crawler visual QA renders published, hidden, invalid, unavailable, and fallback-image final head states into deterministic social-card previews and proves the correct image URL and alt text remain public-safe; social-preview validation packaging commits sanitized JSON/HTML reviewer artifacts for those states without production services; metadata, image/card, visual QA, and validation packaging cannot expose hidden sections, store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility |
+| Future global/support/private chat | Future public support entry point only | Future logged-in player chat/support | Future owner/community chat where scoped | Future owner/community chat where scoped | Not implemented yet; future architecture must keep AI support limited to public DZN website and setup-help content, require moderation/profanity filtering, warning, and timed-mute controls plus report controls, avoid surprise metered AI spend, and remain isolated from billing, scoring, rankings, discovery, reviews, badges, seasons, Server Wars, XP/calling-card awards, events, and competitive eligibility |
 | Public profile attribution on reviews/challenges/leaderboards | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Read-only generated-handle attribution; no name-only matching; ambiguous/hidden/unpublished profiles are not linked |
 | Public profile attribution preview/control and safe event-suggestion author links | Public event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Player-owned visibility control; trusted user bridge required; roster scoring gates and owner mutations excluded |
 | CTF/event presentation roster profile links | 401/login boundary | Owner/admin dashboard access required | Own server dashboard read-only, if owner/admin checks pass | Own server dashboard read-only, if owner/admin checks pass | Exact roster server/player bridge; generated handle required; presentation-only; registration, scoring, eligibility, and owner decisions unaffected |

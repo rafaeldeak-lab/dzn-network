@@ -128,6 +128,10 @@ The rendered social-card preview proof is explicit: no hidden sections, no analy
 - No deployment is performed.
 - No retained export storage or sharing link model is added.
 
-## Next Recommended Slice
+## Follow-On Public Profile Social Preview Validation Package Slice
 
-Next should be public profile social preview validation packaging: produce a durable local artifact containing sanitized rendered head/card snapshots for the published, hidden, invalid, unavailable, and fallback-image states, so reviewers can inspect the exact crawler-visible preview contract without running production services, while still proving no hidden sections, analytics/tracking calls, stored share history, privacy writes, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP/calling-card awards, events, or competitive eligibility impact.
+Branch: `codex/public-profile-social-preview-validation-package-20260826`
+
+The next completed slice should add `scripts/test-public-profile-social-preview-validation-package.ts` and `test:public-profile-social-preview-validation-package`. It should produce deterministic local JSON and HTML artifacts under `docs/artifacts/public-profile-social-preview-validation-package/` containing sanitized rendered head/card snapshots for the published, hidden, invalid, unavailable, and fallback-image states. Reviewers should be able to inspect the exact crawler-visible preview contract without running production services. The package must keep proving no hidden sections, analytics/tracking calls, stored share history, privacy writes, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP/calling-card awards, events, or competitive eligibility impact.
+
+Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.

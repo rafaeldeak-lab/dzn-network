@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import {
   injectPublicPlayerProfileSharePreviewMetadataForTest,
@@ -46,15 +47,16 @@ type VisualCrawlerCase = {
   dbMode: "published" | "hidden" | "unavailable";
 };
 
-type VisualCrawlerCaseKey = VisualCrawlerCase["key"] | "fallback_image";
+export type VisualCrawlerCaseKey = VisualCrawlerCase["key"] | "fallback_image";
 
-type HeadSnapshot = {
+export type HeadSnapshot = {
   key: VisualCrawlerCaseKey;
   route: string;
   status: number;
   content_type: string | null;
   cache_control: string | null;
   asset_path: string;
+  head_html: string;
   title: string;
   description: string;
   canonical: string;
@@ -78,7 +80,7 @@ type HeadSnapshot = {
   write_queries: number;
 };
 
-type SocialCardPreview = {
+export type SocialCardPreview = {
   key: VisualCrawlerCaseKey;
   platform: "open_graph" | "twitter";
   route: string;
@@ -100,6 +102,11 @@ type ImageInfo = {
   width: number;
   height: number;
   bytes: number;
+};
+
+export type PublicProfileShareCardCrawlerVisualQaEvidence = {
+  snapshots: Map<VisualCrawlerCaseKey, HeadSnapshot>;
+  previews: SocialCardPreview[];
 };
 
 const VISUAL_CRAWLER_CASES: VisualCrawlerCase[] = [
@@ -130,10 +137,7 @@ const VISUAL_CRAWLER_CASES: VisualCrawlerCase[] = [
 ];
 
 async function main() {
-  assertStaticContracts();
-  const snapshots = await renderHeadSnapshots();
-  snapshots.set("fallback_image", renderFallbackImageHeadSnapshot());
-  const previews = renderSocialCardPreviews(snapshots);
+  const { snapshots, previews } = await buildPublicProfileShareCardCrawlerVisualQaEvidence();
   assertCrawlerFriendlySnapshots(snapshots);
   assertCrawlerFriendlyPreviewCards(previews);
   assertNoHiddenFields(snapshots, previews);
@@ -141,6 +145,14 @@ async function main() {
   assertProtectedSystemsStayIndependent();
   assertDocumentationContracts();
   console.log("Public profile share-card crawler visual QA tests passed.");
+}
+
+export async function buildPublicProfileShareCardCrawlerVisualQaEvidence(): Promise<PublicProfileShareCardCrawlerVisualQaEvidence> {
+  assertStaticContracts();
+  const snapshots = await renderHeadSnapshots();
+  snapshots.set("fallback_image", renderFallbackImageHeadSnapshot());
+  const previews = renderSocialCardPreviews(snapshots);
+  return { snapshots, previews };
 }
 
 function assertStaticContracts() {
@@ -267,6 +279,7 @@ function headSnapshotFromHtml(input: {
     content_type: input.response.headers.get("content-type"),
     cache_control: input.response.headers.get("cache-control"),
     asset_path: input.assetPath,
+    head_html: head.trim(),
     title: decodeHtml(extractTitle(head)),
     description: decodeHtml(extractMeta(head, "name", "description")),
     canonical: decodeHtml(extractLink(head, "canonical")),
@@ -899,7 +912,10 @@ function read(path: string) {
   return readFileSync(path, "utf8");
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+const entrypointHref = process.argv[1] ? pathToFileURL(process.argv[1]).href : "";
+if (import.meta.url === entrypointHref) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
