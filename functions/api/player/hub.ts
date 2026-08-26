@@ -44,6 +44,7 @@ type PlayerHubServerSummary = {
   guild_icon_url: string | null;
   saved_at: string | null;
   href: string;
+  community_href: string | null;
 };
 
 type PlayerHubCommunitySummary = Omit<PlayerCommunitySummary, "matched_servers"> & {
@@ -184,6 +185,7 @@ function toHubCommunity(community: PlayerCommunitySummary): PlayerHubCommunitySu
         guild_icon_url: community.guild_icon_url,
         saved_at: null,
         href: slug ? `/servers/profile?slug=${encodeURIComponent(slug)}` : "/servers",
+        community_href: publicCommunityHrefForSlug(slug),
       };
     }),
   };
@@ -328,6 +330,7 @@ function toHubServer(row: PlayerHubServerRow): PlayerHubServerSummary {
     guild_icon_url: nullableString(row.guild_icon_url),
     saved_at: nullableString(row.saved_at),
     href: slug ? `/servers/profile?slug=${encodeURIComponent(slug)}` : "/servers",
+    community_href: publicCommunityHrefForSlug(slug),
   };
 }
 
@@ -457,6 +460,7 @@ function demoSuggestedServers(): PlayerHubServerSummary[] {
       guild_icon_url: null,
       saved_at: null,
       href: "/servers/profile?slug=pandora-dayz",
+      community_href: "/servers/pandora-dayz/community",
     },
     {
       linked_server_id: "demo-warlords-pvp",
@@ -476,6 +480,7 @@ function demoSuggestedServers(): PlayerHubServerSummary[] {
       guild_icon_url: null,
       saved_at: null,
       href: "/servers/profile?slug=warlords-pvp",
+      community_href: "/servers/warlords-pvp/community",
     },
   ];
 }
@@ -491,6 +496,10 @@ function nullableString(value: unknown) {
 function safeSlug(value: unknown) {
   const text = stringOrDefault(value, "");
   return /^[a-z0-9][a-z0-9-]{0,95}$/.test(text) ? text : null;
+}
+
+function publicCommunityHrefForSlug(slug: string | null) {
+  return slug ? `/servers/${encodeURIComponent(slug)}/community` : null;
 }
 
 function nullableNumber(value: unknown) {

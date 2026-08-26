@@ -333,3 +333,31 @@ Still excluded:
 ## Next Recommended Slice
 
 Next should be trusted community member source management and audit: add owner/admin-only controls to review or import candidate community members into the `community_members` bridge, with explicit audit history, duplicate/ambiguous-user rejection, and tests proving those source-management actions cannot affect public profile visibility without the player's opt-in handle, CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+
+## Follow-On Community Member Directory and Player Hub Surfacing Polish
+
+Branch: `codex/community-member-directory-player-hub-polish-20260826`
+
+Base branch: `codex/community-member-retained-export-approval-design-20260826`
+
+This slice polishes the public-safe community member directory and the free logged-in Player Hub without adding retained exports, new storage, billing behavior, scoring inputs, or public profile publication writes.
+
+The slice adds:
+
+- `community_href` to Player Hub server summaries so matched, saved, and suggested servers can link directly to `/servers/[slug]/community`.
+- A Player Hub "Community Member Directories" section and direct "Members" actions on matched community/server cards.
+- Public directory search and role filtering against already-public profile rows only.
+- Public community URL copy/share controls for the public directory page only.
+- Clear public-safe empty states for hidden or not-yet-opted-in members.
+- Owner/admin "Public directory status" previews on source candidate cards.
+- `public_directory_preview_presentation_only` in the source-management safeguards.
+
+Still excluded:
+
+- Retained export files, export-history rows, export sharing links, storage bindings, retention write APIs, retained-export migrations, live checkout activation, Stripe product/price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord mutations, and issue #49.
+- Public profile visibility without the player's opt-in generated handle.
+- CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility.
+
+## Next Recommended Slice
+
+Next should be community member directory discovery/search polish for public visitors: add richer public sorting/grouping and server/community context cards for already-visible members only, while continuing to keep hidden players private, owner/admin import controls gated, retained exports blocked unless separately approved, live checkout disabled, and all scoring, billing, rankings, reviews, badges, seasons, Server Wars, XP, calling-card awards, and competitive eligibility isolated.
