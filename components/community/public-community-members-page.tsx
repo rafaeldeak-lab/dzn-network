@@ -42,6 +42,8 @@ type PublicCommunityMembersPayload = {
 };
 
 type ViewState = "loading" | "ready" | "missing" | "error";
+type DirectorySortMode = "featured" | "name" | "role" | "newest";
+type DirectoryGroupMode = "role" | "joined" | "none";
 
 export function PublicCommunityMembersPage({ slug }: { slug: string }) {
   const routeSlug = currentPublicServerCommunitySlug(slug);
@@ -50,6 +52,8 @@ export function PublicCommunityMembersPage({ slug }: { slug: string }) {
   const [message, setMessage] = useState("");
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
+  const [sortMode, setSortMode] = useState<DirectorySortMode>("featured");
+  const [groupMode, setGroupMode] = useState<DirectoryGroupMode>("role");
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -100,6 +104,9 @@ export function PublicCommunityMembersPage({ slug }: { slug: string }) {
   const communityHref = `/servers/${encodeURIComponent(routeSlug)}/community`;
   const roleOptions = useMemo(() => publicMemberRoleOptions(members), [members]);
   const filteredMembers = useMemo(() => filterPublicCommunityMembers(members, query, roleFilter), [members, query, roleFilter]);
+  const sortedMembers = useMemo(() => sortPublicCommunityMembers(filteredMembers, sortMode), [filteredMembers, sortMode]);
+  const memberGroups = useMemo(() => groupPublicCommunityMembers(sortedMembers, groupMode), [sortedMembers, groupMode]);
+  const directoryInsights = useMemo(() => buildPublicDirectoryInsights(members), [members]);
   const unavailable = state === "ready" && !members.length;
   const noMatchingMembers = state === "ready" && members.length > 0 && filteredMembers.length === 0;
 
@@ -198,14 +205,19 @@ export function PublicCommunityMembersPage({ slug }: { slug: string }) {
           </div>
         ) : (
           <>
+            <DirectoryContextGrid insights={directoryInsights} />
             <DirectoryControls
               query={query}
               roleFilter={roleFilter}
+              sortMode={sortMode}
+              groupMode={groupMode}
               roleOptions={roleOptions}
-              visibleCount={filteredMembers.length}
+              visibleCount={sortedMembers.length}
               totalCount={members.length}
               onQueryChange={setQuery}
               onRoleFilterChange={setRoleFilter}
+              onSortModeChange={setSortMode}
+              onGroupModeChange={setGroupMode}
             />
             {noMatchingMembers ? (
               <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.04] p-8 text-center">
@@ -216,30 +228,26 @@ export function PublicCommunityMembersPage({ slug }: { slug: string }) {
                 </p>
               </div>
             ) : (
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {filteredMembers.map((member) => (
-                  <Link
-                    key={member.public_profile.public_href}
-                    href={member.public_profile.public_href}
-                    aria-label={`View ${member.display_name}'s public DZN profile`}
-                    className="group rounded-lg border border-white/10 bg-white/[0.045] p-4 transition hover:border-cyan-300/35 hover:bg-cyan-300/10"
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <span className="grid h-12 w-12 shrink-0 place-items-center rounded border border-cyan-300/20 bg-cyan-400/10 text-cyan-50">
-                        <UserRound className="h-6 w-6" />
-                      </span>
+              <div className="mt-5 grid gap-6">
+                {memberGroups.map((group) => (
+                  <section key={group.key}>
+                    <div className="flex flex-wrap items-end justify-between gap-3 border-b border-white/10 pb-3">
                       <div className="min-w-0">
-                        <h2 className="truncate text-lg font-black uppercase text-white">{member.display_name}</h2>
-                        <p className="mt-1 truncate text-xs font-bold uppercase text-cyan-100">
-                          {member.role_label ?? "Community member"}
-                        </p>
+                        <p className="text-[10px] font-black uppercase text-cyan-100">Public group</p>
+                        <h2 className="mt-1 break-words text-2xl font-black uppercase leading-none text-white [overflow-wrap:anywhere]">
+                          {group.label}
+                        </h2>
                       </div>
+                      <p className="rounded border border-white/10 bg-white/[0.045] px-3 py-2 text-[10px] font-black uppercase text-zinc-300">
+                        {group.members.length} visible
+                      </p>
                     </div>
-                    <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/10 pt-3 text-[10px] font-black uppercase text-zinc-500">
-                      <span>{member.member_since_label ? `Since ${member.member_since_label}` : "DZN profile"}</span>
-                      <span className="text-cyan-100 transition group-hover:text-white">View profile</span>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {group.members.map((member) => (
+                        <MemberProfileCard key={member.public_profile.public_href} member={member} />
+                      ))}
                     </div>
-                  </Link>
+                  </section>
                 ))}
               </div>
             )}
@@ -259,6 +267,19 @@ type NormalizedMember = {
     public_href: string;
     public_api_href: string;
   };
+};
+
+type DirectoryMemberGroup = {
+  key: string;
+  label: string;
+  members: NormalizedMember[];
+};
+
+type DirectoryInsight = {
+  label: string;
+  value: string;
+  text: string;
+  icon: LucideIcon;
 };
 
 function CommunityDirectoryShell({ children }: { children: ReactNode }) {
@@ -290,31 +311,59 @@ function DirectorySafetyBadge({ label, icon: Icon }: { label: string; icon: Luci
   );
 }
 
+function DirectoryContextGrid({ insights }: { insights: DirectoryInsight[] }) {
+  return (
+    <section className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {insights.map((insight) => {
+        const Icon = insight.icon;
+        return (
+          <article key={insight.label} className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+            <Icon className="h-5 w-5 text-cyan-100" />
+            <p className="mt-3 text-2xl font-black uppercase text-white">{insight.value}</p>
+            <p className="mt-1 text-[10px] font-black uppercase text-zinc-500">{insight.label}</p>
+            <p className="mt-3 text-xs font-bold leading-5 text-zinc-400">{insight.text}</p>
+          </article>
+        );
+      })}
+    </section>
+  );
+}
+
 function DirectoryControls({
   query,
   roleFilter,
+  sortMode,
+  groupMode,
   roleOptions,
   visibleCount,
   totalCount,
   onQueryChange,
   onRoleFilterChange,
+  onSortModeChange,
+  onGroupModeChange,
 }: {
   query: string;
   roleFilter: string;
+  sortMode: DirectorySortMode;
+  groupMode: DirectoryGroupMode;
   roleOptions: string[];
   visibleCount: number;
   totalCount: number;
   onQueryChange: (value: string) => void;
   onRoleFilterChange: (value: string) => void;
+  onSortModeChange: (value: DirectorySortMode) => void;
+  onGroupModeChange: (value: DirectoryGroupMode) => void;
 }) {
   return (
     <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-black uppercase text-white">Public member view</p>
-          <p className="mt-1 text-xs font-bold text-zinc-500">{visibleCount} of {totalCount} visible profiles shown</p>
+          <p className="mt-1 text-xs font-bold text-zinc-500">
+            {visibleCount} of {totalCount} visible profiles shown. Sorting and grouping use public rows only.
+          </p>
         </div>
-        <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-[minmax(0,1fr)_220px] lg:max-w-2xl">
+        <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2 xl:max-w-4xl xl:grid-cols-[minmax(0,1fr)_180px_180px_180px]">
           <label className="relative block">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
             <input
@@ -334,9 +383,62 @@ function DirectoryControls({
               <option key={role} value={role}>{role}</option>
             ))}
           </select>
+          <select
+            value={sortMode}
+            onChange={(event) => onSortModeChange(event.target.value as DirectorySortMode)}
+            className="h-11 rounded border border-white/10 bg-black/34 px-3 py-2 text-xs font-black uppercase text-zinc-100 outline-none transition focus:border-cyan-300/40"
+          >
+            <option value="featured">Featured order</option>
+            <option value="name">Name A-Z</option>
+            <option value="role">Role label</option>
+            <option value="newest">Newest public month</option>
+          </select>
+          <select
+            value={groupMode}
+            onChange={(event) => onGroupModeChange(event.target.value as DirectoryGroupMode)}
+            className="h-11 rounded border border-white/10 bg-black/34 px-3 py-2 text-xs font-black uppercase text-zinc-100 outline-none transition focus:border-cyan-300/40"
+          >
+            <option value="role">Group by role</option>
+            <option value="joined">Group by joined</option>
+            <option value="none">No groups</option>
+          </select>
         </div>
       </div>
     </section>
+  );
+}
+
+function MemberProfileCard({ member }: { member: NormalizedMember }) {
+  const roleGroup = publicMemberRoleGroup(member);
+  return (
+    <Link
+      href={member.public_profile.public_href}
+      aria-label={`View ${member.display_name}'s public DZN profile`}
+      className="group rounded-lg border border-white/10 bg-white/[0.045] p-4 transition hover:border-cyan-300/35 hover:bg-cyan-300/10"
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="grid h-12 w-12 shrink-0 place-items-center rounded border border-cyan-300/20 bg-cyan-400/10 text-cyan-50">
+          <UserRound className="h-6 w-6" />
+        </span>
+        <div className="min-w-0">
+          <h3 className="truncate text-lg font-black uppercase text-white">{member.display_name}</h3>
+          <p className="mt-1 truncate text-xs font-bold uppercase text-cyan-100">
+            {member.role_label ?? "Community member"}
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-2 border-t border-white/10 pt-3 text-[10px] font-black uppercase text-zinc-500">
+        <div className="flex items-center justify-between gap-3">
+          <span>{member.member_since_label ? `Since ${member.member_since_label}` : "DZN profile"}</span>
+          <span className="text-cyan-100 transition group-hover:text-white">View profile</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <span className="rounded border border-white/10 bg-black/24 px-2 py-1 text-zinc-300">{roleGroup}</span>
+          <span className="rounded border border-emerald-300/20 bg-emerald-400/10 px-2 py-1 text-emerald-100">Opt-in public</span>
+          <span className="rounded border border-cyan-300/18 bg-cyan-400/10 px-2 py-1 text-cyan-100">@{member.public_profile.public_handle}</span>
+        </div>
+      </div>
+    </Link>
   );
 }
 
@@ -418,4 +520,108 @@ function filterPublicCommunityMembers(members: NormalizedMember[], query: string
     if (!needle) return true;
     return `${member.display_name} ${member.role_label ?? ""}`.toLowerCase().includes(needle);
   });
+}
+
+function sortPublicCommunityMembers(members: NormalizedMember[], sortMode: DirectorySortMode) {
+  return members
+    .map((member, index) => ({ member, index }))
+    .sort((left, right) => {
+      if (sortMode === "name") return compareText(left.member.display_name, right.member.display_name) || left.index - right.index;
+      if (sortMode === "role") {
+        return (
+          compareText(left.member.role_label ?? "Community member", right.member.role_label ?? "Community member")
+          || compareText(left.member.display_name, right.member.display_name)
+          || left.index - right.index
+        );
+      }
+      if (sortMode === "newest") {
+        return (
+          publicMonthSortValue(right.member.member_since_label) - publicMonthSortValue(left.member.member_since_label)
+          || compareText(left.member.display_name, right.member.display_name)
+          || left.index - right.index
+        );
+      }
+      return left.index - right.index;
+    })
+    .map(({ member }) => member);
+}
+
+function groupPublicCommunityMembers(members: NormalizedMember[], groupMode: DirectoryGroupMode): DirectoryMemberGroup[] {
+  if (groupMode === "none") return [{ key: "all-public-members", label: "All Public Members", members }];
+
+  const groups = new Map<string, DirectoryMemberGroup>();
+  for (const member of members) {
+    const label = groupMode === "joined" ? member.member_since_label ?? "Profile Only" : publicMemberRoleGroup(member);
+    const key = `${groupMode}:${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+    const current = groups.get(key) ?? { key, label, members: [] };
+    current.members.push(member);
+    groups.set(key, current);
+  }
+
+  const rows = Array.from(groups.values());
+  if (groupMode === "joined") {
+    return rows.sort((left, right) => publicMonthSortValue(right.label) - publicMonthSortValue(left.label) || compareText(left.label, right.label));
+  }
+  return rows.sort((left, right) => roleGroupRank(left.label) - roleGroupRank(right.label) || compareText(left.label, right.label));
+}
+
+function buildPublicDirectoryInsights(members: NormalizedMember[]): DirectoryInsight[] {
+  const roleGroups = new Set(members.map(publicMemberRoleGroup));
+  const newestMonth = newestPublicMonthLabel(members);
+  return [
+    {
+      label: "Visible profiles",
+      value: String(members.length),
+      text: "Only opted-in public DZN profiles returned by the directory API.",
+      icon: Users,
+    },
+    {
+      label: "Role groups",
+      value: String(roleGroups.size || 0),
+      text: "Grouped from public role labels, not hidden Discord or import records.",
+      icon: UserRound,
+    },
+    {
+      label: "Newest public month",
+      value: newestMonth ?? "Public only",
+      text: "Month-level context from already-visible member rows.",
+      icon: Search,
+    },
+    {
+      label: "Influence",
+      value: "None",
+      text: "Directory presentation cannot change scoring, billing, rankings, or awards.",
+      icon: ShieldCheck,
+    },
+  ];
+}
+
+function publicMemberRoleGroup(member: NormalizedMember) {
+  const role = member.role_label?.toLowerCase() ?? "";
+  if (/\b(owner|admin|founder|lead|leader|captain|commander|staff|moderator|mod)\b/.test(role)) return "Leadership";
+  if (/\b(builder|trader|medic|hunter|scout|raider|pvp|event|organiser|organizer)\b/.test(role)) return "Specialists";
+  return "Community";
+}
+
+function newestPublicMonthLabel(members: NormalizedMember[]) {
+  return members
+    .map((member) => member.member_since_label)
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => publicMonthSortValue(right) - publicMonthSortValue(left))[0] ?? null;
+}
+
+function publicMonthSortValue(value: string | null) {
+  if (!value) return -1;
+  const parsed = Date.parse(`1 ${value} 00:00:00 UTC`);
+  return Number.isFinite(parsed) ? parsed : -1;
+}
+
+function compareText(left: string, right: string) {
+  return left.localeCompare(right, "en-GB", { sensitivity: "base" });
+}
+
+function roleGroupRank(label: string) {
+  if (label === "Leadership") return 0;
+  if (label === "Specialists") return 1;
+  return 2;
 }
