@@ -2,6 +2,8 @@
 
 Issue #49 tracks the future human-approved Stripe live billing activation for DZN. This document is the safe handoff checklist only. It does not approve live billing, create Stripe products, set Cloudflare secrets, apply D1 migrations, deploy production, or change payment state.
 
+The DZN Safe Monetisation and Supporter System implementation preflight is `docs/DZN_SAFE_MONETISATION_SUPPORTER_IMPLEMENTATION_PREFLIGHT.md`. It defines future one-time Store checkout, supporter purchases, earned-only spins, and wheel/payment ledgers, but does not approve store live checkout, Stripe product/Price mutation, Cloudflare secret changes, production D1 writes, webhook fulfilment, account entitlement writes, or issue #49 changes.
+
 ## Activation Boundary
 
 Live billing activation is high-risk billing and production-mutation work.
