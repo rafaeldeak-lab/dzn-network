@@ -22,6 +22,8 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       status: url.searchParams.get("status"),
       issue: url.searchParams.get("issue"),
       linkedServerId: url.searchParams.get("linked_server_id"),
+      auditAction: url.searchParams.get("audit_action"),
+      auditResult: url.searchParams.get("audit_result"),
       limit: Number(url.searchParams.get("limit") ?? 80),
     });
     return json(payload, { headers: privateNoStoreHeaders() });

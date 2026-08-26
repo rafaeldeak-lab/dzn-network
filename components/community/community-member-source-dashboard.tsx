@@ -8,6 +8,8 @@ import {
   Bell,
   CheckCheck,
   CheckCircle2,
+  FileText,
+  Filter,
   EyeOff,
   History,
   Import,
@@ -23,6 +25,18 @@ type CandidateStatus = "pending" | "imported" | "rejected" | "duplicate" | "ambi
 type MatchStatus = "pending" | "matched" | "no_match" | "duplicate" | "ambiguous";
 type StatusFilter = CandidateStatus | "all";
 type IssueFilter = "all" | "importable" | "repeated_no_match" | "repeated_duplicate";
+type AuditAction =
+  | "candidate_created"
+  | "candidate_rejected"
+  | "candidate_imported"
+  | "candidate_preview_refreshed"
+  | "candidate_importable"
+  | "candidate_no_match"
+  | "duplicate_rejected"
+  | "ambiguous_rejected";
+type AuditResult = "accepted" | "rejected" | "skipped" | "failed";
+type AuditActionFilter = AuditAction | "all";
+type AuditResultFilter = AuditResult | "all";
 type ActionKind = "import" | "reject" | "refresh_preview";
 type ImportPreview = {
   status: "ready" | "blocked_no_match" | "blocked_duplicate" | "blocked_ambiguous" | "already_imported" | "rejected";
@@ -92,10 +106,61 @@ type AuditItem = {
   community_name: string;
   actor_user_id: string;
   actor_role: "owner" | "admin";
-  action: string;
-  result_status: string;
+  action: AuditAction;
+  result_status: AuditResult;
   reason: string | null;
   created_at: string | null;
+};
+
+type AuditGroup = {
+  key: string;
+  label: string;
+  linked_server_ref: string;
+  server_name: string;
+  community_name: string;
+  action: AuditAction;
+  result_status: AuditResult;
+  row_count: number;
+  accepted_count: number;
+  rejected_count: number;
+  skipped_count: number;
+  failed_count: number;
+  first_at: string | null;
+  last_at: string | null;
+  export_safe: true;
+};
+
+type ExportSafeAuditItem = {
+  id_ref: string;
+  candidate_ref: string | null;
+  community_member_ref: string | null;
+  server_name: string;
+  public_slug: string | null;
+  community_name: string;
+  actor_role: "owner" | "admin";
+  action: AuditAction;
+  result_status: AuditResult;
+  reason: string | null;
+  created_at: string | null;
+  export_safe: true;
+};
+
+type BulkExecutionSummary = {
+  candidate_id: string;
+  candidate_label: string;
+  candidate_ref: string;
+  server_name: string | null;
+  community_name: string | null;
+  action: "import" | "reject";
+  outcome: "imported" | "rejected" | "blocked" | "failed";
+  result_status: AuditResult;
+  ok: boolean;
+  status: number;
+  error: string | null;
+  message: string;
+  imported_member_ref: string | null;
+  public_profile_linkable: boolean | null;
+  export_safe: true;
 };
 
 type Payload = {
@@ -105,6 +170,8 @@ type Payload = {
     status: StatusFilter;
     issue: IssueFilter;
     linked_server_id: string | null;
+    audit_action: AuditActionFilter;
+    audit_result: AuditResultFilter;
   };
   counts: {
     total: number;
@@ -121,6 +188,8 @@ type Payload = {
   servers: ServerOption[];
   candidates: CandidateItem[];
   audit: AuditItem[];
+  audit_groups: AuditGroup[];
+  export_safe_audit: ExportSafeAuditItem[];
   safeguards: {
     public_profile_link_requires_player_opt_in_handle: boolean;
     trusted_dzn_user_bridge_required: boolean;
@@ -128,6 +197,9 @@ type Payload = {
     import_previews_from_trusted_snapshots_where_available: boolean;
     selected_row_bulk_actions: boolean;
     bulk_actions_recheck_server_side: boolean;
+    bulk_partial_success_execution_summaries: boolean;
+    filterable_bulk_action_audit_groups: boolean;
+    export_safe_audit_views: boolean;
     admin_repeated_source_filters: boolean;
     owner_importable_notification_hook: boolean;
     notification_hook_dzn_pulse_only: boolean;
@@ -178,6 +250,24 @@ const ISSUE_FILTERS: Array<{ value: IssueFilter; label: string }> = [
   { value: "repeated_no_match", label: "Repeated no-match" },
   { value: "repeated_duplicate", label: "Repeated duplicate" },
 ];
+const AUDIT_ACTION_FILTERS: Array<{ value: AuditActionFilter; label: string }> = [
+  { value: "all", label: "All actions" },
+  { value: "candidate_imported", label: "Imported" },
+  { value: "candidate_rejected", label: "Rejected" },
+  { value: "candidate_importable", label: "Importable" },
+  { value: "candidate_preview_refreshed", label: "Preview refreshed" },
+  { value: "candidate_no_match", label: "No match" },
+  { value: "duplicate_rejected", label: "Duplicate rejected" },
+  { value: "ambiguous_rejected", label: "Ambiguous rejected" },
+  { value: "candidate_created", label: "Created" },
+];
+const AUDIT_RESULT_FILTERS: Array<{ value: AuditResultFilter; label: string }> = [
+  { value: "all", label: "All results" },
+  { value: "accepted", label: "Accepted" },
+  { value: "rejected", label: "Rejected" },
+  { value: "skipped", label: "Skipped" },
+  { value: "failed", label: "Failed" },
+];
 
 const EMPTY_FORM: CandidateForm = {
   linkedServerId: "",
@@ -193,6 +283,8 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   const [state, setState] = useState<LoadState>("loading");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
   const [issueFilter, setIssueFilter] = useState<IssueFilter>("all");
+  const [auditActionFilter, setAuditActionFilter] = useState<AuditActionFilter>("all");
+  const [auditResultFilter, setAuditResultFilter] = useState<AuditResultFilter>("all");
   const [linkedServerFilter, setLinkedServerFilter] = useState("all");
   const [payload, setPayload] = useState<Payload | null>(null);
   const [form, setForm] = useState<CandidateForm>(EMPTY_FORM);
@@ -201,6 +293,7 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   const [bulkBusyAction, setBulkBusyAction] = useState<"import" | "reject" | null>(null);
   const [importAlertsBusy, setImportAlertsBusy] = useState(false);
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
+  const [bulkExecutionSummaries, setBulkExecutionSummaries] = useState<BulkExecutionSummary[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [pricingUrl, setPricingUrl] = useState(DEFAULT_PRICING_URL);
 
@@ -208,6 +301,8 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
     let active = true;
     const params = new URLSearchParams({ status: statusFilter, issue: issueFilter, limit: "120" });
     if (linkedServerFilter !== "all") params.set("linked_server_id", linkedServerFilter);
+    if (auditActionFilter !== "all") params.set("audit_action", auditActionFilter);
+    if (auditResultFilter !== "all") params.set("audit_result", auditResultFilter);
 
     fetch(`/api/owner/community-members?${params.toString()}`, {
       cache: "no-store",
@@ -257,12 +352,14 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
     return () => {
       active = false;
     };
-  }, [statusFilter, issueFilter, linkedServerFilter, refreshKey]);
+  }, [statusFilter, issueFilter, auditActionFilter, auditResultFilter, linkedServerFilter, refreshKey]);
 
   const counts = payload?.counts ?? { total: 0, pending: 0, imported: 0, rejected: 0, duplicate: 0, ambiguous: 0 };
   const notificationCounts = payload?.notification_counts ?? { unread_total: 0, community_member_importable: 0 };
   const candidates = payload?.candidates ?? [];
   const audit = payload?.audit ?? [];
+  const auditGroups = payload?.audit_groups ?? [];
+  const exportSafeAudit = payload?.export_safe_audit ?? [];
   const servers = payload?.servers ?? [];
   const selectableCandidateIds = candidates.filter((candidate) => candidate.status === "pending").map((candidate) => candidate.id);
   const selectedCandidateSet = new Set(selectedCandidateIds);
@@ -290,6 +387,7 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   async function submitCandidate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusyAction("create");
+    setBulkExecutionSummaries([]);
     setMessage({ tone: "info", text: "Saving community member candidate." });
     try {
       const response = await fetch("/api/owner/community-members", {
@@ -322,6 +420,7 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   async function runCandidateAction(candidate: CandidateItem, action: ActionKind) {
     const busyKey = `${candidate.id}:${action}`;
     setBusyAction(busyKey);
+    setBulkExecutionSummaries([]);
     setMessage({
       tone: "info",
       text: action === "import"
@@ -396,6 +495,10 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
       });
       const result = await safeJson(response);
       if (!response.ok) throw new Error(apiMessage(result, "Selected community member candidates could not be processed."));
+      const executionSummaries = Array.isArray(result?.execution_summaries)
+        ? result.execution_summaries as BulkExecutionSummary[]
+        : [];
+      setBulkExecutionSummaries(executionSummaries);
       setMessage({
         tone: result?.ok === true ? "success" : "error",
         text: apiMessage(result, "Some selected community member candidates could not be processed after server-side recheck."),
@@ -485,6 +588,8 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
             <StatusLine label="trusted snapshot previews" ok={payload?.safeguards.import_previews_from_trusted_snapshots_where_available ?? true} />
             <StatusLine label="owner Pulse hook only" ok={payload?.safeguards.owner_importable_notification_hook ?? true} />
             <StatusLine label="bulk row server recheck" ok={payload?.safeguards.bulk_actions_recheck_server_side ?? true} />
+            <StatusLine label="bulk execution summaries" ok={payload?.safeguards.bulk_partial_success_execution_summaries ?? true} />
+            <StatusLine label="export-safe audit views" ok={payload?.safeguards.export_safe_audit_views ?? true} />
             <StatusLine label="private import alert reads" ok={payload?.safeguards.community_import_alert_read_state_private_per_owner ?? true} />
             <StatusLine label="CTF scoring rows" ok={!(payload?.safeguards.affects_ctf_scoring_rows ?? false)} />
             <StatusLine label="Billing and rankings" ok={!((payload?.safeguards.affects_billing ?? false) || (payload?.safeguards.affects_rankings ?? false))} />
@@ -494,6 +599,7 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
       </section>
 
       {message ? <MessageBanner tone={message.tone}>{message.text}</MessageBanner> : null}
+      {bulkExecutionSummaries.length ? <BulkExecutionSummaryPanel summaries={bulkExecutionSummaries} /> : null}
 
       {state === "unauthorized" ? <AccessPanel title="Sign in required" body="Log in with Discord before managing community member sources." actionHref="/login?returnTo=%2Fdashboard%2Fcommunity-members" actionLabel="Log in with Discord" /> : null}
       {state === "plan_required" ? <AccessPanel title="Owner access required" body="Community member source controls sit behind the owner entitlement gate." actionHref={pricingUrl} actionLabel="View owner plans" /> : null}
@@ -677,6 +783,55 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
               <PanelTitle icon={<History className="h-4 w-4" />} title="Source audit history" />
               <span className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">{audit.length} rows</span>
             </div>
+            <div className="mt-4 flex flex-wrap items-end gap-2">
+              <label className="grid gap-1 text-[11px] font-black uppercase text-zinc-500">
+                Audit action
+                <select
+                  value={auditActionFilter}
+                  onChange={(event) => setAuditActionFilter(event.target.value as AuditActionFilter)}
+                  className="rounded border border-white/10 bg-black/40 px-3 py-2 text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-300/40"
+                >
+                  {AUDIT_ACTION_FILTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                </select>
+              </label>
+              <label className="grid gap-1 text-[11px] font-black uppercase text-zinc-500">
+                Audit result
+                <select
+                  value={auditResultFilter}
+                  onChange={(event) => setAuditResultFilter(event.target.value as AuditResultFilter)}
+                  className="rounded border border-white/10 bg-black/40 px-3 py-2 text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-300/40"
+                >
+                  {AUDIT_RESULT_FILTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                </select>
+              </label>
+              <span className="inline-flex min-h-9 items-center gap-2 rounded border border-cyan-300/18 bg-cyan-400/8 px-3 py-2 text-[10px] font-black uppercase text-cyan-100">
+                <Filter className="h-3.5 w-3.5" />
+                Filterable bulk action audit grouping
+              </span>
+            </div>
+            {!loading && auditGroups.length ? (
+              <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                {auditGroups.map((group) => (
+                  <div key={group.key} className="rounded-lg border border-cyan-300/14 bg-black/26 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-black uppercase text-white">{titleCaseToken(group.action)}</p>
+                        <p className="mt-1 text-[11px] font-bold text-zinc-500">{group.server_name} / {group.community_name}</p>
+                      </div>
+                      <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase ${auditTone(group.result_status)}`}>{group.result_status}</span>
+                    </div>
+                    <div className="mt-3 grid gap-2 text-[11px] font-bold text-zinc-400 sm:grid-cols-2">
+                      <span>{group.row_count} rows</span>
+                      <span>{formatDate(group.first_at)} - {formatDate(group.last_at)}</span>
+                      <span>{group.accepted_count} accepted</span>
+                      <span>{group.rejected_count} rejected</span>
+                      <span>{group.skipped_count} skipped</span>
+                      <span>{group.failed_count} failed</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <div className="mt-4 grid gap-2">
               {!loading && !audit.length ? <EmptyState icon={<History className="h-5 w-5" />} title="No audit entries yet" body="Candidate creation, import, duplicate rejection, ambiguous rejection, and manual rejection entries will appear here." /> : null}
               {loading ? <SkeletonRows /> : null}
@@ -699,6 +854,30 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
                 </div>
               ))}
             </div>
+            {!loading && exportSafeAudit.length ? (
+              <div className="mt-5 rounded-lg border border-emerald-300/16 bg-emerald-400/8 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <PanelTitle icon={<FileText className="h-4 w-4" />} title="Export-safe audit view" />
+                  <span className="rounded border border-emerald-300/18 bg-black/24 px-2 py-1 text-[10px] font-black uppercase text-emerald-100">Owner/admin only</span>
+                </div>
+                <div className="mt-3 grid gap-2">
+                  {exportSafeAudit.slice(0, 12).map((item) => (
+                    <div key={`${item.id_ref}:${item.created_at ?? "unknown"}`} className="grid gap-2 rounded border border-white/10 bg-black/24 p-3 text-xs font-bold text-zinc-400 lg:grid-cols-[1fr_auto]">
+                      <div>
+                        <p className="font-black uppercase text-white">{titleCaseToken(item.action)} / {item.result_status}</p>
+                        <p className="mt-1">{item.server_name} / {item.community_name}</p>
+                      </div>
+                      <div className="grid gap-1 text-[11px] lg:min-w-72 lg:text-right">
+                        <span>Actor: {item.actor_role}</span>
+                        <span>Candidate: {item.candidate_ref ?? "none"} / Bridge: {item.community_member_ref ?? "none"}</span>
+                        <span>{formatDate(item.created_at)}</span>
+                      </div>
+                      {item.reason ? <p className="lg:col-span-2">{item.reason}</p> : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </section>
         </>
       ) : null}
@@ -706,6 +885,45 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   );
 
   return <main className={wrapperClassName}>{content}</main>;
+}
+
+function BulkExecutionSummaryPanel({ summaries }: { summaries: BulkExecutionSummary[] }) {
+  const imported = summaries.filter((item) => item.outcome === "imported").length;
+  const rejected = summaries.filter((item) => item.outcome === "rejected").length;
+  const blocked = summaries.filter((item) => item.outcome === "blocked").length;
+  const failed = summaries.filter((item) => item.outcome === "failed").length;
+  return (
+    <section className="rounded-lg border border-cyan-300/18 bg-cyan-400/8 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <PanelTitle icon={<CheckCheck className="h-4 w-4" />} title="Bulk action summaries" />
+        <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase">
+          <span className="rounded border border-emerald-300/18 bg-emerald-400/10 px-2 py-1 text-emerald-100">{imported} imported</span>
+          <span className="rounded border border-rose-300/18 bg-rose-400/10 px-2 py-1 text-rose-100">{rejected} rejected</span>
+          <span className="rounded border border-amber-300/18 bg-amber-400/10 px-2 py-1 text-amber-100">{blocked} blocked</span>
+          <span className="rounded border border-zinc-400/18 bg-white/[0.03] px-2 py-1 text-zinc-300">{failed} failed</span>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2">
+        {summaries.map((item) => (
+          <div key={`${item.candidate_id}:${item.action}:${item.status}`} className="rounded border border-white/10 bg-black/24 p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-black text-white">{item.candidate_label}</p>
+                <p className="mt-1 text-xs font-bold text-zinc-500">{item.server_name ?? "DZN Server"} / {item.community_name ?? "DZN Community"}</p>
+              </div>
+              <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase ${outcomeTone(item.outcome)}`}>{item.outcome}</span>
+            </div>
+            <div className="mt-3 grid gap-2 text-xs font-bold text-zinc-500 sm:grid-cols-3">
+              <span>Candidate: {item.candidate_ref}</span>
+              <span>Bridge: {item.imported_member_ref ?? "none"}</span>
+              <span>Profile link: {item.public_profile_linkable ? "player opted in" : "hidden"}</span>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-zinc-400">{item.message}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function CandidateCard({
@@ -967,6 +1185,13 @@ function auditTone(status: string) {
   if (status === "rejected") return "border-red-300/24 bg-red-400/10 text-red-100";
   if (status === "skipped") return "border-amber-300/24 bg-amber-400/10 text-amber-100";
   return "border-zinc-400/18 bg-white/[0.03] text-zinc-400";
+}
+
+function outcomeTone(outcome: BulkExecutionSummary["outcome"]) {
+  if (outcome === "imported") return "border-emerald-300/24 bg-emerald-400/10 text-emerald-100";
+  if (outcome === "rejected") return "border-rose-300/24 bg-rose-400/10 text-rose-100";
+  if (outcome === "blocked") return "border-amber-300/24 bg-amber-400/10 text-amber-100";
+  return "border-zinc-400/18 bg-white/[0.03] text-zinc-300";
 }
 
 function titleCaseToken(value: string | null | undefined) {

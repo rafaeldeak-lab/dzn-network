@@ -877,6 +877,44 @@ Mutation scope:
 
 Fairness remains unchanged: selected-row bulk actions and import-alert read controls are owner/admin workflow aids only. They cannot make a player publicly visible without the player's opt-in generated handle and must not affect CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
 
+## Community Member Import Audit-History Polish Slice
+
+The community member import audit-history polish slice improves owner/admin visibility into bulk execution and source audit history without changing the source-management write model. It remains a private presentation-workflow improvement over the existing `community_member_candidates`, `community_member_source_audit`, `community_member_source_snapshots`, `community_members`, and `user_notifications` controls.
+
+The slice adds:
+
+- Per-candidate execution summaries on `bulkActOnCommunityMemberCandidates`, returned as `execution_summaries` for bulk partial success and full success.
+- A bulk `summary` object that reports requested, processed, imported, rejected, blocked, failed, and partial-success counts.
+- `audit_action` and `audit_result` read filters on `GET /api/owner/community-members`.
+- Filterable bulk action audit grouping through `audit_groups`, derived from already-scoped audit rows by linked server, action, result, and execution window.
+- An `export_safe_audit` view for owner/admin audit exports that omits raw actor user IDs, raw Discord IDs, raw community guild IDs, raw linked-server IDs, and raw DZN user IDs.
+- Dashboard UI for bulk action summaries, audit action/result filters, grouped audit cards, and the export-safe owner/admin audit view.
+
+Authorization and source rules:
+
+- Normal owners must still pass the canonical owner entitlement boundary and may manage only their own linked servers.
+- Configured DZN admins may still review global candidate source rows.
+- Audit filters are applied only after the same owner/admin scope rules.
+- Bulk action summaries are created from the server-side result for each selected row, not from browser trust.
+- Export-safe audit rows are a sanitized view of private owner/admin audit rows; they are not a new public API and they do not widen source-management access.
+
+Still excluded:
+
+- Public profile visibility without the player's opt-in generated handle.
+- Public profile handle creation, profile privacy updates, or player-owned display preference changes.
+- CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, event eligibility, scoring feeds, and accepted audit feeds.
+- Billing, plan status, owner entitlement mutation, rankings, discovery score, reviews, review score, badges, seasons, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility.
+- Stripe checkout activation, Stripe product/price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord resource mutation, and issue #49.
+
+Mutation scope:
+
+- This slice may read the existing owner/admin community member source-management tables and private `user_notifications` counts.
+- This slice may continue the existing selected-row import/reject writes to `community_member_candidates`, `community_member_source_audit`, and imported `community_members` rows through the canonical single-candidate action path.
+- This slice does not add a migration or new tables.
+- It must not add checkout sessions, profile handle generation, profile privacy updates, billing updates, server ownership changes, ranking updates, discovery score updates, review rating changes, event mutations, roster mutations, CTF scoring changes, badge awards, season changes, Server Wars score/result changes, XP awards, calling-card awards, Nitrado calls, Discord bot messages, Cloudflare secret changes, production D1 writes, live checkout activation, or issue #49 changes.
+
+Fairness remains unchanged: per-candidate execution summaries, filterable bulk action audit grouping, and export-safe audit views are owner/admin presentation aids only. They cannot make a player publicly visible without the player's opt-in generated handle and must not affect CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -909,7 +947,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | CTF/event presentation roster profile links | 401/login boundary | Owner/admin dashboard access required | Own server dashboard read-only, if owner/admin checks pass | Own server dashboard read-only, if owner/admin checks pass | Exact roster server/player bridge; generated handle required; presentation-only; registration, scoring, eligibility, and owner decisions unaffected |
 | Public event host/member profile links | Published profiles only | Published profiles only | Published profiles only | Published profiles only | `competitive_events.created_by` trusted user bridge; presentation-only; event leaderboards, scoring rows, approvals, brackets, and owner workflows excluded |
 | Public community member directory profile links | Published profiles only | Published profiles only | Published profiles only | Published profiles only | `community_members.community_guild_id` plus `community_members.user_id` trusted bridge; presentation-only; CTF scoring rows, owner workflow rows, approvals, brackets, billing, rankings, discovery, reviews, badges, seasons, Server Wars, XP, calling cards, and eligibility unaffected |
-| `/api/owner/community-members`, `/dashboard/community-members`, and `/owner/community-members` | Login/pricing boundary | Owner plan required | Own linked-server source management | Own linked-server source management, or global if DZN admin | Owner entitlement/admin plus linked-server scope; writes only candidates, source audit, trusted snapshot previews, private importable notifications, and imported `community_members`; duplicate and ambiguous user bridges are rejected; repeated no-match/duplicate filters are review-only; cannot make a player publicly visible without the player's opt-in generated handle |
+| `/api/owner/community-members`, `/dashboard/community-members`, and `/owner/community-members` | Login/pricing boundary | Owner plan required | Own linked-server source management | Own linked-server source management, or global if DZN admin | Owner entitlement/admin plus linked-server scope; writes only candidates, source audit, trusted snapshot previews, private importable notifications, and imported `community_members`; duplicate and ambiguous user bridges are rejected; repeated no-match/duplicate filters are review-only; bulk partial-success summaries, audit groups, and export-safe audit views are private read models; cannot make a player publicly visible without the player's opt-in generated handle |
 | `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award fact collection, retry, and award processing |
 | `/api/owner/progression/award-audit` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Owner entitlement/admin plus linked-server audit scope; read-only |
 | `/dashboard/progression-awards` and `/owner/progression-awards` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Same private audit API; status/adapter/linked-server/retry filters only |
