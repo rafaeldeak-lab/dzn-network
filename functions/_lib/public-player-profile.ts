@@ -119,6 +119,46 @@ export type PublicPlayerProfileDirectoryPreview = {
   fairness: PlayerProfilePrivacyFairness;
 };
 
+export type PublicPlayerProfileSharePreviewMetadata = {
+  source: "public_profile_payload" | "generic_fallback";
+  title: string;
+  description: string;
+  fallback_copy: string;
+  canonical_href: string;
+  image_href: string;
+  image_alt: string;
+  robots: "index,follow" | "noindex,nofollow";
+  open_graph: {
+    type: "profile" | "website";
+    site_name: "DZN Network";
+    title: string;
+    description: string;
+    url: string;
+    image: string;
+    image_alt: string;
+  };
+  twitter: {
+    card: "summary_large_image";
+    title: string;
+    description: string;
+    image: string;
+    image_alt: string;
+  };
+  privacy: {
+    source: "already_public_profile_payload";
+    uses_saved_visibility_preferences: true;
+    uses_visible_profile_sections_only: true;
+    hidden_sections: "omitted";
+    private_identifiers: "hidden";
+    raw_award_evidence: "hidden";
+    exact_award_times: "hidden";
+    share_history: "not_stored";
+    server_calls_for_share_activity: "not_performed";
+    privacy_setting_writes: "not_performed";
+  };
+  fairness: PlayerProfilePrivacyFairness;
+};
+
 type PublishedPlayerProfileRow = {
   user_id: string;
   username: string | null;
@@ -158,6 +198,53 @@ type PublishedProfileDirectoryCallingCardRow = {
 };
 
 const MAX_DIRECTORY_PREVIEW_LOOKUP_IDS = 96;
+const PUBLIC_PROFILE_SHARE_IMAGE_PATH = "/media/dzn-cinematic-survivor.png";
+const PUBLIC_PROFILE_SHARE_IMAGE_ALT = "DZN public player profile preview";
+const PUBLIC_PROFILE_SHARE_FALLBACK_TITLE = "DZN Player Profile | DZN Network";
+const PUBLIC_PROFILE_SHARE_FALLBACK_DESCRIPTION = "View public DZN player profiles shared by their owners on DZN Network.";
+const PUBLIC_PROFILE_SHARE_DESCRIPTION_LIMIT = 180;
+
+export function buildPublicPlayerProfileSharePreviewMetadata(input: {
+  response?: PublicPlayerProfileResponse | null;
+  requestUrl: string | URL;
+}): PublicPlayerProfileSharePreviewMetadata {
+  const origin = requestOrigin(input.requestUrl);
+  const fallbackCanonical = canonicalRequestHref(input.requestUrl, origin);
+  const imageHref = absolutePublicHref(PUBLIC_PROFILE_SHARE_IMAGE_PATH, origin);
+  const response = input.response;
+  const payload = response?.payload;
+
+  if (!payload?.ok || response?.status !== 200) {
+    return publicPlayerProfileSharePreviewMetadata({
+      source: "generic_fallback",
+      title: PUBLIC_PROFILE_SHARE_FALLBACK_TITLE,
+      description: PUBLIC_PROFILE_SHARE_FALLBACK_DESCRIPTION,
+      fallbackCopy: PUBLIC_PROFILE_SHARE_FALLBACK_DESCRIPTION,
+      canonicalHref: fallbackCanonical,
+      imageHref,
+      robots: "noindex,nofollow",
+    });
+  }
+
+  const displayName = cleanPreviewText(payload.profile.display_name, "DZN Player", 80);
+  const canonicalHref = absolutePublicHref(safePublicProfilePath(payload.profile.public_href) ?? fallbackCanonical, origin);
+  const signals = publicProfileSharePreviewSignals(payload);
+  const signalCopy = signals.length
+    ? `${displayName}'s public DZN profile: ${signals.join(", ")}.`
+    : `${displayName}'s public DZN profile is published on DZN Network. No progression sections are currently visible.`;
+  const safetyCopy = "Private identifiers and raw award evidence stay hidden.";
+  const description = previewDescription(`${signalCopy} ${safetyCopy}`);
+
+  return publicPlayerProfileSharePreviewMetadata({
+    source: "public_profile_payload",
+    title: `${displayName} | DZN Player Profile`,
+    description,
+    fallbackCopy: description,
+    canonicalHref,
+    imageHref,
+    robots: "index,follow",
+  });
+}
 
 export async function getPublicPlayerProfilePayload(
   env: Env,
@@ -401,6 +488,128 @@ function publicProfileDirectoryPreview(input: {
     },
     fairness: playerProfilePrivacyFairness(),
   };
+}
+
+function publicPlayerProfileSharePreviewMetadata(input: {
+  source: PublicPlayerProfileSharePreviewMetadata["source"];
+  title: string;
+  description: string;
+  fallbackCopy: string;
+  canonicalHref: string;
+  imageHref: string;
+  robots: PublicPlayerProfileSharePreviewMetadata["robots"];
+}): PublicPlayerProfileSharePreviewMetadata {
+  return {
+    source: input.source,
+    title: input.title,
+    description: input.description,
+    fallback_copy: input.fallbackCopy,
+    canonical_href: input.canonicalHref,
+    image_href: input.imageHref,
+    image_alt: PUBLIC_PROFILE_SHARE_IMAGE_ALT,
+    robots: input.robots,
+    open_graph: {
+      type: input.source === "public_profile_payload" ? "profile" : "website",
+      site_name: "DZN Network",
+      title: input.title,
+      description: input.description,
+      url: input.canonicalHref,
+      image: input.imageHref,
+      image_alt: PUBLIC_PROFILE_SHARE_IMAGE_ALT,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: input.title,
+      description: input.description,
+      image: input.imageHref,
+      image_alt: PUBLIC_PROFILE_SHARE_IMAGE_ALT,
+    },
+    privacy: {
+      source: "already_public_profile_payload",
+      uses_saved_visibility_preferences: true,
+      uses_visible_profile_sections_only: true,
+      hidden_sections: "omitted",
+      private_identifiers: "hidden",
+      raw_award_evidence: "hidden",
+      exact_award_times: "hidden",
+      share_history: "not_stored",
+      server_calls_for_share_activity: "not_performed",
+      privacy_setting_writes: "not_performed",
+    },
+    fairness: playerProfilePrivacyFairness(),
+  };
+}
+
+function publicProfileSharePreviewSignals(payload: PublicPlayerProfilePayload) {
+  const signals: string[] = [];
+  const xp = payload.visibility.xp ? payload.sections.xp : null;
+  if (xp) {
+    signals.push(`${cleanPreviewText(xp.level_label, "Foundation Track", 48)} with ${formatPreviewCount(xp.total_xp)} XP`);
+  }
+
+  const challengeProgress = payload.visibility.challenge_progress ? payload.sections.challenge_progress : null;
+  if (challengeProgress) {
+    signals.push(countLabel(challengeProgress.completed_challenges, "challenge completed", "challenges completed"));
+  }
+
+  const callingCards = payload.visibility.calling_cards ? payload.sections.calling_cards : null;
+  if (callingCards) {
+    signals.push(countLabel(callingCards.count, "calling card", "calling cards"));
+  }
+
+  return signals.slice(0, 3);
+}
+
+function requestOrigin(value: string | URL) {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "https://dzn-network.pages.dev";
+  }
+}
+
+function canonicalRequestHref(value: string | URL, origin: string) {
+  try {
+    const url = new URL(value);
+    return new URL(url.pathname, origin).toString();
+  } catch {
+    return new URL("/players/preview", origin).toString();
+  }
+}
+
+function absolutePublicHref(pathOrHref: string, origin: string) {
+  try {
+    const url = new URL(pathOrHref, origin);
+    if (url.origin !== origin) return new URL("/players/preview", origin).toString();
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return new URL("/players/preview", origin).toString();
+  }
+}
+
+function safePublicProfilePath(value: unknown) {
+  if (typeof value !== "string") return null;
+  if (!value.startsWith("/players/") || value.startsWith("//")) return null;
+  return value;
+}
+
+function previewDescription(value: string) {
+  const cleaned = cleanPreviewText(value, PUBLIC_PROFILE_SHARE_FALLBACK_DESCRIPTION, PUBLIC_PROFILE_SHARE_DESCRIPTION_LIMIT + 40);
+  if (cleaned.length <= PUBLIC_PROFILE_SHARE_DESCRIPTION_LIMIT) return cleaned;
+  return `${cleaned.slice(0, PUBLIC_PROFILE_SHARE_DESCRIPTION_LIMIT - 1).trimEnd()}.`;
+}
+
+function cleanPreviewText(value: unknown, fallback: string, maxLength: number) {
+  const cleaned = typeof value === "string"
+    ? value.replace(/[\u0000-\u001f\u007f<>]/g, " ").replace(/\s+/g, " ").trim()
+    : "";
+  return (cleaned || fallback).slice(0, Math.max(1, maxLength)).trim();
+}
+
+function formatPreviewCount(value: unknown) {
+  return Math.max(0, Math.trunc(Number(value) || 0)).toLocaleString("en-GB");
 }
 
 function publicXpSection(totalXp: number, level: ReturnType<typeof calculatePlayerProfileLevel>): PublicPlayerProfileXpSection {

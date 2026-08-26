@@ -132,6 +132,27 @@ Share accessibility/fallback polish remains presentation-only and cannot affect:
 - Rendered desktop, mid-width, mobile, and reduced-motion smoke checks
 - Codex Security diff scan
 
-## Next Recommended Slice
+## Prior Next Recommended Slice
 
 Next should be public profile share preview metadata polish: add public-safe Open Graph/Twitter-style metadata and fallback preview copy for `/players/[handle]` using only already-public profile fields and saved visibility preferences, while proving metadata generation cannot expose hidden sections, store share history, create tracking events, call analytics, write profile privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or affect competitive eligibility.
+
+## Follow-On Public Profile Share Preview Metadata Polish
+
+Branch: `codex/public-profile-share-preview-metadata-polish-20260826`
+
+Base branch: `codex/public-profile-share-a11y-fallback-polish-20260826`
+
+This slice adds public-safe Open Graph/Twitter-style metadata and fallback preview copy for `/players/[handle]`. The statically exported Next profile route keeps generic fallback metadata, while the Cloudflare Pages shell route rewrites `/players/[handle]` HTML with per-handle tags from the already-filtered public profile payload.
+
+Still excluded:
+
+- Hidden profile sections, private identifiers, raw award evidence, exact award timestamps, source IDs, private settings, owner/admin rows, retained export artifacts, billing rows, scoring rows, review internals, approval state, and event internals.
+- Stored share history, analytics calls, tracking events, audit-log calls, browser persistence, profile privacy writes, handle creation, retained export writes, and migrations.
+- Stripe checkout activation, Stripe product/price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord mutations, and issue #49.
+- Billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, CTF scoring, and competitive eligibility influence.
+
+Live checkout remains disabled, retained exports remain blocked unless separately approved, and Issue #49 remains reserved for final live payment activation.
+
+## Next Recommended Slice
+
+Next should be public profile share preview crawler/rendered QA polish: add a local smoke harness that renders rewritten `/players/[handle]` metadata for published, hidden, invalid, and unavailable profiles and snapshots the final `<head>` tags while continuing to prove no hidden fields, tracking, analytics, stored share history, privacy writes, billing changes, scoring changes, ranking changes, review changes, badge/season/Server Wars changes, XP/calling-card award changes, event changes, or competitive eligibility impact.
