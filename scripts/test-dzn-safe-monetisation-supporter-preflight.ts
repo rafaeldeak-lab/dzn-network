@@ -13,6 +13,8 @@ const STRIPE_HELPER = "functions/_lib/stripe.ts";
 const PLANS_HELPER = "functions/_lib/plans.ts";
 const STRIPE_WEBHOOK = "functions/api/stripe/webhook.ts";
 const CHECKOUT_ROUTE = "functions/api/billing/create-checkout-session.ts";
+const STORE_CATALOG_HELPER = "functions/_lib/dzn-store-catalog.ts";
+const STORE_CATALOG_MIGRATION = "migrations/0071_dzn_store_catalog_admin_draft.sql";
 const PACKAGE_JSON = "package.json";
 
 const PREFLIGHT_SNIPPETS = [
@@ -84,7 +86,7 @@ const PREFLIGHT_SNIPPETS = [
   "Payment webhooks cannot fulfil the same order twice.",
   "Store purchases cannot alter XP, rankings, scoring, reviews, discovery, badges, seasons, events, Server Wars, CTF scoring, public profile visibility, retained exports, owner entitlement, server ownership, or competitive eligibility.",
   "This Slice's Test Contract",
-  "Next should be the DZN Store catalog and admin product/price draft model",
+  "The follow-on DZN Store catalog and admin product/price draft model slice may add only `store_products`, `store_prices`, and local admin draft validation.",
 ];
 
 const INTEGRATION_SNIPPETS: Record<string, string[]> = {
@@ -93,28 +95,28 @@ const INTEGRATION_SNIPPETS: Record<string, string[]> = {
     "Implementation Preflight",
     "safe production implementation sequence",
     "keeps `DZN_LIVE_CHECKOUT_ENABLED` unset/false",
-    "The first future runtime step after the preflight should be the DZN Store catalog and admin product/price draft model",
+    "The first runtime step after the preflight is the DZN Store catalog and admin product/price draft model",
   ],
   [MASTER_SPEC]: [
     "DZN Safe Monetisation And Supporter System Implementation Preflight Slice",
     "`docs/DZN_SAFE_MONETISATION_SUPPORTER_IMPLEMENTATION_PREFLIGHT.md`",
     "One-time Stripe Checkout using `mode=payment` only after checkout flags are enabled.",
     "delivered as a documentation/test-guard slice",
-    "DZN Store catalog and admin product/price draft model: next safe implementation slice",
+    "DZN Store catalog and admin product/price draft model: delivered as the first safe implementation slice",
   ],
   [PUBLIC_ACCESS_POLICY]: [
     "The DZN Safe Monetisation And Supporter System Implementation Preflight Slice may define the real production store/catalog/order/payment/spin-ledger/supporter-card implementation sequence",
     "one-time Checkout `mode=payment` boundary",
     "It must not implement `/store`, `/account/purchases`, reward wheel, store checkout, store webhook fulfilment",
     "Future store purchases are player/account cosmetics only",
-    "The next safe implementation step should be the DZN Store catalog and admin product/price draft model",
+    "The DZN Store catalog and admin product/price draft model slice may add only the inactive `store_products` and `store_prices` schema",
   ],
   [BILLING_PLANS]: [
     "Future Store And Supporter Purchases",
     "`docs/DZN_SAFE_MONETISATION_SUPPORTER_IMPLEMENTATION_PREFLIGHT.md`",
     "Future one-time Store purchases are separate from Starter/Pro owner subscriptions.",
     "Players must never be able to buy wheel spins.",
-    "This preflight does not add checkout, products, Prices, webhook fulfilment",
+    "The DZN Store catalog and admin product/price draft model adds only inactive product/price metadata",
   ],
   [STRIPE_LIVE_CHECKLIST]: [
     "`docs/DZN_SAFE_MONETISATION_SUPPORTER_IMPLEMENTATION_PREFLIGHT.md`",
@@ -191,6 +193,10 @@ const FORBIDDEN_TABLE_NAMES = [
   "wheel_cooldowns",
 ];
 
+const ALLOWED_CATALOG_TABLE_NAMES = ["store_products", "store_prices"];
+
+const FORBIDDEN_NON_CATALOG_TABLE_NAMES = FORBIDDEN_TABLE_NAMES.filter((table) => !ALLOWED_CATALOG_TABLE_NAMES.includes(table));
+
 const FORBIDDEN_PROVIDER_DEPENDENCIES = [
   /^openai$/i,
   /^ai$/i,
@@ -239,9 +245,9 @@ function main() {
   assertIntegratedDocs();
   assertExistingStripeSafetyContracts();
   assertNoRuntimePaths();
-  assertNoStoreMigrations();
+  assertOnlyCatalogDraftMigration();
   assertNoRuntimeEnvOrConfigFlags();
-  assertNoStoreRuntimePatterns();
+  assertNoStoreRuntimePatternsBeyondCatalogDraft();
   assertNoNewProviderDependencies();
   assertPackageScript();
   console.log("DZN Safe Monetisation and Supporter System implementation preflight tests passed.");
@@ -325,17 +331,19 @@ function assertNoRuntimePaths() {
   }
 }
 
-function assertNoStoreMigrations() {
+function assertOnlyCatalogDraftMigration() {
   const migrationFiles = listFiles("migrations").map((path) => path.replace(/\\/g, "/"));
   const forbiddenNamedMigrations = migrationFiles.filter((path) =>
+    path !== STORE_CATALOG_MIGRATION &&
     /(?:store|supporter|wheel|monetisation|monetization|purchase|payment_event|account_entitlement|earned_spin|spin_ledger|wheel_cooldown)/i.test(path),
   );
-  assert.deepEqual(forbiddenNamedMigrations, [], "Implementation preflight must not add store/supporter/wheel migration files.");
+  assert.deepEqual(forbiddenNamedMigrations, [], "Only the catalog draft migration may be present after the implementation preflight.");
 
   for (const path of migrationFiles.filter((path) => path.endsWith(".sql"))) {
     const source = read(path);
-    for (const table of FORBIDDEN_TABLE_NAMES) {
-      assert.equal(source.includes(table), false, `${path} must not create future store table ${table} in this preflight.`);
+    const forbiddenTables = path === STORE_CATALOG_MIGRATION ? FORBIDDEN_NON_CATALOG_TABLE_NAMES : FORBIDDEN_TABLE_NAMES;
+    for (const table of forbiddenTables) {
+      assert.equal(source.includes(table), false, `${path} must not create blocked future store table ${table}.`);
     }
   }
 }
@@ -349,7 +357,7 @@ function assertNoRuntimeEnvOrConfigFlags() {
   }
 }
 
-function assertNoStoreRuntimePatterns() {
+function assertNoStoreRuntimePatternsBeyondCatalogDraft() {
   const runtimeFiles = [
     ...listFiles("app"),
     ...listFiles("components"),
@@ -358,11 +366,30 @@ function assertNoStoreRuntimePatterns() {
   ].filter((path) => /\.(?:ts|tsx|js|jsx|mjs|cjs)$/.test(path));
 
   const allowExistingSubscriptionFiles = new Set([STRIPE_HELPER, STRIPE_WEBHOOK, CHECKOUT_ROUTE].map((path) => path.replace(/\\/g, "/")));
+  const allowCatalogDraftFile = STORE_CATALOG_HELPER.replace(/\\/g, "/");
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
     if (allowExistingSubscriptionFiles.has(path)) continue;
     const source = read(path);
-    for (const pattern of FORBIDDEN_RUNTIME_STORE_PATTERNS) {
+    const patterns = path === allowCatalogDraftFile
+      ? FORBIDDEN_RUNTIME_STORE_PATTERNS.filter((pattern) =>
+        ![
+          "\\bDZN_STORE_ENABLED\\b",
+          "\\bDZN_STORE_CHECKOUT_ENABLED\\b",
+          "\\bDZN_STORE_SANDBOX_CHECKOUT_ENABLED\\b",
+          "\\bDZN_STORE_WEBHOOK_FULFILMENT_ENABLED\\b",
+          "\\bDZN_SUPPORTER_CARDS_ENABLED\\b",
+          "\\bDZN_EARNED_SPINS_ENABLED\\b",
+          "\\bDZN_REWARD_WHEEL_ENABLED\\b",
+          "\\bDZN_STORE_ADMIN_ENABLED\\b",
+          "\\bDZN_STORE_LIVE_CHECKOUT_ENABLED\\b",
+          "\\bNEXT_PUBLIC_DZN_STORE_ENABLED\\b",
+          "\\bstore_products\\b",
+          "\\bstore_prices\\b",
+        ].includes(pattern.source),
+      )
+      : FORBIDDEN_RUNTIME_STORE_PATTERNS;
+    for (const pattern of patterns) {
       assert.doesNotMatch(source, pattern, `${path} must not contain Store/Supporter/Wheel runtime pattern ${pattern}.`);
     }
   }

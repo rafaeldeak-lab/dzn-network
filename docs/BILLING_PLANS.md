@@ -104,11 +104,13 @@ The DZN Safe Monetisation and Supporter System implementation preflight is `docs
 
 Future one-time Store purchases are separate from Starter/Pro owner subscriptions. They may grant guaranteed account-bound cosmetics or supporter recognition only, such as the planned `DZN FOUNDING SUPPORTER PACK`, and must use a separate Store order/payment/entitlement ledger with verified webhook fulfilment before anything is granted.
 
+The DZN Store catalog and admin product/price draft model adds only inactive product/price metadata in `store_products` and `store_prices`. It does not create Stripe Products or Prices, does not create checkout sessions, and does not fulfil orders. Draft validation keeps Stripe Price IDs unbound in this slice.
+
 Store purchases must never unlock `/setup`, Nitrado linking, owner onboarding, owner dashboards, server-management APIs, owner billing plan status, server ownership, XP, earned calling cards, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, or competitive eligibility.
 
 Players must never be able to buy wheel spins. Spins remain earned-only and must be enforced server-side with a maximum three spins in any rolling 24-hour period, a minimum four-hour cooldown, server-generated outcomes, complete reward-pool probability display, no cash-equivalent rewards, and an auditable spin ledger.
 
-This preflight does not add checkout, products, Prices, webhook fulfilment, account entitlement writes, Supporter Card issuance, wheel runtime, Cloudflare secrets, production D1 writes, live checkout activation, or issue #49 changes.
+The catalog draft slice does not add checkout, payment webhook fulfilment, account entitlement writes, Supporter Card issuance, wheel runtime, Cloudflare secrets, production D1 writes, live checkout activation, or issue #49 changes.
 
 ## Protected Systems
 
