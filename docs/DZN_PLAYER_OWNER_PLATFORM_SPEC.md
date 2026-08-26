@@ -1228,6 +1228,24 @@ Live checkout remains disabled, and Issue #49 remains reserved for final live pa
 
 Billing, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring rows, bracket outcomes, owner workflow decisions, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility remain isolated.
 
+## Player Public Profile Visual Polish Slice
+
+This slice improves `/players/[handle]` as a richer DZN-branded public profile viewer after public community cards can preview visible sections. It is a presentation-only slice: the public profile API, public handle generation, privacy settings model, progression read model, billing gates, scoring systems, and owner/admin workflows remain unchanged.
+
+The slice adds:
+
+- A DZN-branded public profile shell with cinematic background layers, public dossier styling, and subtle slow pan/zoom motion.
+- Reduced-motion fallbacks for animated public profile background and profile signal treatments.
+- A stronger identity card showing public handle, safe section counts, published XP, challenge clears, and calling-card count derived only from the existing public profile response.
+- Richer public-safe cards for visible XP, challenge progress, calling cards, and activity timeline sections.
+- Static guard tests that prove visual classes and presentation helpers do not become dependencies of billing, scoring, ranking, review, badge, season, Server Wars, XP-award, calling-card-award, CTF, event, or owner/community import systems.
+
+The page may show only the public-safe profile payload already returned by `GET /api/public/player-profiles/[handle]`. It must not create profile handles, write profile privacy settings, award XP, award calling cards, change challenge progress, create checkout sessions, update owner billing, change server ownership, update rankings or leaderboards, modify discovery score, mutate reviews, award badges, change seasons, modify events, alter CTF or Server Wars scoring/results, touch retained exports, call Nitrado, mutate Discord resources, change Cloudflare secrets, apply production migrations, enable live checkout, or merge issue #49.
+
+Privacy controls remain authoritative. Hidden profile sections stay hidden, private identifiers and raw award evidence remain unavailable to the viewer, and public profile styling cannot affect billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, or competitive eligibility.
+
+Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -1254,7 +1272,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/player/challenges` | 401 | Allowed | Allowed | Allowed | Session auth, player participation only |
 | `/player/profile` and `/api/player/profile` | 401/login redirect | Allowed | Allowed | Allowed | Session auth, private no-store profile progression showcase, read-only |
 | `/api/player/profile-privacy` | 401 | Allowed | Allowed | Allowed | Private player-owned settings API; GET/PATCH only; writes only `player_profile_privacy_preferences` |
-| `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences |
+| `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences; DZN-branded visual shell is presentation-only and does not change the public API, privacy writes, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, or competitive eligibility |
 | Public profile attribution on reviews/challenges/leaderboards | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Read-only generated-handle attribution; no name-only matching; ambiguous/hidden/unpublished profiles are not linked |
 | Public profile attribution preview/control and safe event-suggestion author links | Public event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Player-owned visibility control; trusted user bridge required; roster scoring gates and owner mutations excluded |
 | CTF/event presentation roster profile links | 401/login boundary | Owner/admin dashboard access required | Own server dashboard read-only, if owner/admin checks pass | Own server dashboard read-only, if owner/admin checks pass | Exact roster server/player bridge; generated handle required; presentation-only; registration, scoring, eligibility, and owner decisions unaffected |

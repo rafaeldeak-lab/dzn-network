@@ -330,7 +330,7 @@ Still excluded:
 - Raw community guild IDs, raw user IDs, Discord IDs, OAuth tokens, server ownership state, billing state, approval state, scoring state, raw award evidence, and owner workflow state.
 - Billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, Nitrado, Discord bot mutations, Cloudflare secrets, production D1 writes, live checkout activation, and issue #49.
 
-## Next Recommended Slice
+## Prior Next Recommended Slice
 
 Next should be trusted community member source management and audit: add owner/admin-only controls to review or import candidate community members into the `community_members` bridge, with explicit audit history, duplicate/ambiguous-user rejection, and tests proving those source-management actions cannot affect public profile visibility without the player's opt-in handle, CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
 
@@ -419,3 +419,31 @@ Live checkout remains disabled, retained exports remain blocked unless separatel
 ## Next Recommended Slice
 
 Next should be player public-profile visual polish: make `/players/[handle]` itself feel richer and more DZN-branded now that community cards can preview visible sections, while preserving the same privacy controls and proving public profile styling cannot affect billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, or competitive eligibility.
+
+## Follow-On Player Public Profile Visual Polish
+
+Branch: `codex/player-public-profile-visual-polish-20260826`
+
+Base branch: `codex/public-community-member-card-preview-polish-20260826`
+
+This slice makes the public-safe profile viewer feel more like a DZN player dossier without changing the public profile API, profile privacy writes, handle generation, retained export policy, billing, checkout, scoring, ranking, review, badge, season, event, Server Wars, XP-award, calling-card-award, or competitive eligibility behavior.
+
+The slice adds:
+
+- Cinematic DZN background layers on `/players/[handle]` using existing DZN media assets.
+- Subtle slow pan/zoom and signal animation with reduced-motion fallbacks.
+- Stronger public profile hero, identity card, public handle treatment, and visible-section signal panels.
+- Richer visible-section cards for XP, challenge progress, calling cards, and timeline rows.
+- `test:public-player-profile-visual-polish` to prove the styling remains presentation-only and does not become a dependency of protected influence systems.
+
+Still excluded:
+
+- Public profile handle generation, profile privacy writes, owner/admin import writes, retained export files, export-history rows, sharing links, storage bindings, retention write APIs, and retained-export migrations.
+- Raw Discord IDs, internal DZN user IDs, source IDs, raw award evidence, exact award timestamps, owner/admin source records, billing state, scoring state, approval state, review internals, and hidden/private profile settings.
+- Stripe checkout activation, Stripe product/price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord mutations, and issue #49.
+
+Live checkout remains disabled, retained exports remain blocked unless separately approved, and Issue #49 remains reserved for final live payment activation.
+
+## Next Recommended Slice
+
+Next should be public profile owner preview/share polish: let logged-in players preview their public profile exactly as visitors will see it from `/player/profile`, improve copy/share affordances and hidden-section warnings there, and keep proving preview/share controls cannot affect billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, retained exports, or competitive eligibility.

@@ -3,17 +3,24 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  Activity,
   ArrowRight,
+  Award,
   BadgeCheck,
   CalendarDays,
+  Eye,
   EyeOff,
+  Gauge,
   Lock,
+  Radar,
   ShieldCheck,
   Sparkles,
   Swords,
+  Target,
   Trophy,
   UserRound,
   Zap,
+  type LucideIcon,
 } from "lucide-react";
 
 import { FetchJsonError, fetchJsonWithRetry } from "@/lib/client-fetch";
@@ -139,6 +146,13 @@ export function PublicPlayerProfilePage({ handle }: { handle: string }) {
   const timeline = profile.sections?.timeline ?? [];
   const displayName = profile.profile?.display_name ?? "DZN Player";
   const avatarInitial = profile.profile?.avatar_initial ?? "D";
+  const publicHandle = profile.profile?.handle ?? currentPublicProfileHandle(handle);
+  const visibleSectionCount = [visibility.xp, visibility.challenge_progress, visibility.calling_cards, visibility.award_dates === "month"].filter(Boolean).length;
+  const completedChallenges = visibility.challenge_progress ? profile.sections?.challenge_progress?.completed_challenges ?? 0 : null;
+  const joinedChallenges = visibility.challenge_progress ? profile.sections?.challenge_progress?.joined_challenges ?? 0 : null;
+  const publishedCardCount = visibility.calling_cards ? profile.sections?.calling_cards?.count ?? 0 : null;
+  const publishedXp = visibility.xp && xp ? xp.total_xp ?? 0 : null;
+  const profileLevel = visibility.xp && xp ? xp.profile_level ?? 1 : null;
 
   if (state === "missing" || state === "error") {
     return (
@@ -170,16 +184,21 @@ export function PublicPlayerProfilePage({ handle }: { handle: string }) {
 
   return (
     <PublicProfileShell>
-      <section className="relative border-b border-white/10">
-        <div className="mx-auto grid min-h-[430px] max-w-7xl content-end gap-6 px-4 pb-8 pt-28 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:px-8">
-          <div>
-            <p className="inline-flex rounded border border-cyan-300/35 bg-cyan-400/12 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-cyan-50">
+      <section className="dzn-public-profile-hero relative border-b border-white/10">
+        <div className="mx-auto grid min-h-[520px] max-w-7xl content-end gap-6 px-4 pb-8 pt-28 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:px-8">
+          <div className="relative z-10 min-w-0">
+            <p className="inline-flex rounded border border-cyan-300/35 bg-cyan-400/12 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-cyan-50 shadow-[0_0_24px_rgba(34,211,238,0.18)]">
               Public DZN profile
             </p>
-            <h1 className="mt-4 max-w-4xl break-words text-4xl font-black uppercase leading-none text-white [overflow-wrap:anywhere] sm:text-6xl">
+            <h1 className="mt-4 max-w-4xl break-words text-5xl font-black uppercase leading-[0.88] text-white [overflow-wrap:anywhere] sm:text-7xl lg:text-8xl">
               {state === "loading" ? "Loading Player Profile" : displayName}
             </h1>
-            <p className="mt-4 max-w-2xl break-words text-sm font-bold leading-6 text-zinc-200 [overflow-wrap:anywhere] sm:text-base">
+            <div className="mt-4 flex flex-wrap gap-2">
+              <ProfileSignalPill icon={Radar} label="Survivor dossier" />
+              <ProfileSignalPill icon={Eye} label={`${visibleSectionCount}/4 sections visible`} />
+              <ProfileSignalPill icon={ShieldCheck} label="Public view / presentation only" />
+            </div>
+            <p className="mt-5 max-w-2xl break-words text-sm font-bold leading-6 text-zinc-200 [overflow-wrap:anywhere] sm:text-base">
               Public-safe player progression, showing only the XP, challenge, calling-card, and month-level award sections this player has chosen to display.
             </p>
             <div className="mt-5 flex flex-wrap gap-3">
@@ -194,30 +213,37 @@ export function PublicPlayerProfilePage({ handle }: { handle: string }) {
             </div>
           </div>
 
-          <section className="rounded-lg border border-cyan-300/20 bg-black/44 p-5 shadow-[0_0_60px_rgba(34,211,238,0.12)]">
+          <section className="dzn-public-profile-identity-card relative z-10 min-w-0 overflow-hidden rounded-lg border border-cyan-300/24 bg-black/54 p-5 shadow-[0_0_80px_rgba(34,211,238,0.14)]">
+            <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(34,211,238,0.82),rgba(168,85,247,0.72),transparent)]" aria-hidden="true" />
             <div className="flex items-center gap-4">
-              <span className="grid h-20 w-20 shrink-0 place-items-center rounded-lg border border-cyan-300/25 bg-cyan-400/12 text-3xl font-black text-cyan-50">
-                {state === "loading" ? <UserRound className="h-8 w-8" /> : avatarInitial}
+              <span className="dzn-public-profile-avatar grid h-24 w-24 shrink-0 place-items-center rounded-lg border border-cyan-300/30 bg-cyan-400/12 text-4xl font-black text-cyan-50">
+                {state === "loading" ? <UserRound className="h-9 w-9" /> : avatarInitial}
               </span>
               <div className="min-w-0">
-                <p className="break-words text-xl font-black uppercase text-white [overflow-wrap:anywhere]">{displayName}</p>
-                <p className="mt-1 text-xs font-black uppercase tracking-[0.14em] text-cyan-100">
+                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">DZN player identity</p>
+                <p className="mt-1 break-words text-2xl font-black uppercase leading-none text-white [overflow-wrap:anywhere]">{displayName}</p>
+                <p className="mt-2 break-words text-xs font-black uppercase tracking-[0.14em] text-cyan-100 [overflow-wrap:anywhere]">
+                  @{publicHandle}
+                </p>
+                <p className="mt-2 text-xs font-black uppercase tracking-[0.12em] text-amber-100">
                   {xp ? `Level ${formatNumber(xp.profile_level ?? 1)} / ${xp.level_label ?? "Foundation Track"}` : "Profile sections selected by player"}
                 </p>
               </div>
             </div>
-            <div className="mt-5 grid grid-cols-3 gap-2">
-              <MiniStat label="XP" value={visibility.xp && xp ? formatNumber(xp.total_xp ?? 0) : "-"} />
-              <MiniStat label="Complete" value={visibility.challenge_progress ? formatNumber(profile.sections?.challenge_progress?.completed_challenges ?? 0) : "-"} />
-              <MiniStat label="Cards" value={visibility.calling_cards ? formatNumber(profile.sections?.calling_cards?.count ?? 0) : "-"} />
-            </div>
+            <ProfileSignalRail
+              xp={publishedXp}
+              level={profileLevel}
+              completedChallenges={completedChallenges}
+              joinedChallenges={joinedChallenges}
+              cardCount={publishedCardCount}
+            />
           </section>
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-7xl gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[0.8fr_1.2fr] lg:px-8">
+      <section className="mx-auto grid max-w-7xl gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[0.78fr_1.22fr] lg:px-8">
         <aside className="grid content-start gap-5">
-          <section className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
+          <section className="dzn-public-profile-panel rounded-lg border border-white/10 bg-white/[0.045] p-4">
             <PanelHeader icon={<ShieldCheck className="h-5 w-5" />} title="Public Visibility" />
             <div className="mt-4 grid gap-2">
               <VisibilityRow label="XP Section" active={visibility.xp} />
@@ -230,19 +256,29 @@ export function PublicPlayerProfilePage({ handle }: { handle: string }) {
             </div>
           </section>
 
-          <section className="rounded-lg border border-amber-300/25 bg-amber-400/10 p-4">
+          <section className="dzn-public-profile-panel rounded-lg border border-amber-300/25 bg-amber-400/10 p-4">
             <PanelHeader icon={<Lock className="h-5 w-5" />} title="Fairness Boundary" />
             <p className="mt-3 text-sm font-bold leading-6 text-amber-50/88">
               Public profile visibility is presentation only. It does not affect billing, rankings, discovery, reviews, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
             </p>
           </section>
+
+          <section className="dzn-public-profile-panel rounded-lg border border-violet-300/20 bg-violet-400/10 p-4">
+            <PanelHeader icon={<Activity className="h-5 w-5" />} title="Profile Signal" />
+            <div className="mt-4 grid gap-2">
+              <IntelRow label="Visible sections" value={`${visibleSectionCount}/4`} />
+              <IntelRow label="Published XP" value={publishedXp === null ? "Hidden" : formatNumber(publishedXp)} />
+              <IntelRow label="Challenge clears" value={completedChallenges === null ? "Hidden" : formatNumber(completedChallenges)} />
+              <IntelRow label="Calling cards" value={publishedCardCount === null ? "Hidden" : formatNumber(publishedCardCount)} />
+            </div>
+          </section>
         </aside>
 
-        <div className="grid gap-5">
+        <div className="min-w-0 grid gap-5">
           {state === "loading" ? <LoadingPanel /> : null}
 
           {visibility.xp && xp ? (
-            <section className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
+            <section className="dzn-public-profile-panel rounded-lg border border-white/10 bg-white/[0.045] p-4">
               <PanelHeader icon={<Zap className="h-5 w-5" />} title="Earned XP" />
               <div className="mt-4 grid gap-3 sm:grid-cols-3">
                 <ProgressStat label="Total XP" value={xp.total_xp ?? 0} tone="amber" />
@@ -260,7 +296,7 @@ export function PublicPlayerProfilePage({ handle }: { handle: string }) {
           )}
 
           {visibility.calling_cards ? (
-            <section className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
+            <section className="dzn-public-profile-panel rounded-lg border border-white/10 bg-white/[0.045] p-4">
               <PanelHeader icon={<Sparkles className="h-5 w-5" />} title="Calling Cards" />
               {cards.length ? (
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -282,7 +318,7 @@ export function PublicPlayerProfilePage({ handle }: { handle: string }) {
           )}
 
           {visibility.challenge_progress ? (
-            <section className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
+            <section className="dzn-public-profile-panel rounded-lg border border-white/10 bg-white/[0.045] p-4">
               <PanelHeader icon={<Trophy className="h-5 w-5" />} title="Challenge Progress" />
               {challenges.length ? (
                 <div className="mt-4 grid gap-3">
@@ -304,7 +340,7 @@ export function PublicPlayerProfilePage({ handle }: { handle: string }) {
           )}
 
           {timeline.length ? (
-            <section className="rounded-lg border border-white/10 bg-white/[0.045] p-4">
+            <section className="dzn-public-profile-panel rounded-lg border border-white/10 bg-white/[0.045] p-4">
               <PanelHeader icon={<CalendarDays className="h-5 w-5" />} title="Progression Timeline" />
               <div className="mt-4 grid gap-2">
                 {timeline.map((item, index) => (
@@ -328,11 +364,66 @@ export function PublicPlayerProfilePage({ handle }: { handle: string }) {
 
 function PublicProfileShell({ children }: { children: ReactNode }) {
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-[#040711] text-white">
-      <div className="fixed inset-0 bg-[url('/media/dzn-cinematic-survivor.png')] bg-cover bg-center opacity-24" aria-hidden="true" />
-      <div className="fixed inset-0 bg-[radial-gradient(circle_at_20%_18%,rgba(34,211,238,0.22),transparent_34%),radial-gradient(circle_at_80%_4%,rgba(168,85,247,0.2),transparent_30%),linear-gradient(90deg,rgba(4,7,17,0.98),rgba(4,7,17,0.88),rgba(4,7,17,0.98))]" aria-hidden="true" />
-      <div className="relative">{children}</div>
+    <main className="dzn-public-profile-page relative min-h-screen overflow-x-hidden bg-[#03040d] text-white">
+      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden" aria-hidden="true">
+        <div className="dzn-public-profile-bg-layer absolute -inset-8 bg-[url('/media/dzn-pricing-bg-layer.png')] bg-cover bg-center" />
+        <div className="dzn-public-profile-survivor-layer absolute -inset-6 bg-[url('/media/dzn-cinematic-survivor.png')] bg-cover bg-center" />
+        <div className="dzn-public-profile-fog-layer absolute -inset-8 bg-[url('/media/dzn-pricing-fog-ember-overlay.png')] bg-cover bg-center" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(34,211,238,0.22),transparent_30%),radial-gradient(circle_at_76%_8%,rgba(168,85,247,0.26),transparent_28%),radial-gradient(circle_at_58%_86%,rgba(245,158,11,0.12),transparent_30%),linear-gradient(90deg,rgba(3,4,13,0.97),rgba(3,4,13,0.72)_46%,rgba(3,4,13,0.94))]" />
+        <div className="scanline absolute inset-0 opacity-20" />
+      </div>
+      <div className="relative z-10">{children}</div>
     </main>
+  );
+}
+
+function ProfileSignalPill({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
+  return (
+    <span className="inline-flex max-w-full items-center gap-2 rounded border border-white/12 bg-black/34 px-3 py-2 text-[10px] font-black uppercase tracking-[0.1em] text-zinc-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+      <Icon className="h-3.5 w-3.5 shrink-0 text-cyan-100" />
+      <span className="min-w-0 break-words [overflow-wrap:anywhere]">{label}</span>
+    </span>
+  );
+}
+
+function ProfileSignalRail({
+  xp,
+  level,
+  completedChallenges,
+  joinedChallenges,
+  cardCount,
+}: {
+  xp: number | null;
+  level: number | null;
+  completedChallenges: number | null;
+  joinedChallenges: number | null;
+  cardCount: number | null;
+}) {
+  return (
+    <div className="mt-5 grid gap-2 sm:grid-cols-2">
+      <SignalTile icon={Gauge} label="XP signal" value={xp === null ? "Hidden" : formatNumber(xp)} tone="amber" />
+      <SignalTile icon={Target} label="Profile level" value={level === null ? "Hidden" : formatNumber(level)} tone="cyan" />
+      <SignalTile icon={Trophy} label="Challenge record" value={completedChallenges === null ? "Hidden" : `${formatNumber(completedChallenges)} / ${formatNumber(joinedChallenges ?? 0)}`} tone="emerald" />
+      <SignalTile icon={Award} label="Calling cards" value={cardCount === null ? "Hidden" : formatNumber(cardCount)} tone="violet" />
+    </div>
+  );
+}
+
+function SignalTile({ icon: Icon, label, value, tone }: { icon: LucideIcon; label: string; value: string; tone: "amber" | "cyan" | "emerald" | "violet" }) {
+  const toneClass = {
+    amber: "border-amber-300/25 bg-amber-400/10 text-amber-50",
+    cyan: "border-cyan-300/25 bg-cyan-400/10 text-cyan-50",
+    emerald: "border-emerald-300/25 bg-emerald-400/10 text-emerald-50",
+    violet: "border-violet-300/25 bg-violet-400/10 text-violet-50",
+  }[tone];
+  return (
+    <div className={`min-h-[5.25rem] rounded border p-3 ${toneClass}`}>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[10px] font-black uppercase tracking-[0.12em] opacity-78">{label}</p>
+        <Icon className="h-4 w-4 shrink-0" />
+      </div>
+      <p className="mt-2 break-words font-mono text-2xl font-black leading-none [overflow-wrap:anywhere]">{value}</p>
+    </div>
   );
 }
 
@@ -345,22 +436,22 @@ function PanelHeader({ icon, title }: { icon: ReactNode; title: string }) {
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) {
+function VisibilityRow({ label, active, detail }: { label: string; active: boolean; detail?: string }) {
   return (
-    <div className="rounded border border-white/10 bg-white/[0.045] p-3 text-center">
-      <p className="font-mono text-xl font-black text-white">{value}</p>
-      <p className="mt-1 text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">{label}</p>
+    <div className="flex items-center justify-between gap-3 rounded border border-white/10 bg-black/24 px-3 py-2">
+      <span className="min-w-0 break-words text-xs font-black uppercase text-zinc-200 [overflow-wrap:anywhere]">{label}</span>
+      <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase ${active ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-50" : "border-rose-300/25 bg-rose-400/10 text-rose-100"}`}>
+        {detail ?? (active ? "Visible" : "Hidden")}
+      </span>
     </div>
   );
 }
 
-function VisibilityRow({ label, active, detail }: { label: string; active: boolean; detail?: string }) {
+function IntelRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded border border-white/10 bg-black/24 px-3 py-2">
-      <span className="text-xs font-black uppercase text-zinc-200">{label}</span>
-      <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase ${active ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-50" : "border-rose-300/25 bg-rose-400/10 text-rose-100"}`}>
-        {detail ?? (active ? "Visible" : "Hidden")}
-      </span>
+      <span className="min-w-0 break-words text-xs font-black uppercase text-zinc-400 [overflow-wrap:anywhere]">{label}</span>
+      <span className="break-words text-right text-sm font-black uppercase text-white [overflow-wrap:anywhere]">{value}</span>
     </div>
   );
 }
@@ -381,7 +472,7 @@ function ProgressStat({ label, value, tone }: { label: string; value: number; to
 
 function CallingCard({ card }: { card: PublicCallingCard }) {
   return (
-    <article className="rounded-lg border border-violet-300/24 bg-[radial-gradient(circle_at_18%_0%,rgba(139,92,246,0.2),transparent_40%),rgba(0,0,0,0.32)] p-4">
+    <article className="dzn-public-profile-calling-card rounded-lg border border-violet-300/24 bg-[radial-gradient(circle_at_18%_0%,rgba(139,92,246,0.2),transparent_40%),rgba(0,0,0,0.32)] p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="break-words text-base font-black uppercase text-white [overflow-wrap:anywhere]">{card.name ?? "Calling Card"}</p>
@@ -398,7 +489,7 @@ function CallingCard({ card }: { card: PublicCallingCard }) {
 function ChallengeCard({ challenge }: { challenge: PublicChallengeProgress }) {
   const percent = clampPercent(challenge.progress_percent);
   return (
-    <article className="rounded-lg border border-white/10 bg-black/28 p-4">
+    <article className="dzn-public-profile-challenge-card rounded-lg border border-white/10 bg-black/28 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="break-words text-base font-black uppercase text-white [overflow-wrap:anywhere]">{challenge.title ?? "DZN Challenge"}</p>
@@ -420,7 +511,7 @@ function ChallengeCard({ challenge }: { challenge: PublicChallengeProgress }) {
 
 function TimelineRow({ item }: { item: PublicTimelineItem }) {
   return (
-    <div className="flex items-start gap-3 rounded border border-white/10 bg-black/24 p-3">
+    <div className="dzn-public-profile-timeline-row flex items-start gap-3 rounded border border-white/10 bg-black/24 p-3">
       <span className="grid h-9 w-9 shrink-0 place-items-center rounded border border-cyan-300/20 bg-cyan-400/10 text-cyan-100">
         {item.kind === "calling_card" ? <Sparkles className="h-4 w-4" /> : <Swords className="h-4 w-4" />}
       </span>
@@ -444,7 +535,7 @@ function EmptyState({ title, body }: { title: string; body: string }) {
 
 function PublicSectionState({ icon, title, body, hidden }: { icon: ReactNode; title: string; body: string; hidden: boolean }) {
   return (
-    <section className={`rounded-lg border p-4 ${hidden ? "border-rose-300/18 bg-rose-400/8" : "border-white/10 bg-white/[0.045]"}`}>
+    <section className={`dzn-public-profile-panel rounded-lg border p-4 ${hidden ? "border-rose-300/18 bg-rose-400/8" : "border-white/10 bg-white/[0.045]"}`}>
       <PanelHeader icon={hidden ? <EyeOff className="h-5 w-5" /> : icon} title={title} />
       <p className={`mt-4 text-sm font-bold leading-6 ${hidden ? "text-rose-50/78" : "text-zinc-400"}`}>{body}</p>
       <div className="mt-4 flex flex-wrap gap-2">
@@ -465,7 +556,7 @@ function LoadingPanel() {
   return (
     <section className="grid gap-3">
       {[0, 1, 2].map((item) => (
-        <div key={item} className="h-36 animate-pulse rounded-lg border border-white/10 bg-white/[0.045]" />
+        <div key={item} className="dzn-public-profile-panel h-36 animate-pulse rounded-lg border border-white/10 bg-white/[0.045]" />
       ))}
     </section>
   );
