@@ -98,6 +98,18 @@ Paid access must never alter competitive results. Starter, Pro, and legacy-mappe
 
 Pro purchases presentation, automation, promotion, analytics, additional server allowance, and advanced owner tools. It does not buy leaderboard rank, crowns, badges, reviews, or gameplay results.
 
+## Future Store And Supporter Purchases
+
+The DZN Safe Monetisation and Supporter System implementation preflight is `docs/DZN_SAFE_MONETISATION_SUPPORTER_IMPLEMENTATION_PREFLIGHT.md`.
+
+Future one-time Store purchases are separate from Starter/Pro owner subscriptions. They may grant guaranteed account-bound cosmetics or supporter recognition only, such as the planned `DZN FOUNDING SUPPORTER PACK`, and must use a separate Store order/payment/entitlement ledger with verified webhook fulfilment before anything is granted.
+
+Store purchases must never unlock `/setup`, Nitrado linking, owner onboarding, owner dashboards, server-management APIs, owner billing plan status, server ownership, XP, earned calling cards, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, or competitive eligibility.
+
+Players must never be able to buy wheel spins. Spins remain earned-only and must be enforced server-side with a maximum three spins in any rolling 24-hour period, a minimum four-hour cooldown, server-generated outcomes, complete reward-pool probability display, no cash-equivalent rewards, and an auditable spin ledger.
+
+This preflight does not add checkout, products, Prices, webhook fulfilment, account entitlement writes, Supporter Card issuance, wheel runtime, Cloudflare secrets, production D1 writes, live checkout activation, or issue #49 changes.
+
 ## Protected Systems
 
 Billing plan cleanup must not change ADM ingestion, Nitrado integration, Worker sync logic, player profiles, kills, deaths, events, sessions, token handling, or auth/session security.

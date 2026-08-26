@@ -6,7 +6,15 @@ This backlog item supersedes the earlier paid-spin idea.
 
 DZN may add a real production store and supporter system in a later approved implementation slice, but spins must never be sold directly or indirectly. The Fair Progression Boundary remains the controlling rule: money may buy guaranteed account-bound presentation items, never competitive power, reward odds, XP, ranking, scoring, discovery, eligibility, or earned progression.
 
-This document is backlog/specification only for the live presence counter slice. It does not implement store routes, payment routes, checkout sessions, webhook handlers, product tables, order tables, entitlement tables, supporter cards, spin ledgers, price changes, Stripe product changes, Cloudflare secret changes, production D1 writes, or live checkout activation.
+The implementation preflight for this backlog is `docs/DZN_SAFE_MONETISATION_SUPPORTER_IMPLEMENTATION_PREFLIGHT.md`. That preflight defines the safe production implementation sequence, migration shapes, feature flags, webhook verification, idempotent fulfilment, refund and chargeback handling, admin pricing controls, tax/receipt boundaries, rollback path, and proof requirements before runtime work starts.
+
+This document and the implementation preflight do not implement store routes, payment routes, checkout sessions, webhook handlers, product tables, order tables, entitlement tables, supporter cards, spin ledgers, price changes, Stripe product changes, Cloudflare secret changes, production D1 writes, or live checkout activation.
+
+## Implementation Preflight
+
+The approved preflight is documentation and test guard work only. It keeps `DZN_LIVE_CHECKOUT_ENABLED` unset/false, keeps issue #49 reserved for final live checkout activation, and blocks one-time Stripe Checkout Sessions, store runtime, webhook fulfilment, account entitlement writes, Supporter Card issuance, earned-spin ledgers, reward wheel runtime, Stripe live object changes, Cloudflare secret changes, production D1 writes, Nitrado changes, Discord changes, AI provider credentials, vector stores, analytics/tracking, and metered model calls.
+
+The first future runtime step after the preflight should be the DZN Store catalog and admin product/price draft model with disabled-by-default migrations and local validation only. Checkout creation, payment webhook fulfilment, Supporter Card issuance, earned spins, wheel runtime, account entitlement writes, and live checkout remain out of scope for that next safe step.
 
 ## Wheel Rules
 
