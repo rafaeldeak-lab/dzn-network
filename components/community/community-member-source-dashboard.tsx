@@ -5,6 +5,8 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowRight,
+  Bell,
+  CheckCheck,
   CheckCircle2,
   EyeOff,
   History,
@@ -112,6 +114,10 @@ type Payload = {
     duplicate: number;
     ambiguous: number;
   };
+  notification_counts: {
+    unread_total: number;
+    community_member_importable: number;
+  };
   servers: ServerOption[];
   candidates: CandidateItem[];
   audit: AuditItem[];
@@ -120,10 +126,13 @@ type Payload = {
     trusted_dzn_user_bridge_required: boolean;
     import_preview_requires_trusted_bridge: boolean;
     import_previews_from_trusted_snapshots_where_available: boolean;
+    selected_row_bulk_actions: boolean;
+    bulk_actions_recheck_server_side: boolean;
     admin_repeated_source_filters: boolean;
     owner_importable_notification_hook: boolean;
     notification_hook_dzn_pulse_only: boolean;
     notification_read_state_private_per_owner: boolean;
+    community_import_alert_read_state_private_per_owner: boolean;
     rejects_duplicate_members: boolean;
     rejects_ambiguous_user_bridge: boolean;
     affects_ctf_scoring_rows: boolean;
@@ -189,6 +198,9 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   const [form, setForm] = useState<CandidateForm>(EMPTY_FORM);
   const [message, setMessage] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [bulkBusyAction, setBulkBusyAction] = useState<"import" | "reject" | null>(null);
+  const [importAlertsBusy, setImportAlertsBusy] = useState(false);
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [pricingUrl, setPricingUrl] = useState(DEFAULT_PRICING_URL);
 
@@ -248,12 +260,32 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   }, [statusFilter, issueFilter, linkedServerFilter, refreshKey]);
 
   const counts = payload?.counts ?? { total: 0, pending: 0, imported: 0, rejected: 0, duplicate: 0, ambiguous: 0 };
+  const notificationCounts = payload?.notification_counts ?? { unread_total: 0, community_member_importable: 0 };
   const candidates = payload?.candidates ?? [];
   const audit = payload?.audit ?? [];
   const servers = payload?.servers ?? [];
+  const selectableCandidateIds = candidates.filter((candidate) => candidate.status === "pending").map((candidate) => candidate.id);
+  const selectedCandidateSet = new Set(selectedCandidateIds);
+  const selectedPendingCandidateIds = selectableCandidateIds.filter((id) => selectedCandidateSet.has(id));
+  const allVisibleSelected = selectableCandidateIds.length > 0 && selectableCandidateIds.every((id) => selectedCandidateSet.has(id));
   const filteredServerName = linkedServerFilter === "all"
     ? "All linked communities"
     : servers.find((server) => server.id === linkedServerFilter)?.server_name ?? "Selected community";
+
+  function toggleCandidateSelection(candidateId: string, selected: boolean) {
+    setSelectedCandidateIds((current) => {
+      if (selected) return Array.from(new Set([...current, candidateId]));
+      return current.filter((id) => id !== candidateId);
+    });
+  }
+
+  function toggleVisibleCandidateSelection(selected: boolean) {
+    setSelectedCandidateIds((current) => {
+      const visible = new Set(selectableCandidateIds);
+      if (!selected) return current.filter((id) => !visible.has(id));
+      return Array.from(new Set([...current, ...selectableCandidateIds]));
+    });
+  }
 
   async function submitCandidate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -335,6 +367,78 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
     }
   }
 
+  async function runBulkCandidateAction(action: "import" | "reject") {
+    const candidateIds = selectedPendingCandidateIds;
+    if (!candidateIds.length) {
+      setMessage({ tone: "error", text: "Choose at least one pending community member candidate." });
+      return;
+    }
+
+    setBulkBusyAction(action);
+    setMessage({
+      tone: "info",
+      text: action === "import"
+        ? "Rechecking every selected row before import."
+        : "Rechecking every selected row before rejection.",
+    });
+    try {
+      const response = await fetch("/api/owner/community-members/bulk", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({
+          action,
+          candidate_ids: candidateIds,
+          reason: action === "import"
+            ? "Selected rows approved after server-side bridge recheck."
+            : "Selected rows rejected from owner/admin review.",
+        }),
+      });
+      const result = await safeJson(response);
+      if (!response.ok) throw new Error(apiMessage(result, "Selected community member candidates could not be processed."));
+      setMessage({
+        tone: result?.ok === true ? "success" : "error",
+        text: apiMessage(result, "Some selected community member candidates could not be processed after server-side recheck."),
+      });
+      setSelectedCandidateIds([]);
+      setRefreshKey((value) => value + 1);
+    } catch (error) {
+      setMessage({ tone: "error", text: error instanceof Error ? error.message : "Selected community member candidates could not be processed." });
+      setRefreshKey((value) => value + 1);
+    } finally {
+      setBulkBusyAction(null);
+    }
+  }
+
+  async function markCommunityImportAlertsRead() {
+    setImportAlertsBusy(true);
+    setMessage({ tone: "info", text: "Marking community member import alerts read." });
+    try {
+      const response = await fetch("/api/owner/community-members/notifications/read", {
+        method: "POST",
+        credentials: "include",
+        headers: { accept: "application/json" },
+      });
+      const result = await safeJson(response);
+      if (!response.ok || !result?.ok) throw new Error(apiMessage(result, "Community member import alerts could not be marked read."));
+      const marked = Number(result.marked ?? 0) || 0;
+      const totalUnread = Number(result.unreadCount ?? Math.max(0, notificationCounts.unread_total - marked)) || 0;
+      const importUnread = Number(result.communityMemberImportUnreadCount ?? 0) || 0;
+      setPayload((current) => current ? {
+        ...current,
+        notification_counts: {
+          unread_total: Math.max(0, totalUnread),
+          community_member_importable: Math.max(0, importUnread),
+        },
+      } : current);
+      setMessage({ tone: "success", text: apiMessage(result, marked ? "Community member import alerts marked read." : "No unread community member import alerts found.") });
+    } catch (error) {
+      setMessage({ tone: "error", text: error instanceof Error ? error.message : "Community member import alerts could not be marked read." });
+    } finally {
+      setImportAlertsBusy(false);
+    }
+  }
+
   const wrapperClassName = embedded ? "grid gap-5" : "min-h-screen bg-[#02030a] px-4 py-5 text-zinc-100 sm:px-6";
   const contentClassName = embedded ? "grid gap-5" : "mx-auto grid max-w-7xl gap-5";
   const loading = state === "loading";
@@ -380,6 +484,8 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
             <StatusLine label="public profile opt-in handle" ok={payload?.safeguards.public_profile_link_requires_player_opt_in_handle ?? true} />
             <StatusLine label="trusted snapshot previews" ok={payload?.safeguards.import_previews_from_trusted_snapshots_where_available ?? true} />
             <StatusLine label="owner Pulse hook only" ok={payload?.safeguards.owner_importable_notification_hook ?? true} />
+            <StatusLine label="bulk row server recheck" ok={payload?.safeguards.bulk_actions_recheck_server_side ?? true} />
+            <StatusLine label="private import alert reads" ok={payload?.safeguards.community_import_alert_read_state_private_per_owner ?? true} />
             <StatusLine label="CTF scoring rows" ok={!(payload?.safeguards.affects_ctf_scoring_rows ?? false)} />
             <StatusLine label="Billing and rankings" ok={!((payload?.safeguards.affects_billing ?? false) || (payload?.safeguards.affects_rankings ?? false))} />
             <StatusLine label="XP and calling cards" ok={!((payload?.safeguards.affects_xp_awards ?? false) || (payload?.safeguards.affects_calling_card_awards ?? false))} />
@@ -397,13 +503,14 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
 
       {state === "ready" || loading ? (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
             <MetricCard label="Total candidates" value={counts.total} loading={loading} tone="cyan" />
             <MetricCard label="Pending review" value={counts.pending} loading={loading} tone="amber" />
             <MetricCard label="Imported bridge" value={counts.imported} loading={loading} tone="emerald" />
             <MetricCard label="Rejected" value={counts.rejected} loading={loading} tone="rose" />
             <MetricCard label="Duplicates" value={counts.duplicate} loading={loading} tone="violet" />
             <MetricCard label="Ambiguous" value={counts.ambiguous} loading={loading} tone="red" />
+            <MetricCard label="Import alerts" value={notificationCounts.community_member_importable} loading={loading} tone="cyan" />
           </div>
 
           <section className="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
@@ -471,17 +578,77 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
                   <p className="mt-2 text-sm font-bold text-zinc-400">{filteredServerName}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)} className="rounded border border-white/10 bg-black/40 px-3 py-2 text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-300/40">
+                  <button
+                    type="button"
+                    disabled={importAlertsBusy || notificationCounts.community_member_importable <= 0}
+                    onClick={markCommunityImportAlertsRead}
+                    className="inline-flex min-h-9 items-center justify-center gap-2 rounded border border-cyan-300/24 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 transition hover:bg-cyan-400/16 disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    {notificationCounts.community_member_importable > 0 ? <Bell className="h-3.5 w-3.5" /> : <CheckCheck className="h-3.5 w-3.5" />}
+                    {importAlertsBusy ? "Marking alerts" : "Mark import alerts read"}
+                    {notificationCounts.community_member_importable > 0 ? (
+                      <span className="rounded bg-cyan-200 px-1.5 py-0.5 text-[9px] text-cyan-950">{notificationCounts.community_member_importable}</span>
+                    ) : null}
+                  </button>
+                  <select value={statusFilter} onChange={(event) => {
+                    setSelectedCandidateIds([]);
+                    setStatusFilter(event.target.value as StatusFilter);
+                  }} className="rounded border border-white/10 bg-black/40 px-3 py-2 text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-300/40">
                     {STATUS_FILTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                   </select>
-                  <select value={issueFilter} onChange={(event) => setIssueFilter(event.target.value as IssueFilter)} className="rounded border border-white/10 bg-black/40 px-3 py-2 text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-300/40">
+                  <select value={issueFilter} onChange={(event) => {
+                    setSelectedCandidateIds([]);
+                    setIssueFilter(event.target.value as IssueFilter);
+                  }} className="rounded border border-white/10 bg-black/40 px-3 py-2 text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-300/40">
                     {ISSUE_FILTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                   </select>
-                  <select value={linkedServerFilter} onChange={(event) => setLinkedServerFilter(event.target.value)} className="rounded border border-white/10 bg-black/40 px-3 py-2 text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-300/40">
+                  <select value={linkedServerFilter} onChange={(event) => {
+                    setSelectedCandidateIds([]);
+                    setLinkedServerFilter(event.target.value);
+                  }} className="rounded border border-white/10 bg-black/40 px-3 py-2 text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-300/40">
                     <option value="all">All communities</option>
                     {servers.map((server) => <option key={server.id} value={server.id}>{server.server_name}</option>)}
                   </select>
                 </div>
+              </div>
+
+              <div className="mt-4 rounded-lg border border-cyan-300/16 bg-cyan-400/8 p-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <label className="inline-flex min-h-10 items-center gap-3 text-xs font-black uppercase text-zinc-200">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      disabled={!selectableCandidateIds.length || Boolean(busyAction) || Boolean(bulkBusyAction)}
+                      onChange={(event) => toggleVisibleCandidateSelection(event.target.checked)}
+                      className="h-4 w-4 rounded border-cyan-300/30 bg-black/40 accent-cyan-300"
+                    />
+                    Select pending rows
+                    <span className="rounded border border-white/10 bg-black/28 px-2 py-1 text-[10px] text-zinc-400">{selectedPendingCandidateIds.length} selected</span>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={!selectedPendingCandidateIds.length || Boolean(busyAction) || Boolean(bulkBusyAction)}
+                      onClick={() => runBulkCandidateAction("import")}
+                      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-emerald-300/24 bg-emerald-400/10 px-3 py-2 text-[10px] font-black uppercase text-emerald-50 transition hover:bg-emerald-400/16 disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      <Import className="h-3.5 w-3.5" />
+                      {bulkBusyAction === "import" ? "Bulk importing" : "Bulk import selected"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!selectedPendingCandidateIds.length || Boolean(busyAction) || Boolean(bulkBusyAction)}
+                      onClick={() => runBulkCandidateAction("reject")}
+                      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-rose-300/24 bg-rose-400/10 px-3 py-2 text-[10px] font-black uppercase text-rose-50 transition hover:bg-rose-400/16 disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      <XCircle className="h-3.5 w-3.5" />
+                      {bulkBusyAction === "reject" ? "Bulk rejecting" : "Bulk reject selected"}
+                    </button>
+                  </div>
+                </div>
+                <p className="mt-2 text-xs font-bold leading-5 text-cyan-100/70">
+                  Each selected row is rechecked server-side before DZN imports or rejects it.
+                </p>
               </div>
 
               <div className="mt-4 grid gap-3">
@@ -490,7 +657,16 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
                   <EmptyState icon={<Users className="h-5 w-5" />} title="No candidates in this view" body="Candidate imports and rejections will appear here with their audit history." />
                 ) : null}
                 {candidates.map((candidate) => (
-                  <CandidateCard key={candidate.id} candidate={candidate} busyAction={busyAction} onAction={runCandidateAction} />
+                  <CandidateCard
+                    key={candidate.id}
+                    candidate={candidate}
+                    busyAction={busyAction}
+                    selected={selectedCandidateSet.has(candidate.id)}
+                    selectionDisabled={candidate.status !== "pending" || Boolean(busyAction) || Boolean(bulkBusyAction)}
+                    actionDisabled={Boolean(bulkBusyAction)}
+                    onSelectionChange={toggleCandidateSelection}
+                    onAction={runCandidateAction}
+                  />
                 ))}
               </div>
             </section>
@@ -532,7 +708,23 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   return <main className={wrapperClassName}>{content}</main>;
 }
 
-function CandidateCard({ candidate, busyAction, onAction }: { candidate: CandidateItem; busyAction: string | null; onAction: (candidate: CandidateItem, action: ActionKind) => void }) {
+function CandidateCard({
+  candidate,
+  busyAction,
+  selected,
+  selectionDisabled,
+  actionDisabled,
+  onSelectionChange,
+  onAction,
+}: {
+  candidate: CandidateItem;
+  busyAction: string | null;
+  selected: boolean;
+  selectionDisabled: boolean;
+  actionDisabled: boolean;
+  onSelectionChange: (candidateId: string, selected: boolean) => void;
+  onAction: (candidate: CandidateItem, action: ActionKind) => void;
+}) {
   const canImport = candidate.import_preview.can_import;
   const canReject = candidate.status === "pending";
   const canRefresh = candidate.status !== "imported" && candidate.status !== "rejected";
@@ -540,9 +732,20 @@ function CandidateCard({ candidate, busyAction, onAction }: { candidate: Candida
   const rejectBusy = busyAction === `${candidate.id}:reject`;
   const refreshBusy = busyAction === `${candidate.id}:refresh_preview`;
   return (
-    <article className="rounded-lg border border-white/10 bg-black/28 p-4">
+    <article className={`rounded-lg border p-4 ${selected ? "border-cyan-300/35 bg-cyan-400/8" : "border-white/10 bg-black/28"}`}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
+        <div className="flex min-w-0 gap-3">
+          <label className="mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded border border-white/10 bg-black/32">
+            <input
+              type="checkbox"
+              checked={selected}
+              disabled={selectionDisabled}
+              onChange={(event) => onSelectionChange(candidate.id, event.target.checked)}
+              className="h-4 w-4 rounded border-cyan-300/30 bg-black/40 accent-cyan-300 disabled:cursor-not-allowed"
+              aria-label={`Select ${candidate.candidate_display_name ?? candidate.candidate_username ?? candidate.matched_username ?? "community member candidate"}`}
+            />
+          </label>
+          <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill status={candidate.status} />
             <MatchPill status={candidate.match_status} />
@@ -559,11 +762,12 @@ function CandidateCard({ candidate, busyAction, onAction }: { candidate: Candida
             {candidate.candidate_display_name ?? candidate.candidate_username ?? candidate.matched_username ?? "Community member candidate"}
           </h2>
           <p className="mt-1 text-xs font-bold text-zinc-500">{candidate.server_name} / {candidate.community_name}</p>
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            disabled={!canRefresh || refreshBusy}
+            disabled={actionDisabled || !canRefresh || refreshBusy}
             onClick={() => onAction(candidate, "refresh_preview")}
             className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-cyan-300/24 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 transition hover:bg-cyan-400/16 disabled:cursor-not-allowed disabled:opacity-45"
           >
@@ -572,7 +776,7 @@ function CandidateCard({ candidate, busyAction, onAction }: { candidate: Candida
           </button>
           <button
             type="button"
-            disabled={!canImport || importBusy}
+            disabled={actionDisabled || !canImport || importBusy}
             onClick={() => onAction(candidate, "import")}
             className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-emerald-300/24 bg-emerald-400/10 px-3 py-2 text-[10px] font-black uppercase text-emerald-50 transition hover:bg-emerald-400/16 disabled:cursor-not-allowed disabled:opacity-45"
           >
@@ -581,7 +785,7 @@ function CandidateCard({ candidate, busyAction, onAction }: { candidate: Candida
           </button>
           <button
             type="button"
-            disabled={!canReject || rejectBusy}
+            disabled={actionDisabled || !canReject || rejectBusy}
             onClick={() => onAction(candidate, "reject")}
             className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-rose-300/24 bg-rose-400/10 px-3 py-2 text-[10px] font-black uppercase text-rose-50 transition hover:bg-rose-400/16 disabled:cursor-not-allowed disabled:opacity-45"
           >

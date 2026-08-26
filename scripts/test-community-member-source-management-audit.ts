@@ -3,10 +3,12 @@ import { existsSync, readFileSync } from "node:fs";
 
 import {
   actOnCommunityMemberCandidate,
+  bulkActOnCommunityMemberCandidates,
   communityMemberSourceManagementSafeguards,
   createCommunityMemberCandidate,
   listCommunityMemberSourceManagement,
 } from "../functions/_lib/community-member-source-management";
+import { markCommunityMemberImportNotificationsRead } from "../functions/_lib/dzn-pulse";
 import type { Env, SessionUser } from "../functions/_lib/types";
 
 type CapturedOperation = {
@@ -116,6 +118,7 @@ type FakeNotification = {
   metadata: string | null;
   read_at: string | null;
   created_at: string;
+  expires_at: string | null;
 };
 
 type FakeState = {
@@ -151,7 +154,8 @@ async function main() {
   await assertCandidateImportFlow();
   await assertOwnerScopeAndAmbiguousRejection();
   await assertImportPreviewPolishAndNotifications();
-  console.log("Community member source management and import usability tests passed.");
+  await assertWorkflowExecutionPolishBulkAndReadState();
+  console.log("Community member source management, import usability, and workflow execution polish tests passed.");
 }
 
 function assertStaticContracts() {
@@ -162,12 +166,15 @@ function assertStaticContracts() {
     "functions/_lib/dzn-pulse.ts",
     "functions/api/owner/community-members.ts",
     "functions/api/owner/community-members/[candidateId].ts",
+    "functions/api/owner/community-members/bulk.ts",
+    "functions/api/owner/community-members/notifications/read.ts",
     "components/community/community-member-source-dashboard.tsx",
     "app/dashboard/community-members/page.tsx",
     "app/owner/community-members/page.tsx",
     "docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md",
     "docs/PUBLIC_ACCESS_POLICY.md",
     "docs/COMMUNITY_MEMBER_SOURCE_MANAGEMENT_AUDIT_HANDOFF.md",
+    "docs/COMMUNITY_MEMBER_IMPORT_WORKFLOW_EXECUTION_POLISH_HANDOFF.md",
   ]) {
     assert.equal(existsSync(path), true, `${path} should exist.`);
   }
@@ -222,6 +229,9 @@ function assertStaticContracts() {
     "community_members",
     "user_notifications",
     "player_profile_privacy_preferences",
+    "bulkActOnCommunityMemberCandidates",
+    "CommunityMemberBulkCandidateActionInput",
+    "MAX_BULK_ACTION_CANDIDATES",
     "candidate_preview_refreshed",
     "candidate_importable",
     "\"refresh_preview\"",
@@ -234,10 +244,13 @@ function assertStaticContracts() {
     "public_profile_link_requires_player_opt_in_handle: true",
     "import_preview_requires_trusted_bridge: true",
     "import_previews_from_trusted_snapshots_where_available: true",
+    "selected_row_bulk_actions: true",
+    "bulk_actions_recheck_server_side: true",
     "admin_repeated_source_filters: true",
     "owner_importable_notification_hook: true",
     "notification_hook_dzn_pulse_only: true",
     "notification_read_state_private_per_owner: true",
+    "community_import_alert_read_state_private_per_owner: true",
     "rejects_duplicate_members: true",
     "rejects_ambiguous_user_bridge: true",
     "affects_ctf_scoring_rows: false",
@@ -264,6 +277,9 @@ function assertStaticContracts() {
   for (const snippet of [
     "PULSE_COMMUNITY_NOTIFICATION_TYPES",
     "community_member_candidate_importable",
+    "countUnreadCommunityMemberImportNotifications",
+    "markCommunityMemberImportNotificationsRead",
+    "communityMemberImportNotificationConditionSql",
     "\"community\"",
     "Community",
   ]) {
@@ -297,6 +313,30 @@ function assertStaticContracts() {
   assertOrder(actionRoute.slice(actionRoute.indexOf("export const onRequestPost")), "authorizeCommunityMemberSourceRequest", "readBoundedJson", "candidate action route must authorize before reading the body");
   assertNoExternalOrLivePaymentMutation(actionRoute, "Owner community member action route");
 
+  const bulkRoute = read("functions/api/owner/community-members/bulk.ts");
+  for (const snippet of [
+    "authorizeCommunityMemberSourceRequest(env, request)",
+    "bulkActOnCommunityMemberCandidates",
+    "readBoundedJson<CommunityMemberBulkCandidateActionInput>",
+    "privateNoStoreHeaders",
+    "methodNotAllowed",
+  ]) {
+    assert.equal(bulkRoute.includes(snippet), true, `Owner community member bulk route must include ${snippet}.`);
+  }
+  assertOrder(bulkRoute, "authorizeCommunityMemberSourceRequest", "readBoundedJson", "bulk candidate action route must authorize before reading the body");
+  assertNoExternalOrLivePaymentMutation(bulkRoute, "Owner community member bulk route");
+
+  const notificationReadRoute = read("functions/api/owner/community-members/notifications/read.ts");
+  for (const snippet of [
+    "authorizeCommunityMemberSourceRequest(env, request)",
+    "markCommunityMemberImportNotificationsRead",
+    "privateNoStoreHeaders",
+    "methodNotAllowed",
+  ]) {
+    assert.equal(notificationReadRoute.includes(snippet), true, `Community member import alert read route must include ${snippet}.`);
+  }
+  assertNoExternalOrLivePaymentMutation(notificationReadRoute, "Community member import alert read route");
+
   const ui = read("components/community/community-member-source-dashboard.tsx");
   for (const snippet of [
     "CommunityMemberSourceDashboard",
@@ -307,6 +347,12 @@ function assertStaticContracts() {
     "safer import previews",
     "Import preview",
     "Refresh preview",
+    "Bulk import selected",
+    "Bulk reject selected",
+    "Each selected row is rechecked server-side",
+    "Mark import alerts read",
+    "/api/owner/community-members/bulk",
+    "/api/owner/community-members/notifications/read",
     "Repeated no-match",
     "Repeated duplicate",
     "public profile opt-in handle",
@@ -350,11 +396,13 @@ function assertStaticContracts() {
   const packageJson = read("package.json");
   assert.equal(packageJson.includes("test:community-member-source-management-audit"), true, "Focused source management audit test must be wired into package scripts.");
   assert.equal(packageJson.includes("test:community-member-import-usability-polish"), true, "Focused import usability polish test must be wired into package scripts.");
+  assert.equal(packageJson.includes("test:community-member-import-workflow-execution-polish"), true, "Focused import workflow execution polish test must be wired into package scripts.");
 
   const platformSpec = read("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md");
   for (const snippet of [
     "Trusted Community Member Source Management and Audit Slice",
     "Community Member Import Usability Polish Slice",
+    "Community Member Import Workflow Execution Polish Slice",
     "`community_member_candidates`",
     "`community_member_source_audit`",
     "`community_member_source_snapshots`",
@@ -365,6 +413,8 @@ function assertStaticContracts() {
     "safer import previews",
     "repeated no-match",
     "community_member_candidate_importable",
+    "selected-row bulk",
+    "bulkActOnCommunityMemberCandidates",
     "cannot make a player publicly visible without the player's opt-in generated handle",
   ]) {
     assert.equal(platformSpec.includes(snippet), true, `Master spec must document ${snippet}.`);
@@ -377,9 +427,28 @@ function assertStaticContracts() {
     "owner/admin-only community member source management",
     "trusted Discord/guild snapshot previews",
     "community_member_candidate_importable",
+    "Selected-row bulk import/reject actions",
+    "`/api/owner/community-members/bulk`",
+    "`/api/owner/community-members/notifications/read`",
     "Public profile visibility still requires the player's opt-in generated handle",
   ]) {
     assert.equal(accessPolicy.includes(snippet), true, `Public access policy must document ${snippet}.`);
+  }
+
+  const workflowHandoff = read("docs/COMMUNITY_MEMBER_IMPORT_WORKFLOW_EXECUTION_POLISH_HANDOFF.md");
+  for (const snippet of [
+    "Community Member Import Workflow Execution Polish",
+    "selected-row bulk import/reject execution",
+    "`community_member_candidate_importable`",
+    "`bulkActOnCommunityMemberCandidates`",
+    "`/api/owner/community-members/bulk`",
+    "`/api/owner/community-members/notifications/read`",
+    "rechecks owner/admin scope",
+    "current user's active `community_member_candidate_importable` alerts",
+    "Public visibility remains player-controlled",
+    "No production D1 migration was applied",
+  ]) {
+    assert.equal(workflowHandoff.includes(snippet), true, `Workflow execution handoff must document ${snippet}.`);
   }
 }
 
@@ -390,10 +459,13 @@ function assertSafeguards() {
   assert.equal(safeguards.trusted_dzn_user_bridge_required, true);
   assert.equal(safeguards.import_preview_requires_trusted_bridge, true);
   assert.equal(safeguards.import_previews_from_trusted_snapshots_where_available, true);
+  assert.equal(safeguards.selected_row_bulk_actions, true);
+  assert.equal(safeguards.bulk_actions_recheck_server_side, true);
   assert.equal(safeguards.admin_repeated_source_filters, true);
   assert.equal(safeguards.owner_importable_notification_hook, true);
   assert.equal(safeguards.notification_hook_dzn_pulse_only, true);
   assert.equal(safeguards.notification_read_state_private_per_owner, true);
+  assert.equal(safeguards.community_import_alert_read_state_private_per_owner, true);
   assert.equal(safeguards.rejects_duplicate_members, true);
   assert.equal(safeguards.rejects_ambiguous_user_bridge, true);
   assert.equal(safeguards.mutates_live_checkout, false);
@@ -574,6 +646,83 @@ async function assertImportPreviewPolishAndNotifications() {
   assertNoForbiddenSqlWrites(state.operations);
 }
 
+async function assertWorkflowExecutionPolishBulkAndReadState() {
+  const state = createFakeState();
+  state.users.push({ id: "player-2", discord_id: "222233334444555566", username: "Second Visible Player" });
+  state.candidates.push(makeCandidate("bulk-import-a", "111122223333444455", "matched", "pending", "player-1"));
+  state.candidates.push(makeCandidate("bulk-import-b", "222233334444555566", "matched", "pending", "player-2"));
+  const env = { DB: createFakeDb(state), DZN_PULSE_ENABLED: "true" } as Env;
+  const ownerActor = { user: OWNER_USER, role: "owner" as const };
+
+  const importResult = await bulkActOnCommunityMemberCandidates(env, ownerActor, {
+    action: "import",
+    candidate_ids: ["bulk-import-a", "bulk-import-b"],
+    reason: "Bulk import selected rows after server-side recheck.",
+  });
+  assert.equal(importResult.ok, true);
+  if (!("results" in importResult)) assert.fail("Bulk import must return per-row results.");
+  assert.equal(importResult.status, 200);
+  assert.equal(importResult.imported_count, 2);
+  assert.equal(importResult.rejected_count, 0);
+  assert.equal(importResult.blocked_count, 0);
+  assert.equal(state.communityMembers.length, 2);
+  assert.equal(state.audit.filter((item) => item.action === "candidate_imported").length, 2);
+  assert.equal(state.privacy.find((item) => item.user_id === "player-1")?.public_profile_enabled, 0, "Bulk import must not publish an opted-out profile.");
+  assert.equal(state.privacy.find((item) => item.user_id === "player-2"), undefined, "Bulk import must not create profile visibility preferences.");
+  assert.equal(state.operations.filter((operation) => operation.sql.includes("SELECT candidate_discord_id FROM community_member_candidates")).length >= 2, true, "Bulk import must re-read private candidate bridge evidence per row.");
+  assert.equal(state.operations.filter((operation) => operation.sql.includes("FROM users WHERE id")).length >= 2, true, "Bulk import must resolve the trusted DZN user bridge per row.");
+
+  state.candidates.push(makeCandidate("bulk-reject-a", "333344445555666677", "no_match", "pending"));
+  const rejectResult = await bulkActOnCommunityMemberCandidates(env, ownerActor, {
+    action: "reject",
+    candidate_ids: ["bulk-reject-a"],
+    reason: "Selected row rejected from owner/admin review.",
+  });
+  assert.equal(rejectResult.ok, true);
+  if (!("results" in rejectResult)) assert.fail("Bulk reject must return per-row results.");
+  assert.equal(rejectResult.rejected_count, 1);
+  assert.equal(state.candidates.find((candidate) => candidate.id === "bulk-reject-a")?.status, "rejected");
+  assert.equal(state.audit.some((item) => item.candidate_id === "bulk-reject-a" && item.action === "candidate_rejected"), true);
+
+  const crossOwnerState = createFakeState();
+  crossOwnerState.candidates.push(makeCandidate("owner-only-candidate", "111122223333444455", "matched", "pending", "player-1"));
+  const crossOwnerEnv = { DB: createFakeDb(crossOwnerState), DZN_PULSE_ENABLED: "true" } as Env;
+  const otherActor = { user: OTHER_OWNER_USER, role: "owner" as const };
+  const crossOwnerResult = await bulkActOnCommunityMemberCandidates(crossOwnerEnv, otherActor, {
+    action: "import",
+    candidate_ids: ["owner-only-candidate"],
+    reason: "Cross-owner attempt should be denied.",
+  });
+  assert.equal(crossOwnerResult.ok, false);
+  if (!("results" in crossOwnerResult)) assert.fail("Cross-owner bulk attempt must return per-row denial results.");
+  assert.equal(crossOwnerResult.status, 207);
+  assert.equal(crossOwnerResult.blocked_count, 1);
+  assert.equal(crossOwnerResult.results[0]?.error, "CANDIDATE_NOT_FOUND");
+  assert.equal(crossOwnerState.communityMembers.length, 0);
+  assert.equal(crossOwnerState.candidates.find((candidate) => candidate.id === "owner-only-candidate")?.status, "pending");
+
+  state.notifications.push(
+    makeNotification("owner-importable", OWNER_USER.id, "community_member_candidate_importable", null),
+    makeNotification("owner-general", OWNER_USER.id, "dzn_announcement", null),
+    makeNotification("other-owner-importable", OTHER_OWNER_USER.id, "community_member_candidate_importable", null),
+    makeNotification("owner-expired-importable", OWNER_USER.id, "community_member_candidate_importable", "2026-01-01T00:00:00.000Z"),
+    { ...makeNotification("owner-read-importable", OWNER_USER.id, "community_member_candidate_importable", null), read_at: "2026-08-26T09:00:00.000Z" },
+  );
+  const readResult = await markCommunityMemberImportNotificationsRead(env, OWNER_USER);
+  assert.equal(readResult.ok, true);
+  if (!("marked" in readResult)) assert.fail("Community member import alert read-state result must include a marked count.");
+  assert.equal(readResult.marked, 1);
+  assert.equal(readResult.communityMemberImportUnreadCount, 0);
+  assert.equal(readResult.unreadCount, 1, "General owner Pulse alerts must remain unread.");
+  assert.notEqual(state.notifications.find((item) => item.id === "owner-importable")?.read_at, null);
+  assert.equal(state.notifications.find((item) => item.id === "owner-general")?.read_at, null);
+  assert.equal(state.notifications.find((item) => item.id === "other-owner-importable")?.read_at, null);
+  assert.equal(state.notifications.find((item) => item.id === "owner-expired-importable")?.read_at, null);
+
+  assertNoForbiddenSqlWrites(state.operations);
+  assertNoForbiddenSqlWrites(crossOwnerState.operations);
+}
+
 function makeCandidate(
   id: string,
   candidateDiscordId: string,
@@ -601,6 +750,23 @@ function makeCandidate(
     reviewed_at: null,
     created_at: "2026-08-26T10:00:00.000Z",
     updated_at: "2026-08-26T10:00:00.000Z",
+  };
+}
+
+function makeNotification(id: string, userId: string, type: string, expiresAt: string | null): FakeNotification {
+  return {
+    id,
+    user_id: userId,
+    server_id: "server-1",
+    type,
+    title: "DZN Pulse",
+    body: "Community member import alert.",
+    action_url: "/dashboard/community-members?status=pending&issue=importable",
+    dedupe_key: id,
+    metadata: null,
+    read_at: null,
+    created_at: "2026-08-26T10:00:00.000Z",
+    expires_at: expiresAt,
   };
 }
 
@@ -651,8 +817,8 @@ function createFakeDb(state: FakeState): D1Database {
             },
             run: async () => {
               state.operations.push({ kind: "run", sql, bindings });
-              mutate(state, sql, bindings);
-              return { success: true };
+              const changes = mutate(state, sql, bindings);
+              return { success: true, meta: { changes: Number(changes ?? 0) || 0 } };
             },
           };
         },
@@ -707,6 +873,18 @@ function selectFirst(state: FakeState, sql: string, bindings: unknown[]) {
   }
   if (sql.includes("FROM users WHERE id")) {
     return state.users.find((user) => user.id === bindings[0]) ?? null;
+  }
+  if (sql.includes("SELECT COUNT(*) AS count") && sql.includes("FROM user_notifications")) {
+    const userId = String(bindings[0] ?? "");
+    const typeFilter = notificationTypeFilter(bindings.slice(1));
+    return {
+      count: state.notifications.filter((notification) => (
+        notification.user_id === userId &&
+        notification.read_at === null &&
+        notificationIsActive(notification) &&
+        (!typeFilter || typeFilter.has(notification.type))
+      )).length,
+    };
   }
   if (sql.includes("FROM community_members")) {
     return state.communityMembers.find((member) => member.community_guild_id === bindings[0] && member.user_id === bindings[1]) ?? null;
@@ -816,16 +994,34 @@ function mutate(state: FakeState, sql: string, bindings: unknown[]) {
   }
   if (sql.includes("SET status = 'rejected'")) {
     const candidate = state.candidates.find((item) => item.id === bindings[2]);
-    if (!candidate) return;
+    if (!candidate) return 0;
     candidate.status = "rejected";
     candidate.reviewed_by_user_id = nullableString(bindings[0]);
     candidate.reason = nullableString(bindings[1]) ?? candidate.reason;
-    return;
+    return 1;
+  }
+  if (sql.includes("UPDATE user_notifications") && sql.includes("SET read_at = COALESCE")) {
+    const readAt = String(bindings[0] ?? "");
+    const userId = String(bindings[1] ?? "");
+    const typeFilter = notificationTypeFilter(bindings.slice(2));
+    let changes = 0;
+    for (const notification of state.notifications) {
+      if (
+        notification.user_id === userId &&
+        notification.read_at === null &&
+        notificationIsActive(notification) &&
+        (!typeFilter || typeFilter.has(notification.type))
+      ) {
+        notification.read_at = readAt;
+        changes += 1;
+      }
+    }
+    return changes;
   }
   if (sql.includes("INSERT OR IGNORE INTO user_notifications")) {
     const userId = String(bindings[1]);
     const dedupeKey = String(bindings[11]);
-    if (state.notifications.some((item) => item.user_id === userId && item.dedupe_key === dedupeKey)) return;
+    if (state.notifications.some((item) => item.user_id === userId && item.dedupe_key === dedupeKey)) return 0;
     state.notifications.push({
       id: String(bindings[0]),
       user_id: userId,
@@ -838,8 +1034,11 @@ function mutate(state: FakeState, sql: string, bindings: unknown[]) {
       metadata: nullableString(bindings[12]),
       read_at: null,
       created_at: String(bindings[13]),
+      expires_at: nullableString(bindings[14]),
     });
+    return 1;
   }
+  return 0;
 }
 
 function serverRow(state: FakeState, server: FakeServer) {
@@ -938,6 +1137,19 @@ function matchesIssueFilter(state: FakeState, candidate: FakeCandidate, issueFil
 
 function nullableString(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function notificationTypeFilter(bindings: unknown[]) {
+  const types = bindings
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .filter((value) => value !== OWNER_USER.id && value !== OTHER_OWNER_USER.id);
+  return types.length ? new Set(types) : null;
+}
+
+function notificationIsActive(notification: FakeNotification) {
+  if (!notification.expires_at) return true;
+  const expiresAt = new Date(notification.expires_at).getTime();
+  return Number.isFinite(expiresAt) && expiresAt > new Date("2026-08-26T10:00:00.000Z").getTime();
 }
 
 function assertNoForbiddenSqlWrites(operations: CapturedOperation[]) {
