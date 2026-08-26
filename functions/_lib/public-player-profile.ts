@@ -97,11 +97,67 @@ type PublicPlayerProfileTimelineItem = {
   occurred_label?: string;
 };
 
+export type PublicPlayerProfileDirectoryPreviewHighlight = {
+  key: "xp" | "challenge_progress" | "calling_cards";
+  label: string;
+  value: string;
+  detail: string | null;
+};
+
+export type PublicPlayerProfileDirectoryPreview = {
+  source: "published_profile_sections";
+  visible_section_count: number;
+  highlights: PublicPlayerProfileDirectoryPreviewHighlight[];
+  empty_state: "profile_sections_hidden_or_not_earned";
+  privacy: {
+    uses_visible_profile_sections_only: true;
+    hidden_sections: "omitted";
+    private_identifiers: "hidden";
+    raw_award_evidence: "hidden";
+    exact_award_times: "hidden";
+  };
+  fairness: PlayerProfilePrivacyFairness;
+};
+
 type PublishedPlayerProfileRow = {
   user_id: string;
   username: string | null;
   public_handle: string;
 };
+
+type PublishedProfileDirectoryPreviewRow = {
+  user_id?: string | null;
+  public_handle?: string | null;
+  show_xp?: number | boolean | null;
+  show_challenge_progress?: number | boolean | null;
+  show_calling_cards?: number | boolean | null;
+  show_award_dates?: number | boolean | null;
+};
+
+type PublishedProfileDirectoryXpRow = {
+  user_id?: string | null;
+  total_xp?: number | null;
+};
+
+type PublishedProfileDirectoryChallengeRow = {
+  user_id?: string | null;
+  joined_challenges?: number | null;
+  completed_challenges?: number | null;
+};
+
+type PublishedProfileDirectoryCallingCardCountRow = {
+  user_id?: string | null;
+  calling_card_count?: number | null;
+};
+
+type PublishedProfileDirectoryCallingCardRow = {
+  user_id?: string | null;
+  calling_card_name?: string | null;
+  calling_card_rarity?: string | null;
+  awarded_at?: string | null;
+};
+
+const MAX_DIRECTORY_PREVIEW_LOOKUP_IDS = 96;
 
 export async function getPublicPlayerProfilePayload(
   env: Env,
@@ -196,6 +252,94 @@ export async function getPublicPlayerProfilePayload(
   };
 }
 
+export async function readPublicPlayerProfileDirectoryPreviewsByUserIds(
+  env: Env,
+  userIds: Array<string | null | undefined>,
+): Promise<Map<string, PublicPlayerProfileDirectoryPreview>> {
+  if (!env.DB) return new Map();
+  const ids = uniqueNonEmptyStrings(userIds).slice(0, MAX_DIRECTORY_PREVIEW_LOOKUP_IDS);
+  if (!ids.length) return new Map();
+
+  try {
+    const publishedRows = await env.DB
+      .prepare(
+        `SELECT
+           users.id AS user_id,
+           player_profile_privacy_preferences.public_handle,
+           player_profile_privacy_preferences.show_xp,
+           player_profile_privacy_preferences.show_challenge_progress,
+           player_profile_privacy_preferences.show_calling_cards,
+           player_profile_privacy_preferences.show_award_dates
+         FROM player_profile_privacy_preferences
+         INNER JOIN users ON users.id = player_profile_privacy_preferences.user_id
+         WHERE player_profile_privacy_preferences.user_id IN (${placeholders(ids.length)})
+           AND player_profile_privacy_preferences.public_profile_enabled = 1
+           AND player_profile_privacy_preferences.public_handle IS NOT NULL`,
+      )
+      .bind(...ids)
+      .all<PublishedProfileDirectoryPreviewRow>();
+    const rows = (publishedRows.results ?? []).filter((row) => Boolean(row.user_id && normalizePublicProfileHandle(row.public_handle)));
+    if (!rows.length) return new Map();
+
+    const xpVisibleIds = rows.filter((row) => dbBoolean(row.show_xp)).map((row) => row.user_id).filter(isNonEmptyString);
+    const challengeVisibleIds = rows.filter((row) => dbBoolean(row.show_challenge_progress)).map((row) => row.user_id).filter(isNonEmptyString);
+    const callingCardVisibleIds = rows.filter((row) => dbBoolean(row.show_calling_cards)).map((row) => row.user_id).filter(isNonEmptyString);
+
+    const [xpTotals, challengeCounts, callingCardCounts, latestCallingCards] = await Promise.all([
+      readPublishedProfileDirectoryXpTotals(env, xpVisibleIds),
+      readPublishedProfileDirectoryChallengeCounts(env, challengeVisibleIds),
+      readPublishedProfileDirectoryCallingCardCounts(env, callingCardVisibleIds),
+      readPublishedProfileDirectoryLatestCallingCards(env, callingCardVisibleIds),
+    ]);
+
+    const previews = new Map<string, PublicPlayerProfileDirectoryPreview>();
+    for (const row of rows) {
+      const userId = isNonEmptyString(row.user_id) ? row.user_id : null;
+      if (!userId) continue;
+      const showAwardMonth = dbBoolean(row.show_award_dates);
+      const totalXp = Math.max(0, Math.trunc(xpTotals.get(userId) ?? 0));
+      const level = calculatePlayerProfileLevel(totalXp);
+      const challengeCount = challengeCounts.get(userId) ?? { joined_challenges: 0, completed_challenges: 0 };
+      const callingCardCount = callingCardCounts.get(userId) ?? 0;
+      const latestCard = latestCallingCards.get(userId) ?? null;
+
+      previews.set(userId, publicProfileDirectoryPreview({
+        xp: dbBoolean(row.show_xp) ? publicXpSection(totalXp, level) : null,
+        challenge_progress: dbBoolean(row.show_challenge_progress) ? {
+          joined_challenges: Math.max(0, Math.trunc(challengeCount.joined_challenges)),
+          completed_challenges: Math.max(0, Math.trunc(challengeCount.completed_challenges)),
+          items: [],
+        } : null,
+        calling_cards: dbBoolean(row.show_calling_cards) ? {
+          count: Math.max(0, Math.trunc(callingCardCount)),
+          items: latestCard ? [{
+            code: "published_calling_card",
+            name: stringOrDefault(latestCard.calling_card_name, "Calling Card"),
+            description: null,
+            rarity: stringOrDefault(latestCard.calling_card_rarity, "earned"),
+            ...(showAwardMonth && latestCard.awarded_at ? { awarded_label: monthLabel(latestCard.awarded_at) } : {}),
+          }] : [],
+        } : null,
+      }));
+    }
+
+    return previews;
+  } catch {
+    return new Map();
+  }
+}
+
+export function projectPublicPlayerProfileDirectoryPreviewForPublicTest(
+  payload: Pick<PublicPlayerProfilePayload, "ok" | "sections"> | null | undefined,
+): PublicPlayerProfileDirectoryPreview | null {
+  if (!payload?.ok) return null;
+  return publicProfileDirectoryPreview({
+    xp: payload.sections.xp,
+    challenge_progress: payload.sections.challenge_progress,
+    calling_cards: payload.sections.calling_cards,
+  });
+}
+
 function publicPlayerProfileError(
   status: PublicPlayerProfileResponse["status"],
   error: PublicPlayerProfileErrorPayload["error"],
@@ -209,6 +353,53 @@ function publicPlayerProfileError(
       message,
       fairness: playerProfilePrivacyFairness(),
     },
+  };
+}
+
+function publicProfileDirectoryPreview(input: {
+  xp: PublicPlayerProfileXpSection | null;
+  challenge_progress: PublicPlayerProfileChallengeSection | null;
+  calling_cards: PublicPlayerProfileCallingCardSection | null;
+}): PublicPlayerProfileDirectoryPreview {
+  const highlights: PublicPlayerProfileDirectoryPreviewHighlight[] = [];
+  if (input.xp) {
+    highlights.push({
+      key: "xp",
+      label: "Profile level",
+      value: input.xp.level_label,
+      detail: `${input.xp.total_xp.toLocaleString("en-GB")} XP`,
+    });
+  }
+  if (input.challenge_progress) {
+    highlights.push({
+      key: "challenge_progress",
+      label: "Challenges",
+      value: countLabel(input.challenge_progress.completed_challenges, "challenge completed", "challenges completed"),
+      detail: countLabel(input.challenge_progress.joined_challenges, "challenge joined", "challenges joined"),
+    });
+  }
+  if (input.calling_cards) {
+    highlights.push({
+      key: "calling_cards",
+      label: "Calling cards",
+      value: countLabel(input.calling_cards.count, "card", "cards"),
+      detail: input.calling_cards.items[0]?.name ?? "None published yet",
+    });
+  }
+
+  return {
+    source: "published_profile_sections",
+    visible_section_count: highlights.length,
+    highlights,
+    empty_state: "profile_sections_hidden_or_not_earned",
+    privacy: {
+      uses_visible_profile_sections_only: true,
+      hidden_sections: "omitted",
+      private_identifiers: "hidden",
+      raw_award_evidence: "hidden",
+      exact_award_times: "hidden",
+    },
+    fairness: playerProfilePrivacyFairness(),
   };
 }
 
@@ -323,4 +514,127 @@ function monthLabel(value: unknown) {
   if (Number.isNaN(date.getTime())) return undefined;
   const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getUTCMonth()];
   return `${month} ${date.getUTCFullYear()}`;
+}
+
+async function readPublishedProfileDirectoryXpTotals(env: Env, userIds: string[]) {
+  const totals = new Map<string, number>();
+  if (!userIds.length || !env.DB) return totals;
+  const rows = await env.DB
+    .prepare(
+      `SELECT user_id,
+              COALESCE(SUM(xp_amount), 0) AS total_xp
+       FROM player_xp_ledger
+       WHERE user_id IN (${placeholders(userIds.length)})
+       GROUP BY user_id`,
+    )
+    .bind(...userIds)
+    .all<PublishedProfileDirectoryXpRow>();
+  for (const row of rows.results ?? []) {
+    if (isNonEmptyString(row.user_id)) totals.set(row.user_id, numberOrZero(row.total_xp));
+  }
+  return totals;
+}
+
+async function readPublishedProfileDirectoryChallengeCounts(env: Env, userIds: string[]) {
+  const counts = new Map<string, { joined_challenges: number; completed_challenges: number }>();
+  if (!userIds.length || !env.DB) return counts;
+  const rows = await env.DB
+    .prepare(
+      `SELECT user_id,
+              COUNT(CASE WHEN status IN ('joined', 'completed') THEN 1 END) AS joined_challenges,
+              COUNT(CASE WHEN status = 'completed' THEN 1 END) AS completed_challenges
+       FROM player_challenge_participations
+       WHERE user_id IN (${placeholders(userIds.length)})
+         AND status IN ('joined', 'completed')
+       GROUP BY user_id`,
+    )
+    .bind(...userIds)
+    .all<PublishedProfileDirectoryChallengeRow>();
+  for (const row of rows.results ?? []) {
+    if (!isNonEmptyString(row.user_id)) continue;
+    counts.set(row.user_id, {
+      joined_challenges: numberOrZero(row.joined_challenges),
+      completed_challenges: numberOrZero(row.completed_challenges),
+    });
+  }
+  return counts;
+}
+
+async function readPublishedProfileDirectoryCallingCardCounts(env: Env, userIds: string[]) {
+  const counts = new Map<string, number>();
+  if (!userIds.length || !env.DB) return counts;
+  const rows = await env.DB
+    .prepare(
+      `SELECT user_id,
+              COUNT(*) AS calling_card_count
+       FROM player_calling_card_awards
+       WHERE user_id IN (${placeholders(userIds.length)})
+       GROUP BY user_id`,
+    )
+    .bind(...userIds)
+    .all<PublishedProfileDirectoryCallingCardCountRow>();
+  for (const row of rows.results ?? []) {
+    if (isNonEmptyString(row.user_id)) counts.set(row.user_id, numberOrZero(row.calling_card_count));
+  }
+  return counts;
+}
+
+async function readPublishedProfileDirectoryLatestCallingCards(env: Env, userIds: string[]) {
+  const latest = new Map<string, PublishedProfileDirectoryCallingCardRow>();
+  if (!userIds.length || !env.DB) return latest;
+  const rows = await env.DB
+    .prepare(
+      `SELECT
+         user_id,
+         calling_card_name,
+         calling_card_rarity,
+         awarded_at
+       FROM (
+         SELECT
+           player_calling_card_awards.user_id,
+           player_calling_cards.name AS calling_card_name,
+           player_calling_cards.rarity AS calling_card_rarity,
+           player_calling_card_awards.awarded_at,
+           ROW_NUMBER() OVER (
+             PARTITION BY player_calling_card_awards.user_id
+             ORDER BY datetime(player_calling_card_awards.awarded_at) DESC
+           ) AS row_number
+         FROM player_calling_card_awards
+         LEFT JOIN player_calling_cards ON player_calling_cards.code = player_calling_card_awards.calling_card_code
+         WHERE player_calling_card_awards.user_id IN (${placeholders(userIds.length)})
+       )
+       WHERE row_number = 1`,
+    )
+    .bind(...userIds)
+    .all<PublishedProfileDirectoryCallingCardRow>();
+  for (const row of rows.results ?? []) {
+    if (isNonEmptyString(row.user_id) && !latest.has(row.user_id)) latest.set(row.user_id, row);
+  }
+  return latest;
+}
+
+function countLabel(count: number, singular: string, plural: string) {
+  const normalized = Math.max(0, Math.trunc(count));
+  return `${normalized.toLocaleString("en-GB")} ${normalized === 1 ? singular : plural}`;
+}
+
+function dbBoolean(value: unknown) {
+  return value === true || value === 1 || value === "1";
+}
+
+function numberOrZero(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : 0;
+}
+
+function uniqueNonEmptyStrings(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map((value) => (typeof value === "string" ? value.trim() : "")).filter(Boolean)));
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function placeholders(count: number) {
+  return Array.from({ length: count }, () => "?").join(", ");
 }

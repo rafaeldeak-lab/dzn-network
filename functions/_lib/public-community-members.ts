@@ -1,5 +1,9 @@
 import { requireDb } from "./db";
 import {
+  readPublicPlayerProfileDirectoryPreviewsByUserIds,
+  type PublicPlayerProfileDirectoryPreview,
+} from "./public-player-profile";
+import {
   publicProfileAttributionFairness,
   readPublicProfileAttributionsByUserIds,
   type PublicProfileAttribution,
@@ -27,6 +31,7 @@ export type PublicCommunityMember = {
   role_label: string | null;
   member_since_label: string | null;
   public_profile: PublicProfileAttribution;
+  profile_preview: PublicPlayerProfileDirectoryPreview | null;
 };
 
 export type PublicCommunityMemberDirectoryPayload = {
@@ -123,8 +128,13 @@ export async function getPublicCommunityMemberDirectoryPayload(
   }
 
   const attributions = await readPublicProfileAttributionsByUserIds(env, memberRows.map((row) => row.user_id));
+  const profilePreviews = await readPublicPlayerProfileDirectoryPreviewsByUserIds(env, [...attributions.keys()]);
   const members = memberRows
-    .map((row) => projectCommunityMemberForPublicTest(row, row.user_id ? attributions.get(row.user_id) ?? null : null))
+    .map((row) => projectCommunityMemberForPublicTest(
+      row,
+      row.user_id ? attributions.get(row.user_id) ?? null : null,
+      row.user_id ? profilePreviews.get(row.user_id) ?? null : null,
+    ))
     .filter((member): member is PublicCommunityMember => Boolean(member));
 
   return {
@@ -149,6 +159,8 @@ export function publicCommunityMemberDirectorySafeguards() {
     link_mode: "presentation_only" as const,
     discovery_polish_presentation_only: true,
     sorts_and_groups_public_rows_only: true,
+    preview_uses_published_profile_sections_only: true,
+    preview_omits_hidden_profile_sections: true,
     trusted_user_bridge: "community_members.community_guild_id + community_members.user_id -> users.id -> player_profile_privacy_preferences.public_handle",
     uses_gamertag_matching: false,
     uses_discord_name_matching: false,
@@ -174,6 +186,7 @@ export function publicCommunityMemberDirectorySafeguards() {
 export function projectCommunityMemberForPublicTest(
   row: Pick<CommunityMemberRow, "role_label" | "created_at">,
   publicProfile?: PublicProfileAttribution | null,
+  profilePreview?: PublicPlayerProfileDirectoryPreview | null,
 ): PublicCommunityMember | null {
   if (!publicProfile) return null;
   return {
@@ -181,6 +194,7 @@ export function projectCommunityMemberForPublicTest(
     role_label: cleanRoleLabel(row.role_label),
     member_since_label: monthLabel(row.created_at),
     public_profile: publicProfile,
+    profile_preview: profilePreview ?? null,
   };
 }
 
