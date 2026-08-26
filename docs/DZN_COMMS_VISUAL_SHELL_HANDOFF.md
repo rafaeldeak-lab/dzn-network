@@ -149,3 +149,5 @@ Live checkout remains disabled. Issue #49 remains reserved for final live paymen
 ## Next Recommended Slice
 
 Next should be the DZN Comms interaction contract and moderation preflight: define the exact client/server contracts for future send attempts, filtering decisions, warning/timeout state, read-only history, report actions, owner/admin moderation scope, private group membership proofs, support source policy, logging/retention rules, and rollback controls before any chat APIs, message tables, Durable Objects/WebSockets, AI provider credentials, vector stores, or metered model calls are implemented.
+
+That follow-on is now the approved contract-preflight slice. It must remain documentation/test-only and must not add runtime chat APIs, message tables, Durable Objects/WebSockets, AI provider credentials, vector stores, metered model calls, analytics/tracking, stored support/chat history, live checkout changes, production mutations, or issue #49 changes.

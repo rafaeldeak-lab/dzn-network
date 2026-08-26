@@ -258,6 +258,41 @@ The visual shell cannot affect billing, scoring, rankings, discovery score, revi
 
 Next should be the DZN Comms interaction contract and moderation preflight before any sending, persistence, real-time transport, moderation database, support bot runtime, vector search, AI provider, or metered model work begins.
 
+## DZN Comms Interaction Contract And Moderation Preflight
+
+The DZN Comms Interaction Contract And Moderation Preflight Slice is documented in `docs/DZN_COMMS_INTERACTION_CONTRACT_PREFLIGHT.md`. It is the contract layer between the static visual shell and any future runtime implementation.
+
+Allowed behavior:
+
+- Define future client/server contracts for send attempts, filtering decisions, warning/timeout state, read-only history, message reports, owner/admin moderation scope, private group membership proofs, support source policy, logging, retention, and rollback.
+- Record the future send attempt shape with `clientMutationId`, server-resolved channel scope, trusted membership checks, moderation checks before persistence, and explicit accepted/blocked/warning/timeout/rate-limited/muted/unauthenticated/forbidden responses.
+- Require private group membership through a trusted DZN user ID bridge, not Discord display names, gamertags, review names, leaderboard names, profile handles alone, request-supplied IDs, or imported unresolved candidates.
+- Require owner/community moderation actions to pass canonical owner entitlement plus linked-server ownership for owner-managed scopes, while DZN admins retain separately configured global moderation scope.
+- Keep DZN Assist limited to public DZN website content, setup-help content, pricing content, public support policy, public event guides, and public feature documentation until a later approved support-bot implementation defines provider, cost, source, retention, refusal, and rollback controls.
+- Define design-only future kill-switch names without adding them to production configuration.
+
+Blocked behavior:
+
+- No runtime chat APIs.
+- No message tables.
+- No chat message database migrations.
+- No Durable Objects/WebSockets.
+- No moderation tables.
+- No bot prompts.
+- No vector stores.
+- No AI provider credentials.
+- No metered model calls.
+- No analytics/tracking.
+- No stored support/chat history.
+- No live checkout changes.
+- No production service mutation.
+
+Free logged-in players can participate in allowed DZN Comms player/community chat without Starter or Pro. Starter and Pro must not grant chat priority, moderation immunity, safety bypasses, scoring advantages, event advantages, XP advantages, calling-card advantages, badge advantages, Server Wars advantages, CTF advantages, ranking boosts, discovery boosts, review boosts, or competitive eligibility advantages.
+
+Warnings, timeouts, mutes, reports, moderation status, private group visibility, DZN Assist support state, and future chat history must not affect billing, owner entitlements, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars, CTF scoring, XP awards, calling-card awards, public profile visibility, retained exports, or competitive eligibility.
+
+Next should be the DZN Comms runtime implementation approval preflight before any chat APIs, message tables, Durable Objects/WebSockets, AI provider credentials, vector stores, or metered model calls are implemented.
+
 ## Roadmap
 
 Future slices should build on this foundation in this order unless product priorities change:
@@ -279,8 +314,9 @@ Future slices should build on this foundation in this order unless product prior
 15. Cosmetics and supporter monetisation: non-competitive profile presentation and optional supporter items that never affect rank, stats, scoring, or earned competitive rewards.
 16. Global/group chat and support bot architecture preflight: delivered as a design-only slice covering site-wide support chat, global player chat, private group chat, moderation/profanity warning/timeouts, and AI support limited to public DZN/help content only, with explicit zero-surprise spend and data-boundary review before any provider wiring.
 17. DZN Comms visual shell and support launcher prototype: approved as a static local mock-data UI slice with a disabled/non-sending composer, DZN Comms layout, site-wide support launcher, authenticated Community nav, and no runtime chat APIs, Durable Objects/WebSockets, moderation tables, bot prompts, vector stores, AI provider credentials, metered calls, analytics/tracking, or message persistence.
-18. DZN Comms interaction contract and moderation preflight: define send/filter/warning/timeout/report/moderation/private-group/support-source/logging/retention/rollback contracts before any real chat runtime is implemented.
-19. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+18. DZN Comms interaction contract and moderation preflight: delivered as a design-only slice defining send/filter/warning/timeout/history/report/moderation/private-group/support-source/logging/retention/rollback contracts before any real chat runtime is implemented.
+19. DZN Comms runtime implementation approval preflight: choose the first runtime slice shape, transport plan, migration plan, feature-flag defaults, retention defaults, moderation data model, testing matrix, and rollback path before implementing APIs, message tables, Durable Objects/WebSockets, AI provider credentials, vector stores, or metered model calls.
+20. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 
