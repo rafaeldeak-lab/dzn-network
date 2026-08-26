@@ -359,6 +359,7 @@ const NAV_ITEMS = [
   "Discord Control",
   "Event Control",
   "Review Control",
+  "Community Members",
   "Progression Audit",
   "Audit Log",
   "Settings / Access",
@@ -558,6 +559,7 @@ export function OwnerConsole() {
       {activeView === "Discord Control" && discordControl ? <DiscordControlPanel data={discordControl} /> : null}
       {activeView === "Event Control" && overview ? <EventControlPanel overview={overview} /> : null}
       {activeView === "Review Control" ? <ReviewControlPanel summary={reviewControlSummary} /> : null}
+      {activeView === "Community Members" ? <CommunityMemberSourceControlPanel /> : null}
       {activeView === "Progression Audit" ? <ProgressionAuditControlPanel /> : null}
       {activeView === "Audit Log" ? <AuditLogPanel auditLog={auditLog} /> : null}
       {activeView === "Settings / Access" && overview ? <SettingsPanel overview={overview} /> : null}
@@ -1573,6 +1575,28 @@ function ProgressionAuditControlPanel() {
         </p>
         <Link href="/owner/progression-awards" className="mt-5 inline-flex rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 hover:bg-cyan-300/20">
           Open Progression Audit
+        </Link>
+      </section>
+    </div>
+  );
+}
+
+function CommunityMemberSourceControlPanel() {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto lg:overflow-hidden">
+      <PanelHeader eyebrow="Community Members" title="Trusted member source management" description="Owner/admin candidate review, imports into the presentation-only bridge, duplicate rejection, ambiguous-user rejection, and source audit history." />
+      <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          <StatusCard title="Source controls" value="Owner/admin only" tone="good" />
+          <StatusCard title="Trusted bridge" value="Required" tone="good" />
+          <StatusCard title="Public profile links" value="player opt-in only" tone="good" />
+          <StatusCard title="Competitive impact" value="None" tone="good" />
+        </div>
+        <p className="mt-5 max-w-3xl text-sm leading-6 text-zinc-400">
+          The management page can add candidates, import a verified member into community_members, and show audit history. It cannot make a hidden player public, cannot affect CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, badges, seasons, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+        </p>
+        <Link href="/owner/community-members" className="mt-5 inline-flex rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 hover:bg-cyan-300/20">
+          Open Community Members
         </Link>
       </section>
     </div>

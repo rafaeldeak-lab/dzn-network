@@ -40,6 +40,7 @@ import Link from "next/link";
 import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner } from "@/components/badges/server-visuals";
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { DznPulseBell, DznPulseProvider } from "@/components/dzn-pulse/dzn-pulse-provider";
+import { CommunityMemberSourceDashboard } from "@/components/community/community-member-source-dashboard";
 import { ProgressionAwardAuditDashboard } from "@/components/progression/progression-award-audit-dashboard";
 import { getServerVisualShowcase } from "@/lib/badges/visuals";
 import { buildServerBadgeCollection } from "@/lib/badges/rules";
@@ -460,7 +461,7 @@ function EmptyDashboard() {
   );
 }
 
-type DashboardTabKey = "overview" | "sync-health" | "public-listing" | "events" | "reviews" | "progression-audit" | "billing" | "discord-posts" | "settings-danger";
+type DashboardTabKey = "overview" | "sync-health" | "public-listing" | "events" | "reviews" | "community-members" | "progression-audit" | "billing" | "discord-posts" | "settings-danger";
 type DashboardPackageTier = "free" | "starter" | "pro";
 type DashboardTabAccess = "trial_safe" | "mixed_pro" | "pro_tools" | "account";
 type DashboardPackageVisibility = {
@@ -3290,6 +3291,7 @@ function ServerDashboard({
       detail: reviewModerationSummary.status === "ready" ? `${reviewQueueBadgeCount} need owner review.` : "Owner replies, reports, and queue alerts.",
       access: "trial_safe",
     },
+    { key: "community-members", label: "Community Members", icon: <Users className="h-4 w-4" />, detail: "Trusted source review, imports, duplicate checks, and audit history.", access: "trial_safe" },
     { key: "progression-audit", label: "Progression Audit", icon: <DatabaseZap className="h-4 w-4" />, detail: "Award sources, adapter status, and protected retry history.", access: "trial_safe" },
     { key: "billing", label: "Billing & Boosts", icon: <Gauge className="h-4 w-4" />, detail: "Compare Starter and Pro without changing live Stripe settings.", access: "account" },
     { key: "discord-posts", label: "Discord Posts", icon: <Bell className="h-4 w-4" />, detail: "Starter posts stay available; Pro embeds are marked.", access: "mixed_pro" },
@@ -3653,6 +3655,10 @@ function ServerDashboard({
               reviewAlertsBusy={reviewAlertsBusy}
               onMarkReviewAlertsRead={markReviewAlertsReadFromDashboard}
             />
+          ) : null}
+
+          {activeTab === "community-members" ? (
+            <CommunityMemberSourceDashboard embedded homeHref="/dashboard" />
           ) : null}
 
           {activeTab === "progression-audit" ? (
