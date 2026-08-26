@@ -83,4 +83,4 @@ Known validation note: the local TAC advisory could not verify Trusted Access fo
 
 ## Next Recommended Slice
 
-Next should be retained-export approval design only if deliberately approved: define the approval owner, exact migration shape, expiry model, storage plan, security review checklist, and rollback rules before any retained export files, export-history rows, sharing links, or retention write APIs are implemented.
+Next should use `docs/COMMUNITY_MEMBER_RETAINED_EXPORT_APPROVAL_DESIGN_HANDOFF.md` as the retained-export approval design record. Retained-export implementation still remains blocked until the dedicated approval, exact migration, expiry model, storage plan, security review checklist, rollback rules, and proof requirements are approved before any retained export files, export-history rows, sharing links, or retention write APIs are implemented.

@@ -176,7 +176,8 @@ async function main() {
   await assertExportUxRetentionControls();
   await assertExportPolicyRetentionSettings();
   await assertExportPolicyAdminGuardrails();
-  console.log("Community member source management, import usability, workflow execution, audit-history, export workflow, export UX/retention control, export policy/retention setting, and admin guardrail tests passed.");
+  await assertRetainedExportApprovalDesignOnly();
+  console.log("Community member source management, import usability, workflow execution, audit-history, export workflow, export UX/retention control, export policy/retention setting, admin guardrail, and retained-export approval design tests passed.");
 }
 
 function assertStaticContracts() {
@@ -202,6 +203,7 @@ function assertStaticContracts() {
     "docs/COMMUNITY_MEMBER_EXPORT_UX_RETENTION_CONTROLS_HANDOFF.md",
     "docs/COMMUNITY_MEMBER_EXPORT_POLICY_RETENTION_SETTINGS_HANDOFF.md",
     "docs/COMMUNITY_MEMBER_EXPORT_POLICY_ADMIN_GUARDRAILS_HANDOFF.md",
+    "docs/COMMUNITY_MEMBER_RETAINED_EXPORT_APPROVAL_DESIGN_HANDOFF.md",
   ]) {
     assert.equal(existsSync(path), true, `${path} should exist.`);
   }
@@ -267,6 +269,7 @@ function assertStaticContracts() {
     "CommunityMemberSourceAuditExportRetention",
     "CommunityMemberSourceExportPolicy",
     "CommunityMemberSourceExportPolicyReview",
+    "CommunityMemberRetainedExportApprovalDesign",
     "MAX_BULK_ACTION_CANDIDATES",
     "MAX_EXPORT_LIMIT",
     "execution_summaries",
@@ -324,6 +327,39 @@ function assertStaticContracts() {
     "future_retained_export_work_requires_expiry_model: true",
     "future_retained_export_work_requires_storage_plan: true",
     "future_retained_export_work_requires_security_review: true",
+    "retained_export_approval_design",
+    "status: \"design_only_not_approved\"",
+    "implementation_blocked: true",
+    "required_approver_role: \"dzn_platform_owner\"",
+    "required_review_roles: [\"security_reviewer\", \"data_retention_owner\"]",
+    "approval_record: \"dedicated_retained_export_approval_issue_or_pr\"",
+    "issue_49_reserved_for_live_checkout: true",
+    "owner_self_approval_allowed: false",
+    "admin_ui_toggle_allowed: false",
+    "status: \"design_only_not_applied\"",
+    "proposed_filename: \"future_retained_community_member_audit_exports.sql\"",
+    "community_member_retained_export_policies",
+    "community_member_retained_exports",
+    "community_member_retained_export_access_audit",
+    "default_retention_days: 7",
+    "max_retention_days: 30",
+    "expires_at_required: true",
+    "expired_downloads_denied: true",
+    "deletion_job_auth: \"cron_secret_only\"",
+    "tombstone_on_delete: true",
+    "provider: \"cloudflare_r2_private_bucket\"",
+    "binding_name: \"COMMUNITY_MEMBER_EXPORTS_BUCKET\"",
+    "public_urls_enabled: false",
+    "signed_downloads_require_owner_admin_auth: true",
+    "persisted_payload: \"export_safe_csv_only\"",
+    "retained_export_approval_design_only: true",
+    "retained_export_design_requires_platform_owner_approval: true",
+    "retained_export_design_requires_security_review_before_build: true",
+    "retained_export_design_has_no_migration_side_effect: true",
+    "retained_export_design_has_no_storage_side_effect: true",
+    "retained_export_design_has_no_write_api: true",
+    "retained_export_design_blocks_implementation_until_approved: true",
+    "retained_export_design_keeps_issue_49_reserved: true",
     "admin_only: true",
     "owner_scope_review: \"all_owner_scopes\"",
     "retention_work_status: \"blocked_until_approved\"",
@@ -506,6 +542,23 @@ function assertStaticContracts() {
     "Expiry model required",
     "Storage plan required",
     "Security review required",
+    "retained-export design only",
+    "Retained-export approval design",
+    "Design only, not approved",
+    "DZN platform owner",
+    "Dedicated issue/PR",
+    "Issue #49 stays reserved for live checkout",
+    "Design only, not applied",
+    "future_retained_community_member_audit_exports.sql",
+    "7-day default",
+    "30-day maximum",
+    "cron-secret-only deletion",
+    "Private R2 only",
+    "No public URLs",
+    "No admin toggle",
+    "Security review checklist",
+    "Proof requirements",
+    "Rollback rules",
     "Private export",
     "Recent exports",
     "Clear local history",
@@ -574,6 +627,7 @@ function assertStaticContracts() {
   assert.equal(packageJson.includes("test:community-member-export-ux-retention-controls"), true, "Focused export UX and retention controls test must be wired into package scripts.");
   assert.equal(packageJson.includes("test:community-member-export-policy-retention-settings"), true, "Focused export policy and retention settings test must be wired into package scripts.");
   assert.equal(packageJson.includes("test:community-member-export-policy-admin-guardrails"), true, "Focused export policy admin guardrails test must be wired into package scripts.");
+  assert.equal(packageJson.includes("test:community-member-retained-export-approval-design"), true, "Focused retained-export approval design test must be wired into package scripts.");
 
   const platformSpec = read("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md");
   for (const snippet of [
@@ -585,6 +639,7 @@ function assertStaticContracts() {
     "Community Member Export UX and Retention Controls Slice",
     "Community Member Export Policy and Optional Retention Settings Slice",
     "Community Member Export Policy Review and Admin Guardrails Slice",
+    "Community Member Retained Export Approval Design Slice",
     "`community_member_candidates`",
     "`community_member_source_audit`",
     "`community_member_source_snapshots`",
@@ -616,6 +671,19 @@ function assertStaticContracts() {
     "expiry model",
     "storage plan",
     "security review",
+    "design-only retained-export approval model",
+    "`dzn_platform_owner`",
+    "`future_retained_community_member_audit_exports.sql`",
+    "`community_member_retained_export_policies`",
+    "`community_member_retained_exports`",
+    "`community_member_retained_export_access_audit`",
+    "7-day default retention",
+    "30-day maximum retention",
+    "`COMMUNITY_MEMBER_EXPORTS_BUCKET`",
+    "private R2 bucket",
+    "rollback rules",
+    "proof requirements",
+    "no retained export files, export-history rows, sharing links, or retention write APIs",
     "`/api/owner/community-members/export`",
     "`date_from`",
     "`date_to`",
@@ -650,6 +718,14 @@ function assertStaticContracts() {
     "admin-only policy review",
     "all owner scopes",
     "future retained-export work is blocked until a dedicated approval, migration, expiry model, storage plan, and security review exist",
+    "retained-export approval design",
+    "DZN platform owner",
+    "dedicated retained-export approval issue or PR",
+    "future retained-export migration shape",
+    "7-day default retention",
+    "30-day maximum retention",
+    "private R2 bucket",
+    "no retained export files, export-history rows, sharing links, or retention write APIs",
     "Public profile visibility still requires the player's opt-in generated handle",
   ]) {
     assert.equal(accessPolicy.includes(snippet), true, `Public access policy must document ${snippet}.`);
@@ -754,6 +830,36 @@ function assertStaticContracts() {
   ]) {
     assert.equal(adminGuardrailsHandoff.includes(snippet), true, `Export policy admin guardrails handoff must document ${snippet}.`);
   }
+
+  const retainedExportHandoff = read("docs/COMMUNITY_MEMBER_RETAINED_EXPORT_APPROVAL_DESIGN_HANDOFF.md");
+  for (const snippet of [
+    "Community Member Retained Export Approval Design",
+    "design-only retained-export approval model",
+    "DZN platform owner",
+    "security reviewer",
+    "data retention owner",
+    "dedicated retained-export approval issue or PR",
+    "issue #49 remains reserved for final live checkout activation",
+    "future_retained_community_member_audit_exports.sql",
+    "community_member_retained_export_policies",
+    "community_member_retained_exports",
+    "community_member_retained_export_access_audit",
+    "7-day default retention",
+    "30-day maximum retention",
+    "cron-secret-only deletion",
+    "private R2 bucket",
+    "COMMUNITY_MEMBER_EXPORTS_BUCKET",
+    "No retained export files were implemented",
+    "No export-history rows were implemented",
+    "No sharing links were implemented",
+    "No retention write APIs were implemented",
+    "Security review checklist",
+    "Rollback rules",
+    "Proof requirements",
+    "DZN_LIVE_CHECKOUT_ENABLED remains disabled",
+  ]) {
+    assert.equal(retainedExportHandoff.includes(snippet), true, `Retained export approval design handoff must document ${snippet}.`);
+  }
 }
 
 function assertSafeguards() {
@@ -789,6 +895,14 @@ function assertSafeguards() {
   assert.equal(safeguards.future_retained_export_work_requires_expiry_model, true);
   assert.equal(safeguards.future_retained_export_work_requires_storage_plan, true);
   assert.equal(safeguards.future_retained_export_work_requires_security_review, true);
+  assert.equal(safeguards.retained_export_approval_design_only, true);
+  assert.equal(safeguards.retained_export_design_requires_platform_owner_approval, true);
+  assert.equal(safeguards.retained_export_design_requires_security_review_before_build, true);
+  assert.equal(safeguards.retained_export_design_has_no_migration_side_effect, true);
+  assert.equal(safeguards.retained_export_design_has_no_storage_side_effect, true);
+  assert.equal(safeguards.retained_export_design_has_no_write_api, true);
+  assert.equal(safeguards.retained_export_design_blocks_implementation_until_approved, true);
+  assert.equal(safeguards.retained_export_design_keeps_issue_49_reserved, true);
   assert.equal(safeguards.admin_repeated_source_filters, true);
   assert.equal(safeguards.owner_importable_notification_hook, true);
   assert.equal(safeguards.notification_hook_dzn_pulse_only, true);
@@ -1437,6 +1551,108 @@ async function assertExportPolicyAdminGuardrails() {
   assert.match(ui, /Current defaults confirmed/);
   assert.match(ui, /Future retained-export work blocked/);
   assert.equal(state.communityMembers.length, 0, "Admin policy review must not import or alter presentation bridge rows.");
+  assert.equal(state.privacy.find((item) => item.user_id === "player-1")?.public_profile_enabled, 0);
+  assertNoForbiddenSqlWrites(state.operations);
+}
+
+async function assertRetainedExportApprovalDesignOnly() {
+  const state = createFakeState();
+  state.audit.push(
+    makeAudit("audit-retained-design-a", "server-1", "guild-row-1", "retained-design-candidate", null, "candidate_importable", "accepted", "Retained export approval design remains metadata only.", "2026-08-26T15:00:00.000Z"),
+  );
+  const env = { DB: createFakeDb(state), DZN_PULSE_ENABLED: "true" } as Env;
+  const ownerActor = { user: OWNER_USER, role: "owner" as const };
+  const adminActor = { user: OWNER_USER, role: "admin" as const };
+
+  const directReview = communityMemberSourceExportPolicyReview();
+  const design = directReview.retained_export_approval_design;
+  assert.equal(design.status, "design_only_not_approved");
+  assert.equal(design.implementation_blocked, true);
+  assert.equal(design.approval_authority.required_approver_role, "dzn_platform_owner");
+  assert.equal(design.approval_authority.required_review_roles.includes("security_reviewer"), true);
+  assert.equal(design.approval_authority.required_review_roles.includes("data_retention_owner"), true);
+  assert.equal(design.approval_authority.approval_record, "dedicated_retained_export_approval_issue_or_pr");
+  assert.equal(design.approval_authority.issue_49_reserved_for_live_checkout, true);
+  assert.equal(design.approval_authority.owner_self_approval_allowed, false);
+  assert.equal(design.approval_authority.admin_ui_toggle_allowed, false);
+  assert.equal(design.migration_shape.status, "design_only_not_applied");
+  assert.equal(design.migration_shape.proposed_filename, "future_retained_community_member_audit_exports.sql");
+  assert.equal(design.migration_shape.tables.some((table) => table.name === "community_member_retained_export_policies" && table.columns.includes("retention_days")), true);
+  assert.equal(design.migration_shape.tables.some((table) => table.name === "community_member_retained_exports" && table.columns.includes("expires_at")), true);
+  assert.equal(design.migration_shape.tables.some((table) => table.name === "community_member_retained_export_access_audit" && table.columns.includes("result_status")), true);
+  assert.equal(design.migration_shape.prohibited_without_approval.includes("retained export migration file"), true);
+  assert.equal(design.migration_shape.prohibited_without_approval.includes("export-history rows"), true);
+  assert.equal(design.migration_shape.prohibited_without_approval.includes("stored export files"), true);
+  assert.equal(design.migration_shape.prohibited_without_approval.includes("sharing links"), true);
+  assert.equal(design.migration_shape.prohibited_without_approval.includes("retention setting write APIs"), true);
+  assert.equal(design.expiry_model.default_retention_days, 7);
+  assert.equal(design.expiry_model.max_retention_days, 30);
+  assert.equal(design.expiry_model.expires_at_required, true);
+  assert.equal(design.expiry_model.expired_downloads_denied, true);
+  assert.equal(design.expiry_model.deletion_job_auth, "cron_secret_only");
+  assert.equal(design.expiry_model.tombstone_on_delete, true);
+  assert.equal(design.storage_plan.provider, "cloudflare_r2_private_bucket");
+  assert.equal(design.storage_plan.binding_name, "COMMUNITY_MEMBER_EXPORTS_BUCKET");
+  assert.equal(design.storage_plan.public_urls_enabled, false);
+  assert.equal(design.storage_plan.signed_downloads_require_owner_admin_auth, true);
+  assert.equal(design.storage_plan.persisted_payload, "export_safe_csv_only");
+  assert.equal(design.storage_plan.forbidden_payloads.includes("raw Discord IDs"), true);
+  assert.equal(design.storage_plan.forbidden_payloads.includes("Stripe secrets"), true);
+  assert.equal(design.security_review_checklist.some((item) => item.includes("Cross-owner access denial")), true);
+  assert.equal(design.rollback_rules.some((item) => item.includes("Disable retained export creation")), true);
+  assert.equal(design.proof_requirements.some((item) => item.includes("Mutation scans prove no retained export files")), true);
+
+  const ownerList = await listCommunityMemberSourceManagement(env, ownerActor, { status: "all", limit: 20 });
+  assert.equal(ownerList.export_policy_review, null, "Normal owners must not receive the retained-export approval design payload.");
+  assert.equal(ownerList.safeguards.retained_export_approval_design_only, true);
+  assert.equal(ownerList.safeguards.retained_export_design_has_no_write_api, true);
+
+  const adminList = await listCommunityMemberSourceManagement(env, adminActor, { status: "all", limit: 20 });
+  const adminDesign = adminList.export_policy_review?.retained_export_approval_design;
+  assert.equal(adminDesign?.status, "design_only_not_approved");
+  assert.equal(adminDesign?.implementation_blocked, true);
+  assert.equal(adminDesign?.approval_authority.required_approver_role, "dzn_platform_owner");
+  assert.equal(adminDesign?.approval_authority.owner_self_approval_allowed, false);
+  assert.equal(adminDesign?.approval_authority.admin_ui_toggle_allowed, false);
+  assert.equal(adminDesign?.expiry_model.default_retention_days, 7);
+  assert.equal(adminDesign?.expiry_model.max_retention_days, 30);
+  assert.equal(adminDesign?.storage_plan.public_urls_enabled, false);
+  assert.equal(adminList.safeguards.retained_export_design_requires_platform_owner_approval, true);
+  assert.equal(adminList.safeguards.retained_export_design_requires_security_review_before_build, true);
+  assert.equal(adminList.safeguards.retained_export_design_has_no_migration_side_effect, true);
+  assert.equal(adminList.safeguards.retained_export_design_has_no_storage_side_effect, true);
+  assert.equal(adminList.safeguards.retained_export_design_blocks_implementation_until_approved, true);
+  assert.equal(adminList.safeguards.retained_export_design_keeps_issue_49_reserved, true);
+
+  assert.equal(existsSync("migrations/future_retained_community_member_audit_exports.sql"), false, "Retained-export approval design must not add a migration file.");
+  for (const path of [
+    "functions/api/owner/community-members/retained-exports.ts",
+    "functions/api/owner/community-members/retained-exports/[exportId].ts",
+    "functions/api/owner/community-members/retained-exports/share.ts",
+    "functions/api/owner/community-members/retention.ts",
+  ]) {
+    assert.equal(existsSync(path), false, `${path} must not exist in the design-only slice.`);
+  }
+
+  const helper = read("functions/_lib/community-member-source-management.ts");
+  const ui = read("components/community/community-member-source-dashboard.tsx");
+  const packageJson = read("package.json");
+  const docs = `${read("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md")}\n${read("docs/PUBLIC_ACCESS_POLICY.md")}\n${read("docs/COMMUNITY_MEMBER_RETAINED_EXPORT_APPROVAL_DESIGN_HANDOFF.md")}`;
+  const combined = `${helper}\n${ui}\n${packageJson}\n${docs}`;
+  const implementationSources = `${helper}\n${ui}\n${packageJson}`;
+  assert.doesNotMatch(
+    combined,
+    /(?:CREATE\s+TABLE|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:community_member_retained_export_policies|community_member_retained_exports|community_member_retained_export_access_audit)\b/i,
+    "Retained-export approval design must not add retained-export tables or writes.",
+  );
+  assert.doesNotMatch(
+    implementationSources,
+    /COMMUNITY_MEMBER_EXPORTS_BUCKET\s*\.\s*(?:put|get|delete|head)|\bR2Bucket\b|createSignedUrl|signedUrl|localStorage|sessionStorage|indexedDB|community_member_export_history/i,
+    "Retained-export approval design must not add storage, signing, or browser-persistent history behavior.",
+  );
+  assertNoExternalOrLivePaymentMutation(helper, "Retained export approval helper");
+  assertNoForbiddenMutationTargets(helper, "Retained export approval helper");
+  assert.equal(state.communityMembers.length, 0, "Retained-export approval design must not import or alter presentation bridge rows.");
   assert.equal(state.privacy.find((item) => item.user_id === "player-1")?.public_profile_enabled, 0);
   assertNoForbiddenSqlWrites(state.operations);
 }
