@@ -164,6 +164,27 @@ type RecentAuditExport = {
   dashboard_history: "client_session_only";
 };
 
+type ExportPolicy = {
+  owner_admin_visible: true;
+  current_retention_mode: "download_only";
+  private_artifact: true;
+  persisted_exports_enabled: false;
+  dashboard_history: "client_session_only";
+  dashboard_history_limit: number;
+  max_rows_per_download: number;
+  export_file_retention: "not_persisted_by_dzn";
+  sharing_links_enabled: false;
+  browser_persistence_enabled: false;
+  persistent_retention_model: {
+    status: "not_approved";
+    requires_explicit_approval: true;
+    requires_expiry: true;
+    requires_audit_controls: true;
+    required_design_controls: string[];
+  };
+  rules: string[];
+};
+
 type BulkExecutionSummary = {
   candidate_id: string;
   candidate_label: string;
@@ -209,6 +230,7 @@ type Payload = {
   audit: AuditItem[];
   audit_groups: AuditGroup[];
   export_safe_audit: ExportSafeAuditItem[];
+  export_policy: ExportPolicy;
   safeguards: {
     public_profile_link_requires_player_opt_in_handle: boolean;
     trusted_dzn_user_bridge_required: boolean;
@@ -227,6 +249,12 @@ type Payload = {
     export_download_non_persistent_by_default: boolean;
     export_private_artifact_notice: boolean;
     export_retention_controls: boolean;
+    export_policy_surface_owner_admin_visible: boolean;
+    export_policy_explains_download_rules: boolean;
+    export_persistent_retention_settings_disabled_without_explicit_approval: boolean;
+    export_persistent_retention_requires_expiry: boolean;
+    export_persistent_retention_requires_audit_controls: boolean;
+    export_retention_policy_has_no_storage_side_effect: boolean;
     admin_repeated_source_filters: boolean;
     owner_importable_notification_hook: boolean;
     notification_hook_dzn_pulse_only: boolean;
@@ -263,6 +291,7 @@ type CandidateForm = {
 };
 
 const DEFAULT_PRICING_URL = "/pricing?intent=owner_setup&returnTo=%2Fdashboard%2Fcommunity-members";
+const CLIENT_RECENT_EXPORT_LIMIT = 5;
 const STATUS_FILTERS: Array<{ value: StatusFilter; label: string }> = [
   { value: "pending", label: "Pending" },
   { value: "ambiguous", label: "Ambiguous" },
@@ -304,6 +333,39 @@ const EMPTY_FORM: CandidateForm = {
   displayName: "",
   roleLabel: "",
   reason: "",
+};
+
+const DEFAULT_EXPORT_POLICY: ExportPolicy = {
+  owner_admin_visible: true,
+  current_retention_mode: "download_only",
+  private_artifact: true,
+  persisted_exports_enabled: false,
+  dashboard_history: "client_session_only",
+  dashboard_history_limit: CLIENT_RECENT_EXPORT_LIMIT,
+  max_rows_per_download: 500,
+  export_file_retention: "not_persisted_by_dzn",
+  sharing_links_enabled: false,
+  browser_persistence_enabled: false,
+  persistent_retention_model: {
+    status: "not_approved",
+    requires_explicit_approval: true,
+    requires_expiry: true,
+    requires_audit_controls: true,
+    required_design_controls: [
+      "Separate owner/admin-scoped retention model",
+      "Expiry date on every retained export",
+      "Actor, scope, filter, and result audit controls",
+      "Export-safe rows only",
+      "Explicit approval before storage or sharing links",
+    ],
+  },
+  rules: [
+    "Only signed-in owners with entitlement or configured DZN admins can download community member audit exports.",
+    "Owner/admin scope is applied before community, action, result, date, and row-limit filters.",
+    "Downloaded CSV files are private owner/admin artifacts.",
+    "DZN does not persist export files or export-history records by default.",
+    "Recent export history is limited to the current dashboard session and can be cleared locally.",
+  ],
 };
 
 export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedded = false }: { homeHref?: string; embedded?: boolean }) {
@@ -393,6 +455,7 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   const auditGroups = payload?.audit_groups ?? [];
   const exportSafeAudit = payload?.export_safe_audit ?? [];
   const servers = payload?.servers ?? [];
+  const exportPolicy = payload?.export_policy ?? DEFAULT_EXPORT_POLICY;
   const selectableCandidateIds = candidates.filter((candidate) => candidate.status === "pending").map((candidate) => candidate.id);
   const selectedCandidateSet = new Set(selectedCandidateIds);
   const selectedPendingCandidateIds = selectableCandidateIds.filter((id) => selectedCandidateSet.has(id));
@@ -633,7 +696,7 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
       setRecentAuditExports((current) => [
         nextExport,
         ...current,
-      ].slice(0, 5));
+      ].slice(0, CLIENT_RECENT_EXPORT_LIMIT));
       setMessage({
         tone: "success",
         text: `Downloaded private export-safe audit CSV with ${rowCount} rows${truncated ? " after applying the server-side row limit" : ""}. DZN does not persist this export by default.`,
@@ -697,6 +760,9 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
             <StatusLine label="export action/result/date filters" ok={payload?.safeguards.export_filters_action_result_date ?? true} />
             <StatusLine label="client-only export history" ok={payload?.safeguards.export_history_affordance_client_only ?? true} />
             <StatusLine label="non-persistent exports" ok={payload?.safeguards.export_download_non_persistent_by_default ?? true} />
+            <StatusLine label="visible export policy" ok={payload?.safeguards.export_policy_surface_owner_admin_visible ?? true} />
+            <StatusLine label="retention approval gate" ok={payload?.safeguards.export_persistent_retention_settings_disabled_without_explicit_approval ?? true} />
+            <StatusLine label="retention expiry/audit" ok={(payload?.safeguards.export_persistent_retention_requires_expiry ?? true) && (payload?.safeguards.export_persistent_retention_requires_audit_controls ?? true)} />
             <StatusLine label="private import alert reads" ok={payload?.safeguards.community_import_alert_read_state_private_per_owner ?? true} />
             <StatusLine label="CTF scoring rows" ok={!(payload?.safeguards.affects_ctf_scoring_rows ?? false)} />
             <StatusLine label="Billing and rankings" ok={!((payload?.safeguards.affects_billing ?? false) || (payload?.safeguards.affects_rankings ?? false))} />
@@ -964,6 +1030,49 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
             <p className="mt-3 text-xs font-bold leading-5 text-zinc-500">
               Audit CSV exports use the selected community, action, result, date filters, and server-side row limit, then download only export-safe owner/admin rows.
             </p>
+            <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+              <div className="rounded-lg border border-cyan-300/16 bg-cyan-400/8 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <PanelTitle icon={<ShieldCheck className="h-4 w-4" />} title="Export policy" />
+                  <span className="rounded border border-cyan-200/18 bg-black/24 px-3 py-2 text-[10px] font-black uppercase text-cyan-100">
+                    Owner/admin visible policy
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 text-xs font-bold text-cyan-50 sm:grid-cols-2 xl:grid-cols-3">
+                  <span className="rounded border border-cyan-200/18 bg-black/24 px-3 py-2">Current retention: {titleCaseToken(exportPolicy.current_retention_mode)}</span>
+                  <span className="rounded border border-cyan-200/18 bg-black/24 px-3 py-2">Max download: {exportPolicy.max_rows_per_download} rows</span>
+                  <span className="rounded border border-cyan-200/18 bg-black/24 px-3 py-2">Last {exportPolicy.dashboard_history_limit} downloads</span>
+                  <span className="rounded border border-cyan-200/18 bg-black/24 px-3 py-2">Private artifact: {exportPolicy.private_artifact ? "Yes" : "No"}</span>
+                  <span className="rounded border border-cyan-200/18 bg-black/24 px-3 py-2">Stored export files off</span>
+                  <span className="rounded border border-cyan-200/18 bg-black/24 px-3 py-2">Shared export links off</span>
+                </div>
+                <div className="mt-3 grid gap-2">
+                  {exportPolicy.rules.map((rule) => (
+                    <span key={rule} className="inline-flex items-start gap-2 text-xs font-bold leading-5 text-cyan-100/78">
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" />
+                      {rule}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-violet-300/16 bg-violet-400/8 p-4">
+                <PanelTitle icon={<LockKeyhole className="h-4 w-4" />} title="Optional retention settings" />
+                <div className="mt-3 grid gap-2 text-xs font-bold text-violet-50 sm:grid-cols-2">
+                  <span className="rounded border border-violet-200/18 bg-black/24 px-3 py-2">Persistent retention disabled</span>
+                  <span className="rounded border border-violet-200/18 bg-black/24 px-3 py-2">Requires explicit approval</span>
+                  <span className="rounded border border-violet-200/18 bg-black/24 px-3 py-2">Expiry and audit required</span>
+                  <span className="rounded border border-violet-200/18 bg-black/24 px-3 py-2">No stored export history</span>
+                </div>
+                <p className="mt-3 text-xs font-bold leading-5 text-violet-100/78">
+                  Persistent export retention is locked off until a separate approved slice adds an owner/admin-scoped model with expiry dates, audit controls, and export-safe storage rules.
+                </p>
+                <div className="mt-3 grid gap-1">
+                  {exportPolicy.persistent_retention_model.required_design_controls.map((control) => (
+                    <span key={control} className="text-[11px] font-black uppercase text-zinc-500">{control}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
             <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               <div className="rounded-lg border border-amber-300/16 bg-amber-400/8 p-4">
                 <PanelTitle icon={<LockKeyhole className="h-4 w-4" />} title="Private export" />

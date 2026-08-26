@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import {
   actOnCommunityMemberCandidate,
   bulkActOnCommunityMemberCandidates,
+  communityMemberSourceExportPolicy,
   communityMemberSourceManagementSafeguards,
   createCommunityMemberCandidate,
   exportCommunityMemberSourceAudit,
@@ -172,7 +173,8 @@ async function main() {
   await assertAuditHistoryPolishSummariesAndExportSafeViews();
   await assertExportWorkflowPolishDownload();
   await assertExportUxRetentionControls();
-  console.log("Community member source management, import usability, workflow execution, audit-history, export workflow, and export UX/retention control tests passed.");
+  await assertExportPolicyRetentionSettings();
+  console.log("Community member source management, import usability, workflow execution, audit-history, export workflow, export UX/retention control, and export policy/retention setting tests passed.");
 }
 
 function assertStaticContracts() {
@@ -196,6 +198,7 @@ function assertStaticContracts() {
     "docs/COMMUNITY_MEMBER_IMPORT_AUDIT_HISTORY_POLISH_HANDOFF.md",
     "docs/COMMUNITY_MEMBER_IMPORT_EXPORT_WORKFLOW_POLISH_HANDOFF.md",
     "docs/COMMUNITY_MEMBER_EXPORT_UX_RETENTION_CONTROLS_HANDOFF.md",
+    "docs/COMMUNITY_MEMBER_EXPORT_POLICY_RETENTION_SETTINGS_HANDOFF.md",
   ]) {
     assert.equal(existsSync(path), true, `${path} should exist.`);
   }
@@ -259,13 +262,16 @@ function assertStaticContracts() {
     "CommunityMemberSourceAuditExport",
     "CommunityMemberSourceAuditExportFilters",
     "CommunityMemberSourceAuditExportRetention",
+    "CommunityMemberSourceExportPolicy",
     "MAX_BULK_ACTION_CANDIDATES",
     "MAX_EXPORT_LIMIT",
     "execution_summaries",
     "audit_groups",
     "export_safe_audit",
+    "export_policy",
     "exportCommunityMemberSourceAudit",
     "communityMemberSourceAuditExportRetention",
+    "communityMemberSourceExportPolicy",
     "buildCommunityMemberSourceAuditCsv",
     "cleanAuditExportDateBoundary",
     "clampExportLimit",
@@ -299,6 +305,19 @@ function assertStaticContracts() {
     "export_download_non_persistent_by_default: true",
     "export_private_artifact_notice: true",
     "export_retention_controls: true",
+    "export_policy_surface_owner_admin_visible: true",
+    "export_policy_explains_download_rules: true",
+    "export_persistent_retention_settings_disabled_without_explicit_approval: true",
+    "export_persistent_retention_requires_expiry: true",
+    "export_persistent_retention_requires_audit_controls: true",
+    "export_retention_policy_has_no_storage_side_effect: true",
+    "persisted_exports_enabled: false",
+    "persistent_retention_model",
+    "requires_explicit_approval: true",
+    "requires_expiry: true",
+    "requires_audit_controls: true",
+    "sharing_links_enabled: false",
+    "browser_persistence_enabled: false",
     "rejects_duplicate_members: true",
     "rejects_ambiguous_user_bridge: true",
     "normalizeAuditActionFilter",
@@ -397,6 +416,10 @@ function assertStaticContracts() {
     "\"x-dzn-export-retention\"",
     "\"x-dzn-export-persisted-by-dzn\"",
     "\"x-dzn-export-dashboard-history\"",
+    "\"x-dzn-export-policy\"",
+    "\"x-dzn-export-persistent-retention\"",
+    "\"x-dzn-export-retention-expiry-required-if-approved\"",
+    "\"x-dzn-export-retention-audit-required-if-approved\"",
     "methodNotAllowed",
   ]) {
     assert.equal(exportRoute.includes(snippet), true, `Owner community member export route must include ${snippet}.`);
@@ -442,6 +465,15 @@ function assertStaticContracts() {
     "downloadAuditExport",
     "/api/owner/community-members/export",
     "Download audit CSV",
+    "Export policy",
+    "Owner/admin visible policy",
+    "Optional retention settings",
+    "Persistent retention disabled",
+    "Requires explicit approval",
+    "Expiry and audit required",
+    "Stored export files off",
+    "Shared export links off",
+    "No stored export history",
     "Private export",
     "Recent exports",
     "Clear local history",
@@ -449,6 +481,8 @@ function assertStaticContracts() {
     "Download-only by default",
     "Not persisted by DZN",
     "Client-session history only",
+    "CLIENT_RECENT_EXPORT_LIMIT",
+    "Last {exportPolicy.dashboard_history_limit} downloads",
     "Export from",
     "Export to",
     "Export rows",
@@ -506,6 +540,7 @@ function assertStaticContracts() {
   assert.equal(packageJson.includes("test:community-member-import-audit-history-polish"), true, "Focused import audit-history polish test must be wired into package scripts.");
   assert.equal(packageJson.includes("test:community-member-import-export-workflow-polish"), true, "Focused import export workflow polish test must be wired into package scripts.");
   assert.equal(packageJson.includes("test:community-member-export-ux-retention-controls"), true, "Focused export UX and retention controls test must be wired into package scripts.");
+  assert.equal(packageJson.includes("test:community-member-export-policy-retention-settings"), true, "Focused export policy and retention settings test must be wired into package scripts.");
 
   const platformSpec = read("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md");
   for (const snippet of [
@@ -515,6 +550,7 @@ function assertStaticContracts() {
     "Community Member Import Audit-History Polish Slice",
     "Community Member Import Export Workflow Polish Slice",
     "Community Member Export UX and Retention Controls Slice",
+    "Community Member Export Policy and Optional Retention Settings Slice",
     "`community_member_candidates`",
     "`community_member_source_audit`",
     "`community_member_source_snapshots`",
@@ -533,6 +569,11 @@ function assertStaticContracts() {
     "client-session-only recent export history",
     "downloaded file is a private owner/admin artifact",
     "non-persistent by default",
+    "owner/admin-visible export policy surface",
+    "optional retention settings",
+    "Persistent export retention remains disabled",
+    "requires explicit approval",
+    "expiry and audit controls",
     "`/api/owner/community-members/export`",
     "`date_from`",
     "`date_to`",
@@ -561,6 +602,9 @@ function assertStaticContracts() {
     "client-session-only recent export history",
     "private owner/admin artifact",
     "non-persistent by default",
+    "owner/admin-visible export policy surface",
+    "optional retention settings",
+    "persistent retention is disabled unless a later approved slice adds expiry and audit controls",
     "Public profile visibility still requires the player's opt-in generated handle",
   ]) {
     assert.equal(accessPolicy.includes(snippet), true, `Public access policy must document ${snippet}.`);
@@ -632,6 +676,20 @@ function assertStaticContracts() {
   ]) {
     assert.equal(retentionHandoff.includes(snippet), true, `Export UX retention handoff must document ${snippet}.`);
   }
+
+  const exportPolicyHandoff = read("docs/COMMUNITY_MEMBER_EXPORT_POLICY_RETENTION_SETTINGS_HANDOFF.md");
+  for (const snippet of [
+    "Community Member Export Policy and Optional Retention Settings",
+    "owner/admin-visible export policy surface",
+    "Optional retention settings",
+    "persistent retention is disabled",
+    "requires explicit approval",
+    "expiry and audit controls",
+    "No production D1 migration was applied",
+    "DZN_LIVE_CHECKOUT_ENABLED remains disabled",
+  ]) {
+    assert.equal(exportPolicyHandoff.includes(snippet), true, `Export policy retention handoff must document ${snippet}.`);
+  }
 }
 
 function assertSafeguards() {
@@ -654,6 +712,12 @@ function assertSafeguards() {
   assert.equal(safeguards.export_download_non_persistent_by_default, true);
   assert.equal(safeguards.export_private_artifact_notice, true);
   assert.equal(safeguards.export_retention_controls, true);
+  assert.equal(safeguards.export_policy_surface_owner_admin_visible, true);
+  assert.equal(safeguards.export_policy_explains_download_rules, true);
+  assert.equal(safeguards.export_persistent_retention_settings_disabled_without_explicit_approval, true);
+  assert.equal(safeguards.export_persistent_retention_requires_expiry, true);
+  assert.equal(safeguards.export_persistent_retention_requires_audit_controls, true);
+  assert.equal(safeguards.export_retention_policy_has_no_storage_side_effect, true);
   assert.equal(safeguards.admin_repeated_source_filters, true);
   assert.equal(safeguards.owner_importable_notification_hook, true);
   assert.equal(safeguards.notification_hook_dzn_pulse_only, true);
@@ -1038,11 +1102,26 @@ async function assertExportWorkflowPolishDownload() {
   assert.equal(exportResult.retention.persisted_by_dzn, false);
   assert.equal(exportResult.retention.dashboard_history, "client_session_only");
   assert.equal(exportResult.retention.private_artifact, true);
+  assert.equal(exportResult.policy.owner_admin_visible, true);
+  assert.equal(exportResult.policy.current_retention_mode, "download_only");
+  assert.equal(exportResult.policy.persisted_exports_enabled, false);
+  assert.equal(exportResult.policy.dashboard_history, "client_session_only");
+  assert.equal(exportResult.policy.dashboard_history_limit, 5);
+  assert.equal(exportResult.policy.max_rows_per_download, 500);
+  assert.equal(exportResult.policy.sharing_links_enabled, false);
+  assert.equal(exportResult.policy.browser_persistence_enabled, false);
+  assert.equal(exportResult.policy.persistent_retention_model.status, "not_approved");
+  assert.equal(exportResult.policy.persistent_retention_model.requires_explicit_approval, true);
+  assert.equal(exportResult.policy.persistent_retention_model.requires_expiry, true);
+  assert.equal(exportResult.policy.persistent_retention_model.requires_audit_controls, true);
+  assert.equal(exportResult.policy.rules.some((rule) => rule.includes("Persistent export retention requires a separate approved slice")), true);
   assert.equal(exportResult.safeguards.bounded_export_downloads, true);
   assert.equal(exportResult.safeguards.export_history_affordance_client_only, true);
   assert.equal(exportResult.safeguards.export_download_non_persistent_by_default, true);
   assert.equal(exportResult.safeguards.export_private_artifact_notice, true);
   assert.equal(exportResult.safeguards.export_retention_controls, true);
+  assert.equal(exportResult.safeguards.export_policy_surface_owner_admin_visible, true);
+  assert.equal(exportResult.safeguards.export_persistent_retention_settings_disabled_without_explicit_approval, true);
   assert.match(exportResult.body, /^exported_at,export_safe,filter_linked_server_ref,filter_audit_action,filter_audit_result,filter_date_from,filter_date_to,audit_ref,/);
   assert.match(exportResult.body, /candidate_imported/);
   assert.doesNotMatch(exportResult.body, /candidate_no_match|Other Owner Server/);
@@ -1086,6 +1165,10 @@ async function assertExportWorkflowPolishDownload() {
   assert.equal(routeResponse.headers.get("x-dzn-export-retention"), "download_only");
   assert.equal(routeResponse.headers.get("x-dzn-export-persisted-by-dzn"), "false");
   assert.equal(routeResponse.headers.get("x-dzn-export-dashboard-history"), "client_session_only");
+  assert.equal(routeResponse.headers.get("x-dzn-export-policy"), "owner-admin-private-download-only");
+  assert.equal(routeResponse.headers.get("x-dzn-export-persistent-retention"), "not_approved");
+  assert.equal(routeResponse.headers.get("x-dzn-export-retention-expiry-required-if-approved"), "true");
+  assert.equal(routeResponse.headers.get("x-dzn-export-retention-audit-required-if-approved"), "true");
   const routeCsv = await routeResponse.text();
   assert.match(routeCsv, /candidate_imported/);
   assert.doesNotMatch(routeCsv, /Other Owner Server|candidate_no_match/);
@@ -1121,6 +1204,12 @@ async function assertExportUxRetentionControls() {
   assert.equal(exportResult.safeguards.export_download_non_persistent_by_default, true);
   assert.equal(exportResult.safeguards.export_private_artifact_notice, true);
   assert.equal(exportResult.safeguards.export_retention_controls, true);
+  assert.equal(exportResult.safeguards.export_policy_surface_owner_admin_visible, true);
+  assert.equal(exportResult.safeguards.export_policy_explains_download_rules, true);
+  assert.equal(exportResult.safeguards.export_persistent_retention_settings_disabled_without_explicit_approval, true);
+  assert.equal(exportResult.safeguards.export_persistent_retention_requires_expiry, true);
+  assert.equal(exportResult.safeguards.export_persistent_retention_requires_audit_controls, true);
+  assert.equal(exportResult.safeguards.export_retention_policy_has_no_storage_side_effect, true);
   assert.equal(state.communityMembers.length, 0, "Export UX/retention controls must not import or alter presentation bridge rows.");
   assert.equal(state.privacy.find((item) => item.user_id === "player-1")?.public_profile_enabled, 0);
   assertNoForbiddenSqlWrites(state.operations);
@@ -1132,11 +1221,84 @@ async function assertExportUxRetentionControls() {
   assert.doesNotMatch(combined, /community_member_export_history|export_history_records|INSERT INTO\s+community_member_source_exports|UPDATE\s+player_profile_privacy_preferences/i, "Export UX retention controls must not add persistent export logs or profile visibility mutations.");
   assert.doesNotMatch(ui, /localStorage|sessionStorage|indexedDB/i, "Recent export history must stay in component state only.");
   assert.match(ui, /setRecentAuditExports/);
-  assert.match(ui, /slice\(0,\s*5\)/, "Recent export affordance should stay bounded in the dashboard.");
+  assert.match(ui, /slice\(0,\s*CLIENT_RECENT_EXPORT_LIMIT\)/, "Recent export affordance should stay bounded in the dashboard.");
   assert.match(ui, /Clear local history/);
   assert.match(ui, /Not persisted by DZN/);
   assert.match(route, /x-dzn-export-retention/);
   assert.match(route, /x-dzn-export-persisted-by-dzn/);
+  assert.match(route, /x-dzn-export-policy/);
+}
+
+async function assertExportPolicyRetentionSettings() {
+  const state = createFakeState();
+  state.audit.push(
+    makeAudit("audit-policy-a", "server-1", "guild-row-1", "policy-candidate", "member-policy-a", "candidate_imported", "accepted", "Policy surface row remains export-safe.", "2026-08-26T13:00:00.000Z"),
+  );
+  const env = { DB: createFakeDb(state), DZN_PULSE_ENABLED: "true" } as Env;
+  const ownerActor = { user: OWNER_USER, role: "owner" as const };
+  const directPolicy = communityMemberSourceExportPolicy();
+  assert.equal(directPolicy.owner_admin_visible, true);
+  assert.equal(directPolicy.current_retention_mode, "download_only");
+  assert.equal(directPolicy.private_artifact, true);
+  assert.equal(directPolicy.persisted_exports_enabled, false);
+  assert.equal(directPolicy.dashboard_history, "client_session_only");
+  assert.equal(directPolicy.dashboard_history_limit, 5);
+  assert.equal(directPolicy.max_rows_per_download, 500);
+  assert.equal(directPolicy.export_file_retention, "not_persisted_by_dzn");
+  assert.equal(directPolicy.sharing_links_enabled, false);
+  assert.equal(directPolicy.browser_persistence_enabled, false);
+  assert.equal(directPolicy.persistent_retention_model.status, "not_approved");
+  assert.equal(directPolicy.persistent_retention_model.requires_explicit_approval, true);
+  assert.equal(directPolicy.persistent_retention_model.requires_expiry, true);
+  assert.equal(directPolicy.persistent_retention_model.requires_audit_controls, true);
+  assert.equal(directPolicy.persistent_retention_model.required_design_controls.length >= 5, true);
+
+  const listResult = await listCommunityMemberSourceManagement(env, ownerActor, { status: "all", limit: 20 });
+  assert.equal(listResult.export_policy.current_retention_mode, "download_only");
+  assert.equal(listResult.export_policy.persisted_exports_enabled, false);
+  assert.equal(listResult.export_policy.persistent_retention_model.status, "not_approved");
+  assert.equal(listResult.export_policy.persistent_retention_model.requires_explicit_approval, true);
+  assert.equal(listResult.safeguards.export_policy_surface_owner_admin_visible, true);
+  assert.equal(listResult.safeguards.export_retention_policy_has_no_storage_side_effect, true);
+
+  const exportResult = await exportCommunityMemberSourceAudit(env, ownerActor, { limit: 9999 });
+  assert.equal(exportResult.ok, true);
+  if (!exportResult.ok) assert.fail("Export policy helper must return an export-safe payload.");
+  assert.equal(exportResult.filters.limit, 500);
+  assert.equal(exportResult.policy.max_rows_per_download, 500);
+  assert.equal(exportResult.policy.persisted_exports_enabled, false);
+  assert.equal(exportResult.policy.persistent_retention_model.status, "not_approved");
+  assert.equal(exportResult.policy.persistent_retention_model.requires_expiry, true);
+  assert.equal(exportResult.policy.persistent_retention_model.requires_audit_controls, true);
+  assert.equal(exportResult.policy.rules.some((rule) => rule.includes("DZN does not persist export files")), true);
+  assert.equal(exportResult.safeguards.export_persistent_retention_settings_disabled_without_explicit_approval, true);
+  assert.equal(exportResult.safeguards.export_retention_policy_has_no_storage_side_effect, true);
+
+  const helper = read("functions/_lib/community-member-source-management.ts");
+  const route = read("functions/api/owner/community-members/export.ts");
+  const ui = read("components/community/community-member-source-dashboard.tsx");
+  const implementationSurface = `${helper}\n${route}\n${ui}`;
+  assert.doesNotMatch(
+    implementationSurface,
+    /CREATE TABLE IF NOT EXISTS\s+(?:community_member_export|community_member_source_export|export_retention)|INSERT INTO\s+(?:community_member_export|community_member_source_export|export_retention)|UPDATE\s+(?:community_member_export|community_member_source_export|export_retention)|DELETE FROM\s+(?:community_member_export|community_member_source_export|export_retention)/i,
+    "Policy slice must not add persistent export-retention tables or writes.",
+  );
+  assert.doesNotMatch(ui, /localStorage|sessionStorage|indexedDB/i, "Policy surface must not persist dashboard export history in browser storage.");
+  assert.match(ui, /Export policy/);
+  assert.match(ui, /Owner\/admin visible policy/);
+  assert.match(ui, /Optional retention settings/);
+  assert.match(ui, /Persistent retention disabled/);
+  assert.match(ui, /Requires explicit approval/);
+  assert.match(ui, /Expiry and audit required/);
+  assert.match(ui, /Stored export files off/);
+  assert.match(ui, /Shared export links off/);
+  assert.match(ui, /No stored export history/);
+  assert.match(route, /x-dzn-export-persistent-retention/);
+  assert.match(route, /x-dzn-export-retention-expiry-required-if-approved/);
+  assert.match(route, /x-dzn-export-retention-audit-required-if-approved/);
+  assert.equal(state.communityMembers.length, 0, "Export policy settings must not import or alter presentation bridge rows.");
+  assert.equal(state.privacy.find((item) => item.user_id === "player-1")?.public_profile_enabled, 0);
+  assertNoForbiddenSqlWrites(state.operations);
 }
 
 function makeCandidate(
