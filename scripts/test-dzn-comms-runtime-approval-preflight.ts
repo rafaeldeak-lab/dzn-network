@@ -132,13 +132,12 @@ const FORBIDDEN_RUNTIME_PATHS = [
   "functions/api/chat",
   "functions/api/support-chat",
   "functions/api/dzn-assist",
-  "functions/api/dzn-comms",
-  "functions/api/presence",
-  "functions/api/live-counter",
-  "functions/api/online-users",
-  "functions/api/site-presence",
+  "functions/api/dzn-comms/channels",
+  "functions/api/dzn-comms/messages",
+  "functions/api/dzn-comms/moderation",
+  "functions/api/dzn-comms/reports",
+  "functions/api/dzn-comms/support",
   "functions/api/community/chat",
-  "functions/api/community/presence",
   "app/api/chat",
   "app/api/support-chat",
   "app/api/dzn-assist",
@@ -184,7 +183,6 @@ const FORBIDDEN_RUNTIME_PATTERNS = [
   /new\s+WebSocket/i,
   /WebSocketPair/i,
   /class\s+\w+\s+extends\s+DurableObject/i,
-  /\bdzn_comms_presence\b/i,
   /\bsite_presence\b/i,
   /\bvisitor_presence\b/i,
   /\blive_presence_sessions\b/i,
@@ -195,7 +193,7 @@ const FORBIDDEN_RUNTIME_PATTERNS = [
   /\bchat_moderation_actions\b/i,
   /\bchat_user_mutes\b/i,
   /\bchat_support_sessions\b/i,
-  /\bDZN_COMMS_(?:PRESENCE_READ|PRESENCE_WRITE|PUBLIC_ONLINE_COUNTER|READ|WRITE|REALTIME|SUPPORT_BOT|MODERATION_ACTIONS|PRIVATE_GROUPS)_ENABLED\b/i,
+  /\bDZN_COMMS_(?:READ|WRITE|REALTIME|SUPPORT_BOT|MODERATION_ACTIONS|PRIVATE_GROUPS)_ENABLED\b/i,
   /\bvectorize\b/i,
   /\bcreateEmbedding\b/i,
   /\bopenai\.responses\b/i,
@@ -331,8 +329,8 @@ function assertNoRuntimeImplementationFiles() {
 
 function assertNoRuntimeMigrations() {
   const migrationFiles = listFiles("migrations").map((path) => path.replace(/\\/g, "/"));
-  const forbiddenMigrations = migrationFiles.filter((path) => /(?:chat|support-chat|dzn-assist|dzn-comms|support-bot|websocket|vector|presence|visitor|online-counter|live-counter)/i.test(path));
-  assert.deepEqual(forbiddenMigrations, [], "Runtime approval preflight must not add chat/support/presence migrations.");
+  const forbiddenMigrations = migrationFiles.filter((path) => /(?:chat|support-chat|dzn-assist|support-bot|websocket|vector|visitor)/i.test(path));
+  assert.deepEqual(forbiddenMigrations, [], "Runtime approval preflight must still block chat/support/moderation/provider migrations after the approved presence slice.");
 }
 
 function assertNoProviderDependencies() {

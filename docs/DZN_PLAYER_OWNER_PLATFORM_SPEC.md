@@ -331,6 +331,54 @@ The future counter must not affect billing, owner entitlement, server ownership,
 
 Next should be the DZN Comms live presence counter foundation: implement the first public-safe aggregate online counter behind disabled-by-default read/write flags, starting on `/community` or the Global Chat shell with a static fallback, short TTL, no identifying public output, no analytics/tracking, no chat message sending, no message persistence, no moderation tables, no Durable Objects/WebSockets unless separately approved in that slice, no AI provider credentials, no vector stores, no metered model calls, no live checkout, no production mutations, and no effect on competitive or billing systems.
 
+## DZN Safe Monetisation And Supporter System Backlog
+
+The durable backlog contract for safe monetisation is `docs/DZN_SAFE_MONETISATION_SUPPORTER_SYSTEM_BACKLOG.md`.
+
+This decision supersedes the earlier paid-spin idea. DZN may add a real production Store and Supporter System later, but the Fair Progression Boundary controls it:
+
+- Players must never be able to buy spins with real money, credits bought with money, Supporter Packs, subscriptions, or indirect bundles.
+- Spins may only be earned from legitimate website activity such as daily activity, challenges, community missions, events, account milestones, and occasional free promotional awards.
+- Wheel limits must be enforced server-side: maximum three total spins in any rolling 24-hour period and a minimum four-hour cooldown between spins.
+- Purchases must never bypass spin limits, cooldowns, or reward odds.
+- Every spin must produce a reward; there are no empty, failed, or lost spins.
+- The full reward pool and probabilities must be displayed.
+- Rewards must be account-bound, non-cash, non-transferable, non-tradeable, non-resellable, and non-redeemable.
+- The wheel must not use fake near-misses, jackpots, spending prompts, or spin-again pressure.
+- Spin results must be generated and recorded server-side in an auditable ledger containing player, source, outcome, and timestamp.
+
+The one-off DZN Store may sell guaranteed digital items such as Supporter Packs, profile theme packs, calling-card packs, chat/profile cosmetic packs, group banner and insignia packs, and event presentation themes. Every product must show exactly what the customer receives before payment and must never provide XP, ranking advantages, better reward odds, additional spins, tournament advantages, review or discovery advantages, Server War scoring advantages, or competitive eligibility.
+
+The planned first supporter product is `DZN FOUNDING SUPPORTER PACK`. It is not a charitable donation; it is a supporter purchase that helps fund DZN development. The price must be administrator-configurable, with a possible later pay-what-you-want option above a defined minimum. It includes one permanent unique DZN Supporter Card with a serial such as `DZN-SUP-002481`, player display name, Supporter Since date, pre-payment card theme choice, generated insignia/detailing, permanent Supporter profile badge, optional Supporter chat badge, Supporter profile frame, public badge hiding, and no competitive or gameplay advantages. Supporter Cards are one per qualifying account, permanent for the life of the account and service, recoverable for the same owner, protected against duplicate serials, non-transferable, non-tradeable, non-resellable, non-redeemable, revoked on refund/reversal/chargeback, and not split into artificial rarity tiers by payment amount.
+
+Future payment implementation must use the existing payment provider and architecture. If Stripe remains configured, one-time Stripe Checkout Sessions are expected. Fulfilment must be webhook-verified and idempotent; success-page redirects must never grant entitlements by themselves. The future production feature needs signed webhook verification, duplicate-event protection, order and entitlement ledgers, refund/chargeback handling, tax/VAT-compatible records, clear purchase/refund terms, admin-configurable availability/pricing, and no storage of card information in DZN.
+
+Suggested future entities are `products`, `prices`, `orders`, `order_items`, `payment_events`, `account_entitlements`, `supporter_cards`, `earned_spins`, `spin_ledger`, and `wheel_cooldowns`.
+
+This backlog item is not implemented by the DZN Comms live presence counter foundation. No store route, checkout route, webhook route, product table, order table, entitlement table, supporter card, spin ledger, price change, Stripe product mutation, Cloudflare secret change, production D1 write, live checkout activation, or issue #49 merge is part of the presence-counter slice.
+
+## DZN Comms Live Presence Counter Foundation Slice
+
+The DZN Comms live presence counter foundation implements only the approved public-safe aggregate counter. It starts on `/community` and the Global Chat shell, behind disabled-by-default read/write flags:
+
+- `DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED`
+- `DZN_COMMS_PRESENCE_READ_ENABLED`
+- `DZN_COMMS_PRESENCE_WRITE_ENABLED`
+- `NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED`
+
+When the flags are not enabled, the UI shows the existing static fallback counts and does not start runtime heartbeat requests from the client. When enabled in a later environment, the client may send a bounded heartbeat to `/api/dzn-comms/presence`, and the public response remains aggregate-only.
+
+The counter stores only a hashed short-lived presence-session key, normalized scope, first seen time, last seen time, and expiry in `dzn_comms_presence_sessions`. It does not store names, Discord IDs, DZN user IDs, profile handles, IP addresses, user agents, referrers, routes, page history, journey history, billing state, owner entitlement, server ownership, Nitrado identifiers, review identifiers, event identifiers, challenge identifiers, scoring identifiers, or competitive identifiers.
+
+The API exposes:
+
+- `GET /api/dzn-comms/presence?scope=site|community|global_chat` for public aggregate read when read flags are enabled.
+- `POST /api/dzn-comms/presence?scope=site|community|global_chat` for a short-lived heartbeat when write flags are enabled.
+
+The client cannot set the displayed count. Invalid scopes fall back to `community`. Stale rows expire by TTL filtering and write-side cleanup. The response is no-store JSON with `label: "DZN online"`, `onlineCount`, `precision`, `updatedAt`, `ttlSeconds`, and status. It is presence, not analytics.
+
+This slice still does not implement message sending, message persistence, message history, private group messages, reports, moderation mutations, DZN Assist AI runtime, bot prompts, vector stores, AI provider credentials, metered model calls, analytics/tracking events, retained exports, live checkout changes, or production service mutations.
+
 ## Roadmap
 
 Future slices should build on this foundation in this order unless product priorities change:
@@ -349,13 +397,14 @@ Future slices should build on this foundation in this order unless product prior
 12. Check-ins, waitlists, and no-shows: event operations for communities and owners.
 13. Discord approval embeds: tick/X owner controls, join request approvals, event reminders, and moderation handoffs.
 14. Rich community systems: Discord community landing views, member matching, role-safe recommendations, and cross-server discovery.
-15. Cosmetics and supporter monetisation: non-competitive profile presentation and optional supporter items that never affect rank, stats, scoring, or earned competitive rewards.
+15. DZN Safe Monetisation and Supporter System: real production Store and supporter purchases in later approved payment slices, with earned-only spins, guaranteed account-bound cosmetics/supporter items, idempotent provider-webhook fulfilment, refund/chargeback handling, and no competitive advantage.
 16. Global/group chat and support bot architecture preflight: delivered as a design-only slice covering site-wide support chat, global player chat, private group chat, moderation/profanity warning/timeouts, and AI support limited to public DZN/help content only, with explicit zero-surprise spend and data-boundary review before any provider wiring.
 17. DZN Comms visual shell and support launcher prototype: approved as a static local mock-data UI slice with a disabled/non-sending composer, DZN Comms layout, site-wide support launcher, authenticated Community nav, and no runtime chat APIs, Durable Objects/WebSockets, moderation tables, bot prompts, vector stores, AI provider credentials, metered calls, analytics/tracking, or message persistence.
 18. DZN Comms interaction contract and moderation preflight: delivered as a design-only slice defining send/filter/warning/timeout/history/report/moderation/private-group/support-source/logging/retention/rollback contracts before any real chat runtime is implemented.
 19. DZN Comms runtime implementation approval preflight: delivered as a design-only slice choosing the first runtime direction, transport plan, migration choices, feature-flag defaults, retention defaults, moderation separation, testing matrix, rollback path, and public-safe live website counter contract before implementing APIs, message tables, Durable Objects/WebSockets, AI provider credentials, vector stores, or metered model calls.
-20. DZN Comms live presence counter foundation: implement the first public-safe aggregate online counter behind disabled-by-default read/write flags, starting on `/community` or the Global Chat shell with a static fallback, short TTL, no identifying public output, no analytics/tracking, and no influence on billing, owner entitlement, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF scoring, XP, calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
-21. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+20. DZN Comms live presence counter foundation: delivered as the first runtime slice with a public-safe aggregate online counter behind disabled-by-default read/write flags, starting on `/community` and the Global Chat shell with a static fallback, short TTL, no identifying public output, no analytics/tracking, and no influence on billing, owner entitlement, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF scoring, XP, calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
+21. DZN Safe Monetisation and Supporter System implementation preflight: define the store/catalog/order/payment/spin-ledger/supporter-card implementation sequence, migrations, webhook safety, refund/chargeback handling, tax/receipt records, admin pricing controls, rollback, and security proof before any one-time Stripe Checkout Sessions, store routes, webhook fulfilment, supporter cards, earned-spin ledgers, or account entitlement writes are implemented.
+22. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 
@@ -1662,6 +1711,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/player/profile` and `/api/player/profile` | 401/login redirect | Allowed | Allowed | Allowed | Session auth, private no-store profile progression showcase, read-only; public-profile owner preview/share UI, share session feedback, and share accessibility/fallback guidance are local presentation only |
 | `/api/player/profile-privacy` | 401 | Allowed | Allowed | Allowed | Private player-owned settings API; GET/PATCH only; writes only `player_profile_privacy_preferences` |
 | `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences; DZN-branded visual shell and Open Graph/Twitter share-preview metadata are presentation-only; per-handle metadata uses only the already-filtered public payload; crawler QA snapshots published, hidden, invalid, and unavailable route states; share-card image QA validates `PUBLIC_PLAYER_PROFILE_SHARE_PREVIEW_IMAGE_CARDS`, `/media/dzn-cinematic-survivor.png`, static/exported asset presence, dimensions, alt text, and fallback behavior for future card references; share-card crawler visual QA renders published, hidden, invalid, unavailable, and fallback-image final head states into deterministic social-card previews and proves the correct image URL and alt text remain public-safe; social-preview validation packaging commits sanitized JSON/HTML reviewer artifacts for those states without production services; metadata, image/card, visual QA, and validation packaging cannot expose hidden sections, store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility |
+| `/api/dzn-comms/presence` and `/community` DZN online counter | Static fallback unless public read flag is enabled; aggregate read only when enabled | Same public aggregate, no Starter or Pro required | Same public aggregate; owner entitlement does not change count | Same public aggregate; Pro does not change count | Presence-only; read/write flags default disabled; stores only hashed short-lived presence-session key, scope, timestamps, and expiry; no names, raw user IDs, Discord IDs, profile handles, IPs, user agents, routes, referrers, billing state, owner entitlement, server ownership, or competitive identifiers; cannot affect billing, owner entitlement, server ownership, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF scoring, XP, calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility |
 | Future global/support/private chat | Future public support entry point only | Future logged-in player chat/support | Future owner/community chat where scoped | Future owner/community chat where scoped | Not implemented yet; future architecture must keep AI support limited to public DZN website and setup-help content, require moderation/profanity filtering, warning, and timed-mute controls plus report controls, avoid surprise metered AI spend, and remain isolated from billing, scoring, rankings, discovery, reviews, badges, seasons, Server Wars, XP/calling-card awards, events, and competitive eligibility |
 | Public profile attribution on reviews/challenges/leaderboards | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Read-only generated-handle attribution; no name-only matching; ambiguous/hidden/unpublished profiles are not linked |
 | Public profile attribution preview/control and safe event-suggestion author links | Public event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Player-owned visibility control; trusted user bridge required; roster scoring gates and owner mutations excluded |

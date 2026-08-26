@@ -3,12 +3,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
+import { DznLivePresenceCounter } from "./dzn-live-presence-counter";
 import {
   AlertTriangle,
   Bot,
   CalendarDays,
   ChevronDown,
-  Circle,
   Hash,
   Link2,
   Lock,
@@ -419,7 +419,7 @@ export function DznCommsVisualShell() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <StatusPill tone="emerald" icon={Circle} label="128 online" />
+            <DznLivePresenceCounter scope="community" fallbackLabel="128 online" />
             <StatusPill tone="amber" icon={ShieldAlert} label="Composer disabled" />
             <StatusPill tone="cyan" icon={Bot} label="No AI call" />
           </div>
@@ -582,7 +582,14 @@ function DznCommsFeedHeader({ surface, privateMode }: { surface: CommsSurface; p
         <p className="mt-1 text-xs font-semibold leading-5 text-zinc-400">{surface.summary}</p>
       </div>
       <div className="flex items-center gap-2">
-        <StatusPill tone={privateMode ? "violet" : "emerald"} icon={privateMode ? Users : Circle} label={surface.onlineLabel} />
+        {privateMode ? (
+          <StatusPill tone="violet" icon={Users} label={surface.onlineLabel} />
+        ) : (
+          <DznLivePresenceCounter
+            scope={surface.key === "global" ? "global_chat" : "community"}
+            fallbackLabel={surface.onlineLabel}
+          />
+        )}
         <IconButton label="Mute preview disabled" icon={VolumeX} />
         <IconButton label="Search preview disabled" icon={Search} />
         <IconButton label="More options preview disabled" icon={MoreHorizontal} />
