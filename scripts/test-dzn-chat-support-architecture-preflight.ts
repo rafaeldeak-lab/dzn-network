@@ -62,7 +62,7 @@ const REQUIRED_MASTER_SPEC_SNIPPETS = [
 ];
 
 const REQUIRED_PUBLIC_POLICY_SNIPPETS = [
-  "Future DZN global/community/private chat and support chat are still blocked at architecture-preflight stage.",
+  "Future DZN global/community/private chat and support chat are still blocked from real runtime implementation until the approved contracts exist.",
   "Support entry points may be visible on most pages",
   "global community chat must require Discord login",
   "private group chat must require a trusted DZN membership bridge",
@@ -83,7 +83,6 @@ const FORBIDDEN_IMPLEMENTATION_PATHS = [
   "functions/api/support-chat",
   "functions/api/dzn-assist",
   "functions/api/community/chat",
-  "app/community/page.tsx",
   "app/community/chat/page.tsx",
   "app/support-chat/page.tsx",
   "app/dzn-assist/page.tsx",

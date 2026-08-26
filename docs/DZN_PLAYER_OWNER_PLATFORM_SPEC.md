@@ -227,6 +227,37 @@ No migration is added in this slice. Future chat tables, support-session tables,
 
 The next implementation-safe step is a DZN Comms visual shell and support launcher prototype using static local mock data, disabled/non-sending composer states, and no runtime message storage or bot calls.
 
+## DZN Comms Visual Shell Prototype Slice
+
+The DZN Comms Visual Shell Prototype Slice may add a static `/community` visual route and a site-wide static DZN Assist support launcher. It exists to make the approved DZN Comms direction visible before any real chat system is built.
+
+Allowed behavior:
+
+- Use static local mock data only.
+- Show Global Chat, New Players, Server Owners, Events, Private Groups, DZN Assist, Channel Safety, Online Members, Group Members, and Safety Ladder panels.
+- Show disabled/non-sending composer controls that clearly state no messages are sent or stored.
+- Mount a static support launcher on most pages with Website support only copy, disabled support input, and a link to the static DZN Comms route.
+- Add Community to authenticated player navigation as a free player/community surface.
+
+Blocked behavior:
+
+- No runtime chat APIs.
+- No support bot APIs.
+- No Durable Objects/WebSockets.
+- No message persistence.
+- No moderation tables.
+- No bot prompts.
+- No vector stores.
+- No AI provider credentials.
+- No metered model calls.
+- No analytics/tracking.
+- No live checkout changes.
+- No production service mutation.
+
+The visual shell cannot affect billing, scoring, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars, CTF scoring, XP awards, calling-card awards, or competitive eligibility. Live checkout remains disabled and Issue #49 remains reserved for final live payment activation.
+
+Next should be the DZN Comms interaction contract and moderation preflight before any sending, persistence, real-time transport, moderation database, support bot runtime, vector search, AI provider, or metered model work begins.
+
 ## Roadmap
 
 Future slices should build on this foundation in this order unless product priorities change:
@@ -247,8 +278,9 @@ Future slices should build on this foundation in this order unless product prior
 14. Rich community systems: Discord community landing views, member matching, role-safe recommendations, and cross-server discovery.
 15. Cosmetics and supporter monetisation: non-competitive profile presentation and optional supporter items that never affect rank, stats, scoring, or earned competitive rewards.
 16. Global/group chat and support bot architecture preflight: delivered as a design-only slice covering site-wide support chat, global player chat, private group chat, moderation/profanity warning/timeouts, and AI support limited to public DZN/help content only, with explicit zero-surprise spend and data-boundary review before any provider wiring.
-17. DZN Comms visual shell and support launcher prototype: build a non-sending logged-in UI shell from static local mock data before runtime chat routes, Durable Objects/WebSockets, moderation tables, bot prompts, vector stores, AI provider credentials, or metered calls are added.
-18. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+17. DZN Comms visual shell and support launcher prototype: approved as a static local mock-data UI slice with a disabled/non-sending composer, DZN Comms layout, site-wide support launcher, authenticated Community nav, and no runtime chat APIs, Durable Objects/WebSockets, moderation tables, bot prompts, vector stores, AI provider credentials, metered calls, analytics/tracking, or message persistence.
+18. DZN Comms interaction contract and moderation preflight: define send/filter/warning/timeout/report/moderation/private-group/support-source/logging/retention/rollback contracts before any real chat runtime is implemented.
+19. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 

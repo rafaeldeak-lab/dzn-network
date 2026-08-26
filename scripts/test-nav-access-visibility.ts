@@ -15,13 +15,14 @@ const headerActionBlock = sourceBlock(siteHeaderSource, "<div className=\"dzn-he
 
 assert.equal(loggedOutHeaderBlock.includes("Features"), true);
 assert.equal(loggedOutHeaderBlock.includes("Pricing"), true);
-for (const privateLabel of ["Leaderboards", "Servers", "Stats", "Events", "Dashboard", "Add Your Server", "Start Setup", "Upgrade to Pro", "Owner Dashboard"]) {
+for (const privateLabel of ["Leaderboards", "Servers", "Stats", "Events", "Community", "Dashboard", "Add Your Server", "Start Setup", "Upgrade to Pro", "Owner Dashboard"]) {
   assert.equal(loggedOutHeaderBlock.includes(privateLabel), false, `Logged-out header links must not include ${privateLabel}.`);
 }
 
 assert.equal(starterHeaderBlock.includes("Leaderboards"), true);
 assert.equal(starterHeaderBlock.includes("Servers"), true);
 assert.equal(starterHeaderBlock.includes("Events"), true);
+assert.equal(starterHeaderBlock.includes("Community"), true);
 assert.equal(starterHeaderBlock.includes("Stats"), false, "Starter/trial header should not advertise Pro stats as a normal nav item.");
 assert.equal(starterHeaderBlock.includes("Pricing"), false, "Starter/trial header should use the upgrade action instead of a generic pricing nav link.");
 
@@ -29,6 +30,7 @@ assert.equal(proHeaderBlock.includes("Leaderboards"), true);
 assert.equal(proHeaderBlock.includes("Servers"), true);
 assert.equal(proHeaderBlock.includes("Stats"), true);
 assert.equal(proHeaderBlock.includes("Events"), true);
+assert.equal(proHeaderBlock.includes("Community"), true);
 assert.equal(proHeaderBlock.includes("Pricing"), false, "Pro header should focus on product tools instead of pricing.");
 
 assert.equal(siteHeaderSource.includes("type HeaderPlanTier = AuthNavigationSummary[\"plan_tier\"]"), true);

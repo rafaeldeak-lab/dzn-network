@@ -9414,6 +9414,69 @@ button.dzn-header-action {
   }
 }
 
+.dzn-comms-bg-layer {
+  opacity: 0.58;
+  filter: saturate(1.18) contrast(1.08) brightness(0.58);
+  transform: translate3d(-0.6rem, -0.4rem, 0) scale(1.05);
+  transform-origin: center;
+  animation: dzn-comms-bg-drift 30s ease-in-out infinite alternate;
+}
+
+.dzn-comms-fog-layer {
+  opacity: 0.5;
+  filter: saturate(1.22) contrast(1.08) brightness(0.78);
+  mix-blend-mode: screen;
+  transform: translate3d(0.35rem, 0.28rem, 0) scale(1.08);
+  transform-origin: center;
+  animation: dzn-comms-fog-drift 38s ease-in-out infinite alternate;
+}
+
+@keyframes dzn-comms-bg-drift {
+  0% {
+    transform: translate3d(-0.85rem, -0.5rem, 0) scale(1.05);
+  }
+
+  50% {
+    transform: translate3d(0.25rem, 0.12rem, 0) scale(1.075);
+  }
+
+  100% {
+    transform: translate3d(0.9rem, 0.42rem, 0) scale(1.06);
+  }
+}
+
+@keyframes dzn-comms-fog-drift {
+  0% {
+    opacity: 0.42;
+    transform: translate3d(0.6rem, 0.25rem, 0) scale(1.08);
+  }
+
+  45% {
+    opacity: 0.58;
+  }
+
+  100% {
+    opacity: 0.48;
+    transform: translate3d(-0.9rem, -0.45rem, 0) scale(1.112);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dzn-comms-bg-layer,
+  .dzn-comms-fog-layer {
+    animation: none !important;
+  }
+
+  .dzn-comms-bg-layer {
+    transform: scale(1.05);
+  }
+
+  .dzn-comms-fog-layer {
+    opacity: 0.42;
+    transform: scale(1.08);
+  }
+}
+
 .dzn-public-profile-page {
   isolation: isolate;
 }

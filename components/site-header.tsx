@@ -9,7 +9,7 @@ import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding
 import type { AuthNavigationSummary } from "@/components/onboarding/types";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
 
-type SiteHeaderActive = "features" | "player" | "leaderboards" | "servers" | "pricing" | "stats" | "events" | "dashboard";
+type SiteHeaderActive = "features" | "player" | "leaderboards" | "servers" | "pricing" | "stats" | "events" | "community" | "dashboard";
 
 type SiteHeaderProps = {
   active?: SiteHeaderActive;
@@ -65,6 +65,7 @@ const starterHeaderLinks: HeaderNavLink[] = [
   { href: "/leaderboards", label: "Leaderboards", active: "leaderboards" },
   { href: "/servers", label: "Servers", active: "servers" },
   { href: "/events", label: "Events", active: "events" },
+  { href: "/community", label: "Community", active: "community" },
 ];
 
 const proHeaderLinks: HeaderNavLink[] = [
@@ -74,6 +75,7 @@ const proHeaderLinks: HeaderNavLink[] = [
   { href: "/servers", label: "Servers", active: "servers" },
   { href: "/#stats", label: "Stats", active: "stats" },
   { href: "/events", label: "Events", active: "events" },
+  { href: "/community", label: "Community", active: "community" },
 ];
 
 let pageHeaderAuthState: SiteHeaderAuthStateProps | null = null;
@@ -329,6 +331,7 @@ function activeFromPathname(pathname: string): SiteHeaderActive | undefined {
   if (pathname.startsWith("/servers")) return "servers";
   if (pathname.startsWith("/pricing")) return "pricing";
   if (pathname.startsWith("/events")) return "events";
+  if (pathname.startsWith("/community")) return "community";
   if (pathname.startsWith("/dashboard")) return "dashboard";
   return undefined;
 }

@@ -204,7 +204,7 @@ Do not implement any of the following until a later approved implementation slic
 - `/api/chat/*`.
 - `/api/support-chat/*`.
 - `/api/dzn-assist/*`.
-- `/community` runtime page.
+- Message-capable or data-backed `/community` runtime chat.
 - Chat message database migrations.
 - Chat moderation database migrations.
 - Durable Object bindings.
@@ -231,4 +231,8 @@ Every future chat/support implementation slice must prove:
 
 ## Next Recommended Slice
 
-Next should be a DZN Comms visual shell and support launcher prototype: build the logged-in community/support UI shell from static local mock data, with the DZN Comms layout, channel rail, safety rail, DZN Assist panel, and disabled/non-sending composer states. That slice should still avoid message storage, runtime chat APIs, Durable Objects/WebSockets, moderation tables, bot prompts, vector stores, AI provider credentials, metered model calls, live checkout, production services, and issue #49.
+Next should be a DZN Comms visual shell and support launcher prototype. That recommendation has now moved into the approved static visual prototype slice.
+
+The DZN Comms visual shell and support launcher prototype is now the approved follow-on slice. It may add a static `/community` visual route and a static support launcher if they use static local mock data, disabled/non-sending composer states, and no runtime message storage or bot calls.
+
+Next after that should be the DZN Comms interaction contract and moderation preflight: define the exact send, filter, warning, timeout, report, owner/admin scope, private-group membership, support source, logging, retention, and rollback contracts before any runtime chat APIs, Durable Objects/WebSockets, moderation tables, bot prompts, vector stores, AI provider credentials, or metered model calls are implemented.
