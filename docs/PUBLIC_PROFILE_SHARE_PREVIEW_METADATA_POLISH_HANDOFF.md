@@ -163,6 +163,26 @@ Public profile share preview metadata cannot expose hidden sections, store share
 - Production-mutation scans for migrations, checkout activation, Stripe/Nitrado/Discord/Cloudflare secret/D1 patterns.
 - Codex Security diff scan.
 
-## Next Recommended Slice
+## Prior Next Recommended Slice
 
 Next should be public profile share preview crawler/rendered QA polish: add a small local smoke harness that renders the rewritten `/players/[handle]` shell for published, hidden, invalid, and unavailable profiles, snapshots the final `<head>` metadata, and proves crawlers see the expected public-safe preview tags without hidden fields, analytics/tracking calls, share-history storage, privacy writes, billing changes, scoring changes, ranking changes, review changes, badge/season/Server Wars changes, XP/calling-card award changes, event changes, or competitive eligibility impact.
+
+## Follow-On Public Profile Share Preview Crawler QA
+
+Branch: `codex/public-profile-share-preview-crawler-qa-20260826`
+
+Base branch: `codex/public-profile-share-preview-metadata-polish-20260826`
+
+This slice adds a local crawler/rendered QA smoke harness for `/players/[handle]`. It calls the real Pages shell handler with a fake exported profile shell and a read-only fake D1 binding, renders published, hidden, invalid, and unavailable profile responses, snapshots the final `<head>` metadata, and proves crawlers see the intended public-safe Open Graph/Twitter/fallback tags.
+
+Still excluded:
+
+- Runtime behavior changes to public profiles, profile publishing, privacy persistence, handle generation, player progression awards, retained exports, owner/admin imports, and billing gates.
+- Hidden profile sections, private identifiers, Discord IDs, raw award evidence, exact award timestamps, source IDs, private settings, owner/admin rows, billing rows, scoring rows, review internals, approval state, event internals, CTF scoring, and Server Wars scoring.
+- Stored share history, analytics calls, tracking events, audit-log calls, browser persistence, privacy writes, checkout behavior, Stripe product/price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord mutations, deployments, and issue #49.
+
+Live checkout remains disabled, retained exports remain blocked unless separately approved, and Issue #49 remains reserved for final live payment activation.
+
+## Next Recommended Slice
+
+Next should be public profile share preview image/card polish: add a public-safe social preview image quality check for `/media/dzn-cinematic-survivor.png` and any future DZN share-card asset references, proving the image exists in the exported/static assets, has suitable crawler-friendly dimensions and alt text, falls back cleanly when unavailable, and still cannot expose hidden profile sections, store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility.
