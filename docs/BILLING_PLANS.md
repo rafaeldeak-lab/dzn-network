@@ -108,6 +108,8 @@ The DZN Store catalog and admin product/price draft model adds only inactive pro
 
 The read-only `/store` preview is not an owner subscription checkout path. It may show safe catalog metadata, guaranteed-purchase/account-bound/no-competitive-advantage labels, and sample-only Supporter Card preview copy. It does not create one-time Checkout Sessions, orders, entitlements, supporter cards, earned spins, wheel runtime, or live payment activation.
 
+The DZN Store sandbox order and checkout approval preflight defines the future authenticated order creation and one-time Stripe Checkout contract using `mode=payment`, but it is still documentation/test-guard work only. No checkout route, Store order table, payment webhook, entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, live checkout activation, or issue #49 change is added by that preflight.
+
 Store purchases must never unlock `/setup`, Nitrado linking, owner onboarding, owner dashboards, server-management APIs, owner billing plan status, server ownership, XP, earned calling cards, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, or competitive eligibility.
 
 Players must never be able to buy wheel spins. Spins remain earned-only and must be enforced server-side with a maximum three spins in any rolling 24-hour period, a minimum four-hour cooldown, server-generated outcomes, complete reward-pool probability display, no cash-equivalent rewards, and an auditable spin ledger.

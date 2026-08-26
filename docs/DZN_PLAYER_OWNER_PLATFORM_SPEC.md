@@ -425,6 +425,30 @@ Blocked behavior:
 
 This slice is presentation-only and cannot affect owner entitlement, server ownership, `/setup`, Nitrado access, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF scoring, XP awards, earned calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
 
+## DZN Store Sandbox Order And Checkout Approval Preflight Slice
+
+The DZN Store sandbox order and checkout approval preflight slice is delivered as a documentation/test-guard slice in `docs/DZN_STORE_SANDBOX_ORDER_CHECKOUT_APPROVAL_PREFLIGHT.md`.
+
+It defines, but does not implement, the future `POST /api/store/orders` contract, one-time Stripe Checkout Session shape using `mode=payment`, and approval boundary:
+
+- Future `POST /api/store/orders` contract for authenticated sandbox order creation.
+- Session-derived purchaser identity and rejection of request body account/owner/server/billing identities.
+- Active Store catalog and price requirements.
+- One-time Stripe Checkout Session shape using `mode=payment`.
+- Non-sensitive order-derived Stripe idempotency key strategy.
+- Future `POST /api/stripe/store-webhook` raw-body signature verification and event-ledger contract.
+- Idempotent webhook-driven fulfilment rules.
+- Refund, reversal, and chargeback revocation plan.
+- Tax/receipt/private payment record boundaries.
+- Default-disabled Store checkout flags.
+- Non-destructive rollback and proof matrix.
+
+Blocked behavior:
+
+- No checkout route, order table, payment webhook, account entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change.
+
+The Store checkout boundary is player/account cosmetics only. It cannot unlock owner setup, Nitrado linking, owner onboarding, owner dashboards, server-management APIs, owner billing plan status, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, earned calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
+
 ## DZN Comms Live Presence Counter Foundation Slice
 
 The DZN Comms live presence counter foundation implements only the approved public-safe aggregate counter. It starts on `/community` and the Global Chat shell, behind disabled-by-default read/write flags:
@@ -474,7 +498,8 @@ Future slices should build on this foundation in this order unless product prior
 21. DZN Safe Monetisation and Supporter System implementation preflight: delivered as a documentation/test-guard slice defining the store/catalog/order/payment/spin-ledger/supporter-card implementation sequence, migration shapes, feature flags, webhook safety, refund/chargeback handling, tax/receipt records, admin pricing controls, rollback, and security proof before any one-time Stripe Checkout Sessions, webhook fulfilment, supporter cards, earned-spin ledgers, wheel runtime, or account entitlement writes are implemented.
 22. DZN Store catalog and admin product/price draft model: delivered as the first safe implementation slice with disabled-by-default local migrations and admin validation only; no checkout creation, webhook fulfilment, supporter card issuance, earned spins, wheel runtime, account entitlement writes, live checkout, Stripe product/Price changes, Cloudflare secret changes, production D1 writes, or issue #49 changes.
 23. DZN Store public browse and Supporter Card preview contract: delivered as a disabled-by-default read-only `/store` preview surface using safe catalog metadata, guaranteed purchase/account-bound/no competitive advantage copy, and Supporter Card theme preview copy; still creates no checkout sessions, orders, webhooks, entitlements, supporter cards, earned spins, wheel runtime, Stripe objects, Cloudflare secrets, production D1 writes, live checkout activation, or issue #49 changes.
-24. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+24. DZN Store sandbox order and checkout approval preflight: delivered as a documentation/test-guard slice defining future authenticated Store order creation, one-time Stripe Checkout `mode=payment`, webhook event ledger, idempotent fulfilment, refund/chargeback revocation, tax/receipt record boundaries, disabled-by-default flags, rollback, and proof matrix before any checkout route, order table, payment webhook, entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change.
+25. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 

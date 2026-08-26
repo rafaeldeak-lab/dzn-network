@@ -4,6 +4,8 @@ Issue #49 tracks the future human-approved Stripe live billing activation for DZ
 
 The DZN Safe Monetisation and Supporter System implementation preflight is `docs/DZN_SAFE_MONETISATION_SUPPORTER_IMPLEMENTATION_PREFLIGHT.md`. It defines future one-time Store checkout, supporter purchases, earned-only spins, and wheel/payment ledgers, but does not approve store live checkout, Stripe product/Price mutation, Cloudflare secret changes, production D1 writes, webhook fulfilment, account entitlement writes, or issue #49 changes.
 
+The DZN Store sandbox order and checkout approval preflight is `docs/DZN_STORE_SANDBOX_ORDER_CHECKOUT_APPROVAL_PREFLIGHT.md`. It defines sandbox order creation, one-time Checkout Session shape, webhook event ledger, idempotent fulfilment, refund/chargeback revocation, tax/receipt records, feature flags, rollback, and proof matrix, but does not approve or implement checkout routes, order tables, Store webhooks, entitlement writes, Supporter Card issuance, earned-spin ledgers, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 writes, live checkout activation, or issue #49 changes.
+
 ## Activation Boundary
 
 Live billing activation is high-risk billing and production-mutation work.
