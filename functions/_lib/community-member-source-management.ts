@@ -259,6 +259,28 @@ export type CommunityMemberSourceExportPolicy = {
   rules: string[];
 };
 
+export type CommunityMemberSourceExportPolicyReview = {
+  admin_only: true;
+  owner_scope_review: "all_owner_scopes";
+  current_defaults_confirmed: true;
+  retention_work_status: "blocked_until_approved";
+  approval_required_before_retained_export_work: true;
+  required_approval_gates: string[];
+  checked_defaults: Array<{
+    key: string;
+    label: string;
+    expected: string;
+    actual: string;
+    ok: true;
+  }>;
+  blocked_future_work: Array<{
+    key: string;
+    label: string;
+    blocked: true;
+    required_before_unblock: string[];
+  }>;
+};
+
 export type CommunityMemberSourceAuditExport = {
   ok: true;
   status: 200;
@@ -467,6 +489,7 @@ export async function listCommunityMemberSourceManagement(
     audit_groups: buildCommunityMemberSourceAuditGroups(audit),
     export_safe_audit: buildExportSafeCommunityMemberSourceAuditRows(audit),
     export_policy: communityMemberSourceExportPolicy(),
+    export_policy_review: actor.role === "admin" ? communityMemberSourceExportPolicyReview() : null,
     safeguards: communityMemberSourceManagementSafeguards(),
     generated_at: new Date().toISOString(),
   };
@@ -1123,6 +1146,13 @@ export function communityMemberSourceManagementSafeguards() {
     export_persistent_retention_requires_expiry: true,
     export_persistent_retention_requires_audit_controls: true,
     export_retention_policy_has_no_storage_side_effect: true,
+    export_policy_review_admin_only: true,
+    export_policy_review_confirms_all_owner_scope_defaults: true,
+    future_retained_export_work_blocked_until_dedicated_approval: true,
+    future_retained_export_work_requires_migration: true,
+    future_retained_export_work_requires_expiry_model: true,
+    future_retained_export_work_requires_storage_plan: true,
+    future_retained_export_work_requires_security_review: true,
     admin_repeated_source_filters: true,
     owner_importable_notification_hook: true,
     notification_hook_dzn_pulse_only: true,
@@ -1154,6 +1184,76 @@ export function communityMemberSourceManagementSafeguards() {
     affects_calling_card_awards: false,
     affects_competitive_eligibility: false,
     fairness: playerProfilePrivacyFairness(),
+  };
+}
+
+export function communityMemberSourceExportPolicyReview(): CommunityMemberSourceExportPolicyReview {
+  const requiredApprovalGates = [
+    "Dedicated approval required",
+    "Migration required",
+    "Expiry model required",
+    "Storage plan required",
+    "Security review required",
+  ];
+  return {
+    admin_only: true,
+    owner_scope_review: "all_owner_scopes",
+    current_defaults_confirmed: true,
+    retention_work_status: "blocked_until_approved",
+    approval_required_before_retained_export_work: true,
+    required_approval_gates: requiredApprovalGates,
+    checked_defaults: [
+      {
+        key: "current_retention_mode",
+        label: "Current retention",
+        expected: "download_only",
+        actual: "download_only",
+        ok: true,
+      },
+      {
+        key: "persisted_exports_enabled",
+        label: "Persisted exports",
+        expected: "false",
+        actual: "false",
+        ok: true,
+      },
+      {
+        key: "export_file_retention",
+        label: "Export file retention",
+        expected: "not_persisted_by_dzn",
+        actual: "not_persisted_by_dzn",
+        ok: true,
+      },
+      {
+        key: "dashboard_history",
+        label: "Dashboard history",
+        expected: "client_session_only",
+        actual: "client_session_only",
+        ok: true,
+      },
+      {
+        key: "sharing_links_enabled",
+        label: "Sharing links",
+        expected: "false",
+        actual: "false",
+        ok: true,
+      },
+      {
+        key: "browser_persistence_enabled",
+        label: "Browser persistence",
+        expected: "false",
+        actual: "false",
+        ok: true,
+      },
+    ],
+    blocked_future_work: [
+      {
+        key: "retained_export_storage",
+        label: "Future retained-export work blocked",
+        blocked: true,
+        required_before_unblock: requiredApprovalGates,
+      },
+    ],
   };
 }
 
