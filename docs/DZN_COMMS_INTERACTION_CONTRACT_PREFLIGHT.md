@@ -338,3 +338,5 @@ Before the first runtime chat/support implementation PR is mergeable, it must pr
 ## Next Recommended Slice
 
 Next should be the DZN Comms runtime implementation approval preflight: choose the first runtime slice shape, transport plan, migration plan, feature-flag defaults, retention defaults, moderation data model, testing matrix, and rollback path before implementing any chat APIs, message tables, Durable Objects/WebSockets, AI provider credentials, vector stores, or metered model calls.
+
+That runtime implementation approval preflight is now captured in `docs/DZN_COMMS_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT.md`. It adds the requested public live website counter to the plan and selects the DZN Comms live presence counter foundation as the next implementation slice, still before chat message sending, message persistence, moderation-table implementation, DZN Assist AI runtime, AI provider credentials, vector stores, or metered model calls.
