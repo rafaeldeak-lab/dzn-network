@@ -9413,3 +9413,184 @@ button.dzn-header-action {
     transform: scale(1.075);
   }
 }
+
+.dzn-public-profile-page {
+  isolation: isolate;
+}
+
+.dzn-public-profile-hero::before,
+.dzn-public-profile-hero::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.dzn-public-profile-hero::before {
+  inset: 0;
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 72px),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.022) 0 1px, transparent 1px 64px),
+    linear-gradient(115deg, transparent 0 45%, rgba(34, 211, 238, 0.12) 48%, transparent 54%);
+  opacity: 0.42;
+  animation: dzn-public-profile-grid-drift 18s ease-in-out infinite alternate;
+}
+
+.dzn-public-profile-hero::after {
+  inset: auto 0 0;
+  height: 8rem;
+  background: linear-gradient(180deg, transparent, rgba(3, 4, 13, 0.92));
+}
+
+.dzn-public-profile-bg-layer {
+  opacity: 0.52;
+  filter: saturate(1.12) contrast(1.05) brightness(0.52);
+  transform: translate3d(-0.45rem, -0.35rem, 0) scale(1.045);
+  transform-origin: center;
+  animation: dzn-public-profile-bg-drift 34s ease-in-out infinite alternate;
+}
+
+.dzn-public-profile-survivor-layer {
+  opacity: 0.24;
+  filter: saturate(1.08) contrast(1.08) brightness(0.58);
+  transform: scale(1.035);
+}
+
+.dzn-public-profile-fog-layer {
+  opacity: 0.45;
+  filter: saturate(1.2) contrast(1.08) brightness(0.82);
+  mix-blend-mode: screen;
+  transform: translate3d(0.35rem, 0.3rem, 0) scale(1.072);
+  transform-origin: center;
+  animation: dzn-public-profile-fog-drift 42s ease-in-out infinite alternate;
+}
+
+.dzn-public-profile-identity-card,
+.dzn-public-profile-panel,
+.dzn-public-profile-calling-card,
+.dzn-public-profile-challenge-card,
+.dzn-public-profile-timeline-row {
+  backdrop-filter: blur(18px);
+  box-shadow:
+    0 22px 70px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.dzn-public-profile-avatar {
+  position: relative;
+  overflow: hidden;
+  text-shadow: 0 0 26px rgba(34, 211, 238, 0.65);
+  box-shadow:
+    0 0 36px rgba(34, 211, 238, 0.2),
+    inset 0 0 28px rgba(34, 211, 238, 0.1);
+}
+
+.dzn-public-profile-avatar::after {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  background: conic-gradient(from 0deg, transparent, rgba(34, 211, 238, 0.28), transparent 34%, rgba(168, 85, 247, 0.24), transparent 70%);
+  animation: dzn-public-profile-avatar-scan 7s linear infinite;
+}
+
+.dzn-public-profile-avatar > * {
+  position: relative;
+  z-index: 1;
+}
+
+.dzn-public-profile-panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.dzn-public-profile-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 88% 0%, rgba(34, 211, 238, 0.1), transparent 30%),
+    radial-gradient(circle at 0% 10%, rgba(168, 85, 247, 0.1), transparent 34%);
+  opacity: 0.85;
+}
+
+.dzn-public-profile-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.dzn-public-profile-calling-card {
+  box-shadow:
+    0 0 34px rgba(168, 85, 247, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.dzn-public-profile-challenge-card,
+.dzn-public-profile-timeline-row {
+  background:
+    radial-gradient(circle at 92% 0%, rgba(34, 211, 238, 0.12), transparent 34%),
+    rgba(0, 0, 0, 0.28);
+}
+
+@keyframes dzn-public-profile-bg-drift {
+  0% {
+    transform: translate3d(-0.7rem, -0.4rem, 0) scale(1.045);
+  }
+
+  50% {
+    transform: translate3d(0.3rem, 0.15rem, 0) scale(1.07);
+  }
+
+  100% {
+    transform: translate3d(0.75rem, 0.45rem, 0) scale(1.055);
+  }
+}
+
+@keyframes dzn-public-profile-fog-drift {
+  0% {
+    opacity: 0.36;
+    transform: translate3d(0.45rem, 0.25rem, 0) scale(1.072);
+  }
+
+  45% {
+    opacity: 0.52;
+  }
+
+  100% {
+    opacity: 0.42;
+    transform: translate3d(-0.75rem, -0.4rem, 0) scale(1.105);
+  }
+}
+
+@keyframes dzn-public-profile-grid-drift {
+  0% {
+    background-position: 0 0, 0 0, 0 0;
+  }
+
+  100% {
+    background-position: 72px 0, 0 64px, 180px 0;
+  }
+}
+
+@keyframes dzn-public-profile-avatar-scan {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dzn-public-profile-bg-layer,
+  .dzn-public-profile-fog-layer,
+  .dzn-public-profile-hero::before,
+  .dzn-public-profile-avatar::after {
+    animation: none !important;
+  }
+
+  .dzn-public-profile-bg-layer {
+    transform: scale(1.045);
+  }
+
+  .dzn-public-profile-fog-layer {
+    opacity: 0.38;
+    transform: scale(1.072);
+  }
+}
