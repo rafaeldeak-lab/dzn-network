@@ -2,19 +2,46 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowRight, CheckCircle2, Clipboard, EyeOff, Share2, UserRound } from "lucide-react";
+import { ArrowRight, CheckCircle2, Clipboard, Copy, Eye, EyeOff, ExternalLink, Share2, ShieldCheck, UserRound } from "lucide-react";
 
-type ShareState = "idle" | "copied" | "shared" | "error";
+type ShareState = "idle" | "copied" | "handle_copied" | "shared" | "error";
+
+export type PublicProfileOwnerPreview = {
+  displayName: string;
+  avatarUrl?: string | null;
+  avatarInitial: string;
+  publicHandle?: string | null;
+  publicHref?: string | null;
+  statusLabel: string;
+  statusDetail: string;
+  unsavedChanges: boolean;
+  visibleSectionCount: number;
+  sections: Array<{
+    key: string;
+    label: string;
+    visible: boolean;
+    detail: string;
+  }>;
+  stats: Array<{
+    key: string;
+    label: string;
+    value: string;
+    visible: boolean;
+  }>;
+  warnings: string[];
+};
 
 export function PublicProfileSharePanel({
   publicHref,
   publicProfileEnabled,
   context = "profile",
+  preview = null,
   className = "",
 }: {
   publicHref?: string | null;
   publicProfileEnabled?: boolean;
   context?: "hub" | "profile";
+  preview?: PublicProfileOwnerPreview | null;
   className?: string;
 }) {
   const [shareState, setShareState] = useState<ShareState>("idle");
@@ -26,6 +53,17 @@ export function PublicProfileSharePanel({
     try {
       await navigator.clipboard.writeText(profileUrl);
       setShareState("copied");
+    } catch {
+      setShareState("error");
+    }
+  }
+
+  async function copyProfileHandle() {
+    const handle = preview?.publicHandle;
+    if (!handle) return;
+    try {
+      await navigator.clipboard.writeText(handle);
+      setShareState("handle_copied");
     } catch {
       setShareState("error");
     }
@@ -51,7 +89,7 @@ export function PublicProfileSharePanel({
 
   if (!ready) {
     return (
-      <section className={`rounded-lg border border-white/10 bg-white/[0.045] p-4 ${className}`}>
+      <section className={`dzn-public-profile-owner-share-panel rounded-lg border border-white/10 bg-white/[0.045] p-4 ${className}`}>
         <div className="flex items-start gap-3">
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded border border-zinc-300/20 bg-zinc-400/10 text-zinc-300">
             <EyeOff className="h-5 w-5" />
@@ -67,12 +105,13 @@ export function PublicProfileSharePanel({
             </Link>
           </div>
         </div>
+        {preview ? <PublicProfileOwnerPreviewCard preview={preview} ready={false} /> : null}
       </section>
     );
   }
 
   return (
-    <section className={`rounded-lg border border-cyan-300/24 bg-[radial-gradient(circle_at_18%_0%,rgba(34,211,238,0.16),transparent_38%),rgba(255,255,255,0.045)] p-4 ${className}`}>
+    <section className={`dzn-public-profile-owner-share-panel rounded-lg border border-cyan-300/24 bg-[radial-gradient(circle_at_18%_0%,rgba(34,211,238,0.16),transparent_38%),rgba(255,255,255,0.045)] p-4 ${className}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-black uppercase text-white">Public Profile Link</p>
@@ -85,14 +124,19 @@ export function PublicProfileSharePanel({
           <UserRound className="h-5 w-5" />
         </span>
       </div>
-      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+      {preview ? <PublicProfileOwnerPreviewCard preview={preview} ready /> : null}
+      <div className="dzn-public-profile-owner-share-actions mt-4 grid gap-2 sm:grid-cols-4">
         <Link href={publicHref ?? "/player/profile"} className="inline-flex min-h-10 items-center justify-center gap-2 rounded bg-cyan-400 px-3 py-2 text-xs font-black uppercase text-slate-950 transition hover:bg-cyan-300">
-          View
-          <ArrowRight className="h-4 w-4" />
+          View Public Page
+          <ExternalLink className="h-4 w-4" />
         </Link>
         <button type="button" onClick={copyProfileLink} className="inline-flex min-h-10 items-center justify-center gap-2 rounded border border-white/12 bg-white/8 px-3 py-2 text-xs font-black uppercase text-white transition hover:bg-white/12">
           {shareState === "copied" ? <CheckCircle2 className="h-4 w-4 text-emerald-200" /> : <Clipboard className="h-4 w-4" />}
-          Copy
+          Copy Link
+        </button>
+        <button type="button" onClick={copyProfileHandle} disabled={!preview?.publicHandle} className="inline-flex min-h-10 items-center justify-center gap-2 rounded border border-white/12 bg-white/8 px-3 py-2 text-xs font-black uppercase text-white transition hover:bg-white/12 disabled:cursor-not-allowed disabled:text-zinc-500">
+          {shareState === "handle_copied" ? <CheckCircle2 className="h-4 w-4 text-emerald-200" /> : <Copy className="h-4 w-4" />}
+          Copy Handle
         </button>
         <button
           type="button"
@@ -109,8 +153,91 @@ export function PublicProfileSharePanel({
         <p className="mt-3 text-xs font-bold leading-5 text-emerald-200">Profile share sheet opened.</p>
       ) : shareState === "copied" ? (
         <p className="mt-3 text-xs font-bold leading-5 text-emerald-200">Public profile link copied.</p>
+      ) : shareState === "handle_copied" ? (
+        <p className="mt-3 text-xs font-bold leading-5 text-emerald-200">Public profile handle copied.</p>
       ) : null}
     </section>
+  );
+}
+
+function PublicProfileOwnerPreviewCard({ preview, ready }: { preview: PublicProfileOwnerPreview; ready: boolean }) {
+  const visibleStats = preview.stats.filter((stat) => stat.visible);
+  return (
+    <div className={`dzn-public-profile-owner-preview mt-4 overflow-hidden rounded-lg border p-4 ${ready ? "border-cyan-300/20 bg-black/30" : "border-zinc-400/15 bg-black/24"}`}>
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <PreviewAvatar preview={preview} ready={ready} />
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-cyan-100">How My Public Profile Looks</p>
+            <p className="mt-1 break-words text-xl font-black uppercase leading-none text-white [overflow-wrap:anywhere]">{ready ? preview.displayName : "Public Profile Hidden"}</p>
+            <p className="mt-2 break-words text-xs font-black uppercase tracking-[0.12em] text-zinc-500 [overflow-wrap:anywhere]">
+              {ready && preview.publicHandle ? `@${preview.publicHandle}` : "No public visitor link yet"}
+            </p>
+          </div>
+        </div>
+        <span className={`inline-flex max-w-full items-center gap-1.5 rounded border px-2.5 py-1 text-[10px] font-black uppercase ${preview.unsavedChanges ? "border-amber-300/30 bg-amber-400/10 text-amber-100" : ready ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-100" : "border-zinc-400/20 bg-zinc-400/10 text-zinc-300"}`}>
+          <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 break-words [overflow-wrap:anywhere]">{preview.statusLabel}</span>
+        </span>
+      </div>
+
+      <p className="mt-4 text-sm font-bold leading-6 text-zinc-300">{preview.statusDetail}</p>
+
+      {visibleStats.length ? (
+        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+          {visibleStats.slice(0, 3).map((stat) => (
+            <div key={stat.key} className="rounded border border-cyan-300/18 bg-cyan-400/8 p-3">
+              <p className="font-mono text-2xl font-black text-cyan-50">{stat.value}</p>
+              <p className="mt-1 text-[10px] font-black uppercase tracking-[0.12em] text-cyan-100/80">{stat.label}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-4 rounded border border-zinc-400/15 bg-black/24 p-3 text-xs font-bold leading-5 text-zinc-400">
+          Visitors will see the public shell with section-safe empty states until profile sections are published and visible.
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-2">
+        {preview.sections.map((section) => (
+          <div key={section.key} className="dzn-public-profile-owner-section-row flex items-center justify-between gap-3 rounded border border-white/10 bg-black/24 px-3 py-2">
+            <span className="min-w-0">
+              <span className="block break-words text-xs font-black uppercase text-white [overflow-wrap:anywhere]">{section.label}</span>
+              <span className="mt-1 block break-words text-[10px] font-bold uppercase text-zinc-500 [overflow-wrap:anywhere]">{section.detail}</span>
+            </span>
+            <span className={`inline-flex shrink-0 items-center gap-1 rounded border px-2 py-1 text-[10px] font-black uppercase ${section.visible ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-50" : "border-rose-300/25 bg-rose-400/10 text-rose-100"}`}>
+              {section.visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+              {section.visible ? "Visible" : "Hidden"}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {preview.warnings.length ? (
+        <div className="mt-4 rounded border border-amber-300/20 bg-amber-400/10 p-3">
+          <p className="text-[10px] font-black uppercase tracking-[0.12em] text-amber-100">Public view warnings</p>
+          <div className="mt-2 grid gap-1.5">
+            {preview.warnings.map((warning) => (
+              <p key={warning} className="text-xs font-bold leading-5 text-amber-50/88">{warning}</p>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PreviewAvatar({ preview, ready }: { preview: PublicProfileOwnerPreview; ready: boolean }) {
+  if (ready && preview.avatarUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={preview.avatarUrl} alt="" className="h-16 w-16 shrink-0 rounded-lg border border-white/10 object-cover" />
+    );
+  }
+  return (
+    <span className="grid h-16 w-16 shrink-0 place-items-center rounded-lg border border-cyan-300/25 bg-cyan-400/12 text-2xl font-black text-cyan-50">
+      {ready ? preview.avatarInitial : <EyeOff className="h-7 w-7 text-zinc-300" />}
+    </span>
   );
 }
 

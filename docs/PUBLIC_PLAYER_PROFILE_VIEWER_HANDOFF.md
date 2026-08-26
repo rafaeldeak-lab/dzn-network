@@ -444,6 +444,35 @@ Still excluded:
 
 Live checkout remains disabled, retained exports remain blocked unless separately approved, and Issue #49 remains reserved for final live payment activation.
 
-## Next Recommended Slice
+## Prior Next Recommended Slice
 
 Next should be public profile owner preview/share polish: let logged-in players preview their public profile exactly as visitors will see it from `/player/profile`, improve copy/share affordances and hidden-section warnings there, and keep proving preview/share controls cannot affect billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, retained exports, or competitive eligibility.
+
+## Follow-On Public Profile Owner Preview And Share Polish
+
+Branch: `codex/public-profile-owner-preview-share-polish-20260826`
+
+Base branch: `codex/player-public-profile-visual-polish-20260826`
+
+This slice gives logged-in players a clearer private owner preview and share surface from `/player/profile` without changing public profile publication, public profile reading, privacy persistence, retained export policy, billing, checkout, scoring, ranking, review, badge, season, event, Server Wars, XP-award, calling-card-award, or competitive eligibility behavior.
+
+The slice adds:
+
+- A "How My Public Profile Looks" preview inside the existing public profile share panel.
+- Section-level visible/hidden rows for XP, challenge progress, calling cards, and award dates.
+- Clear warnings for unpublished profiles, missing generated links, hidden sections, month-only award labels, and unsaved local changes.
+- Improved copy/share affordances for opening the public page, copying the full public link, copying the generated handle, and invoking the browser share sheet.
+- DZN-branded preview styling that stays local to the share panel.
+- `test:public-profile-owner-preview-share-polish` to prove preview/share UI remains presentation-only and does not become a dependency of protected influence systems.
+
+Still excluded:
+
+- Public profile API changes, profile handle generation changes, new privacy write APIs, owner/admin import writes, retained export files, export-history rows, sharing links, storage bindings, retention write APIs, and retained-export migrations.
+- Raw Discord IDs, internal DZN user IDs, source IDs, raw award evidence, exact award timestamps, Discord avatar hashes, owner/admin source records, billing state, scoring state, approval state, review internals, and hidden/private profile settings.
+- Stripe checkout activation, Stripe product/price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord mutations, and issue #49.
+
+Live checkout remains disabled, retained exports remain blocked unless separately approved, and Issue #49 remains reserved for final live payment activation.
+
+## Next Recommended Slice
+
+Next should be public profile share analytics/audit-free UX polish: add lightweight client-only feedback that shows players when they last copied/opened/shared their public link during the current page session, without storing share history, creating tracking events, adding analytics calls, or changing profile privacy settings, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility.
