@@ -9568,6 +9568,16 @@ button.dzn-header-action {
   grid-template-columns: repeat(auto-fit, minmax(8.75rem, 1fr));
 }
 
+.dzn-public-profile-share-session-feedback {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 12px 34px rgba(0, 0, 0, 0.18);
+}
+
+.dzn-public-profile-share-session-row {
+  min-height: 3.5rem;
+}
+
 @keyframes dzn-public-profile-bg-drift {
   0% {
     transform: translate3d(-0.7rem, -0.4rem, 0) scale(1.045);

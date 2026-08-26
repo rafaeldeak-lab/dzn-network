@@ -1277,6 +1277,30 @@ Fairness remains unchanged: owner preview/share UI and copy/share controls canno
 
 Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
 
+## Public Profile Share Session Feedback Slice
+
+This slice adds lightweight feedback to the private `/player/profile` public-profile share panel so players can see what they last did with their generated public profile link during the current browser tab session. It is deliberately analytics-free and audit-free: the feedback is held only in React state for the mounted page and is lost on reload, navigation, tab close, or remount.
+
+The slice adds:
+
+- A "This Page Session" panel inside `PublicProfileSharePanel`.
+- Local rows for the last public page open, public link copy, public handle copy, and browser share-sheet open during this tab session.
+- A clear "Private to this tab. It is not saved or sent to DZN." message.
+- `test:public-profile-share-session-feedback` to prove the feature does not introduce persistence, analytics, server writes, or protected-system dependencies.
+
+Rules:
+
+- The session feedback may use only local component state.
+- The session feedback must not use `localStorage`, `sessionStorage`, IndexedDB, cookies, beacons, analytics events, tracking events, audit-log calls, public-profile API fetches, profile-privacy writes, or any server route.
+- Opening the public page may record an in-memory `opened` timestamp before opening the existing public href in a new tab.
+- Copying the public link or generated handle may record an in-memory copy timestamp only after clipboard copy succeeds.
+- Browser share feedback may record an in-memory share timestamp only after the browser share sheet opens successfully; user-aborted shares should not be treated as a completed share.
+- The timestamp is user-facing feedback only. It must not become evidence of sharing, moderation state, attribution state, profile publication state, or account activity.
+
+Fairness remains unchanged: public profile share session feedback cannot affect profile privacy settings, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility.
+
+Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -1301,7 +1325,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/player/saved-servers` | 401 | Allowed | Allowed | Allowed | Session auth, player preference only |
 | `/api/player/reviews` | 401 | Allowed | Allowed | Allowed | Session auth, review mutation only |
 | `/api/player/challenges` | 401 | Allowed | Allowed | Allowed | Session auth, player participation only |
-| `/player/profile` and `/api/player/profile` | 401/login redirect | Allowed | Allowed | Allowed | Session auth, private no-store profile progression showcase, read-only; public-profile owner preview/share UI is local presentation only |
+| `/player/profile` and `/api/player/profile` | 401/login redirect | Allowed | Allowed | Allowed | Session auth, private no-store profile progression showcase, read-only; public-profile owner preview/share UI and share session feedback are local presentation only |
 | `/api/player/profile-privacy` | 401 | Allowed | Allowed | Allowed | Private player-owned settings API; GET/PATCH only; writes only `player_profile_privacy_preferences` |
 | `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences; DZN-branded visual shell is presentation-only and does not change the public API, privacy writes, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, or competitive eligibility |
 | Public profile attribution on reviews/challenges/leaderboards | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Read-only generated-handle attribution; no name-only matching; ambiguous/hidden/unpublished profiles are not linked |

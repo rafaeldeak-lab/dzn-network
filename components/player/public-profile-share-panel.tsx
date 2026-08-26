@@ -5,6 +5,14 @@ import { useState } from "react";
 import { ArrowRight, CheckCircle2, Clipboard, Copy, Eye, EyeOff, ExternalLink, Share2, ShieldCheck, UserRound } from "lucide-react";
 
 type ShareState = "idle" | "copied" | "handle_copied" | "shared" | "error";
+type ShareActivityKind = "opened" | "copied" | "handle_copied" | "shared";
+type ShareActivityRecord = {
+  kind: ShareActivityKind;
+  label: string;
+  detail: string;
+  displayTime: string;
+  occurredAt: number;
+};
 
 export type PublicProfileOwnerPreview = {
   displayName: string;
@@ -45,13 +53,25 @@ export function PublicProfileSharePanel({
   className?: string;
 }) {
   const [shareState, setShareState] = useState<ShareState>("idle");
+  const [shareActivity, setShareActivity] = useState<Record<ShareActivityKind, ShareActivityRecord | null>>({
+    opened: null,
+    copied: null,
+    handle_copied: null,
+    shared: null,
+  });
   const ready = Boolean(publicProfileEnabled && publicHref);
   const profileUrl = ready ? absoluteProfileUrl(publicHref) : "";
+
+  function recordShareActivity(kind: ShareActivityKind) {
+    const activity = shareActivityRecord(kind, new Date());
+    setShareActivity((current) => ({ ...current, [kind]: activity }));
+  }
 
   async function copyProfileLink() {
     if (!profileUrl) return;
     try {
       await navigator.clipboard.writeText(profileUrl);
+      recordShareActivity("copied");
       setShareState("copied");
     } catch {
       setShareState("error");
@@ -63,6 +83,7 @@ export function PublicProfileSharePanel({
     if (!handle) return;
     try {
       await navigator.clipboard.writeText(handle);
+      recordShareActivity("handle_copied");
       setShareState("handle_copied");
     } catch {
       setShareState("error");
@@ -80,6 +101,7 @@ export function PublicProfileSharePanel({
         text: "View this DZN public player profile.",
         url: profileUrl,
       });
+      recordShareActivity("shared");
       setShareState("shared");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
@@ -126,7 +148,13 @@ export function PublicProfileSharePanel({
       </div>
       {preview ? <PublicProfileOwnerPreviewCard preview={preview} ready /> : null}
       <div className="dzn-public-profile-owner-share-actions mt-4 grid gap-2 sm:grid-cols-4">
-        <Link href={publicHref ?? "/player/profile"} className="inline-flex min-h-10 items-center justify-center gap-2 rounded bg-cyan-400 px-3 py-2 text-xs font-black uppercase text-slate-950 transition hover:bg-cyan-300">
+        <Link
+          href={publicHref ?? "/player/profile"}
+          target="_blank"
+          rel="noreferrer"
+          onClick={() => recordShareActivity("opened")}
+          className="inline-flex min-h-10 items-center justify-center gap-2 rounded bg-cyan-400 px-3 py-2 text-xs font-black uppercase text-slate-950 transition hover:bg-cyan-300"
+        >
           View Public Page
           <ExternalLink className="h-4 w-4" />
         </Link>
@@ -156,6 +184,7 @@ export function PublicProfileSharePanel({
       ) : shareState === "handle_copied" ? (
         <p className="mt-3 text-xs font-bold leading-5 text-emerald-200">Public profile handle copied.</p>
       ) : null}
+      <ShareSessionFeedback activity={shareActivity} />
     </section>
   );
 }
@@ -239,6 +268,89 @@ function PreviewAvatar({ preview, ready }: { preview: PublicProfileOwnerPreview;
       {ready ? preview.avatarInitial : <EyeOff className="h-7 w-7 text-zinc-300" />}
     </span>
   );
+}
+
+function ShareSessionFeedback({ activity }: { activity: Record<ShareActivityKind, ShareActivityRecord | null> }) {
+  const rows = (["opened", "copied", "handle_copied", "shared"] satisfies ShareActivityKind[])
+    .map((kind) => activity[kind])
+    .filter((record): record is ShareActivityRecord => Boolean(record))
+    .sort((left, right) => right.occurredAt - left.occurredAt);
+
+  return (
+    <div className="dzn-public-profile-share-session-feedback mt-4 rounded border border-white/10 bg-black/24 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-cyan-100">This Page Session</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.12em] text-zinc-500">Not saved</p>
+      </div>
+      {rows.length ? (
+        <div className="mt-3 grid gap-2">
+          {rows.map((row) => (
+            <div key={row.kind} className="dzn-public-profile-share-session-row flex items-center justify-between gap-3 rounded border border-white/8 bg-white/[0.035] px-3 py-2">
+              <span className="min-w-0">
+                <span className="block break-words text-xs font-black uppercase text-white [overflow-wrap:anywhere]">{row.label}</span>
+                <span className="mt-1 block break-words text-[10px] font-bold uppercase text-zinc-500 [overflow-wrap:anywhere]">{row.detail}</span>
+              </span>
+              <span className="shrink-0 rounded border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 font-mono text-[10px] font-black text-cyan-50">
+                {row.displayTime}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 text-xs font-bold leading-5 text-zinc-400">No copy, open, or share action has happened in this tab yet.</p>
+      )}
+      <p className="mt-3 text-xs font-bold leading-5 text-zinc-500">
+        Private to this tab. It is not saved or sent to DZN.
+      </p>
+    </div>
+  );
+}
+
+function shareActivityRecord(kind: ShareActivityKind, date: Date): ShareActivityRecord {
+  const displayTime = formatShareActivityTime(date);
+  const occurredAt = date.getTime();
+  if (kind === "opened") {
+    return {
+      kind,
+      label: "Opened Public Page",
+      detail: "The public profile page was opened from this tab.",
+      displayTime,
+      occurredAt,
+    };
+  }
+  if (kind === "copied") {
+    return {
+      kind,
+      label: "Copied Profile Link",
+      detail: "The full public profile link was copied in this tab.",
+      displayTime,
+      occurredAt,
+    };
+  }
+  if (kind === "handle_copied") {
+    return {
+      kind,
+      label: "Copied Profile Handle",
+      detail: "The generated public handle was copied in this tab.",
+      displayTime,
+      occurredAt,
+    };
+  }
+  return {
+    kind,
+    label: "Opened Browser Share",
+    detail: "The browser share sheet opened in this tab.",
+    displayTime,
+    occurredAt,
+  };
+}
+
+function formatShareActivityTime(date: Date) {
+  return date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 function nativeShareAvailable() {
