@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowLeft, Copy, EyeOff, Search, ShieldCheck, UserRound, Users, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Award, Copy, EyeOff, Search, ShieldCheck, Sparkles, Trophy, UserRound, Users, type LucideIcon } from "lucide-react";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
 import { FetchJsonError, fetchJsonWithRetry } from "@/lib/client-fetch";
@@ -19,6 +19,28 @@ type PublicCommunityMember = {
   role_label?: string | null;
   member_since_label?: string | null;
   public_profile?: PublicProfileAttribution | null;
+  profile_preview?: PublicProfileDirectoryPreview | null;
+};
+
+type PublicProfileDirectoryPreviewHighlight = {
+  key?: "xp" | "challenge_progress" | "calling_cards";
+  label?: string;
+  value?: string;
+  detail?: string | null;
+};
+
+type PublicProfileDirectoryPreview = {
+  source?: string;
+  visible_section_count?: number;
+  highlights?: PublicProfileDirectoryPreviewHighlight[];
+  empty_state?: string;
+  privacy?: {
+    uses_visible_profile_sections_only?: boolean;
+    hidden_sections?: string;
+    private_identifiers?: string;
+    raw_award_evidence?: string;
+    exact_award_times?: string;
+  };
 };
 
 type PublicCommunityMembersPayload = {
@@ -267,12 +289,25 @@ type NormalizedMember = {
     public_href: string;
     public_api_href: string;
   };
+  profile_preview: NormalizedProfilePreview | null;
 };
 
 type DirectoryMemberGroup = {
   key: string;
   label: string;
   members: NormalizedMember[];
+};
+
+type NormalizedProfilePreview = {
+  visible_section_count: number;
+  highlights: NormalizedProfilePreviewHighlight[];
+};
+
+type NormalizedProfilePreviewHighlight = {
+  key: "xp" | "challenge_progress" | "calling_cards";
+  label: string;
+  value: string;
+  detail: string | null;
 };
 
 type DirectoryInsight = {
@@ -438,7 +473,56 @@ function MemberProfileCard({ member }: { member: NormalizedMember }) {
           <span className="rounded border border-cyan-300/18 bg-cyan-400/10 px-2 py-1 text-cyan-100">@{member.public_profile.public_handle}</span>
         </div>
       </div>
+      <ProfilePreviewStrip preview={member.profile_preview} />
     </Link>
+  );
+}
+
+function ProfilePreviewStrip({ preview }: { preview: NormalizedProfilePreview | null }) {
+  const highlights = preview?.highlights ?? [];
+  return (
+    <div className="mt-4 border-t border-white/10 pt-3">
+      <div className="flex items-center justify-between gap-3 text-[10px] font-black uppercase text-zinc-500">
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-fuchsia-100" />
+          <span className="truncate">Published profile preview</span>
+        </span>
+        <span className="shrink-0 text-cyan-100">
+          {highlights.length ? `${highlights.length} visible` : "Public-safe"}
+        </span>
+      </div>
+      {highlights.length ? (
+        <div className="mt-3 grid gap-2">
+          {highlights.map((highlight) => {
+            const Icon = profilePreviewIcon(highlight.key);
+            return (
+              <div key={highlight.key} className="flex min-w-0 items-start gap-2 text-left">
+                <Icon className="mt-0.5 h-4 w-4 shrink-0 text-cyan-100" />
+                <div className="min-w-0">
+                  <p className="truncate text-[10px] font-black uppercase text-zinc-500">{highlight.label}</p>
+                  <p className="mt-0.5 break-words text-sm font-black uppercase leading-tight text-white [overflow-wrap:anywhere]">
+                    {highlight.value}
+                  </p>
+                  {highlight.detail ? (
+                    <p className="mt-0.5 break-words text-[11px] font-bold leading-4 text-zinc-400 [overflow-wrap:anywhere]">
+                      {highlight.detail}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-3 flex items-start gap-2 text-[11px] font-bold leading-5 text-zinc-400">
+          <EyeOff className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" />
+          <span>Profile sections hidden or not earned yet.</span>
+        </p>
+      )}
+      <p className="mt-3 text-[10px] font-black uppercase leading-4 text-zinc-600">
+        Visible sections only. Hidden profile sections stay private.
+      </p>
+    </div>
   );
 }
 
@@ -450,6 +534,7 @@ function normalizeMember(value: PublicCommunityMember): NormalizedMember | null 
     role_label: nullableDisplayText(value.role_label, 36),
     member_since_label: nullableDisplayText(value.member_since_label, 24),
     public_profile: profile,
+    profile_preview: normalizeProfilePreview(value.profile_preview),
   };
 }
 
@@ -466,6 +551,51 @@ function normalizePublicProfile(value: unknown) {
     public_href: expectedHref,
     public_api_href: expectedApiHref,
   };
+}
+
+function normalizeProfilePreview(value: unknown): NormalizedProfilePreview | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const privacy = record.privacy && typeof record.privacy === "object" ? record.privacy as Record<string, unknown> : null;
+  if (
+    record.source !== "published_profile_sections"
+    || privacy?.uses_visible_profile_sections_only !== true
+    || privacy.hidden_sections !== "omitted"
+    || privacy.private_identifiers !== "hidden"
+    || privacy.raw_award_evidence !== "hidden"
+    || privacy.exact_award_times !== "hidden"
+  ) {
+    return null;
+  }
+  const highlights = Array.isArray(record.highlights)
+    ? record.highlights.map(normalizeProfilePreviewHighlight).filter((item): item is NormalizedProfilePreviewHighlight => Boolean(item)).slice(0, 3)
+    : [];
+  return {
+    visible_section_count: highlights.length,
+    highlights,
+  };
+}
+
+function normalizeProfilePreviewHighlight(value: unknown): NormalizedProfilePreviewHighlight | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const key = record.key;
+  if (key !== "xp" && key !== "challenge_progress" && key !== "calling_cards") return null;
+  const label = nullableDisplayText(record.label, 36);
+  const previewValue = nullableDisplayText(record.value, 48);
+  if (!label || !previewValue) return null;
+  return {
+    key,
+    label,
+    value: previewValue,
+    detail: nullableDisplayText(record.detail, 72),
+  };
+}
+
+function profilePreviewIcon(key: NormalizedProfilePreviewHighlight["key"]): LucideIcon {
+  if (key === "xp") return Sparkles;
+  if (key === "challenge_progress") return Trophy;
+  return Award;
 }
 
 function publicServerSlug(value: unknown) {

@@ -390,3 +390,32 @@ Live checkout remains disabled, and Issue #49 remains reserved for final live pa
 ## Next Recommended Slice
 
 Next should be public community member card preview polish: add richer, public-safe preview metadata from each member's already-published profile sections, only when those sections are visible under the player's profile privacy settings, while keeping hidden profile sections private and preserving the same presentation-only isolation from billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP, calling-card awards, and competitive eligibility.
+
+## Follow-On Public Community Member Card Preview Polish
+
+Branch: `codex/public-community-member-card-preview-polish-20260826`
+
+Base branch: `codex/public-community-directory-discovery-polish-20260826`
+
+This slice adds richer public-safe preview metadata to visible public community member cards without changing public profile publication, owner/admin import controls, retained export policy, billing, checkout, scoring, ranking, review, badge, season, event, Server Wars, XP-award, calling-card-award, or competitive eligibility behavior.
+
+The slice adds:
+
+- `PublicPlayerProfileDirectoryPreview` as a public-safe read model for directory cards.
+- Batched preview reads keyed by the trusted DZN user bridge, capped to the public directory limit.
+- Section-level privacy enforcement before reading XP, challenge, or calling-card summary data for preview cards.
+- `profile_preview` on public community member rows.
+- Public card UI for visible section highlights plus an empty state when profile sections are hidden or not yet earned.
+- `preview_uses_published_profile_sections_only` and `preview_omits_hidden_profile_sections` safeguards.
+
+Still excluded:
+
+- Profile handle generation, profile privacy writes, owner/admin import writes, retained export files, export-history rows, sharing links, storage bindings, retention write APIs, and retained-export migrations.
+- Raw Discord IDs, internal DZN user IDs, source IDs, raw award evidence, exact award timestamps, owner/admin source records, billing state, scoring state, approval state, review internals, and private profile settings.
+- Stripe checkout activation, Stripe product/price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord mutations, and issue #49.
+
+Live checkout remains disabled, retained exports remain blocked unless separately approved, and Issue #49 remains reserved for final live payment activation.
+
+## Next Recommended Slice
+
+Next should be player public-profile visual polish: make `/players/[handle]` itself feel richer and more DZN-branded now that community cards can preview visible sections, while preserving the same privacy controls and proving public profile styling cannot affect billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, or competitive eligibility.

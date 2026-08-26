@@ -475,7 +475,7 @@ function assertNoSqlWrite(sql: string, message: string) {
 }
 
 function forbiddenProtectedInfluencePattern() {
-  return /\bowner_billing_accounts\b|\bserver_subscriptions\b|\bowner_plan_entitlements\b|\bserver_rankings\b|\bdiscovery_score\b|\bserver_reviews\b|\breview_score\b|\bserver_badge_awards\b|\bbadge_unlock_progress\b|\bdzn_seasons\b|\bcompetitive_events\b|\bcompetitive_event_matches\b|\bctf_tournament\b|\bevent_matchups\b|\bevent_participants\b|\bserver_war_score_snapshots\b|\bserver_war_events\b|\bplayer_progression_award_sources\b|\bplayer_xp\b|\bcalling_card\b|\bstripe\b|\bnitrado\b|\bdiscord_oauth_tokens\b|\bDZN_LIVE_CHECKOUT_ENABLED\b/i;
+  return /\bowner_billing_accounts\b|\bserver_subscriptions\b|\bowner_plan_entitlements\b|\bserver_rankings\b|\bdiscovery_score\b|\bserver_reviews\b|\breview_score\b|\bserver_badge_awards\b|\bbadge_unlock_progress\b|\bdzn_seasons\b|\bcompetitive_events\b|\bcompetitive_event_matches\b|\bctf_tournament\b|\bevent_matchups\b|\bevent_participants\b|\bserver_war_score_snapshots\b|\bserver_war_events\b|\bplayer_progression_award_sources\b|\bstripe\b|\bnitrado\b|\bdiscord_oauth_tokens\b|\bDZN_LIVE_CHECKOUT_ENABLED\b/i;
 }
 
 function forbiddenProductionMutationPattern() {
