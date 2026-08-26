@@ -20,7 +20,24 @@ type LoadState = "loading" | "ready" | "unauthorized" | "plan_required" | "forbi
 type CandidateStatus = "pending" | "imported" | "rejected" | "duplicate" | "ambiguous";
 type MatchStatus = "pending" | "matched" | "no_match" | "duplicate" | "ambiguous";
 type StatusFilter = CandidateStatus | "all";
-type ActionKind = "import" | "reject";
+type IssueFilter = "all" | "importable" | "repeated_no_match" | "repeated_duplicate";
+type ActionKind = "import" | "reject" | "refresh_preview";
+type ImportPreview = {
+  status: "ready" | "blocked_no_match" | "blocked_duplicate" | "blocked_ambiguous" | "already_imported" | "rejected";
+  can_import: boolean;
+  source_trust: "trusted_snapshot" | "manual_or_unknown";
+  summary: string;
+  warnings: string[];
+  snapshot: {
+    available: boolean;
+    source: string | null;
+    trust_status: string | null;
+    captured_at: string | null;
+    username: string | null;
+    display_name: string | null;
+    role_label: string | null;
+  } | null;
+};
 
 type ServerOption = {
   id: string;
@@ -33,6 +50,7 @@ type ServerOption = {
 type CandidateItem = {
   id: string;
   linked_server_id: string;
+  owner_user_id: string | null;
   server_name: string;
   public_slug: string | null;
   community_guild_id: string;
@@ -58,6 +76,7 @@ type CandidateItem = {
     public_href: string;
     public_api_href: string;
   } | null;
+  import_preview: ImportPreview;
 };
 
 type AuditItem = {
@@ -82,6 +101,7 @@ type Payload = {
   role: "owner" | "admin";
   filters: {
     status: StatusFilter;
+    issue: IssueFilter;
     linked_server_id: string | null;
   };
   counts: {
@@ -98,6 +118,12 @@ type Payload = {
   safeguards: {
     public_profile_link_requires_player_opt_in_handle: boolean;
     trusted_dzn_user_bridge_required: boolean;
+    import_preview_requires_trusted_bridge: boolean;
+    import_previews_from_trusted_snapshots_where_available: boolean;
+    admin_repeated_source_filters: boolean;
+    owner_importable_notification_hook: boolean;
+    notification_hook_dzn_pulse_only: boolean;
+    notification_read_state_private_per_owner: boolean;
     rejects_duplicate_members: boolean;
     rejects_ambiguous_user_bridge: boolean;
     affects_ctf_scoring_rows: boolean;
@@ -137,6 +163,12 @@ const STATUS_FILTERS: Array<{ value: StatusFilter; label: string }> = [
   { value: "rejected", label: "Rejected" },
   { value: "all", label: "All" },
 ];
+const ISSUE_FILTERS: Array<{ value: IssueFilter; label: string }> = [
+  { value: "all", label: "All source rows" },
+  { value: "importable", label: "Importable" },
+  { value: "repeated_no_match", label: "Repeated no-match" },
+  { value: "repeated_duplicate", label: "Repeated duplicate" },
+];
 
 const EMPTY_FORM: CandidateForm = {
   linkedServerId: "",
@@ -151,6 +183,7 @@ const EMPTY_FORM: CandidateForm = {
 export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedded = false }: { homeHref?: string; embedded?: boolean }) {
   const [state, setState] = useState<LoadState>("loading");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
+  const [issueFilter, setIssueFilter] = useState<IssueFilter>("all");
   const [linkedServerFilter, setLinkedServerFilter] = useState("all");
   const [payload, setPayload] = useState<Payload | null>(null);
   const [form, setForm] = useState<CandidateForm>(EMPTY_FORM);
@@ -161,7 +194,7 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
 
   useEffect(() => {
     let active = true;
-    const params = new URLSearchParams({ status: statusFilter, limit: "120" });
+    const params = new URLSearchParams({ status: statusFilter, issue: issueFilter, limit: "120" });
     if (linkedServerFilter !== "all") params.set("linked_server_id", linkedServerFilter);
 
     fetch(`/api/owner/community-members?${params.toString()}`, {
@@ -212,7 +245,7 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
     return () => {
       active = false;
     };
-  }, [statusFilter, linkedServerFilter, refreshKey]);
+  }, [statusFilter, issueFilter, linkedServerFilter, refreshKey]);
 
   const counts = payload?.counts ?? { total: 0, pending: 0, imported: 0, rejected: 0, duplicate: 0, ambiguous: 0 };
   const candidates = payload?.candidates ?? [];
@@ -257,7 +290,14 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   async function runCandidateAction(candidate: CandidateItem, action: ActionKind) {
     const busyKey = `${candidate.id}:${action}`;
     setBusyAction(busyKey);
-    setMessage({ tone: "info", text: action === "import" ? "Checking trusted bridge before import." : "Rejecting community member candidate." });
+    setMessage({
+      tone: "info",
+      text: action === "import"
+        ? "Checking trusted bridge before import."
+        : action === "refresh_preview"
+          ? "Refreshing trusted source preview."
+          : "Rejecting community member candidate.",
+    });
     try {
       const response = await fetch(`/api/owner/community-members/${encodeURIComponent(candidate.id)}`, {
         method: "POST",
@@ -265,13 +305,27 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify({
           action,
-          reason: action === "import" ? "Owner/admin approved unique DZN user bridge." : "Rejected by owner/admin review.",
+          reason: action === "import"
+            ? "Owner/admin approved unique DZN user bridge."
+            : action === "refresh_preview"
+              ? "Owner/admin refreshed trusted source preview."
+              : "Rejected by owner/admin review.",
           role_label: candidate.role_label,
         }),
       });
       const result = await safeJson(response);
       if (!response.ok || !result?.ok) throw new Error(apiMessage(result, "Community member action failed."));
-      setMessage({ tone: "success", text: apiMessage(result, action === "import" ? "Community member imported." : "Candidate rejected.") });
+      setMessage({
+        tone: "success",
+        text: apiMessage(
+          result,
+          action === "import"
+            ? "Community member imported."
+            : action === "refresh_preview"
+              ? "Import preview refreshed."
+              : "Candidate rejected.",
+        ),
+      });
       setRefreshKey((value) => value + 1);
     } catch (error) {
       setMessage({ tone: "error", text: error instanceof Error ? error.message : "Community member action failed." });
@@ -319,11 +373,13 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
             </div>
             <h1 className="mt-4 text-2xl font-black uppercase text-white sm:text-3xl">Trusted community member sources</h1>
             <p className="mt-3 max-w-3xl text-sm font-bold leading-6 text-zinc-300">
-              Candidate Source Queue imports into the presentation-only community_members bridge after Duplicate/ambiguous-user rejection and unique DZN user bridge checks.
+              Candidate Source Queue imports into the presentation-only community_members bridge after safer import previews, Duplicate/ambiguous-user rejection, and unique DZN user bridge checks.
             </p>
           </div>
           <div className="grid gap-2 rounded-lg border border-white/10 bg-black/28 p-3 text-xs font-bold text-zinc-400">
             <StatusLine label="public profile opt-in handle" ok={payload?.safeguards.public_profile_link_requires_player_opt_in_handle ?? true} />
+            <StatusLine label="trusted snapshot previews" ok={payload?.safeguards.import_previews_from_trusted_snapshots_where_available ?? true} />
+            <StatusLine label="owner Pulse hook only" ok={payload?.safeguards.owner_importable_notification_hook ?? true} />
             <StatusLine label="CTF scoring rows" ok={!(payload?.safeguards.affects_ctf_scoring_rows ?? false)} />
             <StatusLine label="Billing and rankings" ok={!((payload?.safeguards.affects_billing ?? false) || (payload?.safeguards.affects_rankings ?? false))} />
             <StatusLine label="XP and calling cards" ok={!((payload?.safeguards.affects_xp_awards ?? false) || (payload?.safeguards.affects_calling_card_awards ?? false))} />
@@ -418,6 +474,9 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
                   <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)} className="rounded border border-white/10 bg-black/40 px-3 py-2 text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-300/40">
                     {STATUS_FILTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                   </select>
+                  <select value={issueFilter} onChange={(event) => setIssueFilter(event.target.value as IssueFilter)} className="rounded border border-white/10 bg-black/40 px-3 py-2 text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-300/40">
+                    {ISSUE_FILTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                  </select>
                   <select value={linkedServerFilter} onChange={(event) => setLinkedServerFilter(event.target.value)} className="rounded border border-white/10 bg-black/40 px-3 py-2 text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-300/40">
                     <option value="all">All communities</option>
                     {servers.map((server) => <option key={server.id} value={server.id}>{server.server_name}</option>)}
@@ -474,10 +533,12 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
 }
 
 function CandidateCard({ candidate, busyAction, onAction }: { candidate: CandidateItem; busyAction: string | null; onAction: (candidate: CandidateItem, action: ActionKind) => void }) {
-  const canImport = candidate.status === "pending" && candidate.match_status === "matched" && !candidate.existing_member_id;
+  const canImport = candidate.import_preview.can_import;
   const canReject = candidate.status === "pending";
+  const canRefresh = candidate.status !== "imported" && candidate.status !== "rejected";
   const importBusy = busyAction === `${candidate.id}:import`;
   const rejectBusy = busyAction === `${candidate.id}:reject`;
+  const refreshBusy = busyAction === `${candidate.id}:refresh_preview`;
   return (
     <article className="rounded-lg border border-white/10 bg-black/28 p-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -500,6 +561,15 @@ function CandidateCard({ candidate, busyAction, onAction }: { candidate: Candida
           <p className="mt-1 text-xs font-bold text-zinc-500">{candidate.server_name} / {candidate.community_name}</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={!canRefresh || refreshBusy}
+            onClick={() => onAction(candidate, "refresh_preview")}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-cyan-300/24 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 transition hover:bg-cyan-400/16 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshBusy ? "animate-spin" : ""}`} />
+            {refreshBusy ? "Refreshing" : "Refresh preview"}
+          </button>
           <button
             type="button"
             disabled={!canImport || importBusy}
@@ -526,6 +596,7 @@ function CandidateCard({ candidate, busyAction, onAction }: { candidate: Candida
         <span>Role: {candidate.role_label ?? "Community member"}</span>
         <span>Source: {titleCaseToken(candidate.source)}</span>
       </div>
+      <ImportPreviewPanel preview={candidate.import_preview} />
       {candidate.reason ? <p className="mt-3 rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-zinc-400">{candidate.reason}</p> : null}
       {candidate.public_profile ? (
         <Link href={candidate.public_profile.public_href} className="mt-3 inline-flex items-center gap-2 rounded border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50">
@@ -534,6 +605,45 @@ function CandidateCard({ candidate, busyAction, onAction }: { candidate: Candida
         </Link>
       ) : null}
     </article>
+  );
+}
+
+function ImportPreviewPanel({ preview }: { preview: ImportPreview }) {
+  const tone = importPreviewTone(preview.status);
+  return (
+    <div className="mt-4 border-t border-white/10 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {preview.can_import ? <CheckCircle2 className="h-4 w-4 text-emerald-300" /> : <AlertTriangle className="h-4 w-4 text-amber-300" />}
+          <p className="text-xs font-black uppercase tracking-[0.14em] text-zinc-300">Import preview</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase ${tone}`}>{preview.status.replaceAll("_", " ")}</span>
+          <span className="rounded border border-cyan-300/18 bg-cyan-400/8 px-2 py-1 text-[10px] font-black uppercase text-cyan-100">
+            {preview.source_trust === "trusted_snapshot" ? "Trusted snapshot" : "Manual source"}
+          </span>
+        </div>
+      </div>
+      <p className="mt-2 text-xs font-bold leading-5 text-zinc-400">{preview.summary}</p>
+      {preview.snapshot ? (
+        <div className="mt-3 grid gap-2 text-xs font-bold text-zinc-500 sm:grid-cols-2 xl:grid-cols-4">
+          <span>Snapshot: {titleCaseToken(preview.snapshot.source)}</span>
+          <span>Captured: {formatDate(preview.snapshot.captured_at)}</span>
+          <span>Name: {preview.snapshot.display_name ?? preview.snapshot.username ?? "not supplied"}</span>
+          <span>Role: {preview.snapshot.role_label ?? "not supplied"}</span>
+        </div>
+      ) : null}
+      {preview.warnings.length ? (
+        <div className="mt-3 grid gap-1 text-xs font-bold text-amber-100/85">
+          {preview.warnings.map((warning) => (
+            <span key={warning} className="inline-flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              {warning}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -557,6 +667,15 @@ function MatchPill({ status }: { status: MatchStatus }) {
     ambiguous: "border-red-300/24 bg-red-400/10 text-red-100",
   }[status];
   return <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase ${tone}`}>{status.replace("_", " ")}</span>;
+}
+
+function importPreviewTone(status: ImportPreview["status"]) {
+  if (status === "ready") return "border-emerald-300/24 bg-emerald-400/10 text-emerald-100";
+  if (status === "blocked_duplicate") return "border-violet-300/24 bg-violet-400/10 text-violet-100";
+  if (status === "blocked_ambiguous") return "border-red-300/24 bg-red-400/10 text-red-100";
+  if (status === "already_imported") return "border-cyan-300/24 bg-cyan-400/10 text-cyan-100";
+  if (status === "rejected") return "border-rose-300/24 bg-rose-400/10 text-rose-100";
+  return "border-amber-300/24 bg-amber-400/10 text-amber-100";
 }
 
 function MetricCard({ label, value, loading, tone }: { label: string; value: number; loading: boolean; tone: "cyan" | "amber" | "emerald" | "rose" | "violet" | "red" }) {

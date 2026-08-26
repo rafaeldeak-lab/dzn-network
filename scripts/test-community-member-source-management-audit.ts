@@ -91,6 +91,33 @@ type FakeAudit = {
   created_at: string;
 };
 
+type FakeSnapshot = {
+  id: string;
+  linked_server_id: string;
+  community_guild_id: string;
+  candidate_discord_id: string;
+  candidate_username: string | null;
+  candidate_display_name: string | null;
+  role_label: string | null;
+  source: string;
+  trust_status: string;
+  captured_at: string;
+};
+
+type FakeNotification = {
+  id: string;
+  user_id: string;
+  server_id: string | null;
+  type: string;
+  title: string;
+  body: string;
+  action_url: string | null;
+  dedupe_key: string;
+  metadata: string | null;
+  read_at: string | null;
+  created_at: string;
+};
+
 type FakeState = {
   operations: CapturedOperation[];
   servers: FakeServer[];
@@ -100,6 +127,8 @@ type FakeState = {
   candidates: FakeCandidate[];
   communityMembers: FakeCommunityMember[];
   audit: FakeAudit[];
+  snapshots: FakeSnapshot[];
+  notifications: FakeNotification[];
 };
 
 const OWNER_USER: SessionUser = {
@@ -121,13 +150,16 @@ async function main() {
   assertSafeguards();
   await assertCandidateImportFlow();
   await assertOwnerScopeAndAmbiguousRejection();
-  console.log("Community member source management audit tests passed.");
+  await assertImportPreviewPolishAndNotifications();
+  console.log("Community member source management and import usability tests passed.");
 }
 
 function assertStaticContracts() {
   for (const path of [
     "migrations/0068_community_member_source_management_audit.sql",
+    "migrations/0069_community_member_import_usability_polish.sql",
     "functions/_lib/community-member-source-management.ts",
+    "functions/_lib/dzn-pulse.ts",
     "functions/api/owner/community-members.ts",
     "functions/api/owner/community-members/[candidateId].ts",
     "components/community/community-member-source-dashboard.tsx",
@@ -163,6 +195,19 @@ function assertStaticContracts() {
   assert.doesNotMatch(migration, /\bplayer_stats\b/i, "This slice must not create or depend on player_stats.");
   assert.doesNotMatch(migration, /\b(?:DROP|DELETE|TRUNCATE|UPDATE|INSERT)\b/i, "Migration must be additive only.");
 
+  const polishMigration = read("migrations/0069_community_member_import_usability_polish.sql");
+  for (const snippet of [
+    "CREATE TABLE IF NOT EXISTS community_member_source_snapshots",
+    "candidate_discord_id TEXT NOT NULL",
+    "trust_status TEXT NOT NULL DEFAULT 'trusted'",
+    "idx_community_member_source_snapshots_lookup",
+    "idx_user_notifications_community_member_importable",
+    "WHERE type = 'community_member_candidate_importable'",
+  ]) {
+    assert.equal(polishMigration.includes(snippet), true, `Polish migration must include ${snippet}.`);
+  }
+  assert.doesNotMatch(polishMigration, /\b(?:DROP|DELETE|TRUNCATE|UPDATE|INSERT)\b/i, "Polish migration must be additive only.");
+
   const helper = read("functions/_lib/community-member-source-management.ts");
   for (const snippet of [
     "authorizeCommunityMemberSourceRequest",
@@ -173,10 +218,26 @@ function assertStaticContracts() {
     "readExistingCommunityMemberId",
     "community_member_candidates",
     "community_member_source_audit",
+    "community_member_source_snapshots",
     "community_members",
+    "user_notifications",
     "player_profile_privacy_preferences",
+    "candidate_preview_refreshed",
+    "candidate_importable",
+    "\"refresh_preview\"",
+    "appendCandidateIssueFilter",
+    "candidateSnapshotSelectSql",
+    "buildImportPreview",
+    "maybeNotifyCommunityMemberImportable",
+    "community_member_candidate_importable",
     "candidate_discord_id_masked",
     "public_profile_link_requires_player_opt_in_handle: true",
+    "import_preview_requires_trusted_bridge: true",
+    "import_previews_from_trusted_snapshots_where_available: true",
+    "admin_repeated_source_filters: true",
+    "owner_importable_notification_hook: true",
+    "notification_hook_dzn_pulse_only: true",
+    "notification_read_state_private_per_owner: true",
     "rejects_duplicate_members: true",
     "rejects_ambiguous_user_bridge: true",
     "affects_ctf_scoring_rows: false",
@@ -198,6 +259,16 @@ function assertStaticContracts() {
   }
   assertNoForbiddenMutationTargets(helper, "Source management helper");
   assertNoExternalOrLivePaymentMutation(helper, "Source management helper");
+
+  const pulse = read("functions/_lib/dzn-pulse.ts");
+  for (const snippet of [
+    "PULSE_COMMUNITY_NOTIFICATION_TYPES",
+    "community_member_candidate_importable",
+    "\"community\"",
+    "Community",
+  ]) {
+    assert.equal(pulse.includes(snippet), true, `DZN Pulse must include ${snippet}.`);
+  }
 
   const listRoute = read("functions/api/owner/community-members.ts");
   for (const snippet of [
@@ -233,6 +304,11 @@ function assertStaticContracts() {
     "Candidate Source Queue",
     "Duplicate/ambiguous-user rejection",
     "presentation-only community_members bridge",
+    "safer import previews",
+    "Import preview",
+    "Refresh preview",
+    "Repeated no-match",
+    "Repeated duplicate",
     "public profile opt-in handle",
     "CTF scoring rows",
     "Hidden until player opt-in",
@@ -273,15 +349,22 @@ function assertStaticContracts() {
 
   const packageJson = read("package.json");
   assert.equal(packageJson.includes("test:community-member-source-management-audit"), true, "Focused source management audit test must be wired into package scripts.");
+  assert.equal(packageJson.includes("test:community-member-import-usability-polish"), true, "Focused import usability polish test must be wired into package scripts.");
 
   const platformSpec = read("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md");
   for (const snippet of [
     "Trusted Community Member Source Management and Audit Slice",
+    "Community Member Import Usability Polish Slice",
     "`community_member_candidates`",
     "`community_member_source_audit`",
+    "`community_member_source_snapshots`",
+    "`user_notifications`",
     "`/api/owner/community-members`",
     "`/dashboard/community-members`",
     "duplicate and ambiguous user bridges are rejected",
+    "safer import previews",
+    "repeated no-match",
+    "community_member_candidate_importable",
     "cannot make a player publicly visible without the player's opt-in generated handle",
   ]) {
     assert.equal(platformSpec.includes(snippet), true, `Master spec must document ${snippet}.`);
@@ -292,6 +375,8 @@ function assertStaticContracts() {
     "`/dashboard/community-members`",
     "`/owner/community-members`",
     "owner/admin-only community member source management",
+    "trusted Discord/guild snapshot previews",
+    "community_member_candidate_importable",
     "Public profile visibility still requires the player's opt-in generated handle",
   ]) {
     assert.equal(accessPolicy.includes(snippet), true, `Public access policy must document ${snippet}.`);
@@ -303,6 +388,12 @@ function assertSafeguards() {
   assert.equal(safeguards.access, "owner_admin_only");
   assert.equal(safeguards.public_profile_link_requires_player_opt_in_handle, true);
   assert.equal(safeguards.trusted_dzn_user_bridge_required, true);
+  assert.equal(safeguards.import_preview_requires_trusted_bridge, true);
+  assert.equal(safeguards.import_previews_from_trusted_snapshots_where_available, true);
+  assert.equal(safeguards.admin_repeated_source_filters, true);
+  assert.equal(safeguards.owner_importable_notification_hook, true);
+  assert.equal(safeguards.notification_hook_dzn_pulse_only, true);
+  assert.equal(safeguards.notification_read_state_private_per_owner, true);
   assert.equal(safeguards.rejects_duplicate_members, true);
   assert.equal(safeguards.rejects_ambiguous_user_bridge, true);
   assert.equal(safeguards.mutates_live_checkout, false);
@@ -357,6 +448,7 @@ async function assertCandidateImportFlow() {
     reason: "Unique DZN user bridge approved.",
   });
   assert.equal(importResult.ok, true);
+  if (!("member" in importResult)) assert.fail("Import action must return the imported community member payload.");
   assert.equal(importResult.member?.source, "trusted_dzn_bridge");
   assert.equal(state.communityMembers.length, 1);
   assert.equal(state.privacy.find((item) => item.user_id === "player-1")?.public_profile_enabled, 0, "Owner import must not alter player profile privacy.");
@@ -413,6 +505,105 @@ async function assertOwnerScopeAndAmbiguousRejection() {
   assertNoForbiddenSqlWrites(state.operations);
 }
 
+async function assertImportPreviewPolishAndNotifications() {
+  const state = createFakeState();
+  state.snapshots.push({
+    id: "snapshot-1",
+    linked_server_id: "server-1",
+    community_guild_id: "guild-row-1",
+    candidate_discord_id: "222233334444555566",
+    candidate_username: "late-bridge",
+    candidate_display_name: "Late Bridge Member",
+    role_label: "Scout",
+    source: "discord_guild_snapshot",
+    trust_status: "trusted",
+    captured_at: "2026-08-26T08:45:00.000Z",
+  });
+  const env = { DB: createFakeDb(state), DZN_PULSE_ENABLED: "true" } as Env;
+  const ownerActor = { user: OWNER_USER, role: "owner" as const };
+
+  const noMatch = await createCommunityMemberCandidate(env, ownerActor, {
+    linked_server_id: "server-1",
+    candidate_discord_id: "222233334444555566",
+    candidate_display_name: "Late Bridge Member",
+    source: "discord_guild_snapshot",
+  });
+  assert.equal(noMatch.ok, true);
+  assert.equal(noMatch.candidate?.match_status, "no_match");
+  assert.equal(noMatch.candidate?.import_preview.can_import, false);
+  assert.equal(noMatch.candidate?.import_preview.source_trust, "trusted_snapshot");
+  assert.equal(noMatch.candidate?.import_preview.snapshot?.source, "discord_guild_snapshot");
+  assert.equal(state.notifications.length, 0, "Blocked no-match candidates must not notify owners as importable.");
+  assert.ok(state.audit.some((item) => item.action === "candidate_no_match"));
+
+  state.users.push({ id: "player-2", discord_id: "222233334444555566", username: "Late Bridge User" });
+  const refreshed = await actOnCommunityMemberCandidate(env, ownerActor, noMatch.candidate?.id, {
+    action: "refresh_preview",
+    reason: "DZN user logged in after the snapshot was captured.",
+  });
+  assert.equal(refreshed.ok, true);
+  assert.equal(refreshed.status, 200);
+  assert.equal(refreshed.candidate?.match_status, "matched");
+  assert.equal(refreshed.candidate?.import_preview.can_import, true);
+  assert.equal(refreshed.candidate?.import_preview.source_trust, "trusted_snapshot");
+  assert.equal(state.audit.some((item) => item.action === "candidate_preview_refreshed"), true);
+  assert.equal(state.audit.some((item) => item.action === "candidate_importable"), true);
+  assert.equal(state.notifications.length, 1, "Importable transition should create one private owner Pulse notification.");
+  assert.equal(state.notifications[0].user_id, OWNER_USER.id);
+  assert.equal(state.notifications[0].type, "community_member_candidate_importable");
+  assert.match(state.notifications[0].action_url ?? "", /\/dashboard\/community-members\?status=pending&issue=importable/);
+  assert.equal(state.notifications.some((item) => item.user_id === OTHER_OWNER_USER.id), false, "Importable notification must not leak to another owner.");
+
+  const importableList = await listCommunityMemberSourceManagement(env, ownerActor, { status: "pending", issue: "importable", limit: 80 });
+  assert.equal(importableList.filters.issue, "importable");
+  assert.equal(importableList.candidates.some((candidate) => candidate.id === refreshed.candidate?.id), true);
+
+  state.candidates.push(makeCandidate("repeat-no-match-a", "555544443333222211", "no_match", "pending"));
+  state.candidates.push(makeCandidate("repeat-no-match-b", "555544443333222211", "no_match", "pending"));
+  state.candidates.push(makeCandidate("repeat-duplicate-a", "111122223333444455", "duplicate", "duplicate", "player-1", "member-existing"));
+  state.candidates.push(makeCandidate("repeat-duplicate-b", "111122223333444455", "duplicate", "duplicate", "player-1", "member-existing"));
+  const adminActor = { user: OWNER_USER, role: "admin" as const };
+  const repeatedNoMatch = await listCommunityMemberSourceManagement(env, adminActor, { status: "all", issue: "repeated_no_match", limit: 80 });
+  assert.equal(repeatedNoMatch.filters.issue, "repeated_no_match");
+  assert.equal(repeatedNoMatch.candidates.filter((candidate) => candidate.match_status === "no_match").length >= 2, true);
+  const repeatedDuplicate = await listCommunityMemberSourceManagement(env, adminActor, { status: "all", issue: "repeated_duplicate", limit: 80 });
+  assert.equal(repeatedDuplicate.filters.issue, "repeated_duplicate");
+  assert.equal(repeatedDuplicate.candidates.filter((candidate) => candidate.match_status === "duplicate").length >= 2, true);
+
+  assert.equal(state.privacy.find((item) => item.user_id === "player-2"), undefined, "Preview refresh must not create profile privacy preferences.");
+  assertNoForbiddenSqlWrites(state.operations);
+}
+
+function makeCandidate(
+  id: string,
+  candidateDiscordId: string,
+  matchStatus: string,
+  status: string,
+  matchedUserId: string | null = null,
+  importedMemberId: string | null = null,
+): FakeCandidate {
+  return {
+    id,
+    linked_server_id: "server-1",
+    community_guild_id: "guild-row-1",
+    candidate_discord_id: candidateDiscordId,
+    candidate_username: null,
+    candidate_display_name: id,
+    role_label: null,
+    source: "discord_guild_snapshot",
+    status,
+    match_status: matchStatus,
+    matched_user_id: matchedUserId,
+    imported_member_id: importedMemberId,
+    reason: null,
+    created_by_user_id: OWNER_USER.id,
+    reviewed_by_user_id: null,
+    reviewed_at: null,
+    created_at: "2026-08-26T10:00:00.000Z",
+    updated_at: "2026-08-26T10:00:00.000Z",
+  };
+}
+
 function createFakeState(): FakeState {
   return {
     operations: [],
@@ -439,6 +630,8 @@ function createFakeState(): FakeState {
     candidates: [],
     communityMembers: [],
     audit: [],
+    snapshots: [],
+    notifications: [],
   };
 }
 
@@ -479,9 +672,17 @@ function selectAll(state: FakeState, sql: string, bindings: unknown[]) {
   }
   if (sql.includes("FROM community_member_candidates") && sql.includes("ORDER BY")) {
     const statusFilter = sql.includes("community_member_candidates.status = ?") ? String(bindings.find((value) => typeof value === "string" && ["pending", "imported", "rejected", "duplicate", "ambiguous"].includes(value))) : null;
+    const issueFilter = sql.includes("existing_members.id IS NULL") && sql.includes("match_status = 'matched'")
+      ? "importable"
+      : sql.includes("repeated_candidates.match_status = 'no_match'")
+        ? "repeated_no_match"
+        : sql.includes("repeated_candidates.match_status = 'duplicate'")
+          ? "repeated_duplicate"
+          : "all";
     return state.candidates
       .filter((candidate) => scopedCandidate(state, candidate, bindings))
       .filter((candidate) => !statusFilter || candidate.status === statusFilter)
+      .filter((candidate) => matchesIssueFilter(state, candidate, issueFilter))
       .map((candidate) => candidateRow(state, candidate));
   }
   if (sql.includes("FROM community_member_source_audit")) {
@@ -576,6 +777,18 @@ function mutate(state: FakeState, sql: string, bindings: unknown[]) {
     });
     return;
   }
+  if (sql.includes("matched_user_id = ?") && sql.includes("imported_member_id = ?") && sql.includes("SET status = ?")) {
+    const candidate = state.candidates.find((item) => item.id === bindings[6]);
+    if (!candidate) return;
+    candidate.status = String(bindings[0]);
+    candidate.match_status = String(bindings[1]);
+    candidate.matched_user_id = nullableString(bindings[2]);
+    candidate.imported_member_id = nullableString(bindings[3]);
+    candidate.reviewed_by_user_id = nullableString(bindings[4]);
+    candidate.reviewed_at = "2026-08-26T10:05:00.000Z";
+    candidate.reason = nullableString(bindings[5]) ?? candidate.reason;
+    return;
+  }
   if (sql.includes("SET status = 'imported'")) {
     const candidate = state.candidates.find((item) => item.id === bindings[5]);
     if (!candidate) return;
@@ -607,6 +820,25 @@ function mutate(state: FakeState, sql: string, bindings: unknown[]) {
     candidate.status = "rejected";
     candidate.reviewed_by_user_id = nullableString(bindings[0]);
     candidate.reason = nullableString(bindings[1]) ?? candidate.reason;
+    return;
+  }
+  if (sql.includes("INSERT OR IGNORE INTO user_notifications")) {
+    const userId = String(bindings[1]);
+    const dedupeKey = String(bindings[11]);
+    if (state.notifications.some((item) => item.user_id === userId && item.dedupe_key === dedupeKey)) return;
+    state.notifications.push({
+      id: String(bindings[0]),
+      user_id: userId,
+      server_id: nullableString(bindings[2]),
+      type: String(bindings[5]),
+      title: String(bindings[6]),
+      body: String(bindings[7]),
+      action_url: nullableString(bindings[9]),
+      dedupe_key: dedupeKey,
+      metadata: nullableString(bindings[12]),
+      read_at: null,
+      created_at: String(bindings[13]),
+    });
   }
 }
 
@@ -628,8 +860,12 @@ function candidateRow(state: FakeState, candidate: FakeCandidate) {
   const user = state.users.find((item) => item.id === candidate.matched_user_id);
   const privacy = state.privacy.find((item) => item.user_id === candidate.matched_user_id);
   const existingMember = state.communityMembers.find((item) => item.community_guild_id === candidate.community_guild_id && item.user_id === candidate.matched_user_id);
+  const snapshot = state.snapshots
+    .filter((item) => item.linked_server_id === candidate.linked_server_id && item.community_guild_id === candidate.community_guild_id && item.candidate_discord_id === candidate.candidate_discord_id && item.trust_status === "trusted")
+    .sort((a, b) => b.captured_at.localeCompare(a.captured_at))[0];
   return {
     ...candidate,
+    owner_user_id: server?.user_id ?? null,
     server_name: server?.display_name ?? null,
     public_slug: server?.public_slug ?? null,
     community_name: guild?.name ?? null,
@@ -637,6 +873,12 @@ function candidateRow(state: FakeState, candidate: FakeCandidate) {
     existing_member_id: existingMember?.id ?? null,
     public_profile_enabled: privacy?.public_profile_enabled ?? null,
     public_handle: privacy?.public_handle ?? null,
+    snapshot_source: snapshot?.source ?? null,
+    snapshot_trust_status: snapshot?.trust_status ?? null,
+    snapshot_captured_at: snapshot?.captured_at ?? null,
+    snapshot_username: snapshot?.candidate_username ?? null,
+    snapshot_display_name: snapshot?.candidate_display_name ?? null,
+    snapshot_role_label: snapshot?.role_label ?? null,
   };
 }
 
@@ -670,6 +912,28 @@ function scopedAudit(state: FakeState, audit: FakeAudit, bindings: unknown[]) {
   const ownerBinding = bindings.find((value) => value === OWNER_USER.id || value === OTHER_OWNER_USER.id);
   if (!ownerBinding) return true;
   return server.user_id === ownerBinding;
+}
+
+function matchesIssueFilter(state: FakeState, candidate: FakeCandidate, issueFilter: string) {
+  if (issueFilter === "importable") {
+    return candidate.status === "pending" &&
+      candidate.match_status === "matched" &&
+      !state.communityMembers.some((member) => member.community_guild_id === candidate.community_guild_id && member.user_id === candidate.matched_user_id);
+  }
+  if (issueFilter === "repeated_no_match") {
+    return candidate.match_status === "no_match" &&
+      Boolean(candidate.candidate_discord_id) &&
+      state.candidates.some((other) => other.id !== candidate.id && other.community_guild_id === candidate.community_guild_id && other.candidate_discord_id === candidate.candidate_discord_id && other.match_status === "no_match");
+  }
+  if (issueFilter === "repeated_duplicate") {
+    return candidate.match_status === "duplicate" &&
+      state.candidates.some((other) => {
+        if (other.id === candidate.id || other.community_guild_id !== candidate.community_guild_id || other.match_status !== "duplicate") return false;
+        if (candidate.matched_user_id && other.matched_user_id === candidate.matched_user_id) return true;
+        return Boolean(candidate.candidate_discord_id && other.candidate_discord_id === candidate.candidate_discord_id);
+      });
+  }
+  return true;
 }
 
 function nullableString(value: unknown) {

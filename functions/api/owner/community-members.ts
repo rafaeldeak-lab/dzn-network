@@ -20,6 +20,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const url = new URL(request.url);
     const payload = await listCommunityMemberSourceManagement(env, auth.actor, {
       status: url.searchParams.get("status"),
+      issue: url.searchParams.get("issue"),
       linkedServerId: url.searchParams.get("linked_server_id"),
       limit: Number(url.searchParams.get("limit") ?? 80),
     });

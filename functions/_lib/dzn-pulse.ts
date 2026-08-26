@@ -14,6 +14,10 @@ export const PULSE_REVIEW_NOTIFICATION_TYPES = [
   "review_bulk_triage",
 ] as const;
 
+export const PULSE_COMMUNITY_NOTIFICATION_TYPES = [
+  "community_member_candidate_importable",
+] as const;
+
 export const PULSE_NOTIFICATION_TYPES = [
   "upcoming_event",
   "event_starting",
@@ -29,10 +33,11 @@ export const PULSE_NOTIFICATION_TYPES = [
   "dzn_news",
   "dzn_announcement",
   ...PULSE_REVIEW_NOTIFICATION_TYPES,
+  ...PULSE_COMMUNITY_NOTIFICATION_TYPES,
 ] as const;
 
 export type PulseNotificationType = typeof PULSE_NOTIFICATION_TYPES[number];
-export type PulseNotificationFilter = "all" | "events" | "scores" | "achievements" | "reviews" | "news";
+export type PulseNotificationFilter = "all" | "events" | "scores" | "achievements" | "reviews" | "community" | "news";
 
 export type PulseNotification = {
   id: string;
@@ -1130,6 +1135,7 @@ function notificationTypesForFilter(filter: PulseNotificationFilter): PulseNotif
   if (filter === "scores") return ["event_score_update", "event_rank_update", "monthly_global_rank"];
   if (filter === "achievements") return ["achievement_unlocked"];
   if (filter === "reviews") return [...PULSE_REVIEW_NOTIFICATION_TYPES];
+  if (filter === "community") return [...PULSE_COMMUNITY_NOTIFICATION_TYPES];
   if (filter === "news") return ["dzn_news", "dzn_announcement"];
   return [...PULSE_NOTIFICATION_TYPES];
 }
@@ -1139,6 +1145,7 @@ function categoryForNotificationType(type: PulseNotificationType): PulseNotifica
   if (notificationTypesForFilter("scores").includes(type)) return "scores";
   if (notificationTypesForFilter("achievements").includes(type)) return "achievements";
   if (notificationTypesForFilter("reviews").includes(type)) return "reviews";
+  if (notificationTypesForFilter("community").includes(type)) return "community";
   if (notificationTypesForFilter("news").includes(type)) return "news";
   return "all";
 }
@@ -1148,13 +1155,14 @@ function categoryLabel(category: PulseNotificationFilter) {
   if (category === "scores") return "Scores";
   if (category === "achievements") return "Achievements";
   if (category === "reviews") return "Reviews";
+  if (category === "community") return "Community";
   if (category === "news") return "News";
   return "All";
 }
 
 function normalizeNotificationFilter(value: unknown): PulseNotificationFilter {
   const normalized = String(value ?? "all").trim().toLowerCase();
-  return normalized === "events" || normalized === "scores" || normalized === "achievements" || normalized === "reviews" || normalized === "news" ? normalized : "all";
+  return normalized === "events" || normalized === "scores" || normalized === "achievements" || normalized === "reviews" || normalized === "community" || normalized === "news" ? normalized : "all";
 }
 
 function normalizeNotificationType(value: unknown): PulseNotificationType {
