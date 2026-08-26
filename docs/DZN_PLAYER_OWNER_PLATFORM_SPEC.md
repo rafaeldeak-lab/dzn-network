@@ -1375,6 +1375,33 @@ Fairness remains unchanged: public profile share preview crawler QA proves the r
 
 Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
 
+## Public Profile Share Preview Image/Card Polish Slice
+
+This slice adds a public-safe social preview image/card quality check for `/players/[handle]`. It keeps the Open Graph/Twitter metadata behavior unchanged, but makes the preview image contract explicit so the current `/media/dzn-cinematic-survivor.png` asset and any future DZN share-card asset references are validated before release.
+
+The slice adds:
+
+- `PUBLIC_PLAYER_PROFILE_SHARE_PREVIEW_IMAGE_CARDS` as the canonical catalog of public-safe static share-card assets for public player profile metadata.
+- `resolvePublicPlayerProfileSharePreviewImageCard` as the metadata resolver for selecting a configured card or falling back to the default DZN survivor card when a future candidate is unavailable or misconfigured.
+- `image_card` metadata on `PublicPlayerProfileSharePreviewMetadata`, keeping `image_href`, `image_alt`, Open Graph image tags, and Twitter image tags tied to the same resolved card contract.
+- A local image/card QA script that parses PNG, JPEG, and WebP dimensions directly from static asset bytes.
+- Static checks that `/media/dzn-cinematic-survivor.png` exists under `public/media`, is a crawler-friendly PNG at `1983x793`, meets the declared `1200x630` minimum, has non-empty public-safe alt text, and is copied under `out/` whenever an exported build is present.
+- Static dependency checks proving the share-card catalog does not become an input to protected billing, scoring, ranking, discovery, review, badge, season, Server Wars, XP, calling-card, event, Nitrado, Discord, or checkout paths.
+
+Rules:
+
+- Share-card assets must be root-relative `/media/*` PNG, JPEG, or WebP files with no query string, fragment, traversal, remote host, or tracking URL.
+- Share-card assets must be public-safe static assets and must not embed private profile fields, Discord IDs, internal DZN user IDs, source IDs, raw award evidence, exact award timestamps, billing state, scoring rows, review internals, owner/admin records, retained exports, event internals, CTF scoring, or Server Wars scoring.
+- Alt text must describe the card generically and must not include private identifiers, hidden progression, raw evidence, tracking, or analytics language.
+- Future DZN share-card references must be added to `PUBLIC_PLAYER_PROFILE_SHARE_PREVIEW_IMAGE_CARDS` and must pass the same static source/export checks before they can be used by `/players/[handle]` metadata.
+- Missing or unsafe future candidates must fall back to the default DZN cinematic survivor card rather than leaking profile data, calling trackers, or creating server-side state.
+- The QA path may inspect local `public/` assets, inspect `out/` only when a static export exists locally, and build metadata in memory with synthetic public profile payloads.
+- The QA path must not call production D1, Cloudflare secrets, live Stripe, Nitrado, Discord, analytics, tracking, share-history storage, privacy writes, retained export storage, deployments, or issue #49.
+
+Fairness remains unchanged: public profile share preview image/card polish cannot expose hidden profile sections, store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, discovery, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or affect competitive eligibility.
+
+Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -1401,7 +1428,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/player/challenges` | 401 | Allowed | Allowed | Allowed | Session auth, player participation only |
 | `/player/profile` and `/api/player/profile` | 401/login redirect | Allowed | Allowed | Allowed | Session auth, private no-store profile progression showcase, read-only; public-profile owner preview/share UI, share session feedback, and share accessibility/fallback guidance are local presentation only |
 | `/api/player/profile-privacy` | 401 | Allowed | Allowed | Allowed | Private player-owned settings API; GET/PATCH only; writes only `player_profile_privacy_preferences` |
-| `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences; DZN-branded visual shell and Open Graph/Twitter share-preview metadata are presentation-only; per-handle metadata uses only the already-filtered public payload; crawler QA snapshots published, hidden, invalid, and unavailable route states and proves metadata cannot expose hidden sections, store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility |
+| `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences; DZN-branded visual shell and Open Graph/Twitter share-preview metadata are presentation-only; per-handle metadata uses only the already-filtered public payload; crawler QA snapshots published, hidden, invalid, and unavailable route states; share-card image QA validates `PUBLIC_PLAYER_PROFILE_SHARE_PREVIEW_IMAGE_CARDS`, `/media/dzn-cinematic-survivor.png`, static/exported asset presence, dimensions, alt text, and fallback behavior for future card references; metadata and image/card polish cannot expose hidden sections, store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility |
 | Public profile attribution on reviews/challenges/leaderboards | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Read-only generated-handle attribution; no name-only matching; ambiguous/hidden/unpublished profiles are not linked |
 | Public profile attribution preview/control and safe event-suggestion author links | Public event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Player-owned visibility control; trusted user bridge required; roster scoring gates and owner mutations excluded |
 | CTF/event presentation roster profile links | 401/login boundary | Owner/admin dashboard access required | Own server dashboard read-only, if owner/admin checks pass | Own server dashboard read-only, if owner/admin checks pass | Exact roster server/player bridge; generated handle required; presentation-only; registration, scoring, eligibility, and owner decisions unaffected |

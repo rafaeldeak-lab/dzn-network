@@ -148,6 +148,24 @@ The crawler QA harness proves the rewritten `/players/[handle]` shell can be ren
 - Production-mutation scans for migrations, checkout activation, Stripe/Nitrado/Discord/Cloudflare secret/D1 patterns.
 - Codex Security diff scan.
 
-## Next Recommended Slice
+## Prior Next Recommended Slice
 
 Next should be public profile share preview image/card polish: add a public-safe social preview image quality check for `/media/dzn-cinematic-survivor.png` and any future DZN share-card asset references, proving the image exists in the exported/static assets, has suitable crawler-friendly dimensions and alt text, falls back cleanly when unavailable, and still cannot expose hidden profile sections, store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility.
+
+## Follow-On Public Profile Share Preview Image/Card Polish
+
+Branch: `codex/public-profile-share-preview-image-card-polish-20260826`
+
+Base: `origin/codex/public-profile-share-preview-crawler-qa-20260826`
+
+This slice adds a canonical public-safe share-card asset catalog for `/players/[handle]` metadata and a focused local QA script. The QA script validates `/media/dzn-cinematic-survivor.png`, checks actual static image bytes for crawler-friendly dimensions and alt text, automatically checks `out/` after a local static export exists, and proves future missing or unsafe share-card candidates fall back to the default DZN cinematic survivor card.
+
+Validation added:
+
+- `npm run test:public-profile-share-preview-image-card-polish`
+
+The slice remains metadata/QA-only. It does not store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, discovery, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, competitive eligibility, Nitrado, Discord, Stripe, Cloudflare secrets, production D1, live checkout, deployments, or issue #49.
+
+## Next Recommended Slice
+
+Next should be public profile share preview rendered media QA polish: run the built `/players/[handle]` shell through a local static preview for published, hidden, invalid, and unavailable profile states, verify the social preview image actually loads from static assets with no media/console errors, capture desktop/mobile/reduced-motion rendered evidence, and keep proving the route cannot expose hidden profile sections, store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility.
