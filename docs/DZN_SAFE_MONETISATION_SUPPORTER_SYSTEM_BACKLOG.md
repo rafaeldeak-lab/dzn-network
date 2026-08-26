@@ -10,6 +10,8 @@ The implementation preflight for this backlog is `docs/DZN_SAFE_MONETISATION_SUP
 
 This document and the implementation preflight do not implement payment routes, checkout sessions, webhook handlers, order tables, entitlement tables, supporter cards, spin ledgers, Stripe product changes, Cloudflare secret changes, production D1 writes, or live checkout activation. The follow-on catalog slice adds only inactive local product/price metadata and draft validation. The follow-on Store public preview slice may add only a disabled-by-default, read-only `/store` route that renders safe catalog preview metadata and cannot create checkout sessions or grant anything.
 
+The DZN Store sandbox order and checkout approval preflight is `docs/DZN_STORE_SANDBOX_ORDER_CHECKOUT_APPROVAL_PREFLIGHT.md`. It defines future `POST /api/store/orders` and `POST /api/stripe/store-webhook` contracts, one-time Stripe Checkout Session shape, webhook event ledger, idempotent fulfilment, refund/chargeback revocation, tax/receipt records, feature flags, rollback, and proof requirements. It creates no checkout route, order table, payment webhook, entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change.
+
 ## Implementation Preflight
 
 The approved preflight is documentation and test guard work only. It keeps `DZN_LIVE_CHECKOUT_ENABLED` unset/false, keeps issue #49 reserved for final live checkout activation, and blocks one-time Stripe Checkout Sessions, store runtime, webhook fulfilment, account entitlement writes, Supporter Card issuance, earned-spin ledgers, reward wheel runtime, Stripe live object changes, Cloudflare secret changes, production D1 writes, Nitrado changes, Discord changes, AI provider credentials, vector stores, analytics/tracking, and metered model calls.
@@ -43,6 +45,23 @@ The preview surface may show:
 The preview surface must not show products as active or checkoutable. Every preview product remains `catalogStatus: "preview_only"`, `active: false`, `checkoutAvailable: false`, `accountBound: true`, `guaranteedPurchase: true`, and `noCompetitiveAdvantage: true`.
 
 Checkout creation, order creation, webhook fulfilment, account entitlement writes, Supporter Card issuance, earned spins, wheel runtime, Stripe product/Price changes, Cloudflare secret changes, production D1 writes, live checkout, and issue #49 remain out of scope.
+
+## DZN Store Sandbox Order And Checkout Approval Preflight
+
+The sandbox order and checkout approval preflight is documentation and test guard work only. It defines:
+
+- Authenticated `POST /api/store/orders` for a future sandbox order-to-checkout flow.
+- Session-derived purchaser identity only; request body user, Discord, owner, server, billing, or entitlement ids are ignored or rejected.
+- One active Store product and one active Store price per order, quantity fixed to `1`.
+- One-time Stripe Checkout Session shape using `mode=payment`.
+- Non-sensitive order-derived Stripe idempotency keys.
+- Future `POST /api/stripe/store-webhook` event-ledger verification and retention rules.
+- Exactly-once fulfilment rules for account entitlements and Supporter Cards.
+- Refund, reversal, chargeback, tax, receipt, and private payment-record boundaries.
+- Feature flags that default disabled and keep live checkout blocked.
+- Non-destructive rollback and proof matrix before runtime.
+
+This preflight still does not implement checkout routes, order tables, Store payment webhooks, entitlement writes, Supporter Card issuance, earned-spin ledgers, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 writes, live checkout activation, or issue #49 changes.
 
 ## Wheel Rules
 

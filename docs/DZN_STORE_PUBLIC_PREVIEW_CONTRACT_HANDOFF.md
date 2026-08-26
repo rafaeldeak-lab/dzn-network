@@ -173,3 +173,7 @@ Rendered local QA completed against `http://127.0.0.1:3072/store`:
 ## Next Recommended Slice
 
 Next should be the DZN Store sandbox order and checkout approval preflight: define the exact authenticated order-creation contract, one-time Stripe Checkout Session shape, webhook event ledger, idempotent fulfilment rules, refund/chargeback revocation plan, tax/receipt records, feature-flag defaults, rollback path, and proof matrix before any checkout route, order table, payment webhook, entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change is implemented.
+
+## Follow-On Approval Preflight Delivered
+
+The DZN Store sandbox order and checkout approval preflight is delivered in `docs/DZN_STORE_SANDBOX_ORDER_CHECKOUT_APPROVAL_PREFLIGHT.md`. It defines the future authenticated order creation, one-time Stripe Checkout `mode=payment`, webhook event ledger, idempotent fulfilment, refund/chargeback revocation, tax/receipt records, disabled-by-default flags, rollback, and proof matrix while still adding no checkout route, no order table, no payment webhook, no entitlement write, no Supporter Card issuance, no earned-spin ledger, no wheel runtime, no Stripe object mutation, no Cloudflare secret/config mutation, no production D1 write, no live checkout activation, and no issue #49 change.
