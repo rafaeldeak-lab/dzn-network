@@ -185,6 +185,28 @@ type ExportPolicy = {
   rules: string[];
 };
 
+type ExportPolicyReview = {
+  admin_only: true;
+  owner_scope_review: "all_owner_scopes";
+  current_defaults_confirmed: true;
+  retention_work_status: "blocked_until_approved";
+  approval_required_before_retained_export_work: true;
+  required_approval_gates: string[];
+  checked_defaults: Array<{
+    key: string;
+    label: string;
+    expected: string;
+    actual: string;
+    ok: true;
+  }>;
+  blocked_future_work: Array<{
+    key: string;
+    label: string;
+    blocked: true;
+    required_before_unblock: string[];
+  }>;
+};
+
 type BulkExecutionSummary = {
   candidate_id: string;
   candidate_label: string;
@@ -231,6 +253,7 @@ type Payload = {
   audit_groups: AuditGroup[];
   export_safe_audit: ExportSafeAuditItem[];
   export_policy: ExportPolicy;
+  export_policy_review: ExportPolicyReview | null;
   safeguards: {
     public_profile_link_requires_player_opt_in_handle: boolean;
     trusted_dzn_user_bridge_required: boolean;
@@ -255,6 +278,13 @@ type Payload = {
     export_persistent_retention_requires_expiry: boolean;
     export_persistent_retention_requires_audit_controls: boolean;
     export_retention_policy_has_no_storage_side_effect: boolean;
+    export_policy_review_admin_only: boolean;
+    export_policy_review_confirms_all_owner_scope_defaults: boolean;
+    future_retained_export_work_blocked_until_dedicated_approval: boolean;
+    future_retained_export_work_requires_migration: boolean;
+    future_retained_export_work_requires_expiry_model: boolean;
+    future_retained_export_work_requires_storage_plan: boolean;
+    future_retained_export_work_requires_security_review: boolean;
     admin_repeated_source_filters: boolean;
     owner_importable_notification_hook: boolean;
     notification_hook_dzn_pulse_only: boolean;
@@ -368,6 +398,43 @@ const DEFAULT_EXPORT_POLICY: ExportPolicy = {
   ],
 };
 
+const DEFAULT_EXPORT_POLICY_REVIEW: ExportPolicyReview = {
+  admin_only: true,
+  owner_scope_review: "all_owner_scopes",
+  current_defaults_confirmed: true,
+  retention_work_status: "blocked_until_approved",
+  approval_required_before_retained_export_work: true,
+  required_approval_gates: [
+    "Dedicated approval required",
+    "Migration required",
+    "Expiry model required",
+    "Storage plan required",
+    "Security review required",
+  ],
+  checked_defaults: [
+    { key: "current_retention_mode", label: "Current retention", expected: "download_only", actual: "download_only", ok: true },
+    { key: "persisted_exports_enabled", label: "Persisted exports", expected: "false", actual: "false", ok: true },
+    { key: "export_file_retention", label: "Export file retention", expected: "not_persisted_by_dzn", actual: "not_persisted_by_dzn", ok: true },
+    { key: "dashboard_history", label: "Dashboard history", expected: "client_session_only", actual: "client_session_only", ok: true },
+    { key: "sharing_links_enabled", label: "Sharing links", expected: "false", actual: "false", ok: true },
+    { key: "browser_persistence_enabled", label: "Browser persistence", expected: "false", actual: "false", ok: true },
+  ],
+  blocked_future_work: [
+    {
+      key: "retained_export_storage",
+      label: "Future retained-export work blocked",
+      blocked: true,
+      required_before_unblock: [
+        "Dedicated approval required",
+        "Migration required",
+        "Expiry model required",
+        "Storage plan required",
+        "Security review required",
+      ],
+    },
+  ],
+};
+
 export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedded = false }: { homeHref?: string; embedded?: boolean }) {
   const [state, setState] = useState<LoadState>("loading");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("pending");
@@ -456,6 +523,7 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   const exportSafeAudit = payload?.export_safe_audit ?? [];
   const servers = payload?.servers ?? [];
   const exportPolicy = payload?.export_policy ?? DEFAULT_EXPORT_POLICY;
+  const exportPolicyReview = payload?.role === "admin" ? payload.export_policy_review ?? DEFAULT_EXPORT_POLICY_REVIEW : null;
   const selectableCandidateIds = candidates.filter((candidate) => candidate.status === "pending").map((candidate) => candidate.id);
   const selectedCandidateSet = new Set(selectedCandidateIds);
   const selectedPendingCandidateIds = selectableCandidateIds.filter((id) => selectedCandidateSet.has(id));
@@ -763,6 +831,9 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
             <StatusLine label="visible export policy" ok={payload?.safeguards.export_policy_surface_owner_admin_visible ?? true} />
             <StatusLine label="retention approval gate" ok={payload?.safeguards.export_persistent_retention_settings_disabled_without_explicit_approval ?? true} />
             <StatusLine label="retention expiry/audit" ok={(payload?.safeguards.export_persistent_retention_requires_expiry ?? true) && (payload?.safeguards.export_persistent_retention_requires_audit_controls ?? true)} />
+            {payload?.role === "admin" ? <StatusLine label="admin policy review" ok={payload?.safeguards.export_policy_review_admin_only ?? true} /> : null}
+            {payload?.role === "admin" ? <StatusLine label="all owner-scope defaults" ok={payload?.safeguards.export_policy_review_confirms_all_owner_scope_defaults ?? true} /> : null}
+            <StatusLine label="future retention blocked" ok={payload?.safeguards.future_retained_export_work_blocked_until_dedicated_approval ?? true} />
             <StatusLine label="private import alert reads" ok={payload?.safeguards.community_import_alert_read_state_private_per_owner ?? true} />
             <StatusLine label="CTF scoring rows" ok={!(payload?.safeguards.affects_ctf_scoring_rows ?? false)} />
             <StatusLine label="Billing and rankings" ok={!((payload?.safeguards.affects_billing ?? false) || (payload?.safeguards.affects_rankings ?? false))} />
@@ -1073,6 +1144,47 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
                 </div>
               </div>
             </div>
+            {exportPolicyReview ? (
+              <div className="mt-4 rounded-lg border border-amber-300/18 bg-amber-400/8 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <PanelTitle icon={<ShieldCheck className="h-4 w-4" />} title="Admin export policy review" />
+                  <div className="flex flex-wrap gap-2">
+                    <span className="rounded border border-amber-200/18 bg-black/24 px-3 py-2 text-[10px] font-black uppercase text-amber-100">Admin only</span>
+                    <span className="rounded border border-cyan-200/18 bg-black/24 px-3 py-2 text-[10px] font-black uppercase text-cyan-100">All owner scopes</span>
+                  </div>
+                </div>
+                <p className="mt-3 text-xs font-bold leading-5 text-amber-100/80">
+                  Current defaults confirmed: exports stay private, bounded, download-only, and non-persistent across owner-scoped and admin-scoped review views.
+                </p>
+                <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {exportPolicyReview.checked_defaults.map((item) => (
+                      <div key={item.key} className="rounded border border-emerald-300/16 bg-emerald-400/8 px-3 py-2">
+                        <span className="inline-flex items-center gap-2 text-[10px] font-black uppercase text-emerald-100">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          {item.label}
+                        </span>
+                        <p className="mt-1 text-xs font-bold text-zinc-300">{titleCaseToken(item.actual)}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="rounded border border-rose-300/18 bg-rose-400/8 p-3">
+                    <div className="flex items-center gap-2 text-[10px] font-black uppercase text-rose-100">
+                      <LockKeyhole className="h-3.5 w-3.5" />
+                      Future retained-export work blocked
+                    </div>
+                    <div className="mt-3 grid gap-2">
+                      {exportPolicyReview.required_approval_gates.map((gate) => (
+                        <span key={gate} className="inline-flex items-center gap-2 text-xs font-bold text-rose-50/85">
+                          <XCircle className="h-3.5 w-3.5 shrink-0 text-rose-300" />
+                          {gate}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
             <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               <div className="rounded-lg border border-amber-300/16 bg-amber-400/8 p-4">
                 <PanelTitle icon={<LockKeyhole className="h-4 w-4" />} title="Private export" />

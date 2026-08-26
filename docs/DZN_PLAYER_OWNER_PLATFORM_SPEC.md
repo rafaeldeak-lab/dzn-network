@@ -1034,6 +1034,52 @@ Still excluded:
 
 Fairness remains unchanged: the owner/admin-visible export policy surface, optional retention settings display, disabled persistent-retention state, and future-model requirements are presentation and governance aids only. They cannot make a player publicly visible without the player's opt-in generated handle and must not affect CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
 
+## Community Member Export Policy Review and Admin Guardrails Slice
+
+The community member export policy review and admin guardrails slice adds an admin-only governance affordance for confirming the current export defaults across all owner scopes. It does not approve or implement retained exports. The current export behavior remains private, bounded, download-only, and non-persistent by default.
+
+The slice adds:
+
+- Server-declared `export_policy_review` metadata on the owner/admin source-management payload, returned only when the authenticated actor is a configured DZN admin.
+- An admin-only policy review panel in the community member source dashboard.
+- A clear `Current defaults confirmed` summary covering all owner scopes.
+- A clear `Future retained-export work blocked` summary.
+- Guardrail checks that future retained-export work remains blocked until a dedicated approval, migration, expiry model, storage plan, and security review exist.
+
+Current export defaults confirmed by the admin-only policy review:
+
+- `current_retention_mode = download_only`.
+- `persisted_exports_enabled = false`.
+- `export_file_retention = not_persisted_by_dzn`.
+- `dashboard_history = client_session_only`.
+- `sharing_links_enabled = false`.
+- `browser_persistence_enabled = false`.
+
+Future retained-export work remains blocked until all of the following exist:
+
+- Dedicated approval required.
+- Migration required.
+- Expiry model required.
+- Storage plan required.
+- Security review required.
+
+Still excluded:
+
+- Persistent export archive/storage, export-history tables, export sharing links, browser persistence, retention setting write APIs, retention setting save buttons, and player-visible export records.
+- Public profile visibility without the player's opt-in generated handle.
+- Public profile handle creation, profile privacy updates, or player-owned display preference changes.
+- CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, event eligibility, scoring feeds, and accepted audit feeds.
+- Billing, plan status, owner entitlement mutation, rankings, discovery score, reviews, review score, badges, seasons, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility.
+- Stripe checkout activation, Stripe product/price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord resource mutation, and issue #49.
+
+Mutation scope:
+
+- This slice may read the existing scoped source-management payload and export policy metadata.
+- Configured DZN admins may receive `export_policy_review`; normal owners receive `null` for that admin-only review payload.
+- This slice does not add a migration, database write, browser storage write, export file store, sharing link, retained-export policy save action, checkout session, or external service call.
+
+Fairness remains unchanged: the admin-only policy review, all owner scopes default confirmation, and future-retention blocked state are governance and presentation aids only. They cannot make a player publicly visible without the player's opt-in generated handle and must not affect CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -1066,7 +1112,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | CTF/event presentation roster profile links | 401/login boundary | Owner/admin dashboard access required | Own server dashboard read-only, if owner/admin checks pass | Own server dashboard read-only, if owner/admin checks pass | Exact roster server/player bridge; generated handle required; presentation-only; registration, scoring, eligibility, and owner decisions unaffected |
 | Public event host/member profile links | Published profiles only | Published profiles only | Published profiles only | Published profiles only | `competitive_events.created_by` trusted user bridge; presentation-only; event leaderboards, scoring rows, approvals, brackets, and owner workflows excluded |
 | Public community member directory profile links | Published profiles only | Published profiles only | Published profiles only | Published profiles only | `community_members.community_guild_id` plus `community_members.user_id` trusted bridge; presentation-only; CTF scoring rows, owner workflow rows, approvals, brackets, billing, rankings, discovery, reviews, badges, seasons, Server Wars, XP, calling cards, and eligibility unaffected |
-| `/api/owner/community-members`, `/api/owner/community-members/export`, `/dashboard/community-members`, and `/owner/community-members` | Login/pricing boundary | Owner plan required | Own linked-server source management and export-safe audit downloads | Own linked-server source management and export-safe audit downloads, or global if DZN admin | Owner entitlement/admin plus linked-server scope; writes only candidates, source audit, trusted snapshot previews, private importable notifications, and imported `community_members`; duplicate and ambiguous user bridges are rejected; repeated no-match/duplicate filters are review-only; bulk partial-success summaries, audit groups, export-safe audit views, bounded CSV downloads, client-session-only recent export history, and the owner/admin-visible export policy surface are private read models; export date/action/result filters apply only after scope; downloaded CSV files are private owner/admin artifacts and non-persistent by default; optional retention settings are visible but persistent retention is disabled unless a later approved slice adds expiry and audit controls; cannot make a player publicly visible without the player's opt-in generated handle |
+| `/api/owner/community-members`, `/api/owner/community-members/export`, `/dashboard/community-members`, and `/owner/community-members` | Login/pricing boundary | Owner plan required | Own linked-server source management and export-safe audit downloads | Own linked-server source management and export-safe audit downloads, or global if DZN admin | Owner entitlement/admin plus linked-server scope; writes only candidates, source audit, trusted snapshot previews, private importable notifications, and imported `community_members`; duplicate and ambiguous user bridges are rejected; repeated no-match/duplicate filters are review-only; bulk partial-success summaries, audit groups, export-safe audit views, bounded CSV downloads, client-session-only recent export history, and the owner/admin-visible export policy surface are private read models; export date/action/result filters apply only after scope; downloaded CSV files are private owner/admin artifacts and non-persistent by default; optional retention settings are visible but persistent retention is disabled unless a later approved slice adds expiry and audit controls; configured DZN admins also receive an admin-only policy review confirming current export defaults across all owner scopes and flagging future retained-export work as blocked until dedicated approval, migration, expiry model, storage plan, and security review exist; cannot make a player publicly visible without the player's opt-in generated handle |
 | `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award fact collection, retry, and award processing |
 | `/api/owner/progression/award-audit` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Owner entitlement/admin plus linked-server audit scope; read-only |
 | `/dashboard/progression-awards` and `/owner/progression-awards` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Same private audit API; status/adapter/linked-server/retry filters only |
