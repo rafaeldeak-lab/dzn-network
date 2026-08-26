@@ -135,3 +135,5 @@ Live checkout remains disabled. Issue #49 remains reserved for final live paymen
 ## Next Recommended Slice
 
 Next should be the DZN Comms runtime implementation approval preflight: choose the first runtime slice shape, transport plan, migration plan, feature-flag defaults, retention defaults, moderation data model, testing matrix, and rollback path before implementing any chat APIs, message tables, Durable Objects/WebSockets, AI provider credentials, vector stores, or metered model calls.
+
+That runtime implementation approval preflight is now the approved follow-on slice. It should add the public live website counter to the plan as a public-safe aggregate presence feature, choose the first runtime direction, keep this branch documentation/test-only, and move the next implementation slice to the DZN Comms live presence counter foundation.

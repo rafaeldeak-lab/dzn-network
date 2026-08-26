@@ -293,6 +293,44 @@ Warnings, timeouts, mutes, reports, moderation status, private group visibility,
 
 Next should be the DZN Comms runtime implementation approval preflight before any chat APIs, message tables, Durable Objects/WebSockets, AI provider credentials, vector stores, or metered model calls are implemented.
 
+## DZN Comms Runtime Implementation Approval Preflight
+
+The DZN Comms Runtime Implementation Approval Preflight Slice is documented in `docs/DZN_COMMS_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT.md`. It chooses the first real runtime slice shape before implementation begins.
+
+Approved first runtime direction:
+
+- Start with the DZN Comms live presence counter foundation, not chat message sending.
+- Add a future public-safe aggregate "DZN online" counter that can show how many active page sessions are currently on DZN.
+- Prefer the first placement on `/community` or the Global Chat shell because the static DZN Comms UI already has the visual context.
+- Allow a later polish slice to show the same small counter in the shared site header or major public/player pages only after the privacy, retention, and fallback proof is complete.
+- Treat the counter as presence, not analytics.
+- Use short-lived server-owned presence state with automatic expiry.
+- Return only aggregate counts and safe fallback copy.
+
+Blocked behavior:
+
+- No runtime chat APIs in this preflight.
+- No support chat APIs in this preflight.
+- No presence APIs in this preflight.
+- No live visitor counter APIs in this preflight.
+- No message tables.
+- No presence tables.
+- No database migrations.
+- No Durable Objects/WebSockets.
+- No moderation tables.
+- No AI provider credentials.
+- No vector stores.
+- No metered model calls.
+- No analytics/tracking.
+- No live checkout changes.
+- No production service mutation.
+
+The future counter must not store browsing history, route history, user journeys, marketing events, tracking events, referrers, IP addresses, user agents, Discord identifiers, raw DZN user IDs, profile handles, billing state, owner entitlement, Nitrado identifiers, review identifiers, event identifiers, challenge identifiers, or competitive identifiers.
+
+The future counter must not affect billing, owner entitlement, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars, CTF scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
+
+Next should be the DZN Comms live presence counter foundation: implement the first public-safe aggregate online counter behind disabled-by-default read/write flags, starting on `/community` or the Global Chat shell with a static fallback, short TTL, no identifying public output, no analytics/tracking, no chat message sending, no message persistence, no moderation tables, no Durable Objects/WebSockets unless separately approved in that slice, no AI provider credentials, no vector stores, no metered model calls, no live checkout, no production mutations, and no effect on competitive or billing systems.
+
 ## Roadmap
 
 Future slices should build on this foundation in this order unless product priorities change:
@@ -315,8 +353,9 @@ Future slices should build on this foundation in this order unless product prior
 16. Global/group chat and support bot architecture preflight: delivered as a design-only slice covering site-wide support chat, global player chat, private group chat, moderation/profanity warning/timeouts, and AI support limited to public DZN/help content only, with explicit zero-surprise spend and data-boundary review before any provider wiring.
 17. DZN Comms visual shell and support launcher prototype: approved as a static local mock-data UI slice with a disabled/non-sending composer, DZN Comms layout, site-wide support launcher, authenticated Community nav, and no runtime chat APIs, Durable Objects/WebSockets, moderation tables, bot prompts, vector stores, AI provider credentials, metered calls, analytics/tracking, or message persistence.
 18. DZN Comms interaction contract and moderation preflight: delivered as a design-only slice defining send/filter/warning/timeout/history/report/moderation/private-group/support-source/logging/retention/rollback contracts before any real chat runtime is implemented.
-19. DZN Comms runtime implementation approval preflight: choose the first runtime slice shape, transport plan, migration plan, feature-flag defaults, retention defaults, moderation data model, testing matrix, and rollback path before implementing APIs, message tables, Durable Objects/WebSockets, AI provider credentials, vector stores, or metered model calls.
-20. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+19. DZN Comms runtime implementation approval preflight: delivered as a design-only slice choosing the first runtime direction, transport plan, migration choices, feature-flag defaults, retention defaults, moderation separation, testing matrix, rollback path, and public-safe live website counter contract before implementing APIs, message tables, Durable Objects/WebSockets, AI provider credentials, vector stores, or metered model calls.
+20. DZN Comms live presence counter foundation: implement the first public-safe aggregate online counter behind disabled-by-default read/write flags, starting on `/community` or the Global Chat shell with a static fallback, short TTL, no identifying public output, no analytics/tracking, and no influence on billing, owner entitlement, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF scoring, XP, calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
+21. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 
