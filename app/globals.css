@@ -9578,6 +9578,12 @@ button.dzn-header-action {
   min-height: 3.5rem;
 }
 
+.dzn-public-profile-share-fallback-guidance {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 10px 28px rgba(251, 191, 36, 0.06);
+}
+
 @keyframes dzn-public-profile-bg-drift {
   0% {
     transform: translate3d(-0.7rem, -0.4rem, 0) scale(1.045);

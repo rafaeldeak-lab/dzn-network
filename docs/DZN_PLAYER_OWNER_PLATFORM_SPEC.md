@@ -1301,6 +1301,31 @@ Fairness remains unchanged: public profile share session feedback cannot affect 
 
 Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
 
+## Public Profile Share Accessibility/Fallback Polish Slice
+
+This slice improves the private `/player/profile` public-profile share panel so copy/open/share controls are clearer for keyboard and screen-reader users, and unavailable browser capabilities have explicit fallback guidance. It remains a client-only presentation slice layered on top of the share session feedback.
+
+The slice adds:
+
+- Stable accessible labels, descriptions, and focus-visible states for opening the public profile page, copying the public link, copying the generated public handle, and opening the browser share sheet.
+- An `aria-live` status region so copy, handle-copy, browser-share, clipboard-unavailable, browser-share-unavailable, and generic failure states are announced without requiring a page refresh.
+- Local browser capability checks for clipboard and native share support after mount.
+- Clear fallback guidance when Clipboard copy is unavailable, Browser share is unavailable, or the generated public handle is not available.
+- `test:public-profile-share-a11y-fallback-polish` to prove the controls remain local UI presentation and do not become a dependency of protected influence systems.
+
+Rules:
+
+- The accessibility/fallback polish may use only local component state and browser capability checks.
+- The controls may add ARIA labels, `aria-describedby`, `aria-live`, disabled states, titles, and visible fallback guidance.
+- Clipboard fallback guidance may tell the player to open the public page and copy from the address bar.
+- Browser-share fallback guidance may point the player back to Copy Link when clipboard access works.
+- The slice must not add stored share history, tracking events, analytics calls, audit-log calls, localStorage, sessionStorage, IndexedDB, cookies, beacons, fetches, API calls, privacy-setting writes, or any server route.
+- The only write on `/player/profile` remains the existing explicit Save Preferences action against `/api/player/profile-privacy`.
+
+Fairness remains unchanged: public profile share accessibility/fallback polish cannot affect profile privacy settings, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility.
+
+Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -1325,7 +1350,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/player/saved-servers` | 401 | Allowed | Allowed | Allowed | Session auth, player preference only |
 | `/api/player/reviews` | 401 | Allowed | Allowed | Allowed | Session auth, review mutation only |
 | `/api/player/challenges` | 401 | Allowed | Allowed | Allowed | Session auth, player participation only |
-| `/player/profile` and `/api/player/profile` | 401/login redirect | Allowed | Allowed | Allowed | Session auth, private no-store profile progression showcase, read-only; public-profile owner preview/share UI and share session feedback are local presentation only |
+| `/player/profile` and `/api/player/profile` | 401/login redirect | Allowed | Allowed | Allowed | Session auth, private no-store profile progression showcase, read-only; public-profile owner preview/share UI, share session feedback, and share accessibility/fallback guidance are local presentation only |
 | `/api/player/profile-privacy` | 401 | Allowed | Allowed | Allowed | Private player-owned settings API; GET/PATCH only; writes only `player_profile_privacy_preferences` |
 | `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences; DZN-branded visual shell is presentation-only and does not change the public API, privacy writes, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, or competitive eligibility |
 | Public profile attribution on reviews/challenges/leaderboards | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Read-only generated-handle attribution; no name-only matching; ambiguous/hidden/unpublished profiles are not linked |
