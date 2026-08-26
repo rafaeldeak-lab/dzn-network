@@ -8,13 +8,23 @@ DZN may add a real production store and supporter system in a later approved imp
 
 The implementation preflight for this backlog is `docs/DZN_SAFE_MONETISATION_SUPPORTER_IMPLEMENTATION_PREFLIGHT.md`. That preflight defines the safe production implementation sequence, migration shapes, feature flags, webhook verification, idempotent fulfilment, refund and chargeback handling, admin pricing controls, tax/receipt boundaries, rollback path, and proof requirements before runtime work starts.
 
-This document and the implementation preflight do not implement store routes, payment routes, checkout sessions, webhook handlers, product tables, order tables, entitlement tables, supporter cards, spin ledgers, price changes, Stripe product changes, Cloudflare secret changes, production D1 writes, or live checkout activation.
+This document and the implementation preflight do not implement store routes, payment routes, checkout sessions, webhook handlers, order tables, entitlement tables, supporter cards, spin ledgers, Stripe product changes, Cloudflare secret changes, production D1 writes, or live checkout activation. The follow-on catalog slice adds only inactive local product/price metadata and draft validation.
 
 ## Implementation Preflight
 
 The approved preflight is documentation and test guard work only. It keeps `DZN_LIVE_CHECKOUT_ENABLED` unset/false, keeps issue #49 reserved for final live checkout activation, and blocks one-time Stripe Checkout Sessions, store runtime, webhook fulfilment, account entitlement writes, Supporter Card issuance, earned-spin ledgers, reward wheel runtime, Stripe live object changes, Cloudflare secret changes, production D1 writes, Nitrado changes, Discord changes, AI provider credentials, vector stores, analytics/tracking, and metered model calls.
 
-The first future runtime step after the preflight should be the DZN Store catalog and admin product/price draft model with disabled-by-default migrations and local validation only. Checkout creation, payment webhook fulfilment, Supporter Card issuance, earned spins, wheel runtime, account entitlement writes, and live checkout remain out of scope for that next safe step.
+The first runtime step after the preflight is the DZN Store catalog and admin product/price draft model with disabled-by-default migrations and local validation only. Checkout creation, payment webhook fulfilment, Supporter Card issuance, earned spins, wheel runtime, account entitlement writes, and live checkout remain out of scope for that safe step.
+
+## DZN Store Catalog And Admin Product/Price Draft Model
+
+The catalog slice adds only `store_products` and `store_prices` through `migrations/0071_dzn_store_catalog_admin_draft.sql`, plus local validation in `functions/_lib/dzn-store-catalog.ts`.
+
+Product validation rejects any paid spin, XP, rank, discovery, review, event, Server Wars, CTF, owner setup, Nitrado, or competitive eligibility benefit. Product rows are account-bound guaranteed purchase metadata only, default inactive, and include fixed no-competitive-advantage constraints.
+
+Price validation keeps Stripe Price IDs unbound in this slice, keeps pay-what-you-want future-only, requires GBP local draft prices, and rejects active prices until a later approved catalog-admin surface deliberately enables activation rules.
+
+Checkout creation, payment webhook fulfilment, account entitlement writes, Supporter Card issuance, earned spins, wheel runtime, Stripe product/Price changes, Cloudflare secret changes, production D1 writes, live checkout, and issue #49 remain out of scope.
 
 ## Wheel Rules
 

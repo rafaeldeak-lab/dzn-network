@@ -20,6 +20,10 @@ This slice does not implement or mutate:
 
 `DZN_LIVE_CHECKOUT_ENABLED` remains unset/false. Issue #49 remains reserved for final live owner-subscription checkout activation unless a later explicitly approved payment-governance slice deliberately separates store go-live from owner-subscription go-live.
 
+## Follow-On Catalog Slice Status
+
+The follow-on DZN Store catalog and admin product/price draft model slice may add only `store_products`, `store_prices`, and local admin draft validation. It still must not add checkout creation, webhook fulfilment, Store purchase routes, account entitlement writes, Supporter Card issuance, earned spins, wheel runtime, Stripe product/Price mutation, Cloudflare secret mutation, production D1 writes, live checkout activation, or issue #49 changes.
+
 ## Current DZN Architecture Found
 
 DZN already has a subscription-oriented billing boundary for owner/server-management access:
@@ -478,6 +482,8 @@ This preflight branch should include a focused test that proves:
 - Existing Stripe webhook verification still uses the raw request body and signature helper.
 - Package scripts wire the focused preflight guard into the full test chain.
 
+After the follow-on catalog slice, that guard should remain active but explicitly allow only the catalog migration/helper files named above. It must continue to reject Store orders, payment events, account entitlements, supporter-card issuance, earned spins, wheel cooldowns, checkout routes, webhook fulfilment, runtime Store UI, Stripe product/Price mutation, Cloudflare config changes, live checkout activation, and issue #49 changes.
+
 ## Next Recommended Slice
 
-Next should be the DZN Store catalog and admin product/price draft model: add the disabled-by-default catalog migrations and admin-only draft product/price validation locally, with no checkout creation, no webhook fulfilment, no supporter card issuance, no earned-spin ledger, no wheel runtime, no account entitlement writes, no live checkout, no Stripe product/price changes, no Cloudflare secret changes, no production D1 writes, and no issue #49 changes.
+Next after the catalog draft model should be the DZN Store public browse and Supporter Card preview contract: define and, if approved, add a disabled-by-default read-only `/store` preview surface that reads only approved-safe catalog metadata, shows guaranteed purchase/account-bound/no competitive advantage copy and supporter-card theme preview copy, and still creates no checkout sessions, orders, webhooks, entitlements, supporter cards, earned spins, wheel runtime, Stripe objects, Cloudflare secrets, production D1 writes, live checkout activation, or issue #49 changes.
