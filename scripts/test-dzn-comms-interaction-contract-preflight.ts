@@ -143,7 +143,11 @@ const FORBIDDEN_RUNTIME_PATHS = [
   "functions/api/chat",
   "functions/api/support-chat",
   "functions/api/dzn-assist",
-  "functions/api/dzn-comms",
+  "functions/api/dzn-comms/channels",
+  "functions/api/dzn-comms/messages",
+  "functions/api/dzn-comms/moderation",
+  "functions/api/dzn-comms/reports",
+  "functions/api/dzn-comms/support",
   "functions/api/community/chat",
   "app/api/chat",
   "app/api/support-chat",
@@ -310,8 +314,8 @@ function assertNoRuntimeImplementationFiles() {
 
 function assertNoChatMigrations() {
   const migrationFiles = listFiles("migrations").map((path) => path.replace(/\\/g, "/"));
-  const forbiddenMigrations = migrationFiles.filter((path) => /(?:chat|support-chat|dzn-assist|dzn-comms|support-bot|websocket|vector)/i.test(path));
-  assert.deepEqual(forbiddenMigrations, [], "Interaction contract preflight must not add chat/support migrations.");
+  const forbiddenMigrations = migrationFiles.filter((path) => /(?:chat|support-chat|dzn-assist|support-bot|websocket|vector)/i.test(path));
+  assert.deepEqual(forbiddenMigrations, [], "Interaction contract preflight must still block chat/support/moderation/provider migrations after the approved presence slice.");
 }
 
 function assertNoProviderDependencies() {
