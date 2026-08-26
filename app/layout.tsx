@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Suspense } from "react";
+import { DznSupportLauncher } from "@/components/community/dzn-support-launcher";
 import { BetaTicker } from "@/components/site/beta-ticker";
 import { NavigationProgress } from "@/components/site/navigation-progress";
 import { SiteHeaderRoot } from "@/components/site-header";
@@ -38,6 +39,7 @@ export default function RootLayout({
         </Suspense>
         <SiteHeaderRoot />
         {children}
+        <DznSupportLauncher />
         <BetaTicker />
       </body>
     </html>
