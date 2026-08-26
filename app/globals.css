@@ -9368,6 +9368,27 @@ button.dzn-header-action {
   animation: dzn-pricing-fog-drift 36s ease-in-out infinite alternate;
 }
 
+.dzn-store-page {
+  isolation: isolate;
+}
+
+.dzn-store-bg-layer {
+  opacity: 0.68;
+  filter: saturate(1.2) contrast(1.12) brightness(0.58);
+  transform: translate3d(-0.65rem, -0.4rem, 0) scale(1.052);
+  transform-origin: center;
+  animation: dzn-store-bg-drift 32s ease-in-out infinite alternate;
+}
+
+.dzn-store-fog-layer {
+  opacity: 0.6;
+  filter: saturate(1.24) contrast(1.1) brightness(0.84);
+  mix-blend-mode: screen;
+  transform: translate3d(0.48rem, 0.38rem, 0) scale(1.082);
+  transform-origin: center;
+  animation: dzn-store-fog-drift 40s ease-in-out infinite alternate;
+}
+
 @keyframes dzn-pricing-bg-drift {
   0% {
     transform: translate3d(-0.75rem, -0.45rem, 0) scale(1.045);
@@ -9398,9 +9419,41 @@ button.dzn-header-action {
   }
 }
 
+@keyframes dzn-store-bg-drift {
+  0% {
+    transform: translate3d(-0.8rem, -0.52rem, 0) scale(1.052);
+  }
+
+  50% {
+    transform: translate3d(0.28rem, 0.1rem, 0) scale(1.084);
+  }
+
+  100% {
+    transform: translate3d(0.95rem, 0.48rem, 0) scale(1.064);
+  }
+}
+
+@keyframes dzn-store-fog-drift {
+  0% {
+    opacity: 0.48;
+    transform: translate3d(0.62rem, 0.28rem, 0) scale(1.082);
+  }
+
+  45% {
+    opacity: 0.66;
+  }
+
+  100% {
+    opacity: 0.54;
+    transform: translate3d(-0.96rem, -0.5rem, 0) scale(1.118);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dzn-pricing-bg-layer,
-  .dzn-pricing-fog-layer {
+  .dzn-pricing-fog-layer,
+  .dzn-store-bg-layer,
+  .dzn-store-fog-layer {
     animation: none !important;
   }
 
@@ -9411,6 +9464,15 @@ button.dzn-header-action {
   .dzn-pricing-fog-layer {
     opacity: 0.46;
     transform: scale(1.075);
+  }
+
+  .dzn-store-bg-layer {
+    transform: scale(1.052);
+  }
+
+  .dzn-store-fog-layer {
+    opacity: 0.48;
+    transform: scale(1.082);
   }
 }
 

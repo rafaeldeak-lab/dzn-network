@@ -81,7 +81,6 @@ Validation rejects:
 
 - No checkout creation.
 - No webhook fulfilment.
-- No Store route.
 - No `/account/purchases`.
 - No reward wheel route or runtime.
 - No order table.
@@ -97,6 +96,15 @@ Validation rejects:
 - No live checkout activation.
 - No issue #49 change or merge.
 - No Nitrado, Discord, AI provider, vector store, analytics, tracking, or metered model call.
+
+## Follow-On Preview Contract Delivered
+
+The next slice adds the DZN Store public browse and Supporter Card preview contract without turning on commerce runtime:
+
+- `app/store/page.tsx`
+- `components/store/dzn-store-preview-page.tsx`
+
+That follow-on `/store` page is read-only, disabled by default, and renders safe catalog preview metadata only. It does not create checkout sessions, orders, webhooks, entitlements, supporter cards, earned spins, wheel runtime, Stripe objects, Cloudflare secrets, production D1 writes, live checkout activation, or issue #49 changes.
 
 ## Fair Progression Boundary
 
@@ -148,6 +156,6 @@ Completed validation for this branch:
 - Reviewed security surfaces: `functions/_lib/dzn-store-catalog.ts`, `migrations/0071_dzn_store_catalog_admin_draft.sql`, `scripts/test-dzn-store-catalog-admin-draft.ts`, `scripts/test-dzn-safe-monetisation-supporter-preflight.ts`, and `package.json`.
 - Manual bypass checks confirmed no checkout/session creation, webhook fulfilment, Store UI, order table, entitlement write, supporter-card issuance, earned-spin ledger, reward-wheel runtime, Stripe secret access, external fetch, Cloudflare flag/config mutation, production D1 write, or competitive-system coupling.
 
-## Next Recommended Slice
+## Prior Next Recommended Slice
 
 Next should be the DZN Store public browse and Supporter Card preview contract: define and, if approved, add a disabled-by-default read-only `/store` preview surface that reads only inactive/approved-safe catalog metadata, shows guaranteed purchase/account-bound/no competitive advantage copy and supporter-card theme preview copy, and still creates no checkout sessions, orders, webhooks, entitlements, supporter cards, earned spins, wheel runtime, Stripe objects, Cloudflare secrets, production D1 writes, live checkout activation, or issue #49 changes.

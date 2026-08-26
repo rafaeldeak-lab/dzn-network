@@ -128,12 +128,202 @@ export type DznFoundingSupporterDraft = {
   fulfilmentKind: "supporter_card";
 };
 
+export type DznStorePreviewProductKey =
+  | typeof DZN_FOUNDING_SUPPORTER_PRODUCT_KEY
+  | "dzn-profile-theme-pack"
+  | "dzn-cosmetic-calling-card-pack"
+  | "dzn-chat-profile-cosmetic-pack"
+  | "dzn-group-banner-insignia-pack"
+  | "dzn-event-presentation-theme";
+
+export type DznStorePreviewProduct = {
+  productKey: DznStorePreviewProductKey;
+  name: string;
+  strapline: string;
+  description: string;
+  productType: DznStoreProductType;
+  fulfilmentKind: DznStoreFulfilmentKind;
+  previewPriceLabel: string;
+  catalogStatus: "preview_only";
+  active: false;
+  checkoutAvailable: false;
+  accountBound: true;
+  guaranteedPurchase: true;
+  noCompetitiveAdvantage: true;
+  exactContents: string[];
+  safetyLabels: string[];
+  previewNotes: string[];
+  supporterCardPreview?: {
+    sampleSerial: string;
+    themeOptions: string[];
+    permanentFields: string[];
+  };
+};
+
+export type DznStorePublicPreviewContract = {
+  enabled: boolean;
+  state: "disabled_by_default" | "enabled_read_only_preview";
+  statusLabel: string;
+  products: readonly DznStorePreviewProduct[];
+  safetyBoundary: readonly string[];
+  blockedRuntimeActions: readonly string[];
+};
+
 export const DZN_FOUNDING_SUPPORTER_DRAFT_PRODUCT: DznFoundingSupporterDraft = {
   productKey: DZN_FOUNDING_SUPPORTER_PRODUCT_KEY,
   name: "DZN FOUNDING SUPPORTER PACK",
   productType: "supporter_pack",
   fulfilmentKind: "supporter_card",
 };
+
+export const DZN_STORE_PUBLIC_PREVIEW_PRODUCTS = [
+  {
+    productKey: DZN_FOUNDING_SUPPORTER_PRODUCT_KEY,
+    name: "DZN FOUNDING SUPPORTER PACK",
+    strapline: "Permanent supporter recognition for one DZN account.",
+    description: "A guaranteed account-bound supporter cosmetic package with a previewable card theme, profile frame, and optional chat badge. It funds DZN development without selling gameplay or competitive advantages.",
+    productType: "supporter_pack",
+    fulfilmentKind: "supporter_card",
+    previewPriceLabel: "Admin configurable price - checkout disabled",
+    catalogStatus: "preview_only",
+    active: false,
+    checkoutAvailable: false,
+    accountBound: true,
+    guaranteedPurchase: true,
+    noCompetitiveAdvantage: true,
+    exactContents: [
+      "One permanent DZN Supporter Card",
+      "Unique supporter serial number",
+      "Player display name on the card",
+      "Supporter Since date",
+      "Customer-selected card theme before payment",
+      "Unique generated insignia and cosmetic detailing",
+      "Permanent Supporter profile badge with public hide control",
+      "Optional Supporter chat badge",
+      "Supporter profile frame",
+    ],
+    safetyLabels: ["Guaranteed purchase", "Account-bound", "No competitive advantage", "No buyable spins"],
+    previewNotes: [
+      "Issued only once per qualifying account in a later payment slice.",
+      "Non-transferable, non-tradeable, non-resellable, and non-redeemable.",
+      "Revocation on refund, reversal, or chargeback belongs to a later verified webhook slice.",
+    ],
+    supporterCardPreview: {
+      sampleSerial: "DZN-SUP-002481",
+      themeOptions: ["Signal Crown", "Ember Relay", "Survivor Static"],
+      permanentFields: ["Serial number", "Display name", "Supporter Since", "Selected theme", "Generated insignia"],
+    },
+  },
+  {
+    productKey: "dzn-profile-theme-pack",
+    name: "DZN Profile Theme Pack",
+    strapline: "Cosmetic profile styling for public-safe player identity.",
+    description: "Guaranteed visual profile themes for players who want their public profile to feel more personal while keeping privacy controls and progression rules intact.",
+    productType: "profile_theme",
+    fulfilmentKind: "theme_pack",
+    previewPriceLabel: "Preview only - checkout disabled",
+    catalogStatus: "preview_only",
+    active: false,
+    checkoutAvailable: false,
+    accountBound: true,
+    guaranteedPurchase: true,
+    noCompetitiveAdvantage: true,
+    exactContents: ["Profile background treatment", "Profile accent palette", "Public profile frame styling", "Private preview before publishing"],
+    safetyLabels: ["Guaranteed purchase", "Account-bound", "Privacy controls respected", "No ranking impact"],
+    previewNotes: ["Theme visibility follows the player's saved profile privacy settings.", "Themes cannot change XP, badges, rankings, reviews, or event eligibility."],
+  },
+  {
+    productKey: "dzn-cosmetic-calling-card-pack",
+    name: "DZN Cosmetic Calling-Card Pack",
+    strapline: "Account-bound card artwork separate from earned progression.",
+    description: "Guaranteed cosmetic calling-card artwork for profile presentation only. Earned calling cards remain separate and can only come from verified player activity.",
+    productType: "calling_card_pack",
+    fulfilmentKind: "cosmetic_entitlement",
+    previewPriceLabel: "Preview only - checkout disabled",
+    catalogStatus: "preview_only",
+    active: false,
+    checkoutAvailable: false,
+    accountBound: true,
+    guaranteedPurchase: true,
+    noCompetitiveAdvantage: true,
+    exactContents: ["Cosmetic calling-card artwork", "Profile showcase styling", "Account-bound ownership label"],
+    safetyLabels: ["Guaranteed purchase", "Account-bound", "Earned awards separate", "No XP impact"],
+    previewNotes: ["Paid cosmetic cards must never be treated as earned awards.", "They cannot change award ledgers, XP, Server Wars, CTF, or eligibility."],
+  },
+  {
+    productKey: "dzn-chat-profile-cosmetic-pack",
+    name: "DZN Chat And Profile Cosmetic Pack",
+    strapline: "Presentation cosmetics for future DZN Comms and profiles.",
+    description: "Guaranteed account-bound cosmetics for chat and profile presentation after DZN Comms runtime is separately approved.",
+    productType: "chat_cosmetic_pack",
+    fulfilmentKind: "chat_badge",
+    previewPriceLabel: "Preview only - checkout disabled",
+    catalogStatus: "preview_only",
+    active: false,
+    checkoutAvailable: false,
+    accountBound: true,
+    guaranteedPurchase: true,
+    noCompetitiveAdvantage: true,
+    exactContents: ["Optional chat badge styling", "Profile cosmetic accent", "Display-only ownership label"],
+    safetyLabels: ["Guaranteed purchase", "Account-bound", "Presentation only", "No moderation bypass", "No chat privilege"],
+    previewNotes: ["Chat cosmetics cannot bypass language filtering, warnings, timeouts, or moderation.", "No chat sending, storage, or AI support bot runtime is added by this slice."],
+  },
+  {
+    productKey: "dzn-group-banner-insignia-pack",
+    name: "DZN Group Banner And Insignia Pack",
+    strapline: "Cosmetic group identity assets for future private groups.",
+    description: "Guaranteed cosmetic banner and insignia presentation for future approved group surfaces, separate from group membership proof and owner workflow decisions.",
+    productType: "group_branding_pack",
+    fulfilmentKind: "cosmetic_entitlement",
+    previewPriceLabel: "Preview only - checkout disabled",
+    catalogStatus: "preview_only",
+    active: false,
+    checkoutAvailable: false,
+    accountBound: true,
+    guaranteedPurchase: true,
+    noCompetitiveAdvantage: true,
+    exactContents: ["Group banner style", "Insignia visual set", "Public-safe preview copy"],
+    safetyLabels: ["Guaranteed purchase", "Account-bound", "Presentation only", "No membership proof"],
+    previewNotes: ["Group cosmetics cannot create or prove group membership.", "They cannot influence owner approvals, roster outcomes, CTF scoring, or moderation decisions."],
+  },
+  {
+    productKey: "dzn-event-presentation-theme",
+    name: "DZN Event Presentation Theme",
+    strapline: "Visual event polish without scoring or bracket influence.",
+    description: "Guaranteed event presentation cosmetics for future approved event pages, strictly separate from tournament rules, bracket state, scoring, approvals, and eligibility.",
+    productType: "event_presentation_theme",
+    fulfilmentKind: "event_theme",
+    previewPriceLabel: "Preview only - checkout disabled",
+    catalogStatus: "preview_only",
+    active: false,
+    checkoutAvailable: false,
+    accountBound: true,
+    guaranteedPurchase: true,
+    noCompetitiveAdvantage: true,
+    exactContents: ["Event header treatment", "Event accent frame", "Presentation-only theme label"],
+    safetyLabels: ["Guaranteed purchase", "Account-bound", "Presentation only", "No event advantage"],
+    previewNotes: ["Event themes cannot change brackets, approvals, scoring, no-shows, Server Wars, CTF, or competitive eligibility."],
+  },
+] as const satisfies readonly DznStorePreviewProduct[];
+
+export const DZN_STORE_PUBLIC_PREVIEW_SAFETY_BOUNDARY = [
+  "No checkout sessions are created from the preview.",
+  "No orders, webhooks, entitlements, supporter cards, earned spins, or wheel runtime are written.",
+  "No Stripe Products, Prices, live checkout flags, Cloudflare secrets, or production D1 state are changed.",
+  "No product can alter owner entitlement, server ownership, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF, XP awards, calling-card awards, public profile visibility, moderation decisions, retained exports, or competitive eligibility.",
+] as const;
+
+export const DZN_STORE_PUBLIC_PREVIEW_BLOCKED_ACTIONS = [
+  "create_checkout_session",
+  "create_order",
+  "record_payment_event",
+  "grant_account_entitlement",
+  "issue_supporter_card",
+  "grant_earned_spin",
+  "run_reward_wheel",
+  "bind_stripe_price",
+  "enable_live_checkout",
+] as const;
 
 export function readDznStoreCatalogFlags(env: DznStoreCatalogEnv | Record<string, unknown> = {}): DznStoreCatalogFlags {
   return {
@@ -153,6 +343,19 @@ export function readDznStoreCatalogFlags(env: DznStoreCatalogEnv | Record<string
 export function canValidateDznStoreDrafts(env: DznStoreCatalogEnv | Record<string, unknown> = {}, isDznAdmin: boolean) {
   const flags = readDznStoreCatalogFlags(env);
   return flags.storeEnabled && flags.adminEnabled && isDznAdmin;
+}
+
+export function readDznStorePublicPreviewContract(env: DznStoreCatalogEnv | Record<string, unknown> = {}): DznStorePublicPreviewContract {
+  const flags = readDznStoreCatalogFlags(env);
+  const enabled = flags.storeEnabled && flags.publicStoreEnabled;
+  return {
+    enabled,
+    state: enabled ? "enabled_read_only_preview" : "disabled_by_default",
+    statusLabel: enabled ? "Read-only Store preview" : "Store preview disabled by default",
+    products: DZN_STORE_PUBLIC_PREVIEW_PRODUCTS,
+    safetyBoundary: DZN_STORE_PUBLIC_PREVIEW_SAFETY_BOUNDARY,
+    blockedRuntimeActions: DZN_STORE_PUBLIC_PREVIEW_BLOCKED_ACTIONS,
+  };
 }
 
 export function normalizeDznStoreProductType(value: unknown): DznStoreProductType | null {
