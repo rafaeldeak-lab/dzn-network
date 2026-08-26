@@ -8,7 +8,7 @@ DZN may add a real production store and supporter system in a later approved imp
 
 The implementation preflight for this backlog is `docs/DZN_SAFE_MONETISATION_SUPPORTER_IMPLEMENTATION_PREFLIGHT.md`. That preflight defines the safe production implementation sequence, migration shapes, feature flags, webhook verification, idempotent fulfilment, refund and chargeback handling, admin pricing controls, tax/receipt boundaries, rollback path, and proof requirements before runtime work starts.
 
-This document and the implementation preflight do not implement store routes, payment routes, checkout sessions, webhook handlers, order tables, entitlement tables, supporter cards, spin ledgers, Stripe product changes, Cloudflare secret changes, production D1 writes, or live checkout activation. The follow-on catalog slice adds only inactive local product/price metadata and draft validation.
+This document and the implementation preflight do not implement payment routes, checkout sessions, webhook handlers, order tables, entitlement tables, supporter cards, spin ledgers, Stripe product changes, Cloudflare secret changes, production D1 writes, or live checkout activation. The follow-on catalog slice adds only inactive local product/price metadata and draft validation. The follow-on Store public preview slice may add only a disabled-by-default, read-only `/store` route that renders safe catalog preview metadata and cannot create checkout sessions or grant anything.
 
 ## Implementation Preflight
 
@@ -25,6 +25,24 @@ Product validation rejects any paid spin, XP, rank, discovery, review, event, Se
 Price validation keeps Stripe Price IDs unbound in this slice, keeps pay-what-you-want future-only, requires GBP local draft prices, and rejects active prices until a later approved catalog-admin surface deliberately enables activation rules.
 
 Checkout creation, payment webhook fulfilment, account entitlement writes, Supporter Card issuance, earned spins, wheel runtime, Stripe product/Price changes, Cloudflare secret changes, production D1 writes, live checkout, and issue #49 remain out of scope.
+
+## DZN Store Public Browse And Supporter Card Preview Contract
+
+The public preview slice adds a disabled-by-default, read-only `/store` surface backed by the static preview contract in `functions/_lib/dzn-store-catalog.ts`.
+
+The preview surface may show:
+
+- Safe catalog product names and descriptions.
+- Guaranteed-purchase labels.
+- Account-bound labels.
+- No-competitive-advantage labels.
+- The planned `DZN FOUNDING SUPPORTER PACK` Supporter Card preview copy.
+- Sample-only card fields such as `DZN-SUP-002481`, display name, Supporter Since, selected theme, and generated insignia.
+- The list of runtime actions that remain blocked.
+
+The preview surface must not show products as active or checkoutable. Every preview product remains `catalogStatus: "preview_only"`, `active: false`, `checkoutAvailable: false`, `accountBound: true`, `guaranteedPurchase: true`, and `noCompetitiveAdvantage: true`.
+
+Checkout creation, order creation, webhook fulfilment, account entitlement writes, Supporter Card issuance, earned spins, wheel runtime, Stripe product/Price changes, Cloudflare secret changes, production D1 writes, live checkout, and issue #49 remain out of scope.
 
 ## Wheel Rules
 

@@ -15,6 +15,8 @@ const STRIPE_WEBHOOK = "functions/api/stripe/webhook.ts";
 const CHECKOUT_ROUTE = "functions/api/billing/create-checkout-session.ts";
 const STORE_CATALOG_HELPER = "functions/_lib/dzn-store-catalog.ts";
 const STORE_CATALOG_MIGRATION = "migrations/0071_dzn_store_catalog_admin_draft.sql";
+const STORE_PREVIEW_PAGE = "app/store/page.tsx";
+const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
 const PACKAGE_JSON = "package.json";
 
 const PREFLIGHT_SNIPPETS = [
@@ -87,6 +89,8 @@ const PREFLIGHT_SNIPPETS = [
   "Store purchases cannot alter XP, rankings, scoring, reviews, discovery, badges, seasons, events, Server Wars, CTF scoring, public profile visibility, retained exports, owner entitlement, server ownership, or competitive eligibility.",
   "This Slice's Test Contract",
   "The follow-on DZN Store catalog and admin product/price draft model slice may add only `store_products`, `store_prices`, and local admin draft validation.",
+  "DZN Store public browse and Supporter Card preview contract: delivered as a read-only preview contract slice",
+  "The next payment-facing step must be a DZN Store sandbox order and checkout approval preflight",
 ];
 
 const INTEGRATION_SNIPPETS: Record<string, string[]> = {
@@ -107,7 +111,8 @@ const INTEGRATION_SNIPPETS: Record<string, string[]> = {
   [PUBLIC_ACCESS_POLICY]: [
     "The DZN Safe Monetisation And Supporter System Implementation Preflight Slice may define the real production store/catalog/order/payment/spin-ledger/supporter-card implementation sequence",
     "one-time Checkout `mode=payment` boundary",
-    "It must not implement `/store`, `/account/purchases`, reward wheel, store checkout, store webhook fulfilment",
+    "It must not implement account purchases, reward wheel, store checkout, store webhook fulfilment",
+    "The `/store` route is a public-safe, read-only DZN Store preview contract",
     "Future store purchases are player/account cosmetics only",
     "The DZN Store catalog and admin product/price draft model slice may add only the inactive `store_products` and `store_prices` schema",
   ],
@@ -117,6 +122,7 @@ const INTEGRATION_SNIPPETS: Record<string, string[]> = {
     "Future one-time Store purchases are separate from Starter/Pro owner subscriptions.",
     "Players must never be able to buy wheel spins.",
     "The DZN Store catalog and admin product/price draft model adds only inactive product/price metadata",
+    "The read-only `/store` preview is not an owner subscription checkout path",
   ],
   [STRIPE_LIVE_CHECKLIST]: [
     "`docs/DZN_SAFE_MONETISATION_SUPPORTER_IMPLEMENTATION_PREFLIGHT.md`",
@@ -148,12 +154,10 @@ const FORBIDDEN_RUNTIME_PATHS = [
   "functions/api/billing/create-one-time-checkout-session.ts",
   "functions/api/stripe/store-webhook.ts",
   "functions/api/stripe/store",
-  "app/store/page.tsx",
   "app/account/purchases/page.tsx",
   "app/purchases/page.tsx",
   "app/supporter/page.tsx",
   "app/wheel/page.tsx",
-  "components/store",
   "components/supporter",
   "components/wheel",
   "lib/store.ts",
@@ -248,6 +252,7 @@ function main() {
   assertOnlyCatalogDraftMigration();
   assertNoRuntimeEnvOrConfigFlags();
   assertNoStoreRuntimePatternsBeyondCatalogDraft();
+  assertReadOnlyStorePreviewOnly();
   assertNoNewProviderDependencies();
   assertPackageScript();
   console.log("DZN Safe Monetisation and Supporter System implementation preflight tests passed.");
@@ -367,32 +372,53 @@ function assertNoStoreRuntimePatternsBeyondCatalogDraft() {
 
   const allowExistingSubscriptionFiles = new Set([STRIPE_HELPER, STRIPE_WEBHOOK, CHECKOUT_ROUTE].map((path) => path.replace(/\\/g, "/")));
   const allowCatalogDraftFile = STORE_CATALOG_HELPER.replace(/\\/g, "/");
+  const allowStorePreviewFiles = new Set([STORE_PREVIEW_PAGE, STORE_PREVIEW_COMPONENT].map((path) => path.replace(/\\/g, "/")));
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
     if (allowExistingSubscriptionFiles.has(path)) continue;
     const source = read(path);
-    const patterns = path === allowCatalogDraftFile
-      ? FORBIDDEN_RUNTIME_STORE_PATTERNS.filter((pattern) =>
-        ![
-          "\\bDZN_STORE_ENABLED\\b",
-          "\\bDZN_STORE_CHECKOUT_ENABLED\\b",
-          "\\bDZN_STORE_SANDBOX_CHECKOUT_ENABLED\\b",
-          "\\bDZN_STORE_WEBHOOK_FULFILMENT_ENABLED\\b",
-          "\\bDZN_SUPPORTER_CARDS_ENABLED\\b",
-          "\\bDZN_EARNED_SPINS_ENABLED\\b",
-          "\\bDZN_REWARD_WHEEL_ENABLED\\b",
-          "\\bDZN_STORE_ADMIN_ENABLED\\b",
-          "\\bDZN_STORE_LIVE_CHECKOUT_ENABLED\\b",
-          "\\bNEXT_PUBLIC_DZN_STORE_ENABLED\\b",
-          "\\bstore_products\\b",
-          "\\bstore_prices\\b",
-        ].includes(pattern.source),
-      )
-      : FORBIDDEN_RUNTIME_STORE_PATTERNS;
+    const allowedPatternSources = path === allowCatalogDraftFile
+      ? [
+        "\\bDZN_STORE_ENABLED\\b",
+        "\\bDZN_STORE_CHECKOUT_ENABLED\\b",
+        "\\bDZN_STORE_SANDBOX_CHECKOUT_ENABLED\\b",
+        "\\bDZN_STORE_WEBHOOK_FULFILMENT_ENABLED\\b",
+        "\\bDZN_SUPPORTER_CARDS_ENABLED\\b",
+        "\\bDZN_EARNED_SPINS_ENABLED\\b",
+        "\\bDZN_REWARD_WHEEL_ENABLED\\b",
+        "\\bDZN_STORE_ADMIN_ENABLED\\b",
+        "\\bDZN_STORE_LIVE_CHECKOUT_ENABLED\\b",
+        "\\bNEXT_PUBLIC_DZN_STORE_ENABLED\\b",
+        "\\bstore_products\\b",
+        "\\bstore_prices\\b",
+        "\\bDZN-SUP-\\b",
+      ]
+      : [];
+    const patterns = allowStorePreviewFiles.has(path)
+      ? FORBIDDEN_RUNTIME_STORE_PATTERNS.filter((pattern) => pattern.source !== "\\bDZN-SUP-\\b")
+      : FORBIDDEN_RUNTIME_STORE_PATTERNS.filter((pattern) => !allowedPatternSources.includes(pattern.source));
     for (const pattern of patterns) {
       assert.doesNotMatch(source, pattern, `${path} must not contain Store/Supporter/Wheel runtime pattern ${pattern}.`);
     }
   }
+}
+
+function assertReadOnlyStorePreviewOnly() {
+  assert.equal(existsSync(STORE_PREVIEW_PAGE), true, "The only allowed Store route is the public read-only preview page.");
+  assert.equal(existsSync(STORE_PREVIEW_COMPONENT), true, "The only allowed Store component is the public read-only preview component.");
+
+  const page = read(STORE_PREVIEW_PAGE);
+  assert.equal(page.includes("<DznStorePreviewPage />"), true, "Store route should render the preview component only.");
+
+  const component = read(STORE_PREVIEW_COMPONENT);
+  assert.equal(component.includes('"use client"'), false, "Store preview must not add client-side payment runtime.");
+  assert.equal(component.includes('data-dzn-store-preview="read-only"'), true, "Store preview must identify itself as read-only.");
+  assert.equal(component.includes('data-dzn-store-checkout="disabled"'), true, "Store preview must identify checkout as disabled.");
+  assert.equal(component.includes("Checkout disabled"), true, "Store preview must visibly block checkout.");
+  assert.equal(component.includes("/api/"), false, "Store preview must not call Store or billing APIs.");
+  assert.equal(component.includes("fetch("), false, "Store preview must not fetch runtime Store data.");
+  assert.equal(component.includes("createCheckoutSession"), false, "Store preview must not create checkout sessions.");
+  assert.equal(component.includes("checkout.sessions.create"), false, "Store preview must not include Stripe checkout runtime.");
 }
 
 function assertNoNewProviderDependencies() {

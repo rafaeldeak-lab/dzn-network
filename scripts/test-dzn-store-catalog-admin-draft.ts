@@ -23,6 +23,8 @@ const MASTER_SPEC = "docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md";
 const PUBLIC_ACCESS_POLICY = "docs/PUBLIC_ACCESS_POLICY.md";
 const BILLING_PLANS = "docs/BILLING_PLANS.md";
 const PACKAGE_JSON = "package.json";
+const STORE_PAGE = "app/store/page.tsx";
+const STORE_COMPONENT = "components/store/dzn-store-preview-page.tsx";
 const DZN_STORE_BLOCKED_RUNTIME_TABLES = [
   "store_orders",
   "store_order_items",
@@ -314,16 +316,31 @@ function assertNoRuntimeRoutesOrUi() {
     "functions/api/billing/create-store-checkout-session.ts",
     "functions/api/billing/create-one-time-checkout-session.ts",
     "functions/api/stripe/store-webhook.ts",
-    "app/store/page.tsx",
     "app/account/purchases/page.tsx",
     "app/purchases/page.tsx",
     "app/supporter/page.tsx",
     "app/wheel/page.tsx",
-    "components/store",
     "components/supporter",
     "components/wheel",
   ]) {
-    assert.equal(existsSync(path), false, `${path} must remain unimplemented in this catalog-only slice.`);
+    assert.equal(existsSync(path), false, `${path} must remain unimplemented after the catalog and read-only preview slices.`);
+  }
+
+  assert.equal(existsSync(STORE_PAGE), true, "The only Store route allowed after this slice is the read-only preview page.");
+  assert.equal(existsSync(STORE_COMPONENT), true, "The only Store component allowed after this slice is the read-only preview component.");
+
+  const previewSources = [
+    [STORE_PAGE, read(STORE_PAGE)],
+    [STORE_COMPONENT, read(STORE_COMPONENT)],
+  ] as const;
+  for (const [path, source] of previewSources) {
+    assert.equal(source.includes("checkout.sessions.create"), false, `${path} must not create checkout sessions.`);
+    assert.equal(source.includes("createCheckoutSession"), false, `${path} must not call checkout helpers.`);
+    assert.equal(source.includes("/api/store"), false, `${path} must not call Store APIs.`);
+    assert.equal(source.includes("/api/billing"), false, `${path} must not call billing APIs.`);
+    assert.equal(source.includes("fetch("), false, `${path} must not fetch Store runtime data.`);
+    assert.equal(source.includes("STRIPE_SECRET_KEY"), false, `${path} must not read Stripe secrets.`);
+    assert.equal(source.includes("verifyStripeWebhook"), false, `${path} must not verify or handle webhooks.`);
   }
 }
 
@@ -339,29 +356,38 @@ function assertDocsAndBacklog() {
       "No earned-spin ledger",
       "No live checkout",
       "Next should be the DZN Store public browse and Supporter Card preview contract",
+      "DZN Store public browse and Supporter Card preview contract",
+      "`app/store/page.tsx`",
+      "`components/store/dzn-store-preview-page.tsx`",
     ]],
     [BACKLOG, [
       "DZN Store Catalog And Admin Product/Price Draft Model",
+      "DZN Store Public Browse And Supporter Card Preview Contract",
       "The catalog slice adds only `store_products` and `store_prices`",
+      "The public preview slice adds a disabled-by-default, read-only `/store` surface",
       "Product validation rejects any paid spin, XP, rank, discovery, review, event, Server Wars, CTF, owner setup, Nitrado, or competitive eligibility benefit.",
       "Checkout creation, payment webhook fulfilment, account entitlement writes, Supporter Card issuance, earned spins, wheel runtime, Stripe product/Price changes, Cloudflare secret changes, production D1 writes, live checkout, and issue #49 remain out of scope.",
     ]],
     [MASTER_SPEC, [
       "DZN Store Catalog And Admin Product/Price Draft Model Slice",
+      "DZN Store Public Browse And Supporter Card Preview Contract Slice",
       "`migrations/0071_dzn_store_catalog_admin_draft.sql`",
       "`functions/_lib/dzn-store-catalog.ts`",
       "validation rejects active product/price drafts",
       "DZN Store public browse and Supporter Card preview contract",
+      "`/store`",
     ]],
     [PUBLIC_ACCESS_POLICY, [
       "The DZN Store catalog and admin product/price draft model slice may add only the inactive `store_products` and `store_prices` schema",
       "The catalog helper is local validation only",
-      "No public `/store`, account purchases, checkout, webhook fulfilment, account entitlement, supporter-card, earned-spin, or wheel runtime route is introduced.",
+      "The `/store` route is a public-safe, read-only DZN Store preview contract",
+      "No account purchases, checkout, webhook fulfilment, account entitlement, supporter-card issuance, earned-spin, or wheel runtime route is introduced.",
     ]],
     [BILLING_PLANS, [
       "The DZN Store catalog and admin product/price draft model adds only inactive product/price metadata",
       "It does not create Stripe Products or Prices",
       "Draft validation keeps Stripe Price IDs unbound in this slice",
+      "The read-only `/store` preview is not an owner subscription checkout path",
     ]],
   ];
 
@@ -384,6 +410,11 @@ function assertPackageScript() {
     packageJson.scripts?.test?.includes("npm run test:dzn-store-catalog-admin-draft"),
     true,
     "Full npm test should include the Store catalog draft guard.",
+  );
+  assert.equal(
+    packageJson.scripts?.test?.includes("npm run test:dzn-store-public-preview-contract"),
+    true,
+    "Full npm test should include the Store public preview contract guard.",
   );
 }
 

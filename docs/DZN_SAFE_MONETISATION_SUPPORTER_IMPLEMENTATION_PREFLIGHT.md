@@ -22,7 +22,7 @@ This slice does not implement or mutate:
 
 ## Follow-On Catalog Slice Status
 
-The follow-on DZN Store catalog and admin product/price draft model slice may add only `store_products`, `store_prices`, and local admin draft validation. It still must not add checkout creation, webhook fulfilment, Store purchase routes, account entitlement writes, Supporter Card issuance, earned spins, wheel runtime, Stripe product/Price mutation, Cloudflare secret mutation, production D1 writes, live checkout activation, or issue #49 changes.
+The follow-on DZN Store catalog and admin product/price draft model slice may add only `store_products`, `store_prices`, and local admin draft validation. The follow-on DZN Store public browse and Supporter Card preview contract may add only a disabled-by-default, read-only `/store` preview route backed by safe catalog metadata. These slices still must not add checkout creation, webhook fulfilment, Store purchase routes, account entitlement writes, Supporter Card issuance, earned spins, wheel runtime, Stripe product/Price mutation, Cloudflare secret mutation, production D1 writes, live checkout activation, or issue #49 changes.
 
 ## Current DZN Architecture Found
 
@@ -99,7 +99,7 @@ The later real production feature should be split into explicit high-risk paymen
    - Keep product copy explicit: guaranteed purchase, account-bound, no competitive advantage.
 
 3. Store browse and preview UI:
-   - Add a premium `/store` read surface only when the public store flag is enabled.
+   - Add a premium `/store` read surface as a disabled-by-default preview contract first, and only later convert it to flag-enabled catalog browsing after payment runtime has separate approval.
    - Show exact product contents, price, currency, account receiving the item, account-bound label, no-competitive-advantage label, and purchase/refund terms.
    - Add Supporter Card preview theme selection before checkout.
    - Do not create checkout sessions yet unless the checkout flag is enabled in sandbox.
@@ -482,8 +482,10 @@ This preflight branch should include a focused test that proves:
 - Existing Stripe webhook verification still uses the raw request body and signature helper.
 - Package scripts wire the focused preflight guard into the full test chain.
 
-After the follow-on catalog slice, that guard should remain active but explicitly allow only the catalog migration/helper files named above. It must continue to reject Store orders, payment events, account entitlements, supporter-card issuance, earned spins, wheel cooldowns, checkout routes, webhook fulfilment, runtime Store UI, Stripe product/Price mutation, Cloudflare config changes, live checkout activation, and issue #49 changes.
+After the follow-on catalog and public preview slices, that guard should remain active but explicitly allow only the catalog migration/helper files named above plus `app/store/page.tsx` and `components/store/dzn-store-preview-page.tsx` as a read-only preview. It must continue to reject Store orders, payment events, account entitlements, supporter-card issuance, earned spins, wheel cooldowns, checkout routes, webhook fulfilment, purchase Store UI, Stripe product/Price mutation, Cloudflare config changes, live checkout activation, and issue #49 changes.
 
 ## Next Recommended Slice
 
-Next after the catalog draft model should be the DZN Store public browse and Supporter Card preview contract: define and, if approved, add a disabled-by-default read-only `/store` preview surface that reads only approved-safe catalog metadata, shows guaranteed purchase/account-bound/no competitive advantage copy and supporter-card theme preview copy, and still creates no checkout sessions, orders, webhooks, entitlements, supporter cards, earned spins, wheel runtime, Stripe objects, Cloudflare secrets, production D1 writes, live checkout activation, or issue #49 changes.
+DZN Store public browse and Supporter Card preview contract: delivered as a read-only preview contract slice that may show safe catalog metadata and Supporter Card preview copy while checkout stays disabled.
+
+The next payment-facing step must be a DZN Store sandbox order and checkout approval preflight: define the exact authenticated order-creation route contract, one-time Stripe Checkout Session shape, webhook event ledger, idempotent fulfilment rules, refund/chargeback revocation plan, tax/receipt records, feature-flag defaults, rollback path, and proof matrix before any checkout route, order table, payment webhook, entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change is implemented.

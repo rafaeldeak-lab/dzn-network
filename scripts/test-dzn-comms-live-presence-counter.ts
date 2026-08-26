@@ -23,6 +23,8 @@ const MASTER_SPEC = "docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md";
 const PUBLIC_POLICY = "docs/PUBLIC_ACCESS_POLICY.md";
 const SAFE_MONETISATION_BACKLOG = "docs/DZN_SAFE_MONETISATION_SUPPORTER_SYSTEM_BACKLOG.md";
 const PRESENCE_HANDOFF = "docs/DZN_COMMS_LIVE_PRESENCE_COUNTER_FOUNDATION_HANDOFF.md";
+const STORE_PREVIEW_PAGE = "app/store/page.tsx";
+const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
 const PACKAGE_JSON = "package.json";
 
 const ENABLED_ENV = {
@@ -393,10 +395,8 @@ function assertNoForbiddenRuntime() {
     "functions/api/store",
     "functions/api/supporter",
     "functions/api/wheel",
-    "app/store/page.tsx",
     "app/supporter/page.tsx",
     "app/wheel/page.tsx",
-    "components/store",
     "components/supporter",
     "components/wheel",
     "lib/store.ts",
@@ -405,6 +405,17 @@ function assertNoForbiddenRuntime() {
   ];
   for (const path of forbiddenStorePaths) {
     assert.equal(existsSync(path), false, `${path} must not be introduced by the backlog-only monetisation addition.`);
+  }
+
+  assert.equal(existsSync(STORE_PREVIEW_PAGE), true, "The Store preview route may exist only as the read-only public preview contract.");
+  assert.equal(existsSync(STORE_PREVIEW_COMPONENT), true, "The Store preview component may exist only as the read-only public preview contract.");
+
+  const previewSources = [
+    { path: STORE_PREVIEW_PAGE, source: read(STORE_PREVIEW_PAGE) },
+    { path: STORE_PREVIEW_COMPONENT, source: read(STORE_PREVIEW_COMPONENT) },
+  ];
+  for (const { path, source } of previewSources) {
+    assert.doesNotMatch(source, /fetch\s*\(|\/api\/store|\/api\/billing|createCheckoutSession|checkout\.sessions\.create|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|verifyStripeWebhook/i, `${path} must remain read-only Store preview UI.`);
   }
 }
 
