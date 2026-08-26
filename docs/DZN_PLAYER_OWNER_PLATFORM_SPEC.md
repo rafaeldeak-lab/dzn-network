@@ -1402,6 +1402,34 @@ Fairness remains unchanged: public profile share preview image/card polish canno
 
 Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
 
+## Public Profile Share-Card Crawler Visual QA Slice
+
+This slice adds a local rendered social-card preview QA check for `/players/[handle]`. It does not change the public profile route or profile data model; it proves the existing route output can be rendered into crawler-friendly Open Graph and Twitter preview-card models from the final rewritten `<head>`.
+
+The slice adds:
+
+- A local QA script that renders `/players/[handle]` through the real Pages Function with fake ASSETS and a fake read-only public profile DB.
+- Coverage for published, hidden, invalid, unavailable, and fallback-image states.
+- Deterministic rendered social-card preview models for Open Graph and Twitter, built from the final head tags only.
+- Checks that rendered cards use the correct final image URL and alt text.
+- Checks that `/media/dzn-cinematic-survivor.png` remains the crawler-friendly default static card and satisfies the `1200x630` social-card contract.
+- Checks that a missing future card candidate falls back to the default DZN static card instead of exposing data, calling trackers, or creating state.
+- Checks that hidden profile sections, private identifiers, raw award evidence, private settings, owner/admin rows, retained export references, billing state, scoring rows, review internals, event internals, CTF scoring, and Server Wars scoring do not appear in the rendered head or rendered preview-card HTML.
+- Static dependency checks proving the visual QA path does not become an input to protected billing, scoring, ranking, discovery, review, badge, season, Server Wars, XP, calling-card, event, CTF, community-member, Nitrado, Discord, or checkout paths.
+
+Rules:
+
+- The visual QA harness may render final head tags locally and build in-memory social-card preview HTML.
+- The visual QA harness may use fake public profile rows, fake read-only DB bindings, and fake static assets only.
+- Published-profile rendered previews must use only fields exposed by the public profile payload under saved visibility preferences.
+- Hidden, invalid, unavailable, or failed-profile rendered previews must use generic `noindex,nofollow` fallback metadata.
+- Fallback-image rendered previews must still use the default `/media/dzn-cinematic-survivor.png` image URL and public-safe alt text.
+- The visual QA path must not store share history, create tracking events, call analytics, write profile privacy settings, create profile handles, create checkout sessions, update billing, mutate rankings, change discovery score, mutate reviews, award badges, alter seasons, mutate events, change Server Wars or CTF scoring, award XP, award calling cards, call Nitrado, mutate Discord resources, change Cloudflare secrets, apply production D1 migrations, enable live checkout, or merge Issue #49.
+
+Fairness remains unchanged: public profile share-card crawler visual QA is presentation-proof only with no hidden sections, no analytics/tracking calls, no stored share history, no privacy writes, and no billing, scoring, ranking, discovery, review, badge, season, Server Wars, XP/calling-card award, event, or competitive eligibility impact.
+
+Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -1428,7 +1456,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/player/challenges` | 401 | Allowed | Allowed | Allowed | Session auth, player participation only |
 | `/player/profile` and `/api/player/profile` | 401/login redirect | Allowed | Allowed | Allowed | Session auth, private no-store profile progression showcase, read-only; public-profile owner preview/share UI, share session feedback, and share accessibility/fallback guidance are local presentation only |
 | `/api/player/profile-privacy` | 401 | Allowed | Allowed | Allowed | Private player-owned settings API; GET/PATCH only; writes only `player_profile_privacy_preferences` |
-| `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences; DZN-branded visual shell and Open Graph/Twitter share-preview metadata are presentation-only; per-handle metadata uses only the already-filtered public payload; crawler QA snapshots published, hidden, invalid, and unavailable route states; share-card image QA validates `PUBLIC_PLAYER_PROFILE_SHARE_PREVIEW_IMAGE_CARDS`, `/media/dzn-cinematic-survivor.png`, static/exported asset presence, dimensions, alt text, and fallback behavior for future card references; metadata and image/card polish cannot expose hidden sections, store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility |
+| `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences; DZN-branded visual shell and Open Graph/Twitter share-preview metadata are presentation-only; per-handle metadata uses only the already-filtered public payload; crawler QA snapshots published, hidden, invalid, and unavailable route states; share-card image QA validates `PUBLIC_PLAYER_PROFILE_SHARE_PREVIEW_IMAGE_CARDS`, `/media/dzn-cinematic-survivor.png`, static/exported asset presence, dimensions, alt text, and fallback behavior for future card references; share-card crawler visual QA renders published, hidden, invalid, unavailable, and fallback-image final head states into deterministic social-card previews and proves the correct image URL and alt text remain public-safe; metadata, image/card, and visual QA polish cannot expose hidden sections, store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility |
 | Public profile attribution on reviews/challenges/leaderboards | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Read-only generated-handle attribution; no name-only matching; ambiguous/hidden/unpublished profiles are not linked |
 | Public profile attribution preview/control and safe event-suggestion author links | Public event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Player-owned visibility control; trusted user bridge required; roster scoring gates and owner mutations excluded |
 | CTF/event presentation roster profile links | 401/login boundary | Owner/admin dashboard access required | Own server dashboard read-only, if owner/admin checks pass | Own server dashboard read-only, if owner/admin checks pass | Exact roster server/player bridge; generated handle required; presentation-only; registration, scoring, eligibility, and owner decisions unaffected |

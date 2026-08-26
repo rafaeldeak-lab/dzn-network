@@ -136,6 +136,10 @@ Denied:
 - No deployment is performed.
 - No retained export storage or sharing link model is added.
 
-## Next Recommended Slice
+## Follow-On Public Profile Share-Card Crawler Visual QA Slice
 
-Next should be public profile share preview rendered media QA polish: run the built `/players/[handle]` shell through a local static preview for published, hidden, invalid, and unavailable profile states, verify the social preview image actually loads from static assets with no media/console errors, capture desktop/mobile/reduced-motion rendered evidence, and keep proving the route cannot expose hidden profile sections, store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility.
+Branch: `codex/public-profile-share-card-crawler-visual-qa-20260826`
+
+The next completed slice should add `scripts/test-public-profile-share-card-crawler-visual-qa.ts` and `test:public-profile-share-card-crawler-visual-qa`. It should render the final `/players/[handle]` crawler head into deterministic Open Graph and Twitter social-card preview models for published, hidden, invalid, unavailable, and fallback-image states. The preview checks should prove the correct image URL and alt text are present in the final rendered head, `/media/dzn-cinematic-survivor.png` remains the crawler-friendly static card, future missing image-card references fall back cleanly, and the route cannot expose hidden profile sections, store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility.
+
+Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
