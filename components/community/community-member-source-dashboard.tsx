@@ -9,6 +9,7 @@ import {
   CalendarDays,
   CheckCheck,
   CheckCircle2,
+  Clock3,
   Download,
   FileText,
   Filter,
@@ -17,6 +18,8 @@ import {
   Import,
   RefreshCw,
   ShieldCheck,
+  LockKeyhole,
+  Trash2,
   UserPlus,
   Users,
   XCircle,
@@ -147,6 +150,20 @@ type ExportSafeAuditItem = {
   export_safe: true;
 };
 
+type RecentAuditExport = {
+  id: string;
+  generated_at: string;
+  filename: string;
+  row_count: number;
+  limit: number;
+  truncated: boolean;
+  filters: string[];
+  private_artifact: true;
+  persisted_by_dzn: false;
+  retention: "download_only";
+  dashboard_history: "client_session_only";
+};
+
 type BulkExecutionSummary = {
   candidate_id: string;
   candidate_label: string;
@@ -206,6 +223,10 @@ type Payload = {
     export_download_private_owner_admin_only: boolean;
     export_filters_action_result_date: boolean;
     export_uses_export_safe_audit_rows: boolean;
+    export_history_affordance_client_only: boolean;
+    export_download_non_persistent_by_default: boolean;
+    export_private_artifact_notice: boolean;
+    export_retention_controls: boolean;
     admin_repeated_source_filters: boolean;
     owner_importable_notification_hook: boolean;
     notification_hook_dzn_pulse_only: boolean;
@@ -302,6 +323,7 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   const [exportDateFrom, setExportDateFrom] = useState("");
   const [exportDateTo, setExportDateTo] = useState("");
   const [exportLimit, setExportLimit] = useState("250");
+  const [recentAuditExports, setRecentAuditExports] = useState<RecentAuditExport[]>([]);
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [bulkExecutionSummaries, setBulkExecutionSummaries] = useState<BulkExecutionSummary[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -561,6 +583,15 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
     if (auditResultFilter !== "all") params.set("audit_result", auditResultFilter);
     if (exportDateFrom) params.set("date_from", exportDateFrom);
     if (exportDateTo) params.set("date_to", exportDateTo);
+    const requestedFilters = buildExportFilterSummary({
+      servers,
+      linkedServerFilter,
+      auditActionFilter,
+      auditResultFilter,
+      exportDateFrom,
+      exportDateTo,
+      exportLimit,
+    });
 
     try {
       const response = await fetch(`/api/owner/community-members/export?${params.toString()}`, {
@@ -575,17 +606,37 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
+      const filename = filenameFromContentDisposition(response.headers.get("content-disposition")) ?? "dzn-community-member-import-audit.csv";
       link.href = objectUrl;
-      link.download = filenameFromContentDisposition(response.headers.get("content-disposition")) ?? "dzn-community-member-import-audit.csv";
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
       link.remove();
       URL.revokeObjectURL(objectUrl);
-      const rowCount = response.headers.get("x-dzn-export-row-count") ?? "0";
+      const generatedAt = response.headers.get("x-dzn-export-generated-at") ?? new Date().toISOString();
+      const rowCount = parseHeaderNumber(response.headers.get("x-dzn-export-row-count"), 0);
+      const rowLimit = parseHeaderNumber(response.headers.get("x-dzn-export-limit"), Number(exportLimit));
       const truncated = response.headers.get("x-dzn-export-truncated") === "true";
+      const nextExport: RecentAuditExport = {
+        id: `${generatedAt}:${filename}`,
+        generated_at: generatedAt,
+        filename,
+        row_count: rowCount,
+        limit: rowLimit,
+        truncated,
+        filters: requestedFilters,
+        private_artifact: true,
+        persisted_by_dzn: false,
+        retention: "download_only",
+        dashboard_history: "client_session_only",
+      };
+      setRecentAuditExports((current) => [
+        nextExport,
+        ...current,
+      ].slice(0, 5));
       setMessage({
         tone: "success",
-        text: `Downloaded export-safe community member audit CSV with ${rowCount} rows${truncated ? " after applying the server-side row limit" : ""}.`,
+        text: `Downloaded private export-safe audit CSV with ${rowCount} rows${truncated ? " after applying the server-side row limit" : ""}. DZN does not persist this export by default.`,
       });
     } catch (error) {
       setMessage({ tone: "error", text: error instanceof Error ? error.message : "Community member audit export could not be downloaded." });
@@ -644,6 +695,8 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
             <StatusLine label="export-safe audit views" ok={payload?.safeguards.export_safe_audit_views ?? true} />
             <StatusLine label="bounded export downloads" ok={payload?.safeguards.bounded_export_downloads ?? true} />
             <StatusLine label="export action/result/date filters" ok={payload?.safeguards.export_filters_action_result_date ?? true} />
+            <StatusLine label="client-only export history" ok={payload?.safeguards.export_history_affordance_client_only ?? true} />
+            <StatusLine label="non-persistent exports" ok={payload?.safeguards.export_download_non_persistent_by_default ?? true} />
             <StatusLine label="private import alert reads" ok={payload?.safeguards.community_import_alert_read_state_private_per_owner ?? true} />
             <StatusLine label="CTF scoring rows" ok={!(payload?.safeguards.affects_ctf_scoring_rows ?? false)} />
             <StatusLine label="Billing and rankings" ok={!((payload?.safeguards.affects_billing ?? false) || (payload?.safeguards.affects_rankings ?? false))} />
@@ -911,6 +964,71 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
             <p className="mt-3 text-xs font-bold leading-5 text-zinc-500">
               Audit CSV exports use the selected community, action, result, date filters, and server-side row limit, then download only export-safe owner/admin rows.
             </p>
+            <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+              <div className="rounded-lg border border-amber-300/16 bg-amber-400/8 p-4">
+                <PanelTitle icon={<LockKeyhole className="h-4 w-4" />} title="Private export" />
+                <div className="mt-3 grid gap-2 text-xs font-bold text-amber-50 sm:grid-cols-2">
+                  <span className="rounded border border-amber-200/18 bg-black/24 px-3 py-2">Owner/admin artifact</span>
+                  <span className="rounded border border-amber-200/18 bg-black/24 px-3 py-2">Download-only by default</span>
+                  <span className="rounded border border-amber-200/18 bg-black/24 px-3 py-2">Not stored as a DZN export log</span>
+                  <span className="rounded border border-amber-200/18 bg-black/24 px-3 py-2">Clear local history anytime</span>
+                </div>
+                <p className="mt-3 text-xs font-bold leading-5 text-amber-100/80">
+                  The downloaded CSV is for the signed-in owner/admin view. DZN keeps the source audit rows, but does not persist a separate export file or export history record by default.
+                </p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-black/24 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <PanelTitle icon={<Clock3 className="h-4 w-4" />} title="Recent exports" />
+                  {recentAuditExports.length ? (
+                    <button
+                      type="button"
+                      onClick={() => setRecentAuditExports([])}
+                      className="inline-flex min-h-8 items-center gap-2 rounded border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-300 transition hover:border-red-300/24 hover:text-red-100"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Clear local history
+                    </button>
+                  ) : null}
+                </div>
+                {recentAuditExports.length ? (
+                  <div className="mt-3 grid gap-2">
+                    {recentAuditExports.map((item) => (
+                      <div key={item.id} className="rounded border border-cyan-300/14 bg-cyan-400/6 p-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-black uppercase text-white">{item.filename}</p>
+                            <p className="mt-1 text-[11px] font-bold text-zinc-500">Generated {formatDate(item.generated_at)}</p>
+                          </div>
+                          <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase">
+                            <span className="rounded border border-emerald-300/18 bg-emerald-400/10 px-2 py-1 text-emerald-100">{item.row_count} rows</span>
+                            <span className="rounded border border-cyan-300/18 bg-cyan-400/10 px-2 py-1 text-cyan-100">Limit {item.limit}</span>
+                            <span className="rounded border border-amber-300/18 bg-amber-400/10 px-2 py-1 text-amber-100">{item.truncated ? "Truncated" : "Complete"}</span>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {item.filters.map((filter) => (
+                            <span key={`${item.id}:${filter}`} className="rounded border border-white/10 bg-black/30 px-2 py-1 text-[10px] font-black uppercase text-zinc-400">
+                              {filter}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-black uppercase">
+                          <span className="inline-flex items-center gap-1 rounded border border-amber-200/18 bg-amber-300/10 px-2 py-1 text-amber-100">
+                            <LockKeyhole className="h-3 w-3" />
+                            Private file
+                          </span>
+                          <span className="rounded border border-zinc-400/18 bg-white/[0.03] px-2 py-1 text-zinc-400">Client-session history only</span>
+                          <span className="rounded border border-zinc-400/18 bg-white/[0.03] px-2 py-1 text-zinc-400">Not persisted by DZN</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState icon={<Download className="h-5 w-5" />} title="No export downloads yet" body="Successful downloads will appear here until this dashboard is refreshed or the local history is cleared." />
+                )}
+              </div>
+            </div>
             {!loading && auditGroups.length ? (
               <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                 {auditGroups.map((group) => (
@@ -994,6 +1112,45 @@ function filenameFromContentDisposition(value: string | null) {
   const match = /filename="([^"]+)"/i.exec(value) ?? /filename=([^;]+)/i.exec(value);
   const filename = match?.[1]?.trim();
   return filename ? filename.replace(/[\\/:*?"<>|]/g, "-") : null;
+}
+
+function buildExportFilterSummary({
+  servers,
+  linkedServerFilter,
+  auditActionFilter,
+  auditResultFilter,
+  exportDateFrom,
+  exportDateTo,
+  exportLimit,
+}: {
+  servers: ServerOption[];
+  linkedServerFilter: string;
+  auditActionFilter: AuditActionFilter;
+  auditResultFilter: AuditResultFilter;
+  exportDateFrom: string;
+  exportDateTo: string;
+  exportLimit: string;
+}) {
+  const selectedServer = linkedServerFilter === "all"
+    ? "All scoped communities"
+    : servers.find((server) => server.id === linkedServerFilter)?.server_name ?? "Selected community";
+  return [
+    `Community: ${selectedServer}`,
+    `Action: ${filterLabel(AUDIT_ACTION_FILTERS, auditActionFilter)}`,
+    `Result: ${filterLabel(AUDIT_RESULT_FILTERS, auditResultFilter)}`,
+    `From: ${exportDateFrom || "Start"}`,
+    `To: ${exportDateTo || "Now"}`,
+    `Rows: ${exportLimit}`,
+  ];
+}
+
+function filterLabel<T extends string>(options: Array<{ value: T; label: string }>, value: T) {
+  return options.find((item) => item.value === value)?.label ?? titleCaseToken(value);
+}
+
+function parseHeaderNumber(value: string | null, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function BulkExecutionSummaryPanel({ summaries }: { summaries: BulkExecutionSummary[] }) {
