@@ -127,6 +127,7 @@ export type PublicPlayerProfileSharePreviewMetadata = {
   canonical_href: string;
   image_href: string;
   image_alt: string;
+  image_card: PublicPlayerProfileSharePreviewResolvedImageCard;
   robots: "index,follow" | "noindex,nofollow";
   open_graph: {
     type: "profile" | "website";
@@ -157,6 +158,28 @@ export type PublicPlayerProfileSharePreviewMetadata = {
     privacy_setting_writes: "not_performed";
   };
   fairness: PlayerProfilePrivacyFairness;
+};
+
+export type PublicPlayerProfileSharePreviewImageCard = {
+  path: string;
+  alt: string;
+  twitter_card: "summary_large_image";
+  min_width: number;
+  min_height: number;
+  purpose: "public_profile_share_preview";
+  asset_scope: "static_public_asset";
+  privacy: {
+    public_safe_static_asset: true;
+    profile_data_embedded: false;
+    hidden_sections: "not_used";
+    raw_award_evidence: "not_used";
+  };
+};
+
+export type PublicPlayerProfileSharePreviewResolvedImageCard = PublicPlayerProfileSharePreviewImageCard & {
+  href: string;
+  resolution: "configured_asset" | "fallback_asset";
+  asset_available: boolean | "not_checked";
 };
 
 type PublishedPlayerProfileRow = {
@@ -198,8 +221,23 @@ type PublishedProfileDirectoryCallingCardRow = {
 };
 
 const MAX_DIRECTORY_PREVIEW_LOOKUP_IDS = 96;
-const PUBLIC_PROFILE_SHARE_IMAGE_PATH = "/media/dzn-cinematic-survivor.png";
-const PUBLIC_PROFILE_SHARE_IMAGE_ALT = "DZN public player profile preview";
+export const PUBLIC_PLAYER_PROFILE_SHARE_PREVIEW_IMAGE_CARDS = [
+  {
+    path: "/media/dzn-cinematic-survivor.png",
+    alt: "DZN public player profile preview",
+    twitter_card: "summary_large_image",
+    min_width: 1200,
+    min_height: 630,
+    purpose: "public_profile_share_preview",
+    asset_scope: "static_public_asset",
+    privacy: {
+      public_safe_static_asset: true,
+      profile_data_embedded: false,
+      hidden_sections: "not_used",
+      raw_award_evidence: "not_used",
+    },
+  },
+] as const satisfies readonly PublicPlayerProfileSharePreviewImageCard[];
 const PUBLIC_PROFILE_SHARE_FALLBACK_TITLE = "DZN Player Profile | DZN Network";
 const PUBLIC_PROFILE_SHARE_FALLBACK_DESCRIPTION = "View public DZN player profiles shared by their owners on DZN Network.";
 const PUBLIC_PROFILE_SHARE_DESCRIPTION_LIMIT = 180;
@@ -207,10 +245,16 @@ const PUBLIC_PROFILE_SHARE_DESCRIPTION_LIMIT = 180;
 export function buildPublicPlayerProfileSharePreviewMetadata(input: {
   response?: PublicPlayerProfileResponse | null;
   requestUrl: string | URL;
+  imageCards?: readonly PublicPlayerProfileSharePreviewImageCard[] | null;
+  availablePublicImagePaths?: readonly string[] | ReadonlySet<string> | null;
 }): PublicPlayerProfileSharePreviewMetadata {
   const origin = requestOrigin(input.requestUrl);
   const fallbackCanonical = canonicalRequestHref(input.requestUrl, origin);
-  const imageHref = absolutePublicHref(PUBLIC_PROFILE_SHARE_IMAGE_PATH, origin);
+  const imageCard = resolvePublicPlayerProfileSharePreviewImageCard({
+    requestUrl: input.requestUrl,
+    candidates: input.imageCards,
+    availablePublicPaths: input.availablePublicImagePaths,
+  });
   const response = input.response;
   const payload = response?.payload;
 
@@ -221,7 +265,7 @@ export function buildPublicPlayerProfileSharePreviewMetadata(input: {
       description: PUBLIC_PROFILE_SHARE_FALLBACK_DESCRIPTION,
       fallbackCopy: PUBLIC_PROFILE_SHARE_FALLBACK_DESCRIPTION,
       canonicalHref: fallbackCanonical,
-      imageHref,
+      imageCard,
       robots: "noindex,nofollow",
     });
   }
@@ -241,9 +285,29 @@ export function buildPublicPlayerProfileSharePreviewMetadata(input: {
     description,
     fallbackCopy: description,
     canonicalHref,
-    imageHref,
+    imageCard,
     robots: "index,follow",
   });
+}
+
+export function resolvePublicPlayerProfileSharePreviewImageCard(input: {
+  requestUrl: string | URL;
+  candidates?: readonly PublicPlayerProfileSharePreviewImageCard[] | null;
+  availablePublicPaths?: readonly string[] | ReadonlySet<string> | null;
+}): PublicPlayerProfileSharePreviewResolvedImageCard {
+  const origin = requestOrigin(input.requestUrl);
+  const fallbackCard = PUBLIC_PLAYER_PROFILE_SHARE_PREVIEW_IMAGE_CARDS[0];
+  const availability = normalizeAvailablePublicPaths(input.availablePublicPaths);
+  const candidates = input.candidates?.length ? input.candidates : PUBLIC_PLAYER_PROFILE_SHARE_PREVIEW_IMAGE_CARDS;
+  const configuredCard = candidates.find((candidate) => isSafeSharePreviewImageCard(candidate) && isCardAvailable(candidate, availability));
+  const selectedCard = configuredCard ?? fallbackCard;
+
+  return {
+    ...selectedCard,
+    href: absolutePublicHref(selectedCard.path, origin),
+    resolution: configuredCard ? "configured_asset" : "fallback_asset",
+    asset_available: availability ? availability.has(selectedCard.path) : "not_checked",
+  };
 }
 
 export async function getPublicPlayerProfilePayload(
@@ -496,7 +560,7 @@ function publicPlayerProfileSharePreviewMetadata(input: {
   description: string;
   fallbackCopy: string;
   canonicalHref: string;
-  imageHref: string;
+  imageCard: PublicPlayerProfileSharePreviewResolvedImageCard;
   robots: PublicPlayerProfileSharePreviewMetadata["robots"];
 }): PublicPlayerProfileSharePreviewMetadata {
   return {
@@ -505,8 +569,9 @@ function publicPlayerProfileSharePreviewMetadata(input: {
     description: input.description,
     fallback_copy: input.fallbackCopy,
     canonical_href: input.canonicalHref,
-    image_href: input.imageHref,
-    image_alt: PUBLIC_PROFILE_SHARE_IMAGE_ALT,
+    image_href: input.imageCard.href,
+    image_alt: input.imageCard.alt,
+    image_card: input.imageCard,
     robots: input.robots,
     open_graph: {
       type: input.source === "public_profile_payload" ? "profile" : "website",
@@ -514,15 +579,15 @@ function publicPlayerProfileSharePreviewMetadata(input: {
       title: input.title,
       description: input.description,
       url: input.canonicalHref,
-      image: input.imageHref,
-      image_alt: PUBLIC_PROFILE_SHARE_IMAGE_ALT,
+      image: input.imageCard.href,
+      image_alt: input.imageCard.alt,
     },
     twitter: {
-      card: "summary_large_image",
+      card: input.imageCard.twitter_card,
       title: input.title,
       description: input.description,
-      image: input.imageHref,
-      image_alt: PUBLIC_PROFILE_SHARE_IMAGE_ALT,
+      image: input.imageCard.href,
+      image_alt: input.imageCard.alt,
     },
     privacy: {
       source: "already_public_profile_payload",
@@ -599,6 +664,36 @@ function previewDescription(value: string) {
   const cleaned = cleanPreviewText(value, PUBLIC_PROFILE_SHARE_FALLBACK_DESCRIPTION, PUBLIC_PROFILE_SHARE_DESCRIPTION_LIMIT + 40);
   if (cleaned.length <= PUBLIC_PROFILE_SHARE_DESCRIPTION_LIMIT) return cleaned;
   return `${cleaned.slice(0, PUBLIC_PROFILE_SHARE_DESCRIPTION_LIMIT - 1).trimEnd()}.`;
+}
+
+function normalizeAvailablePublicPaths(value: readonly string[] | ReadonlySet<string> | null | undefined) {
+  if (!value) return null;
+  if (value instanceof Set) return value;
+  return new Set(value);
+}
+
+function isCardAvailable(card: PublicPlayerProfileSharePreviewImageCard, availablePublicPaths: ReadonlySet<string> | null) {
+  return !availablePublicPaths || availablePublicPaths.has(card.path);
+}
+
+function isSafeSharePreviewImageCard(card: PublicPlayerProfileSharePreviewImageCard | null | undefined) {
+  const path = typeof card?.path === "string" ? card.path : "";
+  const alt = typeof card?.alt === "string" ? card.alt : "";
+  return Boolean(
+    card &&
+      /^\/media\/[a-z0-9][a-z0-9._/-]*\.(?:png|jpe?g|webp)$/i.test(path) &&
+      alt.trim().length >= 12 &&
+      alt.length <= 140 &&
+      card.twitter_card === "summary_large_image" &&
+      card.min_width >= 600 &&
+      card.min_height >= 315 &&
+      card.purpose === "public_profile_share_preview" &&
+      card.asset_scope === "static_public_asset" &&
+      card.privacy?.public_safe_static_asset === true &&
+      card.privacy?.profile_data_embedded === false &&
+      card.privacy?.hidden_sections === "not_used" &&
+      card.privacy?.raw_award_evidence === "not_used",
+  );
 }
 
 function cleanPreviewText(value: unknown, fallback: string, maxLength: number) {
