@@ -6,8 +6,10 @@ import {
   AlertTriangle,
   ArrowRight,
   Bell,
+  CalendarDays,
   CheckCheck,
   CheckCircle2,
+  Download,
   FileText,
   Filter,
   EyeOff,
@@ -200,6 +202,10 @@ type Payload = {
     bulk_partial_success_execution_summaries: boolean;
     filterable_bulk_action_audit_groups: boolean;
     export_safe_audit_views: boolean;
+    bounded_export_downloads: boolean;
+    export_download_private_owner_admin_only: boolean;
+    export_filters_action_result_date: boolean;
+    export_uses_export_safe_audit_rows: boolean;
     admin_repeated_source_filters: boolean;
     owner_importable_notification_hook: boolean;
     notification_hook_dzn_pulse_only: boolean;
@@ -292,6 +298,10 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [bulkBusyAction, setBulkBusyAction] = useState<"import" | "reject" | null>(null);
   const [importAlertsBusy, setImportAlertsBusy] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportDateFrom, setExportDateFrom] = useState("");
+  const [exportDateTo, setExportDateTo] = useState("");
+  const [exportLimit, setExportLimit] = useState("250");
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [bulkExecutionSummaries, setBulkExecutionSummaries] = useState<BulkExecutionSummary[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -542,6 +552,48 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
     }
   }
 
+  async function downloadAuditExport() {
+    setExportBusy(true);
+    setMessage({ tone: "info", text: "Preparing export-safe community member audit CSV." });
+    const params = new URLSearchParams({ limit: exportLimit });
+    if (linkedServerFilter !== "all") params.set("linked_server_id", linkedServerFilter);
+    if (auditActionFilter !== "all") params.set("audit_action", auditActionFilter);
+    if (auditResultFilter !== "all") params.set("audit_result", auditResultFilter);
+    if (exportDateFrom) params.set("date_from", exportDateFrom);
+    if (exportDateTo) params.set("date_to", exportDateTo);
+
+    try {
+      const response = await fetch(`/api/owner/community-members/export?${params.toString()}`, {
+        cache: "no-store",
+        credentials: "include",
+        headers: { accept: "text/csv" },
+      });
+      if (!response.ok) {
+        const result = await safeJson(response);
+        throw new Error(apiMessage(result, "Community member audit export could not be downloaded."));
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filenameFromContentDisposition(response.headers.get("content-disposition")) ?? "dzn-community-member-import-audit.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+      const rowCount = response.headers.get("x-dzn-export-row-count") ?? "0";
+      const truncated = response.headers.get("x-dzn-export-truncated") === "true";
+      setMessage({
+        tone: "success",
+        text: `Downloaded export-safe community member audit CSV with ${rowCount} rows${truncated ? " after applying the server-side row limit" : ""}.`,
+      });
+    } catch (error) {
+      setMessage({ tone: "error", text: error instanceof Error ? error.message : "Community member audit export could not be downloaded." });
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
   const wrapperClassName = embedded ? "grid gap-5" : "min-h-screen bg-[#02030a] px-4 py-5 text-zinc-100 sm:px-6";
   const contentClassName = embedded ? "grid gap-5" : "mx-auto grid max-w-7xl gap-5";
   const loading = state === "loading";
@@ -590,6 +642,8 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
             <StatusLine label="bulk row server recheck" ok={payload?.safeguards.bulk_actions_recheck_server_side ?? true} />
             <StatusLine label="bulk execution summaries" ok={payload?.safeguards.bulk_partial_success_execution_summaries ?? true} />
             <StatusLine label="export-safe audit views" ok={payload?.safeguards.export_safe_audit_views ?? true} />
+            <StatusLine label="bounded export downloads" ok={payload?.safeguards.bounded_export_downloads ?? true} />
+            <StatusLine label="export action/result/date filters" ok={payload?.safeguards.export_filters_action_result_date ?? true} />
             <StatusLine label="private import alert reads" ok={payload?.safeguards.community_import_alert_read_state_private_per_owner ?? true} />
             <StatusLine label="CTF scoring rows" ok={!(payload?.safeguards.affects_ctf_scoring_rows ?? false)} />
             <StatusLine label="Billing and rankings" ok={!((payload?.safeguards.affects_billing ?? false) || (payload?.safeguards.affects_rankings ?? false))} />
@@ -804,11 +858,59 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
                   {AUDIT_RESULT_FILTERS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                 </select>
               </label>
+              <label className="grid gap-1 text-[11px] font-black uppercase text-zinc-500">
+                Export from
+                <span className="relative">
+                  <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="date"
+                    value={exportDateFrom}
+                    onChange={(event) => setExportDateFrom(event.target.value)}
+                    className="min-h-9 rounded border border-white/10 bg-black/40 py-2 pl-8 pr-3 text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-300/40"
+                  />
+                </span>
+              </label>
+              <label className="grid gap-1 text-[11px] font-black uppercase text-zinc-500">
+                Export to
+                <span className="relative">
+                  <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="date"
+                    value={exportDateTo}
+                    onChange={(event) => setExportDateTo(event.target.value)}
+                    className="min-h-9 rounded border border-white/10 bg-black/40 py-2 pl-8 pr-3 text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-300/40"
+                  />
+                </span>
+              </label>
+              <label className="grid gap-1 text-[11px] font-black uppercase text-zinc-500">
+                Export rows
+                <select
+                  value={exportLimit}
+                  onChange={(event) => setExportLimit(event.target.value)}
+                  className="rounded border border-white/10 bg-black/40 px-3 py-2 text-xs font-black uppercase text-zinc-100 outline-none focus:border-cyan-300/40"
+                >
+                  <option value="100">100 rows</option>
+                  <option value="250">250 rows</option>
+                  <option value="500">500 rows</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={exportBusy || loading}
+                onClick={downloadAuditExport}
+                className="inline-flex min-h-9 items-center justify-center gap-2 rounded border border-emerald-300/24 bg-emerald-400/10 px-3 py-2 text-[10px] font-black uppercase text-emerald-50 transition hover:bg-emerald-400/16 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Download className="h-3.5 w-3.5" />
+                {exportBusy ? "Preparing CSV" : "Download audit CSV"}
+              </button>
               <span className="inline-flex min-h-9 items-center gap-2 rounded border border-cyan-300/18 bg-cyan-400/8 px-3 py-2 text-[10px] font-black uppercase text-cyan-100">
                 <Filter className="h-3.5 w-3.5" />
                 Filterable bulk action audit grouping
               </span>
             </div>
+            <p className="mt-3 text-xs font-bold leading-5 text-zinc-500">
+              Audit CSV exports use the selected community, action, result, date filters, and server-side row limit, then download only export-safe owner/admin rows.
+            </p>
             {!loading && auditGroups.length ? (
               <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                 {auditGroups.map((group) => (
@@ -885,6 +987,13 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
   );
 
   return <main className={wrapperClassName}>{content}</main>;
+}
+
+function filenameFromContentDisposition(value: string | null) {
+  if (!value) return null;
+  const match = /filename="([^"]+)"/i.exec(value) ?? /filename=([^;]+)/i.exec(value);
+  const filename = match?.[1]?.trim();
+  return filename ? filename.replace(/[\\/:*?"<>|]/g, "-") : null;
 }
 
 function BulkExecutionSummaryPanel({ summaries }: { summaries: BulkExecutionSummary[] }) {

@@ -915,6 +915,48 @@ Mutation scope:
 
 Fairness remains unchanged: per-candidate execution summaries, filterable bulk action audit grouping, and export-safe audit views are owner/admin presentation aids only. They cannot make a player publicly visible without the player's opt-in generated handle and must not affect CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
 
+## Community Member Import Export Workflow Polish Slice
+
+The community member import export workflow polish slice adds a bounded downloadable export action for the existing export-safe owner/admin audit rows. It is a private artifact workflow only; it does not add a public export surface, a new scoring input, or any source-management mutation path.
+
+The slice adds:
+
+- `exportCommunityMemberSourceAudit` as the server-side CSV export helper.
+- `GET /api/owner/community-members/export` as the private owner/admin CSV attachment route.
+- `date_from` and `date_to` filters for export date boundaries, accepting `YYYY-MM-DD` or valid ISO date/time input.
+- `audit_action`, `audit_result`, `linked_server_id`, and bounded `limit` filters on the export request.
+- Dashboard controls for `Export from`, `Export to`, `Export rows`, and `Download audit CSV`.
+- Stable export-safe references for downloadable rows, generated from sanitized refs rather than raw actor, server, community, candidate, member, Discord, or DZN user IDs.
+- Response metadata headers for row count, row limit, truncation, and export-safe status.
+
+Authorization and export rules:
+
+- Logged-out visitors and free logged-in players cannot download community member import audit exports.
+- Normal owners must still pass the canonical owner entitlement boundary.
+- Normal owners may export only already-scoped audit rows tied to their own linked servers.
+- Configured DZN admins may export the admin-scoped source audit queue.
+- Export date/action/result filters are applied after owner/admin scope.
+- Export downloads are server-bounded; the route fetches one extra row only to report whether the export was truncated.
+- CSV rows are built only from `export_safe_audit` data, not detailed private audit rows.
+
+Still excluded:
+
+- Public profile visibility without the player's opt-in generated handle.
+- Public profile handle creation, profile privacy updates, or player-owned display preference changes.
+- CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, event eligibility, scoring feeds, and accepted audit feeds.
+- Billing, plan status, owner entitlement mutation, rankings, discovery score, reviews, review score, badges, seasons, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility.
+- Stripe checkout activation, Stripe product/price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord resource mutation, and issue #49.
+
+Mutation scope:
+
+- This slice may read the existing owner/admin community member source audit rows through the canonical scoped helper.
+- This slice may generate a private CSV `Response` for the authenticated owner/admin.
+- This slice does not add a migration or new table.
+- This slice does not add new database writes.
+- It must not add checkout sessions, profile handle generation, profile privacy updates, billing updates, server ownership changes, ranking updates, discovery score updates, review rating changes, event mutations, roster mutations, CTF scoring changes, badge awards, season changes, Server Wars score/result changes, XP awards, calling-card awards, Nitrado calls, Discord bot messages, Cloudflare secret changes, production D1 writes, live checkout activation, or issue #49 changes.
+
+Fairness remains unchanged: bounded downloadable audit exports, date/action/result filters, and export-safe CSV rows are private owner/admin artifacts only. They cannot make a player publicly visible without the player's opt-in generated handle and must not affect CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -947,7 +989,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | CTF/event presentation roster profile links | 401/login boundary | Owner/admin dashboard access required | Own server dashboard read-only, if owner/admin checks pass | Own server dashboard read-only, if owner/admin checks pass | Exact roster server/player bridge; generated handle required; presentation-only; registration, scoring, eligibility, and owner decisions unaffected |
 | Public event host/member profile links | Published profiles only | Published profiles only | Published profiles only | Published profiles only | `competitive_events.created_by` trusted user bridge; presentation-only; event leaderboards, scoring rows, approvals, brackets, and owner workflows excluded |
 | Public community member directory profile links | Published profiles only | Published profiles only | Published profiles only | Published profiles only | `community_members.community_guild_id` plus `community_members.user_id` trusted bridge; presentation-only; CTF scoring rows, owner workflow rows, approvals, brackets, billing, rankings, discovery, reviews, badges, seasons, Server Wars, XP, calling cards, and eligibility unaffected |
-| `/api/owner/community-members`, `/dashboard/community-members`, and `/owner/community-members` | Login/pricing boundary | Owner plan required | Own linked-server source management | Own linked-server source management, or global if DZN admin | Owner entitlement/admin plus linked-server scope; writes only candidates, source audit, trusted snapshot previews, private importable notifications, and imported `community_members`; duplicate and ambiguous user bridges are rejected; repeated no-match/duplicate filters are review-only; bulk partial-success summaries, audit groups, and export-safe audit views are private read models; cannot make a player publicly visible without the player's opt-in generated handle |
+| `/api/owner/community-members`, `/api/owner/community-members/export`, `/dashboard/community-members`, and `/owner/community-members` | Login/pricing boundary | Owner plan required | Own linked-server source management and export-safe audit downloads | Own linked-server source management and export-safe audit downloads, or global if DZN admin | Owner entitlement/admin plus linked-server scope; writes only candidates, source audit, trusted snapshot previews, private importable notifications, and imported `community_members`; duplicate and ambiguous user bridges are rejected; repeated no-match/duplicate filters are review-only; bulk partial-success summaries, audit groups, export-safe audit views, and bounded CSV downloads are private read models; export date/action/result filters apply only after scope; cannot make a player publicly visible without the player's opt-in generated handle |
 | `/api/cron/player-progression/awards` | 401 | 401 | 401 | 401 | Cron secret only, verified award fact collection, retry, and award processing |
 | `/api/owner/progression/award-audit` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Owner entitlement/admin plus linked-server audit scope; read-only |
 | `/dashboard/progression-awards` and `/owner/progression-awards` | Login/pricing boundary | Owner plan required | Own linked-server award-source history | Own linked-server award-source history, or global if DZN admin | Same private audit API; status/adapter/linked-server/retry filters only |

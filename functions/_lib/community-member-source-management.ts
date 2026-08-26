@@ -222,6 +222,29 @@ export type CommunityMemberSourceExportSafeAuditItem = {
   export_safe: true;
 };
 
+export type CommunityMemberSourceAuditExportFilters = {
+  linked_server_id: string | null;
+  audit_action: CommunityMemberSourceAuditActionFilter;
+  audit_result: CommunityMemberSourceAuditResultFilter;
+  date_from: string | null;
+  date_to: string | null;
+  limit: number;
+};
+
+export type CommunityMemberSourceAuditExport = {
+  ok: true;
+  status: 200;
+  filename: string;
+  content_type: "text/csv; charset=utf-8";
+  body: string;
+  row_count: number;
+  truncated: boolean;
+  filters: CommunityMemberSourceAuditExportFilters;
+  safeguards: ReturnType<typeof communityMemberSourceManagementSafeguards>;
+  generated_at: string;
+  export_safe: true;
+};
+
 type CommunityMemberSourceServerRow = {
   id: string;
   user_id: string | null;
@@ -334,6 +357,8 @@ const AUDIT_RESULT_FILTERS = new Set<CommunityMemberSourceAuditResultFilter>(["a
 const CANDIDATE_SOURCES = new Set(["owner_import", "admin_import", "discord_guild_snapshot", "manual_review"]);
 const DEFAULT_LIMIT = 80;
 const MAX_LIMIT = 160;
+const DEFAULT_EXPORT_LIMIT = 160;
+const MAX_EXPORT_LIMIT = 500;
 const MAX_BULK_ACTION_CANDIDATES = 50;
 
 export async function authorizeCommunityMemberSourceRequest(env: Env, request: Request): Promise<
@@ -388,7 +413,7 @@ export async function listCommunityMemberSourceManagement(
   const [servers, candidates, audit, counts, notificationCounts] = await Promise.all([
     readCommunityMemberSourceServerOptions(db, actor),
     readCommunityMemberCandidates(db, actor, { status: filter, issue: issueFilter, linkedServerId, limit }),
-    readCommunityMemberSourceAudit(db, actor, { linkedServerId, action: auditActionFilter, result: auditResultFilter, limit }),
+    readCommunityMemberSourceAudit(db, actor, { linkedServerId, action: auditActionFilter, result: auditResultFilter, dateFrom: null, dateTo: null, limit }),
     readCommunityMemberSourceCounts(db, actor, linkedServerId),
     readCommunityMemberSourceNotificationCounts(env, actor),
   ]);
@@ -412,6 +437,65 @@ export async function listCommunityMemberSourceManagement(
     export_safe_audit: buildExportSafeCommunityMemberSourceAuditRows(audit),
     safeguards: communityMemberSourceManagementSafeguards(),
     generated_at: new Date().toISOString(),
+  };
+}
+
+export async function exportCommunityMemberSourceAudit(
+  env: Env,
+  actor: CommunityMemberSourceActor,
+  options: {
+    linkedServerId?: string | null;
+    auditAction?: string | null;
+    auditResult?: string | null;
+    dateFrom?: string | null;
+    dateTo?: string | null;
+    limit?: number | null;
+  } = {},
+): Promise<CommunityMemberSourceAuditExport | ReturnType<typeof errorResult>> {
+  const db = requireDb(env);
+  const linkedServerId = cleanIdentifier(options.linkedServerId, 96);
+  const auditActionFilter = normalizeAuditActionFilter(options.auditAction);
+  const auditResultFilter = normalizeAuditResultFilter(options.auditResult);
+  const dateFrom = cleanAuditExportDateBoundary(options.dateFrom, "from");
+  const dateTo = cleanAuditExportDateBoundary(options.dateTo, "to");
+  if (dateFrom === "invalid" || dateTo === "invalid") {
+    return errorResult(400, "INVALID_EXPORT_DATE", "Export date filters must use YYYY-MM-DD or a valid ISO date/time.");
+  }
+  if (dateFrom && dateTo && new Date(dateFrom).getTime() > new Date(dateTo).getTime()) {
+    return errorResult(400, "INVALID_EXPORT_DATE_RANGE", "Export date_from must be before date_to.");
+  }
+
+  const limit = clampExportLimit(options.limit);
+  const generatedAt = new Date().toISOString();
+  const filters: CommunityMemberSourceAuditExportFilters = {
+    linked_server_id: linkedServerId,
+    audit_action: auditActionFilter,
+    audit_result: auditResultFilter,
+    date_from: dateFrom,
+    date_to: dateTo,
+    limit,
+  };
+  const audit = await readCommunityMemberSourceAudit(db, actor, {
+    linkedServerId,
+    action: auditActionFilter,
+    result: auditResultFilter,
+    dateFrom,
+    dateTo,
+    limit: limit + 1,
+  });
+  const exportRows = buildExportSafeCommunityMemberSourceAuditRows(audit.slice(0, limit));
+  return {
+    ok: true,
+    status: 200,
+    filename: buildCommunityMemberSourceAuditExportFilename(generatedAt),
+    content_type: "text/csv; charset=utf-8",
+    body: buildCommunityMemberSourceAuditCsv(exportRows, filters, generatedAt),
+    row_count: exportRows.length,
+    truncated: audit.length > limit,
+    filters,
+    safeguards: communityMemberSourceManagementSafeguards(),
+    generated_at: generatedAt,
+    export_safe: true,
   };
 }
 
@@ -991,6 +1075,10 @@ export function communityMemberSourceManagementSafeguards() {
     bulk_partial_success_execution_summaries: true,
     filterable_bulk_action_audit_groups: true,
     export_safe_audit_views: true,
+    bounded_export_downloads: true,
+    export_download_private_owner_admin_only: true,
+    export_filters_action_result_date: true,
+    export_uses_export_safe_audit_rows: true,
     admin_repeated_source_filters: true,
     owner_importable_notification_hook: true,
     notification_hook_dzn_pulse_only: true,
@@ -1154,6 +1242,8 @@ async function readCommunityMemberSourceAudit(
     linkedServerId: string | null;
     action: CommunityMemberSourceAuditActionFilter;
     result: CommunityMemberSourceAuditResultFilter;
+    dateFrom: string | null;
+    dateTo: string | null;
     limit: number;
   },
 ) {
@@ -1170,6 +1260,14 @@ async function readCommunityMemberSourceAudit(
   if (options.result !== "all") {
     conditions.push("community_member_source_audit.result_status = ?");
     bindings.push(options.result);
+  }
+  if (options.dateFrom) {
+    conditions.push("datetime(community_member_source_audit.created_at) >= datetime(?)");
+    bindings.push(options.dateFrom);
+  }
+  if (options.dateTo) {
+    conditions.push("datetime(community_member_source_audit.created_at) <= datetime(?)");
+    bindings.push(options.dateTo);
   }
   bindings.push(options.limit);
 
@@ -1768,6 +1866,68 @@ function buildExportSafeCommunityMemberSourceAuditRows(audit: CommunityMemberSou
   }));
 }
 
+function buildCommunityMemberSourceAuditCsv(
+  rows: CommunityMemberSourceExportSafeAuditItem[],
+  filters: CommunityMemberSourceAuditExportFilters,
+  generatedAt: string,
+) {
+  const header = [
+    "exported_at",
+    "export_safe",
+    "filter_linked_server_ref",
+    "filter_audit_action",
+    "filter_audit_result",
+    "filter_date_from",
+    "filter_date_to",
+    "audit_ref",
+    "candidate_ref",
+    "community_member_ref",
+    "server_name",
+    "public_slug",
+    "community_name",
+    "actor_role",
+    "action",
+    "result_status",
+    "reason",
+    "created_at",
+  ];
+  const filterLinkedServerRef = filters.linked_server_id ? exportSafeRef(filters.linked_server_id) : "all";
+  const lines = rows.map((row) => [
+    generatedAt,
+    "true",
+    filterLinkedServerRef ?? "server",
+    filters.audit_action,
+    filters.audit_result,
+    filters.date_from ?? "",
+    filters.date_to ?? "",
+    row.id_ref,
+    row.candidate_ref ?? "",
+    row.community_member_ref ?? "",
+    row.server_name,
+    row.public_slug ?? "",
+    row.community_name,
+    row.actor_role,
+    row.action,
+    row.result_status,
+    row.reason ?? "",
+    row.created_at ?? "",
+  ]);
+  return [
+    header.map(csvCell).join(","),
+    ...lines.map((line) => line.map(csvCell).join(",")),
+  ].join("\r\n") + "\r\n";
+}
+
+function csvCell(value: unknown) {
+  const text = String(value ?? "");
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll("\"", "\"\"")}"` : text;
+}
+
+function buildCommunityMemberSourceAuditExportFilename(generatedAt: string) {
+  const stamp = generatedAt.slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
+  return `dzn-community-member-import-audit-${stamp}.csv`;
+}
+
 function auditGroupWindowKey(value: string | null) {
   const text = cleanDisplayText(value, 64);
   return text ? text.slice(0, 16) : "unknown";
@@ -1824,7 +1984,12 @@ function exportSafeText(value: unknown, maxLength: number) {
 function exportSafeRef(value: string | null | undefined) {
   const id = cleanDisplayText(value, 96);
   if (!id) return null;
-  return id.length > 16 ? `${id.slice(0, 8)}...${id.slice(-4)}` : id;
+  let hash = 2166136261;
+  for (let index = 0; index < id.length; index += 1) {
+    hash ^= id.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `ref-${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 function normalizeCandidateStatus(value: unknown): CommunityMemberCandidateStatus {
@@ -1900,10 +2065,27 @@ function cleanReason(value: unknown) {
   return cleanDisplayText(value, 220);
 }
 
+function cleanAuditExportDateBoundary(value: unknown, boundary: "from" | "to") {
+  const text = cleanIdentifier(value, 64);
+  if (!text) return null;
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(text)
+    ? boundary === "from" ? `${text}T00:00:00.000Z` : `${text}T23:59:59.999Z`
+    : text;
+  const parsed = new Date(normalized);
+  if (!Number.isFinite(parsed.getTime())) return "invalid" as const;
+  return parsed.toISOString();
+}
+
 function clampLimit(value: unknown) {
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(parsed)) return DEFAULT_LIMIT;
   return Math.max(1, Math.min(Math.trunc(parsed), MAX_LIMIT));
+}
+
+function clampExportLimit(value: unknown) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_EXPORT_LIMIT;
+  return Math.max(1, Math.min(Math.trunc(parsed), MAX_EXPORT_LIMIT));
 }
 
 function maskDiscordId(value: unknown) {
