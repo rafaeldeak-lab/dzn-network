@@ -161,6 +161,8 @@ Manageable/admin guild filtering remains useful for owner setup. Player guild ma
 
 DZN should eventually include chat as a community/support layer, not as a competitive or billing system.
 
+The DZN Chat And Support Architecture Preflight Slice is captured in `docs/DZN_CHAT_SUPPORT_ARCHITECTURE_PREFLIGHT.md`. That document is the required design contract before any runtime chat or support bot implementation begins.
+
 Future chat surfaces should include:
 
 - A site-wide support chat available from most pages for setup help, account guidance, and public DZN feature questions.
@@ -180,7 +182,50 @@ Rules:
 - The bot must not create checkout sessions, mutate billing, change owner entitlements, call Nitrado, mutate Discord resources, award XP/calling cards, change rankings, alter reviews, alter events, change Server Wars/CTF scoring, or affect competitive eligibility.
 - No AI provider credential, paid API key, metered model call, vector store, training/eval job, or automated spend path may be added until a dedicated support-bot architecture slice explicitly approves the provider, cost controls, data boundary, prompt/source policy, abuse controls, logging policy, and rollback plan.
 
-This roadmap item is not implemented by the public profile social-preview validation package slice.
+This roadmap item is now a design-only preflight. No runtime chat routes, support bot runtime, Durable Objects/WebSockets, moderation tables, bot prompts, vector stores, AI provider credentials, or metered model calls are implemented by this slice.
+
+## DZN Chat And Support Architecture Preflight Slice
+
+The DZN chat/support architecture preflight designs DZN Comms before implementation. It records the user-provided visual direction as non-executable product reference: a dark DZN command-center layout with Public Channels, Global Chat, New Players, Server Owners, Events, Private Groups, pinned guidance, DZN Assist, online members, group members, Channel Safety, and a visible Safety Ladder.
+
+The preflight defines these future surfaces:
+
+- Site-wide support chat: a compact DZN Assist support entry point that may be visible on most pages, with logged-out answers limited to public DZN/help content and account-specific help requiring login.
+- logged-in global community chat: a free player feature after Discord login.
+- Private group chat: invite-only or trusted-membership groups tied to community, team, event, or server bridges.
+- Server-linked group management: an owner/admin management action that must pass the canonical owner entitlement boundary plus linked-server ownership or admin scope before implementation.
+- Moderation surfaces: owner/admin scoped review of reports, warnings, timed mutes/timeouts, blocks, appeals, and staff-review queues.
+
+Normal player chat access must remain free after Discord login. Starter and Pro plans must not give chat ranking priority, moderation immunity, scoring advantages, event advantages, XP advantages, badge advantages, or competitive eligibility advantages.
+
+The preflight safety model requires:
+
+- Profanity filter.
+- Spam protection.
+- Link protection.
+- Invite approval for private groups.
+- Rate limits and slow mode.
+- Report message controls.
+- Blocked-message feedback before publishing where practical.
+- Friendly warning for low-severity first violations.
+- Timed mute/timeout for repeated violations.
+- Staff review for severe or repeated abuse.
+- Scoped, reversible moderation audit where practical.
+
+The safety ladder is:
+
+1. Message blocked.
+2. Friendly warning.
+3. 10-minute timeout.
+4. Staff review.
+
+The public-DZN-info-only AI support bot is bounded to public DZN website content, setup-help content, pricing content, and public support policy. It must not use private player data, private owner data, hidden profile sections, raw Discord IDs, Discord OAuth tokens, Nitrado tokens, billing secrets, Stripe state, production D1 internals, retained export artifacts, raw award evidence, internal moderation notes, or private chat history outside the active support session.
+
+The bot must not create checkout sessions, change billing, change owner entitlements, call Nitrado, mutate Discord resources, award XP, award calling cards, change rankings, change discovery score, change reviews or review score, change events/brackets/rosters/approvals, change Server Wars or CTF scoring, or affect competitive eligibility.
+
+No migration is added in this slice. Future chat tables, support-session tables, Durable Object/WebSocket bindings, provider configuration, prompt registry, vector store, source index, analytics/tracking path, or stored support/chat history remain blocked until a later approved implementation slice.
+
+The next implementation-safe step is a DZN Comms visual shell and support launcher prototype using static local mock data, disabled/non-sending composer states, and no runtime message storage or bot calls.
 
 ## Roadmap
 
@@ -201,8 +246,9 @@ Future slices should build on this foundation in this order unless product prior
 13. Discord approval embeds: tick/X owner controls, join request approvals, event reminders, and moderation handoffs.
 14. Rich community systems: Discord community landing views, member matching, role-safe recommendations, and cross-server discovery.
 15. Cosmetics and supporter monetisation: non-competitive profile presentation and optional supporter items that never affect rank, stats, scoring, or earned competitive rewards.
-16. Global/group chat and support bot architecture preflight: site-wide support chat, global player chat, private group chat, moderation/profanity warning/timeouts, and AI support limited to public DZN/help content only, with explicit zero-surprise spend and data-boundary review before any provider wiring.
-17. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+16. Global/group chat and support bot architecture preflight: delivered as a design-only slice covering site-wide support chat, global player chat, private group chat, moderation/profanity warning/timeouts, and AI support limited to public DZN/help content only, with explicit zero-surprise spend and data-boundary review before any provider wiring.
+17. DZN Comms visual shell and support launcher prototype: build a non-sending logged-in UI shell from static local mock data before runtime chat routes, Durable Objects/WebSockets, moderation tables, bot prompts, vector stores, AI provider credentials, or metered calls are added.
+18. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 

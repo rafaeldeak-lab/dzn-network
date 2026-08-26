@@ -161,6 +161,16 @@ Future implementation must be split into a dedicated architecture preflight befo
 - No retained export storage or sharing link model is added.
 - No chat runtime, bot runtime, AI provider credential, or paid model call is added.
 
+## Follow-On DZN Chat Support Architecture Preflight
+
+The next slice is DZN chat/support architecture preflight.
+
+It is captured in `docs/DZN_CHAT_SUPPORT_ARCHITECTURE_PREFLIGHT.md` and verified by `npm run test:dzn-chat-support-architecture-preflight`.
+
+It designs the site-wide support chat, logged-in global player chat, private group chat, moderation/profanity warning and timed mute/timeout model, and public-DZN-info-only AI support bot boundaries before runtime work begins.
+
+It keeps live checkout disabled, issue #49 reserved, zero-surprise AI spend, private player/owner data isolation, and no billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP/calling-card awards, events, or competitive eligibility impact.
+
 ## Next Recommended Slice
 
-Next should be DZN chat/support architecture preflight: design the site-wide support chat, global logged-in player chat, private group chat, moderation/profanity warning and timed mute/timeout model, and public-DZN-info-only AI support bot boundaries before any runtime chat routes, Durable Objects/WebSockets, moderation tables, bot prompts, vector stores, AI provider credentials, or metered model calls are implemented. This preflight must preserve live checkout disabled, issue #49 reserved, zero-surprise AI spend, private player/owner data isolation, and no billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP/calling-card awards, events, or competitive eligibility impact.
+Next should be a DZN Comms visual shell and support launcher prototype: build the logged-in community/support UI shell from static local mock data, with the DZN Comms layout, channel rail, safety rail, DZN Assist panel, and disabled/non-sending composer states. That slice should still avoid message storage, runtime chat APIs, Durable Objects/WebSockets, moderation tables, bot prompts, vector stores, AI provider credentials, metered model calls, live checkout, production services, and issue #49.
