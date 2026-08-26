@@ -1170,6 +1170,7 @@ export function communityMemberSourceManagementSafeguards() {
     writes: ["community_member_candidates", "community_member_source_audit", "community_members", "user_notifications"] as const,
     public_visibility_controlled_by_player: true,
     public_profile_link_requires_player_opt_in_handle: true,
+    public_directory_preview_presentation_only: true,
     trusted_dzn_user_bridge_required: true,
     import_preview_requires_trusted_bridge: true,
     import_previews_from_trusted_snapshots_where_available: true,

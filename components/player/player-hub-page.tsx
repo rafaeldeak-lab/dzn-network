@@ -41,6 +41,7 @@ type PlayerHubServer = {
   guild_icon_url: string | null;
   saved_at: string | null;
   href: string;
+  community_href: string | null;
 };
 
 type PlayerHubCommunity = {
@@ -258,6 +259,11 @@ export function PlayerHubPage() {
   const suggestedTournaments = hub.suggested_events?.tournaments ?? [];
   const playerProgress = normalizePlayerProgress(hub.player_progress);
   const publicProfile = normalizePublicProfile(hub.public_profile);
+  const publicCommunityDirectories = uniqueCommunityDirectoryServers([
+    ...communities.flatMap((community) => community.matched_servers),
+    ...savedServers,
+    ...suggestedServers,
+  ]).slice(0, 6);
   const profileAttribution = normalizeProfileAttributionPreview(hub.profile_attribution, publicProfile);
   const entryPoints = hub.profile_entry_points?.length ? hub.profile_entry_points : defaultEntryPoints;
   const ownerSetupHref = hub.access?.owner_setup_href ?? "/pricing?intent=owner_setup&returnTo=%2Fsetup";
@@ -337,6 +343,18 @@ export function PlayerHubPage() {
                 <CommunityCard key={community.guild_id} community={community} />
               ))}
             </div>
+          </SectionPanel>
+
+          <SectionPanel
+            icon={RadioTower}
+            title="Community Member Directories"
+            actionHref="/servers"
+            actionLabel="Browse servers"
+            emptyTitle={loading ? "Finding public directories..." : "No public member directories yet"}
+            emptyText={loading ? "DZN is checking matched server communities." : "Public member directories appear only for connected servers with a safe public community page. Hidden players stay hidden until they publish a public profile."}
+            hasItems={publicCommunityDirectories.length > 0}
+          >
+            <CommunityDirectoryGrid servers={publicCommunityDirectories} />
           </SectionPanel>
 
           <SectionPanel
@@ -767,18 +785,60 @@ function ServerCard({ server }: { server: PlayerHubServer }) {
         <MiniBadge icon={Users} label={formatPlayers(server)} />
         <MiniBadge icon={Globe2} label={server.status ?? "Pending"} />
       </div>
+      {server.community_href ? (
+        <Link href={server.community_href} className="mt-4 inline-flex items-center gap-2 rounded border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 transition hover:bg-cyan-400/16">
+          Member Directory
+          <Users className="h-3.5 w-3.5" />
+        </Link>
+      ) : null}
     </article>
   );
 }
 
 function InlineServerLink({ server }: { server: PlayerHubServer }) {
   return (
-    <Link href={server.href} className="flex items-center justify-between gap-3 rounded border border-white/10 bg-white/[0.045] px-3 py-2 text-sm font-bold text-zinc-200 transition hover:border-cyan-300/30 hover:text-white">
-      <span className="truncate">{server.server_name}</span>
-      <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-black uppercase text-cyan-100">
+    <div className="flex items-center justify-between gap-2 rounded border border-white/10 bg-white/[0.045] px-3 py-2 text-sm font-bold text-zinc-200">
+      <Link href={server.href} className="min-w-0 flex-1 truncate transition hover:text-white">
+        {server.server_name}
+      </Link>
+      {server.community_href ? (
+        <Link href={server.community_href} className="inline-flex shrink-0 items-center gap-1 rounded border border-cyan-300/18 bg-cyan-400/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-100 transition hover:bg-cyan-400/16 hover:text-white">
+          Members
+          <Users className="h-3 w-3" />
+        </Link>
+      ) : null}
+      <Link href={server.href} aria-label={`Open ${server.server_name}`} className="inline-flex shrink-0 items-center gap-1 text-[10px] font-black uppercase text-cyan-100 transition hover:text-white">
         Open
         <ArrowRight className="h-3 w-3" />
-      </span>
+      </Link>
+    </div>
+  );
+}
+
+function CommunityDirectoryGrid({ servers }: { servers: PlayerHubServer[] }) {
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {servers.map((server) => (
+        <CommunityDirectoryCard key={`${server.linked_server_id}:${server.community_href}`} server={server} />
+      ))}
+    </div>
+  );
+}
+
+function CommunityDirectoryCard({ server }: { server: PlayerHubServer }) {
+  if (!server.community_href) return null;
+  return (
+    <Link href={server.community_href} className="group rounded border border-cyan-300/18 bg-cyan-400/8 p-4 transition hover:border-cyan-200/40 hover:bg-cyan-400/12">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <span className="min-w-0">
+          <span className="block break-words text-sm font-black uppercase text-white [overflow-wrap:anywhere]">{server.guild_name ?? server.server_name}</span>
+          <span className="mt-1 block break-words text-xs font-bold text-zinc-400 [overflow-wrap:anywhere]">{server.server_name}</span>
+        </span>
+        <Users className="h-5 w-5 shrink-0 text-cyan-100 transition group-hover:text-white" />
+      </div>
+      <p className="mt-3 text-xs font-bold leading-5 text-cyan-50/75">
+        Public-safe member rows only. Hidden players stay anonymous until they opt in from their player profile.
+      </p>
     </Link>
   );
 }
@@ -953,6 +1013,19 @@ function normalizePublicProfileAttribution(value: unknown): PublicProfileAttribu
     public_href: expectedHref,
     public_api_href: expectedApiHref,
   };
+}
+
+function uniqueCommunityDirectoryServers(servers: PlayerHubServer[]) {
+  const seen = new Set<string>();
+  const output: PlayerHubServer[] = [];
+  for (const server of servers) {
+    if (!server.community_href) continue;
+    const key = server.public_slug ?? server.community_href;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(server);
+  }
+  return output;
 }
 
 function normalizePublicProfileHandle(value: unknown) {

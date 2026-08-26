@@ -302,6 +302,7 @@ type Payload = {
   export_policy_review: ExportPolicyReview | null;
   safeguards: {
     public_profile_link_requires_player_opt_in_handle: boolean;
+    public_directory_preview_presentation_only: boolean;
     trusted_dzn_user_bridge_required: boolean;
     import_preview_requires_trusted_bridge: boolean;
     import_previews_from_trusted_snapshots_where_available: boolean;
@@ -952,6 +953,7 @@ export function CommunityMemberSourceDashboard({ homeHref = "/dashboard", embedd
           </div>
           <div className="grid gap-2 rounded-lg border border-white/10 bg-black/28 p-3 text-xs font-bold text-zinc-400">
             <StatusLine label="public profile opt-in handle" ok={payload?.safeguards.public_profile_link_requires_player_opt_in_handle ?? true} />
+            <StatusLine label="directory preview presentation-only" ok={payload?.safeguards.public_directory_preview_presentation_only ?? true} />
             <StatusLine label="trusted snapshot previews" ok={payload?.safeguards.import_previews_from_trusted_snapshots_where_available ?? true} />
             <StatusLine label="owner Pulse hook only" ok={payload?.safeguards.owner_importable_notification_hook ?? true} />
             <StatusLine label="bulk row server recheck" ok={payload?.safeguards.bulk_actions_recheck_server_side ?? true} />
@@ -1710,6 +1712,7 @@ function CandidateCard({
         <span>Role: {candidate.role_label ?? "Community member"}</span>
         <span>Source: {titleCaseToken(candidate.source)}</span>
       </div>
+      <PublicDirectoryStatus candidate={candidate} />
       <ImportPreviewPanel preview={candidate.import_preview} />
       {candidate.reason ? <p className="mt-3 rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-zinc-400">{candidate.reason}</p> : null}
       {candidate.public_profile ? (
@@ -1719,6 +1722,40 @@ function CandidateCard({
         </Link>
       ) : null}
     </article>
+  );
+}
+
+function PublicDirectoryStatus({ candidate }: { candidate: CandidateItem }) {
+  const directoryHref = publicCommunityDirectoryHref(candidate.public_slug);
+  const visible = candidate.status === "imported" && candidate.public_profile_linkable;
+  const bridgeReady = Boolean(candidate.matched_user_id && (candidate.status === "imported" || candidate.import_preview.can_import));
+  return (
+    <div className="mt-4 rounded border border-cyan-300/16 bg-cyan-400/8 p-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-black uppercase tracking-[0.14em] text-cyan-50">Public directory status</p>
+          <p className="mt-2 text-xs font-bold leading-5 text-cyan-50/75">
+            {visible
+              ? "This imported bridge can appear publicly because the player has an opted-in profile handle."
+              : bridgeReady
+                ? "The trusted bridge is ready, but public member rows stay hidden until the player publishes a profile handle."
+                : "No public member row can appear until DZN has a unique trusted user bridge and the player opts in."}
+          </p>
+        </div>
+        <span className={`inline-flex shrink-0 items-center gap-1 rounded border px-2 py-1 text-[10px] font-black uppercase ${visible ? "border-emerald-300/24 bg-emerald-400/10 text-emerald-100" : "border-zinc-400/18 bg-white/[0.03] text-zinc-400"}`}>
+          {visible ? <ShieldCheck className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+          {visible ? "Public-ready" : "Private"}
+        </span>
+      </div>
+      {directoryHref ? (
+        <Link href={directoryHref} className="mt-3 inline-flex items-center gap-2 rounded border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 transition hover:bg-cyan-400/16">
+          View community directory
+          <ArrowRight className="h-3 w-3" />
+        </Link>
+      ) : (
+        <p className="mt-3 text-xs font-bold leading-5 text-zinc-500">This linked server does not have a public community page slug yet.</p>
+      )}
+    </div>
   );
 }
 
@@ -1884,6 +1921,11 @@ function outcomeTone(outcome: BulkExecutionSummary["outcome"]) {
   if (outcome === "rejected") return "border-rose-300/24 bg-rose-400/10 text-rose-100";
   if (outcome === "blocked") return "border-amber-300/24 bg-amber-400/10 text-amber-100";
   return "border-zinc-400/18 bg-white/[0.03] text-zinc-300";
+}
+
+function publicCommunityDirectoryHref(value: string | null | undefined) {
+  const slug = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return /^[a-z0-9](?:[a-z0-9-]{0,94}[a-z0-9])?$/.test(slug) ? `/servers/${encodeURIComponent(slug)}/community` : null;
 }
 
 function titleCaseToken(value: string | null | undefined) {
