@@ -379,6 +379,23 @@ export async function countUnreadReviewNotifications(env: Env, user: SessionUser
   return Math.max(0, Number(row?.count ?? 0) || 0);
 }
 
+export async function countUnreadCommunityMemberImportNotifications(env: Env, user: SessionUser) {
+  if (!isDznPulseEnabled(env)) return 0;
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM user_notifications
+       WHERE user_id = ?
+         AND read_at IS NULL
+         AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
+         AND ${communityMemberImportNotificationConditionSql()}`,
+    )
+    .bind(user.id, ...PULSE_COMMUNITY_NOTIFICATION_TYPES)
+    .first<{ count: number | null }>()
+    .catch(() => ({ count: 0 }));
+  return Math.max(0, Number(row?.count ?? 0) || 0);
+}
+
 export async function markNotificationRead(env: Env, user: SessionUser, notificationId: string) {
   if (!isDznPulseEnabled(env)) return { status: 404, ...pulseFeatureDisabledPayload() };
   const id = sanitizeIdentifier(notificationId);
@@ -432,6 +449,30 @@ export async function markReviewNotificationsRead(env: Env, user: SessionUser) {
     marked: Math.max(0, Number(result.meta?.changes ?? 0) || 0),
     unreadCount: await countUnreadNotifications(env, user),
     reviewUnreadCount: await countUnreadReviewNotifications(env, user),
+  };
+}
+
+export async function markCommunityMemberImportNotificationsRead(env: Env, user: SessionUser) {
+  if (!isDznPulseEnabled(env)) return { status: 404, ...pulseFeatureDisabledPayload() };
+  const now = new Date().toISOString();
+  const result = await requireDb(env)
+    .prepare(
+      `UPDATE user_notifications
+       SET read_at = COALESCE(read_at, ?)
+       WHERE user_id = ?
+         AND read_at IS NULL
+         AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
+         AND ${communityMemberImportNotificationConditionSql()}`,
+    )
+    .bind(now, user.id, ...PULSE_COMMUNITY_NOTIFICATION_TYPES)
+    .run<{ changes?: number }>();
+  return {
+    ok: true,
+    status: 200,
+    read_at: now,
+    marked: Math.max(0, Number(result.meta?.changes ?? 0) || 0),
+    unreadCount: await countUnreadNotifications(env, user),
+    communityMemberImportUnreadCount: await countUnreadCommunityMemberImportNotifications(env, user),
   };
 }
 
@@ -792,6 +833,12 @@ export function reviewNotificationConditionSql(alias = "user_notifications") {
   const tableAlias = alias.replace(/[^a-zA-Z0-9_]/g, "") || "user_notifications";
   const placeholders = PULSE_REVIEW_NOTIFICATION_TYPES.map(() => "?").join(", ");
   return `(${tableAlias}.type IN (${placeholders}) OR ${tableAlias}.action_url LIKE '/dashboard/reviews%')`;
+}
+
+export function communityMemberImportNotificationConditionSql(alias = "user_notifications") {
+  const tableAlias = alias.replace(/[^a-zA-Z0-9_]/g, "") || "user_notifications";
+  const placeholders = PULSE_COMMUNITY_NOTIFICATION_TYPES.map(() => "?").join(", ");
+  return `${tableAlias}.type IN (${placeholders})`;
 }
 
 function emptyPulseList(): PulseListResult {

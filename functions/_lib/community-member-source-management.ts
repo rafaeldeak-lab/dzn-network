@@ -13,7 +13,11 @@ import {
   publicPlayerProfileApiHref,
   publicPlayerProfileHref,
 } from "./player-profile-privacy";
-import { createNotification } from "./dzn-pulse";
+import {
+  countUnreadCommunityMemberImportNotifications,
+  countUnreadNotifications,
+  createNotification,
+} from "./dzn-pulse";
 import type { Env, SessionUser } from "./types";
 
 export type CommunityMemberSourceRole = "owner" | "admin";
@@ -32,6 +36,7 @@ export type CommunityMemberSourceAuditResult = "accepted" | "rejected" | "skippe
 export type CommunityMemberSourceManagementFilter = CommunityMemberCandidateStatus | "all";
 export type CommunityMemberSourceIssueFilter = "all" | "importable" | "repeated_no_match" | "repeated_duplicate";
 export type CommunityMemberCandidateAction = "import" | "reject" | "refresh_preview";
+export type CommunityMemberBulkCandidateAction = "import" | "reject";
 export type CommunityMemberImportPreviewStatus =
   | "ready"
   | "blocked_no_match"
@@ -78,6 +83,18 @@ export type CommunityMemberCandidateActionInput = {
   reason?: unknown;
   role_label?: unknown;
   public_member_enabled?: unknown;
+};
+
+export type CommunityMemberBulkCandidateActionInput = {
+  action?: unknown;
+  candidate_ids?: unknown;
+  reason?: unknown;
+  public_member_enabled?: unknown;
+};
+
+export type CommunityMemberImportNotificationCounts = {
+  unread_total: number;
+  community_member_importable: number;
 };
 
 export type CommunityMemberSourceServerOption = {
@@ -247,6 +264,7 @@ const AUDIT_RESULTS = new Set<CommunityMemberSourceAuditResult>(["accepted", "re
 const CANDIDATE_SOURCES = new Set(["owner_import", "admin_import", "discord_guild_snapshot", "manual_review"]);
 const DEFAULT_LIMIT = 80;
 const MAX_LIMIT = 160;
+const MAX_BULK_ACTION_CANDIDATES = 50;
 
 export async function authorizeCommunityMemberSourceRequest(env: Env, request: Request): Promise<
   | { ok: true; actor: CommunityMemberSourceActor }
@@ -288,11 +306,12 @@ export async function listCommunityMemberSourceManagement(
   const issueFilter = normalizeIssueFilter(options.issue);
   const linkedServerId = cleanIdentifier(options.linkedServerId, 96);
   const limit = clampLimit(options.limit);
-  const [servers, candidates, audit, counts] = await Promise.all([
+  const [servers, candidates, audit, counts, notificationCounts] = await Promise.all([
     readCommunityMemberSourceServerOptions(db, actor),
     readCommunityMemberCandidates(db, actor, { status: filter, issue: issueFilter, linkedServerId, limit }),
     readCommunityMemberSourceAudit(db, actor, { linkedServerId, limit }),
     readCommunityMemberSourceCounts(db, actor, linkedServerId),
+    readCommunityMemberSourceNotificationCounts(env, actor),
   ]);
 
   return {
@@ -304,6 +323,7 @@ export async function listCommunityMemberSourceManagement(
       linked_server_id: linkedServerId,
     },
     counts,
+    notification_counts: notificationCounts,
     servers,
     candidates,
     audit,
@@ -491,6 +511,9 @@ export async function actOnCommunityMemberCandidate(
   }
 
   if (action === "reject") {
+    if (candidate.status !== "pending") {
+      return errorResult(409, "CANDIDATE_NOT_PENDING", "Only pending community member candidates can be rejected from review.");
+    }
     await db
       .prepare(
         `UPDATE community_member_candidates
@@ -651,6 +674,73 @@ export async function actOnCommunityMemberCandidate(
   };
 }
 
+export async function bulkActOnCommunityMemberCandidates(
+  env: Env,
+  actor: CommunityMemberSourceActor,
+  input: CommunityMemberBulkCandidateActionInput,
+) {
+  const action = cleanBulkCandidateAction(input.action);
+  if (!action) {
+    return errorResult(400, "INVALID_BULK_ACTION", "Choose bulk import or bulk reject for selected community member candidates.");
+  }
+
+  const candidateIds = cleanCandidateIdList(input.candidate_ids);
+  if (!candidateIds.length) {
+    return errorResult(400, "CANDIDATES_REQUIRED", "Choose at least one pending community member candidate.");
+  }
+  if (candidateIds.length > MAX_BULK_ACTION_CANDIDATES) {
+    return errorResult(400, "TOO_MANY_CANDIDATES", `Choose ${MAX_BULK_ACTION_CANDIDATES} or fewer community member candidates at a time.`);
+  }
+
+  const reason = cleanReason(input.reason) ?? (
+    action === "import"
+      ? "Selected rows approved after server-side bridge recheck."
+      : "Selected rows rejected from owner/admin review."
+  );
+
+  const results = [];
+  for (const candidateId of candidateIds) {
+    const result = await actOnCommunityMemberCandidate(env, actor, candidateId, {
+      action,
+      reason,
+      public_member_enabled: input.public_member_enabled,
+    });
+    const ok = result.ok === true;
+    results.push({
+      candidate_id: candidateId,
+      action,
+      ok,
+      status: result.status,
+      error: ok ? null : result.error,
+      message: result.message,
+      imported_member_id: ok && "member" in result ? result.member?.id ?? null : null,
+    });
+  }
+
+  const importedCount = results.filter((item) => item.ok && action === "import").length;
+  const rejectedCount = results.filter((item) => item.ok && action === "reject").length;
+  const blockedCount = results.filter((item) => !item.ok && item.status >= 400 && item.status < 500).length;
+  const failedCount = results.filter((item) => !item.ok && item.status >= 500).length;
+  const allSucceeded = results.every((item) => item.ok);
+
+  return {
+    ok: allSucceeded,
+    status: allSucceeded ? 200 as const : 207 as const,
+    action,
+    requested_count: candidateIds.length,
+    processed_count: results.length,
+    imported_count: importedCount,
+    rejected_count: rejectedCount,
+    blocked_count: blockedCount,
+    failed_count: failedCount,
+    message: allSucceeded
+      ? `${results.length} selected community member candidate${results.length === 1 ? "" : "s"} ${action === "import" ? "imported" : "rejected"} after server-side recheck.`
+      : "Some selected community member candidates could not be processed after server-side recheck.",
+    results,
+    safeguards: communityMemberSourceManagementSafeguards(),
+  };
+}
+
 async function refreshCommunityMemberCandidatePreview(
   env: Env,
   db: D1Database,
@@ -798,10 +888,13 @@ export function communityMemberSourceManagementSafeguards() {
     trusted_dzn_user_bridge_required: true,
     import_preview_requires_trusted_bridge: true,
     import_previews_from_trusted_snapshots_where_available: true,
+    selected_row_bulk_actions: true,
+    bulk_actions_recheck_server_side: true,
     admin_repeated_source_filters: true,
     owner_importable_notification_hook: true,
     notification_hook_dzn_pulse_only: true,
     notification_read_state_private_per_owner: true,
+    community_import_alert_read_state_private_per_owner: true,
     rejects_duplicate_members: true,
     rejects_ambiguous_user_bridge: true,
     exposes_private_identifiers_publicly: false,
@@ -1028,6 +1121,20 @@ async function readCommunityMemberSourceCounts(db: D1Database, actor: CommunityM
     counts.total += count;
   }
   return counts;
+}
+
+async function readCommunityMemberSourceNotificationCounts(
+  env: Env,
+  actor: CommunityMemberSourceActor,
+): Promise<CommunityMemberImportNotificationCounts> {
+  const [unreadTotal, importable] = await Promise.all([
+    countUnreadNotifications(env, actor.user).catch(() => 0),
+    countUnreadCommunityMemberImportNotifications(env, actor.user).catch(() => 0),
+  ]);
+  return {
+    unread_total: unreadTotal,
+    community_member_importable: importable,
+  };
 }
 
 async function readScopedCommunityServer(db: D1Database, actor: CommunityMemberSourceActor, linkedServerId: string) {
@@ -1501,6 +1608,20 @@ function normalizeMatchStatus(value: unknown): CommunityMemberMatchStatus {
 
 function cleanCandidateAction(value: unknown): CommunityMemberCandidateAction | null {
   return value === "import" || value === "reject" || value === "refresh_preview" ? value : null;
+}
+
+function cleanBulkCandidateAction(value: unknown): CommunityMemberBulkCandidateAction | null {
+  return value === "import" || value === "reject" ? value : null;
+}
+
+function cleanCandidateIdList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const uniqueIds = new Set<string>();
+  for (const item of value) {
+    const id = cleanIdentifier(item, 96);
+    if (id) uniqueIds.add(id);
+  }
+  return Array.from(uniqueIds);
 }
 
 function cleanCandidateSource(value: unknown, actorRole: CommunityMemberSourceRole) {

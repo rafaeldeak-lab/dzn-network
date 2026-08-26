@@ -838,6 +838,45 @@ Mutation scope:
 
 Fairness remains unchanged: safer import previews, repeated source filters, and owner notification hooks are presentation workflow aids only. They cannot make a player publicly visible without the player's opt-in generated handle and must not affect CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
 
+## Community Member Import Workflow Execution Polish Slice
+
+The community member import workflow execution polish slice turns the reviewed candidate queue into a safer owner/admin workflow with selected-row bulk execution and private import-alert read controls. It remains a presentation-only source-management workflow and keeps every decision server-side.
+
+The slice adds:
+
+- Selected-row bulk import and bulk reject actions from the owner/admin dashboard.
+- `bulkActOnCommunityMemberCandidates` as the server-side execution helper.
+- `POST /api/owner/community-members/bulk` for selected candidate IDs, capped to a bounded request size and authenticated before the request body is read.
+- A server-side recheck for every selected row by reusing the existing single-candidate import/reject path, including owner/admin scope, candidate status, unique trusted DZN user bridge resolution, duplicate community-member rejection, and audit writes.
+- Private unread counts for `community_member_candidate_importable` alerts on the community member source-management payload.
+- `POST /api/owner/community-members/notifications/read` for marking only active `community_member_candidate_importable` alerts read for the current owner/admin user.
+- Dashboard UI for selecting pending rows, importing or rejecting the selected queue entries, and marking import alerts read without clearing general Pulse alerts.
+
+Authorization and source rules:
+
+- Normal owners must still pass the canonical owner entitlement boundary and may manage only their own linked servers.
+- Configured DZN admins may still review global candidate source rows.
+- Browser selection is never trusted as authorization or import readiness. Every selected row is re-read and rechecked server-side.
+- Only pending candidates can be rejected from review.
+- Import still requires exactly one trusted DZN user bridge and no existing `community_members` duplicate for `(community_guild_id, user_id)`.
+- Notification read state is private per owner/admin user. Marking import alerts read cannot clear another owner's alerts and cannot clear unrelated general DZN Pulse alerts.
+
+Still excluded:
+
+- Public profile visibility without the player's opt-in generated handle.
+- Public profile handle creation, profile privacy updates, or player-owned display preference changes.
+- CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, event eligibility, scoring feeds, and accepted audit feeds.
+- Billing, plan status, owner entitlement mutation, rankings, discovery score, reviews, review score, badges, seasons, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility.
+- Stripe checkout activation, Stripe product/price changes, Cloudflare secret changes, production D1 writes, Nitrado calls, Discord resource mutation, and issue #49.
+
+Mutation scope:
+
+- This slice may read `linked_servers`, `discord_guilds`, `users`, `community_members`, `community_member_candidates`, `community_member_source_audit`, `community_member_source_snapshots`, `player_profile_privacy_preferences`, and `user_notifications`.
+- This slice may write only `community_member_candidates` review/import state, `community_member_source_audit` audit rows, imported `community_members` rows after a unique trusted DZN user bridge is confirmed, and private `user_notifications.read_at` values for the current owner/admin user's active `community_member_candidate_importable` alerts.
+- It must not add checkout sessions, profile handle generation, profile privacy updates, billing updates, server ownership changes, ranking updates, discovery score updates, review rating changes, event mutations, roster mutations, CTF scoring changes, badge awards, season changes, Server Wars score/result changes, XP awards, calling-card awards, Nitrado calls, Discord bot messages, Cloudflare secret changes, production D1 writes, live checkout activation, or issue #49 changes.
+
+Fairness remains unchanged: selected-row bulk actions and import-alert read controls are owner/admin workflow aids only. They cannot make a player publicly visible without the player's opt-in generated handle and must not affect CTF scoring rows, owner workflow decisions, approval decisions, bracket outcomes, billing, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
