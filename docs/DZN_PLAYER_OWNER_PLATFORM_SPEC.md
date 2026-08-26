@@ -1326,6 +1326,29 @@ Fairness remains unchanged: public profile share accessibility/fallback polish c
 
 Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
 
+## Public Profile Share Preview Metadata Polish Slice
+
+This slice improves `/players/[handle]` link previews with public-safe Open Graph/Twitter-style metadata and fallback preview copy. Because the app is statically exported and arbitrary player handles are served by the Cloudflare Pages function at `functions/players/[handle].ts`, the Next route keeps generic static fallback metadata while the Pages function rewrites the returned profile shell with per-handle metadata at request time.
+
+The slice adds:
+
+- A `PublicPlayerProfileSharePreviewMetadata` projection built from the already-filtered public profile payload returned by `getPublicPlayerProfilePayload`.
+- Per-handle `<title>`, canonical URL, `description`, Open Graph, Twitter card, preview image, and DZN fallback preview-copy metadata for `/players/[handle]`.
+- Generic `noindex,nofollow` fallback metadata for invalid, hidden, unpublished, unavailable, or failed profile lookups.
+- Visibility-aware metadata summaries that use only visible public profile sections: XP, challenge progress, and calling cards.
+- Static guard tests proving hidden sections are omitted even if contradictory section data is present in a synthetic payload.
+
+Rules:
+
+- Metadata may use only already-public profile fields and saved visibility preferences from the public profile read model.
+- Hidden XP, hidden challenge progress, hidden calling cards, private identifiers, Discord IDs, internal user IDs, source IDs, raw award evidence, exact award timestamps, private profile settings, owner/admin rows, retained export artifacts, billing rows, scoring rows, and event internals must not appear in metadata.
+- The metadata path must not store share history, create tracking events, call analytics, write profile privacy settings, create profile handles, create checkout sessions, update billing, update rankings, modify discovery score, mutate reviews, award badges, alter seasons, mutate events, change Server Wars or CTF scoring, award XP, award calling cards, call Nitrado, mutate Discord resources, change Cloudflare secrets, apply production migrations, enable live checkout, or merge issue #49.
+- The Cloudflare Pages shell function may read the public profile payload and rewrite the static shell response, but it must not introduce new write routes, cookies, browser storage, beacon calls, analytics calls, audit-log calls, or live-service mutations.
+
+Fairness remains unchanged: public profile share preview metadata cannot expose hidden sections, store share history, create tracking events, call analytics, write profile privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or affect competitive eligibility.
+
+Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
@@ -1352,7 +1375,7 @@ Live checkout remains disabled by default. The page may explain that a later app
 | `/api/player/challenges` | 401 | Allowed | Allowed | Allowed | Session auth, player participation only |
 | `/player/profile` and `/api/player/profile` | 401/login redirect | Allowed | Allowed | Allowed | Session auth, private no-store profile progression showcase, read-only; public-profile owner preview/share UI, share session feedback, and share accessibility/fallback guidance are local presentation only |
 | `/api/player/profile-privacy` | 401 | Allowed | Allowed | Allowed | Private player-owned settings API; GET/PATCH only; writes only `player_profile_privacy_preferences` |
-| `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences; DZN-branded visual shell is presentation-only and does not change the public API, privacy writes, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, or competitive eligibility |
+| `/players/[handle]` and `/api/public/player-profiles/[handle]` | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Public-safe read-only profile viewer; respects saved player visibility preferences; DZN-branded visual shell and Open Graph/Twitter share-preview metadata are presentation-only; per-handle metadata uses only the already-filtered public payload and cannot expose hidden sections, store share history, create tracking events, call analytics, write privacy settings, alter billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility |
 | Public profile attribution on reviews/challenges/leaderboards | Published profiles only | Published profiles only | Published profiles only | Published profiles only | Read-only generated-handle attribution; no name-only matching; ambiguous/hidden/unpublished profiles are not linked |
 | Public profile attribution preview/control and safe event-suggestion author links | Public event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Allowed on private player surfaces; event suggestion links only when published | Player-owned visibility control; trusted user bridge required; roster scoring gates and owner mutations excluded |
 | CTF/event presentation roster profile links | 401/login boundary | Owner/admin dashboard access required | Own server dashboard read-only, if owner/admin checks pass | Own server dashboard read-only, if owner/admin checks pass | Exact roster server/player bridge; generated handle required; presentation-only; registration, scoring, eligibility, and owner decisions unaffected |
