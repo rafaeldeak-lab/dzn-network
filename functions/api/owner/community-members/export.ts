@@ -41,6 +41,10 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       "x-dzn-export-retention": result.retention.mode,
       "x-dzn-export-persisted-by-dzn": String(result.retention.persisted_by_dzn),
       "x-dzn-export-dashboard-history": result.retention.dashboard_history,
+      "x-dzn-export-policy": "owner-admin-private-download-only",
+      "x-dzn-export-persistent-retention": result.policy.persistent_retention_model.status,
+      "x-dzn-export-retention-expiry-required-if-approved": String(result.policy.persistent_retention_model.requires_expiry),
+      "x-dzn-export-retention-audit-required-if-approved": String(result.policy.persistent_retention_model.requires_audit_controls),
     });
 
     return new Response(result.body, { status: result.status, headers });

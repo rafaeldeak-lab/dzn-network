@@ -238,6 +238,27 @@ export type CommunityMemberSourceAuditExportRetention = {
   private_artifact: true;
 };
 
+export type CommunityMemberSourceExportPolicy = {
+  owner_admin_visible: true;
+  current_retention_mode: "download_only";
+  private_artifact: true;
+  persisted_exports_enabled: false;
+  dashboard_history: "client_session_only";
+  dashboard_history_limit: number;
+  max_rows_per_download: number;
+  export_file_retention: "not_persisted_by_dzn";
+  sharing_links_enabled: false;
+  browser_persistence_enabled: false;
+  persistent_retention_model: {
+    status: "not_approved";
+    requires_explicit_approval: true;
+    requires_expiry: true;
+    requires_audit_controls: true;
+    required_design_controls: string[];
+  };
+  rules: string[];
+};
+
 export type CommunityMemberSourceAuditExport = {
   ok: true;
   status: 200;
@@ -248,6 +269,7 @@ export type CommunityMemberSourceAuditExport = {
   truncated: boolean;
   filters: CommunityMemberSourceAuditExportFilters;
   retention: CommunityMemberSourceAuditExportRetention;
+  policy: CommunityMemberSourceExportPolicy;
   safeguards: ReturnType<typeof communityMemberSourceManagementSafeguards>;
   generated_at: string;
   export_safe: true;
@@ -367,6 +389,7 @@ const DEFAULT_LIMIT = 80;
 const MAX_LIMIT = 160;
 const DEFAULT_EXPORT_LIMIT = 160;
 const MAX_EXPORT_LIMIT = 500;
+const CLIENT_SESSION_EXPORT_HISTORY_LIMIT = 5;
 const MAX_BULK_ACTION_CANDIDATES = 50;
 
 export async function authorizeCommunityMemberSourceRequest(env: Env, request: Request): Promise<
@@ -443,6 +466,7 @@ export async function listCommunityMemberSourceManagement(
     audit,
     audit_groups: buildCommunityMemberSourceAuditGroups(audit),
     export_safe_audit: buildExportSafeCommunityMemberSourceAuditRows(audit),
+    export_policy: communityMemberSourceExportPolicy(),
     safeguards: communityMemberSourceManagementSafeguards(),
     generated_at: new Date().toISOString(),
   };
@@ -502,6 +526,7 @@ export async function exportCommunityMemberSourceAudit(
     truncated: audit.length > limit,
     filters,
     retention: communityMemberSourceAuditExportRetention(),
+    policy: communityMemberSourceExportPolicy(),
     safeguards: communityMemberSourceManagementSafeguards(),
     generated_at: generatedAt,
     export_safe: true,
@@ -1092,6 +1117,12 @@ export function communityMemberSourceManagementSafeguards() {
     export_download_non_persistent_by_default: true,
     export_private_artifact_notice: true,
     export_retention_controls: true,
+    export_policy_surface_owner_admin_visible: true,
+    export_policy_explains_download_rules: true,
+    export_persistent_retention_settings_disabled_without_explicit_approval: true,
+    export_persistent_retention_requires_expiry: true,
+    export_persistent_retention_requires_audit_controls: true,
+    export_retention_policy_has_no_storage_side_effect: true,
     admin_repeated_source_filters: true,
     owner_importable_notification_hook: true,
     notification_hook_dzn_pulse_only: true,
@@ -1132,6 +1163,42 @@ export function communityMemberSourceAuditExportRetention(): CommunityMemberSour
     persisted_by_dzn: false,
     dashboard_history: "client_session_only",
     private_artifact: true,
+  };
+}
+
+export function communityMemberSourceExportPolicy(): CommunityMemberSourceExportPolicy {
+  return {
+    owner_admin_visible: true,
+    current_retention_mode: "download_only",
+    private_artifact: true,
+    persisted_exports_enabled: false,
+    dashboard_history: "client_session_only",
+    dashboard_history_limit: CLIENT_SESSION_EXPORT_HISTORY_LIMIT,
+    max_rows_per_download: MAX_EXPORT_LIMIT,
+    export_file_retention: "not_persisted_by_dzn",
+    sharing_links_enabled: false,
+    browser_persistence_enabled: false,
+    persistent_retention_model: {
+      status: "not_approved",
+      requires_explicit_approval: true,
+      requires_expiry: true,
+      requires_audit_controls: true,
+      required_design_controls: [
+        "separate owner/admin-scoped retention model",
+        "expires_at required for every persisted export record",
+        "actor, scope, filters, and result audit required for every retained export",
+        "export-safe rows only with no raw Discord, user, server, or guild identifiers",
+        "explicit approval before any migration, stored artifact, or sharing link",
+      ],
+    },
+    rules: [
+      "Only signed-in owners with entitlement or configured DZN admins can request community member audit exports.",
+      "Exports apply owner/admin scope before community, action, result, date, and row-limit filters.",
+      "Downloaded CSV files are private owner/admin artifacts.",
+      "DZN does not persist export files or export-history records by default.",
+      "Recent export history is limited to the active dashboard session and can be cleared locally.",
+      "Persistent export retention requires a separate approved slice with expiry and audit controls.",
+    ],
   };
 }
 
