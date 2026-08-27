@@ -110,6 +110,8 @@ The read-only `/store` preview is not an owner subscription checkout path. It ma
 
 The DZN Store sandbox order and checkout approval preflight defines the future authenticated order creation and one-time Stripe Checkout contract using `mode=payment`, but it is still documentation/test-guard work only. No checkout route, Store order table, payment webhook, entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, live checkout activation, or issue #49 change is added by that preflight.
 
+The DZN Store sandbox order ledger schema adds local/sandbox-only `store_orders`, `store_order_items`, and `store_payment_events` tables. Those tables are fixed to `livemode = 0`, one item per order, immutable product/price/tax snapshots, unique provider event ids, sanitized event summaries, and no-fulfilment blockers. No Store order creation route, Stripe Checkout Session, webhook fulfilment, account entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, live checkout activation, production D1 apply, or issue #49 change is added.
+
 Store purchases must never unlock `/setup`, Nitrado linking, owner onboarding, owner dashboards, server-management APIs, owner billing plan status, server ownership, XP, earned calling cards, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, or competitive eligibility.
 
 Players must never be able to buy wheel spins. Spins remain earned-only and must be enforced server-side with a maximum three spins in any rolling 24-hour period, a minimum four-hour cooldown, server-generated outcomes, complete reward-pool probability display, no cash-equivalent rewards, and an auditable spin ledger.
