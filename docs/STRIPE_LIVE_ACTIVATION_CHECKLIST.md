@@ -6,6 +6,8 @@ The DZN Safe Monetisation and Supporter System implementation preflight is `docs
 
 The DZN Store sandbox order and checkout approval preflight is `docs/DZN_STORE_SANDBOX_ORDER_CHECKOUT_APPROVAL_PREFLIGHT.md`. It defines sandbox order creation, one-time Checkout Session shape, webhook event ledger, idempotent fulfilment, refund/chargeback revocation, tax/receipt records, feature flags, rollback, and proof matrix, but does not approve or implement checkout routes, order tables, Store webhooks, entitlement writes, Supporter Card issuance, earned-spin ledgers, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 writes, live checkout activation, or issue #49 changes.
 
+The DZN Store sandbox order ledger schema is `docs/DZN_STORE_SANDBOX_ORDER_LEDGER_SCHEMA.md`. It adds source-controlled local/sandbox ledger schema only for `store_orders`, `store_order_items`, and `store_payment_events`. It does not approve production D1 migration application, checkout routes, Stripe Checkout Session creation, Store webhook handlers, webhook fulfilment, account entitlement writes, Supporter Card issuance, earned-spin ledgers, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, live checkout activation, or issue #49 changes.
+
 ## Activation Boundary
 
 Live billing activation is high-risk billing and production-mutation work.

@@ -12,6 +12,8 @@ This document and the implementation preflight do not implement payment routes, 
 
 The DZN Store sandbox order and checkout approval preflight is `docs/DZN_STORE_SANDBOX_ORDER_CHECKOUT_APPROVAL_PREFLIGHT.md`. It defines future `POST /api/store/orders` and `POST /api/stripe/store-webhook` contracts, one-time Stripe Checkout Session shape, webhook event ledger, idempotent fulfilment, refund/chargeback revocation, tax/receipt records, feature flags, rollback, and proof requirements. It creates no checkout route, order table, payment webhook, entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change.
 
+The DZN Store sandbox order ledger schema is `docs/DZN_STORE_SANDBOX_ORDER_LEDGER_SCHEMA.md`. It adds `migrations/0072_dzn_store_order_ledger_schema.sql` as a local/sandbox-only schema step for `store_orders`, `store_order_items`, and `store_payment_events`. It stores sandbox-only order headers, one-item order snapshots, and provider event ledger rows with unique Stripe event ids, raw event hashes, sanitized summaries, and no-fulfilment blockers. No checkout route, Stripe Checkout Session creation, Store webhook handler, webhook fulfilment, account entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, Stripe mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change is added.
+
 ## Implementation Preflight
 
 The approved preflight is documentation and test guard work only. It keeps `DZN_LIVE_CHECKOUT_ENABLED` unset/false, keeps issue #49 reserved for final live checkout activation, and blocks one-time Stripe Checkout Sessions, store runtime, webhook fulfilment, account entitlement writes, Supporter Card issuance, earned-spin ledgers, reward wheel runtime, Stripe live object changes, Cloudflare secret changes, production D1 writes, Nitrado changes, Discord changes, AI provider credentials, vector stores, analytics/tracking, and metered model calls.
@@ -62,6 +64,23 @@ The sandbox order and checkout approval preflight is documentation and test guar
 - Non-destructive rollback and proof matrix before runtime.
 
 This preflight still does not implement checkout routes, order tables, Store payment webhooks, entitlement writes, Supporter Card issuance, earned-spin ledgers, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 writes, live checkout activation, or issue #49 changes.
+
+## DZN Store Sandbox Order Ledger Schema
+
+The sandbox order ledger schema slice adds only:
+
+- `migrations/0072_dzn_store_order_ledger_schema.sql`
+- `store_orders`
+- `store_order_items`
+- `store_payment_events`
+
+`store_orders` is fixed to local/sandbox scope with `livemode = 0`, one product per order, immutable product/price/tax/flag snapshots, private hashed Discord/customer references, and lifecycle states that stop before entitlement fulfilment.
+
+`store_order_items` stores the immutable product/price/item snapshot for exactly one item per order. It keeps account-bound, guaranteed-purchase, and no-competitive-advantage checks plus hard false fields for spins, XP, ranking, discovery, review, event, Server Wars, CTF, owner subscription access, and competitive eligibility.
+
+`store_payment_events` stores unique Stripe event ids, provider references, processing status, raw event SHA-256 hash, sanitized summary JSON, and failure metadata. It also fixes fulfilment, entitlement-write, and Supporter Card write attempts to `0`.
+
+This schema does not add Store APIs, checkout routes, Stripe Checkout Sessions, Store webhook handlers, webhook fulfilment, account entitlement tables or writes, Supporter Card tables or issuance, earned-spin ledgers, spin ledgers, wheel cooldowns, reward wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 writes, live checkout activation, or issue #49 changes.
 
 ## Wheel Rules
 

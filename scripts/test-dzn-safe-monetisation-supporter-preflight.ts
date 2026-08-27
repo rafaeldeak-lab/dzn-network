@@ -15,6 +15,7 @@ const STRIPE_WEBHOOK = "functions/api/stripe/webhook.ts";
 const CHECKOUT_ROUTE = "functions/api/billing/create-checkout-session.ts";
 const STORE_CATALOG_HELPER = "functions/_lib/dzn-store-catalog.ts";
 const STORE_CATALOG_MIGRATION = "migrations/0071_dzn_store_catalog_admin_draft.sql";
+const STORE_ORDER_LEDGER_MIGRATION = "migrations/0072_dzn_store_order_ledger_schema.sql";
 const STORE_PREVIEW_PAGE = "app/store/page.tsx";
 const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
 const PACKAGE_JSON = "package.json";
@@ -200,6 +201,11 @@ const FORBIDDEN_TABLE_NAMES = [
 const ALLOWED_CATALOG_TABLE_NAMES = ["store_products", "store_prices"];
 
 const FORBIDDEN_NON_CATALOG_TABLE_NAMES = FORBIDDEN_TABLE_NAMES.filter((table) => !ALLOWED_CATALOG_TABLE_NAMES.includes(table));
+const ALLOWED_ORDER_LEDGER_TABLE_NAMES = ["store_orders", "store_order_items", "store_payment_events"];
+const FORBIDDEN_NON_LEDGER_TABLE_NAMES = FORBIDDEN_TABLE_NAMES.filter(
+  (table) => ![...ALLOWED_CATALOG_TABLE_NAMES, ...ALLOWED_ORDER_LEDGER_TABLE_NAMES].includes(table),
+);
+const ALLOWED_STORE_MIGRATIONS = [STORE_CATALOG_MIGRATION, STORE_ORDER_LEDGER_MIGRATION];
 
 const FORBIDDEN_PROVIDER_DEPENDENCIES = [
   /^openai$/i,
@@ -249,7 +255,7 @@ function main() {
   assertIntegratedDocs();
   assertExistingStripeSafetyContracts();
   assertNoRuntimePaths();
-  assertOnlyCatalogDraftMigration();
+  assertOnlyApprovedStoreMigrations();
   assertNoRuntimeEnvOrConfigFlags();
   assertNoStoreRuntimePatternsBeyondCatalogDraft();
   assertReadOnlyStorePreviewOnly();
@@ -336,17 +342,21 @@ function assertNoRuntimePaths() {
   }
 }
 
-function assertOnlyCatalogDraftMigration() {
+function assertOnlyApprovedStoreMigrations() {
   const migrationFiles = listFiles("migrations").map((path) => path.replace(/\\/g, "/"));
   const forbiddenNamedMigrations = migrationFiles.filter((path) =>
-    path !== STORE_CATALOG_MIGRATION &&
+    !ALLOWED_STORE_MIGRATIONS.includes(path) &&
     /(?:store|supporter|wheel|monetisation|monetization|purchase|payment_event|account_entitlement|earned_spin|spin_ledger|wheel_cooldown)/i.test(path),
   );
-  assert.deepEqual(forbiddenNamedMigrations, [], "Only the catalog draft migration may be present after the implementation preflight.");
+  assert.deepEqual(forbiddenNamedMigrations, [], "Only the approved Store catalog and sandbox order ledger migrations may be present.");
 
   for (const path of migrationFiles.filter((path) => path.endsWith(".sql"))) {
     const source = read(path);
-    const forbiddenTables = path === STORE_CATALOG_MIGRATION ? FORBIDDEN_NON_CATALOG_TABLE_NAMES : FORBIDDEN_TABLE_NAMES;
+    const forbiddenTables = path === STORE_CATALOG_MIGRATION
+      ? FORBIDDEN_NON_CATALOG_TABLE_NAMES
+      : path === STORE_ORDER_LEDGER_MIGRATION
+        ? FORBIDDEN_NON_LEDGER_TABLE_NAMES
+        : FORBIDDEN_TABLE_NAMES;
     for (const table of forbiddenTables) {
       assert.equal(source.includes(table), false, `${path} must not create blocked future store table ${table}.`);
     }

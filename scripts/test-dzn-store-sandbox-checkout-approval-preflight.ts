@@ -18,6 +18,7 @@ const OWNER_PORTAL_ROUTE = "functions/api/billing/create-portal-session.ts";
 const OWNER_WEBHOOK = "functions/api/stripe/webhook.ts";
 const STORE_CATALOG_HELPER = "functions/_lib/dzn-store-catalog.ts";
 const STORE_CATALOG_MIGRATION = "migrations/0071_dzn_store_catalog_admin_draft.sql";
+const STORE_ORDER_LEDGER_MIGRATION = "migrations/0072_dzn_store_order_ledger_schema.sql";
 const STORE_PREVIEW_PAGE = "app/store/page.tsx";
 const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
 const PACKAGE_JSON = "package.json";
@@ -184,6 +185,16 @@ const RUNTIME_TABLES_BLOCKED_IN_THIS_SLICE = [
   "wheel_cooldowns",
 ];
 
+const ORDER_LEDGER_TABLES_ALLOWED_AFTER_FOLLOW_ON_SLICE = [
+  "store_orders",
+  "store_order_items",
+  "store_payment_events",
+];
+
+const RUNTIME_TABLES_STILL_BLOCKED_AFTER_LEDGER_SCHEMA = RUNTIME_TABLES_BLOCKED_IN_THIS_SLICE.filter(
+  (table) => !ORDER_LEDGER_TABLES_ALLOWED_AFTER_FOLLOW_ON_SLICE.includes(table),
+);
+
 const CHECKOUT_RUNTIME_PATTERNS = [
   /\bcheckout\.sessions\.create\b/i,
   /\/checkout\/sessions/i,
@@ -319,13 +330,17 @@ function assertNoRuntimeTablesAdded() {
   const migrationFiles = listFiles("migrations").map((path) => path.replace(/\\/g, "/"));
   const forbiddenNamedMigrations = migrationFiles.filter((path) =>
     path !== STORE_CATALOG_MIGRATION &&
+    path !== STORE_ORDER_LEDGER_MIGRATION &&
     /(?:order|orders|payment_event|account_entitlement|supporter_card|earned_spin|spin_ledger|wheel_cooldown|checkout|webhook|purchase)/i.test(path),
   );
-  assert.deepEqual(forbiddenNamedMigrations, [], "This preflight must not add Store order/payment/entitlement/supporter/spin migrations.");
+  assert.deepEqual(forbiddenNamedMigrations, [], "Only the approved follow-on Store order ledger schema migration may add order/payment ledger tables.");
 
   for (const path of migrationFiles.filter((path) => path.endsWith(".sql"))) {
     const source = read(path);
-    for (const table of RUNTIME_TABLES_BLOCKED_IN_THIS_SLICE) {
+    const blockedTables = path === STORE_ORDER_LEDGER_MIGRATION
+      ? RUNTIME_TABLES_STILL_BLOCKED_AFTER_LEDGER_SCHEMA
+      : RUNTIME_TABLES_BLOCKED_IN_THIS_SLICE;
+    for (const table of blockedTables) {
       assert.equal(source.includes(table), false, `${path} must not create blocked Store runtime table ${table}.`);
     }
   }

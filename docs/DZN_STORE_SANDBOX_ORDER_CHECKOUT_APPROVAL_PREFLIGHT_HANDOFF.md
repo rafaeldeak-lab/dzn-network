@@ -153,3 +153,15 @@ This branch must not create or mutate:
 ## Next Recommended Slice
 
 Next should be the DZN Store sandbox order ledger schema preflight/implementation slice only if deliberately approved: add local/sandbox-only `store_orders`, `store_order_items`, and `store_payment_events` migration drafts plus validation tests behind disabled-by-default Store checkout flags, with no checkout route, no Stripe Checkout Session creation, no webhook fulfilment, no account entitlement writes, no Supporter Card issuance, no earned-spin ledger, no wheel runtime, no Stripe object mutation, no Cloudflare secret/config mutation, no production D1 write, no live checkout activation, and no issue #49 change.
+
+## Follow-On Ledger Schema Slice Delivered
+
+The DZN Store sandbox order ledger schema slice is delivered in `docs/DZN_STORE_SANDBOX_ORDER_LEDGER_SCHEMA.md` and `migrations/0072_dzn_store_order_ledger_schema.sql`.
+
+It adds the private local/sandbox ledger tables:
+
+- `store_orders`
+- `store_order_items`
+- `store_payment_events`
+
+It still adds no checkout route, no Store API, no Stripe Checkout Session creation, no Store webhook handler, no webhook fulfilment, no account entitlement write, no Supporter Card issuance, no earned-spin ledger, no wheel runtime, no Stripe mutation, no Cloudflare secret/config mutation, no production D1 write, no live checkout activation, and no issue #49 change.
