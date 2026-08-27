@@ -403,3 +403,11 @@ That follow-on ledger schema slice is now delivered in `docs/DZN_STORE_SANDBOX_O
 It adds local/sandbox-only `store_orders`, `store_order_items`, and `store_payment_events` schema plus validation tests. It is still no checkout route, Stripe Checkout Session creation, webhook fulfilment, account entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change.
 
 The next Store payment step should be a DZN Store sandbox order creation route approval slice, and only if deliberately approved. That later slice must keep Store writes disabled by default, create no Stripe Checkout Sessions unless a still later approved checkout runtime enables them, grant no entitlements, issue no Supporter Cards, mint no earned spins, run no wheel, mutate no production services, keep live checkout disabled, and keep issue #49 reserved.
+
+## Follow-On Order Creation Route Slice
+
+That follow-on order route slice is now delivered in `docs/DZN_STORE_SANDBOX_ORDER_CREATION_ROUTE_APPROVAL.md`.
+
+`POST /api/store/orders` now creates only a pending local/sandbox order when the caller is authenticated, the Store sandbox flags are explicitly enabled, and the selected catalog product/price passes the Fair Progression Boundary. Checkout Session creation remains future-only and requires a separate approval slice.
+
+The implemented order route intentionally returns `checkout.available = false`. It creates no Stripe Checkout Sessions, processes no Store webhooks, writes no `store_payment_events`, grants no entitlements, issues no Supporter Cards, mints no earned spins, runs no wheel, mutates no Stripe objects, mutates no Cloudflare secrets/config, writes no production D1, enables no live checkout, and changes no issue #49.

@@ -187,3 +187,9 @@ This branch must not create or mutate:
 ## Next Recommended Slice
 
 Next should be the DZN Store sandbox order creation route approval slice: define and, only after deliberate approval, add a disabled-by-default authenticated order creation route that can write pending sandbox orders only when Store sandbox flags are explicitly enabled in local/test. It must still create no Stripe Checkout Sessions, process no Store webhooks, grant no entitlements, issue no Supporter Cards, mint no earned spins, run no wheel, mutate no Stripe objects, mutate no Cloudflare secrets/config, write no production D1, enable no live checkout, and change no issue #49.
+
+## Follow-On Order Creation Route Slice
+
+The follow-on `POST /api/store/orders` slice is now implemented as a disabled-by-default authenticated route. It records pending local/test Store orders only when all sandbox flags are explicitly enabled.
+
+It writes only `store_orders` and `store_order_items`. No checkout session is created. No Store webhook is processed. No entitlement, Supporter Card, earned spin, reward wheel, production D1, live checkout, or issue #49 change is introduced.

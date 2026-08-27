@@ -165,3 +165,9 @@ It adds the private local/sandbox ledger tables:
 - `store_payment_events`
 
 It still adds no checkout route, no Store API, no Stripe Checkout Session creation, no Store webhook handler, no webhook fulfilment, no account entitlement write, no Supporter Card issuance, no earned-spin ledger, no wheel runtime, no Stripe mutation, no Cloudflare secret/config mutation, no production D1 write, no live checkout activation, and no issue #49 change.
+
+## Follow-On Order Creation Route Slice
+
+After the ledger schema, the follow-on `POST /api/store/orders` approval slice adds the first disabled-by-default authenticated pending-order route. It writes `store_orders` and `store_order_items` only in local/test when the Store sandbox flags are explicitly enabled.
+
+The route creates no Stripe Checkout Sessions, processes no Store webhooks, grants no account entitlements, issues no Supporter Cards, mints no earned spins, runs no reward wheel, mutates no Stripe objects, mutates no Cloudflare secrets/config, writes no production D1, enables no live checkout, and changes no issue #49.

@@ -25,6 +25,8 @@ const BILLING_PLANS = "docs/BILLING_PLANS.md";
 const PACKAGE_JSON = "package.json";
 const STORE_PAGE = "app/store/page.tsx";
 const STORE_COMPONENT = "components/store/dzn-store-preview-page.tsx";
+const STORE_ORDER_ROUTE = "functions/api/store/orders.ts";
+const STORE_ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
 const DZN_STORE_BLOCKED_RUNTIME_TABLES = [
   "store_orders",
   "store_order_items",
@@ -309,8 +311,10 @@ function assertNoCheckoutWebhookOrFulfilmentRuntime() {
 }
 
 function assertNoRuntimeRoutesOrUi() {
+  assert.equal(existsSync(STORE_ORDER_ROUTE), true, "The later order-route approval slice may add the Store order route.");
+  assert.equal(existsSync(STORE_ORDER_HELPER), true, "The later order-route approval slice may add the Store order helper.");
+
   for (const path of [
-    "functions/api/store",
     "functions/api/supporter",
     "functions/api/wheel",
     "functions/api/billing/create-store-checkout-session.ts",

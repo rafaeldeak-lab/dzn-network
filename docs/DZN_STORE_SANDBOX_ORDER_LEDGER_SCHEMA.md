@@ -264,3 +264,9 @@ This slice is accepted only if tests prove:
 ## Next Recommended Slice
 
 Next should be the DZN Store sandbox order creation route approval slice: design and, only if deliberately approved, add a disabled-by-default authenticated order-creation route that can write pending sandbox orders only when Store sandbox flags are explicitly enabled in the local/test environment. It must still create no Stripe Checkout Sessions, process no webhooks, grant no entitlements, issue no Supporter Cards, mint no earned spins, run no wheel, change no Stripe objects, change no Cloudflare secrets/config, write no production D1, enable no live checkout, and change no issue #49.
+
+## Follow-On Order Creation Route Slice
+
+That follow-on route slice is now defined in `docs/DZN_STORE_SANDBOX_ORDER_CREATION_ROUTE_APPROVAL.md` and implemented through `functions/api/store/orders.ts` plus `functions/_lib/dzn-store-orders.ts`.
+
+It writes only `store_orders` and `store_order_items`, and only for authenticated local/test sandbox requests where the Store order flags are explicitly enabled. It still creates no Stripe Checkout Sessions, processes no Store webhooks, grants no entitlements, issues no Supporter Cards, mints no earned spins, runs no reward wheel, mutates no Stripe objects, mutates no Cloudflare secrets/config, writes no production D1, enables no live checkout, and changes no issue #49.

@@ -82,6 +82,23 @@ The sandbox order ledger schema slice adds only:
 
 This schema does not add Store APIs, checkout routes, Stripe Checkout Sessions, Store webhook handlers, webhook fulfilment, account entitlement tables or writes, Supporter Card tables or issuance, earned-spin ledgers, spin ledgers, wheel cooldowns, reward wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 writes, live checkout activation, or issue #49 changes.
 
+## DZN Store Sandbox Order Creation Route Approval
+
+The order route slice adds a disabled-by-default authenticated `POST /api/store/orders` route plus the guarded helper in `functions/_lib/dzn-store-orders.ts`.
+
+It writes only pending local/test `store_orders` and `store_order_items`, and only when:
+
+- The caller is authenticated through the existing DZN session model.
+- `DZN_STORE_SANDBOX_RUNTIME=local` or `test`.
+- `DZN_STORE_ENABLED=true`.
+- `DZN_STORE_CHECKOUT_ENABLED=true`.
+- `DZN_STORE_SANDBOX_CHECKOUT_ENABLED=true`.
+- Store live checkout and existing `DZN_LIVE_CHECKOUT_ENABLED` are both false.
+- Webhook fulfilment, Supporter Card runtime, earned-spin runtime, and reward wheel runtime are all false.
+- The selected approved/active product and price preserve the Fair Progression Boundary.
+
+It creates no Stripe Checkout Session, processes no Store webhook, writes no `store_payment_events`, grants no account entitlement, issues no Supporter Card, mints no earned spin, runs no wheel, mutates no Stripe object, mutates no Cloudflare secret/config, writes no production D1, enables no live checkout, and changes no issue #49.
+
 ## Wheel Rules
 
 Players must never be able to purchase spins with:

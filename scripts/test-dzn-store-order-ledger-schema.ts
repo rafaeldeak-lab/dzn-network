@@ -18,6 +18,8 @@ const OWNER_CHECKOUT_ROUTE = "functions/api/billing/create-checkout-session.ts";
 const OWNER_WEBHOOK = "functions/api/stripe/webhook.ts";
 const STRIPE_HELPER = "functions/_lib/stripe.ts";
 const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
+const STORE_ORDER_ROUTE = "functions/api/store/orders.ts";
+const STORE_ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
 const PACKAGE_JSON = "package.json";
 
 const LEDGER_TABLES = ["store_orders", "store_order_items", "store_payment_events"] as const;
@@ -37,7 +39,6 @@ const STORE_FLAGS = [
 ] as const;
 
 const FORBIDDEN_RUNTIME_PATHS = [
-  "functions/api/store",
   "functions/api/supporter",
   "functions/api/wheel",
   "functions/api/billing/create-store-checkout-session.ts",
@@ -135,6 +136,8 @@ function assertFilesExist() {
     OWNER_CHECKOUT_ROUTE,
     OWNER_WEBHOOK,
     STRIPE_HELPER,
+    STORE_ORDER_ROUTE,
+    STORE_ORDER_HELPER,
     STORE_PREVIEW_COMPONENT,
     PACKAGE_JSON,
   ]) {
@@ -265,7 +268,7 @@ function assertNoForbiddenSchemaCouplings() {
 
 function assertNoRuntimePathsOrLedgerUsage() {
   for (const path of FORBIDDEN_RUNTIME_PATHS) {
-    assert.equal(existsSync(path), false, `${path} must not be introduced by the Store order ledger schema slice.`);
+    assert.equal(existsSync(path), false, `${path} must not be introduced by the Store order route approval slice.`);
   }
 
   const runtimeFiles = [
@@ -283,9 +286,41 @@ function assertNoRuntimePathsOrLedgerUsage() {
     "app/store/page.tsx",
     STORE_PREVIEW_COMPONENT,
   ].map((path) => path.replace(/\\/g, "/")));
+  const allowedOrderRouteFiles = new Set([
+    STORE_ORDER_ROUTE,
+    STORE_ORDER_HELPER,
+  ].map((path) => path.replace(/\\/g, "/")));
 
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
+    if (allowedOrderRouteFiles.has(path)) {
+      const source = read(path);
+      assert.equal(source.includes("INSERT INTO store_orders"), path === STORE_ORDER_HELPER, `${path} must keep Store order inserts isolated to the helper.`);
+      assert.equal(source.includes("INSERT INTO store_order_items"), path === STORE_ORDER_HELPER, `${path} must keep Store order item inserts isolated to the helper.`);
+      assert.equal(source.includes("checkout_session_creation_requires_future_approval") || path === STORE_ORDER_ROUTE, true, `${path} must keep checkout unavailable.`);
+      for (const forbidden of [
+        /\bstore_payment_events\b/i,
+        /\bINSERT\s+INTO\s+store_payment_events\b/i,
+        /\baccount_entitlements\b/i,
+        /\bsupporter_cards\b/i,
+        /\bearned_spins\b/i,
+        /\bspin_ledger\b/i,
+        /\bwheel_cooldowns\b/i,
+        /\bcheckout\.sessions\.create\b/i,
+        /\/checkout\/sessions/i,
+        /\bmode\s*[:=]\s*["']payment["']/i,
+        /\bpayment_intent\.succeeded\b/i,
+        /\bcharge\.refunded\b/i,
+        /\bcharge\.dispute/i,
+        /\bverifyStripeWebhook\b/i,
+        /\bstripeFormRequest\b/i,
+        /\bSTRIPE_SECRET_KEY\b/i,
+        /\bSTRIPE_WEBHOOK_SECRET\b/i,
+      ]) {
+        assert.doesNotMatch(source, forbidden, `${path} must not contain Store checkout/webhook/fulfilment pattern ${forbidden}.`);
+      }
+      continue;
+    }
     if (allowedExistingPaymentFiles.has(path)) {
       const source = read(path);
       for (const table of LEDGER_TABLES) {

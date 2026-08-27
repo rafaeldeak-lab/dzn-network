@@ -118,6 +118,17 @@ AutoDev must treat these as blocked unless a future high-risk human-approved red
 
 Read-only checks remain allowed when they do not expose secret values, mutate production, or imply approval.
 
+## DZN Store Sandbox Boundaries
+
+The DZN Store Safe Monetisation track is separate from this live owner-subscription checklist.
+
+- `docs/DZN_SAFE_MONETISATION_SUPPORTER_IMPLEMENTATION_PREFLIGHT.md` defines the future Store production sequence but does not approve store live checkout.
+- `docs/DZN_STORE_SANDBOX_ORDER_CHECKOUT_APPROVAL_PREFLIGHT.md` defines sandbox order, checkout, webhook, fulfilment, refund, tax, rollback, and proof contracts only.
+- `docs/DZN_STORE_SANDBOX_ORDER_LEDGER_SCHEMA.md` adds source-controlled local/sandbox ledger schema only and does not approve production D1 migration application.
+- `docs/DZN_STORE_SANDBOX_ORDER_CREATION_ROUTE_APPROVAL.md` adds a disabled-by-default local/test pending-order route only and does not approve Stripe Checkout Session creation.
+
+The Store order route writes only pending local/test `store_orders` and `store_order_items` after explicit sandbox flags and catalog safety checks pass. It must not create Stripe Checkout Sessions, process Store webhooks, write `store_payment_events`, grant entitlements, issue Supporter Cards, mint earned spins, run the wheel, mutate Stripe objects, mutate Cloudflare secrets/config, write production D1, enable live checkout, or change issue #49.
+
 ## Stop Conditions
 
 Stop the activation and leave billing inactive if any of these are true:

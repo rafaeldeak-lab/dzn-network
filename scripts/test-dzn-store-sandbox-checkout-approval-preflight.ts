@@ -19,6 +19,8 @@ const OWNER_WEBHOOK = "functions/api/stripe/webhook.ts";
 const STORE_CATALOG_HELPER = "functions/_lib/dzn-store-catalog.ts";
 const STORE_CATALOG_MIGRATION = "migrations/0071_dzn_store_catalog_admin_draft.sql";
 const STORE_ORDER_LEDGER_MIGRATION = "migrations/0072_dzn_store_order_ledger_schema.sql";
+const STORE_ORDER_ROUTE = "functions/api/store/orders.ts";
+const STORE_ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
 const STORE_PREVIEW_PAGE = "app/store/page.tsx";
 const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
 const PACKAGE_JSON = "package.json";
@@ -137,7 +139,6 @@ const INTEGRATION_SNIPPETS: Record<string, string[]> = {
 };
 
 const FORBIDDEN_RUNTIME_PATHS = [
-  "functions/api/store",
   "functions/api/supporter",
   "functions/api/wheel",
   "functions/api/billing/create-store-checkout-session.ts",
@@ -266,6 +267,8 @@ function assertFilesExist() {
     STORE_CATALOG_HELPER,
     STORE_PREVIEW_PAGE,
     STORE_PREVIEW_COMPONENT,
+    STORE_ORDER_ROUTE,
+    STORE_ORDER_HELPER,
     PACKAGE_JSON,
   ]) {
     assert.equal(existsSync(path), true, `${path} should exist.`);
@@ -375,10 +378,45 @@ function assertNoCheckoutRuntimePatternsBeyondAllowedExistingFiles() {
     STORE_PREVIEW_PAGE,
     STORE_PREVIEW_COMPONENT,
   ].map((path) => path.replace(/\\/g, "/")));
+  const allowedStoreOrderFiles = new Set([
+    STORE_ORDER_ROUTE,
+    STORE_ORDER_HELPER,
+  ].map((path) => path.replace(/\\/g, "/")));
 
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
     if (allowedExistingPaymentFiles.has(path)) continue;
+    if (allowedStoreOrderFiles.has(path)) {
+      const source = read(path);
+      assert.equal(source.includes("checkout_session_creation_requires_future_approval") || path === STORE_ORDER_ROUTE, true, `${path} must keep checkout session creation future-only.`);
+      assert.equal(source.includes("INSERT INTO store_orders"), path === STORE_ORDER_HELPER, `${path} must keep order inserts isolated to the Store order helper.`);
+      assert.equal(source.includes("INSERT INTO store_order_items"), path === STORE_ORDER_HELPER, `${path} must keep order-item inserts isolated to the Store order helper.`);
+      for (const forbidden of [
+        /\bcheckout\.sessions\.create\b/i,
+        /\/checkout\/sessions/i,
+        /\bmode\s*[:=]\s*["']payment["']/i,
+        /\bpayment_intent\.succeeded\b/i,
+        /\bpayment_intent\.payment_failed\b/i,
+        /\brefund\.created\b/i,
+        /\brefund\.updated\b/i,
+        /\bcharge\.refunded\b/i,
+        /\bcharge\.dispute/i,
+        /\bINSERT\s+INTO\s+store_payment_events\b/i,
+        /\bINSERT\s+INTO\s+account_entitlements\b/i,
+        /\bINSERT\s+INTO\s+supporter_cards\b/i,
+        /\bINSERT\s+INTO\s+earned_spins\b/i,
+        /\bINSERT\s+INTO\s+spin_ledger\b/i,
+        /\bUPDATE\s+account_entitlements\b/i,
+        /\bUPDATE\s+supporter_cards\b/i,
+        /\bSTRIPE_SECRET_KEY\b/i,
+        /\bSTRIPE_WEBHOOK_SECRET\b/i,
+        /\bverifyStripeWebhook\b/i,
+        /\bstripeFormRequest\b/i,
+      ]) {
+        assert.doesNotMatch(source, forbidden, `${path} must not contain Store checkout/webhook/fulfilment pattern ${forbidden}.`);
+      }
+      continue;
+    }
     const source = read(path);
     const patterns = allowedCatalogAndPreviewFiles.has(path)
       ? CHECKOUT_RUNTIME_PATTERNS.filter((pattern) => ![
