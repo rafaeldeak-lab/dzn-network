@@ -25,6 +25,8 @@ const SAFE_MONETISATION_BACKLOG = "docs/DZN_SAFE_MONETISATION_SUPPORTER_SYSTEM_B
 const PRESENCE_HANDOFF = "docs/DZN_COMMS_LIVE_PRESENCE_COUNTER_FOUNDATION_HANDOFF.md";
 const STORE_PREVIEW_PAGE = "app/store/page.tsx";
 const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
+const STORE_ORDER_ROUTE = "functions/api/store/orders.ts";
+const STORE_ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
 const PACKAGE_JSON = "package.json";
 
 const ENABLED_ENV = {
@@ -392,7 +394,6 @@ function assertNoForbiddenRuntime() {
   }
 
   const forbiddenStorePaths = [
-    "functions/api/store",
     "functions/api/supporter",
     "functions/api/wheel",
     "app/supporter/page.tsx",
@@ -409,6 +410,8 @@ function assertNoForbiddenRuntime() {
 
   assert.equal(existsSync(STORE_PREVIEW_PAGE), true, "The Store preview route may exist only as the read-only public preview contract.");
   assert.equal(existsSync(STORE_PREVIEW_COMPONENT), true, "The Store preview component may exist only as the read-only public preview contract.");
+  assert.equal(existsSync(STORE_ORDER_ROUTE), true, "The Store sandbox order route may exist only as the approved disabled local/test pending-order route.");
+  assert.equal(existsSync(STORE_ORDER_HELPER), true, "The Store sandbox order helper may exist only as the approved disabled local/test pending-order helper.");
 
   const previewSources = [
     { path: STORE_PREVIEW_PAGE, source: read(STORE_PREVIEW_PAGE) },
@@ -416,6 +419,15 @@ function assertNoForbiddenRuntime() {
   ];
   for (const { path, source } of previewSources) {
     assert.doesNotMatch(source, /fetch\s*\(|\/api\/store|\/api\/billing|createCheckoutSession|checkout\.sessions\.create|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|verifyStripeWebhook/i, `${path} must remain read-only Store preview UI.`);
+  }
+
+  const storeOrderSources = [
+    { path: STORE_ORDER_ROUTE, source: read(STORE_ORDER_ROUTE) },
+    { path: STORE_ORDER_HELPER, source: read(STORE_ORDER_HELPER) },
+  ];
+  for (const { path, source } of storeOrderSources) {
+    assert.equal(source.includes("checkout_session_creation_requires_future_approval") || path === STORE_ORDER_ROUTE, true, `${path} must keep Store checkout unavailable.`);
+    assert.doesNotMatch(source, /checkout\.sessions\.create|\/checkout\/sessions|stripeFormRequest|verifyStripeWebhook|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|\bstore_payment_events\b|\baccount_entitlements\b|\bsupporter_cards\b|\bearned_spins\b|\bspin_ledger\b|\bwheel_cooldowns\b/i, `${path} must not add Store checkout, webhook, entitlement, supporter, spin, or wheel runtime.`);
   }
 }
 

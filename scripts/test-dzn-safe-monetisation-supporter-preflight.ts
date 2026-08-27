@@ -16,6 +16,8 @@ const CHECKOUT_ROUTE = "functions/api/billing/create-checkout-session.ts";
 const STORE_CATALOG_HELPER = "functions/_lib/dzn-store-catalog.ts";
 const STORE_CATALOG_MIGRATION = "migrations/0071_dzn_store_catalog_admin_draft.sql";
 const STORE_ORDER_LEDGER_MIGRATION = "migrations/0072_dzn_store_order_ledger_schema.sql";
+const STORE_ORDER_ROUTE = "functions/api/store/orders.ts";
+const STORE_ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
 const STORE_PREVIEW_PAGE = "app/store/page.tsx";
 const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
 const PACKAGE_JSON = "package.json";
@@ -148,7 +150,6 @@ const INTEGRATION_SNIPPETS: Record<string, string[]> = {
 };
 
 const FORBIDDEN_RUNTIME_PATHS = [
-  "functions/api/store",
   "functions/api/supporter",
   "functions/api/wheel",
   "functions/api/billing/create-store-checkout-session.ts",
@@ -278,6 +279,8 @@ function assertFilesExist() {
     STRIPE_WEBHOOK,
     CHECKOUT_ROUTE,
     PACKAGE_JSON,
+    STORE_ORDER_ROUTE,
+    STORE_ORDER_HELPER,
   ]) {
     assert.equal(existsSync(path), true, `${path} should exist.`);
   }
@@ -383,10 +386,35 @@ function assertNoStoreRuntimePatternsBeyondCatalogDraft() {
   const allowExistingSubscriptionFiles = new Set([STRIPE_HELPER, STRIPE_WEBHOOK, CHECKOUT_ROUTE].map((path) => path.replace(/\\/g, "/")));
   const allowCatalogDraftFile = STORE_CATALOG_HELPER.replace(/\\/g, "/");
   const allowStorePreviewFiles = new Set([STORE_PREVIEW_PAGE, STORE_PREVIEW_COMPONENT].map((path) => path.replace(/\\/g, "/")));
+  const allowStoreOrderFiles = new Set([STORE_ORDER_ROUTE, STORE_ORDER_HELPER].map((path) => path.replace(/\\/g, "/")));
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
     if (allowExistingSubscriptionFiles.has(path)) continue;
     const source = read(path);
+    if (allowStoreOrderFiles.has(path)) {
+      assert.equal(source.includes("checkout_session_creation_requires_future_approval") || path === STORE_ORDER_ROUTE, true, `${path} must keep checkout creation future-only.`);
+      assert.equal(source.includes("INSERT INTO store_orders"), path === STORE_ORDER_HELPER, `${path} must keep order inserts isolated to the Store order helper.`);
+      assert.equal(source.includes("INSERT INTO store_order_items"), path === STORE_ORDER_HELPER, `${path} must keep order-item inserts isolated to the Store order helper.`);
+      for (const forbidden of [
+        /\bstore_payment_events\b/i,
+        /\baccount_entitlements\b/i,
+        /\bsupporter_cards\b/i,
+        /\bearned_spins\b/i,
+        /\bspin_ledger\b/i,
+        /\bwheel_cooldowns\b/i,
+        /\bcheckout\.sessions\.create\b/i,
+        /\/checkout\/sessions/i,
+        /\bpayment_intent\.succeeded\b/i,
+        /\bcharge\.refunded\b/i,
+        /\bcharge\.dispute/i,
+        /\bmode\s*[:=]\s*["']payment["']/i,
+        /\bSTRIPE_SECRET_KEY\b/i,
+        /\bSTRIPE_WEBHOOK_SECRET\b/i,
+      ]) {
+        assert.doesNotMatch(source, forbidden, `${path} must not contain Store payment/fulfilment/runtime pattern ${forbidden}.`);
+      }
+      continue;
+    }
     const allowedPatternSources = path === allowCatalogDraftFile
       ? [
         "\\bDZN_STORE_ENABLED\\b",

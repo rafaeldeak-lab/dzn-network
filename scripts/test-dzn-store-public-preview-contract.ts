@@ -11,6 +11,8 @@ import {
 const HELPER = "functions/_lib/dzn-store-catalog.ts";
 const STORE_PAGE = "app/store/page.tsx";
 const STORE_COMPONENT = "components/store/dzn-store-preview-page.tsx";
+const STORE_ORDER_ROUTE = "functions/api/store/orders.ts";
+const STORE_ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
 const GLOBAL_CSS = "app/globals.css";
 const HANDOFF = "docs/DZN_STORE_PUBLIC_PREVIEW_CONTRACT_HANDOFF.md";
 const CATALOG_HANDOFF = "docs/DZN_STORE_CATALOG_ADMIN_DRAFT_HANDOFF.md";
@@ -93,6 +95,8 @@ function assertFilesExist() {
     HELPER,
     STORE_PAGE,
     STORE_COMPONENT,
+    STORE_ORDER_ROUTE,
+    STORE_ORDER_HELPER,
     GLOBAL_CSS,
     HANDOFF,
     CATALOG_HANDOFF,
@@ -222,8 +226,12 @@ function assertVisualTreatment() {
 }
 
 function assertNoRuntimeRoutesOrBlockedFiles() {
+  assert.equal(read(STORE_ORDER_ROUTE).includes("createDznStoreSandboxOrder"), true, "The only Store API route allowed after this slice must delegate to the guarded order helper.");
+  assert.equal(read(STORE_ORDER_HELPER).includes("checkout_session_creation_requires_future_approval"), true, "The only Store API route allowed after this slice must keep checkout unavailable.");
+  assert.equal(read(STORE_ORDER_HELPER).includes("INSERT INTO store_orders"), true, "The Store order helper may write pending sandbox order headers only.");
+  assert.equal(read(STORE_ORDER_HELPER).includes("INSERT INTO store_order_items"), true, "The Store order helper may write pending sandbox order items only.");
+
   for (const path of [
-    "functions/api/store",
     "functions/api/supporter",
     "functions/api/wheel",
     "functions/api/billing/create-store-checkout-session.ts",
