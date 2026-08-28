@@ -67,6 +67,24 @@ Store fulfilment runtime remains disabled. No Store webhook fulfilment write, Su
 
 The new schema cannot affect billing, owner entitlement, server ownership, rankings, discovery score, reviews, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, earned calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
 
+## DZN Store Fulfilment Runtime Implementation Approval Preflight
+
+The DZN Store fulfilment runtime implementation approval preflight is `docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION_PREFLIGHT.md`.
+
+It defines the future disabled-by-default local/test fulfilment runtime contract before any runtime side effects exist:
+
+- Exact local/test feature flag requirements for receipt, fulfilment, Supporter Cards, earned spins, reward wheel, Store live checkout, and owner live checkout.
+- Exact future write scope for `store_fulfilment_attempts`, `store_orders`, `store_order_status_history`, `account_entitlements`, `store_entitlement_status_history`, optional `supporter_cards`, and `store_refund_dispute_audit`.
+- Verified `checkout.session.completed` grant flow using raw-body Stripe signature verification and server-side order reconciliation.
+- `checkout.session.async_payment_succeeded` as delayed-payment future-only until separately approved.
+- PaymentIntent events as receipt/corroboration only, not fulfilment triggers.
+- Idempotency rules using `store_payment_events`, `store_fulfilment_attempts`, source order item uniqueness, and Supporter Card uniqueness.
+- Account entitlement and optional Supporter Card issuance boundaries.
+- Full refund, reversal, chargeback, and dispute rollback rules.
+- Proof that Store payments cannot mint spins, run the wheel, unlock owner access, affect rankings, affect discovery, affect reviews, affect events, affect XP/calling-card awards, or affect competitive eligibility.
+
+The current Store webhook remains receipt-only. This preflight adds no Store fulfilment runtime, account entitlement write, Supporter Card issuance, earned-spin ledger, reward wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, or issue #49 change.
+
 ## Implementation Preflight
 
 The approved preflight is documentation and test guard work only. It keeps `DZN_LIVE_CHECKOUT_ENABLED` unset/false, keeps issue #49 reserved for final live checkout activation, and blocks one-time Stripe Checkout Sessions, store runtime, webhook fulfilment, account entitlement writes, Supporter Card issuance, earned-spin ledgers, reward wheel runtime, Stripe live object changes, Cloudflare secret changes, production D1 writes, Nitrado changes, Discord changes, AI provider credentials, vector stores, analytics/tracking, and metered model calls.
