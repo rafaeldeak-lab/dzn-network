@@ -30,6 +30,8 @@ The DZN Store sandbox order ledger schema slice is delivered in `docs/DZN_STORE_
 
 The DZN Store sandbox webhook event ledger receipt slice is now delivered in `docs/DZN_STORE_SANDBOX_WEBHOOK_LEDGER_RECEIPT.md`. It adds a disabled-by-default signed `POST /api/stripe/store-webhook` route that records sanitized test-mode `store_payment_events` receipt rows only. It adds no fulfilment, account entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, or issue #49 change.
 
+The DZN Store webhook fulfilment approval preflight is delivered in `docs/DZN_STORE_WEBHOOK_FULFILMENT_APPROVAL_PREFLIGHT.md`. It defines the future verified test-mode fulfilment contract, eligible Stripe events, order-status transitions, exactly-once account-entitlement and Supporter Card boundaries, refund/chargeback rollback rules, future schema preconditions, and proof matrix. It is documentation/test-guard work only and adds no fulfilment route writes, account entitlement table, Supporter Card table, earned-spin ledger, wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, or issue #49 change.
+
 ## Current DZN Architecture Found
 
 DZN already has a subscription-oriented billing boundary for owner/server-management access:

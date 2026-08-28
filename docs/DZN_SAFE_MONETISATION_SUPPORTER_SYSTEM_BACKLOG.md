@@ -16,6 +16,24 @@ The DZN Store sandbox order ledger schema is `docs/DZN_STORE_SANDBOX_ORDER_LEDGE
 
 The DZN Store Sandbox Webhook Event Ledger Receipt slice is `docs/DZN_STORE_SANDBOX_WEBHOOK_LEDGER_RECEIPT.md`. It adds a disabled-by-default, receipt-only `POST /api/stripe/store-webhook` route that verifies Stripe signatures and records sanitized test-mode `store_payment_events` rows only. No Store webhook fulfilment, account entitlement write, Supporter Card issuance, earned-spin ledger, reward wheel runtime, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change is added.
 
+## DZN Store Webhook Fulfilment Approval Preflight
+
+The DZN Store webhook fulfilment approval preflight is `docs/DZN_STORE_WEBHOOK_FULFILMENT_APPROVAL_PREFLIGHT.md`.
+
+It defines the future verified test-mode fulfilment contract before any runtime side effects exist:
+
+- Eligible fulfilment events: `checkout.session.completed` first, and `checkout.session.async_payment_succeeded` only if delayed payment methods are separately approved.
+- PaymentIntent events remain receipt/corroboration only for the first fulfilment runtime.
+- Success-page redirects must never fulfil purchases.
+- Store order transitions are explicitly bounded through `checkout_created`, `payment_pending`, `paid`, `payment_failed`, `checkout_expired`, `disputed`, `refunded`, `revoked`, `manual_review`, and `blocked_by_flag`.
+- Exactly one account entitlement per fulfilled source order.
+- Exactly one Founding Supporter Card per qualifying account.
+- Full refunds, reversals, chargebacks, and lost disputes revoke only the affected Store entitlement/card.
+- Partial refunds require `manual_review` unless a later policy deliberately handles them.
+- Future schema work must be separately approved before entitlement/supporter-card tables or fulfilment-attempt writes exist.
+
+The current `POST /api/stripe/store-webhook` route remains receipt-only. Current `store_payment_events` fulfilment blockers remain fixed to `0`. This preflight adds no fulfilment route writes, account entitlement table, Supporter Card table, earned-spin ledger, reward wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, or issue #49 change.
+
 ## Implementation Preflight
 
 The approved preflight is documentation and test guard work only. It keeps `DZN_LIVE_CHECKOUT_ENABLED` unset/false, keeps issue #49 reserved for final live checkout activation, and blocks one-time Stripe Checkout Sessions, store runtime, webhook fulfilment, account entitlement writes, Supporter Card issuance, earned-spin ledgers, reward wheel runtime, Stripe live object changes, Cloudflare secret changes, production D1 writes, Nitrado changes, Discord changes, AI provider credentials, vector stores, analytics/tracking, and metered model calls.
