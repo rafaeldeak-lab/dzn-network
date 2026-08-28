@@ -132,6 +132,8 @@ The Store order route writes only pending local/test `store_orders` and `store_o
 
 The Store sandbox Checkout Session route can create only a test-mode `mode=payment` Checkout Session after an owned draft local/test order exists. It updates only `store_orders` to `checkout_created` and keeps `DZN_LIVE_CHECKOUT_ENABLED` unset/false. It must not process Store webhooks, write `store_payment_events`, grant entitlements, issue Supporter Cards, mint earned spins, run the wheel, mutate Stripe Products/Prices/Customers/webhook endpoints/refunds/disputes, mutate Cloudflare secrets/config, write production D1, enable live checkout, or change issue #49.
 
+The Store sandbox webhook event ledger receipt route is `POST /api/stripe/store-webhook`. It remains disabled unless `DZN_STORE_SANDBOX_WEBHOOK_RECEIPT_ENABLED=true` is supplied in local/test runtime. It verifies Stripe signatures and records sanitized test-mode `store_payment_events` receipt rows only. It has no fulfilment, no entitlement writes, no Supporter Card issuance, no earned spins, no wheel runtime, no Stripe Product/Price mutation, no Cloudflare config mutation, no production D1 writes, and does not approve live checkout or issue #49 changes.
+
 ## Stop Conditions
 
 Stop the activation and leave billing inactive if any of these are true:

@@ -27,6 +27,8 @@ const STORE_ORDER_ROUTE = "functions/api/store/orders.ts";
 const OWNER_CHECKOUT_ROUTE = "functions/api/billing/create-checkout-session.ts";
 const OWNER_WEBHOOK = "functions/api/stripe/webhook.ts";
 const ORDER_LEDGER_MIGRATION = "migrations/0072_dzn_store_order_ledger_schema.sql";
+const STORE_WEBHOOK_ROUTE = "functions/api/stripe/store-webhook.ts";
+const STORE_WEBHOOK_HELPER = "functions/_lib/dzn-store-webhook.ts";
 const DOC = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md";
 const HANDOFF = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL_HANDOFF.md";
 const ORDER_DOC = "docs/DZN_STORE_SANDBOX_ORDER_CREATION_ROUTE_APPROVAL.md";
@@ -586,7 +588,6 @@ function assertNoForbiddenRuntimeOrProductionMutationPaths() {
   }
 
   for (const path of [
-    "functions/api/stripe/store-webhook.ts",
     "functions/api/stripe/store",
     "functions/api/supporter",
     "functions/api/wheel",
@@ -646,6 +647,8 @@ function assertNoForbiddenRuntimeOrProductionMutationPaths() {
     HELPER,
     ORDER_HELPER,
     STORE_ORDER_ROUTE,
+    STORE_WEBHOOK_ROUTE,
+    STORE_WEBHOOK_HELPER,
     STRIPE_HELPER,
     "functions/_lib/plans.ts",
     "functions/_lib/dzn-store-catalog.ts",
@@ -679,15 +682,15 @@ function assertDocsAndPackageScripts() {
       "uses a server-controlled `store_prices.stripe_price_id`",
       "uses a Stripe idempotency key derived from `store_orders.checkout_idempotency_key_hash`",
       "updates only `store_orders` to `checkout_created`",
-      "No Store webhook is processed.",
-      "No `store_payment_events` row is written.",
+      "No Store webhook fulfilment is processed.",
+      "The follow-on DZN Store sandbox webhook event ledger receipt slice may record sanitized test-mode `store_payment_events` rows only.",
       "No account entitlement is granted.",
       "No Supporter Card is issued.",
       "No earned spin is minted.",
       "No reward wheel runtime runs.",
       "`DZN_LIVE_CHECKOUT_ENABLED` remains unset/false.",
       "Issue #49 remains reserved for final live checkout activation.",
-      "Next should be the DZN Store sandbox webhook event ledger receipt slice only if deliberately approved",
+      "Next should be Store webhook fulfilment approval preflight",
     ]],
     [HANDOFF, [
       "DZN Store Sandbox Checkout Session Approval Handoff",
@@ -695,7 +698,7 @@ function assertDocsAndPackageScripts() {
       "Branch: `codex/dzn-store-sandbox-checkout-session-approval-20260827`",
       "`POST /api/store/orders/:orderId/checkout`",
       "test-mode only",
-      "No Store webhooks.",
+      "No Store webhook fulfilment.",
       "No entitlements.",
       "No Supporter Cards.",
       "No earned spins.",

@@ -14,6 +14,8 @@ The DZN Store sandbox order and checkout approval preflight is `docs/DZN_STORE_S
 
 The DZN Store sandbox order ledger schema is `docs/DZN_STORE_SANDBOX_ORDER_LEDGER_SCHEMA.md`. It adds `migrations/0072_dzn_store_order_ledger_schema.sql` as a local/sandbox-only schema step for `store_orders`, `store_order_items`, and `store_payment_events`. It stores sandbox-only order headers, one-item order snapshots, and provider event ledger rows with unique Stripe event ids, raw event hashes, sanitized summaries, and no-fulfilment blockers. No checkout route, Stripe Checkout Session creation, Store webhook handler, webhook fulfilment, account entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, Stripe mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change is added.
 
+The DZN Store Sandbox Webhook Event Ledger Receipt slice is `docs/DZN_STORE_SANDBOX_WEBHOOK_LEDGER_RECEIPT.md`. It adds a disabled-by-default, receipt-only `POST /api/stripe/store-webhook` route that verifies Stripe signatures and records sanitized test-mode `store_payment_events` rows only. No Store webhook fulfilment, account entitlement write, Supporter Card issuance, earned-spin ledger, reward wheel runtime, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change is added.
+
 ## Implementation Preflight
 
 The approved preflight is documentation and test guard work only. It keeps `DZN_LIVE_CHECKOUT_ENABLED` unset/false, keeps issue #49 reserved for final live checkout activation, and blocks one-time Stripe Checkout Sessions, store runtime, webhook fulfilment, account entitlement writes, Supporter Card issuance, earned-spin ledgers, reward wheel runtime, Stripe live object changes, Cloudflare secret changes, production D1 writes, Nitrado changes, Discord changes, AI provider credentials, vector stores, analytics/tracking, and metered model calls.
@@ -116,6 +118,18 @@ It creates a test-mode only Stripe Checkout Session after a pending local/test o
 It updates only `store_orders` to `checkout_created`.
 
 It creates no Store webhook fulfilment, entitlements, Supporter Cards, earned spins, wheel runtime, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change.
+
+## DZN Store Sandbox Webhook Event Ledger Receipt
+
+The webhook receipt slice adds a disabled-by-default signed Store webhook endpoint:
+
+- `POST /api/stripe/store-webhook`
+- `functions/api/stripe/store-webhook.ts`
+- `functions/_lib/dzn-store-webhook.ts`
+
+It is receipt-only. It verifies the `Stripe-Signature` header against the unmodified raw request body, accepts only `livemode=false` test events, and records sanitized `store_payment_events` rows with a raw event SHA-256 hash, event class, optional safe provider references, and no-fulfilment blockers fixed to `0`.
+
+It creates no Store webhook fulfilment, account entitlement write, Supporter Card issuance, earned-spin ledger, reward wheel runtime, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change.
 
 ## Wheel Rules
 

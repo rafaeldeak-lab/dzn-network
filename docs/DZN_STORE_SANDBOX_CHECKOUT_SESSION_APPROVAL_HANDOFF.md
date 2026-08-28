@@ -81,8 +81,8 @@ Updated:
 
 ## Explicitly Not Implemented
 
-- No Store webhooks.
-- No `store_payment_events` writes.
+- No Store webhook fulfilment.
+- No `store_payment_events` fulfilment writes.
 - No entitlements.
 - No Supporter Cards.
 - No earned spins.
@@ -119,6 +119,10 @@ Updated:
 
 - Codex Security diff scan: `ed37cd32-0573-4ccf-b95f-65a5dc5a0d2d`
 - Result: zero findings.
+
+## Follow-On Delivered
+
+Follow-on delivered: DZN Store sandbox webhook event ledger receipt. It can record sanitized test-mode `store_payment_events` receipt rows only. No Store webhook fulfilment.
 - Report: `C:\Users\rafae\AppData\Local\Temp\codex-security-scans-gJPi0O\dzn-store-sandbox-checkout-session-approval-20260827\309e0fa0766f963e8f0d93e452fb9089602861c0_20260828T004850Z_606osgk9\report.md`
 - Reviewed changed runtime surfaces for auth bypass, cross-user checkout access, client-controlled product/price/identity fields, unsafe redirects, idempotency, live Stripe leakage, Store webhook fulfilment, entitlement/supporter-card/spin/wheel writes, owner billing coupling, competitive-system coupling, and production mutation.
 

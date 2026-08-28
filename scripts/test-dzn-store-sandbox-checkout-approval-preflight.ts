@@ -25,6 +25,10 @@ const STORE_CHECKOUT_SESSION_ROUTE = "functions/api/store/orders/[orderId]/check
 const STORE_CHECKOUT_SESSION_HELPER = "functions/_lib/dzn-store-checkout.ts";
 const STORE_CHECKOUT_SESSION_DOC = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md";
 const STORE_CHECKOUT_SESSION_HANDOFF = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL_HANDOFF.md";
+const STORE_WEBHOOK_ROUTE = "functions/api/stripe/store-webhook.ts";
+const STORE_WEBHOOK_HELPER = "functions/_lib/dzn-store-webhook.ts";
+const STORE_WEBHOOK_DOC = "docs/DZN_STORE_SANDBOX_WEBHOOK_LEDGER_RECEIPT.md";
+const STORE_WEBHOOK_HANDOFF = "docs/DZN_STORE_SANDBOX_WEBHOOK_LEDGER_RECEIPT_HANDOFF.md";
 const STORE_PREVIEW_PAGE = "app/store/page.tsx";
 const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
 const PACKAGE_JSON = "package.json";
@@ -147,7 +151,6 @@ const FORBIDDEN_RUNTIME_PATHS = [
   "functions/api/wheel",
   "functions/api/billing/create-store-checkout-session.ts",
   "functions/api/billing/create-one-time-checkout-session.ts",
-  "functions/api/stripe/store-webhook.ts",
   "functions/api/stripe/store",
   "app/account/purchases/page.tsx",
   "app/purchases/page.tsx",
@@ -170,6 +173,8 @@ const FUTURE_STORE_FLAGS = [
   "DZN_STORE_ENABLED",
   "DZN_STORE_CHECKOUT_ENABLED",
   "DZN_STORE_SANDBOX_CHECKOUT_ENABLED",
+  "DZN_STORE_SANDBOX_CHECKOUT_SESSION_ENABLED",
+  "DZN_STORE_SANDBOX_WEBHOOK_RECEIPT_ENABLED",
   "DZN_STORE_WEBHOOK_FULFILMENT_ENABLED",
   "DZN_SUPPORTER_CARDS_ENABLED",
   "DZN_EARNED_SPINS_ENABLED",
@@ -277,6 +282,10 @@ function assertFilesExist() {
     STORE_CHECKOUT_SESSION_HELPER,
     STORE_CHECKOUT_SESSION_DOC,
     STORE_CHECKOUT_SESSION_HANDOFF,
+    STORE_WEBHOOK_ROUTE,
+    STORE_WEBHOOK_HELPER,
+    STORE_WEBHOOK_DOC,
+    STORE_WEBHOOK_HANDOFF,
     PACKAGE_JSON,
   ]) {
     assert.equal(existsSync(path), true, `${path} should exist.`);
@@ -394,6 +403,10 @@ function assertNoCheckoutRuntimePatternsBeyondAllowedExistingFiles() {
     STORE_CHECKOUT_SESSION_ROUTE,
     STORE_CHECKOUT_SESSION_HELPER,
   ].map((path) => path.replace(/\\/g, "/")));
+  const allowedStoreWebhookReceiptFiles = new Set([
+    STORE_WEBHOOK_ROUTE,
+    STORE_WEBHOOK_HELPER,
+  ].map((path) => path.replace(/\\/g, "/")));
 
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
@@ -465,6 +478,37 @@ function assertNoCheckoutRuntimePatternsBeyondAllowedExistingFiles() {
         /\bverifyStripeWebhook\b/i,
       ]) {
         assert.doesNotMatch(source, forbidden, `${path} must not contain Store webhook/fulfilment pattern ${forbidden}.`);
+      }
+      continue;
+    }
+    if (allowedStoreWebhookReceiptFiles.has(path)) {
+      const source = read(path);
+      assert.equal(
+        source.includes("receiveDznStoreSandboxWebhookReceipt") || source.includes("DZN_STORE_SANDBOX_WEBHOOK_RECEIPT_ENABLED"),
+        true,
+        `${path} must be part of the explicit sandbox webhook receipt surface.`,
+      );
+      assert.equal(source.includes("INSERT INTO store_payment_events"), path === STORE_WEBHOOK_HELPER, `${path} must keep Store payment-event inserts isolated to the webhook helper.`);
+      assert.equal(source.includes("UPDATE store_orders"), false, `${path} must not update Store orders.`);
+      assert.equal(source.includes("INSERT INTO store_orders"), false, `${path} must not insert Store orders.`);
+      assert.equal(source.includes("/checkout/sessions"), false, `${path} must not create Checkout Sessions.`);
+      assert.equal(source.includes("stripeFormRequest"), false, `${path} must not call Stripe APIs.`);
+      for (const forbidden of [
+        /\bINSERT\s+INTO\s+account_entitlements\b/i,
+        /\bUPDATE\s+account_entitlements\b/i,
+        /\baccount_entitlements\b/i,
+        /\bINSERT\s+INTO\s+supporter_cards\b/i,
+        /\bUPDATE\s+supporter_cards\b/i,
+        /\bsupporter_cards\b/i,
+        /\bINSERT\s+INTO\s+earned_spins\b/i,
+        /\bUPDATE\s+earned_spins\b/i,
+        /\bearned_spins\b/i,
+        /\bINSERT\s+INTO\s+spin_ledger\b/i,
+        /\bspin_ledger\b/i,
+        /\bwheel_cooldowns\b/i,
+        /\bcheckout\.sessions\.create\b/i,
+      ]) {
+        assert.doesNotMatch(source, forbidden, `${path} must not contain Store fulfilment pattern ${forbidden}.`);
       }
       continue;
     }

@@ -31,8 +31,8 @@ This slice creates no live payment path. The only external provider action it pe
 
 - No live Stripe Checkout Session.
 - No Stripe Product, Price, Customer, PaymentIntent, refund, dispute, or webhook endpoint is created, updated, archived, or mutated by DZN.
-- No Store webhook is processed.
-- No `store_payment_events` row is written.
+- No Store webhook fulfilment is processed.
+- The follow-on DZN Store sandbox webhook event ledger receipt slice may record sanitized test-mode `store_payment_events` rows only.
 - No account entitlement is granted.
 - No Supporter Card is issued.
 - No earned spin is minted.
@@ -217,8 +217,8 @@ This slice must not run or approve:
 - `wrangler pages secret put`
 - Stripe Product or Price creation.
 - Stripe webhook endpoint creation.
-- Store webhook processing.
-- Store payment-event ledger writes.
+- Store webhook fulfilment.
+- Store payment-event fulfilment writes.
 - Account entitlement writes.
 - Supporter Card issuance.
 - Earned-spin or reward-wheel runtime.
@@ -247,10 +247,12 @@ This slice is accepted only if tests prove:
 - The Stripe call uses an order-derived idempotency key.
 - Non-test, live-mode, wrong-mode, or URL-less Stripe responses are rejected before D1 update.
 - The route updates only `store_orders`.
-- The route never writes `store_payment_events`, account entitlements, Supporter Cards, earned spins, spin ledgers, or wheel cooldowns.
+- The route never writes `store_payment_events`, account entitlements, Supporter Cards, earned spins, spin ledgers, or wheel cooldowns. A later receipt-only webhook slice may write sanitized `store_payment_events` receipt rows without fulfilment.
 - The response returns a Checkout redirect URL but no raw customer id, PaymentIntent id, Discord id, or separate Checkout Session id field.
 - Cloudflare config files and `cloudflare-env.d.ts` are unchanged.
 
 ## Next Recommended Slice
 
-Next should be the DZN Store sandbox webhook event ledger receipt slice only if deliberately approved: add a disabled-by-default, ledger-only Store webhook route that verifies Stripe signatures and records sanitized test-mode event receipt rows without fulfilment, account entitlements, Supporter Cards, earned spins, wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 writes, or issue #49 changes.
+The follow-on DZN Store sandbox webhook event ledger receipt slice may record sanitized test-mode `store_payment_events` rows only. No Store webhook fulfilment is processed.
+
+Next should be Store webhook fulfilment approval preflight only if deliberately approved: define the verified test-mode fulfilment contract, exact eligible events, order-status transitions, idempotent entitlement/supporter-card boundaries, refund/chargeback rollback rules, and proof matrix before any fulfilment route writes account entitlements, Supporter Cards, earned spins, wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare config mutation, production D1 writes, or issue #49 changes.
