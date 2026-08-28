@@ -1,5 +1,9 @@
 # DZN Store Fulfilment Ledger Schema Migration Approval Preflight
 
+Approved follow-on implementation: `docs/DZN_STORE_FULFILMENT_LEDGER_SCHEMA_MIGRATION.md` and `migrations/0073_dzn_store_fulfilment_ledger_schema.sql`.
+
+That implementation creates only the approved local/test fulfilment ledger schema. Store fulfilment runtime remains disabled; no Supporter Card issuance, earned-spin ledger, reward wheel runtime, live checkout, production D1 write, or issue #49 change is added.
+
 ## Status And Boundary
 
 This slice is approval preflight only. It defines the exact local/test schema migration contract for future Store fulfilment ledgers before any new migration, runtime fulfilment code, entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, live checkout, production D1 operation, Stripe mutation, Cloudflare mutation, or issue #49 change exists.

@@ -1,5 +1,9 @@
 # DZN Store Fulfilment Ledger Schema Migration Approval Preflight Handoff
 
+Approved follow-on implemented: `docs/DZN_STORE_FULFILMENT_LEDGER_SCHEMA_MIGRATION.md` and `migrations/0073_dzn_store_fulfilment_ledger_schema.sql`.
+
+The follow-on implementation creates only the approved local/test schema. It adds no runtime fulfilment, Supporter Card issuance, earned spins, reward wheel runtime, live checkout, production D1 writes, or issue #49 change.
+
 ## Start State
 
 - Worktree: `C:\Users\rafae\Desktop\DZN-Audits\worktrees\dzn-store-fulfilment-ledger-schema-preflight-20260828`
