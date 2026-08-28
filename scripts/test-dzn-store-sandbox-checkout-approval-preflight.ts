@@ -21,6 +21,10 @@ const STORE_CATALOG_MIGRATION = "migrations/0071_dzn_store_catalog_admin_draft.s
 const STORE_ORDER_LEDGER_MIGRATION = "migrations/0072_dzn_store_order_ledger_schema.sql";
 const STORE_ORDER_ROUTE = "functions/api/store/orders.ts";
 const STORE_ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
+const STORE_CHECKOUT_SESSION_ROUTE = "functions/api/store/orders/[orderId]/checkout.ts";
+const STORE_CHECKOUT_SESSION_HELPER = "functions/_lib/dzn-store-checkout.ts";
+const STORE_CHECKOUT_SESSION_DOC = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md";
+const STORE_CHECKOUT_SESSION_HANDOFF = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL_HANDOFF.md";
 const STORE_PREVIEW_PAGE = "app/store/page.tsx";
 const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
 const PACKAGE_JSON = "package.json";
@@ -269,6 +273,10 @@ function assertFilesExist() {
     STORE_PREVIEW_COMPONENT,
     STORE_ORDER_ROUTE,
     STORE_ORDER_HELPER,
+    STORE_CHECKOUT_SESSION_ROUTE,
+    STORE_CHECKOUT_SESSION_HELPER,
+    STORE_CHECKOUT_SESSION_DOC,
+    STORE_CHECKOUT_SESSION_HANDOFF,
     PACKAGE_JSON,
   ]) {
     assert.equal(existsSync(path), true, `${path} should exist.`);
@@ -382,6 +390,10 @@ function assertNoCheckoutRuntimePatternsBeyondAllowedExistingFiles() {
     STORE_ORDER_ROUTE,
     STORE_ORDER_HELPER,
   ].map((path) => path.replace(/\\/g, "/")));
+  const allowedStoreCheckoutSessionFiles = new Set([
+    STORE_CHECKOUT_SESSION_ROUTE,
+    STORE_CHECKOUT_SESSION_HELPER,
+  ].map((path) => path.replace(/\\/g, "/")));
 
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
@@ -414,6 +426,45 @@ function assertNoCheckoutRuntimePatternsBeyondAllowedExistingFiles() {
         /\bstripeFormRequest\b/i,
       ]) {
         assert.doesNotMatch(source, forbidden, `${path} must not contain Store checkout/webhook/fulfilment pattern ${forbidden}.`);
+      }
+      continue;
+    }
+    if (allowedStoreCheckoutSessionFiles.has(path)) {
+      const source = read(path);
+      assert.equal(
+        source.includes("createDznStoreSandboxCheckoutSession") || source.includes("DZN_STORE_SANDBOX_CHECKOUT_SESSION_ENABLED"),
+        true,
+        `${path} must be part of the explicit sandbox Checkout Session approval surface.`,
+      );
+      assert.equal(
+        source.includes("getRequestSessionUser") || source.includes("purchasing_user_id"),
+        true,
+        `${path} must scope Store checkout creation to the authenticated purchasing user.`,
+      );
+      assert.equal(source.includes("INSERT INTO store_orders"), false, `${path} must not create Store orders.`);
+      assert.equal(source.includes("INSERT INTO store_order_items"), false, `${path} must not create Store order items.`);
+      assert.equal(source.includes("UPDATE store_orders"), path === STORE_CHECKOUT_SESSION_HELPER, `${path} must keep checkout status updates isolated to the Store checkout helper.`);
+      assert.equal(source.includes("/checkout/sessions"), path === STORE_CHECKOUT_SESSION_HELPER, `${path} must keep Stripe Checkout API calls isolated to the Store checkout helper.`);
+      assert.equal(source.includes("stripeFormRequest"), path === STORE_CHECKOUT_SESSION_HELPER, `${path} must keep Stripe form requests isolated to the Store checkout helper.`);
+      for (const forbidden of [
+        /\bcheckout\.sessions\.create\b/i,
+        /\bpayment_intent\.succeeded\b/i,
+        /\bpayment_intent\.payment_failed\b/i,
+        /\brefund\.created\b/i,
+        /\brefund\.updated\b/i,
+        /\bcharge\.refunded\b/i,
+        /\bcharge\.dispute/i,
+        /\bINSERT\s+INTO\s+store_payment_events\b/i,
+        /\bINSERT\s+INTO\s+account_entitlements\b/i,
+        /\bINSERT\s+INTO\s+supporter_cards\b/i,
+        /\bINSERT\s+INTO\s+earned_spins\b/i,
+        /\bINSERT\s+INTO\s+spin_ledger\b/i,
+        /\bUPDATE\s+account_entitlements\b/i,
+        /\bUPDATE\s+supporter_cards\b/i,
+        /\bSTRIPE_WEBHOOK_SECRET\b/i,
+        /\bverifyStripeWebhook\b/i,
+      ]) {
+        assert.doesNotMatch(source, forbidden, `${path} must not contain Store webhook/fulfilment pattern ${forbidden}.`);
       }
       continue;
     }

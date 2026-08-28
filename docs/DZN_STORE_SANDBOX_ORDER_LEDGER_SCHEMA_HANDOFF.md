@@ -193,3 +193,11 @@ Next should be the DZN Store sandbox order creation route approval slice: define
 The follow-on `POST /api/store/orders` slice is now implemented as a disabled-by-default authenticated route. It records pending local/test Store orders only when all sandbox flags are explicitly enabled.
 
 It writes only `store_orders` and `store_order_items`. No checkout session is created. No Store webhook is processed. No entitlement, Supporter Card, earned spin, reward wheel, production D1, live checkout, or issue #49 change is introduced.
+
+## Follow-On Checkout Session Slice
+
+The DZN Store sandbox Checkout Session approval slice is now delivered in `docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md`.
+
+The existing schema already contains the checkout columns needed for this step, so no new migration was added. `POST /api/store/orders/:orderId/checkout` can update only an owned draft local/test order to `checkout_created` after a safe test-mode Stripe Checkout Session is returned.
+
+It still adds no Store webhook handler, no `store_payment_events` write, no account entitlement write, no Supporter Card issuance, no earned-spin ledger, no wheel runtime, no production D1 apply, no live checkout activation, and no issue #49 change.

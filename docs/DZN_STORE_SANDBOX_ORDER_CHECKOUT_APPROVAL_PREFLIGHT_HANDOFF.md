@@ -171,3 +171,9 @@ It still adds no checkout route, no Store API, no Stripe Checkout Session creati
 After the ledger schema, the follow-on `POST /api/store/orders` approval slice adds the first disabled-by-default authenticated pending-order route. It writes `store_orders` and `store_order_items` only in local/test when the Store sandbox flags are explicitly enabled.
 
 The route creates no Stripe Checkout Sessions, processes no Store webhooks, grants no account entitlements, issues no Supporter Cards, mints no earned spins, runs no reward wheel, mutates no Stripe objects, mutates no Cloudflare secrets/config, writes no production D1, enables no live checkout, and changes no issue #49.
+
+## Follow-On Checkout Session Slice Delivered
+
+The later checkout slice is now delivered in `docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md`.
+
+`POST /api/store/orders/:orderId/checkout` creates a test-mode Checkout Session only after an authenticated player owns an existing draft local/test Store order. It updates only `store_orders` to `checkout_created`; it does not process Store webhooks, write payment events, grant entitlements, issue Supporter Cards, mint earned spins, run the wheel, enable live checkout, write production D1, mutate Cloudflare config/secrets, or change issue #49.

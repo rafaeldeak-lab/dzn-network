@@ -102,7 +102,7 @@ Before writing an order, the route must resolve one product and one price server
 - Price amount is positive.
 - Quantity remains fixed to `1`.
 - Pay-what-you-want remains blocked.
-- Stripe Price binding remains blocked for this order-only slice.
+- A valid server-side `store_prices.stripe_price_id` is allowed so a later approved checkout slice can use it, but the request body cannot choose or override it and order creation still creates no Stripe Checkout Session.
 
 The product must keep:
 
@@ -232,3 +232,11 @@ This slice is accepted only if tests prove:
 ## Next Recommended Slice
 
 Next should be the DZN Store sandbox Checkout Session creation approval slice, only if deliberately approved: add test-mode Stripe Checkout Session creation after the pending local/test order exists, using server-controlled test Price binding, order-derived idempotency, no fulfilment, no Store webhook processing beyond any separately approved ledger-only receipt, no entitlements, no Supporter Cards, no earned spins, no wheel runtime, no Stripe object mutation, no Cloudflare secret/config mutation, no production D1 write, no live checkout activation, and no issue #49 change.
+
+## Follow-On Checkout Session Slice
+
+That follow-on checkout slice is now delivered in `docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md`.
+
+`POST /api/store/orders/:orderId/checkout` may create a test-mode only Stripe Checkout Session after an authenticated player already owns a pending local/test Store order. A valid server-side `store_prices.stripe_price_id` is allowed for that approved checkout step, but order creation still creates no Stripe Checkout Session and still never trusts a client-supplied Stripe Price id.
+
+The order route continues to write only pending `store_orders` and `store_order_items`. It still processes no Store webhook, writes no `store_payment_events`, grants no entitlements, issues no Supporter Cards, mints no earned spins, runs no wheel, mutates no Stripe Product/Price/Customer/webhook/refund/dispute object, mutates no Cloudflare secrets/config, writes no production D1, enables no live checkout, and changes no issue #49.

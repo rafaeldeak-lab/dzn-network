@@ -6,8 +6,13 @@ export const STRIPE_API_VERSION = "2026-02-25.clover";
 export type StripeCheckoutSession = {
   id: string;
   url: string | null;
-  customer?: string | null;
+  customer?: string | { id?: string | null } | null;
+  payment_intent?: string | { id?: string | null } | null;
   subscription?: string | null;
+  expires_at?: number | null;
+  livemode?: boolean;
+  mode?: string | null;
+  payment_status?: string | null;
   metadata?: Record<string, string | null> | null;
 };
 
@@ -61,7 +66,12 @@ export function billingRedirectUrl(env: Env, request: Request, returnTo: string 
   return url.toString();
 }
 
-export async function stripeFormRequest<T>(env: Env, path: string, params: Record<string, string | number | boolean | null | undefined>): Promise<T> {
+export async function stripeFormRequest<T>(
+  env: Env,
+  path: string,
+  params: Record<string, string | number | boolean | null | undefined>,
+  options: { idempotencyKey?: string | null } = {},
+): Promise<T> {
   const secret = env.STRIPE_SECRET_KEY;
   if (!secret) throw new Error("Stripe is not configured.");
   const body = new URLSearchParams();
@@ -75,6 +85,7 @@ export async function stripeFormRequest<T>(env: Env, path: string, params: Recor
     headers: {
       authorization: `Bearer ${secret}`,
       "content-type": "application/x-www-form-urlencoded",
+      ...(options.idempotencyKey ? { "idempotency-key": options.idempotencyKey } : {}),
       "stripe-version": STRIPE_API_VERSION,
     },
     body,

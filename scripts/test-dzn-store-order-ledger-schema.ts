@@ -20,6 +20,10 @@ const STRIPE_HELPER = "functions/_lib/stripe.ts";
 const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
 const STORE_ORDER_ROUTE = "functions/api/store/orders.ts";
 const STORE_ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
+const STORE_CHECKOUT_SESSION_ROUTE = "functions/api/store/orders/[orderId]/checkout.ts";
+const STORE_CHECKOUT_SESSION_HELPER = "functions/_lib/dzn-store-checkout.ts";
+const STORE_CHECKOUT_SESSION_DOC = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md";
+const STORE_CHECKOUT_SESSION_HANDOFF = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL_HANDOFF.md";
 const PACKAGE_JSON = "package.json";
 
 const LEDGER_TABLES = ["store_orders", "store_order_items", "store_payment_events"] as const;
@@ -29,6 +33,7 @@ const STORE_FLAGS = [
   "DZN_STORE_ENABLED",
   "DZN_STORE_CHECKOUT_ENABLED",
   "DZN_STORE_SANDBOX_CHECKOUT_ENABLED",
+  "DZN_STORE_SANDBOX_CHECKOUT_SESSION_ENABLED",
   "DZN_STORE_WEBHOOK_FULFILMENT_ENABLED",
   "DZN_SUPPORTER_CARDS_ENABLED",
   "DZN_EARNED_SPINS_ENABLED",
@@ -138,6 +143,10 @@ function assertFilesExist() {
     STRIPE_HELPER,
     STORE_ORDER_ROUTE,
     STORE_ORDER_HELPER,
+    STORE_CHECKOUT_SESSION_ROUTE,
+    STORE_CHECKOUT_SESSION_HELPER,
+    STORE_CHECKOUT_SESSION_DOC,
+    STORE_CHECKOUT_SESSION_HANDOFF,
     STORE_PREVIEW_COMPONENT,
     PACKAGE_JSON,
   ]) {
@@ -290,6 +299,10 @@ function assertNoRuntimePathsOrLedgerUsage() {
     STORE_ORDER_ROUTE,
     STORE_ORDER_HELPER,
   ].map((path) => path.replace(/\\/g, "/")));
+  const allowedCheckoutSessionFiles = new Set([
+    STORE_CHECKOUT_SESSION_ROUTE,
+    STORE_CHECKOUT_SESSION_HELPER,
+  ].map((path) => path.replace(/\\/g, "/")));
 
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
@@ -318,6 +331,36 @@ function assertNoRuntimePathsOrLedgerUsage() {
         /\bSTRIPE_WEBHOOK_SECRET\b/i,
       ]) {
         assert.doesNotMatch(source, forbidden, `${path} must not contain Store checkout/webhook/fulfilment pattern ${forbidden}.`);
+      }
+      continue;
+    }
+    if (allowedCheckoutSessionFiles.has(path)) {
+      const source = read(path);
+      assert.equal(
+        source.includes("createDznStoreSandboxCheckoutSession") || source.includes("DZN_STORE_SANDBOX_CHECKOUT_SESSION_ENABLED"),
+        true,
+        `${path} must be part of the approved sandbox Checkout Session slice.`,
+      );
+      assert.equal(source.includes("INSERT INTO store_orders"), false, `${path} must not insert Store orders.`);
+      assert.equal(source.includes("INSERT INTO store_order_items"), false, `${path} must not insert Store order items.`);
+      assert.equal(source.includes("INSERT INTO store_payment_events"), false, `${path} must not insert Store payment events.`);
+      assert.equal(source.includes("UPDATE store_orders"), path === STORE_CHECKOUT_SESSION_HELPER, `${path} must keep Store order checkout updates isolated to the helper.`);
+      assert.equal(source.includes("/checkout/sessions"), path === STORE_CHECKOUT_SESSION_HELPER, `${path} must keep Stripe Checkout API calls isolated to the helper.`);
+      for (const forbidden of [
+        /\bcheckout\.sessions\.create\b/i,
+        /\bpayment_intent\.succeeded\b/i,
+        /\bcharge\.refunded\b/i,
+        /\bcharge\.dispute/i,
+        /\bverifyStripeWebhook\b/i,
+        /\bstore_payment_events\b/i,
+        /\baccount_entitlements\b/i,
+        /\bsupporter_cards\b/i,
+        /\bearned_spins\b/i,
+        /\bspin_ledger\b/i,
+        /\bwheel_cooldowns\b/i,
+        /\bSTRIPE_WEBHOOK_SECRET\b/i,
+      ]) {
+        assert.doesNotMatch(source, forbidden, `${path} must not contain Store webhook/fulfilment pattern ${forbidden}.`);
       }
       continue;
     }

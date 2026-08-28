@@ -411,3 +411,11 @@ That follow-on order route slice is now delivered in `docs/DZN_STORE_SANDBOX_ORD
 `POST /api/store/orders` now creates only a pending local/sandbox order when the caller is authenticated, the Store sandbox flags are explicitly enabled, and the selected catalog product/price passes the Fair Progression Boundary. Checkout Session creation remains future-only and requires a separate approval slice.
 
 The implemented order route intentionally returns `checkout.available = false`. It creates no Stripe Checkout Sessions, processes no Store webhooks, writes no `store_payment_events`, grants no entitlements, issues no Supporter Cards, mints no earned spins, runs no wheel, mutates no Stripe objects, mutates no Cloudflare secrets/config, writes no production D1, enables no live checkout, and changes no issue #49.
+
+## Follow-On Checkout Session Slice
+
+That follow-on checkout slice is now delivered in `docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md`.
+
+`POST /api/store/orders/:orderId/checkout` adds test-mode only Stripe Checkout Session creation after an authenticated player already owns a pending local/test Store order. It uses `mode=payment`, one server-controlled `store_prices.stripe_price_id`, one line item, order-derived idempotency, safe success/cancel URLs, no promotion codes, and sanitized Store metadata.
+
+It updates only `store_orders` to `checkout_created`. It is still no webhook fulfilment, entitlements, Supporter Cards, earned spins, wheel runtime, Store payment-event writes, Stripe Product/Price/Customer/webhook/refund/dispute mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change.

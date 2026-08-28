@@ -22,6 +22,7 @@ const PRODUCT_KEY_PATTERN = /^[a-z0-9][a-z0-9-]{2,80}$/;
 const RECORD_ID_PATTERN = /^[A-Za-z0-9_-]{3,128}$/;
 const THEME_KEY_PATTERN = /^[a-z0-9][a-z0-9-]{1,63}$/;
 const CLIENT_MUTATION_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
+export const DZN_STORE_STRIPE_PRICE_ID_PATTERN = /^price_[A-Za-z0-9_]{3,128}$/;
 const MAX_RETURN_TO_LENGTH = 200;
 
 const FORBIDDEN_REQUEST_FIELDS = [
@@ -612,8 +613,9 @@ function validateCatalogRowForSandboxOrder(row: StoreCatalogRow, input: DznStore
   if (Number(row.allow_pay_what_you_want) !== 0) {
     return catalogError("STORE_PAY_WHAT_YOU_WANT_BLOCKED", "Pay-what-you-want orders require a later approved pricing slice.");
   }
-  if (normalizeString(row.stripe_price_id)) {
-    return catalogError("STORE_STRIPE_PRICE_BINDING_BLOCKED_IN_ORDER_SLICE", "This order-only slice must not bind or use Stripe Price ids.");
+  const stripePriceId = normalizeString(row.stripe_price_id);
+  if (stripePriceId && !DZN_STORE_STRIPE_PRICE_ID_PATTERN.test(stripePriceId)) {
+    return catalogError("STORE_STRIPE_PRICE_BINDING_INVALID", "Server-side Store Stripe Price binding must be a bounded Price id before checkout can be attempted.");
   }
   if (!isProductFulfilmentCompatible(row.product_type, row.fulfilment_kind)) {
     return catalogError("STORE_PRODUCT_FULFILMENT_INVALID", "Store product fulfilment kind is not compatible with the product type.");

@@ -270,3 +270,11 @@ Next should be the DZN Store sandbox order creation route approval slice: design
 That follow-on route slice is now defined in `docs/DZN_STORE_SANDBOX_ORDER_CREATION_ROUTE_APPROVAL.md` and implemented through `functions/api/store/orders.ts` plus `functions/_lib/dzn-store-orders.ts`.
 
 It writes only `store_orders` and `store_order_items`, and only for authenticated local/test sandbox requests where the Store order flags are explicitly enabled. It still creates no Stripe Checkout Sessions, processes no Store webhooks, grants no entitlements, issues no Supporter Cards, mints no earned spins, runs no reward wheel, mutates no Stripe objects, mutates no Cloudflare secrets/config, writes no production D1, enables no live checkout, and changes no issue #49.
+
+## Follow-On Checkout Session Slice
+
+The DZN Store sandbox Checkout Session approval slice is now delivered in `docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md`.
+
+It uses the existing `store_orders` columns `stripe_checkout_session_id`, `stripe_payment_intent_id`, `stripe_customer_ref_hash`, `checkout_idempotency_key_hash`, and `checkout_session_expires_at`; no additional migration is required. `POST /api/store/orders/:orderId/checkout` can update only an owned draft local/test order to `checkout_created` after a safe test-mode Stripe Checkout Session is returned.
+
+It still adds no Store webhook handler, no `store_payment_events` write, no account entitlement write, no Supporter Card issuance, no earned-spin ledger, no wheel runtime, no production D1 apply, no live checkout activation, and no issue #49 change.
