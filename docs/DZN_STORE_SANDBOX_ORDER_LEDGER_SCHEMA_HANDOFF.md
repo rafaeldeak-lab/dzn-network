@@ -200,4 +200,16 @@ The DZN Store sandbox Checkout Session approval slice is now delivered in `docs/
 
 The existing schema already contains the checkout columns needed for this step, so no new migration was added. `POST /api/store/orders/:orderId/checkout` can update only an owned draft local/test order to `checkout_created` after a safe test-mode Stripe Checkout Session is returned.
 
-It still adds no Store webhook handler, no `store_payment_events` write, no account entitlement write, no Supporter Card issuance, no earned-spin ledger, no wheel runtime, no production D1 apply, no live checkout activation, and no issue #49 change.
+Follow-on receipt-only Store webhook handling may now write sanitized `store_payment_events` rows.
+
+## Follow-On Webhook Receipt Slice
+
+The DZN Store sandbox webhook event ledger receipt slice is now delivered in `docs/DZN_STORE_SANDBOX_WEBHOOK_LEDGER_RECEIPT.md`.
+
+It uses the existing `store_payment_events` table. `POST /api/stripe/store-webhook` can insert sanitized test-mode receipt rows only after Stripe signature verification, local/test Store sandbox flags, `DZN_STORE_SANDBOX_WEBHOOK_RECEIPT_ENABLED=true`, and no-fulfilment blockers pass.
+
+It still adds no Store webhook fulfilment, no account entitlement write, no Supporter Card issuance, no earned-spin ledger, no wheel runtime, no production D1 apply, no live checkout activation, and no issue #49 change.
+
+## Current Next Recommended Slice
+
+Next should be Store webhook fulfilment approval preflight only if deliberately approved: define the verified test-mode fulfilment contract, exact eligible events, order-status transitions, idempotent entitlement/supporter-card boundaries, refund/chargeback rollback rules, and proof matrix before any fulfilment route writes account entitlements, Supporter Cards, earned spins, wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare config mutation, production D1 writes, or issue #49 changes.

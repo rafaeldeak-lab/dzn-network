@@ -46,9 +46,17 @@ export type StripeSubscription = {
 export type StripeEvent = {
   id: string;
   type: string;
+  api_version?: string | null;
+  created?: number | null;
+  livemode?: boolean;
   data: {
     object: Record<string, unknown>;
   };
+};
+
+export type StripeWebhookVerificationResult = {
+  event: StripeEvent;
+  rawBody: string;
 };
 
 export function getAppUrl(env: Env, request: Request) {
@@ -126,10 +134,22 @@ export async function retrieveStripeSubscription(env: Env, subscriptionId: strin
   return stripeGetRequest<StripeSubscription>(env, `/subscriptions/${encodeURIComponent(subscriptionId)}`);
 }
 
-export async function verifyStripeWebhook(request: Request, webhookSecret: string): Promise<StripeEvent> {
+export async function verifyStripeWebhookWithRawBody(
+  request: Request,
+  webhookSecret: string,
+  options: { maxBytes?: number } = {},
+): Promise<StripeWebhookVerificationResult> {
   const signature = request.headers.get("stripe-signature");
   if (!signature) throw new Error("Missing Stripe signature.");
+  const maxBytes = options.maxBytes && Number.isFinite(options.maxBytes) ? Math.trunc(options.maxBytes) : null;
+  const contentLength = request.headers.get("content-length");
+  if (maxBytes && contentLength && Number.isFinite(Number(contentLength)) && Number(contentLength) > maxBytes) {
+    throw new Error("Stripe webhook body is too large.");
+  }
   const body = await request.text();
+  if (maxBytes && new TextEncoder().encode(body).byteLength > maxBytes) {
+    throw new Error("Stripe webhook body is too large.");
+  }
   const timestamp = signature.split(",").find((part) => part.startsWith("t="))?.slice(2);
   const expected = signature
     .split(",")
@@ -151,7 +171,15 @@ export async function verifyStripeWebhook(request: Request, webhookSecret: strin
     throw new Error("Stripe signature verification failed.");
   }
 
-  return JSON.parse(body) as StripeEvent;
+  return {
+    event: JSON.parse(body) as StripeEvent,
+    rawBody: body,
+  };
+}
+
+export async function verifyStripeWebhook(request: Request, webhookSecret: string): Promise<StripeEvent> {
+  const { event } = await verifyStripeWebhookWithRawBody(request, webhookSecret);
+  return event;
 }
 
 export function stripeId(value: unknown) {

@@ -28,6 +28,8 @@ const ORDER_LEDGER_HANDOFF = "docs/DZN_STORE_SANDBOX_ORDER_LEDGER_SCHEMA_HANDOFF
 const CHECKOUT_PREFLIGHT = "docs/DZN_STORE_SANDBOX_ORDER_CHECKOUT_APPROVAL_PREFLIGHT.md";
 const CHECKOUT_SESSION_DOC = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md";
 const CHECKOUT_SESSION_HANDOFF = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL_HANDOFF.md";
+const STORE_WEBHOOK_ROUTE = "functions/api/stripe/store-webhook.ts";
+const STORE_WEBHOOK_HELPER = "functions/_lib/dzn-store-webhook.ts";
 const BACKLOG = "docs/DZN_SAFE_MONETISATION_SUPPORTER_SYSTEM_BACKLOG.md";
 const MASTER_SPEC = "docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md";
 const PUBLIC_ACCESS_POLICY = "docs/PUBLIC_ACCESS_POLICY.md";
@@ -435,7 +437,6 @@ function assertNoForbiddenRuntimeOrProductionMutationPaths() {
   }
 
   for (const path of [
-    "functions/api/stripe/store-webhook.ts",
     "functions/api/stripe/store",
     "functions/api/supporter",
     "functions/api/wheel",
@@ -483,6 +484,8 @@ function assertNoForbiddenRuntimeOrProductionMutationPaths() {
     HELPER,
     ROUTE,
     CATALOG_HELPER,
+    STORE_WEBHOOK_ROUTE,
+    STORE_WEBHOOK_HELPER,
     "functions/_lib/stripe.ts",
     "functions/_lib/plans.ts",
     "functions/api/billing/create-checkout-session.ts",

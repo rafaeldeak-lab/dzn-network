@@ -24,6 +24,10 @@ const STORE_CHECKOUT_SESSION_ROUTE = "functions/api/store/orders/[orderId]/check
 const STORE_CHECKOUT_SESSION_HELPER = "functions/_lib/dzn-store-checkout.ts";
 const STORE_CHECKOUT_SESSION_DOC = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md";
 const STORE_CHECKOUT_SESSION_HANDOFF = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL_HANDOFF.md";
+const STORE_WEBHOOK_ROUTE = "functions/api/stripe/store-webhook.ts";
+const STORE_WEBHOOK_HELPER = "functions/_lib/dzn-store-webhook.ts";
+const STORE_WEBHOOK_DOC = "docs/DZN_STORE_SANDBOX_WEBHOOK_LEDGER_RECEIPT.md";
+const STORE_WEBHOOK_HANDOFF = "docs/DZN_STORE_SANDBOX_WEBHOOK_LEDGER_RECEIPT_HANDOFF.md";
 const PACKAGE_JSON = "package.json";
 
 const LEDGER_TABLES = ["store_orders", "store_order_items", "store_payment_events"] as const;
@@ -34,6 +38,7 @@ const STORE_FLAGS = [
   "DZN_STORE_CHECKOUT_ENABLED",
   "DZN_STORE_SANDBOX_CHECKOUT_ENABLED",
   "DZN_STORE_SANDBOX_CHECKOUT_SESSION_ENABLED",
+  "DZN_STORE_SANDBOX_WEBHOOK_RECEIPT_ENABLED",
   "DZN_STORE_WEBHOOK_FULFILMENT_ENABLED",
   "DZN_SUPPORTER_CARDS_ENABLED",
   "DZN_EARNED_SPINS_ENABLED",
@@ -48,7 +53,6 @@ const FORBIDDEN_RUNTIME_PATHS = [
   "functions/api/wheel",
   "functions/api/billing/create-store-checkout-session.ts",
   "functions/api/billing/create-one-time-checkout-session.ts",
-  "functions/api/stripe/store-webhook.ts",
   "functions/api/stripe/store",
   "app/account/purchases/page.tsx",
   "app/purchases/page.tsx",
@@ -147,6 +151,10 @@ function assertFilesExist() {
     STORE_CHECKOUT_SESSION_HELPER,
     STORE_CHECKOUT_SESSION_DOC,
     STORE_CHECKOUT_SESSION_HANDOFF,
+    STORE_WEBHOOK_ROUTE,
+    STORE_WEBHOOK_HELPER,
+    STORE_WEBHOOK_DOC,
+    STORE_WEBHOOK_HANDOFF,
     STORE_PREVIEW_COMPONENT,
     PACKAGE_JSON,
   ]) {
@@ -303,6 +311,10 @@ function assertNoRuntimePathsOrLedgerUsage() {
     STORE_CHECKOUT_SESSION_ROUTE,
     STORE_CHECKOUT_SESSION_HELPER,
   ].map((path) => path.replace(/\\/g, "/")));
+  const allowedWebhookReceiptFiles = new Set([
+    STORE_WEBHOOK_ROUTE,
+    STORE_WEBHOOK_HELPER,
+  ].map((path) => path.replace(/\\/g, "/")));
 
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
@@ -361,6 +373,38 @@ function assertNoRuntimePathsOrLedgerUsage() {
         /\bSTRIPE_WEBHOOK_SECRET\b/i,
       ]) {
         assert.doesNotMatch(source, forbidden, `${path} must not contain Store webhook/fulfilment pattern ${forbidden}.`);
+      }
+      continue;
+    }
+    if (allowedWebhookReceiptFiles.has(path)) {
+      const source = read(path);
+      assert.equal(
+        source.includes("receiveDznStoreSandboxWebhookReceipt") || source.includes("DZN_STORE_SANDBOX_WEBHOOK_RECEIPT_ENABLED"),
+        true,
+        `${path} must be part of the approved sandbox webhook receipt slice.`,
+      );
+      assert.equal(source.includes("INSERT INTO store_orders"), false, `${path} must not insert Store orders.`);
+      assert.equal(source.includes("INSERT INTO store_order_items"), false, `${path} must not insert Store order items.`);
+      assert.equal(source.includes("UPDATE store_orders"), false, `${path} must not update Store orders.`);
+      assert.equal(source.includes("INSERT INTO store_payment_events"), path === STORE_WEBHOOK_HELPER, `${path} must keep Store payment-event inserts isolated to the webhook helper.`);
+      for (const forbidden of [
+        /\bcheckout\.sessions\.create\b/i,
+        /\/checkout\/sessions/i,
+        /\bstripeFormRequest\b/i,
+        /\bINSERT\s+INTO\s+account_entitlements\b/i,
+        /\bUPDATE\s+account_entitlements\b/i,
+        /\baccount_entitlements\b/i,
+        /\bINSERT\s+INTO\s+supporter_cards\b/i,
+        /\bUPDATE\s+supporter_cards\b/i,
+        /\bsupporter_cards\b/i,
+        /\bINSERT\s+INTO\s+earned_spins\b/i,
+        /\bUPDATE\s+earned_spins\b/i,
+        /\bearned_spins\b/i,
+        /\bINSERT\s+INTO\s+spin_ledger\b/i,
+        /\bspin_ledger\b/i,
+        /\bwheel_cooldowns\b/i,
+      ]) {
+        assert.doesNotMatch(source, forbidden, `${path} must not contain Store fulfilment pattern ${forbidden}.`);
       }
       continue;
     }
@@ -428,7 +472,7 @@ function assertDocsAndBacklog() {
       "This schema stores only sanitized summaries and raw event hashes",
       "This branch must not run or approve:",
       "`wrangler d1 migrations apply dzn_network_db --remote`",
-      "Next should be the DZN Store sandbox order creation route approval slice",
+      "The receipt-only webhook follow-on may now write sanitized `store_payment_events` rows.",
     ]],
     [HANDOFF, [
       "DZN Store Sandbox Order Ledger Schema Handoff",
@@ -437,7 +481,7 @@ function assertDocsAndBacklog() {
       "It is a schema and guard-test slice only.",
       "Fulfilment, entitlement-write, and Supporter Card write blockers fixed to `0`.",
       "No production D1 validation is authorized by this slice.",
-      "Next should be the DZN Store sandbox order creation route approval slice",
+      "Follow-on receipt-only Store webhook handling may now write sanitized `store_payment_events` rows.",
     ]],
     [CHECKOUT_PREFLIGHT, [
       "Follow-On Ledger Schema Slice",
@@ -463,7 +507,7 @@ function assertDocsAndBacklog() {
       "DZN Store Sandbox Order Ledger Schema",
       "`docs/DZN_STORE_SANDBOX_ORDER_LEDGER_SCHEMA.md`",
       "`migrations/0072_dzn_store_order_ledger_schema.sql`",
-      "No checkout route, Stripe Checkout Session creation, Store webhook handler, webhook fulfilment, account entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, Stripe mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change is added.",
+      "No Store webhook fulfilment, account entitlement write, Supporter Card issuance, earned-spin ledger, reward wheel runtime, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change is added.",
     ]],
     [MASTER_SPEC, [
       "DZN Store Sandbox Order Ledger Schema Slice",

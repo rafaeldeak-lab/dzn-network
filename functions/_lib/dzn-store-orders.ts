@@ -590,7 +590,7 @@ export function readDznStoreSandboxRuntime(env: Env | StoreOrderEnvRecord = {}):
   return STORE_SANDBOX_RUNTIMES.includes(value as DznStoreSandboxRuntime) ? value as DznStoreSandboxRuntime : null;
 }
 
-function sandboxLedgerScopeForRuntime(runtime: DznStoreSandboxRuntime): DznStoreSandboxLedgerScope {
+export function sandboxLedgerScopeForRuntime(runtime: DznStoreSandboxRuntime): DznStoreSandboxLedgerScope {
   return runtime === "local" ? "local" : "sandbox";
 }
 
