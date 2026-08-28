@@ -134,4 +134,8 @@ TAC advisory: unavailable because Codex Security Access was not connected
 
 ## Next Recommended Slice
 
-Next should be DZN Store fulfilment runtime implementation approval preflight only if deliberately approved: define the disabled-by-default verified test-mode runtime sequence, write scope, idempotency behavior, order-status transitions, account-entitlement creation rules, optional Supporter Card issuance rules, refund/chargeback rollback rules, test matrix, rollback path, and security proof before any runtime fulfilment code writes account entitlements, issues Supporter Cards, mints earned spins, runs the reward wheel, enables live checkout, mutates Stripe Products/Prices, mutates Cloudflare config, writes production D1, or changes issue #49.
+Delivered follow-on reference: the DZN Store fulfilment runtime implementation approval preflight is `docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION_PREFLIGHT.md`. It defines the disabled-by-default local/test runtime sequence, write scope, idempotency behavior, order-status transitions, account-entitlement creation rules, optional Supporter Card issuance rules, refund/chargeback rollback rules, test matrix, rollback path, and security proof.
+
+That preflight adds no runtime fulfilment code, account entitlement writes, Supporter Card issuance, earned spins, reward wheel runtime, live checkout, Stripe Product/Price mutation, Cloudflare config mutation, production D1 writes, or issue #49 changes.
+
+Next should be DZN Store fulfilment runtime implementation only if deliberately approved: add the disabled-by-default local/test runtime from that preflight, with tests proving verified Stripe receipt processing, idempotency, no paid spins, no owner entitlement, privacy, rollback, and Fair Progression Boundary isolation.
