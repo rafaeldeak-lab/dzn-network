@@ -34,6 +34,22 @@ It defines the future verified test-mode fulfilment contract before any runtime 
 
 The current `POST /api/stripe/store-webhook` route remains receipt-only. Current `store_payment_events` fulfilment blockers remain fixed to `0`. This preflight adds no fulfilment route writes, account entitlement table, Supporter Card table, earned-spin ledger, reward wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, or issue #49 change.
 
+## DZN Store Fulfilment Ledger Schema Migration Approval Preflight
+
+The DZN Store fulfilment ledger schema migration approval preflight is `docs/DZN_STORE_FULFILMENT_LEDGER_SCHEMA_PREFLIGHT.md`.
+
+It defines the future local/test-only schema contract before any migration is added:
+
+- `account_entitlements` as private account-bound cosmetic/supporter entitlements only.
+- `supporter_cards` as one serial-unique DZN Founding Supporter Card per qualifying account.
+- `store_fulfilment_attempts` as the idempotent verified-event processing boundary.
+- `store_order_status_history` and `store_entitlement_status_history` as non-destructive audit trails.
+- `store_refund_dispute_audit` as sanitized refund, reversal, chargeback, and dispute reconciliation.
+- Uniqueness constraints for source order item fulfilment, payment-event processing, Supporter Card serials, and one Founding Supporter Card per user.
+- Rollback rules that suspend, restore, or revoke only the affected Store entitlement/card and never delete ledger rows.
+
+This preflight adds no migration file, account entitlement table, Supporter Card table, fulfilment-attempt table, refund/dispute table, Store fulfilment runtime, Store webhook fulfilment write, earned-spin ledger, reward wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, or issue #49 change.
+
 ## Implementation Preflight
 
 The approved preflight is documentation and test guard work only. It keeps `DZN_LIVE_CHECKOUT_ENABLED` unset/false, keeps issue #49 reserved for final live checkout activation, and blocks one-time Stripe Checkout Sessions, store runtime, webhook fulfilment, account entitlement writes, Supporter Card issuance, earned-spin ledgers, reward wheel runtime, Stripe live object changes, Cloudflare secret changes, production D1 writes, Nitrado changes, Discord changes, AI provider credentials, vector stores, analytics/tracking, and metered model calls.

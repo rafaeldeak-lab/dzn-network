@@ -144,4 +144,6 @@ Codex Security diff review completed with no findings. TAC advisory status could
 
 ## Next Recommended Slice
 
-Next should be DZN Store fulfilment ledger/schema migration approval preflight only if deliberately approved: define the exact local/test schema changes for account entitlements, Supporter Cards, fulfilment-attempt state, refund/dispute revocation audit, uniqueness constraints, and rollback before any fulfilment route writes account entitlements, issues Supporter Cards, mints earned spins, runs the wheel, enables live checkout, mutates Stripe Products/Prices, mutates Cloudflare config, writes production D1, or changes issue #49.
+Next should be DZN Store fulfilment ledger schema migration approval preflight only if deliberately approved: define the exact local/test schema changes for account entitlements, Supporter Cards, fulfilment-attempt state, refund/dispute revocation audit, uniqueness constraints, and rollback before any fulfilment route writes account entitlements, issues Supporter Cards, mints earned spins, runs the wheel, enables live checkout, mutates Stripe Products/Prices, mutates Cloudflare config, writes production D1, or changes issue #49.
+
+Delivered follow-on reference: `docs/DZN_STORE_FULFILMENT_LEDGER_SCHEMA_PREFLIGHT.md` now captures the schema migration approval contract only. It adds no migration file, Store fulfilment runtime, account entitlement table, Supporter Card table, earned-spin ledger, wheel runtime, live checkout, production D1 write, Cloudflare config mutation, Stripe mutation, or issue #49 change.
