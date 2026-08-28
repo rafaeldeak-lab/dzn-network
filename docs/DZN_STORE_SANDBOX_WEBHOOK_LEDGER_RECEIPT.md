@@ -206,3 +206,5 @@ This slice is accepted only if tests prove:
 ## Next Recommended Slice
 
 Next should be Store webhook fulfilment approval preflight only if deliberately approved: define the verified test-mode fulfilment contract, exact eligible events, order-status transitions, idempotent entitlement/supporter-card boundaries, refund/chargeback rollback rules, and proof matrix before any fulfilment route writes account entitlements, Supporter Cards, earned spins, wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare config mutation, production D1 writes, or issue #49 changes.
+
+Delivered follow-on reference: the DZN Store webhook fulfilment approval preflight in `docs/DZN_STORE_WEBHOOK_FULFILMENT_APPROVAL_PREFLIGHT.md` defines that approval contract only. The current webhook route remains receipt-only.

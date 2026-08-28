@@ -8,6 +8,8 @@ The DZN Store sandbox order and checkout approval preflight is `docs/DZN_STORE_S
 
 The DZN Store sandbox order ledger schema is `docs/DZN_STORE_SANDBOX_ORDER_LEDGER_SCHEMA.md`. It adds source-controlled local/sandbox ledger schema only for `store_orders`, `store_order_items`, and `store_payment_events`. It does not approve production D1 migration application, checkout routes, Stripe Checkout Session creation, Store webhook handlers, webhook fulfilment, account entitlement writes, Supporter Card issuance, earned-spin ledgers, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, live checkout activation, or issue #49 changes.
 
+The DZN Store webhook fulfilment approval preflight is `docs/DZN_STORE_WEBHOOK_FULFILMENT_APPROVAL_PREFLIGHT.md`. It defines future verified test-mode fulfilment rules only. It does not approve fulfilment route writes, account entitlement tables, Supporter Card tables, earned-spin ledgers, reward wheel runtime, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 writes, live checkout activation, or issue #49 changes.
+
 ## Activation Boundary
 
 Live billing activation is high-risk billing and production-mutation work.
@@ -127,12 +129,15 @@ The DZN Store Safe Monetisation track is separate from this live owner-subscript
 - `docs/DZN_STORE_SANDBOX_ORDER_LEDGER_SCHEMA.md` adds source-controlled local/sandbox ledger schema only and does not approve production D1 migration application.
 - `docs/DZN_STORE_SANDBOX_ORDER_CREATION_ROUTE_APPROVAL.md` adds a disabled-by-default local/test pending-order route only and does not approve Stripe Checkout Session creation.
 - `docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md` adds a disabled-by-default test-mode Store Checkout Session route only and does not approve Store webhook fulfilment, entitlement writes, Supporter Card issuance, earned spins, reward wheel runtime, production D1 writes, live checkout activation, or issue #49 changes.
+- `docs/DZN_STORE_WEBHOOK_FULFILMENT_APPROVAL_PREFLIGHT.md` defines future verified test-mode fulfilment, refund/chargeback rollback, exactly-once entitlement/card boundaries, and proof requirements only.
 
 The Store order route writes only pending local/test `store_orders` and `store_order_items` after explicit sandbox flags and catalog safety checks pass. It must not create Stripe Checkout Sessions, process Store webhooks, write `store_payment_events`, grant entitlements, issue Supporter Cards, mint earned spins, run the wheel, mutate Stripe objects, mutate Cloudflare secrets/config, write production D1, enable live checkout, or change issue #49.
 
 The Store sandbox Checkout Session route can create only a test-mode `mode=payment` Checkout Session after an owned draft local/test order exists. It updates only `store_orders` to `checkout_created` and keeps `DZN_LIVE_CHECKOUT_ENABLED` unset/false. It must not process Store webhooks, write `store_payment_events`, grant entitlements, issue Supporter Cards, mint earned spins, run the wheel, mutate Stripe Products/Prices/Customers/webhook endpoints/refunds/disputes, mutate Cloudflare secrets/config, write production D1, enable live checkout, or change issue #49.
 
 The Store sandbox webhook event ledger receipt route is `POST /api/stripe/store-webhook`. It remains disabled unless `DZN_STORE_SANDBOX_WEBHOOK_RECEIPT_ENABLED=true` is supplied in local/test runtime. It verifies Stripe signatures and records sanitized test-mode `store_payment_events` receipt rows only. It has no fulfilment, no entitlement writes, no Supporter Card issuance, no earned spins, no wheel runtime, no Stripe Product/Price mutation, no Cloudflare config mutation, no production D1 writes, and does not approve live checkout or issue #49 changes.
+
+The Store webhook fulfilment approval preflight leaves that route receipt-only and leaves the `store_payment_events` fulfilment blockers fixed to `0`. Any future fulfilment implementation must be a separate approved local/test runtime slice with schema approval, exactly-once proof, refund/dispute proof, no paid-spin proof, no owner entitlement proof, no production mutation proof, and no issue #49 change unless explicitly approved there.
 
 ## Stop Conditions
 
