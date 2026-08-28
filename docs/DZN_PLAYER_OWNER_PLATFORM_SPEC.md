@@ -592,7 +592,8 @@ Future slices should build on this foundation in this order unless product prior
 25. DZN Store sandbox order ledger schema: delivered as a local/sandbox-only schema slice adding `store_orders`, `store_order_items`, and `store_payment_events` with `livemode = 0`, immutable snapshots, unique provider-event ids, sanitized event summaries, and no-fulfilment blockers; still no checkout route, Stripe Checkout Session creation, Store webhook handler, webhook fulfilment, account entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, production D1 apply, live checkout activation, or issue #49 change.
 26. DZN Store sandbox Checkout Session approval: delivered as a disabled-by-default, test-mode only `POST /api/store/orders/:orderId/checkout` route using an existing owned draft local/test order, a server-controlled test Price binding, order-derived idempotency, and a `store_orders` status update only; still no Store webhook fulfilment, `store_payment_events` writes, entitlements, Supporter Cards, earned spins, wheel runtime, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change.
 27. DZN Store sandbox webhook event ledger receipt: delivered as a disabled-by-default, Stripe-signed `POST /api/stripe/store-webhook` route that accepts test-mode events only and records sanitized `store_payment_events` receipt rows only; still no fulfilment, order-status update, account entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change.
-28. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+28. DZN Store fulfilment ledger schema migration approval preflight: delivered as a documentation/test-guard slice defining the exact future local/test schema contract for account entitlements, Supporter Cards, fulfilment attempts, order status history, entitlement status history, and refund/dispute revocation audit before any migration file, fulfilment route write, entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, live checkout activation, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
+29. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 
@@ -605,6 +606,8 @@ The foundation hub shows:
 - Suggested public servers from safe linked-server discovery fields.
 - Suggested public events and tournaments from the existing public event payload.
 - Profile entry points for DZN Pulse, leaderboards, events, player-profile roadmap work, and owner setup.
+
+The header currently exposes the player area as `Player Hub`, and the private profile surface lives at `/player/profile`; a later player UX polish slice should add a more explicit "My Player Profile" or "My Profile" entry in the logged-in navigation and Player Hub action areas so individual players can find their own page without guessing.
 
 The hub keeps owner setup behind the same owner boundary:
 
@@ -1900,6 +1903,27 @@ The preflight defines:
 This slice must not implement fulfilment route writes, account entitlement tables, Supporter Card tables, earned-spin ledgers, wheel runtime, live checkout activation, Stripe Product/Price/customer/refund/dispute/webhook endpoint mutation, Cloudflare secret/config mutation, production D1 writes, or issue #49 changes.
 
 Fairness remains unchanged: Store fulfilment is future account-bound cosmetic/supporter recognition only and cannot affect owner billing plan status, `/setup`, Nitrado, server ownership, rankings, discovery score, reviews, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
+
+Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
+
+## DZN Store Fulfilment Ledger Schema Migration Approval Preflight Slice
+
+The DZN Store fulfilment ledger schema migration approval preflight is a documentation/test-guard slice only. It defines the exact future local/test schema contract that must be approved before any account entitlement, Supporter Card, fulfilment-attempt, order-status-history, entitlement-status-history, or refund/dispute revocation-audit migration is created.
+
+The future approved schema may add only these local/test ledger objects:
+
+- `account_entitlements`
+- `supporter_cards`
+- `store_fulfilment_attempts`
+- `store_order_status_history`
+- `store_entitlement_status_history`
+- `store_refund_dispute_audit`
+
+The future schema must enforce account-bound cosmetic entitlements, exactly-one Founding Supporter Card per qualifying account, unique Supporter serial numbers, order-derived fulfilment idempotency, private refund/dispute revocation audit, immutable completed order snapshots, and rollback-safe status history. It must not add `earned_spins`, `spin_ledger`, `wheel_cooldowns`, owner subscription tables, Nitrado ownership tables, scoring tables, ranking tables, review tables, event tables, profile visibility tables, retained-export tables, or any competitive-system coupling.
+
+This preflight does not add the future migration file. The current Store webhook remains receipt-only, and `store_payment_events` fulfilment blockers remain fixed to `0`. No Store webhook fulfilment, order-status fulfilment update, account entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, Stripe Product/Price/customer/refund/dispute/webhook endpoint mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change is implemented.
+
+Fairness remains unchanged: the future schema contract is for verified account-bound cosmetic/supporter recognition only. It cannot affect owner billing plan status, `/setup`, Nitrado linking, server ownership, rankings, discovery score, reviews, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
 
 Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
 

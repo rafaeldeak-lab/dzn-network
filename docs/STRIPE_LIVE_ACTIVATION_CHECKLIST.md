@@ -10,6 +10,8 @@ The DZN Store sandbox order ledger schema is `docs/DZN_STORE_SANDBOX_ORDER_LEDGE
 
 The DZN Store webhook fulfilment approval preflight is `docs/DZN_STORE_WEBHOOK_FULFILMENT_APPROVAL_PREFLIGHT.md`. It defines future verified test-mode fulfilment rules only. It does not approve fulfilment route writes, account entitlement tables, Supporter Card tables, earned-spin ledgers, reward wheel runtime, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 writes, live checkout activation, or issue #49 changes.
 
+The DZN Store fulfilment ledger schema migration approval preflight is `docs/DZN_STORE_FULFILMENT_LEDGER_SCHEMA_PREFLIGHT.md`. It defines future local/test-only schema contracts for account entitlements, Supporter Cards, fulfilment attempts, status history, refund/dispute audit, uniqueness, and rollback only. It does not add or approve a migration file, production D1 apply, Store fulfilment runtime, account entitlement writes, Supporter Card issuance, earned-spin ledgers, reward wheel runtime, Stripe Product/Price mutation, Cloudflare secret/config mutation, live checkout activation, or issue #49 changes.
+
 ## Activation Boundary
 
 Live billing activation is high-risk billing and production-mutation work.
@@ -130,6 +132,7 @@ The DZN Store Safe Monetisation track is separate from this live owner-subscript
 - `docs/DZN_STORE_SANDBOX_ORDER_CREATION_ROUTE_APPROVAL.md` adds a disabled-by-default local/test pending-order route only and does not approve Stripe Checkout Session creation.
 - `docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md` adds a disabled-by-default test-mode Store Checkout Session route only and does not approve Store webhook fulfilment, entitlement writes, Supporter Card issuance, earned spins, reward wheel runtime, production D1 writes, live checkout activation, or issue #49 changes.
 - `docs/DZN_STORE_WEBHOOK_FULFILMENT_APPROVAL_PREFLIGHT.md` defines future verified test-mode fulfilment, refund/chargeback rollback, exactly-once entitlement/card boundaries, and proof requirements only.
+- `docs/DZN_STORE_FULFILMENT_LEDGER_SCHEMA_PREFLIGHT.md` defines future local/test fulfilment-ledger schema, uniqueness, status-history, refund/dispute audit, and rollback contracts only; it adds no migration file or runtime fulfilment.
 
 The Store order route writes only pending local/test `store_orders` and `store_order_items` after explicit sandbox flags and catalog safety checks pass. It must not create Stripe Checkout Sessions, process Store webhooks, write `store_payment_events`, grant entitlements, issue Supporter Cards, mint earned spins, run the wheel, mutate Stripe objects, mutate Cloudflare secrets/config, write production D1, enable live checkout, or change issue #49.
 

@@ -281,3 +281,5 @@ This preflight slice is accepted when tests prove:
 ## Next Recommended Slice
 
 Next should be DZN Store fulfilment ledger/schema migration approval preflight only if deliberately approved: define the exact local/test schema changes for account entitlements, Supporter Cards, fulfilment-attempt state, refund/dispute revocation audit, uniqueness constraints, and rollback before any fulfilment route writes account entitlements, issues Supporter Cards, mints earned spins, runs the wheel, enables live checkout, mutates Stripe Products/Prices, mutates Cloudflare config, writes production D1, or changes issue #49.
+
+Delivered follow-on reference: the DZN Store fulfilment ledger schema migration approval preflight is `docs/DZN_STORE_FULFILMENT_LEDGER_SCHEMA_PREFLIGHT.md`. It defines the future local/test schema contract only. No migration file or runtime fulfilment is added by that preflight.
