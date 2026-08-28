@@ -26,6 +26,8 @@ const HANDOFF = "docs/DZN_STORE_SANDBOX_ORDER_CREATION_ROUTE_APPROVAL_HANDOFF.md
 const ORDER_LEDGER_DOC = "docs/DZN_STORE_SANDBOX_ORDER_LEDGER_SCHEMA.md";
 const ORDER_LEDGER_HANDOFF = "docs/DZN_STORE_SANDBOX_ORDER_LEDGER_SCHEMA_HANDOFF.md";
 const CHECKOUT_PREFLIGHT = "docs/DZN_STORE_SANDBOX_ORDER_CHECKOUT_APPROVAL_PREFLIGHT.md";
+const CHECKOUT_SESSION_DOC = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md";
+const CHECKOUT_SESSION_HANDOFF = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL_HANDOFF.md";
 const BACKLOG = "docs/DZN_SAFE_MONETISATION_SUPPORTER_SYSTEM_BACKLOG.md";
 const MASTER_SPEC = "docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md";
 const PUBLIC_ACCESS_POLICY = "docs/PUBLIC_ACCESS_POLICY.md";
@@ -95,6 +97,8 @@ function assertFilesExist() {
     ORDER_LEDGER_DOC,
     ORDER_LEDGER_HANDOFF,
     CHECKOUT_PREFLIGHT,
+    CHECKOUT_SESSION_DOC,
+    CHECKOUT_SESSION_HANDOFF,
     BACKLOG,
     MASTER_SPEC,
     PUBLIC_ACCESS_POLICY,
@@ -344,7 +348,7 @@ async function assertCatalogSafetyBlocksProtectedOutcomes() {
     { account_bound: 0 },
     { guaranteed_purchase: 0 },
     { no_competitive_advantage: 0 },
-    { stripe_price_id: "price_test_blocked" },
+    { stripe_price_id: "pi_not_a_price" },
     { allow_pay_what_you_want: 1 },
     { min_amount_minor: 500 },
     { currency: "usd" },
@@ -353,6 +357,14 @@ async function assertCatalogSafetyBlocksProtectedOutcomes() {
     const blocked = await createDznStoreSandboxOrder({ DB: db, ...STORE_ROUTE_FLAGS } as unknown as Env, TEST_USER, VALID_INPUT, { hashValue });
     assert.equal(blocked.ok, false, `Catalog row patch ${JSON.stringify(rowPatch)} must be blocked.`);
     assert.equal(db.operations.some((operation) => operation.type === "batch"), false);
+  }
+
+  const boundPriceDb = new FakeD1Database(validCatalogRow({ stripe_price_id: "price_dzn_sandbox_founder_1000" }));
+  const boundPrice = await createDznStoreSandboxOrder({ DB: boundPriceDb, ...STORE_ROUTE_FLAGS } as unknown as Env, TEST_USER, VALID_INPUT, { hashValue });
+  assert.equal(boundPrice.ok, true, "A valid server-controlled Stripe Price binding can be prepared for the approved checkout-session slice.");
+  if (boundPrice.ok) {
+    assert.equal(JSON.stringify(boundPrice.body).includes("price_dzn_sandbox_founder_1000"), false, "Order creation response must not expose server Stripe Price bindings.");
+    assert.equal(boundPrice.body.order.checkout.available, false, "Order creation must still not create checkout.");
   }
 
   const themeDb = new FakeD1Database(validCatalogRow());

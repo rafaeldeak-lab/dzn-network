@@ -10,7 +10,7 @@ import {
   releaseStarterTrialReservation,
   reserveStarterTrialClaim,
 } from "../../_lib/plans";
-import { billingRedirectUrl, stripeFormRequest, type StripeCheckoutSession } from "../../_lib/stripe";
+import { billingRedirectUrl, stripeFormRequest, stripeId, type StripeCheckoutSession } from "../../_lib/stripe";
 import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 
 type CheckoutBody = {
@@ -93,7 +93,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   if (starterTrialReservation?.reserved) {
     await attachStarterTrialCheckoutSession(env, {
       discordUserId: user.discord_id,
-      stripeCustomerId: session.customer ?? stripeCustomerId,
+      stripeCustomerId: stripeId(session.customer) ?? stripeCustomerId,
       stripeSubscriptionId: session.subscription,
       checkoutSessionId: session.id,
       status: "checkout_created",

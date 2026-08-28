@@ -18,6 +18,10 @@ const STORE_CATALOG_MIGRATION = "migrations/0071_dzn_store_catalog_admin_draft.s
 const STORE_ORDER_LEDGER_MIGRATION = "migrations/0072_dzn_store_order_ledger_schema.sql";
 const STORE_ORDER_ROUTE = "functions/api/store/orders.ts";
 const STORE_ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
+const STORE_CHECKOUT_SESSION_ROUTE = "functions/api/store/orders/[orderId]/checkout.ts";
+const STORE_CHECKOUT_SESSION_HELPER = "functions/_lib/dzn-store-checkout.ts";
+const STORE_CHECKOUT_SESSION_DOC = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md";
+const STORE_CHECKOUT_SESSION_HANDOFF = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL_HANDOFF.md";
 const STORE_PREVIEW_PAGE = "app/store/page.tsx";
 const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
 const PACKAGE_JSON = "package.json";
@@ -177,6 +181,7 @@ const FUTURE_STORE_FLAGS = [
   "DZN_STORE_ENABLED",
   "DZN_STORE_CHECKOUT_ENABLED",
   "DZN_STORE_SANDBOX_CHECKOUT_ENABLED",
+  "DZN_STORE_SANDBOX_CHECKOUT_SESSION_ENABLED",
   "DZN_STORE_WEBHOOK_FULFILMENT_ENABLED",
   "DZN_SUPPORTER_CARDS_ENABLED",
   "DZN_EARNED_SPINS_ENABLED",
@@ -222,6 +227,7 @@ const FORBIDDEN_RUNTIME_STORE_PATTERNS = [
   /\bDZN_STORE_ENABLED\b/,
   /\bDZN_STORE_CHECKOUT_ENABLED\b/,
   /\bDZN_STORE_SANDBOX_CHECKOUT_ENABLED\b/,
+  /\bDZN_STORE_SANDBOX_CHECKOUT_SESSION_ENABLED\b/,
   /\bDZN_STORE_WEBHOOK_FULFILMENT_ENABLED\b/,
   /\bDZN_SUPPORTER_CARDS_ENABLED\b/,
   /\bDZN_EARNED_SPINS_ENABLED\b/,
@@ -281,6 +287,10 @@ function assertFilesExist() {
     PACKAGE_JSON,
     STORE_ORDER_ROUTE,
     STORE_ORDER_HELPER,
+    STORE_CHECKOUT_SESSION_ROUTE,
+    STORE_CHECKOUT_SESSION_HELPER,
+    STORE_CHECKOUT_SESSION_DOC,
+    STORE_CHECKOUT_SESSION_HANDOFF,
   ]) {
     assert.equal(existsSync(path), true, `${path} should exist.`);
   }
@@ -387,6 +397,7 @@ function assertNoStoreRuntimePatternsBeyondCatalogDraft() {
   const allowCatalogDraftFile = STORE_CATALOG_HELPER.replace(/\\/g, "/");
   const allowStorePreviewFiles = new Set([STORE_PREVIEW_PAGE, STORE_PREVIEW_COMPONENT].map((path) => path.replace(/\\/g, "/")));
   const allowStoreOrderFiles = new Set([STORE_ORDER_ROUTE, STORE_ORDER_HELPER].map((path) => path.replace(/\\/g, "/")));
+  const allowStoreCheckoutSessionFiles = new Set([STORE_CHECKOUT_SESSION_ROUTE, STORE_CHECKOUT_SESSION_HELPER].map((path) => path.replace(/\\/g, "/")));
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
     if (allowExistingSubscriptionFiles.has(path)) continue;
@@ -412,6 +423,35 @@ function assertNoStoreRuntimePatternsBeyondCatalogDraft() {
         /\bSTRIPE_WEBHOOK_SECRET\b/i,
       ]) {
         assert.doesNotMatch(source, forbidden, `${path} must not contain Store payment/fulfilment/runtime pattern ${forbidden}.`);
+      }
+      continue;
+    }
+    if (allowStoreCheckoutSessionFiles.has(path)) {
+      assert.equal(
+        source.includes("createDznStoreSandboxCheckoutSession") || source.includes("DZN_STORE_SANDBOX_CHECKOUT_SESSION_ENABLED"),
+        true,
+        `${path} must be part of the approved sandbox Checkout Session slice.`,
+      );
+      assert.equal(source.includes("INSERT INTO store_orders"), false, `${path} must not insert Store orders.`);
+      assert.equal(source.includes("INSERT INTO store_order_items"), false, `${path} must not insert Store order items.`);
+      assert.equal(source.includes("INSERT INTO store_payment_events"), false, `${path} must not insert Store payment events.`);
+      assert.equal(source.includes("UPDATE store_orders"), path === STORE_CHECKOUT_SESSION_HELPER, `${path} must keep checkout state updates isolated to the Store checkout helper.`);
+      assert.equal(source.includes("/checkout/sessions"), path === STORE_CHECKOUT_SESSION_HELPER, `${path} must keep Stripe Checkout API calls isolated to the Store checkout helper.`);
+      for (const forbidden of [
+        /\bcheckout\.sessions\.create\b/i,
+        /\bpayment_intent\.succeeded\b/i,
+        /\bcharge\.refunded\b/i,
+        /\bcharge\.dispute/i,
+        /\bstore_payment_events\b/i,
+        /\baccount_entitlements\b/i,
+        /\bsupporter_cards\b/i,
+        /\bearned_spins\b/i,
+        /\bspin_ledger\b/i,
+        /\bwheel_cooldowns\b/i,
+        /\bDZN-SUP-\b/i,
+        /\bSTRIPE_WEBHOOK_SECRET\b/i,
+      ]) {
+        assert.doesNotMatch(source, forbidden, `${path} must not contain Store fulfilment/supporter/wheel pattern ${forbidden}.`);
       }
       continue;
     }

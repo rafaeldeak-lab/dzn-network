@@ -126,8 +126,11 @@ The DZN Store Safe Monetisation track is separate from this live owner-subscript
 - `docs/DZN_STORE_SANDBOX_ORDER_CHECKOUT_APPROVAL_PREFLIGHT.md` defines sandbox order, checkout, webhook, fulfilment, refund, tax, rollback, and proof contracts only.
 - `docs/DZN_STORE_SANDBOX_ORDER_LEDGER_SCHEMA.md` adds source-controlled local/sandbox ledger schema only and does not approve production D1 migration application.
 - `docs/DZN_STORE_SANDBOX_ORDER_CREATION_ROUTE_APPROVAL.md` adds a disabled-by-default local/test pending-order route only and does not approve Stripe Checkout Session creation.
+- `docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md` adds a disabled-by-default test-mode Store Checkout Session route only and does not approve Store webhook fulfilment, entitlement writes, Supporter Card issuance, earned spins, reward wheel runtime, production D1 writes, live checkout activation, or issue #49 changes.
 
 The Store order route writes only pending local/test `store_orders` and `store_order_items` after explicit sandbox flags and catalog safety checks pass. It must not create Stripe Checkout Sessions, process Store webhooks, write `store_payment_events`, grant entitlements, issue Supporter Cards, mint earned spins, run the wheel, mutate Stripe objects, mutate Cloudflare secrets/config, write production D1, enable live checkout, or change issue #49.
+
+The Store sandbox Checkout Session route can create only a test-mode `mode=payment` Checkout Session after an owned draft local/test order exists. It updates only `store_orders` to `checkout_created` and keeps `DZN_LIVE_CHECKOUT_ENABLED` unset/false. It must not process Store webhooks, write `store_payment_events`, grant entitlements, issue Supporter Cards, mint earned spins, run the wheel, mutate Stripe Products/Prices/Customers/webhook endpoints/refunds/disputes, mutate Cloudflare secrets/config, write production D1, enable live checkout, or change issue #49.
 
 ## Stop Conditions
 

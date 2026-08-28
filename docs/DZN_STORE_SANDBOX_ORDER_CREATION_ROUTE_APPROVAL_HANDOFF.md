@@ -134,3 +134,13 @@ This branch did not intentionally create or mutate:
 ## Next Recommended Slice
 
 Next should be the DZN Store sandbox Checkout Session creation approval slice, only if deliberately approved. It should create a test-mode Stripe Checkout Session only after the pending local/test order exists and must still avoid webhook fulfilment, entitlements, Supporter Card issuance, earned spins, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 writes, live checkout activation, and issue #49 changes.
+
+## Follow-On Checkout Session Slice
+
+The follow-on checkout slice is now delivered in `docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md` with:
+
+- `functions/api/store/orders/[orderId]/checkout.ts`
+- `functions/_lib/dzn-store-checkout.ts`
+- `POST /api/store/orders/:orderId/checkout`
+
+It creates a test-mode Stripe Checkout Session only after an owned draft order exists. It updates only `store_orders` to `checkout_created`; it does not process Store webhooks, write `store_payment_events`, grant entitlements, issue Supporter Cards, mint earned spins, run the wheel, mutate live Stripe or Cloudflare configuration, write production D1, enable live checkout, or change issue #49.

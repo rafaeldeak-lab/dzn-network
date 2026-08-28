@@ -99,6 +99,24 @@ It writes only pending local/test `store_orders` and `store_order_items`, and on
 
 It creates no Stripe Checkout Session, processes no Store webhook, writes no `store_payment_events`, grants no account entitlement, issues no Supporter Card, mints no earned spin, runs no wheel, mutates no Stripe object, mutates no Cloudflare secret/config, writes no production D1, enables no live checkout, and changes no issue #49.
 
+## DZN Store Sandbox Checkout Session Approval
+
+The checkout slice is `docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md`.
+
+It creates a test-mode only Stripe Checkout Session after a pending local/test order exists and belongs to the authenticated player. It uses:
+
+- `POST /api/store/orders/:orderId/checkout`
+- `functions/api/store/orders/[orderId]/checkout.ts`
+- `functions/_lib/dzn-store-checkout.ts`
+- a server-controlled `store_prices.stripe_price_id`
+- an order-derived Stripe idempotency key
+- safe success/cancel URLs
+- one `mode=payment` line item
+
+It updates only `store_orders` to `checkout_created`.
+
+It creates no Store webhook fulfilment, entitlements, Supporter Cards, earned spins, wheel runtime, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change.
+
 ## Wheel Rules
 
 Players must never be able to purchase spins with:
