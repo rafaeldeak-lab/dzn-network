@@ -594,7 +594,8 @@ Future slices should build on this foundation in this order unless product prior
 27. DZN Store sandbox webhook event ledger receipt: delivered as a disabled-by-default, Stripe-signed `POST /api/stripe/store-webhook` route that accepts test-mode events only and records sanitized `store_payment_events` receipt rows only; still no fulfilment, order-status update, account entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change.
 28. DZN Store fulfilment ledger schema migration approval preflight: delivered as a documentation/test-guard slice defining the exact future local/test schema contract for account entitlements, Supporter Cards, fulfilment attempts, order status history, entitlement status history, and refund/dispute revocation audit before any migration file, fulfilment route write, entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, live checkout activation, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
 29. DZN Store fulfilment runtime implementation approval preflight: delivered as a documentation/test-guard slice defining the future disabled-by-default local/test fulfilment runtime sequence, exact write scope, idempotency behavior, order-status transitions, account-entitlement creation rules, optional Supporter Card issuance rules, refund/chargeback rollback, test matrix, rollback path, and security proof before any runtime code writes entitlements, issues cards, mints earned spins, runs the wheel, enables live checkout, mutates Stripe/Cloudflare, writes production D1, or changes issue #49.
-30. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+30. DZN Store fulfilment runtime implementation: delivered as a disabled-by-default local/test runtime for verified Store `checkout.session.completed` receipts, idempotent attempts, exactly-one safe account entitlement per fulfilled source item, optional independently flagged Supporter Card issuance, and refund/dispute rollback; still no earned spins, reward wheel runtime, live checkout, Stripe Product/Price mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
+31. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 
@@ -1960,6 +1961,20 @@ The current Store webhook remains receipt-only. No Store fulfilment runtime, acc
 Fairness remains unchanged: the future Store runtime may grant only guaranteed account-bound cosmetic/supporter recognition from verified local/test payment receipts, and it cannot affect owner billing plan status, `/setup`, Nitrado linking, server ownership, rankings, discovery score, reviews, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
 
 Live checkout remains disabled, and Issue #49 remains reserved for final live payment activation.
+
+## DZN Store Fulfilment Runtime Implementation Slice
+
+The DZN Store fulfilment runtime implementation is delivered in `docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION.md`.
+
+It adds `functions/_lib/dzn-store-fulfilment.ts` and conditionally wires `functions/_lib/dzn-store-webhook.ts` so signed Store receipts can be processed only when `DZN_STORE_WEBHOOK_FULFILMENT_ENABLED=true` in local/test. Default behavior remains receipt-only with `fulfilment: null`.
+
+Allowed local/test runtime writes are limited to `store_fulfilment_attempts`, `store_order_status_history`, `account_entitlements`, `store_entitlement_status_history`, optional `supporter_cards`, and `store_refund_dispute_audit`. `store_payment_events` remains the existing sanitized receipt ledger and keeps its fulfilment/write blockers fixed to `0`.
+
+`checkout.session.completed` is the only grant event in this slice. PaymentIntent events remain no-grant. Success redirects remain no-grant. Refund and dispute events may suspend, revoke, restore, or move only the affected Store order/account entitlement/card according to verified local/test receipt state.
+
+Store account entitlements remain separate from owner Starter/Pro entitlements. They are private account-bound cosmetic/supporter records only and cannot unlock owner billing status, `/setup`, Nitrado linking, owner dashboards, owner APIs, server management, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, earned calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
+
+No earned-spin ledger, reward wheel runtime, live checkout activation, Stripe Product/Price/customer/refund/dispute/webhook endpoint mutation, Cloudflare config mutation, production D1 write, Nitrado mutation, Discord mutation, analytics/tracking path, metered AI call, or issue #49 change is implemented.
 
 ## Pricing Visual Comparison Upgrade Slice
 

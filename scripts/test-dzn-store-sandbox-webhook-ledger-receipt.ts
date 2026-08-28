@@ -15,6 +15,7 @@ import type { Env, PagesContext } from "../functions/_lib/types";
 
 const ROUTE = "functions/api/stripe/store-webhook.ts";
 const HELPER = "functions/_lib/dzn-store-webhook.ts";
+const FULFILMENT_HELPER = "functions/_lib/dzn-store-fulfilment.ts";
 const STRIPE_HELPER = "functions/_lib/stripe.ts";
 const OWNER_WEBHOOK = "functions/api/stripe/webhook.ts";
 const ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
@@ -80,6 +81,7 @@ function assertFilesExist() {
   for (const path of [
     ROUTE,
     HELPER,
+    FULFILMENT_HELPER,
     STRIPE_HELPER,
     OWNER_WEBHOOK,
     ORDER_HELPER,
@@ -118,10 +120,8 @@ async function assertDisabledByDefault() {
 
 async function assertFulfilmentAndLiveFlagsBlockReceipt() {
   for (const [flag, value, expectedError] of [
-    ["DZN_STORE_WEBHOOK_FULFILMENT_ENABLED", "true", "STORE_WEBHOOK_FULFILMENT_MUST_STAY_DISABLED"],
     ["DZN_STORE_LIVE_CHECKOUT_ENABLED", "true", "STORE_LIVE_CHECKOUT_BLOCKED"],
     ["DZN_LIVE_CHECKOUT_ENABLED", "true", "STORE_LIVE_CHECKOUT_BLOCKED"],
-    ["DZN_SUPPORTER_CARDS_ENABLED", "true", "STORE_SUPPORTER_CARD_RUNTIME_MUST_STAY_DISABLED"],
     ["DZN_EARNED_SPINS_ENABLED", "true", "STORE_EARNED_SPINS_RUNTIME_MUST_STAY_DISABLED"],
     ["DZN_REWARD_WHEEL_ENABLED", "true", "STORE_REWARD_WHEEL_RUNTIME_MUST_STAY_DISABLED"],
   ] as const) {
@@ -134,6 +134,18 @@ async function assertFulfilmentAndLiveFlagsBlockReceipt() {
     assert.equal(result.body.error, expectedError, `${flag} should use the canonical Store sandbox blocker.`);
     assert.equal(result.body.receipt_recorded, false);
     assert.equal(db.paymentEvents.length, 0, `${flag} must block before ledger writes.`);
+  }
+
+  for (const flag of ["DZN_STORE_WEBHOOK_FULFILMENT_ENABLED", "DZN_SUPPORTER_CARDS_ENABLED"] as const) {
+    const db = new FakeD1Database();
+    const result = await receiveDznStoreSandboxWebhookReceipt(
+      { DB: db, ...STORE_WEBHOOK_FLAGS, [flag]: "true" } as unknown as Env,
+      signedStoreWebhookRequest(checkoutCompletedEvent()),
+    );
+    assert.equal(result.status, 200, `${flag} should not block a verified receipt after the approved runtime follow-on.`);
+    assert.equal(result.body.ok, true);
+    assert.equal(result.body.receipt.recorded, true);
+    assert.equal(db.paymentEvents.length, 1, `${flag} should still allow only the sanitized receipt row in this receipt-focused harness.`);
   }
 }
 
@@ -483,6 +495,7 @@ function assertNoForbiddenRuntimeOrProductionMutationPaths() {
     STRIPE_HELPER,
     ORDER_HELPER,
     CHECKOUT_HELPER,
+    FULFILMENT_HELPER,
     OWNER_WEBHOOK,
     "functions/api/billing/create-checkout-session.ts",
     "functions/api/billing/create-portal-session.ts",

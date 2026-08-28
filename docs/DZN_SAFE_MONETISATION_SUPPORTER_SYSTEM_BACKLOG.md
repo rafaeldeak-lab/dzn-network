@@ -379,6 +379,16 @@ Future implementation must prove:
 - Wheel outcomes and probabilities match the configured reward pool.
 - Admin price changes cannot alter completed orders.
 
+## DZN Store Fulfilment Runtime Implementation
+
+Delivered in `docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION.md`.
+
+This slice adds disabled-by-default local/test Store fulfilment runtime for verified `checkout.session.completed` receipts. It writes idempotent `store_fulfilment_attempts`, `store_order_status_history`, exactly one safe `account_entitlements` row per fulfilled source item, optional `supporter_cards` issuance only when `DZN_SUPPORTER_CARDS_ENABLED=true`, and sanitized refund/dispute audit and rollback records.
+
+PaymentIntent events remain no-grant. Success redirects remain no-grant. Store fulfilment remains separate from owner Starter/Pro billing and cannot unlock `/setup`, Nitrado linking, owner dashboards, server management, server ownership, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
+
+This delivered slice still adds no earned-spin ledger, reward wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
+
 ## Implementation Boundary
 
 The Safe Monetisation and Supporter System must be built as a real production feature when selected for implementation, not as a visual-only mockup. Because it introduces payments, order fulfilment, refund handling, entitlements, and player cosmetics, it must be implemented in dedicated high-risk payment slices with explicit approval, sandbox evidence, rollback rules, security review, tax/receipt review, and live-checkout activation review.

@@ -16,6 +16,8 @@ const PUBLIC_ACCESS_POLICY = "docs/PUBLIC_ACCESS_POLICY.md";
 const BILLING_PLANS = "docs/BILLING_PLANS.md";
 const STRIPE_LIVE_CHECKLIST = "docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md";
 const STORE_WEBHOOK_HELPER = "functions/_lib/dzn-store-webhook.ts";
+const STORE_FULFILMENT_HELPER = "functions/_lib/dzn-store-fulfilment.ts";
+const FULFILMENT_RUNTIME_DOC = "docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION.md";
 const STORE_WEBHOOK_ROUTE = "functions/api/stripe/store-webhook.ts";
 const OWNER_WEBHOOK = "functions/api/stripe/webhook.ts";
 const OWNER_CHECKOUT_ROUTE = "functions/api/billing/create-checkout-session.ts";
@@ -71,7 +73,6 @@ const FIXED_ZERO_ENTITLEMENT_FLAGS = [
 ] as const;
 
 const FORBIDDEN_RUNTIME_PATHS = [
-  "functions/_lib/dzn-store-fulfilment.ts",
   "functions/_lib/dzn-store-entitlements.ts",
   "functions/_lib/dzn-supporter-cards.ts",
   "functions/_lib/dzn-store-wheel.ts",
@@ -99,7 +100,7 @@ function main() {
   assertRefundDisputeAuditSchema();
   assertNoForbiddenSchemaOrMutation();
   assertExistingReceiptLedgerStillBlocksRuntimeWrites();
-  assertRuntimeRemainsDisabled();
+  assertApprovedRuntimeRemainsLocalTestOnly();
   assertDocsAndBacklog();
   assertPackageScript();
   console.log("DZN Store fulfilment ledger schema migration tests passed.");
@@ -121,6 +122,8 @@ function assertFilesExist() {
     BILLING_PLANS,
     STRIPE_LIVE_CHECKLIST,
     STORE_WEBHOOK_HELPER,
+    STORE_FULFILMENT_HELPER,
+    FULFILMENT_RUNTIME_DOC,
     STORE_WEBHOOK_ROUTE,
     OWNER_WEBHOOK,
     OWNER_CHECKOUT_ROUTE,
@@ -346,10 +349,26 @@ function assertExistingReceiptLedgerStillBlocksRuntimeWrites() {
   }
 }
 
-function assertRuntimeRemainsDisabled() {
+function assertApprovedRuntimeRemainsLocalTestOnly() {
   const webhookHelper = read(STORE_WEBHOOK_HELPER);
-  assert.match(webhookHelper, /\bINSERT INTO store_payment_events\b/i, "Store webhook should still record only receipt rows.");
-  assert.doesNotMatch(webhookHelper, /\bUPDATE\s+store_orders\b/i, "Store webhook must not fulfil by updating orders.");
+  assert.match(webhookHelper, /\bINSERT INTO store_payment_events\b/i, "Store webhook should still record signed receipt rows first.");
+  assertIncludes(webhookHelper, "processDznStoreSandboxWebhookFulfilment", "Store webhook should call the approved local/test runtime helper only after receipt verification.");
+  assert.doesNotMatch(webhookHelper, /\bINSERT\s+INTO\s+account_entitlements\b/i, "Store webhook helper must not insert account entitlements directly.");
+  assert.doesNotMatch(webhookHelper, /\bINSERT\s+INTO\s+supporter_cards\b/i, "Store webhook helper must not issue Supporter Cards directly.");
+
+  const fulfilmentHelper = read(STORE_FULFILMENT_HELPER);
+  for (const snippet of [
+    "DZN_STORE_WEBHOOK_FULFILMENT_ENABLED",
+    "DZN_STORE_SANDBOX_RUNTIME",
+    "DZN_STORE_SANDBOX_WEBHOOK_RECEIPT_ENABLED",
+    "STORE_LIVE_CHECKOUT_BLOCKED",
+    "STORE_STRIPE_LIVE_SECRET_BLOCKED",
+    "STORE_EARNED_SPINS_RUNTIME_MUST_STAY_DISABLED",
+    "STORE_REWARD_WHEEL_RUNTIME_MUST_STAY_DISABLED",
+    "STORE_PAYMENT_INTENT_EVENT_NO_GRANT",
+  ]) {
+    assertIncludes(fulfilmentHelper, snippet, `${STORE_FULFILMENT_HELPER} should keep approved local/test runtime guard ${snippet}.`);
+  }
 
   for (const path of [
     ...listFiles("app"),
@@ -357,9 +376,15 @@ function assertRuntimeRemainsDisabled() {
     ...listFiles("functions"),
     ...listFiles("lib"),
   ].filter((path) => /\.(?:ts|tsx|js|jsx|mjs|cjs)$/.test(path))) {
+    const normalized = path.replace(/\\/g, "/");
     const source = read(path);
-    for (const table of ALLOWED_TABLES) {
-      assert.doesNotMatch(source, new RegExp(`\\b(?:INSERT\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+${table}\\b`, "i"), `${path} must not write future fulfilment table ${table}.`);
+    if (normalized !== STORE_FULFILMENT_HELPER) {
+      for (const table of ALLOWED_TABLES) {
+        assert.doesNotMatch(source, new RegExp(`\\b(?:INSERT\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+${table}\\b`, "i"), `${path} must not write approved fulfilment table outside the approved helper ${table}.`);
+      }
+    }
+    for (const table of ["earned_spins", "spin_ledger", "wheel_cooldowns"]) {
+      assert.doesNotMatch(source, new RegExp(`\\b(?:INSERT\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+${table}\\b`, "i"), `${path} must not write ${table}.`);
     }
   }
 

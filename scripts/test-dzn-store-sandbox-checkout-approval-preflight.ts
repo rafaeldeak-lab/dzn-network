@@ -28,6 +28,7 @@ const STORE_CHECKOUT_SESSION_DOC = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPR
 const STORE_CHECKOUT_SESSION_HANDOFF = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL_HANDOFF.md";
 const STORE_WEBHOOK_ROUTE = "functions/api/stripe/store-webhook.ts";
 const STORE_WEBHOOK_HELPER = "functions/_lib/dzn-store-webhook.ts";
+const STORE_FULFILMENT_HELPER = "functions/_lib/dzn-store-fulfilment.ts";
 const STORE_WEBHOOK_DOC = "docs/DZN_STORE_SANDBOX_WEBHOOK_LEDGER_RECEIPT.md";
 const STORE_WEBHOOK_HANDOFF = "docs/DZN_STORE_SANDBOX_WEBHOOK_LEDGER_RECEIPT_HANDOFF.md";
 const STORE_PREVIEW_PAGE = "app/store/page.tsx";
@@ -299,6 +300,7 @@ function assertFilesExist() {
     STORE_CHECKOUT_SESSION_HANDOFF,
     STORE_WEBHOOK_ROUTE,
     STORE_WEBHOOK_HELPER,
+    STORE_FULFILMENT_HELPER,
     STORE_WEBHOOK_DOC,
     STORE_WEBHOOK_HANDOFF,
     PACKAGE_JSON,
@@ -425,10 +427,44 @@ function assertNoCheckoutRuntimePatternsBeyondAllowedExistingFiles() {
     STORE_WEBHOOK_ROUTE,
     STORE_WEBHOOK_HELPER,
   ].map((path) => path.replace(/\\/g, "/")));
+  const approvedFulfilmentRuntimeFiles = new Set([
+    STORE_FULFILMENT_HELPER,
+  ].map((path) => path.replace(/\\/g, "/")));
 
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
     if (allowedExistingPaymentFiles.has(path)) continue;
+    if (approvedFulfilmentRuntimeFiles.has(path)) {
+      const source = read(path);
+      for (const required of [
+        "DZN_STORE_WEBHOOK_FULFILMENT_ENABLED",
+        "DZN_STORE_SANDBOX_RUNTIME",
+        "STORE_LIVE_CHECKOUT_BLOCKED",
+        "STORE_EARNED_SPINS_RUNTIME_MUST_STAY_DISABLED",
+        "STORE_REWARD_WHEEL_RUNTIME_MUST_STAY_DISABLED",
+        "STORE_PAYMENT_INTENT_EVENT_NO_GRANT",
+      ]) {
+        assert.equal(source.includes(required), true, `${path} must keep approved fulfilment runtime guard ${required}.`);
+      }
+      for (const forbidden of [
+        /\bstripeFormRequest\b/i,
+        /\bstripeGetRequest\b/i,
+        /\bfetch\s*\(/i,
+        /\bcheckout\.sessions\.create\b/i,
+        /\/checkout\/sessions/i,
+        /\bINSERT\s+INTO\s+earned_spins\b/i,
+        /\bINSERT\s+INTO\s+spin_ledger\b/i,
+        /\bwheel_cooldowns\b/i,
+        /\bowner_billing_accounts\b/i,
+        /\bowner_plan_entitlements\b/i,
+        /\blinked_servers\b/i,
+        /\bnitrado/i,
+        /\bwrangler\b/i,
+      ]) {
+        assert.doesNotMatch(source, forbidden, `${path} must not contain forbidden approved-runtime pattern ${forbidden}.`);
+      }
+      continue;
+    }
     if (allowedStoreOrderFiles.has(path)) {
       const source = read(path);
       assert.equal(source.includes("checkout_session_creation_requires_future_approval") || path === STORE_ORDER_ROUTE, true, `${path} must keep checkout session creation future-only.`);

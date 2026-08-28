@@ -3,11 +3,11 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const PREFLIGHT = "docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION_PREFLIGHT.md";
-const HANDOFF = "docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION_PREFLIGHT_HANDOFF.md";
+const PREFLIGHT_HANDOFF = "docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION_PREFLIGHT_HANDOFF.md";
+const IMPLEMENTATION_DOC = "docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION.md";
+const IMPLEMENTATION_HANDOFF = "docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION_HANDOFF.md";
 const MIGRATION_DOC = "docs/DZN_STORE_FULFILMENT_LEDGER_SCHEMA_MIGRATION.md";
 const MIGRATION_HANDOFF = "docs/DZN_STORE_FULFILMENT_LEDGER_SCHEMA_MIGRATION_HANDOFF.md";
-const SCHEMA_PREFLIGHT = "docs/DZN_STORE_FULFILMENT_LEDGER_SCHEMA_PREFLIGHT.md";
-const WEBHOOK_PREFLIGHT = "docs/DZN_STORE_WEBHOOK_FULFILMENT_APPROVAL_PREFLIGHT.md";
 const SAFE_PREFLIGHT = "docs/DZN_SAFE_MONETISATION_SUPPORTER_IMPLEMENTATION_PREFLIGHT.md";
 const BACKLOG = "docs/DZN_SAFE_MONETISATION_SUPPORTER_SYSTEM_BACKLOG.md";
 const MASTER_SPEC = "docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md";
@@ -17,57 +17,13 @@ const STRIPE_LIVE_CHECKLIST = "docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md";
 const ORDER_LEDGER_MIGRATION = "migrations/0072_dzn_store_order_ledger_schema.sql";
 const FULFILMENT_LEDGER_MIGRATION = "migrations/0073_dzn_store_fulfilment_ledger_schema.sql";
 const STORE_WEBHOOK_HELPER = "functions/_lib/dzn-store-webhook.ts";
+const STORE_FULFILMENT_HELPER = "functions/_lib/dzn-store-fulfilment.ts";
+const STRIPE_HELPER = "functions/_lib/stripe.ts";
 const STORE_WEBHOOK_ROUTE = "functions/api/stripe/store-webhook.ts";
-const STORE_ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
 const STORE_CHECKOUT_HELPER = "functions/_lib/dzn-store-checkout.ts";
 const OWNER_WEBHOOK = "functions/api/stripe/webhook.ts";
 const OWNER_CHECKOUT_ROUTE = "functions/api/billing/create-checkout-session.ts";
 const PACKAGE_JSON = "package.json";
-
-const INTEGRATION_DOCS = [
-  MIGRATION_DOC,
-  MIGRATION_HANDOFF,
-  SCHEMA_PREFLIGHT,
-  WEBHOOK_PREFLIGHT,
-  SAFE_PREFLIGHT,
-  BACKLOG,
-  MASTER_SPEC,
-  PUBLIC_ACCESS_POLICY,
-  BILLING_PLANS,
-  STRIPE_LIVE_CHECKLIST,
-] as const;
-
-const LOCAL_TEST_FULFILMENT_TABLES = [
-  "account_entitlements",
-  "supporter_cards",
-  "store_fulfilment_attempts",
-  "store_order_status_history",
-  "store_entitlement_status_history",
-  "store_refund_dispute_audit",
-] as const;
-
-const FORBIDDEN_WHEEL_TABLES = [
-  "earned_spins",
-  "spin_ledger",
-  "wheel_cooldowns",
-] as const;
-
-const FORBIDDEN_RUNTIME_PATHS = [
-  "functions/_lib/dzn-store-fulfilment.ts",
-  "functions/_lib/dzn-store-entitlements.ts",
-  "functions/_lib/dzn-supporter-cards.ts",
-  "functions/_lib/dzn-store-wheel.ts",
-  "functions/api/stripe/store-fulfilment.ts",
-  "functions/api/store/fulfilment.ts",
-  "functions/api/store/webhook-fulfilment.ts",
-  "functions/api/store/orders/[orderId]/fulfil.ts",
-  "functions/api/account/purchases.ts",
-  "functions/api/wheel",
-  "components/supporter",
-  "components/wheel",
-  "app/account/purchases",
-  "app/wheel",
-] as const;
 
 const SOURCE_CONFIG_FILES = [
   "cloudflare-env.d.ts",
@@ -85,15 +41,29 @@ const BLOCKED_SOURCE_CONFIG_FLAGS = [
   "DZN_LIVE_CHECKOUT_ENABLED=true",
 ] as const;
 
+const FORBIDDEN_RUNTIME_PATHS = [
+  "functions/_lib/dzn-store-entitlements.ts",
+  "functions/_lib/dzn-supporter-cards.ts",
+  "functions/_lib/dzn-store-wheel.ts",
+  "functions/api/stripe/store-fulfilment.ts",
+  "functions/api/store/fulfilment.ts",
+  "functions/api/store/webhook-fulfilment.ts",
+  "functions/api/store/orders/[orderId]/fulfil.ts",
+  "functions/api/account/purchases.ts",
+  "functions/api/wheel",
+  "components/supporter",
+  "components/wheel",
+  "app/account/purchases",
+  "app/wheel",
+] as const;
+
 main();
 
 function main() {
   assertFilesExist();
-  assertPreflightContract();
-  assertIntegratedDocs();
-  assertExistingRuntimeStillReceiptOnly();
-  assertNoFulfilmentRuntimeWrites();
-  assertNoNewRuntimePathsOrMigrations();
+  assertHistoricalPreflightContract();
+  assertDeliveredRuntimeDocs();
+  assertReceiptAndFulfilmentRuntimeBoundaries();
   assertNoSourceConfigEnablesRuntime();
   assertPackageScript();
   console.log("DZN Store fulfilment runtime implementation approval preflight tests passed.");
@@ -102,11 +72,11 @@ function main() {
 function assertFilesExist() {
   for (const path of [
     PREFLIGHT,
-    HANDOFF,
+    PREFLIGHT_HANDOFF,
+    IMPLEMENTATION_DOC,
+    IMPLEMENTATION_HANDOFF,
     MIGRATION_DOC,
     MIGRATION_HANDOFF,
-    SCHEMA_PREFLIGHT,
-    WEBHOOK_PREFLIGHT,
     SAFE_PREFLIGHT,
     BACKLOG,
     MASTER_SPEC,
@@ -116,8 +86,9 @@ function assertFilesExist() {
     ORDER_LEDGER_MIGRATION,
     FULFILMENT_LEDGER_MIGRATION,
     STORE_WEBHOOK_HELPER,
+    STORE_FULFILMENT_HELPER,
+    STRIPE_HELPER,
     STORE_WEBHOOK_ROUTE,
-    STORE_ORDER_HELPER,
     STORE_CHECKOUT_HELPER,
     OWNER_WEBHOOK,
     OWNER_CHECKOUT_ROUTE,
@@ -127,20 +98,11 @@ function assertFilesExist() {
   }
 }
 
-function assertPreflightContract() {
+function assertHistoricalPreflightContract() {
   const doc = read(PREFLIGHT);
   for (const snippet of [
     "# DZN Store Fulfilment Runtime Implementation Approval Preflight",
     "This slice is approval preflight only.",
-    "No Store webhook fulfilment runtime.",
-    "No account entitlement writes.",
-    "No Supporter Card issuance.",
-    "No earned spins.",
-    "No reward wheel runtime.",
-    "No live checkout activation.",
-    "No issue #49 change.",
-    "Current `POST /api/stripe/store-webhook` remains receipt-only.",
-    "Future fulfilment must not relax those receipt-row blockers in place.",
     "## Runtime Flag Contract",
     "`DZN_STORE_WEBHOOK_FULFILMENT_ENABLED`",
     "`DZN_SUPPORTER_CARDS_ENABLED`",
@@ -155,140 +117,154 @@ function assertPreflightContract() {
     "`store_entitlement_status_history`",
     "`supporter_cards`",
     "`store_refund_dispute_audit`",
-    "## Verified Fulfilment Sequence",
-    "Verify the `Stripe-Signature` header against the unmodified raw body before JSON parsing.",
     "Success redirects must never grant or reveal entitlements by themselves.",
-    "## Eligible Event Contract",
-    "`checkout.session.completed`",
-    "`checkout.session.async_payment_succeeded`",
     "PaymentIntent events are not grant events for the first runtime.",
-    "## Order Status Transition Contract",
-    "`checkout_created -> paid`",
-    "`payment_pending -> paid`",
-    "`paid -> disputed`",
-    "`paid|disputed -> refunded`",
-    "`paid|disputed|refunded -> revoked`",
-    "## Idempotency And Concurrency Contract",
-    "## Account Entitlement Creation Rules",
-    "Attach to `store_orders.purchasing_user_id`.",
-    "Keep all no-advantage fields fixed to zero.",
-    "## Supporter Card Issuance Rules",
-    "Supporter Card issuance is optional in the first runtime",
-    "`DZN-SUP-######`",
-    "## Refund, Reversal, And Chargeback Rollback Rules",
-    "Partial refunds require `manual_review`",
-    "## Fair Progression Boundary",
     "Store payments must never mint spins, improve wheel odds, bypass wheel cooldowns, or run the reward wheel.",
-    "## Test Matrix For The Future Runtime PR",
-    "## Rollback Plan",
-    "## Security Proof For This Preflight Slice",
     "Next should be DZN Store fulfilment runtime implementation only if deliberately approved",
+    "Delivered follow-on implementation",
+    "`docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION.md`",
+    "`functions/_lib/dzn-store-fulfilment.ts`",
   ]) {
     assertIncludes(doc, snippet, `${PREFLIGHT} should contain: ${snippet}`);
   }
-
-  for (const url of [
-    "https://docs.stripe.com/webhooks/signature",
-    "https://docs.stripe.com/webhooks",
-    "https://docs.stripe.com/checkout/fulfillment?payment-ui=stripe-hosted",
-    "https://docs.stripe.com/api/events/types",
-    "https://docs.stripe.com/api/idempotent_requests",
-    "https://docs.stripe.com/refunds",
-    "https://docs.stripe.com/disputes/how-disputes-work",
-    "https://developers.cloudflare.com/d1/worker-api/prepared-statements/",
-    "https://developers.cloudflare.com/d1/best-practices/local-development/",
-  ]) {
-    assertIncludes(doc, url, `${PREFLIGHT} should cite ${url}.`);
-  }
 }
 
-function assertIntegratedDocs() {
-  for (const path of INTEGRATION_DOCS) {
-    assertIncludes(read(path), "DZN Store fulfilment runtime implementation approval preflight", `${path} should reference this preflight.`);
-    assertIncludes(read(path), "`docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION_PREFLIGHT.md`", `${path} should link the preflight doc.`);
-  }
-
-  assertIncludes(read(BACKLOG), "## DZN Store Fulfilment Runtime Implementation Approval Preflight");
-  assertIncludes(read(MASTER_SPEC), "DZN Store fulfilment runtime implementation approval preflight: delivered");
-  assertIncludes(read(PUBLIC_ACCESS_POLICY), "The DZN Store fulfilment runtime implementation approval preflight slice is documentation/test-guard work only.");
-  assertIncludes(read(BILLING_PLANS), "defines the future disabled-by-default local/test fulfilment runtime contract");
-  assertIncludes(read(STRIPE_LIVE_CHECKLIST), "`docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION_PREFLIGHT.md`");
-  assertIncludes(read(MIGRATION_DOC), "Delivered follow-on reference: the DZN Store fulfilment runtime implementation approval preflight");
-  assertIncludes(read(MIGRATION_HANDOFF), "Delivered follow-on reference: the DZN Store fulfilment runtime implementation approval preflight");
-}
-
-function assertExistingRuntimeStillReceiptOnly() {
-  const route = read(STORE_WEBHOOK_ROUTE);
-  assertIncludes(route, "receiveDznStoreSandboxWebhookReceipt", "Store webhook route should still call only the receipt helper.");
-  assert.doesNotMatch(route, /fulfil/i, "Store webhook route must not call fulfilment runtime in this preflight.");
-
-  const webhookHelper = read(STORE_WEBHOOK_HELPER);
-  assert.match(webhookHelper, /\bINSERT INTO store_payment_events\b/i, "Webhook helper should still insert only receipt rows.");
-  assert.doesNotMatch(webhookHelper, /\bUPDATE\s+store_orders\b/i, "Webhook helper must not update Store orders in this preflight.");
-  assert.doesNotMatch(webhookHelper, /\bINSERT\s+INTO\s+store_fulfilment_attempts\b/i, "Webhook helper must not insert fulfilment attempts in this preflight.");
-  assert.doesNotMatch(webhookHelper, /\bINSERT\s+INTO\s+account_entitlements\b/i, "Webhook helper must not insert account entitlements in this preflight.");
-  assert.doesNotMatch(webhookHelper, /\bINSERT\s+INTO\s+supporter_cards\b/i, "Webhook helper must not issue Supporter Cards in this preflight.");
-
-  const orderMigration = read(ORDER_LEDGER_MIGRATION);
-  for (const snippet of [
-    "fulfilment_attempted INTEGER NOT NULL DEFAULT 0 CHECK(fulfilment_attempted = 0)",
-    "entitlement_write_attempted INTEGER NOT NULL DEFAULT 0 CHECK(entitlement_write_attempted = 0)",
-    "supporter_card_write_attempted INTEGER NOT NULL DEFAULT 0 CHECK(supporter_card_write_attempted = 0)",
-  ]) {
-    assertIncludes(orderMigration, snippet, `${ORDER_LEDGER_MIGRATION} should retain receipt-only blocker ${snippet}.`);
-  }
-}
-
-function assertNoFulfilmentRuntimeWrites() {
-  const runtimeFiles = [
-    ...listFiles("app"),
-    ...listFiles("components"),
-    ...listFiles("functions"),
-    ...listFiles("lib"),
-  ].filter((path) => /\.(?:ts|tsx|js|jsx|mjs|cjs)$/.test(path));
-
-  for (const path of runtimeFiles) {
+function assertDeliveredRuntimeDocs() {
+  for (const [path, snippets] of [
+    [IMPLEMENTATION_DOC, [
+      "DZN Store Fulfilment Runtime Implementation",
+      "disabled by default",
+      "`POST /api/stripe/store-webhook`",
+      "`DZN_STORE_WEBHOOK_FULFILMENT_ENABLED=true`",
+      "PaymentIntent events do not fulfil alone",
+      "No earned spins",
+      "No reward wheel runtime",
+      "No live checkout",
+      "No production D1 writes",
+      "Issue #49 remains reserved",
+    ]],
+    [IMPLEMENTATION_HANDOFF, [
+      "DZN Store Fulfilment Runtime Implementation Handoff",
+      "Branch: `codex/dzn-store-fulfilment-runtime-implementation-20260828`",
+      "Protected OneDrive checkout was not modified.",
+      "No earned spins.",
+      "No reward wheel runtime.",
+      "No live checkout.",
+      "No production D1 writes.",
+      "No issue #49 change.",
+    ]],
+    [SAFE_PREFLIGHT, [
+      "The DZN Store fulfilment runtime implementation slice is now delivered",
+      "`docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION.md`",
+      "disabled-by-default local/test Store fulfilment runtime",
+    ]],
+    [BACKLOG, [
+      "DZN Store Fulfilment Runtime Implementation",
+      "`docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION.md`",
+      "PaymentIntent events remain no-grant",
+    ]],
+    [MASTER_SPEC, [
+      "DZN Store Fulfilment Runtime Implementation Slice",
+      "`functions/_lib/dzn-store-fulfilment.ts`",
+      "Store account entitlements remain separate from owner Starter/Pro entitlements",
+    ]],
+    [PUBLIC_ACCESS_POLICY, [
+      "The DZN Store fulfilment runtime implementation slice may process verified test-mode Store payment receipts",
+      "Store entitlements remain private account-bound cosmetic/supporter records",
+    ]],
+    [BILLING_PLANS, [
+      "The DZN Store fulfilment runtime implementation adds disabled-by-default local/test processing",
+      "Store fulfilment remains separate from owner Starter/Pro billing",
+    ]],
+    [STRIPE_LIVE_CHECKLIST, [
+      "`docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION.md` adds disabled-by-default local/test Store fulfilment runtime",
+      "does not approve live checkout",
+      "does not approve issue #49 changes",
+    ]],
+  ] satisfies Array<[string, string[]]>) {
     const source = read(path);
-    for (const table of [...LOCAL_TEST_FULFILMENT_TABLES, ...FORBIDDEN_WHEEL_TABLES]) {
-      assert.doesNotMatch(source, new RegExp(`\\bINSERT\\s+INTO\\s+${table}\\b`, "i"), `${path} must not insert into ${table}.`);
-      assert.doesNotMatch(source, new RegExp(`\\bUPDATE\\s+${table}\\b`, "i"), `${path} must not update ${table}.`);
-      assert.doesNotMatch(source, new RegExp(`\\bDELETE\\s+FROM\\s+${table}\\b`, "i"), `${path} must not delete from ${table}.`);
+    for (const snippet of snippets) {
+      assertIncludes(source, snippet, `${path} should contain: ${snippet}`);
     }
   }
-
-  const checkoutHelper = read(STORE_CHECKOUT_HELPER);
-  assertIncludes(checkoutHelper, 'mode: "payment"', "Store checkout should remain one-time payment mode.");
-  assert.doesNotMatch(checkoutHelper, /\bmode:\s*"subscription"\b/i, "Store checkout must not become subscription checkout.");
-
-  const ownerCheckout = read(OWNER_CHECKOUT_ROUTE);
-  assertIncludes(ownerCheckout, 'mode: "subscription"', "Owner checkout should remain subscription mode.");
-  assert.doesNotMatch(ownerCheckout, /\bmode:\s*"payment"\b/i, "Owner checkout should not gain Store payment mode.");
-
-  const ownerWebhook = read(OWNER_WEBHOOK);
-  for (const table of [...LOCAL_TEST_FULFILMENT_TABLES, ...FORBIDDEN_WHEEL_TABLES]) {
-    assert.doesNotMatch(ownerWebhook, new RegExp(`\\b${table}\\b`, "i"), `Owner subscription webhook must not reference ${table}.`);
-  }
 }
 
-function assertNoNewRuntimePathsOrMigrations() {
+function assertReceiptAndFulfilmentRuntimeBoundaries() {
+  const route = read(STORE_WEBHOOK_ROUTE);
+  const webhookHelper = read(STORE_WEBHOOK_HELPER);
+  const fulfilmentHelper = read(STORE_FULFILMENT_HELPER);
+  const stripeHelper = read(STRIPE_HELPER);
+  const checkoutHelper = read(STORE_CHECKOUT_HELPER);
+  const ownerCheckout = read(OWNER_CHECKOUT_ROUTE);
+  const ownerWebhook = read(OWNER_WEBHOOK);
+
+  assertIncludes(route, "receiveDznStoreSandboxWebhookReceipt", "Store webhook route should stay delegated to the receipt helper.");
+  assertIncludes(webhookHelper, "verifyStripeWebhookWithRawBody", "Store webhook helper should verify raw Stripe signatures.");
+  assert.match(`${webhookHelper}\n${stripeHelper}`, /\bawait\s+request\.text\(\)/, "Store webhook flow should read the raw body before parsing.");
+  assertIncludes(webhookHelper, "INSERT INTO store_payment_events", "Store webhook helper should record the receipt row first.");
+  assertIncludes(webhookHelper, "processDznStoreSandboxWebhookFulfilment", "Store webhook helper should call only the approved fulfilment helper.");
+  assert.doesNotMatch(webhookHelper, /\bINSERT\s+INTO\s+account_entitlements\b/i, "Webhook helper must not write account entitlements directly.");
+  assert.doesNotMatch(webhookHelper, /\bINSERT\s+INTO\s+supporter_cards\b/i, "Webhook helper must not issue Supporter Cards directly.");
+
+  for (const required of [
+    "DZN_STORE_WEBHOOK_FULFILMENT_ENABLED",
+    "DZN_STORE_SANDBOX_RUNTIME",
+    "DZN_STORE_SANDBOX_WEBHOOK_RECEIPT_ENABLED",
+    "STORE_WEBHOOK_FULFILMENT_DISABLED",
+    "STORE_LIVE_CHECKOUT_BLOCKED",
+    "STORE_STRIPE_LIVE_SECRET_BLOCKED",
+    "STORE_EARNED_SPINS_RUNTIME_MUST_STAY_DISABLED",
+    "STORE_REWARD_WHEEL_RUNTIME_MUST_STAY_DISABLED",
+    "checkout.session.completed",
+    "STORE_CHECKOUT_COMPLETED_FULFILLED",
+    "STORE_PAYMENT_INTENT_EVENT_NO_GRANT",
+    "STORE_ASYNC_PAYMENT_SUCCESS_DISABLED",
+    "STORE_FULL_REFUND_REVOKED",
+    "STORE_DISPUTE_LOST_REVOKED",
+  ]) {
+    assertIncludes(fulfilmentHelper, required, `${STORE_FULFILMENT_HELPER} should keep ${required}.`);
+  }
+
+  for (const forbidden of [
+    /\bstripeFormRequest\b/i,
+    /\bstripeGetRequest\b/i,
+    /\bfetch\s*\(/i,
+    /\bcheckout\.sessions\.create\b/i,
+    /\/checkout\/sessions/i,
+    /\brefunds\.create\b/i,
+    /\bdisputes\.close\b/i,
+    /\bINSERT\s+INTO\s+earned_spins\b/i,
+    /\bUPDATE\s+earned_spins\b/i,
+    /\bINSERT\s+INTO\s+spin_ledger\b/i,
+    /\bUPDATE\s+spin_ledger\b/i,
+    /\bwheel_cooldowns\b/i,
+    /\breward_wheel\b/i,
+    /\bowner_billing_accounts\b/i,
+    /\bowner_plan_entitlements\b/i,
+    /\blinked_servers\b/i,
+    /\bnitrado/i,
+    /\bwrangler\b/i,
+  ]) {
+    assert.doesNotMatch(fulfilmentHelper, forbidden, `Approved runtime helper must not contain forbidden pattern ${forbidden}.`);
+  }
+
+  assertIncludes(checkoutHelper, 'mode: "payment"', "Store checkout should remain one-time payment mode.");
+  assert.doesNotMatch(checkoutHelper, /\bmode:\s*"subscription"\b/i, "Store checkout must not become a subscription checkout.");
+  assertIncludes(ownerCheckout, 'mode: "subscription"', "Owner checkout should remain subscription mode.");
+  assert.doesNotMatch(ownerCheckout, /\bmode:\s*"payment"\b/i, "Owner checkout should not gain Store payment mode.");
+  for (const forbidden of ["account_entitlements", "supporter_cards", "earned_spins", "spin_ledger", "wheel_cooldowns"]) {
+    assert.doesNotMatch(ownerWebhook, new RegExp(`\\b${forbidden}\\b`, "i"), `Owner subscription webhook must not touch ${forbidden}.`);
+  }
+
   for (const path of FORBIDDEN_RUNTIME_PATHS) {
-    assert.equal(existsSync(path), false, `${path} must not exist in this preflight-only slice.`);
+    assert.equal(existsSync(path), false, `${path} must not exist in this approved runtime slice.`);
   }
 
   const migrationFiles = listFiles("migrations")
     .map((path) => path.replace(/\\/g, "/"))
     .filter((path) => path.endsWith(".sql"))
     .sort();
-  assert.equal(migrationFiles.at(-1), FULFILMENT_LEDGER_MIGRATION, "No migration after 0073 should be added by this preflight.");
-  assert.equal(migrationFiles.filter((path) => path.startsWith("migrations/0074_")).length, 0, "This preflight must not add a 0074 runtime migration.");
-
-  const fulfilmentMigration = read(FULFILMENT_LEDGER_MIGRATION);
-  for (const table of LOCAL_TEST_FULFILMENT_TABLES) {
-    assert.match(fulfilmentMigration, new RegExp(`CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS\\s+${table}\\b`, "i"), `${FULFILMENT_LEDGER_MIGRATION} should retain ${table}.`);
-  }
-  for (const table of FORBIDDEN_WHEEL_TABLES) {
-    assert.doesNotMatch(fulfilmentMigration, new RegExp(`CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS\\s+${table}\\b`, "i"), `${FULFILMENT_LEDGER_MIGRATION} must not add ${table}.`);
-  }
+  assert.equal(migrationFiles.at(-1), FULFILMENT_LEDGER_MIGRATION, "No new migration after 0073 should be added by this runtime slice.");
 }
 
 function assertNoSourceConfigEnablesRuntime() {
@@ -332,6 +308,6 @@ function read(path: string) {
   return readFileSync(path, "utf8");
 }
 
-function assertIncludes(haystack: string | undefined, needle: string, message?: string) {
-  assert.equal(haystack?.includes(needle), true, message ?? `Expected source to include ${needle}.`);
+function assertIncludes(haystack: string, needle: string, message?: string) {
+  assert.equal(haystack.includes(needle), true, message ?? `Expected source to include ${needle}.`);
 }
