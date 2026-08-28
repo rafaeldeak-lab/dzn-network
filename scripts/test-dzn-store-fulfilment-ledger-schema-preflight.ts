@@ -100,7 +100,7 @@ function main() {
   assertFilesExist();
   assertPreflightContract();
   assertIntegratedDocs();
-  assertNoFulfilmentMigrationAdded();
+  assertOnlyApprovedFulfilmentMigrationAdded();
   assertExistingLedgerStillBlocksFulfilment();
   assertRuntimeRemainsReceiptOnly();
   assertNoSourceConfigEnablesFulfilment();
@@ -123,6 +123,7 @@ function assertFilesExist() {
     BILLING_PLANS,
     STRIPE_LIVE_CHECKLIST,
     ORDER_LEDGER_MIGRATION,
+    FUTURE_FULFILMENT_MIGRATION,
     STORE_WEBHOOK_HELPER,
     STORE_WEBHOOK_ROUTE,
     STORE_CHECKOUT_HELPER,
@@ -216,16 +217,43 @@ function assertIntegratedDocs() {
   assertIncludes(read(STRIPE_LIVE_CHECKLIST), "`docs/DZN_STORE_FULFILMENT_LEDGER_SCHEMA_PREFLIGHT.md`");
 }
 
-function assertNoFulfilmentMigrationAdded() {
-  assert.equal(existsSync(FUTURE_FULFILMENT_MIGRATION), false, `${FUTURE_FULFILMENT_MIGRATION} must not exist in this preflight.`);
+function assertOnlyApprovedFulfilmentMigrationAdded() {
+  assert.equal(existsSync(FUTURE_FULFILMENT_MIGRATION), true, `${FUTURE_FULFILMENT_MIGRATION} should exist after deliberate approval.`);
   const migrationFiles = listFiles("migrations")
     .map((path) => path.replace(/\\/g, "/"))
     .filter((path) => path.endsWith(".sql"));
-  assert.equal(
-    migrationFiles.some((path) => /fulfil(?:l)?ment.*ledger|account_entitlement|supporter_card|refund_dispute|wheel_cooldown|spin_ledger|earned_spins/i.test(path)),
-    false,
-    "No fulfilment, entitlement, Supporter Card, refund/dispute, earned-spin, or wheel migration should be added by this preflight.",
+  const fulfilmentLedgerMigrations = migrationFiles.filter((path) =>
+    /fulfil(?:l)?ment.*ledger|account_entitlement|supporter_card|refund_dispute|wheel_cooldown|spin_ledger|earned_spins/i.test(path),
   );
+  assert.deepEqual(
+    fulfilmentLedgerMigrations,
+    [FUTURE_FULFILMENT_MIGRATION],
+    "Only the deliberately approved 0073 fulfilment ledger schema migration should be present.",
+  );
+
+  const migration = read(FUTURE_FULFILMENT_MIGRATION);
+  const createdTables = [...migration.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z_]+)/gi)].map((match) => match[1]);
+  assert.deepEqual(createdTables, [...FUTURE_SCHEMA_OBJECTS], "The approved migration should create exactly the future schema objects defined by this preflight.");
+  for (const blocked of ["earned_spins", "spin_ledger", "wheel_cooldowns"]) {
+    assert.doesNotMatch(migration, new RegExp(`\\b${blocked}\\b`, "i"), `${FUTURE_FULFILMENT_MIGRATION} must not add ${blocked}.`);
+  }
+  for (const forbidden of [
+    /\bINSERT\s+INTO\b/i,
+    /\bUPDATE\b/i,
+    /\bDELETE\s+FROM\b/i,
+    /\bDROP\s+TABLE\b/i,
+    /\bALTER\s+TABLE\b/i,
+    /\bcheckout\.sessions\.create\b/i,
+    /\/checkout\/sessions/i,
+    /\bSTRIPE_SECRET_KEY\b/i,
+    /\bSTRIPE_WEBHOOK_SECRET\b/i,
+    /\bDZN_LIVE_CHECKOUT_ENABLED\s*=\s*true\b/i,
+    /\bDZN_STORE_LIVE_CHECKOUT_ENABLED\s*=\s*true\b/i,
+    /\bwrangler\b/i,
+    /\bissue\s+#49\b/i,
+  ]) {
+    assert.doesNotMatch(migration, forbidden, `${FUTURE_FULFILMENT_MIGRATION} must remain schema-only: ${forbidden}`);
+  }
 }
 
 function assertExistingLedgerStillBlocksFulfilment() {

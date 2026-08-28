@@ -16,6 +16,7 @@ const CHECKOUT_ROUTE = "functions/api/billing/create-checkout-session.ts";
 const STORE_CATALOG_HELPER = "functions/_lib/dzn-store-catalog.ts";
 const STORE_CATALOG_MIGRATION = "migrations/0071_dzn_store_catalog_admin_draft.sql";
 const STORE_ORDER_LEDGER_MIGRATION = "migrations/0072_dzn_store_order_ledger_schema.sql";
+const STORE_FULFILMENT_LEDGER_MIGRATION = "migrations/0073_dzn_store_fulfilment_ledger_schema.sql";
 const STORE_ORDER_ROUTE = "functions/api/store/orders.ts";
 const STORE_ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
 const STORE_CHECKOUT_SESSION_ROUTE = "functions/api/store/orders/[orderId]/checkout.ts";
@@ -215,7 +216,18 @@ const ALLOWED_ORDER_LEDGER_TABLE_NAMES = ["store_orders", "store_order_items", "
 const FORBIDDEN_NON_LEDGER_TABLE_NAMES = FORBIDDEN_TABLE_NAMES.filter(
   (table) => ![...ALLOWED_CATALOG_TABLE_NAMES, ...ALLOWED_ORDER_LEDGER_TABLE_NAMES].includes(table),
 );
-const ALLOWED_STORE_MIGRATIONS = [STORE_CATALOG_MIGRATION, STORE_ORDER_LEDGER_MIGRATION];
+const ALLOWED_FULFILMENT_LEDGER_TABLE_NAMES = [
+  "account_entitlements",
+  "supporter_cards",
+  "store_fulfilment_attempts",
+  "store_order_status_history",
+  "store_entitlement_status_history",
+  "store_refund_dispute_audit",
+];
+const FORBIDDEN_NON_FULFILMENT_LEDGER_TABLE_NAMES = FORBIDDEN_TABLE_NAMES.filter(
+  (table) => ![...ALLOWED_CATALOG_TABLE_NAMES, ...ALLOWED_ORDER_LEDGER_TABLE_NAMES, ...ALLOWED_FULFILMENT_LEDGER_TABLE_NAMES].includes(table),
+);
+const ALLOWED_STORE_MIGRATIONS = [STORE_CATALOG_MIGRATION, STORE_ORDER_LEDGER_MIGRATION, STORE_FULFILMENT_LEDGER_MIGRATION];
 
 const FORBIDDEN_PROVIDER_DEPENDENCIES = [
   /^openai$/i,
@@ -370,7 +382,7 @@ function assertOnlyApprovedStoreMigrations() {
     !ALLOWED_STORE_MIGRATIONS.includes(path) &&
     /(?:store|supporter|wheel|monetisation|monetization|purchase|payment_event|account_entitlement|earned_spin|spin_ledger|wheel_cooldown)/i.test(path),
   );
-  assert.deepEqual(forbiddenNamedMigrations, [], "Only the approved Store catalog and sandbox order ledger migrations may be present.");
+  assert.deepEqual(forbiddenNamedMigrations, [], "Only the approved Store catalog, sandbox order ledger, and fulfilment ledger migrations may be present.");
 
   for (const path of migrationFiles.filter((path) => path.endsWith(".sql"))) {
     const source = read(path);
@@ -378,6 +390,8 @@ function assertOnlyApprovedStoreMigrations() {
       ? FORBIDDEN_NON_CATALOG_TABLE_NAMES
       : path === STORE_ORDER_LEDGER_MIGRATION
         ? FORBIDDEN_NON_LEDGER_TABLE_NAMES
+        : path === STORE_FULFILMENT_LEDGER_MIGRATION
+          ? FORBIDDEN_NON_FULFILMENT_LEDGER_TABLE_NAMES
         : FORBIDDEN_TABLE_NAMES;
     for (const table of forbiddenTables) {
       assert.equal(source.includes(table), false, `${path} must not create blocked future store table ${table}.`);

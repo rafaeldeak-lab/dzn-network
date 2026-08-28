@@ -8,7 +8,7 @@ DZN may add a real production store and supporter system in a later approved imp
 
 The implementation preflight for this backlog is `docs/DZN_SAFE_MONETISATION_SUPPORTER_IMPLEMENTATION_PREFLIGHT.md`. That preflight defines the safe production implementation sequence, migration shapes, feature flags, webhook verification, idempotent fulfilment, refund and chargeback handling, admin pricing controls, tax/receipt boundaries, rollback path, and proof requirements before runtime work starts.
 
-This document and the implementation preflight do not implement payment routes, checkout sessions, webhook handlers, order tables, entitlement tables, supporter cards, spin ledgers, Stripe product changes, Cloudflare secret changes, production D1 writes, or live checkout activation. The follow-on catalog slice adds only inactive local product/price metadata and draft validation. The follow-on Store public preview slice may add only a disabled-by-default, read-only `/store` route that renders safe catalog preview metadata and cannot create checkout sessions or grant anything.
+The original implementation preflight did not itself implement payment routes, checkout sessions, webhook handlers, order tables, entitlement tables, supporter cards, spin ledgers, Stripe product changes, Cloudflare secret changes, production D1 writes, or live checkout activation. Follow-on slices now add the bounded local/test schema and disabled-by-default sandbox route pieces described below. None of those slices enable live checkout, Store webhook fulfilment, Supporter Card issuance, earned-spin ledgers, reward wheel runtime, Stripe product changes, Cloudflare secret changes, production D1 writes, or issue #49 changes.
 
 The DZN Store sandbox order and checkout approval preflight is `docs/DZN_STORE_SANDBOX_ORDER_CHECKOUT_APPROVAL_PREFLIGHT.md`. It defines future `POST /api/store/orders` and `POST /api/stripe/store-webhook` contracts, one-time Stripe Checkout Session shape, webhook event ledger, idempotent fulfilment, refund/chargeback revocation, tax/receipt records, feature flags, rollback, and proof requirements. It creates no checkout route, order table, payment webhook, entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, Stripe object mutation, Cloudflare secret/config mutation, production D1 write, live checkout activation, or issue #49 change.
 
@@ -49,6 +49,23 @@ It defines the future local/test-only schema contract before any migration is ad
 - Rollback rules that suspend, restore, or revoke only the affected Store entitlement/card and never delete ledger rows.
 
 This preflight adds no migration file, account entitlement table, Supporter Card table, fulfilment-attempt table, refund/dispute table, Store fulfilment runtime, Store webhook fulfilment write, earned-spin ledger, reward wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, or issue #49 change.
+
+## DZN Store Fulfilment Ledger Schema Migration Implementation
+
+The DZN Store fulfilment ledger schema migration implementation is `docs/DZN_STORE_FULFILMENT_LEDGER_SCHEMA_MIGRATION.md`.
+
+It adds `migrations/0073_dzn_store_fulfilment_ledger_schema.sql` as a local/test-only private Store fulfilment ledger schema step for:
+
+- `account_entitlements`
+- `supporter_cards`
+- `store_fulfilment_attempts`
+- `store_order_status_history`
+- `store_entitlement_status_history`
+- `store_refund_dispute_audit`
+
+Store fulfilment runtime remains disabled. No Store webhook fulfilment write, Supporter Card issuance, earned-spin ledger, reward wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, or issue #49 change is added.
+
+The new schema cannot affect billing, owner entitlement, server ownership, rankings, discovery score, reviews, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, earned calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
 
 ## Implementation Preflight
 

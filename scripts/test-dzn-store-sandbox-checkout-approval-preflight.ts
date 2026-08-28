@@ -19,6 +19,7 @@ const OWNER_WEBHOOK = "functions/api/stripe/webhook.ts";
 const STORE_CATALOG_HELPER = "functions/_lib/dzn-store-catalog.ts";
 const STORE_CATALOG_MIGRATION = "migrations/0071_dzn_store_catalog_admin_draft.sql";
 const STORE_ORDER_LEDGER_MIGRATION = "migrations/0072_dzn_store_order_ledger_schema.sql";
+const STORE_FULFILMENT_LEDGER_MIGRATION = "migrations/0073_dzn_store_fulfilment_ledger_schema.sql";
 const STORE_ORDER_ROUTE = "functions/api/store/orders.ts";
 const STORE_ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
 const STORE_CHECKOUT_SESSION_ROUTE = "functions/api/store/orders/[orderId]/checkout.ts";
@@ -205,6 +206,20 @@ const RUNTIME_TABLES_STILL_BLOCKED_AFTER_LEDGER_SCHEMA = RUNTIME_TABLES_BLOCKED_
   (table) => !ORDER_LEDGER_TABLES_ALLOWED_AFTER_FOLLOW_ON_SLICE.includes(table),
 );
 
+const FULFILMENT_LEDGER_TABLES_ALLOWED_AFTER_FOLLOW_ON_SLICE = [
+  ...ORDER_LEDGER_TABLES_ALLOWED_AFTER_FOLLOW_ON_SLICE,
+  "account_entitlements",
+  "supporter_cards",
+  "store_fulfilment_attempts",
+  "store_order_status_history",
+  "store_entitlement_status_history",
+  "store_refund_dispute_audit",
+];
+
+const RUNTIME_TABLES_STILL_BLOCKED_AFTER_FULFILMENT_LEDGER_SCHEMA = RUNTIME_TABLES_BLOCKED_IN_THIS_SLICE.filter(
+  (table) => !FULFILMENT_LEDGER_TABLES_ALLOWED_AFTER_FOLLOW_ON_SLICE.includes(table),
+);
+
 const CHECKOUT_RUNTIME_PATTERNS = [
   /\bcheckout\.sessions\.create\b/i,
   /\/checkout\/sessions/i,
@@ -351,14 +366,17 @@ function assertNoRuntimeTablesAdded() {
   const forbiddenNamedMigrations = migrationFiles.filter((path) =>
     path !== STORE_CATALOG_MIGRATION &&
     path !== STORE_ORDER_LEDGER_MIGRATION &&
+    path !== STORE_FULFILMENT_LEDGER_MIGRATION &&
     /(?:order|orders|payment_event|account_entitlement|supporter_card|earned_spin|spin_ledger|wheel_cooldown|checkout|webhook|purchase)/i.test(path),
   );
-  assert.deepEqual(forbiddenNamedMigrations, [], "Only the approved follow-on Store order ledger schema migration may add order/payment ledger tables.");
+  assert.deepEqual(forbiddenNamedMigrations, [], "Only the approved follow-on Store order and fulfilment ledger schema migrations may add Store ledger tables.");
 
   for (const path of migrationFiles.filter((path) => path.endsWith(".sql"))) {
     const source = read(path);
     const blockedTables = path === STORE_ORDER_LEDGER_MIGRATION
       ? RUNTIME_TABLES_STILL_BLOCKED_AFTER_LEDGER_SCHEMA
+      : path === STORE_FULFILMENT_LEDGER_MIGRATION
+        ? RUNTIME_TABLES_STILL_BLOCKED_AFTER_FULFILMENT_LEDGER_SCHEMA
       : RUNTIME_TABLES_BLOCKED_IN_THIS_SLICE;
     for (const table of blockedTables) {
       assert.equal(source.includes(table), false, `${path} must not create blocked Store runtime table ${table}.`);
