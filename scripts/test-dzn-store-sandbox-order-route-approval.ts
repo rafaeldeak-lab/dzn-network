@@ -30,6 +30,7 @@ const CHECKOUT_SESSION_DOC = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.m
 const CHECKOUT_SESSION_HANDOFF = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL_HANDOFF.md";
 const STORE_WEBHOOK_ROUTE = "functions/api/stripe/store-webhook.ts";
 const STORE_WEBHOOK_HELPER = "functions/_lib/dzn-store-webhook.ts";
+const STORE_FULFILMENT_HELPER = "functions/_lib/dzn-store-fulfilment.ts";
 const BACKLOG = "docs/DZN_SAFE_MONETISATION_SUPPORTER_SYSTEM_BACKLOG.md";
 const MASTER_SPEC = "docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md";
 const PUBLIC_ACCESS_POLICY = "docs/PUBLIC_ACCESS_POLICY.md";
@@ -101,6 +102,9 @@ function assertFilesExist() {
     CHECKOUT_PREFLIGHT,
     CHECKOUT_SESSION_DOC,
     CHECKOUT_SESSION_HANDOFF,
+    STORE_WEBHOOK_ROUTE,
+    STORE_WEBHOOK_HELPER,
+    STORE_FULFILMENT_HELPER,
     BACKLOG,
     MASTER_SPEC,
     PUBLIC_ACCESS_POLICY,
@@ -486,6 +490,7 @@ function assertNoForbiddenRuntimeOrProductionMutationPaths() {
     CATALOG_HELPER,
     STORE_WEBHOOK_ROUTE,
     STORE_WEBHOOK_HELPER,
+    STORE_FULFILMENT_HELPER,
     "functions/_lib/stripe.ts",
     "functions/_lib/plans.ts",
     "functions/api/billing/create-checkout-session.ts",

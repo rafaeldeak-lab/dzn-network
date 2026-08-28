@@ -16,6 +16,8 @@ const STRIPE_LIVE_CHECKLIST = "docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md";
 const ORDER_LEDGER_MIGRATION = "migrations/0072_dzn_store_order_ledger_schema.sql";
 const FUTURE_FULFILMENT_MIGRATION = "migrations/0073_dzn_store_fulfilment_ledger_schema.sql";
 const STORE_WEBHOOK_HELPER = "functions/_lib/dzn-store-webhook.ts";
+const STORE_FULFILMENT_HELPER = "functions/_lib/dzn-store-fulfilment.ts";
+const FULFILMENT_RUNTIME_DOC = "docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION.md";
 const STORE_WEBHOOK_ROUTE = "functions/api/stripe/store-webhook.ts";
 const STORE_CHECKOUT_HELPER = "functions/_lib/dzn-store-checkout.ts";
 const STORE_ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
@@ -79,7 +81,6 @@ const BLOCKED_STORE_FLAGS_IN_SOURCE_CONFIG = [
 ] as const;
 
 const FORBIDDEN_NEW_RUNTIME_PATHS = [
-  "functions/_lib/dzn-store-fulfilment.ts",
   "functions/_lib/dzn-store-entitlements.ts",
   "functions/_lib/dzn-supporter-cards.ts",
   "functions/_lib/dzn-store-wheel.ts",
@@ -125,6 +126,8 @@ function assertFilesExist() {
     ORDER_LEDGER_MIGRATION,
     FUTURE_FULFILMENT_MIGRATION,
     STORE_WEBHOOK_HELPER,
+    STORE_FULFILMENT_HELPER,
+    FULFILMENT_RUNTIME_DOC,
     STORE_WEBHOOK_ROUTE,
     STORE_CHECKOUT_HELPER,
     STORE_ORDER_HELPER,
@@ -283,9 +286,41 @@ function assertExistingLedgerStillBlocksFulfilment() {
 function assertRuntimeRemainsReceiptOnly() {
   const webhookHelper = read(STORE_WEBHOOK_HELPER);
   assert.match(webhookHelper, /\bINSERT INTO store_payment_events\b/i, "Webhook helper should still insert receipt rows.");
-  assert.doesNotMatch(webhookHelper, /\bUPDATE\s+store_orders\b/i, "Webhook helper must not update Store orders.");
+  assertIncludes(webhookHelper, "processDznStoreSandboxWebhookFulfilment", "Webhook helper should delegate to the approved runtime follow-on only after signed receipt handling.");
+  assert.doesNotMatch(webhookHelper, /\bINSERT\s+INTO\s+account_entitlements\b/i, "Webhook helper must not insert account entitlements directly.");
+  assert.doesNotMatch(webhookHelper, /\bINSERT\s+INTO\s+supporter_cards\b/i, "Webhook helper must not issue Supporter Cards directly.");
   assert.doesNotMatch(webhookHelper, /\bINSERT\s+INTO\s+store_orders\b/i, "Webhook helper must not create Store orders.");
   assert.doesNotMatch(webhookHelper, /\bDELETE\s+FROM\b/i, "Webhook helper must not delete rows.");
+
+  const fulfilmentHelper = read(STORE_FULFILMENT_HELPER);
+  for (const snippet of [
+    "DZN_STORE_WEBHOOK_FULFILMENT_ENABLED",
+    "DZN_STORE_SANDBOX_RUNTIME",
+    "DZN_STORE_SANDBOX_WEBHOOK_RECEIPT_ENABLED",
+    "STORE_LIVE_CHECKOUT_BLOCKED",
+    "STORE_STRIPE_LIVE_SECRET_BLOCKED",
+    "STORE_EARNED_SPINS_RUNTIME_MUST_STAY_DISABLED",
+    "STORE_REWARD_WHEEL_RUNTIME_MUST_STAY_DISABLED",
+    "STORE_PAYMENT_INTENT_EVENT_NO_GRANT",
+  ]) {
+    assertIncludes(fulfilmentHelper, snippet, `${STORE_FULFILMENT_HELPER} should keep approved local/test runtime guard ${snippet}.`);
+  }
+  for (const forbidden of [
+    /\bstripeFormRequest\b/i,
+    /\bstripeGetRequest\b/i,
+    /\bfetch\s*\(/i,
+    /\bcheckout\.sessions\.create\b/i,
+    /\bINSERT\s+INTO\s+earned_spins\b/i,
+    /\bINSERT\s+INTO\s+spin_ledger\b/i,
+    /\bwheel_cooldowns\b/i,
+    /\bowner_billing_accounts\b/i,
+    /\bowner_plan_entitlements\b/i,
+    /\blinked_servers\b/i,
+    /\bnitrado/i,
+    /\bwrangler\b/i,
+  ]) {
+    assert.doesNotMatch(fulfilmentHelper, forbidden, `${STORE_FULFILMENT_HELPER} must not contain forbidden runtime pattern ${forbidden}.`);
+  }
 
   for (const path of RUNTIME_FILES_TO_CHECK) {
     const source = read(path);

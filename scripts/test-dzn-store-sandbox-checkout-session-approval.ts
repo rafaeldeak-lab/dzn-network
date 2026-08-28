@@ -29,6 +29,7 @@ const OWNER_WEBHOOK = "functions/api/stripe/webhook.ts";
 const ORDER_LEDGER_MIGRATION = "migrations/0072_dzn_store_order_ledger_schema.sql";
 const STORE_WEBHOOK_ROUTE = "functions/api/stripe/store-webhook.ts";
 const STORE_WEBHOOK_HELPER = "functions/_lib/dzn-store-webhook.ts";
+const STORE_FULFILMENT_HELPER = "functions/_lib/dzn-store-fulfilment.ts";
 const DOC = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md";
 const HANDOFF = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL_HANDOFF.md";
 const ORDER_DOC = "docs/DZN_STORE_SANDBOX_ORDER_CREATION_ROUTE_APPROVAL.md";
@@ -111,6 +112,9 @@ function assertFilesExist() {
     ORDER_HELPER,
     STRIPE_HELPER,
     STORE_ORDER_ROUTE,
+    STORE_WEBHOOK_ROUTE,
+    STORE_WEBHOOK_HELPER,
+    STORE_FULFILMENT_HELPER,
     OWNER_CHECKOUT_ROUTE,
     OWNER_WEBHOOK,
     ORDER_LEDGER_MIGRATION,
@@ -649,6 +653,7 @@ function assertNoForbiddenRuntimeOrProductionMutationPaths() {
     STORE_ORDER_ROUTE,
     STORE_WEBHOOK_ROUTE,
     STORE_WEBHOOK_HELPER,
+    STORE_FULFILMENT_HELPER,
     STRIPE_HELPER,
     "functions/_lib/plans.ts",
     "functions/_lib/dzn-store-catalog.ts",

@@ -12,6 +12,8 @@ const PUBLIC_ACCESS_POLICY = "docs/PUBLIC_ACCESS_POLICY.md";
 const BILLING_PLANS = "docs/BILLING_PLANS.md";
 const STRIPE_LIVE_CHECKLIST = "docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md";
 const STORE_WEBHOOK_HELPER = "functions/_lib/dzn-store-webhook.ts";
+const STORE_FULFILMENT_HELPER = "functions/_lib/dzn-store-fulfilment.ts";
+const FULFILMENT_RUNTIME_DOC = "docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION.md";
 const STORE_WEBHOOK_ROUTE = "functions/api/stripe/store-webhook.ts";
 const STORE_ORDER_HELPER = "functions/_lib/dzn-store-orders.ts";
 const STORE_CHECKOUT_HELPER = "functions/_lib/dzn-store-checkout.ts";
@@ -65,7 +67,6 @@ const SOURCE_CONFIG_FILES = [
 ] as const;
 
 const FORBIDDEN_NEW_RUNTIME_PATHS = [
-  "functions/_lib/dzn-store-fulfilment.ts",
   "functions/_lib/dzn-store-entitlements.ts",
   "functions/_lib/dzn-supporter-cards.ts",
   "functions/_lib/dzn-store-wheel.ts",
@@ -84,7 +85,7 @@ async function main() {
   assertFilesExist();
   assertPreflightContract();
   assertIntegratedDocs();
-  assertReceiptRuntimeRemainsReceiptOnly();
+  assertApprovedRuntimeRemainsFlaggedAndLocalTestOnly();
   assertMigrationStillBlocksFulfilment();
   assertNoNewFulfilmentRuntimePaths();
   assertNoSourceConfigEnablesStoreFulfilment();
@@ -105,6 +106,8 @@ function assertFilesExist() {
     BILLING_PLANS,
     STRIPE_LIVE_CHECKLIST,
     STORE_WEBHOOK_HELPER,
+    STORE_FULFILMENT_HELPER,
+    FULFILMENT_RUNTIME_DOC,
     STORE_WEBHOOK_ROUTE,
     STORE_ORDER_HELPER,
     STORE_CHECKOUT_HELPER,
@@ -176,15 +179,44 @@ function assertIntegratedDocs() {
   assertIncludes(read(RECEIPT_HANDOFF), "Next should be Store webhook fulfilment approval preflight");
 }
 
-function assertReceiptRuntimeRemainsReceiptOnly() {
+function assertApprovedRuntimeRemainsFlaggedAndLocalTestOnly() {
   const webhookHelper = read(STORE_WEBHOOK_HELPER);
   assert.match(webhookHelper, /\bINSERT INTO store_payment_events\b/i, "Webhook helper should still insert only receipt rows.");
-  assert.doesNotMatch(webhookHelper, /\bUPDATE\s+store_orders\b/i, "Webhook helper must not update Store order status in this preflight.");
+  assertIncludes(webhookHelper, "processDznStoreSandboxWebhookFulfilment", "Webhook helper should delegate to the approved follow-on fulfilment runtime only after receipt verification.");
+  assert.doesNotMatch(webhookHelper, /\bINSERT\s+INTO\s+account_entitlements\b/i, "Webhook helper must not insert account entitlements directly.");
+  assert.doesNotMatch(webhookHelper, /\bINSERT\s+INTO\s+supporter_cards\b/i, "Webhook helper must not issue Supporter Cards directly.");
   assert.doesNotMatch(webhookHelper, /\bINSERT\s+INTO\s+store_orders\b/i, "Webhook helper must not create Store orders.");
   assert.doesNotMatch(webhookHelper, /\bDELETE\s+FROM\b/i, "Webhook helper must not delete anything.");
 
-  for (const table of BLOCKED_TABLES) {
-    assert.doesNotMatch(webhookHelper, new RegExp(`\\b(?:INSERT\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+${table}\\b`, "i"), `Webhook helper must not write ${table}.`);
+  const fulfilmentHelper = read(STORE_FULFILMENT_HELPER);
+  for (const required of [
+    "DZN_STORE_WEBHOOK_FULFILMENT_ENABLED",
+    "DZN_STORE_SANDBOX_RUNTIME",
+    "DZN_STORE_SANDBOX_WEBHOOK_RECEIPT_ENABLED",
+    "STORE_LIVE_CHECKOUT_BLOCKED",
+    "STORE_STRIPE_LIVE_SECRET_BLOCKED",
+    "STORE_EARNED_SPINS_RUNTIME_MUST_STAY_DISABLED",
+    "STORE_REWARD_WHEEL_RUNTIME_MUST_STAY_DISABLED",
+    "checkout.session.completed",
+    "STORE_PAYMENT_INTENT_EVENT_NO_GRANT",
+  ]) {
+    assertIncludes(fulfilmentHelper, required, `${STORE_FULFILMENT_HELPER} should retain approved runtime guard ${required}.`);
+  }
+  for (const forbidden of [
+    /\bstripeFormRequest\b/i,
+    /\bstripeGetRequest\b/i,
+    /\bfetch\s*\(/i,
+    /\bcheckout\.sessions\.create\b/i,
+    /\bINSERT\s+INTO\s+earned_spins\b/i,
+    /\bINSERT\s+INTO\s+spin_ledger\b/i,
+    /\bwheel_cooldowns\b/i,
+    /\bowner_billing_accounts\b/i,
+    /\bowner_plan_entitlements\b/i,
+    /\blinked_servers\b/i,
+    /\bnitrado/i,
+    /\bwrangler\b/i,
+  ]) {
+    assert.doesNotMatch(fulfilmentHelper, forbidden, `${STORE_FULFILMENT_HELPER} must not contain forbidden runtime pattern ${forbidden}.`);
   }
 
   for (const path of RUNTIME_FILES_TO_CHECK) {

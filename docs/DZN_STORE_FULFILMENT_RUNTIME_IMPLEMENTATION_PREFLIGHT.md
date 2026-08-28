@@ -4,6 +4,8 @@
 
 This slice is approval preflight only. It defines the exact disabled-by-default local/test runtime contract for the first future DZN Store fulfilment implementation.
 
+Delivered follow-on implementation: `docs/DZN_STORE_FULFILMENT_RUNTIME_IMPLEMENTATION.md` and `functions/_lib/dzn-store-fulfilment.ts` now implement this approved local/test runtime with disabled defaults, no earned-spin or reward-wheel runtime, no live checkout, no production D1 write, and no issue #49 change.
+
 This slice does not add, enable, create, mutate, or approve:
 
 - No Store webhook fulfilment runtime.

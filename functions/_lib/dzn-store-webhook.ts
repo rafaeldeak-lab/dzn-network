@@ -1,9 +1,15 @@
 import { requireDb } from "./db";
+import { readDznStoreCatalogFlags, type DznStoreCatalogFlags } from "./dzn-store-catalog";
 import {
-  canCreateDznStoreSandboxOrder,
+  processDznStoreSandboxWebhookFulfilment,
+  type DznStoreFulfilmentResult,
+} from "./dzn-store-fulfilment";
+import {
   DZN_STORE_SANDBOX_RUNTIME_FLAG,
+  readDznStoreSandboxRuntime,
   sandboxLedgerScopeForRuntime,
   type DznStoreSandboxLedgerScope,
+  type DznStoreSandboxRuntime,
 } from "./dzn-store-orders";
 import {
   stripeId,
@@ -48,6 +54,7 @@ export type DznStoreSandboxWebhookReceiptSuccessPayload = {
     raw_event_sha256_recorded: true;
     sanitized_summary_recorded: true;
   };
+  fulfilment: DznStoreFulfilmentResult | null;
   safety: StoreWebhookSafetyPayload;
 };
 
@@ -56,15 +63,15 @@ export type DznStoreSandboxWebhookReceiptErrorPayload = {
   error: string;
   message: string;
   received: false;
-  receipt_recorded: false;
+  receipt_recorded: boolean;
   live_checkout_enabled: false;
   safety: StoreWebhookSafetyPayload;
 };
 
 type StoreWebhookSafetyPayload = {
-  webhook_fulfilment_attempted: false;
-  entitlement_write_attempted: false;
-  supporter_card_write_attempted: false;
+  webhook_fulfilment_attempted: boolean;
+  entitlement_write_attempted: boolean;
+  supporter_card_write_attempted: boolean;
   earned_spin_write_attempted: false;
   wheel_runtime_attempted: false;
   stripe_product_price_mutation_attempted: false;
@@ -98,14 +105,30 @@ type StorePaymentEventRefs = {
 };
 
 export function canReceiveDznStoreSandboxWebhookReceipt(env: Env | StoreWebhookEnvRecord = {}) {
-  const base = canCreateDznStoreSandboxOrder(env as Env);
-  if (!base.ok) {
-    return {
-      ok: false as const,
-      status: base.status,
-      code: base.code,
-      message: base.message,
-    };
+  const flags = readDznStoreCatalogFlags(env as StoreWebhookEnvRecord);
+  const runtime = readDznStoreSandboxRuntime(env);
+  const ownerLiveCheckoutEnabled = parseBooleanFlag(readEnvValue(env, "DZN_LIVE_CHECKOUT_ENABLED"));
+
+  if (!runtime) {
+    return blockedReceiptAccess("STORE_SANDBOX_RUNTIME_REQUIRED", `${DZN_STORE_SANDBOX_RUNTIME_FLAG}=local or test is required before sandbox Store webhook receipt.`, flags, runtime);
+  }
+  if (!flags.storeEnabled) {
+    return blockedReceiptAccess("STORE_DISABLED", "DZN Store is disabled.", flags, runtime);
+  }
+  if (!flags.checkoutEnabled) {
+    return blockedReceiptAccess("STORE_CHECKOUT_DISABLED", "DZN Store checkout/order flow is disabled.", flags, runtime);
+  }
+  if (!flags.sandboxCheckoutEnabled) {
+    return blockedReceiptAccess("STORE_SANDBOX_CHECKOUT_DISABLED", "DZN Store sandbox checkout/order flow is disabled.", flags, runtime);
+  }
+  if (flags.liveCheckoutEnabled || ownerLiveCheckoutEnabled) {
+    return blockedReceiptAccess("STORE_LIVE_CHECKOUT_BLOCKED", "Live checkout remains blocked for Store webhook receipt.", flags, runtime);
+  }
+  if (flags.earnedSpinsEnabled) {
+    return blockedReceiptAccess("STORE_EARNED_SPINS_RUNTIME_MUST_STAY_DISABLED", "Store webhook receipt cannot run while earned-spin runtime is enabled.", flags, runtime);
+  }
+  if (flags.rewardWheelEnabled) {
+    return blockedReceiptAccess("STORE_REWARD_WHEEL_RUNTIME_MUST_STAY_DISABLED", "Store webhook receipt cannot run while reward wheel runtime is enabled.", flags, runtime);
   }
 
   if (!parseBooleanFlag(readEnvValue(env, DZN_STORE_SANDBOX_WEBHOOK_RECEIPT_FLAG))) {
@@ -129,9 +152,9 @@ export function canReceiveDznStoreSandboxWebhookReceipt(env: Env | StoreWebhookE
 
   return {
     ok: true as const,
-    runtime: base.runtime,
-    ledgerScope: sandboxLedgerScopeForRuntime(base.runtime),
-    flags: base.flags,
+    runtime,
+    ledgerScope: sandboxLedgerScopeForRuntime(runtime),
+    flags,
     webhookSecret,
   };
 }
@@ -229,6 +252,34 @@ export async function receiveDznStoreSandboxWebhookReceipt(
       .run();
 
     const recorded = resultChanges(result) === 1;
+    let fulfilment: DznStoreFulfilmentResult | null = null;
+    if (access.flags.webhookFulfilmentEnabled) {
+      try {
+        fulfilment = await processDznStoreSandboxWebhookFulfilment(env, {
+          db,
+          event,
+          refs,
+          ledgerScope: access.ledgerScope,
+        }, options);
+      } catch {
+        return storeWebhookError(503, "STORE_FULFILMENT_RUNTIME_FAILED", "DZN Store webhook fulfilment failed after recording the receipt. Retry is safe because receipt and fulfilment ledgers are idempotent.", storeWebhookSafety({
+          attempted: true,
+          status: "failed",
+          reason_code: "STORE_FULFILMENT_RUNTIME_FAILED",
+          duplicate: false,
+          event_type: event.type,
+          event_class: refs.eventClass,
+          order_linked: Boolean(relatedOrderId),
+          order_status: null,
+          entitlement_write_attempted: false,
+          entitlement_written: false,
+          supporter_card_write_attempted: false,
+          supporter_card_written: false,
+          refund_dispute_audit_written: false,
+          live_checkout_enabled: false,
+        }), recorded);
+      }
+    }
     return {
       ok: true,
       status: 200,
@@ -249,7 +300,8 @@ export async function receiveDznStoreSandboxWebhookReceipt(
           raw_event_sha256_recorded: true,
           sanitized_summary_recorded: true,
         },
-        safety: storeWebhookSafety(),
+        fulfilment,
+        safety: storeWebhookSafety(fulfilment),
       },
     };
   } catch {
@@ -369,6 +421,8 @@ function storeWebhookError(
   status: DznStoreSandboxWebhookReceiptResult["status"],
   error: string,
   message: string,
+  safety: StoreWebhookSafetyPayload = storeWebhookSafety(),
+  receiptRecorded = false,
 ): DznStoreSandboxWebhookReceiptResult {
   return {
     ok: false,
@@ -378,10 +432,26 @@ function storeWebhookError(
       error,
       message,
       received: false,
-      receipt_recorded: false,
+      receipt_recorded: receiptRecorded,
       live_checkout_enabled: false,
-      safety: storeWebhookSafety(),
+      safety,
     },
+  };
+}
+
+function blockedReceiptAccess(
+  code: string,
+  message: string,
+  flags: DznStoreCatalogFlags,
+  runtime: DznStoreSandboxRuntime | null,
+) {
+  void flags;
+  void runtime;
+  return {
+    ok: false as const,
+    status: 403 as const,
+    code,
+    message,
   };
 }
 
@@ -389,11 +459,11 @@ function webhookValidationError(error: string, message: string) {
   return { ok: false as const, error, message };
 }
 
-function storeWebhookSafety(): StoreWebhookSafetyPayload {
+function storeWebhookSafety(fulfilment: DznStoreFulfilmentResult | null = null): StoreWebhookSafetyPayload {
   return {
-    webhook_fulfilment_attempted: false,
-    entitlement_write_attempted: false,
-    supporter_card_write_attempted: false,
+    webhook_fulfilment_attempted: Boolean(fulfilment?.attempted),
+    entitlement_write_attempted: Boolean(fulfilment?.entitlement_write_attempted),
+    supporter_card_write_attempted: Boolean(fulfilment?.supporter_card_write_attempted),
     earned_spin_write_attempted: false,
     wheel_runtime_attempted: false,
     stripe_product_price_mutation_attempted: false,
