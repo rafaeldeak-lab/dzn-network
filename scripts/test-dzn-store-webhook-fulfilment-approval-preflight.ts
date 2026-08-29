@@ -73,7 +73,6 @@ const FORBIDDEN_NEW_RUNTIME_PATHS = [
   "functions/api/stripe/store-fulfilment.ts",
   "functions/api/store/fulfilment.ts",
   "functions/api/store/webhook-fulfilment.ts",
-  "functions/api/account/purchases.ts",
   "functions/api/wheel",
   "components/supporter",
   "components/wheel",

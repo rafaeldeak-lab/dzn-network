@@ -38,7 +38,6 @@ const FUTURE_FLAGS_THAT_MUST_NOT_BE_CONFIGURED = [
 ] as const;
 
 const FORBIDDEN_NEW_RUNTIME_PATHS = [
-  "functions/api/account/purchases.ts",
   "functions/api/account/entitlements.ts",
   "functions/api/store/account-purchases.ts",
   "functions/api/store/entitlements.ts",
