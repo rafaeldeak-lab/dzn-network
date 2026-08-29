@@ -100,3 +100,9 @@ Expected validation for this slice:
 ## Next Recommended Slice
 
 Next should be the Store private Account Purchases and Entitlements read-model implementation approval slice, only if deliberately approved: add a disabled-by-default authenticated private read-only route for the current user's Store purchases, entitlements, and private Supporter Card status using sanitized ledgers only, while still adding no public Supporter Card reveal, no webhook replay route, no manual-review route, no refund/dispute operator route, no notifications, no production migration apply, no live checkout activation, no earned-spin ledger, no reward wheel runtime, no Stripe mutation, no Cloudflare config mutation, no production D1 write, and no issue #49 change.
+
+## Follow-On Implementation Status
+
+The Store private Account Purchases and Entitlements read-model implementation is now delivered separately in `docs/DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_IMPLEMENTATION.md`.
+
+The follow-on implementation adds `functions/api/account/purchases.ts` and `functions/_lib/dzn-store-account-purchases.ts`. It remains disabled by default behind `DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_ENABLED`, requires authentication and local/test Store runtime flags, returns private/no-store sanitized current-user data only, and still adds no public Supporter Card reveal, no operator route, no notification, no migration, no live checkout activation, no Stripe mutation, no Cloudflare config mutation, no production D1 write, and no issue #49 change.

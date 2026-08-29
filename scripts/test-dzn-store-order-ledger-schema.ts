@@ -320,9 +320,25 @@ function assertNoRuntimePathsOrLedgerUsage() {
   const approvedFulfilmentRuntimeFiles = new Set([
     STORE_FULFILMENT_HELPER,
   ].map((path) => path.replace(/\\/g, "/")));
+  const approvedAccountPurchasesReadModelFiles = new Set([
+    "functions/api/account/purchases.ts",
+    "functions/_lib/dzn-store-account-purchases.ts",
+  ].map((path) => path.replace(/\\/g, "/")));
 
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
+    if (approvedAccountPurchasesReadModelFiles.has(path)) {
+      const source = read(path);
+      assert.equal(
+        source.includes("DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_ENABLED") || source.includes("readDznStoreAccountPurchasesReadModel"),
+        true,
+        `${path} must be part of the approved Account Purchases read-model slice.`,
+      );
+      assert.doesNotMatch(source, /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE)\b/i, `${path} must remain read-only.`);
+      assert.doesNotMatch(source, /\b(?:checkout\.sessions\.create|stripeFormRequest|stripeGetRequest|fetch\s*\(|\/checkout\/sessions|wrangler)\b/i, `${path} must not create checkout sessions or mutate providers.`);
+      assert.doesNotMatch(source, /\b(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+(?:earned_spins|spin_ledger|wheel_cooldowns)\b/i, `${path} must not touch Store wheel tables.`);
+      continue;
+    }
     if (approvedFulfilmentRuntimeFiles.has(path)) {
       const source = read(path);
       for (const required of [

@@ -660,6 +660,8 @@ function assertNoForbiddenRuntimeOrProductionMutationPaths() {
     "functions/api/billing/create-checkout-session.ts",
     "functions/api/billing/create-portal-session.ts",
     "functions/api/stripe/webhook.ts",
+    "functions/api/account/purchases.ts",
+    "functions/_lib/dzn-store-account-purchases.ts",
     "app/store/page.tsx",
     "components/store/dzn-store-preview-page.tsx",
   ].map((path) => path.replace(/\\/g, "/")));

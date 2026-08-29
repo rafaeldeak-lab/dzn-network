@@ -399,6 +399,18 @@ It is documentation/test-guard work only. It adds no public card reveal, Account
 
 The next Store payment step should be the Store private Account Purchases and Entitlements read-model implementation approval slice, only if deliberately approved.
 
+## DZN Store Account Purchases Read-Model Implementation
+
+Delivered in `docs/DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_IMPLEMENTATION.md`.
+
+This slice adds the disabled-by-default authenticated private read-only `GET /api/account/purchases` route for the current user's Store purchases, entitlements, and private Supporter Card status. It uses only sanitized local/test Store ledgers and returns no raw Stripe ids, payment method details, billing address, raw Discord ids, raw internal DZN user/order/item/entitlement/card ids, Supporter Card serial numbers, webhook raw bodies, raw provider payloads, operator notes, or other users' Store records.
+
+The route remains behind `DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_ENABLED=false` by default, requires `DZN_STORE_SANDBOX_RUNTIME=local` or `test`, and blocks live checkout, earned-spin runtime, and reward-wheel runtime flags.
+
+This delivered slice still adds no Account Purchases UI, no public Supporter Card reveal, no private Supporter Card reveal component, no Entitlements route, no webhook replay route, no manual-review route, no refund/dispute operator route, no notification, no migration, no production D1 apply, no live checkout activation, no earned-spin ledger, no reward wheel runtime, no Stripe Product/Price/customer/refund/dispute/webhook endpoint mutation, no Cloudflare config mutation, no production D1 write, and no issue #49 change.
+
+The next Store payment step should be the Store private Account Purchases UI shell and Supporter Card status presentation preflight/implementation, only if deliberately approved.
+
 ## Implementation Boundary
 
 The Safe Monetisation and Supporter System must be built as a real production feature when selected for implementation, not as a visual-only mockup. Because it introduces payments, order fulfilment, refund handling, entitlements, and player cosmetics, it must be implemented in dedicated high-risk payment slices with explicit approval, sandbox evidence, rollback rules, security review, tax/receipt review, and live-checkout activation review.
