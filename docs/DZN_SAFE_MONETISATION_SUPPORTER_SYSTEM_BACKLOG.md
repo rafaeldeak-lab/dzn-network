@@ -389,6 +389,16 @@ PaymentIntent events remain no-grant. Success redirects remain no-grant. Store f
 
 This delivered slice still adds no earned-spin ledger, reward wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
 
+## DZN Store Fulfilment Reconciliation/Read-Model Preflight
+
+Delivered in `docs/DZN_STORE_FULFILMENT_RECONCILIATION_READ_MODEL_PREFLIGHT.md`.
+
+This preflight defines future private Account Purchases and Entitlements read models, private Supporter Card reveal/status UI, admin-only webhook replay controls, admin-only manual-review controls, and admin-only refund/dispute operator workflow.
+
+It is documentation/test-guard work only. It adds no public card reveal, Account Purchases route, Entitlements route, admin replay route, manual-review route, refund/dispute operator route, notification, migration, production D1 apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe Product/Price/customer/refund/dispute/webhook endpoint mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
+
+The next Store payment step should be the Store private Account Purchases and Entitlements read-model implementation approval slice, only if deliberately approved.
+
 ## Implementation Boundary
 
 The Safe Monetisation and Supporter System must be built as a real production feature when selected for implementation, not as a visual-only mockup. Because it introduces payments, order fulfilment, refund handling, entitlements, and player cosmetics, it must be implemented in dedicated high-risk payment slices with explicit approval, sandbox evidence, rollback rules, security review, tax/receipt review, and live-checkout activation review.

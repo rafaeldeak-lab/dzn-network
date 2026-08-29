@@ -1976,6 +1976,20 @@ Store account entitlements remain separate from owner Starter/Pro entitlements. 
 
 No earned-spin ledger, reward wheel runtime, live checkout activation, Stripe Product/Price/customer/refund/dispute/webhook endpoint mutation, Cloudflare config mutation, production D1 write, Nitrado mutation, Discord mutation, analytics/tracking path, metered AI call, or issue #49 change is implemented.
 
+## DZN Store Fulfilment Reconciliation/Read-Model Preflight Slice
+
+The DZN Store fulfilment reconciliation/read-model preflight is delivered in `docs/DZN_STORE_FULFILMENT_RECONCILIATION_READ_MODEL_PREFLIGHT.md`.
+
+It defines future private Account Purchases and Entitlements read models, private Supporter Card reveal/status UI, admin-only webhook replay controls, admin-only manual-review controls, and admin-only refund/dispute operator workflow.
+
+The future Account Purchases and Entitlements read model must be authenticated, private/no-store, scoped to the current user, and sanitized. It may show Store purchase status, product labels, entitlement status, and private Supporter Card status only for that user's own records. It must not expose raw Stripe ids, payment method data, customer email, billing address, raw webhook bodies, raw provider payloads, raw Discord ids, raw internal DZN user ids, or any other user's records.
+
+The future operator workflow must require configured DZN admin/operator scope. Owner Starter/Pro entitlement must not grant Store operator access. Webhook replay, manual review, and refund/dispute triage must use the same idempotent fulfilment and status-history boundaries instead of bespoke grant paths.
+
+This preflight adds no Account Purchases route, Entitlements route, public Supporter Card reveal, private Supporter Card reveal component, webhook replay route, manual-review route, refund/dispute operator route, notification, migration, production D1 apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
+
+Fairness remains unchanged: Store reconciliation/read-model work cannot affect owner billing plan status, `/setup`, Nitrado linking, server ownership, rankings, discovery score, reviews, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.
