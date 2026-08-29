@@ -91,6 +91,12 @@ This slice made no production mutation:
 - No analytics/tracking or metered AI call.
 - No issue #49 change.
 
+## Delivered Follow-On Preflight
+
+The DZN Store fulfilment reconciliation/read-model preflight is now delivered in `docs/DZN_STORE_FULFILMENT_RECONCILIATION_READ_MODEL_PREFLIGHT.md`. It defines future private Account Purchases and Entitlements read models, Supporter Card reveal/status UI contract, webhook replay/manual-review controls, and refund/dispute operator workflow.
+
+It adds no public card reveal, account purchases route, admin replay route, manual-review route, refund/dispute operator route, notification, production migration apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
+
 ## Next Recommended Slice
 
-Next should be the Store fulfilment reconciliation/read-model preflight: define the private Account Purchases and Entitlements read model, Supporter Card reveal/status UI contract, webhook replay/manual-review controls, and refund/dispute operator workflow before adding any public card reveal, account purchases route, admin replay route, notification, production migration apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
+Next should be the Store private Account Purchases and Entitlements read-model implementation approval slice, only if deliberately approved: add a disabled-by-default authenticated private read-only route for the current user's Store purchases, entitlements, and private Supporter Card status using sanitized ledgers only, while still adding no public Supporter Card reveal, no webhook replay route, no manual-review route, no refund/dispute operator route, no notifications, no production migration apply, no live checkout activation, no earned-spin ledger, no reward wheel runtime, no Stripe mutation, no Cloudflare config mutation, no production D1 write, and no issue #49 change.
