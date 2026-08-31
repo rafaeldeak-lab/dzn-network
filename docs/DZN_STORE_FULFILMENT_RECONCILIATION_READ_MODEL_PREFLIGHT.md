@@ -355,6 +355,8 @@ Next should be the Store private Account Purchases and Entitlements read-model i
 
 The Store private Account Purchases and Entitlements read-model implementation is now delivered separately in `docs/DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_IMPLEMENTATION.md`.
 
+The Store private Account Purchases UI shell is now delivered separately in `docs/DZN_STORE_ACCOUNT_PURCHASES_UI_SHELL.md`. It consumes the private read model only and keeps Supporter Card reveal, operator actions, notifications, live checkout, earned spins, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 writes, and issue #49 blocked.
+
 That follow-on slice adds `GET /api/account/purchases` behind `DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_ENABLED=false` by default. It is authenticated, private/no-store, current-user scoped, sanitized, local/test sandbox only, and read-only.
 
 The follow-on implementation still adds no public Supporter Card reveal, no private Supporter Card reveal component, no webhook replay route, no manual-review route, no refund/dispute operator route, no notifications, no production migration apply, no live checkout activation, no earned-spin ledger, no reward wheel runtime, no Stripe mutation, no Cloudflare config mutation, no production D1 write, and no issue #49 change.

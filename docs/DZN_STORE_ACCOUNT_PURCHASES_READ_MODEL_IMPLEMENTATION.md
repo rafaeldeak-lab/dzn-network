@@ -36,13 +36,13 @@ This slice does not add, enable, create, mutate, or approve:
 - No notification.
 - No migration.
 - No production migration apply.
-- No live checkout activation.
+- no live checkout activation.
 - No earned-spin ledger.
 - No reward wheel runtime.
 - No Stripe Product, Price, Customer, Checkout Session, refund, dispute, payment, webhook endpoint, or API mutation.
 - No Cloudflare variable, secret, binding, Pages config, Workers config, or production D1 mutation.
 - No Nitrado, Discord, analytics, tracking, AI provider credentials, vector stores, or metered model calls.
-- No issue #49 change.
+- no issue #49 change.
 
 `DZN_LIVE_CHECKOUT_ENABLED` remains unset/false. `DZN_STORE_LIVE_CHECKOUT_ENABLED` remains unset/false. Issue #49 remains reserved for final live checkout activation.
 
@@ -235,8 +235,12 @@ Required validation for this slice:
 - `git diff --check`
 - Codex Security diff scan
 
+## Follow-On Delivered
+
+The follow-on Account Purchases UI shell is delivered separately in `docs/DZN_STORE_ACCOUNT_PURCHASES_UI_SHELL.md`. It adds `/account/purchases` as an authenticated private read-only page that consumes only `GET /api/account/purchases`, keeps Supporter Card reveal blocked, and adds no webhook replay route, manual-review route, refund/dispute operator route, notifications, production migration apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
+
 ## Next Recommended Slice
 
-Next should be the Store private Account Purchases UI shell and Supporter Card status presentation preflight/implementation: add an authenticated read-only account page that consumes `GET /api/account/purchases`, shows purchase and entitlement status clearly, keeps Supporter Card reveal blocked until separately approved, and still adds no webhook replay route, no manual-review route, no refund/dispute operator route, no notifications, no production migration apply, no live checkout activation, no earned-spin ledger, no reward wheel runtime, no Stripe mutation, no Cloudflare config mutation, no production D1 write, and no issue #49 change.
+Next should be Store private Supporter Card reveal approval preflight only if deliberately approved: define the exact private reveal contract, serial/art redaction boundaries, account ownership proof, visibility controls, screenshot/export rules, audit requirements, rollback path, and security proof before any card reveal route, card-art generation, public reveal, sharing controls, notifications, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change is implemented.
 
 The personal player page/nav button remains a separate player UX slice.

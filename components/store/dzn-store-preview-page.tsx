@@ -77,7 +77,14 @@ export function DznStorePreviewPage() {
             <p className="mt-3 text-sm font-semibold leading-6 text-slate-300">
               Every product card must tell players exactly what they would receive before any future payment flow. Nothing on this page can start checkout or grant an item.
             </p>
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+              <Link
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-300/35 bg-emerald-300/12 px-4 py-3 text-sm font-black uppercase text-emerald-50 transition hover:border-emerald-200/70 hover:bg-emerald-300/20"
+                href="/account/purchases"
+              >
+                <WalletCards className="h-4 w-4" aria-hidden="true" />
+                Purchases
+              </Link>
               <Link
                 className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/35 bg-cyan-300/12 px-4 py-3 text-sm font-black uppercase text-cyan-50 transition hover:border-cyan-200/70 hover:bg-cyan-300/20"
                 href="/player"
