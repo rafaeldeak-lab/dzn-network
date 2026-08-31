@@ -2016,6 +2016,20 @@ This implementation adds no public Supporter Card reveal, no private Supporter C
 
 Fairness remains unchanged: Account Purchases UI work cannot affect owner billing plan status, `/setup`, Nitrado linking, server ownership, rankings, discovery score, reviews, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
 
+## DZN Store Supporter Card Reveal Approval Preflight Slice
+
+The DZN Store Supporter Card reveal approval preflight is delivered in `docs/DZN_STORE_SUPPORTER_CARD_REVEAL_APPROVAL_PREFLIGHT.md`.
+
+It defines a future private current-user reveal boundary before any Supporter Card serial or card-art data can be shown. The proposed future route is `GET /api/account/supporter-cards/[cardRef]/reveal`, but this slice adds no route, component, migration, flag configuration, or runtime behavior.
+
+The future route must be authenticated, private/no-store, current-user scoped, local/test only until separate live Store approval, and must prove account ownership through joined `supporter_cards`, `account_entitlements`, `store_orders`, and `store_order_items` rows. It may never use Discord display names, client-supplied Discord ids, email, public profile handle, owner Starter/Pro entitlement, server ownership, or Stripe metadata alone as ownership proof.
+
+Supporter Card serial numbers remain absent from `/account/purchases`, `/store`, public profiles, social metadata, reviews, leaderboards, events, community directories, owner dashboards, admin export-safe rows, notification payloads, browser storage, analytics, tracking, logs, and error bodies until a later approved implementation exposes them privately to the owning account. Raw card-art fields such as `insignia_seed_hash` and `generated_insignia_json` remain server-private.
+
+This preflight adds no card reveal route, private reveal component, public reveal, card-art generation, sharing controls, screenshot/export controls, notifications, migrations, production D1 apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
+
+Fairness remains unchanged: Supporter Card reveal planning cannot affect owner billing plan status, `/setup`, Nitrado linking, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions, earned spins, reward wheel state, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.

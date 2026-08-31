@@ -421,6 +421,18 @@ This delivered UI shell still adds no public Supporter Card reveal, no private S
 
 The next Store payment step should be Store private Supporter Card reveal approval preflight only if deliberately approved.
 
+## DZN Store Supporter Card Reveal Approval Preflight
+
+Delivered in `docs/DZN_STORE_SUPPORTER_CARD_REVEAL_APPROVAL_PREFLIGHT.md`.
+
+This slice defines the future private Supporter Card reveal contract, serial/art redaction boundaries, account ownership proof, visibility controls, screenshot/export rules, audit requirements, rollback path, and security proof.
+
+The future private reveal must be authenticated, current-user scoped, private/no-store, local/test only until separate live Store approval, and based on joined Store order, order item, account entitlement, and Supporter Card ownership proof. The current Account Purchases read model remains status-only until a later implementation is deliberately approved.
+
+This delivered preflight adds no card reveal route, private reveal component, public reveal, card-art generation, sharing controls, screenshot/export controls, notifications, migrations, production D1 apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe Product/Price/customer/refund/dispute/webhook endpoint mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
+
+The next Store payment step should be Store private Supporter Card reveal implementation only if deliberately approved.
+
 ## Implementation Boundary
 
 The Safe Monetisation and Supporter System must be built as a real production feature when selected for implementation, not as a visual-only mockup. Because it introduces payments, order fulfilment, refund handling, entitlements, and player cosmetics, it must be implemented in dedicated high-risk payment slices with explicit approval, sandbox evidence, rollback rules, security review, tax/receipt review, and live-checkout activation review.
