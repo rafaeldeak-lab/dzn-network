@@ -74,7 +74,9 @@ Rejected message bodies must not be echoed back to other users, public logs, ana
 
 The static DZN Comms shell can show emoji reaction chips, but runtime reactions remain blocked until a dedicated DZN Comms reaction interaction contract slice is approved.
 
-That future slice must define:
+The dedicated DZN Comms reaction interaction contract preflight is now captured in `docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT.md`. The dedicated reaction contract is now captured in `docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT.md`. That reaction-specific preflight is still documentation/test-only, but it defines the future emoji allow-list, add/remove/list/read routes, message-history embedding, per-user idempotency, aggregate-count privacy, current-user reaction state, rate limits, moderation behavior, retention/logging, rollback, and proof matrix.
+
+That reaction slice defines:
 
 - The add/remove/list/read API shape for message reactions.
 - A server-controlled emoji allow-list.
@@ -85,6 +87,7 @@ That future slice must define:
 - Moderation visibility and removal rules for hidden, removed, or reported messages.
 - Retention and logging boundaries.
 - Rollback behavior if reactions are disabled after launch.
+- Proof that reactions cannot affect billing, owner entitlement, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, CTF scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions outside reaction moderation, or competitive eligibility.
 
 No runtime reaction route, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking call, AI provider credential, vector store, metered model call, or production mutation may be added until that reaction contract is complete.
 

@@ -19,6 +19,7 @@ This slice is documentation/test only. It does not add runtime chat APIs, messag
 - `docs/DZN_COMMS_INTERACTION_CONTRACT_PREFLIGHT.md`
   - Defines future surface contracts for site-wide support, Global Chat, New Players, Server Owners, Events, private group chat, server-linked group management, and moderation queues.
   - Captures the exact named sections: Send Attempt Contract, Filtering Decision Contract, Warning And Timeout State Contract, Read-Only History Contract, Report Action Contract, Owner/Admin Moderation Scope Contract, Private Group Membership Proof Contract, Support Source Policy, Logging And Retention Contract, and Rollback Controls.
+  - Points runtime emoji reactions to the dedicated `docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT.md` contract. No runtime reaction behavior, message table, reaction table, persistence, analytics/tracking, or issue #49 change is introduced here.
   - Defines send attempt request/response behavior with `clientMutationId`, server-side channel resolution, membership checks, rate limits, safety filtering, persistence after acceptance only, and safe blocked/warning/timeout responses.
   - Defines filtering decision inputs/outputs for allow, allow-with-notice, block, warn, timeout, and escalate.
   - Defines the Safety Ladder: Message blocked, Friendly warning, 10-minute timeout, Staff review.
@@ -134,6 +135,8 @@ Live checkout remains disabled. Issue #49 remains reserved for final live paymen
 
 ## Next Recommended Slice
 
-Next should be the DZN Comms runtime implementation approval preflight: choose the first runtime slice shape, transport plan, migration plan, feature-flag defaults, retention defaults, moderation data model, testing matrix, and rollback path before implementing any chat APIs, message tables, Durable Objects/WebSockets, AI provider credentials, vector stores, or metered model calls.
+Next should be the DZN Comms runtime implementation approval preflight or, for message-adjacent UI, the dedicated DZN Comms reaction interaction contract preflight before runtime reactions.
 
 That runtime implementation approval preflight is now the approved follow-on slice. It should add the public live website counter to the plan as a public-safe aggregate presence feature, choose the first runtime direction, keep this branch documentation/test-only, and move the next implementation slice to the DZN Comms live presence counter foundation.
+
+The dedicated reaction preflight is now captured separately. Runtime reactions remain blocked until a later reaction runtime approval slice chooses the exact routes, storage model, feature flags, retention, moderation scope, idempotency strategy, rollback, and proof matrix.
