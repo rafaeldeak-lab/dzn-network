@@ -32,6 +32,9 @@ const STORE_PREVIEW_PAGE = "app/store/page.tsx";
 const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
 const STORE_ACCOUNT_PURCHASES_PAGE = "app/account/purchases/page.tsx";
 const STORE_ACCOUNT_PURCHASES_COMPONENT = "components/store/dzn-store-account-purchases-page.tsx";
+const STORE_SUPPORTER_CARD_REVEAL_ROUTE = "functions/api/account/supporter-cards/[cardRef]/reveal.ts";
+const STORE_SUPPORTER_CARD_REVEAL_HELPER = "functions/_lib/dzn-store-supporter-card-reveal.ts";
+const STORE_SUPPORTER_CARD_REVEAL_DOC = "docs/DZN_STORE_SUPPORTER_CARD_REVEAL_IMPLEMENTATION.md";
 const PACKAGE_JSON = "package.json";
 
 const PREFLIGHT_SNIPPETS = [
@@ -317,6 +320,9 @@ function assertFilesExist() {
     STORE_WEBHOOK_HANDOFF,
     STORE_ACCOUNT_PURCHASES_PAGE,
     STORE_ACCOUNT_PURCHASES_COMPONENT,
+    STORE_SUPPORTER_CARD_REVEAL_ROUTE,
+    STORE_SUPPORTER_CARD_REVEAL_HELPER,
+    STORE_SUPPORTER_CARD_REVEAL_DOC,
   ]) {
     assert.equal(existsSync(path), true, `${path} should exist.`);
   }
@@ -436,9 +442,61 @@ function assertNoStoreRuntimePatternsBeyondCatalogDraft() {
     STORE_ACCOUNT_PURCHASES_PAGE,
     STORE_ACCOUNT_PURCHASES_COMPONENT,
   ].map((path) => path.replace(/\\/g, "/")));
+  const allowStoreSupporterCardPrivateRevealFiles = new Set([
+    STORE_SUPPORTER_CARD_REVEAL_ROUTE,
+    STORE_SUPPORTER_CARD_REVEAL_HELPER,
+  ].map((path) => path.replace(/\\/g, "/")));
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
     if (allowExistingSubscriptionFiles.has(path)) continue;
+    if (allowStoreSupporterCardPrivateRevealFiles.has(path)) {
+      const source = read(path);
+      assert.equal(
+        source.includes("readDznStorePrivateSupporterCardReveal") || source.includes("DZN_STORE_SUPPORTER_CARD_PRIVATE_REVEAL_ROUTE"),
+        true,
+        `${path} must be part of the approved private Supporter Card reveal slice.`,
+      );
+      const routeRequired = path === STORE_SUPPORTER_CARD_REVEAL_ROUTE
+        ? [
+          "readDznStorePrivateSupporterCardReveal",
+          "getRequestSessionUser",
+          "privateNoStoreHeaders",
+          "x-dzn-store-supporter-card-public-reveal",
+          "x-dzn-store-live-checkout",
+          "x-dzn-store-production-mutation",
+        ]
+        : [
+          "canReadDznStorePrivateSupporterCardReveal",
+          "readDznStorePrivateSupporterCardReveal",
+          "supporter_cards.user_id = ?",
+          "account_entitlements.user_id = supporter_cards.user_id",
+          "store_orders.purchasing_user_id = supporter_cards.user_id",
+        ];
+      for (const required of routeRequired) {
+        assert.equal(source.includes(required), true, `${path} must keep approved private reveal guard ${required}.`);
+      }
+      for (const forbidden of [
+        /\bINSERT\s+INTO\b/i,
+        /\bUPDATE\s+\w+/i,
+        /\bDELETE\s+FROM\b/i,
+        /\bcheckout\.sessions\.create\b/i,
+        /\bstripeFormRequest\b/i,
+        /\bstripeGetRequest\b/i,
+        /\bfetch\s*\(/i,
+        /\/checkout\/sessions/i,
+        /\bearned_spins\b/i,
+        /\bspin_ledger\b/i,
+        /\bwheel_cooldowns\b/i,
+        /\bowner_billing_accounts\b/i,
+        /\bowner_plan_entitlements\b/i,
+        /\blinked_servers\b/i,
+        /\bnitrado/i,
+        /\bwrangler\b/i,
+      ]) {
+        assert.doesNotMatch(source, forbidden, `${path} must not contain forbidden private reveal pattern ${forbidden}.`);
+      }
+      continue;
+    }
     const source = read(path);
     if (allowStoreAccountPurchasesUiFiles.has(path)) {
       assert.equal(
@@ -631,7 +689,11 @@ function assertReadOnlyStorePreviewOnly() {
   assert.equal(accountComponent.includes('cache: "no-store"'), true, "Account Purchases UI must request uncached private account data.");
   assert.equal(accountComponent.includes('credentials: "include"'), true, "Account Purchases UI must include the authenticated session.");
   assert.equal(accountComponent.includes('data-dzn-store-account-purchases-ui="read-only"'), true, "Account Purchases UI must identify itself as read-only.");
-  assert.equal(accountComponent.includes('data-supporter-card-reveal="blocked"'), true, "Account Purchases UI must keep Supporter Card reveal blocked.");
+  assert.equal(accountComponent.includes('data-supporter-card-reveal="private-local-test-guarded"'), true, "Account Purchases UI must keep private Supporter Card reveal guarded.");
+  assert.equal(accountComponent.includes('data-public-supporter-card-reveal="blocked"'), true, "Account Purchases UI must keep public Supporter Card reveal blocked.");
+  assert.equal(accountComponent.includes('data-card-art-generation="blocked"'), true, "Account Purchases UI must keep card-art generation blocked.");
+  assert.equal(accountComponent.includes('data-sharing-controls="blocked"'), true, "Account Purchases UI must keep sharing controls blocked.");
+  assert.equal(accountComponent.includes('data-screenshot-export-controls="blocked"'), true, "Account Purchases UI must keep screenshot/export controls blocked.");
   assert.equal(accountComponent.includes('data-live-checkout="disabled"'), true, "Account Purchases UI must identify live checkout as disabled.");
   assert.equal(accountComponent.includes('data-production-mutation="none"'), true, "Account Purchases UI must identify production mutation as absent.");
   assert.equal(accountComponent.includes("checkout.sessions.create"), false, "Account Purchases UI must not include Stripe checkout runtime.");

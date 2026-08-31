@@ -348,8 +348,14 @@ No database rollback, Stripe rollback, Cloudflare rollback, Nitrado rollback, Di
 
 If a later implementation exists, rollback must first disable `DZN_SUPPORTER_CARD_PRIVATE_REVEAL_ENABLED`, then remove the reveal route/UI while preserving immutable payment, entitlement, status-history, refund/dispute, and Supporter Card ledger rows. Paid ledger rows must never be deleted as a UI rollback.
 
+## Follow-On Delivered
+
+The Store private Supporter Card reveal implementation is now delivered separately in `docs/DZN_STORE_SUPPORTER_CARD_REVEAL_IMPLEMENTATION.md`.
+
+That follow-on slice implements the approved private current-account route and UI panel while keeping public reveal, card-art generation, sharing controls, screenshot/export controls, notifications, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 writes, and issue #49 blocked.
+
 ## Next Recommended Slice
 
-Next should be Store private Supporter Card reveal implementation only if deliberately approved: add a disabled-by-default local/test private route and private `/account/purchases` reveal UI panel from this preflight, proving current-account ownership before showing a Supporter Card serial/status and keeping card-art generation, public reveal, sharing controls, screenshot/export controls, notifications, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 writes, and issue #49 blocked.
+Next should be the Store private Supporter Card reveal visual polish and manual QA slice only if deliberately approved: refine the private `/account/purchases` reveal panel styling/states and run rendered local QA for disabled, no purchases, revealable, unavailable, and cross-account-denied states. It should still add no card-art generation, public reveal, sharing controls, screenshot/export controls, notifications, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 writes, or issue #49 changes.
 
 The personal player page/nav button remains a separate player UX slice.

@@ -34,6 +34,8 @@ The DZN Store webhook fulfilment approval preflight is delivered in `docs/DZN_ST
 
 The DZN Store fulfilment ledger schema migration approval preflight is now delivered in `docs/DZN_STORE_FULFILMENT_LEDGER_SCHEMA_PREFLIGHT.md`. It defines the future local/test-only schema contract for account entitlements, Supporter Cards, fulfilment attempts, order-status history, entitlement-status history, refund/dispute audit, uniqueness constraints, and rollback. It is documentation/test-guard work only and adds no migration file, account entitlement table, Supporter Card table, fulfilment-attempt table, refund/dispute table, Store fulfilment runtime, earned-spin ledger, wheel runtime, live checkout activation, Stripe Product/Price mutation, Cloudflare secret/config mutation, production D1 write, or issue #49 change.
 
+The DZN Store Supporter Card private reveal implementation is now delivered in `docs/DZN_STORE_SUPPORTER_CARD_REVEAL_IMPLEMENTATION.md`. It adds a disabled-by-default local/test private route and `/account/purchases` panel for the current authenticated account to reveal its own Supporter Card serial/status after Store order, order item, entitlement, and card ownership proof. It still adds no public Supporter Card reveal, card-art generation, sharing controls, screenshot/export controls, notifications, earned-spin ledger, reward wheel runtime, live checkout activation, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
+
 ## Current DZN Architecture Found
 
 DZN already has a subscription-oriented billing boundary for owner/server-management access:

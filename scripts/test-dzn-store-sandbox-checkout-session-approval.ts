@@ -30,6 +30,8 @@ const ORDER_LEDGER_MIGRATION = "migrations/0072_dzn_store_order_ledger_schema.sq
 const STORE_WEBHOOK_ROUTE = "functions/api/stripe/store-webhook.ts";
 const STORE_WEBHOOK_HELPER = "functions/_lib/dzn-store-webhook.ts";
 const STORE_FULFILMENT_HELPER = "functions/_lib/dzn-store-fulfilment.ts";
+const STORE_SUPPORTER_CARD_REVEAL_ROUTE = "functions/api/account/supporter-cards/[cardRef]/reveal.ts";
+const STORE_SUPPORTER_CARD_REVEAL_HELPER = "functions/_lib/dzn-store-supporter-card-reveal.ts";
 const DOC = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL.md";
 const HANDOFF = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_APPROVAL_HANDOFF.md";
 const ORDER_DOC = "docs/DZN_STORE_SANDBOX_ORDER_CREATION_ROUTE_APPROVAL.md";
@@ -661,6 +663,8 @@ function assertNoForbiddenRuntimeOrProductionMutationPaths() {
     "functions/api/stripe/webhook.ts",
     "functions/api/account/purchases.ts",
     "functions/_lib/dzn-store-account-purchases.ts",
+    STORE_SUPPORTER_CARD_REVEAL_ROUTE,
+    STORE_SUPPORTER_CARD_REVEAL_HELPER,
     "app/store/page.tsx",
     "components/store/dzn-store-preview-page.tsx",
   ].map((path) => path.replace(/\\/g, "/")));

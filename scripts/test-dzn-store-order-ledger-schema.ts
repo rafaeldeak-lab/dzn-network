@@ -27,6 +27,8 @@ const STORE_CHECKOUT_SESSION_HANDOFF = "docs/DZN_STORE_SANDBOX_CHECKOUT_SESSION_
 const STORE_WEBHOOK_ROUTE = "functions/api/stripe/store-webhook.ts";
 const STORE_WEBHOOK_HELPER = "functions/_lib/dzn-store-webhook.ts";
 const STORE_FULFILMENT_HELPER = "functions/_lib/dzn-store-fulfilment.ts";
+const STORE_SUPPORTER_CARD_REVEAL_ROUTE = "functions/api/account/supporter-cards/[cardRef]/reveal.ts";
+const STORE_SUPPORTER_CARD_REVEAL_HELPER = "functions/_lib/dzn-store-supporter-card-reveal.ts";
 const STORE_WEBHOOK_DOC = "docs/DZN_STORE_SANDBOX_WEBHOOK_LEDGER_RECEIPT.md";
 const STORE_WEBHOOK_HANDOFF = "docs/DZN_STORE_SANDBOX_WEBHOOK_LEDGER_RECEIPT_HANDOFF.md";
 const PACKAGE_JSON = "package.json";
@@ -323,9 +325,25 @@ function assertNoRuntimePathsOrLedgerUsage() {
     "functions/api/account/purchases.ts",
     "functions/_lib/dzn-store-account-purchases.ts",
   ].map((path) => path.replace(/\\/g, "/")));
+  const approvedSupporterCardPrivateRevealFiles = new Set([
+    STORE_SUPPORTER_CARD_REVEAL_ROUTE,
+    STORE_SUPPORTER_CARD_REVEAL_HELPER,
+  ].map((path) => path.replace(/\\/g, "/")));
 
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
+    if (approvedSupporterCardPrivateRevealFiles.has(path)) {
+      const source = read(path);
+      assert.equal(
+        source.includes("DZN_SUPPORTER_CARD_PRIVATE_REVEAL_ENABLED") || source.includes("readDznStorePrivateSupporterCardReveal"),
+        true,
+        `${path} must be part of the approved private Supporter Card reveal slice.`,
+      );
+      assert.doesNotMatch(source, /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE)\b/i, `${path} must remain read-only.`);
+      assert.doesNotMatch(source, /\b(?:checkout\.sessions\.create|stripeFormRequest|stripeGetRequest|fetch\s*\(|\/checkout\/sessions|wrangler)\b/i, `${path} must not create checkout sessions or mutate providers.`);
+      assert.doesNotMatch(source, /\b(?:FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+(?:earned_spins|spin_ledger|wheel_cooldowns|owner_billing_accounts|owner_plan_entitlements|linked_servers|server_rankings|server_reviews|player_xp|player_calling_card_awards)\b/i, `${path} must not touch protected wheel, billing, owner, ranking, review, or progression systems.`);
+      continue;
+    }
     if (approvedAccountPurchasesReadModelFiles.has(path)) {
       const source = read(path);
       assert.equal(
