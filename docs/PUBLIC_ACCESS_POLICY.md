@@ -38,9 +38,11 @@ Starter trial and Pro behavior must continue to come from the billing/entitlemen
 
 Free or Starter/trial accounts should see trial-safe app navigation, including the personal Player Hub, plus a clear Pro upgrade action. Pro-effective accounts should see Player Hub and Pro tools in the header. This header visibility is product guidance only; APIs and owner/product pages must continue enforcing access server-side.
 
+Player-owned preferences, including saved/followed servers, are free logged-in player features. They must be read and written through private no-store player APIs, remain scoped to the current user, and stay out of shared public API caches.
+
 Dashboard package visibility must follow the same split. Starter/trial users may see the normal setup, public listing, basic stats, events, billing comparison, and basic Discord posting surfaces, but any Pro-only analytics, promotion, Server VS Server hosting, or enhanced Discord post controls must read as locked or upgrade-gated. Pro-effective users may see those tools as active, while server-side entitlement checks remain authoritative.
 
-Package copy must not imply a competitive advantage. Pro presentation, promotion, analytics, and owner tooling must not change leaderboard rank, K/D, score, reviews, crowns, badges, season wins, event outcomes, or gameplay results.
+Package copy must not imply a competitive advantage. Pro presentation, promotion, analytics, owner tooling, and private saved/followed preferences must not change leaderboard rank, K/D, score, discovery score, reviews, crowns, badges, season wins, event outcomes, or gameplay results.
 
 ## Owner Pages
 
@@ -61,6 +63,8 @@ The homepage and public preview surfaces still need public read-only JSON. These
 - `/api/dzn-pulse/config`
 
 These APIs must keep their existing preview redaction and `Vary: Cookie` behavior where applicable. Public API availability does not mean the corresponding app page is public.
+
+Private player APIs are not public APIs. `/api/player/saved-servers` requires a logged-in Discord session, returns `private, no-store` responses, varies by Cookie, rejects mismatched `Origin` headers on mutations when present, and may only write rows owned by the current user in `player_saved_servers`.
 
 ## Production Verification
 
