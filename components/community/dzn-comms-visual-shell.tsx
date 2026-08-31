@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DznLivePresenceCounter } from "./dzn-live-presence-counter";
 import {
   dznCommsMessageHistoryChannelId,
@@ -486,7 +486,8 @@ function useDznCommsMessageHistory(
   retryNonce: number,
   uiEnabled: boolean,
 ): DznCommsMessageHistoryUiState {
-  const requestKey = `${surfaceKey}:${retryNonce}`;
+  const activationKey = useDznCommsSurfaceActivationKey(surfaceKey);
+  const requestKey = `${activationKey}:${retryNonce}`;
   const channelId = dznCommsMessageHistoryChannelId(surfaceKey);
   const [loadedState, setLoadedState] = useState<{
     requestKey: string;
@@ -511,6 +512,22 @@ function useDznCommsMessageHistory(
   if (!channelId) return dznCommsMessageHistoryStaticState("support-static");
   if (loadedState?.requestKey !== requestKey) return dznCommsMessageHistoryLoadingState();
   return loadedState.state;
+}
+
+function useDznCommsSurfaceActivationKey(surfaceKey: CommsSurfaceKey) {
+  const activeSurface = useRef<{ surfaceKey: CommsSurfaceKey; generation: number }>({
+    surfaceKey,
+    generation: 0,
+  });
+
+  if (activeSurface.current.surfaceKey !== surfaceKey) {
+    activeSurface.current = {
+      surfaceKey,
+      generation: activeSurface.current.generation + 1,
+    };
+  }
+
+  return `${activeSurface.current.surfaceKey}:${activeSurface.current.generation}`;
 }
 
 function toCommsMessageFromHistory(message: DznCommsMessageHistoryMessage): CommsMessage {

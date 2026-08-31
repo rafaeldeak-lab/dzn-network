@@ -24,6 +24,12 @@ const RENDERED_QA_ARTIFACT_DIR = "docs/artifacts/dzn-comms-message-history-rende
 const RENDERED_QA_ARTIFACT_README = `${RENDERED_QA_ARTIFACT_DIR}/README.md`;
 const RENDERED_QA_ARTIFACT_JSON = `${RENDERED_QA_ARTIFACT_DIR}/dzn-comms-message-history-rendered-qa.json`;
 const RENDERED_QA_ARTIFACT_HTML = `${RENDERED_QA_ARTIFACT_DIR}/index.html`;
+const BASE_REF = "origin/codex/dzn-comms-message-read-model-local-read-foundation-20260831";
+const SLICE_HEAD_REFS = [
+  "codex/dzn-comms-message-history-ui-integration-approval-preflight-20260831",
+  "origin/codex/dzn-comms-message-history-ui-integration-approval-preflight-20260831",
+  "HEAD",
+] as const;
 
 const DOC_SNIPPETS = [
   "DZN Comms Message-History UI Integration Approval Preflight",
@@ -398,12 +404,54 @@ function assertOrder(source: string, before: string, after: string, message: str
 }
 
 function listChangedFiles(): string[] {
-  const output = execSync("git status --short --untracked-files=all", { encoding: "utf8" });
-  return output
-    .split(/\r?\n/)
-    .map((line) => line.slice(3).trim())
-    .filter(Boolean)
-    .map((path) => path.split(" -> ").at(-1) ?? path);
+  const files = new Set<string>();
+  const sliceHead = resolveSliceHead();
+  const baseline = resolveBaseline(sliceHead);
+
+  addChangedFileLines(files, execGit(`git diff --name-only ${baseline}...${sliceHead}`));
+  addChangedFileLines(files, execGit("git diff --name-only"));
+  addChangedFileLines(files, execGit("git diff --cached --name-only"));
+
+  for (const line of execGit("git status --short --untracked-files=all").split(/\r?\n/)) {
+    const trimmed = line.slice(3).trim();
+    if (trimmed) files.add(trimmed.split(" -> ").at(-1) ?? trimmed);
+  }
+
+  return [...files].sort();
+}
+
+function resolveSliceHead() {
+  for (const ref of SLICE_HEAD_REFS) {
+    const resolved = execGit(`git rev-parse --verify ${ref}`).trim();
+    if (resolved) return ref;
+  }
+
+  return "HEAD";
+}
+
+function resolveBaseline(sliceHead: string) {
+  const base = execGit(`git rev-parse --verify ${BASE_REF}`).trim();
+  if (base) return BASE_REF;
+
+  const parents = execGit(`git rev-list --parents -n 1 ${sliceHead}`)
+    .trim()
+    .split(/\s+/);
+  return parents[1] ?? `${sliceHead}^`;
+}
+
+function addChangedFileLines(files: Set<string>, output: string) {
+  for (const line of output.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed) files.add(trimmed);
+  }
+}
+
+function execGit(command: string) {
+  try {
+    return execSync(command, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch {
+    return "";
+  }
 }
 
 function assertIncludes(source: string, snippet: string, message: string) {

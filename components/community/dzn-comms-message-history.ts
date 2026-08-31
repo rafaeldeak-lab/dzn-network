@@ -232,7 +232,7 @@ export async function loadDznCommsMessageHistory({
     });
 
     const raw = await response.text();
-    if (raw.length > DZN_COMMS_MESSAGE_HISTORY_MAX_PAYLOAD_BYTES) {
+    if (dznCommsMessageHistoryEncodedBytes(raw) > DZN_COMMS_MESSAGE_HISTORY_MAX_PAYLOAD_BYTES) {
       return fallbackState("overlarge-response", response.status);
     }
 
@@ -326,6 +326,10 @@ function validateHistoryMessage(value: unknown): DznCommsMessageHistoryMessage |
       kind: value.presentation.kind as DznCommsMessageHistoryMessage["presentation"]["kind"],
     },
   };
+}
+
+export function dznCommsMessageHistoryEncodedBytes(value: string) {
+  return new TextEncoder().encode(value).byteLength;
 }
 
 function fallbackForStatus(status: number, payload: unknown): DznCommsMessageHistoryUiState {
