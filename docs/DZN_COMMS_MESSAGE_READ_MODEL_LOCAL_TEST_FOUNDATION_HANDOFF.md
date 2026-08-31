@@ -207,3 +207,5 @@ Only report message history as live after a later approved PR is merged, deploye
 The DZN Comms message-history UI integration approval preflight is documented in `docs/DZN_COMMS_MESSAGE_HISTORY_UI_INTEGRATION_APPROVAL_PREFLIGHT.md`.
 
 Next should be the DZN Comms message-history UI integration implementation: wire `/community` to optionally fetch `GET /api/dzn-comms/channels/:channelId/messages` only behind `NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED` plus the disabled-by-default server read flags, keep static fallback as the default and failure path, preserve the disabled composer, and continue blocking chat sending, runtime reactions, report routes, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, analytics/tracking, Store/payment/live checkout changes, production mutations, retained exports, and competitive-system effects.
+
+Implementation follow-up: the DZN Comms Message-History UI Integration Implementation is documented in `docs/DZN_COMMS_MESSAGE_HISTORY_UI_INTEGRATION_IMPLEMENTATION.md`.

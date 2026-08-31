@@ -2290,6 +2290,28 @@ The UI must fall back to the static shell for disabled flags, loading failure, i
 
 No browser storage, read receipts, analytics/tracking, chat sending, reactions, reports, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, Store/payment changes, live checkout, production mutations, retained exports, or competitive-system effects are approved. Live checkout remains disabled and Issue #49 remains reserved for final live payment activation.
 
+## DZN Comms Message-History UI Integration Implementation
+
+The DZN Comms Message-History UI Integration Implementation is documented in `docs/DZN_COMMS_MESSAGE_HISTORY_UI_INTEGRATION_IMPLEMENTATION.md`.
+
+`/community` now has a guarded client-side read path for the approved route:
+
+```text
+GET /api/dzn-comms/channels/:channelId/messages
+```
+
+The client integration is disabled by default through `NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED`. Only an explicit normalized `true` value lets the page attempt same-origin read-only history. The server route remains separately disabled by default through the existing local/test message-read flags, so the client flag alone cannot unlock history.
+
+The implemented channel mapping is `global`, `new_players`, `server_owners`, `events`, and `pandora_squad`. Public-channel reads remain free logged-in player access when all local/test read flags are enabled. Private group denial remains server-owned: the UI does not accept client-submitted identifiers, public handles, billing plans, owner entitlement, display names, or gamertags as membership proof.
+
+Support remains static and does not fetch message history. DZN Assist stays blocked until a separate runtime approval defines source policy, privacy, cost controls, logging, refusal behavior, and rollback.
+
+The UI keeps static fallback for the default disabled flag, support, invalid cursor, login-required, private group denial, disabled/not configured route, unavailable route, timeout, network error, malformed response, or overlarge response. The fetch helper uses same-origin `GET`, credentials, `Accept: application/json`, `cache: "no-store"`, an `AbortController` timeout, a 25-message limit, cursor filtering, and a 128000-byte payload cap. Valid messages are kept only in mounted page state.
+
+No chat sending. No runtime reactions. No report routes. No moderation mutations. No DZN Assist AI runtime. No Durable Objects/WebSockets. No analytics/tracking. No Store/payment/live checkout changes. No production mutations. No retained exports. Issue #49 remains reserved for final live payment activation.
+
+The message-history UI cannot affect billing, owner entitlement, server ownership, scoring, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF, XP awards, calling-card awards, public profile visibility, retained exports, or competitive eligibility.
+
 ## Foundation Acceptance Criteria
 
 The Player vs Owner Access Foundation PR is complete when:
