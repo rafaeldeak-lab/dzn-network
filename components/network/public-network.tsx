@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -434,6 +434,23 @@ type VisualAccentStyle = CSSProperties & {
   "--dzn-profile-accent"?: string;
 };
 
+type SavedServersStatus = "loading" | "ready" | "logged_out" | "error";
+
+type SavedServersContextValue = {
+  savedServerIds: Set<string>;
+  savingServerIds: Set<string>;
+  status: SavedServersStatus;
+  error: string;
+  toggleSavedServer: (linkedServerId: string) => Promise<void>;
+};
+
+type SavedServersPayload = {
+  ok?: boolean;
+  saved_server_ids?: unknown;
+};
+
+const SavedServersContext = createContext<SavedServersContextValue | null>(null);
+
 export function PublicNetwork() {
   const slug = useSyncExternalStore(subscribeToPath, getCurrentSlug, getServerSlugSnapshot);
   const initialCache = loadPublicNetworkCache(slug);
@@ -446,6 +463,10 @@ export function PublicNetwork() {
   const [loadState, setLoadState] = useState<PublicLoadState>(() => initialCache ? "loaded" : "loading_initial");
   const [error, setError] = useState("");
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [savedServerIds, setSavedServerIds] = useState<Set<string>>(() => new Set());
+  const [savingServerIds, setSavingServerIds] = useState<Set<string>>(() => new Set());
+  const [savedServersStatus, setSavedServersStatus] = useState<SavedServersStatus>("loading");
+  const [savedServersError, setSavedServersError] = useState("");
   const visibleDataRef = useRef(Boolean(initialCache));
 
   useEffect(() => {
@@ -565,20 +586,139 @@ export function PublicNetwork() {
     [filter, sortedServers],
   );
   const calculatedStats = useMemo(() => stats ?? buildStats(servers), [stats, servers]);
+  const visibleSavedServerIdsKey = useMemo(() => {
+    const ids = new Set<string>();
+    if (server?.linked_server_id) ids.add(server.linked_server_id);
+    for (const item of servers) {
+      if (item.linked_server_id) ids.add(item.linked_server_id);
+    }
+    return [...ids].sort().join(",");
+  }, [server, servers]);
+
+  useEffect(() => {
+    const ids = visibleSavedServerIdsKey.split(",").filter(Boolean);
+    if (!ids.length) {
+      let active = true;
+      queueMicrotask(() => {
+        if (!active) return;
+        setSavedServerIds(new Set());
+        setSavedServersStatus("ready");
+        setSavedServersError("");
+      });
+      return () => {
+        active = false;
+      };
+    }
+
+    const controller = new AbortController();
+
+    async function loadSavedServers() {
+      try {
+        const response = await fetch(`/api/player/saved-servers?server_ids=${encodeURIComponent(ids.join(","))}`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: { accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        if (response.status === 401) {
+          setSavedServerIds(new Set());
+          setSavedServersStatus("logged_out");
+          setSavedServersError("");
+          return;
+        }
+        if (!response.ok) throw new Error("Saved servers are unavailable right now.");
+
+        const payload = (await response.json().catch(() => null)) as SavedServersPayload | null;
+        const nextSavedIds = Array.isArray(payload?.saved_server_ids)
+          ? payload.saved_server_ids.filter((value): value is string => typeof value === "string")
+          : [];
+        setSavedServerIds(new Set(nextSavedIds));
+        setSavedServersStatus("ready");
+        setSavedServersError("");
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setSavedServersStatus("error");
+        setSavedServersError(error instanceof Error ? error.message : "Saved servers are unavailable right now.");
+      }
+    }
+
+    loadSavedServers();
+    return () => controller.abort();
+  }, [visibleSavedServerIdsKey]);
+
+  const toggleSavedServer = useCallback(async (linkedServerId: string) => {
+    if (!linkedServerId || savingServerIds.has(linkedServerId)) return;
+    if (savedServersStatus === "logged_out") {
+      window.location.href = `/login?returnTo=${encodeURIComponent(currentPageReturnTo("/servers"))}`;
+      return;
+    }
+    if (savedServersStatus !== "ready" && savedServersStatus !== "error") return;
+
+    const currentlySaved = savedServerIds.has(linkedServerId);
+    setSavingServerIds((current) => new Set(current).add(linkedServerId));
+
+    try {
+      const response = await fetch("/api/player/saved-servers", {
+        method: currentlySaved ? "DELETE" : "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ linked_server_id: linkedServerId }),
+      });
+      if (response.status === 401) {
+        setSavedServersStatus("logged_out");
+        setSavedServersError("");
+        return;
+      }
+      if (!response.ok) throw new Error(currentlySaved ? "Could not remove this saved server." : "Could not save this server.");
+
+      setSavedServerIds((current) => {
+        const next = new Set(current);
+        if (currentlySaved) next.delete(linkedServerId);
+        else next.add(linkedServerId);
+        return next;
+      });
+      setSavedServersStatus("ready");
+      setSavedServersError("");
+    } catch (error) {
+      setSavedServersStatus("error");
+      setSavedServersError(error instanceof Error ? error.message : "Saved servers are unavailable right now.");
+    } finally {
+      setSavingServerIds((current) => {
+        const next = new Set(current);
+        next.delete(linkedServerId);
+        return next;
+      });
+    }
+  }, [savedServerIds, savedServersStatus, savingServerIds]);
+
+  const savedServersContext = useMemo<SavedServersContextValue>(() => ({
+    savedServerIds,
+    savingServerIds,
+    status: savedServersStatus,
+    error: savedServersError,
+    toggleSavedServer,
+  }), [savedServerIds, savedServersError, savedServersStatus, savingServerIds, toggleSavedServer]);
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#02030a] text-white">
-      <AnimatedBackground />
-      <div className="relative z-10 flex min-h-screen flex-col">
-        <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-5 py-6 sm:px-6 lg:px-8">
-          {slug ? (
-            <ServerProfileShell server={server} loading={loading} error={error} loadState={loadState} onRetry={() => setReloadNonce((value) => value + 1)} />
-          ) : (
-            <ServerBrowser servers={filteredServers} allServers={servers} groups={serverGroups} stats={calculatedStats} filter={filter} setFilter={setFilter} loading={loading} loadState={loadState} error={error} onRetry={() => setReloadNonce((value) => value + 1)} />
-          )}
+    <SavedServersContext.Provider value={savedServersContext}>
+      <main className="relative min-h-screen overflow-hidden bg-[#02030a] text-white">
+        <AnimatedBackground />
+        <div className="relative z-10 flex min-h-screen flex-col">
+          <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-5 py-6 sm:px-6 lg:px-8">
+            {slug ? (
+              <ServerProfileShell server={server} loading={loading} error={error} loadState={loadState} onRetry={() => setReloadNonce((value) => value + 1)} />
+            ) : (
+              <ServerBrowser servers={filteredServers} allServers={servers} groups={serverGroups} stats={calculatedStats} filter={filter} setFilter={setFilter} loading={loading} loadState={loadState} error={error} onRetry={() => setReloadNonce((value) => value + 1)} />
+            )}
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </SavedServersContext.Provider>
   );
 }
 
@@ -851,16 +991,19 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
           </div>
         ) : null}
 
-        <div className="mt-auto flex items-center justify-between gap-3 border-t border-white/10 pt-3">
+        <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-3">
           <p className="min-w-0 truncate text-[10px] font-bold uppercase text-zinc-500">{formatPublicVisibilitySummary(server.visibilityExplanation?.summary) ?? "Discovery placement"}</p>
-          <Link
-            href={publicServerProfileHref(server.public_slug)}
-            onClick={() => trackPromotionEvent(server.linked_server_id, activePromotionId, "click", trackingSource)}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400"
-          >
-            View
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <SavedServerButton server={server} variant="compact" />
+            <Link
+              href={publicServerProfileHref(server.public_slug)}
+              onClick={() => trackPromotionEvent(server.linked_server_id, activePromotionId, "click", trackingSource)}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400"
+            >
+              View
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
         </div>
       </div>
     </motion.article>
@@ -967,6 +1110,63 @@ function LoginToUnlockBanner({
   );
 }
 
+function SavedServerButton({ server, variant = "card" }: { server: PublicServer; variant?: "card" | "compact" | "profile" }) {
+  const savedServers = useContext(SavedServersContext);
+  if (!savedServers) return null;
+
+  const isSaved = savedServers.savedServerIds.has(server.linked_server_id);
+  const isBusy = savedServers.savingServerIds.has(server.linked_server_id);
+  const isLoading = savedServers.status === "loading";
+  const isLoggedOut = savedServers.status === "logged_out";
+  const isUnavailable = savedServers.status === "error";
+  const label = isLoggedOut
+    ? "Login to Save"
+    : isBusy
+      ? "Saving"
+      : isSaved
+        ? "Saved"
+        : isUnavailable
+          ? "Save Unavailable"
+          : "Save Server";
+  const title = isLoggedOut
+    ? "Log in with Discord to save this server privately."
+    : isSaved
+      ? "Remove this server from your private saved list."
+      : "Save this server to your private player list.";
+  const sizeClass = variant === "profile"
+    ? "min-h-11 px-4 py-2 text-xs"
+    : variant === "compact"
+      ? "px-3 py-2 text-[10px]"
+      : "px-4 py-2 text-xs";
+  const stateClass = isSaved
+    ? "border-cyan-200/60 bg-cyan-300/18 text-cyan-50 shadow-[0_0_18px_rgba(34,211,238,0.16)]"
+    : "border-white/12 bg-white/[0.05] text-zinc-200 hover:border-cyan-200/45 hover:bg-cyan-300/12 hover:text-white";
+  const className = `inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border font-black uppercase transition ${sizeClass} ${stateClass}`;
+
+  if (isLoggedOut) {
+    return (
+      <Link href={`/login?returnTo=${encodeURIComponent(currentPageReturnTo("/servers"))}`} className={className} title={title}>
+        <Star className="h-4 w-4" aria-hidden="true" />
+        {label}
+      </Link>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      aria-pressed={isSaved}
+      disabled={isBusy || isLoading || isUnavailable}
+      onClick={() => savedServers.toggleSavedServer(server.linked_server_id)}
+      className={`${className} disabled:cursor-not-allowed disabled:opacity-55`}
+      title={isUnavailable && savedServers.error ? savedServers.error : title}
+    >
+      <Star className="h-4 w-4" aria-hidden="true" fill={isSaved ? "currentColor" : "none"} />
+      {label}
+    </button>
+  );
+}
+
 function ServerCard({ server, index }: { server: PublicServer; index: number }) {
   const tags = parseTags(server.tags_json);
   const scoreTitle = scoreBreakdownTitle(server.score_breakdown);
@@ -1040,12 +1240,15 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
           {tags.length ? tags.map((tag) => <span key={tag} className="rounded-md border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-bold text-cyan-100">{tag}</span>) : <span className="text-sm text-zinc-500">No tags listed</span>}
         </div>
 
-        <div className="mt-6 flex items-center justify-between border-t border-white/10 pt-4">
+        <div className="mt-6 flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs font-bold uppercase text-zinc-500">{publicCardFooter(server)}</p>
-          <Link href={publicServerProfileHref(server.public_slug)} className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.3)] transition hover:bg-violet-400">
-            View Server
-            <ArrowRight className="h-4 w-4" />
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <SavedServerButton server={server} />
+            <Link href={publicServerProfileHref(server.public_slug)} className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.3)] transition hover:bg-violet-400">
+              View Server
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
         </div>
       </div>
     </motion.article>
@@ -1374,10 +1577,13 @@ function ServerProfile({ server }: { server: PublicServer }) {
   return (
     <div className="relative pb-12 pt-6">
       <div className="pointer-events-none absolute inset-x-[-12vw] top-10 -z-10 h-[520px] bg-[radial-gradient(circle_at_18%_18%,rgba(139,92,246,0.28),transparent_34%),radial-gradient(circle_at_88%_12%,rgba(34,211,238,0.16),transparent_28%)] blur-2xl" />
-      <Link href="/servers" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white">
-        <ArrowLeft className="h-4 w-4" />
-        Back to servers
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link href="/servers" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white">
+          <ArrowLeft className="h-4 w-4" />
+          Back to servers
+        </Link>
+        <SavedServerButton server={server} variant="profile" />
+      </div>
 
       <motion.header initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.42 }} className={`relative mt-5 overflow-hidden rounded-xl border border-white/10 bg-[#050815]/78 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl ${visualCardStyle !== "standard" ? `dzn-profile-header--visual-${visualCardStyle}` : ""}`} style={profileAccentStyle}>
         <ServerThemeBanner theme={server.themeBanner} overlay />
@@ -1893,6 +2099,11 @@ function getSlugFromPath(pathname: string) {
   const parts = pathname.split("/").filter(Boolean);
   if (parts[0] === "servers" && parts[1] === "profile") return null;
   return parts[0] === "servers" && parts[1] ? decodeURIComponent(parts[1]) : null;
+}
+
+function currentPageReturnTo(fallback: string) {
+  if (typeof window === "undefined") return fallback;
+  return `${window.location.pathname}${window.location.search}`;
 }
 
 function GlassPanel({ title, icon: Icon, children }: { title: string; icon: typeof Activity; children: React.ReactNode }) {
