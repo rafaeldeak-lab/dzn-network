@@ -244,3 +244,15 @@ The follow-on Account Purchases UI shell is delivered separately in `docs/DZN_ST
 Next should be Store private Supporter Card reveal approval preflight only if deliberately approved: define the exact private reveal contract, serial/art redaction boundaries, account ownership proof, visibility controls, screenshot/export rules, audit requirements, rollback path, and security proof before any card reveal route, card-art generation, public reveal, sharing controls, notifications, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change is implemented.
 
 The personal player page/nav button remains a separate player UX slice.
+
+## Follow-On Delivered
+
+The Store private Supporter Card reveal approval preflight is now delivered in `docs/DZN_STORE_SUPPORTER_CARD_REVEAL_APPROVAL_PREFLIGHT.md`.
+
+It defines a future private current-user reveal contract only. This read-model implementation still returns Supporter Card status only and keeps `private_reveal_available: false`, `public_reveal_available: false`, and `reveal_blocked_reason: "supporter_card_reveal_requires_future_approved_slice"` until a later implementation is deliberately approved.
+
+## Next Recommended Slice
+
+Next should be Store private Supporter Card reveal implementation only if deliberately approved: add a disabled-by-default local/test private route and private `/account/purchases` reveal UI panel from the preflight, proving current-account ownership before showing a Supporter Card serial/status and keeping card-art generation, public reveal, sharing controls, screenshot/export controls, notifications, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 writes, and issue #49 blocked.
+
+The personal player page/nav button remains a separate player UX slice.

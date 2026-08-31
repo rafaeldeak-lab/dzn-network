@@ -360,3 +360,7 @@ The Store private Account Purchases UI shell is now delivered separately in `doc
 That follow-on slice adds `GET /api/account/purchases` behind `DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_ENABLED=false` by default. It is authenticated, private/no-store, current-user scoped, sanitized, local/test sandbox only, and read-only.
 
 The follow-on implementation still adds no public Supporter Card reveal, no private Supporter Card reveal component, no webhook replay route, no manual-review route, no refund/dispute operator route, no notifications, no production migration apply, no live checkout activation, no earned-spin ledger, no reward wheel runtime, no Stripe mutation, no Cloudflare config mutation, no production D1 write, and no issue #49 change.
+
+The Store private Supporter Card reveal approval preflight is now delivered in `docs/DZN_STORE_SUPPORTER_CARD_REVEAL_APPROVAL_PREFLIGHT.md`.
+
+That follow-on preflight defines the private reveal contract, serial/art redaction boundaries, account ownership proof, visibility controls, screenshot/export rules, audit requirements, rollback path, and security proof. It adds no card reveal route, private reveal component, public reveal, card-art generation, sharing controls, screenshot/export controls, notifications, migrations, production D1 apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
