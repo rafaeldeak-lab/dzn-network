@@ -3228,7 +3228,7 @@ button.dzn-header-action {
   }
 }
 
-@media (max-width: 1020px) {
+@media (max-width: 1400px) {
   .dzn-header-nav {
     flex-wrap: wrap;
     align-items: center;
