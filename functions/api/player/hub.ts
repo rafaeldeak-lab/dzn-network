@@ -15,6 +15,23 @@ type PlayerHubCommunityRow = {
   is_owner: number | null;
 };
 
+type PlayerHubCommunityMembershipRow = {
+  guild_id: string;
+  name: string;
+  icon_url: string | null;
+  relationship: "member" | "administrator" | "owner" | null;
+  last_seen_at: string | null;
+};
+
+type PlayerHubCommunityMatch = {
+  guild_id: string;
+  name: string;
+  icon_url: string | null;
+  relationship: "member" | "administrator" | "owner" | "matched";
+  relationship_label: string;
+  match_keys: string[];
+};
+
 type PlayerHubCommunityServerRow = {
   linked_server_id: string;
   discord_guild_id: string | null;
@@ -125,7 +142,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       },
       fairness_boundary: [
         "Saved servers are private player preferences only.",
-        "Matched communities are read-only cached Discord context.",
+        "Matched communities are private player Discord membership context.",
         "Player Hub surfacing cannot alter billing, server ownership, rankings, discovery, reviews, events, scoring, progression, or competitive eligibility.",
       ],
     },
@@ -164,33 +181,32 @@ async function readSafeSavedServers(env: Env, userId: string) {
 async function readMatchedCommunities(env: Env, userId: string) {
   try {
     const db = requireDb(env);
-    const guildRows = await db
-      .prepare(
-        `SELECT id, guild_id, name, icon_url, permissions, is_owner
-         FROM discord_guilds
-         WHERE owner_user_id = ?
-         ORDER BY name ASC
-         LIMIT ?`,
-      )
-      .bind(userId, MAX_MATCHED_COMMUNITIES)
-      .all<PlayerHubCommunityRow>();
+    const membershipRows = await readPlayerCommunityMembershipRows(db, userId).catch(() => null);
+    const managedGuildRows = await readManagedDiscordGuildRows(db, userId);
+    const guilds = mergeCommunityMatches(membershipRows ?? [], managedGuildRows);
+    const source = membershipRows?.length
+      ? "player_discord_community_memberships"
+      : managedGuildRows.length
+        ? "cached_discord_manageable_guilds"
+        : membershipRows
+          ? "player_discord_community_memberships"
+          : "cached_discord_manageable_guilds";
 
-    const guilds = (guildRows.results ?? []).filter((guild) => Boolean(guild.id && guild.guild_id));
     if (!guilds.length) {
-      return { communities: [], source: "cached_discord_manageable_guilds" as const };
+      return { communities: [], source };
     }
 
-    const dbGuildIds = [...new Set(guilds.map((guild) => guild.id).filter(Boolean))];
     const discordGuildIds = [...new Set(guilds.map((guild) => guild.guild_id).filter(Boolean))];
+    const internalGuildIds = [...new Set(guilds.flatMap((guild) => guild.match_keys).filter((key) => !discordGuildIds.includes(key)))];
     const matchClauses: string[] = [];
     const bindings: unknown[] = [];
-    if (dbGuildIds.length) {
-      matchClauses.push(`linked_servers.discord_guild_id IN (${dbGuildIds.map(() => "?").join(", ")})`);
-      bindings.push(...dbGuildIds);
-    }
     if (discordGuildIds.length) {
       matchClauses.push(`linked_servers.guild_id IN (${discordGuildIds.map(() => "?").join(", ")})`);
       bindings.push(...discordGuildIds);
+    }
+    if (internalGuildIds.length) {
+      matchClauses.push(`linked_servers.discord_guild_id IN (${internalGuildIds.map(() => "?").join(", ")})`);
+      bindings.push(...internalGuildIds);
     }
 
     const serverRows = matchClauses.length
@@ -218,28 +234,131 @@ async function readMatchedCommunities(env: Env, userId: string) {
       : { results: [] as PlayerHubCommunityServerRow[] };
 
     const serverRowsByCommunity = groupCommunityServerRows(serverRows.results ?? []);
-    const communities = guilds.map((guild) => {
-      const matchedServers = uniqueCommunityServers([
-        ...(serverRowsByCommunity.get(guild.id) ?? []),
-        ...(serverRowsByCommunity.get(guild.guild_id) ?? []),
-      ]).slice(0, MAX_COMMUNITY_SERVER_PREVIEWS);
-      const owner = Number(guild.is_owner ?? 0) === 1;
-      const administrator = canManageDiscordGuild({ owner, permissions: guild.permissions ?? "0" });
-      return {
-        guild_id: guild.guild_id,
-        name: guild.name || "Discord Community",
-        icon_url: guild.icon_url,
-        relationship: owner ? "owner" : administrator ? "administrator" : "matched",
-        relationship_label: owner ? "Owner" : administrator ? "Admin" : "Matched",
-        public_server_count: matchedServers.length,
-        matched_servers: matchedServers,
-      };
-    });
+    const communities = guilds
+      .map((guild) => {
+        const matchedServers = uniqueCommunityServers(guild.match_keys.flatMap((key) => serverRowsByCommunity.get(key) ?? []))
+          .slice(0, MAX_COMMUNITY_SERVER_PREVIEWS);
+        return {
+          guild_id: guild.guild_id,
+          name: guild.name || "Discord Community",
+          icon_url: guild.icon_url,
+          relationship: guild.relationship,
+          relationship_label: guild.relationship_label,
+          public_server_count: matchedServers.length,
+          matched_servers: matchedServers,
+        };
+      })
+      .filter((community) => community.public_server_count > 0);
 
-    return { communities, source: "cached_discord_manageable_guilds" as const };
+    return { communities, source };
   } catch {
     return { communities: [], source: "unavailable" as const };
   }
+}
+
+async function readPlayerCommunityMembershipRows(db: D1Database, userId: string) {
+  const result = await db
+    .prepare(
+      `SELECT
+        guild_id,
+        guild_name AS name,
+        guild_icon_url AS icon_url,
+        relationship,
+        last_seen_at
+       FROM player_discord_community_memberships
+       WHERE user_id = ?
+         AND revoked_at IS NULL
+       ORDER BY CASE relationship
+         WHEN 'owner' THEN 0
+         WHEN 'administrator' THEN 1
+         WHEN 'member' THEN 2
+         ELSE 3
+       END, lower(guild_name) ASC
+       LIMIT ?`,
+    )
+    .bind(userId, MAX_MATCHED_COMMUNITIES)
+    .all<PlayerHubCommunityMembershipRow>();
+
+  return (result.results ?? []).filter((row) => Boolean(row.guild_id && row.name));
+}
+
+async function readManagedDiscordGuildRows(db: D1Database, userId: string) {
+  const guildRows = await db
+    .prepare(
+      `SELECT id, guild_id, name, icon_url, permissions, is_owner
+       FROM discord_guilds
+       WHERE owner_user_id = ?
+       ORDER BY name ASC
+       LIMIT ?`,
+    )
+    .bind(userId, MAX_MATCHED_COMMUNITIES)
+    .all<PlayerHubCommunityRow>();
+
+  return (guildRows.results ?? []).filter((guild) => Boolean(guild.id && guild.guild_id));
+}
+
+function mergeCommunityMatches(memberships: PlayerHubCommunityMembershipRow[], managedGuilds: PlayerHubCommunityRow[]) {
+  const matches = new Map<string, PlayerHubCommunityMatch>();
+
+  for (const membership of memberships) {
+    const relationship = normalizeCommunityRelationship(membership.relationship);
+    matches.set(membership.guild_id, {
+      guild_id: membership.guild_id,
+      name: membership.name || "Discord Community",
+      icon_url: membership.icon_url,
+      relationship,
+      relationship_label: communityRelationshipLabel(relationship),
+      match_keys: [membership.guild_id],
+    });
+  }
+
+  for (const guild of managedGuilds) {
+    const owner = Number(guild.is_owner ?? 0) === 1;
+    const relationship = owner
+      ? "owner"
+      : canManageDiscordGuild({ owner, permissions: guild.permissions ?? "0" })
+        ? "administrator"
+        : "matched";
+    const existing = matches.get(guild.guild_id);
+    if (existing) {
+      existing.match_keys = [...new Set([...existing.match_keys, guild.guild_id, guild.id].filter(Boolean))];
+      if (relationshipPriority(relationship) < relationshipPriority(existing.relationship)) {
+        existing.relationship = relationship;
+        existing.relationship_label = communityRelationshipLabel(relationship);
+      }
+      if (!existing.icon_url && guild.icon_url) existing.icon_url = guild.icon_url;
+      continue;
+    }
+
+    matches.set(guild.guild_id, {
+      guild_id: guild.guild_id,
+      name: guild.name || "Discord Community",
+      icon_url: guild.icon_url,
+      relationship,
+      relationship_label: communityRelationshipLabel(relationship),
+      match_keys: [...new Set([guild.guild_id, guild.id].filter(Boolean))],
+    });
+  }
+
+  return [...matches.values()].slice(0, MAX_MATCHED_COMMUNITIES);
+}
+
+function normalizeCommunityRelationship(value: PlayerHubCommunityMembershipRow["relationship"]) {
+  return value === "owner" || value === "administrator" || value === "member" ? value : "member";
+}
+
+function communityRelationshipLabel(value: PlayerHubCommunityMatch["relationship"]) {
+  if (value === "owner") return "Owner";
+  if (value === "administrator") return "Admin";
+  if (value === "member") return "Member";
+  return "Matched";
+}
+
+function relationshipPriority(value: PlayerHubCommunityMatch["relationship"]) {
+  if (value === "owner") return 0;
+  if (value === "administrator") return 1;
+  if (value === "member") return 2;
+  return 3;
 }
 
 function groupCommunityServerRows(rows: PlayerHubCommunityServerRow[]) {
