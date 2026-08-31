@@ -101,11 +101,13 @@ type PlayerHubCommunity = {
   guild_id: string;
   name: string;
   icon_url: string | null;
-  relationship: "member" | "owner" | "administrator" | "matched";
+  relationship: PlayerHubCommunityRelationship;
   relationship_label: string;
   public_server_count: number;
   matched_servers: PlayerHubCommunityServer[];
 };
+
+type PlayerHubCommunityRelationship = "member" | "owner" | "administrator" | "matched";
 
 type PlayerHubEvent = {
   id: string;
@@ -528,54 +530,84 @@ function FollowedServersPanel({ servers, source }: { servers: PlayerHubSavedServ
 }
 
 function MatchedCommunitiesPanel({ communities, source }: { communities: PlayerHubCommunity[]; source: PlayerHubPayload["sources"]["matched_communities"] }) {
+  const summary = summarizeCommunityMatches(communities);
+
   return (
-    <section className="rounded-lg border border-violet-300/24 bg-slate-950/78 p-5 backdrop-blur">
+    <section className="rounded-lg border border-violet-300/24 bg-slate-950/78 p-5 shadow-[0_0_36px_rgba(168,85,247,0.1)] backdrop-blur">
       <PanelHeader
         title="Matched Communities"
-        body="Private Discord membership matches connected to public DZN server profiles."
+        body="Private Discord membership matches connected to public DZN server profiles. Presentation only."
         icon={<Users aria-hidden="true" className="h-5 w-5" />}
         tone="violet"
       />
       {source === "unavailable" ? <InlineNotice text="Discord community matching is not available in this environment yet." /> : null}
       {communities.length ? (
-        <ul className="mt-4 divide-y divide-white/10">
-          {communities.map((community) => (
-            <li key={community.guild_id} className="py-3 first:pt-0 last:pb-0">
-              <span className="flex items-start justify-between gap-3">
-                <span>
-                  <span className="block text-sm font-black text-white">{community.name}</span>
-                  <span className="mt-1 block text-xs font-semibold uppercase text-violet-100">{community.relationship_label} match</span>
-                </span>
-                <span className="rounded-md border border-violet-300/30 bg-violet-300/10 px-2 py-1 text-xs font-black uppercase text-violet-100">
-                  {community.public_server_count}
-                </span>
-              </span>
-              {community.matched_servers.length ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {community.matched_servers.map((server) => (
-                    <Link
-                      key={server.linked_server_id}
-                      href={`/servers/profile?slug=${encodeURIComponent(server.public_slug)}`}
-                      className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/6 px-2.5 py-1.5 text-xs font-bold text-slate-200 transition hover:border-violet-200/45 hover:text-white"
-                    >
-                      {server.server_name}
-                      <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
-                    </Link>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-3 text-sm font-semibold leading-6 text-slate-400">No public DZN server profile matched this private Discord community yet.</p>
-              )}
-            </li>
-          ))}
-        </ul>
+        <>
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <CommunityMetricTile label="Matched" value={String(summary.totalCommunities)} />
+            <CommunityMetricTile label="Public Servers" value={String(summary.publicServers)} />
+            <CommunityMetricTile label="Owner/Admin" value={String(summary.owners + summary.administrators)} />
+          </div>
+          <div className="mt-3 grid gap-2 text-xs font-black uppercase text-slate-300 sm:grid-cols-3">
+            <span className="rounded-md border border-cyan-300/20 bg-cyan-300/8 px-3 py-2 text-cyan-100">Private To You</span>
+            <span className="rounded-md border border-violet-300/20 bg-violet-300/8 px-3 py-2 text-violet-100">Presentation Only</span>
+            <span className="rounded-md border border-amber-300/20 bg-amber-300/8 px-3 py-2 text-amber-100">Not Owner Access</span>
+          </div>
+          <ul className="mt-4 space-y-3">
+            {communities.map((community) => {
+              const iconUrl = safeDiscordIconUrl(community.icon_url);
+              return (
+                <li key={community.guild_id} className={`rounded-md border p-3 ${communityToneClasses(community.relationship)}`}>
+                  <span className="flex items-start justify-between gap-3">
+                    <span className="flex min-w-0 items-start gap-3">
+                      <span className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/15 bg-white/8 text-sm font-black uppercase text-white">
+                        {iconUrl ? (
+                          <span className="h-full w-full bg-cover bg-center" style={{ backgroundImage: `url(${iconUrl})` }} aria-hidden="true" />
+                        ) : (
+                          initialsFromName(community.name)
+                        )}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-black text-white">{community.name}</span>
+                        <span className="mt-1 flex flex-wrap items-center gap-2 text-xs font-black uppercase">
+                          <span className="inline-flex items-center gap-1.5 rounded-md border border-white/15 bg-white/8 px-2 py-1 text-white">
+                            {communityRelationshipIcon(community.relationship)}
+                            {community.relationship_label}
+                          </span>
+                          <span className="rounded-md border border-violet-200/20 bg-violet-300/10 px-2 py-1 text-violet-100">Private Match</span>
+                        </span>
+                        <span className="mt-2 block text-sm font-semibold leading-6 text-slate-300">{communityRelationshipCopy(community.relationship)}</span>
+                      </span>
+                    </span>
+                    <span className="shrink-0 rounded-md border border-violet-300/30 bg-violet-300/10 px-2 py-1 text-center text-xs font-black uppercase text-violet-100">
+                      {community.public_server_count}
+                      <span className="block text-[10px] text-slate-400">public</span>
+                    </span>
+                  </span>
+                  {community.matched_servers.length ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {community.matched_servers.map((server) => (
+                        <Link
+                          key={server.linked_server_id}
+                          href={`/servers/profile?slug=${encodeURIComponent(server.public_slug)}`}
+                          className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/6 px-2.5 py-1.5 text-xs font-bold text-slate-200 transition hover:border-violet-200/45 hover:text-white"
+                        >
+                          <span className="max-w-[13rem] truncate">{server.server_name}</span>
+                          <span className="text-slate-500">{server.platform ?? "DZN"}</span>
+                          <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
+                        </Link>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm font-semibold leading-6 text-slate-400">No public DZN server profile is visible for this private match.</p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </>
       ) : (
-        <EmptyList
-          title="No community matches yet"
-          body="DZN will show private Discord membership matches here when they connect to public DZN server profiles."
-          href="/servers"
-          action="View Server Network"
-        />
+        <CommunityMatchEmptyState source={source} />
       )}
     </section>
   );
@@ -737,6 +769,48 @@ function EmptyList({ title, body, href, action }: { title: string; body: string;
   );
 }
 
+function CommunityMatchEmptyState({ source }: { source: PlayerHubPayload["sources"]["matched_communities"] }) {
+  if (source === "unavailable") {
+    return (
+      <EmptyList
+        title="Community matching offline"
+        body="The Player Hub keeps this panel private and read-only when matching data is unavailable. No owner, billing, profile, or competitive data is changed."
+        href="/servers"
+        action="View Server Network"
+      />
+    );
+  }
+
+  if (source === "cached_discord_manageable_guilds") {
+    return (
+      <EmptyList
+        title="No public DZN matches yet"
+        body="DZN checked the older manageable-guild cache and only shows communities when they connect to public server profiles. Your raw Discord guild list is not exposed."
+        href="/servers"
+        action="View Server Network"
+      />
+    );
+  }
+
+  return (
+    <EmptyList
+      title="No public DZN matches yet"
+      body="DZN only shows private Discord memberships here after they match public DZN server profiles. Hidden, unmatched, and other-user communities stay private."
+      href="/servers"
+      action="View Server Network"
+    />
+  );
+}
+
+function CommunityMetricTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-violet-300/18 bg-violet-300/8 px-3 py-2">
+      <p className="text-lg font-black text-white">{value}</p>
+      <p className="mt-0.5 text-[10px] font-black uppercase text-violet-100">{label}</p>
+    </div>
+  );
+}
+
 function MetricTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border border-white/10 bg-white/6 p-3">
@@ -760,6 +834,60 @@ function toneClasses(tone: PlayerActionCard["tone"]) {
   if (tone === "amber") return "border-amber-300/24 hover:border-amber-200/55";
   if (tone === "emerald") return "border-emerald-300/24 hover:border-emerald-200/55";
   return "border-cyan-300/24 hover:border-cyan-200/55";
+}
+
+function summarizeCommunityMatches(communities: PlayerHubCommunity[]) {
+  return communities.reduce(
+    (summary, community) => {
+      summary.totalCommunities += 1;
+      summary.publicServers += community.public_server_count;
+      if (community.relationship === "owner") summary.owners += 1;
+      if (community.relationship === "administrator") summary.administrators += 1;
+      if (community.relationship === "member") summary.members += 1;
+      return summary;
+    },
+    { totalCommunities: 0, publicServers: 0, members: 0, administrators: 0, owners: 0 },
+  );
+}
+
+function communityToneClasses(relationship: PlayerHubCommunityRelationship) {
+  if (relationship === "owner") return "border-amber-300/30 bg-amber-300/8 shadow-[inset_0_0_24px_rgba(251,191,36,0.05)]";
+  if (relationship === "administrator") return "border-cyan-300/30 bg-cyan-300/8 shadow-[inset_0_0_24px_rgba(34,211,238,0.05)]";
+  if (relationship === "member") return "border-violet-300/30 bg-violet-300/8 shadow-[inset_0_0_24px_rgba(168,85,247,0.05)]";
+  return "border-white/12 bg-white/6";
+}
+
+function communityRelationshipIcon(relationship: PlayerHubCommunityRelationship) {
+  if (relationship === "owner") return <Crown aria-hidden="true" className="h-3.5 w-3.5 text-amber-100" />;
+  if (relationship === "administrator") return <ShieldCheck aria-hidden="true" className="h-3.5 w-3.5 text-cyan-100" />;
+  if (relationship === "member") return <UserRound aria-hidden="true" className="h-3.5 w-3.5 text-violet-100" />;
+  return <Users aria-hidden="true" className="h-3.5 w-3.5 text-slate-200" />;
+}
+
+function communityRelationshipCopy(relationship: PlayerHubCommunityRelationship) {
+  if (relationship === "owner") return "Your Discord account owns this community, but setup still stays behind pricing and entitlement checks.";
+  if (relationship === "administrator") return "Your Discord account can manage this community, but this match does not unlock owner tools.";
+  if (relationship === "member") return "You are a normal member of this Discord community, matched privately to public DZN servers.";
+  return "Matched from safe cached Discord context and shown only inside your private Player Hub.";
+}
+
+function initialsFromName(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("") || "D";
+}
+
+function safeDiscordIconUrl(value: string | null) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "cdn.discordapp.com" ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 function hubMetric(value: number | undefined, state: PlayerHubState) {
