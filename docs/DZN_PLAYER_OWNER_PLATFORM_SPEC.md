@@ -75,6 +75,20 @@ The Player Hub should become the free logged-in player home:
 
 The Player Hub must stay player-side and cannot unlock owner setup without going through `/pricing` and entitlement gates.
 
+### Player Hub Real-Data Foundation
+
+The first real-data Player Hub slice adds a private read-only `/api/player/hub` model and hydrates `/player` from it:
+
+- `saved_servers`: current user's private rows from `player_saved_servers`, joined only to public-safe server display fields.
+- `matched_communities`: cached Discord guild context for the current user, matched to public DZN server profiles where the existing OAuth/cache model supports it.
+- `suggested_events`: public live/upcoming/registration event and tournament rows from `competitive_events`, without reading or applying paid-plan event access.
+- `profile_entries`: private `/player` and `/player/profile` entry points for current and future profile/progression controls.
+- `owner_setup`: a pricing-only CTA to `/pricing?intent=owner_setup&returnTo=%2Fsetup`.
+
+The current Discord guild cache stores manageable/admin guild context from the Discord OAuth flow. Broader ordinary-member community matching needs a later data-model slice before it can truthfully show non-admin memberships.
+
+The Player Hub read model is `GET` only, returns private no-store responses, and must not write or alter billing, owner entitlement, Nitrado, server ownership, reviews, public discovery, rankings, badges, seasons, Server Wars, CTF scoring, XP awards, calling-card awards, event outcomes, or competitive eligibility.
+
 ## Reviews Roadmap
 
 Reviews are free logged-in player actions:
@@ -161,7 +175,8 @@ Completed or active foundation slices:
 - Dedicated pricing page: full payment content moved away from the homepage.
 - Player navigation access polish: `/player`, `/player/profile`, and logged-in Player Hub navigation.
 - Saved/followed server interaction foundation: private player saved-server actions behind `player_saved_servers`.
+- Player Hub real-data foundation: private read-only hub payload plus `/player` panels for followed/saved servers, matched cached Discord communities, public event/tournament suggestions, and profile entry points while keeping owner setup behind `/pricing` and entitlement gates.
 
-Next recommended product slice after saved/followed servers:
+Next recommended product slice after Player Hub real data:
 
-- Player Hub real-data foundation: show matched Discord communities, followed/saved servers, suggested events/tournaments, and profile entry points for logged-in players while keeping owner setup behind `/pricing` and entitlement gates.
+- Broader player-community matching model: add a trusted, privacy-aware ordinary-member community bridge so non-admin Discord memberships can appear in Player Hub without exposing hidden players, bypassing opt-in public profile controls, or affecting owner workflows and competitive systems.
