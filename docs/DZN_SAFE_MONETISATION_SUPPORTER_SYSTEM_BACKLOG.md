@@ -431,7 +431,15 @@ The future private reveal must be authenticated, current-user scoped, private/no
 
 This delivered preflight adds no card reveal route, private reveal component, public reveal, card-art generation, sharing controls, screenshot/export controls, notifications, migrations, production D1 apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe Product/Price/customer/refund/dispute/webhook endpoint mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
 
-The next Store payment step should be Store private Supporter Card reveal implementation only if deliberately approved.
+## DZN Store Supporter Card Private Reveal Implementation
+
+Delivered in `docs/DZN_STORE_SUPPORTER_CARD_REVEAL_IMPLEMENTATION.md`.
+
+This slice adds the disabled-by-default local/test private `GET /api/account/supporter-cards/[cardRef]/reveal` route and private `/account/purchases` reveal panel. It can show the owning account's Supporter Card serial/status only after current-account ownership proof across Store order, order item, account entitlement, and Supporter Card ledgers.
+
+It still adds no generated card art, public Supporter Card reveal, sharing controls, screenshot/export controls, notifications, migrations, production D1 apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe Product/Price/customer/refund/dispute/webhook endpoint mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
+
+The next Store payment step should be the Store private Supporter Card reveal visual polish and manual QA slice only if deliberately approved.
 
 ## Implementation Boundary
 

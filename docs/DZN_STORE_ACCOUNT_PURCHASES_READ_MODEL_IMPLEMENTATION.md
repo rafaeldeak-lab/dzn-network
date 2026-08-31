@@ -9,6 +9,7 @@ It adds:
 - `GET /api/account/purchases`
 - `functions/_lib/dzn-store-account-purchases.ts`
 - `DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_ENABLED` as a runtime-only feature flag read from the request environment
+- `DZN_SUPPORTER_CARD_PRIVATE_REVEAL_ENABLED` as a runtime-only feature flag that lets the read model advertise private reveal availability without returning serials
 - A focused implementation test in `scripts/test-dzn-store-account-purchases-read-model.ts`
 
 The route is disabled by default. It returns no customer data unless all of these are true:
@@ -97,7 +98,7 @@ Successful response:
 - `cache: "no-store"`
 - `scope: "current_user"`
 - `route: "/api/account/purchases"`
-- `schema_version: "2026-08-29.store-account-purchases-read-model-v1"`
+- `schema_version: "2026-08-31.store-account-purchases-read-model-v2"`
 - `purchases`
 - `entitlements`
 - `supporter_cards`
@@ -117,6 +118,7 @@ The route may return:
 - Fulfilment attempt status.
 - Entitlement status.
 - Private Supporter Card status only.
+- The read model v2 can advertise `private_reveal_available: true` when the later approved private reveal flag is enabled, but it still does not return Supporter Card serial numbers.
 - Display-safe status history reason codes.
 - Refund/dispute local decision summaries.
 
@@ -239,20 +241,18 @@ Required validation for this slice:
 
 The follow-on Account Purchases UI shell is delivered separately in `docs/DZN_STORE_ACCOUNT_PURCHASES_UI_SHELL.md`. It adds `/account/purchases` as an authenticated private read-only page that consumes only `GET /api/account/purchases`, keeps Supporter Card reveal blocked, and adds no webhook replay route, manual-review route, refund/dispute operator route, notifications, production migration apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
 
-## Next Recommended Slice
-
-Next should be Store private Supporter Card reveal approval preflight only if deliberately approved: define the exact private reveal contract, serial/art redaction boundaries, account ownership proof, visibility controls, screenshot/export rules, audit requirements, rollback path, and security proof before any card reveal route, card-art generation, public reveal, sharing controls, notifications, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change is implemented.
-
-The personal player page/nav button remains a separate player UX slice.
-
-## Follow-On Delivered
-
 The Store private Supporter Card reveal approval preflight is now delivered in `docs/DZN_STORE_SUPPORTER_CARD_REVEAL_APPROVAL_PREFLIGHT.md`.
 
-It defines a future private current-user reveal contract only. This read-model implementation still returns Supporter Card status only and keeps `private_reveal_available: false`, `public_reveal_available: false`, and `reveal_blocked_reason: "supporter_card_reveal_requires_future_approved_slice"` until a later implementation is deliberately approved.
+It defines a future private current-user reveal contract only. The follow-on private reveal implementation is now delivered separately in `docs/DZN_STORE_SUPPORTER_CARD_REVEAL_IMPLEMENTATION.md`.
+
+The read model is now v2. It can advertise `private_reveal_available: true` for an owned active/hidden Supporter Card when `DZN_SUPPORTER_CARD_PRIVATE_REVEAL_ENABLED=true`, but it still does not return Supporter Card serial numbers or generated card art.
+
+The Store private Supporter Card reveal implementation is now delivered separately in `docs/DZN_STORE_SUPPORTER_CARD_REVEAL_IMPLEMENTATION.md`.
+
+It adds `GET /api/account/supporter-cards/[cardRef]/reveal` and a private `/account/purchases` reveal panel that can display the Supporter Card serial/status only after current-account ownership proof. It still adds no generated card art, public Supporter Card reveal, sharing controls, screenshot/export controls, notifications, migrations, production D1 apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
 
 ## Next Recommended Slice
 
-Next should be Store private Supporter Card reveal implementation only if deliberately approved: add a disabled-by-default local/test private route and private `/account/purchases` reveal UI panel from the preflight, proving current-account ownership before showing a Supporter Card serial/status and keeping card-art generation, public reveal, sharing controls, screenshot/export controls, notifications, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 writes, and issue #49 blocked.
+Next should be the Store private Supporter Card reveal visual polish and manual QA slice only if deliberately approved: refine the private `/account/purchases` reveal panel styling/states and run rendered local QA for disabled, no purchases, revealable, unavailable, and cross-account-denied states. It should still add no card-art generation, public reveal, sharing controls, screenshot/export controls, notifications, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 writes, or issue #49 changes.
 
 The personal player page/nav button remains a separate player UX slice.

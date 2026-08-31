@@ -1,4 +1,4 @@
-import { readDznStoreCatalogFlags } from "./dzn-store-catalog";
+import { DZN_FOUNDING_SUPPORTER_PRODUCT_KEY, readDznStoreCatalogFlags } from "./dzn-store-catalog";
 import {
   readDznStoreSandboxRuntime,
   sandboxLedgerScopeForRuntime,
@@ -9,7 +9,8 @@ import type { Env, SessionUser } from "./types";
 
 export const DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_ROUTE = "/api/account/purchases";
 export const DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_FLAG = "DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_ENABLED";
-export const DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_SCHEMA_VERSION = "2026-08-29.store-account-purchases-read-model-v1";
+export const DZN_SUPPORTER_CARD_PRIVATE_REVEAL_FLAG = "DZN_SUPPORTER_CARD_PRIVATE_REVEAL_ENABLED";
+export const DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_SCHEMA_VERSION = "2026-08-31.store-account-purchases-read-model-v2";
 
 const MAX_PURCHASE_ROWS = 50;
 const MAX_AUDIT_ROWS = 200;
@@ -135,9 +136,9 @@ export type DznStoreSupporterCardStatus = {
   issued_at: string | null;
   suspended_at: string | null;
   revoked_at: string | null;
-  private_reveal_available: false;
+  private_reveal_available: boolean;
   public_reveal_available: false;
-  reveal_blocked_reason: "supporter_card_reveal_requires_future_approved_slice";
+  reveal_blocked_reason: "supporter_card_private_reveal_disabled" | "supporter_card_not_privately_viewable" | null;
 };
 
 export type DznStorePaymentReceiptSummary =
@@ -184,6 +185,7 @@ export type DznStoreAccountPurchasesSafety = {
   read_only: true;
   sanitized_ledgers_only: true;
   current_user_only: true;
+  private_supporter_card_reveal: boolean;
   public_supporter_card_reveal: false;
   webhook_replay_route: false;
   manual_review_route: false;
@@ -364,6 +366,23 @@ export function canReadDznStoreAccountPurchasesReadModel(env: Env | EnvRecord = 
   };
 }
 
+export function canReadDznStorePrivateSupporterCardReveal(env: Env | EnvRecord = {}): DznStoreAccountPurchasesReadModelAccess {
+  const readModelAccess = canReadDznStoreAccountPurchasesReadModel(env);
+  if (!readModelAccess.ok) return readModelAccess;
+
+  const privateRevealEnabled = parseBooleanFlag(readEnvValue(env, DZN_SUPPORTER_CARD_PRIVATE_REVEAL_FLAG));
+  if (!privateRevealEnabled) {
+    return blockedAccess(
+      "STORE_SUPPORTER_CARD_PRIVATE_REVEAL_DISABLED",
+      "Private Supporter Card reveal is not available yet.",
+      readModelAccess.runtime,
+      404,
+    );
+  }
+
+  return readModelAccess;
+}
+
 export async function readDznStoreAccountPurchasesReadModel(
   env: Env,
   user: SessionUser,
@@ -392,12 +411,15 @@ export async function readDznStoreAccountPurchasesReadModel(
     const orderHistoryByOrder = groupByOrderId(orderStatusHistory, "order_id");
     const entitlementHistoryByOrder = groupByOrderId(entitlementStatusHistory, "order_id");
 
+    const privateRevealAccess = canReadDznStorePrivateSupporterCardReveal(env);
+    const privateRevealAvailable = privateRevealAccess.ok;
     const summaries = purchases.map((row) => purchaseSummary(row, {
       paymentEvents: paymentEventsByOrder.get(row.order_id) ?? [],
       fulfilmentAttempts: fulfilmentByOrder.get(row.order_id) ?? [],
       refundDisputeAudits: refundsByOrder.get(row.order_id) ?? [],
       orderStatusHistory: orderHistoryByOrder.get(row.order_id) ?? [],
       entitlementStatusHistory: entitlementHistoryByOrder.get(row.order_id) ?? [],
+      privateRevealAvailable,
     }));
 
     const entitlements = summaries.flatMap((purchase) => purchase.entitlement ? [purchase.entitlement] : []);
@@ -423,8 +445,8 @@ export async function readDznStoreAccountPurchasesReadModel(
         entitlements,
         supporter_cards_count: supporterCards.length,
         supporter_cards: supporterCards,
-        safety: safetyBoundary(),
-        unavailable_actions: unavailableActions(),
+        safety: safetyBoundary({ privateRevealAvailable }),
+        unavailable_actions: unavailableActions(privateRevealAvailable),
       },
     };
   } catch {
@@ -440,11 +462,12 @@ function purchaseSummary(
     refundDisputeAudits: RefundDisputeAuditRow[];
     orderStatusHistory: OrderStatusHistoryRow[];
     entitlementStatusHistory: EntitlementStatusHistoryRow[];
+    privateRevealAvailable: boolean;
   },
 ): DznStorePurchaseSummary {
   const purchaseRef = row.order_number;
   const entitlement = entitlementSummary(row, purchaseRef);
-  const supporterCard = supporterCardStatus(row, purchaseRef);
+  const supporterCard = supporterCardStatus(row, purchaseRef, linkedRows.privateRevealAvailable);
 
   return {
     purchase_ref: purchaseRef,
@@ -508,8 +531,9 @@ function entitlementSummary(row: StorePurchaseRow, purchaseRef: string): DznStor
   };
 }
 
-function supporterCardStatus(row: StorePurchaseRow, purchaseRef: string): DznStoreSupporterCardStatus | null {
+function supporterCardStatus(row: StorePurchaseRow, purchaseRef: string, privateRevealEnabled: boolean): DznStoreSupporterCardStatus | null {
   if (!row.supporter_card_status) return null;
+  const canRevealPrivately = privateRevealEnabled && isPrivatelyRevealableSupporterCardRow(row);
   return {
     purchase_ref: purchaseRef,
     product_key: normalizeDisplayText(row.product_key, "unknown-product"),
@@ -520,9 +544,13 @@ function supporterCardStatus(row: StorePurchaseRow, purchaseRef: string): DznSto
     issued_at: nullableDisplayText(row.supporter_card_issued_at),
     suspended_at: nullableDisplayText(row.supporter_card_suspended_at),
     revoked_at: nullableDisplayText(row.supporter_card_revoked_at),
-    private_reveal_available: false,
+    private_reveal_available: canRevealPrivately,
     public_reveal_available: false,
-    reveal_blocked_reason: "supporter_card_reveal_requires_future_approved_slice",
+    reveal_blocked_reason: canRevealPrivately
+      ? null
+      : privateRevealEnabled
+        ? "supporter_card_not_privately_viewable"
+        : "supporter_card_private_reveal_disabled",
   };
 }
 
@@ -800,11 +828,12 @@ function fairProgressionBoundary(): DznStoreFairProgressionBoundary {
   };
 }
 
-export function safetyBoundary(): DznStoreAccountPurchasesSafety {
+export function safetyBoundary(options: { privateRevealAvailable?: boolean } = {}): DznStoreAccountPurchasesSafety {
   return {
     read_only: true,
     sanitized_ledgers_only: true,
     current_user_only: true,
+    private_supporter_card_reveal: options.privateRevealAvailable === true,
     public_supporter_card_reveal: false,
     webhook_replay_route: false,
     manual_review_route: false,
@@ -835,8 +864,8 @@ export function safetyBoundary(): DznStoreAccountPurchasesSafety {
   };
 }
 
-function unavailableActions() {
-  return [
+function unavailableActions(privateRevealAvailable = false) {
+  const actions = [
     "public_supporter_card_reveal",
     "webhook_replay",
     "manual_review",
@@ -845,7 +874,24 @@ function unavailableActions() {
     "earned_spins",
     "reward_wheel",
     "live_checkout",
-  ] as const;
+  ];
+  if (!privateRevealAvailable) actions.unshift("private_supporter_card_reveal");
+  return actions;
+}
+
+function isPrivatelyRevealableSupporterCardRow(row: StorePurchaseRow) {
+  return row.product_key === DZN_FOUNDING_SUPPORTER_PRODUCT_KEY
+    && row.product_type === "supporter_pack"
+    && row.fulfilment_kind === "supporter_card"
+    && ["active", "hidden"].includes(row.supporter_card_status ?? "")
+    && ["active", "hidden"].includes(row.entitlement_status ?? "")
+    && row.order_status === "paid"
+    && row.refunded_at === null
+    && row.revoked_at === null
+    && row.account_bound === 1
+    && row.guaranteed_purchase === 1
+    && row.no_competitive_advantage === 1
+    && fairProgressionBoundaryFromRow(row);
 }
 
 function readModelError(status: 403 | 404 | 503, error: string, message: string): DznStoreAccountPurchasesResult {

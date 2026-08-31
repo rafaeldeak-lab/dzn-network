@@ -7,7 +7,10 @@ const ACCOUNT_COMPONENT = "components/store/dzn-store-account-purchases-page.tsx
 const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
 const ACCOUNT_READ_MODEL_ROUTE = "functions/api/account/purchases.ts";
 const ACCOUNT_READ_MODEL_HELPER = "functions/_lib/dzn-store-account-purchases.ts";
+const SUPPORTER_CARD_REVEAL_ROUTE = "functions/api/account/supporter-cards/[cardRef]/reveal.ts";
+const SUPPORTER_CARD_REVEAL_HELPER = "functions/_lib/dzn-store-supporter-card-reveal.ts";
 const READ_MODEL_TEST = "scripts/test-dzn-store-account-purchases-read-model.ts";
+const REVEAL_IMPLEMENTATION_TEST = "scripts/test-dzn-store-supporter-card-reveal-implementation.ts";
 const DOC = "docs/DZN_STORE_ACCOUNT_PURCHASES_UI_SHELL.md";
 const HANDOFF = "docs/DZN_STORE_ACCOUNT_PURCHASES_UI_SHELL_HANDOFF.md";
 const READ_MODEL_DOC = "docs/DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_IMPLEMENTATION.md";
@@ -19,6 +22,7 @@ const MASTER_SPEC = "docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md";
 const PUBLIC_ACCESS_POLICY = "docs/PUBLIC_ACCESS_POLICY.md";
 const BILLING_PLANS = "docs/BILLING_PLANS.md";
 const STRIPE_LIVE_CHECKLIST = "docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md";
+const REVEAL_IMPLEMENTATION_DOC = "docs/DZN_STORE_SUPPORTER_CARD_REVEAL_IMPLEMENTATION.md";
 const PACKAGE_JSON = "package.json";
 
 const SOURCE_CONFIG_FILES = [
@@ -90,7 +94,6 @@ const FORBIDDEN_UI_PATTERNS = [
 ] as const;
 
 const FORBIDDEN_RAW_FIELD_REFERENCES = [
-  "serial_number",
   "stripe_event_id",
   "stripe_checkout_session_id",
   "stripe_payment_intent_id",
@@ -126,7 +129,10 @@ function assertFilesExist() {
     STORE_PREVIEW_COMPONENT,
     ACCOUNT_READ_MODEL_ROUTE,
     ACCOUNT_READ_MODEL_HELPER,
+    SUPPORTER_CARD_REVEAL_ROUTE,
+    SUPPORTER_CARD_REVEAL_HELPER,
     READ_MODEL_TEST,
+    REVEAL_IMPLEMENTATION_TEST,
     DOC,
     HANDOFF,
     READ_MODEL_DOC,
@@ -138,6 +144,7 @@ function assertFilesExist() {
     PUBLIC_ACCESS_POLICY,
     BILLING_PLANS,
     STRIPE_LIVE_CHECKLIST,
+    REVEAL_IMPLEMENTATION_DOC,
     PACKAGE_JSON,
   ]) {
     assert.equal(existsSync(path), true, `${path} should exist.`);
@@ -155,21 +162,27 @@ function assertAccountPurchasesComponent() {
   const source = read(ACCOUNT_COMPONENT);
   assert.equal(source.includes('"use client"'), true, "Account Purchases UI shell should be a client component.");
   assert.equal(source.includes('ACCOUNT_PURCHASES_ENDPOINT = "/api/account/purchases"'), true, "UI must consume the private Account Purchases read model.");
-  assert.equal(source.includes("fetchJsonWithRetry<AccountPurchasesApiResponse>(ACCOUNT_PURCHASES_ENDPOINT"), true, "UI must call only the read model endpoint.");
+  assert.equal(source.includes("fetchJsonWithRetry<AccountPurchasesApiResponse>(ACCOUNT_PURCHASES_ENDPOINT"), true, "UI must call the read model endpoint.");
+  assert.equal(source.includes("fetchJsonWithRetry<SupporterCardRevealApiResponse>(revealEndpoint(card)"), true, "UI may call only the approved private reveal endpoint.");
   assert.equal(source.includes('credentials: "include"'), true, "UI must include session credentials.");
   assert.equal(source.includes('cache: "no-store"'), true, "UI must bypass browser/proxy cache.");
   assert.equal(source.includes("error.status === 401"), true, "UI should handle unauthenticated API responses.");
   assert.equal(source.includes("encodeURIComponent(ACCOUNT_PURCHASES_ROUTE)"), true, "Login redirect should preserve the Account Purchases return path.");
   assert.equal(source.includes('data-dzn-store-account-purchases-ui="read-only"'), true, "UI must declare its read-only contract.");
   assert.equal(source.includes('data-dzn-store-account-purchases-endpoint={ACCOUNT_PURCHASES_ENDPOINT}'), true, "UI must declare the endpoint it consumes.");
-  assert.equal(source.includes('data-supporter-card-reveal="blocked"'), true, "UI must declare that Supporter Card reveal is blocked.");
-  assert.equal(source.includes('data-store-runtime="ui-shell-only"'), true, "UI must declare that it is not runtime fulfilment.");
+  assert.equal(source.includes('data-supporter-card-reveal="private-local-test-guarded"'), true, "UI must declare that private Supporter Card reveal is guarded.");
+  assert.equal(source.includes('data-public-supporter-card-reveal="blocked"'), true, "UI must declare public Supporter Card reveal is blocked.");
+  assert.equal(source.includes('data-store-runtime="read-only-account-ui"'), true, "UI must declare that it is not runtime fulfilment.");
   assert.equal(source.includes('data-live-checkout="disabled"'), true, "UI must declare live checkout disabled.");
   assert.equal(source.includes('data-production-mutation="none"'), true, "UI must declare no production mutation.");
-  assert.equal(source.includes("private_reveal_available"), false, "UI should not branch on a future private reveal grant.");
+  assert.equal(source.includes("private_reveal_available"), true, "UI should branch only on the approved private reveal availability flag.");
   assert.equal(source.includes("public_reveal_available"), false, "UI should not branch on a future public reveal grant.");
   assert.equal(source.includes("reveal_blocked_reason"), true, "UI should show the blocked reveal reason from the sanitized status payload.");
-  assert.equal(source.includes("Card reveal blocked"), true, "UI should clearly disable Supporter Card reveal.");
+  assert.equal(source.includes("Reveal private card"), true, "UI should expose the approved private reveal action.");
+  assert.equal(source.includes("Private reveal disabled"), true, "UI should clearly disable private reveal when flags/status block it.");
+  assert.equal(source.includes('data-card-art-generation="blocked"'), true, "UI must keep card-art generation blocked.");
+  assert.equal(source.includes('data-sharing-controls="blocked"'), true, "UI must keep sharing controls blocked.");
+  assert.equal(source.includes('data-screenshot-export-controls="blocked"'), true, "UI must keep screenshot/export controls blocked.");
   assert.equal(source.includes("Fair Progression Boundary"), true, "UI should display the Fair Progression Boundary.");
   assert.equal(source.includes("No earned spins or reward wheel runtime"), true, "UI should keep wheel runtime out of scope.");
   assert.equal(source.includes("No billing, ranking, scoring, XP, event, review, badge, season, Server Wars, CTF, public-profile, or eligibility impact"), true);
@@ -227,14 +240,15 @@ function assertDocsAndPackageScripts() {
       "`app/account/purchases/page.tsx`",
       "`components/store/dzn-store-account-purchases-page.tsx`",
       "`GET /api/account/purchases`",
+      "`GET /api/account/supporter-cards/[cardRef]/reveal`",
       "`credentials: \"include\"`",
       "`cache: \"no-store\"`",
       "No public Supporter Card reveal.",
-      "No Supporter Card serial number display.",
+      "Supporter Card serial display is limited to the approved private reveal panel",
       "No live checkout activation.",
       "No Cloudflare variable, secret, binding, Pages config, Workers config, or production D1 mutation.",
       "No issue #49 change.",
-      "Store private Supporter Card reveal approval preflight",
+      "Store private Supporter Card reveal implementation",
     ]],
     [HANDOFF, [
       "# DZN Store Account Purchases UI Shell Handoff",
@@ -243,7 +257,7 @@ function assertDocsAndPackageScripts() {
       "Protected OneDrive checkout was not modified.",
       "Added `/account/purchases`.",
       "No public Supporter Card reveal.",
-      "No Supporter Card serial number display.",
+      "Private Supporter Card reveal is handled by the later approved implementation slice.",
       "No live checkout activation.",
       "No issue #49 change.",
     ]],
@@ -277,6 +291,10 @@ function assertDocsAndPackageScripts() {
     ]],
     [SAFE_PREFLIGHT, [
       "The DZN Store Account Purchases UI shell is now delivered",
+    ]],
+    [REVEAL_IMPLEMENTATION_DOC, [
+      "`/account/purchases`",
+      "`GET /api/account/supporter-cards/[cardRef]/reveal`",
     ]],
   ];
 

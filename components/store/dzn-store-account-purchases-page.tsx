@@ -6,6 +6,7 @@ import {
   Ban,
   Clock3,
   Crown,
+  Eye,
   History,
   Loader2,
   Lock,
@@ -29,16 +30,32 @@ import type {
   DznStoreStatusHistoryEntry,
   DznStoreSupporterCardStatus,
 } from "@/functions/_lib/dzn-store-account-purchases";
+import type {
+  DznStoreSupporterCardPrivateRevealErrorPayload,
+  DznStoreSupporterCardPrivateRevealPayload,
+} from "@/functions/_lib/dzn-store-supporter-card-reveal";
 
 const ACCOUNT_PURCHASES_ENDPOINT = "/api/account/purchases";
 const ACCOUNT_PURCHASES_ROUTE = "/account/purchases";
+const SUPPORTER_CARD_REVEAL_ENDPOINT_PREFIX = "/api/account/supporter-cards";
+const SUPPORTER_CARD_REVEAL_ROUTE = "/api/account/supporter-cards/[cardRef]/reveal";
+const SUPPORTER_CARD_ART_BLOCKED_REASON = "card_art_generation_requires_future_approved_slice";
+const SUPPORTER_CARD_PUBLIC_REVEAL_BLOCKED_REASON = "public_reveal_requires_future_opt_in_slice";
 
 type AccountPurchasesApiResponse = DznStoreAccountPurchasesPayload | DznStoreAccountPurchasesErrorPayload;
+type SupporterCardRevealApiResponse = DznStoreSupporterCardPrivateRevealPayload | DznStoreSupporterCardPrivateRevealErrorPayload;
 type LoadState = "loading" | "ready" | "unavailable" | "error";
+type RevealLoadState = "idle" | "loading" | "revealed" | "unavailable" | "error";
+type SupporterCardRevealState = {
+  state: RevealLoadState;
+  message: string;
+  payload: DznStoreSupporterCardPrivateRevealPayload | null;
+};
 
 const boundaryItems = [
   "No live checkout activation",
-  "No public Supporter Card reveal",
+  "No public Supporter Card reveal or sharing",
+  "Private reveal is local/test, current-account only",
   "No webhook replay or operator workflow",
   "No earned spins or reward wheel runtime",
   "No billing, ranking, scoring, XP, event, review, badge, season, Server Wars, CTF, public-profile, or eligibility impact",
@@ -109,8 +126,10 @@ export function DznStoreAccountPurchasesPage() {
       className="dzn-store-page relative min-h-screen overflow-hidden bg-[#02030a] text-white"
       data-dzn-store-account-purchases-ui="read-only"
       data-dzn-store-account-purchases-endpoint={ACCOUNT_PURCHASES_ENDPOINT}
-      data-supporter-card-reveal="blocked"
-      data-store-runtime="ui-shell-only"
+      data-supporter-card-reveal="private-local-test-guarded"
+      data-public-supporter-card-reveal="blocked"
+      data-supporter-card-reveal-endpoint-prefix={SUPPORTER_CARD_REVEAL_ENDPOINT_PREFIX}
+      data-store-runtime="read-only-account-ui"
       data-live-checkout="disabled"
       data-production-mutation="none"
       data-store-account-purchases-state={state}
@@ -129,12 +148,12 @@ export function DznStoreAccountPurchasesPage() {
               DZN Account Purchases
             </h1>
             <p className="mt-4 max-w-3xl text-base font-semibold leading-7 text-slate-200 sm:text-lg">
-              View the current account&apos;s Store purchase, entitlement, and Supporter Card status from the sanitized read model only. This page cannot start checkout, replay webhooks, issue cards, or reveal Supporter Card serials.
+              View the current account&apos;s Store purchase, entitlement, and Supporter Card status from the sanitized read model. Supporter Card serial reveal is limited to a separate local/test private route after current-account ownership proof.
             </p>
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
               <SafetyPill icon={Lock} label="Private no-store" />
               <SafetyPill icon={ShieldCheck} label="Read-only ledgers" />
-              <SafetyPill icon={Ban} label="Reveal blocked" />
+              <SafetyPill icon={Eye} label="Private reveal gated" />
             </div>
           </div>
 
@@ -148,7 +167,7 @@ export function DznStoreAccountPurchasesPage() {
                 <p className="text-xs font-black uppercase text-amber-100">Safety boundary</p>
                 <h2 className="mt-2 text-xl font-black uppercase text-white">Status only</h2>
                 <p className="mt-3 text-sm font-semibold leading-6 text-slate-200">
-                  Supporter Card reveal, public card sharing, operator actions, notifications, wheel runtime, and live checkout remain blocked for later approval.
+                  Public card sharing, card-art generation, operator actions, notifications, wheel runtime, and live checkout remain blocked for later approval.
                 </p>
               </div>
             </div>
@@ -319,7 +338,11 @@ function PurchaseCard({ purchase }: { purchase: DznStorePurchaseSummary }) {
           icon={Crown}
           label="Supporter Card"
           value={purchase.supporter_card?.status ?? "Not issued"}
-          detail={purchase.supporter_card ? "Private status only; reveal blocked" : "No Supporter Card status row"}
+          detail={purchase.supporter_card
+            ? purchase.supporter_card.private_reveal_available
+              ? "Private reveal available in the account panel"
+              : "Private reveal disabled or not viewable"
+            : "No Supporter Card status row"}
         />
       </div>
 
@@ -341,11 +364,61 @@ function PurchaseCard({ purchase }: { purchase: DznStorePurchaseSummary }) {
 }
 
 function SupporterCardPanel({ cards }: { cards: DznStoreSupporterCardStatus[] }) {
+  const [reveals, setReveals] = useState<Record<string, SupporterCardRevealState>>({});
+
+  const revealPrivateCard = (card: DznStoreSupporterCardStatus) => {
+    if (!card.private_reveal_available) return;
+    const key = card.purchase_ref;
+    setReveals((current) => ({
+      ...current,
+      [key]: { state: "loading", message: "Checking private ownership proof.", payload: null },
+    }));
+
+    fetchJsonWithRetry<SupporterCardRevealApiResponse>(revealEndpoint(card), {
+      cache: "no-store",
+      credentials: "include",
+      headers: { accept: "application/json" },
+      timeoutMs: 12_000,
+    })
+      .then((data) => {
+        const normalized = normalizeRevealResponse(data);
+        if (!normalized || !isRevealSuccessPayload(normalized)) {
+          const errorBody = normalized && !isRevealSuccessPayload(normalized) ? normalized : null;
+          setReveals((current) => ({
+            ...current,
+            [key]: {
+              state: "unavailable",
+              message: errorBody?.message ?? "Private Supporter Card reveal is unavailable.",
+              payload: null,
+            },
+          }));
+          return;
+        }
+
+        setReveals((current) => ({
+          ...current,
+          [key]: { state: "revealed", message: "Private Supporter Card revealed for this account.", payload: normalized },
+        }));
+      })
+      .catch((error) => {
+        const apiBody = error instanceof FetchJsonError ? normalizeRevealResponse(error.body) : null;
+        const message = apiBody && !isRevealSuccessPayload(apiBody)
+          ? apiBody.message
+          : "Private Supporter Card reveal could not be loaded right now.";
+        setReveals((current) => ({
+          ...current,
+          [key]: { state: "error", message, payload: null },
+        }));
+      });
+  };
+
   return (
     <section
       className="relative overflow-hidden rounded-lg border border-amber-300/30 bg-[#130b21]/82 p-5 shadow-[0_0_46px_rgba(168,85,247,0.14)] backdrop-blur"
       data-supporter-card-status-panel="private"
-      data-supporter-card-reveal="blocked"
+      data-supporter-card-reveal="private-local-test-guarded"
+      data-public-supporter-card-reveal="blocked"
+      data-supporter-card-reveal-route={SUPPORTER_CARD_REVEAL_ROUTE}
     >
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-200/80 to-transparent" />
       <div className="flex items-start gap-3">
@@ -354,35 +427,43 @@ function SupporterCardPanel({ cards }: { cards: DznStoreSupporterCardStatus[] })
         </span>
         <div>
           <p className="text-xs font-black uppercase text-amber-100">Supporter Card status</p>
-          <h2 className="mt-2 text-xl font-black uppercase text-white">Private status only</h2>
+          <h2 className="mt-2 text-xl font-black uppercase text-white">Private reveal panel</h2>
           <p className="mt-3 text-sm font-semibold leading-6 text-slate-200">
-            This shell never displays card serials or generated card art. Reveal stays blocked until a separate approved privacy and security slice.
+            Serial reveal uses a separate no-store route and only unlocks when local/test flags and current-account ledger ownership proof pass. Card art, public reveal, sharing, downloads, notifications, and live checkout stay blocked.
           </p>
         </div>
       </div>
 
       <div className="mt-5 grid gap-3">
-        {cards.length ? cards.map((card) => <SupporterCardStatusRow key={`${card.purchase_ref}-${card.product_key}`} card={card} />) : (
+        {cards.length ? cards.map((card) => (
+          <SupporterCardStatusRow
+            key={`${card.purchase_ref}-${card.product_key}`}
+            card={card}
+            revealState={reveals[card.purchase_ref] ?? { state: "idle", message: "", payload: null }}
+            onReveal={() => revealPrivateCard(card)}
+          />
+        )) : (
           <p className="rounded-lg border border-white/10 bg-black/26 p-4 text-sm font-semibold leading-6 text-slate-300">
             No private Supporter Card status is available for this account.
           </p>
         )}
       </div>
-
-      <button
-        type="button"
-        disabled
-        aria-disabled="true"
-        className="mt-5 inline-flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-red-300/25 bg-red-950/25 px-4 py-3 text-sm font-black uppercase text-red-100 opacity-85"
-      >
-        <Lock className="h-4 w-4" aria-hidden="true" />
-        Card reveal blocked
-      </button>
     </section>
   );
 }
 
-function SupporterCardStatusRow({ card }: { card: DznStoreSupporterCardStatus }) {
+function SupporterCardStatusRow({
+  card,
+  revealState,
+  onReveal,
+}: {
+  card: DznStoreSupporterCardStatus;
+  revealState: SupporterCardRevealState;
+  onReveal: () => void;
+}) {
+  const panelId = `supporter-card-reveal-${card.purchase_ref.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+  const reveal = revealState.payload;
+
   return (
     <article className="rounded-lg border border-white/10 bg-black/28 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -393,8 +474,52 @@ function SupporterCardStatusRow({ card }: { card: DznStoreSupporterCardStatus })
         <InfoPair label="Theme" value={card.selected_theme_key ?? "Not selected"} />
         <InfoPair label="Visibility" value={card.visibility_state} />
         <InfoPair label="Supporter since" value={formatDateTime(card.supporter_since)} />
-        <InfoPair label="Reveal" value={card.reveal_blocked_reason.replace(/_/g, " ")} />
+        <InfoPair label="Reveal" value={card.private_reveal_available ? "private reveal available" : (card.reveal_blocked_reason ?? "private reveal unavailable").replace(/_/g, " ")} />
       </dl>
+      <button
+        type="button"
+        disabled={!card.private_reveal_available || revealState.state === "loading"}
+        aria-controls={panelId}
+        aria-expanded={revealState.state === "revealed"}
+        aria-disabled={!card.private_reveal_available || revealState.state === "loading"}
+        onClick={onReveal}
+        className={`mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-black uppercase transition ${
+          card.private_reveal_available
+            ? "border-amber-200/45 bg-amber-200/15 text-amber-50 hover:border-amber-100/80 hover:bg-amber-200/24"
+            : "cursor-not-allowed border-red-300/25 bg-red-950/25 text-red-100 opacity-85"
+        }`}
+      >
+        {revealState.state === "loading" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : card.private_reveal_available ? <Eye className="h-4 w-4" aria-hidden="true" /> : <Lock className="h-4 w-4" aria-hidden="true" />}
+        {revealState.state === "loading" ? "Checking private card" : card.private_reveal_available ? "Reveal private card" : "Private reveal disabled"}
+      </button>
+      <div id={panelId} className="mt-4" aria-live="polite">
+        {revealState.state === "unavailable" || revealState.state === "error" ? (
+          <p className="rounded-lg border border-amber-300/20 bg-amber-300/[0.07] p-3 text-sm font-semibold leading-6 text-amber-50">
+            {revealState.message}
+          </p>
+        ) : null}
+        {reveal ? (
+          <div
+            className="rounded-lg border border-amber-200/35 bg-gradient-to-br from-amber-300/14 via-purple-500/12 to-cyan-300/10 p-4"
+            data-supporter-card-private-reveal="current-account-only"
+            data-card-art-generation="blocked"
+            data-public-reveal="blocked"
+            data-sharing-controls="blocked"
+            data-screenshot-export-controls="blocked"
+          >
+            <p className="text-xs font-black uppercase text-amber-100">Private card reveal</p>
+            <p className="mt-2 text-2xl font-black uppercase tracking-normal text-white">{reveal.card.serial_number}</p>
+            <dl className="mt-4 grid gap-3 text-sm">
+              <InfoPair label="Name" value={reveal.card.display_name_snapshot} />
+              <InfoPair label="Status" value={reveal.card.status} />
+              <InfoPair label="Theme" value={reveal.card.theme_label} />
+              <InfoPair label="Issued" value={formatDateTime(reveal.card.issued_at)} />
+              <InfoPair label="Card art" value={formatStatusReason(reveal.card.card_art.reason || SUPPORTER_CARD_ART_BLOCKED_REASON)} />
+              <InfoPair label="Public reveal" value={formatStatusReason(reveal.card.public_reveal.reason || SUPPORTER_CARD_PUBLIC_REVEAL_BLOCKED_REASON)} />
+            </dl>
+          </div>
+        ) : null}
+      </div>
     </article>
   );
 }
@@ -624,5 +749,26 @@ function normalizeResponse(value: unknown): AccountPurchasesApiResponse | null {
   if (record.route !== ACCOUNT_PURCHASES_ENDPOINT) return null;
   if (record.ok === true) return record as DznStoreAccountPurchasesPayload;
   if (record.ok === false) return record as DznStoreAccountPurchasesErrorPayload;
+  return null;
+}
+
+function formatStatusReason(value: string) {
+  return value.replace(/_/g, " ");
+}
+
+function revealEndpoint(card: DznStoreSupporterCardStatus) {
+  return `${SUPPORTER_CARD_REVEAL_ENDPOINT_PREFIX}/${encodeURIComponent(card.purchase_ref)}/reveal`;
+}
+
+function isRevealSuccessPayload(payload: SupporterCardRevealApiResponse | null): payload is DznStoreSupporterCardPrivateRevealPayload {
+  return Boolean(payload && payload.ok === true);
+}
+
+function normalizeRevealResponse(value: unknown): SupporterCardRevealApiResponse | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Partial<SupporterCardRevealApiResponse> & Record<string, unknown>;
+  if (record.route !== SUPPORTER_CARD_REVEAL_ROUTE) return null;
+  if (record.ok === true) return record as DznStoreSupporterCardPrivateRevealPayload;
+  if (record.ok === false) return record as DznStoreSupporterCardPrivateRevealErrorPayload;
   return null;
 }

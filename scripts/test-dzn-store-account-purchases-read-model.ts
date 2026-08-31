@@ -8,6 +8,7 @@ import {
   DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_FLAG,
   DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_ROUTE,
   DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_SCHEMA_VERSION,
+  DZN_SUPPORTER_CARD_PRIVATE_REVEAL_FLAG,
   readDznStoreAccountPurchasesReadModel,
 } from "../functions/_lib/dzn-store-account-purchases";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
@@ -161,7 +162,7 @@ function assertFilesExist() {
 function assertConstants() {
   assert.equal(DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_ROUTE, "/api/account/purchases");
   assert.equal(DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_FLAG, "DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_ENABLED");
-  assert.equal(DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_SCHEMA_VERSION, "2026-08-29.store-account-purchases-read-model-v1");
+  assert.equal(DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_SCHEMA_VERSION, "2026-08-31.store-account-purchases-read-model-v2");
 }
 
 function assertAccessGates() {
@@ -270,6 +271,7 @@ async function assertPrivateCurrentUserReadModel() {
   assert.equal(body.safety.read_only, true);
   assert.equal(body.safety.sanitized_ledgers_only, true);
   assert.equal(body.safety.current_user_only, true);
+  assert.equal(body.safety.private_supporter_card_reveal, false);
   assert.equal(body.safety.live_checkout_enabled, false);
   assert.equal(body.safety.stripe_mutation, false);
   assert.equal(body.safety.cloudflare_config_mutation, false);
@@ -301,7 +303,7 @@ async function assertPrivateCurrentUserReadModel() {
   assert.equal(paidPurchase.supporter_card?.status, "active");
   assert.equal(paidPurchase.supporter_card?.private_reveal_available, false);
   assert.equal(paidPurchase.supporter_card?.public_reveal_available, false);
-  assert.equal(paidPurchase.supporter_card?.reveal_blocked_reason, "supporter_card_reveal_requires_future_approved_slice");
+  assert.equal(paidPurchase.supporter_card?.reveal_blocked_reason, "supporter_card_private_reveal_disabled");
   assert.equal(paidPurchase.fair_progression_boundary.grants_spins, false);
   assert.equal(paidPurchase.fair_progression_boundary.grants_xp, false);
   assert.equal(paidPurchase.fair_progression_boundary.grants_owner_subscription_access, false);
@@ -342,6 +344,20 @@ async function assertHelperMatchesRoutePayload() {
     assert.equal(result.body.purchases_count, 2);
     assert.equal(result.body.entitlements[0].purchase_ref, "DZN-STORE-20260829-PLAYER01");
     assert.equal(result.body.supporter_cards[0].private_reveal_available, false);
+  }
+
+  const enabledReveal = await readDznStoreAccountPurchasesReadModel({
+    DB: seededDb(),
+    ...READ_MODEL_FLAGS,
+    [DZN_SUPPORTER_CARD_PRIVATE_REVEAL_FLAG]: "true",
+  } as unknown as Env, TEST_USER, { now: NOW });
+  assert.equal(enabledReveal.status, 200);
+  assert.equal(enabledReveal.body.ok, true);
+  if (enabledReveal.body.ok) {
+    assert.equal(enabledReveal.body.safety.private_supporter_card_reveal, true);
+    assert.equal(enabledReveal.body.supporter_cards[0].private_reveal_available, true);
+    assert.equal(enabledReveal.body.supporter_cards[0].reveal_blocked_reason, null);
+    assert.equal(JSON.stringify(enabledReveal.body).includes("DZN-SUP-000001"), false, "Account Purchases v2 must advertise private reveal without listing serials.");
   }
 }
 
@@ -385,9 +401,11 @@ function assertDocsAndPackageScript() {
       "# DZN Store Account Purchases Read-Model Implementation",
       "`GET /api/account/purchases`",
       "`DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_ENABLED`",
+      "`DZN_SUPPORTER_CARD_PRIVATE_REVEAL_ENABLED`",
       "private/no-store",
       "current authenticated user",
       "No public Supporter Card reveal.",
+      "does not return Supporter Card serial numbers",
       "no live checkout activation",
       "no issue #49 change",
     ]],
@@ -732,16 +750,16 @@ type AccountPurchasesPayload = {
     entitlement: { status: string } | null;
     supporter_card: {
       status: string;
-      private_reveal_available: false;
+      private_reveal_available: boolean;
       public_reveal_available: false;
-      reveal_blocked_reason: string;
+      reveal_blocked_reason: string | null;
     } | null;
     fair_progression_boundary: Record<string, false>;
   }>;
   entitlements_count: number;
   entitlements: Array<{ purchase_ref: string }>;
   supporter_cards_count: number;
-  supporter_cards: Array<{ private_reveal_available: false }>;
+  supporter_cards: Array<{ private_reveal_available: boolean; reveal_blocked_reason: string | null }>;
   safety: Record<string, boolean>;
 };
 

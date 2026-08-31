@@ -20,6 +20,11 @@ const ACCOUNT_PAGE = "app/account/purchases/page.tsx";
 const ACCOUNT_COMPONENT = "components/store/dzn-store-account-purchases-page.tsx";
 const ACCOUNT_READ_MODEL_ROUTE = "functions/api/account/purchases.ts";
 const ACCOUNT_READ_MODEL_HELPER = "functions/_lib/dzn-store-account-purchases.ts";
+const REVEAL_ROUTE = "functions/api/account/supporter-cards/[cardRef]/reveal.ts";
+const REVEAL_HELPER = "functions/_lib/dzn-store-supporter-card-reveal.ts";
+const REVEAL_DOC = "docs/DZN_STORE_SUPPORTER_CARD_REVEAL_IMPLEMENTATION.md";
+const REVEAL_HANDOFF = "docs/DZN_STORE_SUPPORTER_CARD_REVEAL_IMPLEMENTATION_HANDOFF.md";
+const REVEAL_TEST = "scripts/test-dzn-store-supporter-card-reveal-implementation.ts";
 const FULFILMENT_MIGRATION = "migrations/0073_dzn_store_fulfilment_ledger_schema.sql";
 const PACKAGE_JSON = "package.json";
 
@@ -31,7 +36,6 @@ const SOURCE_CONFIG_FILES = [
 ] as const;
 
 const FORBIDDEN_REVEAL_RUNTIME_PATHS = [
-  "functions/api/account/supporter-cards",
   "functions/api/account/supporter-card-reveal.ts",
   "functions/api/store/supporter-card-reveal.ts",
   "functions/api/store/supporter-cards",
@@ -65,7 +69,6 @@ const FORBIDDEN_SOURCE_CONFIG_FLAGS = [
 
 const FORBIDDEN_ACCOUNT_UI_PATTERNS = [
   /\bmethod\s*:\s*["'](?:POST|PUT|PATCH|DELETE)["']/i,
-  /\/api\/account\/supporter-cards/i,
   /\/api\/store\/supporter-card/i,
   /\/api\/public\/supporter-cards/i,
   /\/api\/stripe/i,
@@ -91,7 +94,6 @@ const FORBIDDEN_ACCOUNT_UI_PATTERNS = [
 ] as const;
 
 const FORBIDDEN_ACCOUNT_UI_RAW_FIELDS = [
-  "serial_number",
   "DZN-SUP-",
   "generated_insignia_json",
   "insignia_seed_hash",
@@ -144,6 +146,11 @@ function assertFilesExist() {
     ACCOUNT_COMPONENT,
     ACCOUNT_READ_MODEL_ROUTE,
     ACCOUNT_READ_MODEL_HELPER,
+    REVEAL_ROUTE,
+    REVEAL_HELPER,
+    REVEAL_DOC,
+    REVEAL_HANDOFF,
+    REVEAL_TEST,
     FULFILMENT_MIGRATION,
     PACKAGE_JSON,
   ]) {
@@ -191,7 +198,8 @@ function assertPreflightContract() {
     "If DZN later wants security audit rows for reveal views, that must be separately approved before implementation.",
     "Owner Starter/Pro plans must not force a Supporter Card public, hide it, reveal it, or use it as an owner entitlement.",
     "Store account entitlements and Supporter Cards remain account-bound cosmetic/supporter recognition only.",
-    "Next should be Store private Supporter Card reveal implementation only if deliberately approved",
+    "The Store private Supporter Card reveal implementation is now delivered separately",
+    "Next should be the Store private Supporter Card reveal visual polish and manual QA slice only if deliberately approved",
   ]) {
     assertIncludes(doc, snippet, `${PREFLIGHT} should contain: ${snippet}`);
   }
@@ -254,7 +262,9 @@ function assertHandoffContract() {
     "No earned-spin ledger.",
     "No reward wheel runtime.",
     "No issue #49 change.",
-    "Store private Supporter Card reveal implementation only if deliberately approved",
+    "The Store private Supporter Card reveal implementation is now delivered separately",
+    "`functions/api/account/supporter-cards/[cardRef]/reveal.ts`",
+    "Next should be the Store private Supporter Card reveal visual polish and manual QA slice only if deliberately approved",
   ]) {
     assertIncludes(handoff, snippet, `${HANDOFF} should contain: ${snippet}`);
   }
@@ -265,7 +275,7 @@ function assertIntegratedDocs() {
     [ACCOUNT_UI_DOC, [
       "The Store private Supporter Card reveal approval preflight is now delivered",
       "`docs/DZN_STORE_SUPPORTER_CARD_REVEAL_APPROVAL_PREFLIGHT.md`",
-      "Supporter Card serial/card-art reveal remains blocked until a later implementation slice.",
+      "The Store private Supporter Card reveal implementation is now delivered separately",
     ]],
     [ACCOUNT_UI_HANDOFF, [
       "The Store private Supporter Card reveal approval preflight is now delivered",
@@ -341,11 +351,17 @@ function assertAccountPurchasesStaysRevealBlocked() {
   assertIncludes(page, "<DznStoreAccountPurchasesPage />", `${ACCOUNT_PAGE} should remain the same private UI shell route.`);
 
   const component = read(ACCOUNT_COMPONENT);
-  assertIncludes(component, 'data-supporter-card-reveal="blocked"', "Account Purchases UI must still declare card reveal blocked.");
-  assertIncludes(component, "Card reveal blocked", "Account Purchases UI must visibly keep reveal blocked.");
-  assertIncludes(component, 'const ACCOUNT_PURCHASES_ENDPOINT = "/api/account/purchases";', "Account Purchases UI must consume only the existing read model.");
+  assertIncludes(component, 'data-supporter-card-reveal="private-local-test-guarded"', "Account Purchases UI must declare private reveal as guarded.");
+  assertIncludes(component, 'data-public-supporter-card-reveal="blocked"', "Account Purchases UI must still declare public reveal blocked.");
+  assertIncludes(component, "Reveal private card", "Account Purchases UI may expose only the approved private reveal action.");
+  assertIncludes(component, "Private reveal disabled", "Account Purchases UI must visibly disable reveal when flags/status block it.");
+  assertIncludes(component, 'const ACCOUNT_PURCHASES_ENDPOINT = "/api/account/purchases";', "Account Purchases UI must consume the existing read model.");
+  assertIncludes(component, 'const SUPPORTER_CARD_REVEAL_ENDPOINT_PREFIX = "/api/account/supporter-cards";', "Account Purchases UI must use only the approved private reveal endpoint prefix.");
   assertIncludes(component, 'credentials: "include"', "Account Purchases UI must include session credentials.");
   assertIncludes(component, 'cache: "no-store"', "Account Purchases UI must request private no-store data.");
+  assertIncludes(component, 'data-card-art-generation="blocked"', "Account Purchases UI must keep card-art generation blocked.");
+  assertIncludes(component, 'data-sharing-controls="blocked"', "Account Purchases UI must keep sharing controls blocked.");
+  assertIncludes(component, 'data-screenshot-export-controls="blocked"', "Account Purchases UI must keep screenshot/export controls blocked.");
 
   for (const pattern of FORBIDDEN_ACCOUNT_UI_PATTERNS) {
     assert.doesNotMatch(component, pattern, `${ACCOUNT_COMPONENT} must not add reveal/share/payment/runtime pattern ${pattern}.`);
@@ -358,9 +374,10 @@ function assertAccountPurchasesStaysRevealBlocked() {
 
   const helper = read(ACCOUNT_READ_MODEL_HELPER);
   for (const snippet of [
-    "private_reveal_available: false",
+    "private_reveal_available: canRevealPrivately",
     "public_reveal_available: false",
-    'reveal_blocked_reason: "supporter_card_reveal_requires_future_approved_slice"',
+    'reveal_blocked_reason: canRevealPrivately',
+    '"supporter_card_private_reveal_disabled"',
     "supporter_cards.user_id = store_orders.purchasing_user_id",
     "account_entitlements.user_id = store_orders.purchasing_user_id",
     "account_entitlements.livemode = 0",
@@ -397,6 +414,16 @@ function assertPackageScriptWired() {
     packageJson.scripts?.test ?? "",
     "npm run test:dzn-store-supporter-card-reveal-approval-preflight",
     "Full npm test should include the Supporter Card reveal approval preflight guard.",
+  );
+  assert.equal(
+    packageJson.scripts?.["test:dzn-store-supporter-card-reveal-implementation"],
+    "tsx scripts/test-dzn-store-supporter-card-reveal-implementation.ts",
+    "Focused Supporter Card private reveal implementation test should be wired into package scripts.",
+  );
+  assertIncludes(
+    packageJson.scripts?.test ?? "",
+    "npm run test:dzn-store-supporter-card-reveal-implementation",
+    "Full npm test should include the Supporter Card private reveal implementation guard.",
   );
 }
 

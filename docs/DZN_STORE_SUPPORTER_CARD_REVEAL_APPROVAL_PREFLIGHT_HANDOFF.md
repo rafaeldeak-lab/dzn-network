@@ -104,6 +104,10 @@ This slice is source-only documentation and test-guard work. It does not apply m
 
 ## Next Recommended Slice
 
-Next should be Store private Supporter Card reveal implementation only if deliberately approved: add a disabled-by-default local/test private route and private `/account/purchases` reveal UI panel from the preflight, proving current-account ownership before showing a Supporter Card serial/status and keeping card-art generation, public reveal, sharing controls, screenshot/export controls, notifications, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 writes, and issue #49 blocked.
+The Store private Supporter Card reveal implementation is now delivered separately in `docs/DZN_STORE_SUPPORTER_CARD_REVEAL_IMPLEMENTATION.md`.
+
+It adds `functions/api/account/supporter-cards/[cardRef]/reveal.ts` and a private `/account/purchases` reveal UI panel that can display the owning account's Supporter Card serial/status only after current-account ownership proof.
+
+Next should be the Store private Supporter Card reveal visual polish and manual QA slice only if deliberately approved: refine the private `/account/purchases` reveal panel styling/states and run rendered local QA for disabled, no purchases, revealable, unavailable, and cross-account-denied states. It should still add no card-art generation, public reveal, sharing controls, screenshot/export controls, notifications, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 writes, or issue #49 changes.
 
 The personal player page/nav button remains a separate player UX slice.
