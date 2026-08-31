@@ -196,7 +196,11 @@ function assertVisualContracts() {
   for (const snippet of VISUAL_SNIPPETS) {
     assert.equal(shell.includes(snippet), true, `Visual shell should include ${snippet}.`);
   }
-  assert.equal(shell.includes("useState<CommsSurfaceKey>"), true, "Visual shell should use local state only for surface switching.");
+  assert.equal(
+    shell.includes("useState<{ key: CommsSurfaceKey; generation: number }>"),
+    true,
+    "Visual shell should use local state only for surface switching.",
+  );
   assert.equal(shell.includes("disabled"), true, "Visual shell should include disabled controls.");
   assert.equal(shell.includes("/api/"), false, "Visual shell must not reference API routes.");
   assert.equal(shell.includes("{reaction.label} {reaction.count}"), false, "Reaction chips should render emoji plus count, not text-label plus count.");

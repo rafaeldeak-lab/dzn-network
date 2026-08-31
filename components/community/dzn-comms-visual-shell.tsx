@@ -2,8 +2,17 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { DznLivePresenceCounter } from "./dzn-live-presence-counter";
+import {
+  dznCommsMessageHistoryChannelId,
+  dznCommsMessageHistoryLoadingState,
+  dznCommsMessageHistoryStaticState,
+  isDznCommsMessageHistoryUiEnabled,
+  loadDznCommsMessageHistory,
+  type DznCommsMessageHistoryMessage,
+  type DznCommsMessageHistoryUiState,
+} from "./dzn-comms-message-history";
 import {
   AlertTriangle,
   Bot,
@@ -58,6 +67,8 @@ type CommsMessage = {
   body: string;
   badge?: string;
   tone: CommsTone;
+  visibility?: "visible" | "locked";
+  source?: "static" | "message_history";
   reactions?: Array<{ emoji: string; label: string; count: number }>;
   actions?: Array<{ label: string; href?: string }>;
 };
@@ -386,8 +397,32 @@ const staticCommsSurfaces: Record<CommsSurfaceKey, CommsSurface> = {
 };
 
 export function DznCommsVisualShell() {
-  const [activeSurfaceKey, setActiveSurfaceKey] = useState<CommsSurfaceKey>("global");
+  const [activeSurfaceState, setActiveSurfaceState] = useState<{ key: CommsSurfaceKey; generation: number }>({
+    key: "global",
+    generation: 0,
+  });
+  const [historyRetryNonce, setHistoryRetryNonce] = useState(0);
+  const activeSurfaceKey = activeSurfaceState.key;
   const activeSurface = staticCommsSurfaces[activeSurfaceKey];
+  const messageHistoryUiEnabled = useMemo(() => isDznCommsMessageHistoryUiEnabled(), []);
+  const messageHistoryState = useDznCommsMessageHistory(
+    activeSurfaceKey,
+    activeSurfaceState.generation,
+    historyRetryNonce,
+    messageHistoryUiEnabled,
+  );
+  const selectActiveSurface = useCallback((nextKey: CommsSurfaceKey) => {
+    setActiveSurfaceState((current) => {
+      if (current.key === nextKey) return current;
+      return { key: nextKey, generation: current.generation + 1 };
+    });
+  }, []);
+  const activeMessages = useMemo(
+    () => messageHistoryState.status === "live"
+      ? messageHistoryState.messages.map(toCommsMessageFromHistory)
+      : activeSurface.messages,
+    [activeSurface.messages, messageHistoryState],
+  );
   const activeMembers = useMemo(
     () => activeSurfaceKey === "pandora_squad" ? staticMembers.slice(0, 5) : staticMembers,
     [activeSurfaceKey],
@@ -399,6 +434,8 @@ export function DznCommsVisualShell() {
       className="dzn-comms-page relative min-h-screen overflow-hidden bg-[#02030a] text-white"
       data-dzn-comms-prototype="static-local-mock-data"
       data-dzn-comms-reactions="emoji-static-preview"
+      data-dzn-comms-message-history-ui={messageHistoryUiEnabled ? "enabled-read-only" : "disabled-static-fallback"}
+      data-dzn-comms-history-source={messageHistoryState.status === "live" ? "read-only-message-history" : "static-fallback"}
     >
       <DznCommsBackground />
 
@@ -407,7 +444,7 @@ export function DznCommsVisualShell() {
           <div className="min-w-0">
             <span className="inline-flex items-center gap-2 rounded border border-violet-300/30 bg-violet-400/12 px-3 py-1.5 text-[11px] font-black uppercase text-violet-100">
               <Radio className="h-3.5 w-3.5" aria-hidden="true" />
-              Static Prototype
+              {messageHistoryUiEnabled ? "Read-Only History" : "Static Prototype"}
             </span>
             <h1 className="mt-4 break-words text-5xl font-black uppercase leading-none text-white [overflow-wrap:anywhere] sm:text-7xl">
               DZN Comms
@@ -416,7 +453,9 @@ export function DznCommsVisualShell() {
               Connect. Coordinate. Get support.
             </p>
             <p className="mt-4 max-w-3xl text-sm font-semibold leading-6 text-zinc-300">
-              Static local mock data only. The shell previews support, global player chat, and private group chat without message storage, real sending, bot runtime, tracking, billing changes, or competitive-system impact.
+              {messageHistoryUiEnabled
+                ? "Read-only local/test message history can load for approved channels. The composer, reactions, reports, DZN Assist, tracking, billing, and competitive systems remain disconnected."
+                : "Static local mock data only. The shell previews support, global player chat, and private group chat without message storage, real sending, bot runtime, tracking, billing changes, or competitive-system impact."}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -427,29 +466,141 @@ export function DznCommsVisualShell() {
         </div>
 
         <div className="mt-5 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_340px]">
-          <DznCommsChannelRail activeKey={activeSurfaceKey} onSelect={setActiveSurfaceKey} />
+          <DznCommsChannelRail activeKey={activeSurfaceKey} onSelect={selectActiveSurface} />
 
           <section className="min-w-0 rounded-lg border border-cyan-300/18 bg-slate-950/74 shadow-[0_26px_90px_rgba(0,0,0,0.34)] backdrop-blur-xl">
             <DznCommsFeedHeader surface={activeSurface} privateMode={activeIsPrivate} />
             <PinnedGuidance surface={activeSurface} />
+            <MessageHistoryStatusBanner
+              state={messageHistoryState}
+              onRetry={() => setHistoryRetryNonce((value) => value + 1)}
+            />
             <div className="grid gap-3 px-3 py-3 sm:px-4">
-              {activeSurface.messages.map((message) => (
+              {activeMessages.map((message) => (
                 <CommsMessageRow key={message.id} message={message} />
               ))}
-              <FilteredMessageNotice />
+              {messageHistoryState.status === "live" ? null : <FilteredMessageNotice />}
               {activeIsPrivate ? <StaticWarningPreview /> : null}
             </div>
             <StaticComposer surface={activeSurface} />
           </section>
 
           <aside className="grid gap-4">
-            <DznAssistPanel onSelectSupport={() => setActiveSurfaceKey("support")} />
+            <DznAssistPanel onSelectSupport={() => selectActiveSurface("support")} />
             <ChannelSafetyPanel privateMode={activeIsPrivate} />
             <MemberPresencePanel members={activeMembers} privateMode={activeIsPrivate} />
           </aside>
         </div>
       </section>
     </main>
+  );
+}
+
+function useDznCommsMessageHistory(
+  surfaceKey: CommsSurfaceKey,
+  surfaceActivationGeneration: number,
+  retryNonce: number,
+  uiEnabled: boolean,
+): DznCommsMessageHistoryUiState {
+  const requestKey = `${surfaceKey}:${surfaceActivationGeneration}:${retryNonce}`;
+  const channelId = dznCommsMessageHistoryChannelId(surfaceKey);
+  const [loadedState, setLoadedState] = useState<{
+    requestKey: string;
+    state: DznCommsMessageHistoryUiState;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!uiEnabled || !channelId) return;
+
+    let active = true;
+
+    void loadDznCommsMessageHistory({ surfaceKey }).then((nextState) => {
+      if (active) setLoadedState({ requestKey, state: nextState });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [channelId, requestKey, surfaceKey, uiEnabled]);
+
+  if (!channelId) return dznCommsMessageHistoryStaticState("support-static");
+  if (!uiEnabled) return dznCommsMessageHistoryStaticState("client-flag-disabled");
+  if (loadedState?.requestKey !== requestKey) return dznCommsMessageHistoryLoadingState();
+  return loadedState.state;
+}
+
+function toCommsMessageFromHistory(message: DznCommsMessageHistoryMessage): CommsMessage {
+  const role = roleFromHistoryLabel(message.author.roleLabel);
+  return {
+    id: message.id,
+    author: message.author.displayName,
+    role,
+    time: formatHistoryTime(message.createdAt),
+    body: message.body,
+    badge: message.author.roleLabel ?? undefined,
+    tone: toneForHistoryRole(role),
+    visibility: message.visibility,
+    source: "message_history",
+  };
+}
+
+function roleFromHistoryLabel(label: string | null): MemberRole {
+  if (label === "Owner" || label === "Mod" || label === "VIP" || label === "AI") return label;
+  if (label === "Website Support") return "AI";
+  return "Member";
+}
+
+function toneForHistoryRole(role: MemberRole): CommsTone {
+  if (role === "Owner" || role === "AI") return "cyan";
+  if (role === "Mod") return "emerald";
+  if (role === "VIP") return "amber";
+  return "violet";
+}
+
+function formatHistoryTime(value: string) {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return "Saved";
+  const date = new Date(parsed);
+  const hours = String(date.getUTCHours()).padStart(2, "0");
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+  return `${hours}:${minutes} UTC`;
+}
+
+function MessageHistoryStatusBanner({
+  state,
+  onRetry,
+}: {
+  state: DznCommsMessageHistoryUiState;
+  onRetry: () => void;
+}) {
+  const tone = state.status === "live" ? "emerald" : state.status === "loading" ? "cyan" : state.status === "fallback" && state.reason === "private-denied" ? "violet" : "amber";
+  const Icon = state.status === "live" ? ShieldCheck : state.status === "loading" ? Radio : ShieldAlert;
+  const reason = "reason" in state ? state.reason : state.status;
+
+  return (
+    <section
+      className={`mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded border px-3 py-2 sm:mx-4 ${toneClasses(tone).soft}`}
+      data-dzn-comms-message-history-state={state.status}
+      data-dzn-comms-message-history-reason={reason}
+      aria-live="polite"
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span className="min-w-0">
+          <span className="block break-words text-[11px] font-black uppercase [overflow-wrap:anywhere]">{state.label}</span>
+          <span className="block break-words text-xs font-semibold leading-5 text-zinc-300 [overflow-wrap:anywhere]">{state.detail}</span>
+        </span>
+      </span>
+      {state.canRetry ? (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="inline-flex min-h-8 shrink-0 items-center justify-center rounded border border-white/14 bg-black/28 px-3 text-[11px] font-black uppercase text-white transition hover:bg-black/40"
+        >
+          Refresh
+        </button>
+      ) : null}
+    </section>
   );
 }
 
@@ -642,6 +793,12 @@ function CommsMessageRow({ message }: { message: CommsMessage }) {
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="break-words text-sm font-black text-white [overflow-wrap:anywhere]">{message.author}</h3>
           {message.badge ? <RoleBadge label={message.badge} role={message.role} /> : null}
+          {message.visibility === "locked" ? <RoleBadge label="Locked" role="AI" /> : null}
+          {message.source === "message_history" ? (
+            <span className="rounded border border-emerald-300/24 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-100">
+              Read-only
+            </span>
+          ) : null}
           <span className="text-xs font-semibold text-zinc-500">{message.time}</span>
         </div>
         <p className="mt-1 break-words text-sm font-semibold leading-6 text-zinc-300 [overflow-wrap:anywhere]">{message.body}</p>
