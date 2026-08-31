@@ -58,7 +58,7 @@ type CommsMessage = {
   body: string;
   badge?: string;
   tone: CommsTone;
-  reactions?: Array<{ label: string; count: number }>;
+  reactions?: Array<{ emoji: string; label: string; count: number }>;
   actions?: Array<{ label: string; href?: string }>;
 };
 
@@ -140,9 +140,9 @@ const staticCommsSurfaces: Record<CommsSurfaceKey, CommsSurface> = {
         tone: "cyan",
         body: "Welcome everyone. If you are new, check #new-players and say hi. Let's build the best servers and community together.",
         reactions: [
-          { label: "Boost", count: 14 },
-          { label: "Wave", count: 9 },
-          { label: "Heart", count: 12 },
+          { emoji: "\u{1F680}", label: "Boost", count: 14 },
+          { emoji: "\u{1F44B}", label: "Wave", count: 9 },
+          { emoji: "\u{1F49C}", label: "Heart", count: 12 },
         ],
       },
       {
@@ -154,9 +154,9 @@ const staticCommsSurfaces: Record<CommsSurfaceKey, CommsSurface> = {
         tone: "emerald",
         body: "Reminder: tonight's Survival Showdown starts in 2 hours. Sign up in #events if you have not yet.",
         reactions: [
-          { label: "Trophy", count: 8 },
-          { label: "Fire", count: 6 },
-          { label: "Target", count: 7 },
+          { emoji: "\u{1F3C6}", label: "Trophy", count: 8 },
+          { emoji: "\u{1F525}", label: "Fire", count: 6 },
+          { emoji: "\u{1F3AF}", label: "Target", count: 7 },
         ],
       },
       {
@@ -167,7 +167,7 @@ const staticCommsSurfaces: Record<CommsSurfaceKey, CommsSurface> = {
         badge: "Member",
         tone: "rose",
         body: "Just finished linking my server - smooth process. Thanks for the guide.",
-        reactions: [{ label: "Thumbs up", count: 6 }],
+        reactions: [{ emoji: "\u{1F44D}", label: "Thumbs up", count: 6 }],
       },
       {
         id: "global-filtered",
@@ -194,7 +194,7 @@ const staticCommsSurfaces: Record<CommsSurfaceKey, CommsSurface> = {
         badge: "Mod",
         tone: "emerald",
         body: "Base amount plus event bonus. Check the challenge details for specifics. Happy grinding.",
-        reactions: [{ label: "Thumbs up", count: 5 }],
+        reactions: [{ emoji: "\u{1F44D}", label: "Thumbs up", count: 5 }],
       },
     ],
   },
@@ -338,7 +338,7 @@ const staticCommsSurfaces: Record<CommsSurfaceKey, CommsSurface> = {
         badge: "Member",
         tone: "amber",
         body: "I'll draft the launch announcement. Any theme ideas?",
-        reactions: [{ label: "Thumbs up", count: 3 }],
+        reactions: [{ emoji: "\u{1F44D}", label: "Thumbs up", count: 3 }],
       },
       {
         id: "pandora-assist",
@@ -398,6 +398,7 @@ export function DznCommsVisualShell() {
     <main
       className="dzn-comms-page relative min-h-screen overflow-hidden bg-[#02030a] text-white"
       data-dzn-comms-prototype="static-local-mock-data"
+      data-dzn-comms-reactions="emoji-static-preview"
     >
       <DznCommsBackground />
 
@@ -670,8 +671,14 @@ function CommsMessageRow({ message }: { message: CommsMessage }) {
         ) : null}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {message.reactions?.map((reaction) => (
-            <span key={reaction.label} className="rounded border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] font-black text-zinc-300">
-              {reaction.label} {reaction.count}
+            <span
+              key={reaction.label}
+              aria-label={`${reaction.label} reaction, ${reaction.count}`}
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-cyan-300/16 bg-white/[0.055] px-2.5 py-1 text-xs font-black text-zinc-200"
+              data-dzn-comms-reaction="emoji-static-preview"
+            >
+              <span aria-hidden="true" className="text-base leading-none">{reaction.emoji}</span>
+              <span aria-hidden="true">{reaction.count}</span>
             </span>
           ))}
           <button type="button" disabled className="ml-auto inline-flex cursor-not-allowed items-center gap-1 text-[11px] font-black uppercase text-zinc-500">

@@ -439,7 +439,17 @@ This slice adds the disabled-by-default local/test private `GET /api/account/sup
 
 It still adds no generated card art, public Supporter Card reveal, sharing controls, screenshot/export controls, notifications, migrations, production D1 apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe Product/Price/customer/refund/dispute/webhook endpoint mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
 
-The next Store payment step should be the Store private Supporter Card reveal visual polish and manual QA slice only if deliberately approved.
+## DZN Store Supporter Card Reveal Visual QA
+
+Delivered in `docs/DZN_STORE_SUPPORTER_CARD_REVEAL_VISUAL_QA.md`.
+
+This slice polishes the private `/account/purchases` Supporter Card reveal panel, keeps the serial masked before current-account reveal, adds clearer private reveal, empty, loading, unavailable, and error states, and records local seeded preview evidence under `docs/artifacts/dzn-store-supporter-card-reveal-visual-qa/`.
+
+It also updates the static DZN Comms visual shell reaction chips so visible reactions render as emoji plus count, while preserving accessible reaction labels.
+
+It still adds no generated card art, public Supporter Card reveal, sharing controls, screenshot/export controls, notifications, migrations, production D1 apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe Product/Price/customer/refund/dispute/webhook endpoint mutation, Cloudflare config mutation, production D1 write, chat route, message persistence, AI provider credential, metered model call, or issue #49 change.
+
+The next non-payment UX step should be personal player page/nav access polish so logged-in players can more clearly reach `/player` and `/player/profile`.
 
 ## Implementation Boundary
 

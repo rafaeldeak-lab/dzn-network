@@ -60,6 +60,12 @@ The user-provided DZN Comms references were used as visual direction for the com
   - Adds `test:dzn-comms-visual-shell`.
   - Wires the focused test into `npm test` immediately after the chat/support preflight test.
 
+## Follow-On Visual Polish
+
+The Store private Supporter Card reveal visual QA slice also updates `components/community/dzn-comms-visual-shell.tsx` so static reaction chips render actual emoji plus count instead of text labels such as "Boost 14" or "Heart 12".
+
+This is still static local mock data only. Reaction names remain available as accessible labels, and the visual shell still adds no chat API, message sending, message persistence, moderation table, Durable Object, WebSocket, support bot runtime, AI provider credential, metered model call, analytics/tracking, production mutation, or issue #49 change.
+
 ## Entitlement And Access Matrix
 
 | Surface | Prototype behavior |

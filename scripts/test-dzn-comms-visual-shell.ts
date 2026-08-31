@@ -23,6 +23,12 @@ const VISUAL_SNIPPETS = [
   "Static Prototype",
   "DZN Comms",
   "Connect. Coordinate. Get support.",
+  "data-dzn-comms-reactions=\"emoji-static-preview\"",
+  "data-dzn-comms-reaction=\"emoji-static-preview\"",
+  "emoji: \"\\u{1F680}\"",
+  "emoji: \"\\u{1F44B}\"",
+  "emoji: \"\\u{1F49C}\"",
+  "aria-label={`${reaction.label} reaction, ${reaction.count}`}",
   "Public Channels",
   "Global Chat",
   "New Players",
@@ -193,6 +199,7 @@ function assertVisualContracts() {
   assert.equal(shell.includes("useState<CommsSurfaceKey>"), true, "Visual shell should use local state only for surface switching.");
   assert.equal(shell.includes("disabled"), true, "Visual shell should include disabled controls.");
   assert.equal(shell.includes("/api/"), false, "Visual shell must not reference API routes.");
+  assert.equal(shell.includes("{reaction.label} {reaction.count}"), false, "Reaction chips should render emoji plus count, not text-label plus count.");
   assertNoForbiddenRuntime(shell, COMMS_SHELL);
 
   const globals = read(GLOBALS);

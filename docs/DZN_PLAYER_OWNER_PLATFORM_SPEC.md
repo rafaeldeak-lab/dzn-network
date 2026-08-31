@@ -595,7 +595,8 @@ Future slices should build on this foundation in this order unless product prior
 28. DZN Store fulfilment ledger schema migration approval preflight: delivered as a documentation/test-guard slice defining the exact future local/test schema contract for account entitlements, Supporter Cards, fulfilment attempts, order status history, entitlement status history, and refund/dispute revocation audit before any migration file, fulfilment route write, entitlement write, Supporter Card issuance, earned-spin ledger, wheel runtime, live checkout activation, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
 29. DZN Store fulfilment runtime implementation approval preflight: delivered as a documentation/test-guard slice defining the future disabled-by-default local/test fulfilment runtime sequence, exact write scope, idempotency behavior, order-status transitions, account-entitlement creation rules, optional Supporter Card issuance rules, refund/chargeback rollback, test matrix, rollback path, and security proof before any runtime code writes entitlements, issues cards, mints earned spins, runs the wheel, enables live checkout, mutates Stripe/Cloudflare, writes production D1, or changes issue #49.
 30. DZN Store fulfilment runtime implementation: delivered as a disabled-by-default local/test runtime for verified Store `checkout.session.completed` receipts, idempotent attempts, exactly-one safe account entitlement per fulfilled source item, optional independently flagged Supporter Card issuance, and refund/dispute rollback; still no earned spins, reward wheel runtime, live checkout, Stripe Product/Price mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
-31. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+31. DZN Store Supporter Card reveal visual QA: delivered as a private `/account/purchases` visual polish and local seeded evidence slice with masked serial preview, clearer reveal states, and static DZN Comms emoji reactions; still no generated card art, public reveal, sharing, screenshot/export, notifications, live checkout, Stripe/Cloudflare/production mutation, chat runtime, AI provider credentials, or issue #49 change.
+32. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 
@@ -2041,6 +2042,18 @@ The Account Purchases read model can now advertise private reveal availability b
 This implementation adds no generated card art, public Supporter Card reveal, sharing controls, screenshot/export controls, notifications, migrations, production D1 apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
 
 Fairness remains unchanged: private Supporter Card reveal cannot affect owner billing plan status, `/setup`, Nitrado linking, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions, earned spins, reward wheel state, or competitive eligibility.
+
+## DZN Store Supporter Card Reveal Visual QA Slice
+
+The DZN Store Supporter Card reveal visual QA slice is delivered in `docs/DZN_STORE_SUPPORTER_CARD_REVEAL_VISUAL_QA.md`.
+
+It polishes the private `/account/purchases` Supporter Card reveal panel with a stronger DZN Founding Supporter frame, masked serial preview, clearer empty/loading/unavailable/error states, and local seeded preview evidence. The actual serial still appears only after the approved private current-account reveal route succeeds.
+
+This slice also updates the static DZN Comms visual shell reaction chips so visible reactions render as actual emoji plus count while keeping accessible text labels.
+
+This slice adds no generated card art, public Supporter Card reveal, sharing controls, screenshot/export controls, notifications, migrations, production D1 apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 write, chat message route, message persistence, AI provider credentials, metered model calls, or issue #49 change.
+
+Fairness remains unchanged: Supporter Card reveal visual polish and static Comms reaction presentation cannot affect owner billing plan status, `/setup`, Nitrado linking, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions, earned spins, reward wheel state, chat history, support sessions, or competitive eligibility.
 
 ## Pricing Visual Comparison Upgrade Slice
 

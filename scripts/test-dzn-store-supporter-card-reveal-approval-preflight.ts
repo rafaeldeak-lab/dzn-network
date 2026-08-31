@@ -369,6 +369,11 @@ function assertAccountPurchasesStaysRevealBlocked() {
   }
 
   for (const field of FORBIDDEN_ACCOUNT_UI_RAW_FIELDS) {
+    if (field === "DZN-SUP-") {
+      assertIncludes(component, "DZN-SUP-******", `${ACCOUNT_COMPONENT} may show only the approved masked visual placeholder.`);
+      assert.doesNotMatch(component, /DZN-SUP-\d{6}/, `${ACCOUNT_COMPONENT} must not bake in a real-looking Supporter Card serial.`);
+      continue;
+    }
     assert.equal(component.includes(field), false, `${ACCOUNT_COMPONENT} must not reference private card/payment field ${field}.`);
   }
 

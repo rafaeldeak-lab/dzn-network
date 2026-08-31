@@ -1,0 +1,120 @@
+{
+  "artifact": "dzn-store-supporter-card-reveal-visual-qa",
+  "version": "2026-08-31.visual-qa-v1",
+  "scope": "local_test_seeded_preview_only",
+  "route": "/account/purchases",
+  "private_reveal_route": "/api/account/supporter-cards/[cardRef]/reveal",
+  "source": "source_controlled_review_artifact",
+  "runtime_effect": "none",
+  "contains_production_data": false,
+  "contains_raw_internal_ids": false,
+  "contains_discord_ids": false,
+  "contains_stripe_ids": false,
+  "contains_payment_method_data": false,
+  "contains_billing_address": false,
+  "contains_provider_payloads": false,
+  "contains_operator_notes": false,
+  "serial_redaction": "masked_until_current_account_private_reveal_success",
+  "blocked_runtime": {
+    "card_art_generation": false,
+    "public_reveal": false,
+    "sharing_controls": false,
+    "screenshot_export_controls": false,
+    "notifications": false,
+    "live_checkout": false,
+    "earned_spins": false,
+    "reward_wheel": false,
+    "stripe_mutation": false,
+    "cloudflare_mutation": false,
+    "production_d1_write": false,
+    "issue_49_change": false
+  },
+  "seeded_states": [
+    {
+      "state": "read_model_disabled",
+      "expected_panel": "Account purchases unavailable",
+      "expected_copy": "The private Account Purchases read model is not enabled for this environment.",
+      "serial_visible": false,
+      "private_data_visible": false
+    },
+    {
+      "state": "no_store_purchases",
+      "expected_panel": "No Store purchases yet",
+      "expected_supporter_card_panel": "No Supporter Card to reveal",
+      "serial_visible": false,
+      "private_data_visible": false
+    },
+    {
+      "state": "private_card_status_masked",
+      "purchase_ref": "DZN-STORE-20260831-QATEST",
+      "product_name": "DZN Founding Supporter Pack",
+      "status": "active",
+      "visibility_state": "hidden",
+      "masked_serial": "DZN-SUP-******",
+      "expected_copy": "Serial hidden until reveal",
+      "serial_visible": false,
+      "private_data_visible": false
+    },
+    {
+      "state": "private_card_revealed_current_account",
+      "purchase_ref": "DZN-STORE-20260831-QATEST",
+      "card_type_label": "DZN Founding Supporter",
+      "serial_number": "DZN-SUP-000001",
+      "display_name_snapshot": "Local QA Player",
+      "theme_label": "Signal Violet",
+      "supporter_since": "2026-08-31T10:00:00.000Z",
+      "expected_copy": "Shown only after current-account ownership proof.",
+      "serial_visible": true,
+      "private_data_visible": true,
+      "card_art": {
+        "available": false,
+        "reason": "card_art_generation_requires_future_approved_slice"
+      },
+      "public_reveal": {
+        "available": false,
+        "reason": "public_reveal_requires_future_opt_in_slice"
+      }
+    },
+    {
+      "state": "private_reveal_unavailable",
+      "purchase_ref": "DZN-STORE-20260831-BLOCKD",
+      "status": "manual_review",
+      "expected_panel": "Private Supporter Card reveal is unavailable.",
+      "serial_visible": false,
+      "private_data_visible": false
+    },
+    {
+      "state": "cross_account_denied",
+      "purchase_ref": "DZN-STORE-20260831-OTHER1",
+      "expected_status": 404,
+      "expected_panel": "Supporter Card is not available for this account.",
+      "serial_visible": false,
+      "private_data_visible": false
+    }
+  ],
+  "protected_systems": [
+    "billing",
+    "owner_entitlement",
+    "server_ownership",
+    "setup",
+    "nitrado_linking",
+    "rankings",
+    "discovery_score",
+    "reviews",
+    "badges",
+    "seasons",
+    "events",
+    "server_wars",
+    "ctf_scoring",
+    "xp_awards",
+    "calling_card_awards",
+    "public_profile_visibility",
+    "retained_exports",
+    "moderation_decisions",
+    "earned_spins",
+    "reward_wheel",
+    "chat_messages",
+    "support_sessions",
+    "competitive_eligibility"
+  ]
+}
