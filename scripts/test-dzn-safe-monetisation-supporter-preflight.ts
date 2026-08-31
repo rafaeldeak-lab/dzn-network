@@ -30,6 +30,8 @@ const STORE_WEBHOOK_DOC = "docs/DZN_STORE_SANDBOX_WEBHOOK_LEDGER_RECEIPT.md";
 const STORE_WEBHOOK_HANDOFF = "docs/DZN_STORE_SANDBOX_WEBHOOK_LEDGER_RECEIPT_HANDOFF.md";
 const STORE_PREVIEW_PAGE = "app/store/page.tsx";
 const STORE_PREVIEW_COMPONENT = "components/store/dzn-store-preview-page.tsx";
+const STORE_ACCOUNT_PURCHASES_PAGE = "app/account/purchases/page.tsx";
+const STORE_ACCOUNT_PURCHASES_COMPONENT = "components/store/dzn-store-account-purchases-page.tsx";
 const PACKAGE_JSON = "package.json";
 
 const PREFLIGHT_SNIPPETS = [
@@ -165,7 +167,6 @@ const FORBIDDEN_RUNTIME_PATHS = [
   "functions/api/billing/create-store-checkout-session.ts",
   "functions/api/billing/create-one-time-checkout-session.ts",
   "functions/api/stripe/store",
-  "app/account/purchases/page.tsx",
   "app/purchases/page.tsx",
   "app/supporter/page.tsx",
   "app/wheel/page.tsx",
@@ -314,6 +315,8 @@ function assertFilesExist() {
     STORE_FULFILMENT_HELPER,
     STORE_WEBHOOK_DOC,
     STORE_WEBHOOK_HANDOFF,
+    STORE_ACCOUNT_PURCHASES_PAGE,
+    STORE_ACCOUNT_PURCHASES_COMPONENT,
   ]) {
     assert.equal(existsSync(path), true, `${path} should exist.`);
   }
@@ -429,10 +432,26 @@ function assertNoStoreRuntimePatternsBeyondCatalogDraft() {
     "functions/api/account/purchases.ts",
     "functions/_lib/dzn-store-account-purchases.ts",
   ].map((path) => path.replace(/\\/g, "/")));
+  const allowStoreAccountPurchasesUiFiles = new Set([
+    STORE_ACCOUNT_PURCHASES_PAGE,
+    STORE_ACCOUNT_PURCHASES_COMPONENT,
+  ].map((path) => path.replace(/\\/g, "/")));
   for (const rawPath of runtimeFiles) {
     const path = rawPath.replace(/\\/g, "/");
     if (allowExistingSubscriptionFiles.has(path)) continue;
     const source = read(path);
+    if (allowStoreAccountPurchasesUiFiles.has(path)) {
+      assert.equal(
+        source.includes("<DznStoreAccountPurchasesPage />") || source.includes('const ACCOUNT_PURCHASES_ENDPOINT = "/api/account/purchases";'),
+        true,
+        `${path} must be part of the approved Account Purchases UI shell slice.`,
+      );
+      assert.doesNotMatch(source, /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE)\b/i, `${path} must not contain Store write/runtime statements.`);
+      assert.doesNotMatch(source, /\b(?:checkout\.sessions\.create|stripeFormRequest|stripeGetRequest|\/checkout\/sessions|wrangler)\b/i, `${path} must not create checkout sessions or mutate providers.`);
+      assert.doesNotMatch(source, /\b(?:localStorage|sessionStorage|sendBeacon|gtag|analytics|trackEvent)\b/i, `${path} must not store share/account history or call analytics.`);
+      assert.doesNotMatch(source, /\bmethod\s*:\s*["'](?:POST|PUT|PATCH|DELETE)["']/i, `${path} must not issue mutating API requests.`);
+      continue;
+    }
     if (allowStoreAccountPurchasesReadModelFiles.has(path)) {
       assert.equal(
         source.includes("DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_ENABLED") || source.includes("readDznStoreAccountPurchasesReadModel"),
@@ -586,8 +605,10 @@ function assertNoStoreRuntimePatternsBeyondCatalogDraft() {
 }
 
 function assertReadOnlyStorePreviewOnly() {
-  assert.equal(existsSync(STORE_PREVIEW_PAGE), true, "The only allowed Store route is the public read-only preview page.");
-  assert.equal(existsSync(STORE_PREVIEW_COMPONENT), true, "The only allowed Store component is the public read-only preview component.");
+  assert.equal(existsSync(STORE_PREVIEW_PAGE), true, "The public Store preview page should exist.");
+  assert.equal(existsSync(STORE_PREVIEW_COMPONENT), true, "The public Store preview component should exist.");
+  assert.equal(existsSync(STORE_ACCOUNT_PURCHASES_PAGE), true, "The approved private Account Purchases UI shell page should exist.");
+  assert.equal(existsSync(STORE_ACCOUNT_PURCHASES_COMPONENT), true, "The approved private Account Purchases UI shell component should exist.");
 
   const page = read(STORE_PREVIEW_PAGE);
   assert.equal(page.includes("<DznStorePreviewPage />"), true, "Store route should render the preview component only.");
@@ -601,6 +622,19 @@ function assertReadOnlyStorePreviewOnly() {
   assert.equal(component.includes("fetch("), false, "Store preview must not fetch runtime Store data.");
   assert.equal(component.includes("createCheckoutSession"), false, "Store preview must not create checkout sessions.");
   assert.equal(component.includes("checkout.sessions.create"), false, "Store preview must not include Stripe checkout runtime.");
+
+  const accountPage = read(STORE_ACCOUNT_PURCHASES_PAGE);
+  assert.equal(accountPage.includes("<DznStoreAccountPurchasesPage />"), true, "Account Purchases page should render the UI shell component only.");
+
+  const accountComponent = read(STORE_ACCOUNT_PURCHASES_COMPONENT);
+  assert.equal(accountComponent.includes('const ACCOUNT_PURCHASES_ENDPOINT = "/api/account/purchases";'), true, "Account Purchases UI must consume only the private read-model endpoint.");
+  assert.equal(accountComponent.includes('cache: "no-store"'), true, "Account Purchases UI must request uncached private account data.");
+  assert.equal(accountComponent.includes('credentials: "include"'), true, "Account Purchases UI must include the authenticated session.");
+  assert.equal(accountComponent.includes('data-dzn-store-account-purchases-ui="read-only"'), true, "Account Purchases UI must identify itself as read-only.");
+  assert.equal(accountComponent.includes('data-supporter-card-reveal="blocked"'), true, "Account Purchases UI must keep Supporter Card reveal blocked.");
+  assert.equal(accountComponent.includes('data-live-checkout="disabled"'), true, "Account Purchases UI must identify live checkout as disabled.");
+  assert.equal(accountComponent.includes('data-production-mutation="none"'), true, "Account Purchases UI must identify production mutation as absent.");
+  assert.equal(accountComponent.includes("checkout.sessions.create"), false, "Account Purchases UI must not include Stripe checkout runtime.");
 }
 
 function assertNoNewProviderDependencies() {

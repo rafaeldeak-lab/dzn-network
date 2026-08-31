@@ -76,8 +76,12 @@ Validation to run before final handoff:
 - `git diff --check`
 - Codex Security diff scan
 
+## Follow-On Delivered
+
+Follow-on delivered separately: Store private Account Purchases UI shell in `docs/DZN_STORE_ACCOUNT_PURCHASES_UI_SHELL.md`. It adds `/account/purchases` and consumes only `GET /api/account/purchases`, while keeping Supporter Card reveal blocked and adding no webhook replay route, manual-review route, refund/dispute operator route, notifications, production migration apply, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
+
 ## Next Recommended Slice
 
-Next should be the Store private Account Purchases UI shell and Supporter Card status presentation preflight/implementation: add an authenticated read-only account page that consumes `GET /api/account/purchases`, shows purchase and entitlement status clearly, keeps Supporter Card reveal blocked until separately approved, and still adds no webhook replay route, no manual-review route, no refund/dispute operator route, no notifications, no production migration apply, no live checkout activation, no earned-spin ledger, no reward wheel runtime, no Stripe mutation, no Cloudflare config mutation, no production D1 write, and no issue #49 change.
+Next should be Store private Supporter Card reveal approval preflight only if deliberately approved.
 
 The personal player page/nav button remains a separate player UX slice.

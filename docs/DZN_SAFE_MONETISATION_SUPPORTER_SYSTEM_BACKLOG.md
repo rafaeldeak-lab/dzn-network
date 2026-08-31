@@ -407,9 +407,19 @@ This slice adds the disabled-by-default authenticated private read-only `GET /ap
 
 The route remains behind `DZN_STORE_ACCOUNT_PURCHASES_READ_MODEL_ENABLED=false` by default, requires `DZN_STORE_SANDBOX_RUNTIME=local` or `test`, and blocks live checkout, earned-spin runtime, and reward-wheel runtime flags.
 
-This delivered slice still adds no Account Purchases UI, no public Supporter Card reveal, no private Supporter Card reveal component, no Entitlements route, no webhook replay route, no manual-review route, no refund/dispute operator route, no notification, no migration, no production D1 apply, no live checkout activation, no earned-spin ledger, no reward wheel runtime, no Stripe Product/Price/customer/refund/dispute/webhook endpoint mutation, no Cloudflare config mutation, no production D1 write, and no issue #49 change.
+This read-model slice itself added no Account Purchases UI, no public Supporter Card reveal, no private Supporter Card reveal component, no Entitlements route, no webhook replay route, no manual-review route, no refund/dispute operator route, no notification, no migration, no production D1 apply, no live checkout activation, no earned-spin ledger, no reward wheel runtime, no Stripe Product/Price/customer/refund/dispute/webhook endpoint mutation, no Cloudflare config mutation, no production D1 write, and no issue #49 change.
 
-The next Store payment step should be the Store private Account Purchases UI shell and Supporter Card status presentation preflight/implementation, only if deliberately approved.
+## DZN Store Account Purchases UI Shell
+
+Delivered in `docs/DZN_STORE_ACCOUNT_PURCHASES_UI_SHELL.md`.
+
+This slice adds `/account/purchases` as an authenticated private read-only account page that consumes only `GET /api/account/purchases` with included session credentials and no-store caching. The Store preview also links to this private Account Purchases shell.
+
+The UI may show purchase, entitlement, and private Supporter Card status returned by the sanitized current-user read model. It must not show Supporter Card serial numbers, generated card art, raw Stripe IDs, payment method data, billing details, raw Discord IDs, raw internal DZN IDs, webhook raw bodies, raw provider payloads, operator notes, or any other user's Store records.
+
+This delivered UI shell still adds no public Supporter Card reveal, no private Supporter Card reveal component, no Entitlements route, no webhook replay route, no manual-review route, no refund/dispute operator route, no notification, no migration, no production D1 apply, no live checkout activation, no earned-spin ledger, no reward wheel runtime, no Stripe Product/Price/customer/refund/dispute/webhook endpoint mutation, no Cloudflare config mutation, no production D1 write, and no issue #49 change.
+
+The next Store payment step should be Store private Supporter Card reveal approval preflight only if deliberately approved.
 
 ## Implementation Boundary
 

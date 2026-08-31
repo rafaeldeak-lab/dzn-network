@@ -2004,6 +2004,18 @@ This implementation adds no Account Purchases UI page, no public Supporter Card 
 
 Fairness remains unchanged: Account Purchases read-model work cannot affect owner billing plan status, `/setup`, Nitrado linking, server ownership, rankings, discovery score, reviews, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
 
+## DZN Store Account Purchases UI Shell Slice
+
+The DZN Store Account Purchases UI shell is delivered in `docs/DZN_STORE_ACCOUNT_PURCHASES_UI_SHELL.md`.
+
+It adds `app/account/purchases/page.tsx` and `components/store/dzn-store-account-purchases-page.tsx` as an authenticated private read-only account page over `GET /api/account/purchases`. The UI uses included session credentials, no-store caching, a login redirect for `401`, and an unavailable state when the read-model API is disabled by default.
+
+The UI may show the current user's sanitized purchase, entitlement, receipt, fulfilment, private Supporter Card status, status-history, and refund/dispute summary fields from the read model only. It must not show Supporter Card serial numbers, generated card art, raw Stripe ids, payment method data, billing details, raw Discord ids, raw internal DZN ids, raw webhook bodies, raw provider payloads, operator notes, other sandbox-scope rows, or any other user's Store records.
+
+This implementation adds no public Supporter Card reveal, no private Supporter Card reveal component, no Entitlements route, no webhook replay route, no manual-review route, no refund/dispute operator route, no notification, no migration, no production D1 apply, no live checkout activation, no earned-spin ledger, no reward wheel runtime, no Stripe mutation, no Cloudflare config mutation, no production D1 write, and no issue #49 change.
+
+Fairness remains unchanged: Account Purchases UI work cannot affect owner billing plan status, `/setup`, Nitrado linking, server ownership, rankings, discovery score, reviews, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
+
 ## Pricing Visual Comparison Upgrade Slice
 
 The pricing visual/comparison upgrade is a dedicated `/pricing` page slice. It does not change billing plans, entitlement normalization, checkout safety, owner gating, production configuration, or issue #49.

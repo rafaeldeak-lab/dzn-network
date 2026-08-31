@@ -154,7 +154,6 @@ const FORBIDDEN_RUNTIME_PATHS = [
   "functions/api/billing/create-store-checkout-session.ts",
   "functions/api/billing/create-one-time-checkout-session.ts",
   "functions/api/stripe/store",
-  "app/account/purchases/page.tsx",
   "app/purchases/page.tsx",
   "app/supporter/page.tsx",
   "app/wheel/page.tsx",

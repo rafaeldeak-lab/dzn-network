@@ -76,7 +76,6 @@ const FORBIDDEN_NEW_RUNTIME_PATHS = [
   "functions/api/wheel",
   "components/supporter",
   "components/wheel",
-  "app/account/purchases",
   "app/wheel",
 ] as const;
 
