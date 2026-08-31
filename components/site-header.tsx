@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { UserRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { DznPulseBell, DznPulseProvider } from "@/components/dzn-pulse/dzn-pulse-provider";
@@ -42,6 +43,9 @@ const logoSources = {
   mp4: "/media/server-wars-logo/dzn-server-wars-logo-loop-v2.mp4",
   poster: "/media/server-wars-logo/dzn-server-wars-logo-poster-v2.jpg",
 };
+
+const PLAYER_HOME_URL = "/player";
+const PLAYER_PROFILE_URL = "/player/profile";
 
 const rootHeaderHiddenPrefixes = [
   "/dashboard",
@@ -178,6 +182,8 @@ export function SiteHeader({
   const planTier = resolvedNavigation?.plan_tier ?? "free";
   const navLinks = resolvedAuthenticated ? authenticatedHeaderLinksForTier(planTier) : loggedOutHeaderLinks;
   const primaryAction = resolvedNavigation?.primary_action ?? defaultPrimaryActionForTier(planTier);
+  const playerHomeHref = resolvedNavigation?.player_home_url ?? PLAYER_HOME_URL;
+  const playerProfileHref = resolvedNavigation?.player_profile_url ?? PLAYER_PROFILE_URL;
   const canUseOwnerTools = Boolean(resolvedNavigation?.can_use_owner_tools);
   const showOwnerDashboard = resolvedAuthenticated && canUseOwnerTools && primaryAction.href !== "/dashboard";
   const showAddServer = resolvedAuthenticated && canUseOwnerTools && Boolean(resolvedNavigation?.can_link_more_servers);
@@ -207,6 +213,19 @@ export function SiteHeader({
 
         <div className="dzn-header-actions">
           {resolvedAuthenticated ? <DznPulseBell className="dzn-header-pulse-bell" /> : null}
+          {resolvedAuthenticated ? (
+            <Link
+              href={playerHomeHref}
+              className="dzn-header-action dzn-header-action--player-home"
+              aria-label="Open your DZN Player Hub and private player profile"
+              title="Player Hub and profile"
+              data-player-nav-access="authenticated-player-home"
+              data-player-profile-href={playerProfileHref}
+            >
+              <UserRound className="h-4 w-4" aria-hidden="true" />
+              My Player
+            </Link>
+          ) : null}
           <a href={DZN_PUBLIC_DISCORD_INVITE_URL} target="_blank" rel="noopener noreferrer" className="dzn-header-action dzn-header-action--discord">
             Discord
           </a>

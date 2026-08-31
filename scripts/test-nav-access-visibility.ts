@@ -15,7 +15,7 @@ const headerActionBlock = sourceBlock(siteHeaderSource, "<div className=\"dzn-he
 
 assert.equal(loggedOutHeaderBlock.includes("Features"), true);
 assert.equal(loggedOutHeaderBlock.includes("Pricing"), true);
-for (const privateLabel of ["Leaderboards", "Servers", "Stats", "Events", "Community", "Dashboard", "Add Your Server", "Start Setup", "Upgrade to Pro", "Owner Dashboard"]) {
+for (const privateLabel of ["Leaderboards", "Servers", "Stats", "Events", "Community", "Dashboard", "Add Your Server", "Start Setup", "Upgrade to Pro", "Owner Dashboard", "My Player", "My Profile"]) {
   assert.equal(loggedOutHeaderBlock.includes(privateLabel), false, `Logged-out header links must not include ${privateLabel}.`);
 }
 
@@ -46,6 +46,10 @@ assert.equal(globalsSource.includes("@media (max-width: 560px)"), true, "Small m
 assert.equal(globalsSource.includes("grid-template-columns: 1fr;"), true, "Small mobile header actions must use one full-width column.");
 
 assert.equal(headerActionBlock.includes("DznPulseBell"), true);
+assert.equal(headerActionBlock.includes("data-player-nav-access=\"authenticated-player-home\""), true);
+assert.equal(headerActionBlock.includes("data-player-profile-href={playerProfileHref}"), true);
+assert.equal(headerActionBlock.includes("My Player"), true);
+assert.equal(headerActionBlock.includes("Open your DZN Player Hub and private player profile"), true);
 assert.equal(headerActionBlock.includes("dzn-header-plan--${planTier}"), true);
 assert.equal(siteHeaderSource.includes("const canUseOwnerTools = Boolean(resolvedNavigation?.can_use_owner_tools)"), true);
 assert.equal(siteHeaderSource.includes("const showOwnerDashboard = resolvedAuthenticated && canUseOwnerTools"), true);
@@ -74,6 +78,8 @@ assert.equal(authTypesSource.includes("can_use_player_surfaces: boolean"), true)
 assert.equal(authTypesSource.includes("can_use_owner_tools: boolean"), true);
 assert.equal(authTypesSource.includes("owner_action_required: \"choose_plan\" | null"), true);
 assert.equal(authTypesSource.includes("owner_pricing_url: string"), true);
+assert.equal(authTypesSource.includes("player_home_url: string"), true);
+assert.equal(authTypesSource.includes("player_profile_url: string"), true);
 assert.equal(authTypesSource.includes("label: \"Owner Plans\" | \"Upgrade to Pro\" | \"Owner Dashboard\""), true);
 
 assert.equal(authMeSource.includes("SELECT plan_key, plan_status FROM owner_billing_accounts"), true);
@@ -84,6 +90,8 @@ assert.equal(authMeSource.includes("role: canUseOwnerTools ? \"owner\" : \"playe
 assert.equal(authMeSource.includes("can_use_player_surfaces: true"), true);
 assert.equal(authMeSource.includes("can_use_owner_tools: canUseOwnerTools"), true);
 assert.equal(authMeSource.includes("owner_action_required: canUseOwnerTools ? null : \"choose_plan\""), true);
+assert.equal(authMeSource.includes("player_home_url: PLAYER_HOME_URL"), true);
+assert.equal(authMeSource.includes("player_profile_url: PLAYER_PROFILE_URL"), true);
 assert.equal(authMeSource.includes("can_use_pro_tools: tier === \"pro\""), true);
 assert.equal(authMeSource.includes("primary_action: navigationPrimaryActionForTier(tier)"), true);
 assert.equal(authMeSource.includes("getOwnerBillingStatus"), false, "Auth summary must not call the billing status helper because that upserts entitlements.");
@@ -94,6 +102,7 @@ for (const className of [
   ".dzn-header-plan",
   ".dzn-header-plan--starter",
   ".dzn-header-plan--pro",
+  ".dzn-header-action--player-home",
   ".dzn-header-action--package-trial",
   ".dzn-header-action--package-upgrade",
   ".dzn-header-action--package-pro",

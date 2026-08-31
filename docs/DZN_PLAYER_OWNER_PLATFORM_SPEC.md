@@ -596,7 +596,8 @@ Future slices should build on this foundation in this order unless product prior
 29. DZN Store fulfilment runtime implementation approval preflight: delivered as a documentation/test-guard slice defining the future disabled-by-default local/test fulfilment runtime sequence, exact write scope, idempotency behavior, order-status transitions, account-entitlement creation rules, optional Supporter Card issuance rules, refund/chargeback rollback, test matrix, rollback path, and security proof before any runtime code writes entitlements, issues cards, mints earned spins, runs the wheel, enables live checkout, mutates Stripe/Cloudflare, writes production D1, or changes issue #49.
 30. DZN Store fulfilment runtime implementation: delivered as a disabled-by-default local/test runtime for verified Store `checkout.session.completed` receipts, idempotent attempts, exactly-one safe account entitlement per fulfilled source item, optional independently flagged Supporter Card issuance, and refund/dispute rollback; still no earned spins, reward wheel runtime, live checkout, Stripe Product/Price mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
 31. DZN Store Supporter Card reveal visual QA: delivered as a private `/account/purchases` visual polish and local seeded evidence slice with masked serial preview, clearer reveal states, and static DZN Comms emoji reactions; still no generated card art, public reveal, sharing, screenshot/export, notifications, live checkout, Stripe/Cloudflare/production mutation, chat runtime, AI provider credentials, or issue #49 change.
-32. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+32. Player navigation access polish: delivered as a logged-in `My Player` header action to `/player`, direct `My Profile` Player Hub hero action to `/player/profile`, and read-only auth navigation URLs for those fixed player paths; still no Store payment, Supporter Card reveal, checkout, entitlement write, wheel, chat runtime, competitive-system behavior, production mutation, or issue #49 change.
+33. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 
@@ -610,7 +611,7 @@ The foundation hub shows:
 - Suggested public events and tournaments from the existing public event payload.
 - Profile entry points for DZN Pulse, leaderboards, events, player-profile roadmap work, and owner setup.
 
-The header currently exposes the player area as `Player Hub`, and the private profile surface lives at `/player/profile`; a later player UX polish slice should add a more explicit "My Player Profile" or "My Profile" entry in the logged-in navigation and Player Hub action areas so individual players can find their own page without guessing.
+The player navigation access polish slice adds a more explicit authenticated `My Player` header action to `/player` and a direct `My Profile` action inside the Player Hub hero to `/player/profile`, so individual players can find their private player area without guessing.
 
 The hub keeps owner setup behind the same owner boundary:
 
@@ -619,6 +620,18 @@ Player Hub -> Add Server -> /pricing?intent=owner_setup&returnTo=%2Fsetup -> gua
 ```
 
 The Player Hub API is `/api/player/hub`. It requires a logged-in Discord session, but it must not call `requireOwnerRequestAccess`, return owner-plan-required errors, mutate guild ownership, create checkout sessions, write Stripe state, call Nitrado, or modify competitive/stat tables. Saved/followed server storage is additive player preference state only and must not affect discovery rank, leaderboard score, event scoring, reviews, badges, XP, challenge outcomes, or competitive eligibility.
+
+## Player Navigation Access Polish Slice
+
+The player navigation access polish slice is delivered in `docs/DZN_PLAYER_NAV_ACCESS_POLISH.md`.
+
+It adds a clearer authenticated `My Player` action in the shared header. The action opens `/player` and carries the private profile path `/player/profile` as a QA marker only. The auth summary from `GET /api/auth/me` now returns fixed `player_home_url` and `player_profile_url` values so the header can render player access after account verification without exposing user IDs, Discord IDs, profile handles, billing IDs, or other private identifiers.
+
+The Player Hub hero also exposes a direct `My Profile` button to `/player/profile`. This makes the personal player page easier to find while keeping the profile itself session-scoped through the existing private player APIs.
+
+This slice does not change logged-out navigation, page middleware, owner entitlement checks, Store checkout, Supporter Card reveal, profile privacy writes, progression awards, public profile publishing, DZN Comms runtime behavior, or competitive systems.
+
+The DZN Comms reaction interaction contract remains the next separate Comms slice. That future preflight must define add/remove/list/read behavior, emoji allow-lists, per-user idempotency, reaction count privacy, moderation visibility, rate limits, retention/logging, rollback, and proof requirements before any runtime reaction route, message table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, or metered model call is implemented.
 
 ## Saved/Followed Server Interaction Slice
 

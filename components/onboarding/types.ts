@@ -22,6 +22,8 @@ export type AuthNavigationSummary = {
   can_use_owner_tools: boolean;
   owner_action_required: "choose_plan" | null;
   owner_pricing_url: string;
+  player_home_url: string;
+  player_profile_url: string;
   linked_server_count: number;
   linked_server_limit: number;
   can_link_more_servers: boolean;

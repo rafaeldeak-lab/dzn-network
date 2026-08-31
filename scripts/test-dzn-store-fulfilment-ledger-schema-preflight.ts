@@ -351,7 +351,7 @@ function assertPlayerProfileEntryDiscovery() {
   const hub = read(PLAYER_HUB_API);
   assertIncludes(hub, 'href: "/player/profile"', "Player Hub API should expose a private player profile entry.");
   assert.match(hub, /publicProfileReady \? privacy\.public_href! : "\/player\/profile"/, "Player Hub should expose either public profile link or profile settings entry.");
-  assertIncludes(read(MASTER_SPEC), "a later player UX polish slice should add a more explicit \"My Player Profile\" or \"My Profile\" entry");
+  assertIncludes(read(MASTER_SPEC), "The player navigation access polish slice adds a more explicit authenticated `My Player` header action to `/player`");
 }
 
 function assertPackageScriptWired() {

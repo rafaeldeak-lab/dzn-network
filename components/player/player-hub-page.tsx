@@ -285,6 +285,10 @@ export function PlayerHubPage() {
               Welcome back, {username}. Your Discord login opens player communities, saved servers, events, tournaments, leaderboards and profile entry points without forcing an owner plan.
             </p>
             <div className="mt-5 grid w-full max-w-md grid-cols-1 gap-3 sm:flex sm:max-w-none sm:flex-wrap">
+              <Link href="/player/profile" className="inline-flex w-full items-center justify-center gap-2 rounded bg-violet-300 px-4 py-3 text-xs font-black uppercase text-slate-950 transition hover:bg-violet-200 sm:w-auto" data-player-profile-entry="hero-private-profile">
+                My Profile
+                <UserRound className="h-4 w-4" />
+              </Link>
               <Link href="/servers" className="inline-flex w-full items-center justify-center gap-2 rounded bg-cyan-400 px-4 py-3 text-xs font-black uppercase text-slate-950 transition hover:bg-cyan-300 sm:w-auto">
                 Browse Servers
                 <ArrowRight className="h-4 w-4" />

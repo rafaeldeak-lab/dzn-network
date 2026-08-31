@@ -70,6 +70,24 @@ Future responses must be explicit and safe:
 
 Rejected message bodies must not be echoed back to other users, public logs, analytics, owner dashboards, support sources, rankings, discovery, reviews, profiles, XP, calling-card awards, events, seasons, CTF, or Server Wars.
 
+## Future Reaction Interaction Contract
+
+The static DZN Comms shell can show emoji reaction chips, but runtime reactions remain blocked until a dedicated DZN Comms reaction interaction contract slice is approved.
+
+That future slice must define:
+
+- The add/remove/list/read API shape for message reactions.
+- A server-controlled emoji allow-list.
+- Per-user idempotency so one account cannot inflate a reaction count through repeat requests.
+- Current-user reaction state without exposing raw user IDs, Discord IDs, or private profile identifiers.
+- Public-safe aggregate counts only.
+- Rate limits and abuse handling for rapid reaction changes.
+- Moderation visibility and removal rules for hidden, removed, or reported messages.
+- Retention and logging boundaries.
+- Rollback behavior if reactions are disabled after launch.
+
+No runtime reaction route, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking call, AI provider credential, vector store, metered model call, or production mutation may be added until that reaction contract is complete.
+
 ## Filtering Decision Contract
 
 Filtering decisions are server-side policy decisions, not UI-only decorations.

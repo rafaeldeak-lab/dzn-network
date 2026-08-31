@@ -3106,6 +3106,21 @@ button.dzn-header-action {
   box-shadow: 0 0 18px rgba(99, 102, 241, 0.12);
 }
 
+.dzn-header-action--player-home {
+  border-color: rgba(34, 211, 238, 0.58);
+  background:
+    linear-gradient(135deg, rgba(34, 211, 238, 0.2), rgba(124, 58, 237, 0.14)),
+    rgba(2, 6, 23, 0.64);
+  color: #ecfeff;
+  box-shadow:
+    0 0 20px rgba(34, 211, 238, 0.12),
+    inset 0 0 14px rgba(255, 255, 255, 0.045);
+}
+
+.dzn-header-action--player-home svg {
+  color: #67e8f9;
+}
+
 .dzn-header-action--primary {
   border-color: rgba(34, 211, 238, 0.48);
   background:
