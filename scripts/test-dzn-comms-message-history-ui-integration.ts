@@ -6,6 +6,7 @@ import {
   DZN_COMMS_MESSAGE_HISTORY_LIMIT,
   DZN_COMMS_MESSAGE_HISTORY_MAX_PAYLOAD_BYTES,
   DZN_COMMS_MESSAGE_HISTORY_ROUTE_PREFIX,
+  dznCommsMessageHistoryEncodedBytes,
   dznCommsMessageHistoryChannelId,
   dznCommsMessageHistoryStaticState,
   dznCommsMessageHistoryUrl,
@@ -265,6 +266,17 @@ async function assertStaticAndFailureFallbacks() {
   if (overlarge.status !== "fallback") throw new Error("Expected overlarge fallback.");
   assert.equal(overlarge.reason, "overlarge-response");
 
+  const multibyteOverlargeBody = "\u{1F680}".repeat(Math.floor(DZN_COMMS_MESSAGE_HISTORY_MAX_PAYLOAD_BYTES / 4) + 1);
+  assert.equal(multibyteOverlargeBody.length < DZN_COMMS_MESSAGE_HISTORY_MAX_PAYLOAD_BYTES, true);
+  assert.equal(dznCommsMessageHistoryEncodedBytes(multibyteOverlargeBody) > DZN_COMMS_MESSAGE_HISTORY_MAX_PAYLOAD_BYTES, true);
+  const multibyteOverlarge = await loadDznCommsMessageHistory({
+    surfaceKey: "global",
+    fetcher: async () => new Response(multibyteOverlargeBody, { status: 200 }),
+  });
+  assert.equal(multibyteOverlarge.status, "fallback");
+  if (multibyteOverlarge.status !== "fallback") throw new Error("Expected multibyte overlarge fallback.");
+  assert.equal(multibyteOverlarge.reason, "overlarge-response");
+
   const timeout = await loadDznCommsMessageHistory({
     surfaceKey: "global",
     fetcher: async (_input, init) => {
@@ -337,6 +349,8 @@ function assertCommunityIntegrationSource() {
 
   assertIncludes(page, "<DznCommsVisualShell />", "Community page should still render the Comms shell.");
   assertIncludes(shell, "useDznCommsMessageHistory", "Comms shell should use the guarded message-history hook.");
+  assertIncludes(shell, "useDznCommsSurfaceActivationKey", "Comms shell should invalidate cached history when a surface is reactivated.");
+  assertIncludes(shell, "const requestKey = `${activationKey}:${retryNonce}`", "Comms shell should include the activation generation in the history request key.");
   assertIncludes(shell, "isDznCommsMessageHistoryUiEnabled()", "Comms shell should gate reads through the public UI flag helper.");
   assertIncludes(shell, "loadDznCommsMessageHistory({ surfaceKey })", "Comms shell should call the read-only loader only from the hook.");
   assertIncludes(shell, "data-dzn-comms-message-history-ui={messageHistoryUiEnabled ? \"enabled-read-only\" : \"disabled-static-fallback\"}", "Comms shell should expose the disabled/enabled UI state for QA.");
@@ -352,6 +366,8 @@ function assertCommunityIntegrationSource() {
   assertIncludes(helper, "cache: \"no-store\"", "Helper should opt out of browser cache for private reads.");
   assertIncludes(helper, "headers: { Accept: \"application/json\" }", "Helper should request JSON explicitly.");
   assertIncludes(helper, "new AbortController()", "Helper should time-bound reads with AbortController.");
+  assertIncludes(helper, "dznCommsMessageHistoryEncodedBytes(raw)", "Helper should enforce the response cap in encoded bytes.");
+  assertIncludes(helper, "new TextEncoder().encode(value).byteLength", "Helper should measure multibyte payload size by bytes.");
   assertIncludes(helper, "profileHref !== null", "Helper must reject profile links until a later visibility recheck.");
 
   for (const { path, source } of [
