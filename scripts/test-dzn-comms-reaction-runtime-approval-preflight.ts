@@ -34,7 +34,7 @@ const RUNTIME_DOC_SNIPPETS = [
   "must not create the general chat-send runtime",
   "must not create the first DZN Comms message table",
   "must not add owner/admin moderation mutation routes",
-  "If an approved DZN Comms message/read model does not exist yet",
+  "If an approved DZN Comms message/read runtime does not exist yet",
   "Exact Future Runtime Route Set",
   "GET /api/dzn-comms/messages/:messageId/reactions",
   "POST /api/dzn-comms/messages/:messageId/reactions",
@@ -90,7 +90,7 @@ const RUNTIME_DOC_SNIPPETS = [
   "Live-Site Boundary",
   "does not deploy to `https://dayz-network.com/`",
   "DZN Comms message/read model approval preflight",
-  "DZN Comms reaction runtime local/test implementation slice",
+  "DZN Comms reaction runtime local/test implementation",
 ];
 
 const HANDOFF_SNIPPETS = [
@@ -109,7 +109,8 @@ const HANDOFF_SNIPPETS = [
   "Live checkout remains disabled. Issue `#49` remains reserved for final live payment activation.",
   "`npm run test:dzn-comms-reaction-runtime-approval-preflight`",
   "Changed-file scope check for no runtime files.",
-  "Next should be DZN Comms message/read model approval preflight",
+  "The DZN Comms message/read model approval preflight is now captured in `docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT.md`.",
+  "Next should be DZN Comms message/read model local/test implementation foundation",
 ];
 
 const RELATED_DOC_SNIPPETS = [
@@ -141,7 +142,8 @@ const MASTER_SPEC_SNIPPETS = [
   "Moderation inheritance from message visibility",
   "Reaction runtime cannot proceed unless a separately approved DZN Comms message/read model exists.",
   "34. DZN Comms reaction runtime implementation approval preflight",
-  "35. Issue #49 live checkout activation",
+  "35. DZN Comms message/read model approval preflight",
+  "36. Issue #49 live checkout activation",
 ];
 
 const PUBLIC_POLICY_SNIPPETS = [

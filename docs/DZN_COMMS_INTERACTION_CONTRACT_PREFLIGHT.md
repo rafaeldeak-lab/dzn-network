@@ -164,7 +164,9 @@ Required response properties:
 - No private support context.
 - No deleted or rejected message bodies except to authorized staff when a retention model explicitly allows it.
 
-Read-only history must not calculate, return, update, or influence rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars, CTF scoring, XP awards, calling-card awards, billing, owner entitlement, server ownership, or competitive eligibility.
+Read-only history must not calculate, return, update, or influence rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars, CTF scoring, XP awards, calling-card awards, billing, owner entitlement, server ownership, public profile visibility, retained exports, analytics/tracking, AI, live checkout, production systems, or competitive eligibility.
+
+The dedicated DZN Comms message/read model approval preflight is now captured in `docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT.md`. That preflight keeps the first message-history route read-only, local/test-only, disabled by default, and blocked from chat sending, reaction runtime, report routes, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, analytics/tracking, Store/payment changes, live checkout, production service mutation, retained exports, and issue #49.
 
 ## Report Action Contract
 
@@ -361,3 +363,5 @@ Before the first runtime chat/support implementation PR is mergeable, it must pr
 Next should be the DZN Comms runtime implementation approval preflight: choose the first runtime slice shape, transport plan, migration plan, feature-flag defaults, retention defaults, moderation data model, testing matrix, and rollback path before implementing any chat APIs, message tables, Durable Objects/WebSockets, AI provider credentials, vector stores, or metered model calls.
 
 That runtime implementation approval preflight is now captured in `docs/DZN_COMMS_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT.md`. It adds the requested public live website counter to the plan and selects the DZN Comms live presence counter foundation as the next implementation slice, still before chat message sending, message persistence, moderation-table implementation, DZN Assist AI runtime, AI provider credentials, vector stores, or metered model calls.
+
+The DZN Comms message/read model approval preflight is now captured in `docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT.md` as the prerequisite before any real message-history route or reaction runtime can be implemented.

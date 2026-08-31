@@ -24,7 +24,7 @@ The protected OneDrive checkout was not modified.
 - Defined the exact future route set for reaction reads, adds, deletes, and message-history embedding.
 - Chose the first future runtime shape: disabled-by-default local/test reaction read/write for already-readable messages only.
 - Blocked chat sending, first message table creation, private group runtime creation, support bot runtime, WebSockets, Durable Objects, analytics, AI provider work, Store/payment work, production mutation, and issue #49 changes.
-- Defined the prerequisite message/read model and authorization dependency.
+- Defined the prerequisite message/read model and authorization dependency, now captured in `docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT.md`.
 - Defined the future reaction storage/migration model: `dzn_comms_message_reactions` and `dzn_comms_reaction_mutations`.
 - Defined feature-flag defaults, idempotency/concurrency behavior, rate limits, moderation inheritance, retention model, rollout sequence, rollback plan, and proof matrix.
 - Updated the broader reaction contract, master spec, public access policy, and related Comms handoffs to point at this approval preflight.
@@ -198,6 +198,8 @@ Only report reaction runtime as live after a later approved implementation PR is
 
 ## Next Recommended Slice
 
-Next should be DZN Comms message/read model approval preflight if no approved DZN Comms message/read runtime exists yet.
+The DZN Comms message/read model approval preflight is now captured in `docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT.md`.
 
-If that prerequisite already exists in the chosen base branch, next should be the DZN Comms reaction runtime local/test implementation slice, disabled by default, using only the approved route set, storage model, flags, idempotency/concurrency behavior, rate limits, moderation inheritance, retention model, rollback plan, and proof matrix.
+Next should be DZN Comms message/read model local/test implementation foundation, only if deliberately approved. That future slice should add the disabled-by-default read-only message-history route and approved schema from the message/read preflight, keep `/community` on static fallback unless flags are enabled, prove public-channel reads and private group membership checks, and still avoid chat sending, reaction runtime, report routes, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, analytics/tracking, Store/payment changes, live checkout, Stripe/Cloudflare/production D1/Nitrado/Discord mutations, retained exports, deployment, or issue #49 changes.
+
+After that prerequisite exists and is separately proven safe, the next reaction slice can be the DZN Comms reaction runtime local/test implementation, disabled by default, using only the approved route set, storage model, flags, idempotency/concurrency behavior, rate limits, moderation inheritance, retention model, rollback plan, and proof matrix.
