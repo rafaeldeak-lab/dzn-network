@@ -370,7 +370,8 @@ function assertRuntimeBoundary() {
     .map((path) => path.replace(/\\/g, "/"))
     .filter((path) => path.endsWith(".sql"))
     .sort();
-  assert.equal(migrationFiles.at(-1), FULFILMENT_LEDGER_MIGRATION, "This read-model slice must not add a migration after 0073.");
+  const storeMigrationFiles = migrationFiles.filter((path) => path.includes("_dzn_store_"));
+  assert.equal(storeMigrationFiles.at(-1), FULFILMENT_LEDGER_MIGRATION, "This read-model slice must not add a Store migration after 0073.");
 
   const helper = read(HELPER);
   const route = read(ROUTE);

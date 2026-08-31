@@ -261,7 +261,8 @@ function assertNoRuntimePathsOrMigrations() {
     .map((path) => path.replace(/\\/g, "/"))
     .filter((path) => path.endsWith(".sql"))
     .sort();
-  assert.equal(migrationFiles.at(-1), FULFILMENT_MIGRATION, "No migration after 0073 should be added by this preflight.");
+  const storeMigrationFiles = migrationFiles.filter((path) => path.includes("_dzn_store_"));
+  assert.equal(storeMigrationFiles.at(-1), FULFILMENT_MIGRATION, "No Store migration after 0073 should be added by this preflight.");
 }
 
 function assertNoSourceConfigEnablesFutureFlags() {

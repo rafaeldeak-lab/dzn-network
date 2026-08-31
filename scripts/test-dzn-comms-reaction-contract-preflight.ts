@@ -175,7 +175,6 @@ const HANDOFF_SNIPPETS = [
 const FORBIDDEN_RUNTIME_PATHS = [
   "functions/api/dzn-comms/messages",
   "functions/api/dzn-comms/reactions",
-  "functions/api/dzn-comms/channels",
   "functions/api/dzn-comms/moderation",
   "functions/api/dzn-comms/reports",
   "functions/api/chat",

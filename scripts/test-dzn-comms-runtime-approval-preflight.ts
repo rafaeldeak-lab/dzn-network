@@ -132,7 +132,6 @@ const FORBIDDEN_RUNTIME_PATHS = [
   "functions/api/chat",
   "functions/api/support-chat",
   "functions/api/dzn-assist",
-  "functions/api/dzn-comms/channels",
   "functions/api/dzn-comms/messages",
   "functions/api/dzn-comms/moderation",
   "functions/api/dzn-comms/reports",

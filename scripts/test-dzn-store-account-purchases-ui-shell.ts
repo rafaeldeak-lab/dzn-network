@@ -211,7 +211,8 @@ function assertRuntimeBoundary() {
     .map((path) => path.replace(/\\/g, "/"))
     .filter((path) => path.endsWith(".sql"))
     .sort();
-  assert.equal(migrationFiles.at(-1), "migrations/0073_dzn_store_fulfilment_ledger_schema.sql", "This UI shell must not add a migration after 0073.");
+  const storeMigrationFiles = migrationFiles.filter((path) => path.includes("_dzn_store_"));
+  assert.equal(storeMigrationFiles.at(-1), "migrations/0073_dzn_store_fulfilment_ledger_schema.sql", "This UI shell must not add a Store migration after 0073.");
 
   for (const path of SOURCE_CONFIG_FILES) {
     if (!existsSync(path)) continue;

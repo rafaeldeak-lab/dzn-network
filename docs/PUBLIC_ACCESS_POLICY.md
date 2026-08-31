@@ -229,6 +229,14 @@ Event browsing, event detail pages, event suggestions, votes, and reports remain
 
 These APIs must keep their existing preview redaction and `Vary: Cookie` behavior where applicable. Public API availability does not mean the corresponding app page is public.
 
+`GET /api/dzn-comms/channels/:channelId/messages` is the first approved DZN Comms message/read model local/test foundation route. It is disabled by default, private/no-store, authenticated, read-only, and local/test only. It requires `DZN_COMMS_MESSAGE_READ_ENABLED=true`, `DZN_COMMS_MESSAGE_READ_LOCAL_TEST_RUNTIME=local` or `test`, and either `DZN_COMMS_PUBLIC_CHANNEL_HISTORY_ENABLED=true` for public channels or `DZN_COMMS_PRIVATE_GROUP_HISTORY_ENABLED=true` for private groups.
+
+Free logged-in Discord players may read visible public-channel messages for `global`, `new-players`, `server-owners`, and `events` when those local/test flags are enabled. Starter and Pro do not change message visibility, ordering, page size, retention, private group access, fallback behavior, author display, or current-user state. Private group reads require active trusted membership in `dzn_comms_channel_memberships` for the server-resolved DZN user ID; owner entitlement alone is not private group membership.
+
+The route may return only visible/locked messages and public-safe display author fields. Hidden, deleted, quarantined, expired, staff-only, unavailable, rejected, blocked, support, report, moderation, raw-evidence, and expired-by-time bodies must not be exposed. This first implementation returns `profileHref: null` until a later attribution slice re-checks saved public profile visibility preferences at read time.
+
+The `/community` route remains on the static local mock-data shell unless a later UI integration slice enables runtime fetching behind `NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED`. Message reads cannot create read receipts, last-read persistence, tracking events, analytics events, support transcripts, reactions, reports, moderation decisions, Store orders, Store entitlements, Supporter Cards, retained exports, or production writes. They cannot affect billing, owner entitlement, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, CTF scoring, XP awards, calling-card awards, public profile visibility, retained exports, DZN Assist AI state, live checkout, production systems, or competitive eligibility. Live checkout remains disabled and Issue #49 remains reserved for final live payment activation.
+
 ## Production Verification
 
 Post-merge verification should expect:
