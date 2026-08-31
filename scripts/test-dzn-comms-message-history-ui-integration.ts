@@ -352,6 +352,12 @@ function assertCommunityIntegrationSource() {
   assertIncludes(shell, "useDznCommsSurfaceActivationKey", "Comms shell should invalidate cached history when a surface is reactivated.");
   assertIncludes(shell, "const requestKey = `${activationKey}:${retryNonce}`", "Comms shell should include the activation generation in the history request key.");
   assertIncludes(shell, "isDznCommsMessageHistoryUiEnabled()", "Comms shell should gate reads through the public UI flag helper.");
+  assert.equal(
+    shell.indexOf("if (!channelId) return dznCommsMessageHistoryStaticState(\"support-static\");") <
+      shell.indexOf("if (!uiEnabled) return dznCommsMessageHistoryStaticState(\"client-flag-disabled\");"),
+    true,
+    "Support should remain static without a message-history request even when the client flag is disabled.",
+  );
   assertIncludes(shell, "loadDznCommsMessageHistory({ surfaceKey })", "Comms shell should call the read-only loader only from the hook.");
   assertIncludes(shell, "data-dzn-comms-message-history-ui={messageHistoryUiEnabled ? \"enabled-read-only\" : \"disabled-static-fallback\"}", "Comms shell should expose the disabled/enabled UI state for QA.");
   assertIncludes(shell, "data-dzn-comms-history-source={messageHistoryState.status === \"live\" ? \"read-only-message-history\" : \"static-fallback\"}", "Comms shell should expose static fallback vs read-only history source.");
