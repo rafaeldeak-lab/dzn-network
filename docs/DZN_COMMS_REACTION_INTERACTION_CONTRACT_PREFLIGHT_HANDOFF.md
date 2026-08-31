@@ -188,6 +188,8 @@ Only report the feature as live after the normal repository merge/deployment pro
 
 ## Next Recommended Slice
 
-Next should be DZN Comms reaction runtime implementation approval preflight, only if deliberately approved.
+The DZN Comms reaction runtime implementation approval preflight is now captured in `docs/DZN_COMMS_REACTION_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT.md`.
 
-That future slice should choose the exact runtime route set, message-read prerequisite, storage/migration model, feature-flag defaults, current-user state, idempotency/concurrency strategy, moderation scope, retention model, rollout and rollback plan, and proof matrix before any reaction API, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered model call, live checkout, production mutation, or issue `#49` change is implemented.
+Next should be DZN Comms message/read model approval preflight if no approved DZN Comms message/read runtime exists yet.
+
+If that prerequisite already exists in the chosen base branch, next should be DZN Comms reaction runtime local/test implementation, disabled by default, using only the approved route set, storage model, flags, idempotency/concurrency behavior, rate limits, moderation inheritance, retention model, rollback plan, and proof matrix from `docs/DZN_COMMS_REACTION_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT.md`.

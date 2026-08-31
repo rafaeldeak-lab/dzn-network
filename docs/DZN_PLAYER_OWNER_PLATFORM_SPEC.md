@@ -368,7 +368,45 @@ Blocked behavior:
 
 Future reactions are player/community expression only. They cannot affect billing, owner entitlement, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions outside approved reaction moderation, or competitive eligibility.
 
-Next should be DZN Comms reaction runtime implementation approval preflight, only if deliberately approved, before any reaction route, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered model call, production mutation, live checkout, or issue #49 change.
+The DZN Comms reaction runtime implementation approval preflight is now captured in `docs/DZN_COMMS_REACTION_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT.md` before any reaction route, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered model call, production mutation, live checkout, or issue #49 change.
+
+## DZN Comms Reaction Runtime Implementation Approval Preflight
+
+The DZN Comms reaction runtime implementation approval preflight is documented in `docs/DZN_COMMS_REACTION_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT.md`. It chooses the future reaction runtime contract before implementation begins.
+
+Approved future runtime shape:
+
+- Disabled-by-default local/test reaction reads and writes for already-readable DZN Comms messages only.
+- Exact first route set: `GET /api/dzn-comms/messages/:messageId/reactions`, `POST /api/dzn-comms/messages/:messageId/reactions`, and `DELETE /api/dzn-comms/messages/:messageId/reactions/:reactionKey`.
+- Optional reaction summary embedding in `GET /api/dzn-comms/channels/:channelId/messages` only after that message-history route exists and is separately approved.
+- Storage model limited to `dzn_comms_message_reactions` and short-lived `dzn_comms_reaction_mutations`.
+- Feature flags default disabled: `DZN_COMMS_REACTIONS_READ_ENABLED`, `DZN_COMMS_REACTIONS_WRITE_ENABLED`, `DZN_COMMS_REACTIONS_LOCAL_TEST_RUNTIME`, `DZN_COMMS_REACTIONS_MODERATION_ENABLED`, and `NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED`.
+- Idempotent add/remove behavior using `clientMutationId`, one row per actor/message/reaction key, server-computed counts, and concurrency controls.
+- Rate limits for actor, actor/message, hourly actor totals, invalid keys, and unauthenticated attempts without analytics/tracking.
+- Moderation inheritance from message visibility in the first runtime PR; standalone owner/admin reaction moderation remains blocked until a separate approval.
+- Retention tied to the approved message retention model, with 24-hour idempotency cleanup and no owner/player export of raw reaction rows.
+- Rollback through read/write/UI flags without deleting unrelated player, owner, billing, review, event, progression, public profile, retained export, or competitive data.
+
+Blocked behavior:
+
+- No runtime reaction APIs in this preflight.
+- No runtime chat send APIs.
+- No first message table creation.
+- No reaction tables or migrations in this preflight.
+- No moderation mutation routes.
+- No Durable Objects/WebSockets.
+- No persistence.
+- No analytics/tracking.
+- No AI provider credentials.
+- No vector stores.
+- No metered model calls.
+- No Store payment or Supporter Card reveal changes.
+- No live checkout changes.
+- No Stripe, Cloudflare, production D1, Nitrado, Discord, retained export, deployment, or issue #49 mutation.
+
+Reaction runtime cannot proceed unless a separately approved DZN Comms message/read model exists. If that prerequisite does not exist, the next implementation slice is the message/read model approval preflight, not reaction runtime.
+
+Future reaction runtime cannot affect billing, owner entitlement, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions outside approved reaction abuse handling, or competitive eligibility.
 
 ## DZN Safe Monetisation And Supporter System Backlog
 
@@ -637,7 +675,8 @@ Future slices should build on this foundation in this order unless product prior
 31. DZN Store Supporter Card reveal visual QA: delivered as a private `/account/purchases` visual polish and local seeded evidence slice with masked serial preview, clearer reveal states, and static DZN Comms emoji reactions; still no generated card art, public reveal, sharing, screenshot/export, notifications, live checkout, Stripe/Cloudflare/production mutation, chat runtime, AI provider credentials, or issue #49 change.
 32. Player navigation access polish: delivered as a logged-in `My Player` header action to `/player`, direct `My Profile` Player Hub hero action to `/player/profile`, and read-only auth navigation URLs for those fixed player paths; still no Store payment, Supporter Card reveal, checkout, entitlement write, wheel, chat runtime, competitive-system behavior, production mutation, or issue #49 change.
 33. DZN Comms reaction interaction contract preflight: delivered as a documentation/test-only slice defining allowed emoji, add/remove/list/read contracts, per-user idempotency, aggregate counts, current-user state, rate limits, moderation scope, retention/logging, rollback, and proof before runtime reactions; still no reaction API, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered call, live checkout, production mutation, or issue #49 change.
-34. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+34. DZN Comms reaction runtime implementation approval preflight: delivered as a documentation/test-only slice choosing the future disabled-by-default local/test reaction route set, message/read prerequisite, storage/migration model, feature flags, idempotency/concurrency behavior, rate limits, moderation inheritance, retention model, rollout/rollback plan, and proof matrix; still no runtime reaction API, message table, reaction table, migration, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered call, live checkout, production mutation, or issue #49 change.
+35. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 

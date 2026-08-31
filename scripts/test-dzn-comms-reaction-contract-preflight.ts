@@ -86,7 +86,7 @@ const REACTION_DOC_SNIPPETS = [
   "Reaction state must not affect billing",
   "Live-Site Boundary",
   "does not push behavior to `https://dayz-network.com/` by itself",
-  "Next should be DZN Comms reaction runtime implementation approval preflight",
+  "The DZN Comms reaction runtime implementation approval preflight is now captured in `docs/DZN_COMMS_REACTION_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT.md`.",
 ];
 
 const CROSS_DOC_SNIPPETS = [
@@ -118,7 +118,7 @@ const MASTER_SPEC_SNIPPETS = [
   "AI provider",
   "vector store",
   "metered model call",
-  "34. Issue #49 live checkout activation",
+  "35. Issue #49 live checkout activation",
 ];
 
 const INTERACTION_DOC_SNIPPETS = [
@@ -168,7 +168,7 @@ const HANDOFF_SNIPPETS = [
   "Live checkout remains disabled. Issue `#49` remains reserved for final live payment activation.",
   "`npm run test:dzn-comms-reaction-contract-preflight`",
   "Only report the feature as live after the normal repository merge/deployment process runs",
-  "Next should be DZN Comms reaction runtime implementation approval preflight",
+  "The DZN Comms reaction runtime implementation approval preflight is now captured in `docs/DZN_COMMS_REACTION_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT.md`.",
 ];
 
 const FORBIDDEN_RUNTIME_PATHS = [
