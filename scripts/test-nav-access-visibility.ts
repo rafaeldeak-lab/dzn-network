@@ -15,16 +15,18 @@ const headerActionBlock = sourceBlock(siteHeaderSource, "<div className=\"dzn-he
 
 assert.equal(loggedOutHeaderBlock.includes("Features"), true);
 assert.equal(loggedOutHeaderBlock.includes("Pricing"), true);
-for (const privateLabel of ["Leaderboards", "Servers", "Stats", "Events", "Dashboard", "Add Your Server", "Start Setup", "Upgrade to Pro", "Pro Tools"]) {
+for (const privateLabel of ["Player Hub", "Leaderboards", "Servers", "Stats", "Events", "Dashboard", "Add Your Server", "Start Setup", "Upgrade to Pro", "Pro Tools"]) {
   assert.equal(loggedOutHeaderBlock.includes(privateLabel), false, `Logged-out header links must not include ${privateLabel}.`);
 }
 
+assert.equal(starterHeaderBlock.includes("Player Hub"), true, "Starter/trial header should expose the personal player page.");
 assert.equal(starterHeaderBlock.includes("Leaderboards"), true);
 assert.equal(starterHeaderBlock.includes("Servers"), true);
 assert.equal(starterHeaderBlock.includes("Events"), true);
 assert.equal(starterHeaderBlock.includes("Stats"), false, "Starter/trial header should not advertise Pro stats as a normal nav item.");
 assert.equal(starterHeaderBlock.includes("Pricing"), false, "Starter/trial header should use the upgrade action instead of a generic pricing nav link.");
 
+assert.equal(proHeaderBlock.includes("Player Hub"), true, "Pro header should expose the personal player page.");
 assert.equal(proHeaderBlock.includes("Leaderboards"), true);
 assert.equal(proHeaderBlock.includes("Servers"), true);
 assert.equal(proHeaderBlock.includes("Stats"), true);
@@ -32,6 +34,7 @@ assert.equal(proHeaderBlock.includes("Events"), true);
 assert.equal(proHeaderBlock.includes("Pricing"), false, "Pro header should focus on product tools instead of pricing.");
 
 assert.equal(siteHeaderSource.includes("type HeaderPlanTier = AuthNavigationSummary[\"plan_tier\"]"), true);
+assert.equal(siteHeaderSource.includes("if (pathname.startsWith(\"/player\")) return \"player\";"), true);
 assert.equal(siteHeaderSource.includes("function authenticatedHeaderLinksForTier"), true);
 assert.equal(siteHeaderSource.includes("if (tier === \"pro\") return proHeaderLinks;"), true);
 assert.equal(siteHeaderSource.includes("return starterHeaderLinks;"), true);
@@ -89,8 +92,8 @@ for (const className of [
 
 for (const expectedPolicy of [
   "Logged-out navigation must only expose the public funnel",
-  "Free or Starter/trial accounts should see trial-safe app navigation plus a clear Pro upgrade action.",
-  "Pro-effective accounts should see Pro tools in the header.",
+  "Free or Starter/trial accounts should see trial-safe app navigation, including the personal Player Hub",
+  "Pro-effective accounts should see Player Hub and Pro tools in the header.",
 ]) {
   assert.equal(publicAccessPolicyDoc.includes(expectedPolicy), true, `Public access policy must document: ${expectedPolicy}`);
 }

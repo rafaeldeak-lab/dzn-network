@@ -620,15 +620,18 @@ assert.equal(loggedOutHeaderBlock.includes("Features"), true);
 assert.equal(loggedOutHeaderBlock.includes("Pricing"), true);
 assert.equal(loggedOutHeaderBlock.includes("Leaderboards"), false);
 assert.equal(loggedOutHeaderBlock.includes("Servers"), false);
+assert.equal(loggedOutHeaderBlock.includes("Player Hub"), false);
 assert.equal(loggedOutHeaderBlock.includes("Stats"), false);
 assert.equal(loggedOutHeaderBlock.includes("Events"), false);
 assert.equal(loggedOutHeaderBlock.includes("Dashboard"), false);
 assert.equal(loggedOutHeaderBlock.includes("Add Your Server"), false);
 assert.equal(signupPageSource.includes("hideNavActions"), true, "Signup must use the simplified logged-out auth header.");
+assert.equal(starterHeaderBlock.includes("Player Hub"), true);
 assert.equal(starterHeaderBlock.includes("Leaderboards"), true);
 assert.equal(starterHeaderBlock.includes("Servers"), true);
 assert.equal(starterHeaderBlock.includes("Stats"), false);
 assert.equal(starterHeaderBlock.includes("Events"), true);
+assert.equal(proHeaderBlock.includes("Player Hub"), true);
 assert.equal(proHeaderBlock.includes("Leaderboards"), true);
 assert.equal(proHeaderBlock.includes("Servers"), true);
 assert.equal(proHeaderBlock.includes("Stats"), true);
@@ -637,13 +640,13 @@ assert.equal(siteHeaderSource.includes("data-auth-state"), true);
 assert.equal(siteHeaderSource.includes("checking-public"), true);
 assert.equal(siteHeaderSource.includes("aria-busy={authProbePending}"), true);
 assert.equal(siteHeaderSource.includes("authProbePending ?"), true);
-for (const route of ["/dashboard", "/dzn-pulse", "/events", "/leaderboards", "/seasons", "/servers", "/setup", "/test"]) {
+for (const route of ["/dashboard", "/dzn-pulse", "/events", "/leaderboards", "/player", "/seasons", "/servers", "/setup", "/test"]) {
   assert.equal(pageMiddlewareSource.includes(`"${route}"`), true, `Protected app page middleware must include ${route}.`);
   assert.equal(routesPatchSource.includes(`"${route}"`), true, `Pages route patcher must include exact ${route}.`);
   assert.equal(staticRoutesSource.includes(`"${route}"`), true, `Static routes file must include exact ${route}.`);
   assert.equal(publicAccessPolicyDoc.includes(`\`${route}\``), true, `Public access policy doc must describe ${route}.`);
 }
-for (const route of ["/dashboard/*", "/dzn-pulse/*", "/events/*", "/leaderboards/*", "/seasons/*", "/servers/*", "/setup/*", "/test/*"]) {
+for (const route of ["/dashboard/*", "/dzn-pulse/*", "/events/*", "/leaderboards/*", "/player/*", "/seasons/*", "/servers/*", "/setup/*", "/test/*"]) {
   assert.equal(routesPatchSource.includes(`"${route}"`), true, `Pages route patcher must include nested ${route}.`);
   assert.equal(staticRoutesSource.includes(`"${route}"`), true, `Static routes file must include nested ${route}.`);
 }
