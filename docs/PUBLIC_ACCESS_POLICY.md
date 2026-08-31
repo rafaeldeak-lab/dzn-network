@@ -46,7 +46,7 @@ Player-facing and community surfaces may use the Discord OAuth `identify guilds`
 
 Starter trial and Pro behavior must continue to come from the billing/entitlement helpers and API responses. A page redirect must not replace owner authorization, plan enforcement, Stripe webhook checks, Nitrado ownership checks, or protected API 401/403 behavior.
 
-Free player accounts should see player navigation plus a clear owner-plan action. Starter/trial accounts should see trial-safe owner navigation plus a clear Pro upgrade action. Pro-effective accounts should see Pro tools in the header. This header visibility is product guidance only; APIs and owner/product pages must continue enforcing access server-side.
+Free player accounts should see player navigation plus a clear owner-plan action. Starter/trial accounts should see trial-safe owner navigation plus a clear Pro upgrade action. Pro-effective accounts should see Pro tools in the header. The player navigation/access polish slice adds an authenticated-only `My Player` header action to `/player`, keeps `/player/profile` visible from the Player Hub as `My Profile`, and returns fixed player home/profile URLs from the read-only auth summary. This header visibility is product guidance only; APIs and owner/product pages must continue enforcing access server-side.
 
 Dashboard package visibility must follow the same split. Starter/trial users may see the normal setup, public listing, basic stats, events, billing comparison, and basic Discord posting surfaces, but any Pro-only analytics, promotion, Server VS Server hosting, or enhanced Discord post controls must read as locked or upgrade-gated. Pro-effective users may see those tools as active, while server-side entitlement checks remain authoritative.
 

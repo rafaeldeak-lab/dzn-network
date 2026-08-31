@@ -17,6 +17,8 @@ type OwnerBillingNavigationRow = {
 };
 
 const OWNER_SETUP_PRICING_URL = "/pricing?intent=owner_setup&returnTo=%2Fsetup";
+const PLAYER_HOME_URL = "/player";
+const PLAYER_PROFILE_URL = "/player/profile";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   let user = await getSessionUser(env, request);
@@ -64,6 +66,8 @@ async function getAuthNavigationSummary(env: Env, user: SessionUser, linkedServe
     can_use_owner_tools: canUseOwnerTools,
     owner_action_required: canUseOwnerTools ? null : "choose_plan",
     owner_pricing_url: OWNER_SETUP_PRICING_URL,
+    player_home_url: PLAYER_HOME_URL,
+    player_profile_url: PLAYER_PROFILE_URL,
     linked_server_count: linkedServerCount,
     linked_server_limit: canUseOwnerTools ? config.max_linked_servers : 0,
     can_link_more_servers: canUseOwnerTools && linkedServerCount < config.max_linked_servers,
