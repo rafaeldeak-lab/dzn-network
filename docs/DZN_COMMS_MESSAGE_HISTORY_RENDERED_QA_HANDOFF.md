@@ -43,8 +43,12 @@ The protected OneDrive checkout was not modified.
 | --- | --- | --- | --- |
 | Static fallback | Captured | Captured | No message-history route request |
 | Public-channel read | Captured | Captured | Actual local Pages function route with seeded local/test D1 rows returned `200` |
+| Login-required fallback | Captured | Captured | Local rendered route returned `401` and the UI stayed on static Global Chat fallback |
 | Unavailable route fallback | Captured | Captured | Actual local Pages function route with no usable local message store returned `503` |
 | Private-group denial | Captured | Captured | Actual local Pages function route without trusted `pandora-squad` membership returned `403` |
+| Support-static fallback | Captured | Captured | DZN Assist support surface made no message-history route request |
+
+Each screenshot entry also records browser inner-text checks immediately before capture, proving denied private bodies, private identifiers, production diagnostics, and payment/provider markers were absent from the rendered page state.
 
 The local Pages preview also produced unrelated `/api/auth/me` local schema noise for missing `linked_servers.merged_into_server_id` in the temporary D1 migration state. That was not changed in this slice because the requested message-history route still served the public, unavailable, and private-denial states correctly.
 
@@ -89,6 +93,8 @@ The rendered QA slice cannot affect billing, owner entitlement, server ownership
 - changed-file scope check
 - production-mutation scan
 - manual rendered artifact inspection
+
+The previous implementation and preflight review fixes were also synced into this branch: private-surface reactivation invalidates stale cached private history, the payload limit is enforced by encoded bytes, support remains static before client-flag gating, and the preflight scope guard checks the committed slice rather than only the clean working tree.
 
 ## Production-Mutation Confirmation
 

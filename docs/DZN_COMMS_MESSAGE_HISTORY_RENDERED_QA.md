@@ -8,8 +8,10 @@ It does not change runtime chat behavior. The only purpose is to prove that the 
 
 - static fallback when `NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED` is disabled
 - public-channel read when the client flag is enabled and a seeded local/test route response is available
+- login-required fallback when the enabled route rejects an unauthenticated read
 - unavailable route fallback when the read route cannot supply usable history
 - private-group denial when the user lacks the trusted private membership bridge
+- support-static fallback proving the DZN Assist support panel does not request stored history
 
 The screenshots and manifest are stored under:
 
@@ -23,8 +25,10 @@ docs/artifacts/dzn-comms-message-history-rendered-qa/
 | --- | --- | --- | --- |
 | Static fallback | Disabled | Not called | Static DZN Comms prototype remains visible |
 | Public-channel read | Enabled | Local Pages route with seeded public local/test D1 rows | Global Chat shows read-only saved history |
+| Login-required fallback | Enabled | Local rendered route returns `401` | Static Global Chat fallback remains visible with login copy |
 | Unavailable route fallback | Enabled | Local Pages route with no usable local D1 message store | Static Global Chat fallback remains visible |
 | Private-group denial | Enabled | Local Pages route with no trusted private membership row | Static Pandora Squad fallback remains visible without private bodies |
+| Support-static fallback | Disabled | Not called | Static DZN Assist support preview remains visible without AI or history calls |
 
 Each state has desktop and mobile screenshots.
 
@@ -35,6 +39,8 @@ The QA run uses local browser rendering against `/community`.
 The client flag is tested both disabled and enabled. Enabled route outcomes are captured through the actual local Cloudflare Pages function route with local/test bindings only. The seeded public success response follows the approved `GET /api/dzn-comms/channels/:channelId/messages` payload contract and includes only public-safe author and message fields.
 
 Private-group denial intentionally omits trusted `pandora-squad` membership for the mock user. The rendered output must show only fallback messaging and static private-group preview content. It must not render denied private message bodies or identifiers.
+
+The login-required state records the rendered 401 fallback without adding a payment prompt. The support-static state confirms that the DZN Assist support surface stays static and does not fetch stored message history even when the broader Comms shell is rendered.
 
 ## Safety Boundary
 
@@ -62,7 +68,7 @@ The durable proof package includes:
 - `dzn-comms-message-history-rendered-qa.json`
 - `index.html`
 - `README.md`
-- desktop and mobile JPEG screenshots for the four requested states
+- desktop and mobile JPEG screenshots for the six requested states
 
 The focused guard is:
 
@@ -70,7 +76,7 @@ The focused guard is:
 npm run test:dzn-comms-message-history-rendered-qa
 ```
 
-It verifies artifact coverage, screenshot dimensions, non-placeholder JPEG data, static fallback behavior, public-channel read proof, unavailable fallback proof, private-group denial proof, route-request shape, disabled composer state, static reaction-only state, docs, package wiring, and no blocked runtime/provider/production patterns.
+It verifies artifact coverage, screenshot dimensions, non-placeholder JPEG data, browser-captured screenshot content checks, static fallback behavior, public-channel read proof, login-required fallback proof, unavailable fallback proof, private-group denial proof, support-static proof, route-request shape, disabled composer state, static reaction-only state, docs, package wiring, and no blocked runtime/provider/production patterns.
 
 ## Next Recommended Slice
 

@@ -6,12 +6,14 @@ Captured cases:
 
 - static fallback
 - public-channel read
+- login-required fallback
 - unavailable route fallback
 - private-group denial
+- support-static/no-request fallback
 
-Each case has desktop and mobile JPEG screenshots plus a sanitized JSON/HTML report.
+Each case has desktop and mobile JPEG screenshots plus a sanitized JSON/HTML report. The manifest records the browser inner text checked immediately before each capture, and the focused test scans screenshot files for blocked clear-text markers.
 
-This is a local/test only artifact. It uses actual local Cloudflare Pages function responses with temporary local D1 state where needed and requires no production services.
+This is a local/test only artifact. It uses actual local rendering, local request interception for the unauthenticated 401 state, and local Cloudflare Pages function responses with temporary local D1 state where needed. It requires no production services.
 
 No chat sending.
 No runtime reactions.

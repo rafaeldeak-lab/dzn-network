@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 
-const BASE_REF = "origin/codex/dzn-comms-message-history-ui-integration-implementation-20260831";
+const BASE_REFS = [
+  "codex/dzn-comms-message-history-ui-integration-implementation-20260831",
+  "origin/codex/dzn-comms-message-history-ui-integration-implementation-20260831",
+] as const;
+const SLICE_HEAD_REFS = [
+  "codex/dzn-comms-message-history-rendered-qa-20260831",
+  "origin/codex/dzn-comms-message-history-rendered-qa-20260831",
+  "HEAD",
+] as const;
 const ARTIFACT_DIR = "docs/artifacts/dzn-comms-message-history-rendered-qa";
 const ARTIFACT_JSON = `${ARTIFACT_DIR}/dzn-comms-message-history-rendered-qa.json`;
 const ARTIFACT_HTML = `${ARTIFACT_DIR}/index.html`;
@@ -24,8 +32,10 @@ const PACKAGE_JSON = "package.json";
 const CASES = [
   "static_fallback",
   "public_channel_read",
+  "login_required",
   "unavailable_route_fallback",
   "private_group_denial",
+  "support_static",
 ] as const;
 
 const VIEWPORTS = {
@@ -120,6 +130,13 @@ type ScreenshotEvidence = {
   image_height: number;
   image_mime: "image/png" | "image/jpeg";
   non_blank_sample: true;
+  content_verification: {
+    source: "browser_inner_text_before_capture";
+    private_denied_seed_body_visible: false;
+    private_identifiers_visible: false;
+    production_diagnostics_visible: false;
+    payment_or_provider_markers_visible: false;
+  };
 };
 
 type RouteRequestEvidence = {
@@ -137,7 +154,9 @@ type RenderedCaseEvidence = {
   client_flag: "disabled" | "enabled";
   server_route_mode:
     | "not_called"
+    | "not_called_support_static"
     | "local_pages_seeded_public_success"
+    | "local_pages_login_required"
     | "local_pages_unavailable_no_db"
     | "local_pages_private_denial";
   data_dzn_comms_message_history_ui: "disabled-static-fallback" | "enabled-read-only";
@@ -289,6 +308,17 @@ function assertRenderedCases(artifact: RenderedQaArtifact) {
     requests: 1,
     contains: ["Read-Only History", "Saved history synced", "Rendered QA public message", "Read-only"],
   });
+  assertCase(cases.get("login_required"), {
+    clientFlag: "enabled",
+    serverRouteMode: "local_pages_login_required",
+    ui: "enabled-read-only",
+    source: "static-fallback",
+    state: "fallback",
+    reason: "login-required",
+    channel: "# Global Chat",
+    requests: 1,
+    contains: ["Read-Only History", "Log in to read saved history", "Welcome everyone"],
+  });
   assertCase(cases.get("unavailable_route_fallback"), {
     clientFlag: "enabled",
     serverRouteMode: "local_pages_unavailable_no_db",
@@ -311,11 +341,27 @@ function assertRenderedCases(artifact: RenderedQaArtifact) {
     requests: 1,
     contains: ["Read-Only History", "Private group history unavailable", "Pandora Squad"],
   });
+  assertCase(cases.get("support_static"), {
+    clientFlag: "disabled",
+    serverRouteMode: "not_called_support_static",
+    ui: "disabled-static-fallback",
+    source: "static-fallback",
+    state: "static",
+    reason: "support-static",
+    channel: "DZN Assist",
+    requests: 0,
+    contains: ["Static Prototype", "Static support preview", "DZN Assist", "No AI call"],
+  });
 
   const publicCase = cases.get("public_channel_read");
   assert.ok(publicCase);
   assert.equal(publicCase.route_requests[0]?.path, "/api/dzn-comms/channels/global/messages?limit=25");
   assert.equal(publicCase.route_requests[0]?.observed_status, 200);
+
+  const loginCase = cases.get("login_required");
+  assert.ok(loginCase);
+  assert.equal(loginCase.route_requests[0]?.path, "/api/dzn-comms/channels/global/messages?limit=25");
+  assert.equal(loginCase.route_requests[0]?.observed_status, 401);
 
   const unavailableCase = cases.get("unavailable_route_fallback");
   assert.ok(unavailableCase);
@@ -394,6 +440,25 @@ function assertScreenshots(artifact: RenderedQaArtifact) {
       assert.equal(info.width, expected.width);
       assert.equal(info.height >= expected.minHeight, true);
       assert.equal(info.bytes > 12_000, true, `${screenshot.screenshot_path} should not be a tiny placeholder.`);
+      assert.equal(screenshot.content_verification.source, "browser_inner_text_before_capture");
+      assert.equal(screenshot.content_verification.private_denied_seed_body_visible, false);
+      assert.equal(screenshot.content_verification.private_identifiers_visible, false);
+      assert.equal(screenshot.content_verification.production_diagnostics_visible, false);
+      assert.equal(screenshot.content_verification.payment_or_provider_markers_visible, false);
+
+      const screenshotText = readFileSync(screenshot.screenshot_path).toString("latin1");
+      assert.equal(
+        screenshotText.includes("Seeded private squad message"),
+        false,
+        `${screenshot.screenshot_path} must not embed denied private message proof text.`,
+      );
+      for (const forbidden of FORBIDDEN_ARTIFACT_STRINGS) {
+        assert.equal(
+          screenshotText.includes(forbidden),
+          false,
+          `${screenshot.screenshot_path} must not embed blocked marker ${forbidden}.`,
+        );
+      }
     }
   }
 }
@@ -435,6 +500,8 @@ function assertDocsAndPackageWiring() {
     "public-channel read",
     "unavailable route fallback",
     "private-group denial",
+    "login-required fallback",
+    "support-static/no-request fallback",
     "desktop",
     "mobile",
     "local/test only",
@@ -509,22 +576,51 @@ function assertChangedPathsStayBounded() {
 
 function changedFiles() {
   const files = new Set<string>();
-  for (const command of [
-    `git diff --name-only ${BASE_REF}...HEAD`,
-    "git diff --name-only",
-    "git diff --cached --name-only",
-  ]) {
-    for (const line of execSync(command, { encoding: "utf8" }).split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (trimmed) files.add(trimmed);
-    }
-  }
-  for (const line of execSync("git status --short --untracked-files=all", { encoding: "utf8" }).split(/\r?\n/)) {
+  const sliceHead = resolveSliceHead();
+  const baseline = resolveBaseline(sliceHead);
+  addChangedFileLines(files, execGit(`git diff --name-only ${baseline}...${sliceHead}`));
+  addChangedFileLines(files, execGit("git diff --name-only"));
+  addChangedFileLines(files, execGit("git diff --cached --name-only"));
+
+  for (const line of execGit("git status --short --untracked-files=all").split(/\r?\n/)) {
     const trimmed = line.slice(3).trim();
     if (!trimmed) continue;
     files.add(trimmed.split(" -> ").at(-1) ?? trimmed);
   }
   return [...files].sort();
+}
+
+function addChangedFileLines(files: Set<string>, output: string) {
+  for (const line of output.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed) files.add(trimmed);
+  }
+}
+
+function resolveSliceHead() {
+  for (const ref of SLICE_HEAD_REFS) {
+    const resolved = execGit(`git rev-parse --verify ${ref}`).trim();
+    if (resolved) return resolved;
+  }
+  return "HEAD";
+}
+
+function resolveBaseline(sliceHead: string) {
+  for (const ref of BASE_REFS) {
+    const base = execGit(`git rev-parse --verify ${ref}`).trim();
+    if (base) return ref;
+  }
+  const mergeBase = execGit(`git merge-base HEAD ${sliceHead}`).trim();
+  if (mergeBase) return mergeBase;
+  return "HEAD";
+}
+
+function execGit(command: string) {
+  try {
+    return execSync(command, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch {
+    return "";
+  }
 }
 
 function readImageInfo(path: string) {

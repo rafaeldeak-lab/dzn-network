@@ -1,10 +1,10 @@
 {
   "schema_version": "dzn-comms-message-history-rendered-qa/v1",
-  "generated_at": "2026-08-31T17:15:00.000Z",
+  "generated_at": "2026-08-31T18:28:33.731Z",
   "generated_by": "DZN Comms message-history rendered local/test QA",
   "source_branch": "codex/dzn-comms-message-history-rendered-qa-20260831",
   "base_branch": "origin/codex/dzn-comms-message-history-ui-integration-implementation-20260831",
-  "source_commit": "79e2265a25facaabd862d8ad5f9e64483519b531",
+  "source_commit": "c30130bbe8a6202e0c63cdffb94b5d106f82e384",
   "route": "/community",
   "production_services_required": false,
   "screenshots_committed": true,
@@ -39,7 +39,14 @@
           "image_width": 1425,
           "image_height": 2136,
           "image_mime": "image/jpeg",
-          "non_blank_sample": true
+          "non_blank_sample": true,
+          "content_verification": {
+            "source": "browser_inner_text_before_capture",
+            "private_denied_seed_body_visible": false,
+            "private_identifiers_visible": false,
+            "production_diagnostics_visible": false,
+            "payment_or_provider_markers_visible": false
+          }
         },
         {
           "viewport": "mobile",
@@ -49,7 +56,14 @@
           "image_width": 375,
           "image_height": 4727,
           "image_mime": "image/jpeg",
-          "non_blank_sample": true
+          "non_blank_sample": true,
+          "content_verification": {
+            "source": "browser_inner_text_before_capture",
+            "private_denied_seed_body_visible": false,
+            "private_identifiers_visible": false,
+            "production_diagnostics_visible": false,
+            "payment_or_provider_markers_visible": false
+          }
         }
       ],
       "visible_text_contains": [
@@ -60,7 +74,7 @@
         "No AI call"
       ],
       "visible_text_absent": [
-        "private seed body",
+        "denied private seed text",
         "checkout session",
         "raw user id"
       ]
@@ -98,7 +112,14 @@
           "image_width": 1425,
           "image_height": 2136,
           "image_mime": "image/jpeg",
-          "non_blank_sample": true
+          "non_blank_sample": true,
+          "content_verification": {
+            "source": "browser_inner_text_before_capture",
+            "private_denied_seed_body_visible": false,
+            "private_identifiers_visible": false,
+            "production_diagnostics_visible": false,
+            "payment_or_provider_markers_visible": false
+          }
         },
         {
           "viewport": "mobile",
@@ -108,7 +129,14 @@
           "image_width": 375,
           "image_height": 3790,
           "image_mime": "image/jpeg",
-          "non_blank_sample": true
+          "non_blank_sample": true,
+          "content_verification": {
+            "source": "browser_inner_text_before_capture",
+            "private_denied_seed_body_visible": false,
+            "private_identifiers_visible": false,
+            "production_diagnostics_visible": false,
+            "payment_or_provider_markers_visible": false
+          }
         }
       ],
       "visible_text_contains": [
@@ -119,7 +147,79 @@
         "Composer disabled"
       ],
       "visible_text_absent": [
-        "private seed body",
+        "denied private seed text",
+        "checkout session",
+        "raw user id"
+      ]
+    },
+    {
+      "key": "login_required",
+      "route": "/community",
+      "scenario": "Client flag enabled, but the local rendered route receives a 401 unauthenticated message-history response. Static Global Chat remains visible with a login-required fallback.",
+      "client_flag": "enabled",
+      "server_route_mode": "local_pages_login_required",
+      "data_dzn_comms_message_history_ui": "enabled-read-only",
+      "data_dzn_comms_history_source": "static-fallback",
+      "status_state": "fallback",
+      "status_reason": "login-required",
+      "status_label": "Log in to read saved history",
+      "active_channel_label": "# Global Chat",
+      "composer_disabled": true,
+      "send_button_disabled": true,
+      "reaction_runtime": "static-emoji-preview-only",
+      "route_requests": [
+        {
+          "method": "GET",
+          "path": "/api/dzn-comms/channels/global/messages?limit=25",
+          "observed_status": 401,
+          "credentials": "include",
+          "cache": "no-store"
+        }
+      ],
+      "screenshots": [
+        {
+          "viewport": "desktop",
+          "width": 1425,
+          "height": 2136,
+          "screenshot_path": "docs/artifacts/dzn-comms-message-history-rendered-qa/screenshots/login-required-desktop.jpg",
+          "image_width": 1425,
+          "image_height": 2136,
+          "image_mime": "image/jpeg",
+          "non_blank_sample": true,
+          "content_verification": {
+            "source": "browser_inner_text_before_capture",
+            "private_denied_seed_body_visible": false,
+            "private_identifiers_visible": false,
+            "production_diagnostics_visible": false,
+            "payment_or_provider_markers_visible": false
+          }
+        },
+        {
+          "viewport": "mobile",
+          "width": 375,
+          "height": 4727,
+          "screenshot_path": "docs/artifacts/dzn-comms-message-history-rendered-qa/screenshots/login-required-mobile.jpg",
+          "image_width": 375,
+          "image_height": 4727,
+          "image_mime": "image/jpeg",
+          "non_blank_sample": true,
+          "content_verification": {
+            "source": "browser_inner_text_before_capture",
+            "private_denied_seed_body_visible": false,
+            "private_identifiers_visible": false,
+            "production_diagnostics_visible": false,
+            "payment_or_provider_markers_visible": false
+          }
+        }
+      ],
+      "visible_text_contains": [
+        "Read-Only History",
+        "Log in to read saved history",
+        "Welcome everyone",
+        "Composer disabled"
+      ],
+      "visible_text_absent": [
+        "denied private seed text",
         "checkout session",
         "raw user id"
       ]
@@ -157,7 +257,14 @@
           "image_width": 1425,
           "image_height": 2136,
           "image_mime": "image/jpeg",
-          "non_blank_sample": true
+          "non_blank_sample": true,
+          "content_verification": {
+            "source": "browser_inner_text_before_capture",
+            "private_denied_seed_body_visible": false,
+            "private_identifiers_visible": false,
+            "production_diagnostics_visible": false,
+            "payment_or_provider_markers_visible": false
+          }
         },
         {
           "viewport": "mobile",
@@ -167,7 +274,14 @@
           "image_width": 375,
           "image_height": 4771,
           "image_mime": "image/jpeg",
-          "non_blank_sample": true
+          "non_blank_sample": true,
+          "content_verification": {
+            "source": "browser_inner_text_before_capture",
+            "private_denied_seed_body_visible": false,
+            "private_identifiers_visible": false,
+            "production_diagnostics_visible": false,
+            "payment_or_provider_markers_visible": false
+          }
         }
       ],
       "visible_text_contains": [
@@ -178,7 +292,7 @@
         "No AI call"
       ],
       "visible_text_absent": [
-        "private seed body",
+        "denied private seed text",
         "checkout session",
         "raw user id"
       ]
@@ -216,7 +330,14 @@
           "image_width": 1425,
           "image_height": 2074,
           "image_mime": "image/jpeg",
-          "non_blank_sample": true
+          "non_blank_sample": true,
+          "content_verification": {
+            "source": "browser_inner_text_before_capture",
+            "private_denied_seed_body_visible": false,
+            "private_identifiers_visible": false,
+            "production_diagnostics_visible": false,
+            "payment_or_provider_markers_visible": false
+          }
         },
         {
           "viewport": "mobile",
@@ -226,7 +347,14 @@
           "image_width": 375,
           "image_height": 4887,
           "image_mime": "image/jpeg",
-          "non_blank_sample": true
+          "non_blank_sample": true,
+          "content_verification": {
+            "source": "browser_inner_text_before_capture",
+            "private_denied_seed_body_visible": false,
+            "private_identifiers_visible": false,
+            "production_diagnostics_visible": false,
+            "payment_or_provider_markers_visible": false
+          }
         }
       ],
       "visible_text_contains": [
@@ -237,7 +365,72 @@
         "No AI call"
       ],
       "visible_text_absent": [
-        "private seed body",
+        "denied private seed text",
+        "checkout session",
+        "raw user id"
+      ]
+    },
+    {
+      "key": "support_static",
+      "route": "/community",
+      "scenario": "Support surface selected with the default client flag disabled. DZN Assist remains a static website-support preview and no message-history request is made.",
+      "client_flag": "disabled",
+      "server_route_mode": "not_called_support_static",
+      "data_dzn_comms_message_history_ui": "disabled-static-fallback",
+      "data_dzn_comms_history_source": "static-fallback",
+      "status_state": "static",
+      "status_reason": "support-static",
+      "status_label": "Static support preview",
+      "active_channel_label": "DZN Assist",
+      "composer_disabled": true,
+      "send_button_disabled": true,
+      "reaction_runtime": "static-emoji-preview-only",
+      "route_requests": [],
+      "screenshots": [
+        {
+          "viewport": "desktop",
+          "width": 1425,
+          "height": 2136,
+          "screenshot_path": "docs/artifacts/dzn-comms-message-history-rendered-qa/screenshots/support-static-desktop.jpg",
+          "image_width": 1425,
+          "image_height": 2136,
+          "image_mime": "image/jpeg",
+          "non_blank_sample": true,
+          "content_verification": {
+            "source": "browser_inner_text_before_capture",
+            "private_denied_seed_body_visible": false,
+            "private_identifiers_visible": false,
+            "production_diagnostics_visible": false,
+            "payment_or_provider_markers_visible": false
+          }
+        },
+        {
+          "viewport": "mobile",
+          "width": 375,
+          "height": 4011,
+          "screenshot_path": "docs/artifacts/dzn-comms-message-history-rendered-qa/screenshots/support-static-mobile.jpg",
+          "image_width": 375,
+          "image_height": 4011,
+          "image_mime": "image/jpeg",
+          "non_blank_sample": true,
+          "content_verification": {
+            "source": "browser_inner_text_before_capture",
+            "private_denied_seed_body_visible": false,
+            "private_identifiers_visible": false,
+            "production_diagnostics_visible": false,
+            "payment_or_provider_markers_visible": false
+          }
+        }
+      ],
+      "visible_text_contains": [
+        "Static Prototype",
+        "Static support preview",
+        "DZN Assist",
+        "No AI call",
+        "Composer disabled"
+      ],
+      "visible_text_absent": [
+        "denied private seed text",
         "checkout session",
         "raw user id"
       ]

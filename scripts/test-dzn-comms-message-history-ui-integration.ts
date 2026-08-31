@@ -369,8 +369,9 @@ function assertCommunityIntegrationSource() {
 
   assertIncludes(page, "<DznCommsVisualShell />", "Community page should still render the Comms shell.");
   assertIncludes(shell, "useDznCommsMessageHistory", "Comms shell should use the guarded message-history hook.");
-  assertIncludes(shell, "useDznCommsSurfaceActivationKey", "Comms shell should invalidate cached history when a surface is reactivated.");
-  assertIncludes(shell, "const requestKey = `${activationKey}:${retryNonce}`", "Comms shell should include the activation generation in the history request key.");
+  assertIncludes(shell, "setActiveSurfaceState", "Comms shell should track surface activation state for cache invalidation.");
+  assertIncludes(shell, "generation: current.generation + 1", "Comms shell should bump the activation generation when the user switches surfaces.");
+  assertIncludes(shell, "const requestKey = `${surfaceKey}:${surfaceActivationGeneration}:${retryNonce}`", "Comms shell should include the activation generation in the history request key.");
   assertIncludes(shell, "isDznCommsMessageHistoryUiEnabled()", "Comms shell should gate reads through the public UI flag helper.");
   assert.equal(
     shell.indexOf("if (!channelId) return dznCommsMessageHistoryStaticState(\"support-static\");") <

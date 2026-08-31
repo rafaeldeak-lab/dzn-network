@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { DznLivePresenceCounter } from "./dzn-live-presence-counter";
 import {
   dznCommsMessageHistoryChannelId,
@@ -397,11 +397,26 @@ const staticCommsSurfaces: Record<CommsSurfaceKey, CommsSurface> = {
 };
 
 export function DznCommsVisualShell() {
-  const [activeSurfaceKey, setActiveSurfaceKey] = useState<CommsSurfaceKey>("global");
+  const [activeSurfaceState, setActiveSurfaceState] = useState<{ key: CommsSurfaceKey; generation: number }>({
+    key: "global",
+    generation: 0,
+  });
   const [historyRetryNonce, setHistoryRetryNonce] = useState(0);
+  const activeSurfaceKey = activeSurfaceState.key;
   const activeSurface = staticCommsSurfaces[activeSurfaceKey];
   const messageHistoryUiEnabled = useMemo(() => isDznCommsMessageHistoryUiEnabled(), []);
-  const messageHistoryState = useDznCommsMessageHistory(activeSurfaceKey, historyRetryNonce, messageHistoryUiEnabled);
+  const messageHistoryState = useDznCommsMessageHistory(
+    activeSurfaceKey,
+    activeSurfaceState.generation,
+    historyRetryNonce,
+    messageHistoryUiEnabled,
+  );
+  const selectActiveSurface = useCallback((nextKey: CommsSurfaceKey) => {
+    setActiveSurfaceState((current) => {
+      if (current.key === nextKey) return current;
+      return { key: nextKey, generation: current.generation + 1 };
+    });
+  }, []);
   const activeMessages = useMemo(
     () => messageHistoryState.status === "live"
       ? messageHistoryState.messages.map(toCommsMessageFromHistory)
@@ -451,7 +466,7 @@ export function DznCommsVisualShell() {
         </div>
 
         <div className="mt-5 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_340px]">
-          <DznCommsChannelRail activeKey={activeSurfaceKey} onSelect={setActiveSurfaceKey} />
+          <DznCommsChannelRail activeKey={activeSurfaceKey} onSelect={selectActiveSurface} />
 
           <section className="min-w-0 rounded-lg border border-cyan-300/18 bg-slate-950/74 shadow-[0_26px_90px_rgba(0,0,0,0.34)] backdrop-blur-xl">
             <DznCommsFeedHeader surface={activeSurface} privateMode={activeIsPrivate} />
@@ -471,7 +486,7 @@ export function DznCommsVisualShell() {
           </section>
 
           <aside className="grid gap-4">
-            <DznAssistPanel onSelectSupport={() => setActiveSurfaceKey("support")} />
+            <DznAssistPanel onSelectSupport={() => selectActiveSurface("support")} />
             <ChannelSafetyPanel privateMode={activeIsPrivate} />
             <MemberPresencePanel members={activeMembers} privateMode={activeIsPrivate} />
           </aside>
@@ -483,11 +498,11 @@ export function DznCommsVisualShell() {
 
 function useDznCommsMessageHistory(
   surfaceKey: CommsSurfaceKey,
+  surfaceActivationGeneration: number,
   retryNonce: number,
   uiEnabled: boolean,
 ): DznCommsMessageHistoryUiState {
-  const activationKey = useDznCommsSurfaceActivationKey(surfaceKey);
-  const requestKey = `${activationKey}:${retryNonce}`;
+  const requestKey = `${surfaceKey}:${surfaceActivationGeneration}:${retryNonce}`;
   const channelId = dznCommsMessageHistoryChannelId(surfaceKey);
   const [loadedState, setLoadedState] = useState<{
     requestKey: string;
@@ -512,22 +527,6 @@ function useDznCommsMessageHistory(
   if (!uiEnabled) return dznCommsMessageHistoryStaticState("client-flag-disabled");
   if (loadedState?.requestKey !== requestKey) return dznCommsMessageHistoryLoadingState();
   return loadedState.state;
-}
-
-function useDznCommsSurfaceActivationKey(surfaceKey: CommsSurfaceKey) {
-  const activeSurface = useRef<{ surfaceKey: CommsSurfaceKey; generation: number }>({
-    surfaceKey,
-    generation: 0,
-  });
-
-  if (activeSurface.current.surfaceKey !== surfaceKey) {
-    activeSurface.current = {
-      surfaceKey,
-      generation: activeSurface.current.generation + 1,
-    };
-  }
-
-  return `${activeSurface.current.surfaceKey}:${activeSurface.current.generation}`;
 }
 
 function toCommsMessageFromHistory(message: DznCommsMessageHistoryMessage): CommsMessage {

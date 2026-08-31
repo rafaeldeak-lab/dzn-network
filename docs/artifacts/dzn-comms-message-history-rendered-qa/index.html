@@ -176,7 +176,7 @@
   <main>
     <section class="hero">
       <h1>DZN Comms Message-History Rendered Local/Test QA</h1>
-      <p>This package captures the guarded <code>/community</code> message-history UI with the flag off and on. The enabled states use actual local Cloudflare Pages function responses and temporary local D1 state only.</p>
+      <p>This package captures the guarded <code>/community</code> message-history UI with the flag off and on. The enabled states use local/test responses only, and the support surface proves no message-history request is made.</p>
       <div class="chips" aria-label="QA boundaries">
         <span class="chip">Read-only</span>
         <span class="chip">Local/test only</span>
@@ -189,92 +189,169 @@
     <section class="grid" aria-label="Rendered cases">
       <article class="case">
         <h2>Static Fallback</h2>
-        <p>The default client flag is disabled, no message-history request is made, and the static Global Chat prototype remains visible.</p>
+        <p>Client message-history UI flag absent. Static DZN Comms prototype remains visible and no message-history request is made.</p>
         <div class="meta">
-          <div class="proof"><strong>Client flag</strong><span>Disabled</span></div>
+          <div class="proof"><strong>Client flag</strong><span>disabled</span></div>
           <div class="proof"><strong>Route status</strong><span>Not called</span></div>
-          <div class="proof"><strong>Source</strong><span>Static fallback</span></div>
+          <div class="proof"><strong>Source</strong><span>static-fallback</span></div>
           <div class="proof"><strong>Write surface</strong><span>None</span></div>
         </div>
         <div class="shots">
           <figure>
-            <img src="screenshots/static-fallback-desktop.jpg" alt="Desktop screenshot of DZN Comms static fallback on Global Chat">
-            <figcaption>Desktop static fallback.</figcaption>
+            <img src="screenshots/static-fallback-desktop.jpg" alt="desktop screenshot of Static Fallback on DZN Comms">
+            <figcaption>desktop Static preview active.</figcaption>
           </figure>
           <figure>
-            <img src="screenshots/static-fallback-mobile.jpg" alt="Mobile screenshot of DZN Comms static fallback on Global Chat">
-            <figcaption>Mobile static fallback.</figcaption>
+            <img src="screenshots/static-fallback-mobile.jpg" alt="mobile screenshot of Static Fallback on DZN Comms">
+            <figcaption>mobile Static preview active.</figcaption>
           </figure>
         </div>
       </article>
 
       <article class="case">
-        <h2>Public-Channel Read</h2>
-        <p>The local Pages route returns one seeded public-safe Global Chat message. The page renders it as read-only history and keeps sending disabled.</p>
+        <h2>Public Channel Read</h2>
+        <p>Client and server local/test flags enabled. The actual local Pages route returns one seeded public-safe message for Global Chat.</p>
         <div class="meta">
-          <div class="proof"><strong>Client flag</strong><span>Enabled</span></div>
+          <div class="proof"><strong>Client flag</strong><span>enabled</span></div>
           <div class="proof"><strong>Route status</strong><span>200</span></div>
-          <div class="proof"><strong>Source</strong><span>Read-only history</span></div>
+          <div class="proof"><strong>Source</strong><span>read-only-message-history</span></div>
           <div class="proof"><strong>Write surface</strong><span>None</span></div>
         </div>
         <div class="shots">
           <figure>
-            <img src="screenshots/public-channel-read-desktop.jpg" alt="Desktop screenshot of DZN Comms public channel read-only message history">
-            <figcaption>Desktop public read.</figcaption>
+            <img src="screenshots/public-channel-read-desktop.jpg" alt="desktop screenshot of Public Channel Read on DZN Comms">
+            <figcaption>desktop Saved history synced.</figcaption>
           </figure>
           <figure>
-            <img src="screenshots/public-channel-read-mobile.jpg" alt="Mobile screenshot of DZN Comms public channel read-only message history">
-            <figcaption>Mobile public read.</figcaption>
+            <img src="screenshots/public-channel-read-mobile.jpg" alt="mobile screenshot of Public Channel Read on DZN Comms">
+            <figcaption>mobile Saved history synced.</figcaption>
+          </figure>
+        </div>
+      </article>
+
+      <article class="case">
+        <h2>Login Required</h2>
+        <p>Client flag enabled, but the local rendered route receives a 401 unauthenticated message-history response. Static Global Chat remains visible with a login-required fallback.</p>
+        <div class="meta">
+          <div class="proof"><strong>Client flag</strong><span>enabled</span></div>
+          <div class="proof"><strong>Route status</strong><span>401</span></div>
+          <div class="proof"><strong>Source</strong><span>static-fallback</span></div>
+          <div class="proof"><strong>Write surface</strong><span>None</span></div>
+        </div>
+        <div class="shots">
+          <figure>
+            <img src="screenshots/login-required-desktop.jpg" alt="desktop screenshot of Login Required on DZN Comms">
+            <figcaption>desktop Log in to read saved history.</figcaption>
+          </figure>
+          <figure>
+            <img src="screenshots/login-required-mobile.jpg" alt="mobile screenshot of Login Required on DZN Comms">
+            <figcaption>mobile Log in to read saved history.</figcaption>
           </figure>
         </div>
       </article>
 
       <article class="case">
         <h2>Unavailable Route Fallback</h2>
-        <p>The local Pages route returns an unavailable response when the message store is not usable. The page keeps the static Global Chat fallback.</p>
+        <p>Client flag enabled, but the local Pages route has no usable local message store. The UI keeps the static fallback.</p>
         <div class="meta">
-          <div class="proof"><strong>Client flag</strong><span>Enabled</span></div>
+          <div class="proof"><strong>Client flag</strong><span>enabled</span></div>
           <div class="proof"><strong>Route status</strong><span>503</span></div>
-          <div class="proof"><strong>Source</strong><span>Static fallback</span></div>
+          <div class="proof"><strong>Source</strong><span>static-fallback</span></div>
           <div class="proof"><strong>Write surface</strong><span>None</span></div>
         </div>
         <div class="shots">
           <figure>
-            <img src="screenshots/unavailable-route-fallback-desktop.jpg" alt="Desktop screenshot of DZN Comms unavailable message-history fallback">
-            <figcaption>Desktop unavailable fallback.</figcaption>
+            <img src="screenshots/unavailable-route-fallback-desktop.jpg" alt="desktop screenshot of Unavailable Route Fallback on DZN Comms">
+            <figcaption>desktop Saved history unavailable.</figcaption>
           </figure>
           <figure>
-            <img src="screenshots/unavailable-route-fallback-mobile.jpg" alt="Mobile screenshot of DZN Comms unavailable message-history fallback">
-            <figcaption>Mobile unavailable fallback.</figcaption>
+            <img src="screenshots/unavailable-route-fallback-mobile.jpg" alt="mobile screenshot of Unavailable Route Fallback on DZN Comms">
+            <figcaption>mobile Saved history unavailable.</figcaption>
           </figure>
         </div>
       </article>
 
       <article class="case">
-        <h2>Private-Group Denial</h2>
-        <p>The local Pages route denies Pandora Squad history without a trusted private membership row. The page shows the safe private fallback and does not render the seeded private body.</p>
+        <h2>Private Group Denial</h2>
+        <p>Client and server local/test flags enabled. The actual local Pages route denies Pandora Squad because no trusted private membership row exists for the mock user.</p>
         <div class="meta">
-          <div class="proof"><strong>Client flag</strong><span>Enabled</span></div>
+          <div class="proof"><strong>Client flag</strong><span>enabled</span></div>
           <div class="proof"><strong>Route status</strong><span>403</span></div>
-          <div class="proof"><strong>Source</strong><span>Static fallback</span></div>
+          <div class="proof"><strong>Source</strong><span>static-fallback</span></div>
           <div class="proof"><strong>Write surface</strong><span>None</span></div>
         </div>
         <div class="shots">
           <figure>
-            <img src="screenshots/private-group-denial-desktop.jpg" alt="Desktop screenshot of DZN Comms private group denial fallback">
-            <figcaption>Desktop private denial.</figcaption>
+            <img src="screenshots/private-group-denial-desktop.jpg" alt="desktop screenshot of Private Group Denial on DZN Comms">
+            <figcaption>desktop Private group history unavailable.</figcaption>
           </figure>
           <figure>
-            <img src="screenshots/private-group-denial-mobile.jpg" alt="Mobile screenshot of DZN Comms private group denial fallback">
-            <figcaption>Mobile private denial.</figcaption>
+            <img src="screenshots/private-group-denial-mobile.jpg" alt="mobile screenshot of Private Group Denial on DZN Comms">
+            <figcaption>mobile Private group history unavailable.</figcaption>
+          </figure>
+        </div>
+      </article>
+
+      <article class="case">
+        <h2>Support Static</h2>
+        <p>Support surface selected with the default client flag disabled. DZN Assist remains a static website-support preview and no message-history request is made.</p>
+        <div class="meta">
+          <div class="proof"><strong>Client flag</strong><span>disabled</span></div>
+          <div class="proof"><strong>Route status</strong><span>Not called</span></div>
+          <div class="proof"><strong>Source</strong><span>static-fallback</span></div>
+          <div class="proof"><strong>Write surface</strong><span>None</span></div>
+        </div>
+        <div class="shots">
+          <figure>
+            <img src="screenshots/support-static-desktop.jpg" alt="desktop screenshot of Support Static on DZN Comms">
+            <figcaption>desktop Static support preview.</figcaption>
+          </figure>
+          <figure>
+            <img src="screenshots/support-static-mobile.jpg" alt="mobile screenshot of Support Static on DZN Comms">
+            <figcaption>mobile Static support preview.</figcaption>
           </figure>
         </div>
       </article>
     </section>
 
     <section class="safety">
-      <h2>Safety Boundary</h2>
-      <p>No sending, reaction runtime, reports, moderation mutations, DZN Assist runtime, WebSockets, Durable Objects, tracking calls, Store/payment changes, live checkout, production writes, retained exports, deployment, or issue #49 change is included in this QA package.</p>
+      <h2>Safety Contract</h2>
+      <p>Every protected system remains false/no-effect for this rendered QA package.</p>
+      <div class="meta">
+        <div class="safety"><strong>chat sending</strong><span>false</span></div>
+        <div class="safety"><strong>reaction runtime</strong><span>false</span></div>
+        <div class="safety"><strong>report routes</strong><span>false</span></div>
+        <div class="safety"><strong>moderation mutations</strong><span>false</span></div>
+        <div class="safety"><strong>dzn assist ai runtime</strong><span>false</span></div>
+        <div class="safety"><strong>durable objects</strong><span>false</span></div>
+        <div class="safety"><strong>websockets</strong><span>false</span></div>
+        <div class="safety"><strong>analytics tracking</strong><span>false</span></div>
+        <div class="safety"><strong>store payment changes</strong><span>false</span></div>
+        <div class="safety"><strong>live checkout</strong><span>false</span></div>
+        <div class="safety"><strong>stripe mutations</strong><span>false</span></div>
+        <div class="safety"><strong>cloudflare config mutations</strong><span>false</span></div>
+        <div class="safety"><strong>production d1 writes</strong><span>false</span></div>
+        <div class="safety"><strong>nitrado mutations</strong><span>false</span></div>
+        <div class="safety"><strong>discord mutations</strong><span>false</span></div>
+        <div class="safety"><strong>retained exports</strong><span>false</span></div>
+        <div class="safety"><strong>deployment</strong><span>false</span></div>
+        <div class="safety"><strong>issue 49 changes</strong><span>false</span></div>
+        <div class="safety"><strong>billing effect</strong><span>false</span></div>
+        <div class="safety"><strong>owner entitlement effect</strong><span>false</span></div>
+        <div class="safety"><strong>server ownership effect</strong><span>false</span></div>
+        <div class="safety"><strong>ranking effect</strong><span>false</span></div>
+        <div class="safety"><strong>discovery effect</strong><span>false</span></div>
+        <div class="safety"><strong>review effect</strong><span>false</span></div>
+        <div class="safety"><strong>badge effect</strong><span>false</span></div>
+        <div class="safety"><strong>season effect</strong><span>false</span></div>
+        <div class="safety"><strong>event effect</strong><span>false</span></div>
+        <div class="safety"><strong>server wars effect</strong><span>false</span></div>
+        <div class="safety"><strong>ctf effect</strong><span>false</span></div>
+        <div class="safety"><strong>xp award effect</strong><span>false</span></div>
+        <div class="safety"><strong>calling card award effect</strong><span>false</span></div>
+        <div class="safety"><strong>public profile visibility effect</strong><span>false</span></div>
+        <div class="safety"><strong>competitive eligibility effect</strong><span>false</span></div>
+      </div>
     </section>
   </main>
 </body>
