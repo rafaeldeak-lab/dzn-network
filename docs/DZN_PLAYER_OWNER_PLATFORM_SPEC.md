@@ -291,6 +291,10 @@ Free logged-in players can participate in allowed DZN Comms player/community cha
 
 Warnings, timeouts, mutes, reports, moderation status, private group visibility, DZN Assist support state, and future chat history must not affect billing, owner entitlements, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars, CTF scoring, XP awards, calling-card awards, public profile visibility, retained exports, or competitive eligibility.
 
+Future reactions must follow the same boundary and must not affect billing, owner entitlements, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars, CTF scoring, XP awards, calling-card awards, public profile visibility, retained exports, or competitive eligibility.
+
+Future reactions are handled by the dedicated `docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT.md` document before any reaction route, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered model call, live checkout, production mutation, or issue #49 change is implemented.
+
 Next should be the DZN Comms runtime implementation approval preflight before any chat APIs, message tables, Durable Objects/WebSockets, AI provider credentials, vector stores, or metered model calls are implemented.
 
 ## DZN Comms Runtime Implementation Approval Preflight
@@ -330,6 +334,41 @@ The future counter must not store browsing history, route history, user journeys
 The future counter must not affect billing, owner entitlement, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars, CTF scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions, or competitive eligibility.
 
 Next should be the DZN Comms live presence counter foundation: implement the first public-safe aggregate online counter behind disabled-by-default read/write flags, starting on `/community` or the Global Chat shell with a static fallback, short TTL, no identifying public output, no analytics/tracking, no chat message sending, no message persistence, no moderation tables, no Durable Objects/WebSockets unless separately approved in that slice, no AI provider credentials, no vector stores, no metered model calls, no live checkout, no production mutations, and no effect on competitive or billing systems.
+
+## DZN Comms Reaction Interaction Contract Preflight
+
+The DZN Comms reaction interaction contract preflight is documented in `docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT.md`. It is the reaction-specific contract layer after the static visual shell and presence counter, and before any message-adjacent reaction runtime.
+
+Allowed behavior:
+
+- Define the future server-controlled reaction allow-list with keys such as `rocket`, `wave`, `heart`, `trophy`, `fire`, `target`, `thumbs_up`, `shield`, `eyes`, and `check`.
+- Define future read/add/remove/message-history reaction API contracts.
+- Require `clientMutationId` idempotency and one active reaction per actor, message, and reaction key.
+- Define public-safe aggregate counts and private current-user reaction state without exposing raw DZN user IDs, Discord IDs, profile handles, billing state, owner state, private profile fields, IP addresses, user agents, or moderation evidence.
+- Define reaction access rules for visitors, free players, Starter/Pro owners, and DZN admins/moderators.
+- Define rate limits, abuse handling, moderation scope, cross-owner denial, retention/logging, rollback, and proof requirements.
+- Record that `https://dayz-network.com/` is not changed by the preflight until the normal merge/deploy process is verified.
+
+Blocked behavior:
+
+- No runtime reaction APIs.
+- No runtime chat send APIs.
+- No message tables.
+- No reaction tables.
+- No chat/support/moderation database migrations.
+- No Durable Objects/WebSockets.
+- No persistence.
+- No analytics/tracking.
+- No AI provider credentials.
+- No vector stores.
+- No metered model calls.
+- No Store payment or Supporter Card reveal changes.
+- No live checkout changes.
+- No Stripe, Cloudflare, production D1, Nitrado, Discord, retained export, deployment, or issue #49 mutation.
+
+Future reactions are player/community expression only. They cannot affect billing, owner entitlement, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions outside approved reaction moderation, or competitive eligibility.
+
+Next should be DZN Comms reaction runtime implementation approval preflight, only if deliberately approved, before any reaction route, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered model call, production mutation, live checkout, or issue #49 change.
 
 ## DZN Safe Monetisation And Supporter System Backlog
 
@@ -597,7 +636,8 @@ Future slices should build on this foundation in this order unless product prior
 30. DZN Store fulfilment runtime implementation: delivered as a disabled-by-default local/test runtime for verified Store `checkout.session.completed` receipts, idempotent attempts, exactly-one safe account entitlement per fulfilled source item, optional independently flagged Supporter Card issuance, and refund/dispute rollback; still no earned spins, reward wheel runtime, live checkout, Stripe Product/Price mutation, Cloudflare config mutation, production D1 write, or issue #49 change.
 31. DZN Store Supporter Card reveal visual QA: delivered as a private `/account/purchases` visual polish and local seeded evidence slice with masked serial preview, clearer reveal states, and static DZN Comms emoji reactions; still no generated card art, public reveal, sharing, screenshot/export, notifications, live checkout, Stripe/Cloudflare/production mutation, chat runtime, AI provider credentials, or issue #49 change.
 32. Player navigation access polish: delivered as a logged-in `My Player` header action to `/player`, direct `My Profile` Player Hub hero action to `/player/profile`, and read-only auth navigation URLs for those fixed player paths; still no Store payment, Supporter Card reveal, checkout, entitlement write, wheel, chat runtime, competitive-system behavior, production mutation, or issue #49 change.
-33. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+33. DZN Comms reaction interaction contract preflight: delivered as a documentation/test-only slice defining allowed emoji, add/remove/list/read contracts, per-user idempotency, aggregate counts, current-user state, rate limits, moderation scope, retention/logging, rollback, and proof before runtime reactions; still no reaction API, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered call, live checkout, production mutation, or issue #49 change.
+34. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 
@@ -631,7 +671,7 @@ The Player Hub hero also exposes a direct `My Profile` button to `/player/profil
 
 This slice does not change logged-out navigation, page middleware, owner entitlement checks, Store checkout, Supporter Card reveal, profile privacy writes, progression awards, public profile publishing, DZN Comms runtime behavior, or competitive systems.
 
-The DZN Comms reaction interaction contract remains the next separate Comms slice. That future preflight must define add/remove/list/read behavior, emoji allow-lists, per-user idempotency, reaction count privacy, moderation visibility, rate limits, retention/logging, rollback, and proof requirements before any runtime reaction route, message table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, or metered model call is implemented.
+The DZN Comms reaction interaction contract is now the next separate Comms slice and is captured in `docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT.md`. It defines add/remove/list/read behavior, emoji allow-lists, per-user idempotency, reaction count privacy, moderation visibility, rate limits, retention/logging, rollback, and proof requirements before any runtime reaction route, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered model call, live checkout, production mutation, or issue #49 change.
 
 ## Saved/Followed Server Interaction Slice
 

@@ -106,4 +106,6 @@ Use a local dev server and verify:
 
 Next recommended slice: DZN Comms reaction interaction contract preflight.
 
-That slice should define the future reaction add/remove/list/read API shape, emoji allow-list, count aggregation, current-user reaction state, per-user idempotency, rate limits, moderation visibility, privacy boundaries, retention/logging, rollback, and proof matrix before any runtime reaction route, message table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, or metered model call is implemented.
+That slice should define the future reaction add/remove/list/read API shape, emoji allow-list, count aggregation, current-user reaction state, per-user idempotency, rate limits, moderation visibility, privacy boundaries, retention/logging, rollback, and proof matrix before any runtime reaction route, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered model call, live checkout, production mutation, or issue #49 change is implemented.
+
+That slice is now captured in `docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT.md` and remains runtime-blocking until a later reaction runtime implementation approval preflight is deliberately approved.

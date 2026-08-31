@@ -172,4 +172,6 @@ Live checkout remains disabled. Issue #49 remains reserved for final live paymen
 
 ## Next Recommended Slice
 
-Next should be the DZN Safe Monetisation and Supporter System implementation preflight: define the real production store/catalog/order/payment/spin-ledger/supporter-card architecture, migrations, feature flags, webhook verification, idempotent fulfilment, refund/chargeback handling, admin pricing controls, tax/receipt record boundaries, rollback plan, and security proof before any one-time Stripe Checkout Sessions, store routes, payment webhook fulfilment, supporter card issuance, earned-spin ledgers, wheel runtime, account entitlement writes, live checkout activation, Stripe product/price changes, Cloudflare secret changes, production D1 writes, or issue #49 changes.
+The DZN Safe Monetisation and Supporter System implementation preflight was the historical next slice after presence and has since been captured in the Store stack.
+
+The current Comms follow-on is the DZN Comms reaction interaction contract preflight in `docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT.md`: define allowed emoji, add/remove/list/read behavior, per-user idempotency, aggregate counts, current-user reaction state, rate limits, moderation scope, retention/logging, rollback, and proof before any runtime reaction route, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered model call, live checkout, production mutation, or issue #49 change.
