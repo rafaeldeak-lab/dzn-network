@@ -318,10 +318,11 @@ Required sequence:
 2. Add a disabled-by-default local/test-only message/read implementation PR using this contract.
 3. Add only the approved local/test message-read schema after migration numbering is rechecked.
 4. Add the read-only route with no send, report, reaction, moderation, support-bot, AI, analytics, or production behavior.
-5. Add UI integration only behind `NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED`.
-6. Keep `/community` on static mock fallback when flags are disabled.
-7. Run the proof matrix before any merge.
-8. Only after message/read runtime is approved and merged may reaction runtime proceed under its separate approval preflight.
+5. Approve UI integration in `docs/DZN_COMMS_MESSAGE_HISTORY_UI_INTEGRATION_APPROVAL_PREFLIGHT.md`.
+6. Add UI integration only behind `NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED`.
+7. Keep `/community` on static mock fallback when flags are disabled.
+8. Run the proof matrix before any merge.
+9. Only after message/read runtime is approved and merged may reaction runtime proceed under its separate approval preflight.
 
 ## Rollback Plan
 
@@ -368,4 +369,10 @@ Only report message history as live after a later approved implementation PR is 
 
 ## Next Recommended Slice
 
-Next should be DZN Comms message/read model local/test implementation foundation, only if deliberately approved: add the disabled-by-default local/test read-only message-history route and approved schema from this preflight, keep `/community` on static fallback unless flags are enabled, prove public-channel reads and private group membership checks, and still avoid chat sending, reaction runtime, report routes, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, analytics/tracking, Store/payment changes, live checkout, Stripe/Cloudflare/production D1/Nitrado/Discord mutations, retained exports, deployment, or issue #49 changes.
+The DZN Comms message/read model local/test implementation foundation is documented in `docs/DZN_COMMS_MESSAGE_READ_MODEL_LOCAL_TEST_FOUNDATION.md`.
+
+The DZN Comms message-history UI integration approval preflight is documented in `docs/DZN_COMMS_MESSAGE_HISTORY_UI_INTEGRATION_APPROVAL_PREFLIGHT.md`.
+
+Still blocked in the UI step: chat sending, reaction runtime, report routes, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, analytics/tracking, Store/payment changes, live checkout, production mutations, retained exports, and competitive-system effects.
+
+Next should be the DZN Comms message-history UI integration implementation: wire `/community` to optionally fetch `GET /api/dzn-comms/channels/:channelId/messages` only behind `NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED` plus the disabled-by-default server read flags, keep static fallback as the default and failure path, preserve the disabled composer, and continue blocking chat sending, runtime reactions, report routes, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, analytics/tracking, Store/payment/live checkout changes, production mutations, retained exports, and competitive-system effects.

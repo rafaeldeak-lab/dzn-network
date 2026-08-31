@@ -243,4 +243,6 @@ No unrelated player, owner, billing, Store, review, event, progression, public p
 
 ## Next Recommended Slice
 
-Next should be DZN Comms message-history UI integration approval preflight: define whether `/community` may fetch the local/test read-only route behind `NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED`, how fallback/error states should render, and how reviewers prove the UI still cannot send messages, create reactions, report/moderate, call DZN Assist AI, use Durable Objects/WebSockets, track analytics, alter Store/payment/live checkout, mutate production services, change retained exports, or affect competitive systems. Only after that UI contract is approved should a UI integration slice be implemented.
+The DZN Comms message-history UI integration approval preflight is documented in `docs/DZN_COMMS_MESSAGE_HISTORY_UI_INTEGRATION_APPROVAL_PREFLIGHT.md`.
+
+Next should be the DZN Comms message-history UI integration implementation: wire `/community` to optionally fetch `GET /api/dzn-comms/channels/:channelId/messages` only behind `NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED` plus the disabled-by-default server read flags, keep static fallback as the default and failure path, preserve the disabled composer, and continue blocking chat sending, runtime reactions, report routes, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, analytics/tracking, Store/payment/live checkout changes, production mutations, retained exports, and competitive-system effects.
