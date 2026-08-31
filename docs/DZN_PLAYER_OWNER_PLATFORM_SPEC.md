@@ -716,7 +716,8 @@ Future slices should build on this foundation in this order unless product prior
 33. DZN Comms reaction interaction contract preflight: delivered as a documentation/test-only slice defining allowed emoji, add/remove/list/read contracts, per-user idempotency, aggregate counts, current-user state, rate limits, moderation scope, retention/logging, rollback, and proof before runtime reactions; still no reaction API, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered call, live checkout, production mutation, or issue #49 change.
 34. DZN Comms reaction runtime implementation approval preflight: delivered as a documentation/test-only slice choosing the future disabled-by-default local/test reaction route set, message/read prerequisite, storage/migration model, feature flags, idempotency/concurrency behavior, rate limits, moderation inheritance, retention model, rollout/rollback plan, and proof matrix; still no runtime reaction API, message table, reaction table, migration, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered call, live checkout, production mutation, or issue #49 change.
 35. DZN Comms message/read model approval preflight: delivered as a documentation/test-only slice defining the future disabled-by-default local/test read-only message-history route, public channel reads, private group membership proof, message visibility states, no-store private responses, mock-to-real transition, rollback, and proof matrix; still no runtime message-history API, chat send API, reaction API, report route, moderation mutation, Durable Object, WebSocket, persistence, analytics/tracking, AI runtime, Store/payment change, live checkout, production mutation, retained export, or issue #49 change.
-36. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+36. DZN Comms message-history rendered local/test QA: delivered as a local rendered proof slice for `/community` covering static fallback, public-channel read, login-required fallback, unavailable route fallback, private-group denial, and support-static/no-request fallback across desktop and mobile screenshots; still no chat sending, runtime reactions, report routes, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, analytics/tracking, Store/payment/live checkout, production mutation, retained exports, deployment, or competitive-system effect.
+37. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 
@@ -2311,6 +2312,18 @@ The UI keeps static fallback for the default disabled flag, support, invalid cur
 No chat sending. No runtime reactions. No report routes. No moderation mutations. No DZN Assist AI runtime. No Durable Objects/WebSockets. No analytics/tracking. No Store/payment/live checkout changes. No production mutations. No retained exports. Issue #49 remains reserved for final live payment activation.
 
 The message-history UI cannot affect billing, owner entitlement, server ownership, scoring, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF, XP awards, calling-card awards, public profile visibility, retained exports, or competitive eligibility.
+
+## DZN Comms Message-History Rendered Local/Test QA
+
+The DZN Comms Message-History Rendered Local/Test QA is documented in `docs/DZN_COMMS_MESSAGE_HISTORY_RENDERED_QA.md`.
+
+This slice captures local rendered `/community` proof for the guarded message-history UI. It covers static fallback with the client flag disabled, public-channel read with a seeded local/test `GET /api/dzn-comms/channels/global/messages?limit=25` response, unavailable route fallback, and private-group denial for `pandora-squad`.
+
+The durable proof package is under `docs/artifacts/dzn-comms-message-history-rendered-qa/` and includes desktop and mobile JPEG screenshots, a sanitized JSON manifest, an HTML reviewer report, and an artifact README. The proof package is local/test only, uses actual local Cloudflare Pages function responses with temporary local D1 state where needed, and requires no production services.
+
+No chat sending. No runtime reactions. No report routes. No moderation mutations. No DZN Assist AI runtime. No Durable Objects/WebSockets. No analytics/tracking. No Store/payment/live checkout changes. No production mutations. No retained exports. No deployment. Issue #49 remains reserved for final live payment activation.
+
+The rendered QA slice cannot affect billing, owner entitlement, server ownership, scoring, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF, XP awards, calling-card awards, public profile visibility, retained exports, or competitive eligibility.
 
 ## Foundation Acceptance Criteria
 

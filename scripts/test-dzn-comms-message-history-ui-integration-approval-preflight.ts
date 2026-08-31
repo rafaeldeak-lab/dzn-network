@@ -16,6 +16,14 @@ const PRESENCE_COUNTER = "components/community/dzn-live-presence-counter.tsx";
 const MASTER_SPEC = "docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md";
 const PUBLIC_ACCESS_POLICY = "docs/PUBLIC_ACCESS_POLICY.md";
 const PACKAGE_JSON = "package.json";
+const UI_IMPLEMENTATION_DOC = "docs/DZN_COMMS_MESSAGE_HISTORY_UI_INTEGRATION_IMPLEMENTATION.md";
+const UI_IMPLEMENTATION_HANDOFF = "docs/DZN_COMMS_MESSAGE_HISTORY_UI_INTEGRATION_IMPLEMENTATION_HANDOFF.md";
+const RENDERED_QA_DOC = "docs/DZN_COMMS_MESSAGE_HISTORY_RENDERED_QA.md";
+const RENDERED_QA_HANDOFF = "docs/DZN_COMMS_MESSAGE_HISTORY_RENDERED_QA_HANDOFF.md";
+const RENDERED_QA_ARTIFACT_DIR = "docs/artifacts/dzn-comms-message-history-rendered-qa";
+const RENDERED_QA_ARTIFACT_README = `${RENDERED_QA_ARTIFACT_DIR}/README.md`;
+const RENDERED_QA_ARTIFACT_JSON = `${RENDERED_QA_ARTIFACT_DIR}/dzn-comms-message-history-rendered-qa.json`;
+const RENDERED_QA_ARTIFACT_HTML = `${RENDERED_QA_ARTIFACT_DIR}/index.html`;
 const BASE_REF = "origin/codex/dzn-comms-message-read-model-local-read-foundation-20260831";
 const SLICE_HEAD_REFS = [
   "codex/dzn-comms-message-history-ui-integration-approval-preflight-20260831",
@@ -115,11 +123,27 @@ const ALLOWED_CHANGED_PATHS = new Set([
   MESSAGE_READ_APPROVAL_DOC,
   MESSAGE_READ_DOC,
   MESSAGE_READ_HANDOFF,
+  UI_IMPLEMENTATION_DOC,
+  UI_IMPLEMENTATION_HANDOFF,
+  RENDERED_QA_DOC,
+  RENDERED_QA_HANDOFF,
+  RENDERED_QA_ARTIFACT_README,
+  RENDERED_QA_ARTIFACT_JSON,
+  RENDERED_QA_ARTIFACT_HTML,
   MASTER_SPEC,
   PUBLIC_ACCESS_POLICY,
   "scripts/test-dzn-comms-message-history-ui-integration-approval-preflight.ts",
+  "scripts/test-dzn-comms-message-history-ui-integration.ts",
+  "scripts/test-dzn-comms-message-history-rendered-qa.ts",
+  "scripts/test-dzn-comms-message-read-model-approval-preflight.ts",
+  "scripts/test-dzn-comms-reaction-contract-preflight.ts",
+  "scripts/test-dzn-comms-reaction-runtime-approval-preflight.ts",
   PACKAGE_JSON,
 ]);
+
+const ALLOWED_CHANGED_PREFIXES = [
+  `${RENDERED_QA_ARTIFACT_DIR}/screenshots/`,
+] as const;
 
 const FORBIDDEN_RUNTIME_PATHS = [
   "functions/api/dzn-comms/messages",
@@ -342,7 +366,10 @@ function assertNoForbiddenRuntimeFiles() {
 
 function assertNoRuntimeOrProductionFilesChanged() {
   const changed = listChangedFiles().map((path) => path.replace(/\\/g, "/"));
-  const unexpected = changed.filter((path) => !ALLOWED_CHANGED_PATHS.has(path));
+  const unexpected = changed.filter((path) => {
+    if (ALLOWED_CHANGED_PATHS.has(path)) return false;
+    return !ALLOWED_CHANGED_PREFIXES.some((prefix) => path.startsWith(prefix));
+  });
   assert.deepEqual(unexpected, [], "UI integration approval preflight may change only approved docs, package script, and guard test files.");
 
   const runtimeChanges = changed.filter((path) => FORBIDDEN_CHANGED_RUNTIME_PATTERN.test(path));

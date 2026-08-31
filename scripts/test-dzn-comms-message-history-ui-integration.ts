@@ -32,6 +32,13 @@ const MESSAGE_READ_HANDOFF = "docs/DZN_COMMS_MESSAGE_READ_MODEL_LOCAL_TEST_FOUND
 const MASTER_SPEC = "docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md";
 const PUBLIC_ACCESS_POLICY = "docs/PUBLIC_ACCESS_POLICY.md";
 const PACKAGE_JSON = "package.json";
+const RENDERED_QA_DOC = "docs/DZN_COMMS_MESSAGE_HISTORY_RENDERED_QA.md";
+const RENDERED_QA_HANDOFF = "docs/DZN_COMMS_MESSAGE_HISTORY_RENDERED_QA_HANDOFF.md";
+const RENDERED_QA_ARTIFACT_DIR = "docs/artifacts/dzn-comms-message-history-rendered-qa";
+const RENDERED_QA_ARTIFACT_README = `${RENDERED_QA_ARTIFACT_DIR}/README.md`;
+const RENDERED_QA_ARTIFACT_JSON = `${RENDERED_QA_ARTIFACT_DIR}/dzn-comms-message-history-rendered-qa.json`;
+const RENDERED_QA_ARTIFACT_HTML = `${RENDERED_QA_ARTIFACT_DIR}/index.html`;
+const RENDERED_QA_TEST = "scripts/test-dzn-comms-message-history-rendered-qa.ts";
 
 const ALLOWED_CHANGED_PATHS = new Set([
   COMMUNITY_PAGE,
@@ -43,9 +50,18 @@ const ALLOWED_CHANGED_PATHS = new Set([
   MESSAGE_READ_HANDOFF,
   IMPLEMENTATION_DOC,
   IMPLEMENTATION_HANDOFF,
+  RENDERED_QA_DOC,
+  RENDERED_QA_HANDOFF,
+  RENDERED_QA_ARTIFACT_README,
+  RENDERED_QA_ARTIFACT_JSON,
+  RENDERED_QA_ARTIFACT_HTML,
   MASTER_SPEC,
   PUBLIC_ACCESS_POLICY,
   "scripts/test-dzn-comms-message-history-ui-integration.ts",
+  "scripts/test-dzn-comms-message-read-model-approval-preflight.ts",
+  "scripts/test-dzn-comms-reaction-contract-preflight.ts",
+  "scripts/test-dzn-comms-reaction-runtime-approval-preflight.ts",
+  RENDERED_QA_TEST,
   "scripts/test-dzn-comms-message-history-ui-integration-approval-preflight.ts",
   "scripts/test-dzn-comms-message-read-model-local-foundation.ts",
   "scripts/test-dzn-comms-visual-shell.ts",
@@ -53,6 +69,10 @@ const ALLOWED_CHANGED_PATHS = new Set([
   "scripts/test-dzn-comms-runtime-approval-preflight.ts",
   PACKAGE_JSON,
 ]);
+
+const ALLOWED_CHANGED_PREFIXES = [
+  `${RENDERED_QA_ARTIFACT_DIR}/screenshots/`,
+] as const;
 
 const FORBIDDEN_SOURCE_PATTERNS = [
   /method:\s*["'](?:POST|PUT|PATCH|DELETE)["']/i,
@@ -481,7 +501,10 @@ function assertDocsAndPackageScript() {
 
 function assertChangedPathsStayBounded() {
   const changed = changedFiles().map((path) => path.replace(/\\/g, "/"));
-  const unexpected = changed.filter((path) => !ALLOWED_CHANGED_PATHS.has(path));
+  const unexpected = changed.filter((path) => {
+    if (ALLOWED_CHANGED_PATHS.has(path)) return false;
+    return !ALLOWED_CHANGED_PREFIXES.some((prefix) => path.startsWith(prefix));
+  });
   assert.deepEqual(unexpected, [], "This slice may change only the approved UI integration files, docs, tests, and package script.");
 
   const forbidden = changed.filter((path) => FORBIDDEN_CHANGED_PATH_PATTERNS.some((pattern) => pattern.test(path)));

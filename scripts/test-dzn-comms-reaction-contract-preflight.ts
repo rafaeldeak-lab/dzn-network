@@ -119,7 +119,7 @@ const MASTER_SPEC_SNIPPETS = [
   "vector store",
   "metered model call",
   "35. DZN Comms message/read model approval preflight",
-  "36. Issue #49 live checkout activation",
+  "Issue #49 live checkout activation",
 ];
 
 const INTERACTION_DOC_SNIPPETS = [
