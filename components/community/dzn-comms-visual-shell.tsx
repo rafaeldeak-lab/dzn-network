@@ -508,8 +508,8 @@ function useDznCommsMessageHistory(
     };
   }, [channelId, requestKey, surfaceKey, uiEnabled]);
 
-  if (!uiEnabled) return dznCommsMessageHistoryStaticState("client-flag-disabled");
   if (!channelId) return dznCommsMessageHistoryStaticState("support-static");
+  if (!uiEnabled) return dznCommsMessageHistoryStaticState("client-flag-disabled");
   if (loadedState?.requestKey !== requestKey) return dznCommsMessageHistoryLoadingState();
   return loadedState.state;
 }
