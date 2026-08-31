@@ -74,7 +74,7 @@ Rejected message bodies must not be echoed back to other users, public logs, ana
 
 The static DZN Comms shell can show emoji reaction chips, but runtime reactions remain blocked until a dedicated DZN Comms reaction interaction contract slice is approved.
 
-The dedicated DZN Comms reaction interaction contract preflight is now captured in `docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT.md`. The dedicated reaction contract is now captured in `docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT.md`. That reaction-specific preflight is still documentation/test-only, but it defines the future emoji allow-list, add/remove/list/read routes, message-history embedding, per-user idempotency, aggregate-count privacy, current-user reaction state, rate limits, moderation behavior, retention/logging, rollback, and proof matrix.
+The dedicated DZN Comms reaction interaction contract preflight is now captured in `docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT.md`. The dedicated reaction contract is now captured in `docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT.md`. The DZN Comms reaction runtime implementation approval preflight is captured in `docs/DZN_COMMS_REACTION_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT.md`. Those reaction-specific preflights are still documentation/test-only, but they define the future emoji allow-list, add/remove/list/read routes, message-history embedding, per-user idempotency, aggregate-count privacy, current-user reaction state, rate limits, moderation behavior, storage/migration model, retention/logging, rollback, and proof matrix.
 
 That reaction slice defines:
 
@@ -89,7 +89,7 @@ That reaction slice defines:
 - Rollback behavior if reactions are disabled after launch.
 - Proof that reactions cannot affect billing, owner entitlement, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, CTF scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions outside reaction moderation, or competitive eligibility.
 
-No runtime reaction route, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking call, AI provider credential, vector store, metered model call, or production mutation may be added until that reaction contract is complete.
+No runtime reaction route, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking call, AI provider credential, vector store, metered model call, or production mutation may be added until both reaction preflights are complete and a later disabled local/test implementation slice is approved.
 
 ## Filtering Decision Contract
 
