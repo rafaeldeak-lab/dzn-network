@@ -190,6 +190,8 @@ Only report the feature as live after the normal repository merge/deployment pro
 
 The DZN Comms reaction runtime implementation approval preflight is now captured in `docs/DZN_COMMS_REACTION_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT.md`.
 
-Next should be DZN Comms message/read model approval preflight if no approved DZN Comms message/read runtime exists yet.
+The DZN Comms message/read model approval preflight is now captured in `docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT.md`.
+
+Next should be DZN Comms message/read model local/test implementation foundation, only if deliberately approved.
 
 If that prerequisite already exists in the chosen base branch, next should be DZN Comms reaction runtime local/test implementation, disabled by default, using only the approved route set, storage model, flags, idempotency/concurrency behavior, rate limits, moderation inheritance, retention model, rollback plan, and proof matrix from `docs/DZN_COMMS_REACTION_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT.md`.

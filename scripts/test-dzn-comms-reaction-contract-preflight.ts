@@ -118,7 +118,8 @@ const MASTER_SPEC_SNIPPETS = [
   "AI provider",
   "vector store",
   "metered model call",
-  "35. Issue #49 live checkout activation",
+  "35. DZN Comms message/read model approval preflight",
+  "36. Issue #49 live checkout activation",
 ];
 
 const INTERACTION_DOC_SNIPPETS = [

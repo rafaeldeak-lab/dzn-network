@@ -404,9 +404,48 @@ Blocked behavior:
 - No live checkout changes.
 - No Stripe, Cloudflare, production D1, Nitrado, Discord, retained export, deployment, or issue #49 mutation.
 
-Reaction runtime cannot proceed unless a separately approved DZN Comms message/read model exists. If that prerequisite does not exist, the next implementation slice is the message/read model approval preflight, not reaction runtime.
+Reaction runtime cannot proceed unless a separately approved DZN Comms message/read model exists. The DZN Comms message/read model approval preflight is now captured in `docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT.md`. If that prerequisite does not exist as an implemented local/test runtime, the next implementation slice is the message/read model local/test foundation, not reaction runtime.
 
 Future reaction runtime cannot affect billing, owner entitlement, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, moderation decisions outside approved reaction abuse handling, or competitive eligibility.
+
+## DZN Comms Message/Read Model Approval Preflight
+
+The DZN Comms message/read model approval preflight is documented in `docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT.md`. It defines the safe read-only message-history prerequisite before any real chat history route or reaction runtime can be implemented.
+
+Approved future message/read contract:
+
+- Read-only route limited to `GET /api/dzn-comms/channels/:channelId/messages`.
+- First future runtime must be disabled by default and local/test-only.
+- Public channels limited to `global`, `new-players`, `server-owners`, and `events`.
+- Free logged-in Discord players may read visible public-channel messages when local/test flags are enabled.
+- Visitors may see the static mock `/community` shell only in the first runtime plan.
+- Private group reads require trusted DZN user ID bridge membership.
+- Owner entitlement alone is not private group membership.
+- Starter and Pro do not alter message visibility, ordering, page size, retention, private group access, current-user state, fallback behavior, or author display treatment.
+- Hidden, deleted, quarantined, expired, staff-only, and unavailable messages do not expose bodies to normal readers.
+- Rejected, blocked, profanity-filtered, spam-filtered, timeout-triggering, private support, AI support, moderation-note, report-note, and raw-evidence bodies are not message history.
+- Responses expose only public-safe author display fields and must not expose raw Discord IDs, OAuth tokens, internal DZN user IDs, private emails, hidden profile fields, billing identifiers, owner entitlement state, Nitrado identifiers, IP addresses, user agents, referrers, route history, moderation evidence, report details, support transcripts, retained exports, or raw ledger rows.
+- Authenticated/private responses require `Cache-Control: no-store` and `Vary: Cookie`.
+- Future storage candidates are limited to `dzn_comms_channels`, `dzn_comms_channel_memberships`, `dzn_comms_messages`, and `dzn_comms_message_visibility_events`, but no migration is added by this preflight.
+- Feature flags default disabled: `DZN_COMMS_MESSAGE_READ_ENABLED`, `DZN_COMMS_MESSAGE_READ_LOCAL_TEST_RUNTIME`, `DZN_COMMS_PUBLIC_CHANNEL_HISTORY_ENABLED`, `DZN_COMMS_PRIVATE_GROUP_HISTORY_ENABLED`, and `NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED`.
+- `/community` must keep the static mock fallback unless future message-history flags are enabled.
+
+Blocked behavior:
+
+- No runtime message-history API in this preflight.
+- No runtime chat send API.
+- No runtime reaction API.
+- No report routes.
+- No moderation mutation routes.
+- No DZN Assist AI runtime.
+- No Durable Objects/WebSockets.
+- No message persistence.
+- No analytics/tracking.
+- No Store payment or Supporter Card reveal changes.
+- No live checkout changes.
+- No Stripe, Cloudflare, production D1, Nitrado, Discord, retained export, deployment, or issue #49 mutation.
+
+Message reads cannot affect billing, owner entitlement, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, analytics/tracking, AI, live checkout, production systems, or competitive eligibility.
 
 ## DZN Safe Monetisation And Supporter System Backlog
 
@@ -676,7 +715,8 @@ Future slices should build on this foundation in this order unless product prior
 32. Player navigation access polish: delivered as a logged-in `My Player` header action to `/player`, direct `My Profile` Player Hub hero action to `/player/profile`, and read-only auth navigation URLs for those fixed player paths; still no Store payment, Supporter Card reveal, checkout, entitlement write, wheel, chat runtime, competitive-system behavior, production mutation, or issue #49 change.
 33. DZN Comms reaction interaction contract preflight: delivered as a documentation/test-only slice defining allowed emoji, add/remove/list/read contracts, per-user idempotency, aggregate counts, current-user state, rate limits, moderation scope, retention/logging, rollback, and proof before runtime reactions; still no reaction API, message table, reaction table, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered call, live checkout, production mutation, or issue #49 change.
 34. DZN Comms reaction runtime implementation approval preflight: delivered as a documentation/test-only slice choosing the future disabled-by-default local/test reaction route set, message/read prerequisite, storage/migration model, feature flags, idempotency/concurrency behavior, rate limits, moderation inheritance, retention model, rollout/rollback plan, and proof matrix; still no runtime reaction API, message table, reaction table, migration, Durable Object, WebSocket, persistence, analytics/tracking, AI provider, vector store, metered call, live checkout, production mutation, or issue #49 change.
-35. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
+35. DZN Comms message/read model approval preflight: delivered as a documentation/test-only slice defining the future disabled-by-default local/test read-only message-history route, public channel reads, private group membership proof, message visibility states, no-store private responses, mock-to-real transition, rollback, and proof matrix; still no runtime message-history API, chat send API, reaction API, report route, moderation mutation, Durable Object, WebSocket, persistence, analytics/tracking, AI runtime, Store/payment change, live checkout, production mutation, retained export, or issue #49 change.
+36. Issue #49 live checkout activation: only after sandbox evidence, readiness review, production configuration review, migration safety, and explicit approval.
 
 ## Player Hub Foundation Slice
 

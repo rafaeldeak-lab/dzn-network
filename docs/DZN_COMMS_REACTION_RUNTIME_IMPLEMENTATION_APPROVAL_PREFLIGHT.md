@@ -25,7 +25,7 @@ That future implementation may include only:
 
 That future implementation must not create the general chat-send runtime. It must not create the first DZN Comms message table. It must not add private group runtime if private group messages are not already approved. It must not add owner/admin moderation mutation routes in the first reaction runtime PR. It must inherit message visibility and lock state from the approved DZN Comms message/read model.
 
-If an approved DZN Comms message/read model does not exist yet, the next implementation step must be the message/read model approval slice, not reaction runtime.
+The DZN Comms message/read model approval preflight is now captured in `docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT.md`. If an approved DZN Comms message/read runtime does not exist yet, the next implementation step must be the message/read model local/test implementation foundation, not reaction runtime.
 
 ## Exact Future Runtime Route Set
 
@@ -171,7 +171,7 @@ Response results:
 
 ## Message Read Prerequisites
 
-Reaction runtime depends on a separately approved message/read model.
+Reaction runtime depends on a separately approved message/read model. The approval preflight for that prerequisite is now captured in `docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT.md`.
 
 Before reaction runtime can be implemented, DZN must already have:
 
@@ -395,7 +395,7 @@ Private audit retention for future moderation is not approved in the first runti
 Required sequence:
 
 1. Keep this approval preflight as docs/tests only.
-2. Confirm a separate DZN Comms message/read model exists and is approved.
+2. Confirm the DZN Comms message/read model approval preflight in `docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT.md` has been implemented as a disabled local/test runtime and separately proven safe.
 3. Add a local/test-only reaction storage migration in a dedicated implementation PR.
 4. Add disabled-by-default local/test runtime routes using the approved route set.
 5. Add disabled-by-default UI affordances only after API tests pass.
@@ -454,6 +454,8 @@ Only report reaction runtime as live after a later approved implementation PR is
 
 ## Next Recommended Slice
 
-Next should be the DZN Comms message/read model approval preflight if no approved DZN Comms message/read runtime exists yet.
+The DZN Comms message/read model approval preflight is now captured in `docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT.md`.
 
-If that prerequisite already exists in the chosen base branch, next should be the DZN Comms reaction runtime local/test implementation slice, disabled by default, using only the route set, storage model, flags, idempotency rules, rate limits, retention model, rollback plan, and proof matrix from this preflight.
+Next should be the DZN Comms message/read model local/test implementation foundation, only if deliberately approved. That future slice should add the disabled-by-default read-only message-history route and approved schema from the message/read preflight, keep `/community` on static fallback unless flags are enabled, prove public-channel reads and private group membership checks, and still avoid chat sending, reaction runtime, report routes, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, analytics/tracking, Store/payment changes, live checkout, Stripe/Cloudflare/production D1/Nitrado/Discord mutations, retained exports, deployment, or issue #49 changes.
+
+After that prerequisite exists and is separately proven safe, the next reaction slice can be the DZN Comms reaction runtime local/test implementation, disabled by default, using only the route set, storage model, flags, idempotency rules, rate limits, retention model, rollback plan, and proof matrix from this preflight.
