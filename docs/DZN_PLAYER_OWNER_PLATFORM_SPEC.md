@@ -2242,6 +2242,35 @@ Live checkout remains disabled by default. The page may explain that a later app
 | Manual sync/ingestion APIs | 401 unless cron-secret path applies | 402 owner plan required | Allowed, then existing checks still apply | Allowed, then existing checks still apply | Cron secret or owner entitlement |
 | `/owner` platform admin | Platform-owner auth required | Platform-owner auth required | Platform-owner auth required | Platform-owner auth required | Existing platform-owner authorization |
 
+## DZN Comms Message/Read Model Local/Test Foundation
+
+The DZN Comms Message/Read Model Local/Test Foundation is documented in `docs/DZN_COMMS_MESSAGE_READ_MODEL_LOCAL_TEST_FOUNDATION.md`.
+
+It adds the first approved read-only message-history route:
+
+```text
+GET /api/dzn-comms/channels/:channelId/messages
+```
+
+It also adds the approved local/test message-read schema:
+
+```text
+dzn_comms_channels
+dzn_comms_channel_memberships
+dzn_comms_messages
+dzn_comms_message_visibility_events
+```
+
+All message-history flags remain disabled by default. The route requires explicit local/test enablement through `DZN_COMMS_MESSAGE_READ_ENABLED=true`, `DZN_COMMS_MESSAGE_READ_LOCAL_TEST_RUNTIME=local` or `test`, and the matching public/private channel history flag. The `/community` route remains on the static local mock-data shell unless a later UI integration slice enables runtime fetching.
+
+Free logged-in Discord players may read visible public-channel messages on `global`, `new-players`, `server-owners`, and `events` when the local/test flags are enabled. Private group reads require active trusted membership in `dzn_comms_channel_memberships` for the current server-resolved DZN user ID. Owner entitlement alone is not private group membership, and Starter/Pro do not change message visibility, ordering, page size, retention, private group access, fallback behavior, author display, rankings, discovery, reviews, XP, calling-card awards, public profile visibility, or competitive eligibility.
+
+This slice returns only visible/locked message bodies and public-safe author display fields. It intentionally returns `profileHref: null` until a later attribution slice re-checks saved public profile visibility preferences at read time. Hidden, deleted, quarantined, expired, staff-only, rejected, blocked, support, moderation, report, raw-evidence, and expired-by-time bodies are not returned.
+
+The message/read foundation cannot affect billing, owner entitlement, server ownership, Store purchases, live checkout, Supporter Cards, rankings, discovery score, reviews, review score, badges, seasons, events, Server Wars scoring, CTF scoring, XP awards, calling-card awards, public profile visibility, retained exports, analytics/tracking, DZN Assist AI state, moderation decisions outside stored message visibility, or competitive eligibility.
+
+It adds no chat sending, reaction runtime, report routes, moderation mutation routes, DZN Assist AI runtime, Durable Objects, WebSockets, analytics/tracking, Store/payment changes, live checkout activation, production D1 apply, Stripe Product/Price mutation, Cloudflare config/secret mutation, Nitrado mutation, Discord mutation, retained export changes, deployment, or issue #49 changes. Live checkout remains disabled and Issue #49 remains reserved for final live payment activation.
+
 ## Foundation Acceptance Criteria
 
 The Player vs Owner Access Foundation PR is complete when:

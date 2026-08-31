@@ -139,7 +139,8 @@ function assertMigrationNumbering() {
   assert.equal(migrationFiles.includes(ORDER_LEDGER_MIGRATION), true, "0072 Store order ledger migration should remain present.");
   assert.equal(migrationFiles.includes(MIGRATION), true, "0073 Store fulfilment ledger schema migration should exist.");
   assert.equal(migrationFiles.filter((path) => path.startsWith("migrations/0073_")).length, 1, "There must be exactly one 0073 migration.");
-  assert.equal(migrationFiles.at(-1), MIGRATION, "0073 should be the latest migration after numbering was rechecked.");
+  const storeMigrationFiles = migrationFiles.filter((path) => path.includes("_dzn_store_"));
+  assert.equal(storeMigrationFiles.at(-1), MIGRATION, "0073 should remain the latest Store migration after numbering was rechecked.");
 }
 
 function assertMigrationCreatesOnlyApprovedTables() {

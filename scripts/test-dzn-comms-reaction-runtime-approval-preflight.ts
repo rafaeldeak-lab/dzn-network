@@ -5,6 +5,9 @@ import { join } from "node:path";
 
 const RUNTIME_APPROVAL_DOC = "docs/DZN_COMMS_REACTION_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT.md";
 const RUNTIME_APPROVAL_HANDOFF = "docs/DZN_COMMS_REACTION_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT_HANDOFF.md";
+const APPROVED_MESSAGE_READ_ROUTE = "functions/api/dzn-comms/channels/[channelId]/messages.ts";
+const APPROVED_MESSAGE_READ_HELPER = "functions/_lib/dzn-comms-message-read.ts";
+const APPROVED_MESSAGE_READ_MIGRATION = "migrations/0074_dzn_comms_message_read_model.sql";
 const REACTION_CONTRACT_DOC = "docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT.md";
 const REACTION_CONTRACT_HANDOFF = "docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT_HANDOFF.md";
 const INTERACTION_DOC = "docs/DZN_COMMS_INTERACTION_CONTRACT_PREFLIGHT.md";
@@ -159,7 +162,6 @@ const PUBLIC_POLICY_SNIPPETS = [
 const FORBIDDEN_RUNTIME_PATHS = [
   "functions/api/dzn-comms/messages",
   "functions/api/dzn-comms/reactions",
-  "functions/api/dzn-comms/channels",
   "functions/api/dzn-comms/moderation",
   "functions/api/dzn-comms/reports",
   "functions/api/chat",
@@ -352,9 +354,12 @@ function assertNoChangedRuntimeFiles() {
       /\.(?:ts|tsx|js|jsx|mjs|cjs)$/.test(path),
   );
 
-  assert.deepEqual(changedRuntimeFiles, [], "Runtime approval preflight must not change runtime files.");
+  const approvedPrerequisiteFiles = new Set([APPROVED_MESSAGE_READ_ROUTE, APPROVED_MESSAGE_READ_HELPER]);
+  const unexpectedRuntimeFiles = changedRuntimeFiles.filter((path) => !approvedPrerequisiteFiles.has(path.replace(/\\/g, "/")));
 
-  for (const path of changedRuntimeFiles) {
+  assert.deepEqual(unexpectedRuntimeFiles, [], "Reaction runtime preflight may only see the approved message/read prerequisite runtime files.");
+
+  for (const path of unexpectedRuntimeFiles) {
     const source = read(path);
     for (const pattern of FORBIDDEN_RUNTIME_PATTERNS) {
       assert.doesNotMatch(source, pattern, `${path} must not contain runtime/chat/payment/tracking pattern ${pattern}.`);
@@ -363,7 +368,10 @@ function assertNoChangedRuntimeFiles() {
 }
 
 function assertNoProtectedProductionFilesChanged() {
-  const protectedChanges = listChangedFiles().filter((path) => FORBIDDEN_PROTECTED_CHANGED_PATH.test(path));
+  const protectedChanges = listChangedFiles()
+    .map((path) => path.replace(/\\/g, "/"))
+    .filter((path) => path !== APPROVED_MESSAGE_READ_MIGRATION)
+    .filter((path) => FORBIDDEN_PROTECTED_CHANGED_PATH.test(path));
   assert.deepEqual(protectedChanges, [], "Runtime approval preflight must not change production config, migrations, workflows, package-lock, or public assets.");
 }
 

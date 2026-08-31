@@ -5,6 +5,11 @@ import { join } from "node:path";
 
 const MESSAGE_READ_DOC = "docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT.md";
 const MESSAGE_READ_HANDOFF = "docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT_HANDOFF.md";
+const MESSAGE_READ_IMPLEMENTATION_DOC = "docs/DZN_COMMS_MESSAGE_READ_MODEL_LOCAL_TEST_FOUNDATION.md";
+const MESSAGE_READ_IMPLEMENTATION_HANDOFF = "docs/DZN_COMMS_MESSAGE_READ_MODEL_LOCAL_TEST_FOUNDATION_HANDOFF.md";
+const APPROVED_MESSAGE_READ_ROUTE = "functions/api/dzn-comms/channels/[channelId]/messages.ts";
+const APPROVED_MESSAGE_READ_HELPER = "functions/_lib/dzn-comms-message-read.ts";
+const APPROVED_MESSAGE_READ_MIGRATION = "migrations/0074_dzn_comms_message_read_model.sql";
 const REACTION_RUNTIME_DOC = "docs/DZN_COMMS_REACTION_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT.md";
 const REACTION_RUNTIME_HANDOFF = "docs/DZN_COMMS_REACTION_RUNTIME_IMPLEMENTATION_APPROVAL_PREFLIGHT_HANDOFF.md";
 const REACTION_CONTRACT_DOC = "docs/DZN_COMMS_REACTION_INTERACTION_CONTRACT_PREFLIGHT.md";
@@ -120,7 +125,6 @@ const PUBLIC_POLICY_SNIPPETS = [
 ];
 
 const FORBIDDEN_RUNTIME_PATHS = [
-  "functions/api/dzn-comms/channels",
   "functions/api/dzn-comms/messages",
   "functions/api/dzn-comms/reactions",
   "functions/api/dzn-comms/moderation",
@@ -146,22 +150,14 @@ const FORBIDDEN_RUNTIME_PATHS = [
 
 const FORBIDDEN_PROTECTED_CHANGED_PATH = /^(?:migrations|public|\.github)[\\/]|^(?:cloudflare-env\.d\.ts|wrangler(?:\.adm-sync|\.auto-update)?\.toml|package-lock\.json)$/i;
 
-const FORBIDDEN_MIGRATION_PATTERN = /(?:chat_messages|dzn_comms_messages|dzn_comms_channels|channel_memberships|message_visibility|message_reactions|reaction_mutations|message_reports|moderation_actions|warning_timeouts|support_sessions|support_messages|ai_sources|ai_embeddings|analytics_events|websocket|vector)/i;
+const FORBIDDEN_MIGRATION_PATTERN = /(?:chat_messages|message_reactions|reaction_mutations|message_reports|moderation_actions|warning_timeouts|support_sessions|support_messages|ai_sources|ai_embeddings|analytics_events|websocket|vector)/i;
 
 const FORBIDDEN_RUNTIME_PATTERNS = [
   /new\s+WebSocket/i,
   /WebSocketPair/i,
   /class\s+\w+\s+extends\s+DurableObject/i,
-  /\bdzn_comms_messages\b/i,
-  /\bdzn_comms_channels\b/i,
-  /\bdzn_comms_channel_memberships\b/i,
-  /\bdzn_comms_message_visibility_events\b/i,
   /\bdzn_comms_message_reactions\b/i,
   /\bdzn_comms_reaction_mutations\b/i,
-  /\bDZN_COMMS_MESSAGE_READ_ENABLED\b/i,
-  /\bDZN_COMMS_MESSAGE_READ_LOCAL_TEST_RUNTIME\b/i,
-  /\bDZN_COMMS_PUBLIC_CHANNEL_HISTORY_ENABLED\b/i,
-  /\bDZN_COMMS_PRIVATE_GROUP_HISTORY_ENABLED\b/i,
   /\bNEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED\b/i,
   /\bnavigator\.sendBeacon\b/i,
   /\bgtag\b/i,
@@ -195,6 +191,7 @@ function main() {
   assertCrossDocs();
   assertPackageScript();
   assertNoRuntimeMessageFiles();
+  assertApprovedMessageReadRuntimeFiles();
   assertNoMessageMigrations();
   assertNoChangedRuntimeFiles();
   assertNoProtectedProductionFilesChanged();
@@ -206,6 +203,8 @@ function assertFilesExist() {
   for (const path of [
     MESSAGE_READ_DOC,
     MESSAGE_READ_HANDOFF,
+    MESSAGE_READ_IMPLEMENTATION_DOC,
+    MESSAGE_READ_IMPLEMENTATION_HANDOFF,
     REACTION_RUNTIME_DOC,
     REACTION_RUNTIME_HANDOFF,
     REACTION_CONTRACT_DOC,
@@ -287,9 +286,21 @@ function assertNoRuntimeMessageFiles() {
   }
 }
 
+function assertApprovedMessageReadRuntimeFiles() {
+  const channelRuntimeFiles = listFiles("functions/api/dzn-comms/channels").map((path) => path.replace(/\\/g, "/"));
+  assert.deepEqual(
+    channelRuntimeFiles,
+    [APPROVED_MESSAGE_READ_ROUTE],
+    "Only the approved read-only channel message route may exist under functions/api/dzn-comms/channels.",
+  );
+  assert.equal(existsSync(APPROVED_MESSAGE_READ_HELPER), true, "Approved message/read helper should exist after the implementation foundation.");
+}
+
 function assertNoMessageMigrations() {
   const migrationFiles = listFiles("migrations").map((path) => path.replace(/\\/g, "/"));
-  const forbiddenMigrations = migrationFiles.filter((path) => FORBIDDEN_MIGRATION_PATTERN.test(path));
+  const forbiddenMigrations = migrationFiles
+    .filter((path) => path !== APPROVED_MESSAGE_READ_MIGRATION)
+    .filter((path) => FORBIDDEN_MIGRATION_PATTERN.test(path));
   assert.deepEqual(forbiddenMigrations, [], "Message/read approval preflight must not add chat/message/support/provider migrations.");
 }
 
@@ -300,9 +311,12 @@ function assertNoChangedRuntimeFiles() {
       /\.(?:ts|tsx|js|jsx|mjs|cjs)$/.test(path),
   );
 
-  assert.deepEqual(changedRuntimeFiles, [], "Message/read approval preflight must not change runtime files.");
+  const allowedRuntimeFiles = new Set([APPROVED_MESSAGE_READ_ROUTE, APPROVED_MESSAGE_READ_HELPER]);
+  const unexpectedRuntimeFiles = changedRuntimeFiles.filter((path) => !allowedRuntimeFiles.has(path.replace(/\\/g, "/")));
 
-  for (const path of changedRuntimeFiles) {
+  assert.deepEqual(unexpectedRuntimeFiles, [], "Only the approved message/read route and helper may change runtime files.");
+
+  for (const path of unexpectedRuntimeFiles) {
     const source = read(path);
     for (const pattern of FORBIDDEN_RUNTIME_PATTERNS) {
       assert.doesNotMatch(source, pattern, `${path} must not contain runtime/chat/payment/tracking pattern ${pattern}.`);
@@ -311,8 +325,11 @@ function assertNoChangedRuntimeFiles() {
 }
 
 function assertNoProtectedProductionFilesChanged() {
-  const protectedChanges = listChangedFiles().filter((path) => FORBIDDEN_PROTECTED_CHANGED_PATH.test(path));
-  assert.deepEqual(protectedChanges, [], "Message/read approval preflight must not change production config, migrations, workflows, package-lock, or public assets.");
+  const protectedChanges = listChangedFiles()
+    .map((path) => path.replace(/\\/g, "/"))
+    .filter((path) => path !== APPROVED_MESSAGE_READ_MIGRATION)
+    .filter((path) => FORBIDDEN_PROTECTED_CHANGED_PATH.test(path));
+  assert.deepEqual(protectedChanges, [], "Message/read implementation must not change production config, workflows, package-lock, or public assets.");
 }
 
 function assertNoMutationCommandsInDocs() {

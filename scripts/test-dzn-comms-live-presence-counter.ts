@@ -368,7 +368,6 @@ function assertNoForbiddenRuntime() {
     "functions/api/support-chat",
     "functions/api/dzn-assist",
     "functions/api/dzn-comms/messages",
-    "functions/api/dzn-comms/channels",
     "functions/api/dzn-comms/moderation",
     "functions/api/dzn-comms/support",
     "functions/api/community/chat",

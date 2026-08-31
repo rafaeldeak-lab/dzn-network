@@ -215,6 +215,14 @@ This PR does not deploy to `https://dayz-network.com/`.
 
 Only report message history as live after a later approved implementation PR is merged, deployed, and verified on the production URL.
 
+## Follow-On Implementation Slice
+
+The DZN Comms Message/Read Model Local/Test Foundation is documented in `docs/DZN_COMMS_MESSAGE_READ_MODEL_LOCAL_TEST_FOUNDATION.md` and `docs/DZN_COMMS_MESSAGE_READ_MODEL_LOCAL_TEST_FOUNDATION_HANDOFF.md`.
+
+This is the approved DZN Comms message/read model local/test implementation foundation.
+
+It adds the approved disabled-by-default local/test read-only route and schema while keeping `/community` on static fallback unless a later UI integration slice enables runtime fetching. It still avoids chat sending, reaction runtime, report routes, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, analytics/tracking, Store/payment changes, live checkout, Stripe/Cloudflare/production D1/Nitrado/Discord mutations, retained exports, deployment, and issue #49 changes.
+
 ## Next Recommended Slice
 
-Next should be DZN Comms message/read model local/test implementation foundation, only if deliberately approved: add the disabled-by-default local/test read-only message-history route and approved schema from `docs/DZN_COMMS_MESSAGE_READ_MODEL_APPROVAL_PREFLIGHT.md`, keep `/community` on static fallback unless flags are enabled, prove public-channel reads and private group membership checks, and still avoid chat sending, reaction runtime, report routes, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, analytics/tracking, Store/payment changes, live checkout, Stripe/Cloudflare/production D1/Nitrado/Discord mutations, retained exports, deployment, or issue #49 changes.
+Next should be DZN Comms message-history UI integration approval preflight: define whether `/community` may fetch the local/test read-only route behind `NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED`, how fallback/error states should render, and how reviewers prove the UI still cannot send messages, create reactions, report/moderate, call DZN Assist AI, use Durable Objects/WebSockets, track analytics, alter Store/payment/live checkout, mutate production services, change retained exports, or affect competitive systems.
