@@ -203,6 +203,8 @@ Paid order, payment event, fulfilment, entitlement, status-history, refund/dispu
 
 ## Next Recommended Slice
 
-Next should be the Store private Supporter Card reveal visual polish and manual QA slice only if deliberately approved: refine the private `/account/purchases` reveal panel styling/states and run rendered local QA for disabled, no purchases, revealable, unavailable, and cross-account-denied states. It should still add no card-art generation, public reveal, sharing controls, screenshot/export controls, notifications, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 writes, or issue #49 changes.
+The Store private Supporter Card reveal visual polish and manual QA slice is now delivered separately in `docs/DZN_STORE_SUPPORTER_CARD_REVEAL_VISUAL_QA.md`. It refines the private `/account/purchases` reveal panel styling/states, adds local seeded preview evidence, and keeps card-art generation, public reveal, sharing controls, screenshot/export controls, notifications, live checkout activation, earned-spin ledger, reward wheel runtime, Stripe mutation, Cloudflare config mutation, production D1 writes, and issue #49 blocked.
+
+Next should be the personal player page/nav access polish slice: add clearer logged-in access to `/player` and `/player/profile` through the header/account menu or another obvious player-facing route entry, without touching Store payment runtime or Supporter Card reveal safety.
 
 The personal player page/nav button remains a separate player UX slice.

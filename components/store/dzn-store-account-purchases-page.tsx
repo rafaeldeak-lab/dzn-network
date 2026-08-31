@@ -129,6 +129,7 @@ export function DznStoreAccountPurchasesPage() {
       data-supporter-card-reveal="private-local-test-guarded"
       data-public-supporter-card-reveal="blocked"
       data-supporter-card-reveal-endpoint-prefix={SUPPORTER_CARD_REVEAL_ENDPOINT_PREFIX}
+      data-dzn-store-supporter-card-visual-polish="manual-qa-local-seeded"
       data-store-runtime="read-only-account-ui"
       data-live-checkout="disabled"
       data-production-mutation="none"
@@ -417,20 +418,27 @@ function SupporterCardPanel({ cards }: { cards: DznStoreSupporterCardStatus[] })
       className="relative overflow-hidden rounded-lg border border-amber-300/30 bg-[#130b21]/82 p-5 shadow-[0_0_46px_rgba(168,85,247,0.14)] backdrop-blur"
       data-supporter-card-status-panel="private"
       data-supporter-card-reveal="private-local-test-guarded"
+      data-supporter-card-visual-polish="manual-qa-local-seeded"
       data-public-supporter-card-reveal="blocked"
       data-supporter-card-reveal-route={SUPPORTER_CARD_REVEAL_ROUTE}
     >
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-200/80 to-transparent" />
+      <div className="absolute -right-24 -top-24 h-56 w-56 rounded-full border border-amber-200/12 bg-amber-200/[0.04] blur-3xl" aria-hidden="true" />
       <div className="flex items-start gap-3">
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-amber-200/40 bg-amber-200/15 text-amber-100">
           <Crown className="h-5 w-5" aria-hidden="true" />
         </span>
         <div>
           <p className="text-xs font-black uppercase text-amber-100">Supporter Card status</p>
-          <h2 className="mt-2 text-xl font-black uppercase text-white">Private reveal panel</h2>
+          <h2 className="mt-2 text-xl font-black uppercase text-white">Private Supporter Card reveal</h2>
           <p className="mt-3 text-sm font-semibold leading-6 text-slate-200">
             Serial reveal uses a separate no-store route and only unlocks when local/test flags and current-account ledger ownership proof pass. Card art, public reveal, sharing, downloads, notifications, and live checkout stay blocked.
           </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <RevealBadge label="Current-account proof" tone="cyan" />
+            <RevealBadge label="Local/test only" tone="amber" />
+            <RevealBadge label="No share/export" tone="red" />
+          </div>
         </div>
       </div>
 
@@ -443,9 +451,7 @@ function SupporterCardPanel({ cards }: { cards: DznStoreSupporterCardStatus[] })
             onReveal={() => revealPrivateCard(card)}
           />
         )) : (
-          <p className="rounded-lg border border-white/10 bg-black/26 p-4 text-sm font-semibold leading-6 text-slate-300">
-            No private Supporter Card status is available for this account.
-          </p>
+          <SupporterCardEmptyState />
         )}
       </div>
     </section>
@@ -465,12 +471,24 @@ function SupporterCardStatusRow({
   const reveal = revealState.payload;
 
   return (
-    <article className="rounded-lg border border-white/10 bg-black/28 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-black uppercase text-cyan-100">{card.purchase_ref}</p>
-        <StatusPill status={card.status} compact />
+    <article className="relative overflow-hidden rounded-lg border border-white/10 bg-black/32 p-4 shadow-[0_18px_70px_rgba(0,0,0,0.22)]">
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-cyan-200/0 via-amber-200/55 to-violet-200/0" />
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_170px]">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-black uppercase text-cyan-100">{card.purchase_ref}</p>
+            <StatusPill status={card.status} compact />
+          </div>
+          <h3 className="mt-3 text-lg font-black uppercase leading-tight text-white">
+            DZN Founding Supporter
+          </h3>
+          <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">
+            Private card status is shown from the account read model. The actual serial stays hidden until the private reveal endpoint proves this signed-in account owns the card.
+          </p>
+        </div>
+        <SupporterCardPreviewFrame card={card} reveal={reveal?.card ?? null} />
       </div>
-      <dl className="mt-4 grid gap-3 text-sm">
+      <dl className="mt-5 grid gap-3 rounded-lg border border-white/10 bg-white/[0.035] p-4 text-sm">
         <InfoPair label="Theme" value={card.selected_theme_key ?? "Not selected"} />
         <InfoPair label="Visibility" value={card.visibility_state} />
         <InfoPair label="Supporter since" value={formatDateTime(card.supporter_since)} />
@@ -493,22 +511,24 @@ function SupporterCardStatusRow({
         {revealState.state === "loading" ? "Checking private card" : card.private_reveal_available ? "Reveal private card" : "Private reveal disabled"}
       </button>
       <div id={panelId} className="mt-4" aria-live="polite">
-        {revealState.state === "unavailable" || revealState.state === "error" ? (
-          <p className="rounded-lg border border-amber-300/20 bg-amber-300/[0.07] p-3 text-sm font-semibold leading-6 text-amber-50">
-            {revealState.message}
-          </p>
-        ) : null}
+        <RevealStateCallout state={revealState.state} message={revealState.message} />
         {reveal ? (
           <div
-            className="rounded-lg border border-amber-200/35 bg-gradient-to-br from-amber-300/14 via-purple-500/12 to-cyan-300/10 p-4"
+            className="relative overflow-hidden rounded-lg border border-amber-200/40 bg-[linear-gradient(135deg,rgba(251,191,36,0.18),rgba(124,58,237,0.16)_52%,rgba(34,211,238,0.12))] p-4 shadow-[0_0_44px_rgba(251,191,36,0.14)]"
             data-supporter-card-private-reveal="current-account-only"
             data-card-art-generation="blocked"
             data-public-reveal="blocked"
             data-sharing-controls="blocked"
             data-screenshot-export-controls="blocked"
           >
-            <p className="text-xs font-black uppercase text-amber-100">Private card reveal</p>
-            <p className="mt-2 text-2xl font-black uppercase tracking-normal text-white">{reveal.card.serial_number}</p>
+            <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(0deg,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:34px_34px] opacity-20" aria-hidden="true" />
+            <div className="relative">
+              <p className="text-xs font-black uppercase text-amber-100">Private serial reveal</p>
+              <p className="mt-2 break-words text-3xl font-black uppercase tracking-normal text-white [overflow-wrap:anywhere]">{reveal.card.serial_number}</p>
+              <p className="mt-2 text-xs font-semibold uppercase text-amber-100/80">
+                Shown only after current-account ownership proof. Not public. Not shareable. Not exportable.
+              </p>
+            </div>
             <dl className="mt-4 grid gap-3 text-sm">
               <InfoPair label="Name" value={reveal.card.display_name_snapshot} />
               <InfoPair label="Status" value={reveal.card.status} />
@@ -521,6 +541,122 @@ function SupporterCardStatusRow({
         ) : null}
       </div>
     </article>
+  );
+}
+
+function SupporterCardPreviewFrame({
+  card,
+  reveal,
+}: {
+  card: DznStoreSupporterCardStatus;
+  reveal: DznStoreSupporterCardPrivateRevealPayload["card"] | null;
+}) {
+  return (
+    <div
+      className="relative min-h-[150px] overflow-hidden rounded-lg border border-amber-200/30 bg-[radial-gradient(circle_at_30%_12%,rgba(251,191,36,0.28),transparent_34%),linear-gradient(135deg,rgba(6,13,24,0.96),rgba(42,18,65,0.88))] p-4"
+      data-supporter-card-preview-frame="private-status"
+      data-supporter-card-serial-state={reveal ? "revealed-current-account" : "masked-until-reveal"}
+    >
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(255,255,255,0.07)_1px,transparent_1px),linear-gradient(0deg,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:28px_28px] opacity-20" aria-hidden="true" />
+      <div className="relative flex h-full min-h-[118px] flex-col justify-between gap-5">
+        <div className="flex items-start justify-between gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-amber-200/45 bg-amber-200/14 text-amber-100">
+            <Crown className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <span className="rounded border border-cyan-200/28 bg-cyan-300/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-100">
+            Private
+          </span>
+        </div>
+        <div>
+          <p className="text-[10px] font-black uppercase text-amber-100">DZN Founding Supporter</p>
+          <p className="mt-1 break-words text-lg font-black uppercase text-white [overflow-wrap:anywhere]">
+            {reveal?.serial_number ?? "DZN-SUP-******"}
+          </p>
+          <p className="mt-1 break-words text-xs font-semibold uppercase text-slate-300 [overflow-wrap:anywhere]">
+            {reveal?.display_name_snapshot ?? (card.private_reveal_available ? "Serial hidden until reveal" : "Reveal currently blocked")}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SupporterCardEmptyState() {
+  return (
+    <div
+      className="rounded-lg border border-white/10 bg-black/30 p-5"
+      data-supporter-card-empty-state="no-current-account-card"
+    >
+      <div className="flex items-start gap-3">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-cyan-200/25 bg-cyan-200/10 text-cyan-100">
+          <Crown className="h-5 w-5" aria-hidden="true" />
+        </span>
+        <div>
+          <p className="text-xs font-black uppercase text-cyan-100">No private card yet</p>
+          <h3 className="mt-2 text-lg font-black uppercase text-white">No Supporter Card to reveal</h3>
+          <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">
+            When a local/test Store ledger has a fulfilled current-account DZN Founding Supporter Pack, this panel shows its private status first and only reveals the serial after ownership proof.
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-2">
+        <BoundaryRow>No public card page is added.</BoundaryRow>
+        <BoundaryRow>No card art, sharing, download, copy-link, screenshot, or export controls are added.</BoundaryRow>
+        <BoundaryRow>No live checkout, Store fulfilment change, earned spin, or reward wheel runtime is added.</BoundaryRow>
+      </div>
+    </div>
+  );
+}
+
+function RevealStateCallout({ state, message }: { state: RevealLoadState; message: string }) {
+  if (state === "idle") return null;
+
+  if (state === "loading") {
+    return (
+      <div className="mb-4 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.07] p-3 text-sm font-semibold leading-6 text-cyan-50">
+        <span className="inline-flex items-center gap-2">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          Checking current-account proof.
+        </span>
+      </div>
+    );
+  }
+
+  if (state === "revealed") {
+    return (
+      <div className="mb-4 rounded-lg border border-emerald-300/22 bg-emerald-300/[0.08] p-3 text-sm font-semibold leading-6 text-emerald-50">
+        <span className="inline-flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+          {message || "Private Supporter Card revealed for this account."}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="mb-4 rounded-lg border border-amber-300/22 bg-amber-300/[0.08] p-3 text-sm font-semibold leading-6 text-amber-50"
+      data-supporter-card-reveal-error-state={state}
+    >
+      <span className="inline-flex items-center gap-2">
+        <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+        {message || "Private Supporter Card reveal is unavailable."}
+      </span>
+    </div>
+  );
+}
+
+function RevealBadge({ label, tone }: { label: string; tone: "cyan" | "amber" | "red" }) {
+  const className = tone === "cyan"
+    ? "border-cyan-300/25 bg-cyan-300/10 text-cyan-100"
+    : tone === "amber"
+      ? "border-amber-300/25 bg-amber-300/10 text-amber-100"
+      : "border-red-300/25 bg-red-950/25 text-red-100";
+
+  return (
+    <span className={`inline-flex min-h-8 items-center rounded-lg border px-3 text-[11px] font-black uppercase ${className}`}>
+      {label}
+    </span>
   );
 }
 
