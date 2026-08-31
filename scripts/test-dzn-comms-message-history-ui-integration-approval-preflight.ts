@@ -16,6 +16,7 @@ const PRESENCE_COUNTER = "components/community/dzn-live-presence-counter.tsx";
 const MASTER_SPEC = "docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md";
 const PUBLIC_ACCESS_POLICY = "docs/PUBLIC_ACCESS_POLICY.md";
 const PACKAGE_JSON = "package.json";
+const BASE_REF = "origin/codex/dzn-comms-message-read-model-local-read-foundation-20260831";
 
 const DOC_SNIPPETS = [
   "DZN Comms Message-History UI Integration Approval Preflight",
@@ -371,12 +372,38 @@ function assertOrder(source: string, before: string, after: string, message: str
 }
 
 function listChangedFiles(): string[] {
-  const output = execSync("git status --short --untracked-files=all", { encoding: "utf8" });
-  return output
-    .split(/\r?\n/)
-    .map((line) => line.slice(3).trim())
-    .filter(Boolean)
-    .map((path) => path.split(" -> ").at(-1) ?? path);
+  const files = new Set<string>();
+
+  for (const command of [
+    `git diff --name-only ${BASE_REF}...HEAD`,
+    "git diff --name-only HEAD^...HEAD",
+    "git diff --name-only",
+    "git diff --cached --name-only",
+  ]) {
+    addChangedFileLines(files, execGit(command));
+  }
+
+  for (const line of execGit("git status --short --untracked-files=all").split(/\r?\n/)) {
+    const trimmed = line.slice(3).trim();
+    if (trimmed) files.add(trimmed.split(" -> ").at(-1) ?? trimmed);
+  }
+
+  return [...files].sort();
+}
+
+function addChangedFileLines(files: Set<string>, output: string) {
+  for (const line of output.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed) files.add(trimmed);
+  }
+}
+
+function execGit(command: string) {
+  try {
+    return execSync(command, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch {
+    return "";
+  }
 }
 
 function assertIncludes(source: string, snippet: string, message: string) {
