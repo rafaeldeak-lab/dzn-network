@@ -1,0 +1,281 @@
+{
+  "schema_version": "dzn-comms-message-history-rendered-qa/v1",
+  "generated_at": "2026-08-31T17:15:00.000Z",
+  "generated_by": "DZN Comms message-history rendered local/test QA",
+  "source_branch": "codex/dzn-comms-message-history-rendered-qa-20260831",
+  "base_branch": "origin/codex/dzn-comms-message-history-ui-integration-implementation-20260831",
+  "source_commit": "79e2265a25facaabd862d8ad5f9e64483519b531",
+  "route": "/community",
+  "production_services_required": false,
+  "screenshots_committed": true,
+  "feature_flags": {
+    "default_client_flag": "disabled",
+    "enabled_client_flag": "NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED=true",
+    "server_message_read_flags": "actual local Pages route with temporary local D1 state where needed"
+  },
+  "cases": [
+    {
+      "key": "static_fallback",
+      "route": "/community",
+      "scenario": "Client message-history UI flag absent. Static DZN Comms prototype remains visible and no message-history request is made.",
+      "client_flag": "disabled",
+      "server_route_mode": "not_called",
+      "data_dzn_comms_message_history_ui": "disabled-static-fallback",
+      "data_dzn_comms_history_source": "static-fallback",
+      "status_state": "static",
+      "status_reason": "client-flag-disabled",
+      "status_label": "Static preview active",
+      "active_channel_label": "# Global Chat",
+      "composer_disabled": true,
+      "send_button_disabled": true,
+      "reaction_runtime": "static-emoji-preview-only",
+      "route_requests": [],
+      "screenshots": [
+        {
+          "viewport": "desktop",
+          "width": 1425,
+          "height": 2136,
+          "screenshot_path": "docs/artifacts/dzn-comms-message-history-rendered-qa/screenshots/static-fallback-desktop.jpg",
+          "image_width": 1425,
+          "image_height": 2136,
+          "image_mime": "image/jpeg",
+          "non_blank_sample": true
+        },
+        {
+          "viewport": "mobile",
+          "width": 375,
+          "height": 4727,
+          "screenshot_path": "docs/artifacts/dzn-comms-message-history-rendered-qa/screenshots/static-fallback-mobile.jpg",
+          "image_width": 375,
+          "image_height": 4727,
+          "image_mime": "image/jpeg",
+          "non_blank_sample": true
+        }
+      ],
+      "visible_text_contains": [
+        "Static Prototype",
+        "Static preview active",
+        "Welcome everyone",
+        "Composer disabled",
+        "No AI call"
+      ],
+      "visible_text_absent": [
+        "private seed body",
+        "checkout session",
+        "raw user id"
+      ]
+    },
+    {
+      "key": "public_channel_read",
+      "route": "/community",
+      "scenario": "Client and server local/test flags enabled. The actual local Pages route returns one seeded public-safe message for Global Chat.",
+      "client_flag": "enabled",
+      "server_route_mode": "local_pages_seeded_public_success",
+      "data_dzn_comms_message_history_ui": "enabled-read-only",
+      "data_dzn_comms_history_source": "read-only-message-history",
+      "status_state": "live",
+      "status_reason": "live",
+      "status_label": "Saved history synced",
+      "active_channel_label": "# Global Chat",
+      "composer_disabled": true,
+      "send_button_disabled": true,
+      "reaction_runtime": "static-emoji-preview-only",
+      "route_requests": [
+        {
+          "method": "GET",
+          "path": "/api/dzn-comms/channels/global/messages?limit=25",
+          "observed_status": 200,
+          "credentials": "include",
+          "cache": "no-store"
+        }
+      ],
+      "screenshots": [
+        {
+          "viewport": "desktop",
+          "width": 1425,
+          "height": 2136,
+          "screenshot_path": "docs/artifacts/dzn-comms-message-history-rendered-qa/screenshots/public-channel-read-desktop.jpg",
+          "image_width": 1425,
+          "image_height": 2136,
+          "image_mime": "image/jpeg",
+          "non_blank_sample": true
+        },
+        {
+          "viewport": "mobile",
+          "width": 375,
+          "height": 3790,
+          "screenshot_path": "docs/artifacts/dzn-comms-message-history-rendered-qa/screenshots/public-channel-read-mobile.jpg",
+          "image_width": 375,
+          "image_height": 3790,
+          "image_mime": "image/jpeg",
+          "non_blank_sample": true
+        }
+      ],
+      "visible_text_contains": [
+        "Read-Only History",
+        "Saved history synced",
+        "Rendered QA public message",
+        "Read-only",
+        "Composer disabled"
+      ],
+      "visible_text_absent": [
+        "private seed body",
+        "checkout session",
+        "raw user id"
+      ]
+    },
+    {
+      "key": "unavailable_route_fallback",
+      "route": "/community",
+      "scenario": "Client flag enabled, but the local Pages route has no usable local message store. The UI keeps the static fallback.",
+      "client_flag": "enabled",
+      "server_route_mode": "local_pages_unavailable_no_db",
+      "data_dzn_comms_message_history_ui": "enabled-read-only",
+      "data_dzn_comms_history_source": "static-fallback",
+      "status_state": "fallback",
+      "status_reason": "unavailable",
+      "status_label": "Saved history unavailable",
+      "active_channel_label": "# Global Chat",
+      "composer_disabled": true,
+      "send_button_disabled": true,
+      "reaction_runtime": "static-emoji-preview-only",
+      "route_requests": [
+        {
+          "method": "GET",
+          "path": "/api/dzn-comms/channels/global/messages?limit=25",
+          "observed_status": 503,
+          "credentials": "include",
+          "cache": "no-store"
+        }
+      ],
+      "screenshots": [
+        {
+          "viewport": "desktop",
+          "width": 1425,
+          "height": 2136,
+          "screenshot_path": "docs/artifacts/dzn-comms-message-history-rendered-qa/screenshots/unavailable-route-fallback-desktop.jpg",
+          "image_width": 1425,
+          "image_height": 2136,
+          "image_mime": "image/jpeg",
+          "non_blank_sample": true
+        },
+        {
+          "viewport": "mobile",
+          "width": 375,
+          "height": 4771,
+          "screenshot_path": "docs/artifacts/dzn-comms-message-history-rendered-qa/screenshots/unavailable-route-fallback-mobile.jpg",
+          "image_width": 375,
+          "image_height": 4771,
+          "image_mime": "image/jpeg",
+          "non_blank_sample": true
+        }
+      ],
+      "visible_text_contains": [
+        "Read-Only History",
+        "Saved history unavailable",
+        "Welcome everyone",
+        "Composer disabled",
+        "No AI call"
+      ],
+      "visible_text_absent": [
+        "private seed body",
+        "checkout session",
+        "raw user id"
+      ]
+    },
+    {
+      "key": "private_group_denial",
+      "route": "/community",
+      "scenario": "Client and server local/test flags enabled. The actual local Pages route denies Pandora Squad because no trusted private membership row exists for the mock user.",
+      "client_flag": "enabled",
+      "server_route_mode": "local_pages_private_denial",
+      "data_dzn_comms_message_history_ui": "enabled-read-only",
+      "data_dzn_comms_history_source": "static-fallback",
+      "status_state": "fallback",
+      "status_reason": "private-denied",
+      "status_label": "Private group history unavailable",
+      "active_channel_label": "Pandora Squad",
+      "composer_disabled": true,
+      "send_button_disabled": true,
+      "reaction_runtime": "static-emoji-preview-only",
+      "route_requests": [
+        {
+          "method": "GET",
+          "path": "/api/dzn-comms/channels/pandora-squad/messages?limit=25",
+          "observed_status": 403,
+          "credentials": "include",
+          "cache": "no-store"
+        }
+      ],
+      "screenshots": [
+        {
+          "viewport": "desktop",
+          "width": 1425,
+          "height": 2074,
+          "screenshot_path": "docs/artifacts/dzn-comms-message-history-rendered-qa/screenshots/private-group-denial-desktop.jpg",
+          "image_width": 1425,
+          "image_height": 2074,
+          "image_mime": "image/jpeg",
+          "non_blank_sample": true
+        },
+        {
+          "viewport": "mobile",
+          "width": 375,
+          "height": 4887,
+          "screenshot_path": "docs/artifacts/dzn-comms-message-history-rendered-qa/screenshots/private-group-denial-mobile.jpg",
+          "image_width": 375,
+          "image_height": 4887,
+          "image_mime": "image/jpeg",
+          "non_blank_sample": true
+        }
+      ],
+      "visible_text_contains": [
+        "Read-Only History",
+        "Private group history unavailable",
+        "Pandora Squad",
+        "Composer disabled",
+        "No AI call"
+      ],
+      "visible_text_absent": [
+        "private seed body",
+        "checkout session",
+        "raw user id"
+      ]
+    }
+  ],
+  "safety_contract": {
+    "chat_sending": false,
+    "reaction_runtime": false,
+    "report_routes": false,
+    "moderation_mutations": false,
+    "dzn_assist_ai_runtime": false,
+    "durable_objects": false,
+    "websockets": false,
+    "analytics_tracking": false,
+    "store_payment_changes": false,
+    "live_checkout": false,
+    "stripe_mutations": false,
+    "cloudflare_config_mutations": false,
+    "production_d1_writes": false,
+    "nitrado_mutations": false,
+    "discord_mutations": false,
+    "retained_exports": false,
+    "deployment": false,
+    "issue_49_changes": false,
+    "billing_effect": false,
+    "owner_entitlement_effect": false,
+    "server_ownership_effect": false,
+    "ranking_effect": false,
+    "discovery_effect": false,
+    "review_effect": false,
+    "badge_effect": false,
+    "season_effect": false,
+    "event_effect": false,
+    "server_wars_effect": false,
+    "ctf_effect": false,
+    "xp_award_effect": false,
+    "calling_card_award_effect": false,
+    "public_profile_visibility_effect": false,
+    "competitive_eligibility_effect": false
+  }
+}

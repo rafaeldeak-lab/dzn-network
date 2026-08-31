@@ -146,7 +146,7 @@ const MASTER_SPEC_SNIPPETS = [
   "Reaction runtime cannot proceed unless a separately approved DZN Comms message/read model exists.",
   "34. DZN Comms reaction runtime implementation approval preflight",
   "35. DZN Comms message/read model approval preflight",
-  "36. Issue #49 live checkout activation",
+  "Issue #49 live checkout activation",
 ];
 
 const PUBLIC_POLICY_SNIPPETS = [

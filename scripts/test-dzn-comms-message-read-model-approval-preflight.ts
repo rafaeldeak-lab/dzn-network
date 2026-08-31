@@ -111,7 +111,7 @@ const MASTER_SPEC_SNIPPETS = [
   "Hidden, deleted, quarantined, expired, staff-only, and unavailable messages do not expose bodies to normal readers.",
   "Message reads cannot affect billing, owner entitlement, server ownership, rankings, discovery score, reviews, review score, badges, seasons, events, CTF scoring, Server Wars scoring, XP awards, calling-card awards, public profile visibility, retained exports, analytics/tracking, AI, live checkout, production systems, or competitive eligibility.",
   "35. DZN Comms message/read model approval preflight",
-  "36. Issue #49 live checkout activation",
+  "Issue #49 live checkout activation",
 ];
 
 const PUBLIC_POLICY_SNIPPETS = [

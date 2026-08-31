@@ -156,3 +156,9 @@ Only report this change as live after a later approved merge, deployment, and pr
 ## Next Recommended Slice
 
 Next should be DZN Comms message-history rendered local/test QA: run a local flagged preview with controlled seeded public and private-group responses, capture the `/community` static-disabled, public-history-success, private-denied, login-required, unavailable, and support-static states, and prove the rendered UI still cannot send messages, add reactions, report/moderate, call DZN Assist AI, use Durable Objects/WebSockets, track analytics, alter Store/payment/live checkout, mutate production services, change retained exports, or affect competitive systems.
+
+## Rendered QA Follow-Up
+
+The DZN Comms Message-History Rendered Local/Test QA slice is now documented in `docs/DZN_COMMS_MESSAGE_HISTORY_RENDERED_QA.md` and `docs/DZN_COMMS_MESSAGE_HISTORY_RENDERED_QA_HANDOFF.md`.
+
+That follow-up captures local/test `/community` desktop and mobile proof for static fallback, public-channel read, unavailable route fallback, and private-group denial while keeping chat sending, runtime reactions, report routes, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, analytics/tracking, Store/payment/live checkout, production mutations, retained exports, deployment, and competitive-system effects blocked.
