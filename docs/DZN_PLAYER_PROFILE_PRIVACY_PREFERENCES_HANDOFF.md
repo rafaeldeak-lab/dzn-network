@@ -64,10 +64,12 @@ The test proves anonymous denial, private no-store headers, same-origin PATCH en
 
 ## Next Slice
 
-The next clean slice should be the public profile publishing/viewer foundation:
+Superseded by the later public profile publishing/viewer foundation slice:
 
 - Generate or use a trusted public handle only after explicit approval.
 - Add a public-safe profile route/API that reads these saved preferences.
 - Show only approved sections.
 - Hide private identifiers and raw award evidence.
 - Prove again that visibility choices are presentation-only and cannot affect billing, rankings, discovery, reviews, badges, seasons, events, Server Wars, XP awards, calling-card awards, CTF, or competitive eligibility.
+
+After that viewer slice, `/api/player/profile/privacy` may return the current user's active `public_profile_href` only when `public_profile_enabled` is true and a generated current-user handle exists. Profile attribution across other DZN surfaces remains a separate approval slice.

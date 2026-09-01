@@ -1,0 +1,45 @@
+{
+  "generated_at": "2026-09-01T16:14:37.150Z",
+  "results": [
+    {
+      "scenario": "published",
+      "viewport": "desktop",
+      "screenshot": "screenshots/published-desktop.png",
+      "assertions": 16,
+      "consoleMessages": [],
+      "failedRequests": []
+    },
+    {
+      "scenario": "published",
+      "viewport": "mobile",
+      "screenshot": "screenshots/published-mobile.png",
+      "assertions": 16,
+      "consoleMessages": [],
+      "failedRequests": []
+    },
+    {
+      "scenario": "hidden",
+      "viewport": "desktop",
+      "screenshot": "screenshots/hidden-desktop.png",
+      "assertions": 9,
+      "consoleMessages": [],
+      "failedRequests": []
+    },
+    {
+      "scenario": "unavailable",
+      "viewport": "desktop",
+      "screenshot": "screenshots/unavailable-desktop.png",
+      "assertions": 7,
+      "consoleMessages": [],
+      "failedRequests": []
+    },
+    {
+      "scenario": "invalidHandle",
+      "viewport": "desktop",
+      "screenshot": "screenshots/invalidHandle-desktop.png",
+      "assertions": 8,
+      "consoleMessages": [],
+      "failedRequests": []
+    }
+  ]
+}
