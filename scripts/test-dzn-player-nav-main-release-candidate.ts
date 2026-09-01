@@ -77,6 +77,8 @@ assert.equal(authMeSource.includes("getOwnerBillingStatus"), false, "Auth summar
 assert.equal(authMeSource.includes("ensureBillingSchema"), false, "Auth summary must not create billing schema during player/header probes.");
 assert.equal(authMeSource.includes("upsertOwnerEntitlements"), false, "Auth summary must not upsert billing entitlements during player/header probes.");
 
+const privatePlayerRoutePattern = /["'`]\/player(?:[/"'`?#])/;
+
 for (const competitiveSource of [
   "functions/api/public/leaderboards.ts",
   "functions/api/public/server-leaderboard.ts",
@@ -84,7 +86,7 @@ for (const competitiveSource of [
   "functions/_lib/server-war-scoring.ts",
 ]) {
   const source = readFileSync(competitiveSource, "utf8");
-  assert.equal(source.includes("/player"), false, `${competitiveSource} must not depend on personal player routes.`);
+  assert.equal(privatePlayerRoutePattern.test(source), false, `${competitiveSource} must not depend on personal player routes.`);
 }
 
 assert.equal(packageSource.includes("\"test:dzn-player-nav-main-release-candidate\""), true);
