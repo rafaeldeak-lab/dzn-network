@@ -17,13 +17,6 @@ DZN has two connected but separate journeys:
 
 The homepage must remain a clear DZN intro/sales page. It may show a short pricing teaser and action buttons, but it must not carry the full billing surface.
 
-Homepage visual direction:
-
-- Use DZN-specific no-text HUD/background assets where they strengthen the first-screen and public feature sections.
-- Background motion may use slow pan/zoom, haze, lightning, ember, and faint levitating/rotating icon treatments.
-- Motion must respect reduced-motion settings and must not make navigation, cards, buttons, or page text overlap.
-- Homepage visual polish is presentation-only and must not add payment runtime, Store runtime, Comms runtime, analytics/tracking, production mutations, or competitive-system effects.
-
 The dedicated `/pricing` page owns the full pricing/payment explanation:
 
 - Starter: 2-day free trial, then `£2/month`.
