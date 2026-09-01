@@ -63,7 +63,15 @@ for (const forbidden of [
   assert.equal(playerHomeSource.includes(forbidden), false, `Player nav slice must not introduce ${forbidden}.`);
 }
 
-assert.equal(/fetch\([^)]*,\s*\{[\s\S]*method:\s*["'](?:POST|PUT|PATCH|DELETE)["']/i.test(playerHomeSource), false, "Player page must stay read-only.");
+const approvedRefreshStart = playerHomeSource.indexOf("async function refreshCommunityMatches");
+const approvedRefreshEnd = playerHomeSource.indexOf("const profileHandlePreview", approvedRefreshStart);
+assert.notEqual(approvedRefreshStart, -1, "Approved player Discord membership refresh action must remain findable.");
+assert.notEqual(approvedRefreshEnd, -1, "Approved player Discord membership refresh action must have a stable end marker.");
+const approvedRefreshSource = playerHomeSource.slice(approvedRefreshStart, approvedRefreshEnd);
+const playerHomeWithoutApprovedRefresh = `${playerHomeSource.slice(0, approvedRefreshStart)}${playerHomeSource.slice(approvedRefreshEnd)}`;
+assert.equal(approvedRefreshSource.includes("fetch(\"/api/player/community-memberships/refresh\""), true, "Player page may only send the approved private membership refresh.");
+assert.equal(approvedRefreshSource.includes("method: \"POST\""), true, "Approved private membership refresh must use POST.");
+assert.equal(/fetch\([^)]*,\s*\{[\s\S]*method:\s*["'](?:POST|PUT|PATCH|DELETE)["']/i.test(playerHomeWithoutApprovedRefresh), false, "Player page must not send unapproved mutations.");
 assert.equal(/\b(?:INSERT|UPDATE|DELETE FROM|DROP TABLE|ALTER TABLE)\b/i.test(playerHomeSource), false, "Player UI must not contain mutation SQL.");
 assert.equal(authMeSource.includes("getOwnerBillingStatus"), false, "Auth summary must remain read-only.");
 assert.equal(authMeSource.includes("ensureBillingSchema"), false, "Auth summary must not create billing schema during player/header probes.");

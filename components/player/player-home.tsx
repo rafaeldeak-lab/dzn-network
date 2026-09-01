@@ -10,6 +10,7 @@ import {
   Loader2,
   LockKeyhole,
   Radio,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
   Trophy,
@@ -42,6 +43,18 @@ type PlayerHubState =
   | { status: "unauthorized"; data: null; message: string }
   | { status: "error"; data: null; message: string };
 
+type PlayerHubCommunitySource = "player_discord_community_memberships" | "cached_discord_manageable_guilds" | "unavailable";
+
+type CommunityRefreshState =
+  | { status: "idle"; message: null; refreshedAt: null; requiresRelogin: false }
+  | { status: "refreshing"; message: string; refreshedAt: null; requiresRelogin: false }
+  | { status: "success"; message: string; refreshedAt: string | null; requiresRelogin: false }
+  | { status: "error"; message: string; refreshedAt: null; requiresRelogin: boolean };
+
+type PlayerHubRequestResult =
+  | { status: "ready"; data: PlayerHubPayload }
+  | { status: "unauthorized" | "error"; message: string };
+
 type PlayerHubPayload = {
   ok: true;
   generated_at: string;
@@ -54,6 +67,16 @@ type PlayerHubPayload = {
   saved_servers: PlayerHubSavedServer[];
   saved_server_ids: string[];
   matched_communities: PlayerHubCommunity[];
+  discord_membership_status: {
+    source: PlayerHubCommunitySource;
+    last_checked_at: string | null;
+    refresh_href: string;
+    refresh_method: "POST";
+    requires_relogin: boolean;
+    private: true;
+    presentation_only: true;
+    message: string;
+  };
   suggested_events: PlayerHubEvent[];
   profile_entries: PlayerHubProfileEntry[];
   owner_setup: {
@@ -65,7 +88,7 @@ type PlayerHubPayload = {
   };
   sources: {
     saved_servers: "player_saved_servers" | "unavailable";
-    matched_communities: "player_discord_community_memberships" | "cached_discord_manageable_guilds" | "unavailable";
+    matched_communities: PlayerHubCommunitySource;
     suggested_events: "public_competitive_events" | "unavailable";
   };
   fairness_boundary: string[];
@@ -182,6 +205,26 @@ const profileStatusCards = [
 
 const ownerSetupFallbackHref = "/pricing?intent=owner_setup&returnTo=%2Fsetup";
 
+async function requestPlayerHub(): Promise<PlayerHubRequestResult> {
+  const response = await fetch("/api/player/hub", { cache: "no-store", credentials: "include" });
+  const payload = (await response.json().catch(() => null)) as Partial<PlayerHubPayload> & { message?: string } | null;
+
+  if (response.status === 401) {
+    return {
+      status: "unauthorized",
+      message: payload?.message ?? "Log in with Discord to open your Player Hub.",
+    };
+  }
+  if (!response.ok || !payload?.ok) {
+    return {
+      status: "error",
+      message: payload?.message ?? "Player Hub data is not available right now.",
+    };
+  }
+
+  return { status: "ready", data: payload as PlayerHubPayload };
+}
+
 export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
   const returnTo = mode === "profile" ? "/player/profile" : "/player";
   const [authState, setAuthState] = useState<PlayerAuthState>({
@@ -194,6 +237,12 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
     status: "idle",
     data: null,
     message: null,
+  });
+  const [communityRefresh, setCommunityRefresh] = useState<CommunityRefreshState>({
+    status: "idle",
+    message: null,
+    refreshedAt: null,
+    requiresRelogin: false,
   });
   const hubUserId = authState.status === "logged_in" ? authState.user.id : null;
 
@@ -234,28 +283,14 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
     if (!hubUserId) return;
     let activeRequest = true;
 
-    fetch("/api/player/hub", { cache: "no-store", credentials: "include" })
-      .then(async (response) => {
+    requestPlayerHub()
+      .then((result) => {
         if (!activeRequest) return;
-        const payload = (await response.json().catch(() => null)) as Partial<PlayerHubPayload> & { message?: string } | null;
-        if (response.status === 401) {
-          setHubState({
-            status: "unauthorized",
-            data: null,
-            message: payload?.message ?? "Log in with Discord to open your Player Hub.",
-          });
+        if (result.status === "ready") {
+          setHubState({ status: "ready", data: result.data, message: null });
           return;
         }
-        if (!response.ok || !payload?.ok) {
-          setHubState({
-            status: "error",
-            data: null,
-            message: payload?.message ?? "Player Hub data is not available right now.",
-          });
-          return;
-        }
-
-        setHubState({ status: "ready", data: payload as PlayerHubPayload, message: null });
+        setHubState({ status: result.status, data: null, message: result.message });
       })
       .catch(() => {
         if (activeRequest) {
@@ -267,6 +302,63 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
       activeRequest = false;
     };
   }, [hubUserId]);
+
+  async function refreshCommunityMatches() {
+    if (communityRefresh.status === "refreshing") return;
+
+    setCommunityRefresh({
+      status: "refreshing",
+      message: "Checking Discord memberships for private Player Hub matches.",
+      refreshedAt: null,
+      requiresRelogin: false,
+    });
+
+    try {
+      const response = await fetch("/api/player/community-memberships/refresh", {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: { accept: "application/json" },
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        message?: string;
+        refreshed_at?: string | null;
+        requires_relogin?: boolean;
+      } | null;
+
+      if (!response.ok || !payload?.ok) {
+        setCommunityRefresh({
+          status: "error",
+          message: payload?.message ?? "Discord community matching could not be refreshed right now.",
+          refreshedAt: null,
+          requiresRelogin: Boolean(payload?.requires_relogin || response.status === 401),
+        });
+        return;
+      }
+
+      const nextHub = await requestPlayerHub();
+      if (nextHub.status === "ready") {
+        setHubState({ status: "ready", data: nextHub.data, message: null });
+      } else {
+        setHubState({ status: nextHub.status, data: null, message: nextHub.message });
+      }
+
+      setCommunityRefresh({
+        status: "success",
+        message: payload.message ?? "Discord community matching was refreshed for your private Player Hub.",
+        refreshedAt: payload.refreshed_at ?? new Date().toISOString(),
+        requiresRelogin: false,
+      });
+    } catch {
+      setCommunityRefresh({
+        status: "error",
+        message: "Discord community matching could not be refreshed right now.",
+        refreshedAt: null,
+        requiresRelogin: false,
+      });
+    }
+  }
 
   const profileHandlePreview = useMemo(() => {
     if (authState.status !== "logged_in") return "Player";
@@ -411,7 +503,7 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
         </div>
 
         {authState.status === "logged_in" ? (
-          <PlayerHubDataPanels state={hubState} />
+          <PlayerHubDataPanels state={hubState} refreshState={communityRefresh} onRefreshCommunityMatches={refreshCommunityMatches} />
         ) : (
           <LoggedOutHubPreview />
         )}
@@ -447,7 +539,15 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
   );
 }
 
-function PlayerHubDataPanels({ state }: { state: PlayerHubState }) {
+function PlayerHubDataPanels({
+  state,
+  refreshState,
+  onRefreshCommunityMatches,
+}: {
+  state: PlayerHubState;
+  refreshState: CommunityRefreshState;
+  onRefreshCommunityMatches: () => void;
+}) {
   if (state.status === "loading" || state.status === "idle") {
     return (
       <div className="grid gap-4 xl:grid-cols-3">
@@ -477,7 +577,13 @@ function PlayerHubDataPanels({ state }: { state: PlayerHubState }) {
   return (
     <div className="grid gap-4 xl:grid-cols-3">
       <FollowedServersPanel servers={state.data.saved_servers} source={state.data.sources.saved_servers} />
-      <MatchedCommunitiesPanel communities={state.data.matched_communities} source={state.data.sources.matched_communities} />
+      <MatchedCommunitiesPanel
+        communities={state.data.matched_communities}
+        source={state.data.sources.matched_communities}
+        membershipStatus={state.data.discord_membership_status}
+        refreshState={refreshState}
+        onRefreshCommunityMatches={onRefreshCommunityMatches}
+      />
       <SuggestedEventsPanel events={state.data.suggested_events} source={state.data.sources.suggested_events} />
     </div>
   );
@@ -529,7 +635,19 @@ function FollowedServersPanel({ servers, source }: { servers: PlayerHubSavedServ
   );
 }
 
-function MatchedCommunitiesPanel({ communities, source }: { communities: PlayerHubCommunity[]; source: PlayerHubPayload["sources"]["matched_communities"] }) {
+function MatchedCommunitiesPanel({
+  communities,
+  source,
+  membershipStatus,
+  refreshState,
+  onRefreshCommunityMatches,
+}: {
+  communities: PlayerHubCommunity[];
+  source: PlayerHubPayload["sources"]["matched_communities"];
+  membershipStatus: PlayerHubPayload["discord_membership_status"];
+  refreshState: CommunityRefreshState;
+  onRefreshCommunityMatches: () => void;
+}) {
   const summary = summarizeCommunityMatches(communities);
 
   return (
@@ -539,6 +657,11 @@ function MatchedCommunitiesPanel({ communities, source }: { communities: PlayerH
         body="Private Discord membership matches connected to public DZN server profiles. Presentation only."
         icon={<Users aria-hidden="true" className="h-5 w-5" />}
         tone="violet"
+      />
+      <CommunityRefreshControl
+        membershipStatus={membershipStatus}
+        refreshState={refreshState}
+        onRefreshCommunityMatches={onRefreshCommunityMatches}
       />
       {source === "unavailable" ? <InlineNotice text="Discord community matching is not available in this environment yet." /> : null}
       {communities.length ? (
@@ -756,6 +879,56 @@ function InlineNotice({ text }: { text: string }) {
   );
 }
 
+function CommunityRefreshControl({
+  membershipStatus,
+  refreshState,
+  onRefreshCommunityMatches,
+}: {
+  membershipStatus: PlayerHubPayload["discord_membership_status"];
+  refreshState: CommunityRefreshState;
+  onRefreshCommunityMatches: () => void;
+}) {
+  const isRefreshing = refreshState.status === "refreshing";
+  const checkedAt = refreshState.refreshedAt ?? membershipStatus.last_checked_at;
+  const statusMessage = refreshState.status === "idle" ? membershipStatus.message : refreshState.message;
+
+  return (
+    <div className="mt-4 rounded-md border border-violet-300/20 bg-violet-300/8 p-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-black uppercase text-violet-100">Discord Membership Status</p>
+          <p className="mt-1 text-sm font-semibold leading-6 text-slate-200">{formatCommunityCheckedAt(checkedAt)}</p>
+          <p className="mt-1 text-xs font-bold leading-5 text-slate-400">{statusMessage}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onRefreshCommunityMatches}
+          disabled={isRefreshing}
+          className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-md border border-violet-200/35 bg-violet-300/12 px-3 text-xs font-black uppercase text-violet-50 transition hover:border-violet-100/60 hover:bg-violet-300/18 disabled:cursor-not-allowed disabled:opacity-60"
+          aria-label="Refresh private Discord community matches"
+        >
+          <RefreshCw aria-hidden="true" className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+          {isRefreshing ? "Checking" : "Refresh Matches"}
+        </button>
+      </div>
+      {refreshState.status === "error" ? (
+        <div className="mt-3 rounded-md border border-amber-300/25 bg-amber-300/10 p-3 text-sm font-semibold leading-6 text-amber-50">
+          {refreshState.requiresRelogin ? (
+            <>
+              <span>Discord permissions need refreshing before DZN can refresh private matches.</span>
+              <Link href="/login?returnTo=%2Fplayer" className="ml-2 inline-flex font-black uppercase text-white underline decoration-amber-200/50 underline-offset-4">
+                Reconnect Discord
+              </Link>
+            </>
+          ) : (
+            <span>{refreshState.message}</span>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function EmptyList({ title, body, href, action }: { title: string; body: string; href: string; action: string }) {
   return (
     <div className="mt-5 rounded-md border border-white/10 bg-white/6 p-4">
@@ -901,6 +1074,17 @@ function formatPlayers(current: number | null, max: number | null) {
   if (current !== null && max !== null) return `${current}/${max} players`;
   if (current !== null) return `${current} online`;
   return `${max} slots`;
+}
+
+function formatCommunityCheckedAt(value: string | null) {
+  if (!value) return "No private Discord membership check recorded yet.";
+  const normalizedValue = value.includes("T") ? value : `${value.replace(" ", "T")}Z`;
+  const date = new Date(normalizedValue);
+  if (Number.isNaN(date.getTime())) return "Last checked recently.";
+  return `Last checked ${new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date)}`;
 }
 
 function formatEventTime(value: string | null) {
