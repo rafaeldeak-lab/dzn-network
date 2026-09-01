@@ -102,7 +102,7 @@ const MAX_COMMUNITY_MATCH_CANDIDATES = 200;
 const MAX_COMMUNITY_SERVER_PREVIEWS = 3;
 const MAX_SUGGESTED_EVENTS = 5;
 const MAX_SUGGESTED_EVENT_CANDIDATES = 24;
-const MAX_SUGGESTED_EVENT_SERVER_ROWS = 400;
+const MAX_SUGGESTED_EVENT_RELEVANCE_SERVER_IDS = 128;
 
 const ownerSetupHref = "/pricing?intent=owner_setup&returnTo=%2Fsetup";
 const communityMembershipRefreshHref = "/api/player/community-memberships/refresh";
@@ -527,7 +527,11 @@ async function readSuggestedEvents(env: Env, context: PlayerHubSuggestedEventCon
       .all<PlayerHubEventRow>();
 
     const eventRows = events.results ?? [];
-    const eventServerRows = await readSuggestedEventServerRows(db, eventRows.map((event) => event.id)).catch(() => []);
+    const eventServerRows = await readSuggestedEventServerRows(
+      db,
+      eventRows.map((event) => event.id),
+      suggestedEventRelevantServerIds(context),
+    ).catch(() => []);
     const serverRowsByEvent = groupSuggestedEventServerRows(eventServerRows);
     const suggestedEvents = orderSuggestedEventsByPrivateRelevance(eventRows, serverRowsByEvent, context)
       .slice(0, MAX_SUGGESTED_EVENTS);
@@ -558,18 +562,27 @@ async function readSuggestedEvents(env: Env, context: PlayerHubSuggestedEventCon
   }
 }
 
-async function readSuggestedEventServerRows(db: D1Database, eventIds: string[]) {
+function suggestedEventRelevantServerIds(context: PlayerHubSuggestedEventContext) {
+  return [...new Set([
+    ...context.savedServerIds,
+    ...context.matchedCommunityServerIds,
+  ].filter(Boolean))].slice(0, MAX_SUGGESTED_EVENT_RELEVANCE_SERVER_IDS);
+}
+
+async function readSuggestedEventServerRows(db: D1Database, eventIds: string[], relevantServerIds: string[]) {
   const ids = [...new Set(eventIds.filter(Boolean))].slice(0, MAX_SUGGESTED_EVENT_CANDIDATES);
-  if (!ids.length) return [];
+  const serverIds = [...new Set(relevantServerIds.filter(Boolean))].slice(0, MAX_SUGGESTED_EVENT_RELEVANCE_SERVER_IDS);
+  if (!ids.length || !serverIds.length) return [];
 
   const result = await db
     .prepare(
-      `SELECT event_id, server_id
+      `SELECT DISTINCT event_id, server_id
        FROM competitive_event_servers
        WHERE event_id IN (${ids.map(() => "?").join(", ")})
-       LIMIT ?`,
+         AND server_id IN (${serverIds.map(() => "?").join(", ")})
+       ORDER BY event_id ASC, server_id ASC`,
     )
-    .bind(...ids, MAX_SUGGESTED_EVENT_SERVER_ROWS)
+    .bind(...ids, ...serverIds)
     .all<PlayerHubEventServerRow>();
 
   return result.results ?? [];
