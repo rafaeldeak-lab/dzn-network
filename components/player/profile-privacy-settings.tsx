@@ -4,6 +4,8 @@ import { ExternalLink, Eye, EyeOff, Loader2, ShieldCheck, ToggleLeft, ToggleRigh
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { PublicProfileOwnerPreviewPanel } from "@/components/player/public-profile-owner-preview-panel";
+
 type PrivacyPreferenceKey =
   | "public_profile_enabled"
   | "show_display_name"
@@ -163,6 +165,13 @@ export function PlayerProfilePrivacySettings() {
               />
             ))}
           </div>
+
+          <PublicProfileOwnerPreviewPanel
+            publicProfileEnabled={state.data.settings.public_profile_enabled}
+            publicProfileHref={state.data.public_profile_href}
+            publicProfileHandle={state.data.public_profile_handle}
+            sections={state.data.sections}
+          />
 
           <div className="rounded-md border border-violet-300/20 bg-violet-300/8 p-4">
             <p className="text-xs font-black uppercase text-violet-100">Saved Preference Boundary</p>

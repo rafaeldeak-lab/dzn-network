@@ -1,0 +1,55 @@
+{
+  "generated_at": "2026-09-01T18:39:48.160Z",
+  "results": [
+    {
+      "scenario": "published",
+      "viewport": "desktop",
+      "screenshot": "screenshots/published-desktop.png",
+      "assertions": 29,
+      "interactionProof": {
+        "copyFeedback": true,
+        "handleCopyFeedback": true,
+        "shareControlEnabled": true,
+        "browserStorageWrites": 0
+      },
+      "consoleMessages": [],
+      "failedRequests": []
+    },
+    {
+      "scenario": "published",
+      "viewport": "mobile",
+      "screenshot": "screenshots/published-mobile.png",
+      "assertions": 26,
+      "interactionProof": null,
+      "consoleMessages": [],
+      "failedRequests": []
+    },
+    {
+      "scenario": "disabled",
+      "viewport": "desktop",
+      "screenshot": "screenshots/disabled-desktop.png",
+      "assertions": 13,
+      "interactionProof": null,
+      "consoleMessages": [],
+      "failedRequests": []
+    },
+    {
+      "scenario": "hiddenResponse",
+      "viewport": "desktop",
+      "screenshot": "screenshots/hiddenResponse-desktop.png",
+      "assertions": 12,
+      "interactionProof": null,
+      "consoleMessages": [],
+      "failedRequests": []
+    },
+    {
+      "scenario": "unavailable",
+      "viewport": "desktop",
+      "screenshot": "screenshots/unavailable-desktop.png",
+      "assertions": 12,
+      "interactionProof": null,
+      "consoleMessages": [],
+      "failedRequests": []
+    }
+  ]
+}
