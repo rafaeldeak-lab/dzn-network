@@ -61,6 +61,7 @@ type PlayerHubEventRow = {
 };
 
 const MAX_MATCHED_COMMUNITIES = 8;
+const MAX_COMMUNITY_MATCH_CANDIDATES = 200;
 const MAX_COMMUNITY_SERVER_PREVIEWS = 3;
 const MAX_SUGGESTED_EVENTS = 5;
 
@@ -248,7 +249,8 @@ async function readMatchedCommunities(env: Env, userId: string) {
           matched_servers: matchedServers,
         };
       })
-      .filter((community) => community.public_server_count > 0);
+      .filter((community) => community.public_server_count > 0)
+      .slice(0, MAX_MATCHED_COMMUNITIES);
 
     return { communities, source };
   } catch {
@@ -276,7 +278,7 @@ async function readPlayerCommunityMembershipRows(db: D1Database, userId: string)
        END, lower(guild_name) ASC
        LIMIT ?`,
     )
-    .bind(userId, MAX_MATCHED_COMMUNITIES)
+    .bind(userId, MAX_COMMUNITY_MATCH_CANDIDATES)
     .all<PlayerHubCommunityMembershipRow>();
 
   return (result.results ?? []).filter((row) => Boolean(row.guild_id && row.name));
@@ -291,7 +293,7 @@ async function readManagedDiscordGuildRows(db: D1Database, userId: string) {
        ORDER BY name ASC
        LIMIT ?`,
     )
-    .bind(userId, MAX_MATCHED_COMMUNITIES)
+    .bind(userId, MAX_COMMUNITY_MATCH_CANDIDATES)
     .all<PlayerHubCommunityRow>();
 
   return (guildRows.results ?? []).filter((guild) => Boolean(guild.id && guild.guild_id));
@@ -340,7 +342,7 @@ function mergeCommunityMatches(memberships: PlayerHubCommunityMembershipRow[], m
     });
   }
 
-  return [...matches.values()].slice(0, MAX_MATCHED_COMMUNITIES);
+  return [...matches.values()];
 }
 
 function normalizeCommunityRelationship(value: PlayerHubCommunityMembershipRow["relationship"]) {

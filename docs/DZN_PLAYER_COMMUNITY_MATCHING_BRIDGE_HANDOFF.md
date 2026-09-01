@@ -84,6 +84,12 @@ Completed locally in this isolated worktree on 2026-08-31:
 
 `npm ci` reported dependency audit warnings in the existing dependency tree; this slice does not change package versions.
 
+Release-review update on 2026-09-01:
+
+- The Player Hub read model now reads a wider bounded candidate set of private Discord memberships before filtering to communities with public DZN server matches.
+- Visible matched communities are capped only after unmatched private Discord guilds are removed.
+- `npm run test:player-community-matching` includes coverage proving a valid match still appears even when earlier private Discord guilds do not match public DZN server profiles.
+
 ## Manual QA Notes
 
 Expected rendered behavior:
