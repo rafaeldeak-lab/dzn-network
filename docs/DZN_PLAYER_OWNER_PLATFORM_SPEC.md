@@ -227,6 +227,7 @@ Completed or active foundation slices:
 - Broader player-community matching model: private ordinary-member Discord membership bridge for Player Hub community matching.
 - Player Hub community matching UI polish: clearer private matched-community cards, relationship badges, source-aware empty states, and presentation-only boundary copy.
 - Player Hub Discord membership refresh/status UX: current-user-only refresh button/status copy backed by a same-origin player membership refresh route, without owner guild-cache, payment, profile-publication, analytics, production migration, or competitive-system changes.
+- Shared header command bar visual polish: DZN command-deck styling for the root header, animated corner logo preserved, icon-based nav/action controls, hover/focus highlighting, and bright red DZN Pulse unread badges; visual only with no payment, Store, chat runtime, production, or competitive-system changes.
 
 Next recommended product slice after Discord membership refresh/status UX:
 

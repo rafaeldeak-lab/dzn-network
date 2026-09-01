@@ -2,6 +2,22 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  Activity,
+  CalendarDays,
+  Crown,
+  LayoutDashboard,
+  LogIn,
+  LogOut,
+  MessageCircle,
+  Plus,
+  Server,
+  Sparkles,
+  Trophy,
+  User,
+  Wrench,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { DznPulseBell, DznPulseProvider } from "@/components/dzn-pulse/dzn-pulse-provider";
@@ -25,6 +41,7 @@ type HeaderNavLink = {
   href: string;
   label: string;
   active?: SiteHeaderActive;
+  icon: LucideIcon;
 };
 type HeaderAuthProbeState = {
   authenticated: boolean;
@@ -55,25 +72,25 @@ const rootHeaderHiddenPrefixes = [
 ];
 
 const loggedOutHeaderLinks: HeaderNavLink[] = [
-  { href: "/#features", label: "Features", active: "features" },
-  { href: "/#pricing", label: "Pricing", active: "pricing" },
+  { href: "/#features", label: "Features", active: "features", icon: Sparkles },
+  { href: "/#pricing", label: "Pricing", active: "pricing", icon: Crown },
 ];
 
 const starterHeaderLinks: HeaderNavLink[] = [
-  { href: "/#features", label: "Features", active: "features" },
-  { href: "/player", label: "Player Hub", active: "player" },
-  { href: "/leaderboards", label: "Leaderboards", active: "leaderboards" },
-  { href: "/servers", label: "Servers", active: "servers" },
-  { href: "/events", label: "Events", active: "events" },
+  { href: "/#features", label: "Features", active: "features", icon: Sparkles },
+  { href: "/player", label: "Player Hub", active: "player", icon: User },
+  { href: "/leaderboards", label: "Leaderboards", active: "leaderboards", icon: Trophy },
+  { href: "/servers", label: "Servers", active: "servers", icon: Server },
+  { href: "/events", label: "Events", active: "events", icon: CalendarDays },
 ];
 
 const proHeaderLinks: HeaderNavLink[] = [
-  { href: "/#features", label: "Features", active: "features" },
-  { href: "/player", label: "Player Hub", active: "player" },
-  { href: "/leaderboards", label: "Leaderboards", active: "leaderboards" },
-  { href: "/servers", label: "Servers", active: "servers" },
-  { href: "/#stats", label: "Stats", active: "stats" },
-  { href: "/events", label: "Events", active: "events" },
+  { href: "/#features", label: "Features", active: "features", icon: Sparkles },
+  { href: "/player", label: "Player Hub", active: "player", icon: User },
+  { href: "/leaderboards", label: "Leaderboards", active: "leaderboards", icon: Trophy },
+  { href: "/servers", label: "Servers", active: "servers", icon: Server },
+  { href: "/#stats", label: "Stats", active: "stats", icon: Activity },
+  { href: "/events", label: "Events", active: "events", icon: CalendarDays },
 ];
 
 let pageHeaderAuthState: SiteHeaderAuthStateProps | null = null;
@@ -194,46 +211,59 @@ export function SiteHeader({
         </Link>
 
         <div className="dzn-header-links">
-          {navLinks.map((link) => (
-            <Link key={link.href} href={link.href} aria-current={active === link.active ? "page" : undefined}>
-              {link.label}
-            </Link>
-          ))}
+          {navLinks.map((link) => {
+            const LinkIcon = link.icon;
+            return (
+              <Link key={link.href} href={link.href} aria-current={active === link.active ? "page" : undefined}>
+                <LinkIcon className="dzn-header-link-icon" aria-hidden="true" />
+                <span>{link.label}</span>
+              </Link>
+            );
+          })}
         </div>
 
         <div className="dzn-header-actions">
           {resolvedAuthenticated ? <DznPulseBell className="dzn-header-pulse-bell" /> : null}
           <a href={DZN_PUBLIC_DISCORD_INVITE_URL} target="_blank" rel="noopener noreferrer" className="dzn-header-action dzn-header-action--discord">
-            Discord
+            <MessageCircle className="dzn-header-action-icon" aria-hidden="true" />
+            <span>Discord</span>
           </a>
           {resolvedAuthenticated ? (
             <>
               <span className={`dzn-header-plan dzn-header-plan--${planTier}`} title={headerPlanTitle(resolvedNavigation)}>
-                <span>{resolvedNavigation?.plan_label ?? "Free"}</span>
-                <small>{headerPlanDetail(resolvedNavigation)}</small>
+                <Crown className="dzn-header-plan-icon" aria-hidden="true" />
+                <span className="dzn-header-plan-copy">
+                  <span>{resolvedNavigation?.plan_label ?? "Free"}</span>
+                  <small>{headerPlanDetail(resolvedNavigation)}</small>
+                </span>
               </span>
               {primaryAction.href === "/dashboard" ? null : (
                 <Link href="/dashboard" className="dzn-header-action">
-                  Dashboard
+                  <LayoutDashboard className="dzn-header-action-icon" aria-hidden="true" />
+                  <span>Dashboard</span>
                 </Link>
               )}
               {showAddServer ? (
                 <Link href="/setup" className="dzn-header-action dzn-header-action--primary">
-                  {planTier === "free" ? "Start Setup" : "Add Your Server"}
+                  <Plus className="dzn-header-action-icon" aria-hidden="true" />
+                  <span>{planTier === "free" ? "Start Setup" : "Add Your Server"}</span>
                 </Link>
               ) : null}
               <Link href={primaryAction.href} className={`dzn-header-action dzn-header-action--package dzn-header-action--package-${primaryAction.tone}`}>
-                {primaryAction.label}
+                <Wrench className="dzn-header-action-icon" aria-hidden="true" />
+                <span>{primaryAction.label}</span>
               </Link>
             </>
           ) : null}
           {resolvedAuthenticated && showLogout ? (
             <button type="button" onClick={signOut} className="dzn-header-action dzn-header-action--logout">
-              Logout
+              <LogOut className="dzn-header-action-icon" aria-hidden="true" />
+              <span>Logout</span>
             </button>
           ) : (
             <Link href={`/login?returnTo=${encodeURIComponent(returnTo)}`} className="dzn-header-action dzn-header-action--logout">
-              Login
+              <LogIn className="dzn-header-action-icon" aria-hidden="true" />
+              <span>Login</span>
             </Link>
           )}
         </div>
@@ -268,7 +298,6 @@ function HeaderLogoVideo() {
     const play = () => {
       video.play().catch(() => {
         video.pause();
-        setUseVideo(false);
       });
     };
     const syncVisibility = () => {

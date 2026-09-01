@@ -37,8 +37,8 @@ const proHeaderBlock = sourceBlock(siteHeaderSource, "const proHeaderLinks", "le
 assert.equal(siteHeaderSource.includes("type SiteHeaderActive = \"features\" | \"player\""), true);
 assert.equal(siteHeaderSource.includes("if (pathname.startsWith(\"/player\")) return \"player\";"), true);
 assert.equal(loggedOutHeaderBlock.includes("Player Hub"), false, "Logged-out header must not advertise private player pages.");
-assert.equal(starterHeaderBlock.includes("{ href: \"/player\", label: \"Player Hub\", active: \"player\" }"), true);
-assert.equal(proHeaderBlock.includes("{ href: \"/player\", label: \"Player Hub\", active: \"player\" }"), true);
+assert.equal(starterHeaderBlock.includes("{ href: \"/player\", label: \"Player Hub\", active: \"player\", icon: User }"), true);
+assert.equal(proHeaderBlock.includes("{ href: \"/player\", label: \"Player Hub\", active: \"player\", icon: User }"), true);
 
 assert.equal(middlewareSource.includes("\"/player\""), true, "Player pages must be protected by the page middleware.");
 assert.equal(routesPatchSource.includes("\"/player\""), true, "Exact player route must be included in Pages functions routing.");

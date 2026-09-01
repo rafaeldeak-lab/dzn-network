@@ -407,7 +407,7 @@ export function DznPulseBell({ className = "" }: { className?: string }) {
     >
       <Bell className="h-4 w-4" />
       {pulse.unreadCount > 0 ? (
-        <span className="absolute -right-1 -top-1 min-w-5 rounded-full border border-[#050812] bg-fuchsia-500 px-1.5 py-0.5 text-[9px] font-black leading-none text-white shadow-[0_0_16px_rgba(217,70,239,0.55)]">
+        <span className="absolute -right-1 -top-1 min-w-5 rounded-full border border-red-100 bg-red-600 px-1.5 py-0.5 text-[9px] font-black leading-none text-white shadow-[0_0_18px_rgba(239,29,40,0.85)]">
           {visibleCount}
         </span>
       ) : null}
