@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Activity,
   BookmarkCheck,
   CalendarDays,
   ChevronRight,
@@ -86,6 +87,8 @@ type PlayerHubPayload = {
     message: string;
   };
   profile_entries: PlayerHubProfileEntry[];
+  profile_summary: PlayerHubProfileSummary;
+  progression_summary: PlayerHubProgressionSummary;
   owner_setup: {
     href: string;
     gated: true;
@@ -97,6 +100,7 @@ type PlayerHubPayload = {
     saved_servers: "player_saved_servers" | "unavailable";
     matched_communities: PlayerHubCommunitySource;
     suggested_events: "public_competitive_events" | "unavailable";
+    profile_progression: "player_profiles" | "unavailable";
   };
   fairness_boundary: string[];
 };
@@ -171,6 +175,52 @@ type PlayerHubProfileEntry = {
   description: string;
 };
 
+type PlayerHubProfileSummary = {
+  display_name: string;
+  private_profile_href: string;
+  public_profile_href: string | null;
+  public_profile_status: "not_configured";
+  public_profile_message: string;
+  linked_game_profiles: number;
+  linked_public_servers: number;
+  last_seen_at: string | null;
+  source: "player_profiles" | "unavailable";
+  private: true;
+  presentation_only: true;
+};
+
+type PlayerHubProgressionSummary = {
+  status: "stats_available" | "empty" | "unavailable";
+  source: "player_profiles" | "unavailable";
+  gameplay_totals: {
+    kills: number;
+    deaths: number;
+    suicides: number;
+    longest_kill_distance: number;
+  };
+  featured_server: {
+    linked_server_id: string;
+    public_slug: string;
+    server_name: string;
+    server_type: string;
+    platform: string | null;
+    map_name: string | null;
+    kills: number;
+    deaths: number;
+    longest_kill_distance: number;
+    last_seen_at: string | null;
+  } | null;
+  tracks: Array<{
+    key: "xp" | "challenges" | "calling_cards";
+    label: string;
+    status: "future_earned_runtime";
+    description: string;
+  }>;
+  message: string;
+  private: true;
+  presentation_only: true;
+};
+
 type PlayerActionCard = {
   href: string;
   title: string;
@@ -204,7 +254,7 @@ const playerActionCards: PlayerActionCard[] = [
   {
     href: "/player/profile",
     title: "Profile Entry",
-    description: "Open your personal player profile area and future privacy/profile controls.",
+    description: "Open your personal profile, private stat summary, and earned progression entry points.",
     icon: <UserRound aria-hidden="true" className="h-5 w-5" />,
     tone: "emerald",
   },
@@ -522,7 +572,7 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
         )}
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-          <ProfileEntryPanel state={hubState} />
+          <ProfileProgressionPanel state={hubState} />
 
           <section className="rounded-lg border border-amber-300/25 bg-slate-950/78 p-5 backdrop-blur">
             <div className="flex items-center gap-3">
@@ -806,8 +856,12 @@ function SuggestedEventsPanel({ events, source }: { events: PlayerHubEvent[]; so
   );
 }
 
-function ProfileEntryPanel({ state }: { state: PlayerHubState }) {
-  const entries = state.status === "ready" ? state.data.profile_entries : [];
+function ProfileProgressionPanel({ state }: { state: PlayerHubState }) {
+  const data = state.status === "ready" ? state.data : null;
+  const entries = data?.profile_entries ?? [];
+  const profile = data?.profile_summary ?? null;
+  const progression = data?.progression_summary ?? null;
+
   return (
     <section className="rounded-lg border border-emerald-300/25 bg-slate-950/78 p-5 backdrop-blur">
       <div className="flex items-center gap-3">
@@ -815,26 +869,102 @@ function ProfileEntryPanel({ state }: { state: PlayerHubState }) {
           <UserRound aria-hidden="true" className="h-5 w-5" />
         </span>
         <div>
-          <h2 className="text-lg font-black uppercase text-white">Profile Entry Points</h2>
-          <p className="text-sm font-semibold text-slate-300">Private player profile paths stay separate from owner setup and paid plans.</p>
+          <h2 className="text-lg font-black uppercase text-white">Profile & Progression</h2>
+          <p className="text-sm font-semibold text-slate-300">Private current-user summaries stay separate from owner setup, paid plans, and competitive systems.</p>
         </div>
       </div>
-      {entries.length ? (
-        <ul className="mt-5 divide-y divide-white/10">
-          {entries.map((entry) => (
-            <li key={entry.key} className="py-3 first:pt-0 last:pb-0">
-              <Link href={entry.href} className="group flex items-start justify-between gap-3">
+
+      {profile && progression ? (
+        <div className="mt-5 space-y-4">
+          <div className="rounded-md border border-emerald-300/20 bg-emerald-300/8 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase text-emerald-100">Private Player Profile</p>
+                <p className="mt-1 text-lg font-black text-white">{profile.display_name}</p>
+                <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">{profile.public_profile_message}</p>
+              </div>
+              <span className="inline-flex w-fit items-center gap-2 rounded-md border border-emerald-300/25 bg-emerald-300/10 px-3 py-1.5 text-xs font-black uppercase text-emerald-100">
+                {profile.public_profile_status.replace(/_/g, " ")}
+              </span>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <MetricTile label="Game Profiles" value={String(profile.linked_game_profiles)} />
+              <MetricTile label="Public Servers" value={String(profile.linked_public_servers)} />
+            </div>
+          </div>
+
+          <div className="rounded-md border border-cyan-300/20 bg-cyan-300/8 p-4">
+            <div className="flex items-start gap-3">
+              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-cyan-300/30 bg-cyan-300/10 text-cyan-100">
+                <Activity aria-hidden="true" className="h-5 w-5" />
+              </span>
+              <div>
+                <p className="text-sm font-black uppercase text-white">Current Profile Signals</p>
+                <p className="mt-1 text-sm font-semibold leading-6 text-slate-300">{progression.message}</p>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <MetricTile label="Kills" value={String(progression.gameplay_totals.kills)} />
+              <MetricTile label="Deaths" value={String(progression.gameplay_totals.deaths)} />
+              <MetricTile label="Suicides" value={String(progression.gameplay_totals.suicides)} />
+              <MetricTile label="Longest" value={formatDistance(progression.gameplay_totals.longest_kill_distance)} />
+            </div>
+            {progression.featured_server ? (
+              <Link
+                href={`/servers/profile?slug=${encodeURIComponent(progression.featured_server.public_slug)}`}
+                className="group mt-4 flex items-start justify-between gap-3 rounded-md border border-cyan-300/18 bg-slate-950/50 p-3 transition hover:border-cyan-200/45"
+              >
                 <span>
-                  <span className="block text-sm font-black uppercase text-white transition group-hover:text-emerald-100">{entry.label}</span>
-                  <span className="mt-1 block text-sm font-semibold leading-6 text-slate-300">{entry.description}</span>
+                  <span className="block text-sm font-black uppercase text-white transition group-hover:text-cyan-100">
+                    {progression.featured_server.server_name}
+                  </span>
+                  <span className="mt-1 block text-xs font-bold uppercase text-slate-400">
+                    {progression.featured_server.server_type} - {progression.featured_server.platform ?? "Platform TBA"} - {progression.featured_server.map_name ?? "Map TBA"}
+                  </span>
+                  <span className="mt-2 block text-sm font-semibold leading-6 text-slate-300">
+                    {progression.featured_server.kills} kills, {progression.featured_server.deaths} deaths, {formatDistance(progression.featured_server.longest_kill_distance)} longest.
+                  </span>
                 </span>
-                <span className="mt-1 inline-flex shrink-0 items-center gap-2 rounded-md border border-emerald-300/25 bg-emerald-300/10 px-2 py-1 text-xs font-black uppercase text-emerald-100">
-                  {entry.status.replace(/_/g, " ")}
-                </span>
+                <ChevronRight aria-hidden="true" className="mt-1 h-4 w-4 shrink-0 text-slate-500 transition group-hover:text-cyan-100" />
               </Link>
-            </li>
-          ))}
-        </ul>
+            ) : null}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            {progression.tracks.map((track) => (
+              <div key={track.key} className="rounded-md border border-violet-300/20 bg-violet-300/8 p-3">
+                <p className="text-xs font-black uppercase text-violet-100">{track.label}</p>
+                <p className="mt-1 text-[10px] font-black uppercase text-slate-400">{track.status.replace(/_/g, " ")}</p>
+                <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">{track.description}</p>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <h3 className="text-sm font-black uppercase text-white">Profile Entry Points</h3>
+            {entries.length ? (
+              <ul className="mt-3 divide-y divide-white/10 rounded-md border border-white/10 bg-white/6">
+                {entries.map((entry) => (
+                  <li key={entry.key} className="p-3">
+                    <Link href={entry.href} className="group flex items-start justify-between gap-3">
+                      <span>
+                        <span className="block text-sm font-black uppercase text-white transition group-hover:text-emerald-100">{entry.label}</span>
+                        <span className="mt-1 block text-sm font-semibold leading-6 text-slate-300">{entry.description}</span>
+                      </span>
+                      <span className="mt-1 inline-flex shrink-0 items-center gap-2 rounded-md border border-emerald-300/25 bg-emerald-300/10 px-2 py-1 text-xs font-black uppercase text-emerald-100">
+                        {entry.status.replace(/_/g, " ")}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+
+          <p className="rounded-md border border-amber-300/20 bg-amber-300/8 p-3 text-sm font-semibold leading-6 text-amber-50">
+            This panel is private and read-only. It cannot write privacy settings, grant awards, change billing, alter scores, change rankings, edit reviews, change events, affect Server Wars or CTF, or change competitive eligibility.
+          </p>
+        </div>
       ) : (
         <div className="mt-5 grid gap-3">
           {profileStatusCards.map((copy) => (
@@ -1129,4 +1259,9 @@ function formatEventTime(value: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function formatDistance(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0m";
+  return `${Math.round(value)}m`;
 }
