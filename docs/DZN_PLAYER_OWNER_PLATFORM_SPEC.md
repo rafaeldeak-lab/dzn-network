@@ -128,6 +128,15 @@ This slice adds a current-user-only refresh/status contract:
 - No production migration is required for this slice because `player_discord_community_memberships` already stores active memberships and `last_seen_at`.
 - The refresh/status UI and route must not alter billing, owner entitlement, Nitrado, server ownership, rankings, discovery, reviews, events, progression, scoring, public profile visibility, retained exports, Store/payment state, live checkout, or competitive eligibility.
 
+### Player Hub Suggested Event/Tournament Relevance Polish
+
+After the Player Hub Discord membership refresh/status UX is reviewed, merged, and released separately, the next clean product slice should make `/player` event suggestions more useful:
+
+- Prioritise public events connected to the player's privately followed servers.
+- Prioritise public events connected to the player's privately matched Discord communities.
+- Keep suggestions presentation-only.
+- Do not write event registrations, owner workflow state, scoring rows, eligibility rows, billing, discovery formulas, rankings, reviews, progression, XP awards, calling-card awards, badges, seasons, Server Wars, CTF, or competitive eligibility.
+
 ## Reviews Roadmap
 
 Reviews are free logged-in player actions:

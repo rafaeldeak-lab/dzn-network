@@ -2853,12 +2853,14 @@ body.dzn-pricing-modal-open .dzn-beta-ticker {
 }
 
 .dzn-header-nav {
-  width: min(100%, 1500px);
+  width: min(100%, 1880px);
   margin-inline: auto;
   min-height: 72px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: clamp(18px, 2.2vw, 34px);
+  column-gap: clamp(14px, 1.8vw, 28px);
+  row-gap: 10px;
   padding: 9px 18px;
   border: 1px solid rgba(168, 85, 247, 0.36);
   border-radius: 18px;
@@ -2870,6 +2872,7 @@ body.dzn-pricing-modal-open .dzn-beta-ticker {
     inset 0 0 20px rgba(34, 211, 238, 0.04),
     inset 0 -1px 0 rgba(34, 211, 238, 0.22);
   backdrop-filter: blur(16px);
+  container: dzn-header / inline-size;
 }
 
 .dzn-header-logo {
@@ -2930,12 +2933,14 @@ body.dzn-pricing-modal-open .dzn-beta-ticker {
 }
 
 .dzn-header-links {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 1 1 520px;
+  min-width: min(100%, 420px);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: clamp(24px, 3vw, 52px);
+  column-gap: clamp(20px, 2.6vw, 46px);
+  row-gap: 6px;
   margin-inline: clamp(4px, 1vw, 16px);
 }
 
@@ -2990,11 +2995,18 @@ body.dzn-pricing-modal-open .dzn-beta-ticker {
 }
 
 .dzn-header-actions {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  max-width: 100%;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
+  row-gap: 8px;
+}
+
+.dzn-header-pulse-bell {
+  flex: 0 0 2.25rem;
 }
 
 .dzn-header-nav--logged-out .dzn-header-links {
@@ -3154,6 +3166,28 @@ button.dzn-header-action {
 
 .dzn-header-action--logout {
   border-color: rgba(168, 85, 247, 0.38);
+}
+
+@container dzn-header (max-width: 1820px) {
+  .dzn-header-nav--authenticated .dzn-header-links {
+    order: 3;
+    width: 100%;
+    flex: 1 0 100%;
+    justify-content: center;
+    gap: clamp(18px, 3vw, 34px);
+    margin: 2px 0 0;
+    padding: 4px 0 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .dzn-header-nav--authenticated .dzn-header-links::-webkit-scrollbar {
+    display: none;
+  }
+
+  .dzn-header-nav--authenticated .dzn-header-actions {
+    margin-left: auto;
+  }
 }
 
 @media (max-width: 1500px) {
