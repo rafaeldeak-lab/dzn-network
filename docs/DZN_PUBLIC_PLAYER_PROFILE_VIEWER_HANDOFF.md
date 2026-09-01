@@ -37,6 +37,12 @@ Publishing requires both:
 - Uses the same safe 404 shape for hidden and missing handles.
 - Returns only public-safe display fields and saved visible sections.
 - Does not require or send player cookies.
+- Uses no-store headers, including successful published payloads, so saved privacy changes are not served stale from browser or shared caches.
+
+`/players/[handle]`:
+
+- Uses the shared root DZN header and lets it resolve the current visitor's real login state.
+- Keeps the public profile API fetch cookie-free with `credentials: "omit"`.
 
 `GET/PATCH /api/player/profile/privacy`:
 

@@ -5,8 +5,6 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
-import { SiteHeaderAuthState } from "@/components/site-header";
-
 type PublicPlayerProfilePayload = {
   ok: true;
   handle: string;
@@ -129,11 +127,9 @@ export function PublicPlayerProfile({ handle: initialHandle = null }: { handle?:
   }, [initialHandle]);
 
   const displayName = state.status === "ready" ? state.data.display_name : "Public Player Profile";
-  const returnTo = state.status === "ready" ? state.data.href : "/players";
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#02030a] text-white">
-      <SiteHeaderAuthState authenticated={false} checkingAccount={false} navigation={null} returnTo={returnTo} />
       <div
         className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-24"
         style={{ backgroundImage: "linear-gradient(180deg, rgba(2, 3, 10, 0.18), rgba(2, 3, 10, 0.98)), url('/media/dzn-cinematic-survivor.png')" }}

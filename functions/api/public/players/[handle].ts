@@ -1,9 +1,9 @@
 import { json, methodNotAllowed } from "../../../_lib/http";
-import { noStoreForErrorHeaders, publicCacheHeaders } from "../../../_lib/performance";
+import { noStoreForErrorHeaders } from "../../../_lib/performance";
 import { readPublicPlayerProfileByHandle } from "../../../_lib/player-public-profiles";
 import type { PagesFunction } from "../../../_lib/types";
 
-const publicProfileHeaders = publicCacheHeaders({ maxAge: 15, staleWhileRevalidate: 45 });
+const publicProfileHeaders = noStoreForErrorHeaders({ vary: "Cookie" });
 
 export const onRequest: PagesFunction = async ({ request, env, params }) => {
   if (request.method !== "GET") return methodNotAllowed();

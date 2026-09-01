@@ -50,12 +50,15 @@ assert.doesNotMatch(
 assert.match(publicApi, /request\.method !== "GET"/, "Public profile API must be read-only.");
 assert.match(publicApi, /readPublicPlayerProfileByHandle\(env, params\.handle\)/, "Public profile API must use the canonical reader.");
 assert.match(publicApi, /PROFILE_NOT_FOUND/, "Hidden and missing profiles must share a safe not-found response.");
+assert.match(publicApi, /noStoreForErrorHeaders\(\{ vary: "Cookie" \}\)/, "Published public profile responses must be no-store so privacy changes are not served stale.");
+assert.doesNotMatch(publicApi, /publicCacheHeaders/, "Public profile payloads must not use stale public cache headers.");
 assert.doesNotMatch(publicApi, /\b(?:getSessionUser|ensureMockUser|INSERT INTO|UPDATE\s+[a-z_]+|DELETE FROM)\b/i, "Public profile API must not require sessions or write data.");
 assert.match(shellRoute, /env\.ASSETS\.fetch/, "Dynamic public profile pages must serve the static players shell through Pages assets.");
 assert.match(shellRoute, /\/players\.html/, "Dynamic public profile shell must serve the exported players page.");
 assert.match(page, /generateStaticParams/, "The exported dynamic player route must include a static shell path.");
 assert.match(component, /fetch\(`\/api\/public\/players\/\$\{encodeURIComponent\(handle\)\}`/, "Public profile UI must read the public-safe profile API.");
 assert.match(component, /credentials: "omit"/, "Public profile UI must not send player cookies to the public profile API.");
+assert.doesNotMatch(component, /SiteHeaderAuthState authenticated=\{false\}/, "Public profile pages must let the shared header resolve the real logged-in state.");
 assert.match(component, /Manage My Profile/, "Public profile UI must send owners to the private profile settings surface.");
 assert.doesNotMatch(component, /\b(?:sendBeacon|analytics|localStorage|sessionStorage)\b/i, "Public profile UI must not store share history or track analytics.");
 assert.doesNotMatch(component, /fetch\([^)]*(?:checkout|STRIPE|nitrado_connections|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns|server_reviews|competitive_events|leaderboards)/i, "Public profile UI must not call Store/payment/owner/review/event/competitive routes.");
@@ -184,7 +187,7 @@ async function testPublicProfileRuntimeContract() {
 
   const publishedRouteResponse = await callPublicProfileRoute(db, generated.handle);
   assert.equal(publishedRouteResponse.status, 200, "Published public profiles should return 200.");
-  assert.equal(publishedRouteResponse.headers.get("cache-control")?.includes("public"), true, "Published public profile reads may use short public cache headers.");
+  assert.equal(publishedRouteResponse.headers.get("cache-control")?.includes("no-store"), true, "Published public profile reads must be no-store so privacy changes are respected immediately.");
   const publishedRoutePayload = await publishedRouteResponse.json();
   assertNoPrivatePublicProfileLeak(publishedRoutePayload);
 
