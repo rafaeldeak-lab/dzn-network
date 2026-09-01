@@ -140,6 +140,16 @@ This slice makes `/player` event suggestions more useful inside the private Play
 - Return private no-store relevance metadata only to the logged-in player; do not expose raw Discord guild ids through event suggestions.
 - Do not write event registrations, owner workflow state, scoring rows, eligibility rows, billing, discovery formulas, rankings, reviews, progression, XP awards, calling-card awards, badges, seasons, Server Wars, CTF, or competitive eligibility.
 
+### Player Hub Rendered QA/Release Polish
+
+This slice proves the private `/player` experience in a browser before the next Player Hub product feature:
+
+- Capture representative local/test desktop and mobile screenshots for followed servers, matched Discord communities, suggested events, relevance badges, profile entry points, empty states, unavailable states, and storage fallback states.
+- Include a crowded-event case where many irrelevant registered servers do not hide the current player's followed-server or matched-community relevance labels.
+- Keep the QA harness local and browser-intercepted with sanitized current-user JSON only.
+- Do not write production D1, call Stripe, mutate Cloudflare secrets/config, call Nitrado or Discord runtime APIs, send chat messages, add reactions, report/moderate, call DZN Assist AI, use Durable Objects/WebSockets, change retained exports, deploy, enable live checkout, or change issue `#49`.
+- Prove the rendered Player Hub remains private, presentation-only, and isolated from billing, owner entitlement, server ownership, scoring, ranking, discovery, reviews, progression, XP awards, calling-card awards, badges, seasons, Server Wars, CTF, and competitive eligibility.
+
 ## Reviews Roadmap
 
 Reviews are free logged-in player actions:
@@ -233,7 +243,8 @@ Completed or active foundation slices:
 - Shared header command bar visual polish: DZN command-deck styling for the root header, animated corner logo preserved, icon-based nav/action controls, hover/focus highlighting, and bright red DZN Pulse unread badges; visual only with no payment, Store, chat runtime, production, or competitive-system changes.
 - Player Hub suggested event/tournament relevance polish: private no-store suggestions now prioritise public events connected to followed servers and matched-community server previews, with presentation-only labels and no event registration, scoring, eligibility, billing, owner workflow, progression, review, ranking, discovery, or competitive-system changes.
 - Player Hub event relevance query cap fix: private relevance server-link reads are now filtered to the current player's followed or matched-community server ids so crowded event registrations cannot hide a relevant match.
+- Player Hub rendered QA/release polish: local browser artifact captures representative saved-server, matched-community, crowded-event, empty, unavailable, and storage-fallback states before the next Player Hub product feature.
 
-Next recommended product slice after Player Hub event relevance:
+Next recommended product slice after Player Hub rendered QA:
 
-- Player Hub suggested event/tournament rendered QA and release review: run `/player` locally with representative saved-server and matched-community data, capture desktop/mobile proof of relevance badges and fallback states, then approve merge/release separately.
+- Player Hub profile/progression entry-point real-data polish: make the private `/player` entry points more useful by surfacing safe current-user profile/progression summaries and next actions while keeping visibility, awards, billing, scoring, rankings, reviews, events, Server Wars, CTF, and competitive eligibility isolated.

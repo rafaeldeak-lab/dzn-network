@@ -1,0 +1,97 @@
+{
+  "generated_at": "2026-09-01T12:18:43.036Z",
+  "results": [
+    {
+      "scenario": "rich",
+      "viewport": "desktop",
+      "screenshot": "screenshots/rich-desktop.png",
+      "assertions": 20,
+      "consoleMessages": [],
+      "failedRequests": [],
+      "textChecks": [
+        "Player Hub",
+        "Rafael DZN",
+        "Pandora Squad",
+        "Followed Servers",
+        "Matched Communities",
+        "Suggested Events",
+        "Survival Showdown",
+        "Followed server",
+        "Community Night Ops",
+        "Matched community",
+        "451/512 servers",
+        "Public Network Briefing",
+        "Public network",
+        "These suggestions are private to your Player Hub and stay presentation-only."
+      ]
+    },
+    {
+      "scenario": "rich",
+      "viewport": "mobile",
+      "screenshot": "screenshots/rich-mobile.png",
+      "assertions": 20,
+      "consoleMessages": [],
+      "failedRequests": [],
+      "textChecks": [
+        "Player Hub",
+        "Rafael DZN",
+        "Pandora Squad",
+        "Followed Servers",
+        "Matched Communities",
+        "Suggested Events",
+        "Survival Showdown",
+        "Followed server",
+        "Community Night Ops",
+        "Matched community",
+        "451/512 servers",
+        "Public Network Briefing",
+        "Public network",
+        "These suggestions are private to your Player Hub and stay presentation-only."
+      ]
+    },
+    {
+      "scenario": "empty",
+      "viewport": "desktop",
+      "screenshot": "screenshots/empty-desktop.png",
+      "assertions": 9,
+      "consoleMessages": [],
+      "failedRequests": [],
+      "textChecks": [
+        "No followed servers yet",
+        "No public DZN matches yet",
+        "No suggested events yet",
+        "Presentation Only",
+        "Owner Setup Stays Gated"
+      ]
+    },
+    {
+      "scenario": "unavailable",
+      "viewport": "desktop",
+      "screenshot": "screenshots/unavailable-desktop.png",
+      "assertions": 7,
+      "consoleMessages": [],
+      "failedRequests": [],
+      "textChecks": [
+        "Player Hub Data Unavailable",
+        "Player Hub data is not available right now.",
+        "Owner Setup Stays Gated"
+      ]
+    },
+    {
+      "scenario": "storageFallback",
+      "viewport": "desktop",
+      "screenshot": "screenshots/storageFallback-desktop.png",
+      "assertions": 10,
+      "consoleMessages": [],
+      "failedRequests": [],
+      "textChecks": [
+        "Saved-server storage is not available in this environment yet.",
+        "Discord community matching is not available in this environment yet.",
+        "Event storage is not available in this environment yet.",
+        "No followed servers yet",
+        "Community matching offline",
+        "No suggested events yet"
+      ]
+    }
+  ]
+}

@@ -107,6 +107,7 @@
     "check:badge-assets": "tsx scripts/check-badge-assets.ts",
     "check:billing-config": "tsx scripts/check-billing-config.ts",
     "adm:audit-health": "tsx scripts/adm-audit-health.ts",
+    "qa:player-hub-rendered": "node scripts/qa-player-hub-rendered.mjs",
     "player-counts:audit": "tsx scripts/audit-player-counts.ts",
     "adm:backfill-missing": "tsx scripts/adm-backfill-missing.ts",
     "adm:backfill": "tsx scripts/backfill-adm-files.ts",
