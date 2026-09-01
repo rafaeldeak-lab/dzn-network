@@ -20,6 +20,11 @@ export type PlayerPublicProfileHandle = {
   updated_at: string | null;
 };
 
+export type PublicProfileLink = {
+  handle: string;
+  href: string;
+};
+
 export type PublicPlayerProfilePayload = {
   ok: true;
   handle: string;
@@ -137,6 +142,8 @@ type PublicPlayerFeaturedServerRow = {
 };
 
 const fallbackHandlePrefix = "dzn-player";
+const maxPublicProfileLinkLookupIds = 100;
+const publicProfileLinkLookupChunkSize = 50;
 const publicServerWhere = `
   lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
   AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
@@ -147,6 +154,49 @@ const publicServerWhere = `
 
 export function publicProfileHref(handle: string) {
   return `/players/${handle}`;
+}
+
+export async function readPublicProfileLinksByDiscordIds(
+  env: Env,
+  discordIds: Array<string | null | undefined>,
+): Promise<Map<string, PublicProfileLink>> {
+  const ids = uniqueDiscordIds(discordIds).slice(0, maxPublicProfileLinkLookupIds);
+  const links = new Map<string, PublicProfileLink>();
+  if (ids.length === 0 || !env.DB) return links;
+
+  const db = requireDb(env);
+  for (let index = 0; index < ids.length; index += publicProfileLinkLookupChunkSize) {
+    const chunk = ids.slice(index, index + publicProfileLinkLookupChunkSize);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const rows = await db
+      .prepare(
+        `SELECT
+          users.discord_id,
+          player_public_profiles.handle
+         FROM users
+         INNER JOIN player_public_profiles ON player_public_profiles.user_id = users.id
+         INNER JOIN player_profile_privacy_preferences
+           ON player_profile_privacy_preferences.user_id = users.id
+         WHERE users.discord_id IN (${placeholders})
+           AND player_public_profiles.status = 'active'
+           AND player_profile_privacy_preferences.public_profile_enabled = 1`,
+      )
+      .bind(...chunk)
+      .all<{ discord_id: string | null; handle: string | null }>()
+      .catch(() => null);
+
+    if (!rows) return links;
+
+    for (const row of rows.results ?? []) {
+      if (!row.discord_id || !row.handle) continue;
+      links.set(row.discord_id, {
+        handle: row.handle,
+        href: publicProfileHref(row.handle),
+      });
+    }
+  }
+
+  return links;
 }
 
 export function normalizePublicProfileHandle(value: unknown) {
@@ -165,6 +215,15 @@ function normalizeHandleToken(value: unknown, maxLength: number) {
     .slice(0, boundedMaxLength)
     .replace(/^-+|-+$/g, "");
   return normalized.length >= 3 ? normalized : fallbackHandlePrefix;
+}
+
+function uniqueDiscordIds(values: Array<string | null | undefined>) {
+  const ids = new Set<string>();
+  for (const value of values) {
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (trimmed) ids.add(trimmed);
+  }
+  return [...ids];
 }
 
 export async function readCurrentPublicProfileHandle(env: Env, userId: string): Promise<PlayerPublicProfileHandle | null> {
