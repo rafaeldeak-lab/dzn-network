@@ -1,6 +1,6 @@
 # DZN Player + Owner Platform Specification
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 This document is the durable product and engineering contract for DZN's split player and server-owner platform. Chat history is not the source of truth once this spec exists.
 
@@ -112,6 +112,22 @@ The Player Hub matched-community panel should make the bridge understandable wit
 - Provide source-aware empty states for unavailable matching, legacy manageable-guild fallback, and no public DZN matches.
 - Keep the panel UI/read-only only: no setup action, no public directory, no profile opt-in bypass, no billing, no ranking/discovery/review/event/progression/scoring effect.
 
+### Player Hub Discord Membership Refresh/Status UX
+
+Players need a clear way to understand when DZN last checked their Discord community memberships and how to refresh the private Player Hub matching cache.
+
+This slice adds a current-user-only refresh/status contract:
+
+- `/api/player/hub` remains `GET` only and returns a private no-store `discord_membership_status` object with source, last checked timestamp when the private bridge has one, refresh href, method, and presentation-only/private flags.
+- `/api/player/community-memberships/refresh` is a same-origin authenticated `POST` route.
+- The refresh route uses the current user's saved Discord OAuth token, fetches `/users/@me/guilds`, and writes only `player_discord_community_memberships`.
+- The refresh route must not return raw Discord guild lists, Discord permission bits, other-user data, hidden server data, owner entitlement data, or public profile visibility fields.
+- The route may tell the current player to reconnect Discord if the saved token is missing, expired without a usable refresh token, or rejected by Discord.
+- The route must not write `discord_guilds`; the older owner/setup guild cache remains owned by the existing `/api/discord/guilds?fresh=1` route.
+- `/player` may show last checked copy, a refresh button, refresh progress, success, error, and reconnect states. It must reload the private Hub read model after a successful refresh.
+- No production migration is required for this slice because `player_discord_community_memberships` already stores active memberships and `last_seen_at`.
+- The refresh/status UI and route must not alter billing, owner entitlement, Nitrado, server ownership, rankings, discovery, reviews, events, progression, scoring, public profile visibility, retained exports, Store/payment state, live checkout, or competitive eligibility.
+
 ## Reviews Roadmap
 
 Reviews are free logged-in player actions:
@@ -201,7 +217,8 @@ Completed or active foundation slices:
 - Player Hub real-data foundation: private read-only hub payload plus `/player` panels for followed/saved servers, matched cached Discord communities, public event/tournament suggestions, and profile entry points while keeping owner setup behind `/pricing` and entitlement gates.
 - Broader player-community matching model: private ordinary-member Discord membership bridge for Player Hub community matching.
 - Player Hub community matching UI polish: clearer private matched-community cards, relationship badges, source-aware empty states, and presentation-only boundary copy.
+- Player Hub Discord membership refresh/status UX: current-user-only refresh button/status copy backed by a same-origin player membership refresh route, without owner guild-cache, payment, profile-publication, analytics, production migration, or competitive-system changes.
 
-Next recommended product slice after community matching UI polish:
+Next recommended product slice after Discord membership refresh/status UX:
 
-- Review/merge/release the stacked community matching PRs in order, then build a player-controlled Discord membership refresh/status slice if the released UX needs clearer account refresh feedback.
+- Player Hub suggested event/tournament relevance polish: make suggested events more useful by prioritising public events connected to followed servers and privately matched communities, while keeping suggestions presentation-only and isolated from scoring, eligibility, billing, owner workflows, progression, reviews, rankings, and discovery formulas.

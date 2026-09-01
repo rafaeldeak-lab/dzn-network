@@ -30,6 +30,23 @@ type PlayerHubCommunityMatch = {
   relationship: "member" | "administrator" | "owner" | "matched";
   relationship_label: string;
   match_keys: string[];
+  last_seen_at: string | null;
+};
+
+type PlayerHubCommunitySource = "player_discord_community_memberships" | "cached_discord_manageable_guilds" | "unavailable";
+
+type PlayerHubCommunitiesReadModel = {
+  communities: Array<{
+    guild_id: string;
+    name: string;
+    icon_url: string | null;
+    relationship: PlayerHubCommunityMatch["relationship"];
+    relationship_label: string;
+    public_server_count: number;
+    matched_servers: ReturnType<typeof uniqueCommunityServers>;
+  }>;
+  source: PlayerHubCommunitySource;
+  lastCheckedAt: string | null;
 };
 
 type PlayerHubCommunityServerRow = {
@@ -66,6 +83,7 @@ const MAX_COMMUNITY_SERVER_PREVIEWS = 3;
 const MAX_SUGGESTED_EVENTS = 5;
 
 const ownerSetupHref = "/pricing?intent=owner_setup&returnTo=%2Fsetup";
+const communityMembershipRefreshHref = "/api/player/community-memberships/refresh";
 
 const publicServerWhere = `
   lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
@@ -105,6 +123,16 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       saved_servers: savedServers.savedServers,
       saved_server_ids: savedServers.savedServerIds,
       matched_communities: communities.communities,
+      discord_membership_status: {
+        source: communities.source,
+        last_checked_at: communities.lastCheckedAt,
+        refresh_href: communityMembershipRefreshHref,
+        refresh_method: "POST",
+        requires_relogin: false,
+        private: true,
+        presentation_only: true,
+        message: communityMembershipStatusMessage(communities.source, communities.lastCheckedAt),
+      },
       suggested_events: events.events,
       profile_entries: [
         {
@@ -179,13 +207,13 @@ async function readSafeSavedServers(env: Env, userId: string) {
   }
 }
 
-async function readMatchedCommunities(env: Env, userId: string) {
+async function readMatchedCommunities(env: Env, userId: string): Promise<PlayerHubCommunitiesReadModel> {
   try {
     const db = requireDb(env);
     const membershipRows = await readPlayerCommunityMembershipRows(db, userId).catch(() => null);
     const managedGuildRows = await readManagedDiscordGuildRows(db, userId);
     const guilds = mergeCommunityMatches(membershipRows ?? [], managedGuildRows);
-    const source = membershipRows?.length
+    const source: PlayerHubCommunitySource = membershipRows?.length
       ? "player_discord_community_memberships"
       : managedGuildRows.length
         ? "cached_discord_manageable_guilds"
@@ -194,7 +222,7 @@ async function readMatchedCommunities(env: Env, userId: string) {
           : "cached_discord_manageable_guilds";
 
     if (!guilds.length) {
-      return { communities: [], source };
+      return { communities: [], source, lastCheckedAt: latestCommunityMembershipSeenAt(guilds) };
     }
 
     const discordGuildIds = [...new Set(guilds.map((guild) => guild.guild_id).filter(Boolean))];
@@ -252,9 +280,9 @@ async function readMatchedCommunities(env: Env, userId: string) {
       .filter((community) => community.public_server_count > 0)
       .slice(0, MAX_MATCHED_COMMUNITIES);
 
-    return { communities, source };
+    return { communities, source, lastCheckedAt: latestCommunityMembershipSeenAt(guilds) };
   } catch {
-    return { communities: [], source: "unavailable" as const };
+    return { communities: [], source: "unavailable" as const, lastCheckedAt: null };
   }
 }
 
@@ -311,6 +339,7 @@ function mergeCommunityMatches(memberships: PlayerHubCommunityMembershipRow[], m
       relationship,
       relationship_label: communityRelationshipLabel(relationship),
       match_keys: [membership.guild_id],
+      last_seen_at: membership.last_seen_at,
     });
   }
 
@@ -339,10 +368,37 @@ function mergeCommunityMatches(memberships: PlayerHubCommunityMembershipRow[], m
       relationship,
       relationship_label: communityRelationshipLabel(relationship),
       match_keys: [...new Set([guild.guild_id, guild.id].filter(Boolean))],
+      last_seen_at: null,
     });
   }
 
   return [...matches.values()];
+}
+
+function latestCommunityMembershipSeenAt(guilds: PlayerHubCommunityMatch[]) {
+  let latest: { value: string; time: number } | null = null;
+  for (const guild of guilds) {
+    if (!guild.last_seen_at) continue;
+    const parsed = Date.parse(guild.last_seen_at);
+    const time = Number.isFinite(parsed) ? parsed : 0;
+    if (!latest || time > latest.time || (time === latest.time && guild.last_seen_at > latest.value)) {
+      latest = { value: guild.last_seen_at, time };
+    }
+  }
+  return latest?.value ?? null;
+}
+
+function communityMembershipStatusMessage(source: PlayerHubCommunitySource, lastCheckedAt: string | null) {
+  if (source === "unavailable") {
+    return "Discord community matching is private but unavailable in this environment.";
+  }
+  if (source === "cached_discord_manageable_guilds") {
+    return "DZN is showing older setup-era guild matches. Refresh Discord matches to check ordinary player memberships.";
+  }
+  if (!lastCheckedAt) {
+    return "Discord community matching is private to your Player Hub. Refresh to check current memberships.";
+  }
+  return "Discord community matching is private to your Player Hub and can be refreshed from this account.";
 }
 
 function normalizeCommunityRelationship(value: PlayerHubCommunityMembershipRow["relationship"]) {

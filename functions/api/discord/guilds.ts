@@ -1,17 +1,15 @@
 import {
   ensureMockUser,
-  getDiscordOAuthToken,
   getSessionUser,
   requireDb,
-  storeDiscordOAuthToken,
   storeGuilds,
 } from "../../_lib/db";
 import {
   canManageDiscordGuild,
   fetchDiscordGuilds,
   guildIconUrl,
-  refreshDiscordAccessToken,
 } from "../../_lib/discord";
+import { getUsableDiscordAccessToken } from "../../_lib/discord-oauth";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, mockGuilds } from "../../_lib/mock";
 import { storePlayerDiscordCommunityMemberships } from "../../_lib/player-community-memberships";
@@ -122,21 +120,6 @@ async function getCachedGuilds(env: Env, userId: string) {
       bot_present: false,
     };
   });
-}
-
-async function getUsableDiscordAccessToken(env: Env, userId: string) {
-  const token = await getDiscordOAuthToken(env, userId);
-  if (!token?.access_token) return null;
-
-  const expiresAt = token.expires_at ? Date.parse(token.expires_at) : Number.NaN;
-  const isExpired = Number.isFinite(expiresAt) && expiresAt <= Date.now() + 30_000;
-  if (!isExpired) return token.access_token;
-  if (!token.refresh_token) return null;
-
-  const refreshed = await refreshDiscordAccessToken(env, token.refresh_token).catch(() => null);
-  if (!refreshed?.access_token) return null;
-  await storeDiscordOAuthToken(env, userId, refreshed);
-  return refreshed.access_token;
 }
 
 function toSafeGuild(guild: DiscordGuild) {

@@ -27,7 +27,14 @@ assert.match(playerHome, /Suggested Events/, "Player Hub UI must show suggested 
 assert.match(playerHome, /Profile Entry Points/, "Player Hub UI must show profile entry points.");
 assert.match(playerHome, /Owner Setup Stays Gated/, "Player Hub UI must keep the owner setup boundary visible.");
 assert.match(playerHome, /\/pricing\?intent=owner_setup&returnTo=%2Fsetup/, "Player Hub UI owner action must point to pricing, not setup bypass.");
-assert.doesNotMatch(playerHome, /\bmethod:\s*"(?:POST|PUT|PATCH|DELETE)"/i, "Player Hub UI must not send mutations.");
+const approvedRefreshStart = playerHome.indexOf("async function refreshCommunityMatches");
+const approvedRefreshEnd = playerHome.indexOf("const profileHandlePreview", approvedRefreshStart);
+assert.ok(approvedRefreshStart > -1 && approvedRefreshEnd > approvedRefreshStart, "Approved Discord membership refresh action must remain findable.");
+const approvedRefreshSource = playerHome.slice(approvedRefreshStart, approvedRefreshEnd);
+const playerHomeWithoutApprovedRefresh = `${playerHome.slice(0, approvedRefreshStart)}${playerHome.slice(approvedRefreshEnd)}`;
+assert.match(approvedRefreshSource, /fetch\("\/api\/player\/community-memberships\/refresh"/, "Player Hub UI may only send the approved private Discord membership refresh.");
+assert.match(approvedRefreshSource, /method: "POST"/, "Approved private Discord membership refresh must use POST.");
+assert.doesNotMatch(playerHomeWithoutApprovedRefresh, /\bmethod:\s*"(?:POST|PUT|PATCH|DELETE)"/i, "Player Hub UI must not send unapproved mutations.");
 assert.doesNotMatch(playerHome, /\b(?:sendBeacon|analytics|localStorage|sessionStorage)\b/i, "Player Hub UI must not track analytics or store private fallback state.");
 assert.doesNotMatch(playerHome, /fetch\([^)]*(?:checkout|STRIPE|nitrado_connections|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns)/i, "Player Hub UI must not call Store/payment/owner runtime routes.");
 
