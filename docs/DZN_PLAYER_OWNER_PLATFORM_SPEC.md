@@ -150,6 +150,21 @@ This slice proves the private `/player` experience in a browser before the next 
 - Do not write production D1, call Stripe, mutate Cloudflare secrets/config, call Nitrado or Discord runtime APIs, send chat messages, add reactions, report/moderate, call DZN Assist AI, use Durable Objects/WebSockets, change retained exports, deploy, enable live checkout, or change issue `#49`.
 - Prove the rendered Player Hub remains private, presentation-only, and isolated from billing, owner entitlement, server ownership, scoring, ranking, discovery, reviews, progression, XP awards, calling-card awards, badges, seasons, Server Wars, CTF, and competitive eligibility.
 
+### Player Hub Profile/Progression Entry-Point Real-Data Polish
+
+This slice makes `/player` and `/player/profile` more useful without introducing a progression runtime:
+
+- Add a private read-only current-user profile/progression summary to `GET /api/player/hub`.
+- Read only Discord-scoped `player_profiles` rows for the current logged-in user.
+- Join those rows only to public-safe server display fields, so hidden/deleted/merged/slugless server rows do not appear.
+- Expose aggregate gameplay profile signals such as linked profile count, linked public-server count, total kills/deaths/suicides, longest kill distance, latest seen timestamp, and one public-safe featured server.
+- Do not expose raw `player_name`, `player_id`, private Discord identifiers, hidden server rows, other-user rows, profile privacy settings, or public profile handles.
+- This does not publish public profile handles or bypass the future saved privacy preference model.
+- Render a richer private `/player` Profile & Progression panel with current profile signals, profile entry points, future earned-track readiness, and next actions.
+- Keep XP, challenges, and calling cards marked as future earned runtime tracks until trusted server-side award sources and ledgers exist.
+- Keep owner setup behind `/pricing?intent=owner_setup&returnTo=%2Fsetup`.
+- Do not add migrations, write profile/privacy/award rows, grant awards, alter billing, alter owner entitlement, alter scoring, alter rankings, alter discovery, alter reviews, alter events, alter Server Wars/CTF, or alter competitive eligibility.
+
 ## Reviews Roadmap
 
 Reviews are free logged-in player actions:
@@ -245,7 +260,8 @@ Completed or active foundation slices:
 - Player Hub suggested event/tournament relevance polish: private no-store suggestions now prioritise public events connected to followed servers and matched-community server previews, with presentation-only labels and no event registration, scoring, eligibility, billing, owner workflow, progression, review, ranking, discovery, or competitive-system changes.
 - Player Hub event relevance query cap fix: private relevance server-link reads are now filtered to the current player's followed or matched-community server ids so crowded event registrations cannot hide a relevant match.
 - Player Hub rendered QA/release polish: local browser artifact captures representative saved-server, matched-community, crowded-event, empty, unavailable, and storage-fallback states before the next Player Hub product feature.
+- Player Hub profile/progression entry-point real-data polish: private current-user `player_profiles` summaries now feed `/player` and `/player/profile` entry panels without exposing raw player identifiers, profile privacy settings, public handles, hidden rows, other-user rows, award writes, billing, owner workflows, scoring, ranking, discovery, reviews, events, Server Wars, CTF, or competitive eligibility.
 
-Next recommended product slice after Player Hub rendered QA:
+Next recommended product slice after Player Hub profile/progression polish:
 
-- Player Hub profile/progression entry-point real-data polish: make the private `/player` entry points more useful by surfacing safe current-user profile/progression summaries and next actions while keeping visibility, awards, billing, scoring, rankings, reviews, events, Server Wars, CTF, and competitive eligibility isolated.
+- Player profile privacy settings model: add persistent player-owned public profile visibility and per-section display preferences behind private settings APIs, with tests proving those settings do not affect billing, rankings, discovery, reviews, badges, seasons, events, Server Wars, XP awards, calling-card awards, or competitive eligibility.

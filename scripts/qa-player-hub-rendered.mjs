@@ -39,6 +39,11 @@ const scenarios = {
       "Public Network Briefing",
       "Public network",
       "These suggestions are private to your Player Hub and stay presentation-only.",
+      "Profile & Progression",
+      "Current Profile Signals",
+      "421m",
+      "future earned runtime",
+      "This panel is private and read-only.",
     ],
     mustNotContain: [
       "200000000000000001",
@@ -55,6 +60,7 @@ const scenarios = {
       "No followed servers yet",
       "No public DZN matches yet",
       "No suggested events yet",
+      "No Discord-linked public gameplay profile rows were found for this account yet.",
       "Presentation Only",
       "Owner Setup Stays Gated",
     ],
@@ -89,6 +95,7 @@ const scenarios = {
       "Saved-server storage is not available in this environment yet.",
       "Discord community matching is not available in this environment yet.",
       "Event storage is not available in this environment yet.",
+      "Profile/progression summary storage is unavailable in this environment",
       "No followed servers yet",
       "Community matching offline",
       "No suggested events yet",
@@ -509,7 +516,35 @@ function richHubPayload() {
       saved_servers: "player_saved_servers",
       matched_communities: "player_discord_community_memberships",
       suggested_events: "public_competitive_events",
+      profile_progression: "player_profiles",
     },
+    profile_summary: defaultProfileSummary("Rafael DZN", {
+      linked_game_profiles: 2,
+      linked_public_servers: 2,
+      last_seen_at: "2026-09-01T10:30:00.000Z",
+    }),
+    progression_summary: defaultProgressionSummary({
+      status: "stats_available",
+      gameplay_totals: {
+        kills: 25,
+        deaths: 7,
+        suicides: 1,
+        longest_kill_distance: 421.4,
+      },
+      featured_server: {
+        linked_server_id: "server-public",
+        public_slug: "pandora-squad",
+        server_name: "Pandora Squad",
+        server_type: "PvP Survival",
+        platform: "PC",
+        map_name: "Chernarus",
+        kills: 18,
+        deaths: 4,
+        longest_kill_distance: 421.4,
+        last_seen_at: "2026-09-01T10:30:00.000Z",
+      },
+      message: "This private summary is read from Discord-linked gameplay profile rows and is presentation-only.",
+    }),
   });
 }
 
@@ -524,6 +559,7 @@ function emptyHubPayload() {
       saved_servers: "player_saved_servers",
       matched_communities: "player_discord_community_memberships",
       suggested_events: "public_competitive_events",
+      profile_progression: "player_profiles",
     },
   });
 }
@@ -539,7 +575,16 @@ function storageFallbackHubPayload() {
       saved_servers: "unavailable",
       matched_communities: "unavailable",
       suggested_events: "unavailable",
+      profile_progression: "unavailable",
     },
+    profile_summary: defaultProfileSummary("Fallback Scout", {
+      source: "unavailable",
+    }),
+    progression_summary: defaultProgressionSummary({
+      source: "unavailable",
+      status: "unavailable",
+      message: "Profile/progression summary storage is unavailable in this environment, so DZN shows safe private fallback copy only.",
+    }),
     membershipStatus: {
       source: "unavailable",
       last_checked_at: null,
@@ -561,6 +606,8 @@ function baseHubPayload({
   suggested_events,
   sources,
   membershipStatus,
+  profile_summary,
+  progression_summary,
 }) {
   return {
     ok: true,
@@ -595,19 +642,28 @@ function baseHubPayload({
     profile_entries: [
       {
         key: "private_profile",
-        label: "Private Player Profile",
+        label: "Personal profile",
         href: "/player/profile",
         status: "available",
-        description: "Open your private player profile and future privacy controls.",
+        description: "Open the private player profile entry point for account-specific profile tools.",
       },
       {
         key: "public_profile",
-        label: "Public Profile Preview",
-        href: "/account/profile/public-preview",
-        status: "privacy_controlled",
-        description: "Review only the profile sections you have chosen to publish.",
+        label: "Public profile controls",
+        href: "/player/profile",
+        status: "not_configured",
+        description: "Public profile publishing still requires saved privacy preferences and never bypasses opt-in controls.",
+      },
+      {
+        key: "progression",
+        label: "Progression summary",
+        href: "/player/profile",
+        status: progression_summary?.status === "stats_available" ? "stats_ready" : progression_summary?.status ?? "empty",
+        description: "Current-player gameplay summaries are read-only; XP and calling cards remain earned-only future runtimes.",
       },
     ],
+    profile_summary: profile_summary ?? defaultProfileSummary(accountName),
+    progression_summary: progression_summary ?? defaultProgressionSummary(),
     owner_setup: {
       href: "/pricing?intent=owner_setup&returnTo=%2Fsetup",
       gated: true,
@@ -620,8 +676,64 @@ function baseHubPayload({
       "Saved servers are private player preferences only.",
       "Matched communities are private player Discord membership context.",
       "Suggested event relevance is presentation-only.",
-      "Player Hub data cannot alter billing, ownership, ranking, discovery, reviews, progression, scoring, or competitive eligibility.",
+      "Profile and progression summaries are private current-user read models only.",
+      "Player Hub data cannot alter billing, ownership, ranking, discovery, reviews, awards, scoring, or competitive eligibility.",
     ],
+  };
+}
+
+function defaultProfileSummary(accountName, overrides = {}) {
+  return {
+    display_name: accountName,
+    private_profile_href: "/player/profile",
+    public_profile_href: null,
+    public_profile_status: "not_configured",
+    public_profile_message: "Public profile publishing and visibility controls stay in the dedicated profile privacy slices.",
+    linked_game_profiles: 0,
+    linked_public_servers: 0,
+    last_seen_at: null,
+    source: "player_profiles",
+    private: true,
+    presentation_only: true,
+    ...overrides,
+  };
+}
+
+function defaultProgressionSummary(overrides = {}) {
+  return {
+    status: "empty",
+    source: "player_profiles",
+    gameplay_totals: {
+      kills: 0,
+      deaths: 0,
+      suicides: 0,
+      longest_kill_distance: 0,
+    },
+    featured_server: null,
+    tracks: [
+      {
+        key: "xp",
+        label: "XP",
+        status: "future_earned_runtime",
+        description: "XP stays blocked until trusted server-side award sources are connected.",
+      },
+      {
+        key: "challenges",
+        label: "Challenges",
+        status: "future_earned_runtime",
+        description: "Challenge progress will be earned player-side and cannot be paid into.",
+      },
+      {
+        key: "calling_cards",
+        label: "Calling cards",
+        status: "future_earned_runtime",
+        description: "Calling-card awards remain account-bound earned cosmetics when that runtime lands.",
+      },
+    ],
+    message: "No Discord-linked public gameplay profile rows were found for this account yet.",
+    private: true,
+    presentation_only: true,
+    ...overrides,
   };
 }
 
@@ -725,7 +837,7 @@ async function writeReport(results) {
   const report = [
     "# Player Hub Rendered QA - 2026-09-01",
     "",
-    "This local artifact proves the rendered `/player` Player Hub states after PR #132. It uses a headless browser against the local Next app and intercepts only `/api/auth/me`, `/api/dzn-pulse/config`, `/api/player/hub`, and `/api/player/community-memberships/refresh` with sanitized representative JSON.",
+    "This local artifact proves the rendered `/player` Player Hub states for the profile/progression entry-point polish slice. It uses a headless browser against the local Next app and intercepts only `/api/auth/me`, `/api/dzn-pulse/config`, `/api/player/hub`, and `/api/player/community-memberships/refresh` with sanitized representative JSON.",
     "",
     "No production D1, Stripe, Cloudflare secret/config, Nitrado, Discord runtime, Store/payment, live checkout, retained export, analytics, scoring, ranking, discovery, review, progression, or competitive-system mutation is used by this QA harness.",
     "",
@@ -737,7 +849,8 @@ async function writeReport(results) {
     "",
     "## Verified States",
     "",
-    "- Rich current-player data: followed servers, matched Discord communities, suggested events, relevance badges, and profile entry points render from the private Player Hub payload.",
+    "- Rich current-player data: followed servers, matched Discord communities, suggested events, relevance badges, profile entry points, and private profile/progression summaries render from the private Player Hub payload.",
+    "- Profile/progression proof: safe current-user gameplay summary metrics render without raw player names, raw player ids, public profile handles, privacy-setting writes, or award runtime writes.",
     "- Crowded-event proof: the matched-community event renders as `451/512 servers` and still shows `Matched community`, proving irrelevant registered servers do not hide a relevant private match.",
     "- Empty state proof: followed servers, matched communities, and suggested events show useful empty states.",
     "- Unavailable state proof: a failed Player Hub API response renders the `Player Hub Data Unavailable` fallback.",

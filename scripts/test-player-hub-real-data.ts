@@ -18,6 +18,9 @@ assert.match(route, /discord_guilds/, "Player Hub route must use cached Discord 
 assert.match(route, /competitive_events/, "Player Hub route must read public event/tournament suggestions.");
 assert.match(route, /readSuggestedEventServerRows/, "Player Hub route must read public event server links for private relevance ordering.");
 assert.match(route, /suggestedEventRelevance/, "Player Hub route must label suggested event relevance without changing event systems.");
+assert.match(route, /readPlayerProfileProgression/, "Player Hub route must build the private profile/progression read model.");
+assert.match(route, /FROM player_profiles/, "Player Hub profile/progression summary may read current-user gameplay profile rows.");
+assert.match(route, /player_profiles\.discord_id = \?/, "Player Hub profile/progression summary must be scoped to the current Discord user.");
 assert.match(route, /\/pricing\?intent=owner_setup&returnTo=%2Fsetup/, "Owner setup CTA must route through pricing.");
 assert.doesNotMatch(route, /\b(?:INSERT INTO|UPDATE\s+[a-z_]+|DELETE FROM)\b/i, "Player Hub route must not contain direct SQL writes.");
 assert.doesNotMatch(route, /\b(?:STRIPE|checkout_session|checkout\.session|nitrado_connections|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns|server_reviews|review_score|badge_awards|user_badges|dzn_season|server_war_events|ctf_tournaments|xp_award|calling_card_awards|dynamic_visibility_score|network_rank)\b/i, "Player Hub route must stay out of payment, owner, review, progression, and competitive systems.");
@@ -29,6 +32,9 @@ assert.match(playerHome, /Suggested Events/, "Player Hub UI must show suggested 
 assert.match(playerHome, /event\.relevance\.label/, "Player Hub UI must render suggested event relevance labels from the private API payload.");
 assert.match(playerHome, /event\.relevance\.reasons/, "Player Hub UI must render suggested event relevance reasons from the private API payload.");
 assert.match(playerHome, /presentation-only/, "Player Hub UI must explain event suggestions remain presentation-only.");
+assert.match(playerHome, /Profile & Progression/, "Player Hub UI must show private profile/progression summaries.");
+assert.match(playerHome, /Current Profile Signals/, "Player Hub UI must show current-user profile signal metrics.");
+assert.match(playerHome, /future_earned_runtime/, "Player Hub UI must keep XP/challenge/calling-card runtime disconnected.");
 assert.match(playerHome, /Profile Entry Points/, "Player Hub UI must show profile entry points.");
 assert.match(playerHome, /Owner Setup Stays Gated/, "Player Hub UI must keep the owner setup boundary visible.");
 assert.match(playerHome, /\/pricing\?intent=owner_setup&returnTo=%2Fsetup/, "Player Hub UI owner action must point to pricing, not setup bypass.");
@@ -144,6 +150,64 @@ async function testPlayerHubRouteRuntimeContract() {
       updated_at: "2026-08-31T11:02:00.000Z",
     },
   );
+  db.playerProfiles.push(
+    {
+      id: "profile-current-public",
+      linked_server_id: "server-public",
+      player_name: "PrivatePlayerName",
+      player_id: "private-platform-id",
+      discord_id: "mock-discord-user",
+      kills: 18,
+      deaths: 4,
+      suicides: 1,
+      longest_kill_distance: 421.4,
+      last_seen_at: "2026-08-31T12:00:00.000Z",
+      created_at: "2026-08-30T10:00:00.000Z",
+      updated_at: "2026-08-31T12:00:00.000Z",
+    },
+    {
+      id: "profile-current-community",
+      linked_server_id: "server-community",
+      player_name: "PrivateCommunityName",
+      player_id: "private-community-id",
+      discord_id: "mock-discord-user",
+      kills: 7,
+      deaths: 3,
+      suicides: 0,
+      longest_kill_distance: 300,
+      last_seen_at: "2026-08-31T11:00:00.000Z",
+      created_at: "2026-08-30T10:00:00.000Z",
+      updated_at: "2026-08-31T11:00:00.000Z",
+    },
+    {
+      id: "profile-current-hidden",
+      linked_server_id: "server-hidden",
+      player_name: "HiddenPrivateName",
+      player_id: "hidden-platform-id",
+      discord_id: "mock-discord-user",
+      kills: 1000,
+      deaths: 0,
+      suicides: 0,
+      longest_kill_distance: 999,
+      last_seen_at: "2026-08-31T13:00:00.000Z",
+      created_at: "2026-08-30T10:00:00.000Z",
+      updated_at: "2026-08-31T13:00:00.000Z",
+    },
+    {
+      id: "profile-other-public",
+      linked_server_id: "server-public",
+      player_name: "OtherPlayer",
+      player_id: "other-platform-id",
+      discord_id: "other-discord-user",
+      kills: 500,
+      deaths: 1,
+      suicides: 0,
+      longest_kill_distance: 800,
+      last_seen_at: "2026-08-31T14:00:00.000Z",
+      created_at: "2026-08-30T10:00:00.000Z",
+      updated_at: "2026-08-31T14:00:00.000Z",
+    },
+  );
   db.competitiveEvents.set("event-public", {
     id: "event-public",
     name: "Survival Showdown",
@@ -254,6 +318,26 @@ async function testPlayerHubRouteRuntimeContract() {
       relevance: { level: string; label: string; reasons: string[]; presentation_only: boolean };
     }>;
     suggested_event_relevance: { private: boolean; presentation_only: boolean; uses_followed_servers: boolean; uses_matched_communities: boolean };
+    profile_summary: {
+      source: string;
+      private: boolean;
+      presentation_only: boolean;
+      public_profile_href: string | null;
+      public_profile_status: string;
+      linked_game_profiles: number;
+      linked_public_servers: number;
+      last_seen_at: string | null;
+    };
+    progression_summary: {
+      status: string;
+      source: string;
+      private: boolean;
+      presentation_only: boolean;
+      gameplay_totals: { kills: number; deaths: number; suicides: number; longest_kill_distance: number };
+      featured_server: { linked_server_id: string; public_slug: string; server_name: string; kills: number; deaths: number; longest_kill_distance: number } | null;
+      tracks: Array<{ key: string; status: string; description: string }>;
+    };
+    profile_entries: Array<{ key: string; status: string; href: string }>;
     owner_setup: { href: string; gated: boolean; requires_entitlement: boolean };
     sources: Record<string, string>;
     fairness_boundary: string[];
@@ -280,11 +364,39 @@ async function testPlayerHubRouteRuntimeContract() {
   assert.equal(payload.suggested_event_relevance.uses_followed_servers, true, "Suggested event relevance should declare followed-server input use.");
   assert.equal(payload.suggested_event_relevance.uses_matched_communities, true, "Suggested event relevance should declare matched-community input use.");
   assert.doesNotMatch(JSON.stringify(payload.suggested_events), /200000000000000001|guild_id|discord_guild/i, "Suggested events must not expose raw Discord community identifiers.");
+  assert.equal(payload.profile_summary.source, "player_profiles", "Profile summary should use the existing current-user gameplay profile source.");
+  assert.equal(payload.profile_summary.private, true, "Profile summary must be private.");
+  assert.equal(payload.profile_summary.presentation_only, true, "Profile summary must be presentation-only.");
+  assert.equal(payload.profile_summary.public_profile_href, null, "Player Hub must not invent or expose a public profile handle.");
+  assert.equal(payload.profile_summary.public_profile_status, "not_configured", "Public profile publishing should remain a separate privacy slice.");
+  assert.equal(payload.profile_summary.linked_game_profiles, 2, "Profile summary must include only current-user public linked gameplay profiles.");
+  assert.equal(payload.profile_summary.linked_public_servers, 2, "Profile summary must count only current-user public servers.");
+  assert.equal(payload.profile_summary.last_seen_at, "2026-08-31T12:00:00.000Z", "Profile summary must ignore hidden and other-user profile rows.");
+  assert.equal(payload.progression_summary.status, "stats_available", "Progression summary should show current-user stat availability when safe rows exist.");
+  assert.equal(payload.progression_summary.private, true, "Progression summary must be private.");
+  assert.equal(payload.progression_summary.presentation_only, true, "Progression summary must be presentation-only.");
+  assert.deepEqual(payload.progression_summary.gameplay_totals, {
+    kills: 25,
+    deaths: 7,
+    suicides: 1,
+    longest_kill_distance: 421.4,
+  }, "Progression summary must aggregate only current-user public gameplay profile rows.");
+  assert.equal(payload.progression_summary.featured_server?.linked_server_id, "server-public", "Featured profile server should come from the strongest current-user public profile row.");
+  assert.equal(payload.progression_summary.featured_server?.public_slug, "pandora-squad", "Featured profile server should expose only public server profile slug.");
+  assert.deepEqual(payload.progression_summary.tracks.map((track) => track.status), [
+    "future_earned_runtime",
+    "future_earned_runtime",
+    "future_earned_runtime",
+  ], "XP, challenge, and calling-card runtimes must stay disconnected in this slice.");
+  assert.deepEqual(payload.profile_entries.map((entry) => entry.key), ["private_profile", "public_profile", "progression"], "Profile entries must remain private player entry points.");
   assert.equal(payload.owner_setup.href, "/pricing?intent=owner_setup&returnTo=%2Fsetup", "Owner setup must stay routed through pricing.");
   assert.equal(payload.owner_setup.gated, true, "Owner setup must stay marked as gated.");
   assert.equal(payload.owner_setup.requires_entitlement, true, "Owner setup must require entitlement after pricing.");
   assert.equal(payload.sources.saved_servers, "player_saved_servers", "Saved source should be the canonical player preference table.");
+  assert.equal(payload.sources.profile_progression, "player_profiles", "Profile/progression source should be explicit and private.");
   assert.ok(payload.fairness_boundary.some((line) => /cannot alter billing/i.test(line)), "Payload should carry the fairness boundary copy.");
+  assert.doesNotMatch(JSON.stringify(payload.profile_summary), /PrivatePlayerName|private-platform-id|HiddenPrivateName|hidden-platform-id|OtherPlayer|other-platform-id/i, "Profile summary must not expose raw player names, raw player ids, hidden rows, or other-user rows.");
+  assert.doesNotMatch(JSON.stringify(payload.progression_summary), /PrivatePlayerName|private-platform-id|HiddenPrivateName|hidden-platform-id|OtherPlayer|other-platform-id/i, "Progression summary must not expose raw player names, raw player ids, hidden rows, or other-user rows.");
 
   const publicPayloadKeys = collectKeys(payload);
   for (const forbiddenKey of [
@@ -395,10 +507,26 @@ type FakeCompetitiveEventServer = {
   server_id: string;
 };
 
+type FakePlayerProfile = {
+  id: string;
+  linked_server_id: string;
+  player_name: string;
+  player_id: string | null;
+  discord_id: string | null;
+  kills: number;
+  deaths: number;
+  suicides: number;
+  longest_kill_distance: number;
+  last_seen_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 class FakeD1Database {
   readonly discordGuilds = new Map<string, FakeDiscordGuild>();
   readonly linkedServers = new Map<string, FakeLinkedServer>();
   readonly playerSavedServers: FakeSavedServer[] = [];
+  readonly playerProfiles: FakePlayerProfile[] = [];
   readonly competitiveEvents = new Map<string, FakeCompetitiveEvent>();
   readonly competitiveEventServers: FakeCompetitiveEventServer[] = [];
   readonly writeTargets = new Set<string>();
@@ -492,6 +620,49 @@ class FakeD1PreparedStatement {
       const rows = [...this.db.discordGuilds.values()]
         .filter((guild) => guild.owner_user_id === userId)
         .sort((a, b) => a.name.localeCompare(b.name));
+      return d1Ok<T>(rows as T[]);
+    }
+
+    if (query.includes("from player_profiles")) {
+      const discordId = String(this.bindings[0]);
+      const profiles = this.db.playerProfiles
+        .map((profile) => ({ profile, server: this.db.linkedServers.get(profile.linked_server_id) }))
+        .filter((row): row is { profile: FakePlayerProfile; server: FakeLinkedServer } => Boolean(row.server && isPublicServer(row.server)))
+        .filter(({ profile }) => profile.discord_id === discordId);
+
+      if (query.includes("count(player_profiles.id) as linked_game_profiles")) {
+        const aggregate = {
+          linked_game_profiles: profiles.length,
+          linked_public_servers: new Set(profiles.map(({ profile }) => profile.linked_server_id)).size,
+          total_kills: profiles.reduce((total, { profile }) => total + profile.kills, 0),
+          total_deaths: profiles.reduce((total, { profile }) => total + profile.deaths, 0),
+          total_suicides: profiles.reduce((total, { profile }) => total + profile.suicides, 0),
+          longest_kill_distance: profiles.reduce((longest, { profile }) => Math.max(longest, profile.longest_kill_distance), 0),
+          last_seen_at: profiles
+            .map(({ profile }) => profile.last_seen_at || profile.updated_at || profile.created_at)
+            .sort()
+            .at(-1) ?? null,
+        };
+        return d1Ok<T>([aggregate] as T[]);
+      }
+
+      const rows = profiles
+        .sort((left, right) => right.profile.kills - left.profile.kills
+          || right.profile.longest_kill_distance - left.profile.longest_kill_distance
+          || String(right.profile.last_seen_at ?? right.profile.updated_at).localeCompare(String(left.profile.last_seen_at ?? left.profile.updated_at)))
+        .slice(0, 1)
+        .map(({ profile, server }) => ({
+          linked_server_id: profile.linked_server_id,
+          public_slug: server.public_slug,
+          server_name: displayServerName(server),
+          server_type: server.server_category || server.server_mode || server.server_type,
+          platform: server.platform,
+          map_name: server.map_name,
+          kills: profile.kills,
+          deaths: profile.deaths,
+          longest_kill_distance: profile.longest_kill_distance,
+          last_seen_at: profile.last_seen_at || profile.updated_at || profile.created_at,
+        }));
       return d1Ok<T>(rows as T[]);
     }
 

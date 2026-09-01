@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-01T12:18:43.036Z",
+  "generated_at": "2026-09-01T14:24:57.476Z",
   "results": [
     {
       "scenario": "rich",
       "viewport": "desktop",
       "screenshot": "screenshots/rich-desktop.png",
-      "assertions": 20,
+      "assertions": 25,
       "consoleMessages": [],
       "failedRequests": [],
       "textChecks": [
@@ -22,14 +22,19 @@
         "451/512 servers",
         "Public Network Briefing",
         "Public network",
-        "These suggestions are private to your Player Hub and stay presentation-only."
+        "These suggestions are private to your Player Hub and stay presentation-only.",
+        "Profile & Progression",
+        "Current Profile Signals",
+        "421m",
+        "future earned runtime",
+        "This panel is private and read-only."
       ]
     },
     {
       "scenario": "rich",
       "viewport": "mobile",
       "screenshot": "screenshots/rich-mobile.png",
-      "assertions": 20,
+      "assertions": 25,
       "consoleMessages": [],
       "failedRequests": [],
       "textChecks": [
@@ -46,20 +51,26 @@
         "451/512 servers",
         "Public Network Briefing",
         "Public network",
-        "These suggestions are private to your Player Hub and stay presentation-only."
+        "These suggestions are private to your Player Hub and stay presentation-only.",
+        "Profile & Progression",
+        "Current Profile Signals",
+        "421m",
+        "future earned runtime",
+        "This panel is private and read-only."
       ]
     },
     {
       "scenario": "empty",
       "viewport": "desktop",
       "screenshot": "screenshots/empty-desktop.png",
-      "assertions": 9,
+      "assertions": 10,
       "consoleMessages": [],
       "failedRequests": [],
       "textChecks": [
         "No followed servers yet",
         "No public DZN matches yet",
         "No suggested events yet",
+        "No Discord-linked public gameplay profile rows were found for this account yet.",
         "Presentation Only",
         "Owner Setup Stays Gated"
       ]
@@ -81,13 +92,14 @@
       "scenario": "storageFallback",
       "viewport": "desktop",
       "screenshot": "screenshots/storageFallback-desktop.png",
-      "assertions": 10,
+      "assertions": 11,
       "consoleMessages": [],
       "failedRequests": [],
       "textChecks": [
         "Saved-server storage is not available in this environment yet.",
         "Discord community matching is not available in this environment yet.",
         "Event storage is not available in this environment yet.",
+        "Profile/progression summary storage is unavailable in this environment",
         "No followed servers yet",
         "Community matching offline",
         "No suggested events yet"
