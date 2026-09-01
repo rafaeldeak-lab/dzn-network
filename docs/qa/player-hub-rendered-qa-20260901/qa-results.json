@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-01T15:03:06.477Z",
+  "generated_at": "2026-09-01T19:45:02.290Z",
   "results": [
     {
       "scenario": "rich",
@@ -63,7 +63,7 @@
       "scenario": "profilePrivacy",
       "viewport": "desktop",
       "screenshot": "screenshots/profilePrivacy-desktop.png",
-      "assertions": 16,
+      "assertions": 18,
       "consoleMessages": [],
       "failedRequests": [],
       "textChecks": [
@@ -75,8 +75,10 @@
         "Calling cards",
         "Private by default",
         "Last saved: not saved yet",
-        "public profile viewer, handle generation, and profile attribution remain blocked",
-        "These settings do not write public profile routes"
+        "Choose which approved sections can appear on your public DZN profile link",
+        "Profile attribution across other DZN surfaces remains blocked",
+        "Turn on public profile only when you want approved sections",
+        "Generated profile handles are presentation-only"
       ]
     },
     {
@@ -90,7 +92,7 @@
         "No followed servers yet",
         "No public DZN matches yet",
         "No suggested events yet",
-        "No Discord-linked public gameplay profile rows were found for this account yet.",
+        "No trusted Discord-linked public gameplay profile rows were found for this account yet. DZN does not attach leaderboard stats by display name alone.",
         "Presentation Only",
         "Owner Setup Stays Gated"
       ]

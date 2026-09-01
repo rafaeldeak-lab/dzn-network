@@ -5,6 +5,7 @@ import { onRequest as playerHubRoute } from "../functions/api/player/hub";
 import type { Env, PagesContext } from "../functions/_lib/types";
 
 const route = readFileSync("functions/api/player/hub.ts", "utf8");
+const statBridge = readFileSync("functions/_lib/player-stat-bridge.ts", "utf8");
 const playerHome = readFileSync("components/player/player-home.tsx", "utf8");
 const platformSpec = readFileSync("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md", "utf8");
 const packageJson = readFileSync("package.json", "utf8");
@@ -19,8 +20,12 @@ assert.match(route, /competitive_events/, "Player Hub route must read public eve
 assert.match(route, /readSuggestedEventServerRows/, "Player Hub route must read public event server links for private relevance ordering.");
 assert.match(route, /suggestedEventRelevance/, "Player Hub route must label suggested event relevance without changing event systems.");
 assert.match(route, /readPlayerProfileProgression/, "Player Hub route must build the private profile/progression read model.");
-assert.match(route, /FROM player_profiles/, "Player Hub profile/progression summary may read current-user gameplay profile rows.");
-assert.match(route, /player_profiles\.discord_id = \?/, "Player Hub profile/progression summary must be scoped to the current Discord user.");
+assert.match(route, /readTrustedPlayerGameplayAggregate/, "Player Hub profile/progression summary must use the shared trusted stat bridge.");
+assert.match(statBridge, /FROM player_profiles/, "Player Hub profile/progression summary may read current-user gameplay profile rows.");
+assert.match(statBridge, /player_profiles\.discord_id = \?/, "Player Hub profile/progression summary must be scoped to the current Discord user.");
+assert.match(statBridge, /kill_events\.killer_id = trusted_public_player_profiles\.player_id/, "Player Hub profile/progression summary must mirror leaderboard kills through the trusted player ID bridge.");
+assert.match(statBridge, /kill_events\.victim_id = trusted_public_player_profiles\.player_id/, "Player Hub profile/progression summary must mirror leaderboard deaths through the trusted player ID bridge.");
+assert.doesNotMatch(statBridge, /lower\([^)]*(?:player_name|killer_name|victim_name)|(?:player_profiles\.player_name|kill_events\.killer_name|kill_events\.victim_name)\s*=/i, "Player Hub profile/progression summary must not attach gameplay rows by ambiguous public names.");
 assert.match(route, /\/pricing\?intent=owner_setup&returnTo=%2Fsetup/, "Owner setup CTA must route through pricing.");
 assert.doesNotMatch(route, /\b(?:INSERT INTO|UPDATE\s+[a-z_]+|DELETE FROM)\b/i, "Player Hub route must not contain direct SQL writes.");
 assert.doesNotMatch(route, /\b(?:STRIPE|checkout_session|checkout\.session|nitrado_connections|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns|server_reviews|review_score|badge_awards|user_badges|dzn_season|server_war_events|ctf_tournaments|xp_award|calling_card_awards|dynamic_visibility_score|network_rank)\b/i, "Player Hub route must stay out of payment, owner, review, progression, and competitive systems.");
@@ -558,6 +563,52 @@ class FakeD1PreparedStatement {
   }
 
   async first<T>() {
+    const query = normalizedSql(this.query);
+
+    if (query.includes("from trusted_public_player_profile_resolved_stats")) {
+      assert.match(query, /player_profiles\.discord_id = \?/, "Trusted profile reads must remain scoped to the current Discord user.");
+      assert.match(query, /kill_events\.killer_id = trusted_public_player_profiles\.player_id/, "Trusted profile reads must bridge leaderboard event rows by per-server player ID.");
+      assert.doesNotMatch(query, /lower\([^)]*(?:player_name|killer_name|victim_name)|(?:player_profiles\.player_name|kill_events\.killer_name|kill_events\.victim_name)\s*=/i, "Trusted profile reads must not link public stats by player name.");
+
+      const discordId = String(this.bindings[0]);
+      const profiles = this.trustedProfilesForDiscord(discordId);
+
+      if (query.includes("count(trusted_public_player_profile_resolved_stats.id) as linked_game_profiles")) {
+        return {
+          linked_game_profiles: profiles.length,
+          linked_public_servers: new Set(profiles.map(({ profile }) => profile.linked_server_id)).size,
+          total_kills: profiles.reduce((total, { profile }) => total + profile.kills, 0),
+          total_deaths: profiles.reduce((total, { profile }) => total + profile.deaths, 0),
+          total_suicides: profiles.reduce((total, { profile }) => total + profile.suicides, 0),
+          longest_kill_distance: profiles.reduce((longest, { profile }) => Math.max(longest, profile.longest_kill_distance), 0),
+          last_seen_at: profiles
+            .map(({ profile }) => profile.last_seen_at || profile.updated_at || profile.created_at)
+            .sort()
+            .at(-1) ?? null,
+        } as T;
+      }
+
+      const featured = profiles
+        .sort((left, right) => right.profile.kills - left.profile.kills
+          || right.profile.longest_kill_distance - left.profile.longest_kill_distance
+          || String(right.profile.last_seen_at ?? right.profile.updated_at).localeCompare(String(left.profile.last_seen_at ?? left.profile.updated_at)))
+        .at(0);
+      if (!featured) return null as T | null;
+
+      return {
+        linked_server_id: featured.profile.linked_server_id,
+        public_slug: featured.server.public_slug,
+        server_name: displayServerName(featured.server),
+        server_type: featured.server.server_category || featured.server.server_mode || featured.server.server_type,
+        platform: featured.server.platform,
+        map_name: featured.server.map_name,
+        kills: featured.profile.kills,
+        deaths: featured.profile.deaths,
+        longest_kill_distance: featured.profile.longest_kill_distance,
+        last_seen_at: featured.profile.last_seen_at || featured.profile.updated_at || featured.profile.created_at,
+      } as T;
+    }
+
     return null as T | null;
   }
 
@@ -731,6 +782,13 @@ class FakeD1PreparedStatement {
 
   raw() {
     throw new Error("Fake D1 raw is not implemented for Player Hub tests.");
+  }
+
+  private trustedProfilesForDiscord(discordId: string) {
+    return this.db.playerProfiles
+      .map((profile) => ({ profile, server: this.db.linkedServers.get(profile.linked_server_id) }))
+      .filter((row): row is { profile: FakePlayerProfile; server: FakeLinkedServer } => Boolean(row.server && isPublicServer(row.server)))
+      .filter(({ profile }) => profile.discord_id === discordId);
   }
 }
 

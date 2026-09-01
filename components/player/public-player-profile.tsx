@@ -172,6 +172,7 @@ export function PublicPlayerProfile({ handle: initialHandle = null }: { handle?:
 
 function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
   const totals = data.sections.gameplay_summary.totals;
+  const hasLinkedGameplay = Boolean(totals && totals.linked_public_servers > 0);
 
   return (
     <>
@@ -186,12 +187,19 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
         <div className="space-y-5">
           <Panel title="Gameplay Summary" visible={data.sections.gameplay_summary.visible}>
             {totals ? (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <DetailTile label="Linked public servers" value={String(totals.linked_public_servers)} />
-                <DetailTile label="Last seen" value={formatDate(data.sections.gameplay_summary.last_seen_at)} />
-                <DetailTile label="Suicides" value={String(totals.suicides)} />
-                <DetailTile label="Longest kill" value={formatDistance(totals.longest_kill_distance)} />
-              </div>
+              <>
+                {!hasLinkedGameplay ? (
+                  <p className="mb-3 rounded-md border border-amber-300/24 bg-amber-300/10 p-3 text-sm font-semibold leading-6 text-amber-50">
+                    No trusted Discord-linked DayZ gameplay rows are available for this public profile yet. DZN does not attach leaderboard stats by display name alone.
+                  </p>
+                ) : null}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <DetailTile label="Linked public servers" value={String(totals.linked_public_servers)} />
+                  <DetailTile label="Last seen" value={formatDate(data.sections.gameplay_summary.last_seen_at)} />
+                  <DetailTile label="Suicides" value={String(totals.suicides)} />
+                  <DetailTile label="Longest kill" value={formatDistance(totals.longest_kill_distance)} />
+                </div>
+              </>
             ) : (
               <HiddenCopy />
             )}

@@ -156,6 +156,8 @@ This slice makes `/player` and `/player/profile` more useful without introducing
 
 - Add a private read-only current-user profile/progression summary to `GET /api/player/hub`.
 - Read only Discord-scoped `player_profiles` rows for the current logged-in user.
+- Profile stats use the trusted Discord/stat bridge: `player_profiles.discord_id` must match the current user and leaderboard-style event totals may be mirrored only through the same per-server `player_profiles.player_id` bridge used by public leaderboard attribution.
+- DZN must not attach gameplay rows to a Discord account by display name, profile handle, leaderboard name, review name, or any other public text alone.
 - Join those rows only to public-safe server display fields, so hidden/deleted/merged/slugless server rows do not appear.
 - Expose aggregate gameplay profile signals such as linked profile count, linked public-server count, total kills/deaths/suicides, longest kill distance, latest seen timestamp, and one public-safe featured server.
 - Do not expose raw `player_name`, `player_id`, private Discord identifiers, hidden server rows, other-user rows, profile privacy settings, or public profile handles.
@@ -197,6 +199,8 @@ Public profiles must respect saved privacy preferences:
 - Enabling public profile publishing may generate or reactivate only the current user's handle. Handles are presentation-only and cannot grant authority or competitive effect.
 - Public `GET /api/public/players/[handle]` and `/players/[handle]` show only approved sections.
 - Hidden sections, private identifiers, and raw award evidence stay private.
+- Public profile gameplay totals and featured-server cards reuse the trusted Discord/stat bridge. They may show existing public leaderboard-style ADM event facts only when a Discord-linked `player_profiles` row and per-server `player_id` prove the account-to-gameplay relationship.
+- If no trusted Discord-linked gameplay row exists, public profiles may show a safe empty state; they must not infer stats from a matching display name or handle.
 - Public profile links are opt-in and only shown where a generated public handle exists.
 - Public profile discovery/linking uses the trusted current-user bridge from Discord ID to DZN user to active `player_public_profiles` handle, and also requires `player_profile_privacy_preferences.public_profile_enabled = 1`.
 - Kill-event and leaderboard attribution also require a trusted per-server `player_profiles.player_id` bridge; player-name matching alone must not create profile links.
@@ -275,6 +279,7 @@ Completed or active foundation slices:
 - Public profile publishing/viewer foundation: opt-in current-user handles now live in `player_public_profiles`, private `/player/profile` can expose the user's active profile link, and public `/players/[handle]` plus `GET /api/public/players/[handle]` render only saved visible sections without private identifiers, raw award evidence, payment state, owner state, billing, rankings, discovery, reviews, badges, seasons, events, Server Wars, XP awards, calling-card awards, CTF, or competitive eligibility effect.
 - Public profile discovery/linking polish: review author rows, public server profile player leaderboards, top-player cards, global leaderboard player rows, and longest-kill player mentions can link to `/players/[handle]` only when an active generated public handle exists and saved privacy preferences keep the profile public. These links are stripped from public API fallback snapshots and remain presentation-only with no payment, owner, review score, ranking, discovery, event, award, Server Wars, CTF, XP, calling-card, or eligibility effect.
 - Public Profile Owner Preview And Share Polish: the logged-in `/player/profile` privacy panel now shows a private "How My Public Profile Looks" visitor-view mirror, owner copy/share controls, handle copy, open-public-page action, hidden/not-yet-earned section states, and current-page-session-only action feedback. It reads only the current user's private privacy payload plus the public read-only profile endpoint. Copy/share controls cannot affect profile privacy settings, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility.
+- Trusted Player Stat Bridge: `/player` and public `/players/[handle]` share a read-only gameplay/stat bridge that scopes by Discord ID and mirrors existing public leaderboard ADM event totals only through the per-server player ID relationship. It keeps display names/handles out of identity proof, keeps hidden/merged/slugless server rows out, writes nothing, and cannot affect billing, ownership, scoring, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF, XP awards, calling-card awards, public profile visibility, or competitive eligibility.
 
 Next recommended product area after public profile owner preview/share polish:
 
