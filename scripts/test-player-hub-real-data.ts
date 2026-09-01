@@ -226,6 +226,11 @@ async function testPlayerHubRouteRuntimeContract() {
   });
   db.competitiveEventServers.push(
     { event_id: "event-public", server_id: "server-public" },
+  );
+  for (let index = 0; index < 450; index += 1) {
+    db.competitiveEventServers.push({ event_id: "event-community", server_id: `irrelevant-server-${index}` });
+  }
+  db.competitiveEventServers.push(
     { event_id: "event-community", server_id: "server-community" },
   );
 
@@ -245,6 +250,7 @@ async function testPlayerHubRouteRuntimeContract() {
       id: string;
       slug: string;
       status: string;
+      registered_servers: number;
       relevance: { level: string; label: string; reasons: string[]; presentation_only: boolean };
     }>;
     suggested_event_relevance: { private: boolean; presentation_only: boolean; uses_followed_servers: boolean; uses_matched_communities: boolean };
@@ -266,6 +272,7 @@ async function testPlayerHubRouteRuntimeContract() {
     "A public server from one of your private Discord matches is entered.",
   ], "Followed-server event suggestions should explain private relevance without exposing Discord ids.");
   assert.equal(payload.suggested_events[1]?.relevance.level, "matched_community", "Matched-community event suggestions should come before general public events.");
+  assert.equal(payload.suggested_events[1]?.registered_servers, 451, "Private relevance matching must not depend on the bounded public registered-server count.");
   assert.equal(payload.suggested_events[2]?.relevance.level, "public_network", "General public events should still appear after private relevance matches.");
   assert.equal(payload.suggested_events.every((event) => event.relevance.presentation_only), true, "Suggested event relevance labels must be presentation-only.");
   assert.equal(payload.suggested_event_relevance.private, true, "Suggested event relevance metadata must stay private.");
@@ -509,10 +516,26 @@ class FakeD1PreparedStatement {
       return d1Ok<T>(rows as T[]);
     }
 
+    if (query.startsWith("select distinct event_id, server_id from competitive_event_servers")) {
+      const eventPlaceholderCount = countPlaceholdersInFirstInClause(query);
+      const eventIds = new Set(this.bindings.slice(0, eventPlaceholderCount).map((value) => String(value)));
+      const relevantServerIds = new Set(this.bindings.slice(eventPlaceholderCount).map((value) => String(value)));
+      const rows = this.db.competitiveEventServers
+        .filter((row) => eventIds.has(row.event_id))
+        .filter((row) => relevantServerIds.has(row.server_id))
+        .map((row) => ({
+          event_id: row.event_id,
+          server_id: row.server_id,
+        }));
+      return d1Ok<T>(rows as T[]);
+    }
+
     if (query.startsWith("select event_id, server_id from competitive_event_servers")) {
+      const limit = Number(this.bindings.at(-1) ?? this.db.competitiveEventServers.length);
       const eventIds = new Set(this.bindings.slice(0, -1).map((value) => String(value)));
       const rows = this.db.competitiveEventServers
         .filter((row) => eventIds.has(row.event_id))
+        .slice(0, Number.isFinite(limit) ? limit : undefined)
         .map((row) => ({
           event_id: row.event_id,
           server_id: row.server_id,
@@ -566,6 +589,11 @@ function eventOrder(event: FakeCompetitiveEvent) {
 
 function normalizedSql(query: string) {
   return query.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function countPlaceholdersInFirstInClause(query: string) {
+  const clause = query.match(/\bin \(([^)]*)\)/)?.[1] ?? "";
+  return clause.match(/\?/g)?.length ?? 0;
 }
 
 function d1Ok<T = unknown>(results: T[] = []) {
