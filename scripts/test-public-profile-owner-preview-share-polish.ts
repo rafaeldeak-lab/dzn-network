@@ -52,6 +52,7 @@ function assertOwnerPreviewPanelContract() {
     "navigator.clipboard?.writeText",
     "navigator.share",
     "new URL(href, \"https://dayz-network.com\").toString()",
+    "sectionVisibilityKey",
     "previewState.status === \"ready\"",
     "shareLockCopy",
     "safePublicProfileHref",
@@ -66,7 +67,22 @@ function assertOwnerPreviewPanelContract() {
     "Owner preview must fetch the same public-safe public profile API without sending player cookies.",
   );
   assert.match(panel, /cache: "no-store"/, "Owner preview must avoid stale preview reads.");
+  assert.match(
+    panel,
+    /requestKey = `\$\{publicProfileEnabled \? "public" : "private"\}:[^`]+:\$\{sectionVisibilityKey\}`/,
+    "Owner preview must invalidate the visitor-safe fetch when saved section visibility changes.",
+  );
   assert.match(panel, /aria-live="polite"/, "Copy/share feedback must be announced accessibly.");
+  assert.doesNotMatch(
+    panel,
+    /xl:grid-cols|href=\{validatedHref \?\? "\/player\/profile"\}|aria-disabled=\{!readyToShare\}/,
+    "Owner preview must stay stacked in the profile column and must not expose a keyboard-activatable locked link.",
+  );
+  assert.match(
+    panel,
+    /\{readyToShare && validatedHref \? \([\s\S]+<Link[\s\S]+href=\{validatedHref\}[\s\S]+\) : \([\s\S]+<button[\s\S]+disabled[\s\S]+Open Public Page/,
+    "Open Public Page must be a real link only after the visitor-safe preview is ready.",
+  );
   assert.doesNotMatch(
     panel,
     /fetch\([^)]*\/api\/player\/profile\/privacy|method:\s*["'](?:POST|PATCH|PUT|DELETE)["']|localStorage|sessionStorage|sendBeacon|gtag|posthog|plausible|document\.cookie/i,

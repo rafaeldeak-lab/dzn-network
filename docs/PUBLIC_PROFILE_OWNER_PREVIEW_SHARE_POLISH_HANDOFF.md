@@ -23,6 +23,12 @@ It does not add migrations, public profile write APIs, privacy-setting writes be
 - Handles hidden, disabled, missing-handle, loading, and unavailable preview states.
 - Shows visible/hidden/not-yet-earned section states without exposing private identifiers or raw award evidence.
 
+## PR Review Fixes
+
+- Revalidates the visitor-safe preview whenever saved section visibility changes.
+- Keeps the owner preview/share panel stacked so it does not collapse inside the narrower profile-page column.
+- Renders the locked "Open Public Page" state as a disabled button, not a keyboard-activatable link.
+
 ## Privacy And Fairness Boundary
 
 The panel is a private player convenience surface only.

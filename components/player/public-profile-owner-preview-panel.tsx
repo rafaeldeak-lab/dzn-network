@@ -121,7 +121,11 @@ export function PublicProfileOwnerPreviewPanel({
 
   const validatedHref = safePublicProfileHref(publicProfileHref);
   const validatedHandle = safePublicProfileHandle(publicProfileHandle) ?? handleFromHref(validatedHref);
-  const requestKey = `${publicProfileEnabled ? "public" : "private"}:${validatedHandle ?? "no-handle"}:${validatedHref ?? "no-href"}`;
+  const sectionVisibilityKey = sections
+    .map((section) => `${section.key}:${section.enabled ? "1" : "0"}`)
+    .sort()
+    .join("|");
+  const requestKey = `${publicProfileEnabled ? "public" : "private"}:${validatedHandle ?? "no-handle"}:${validatedHref ?? "no-href"}:${sectionVisibilityKey}`;
   const basePreviewState = previewStateFromInputs(publicProfileEnabled, validatedHref, validatedHandle);
   const previewState: PreviewState = basePreviewState.status === "loading" && remotePreviewState?.requestKey === requestKey
     ? withoutRequestKey(remotePreviewState)
@@ -253,7 +257,7 @@ export function PublicProfileOwnerPreviewPanel({
         <PreviewStatusBadge state={previewState} />
       </div>
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(340px,0.65fr)]">
+      <div className="mt-5 grid gap-4">
         <div className="min-w-0 rounded-lg border border-white/10 bg-slate-950/70 p-4">
           <PreviewHero state={previewState} handle={validatedHandle} href={validatedHref} />
 
@@ -319,23 +323,27 @@ export function PublicProfileOwnerPreviewPanel({
           )}
 
           <div className="mt-4 grid gap-2">
-            <Link
-              href={validatedHref ?? "/player/profile"}
-              target={readyToShare ? "_blank" : undefined}
-              rel={readyToShare ? "noreferrer" : undefined}
-              onClick={() => {
-                if (readyToShare) recordShareAction("opened", "Public profile opened for this page session.");
-              }}
-              aria-disabled={!readyToShare}
-              className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-3 text-xs font-black uppercase transition ${
-                readyToShare
-                  ? "border border-cyan-200/55 bg-cyan-300 text-slate-950 hover:bg-cyan-200"
-                  : "pointer-events-none border border-slate-500/25 bg-slate-700/35 text-slate-400"
-              }`}
-            >
-              <ExternalLink aria-hidden="true" className="h-4 w-4" />
-              Open Public Page
-            </Link>
+            {readyToShare && validatedHref ? (
+              <Link
+                href={validatedHref}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => recordShareAction("opened", "Public profile opened for this page session.")}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-cyan-200/55 bg-cyan-300 px-3 text-xs font-black uppercase text-slate-950 transition hover:bg-cyan-200"
+              >
+                <ExternalLink aria-hidden="true" className="h-4 w-4" />
+                Open Public Page
+              </Link>
+            ) : (
+              <button
+                type="button"
+                disabled
+                className="inline-flex min-h-10 cursor-not-allowed items-center justify-center gap-2 rounded-md border border-slate-500/25 bg-slate-700/35 px-3 text-xs font-black uppercase text-slate-400 opacity-70"
+              >
+                <ExternalLink aria-hidden="true" className="h-4 w-4" />
+                Open Public Page
+              </button>
+            )}
             <button
               type="button"
               onClick={copyProfileLink}
