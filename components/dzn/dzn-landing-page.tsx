@@ -421,8 +421,9 @@ const HOME_AMBIENT_ICONS = [
     style: { left: "62%", top: "84%", animationDelay: "5.1s", animationDuration: "28s" },
   },
 ] satisfies Array<{ key: string; src: string; style: CSSProperties }>;
-const HOMEPAGE_AMBIENT_ASSET_PATHS = [
-  HOMEPAGE_AMBIENT_ASSETS.background,
+
+const HOMEPAGE_MOTION_AMBIENT_ASSET_PATHS = HOME_AMBIENT_ICONS.map((icon) => icon.src);
+const HOMEPAGE_FEATURE_SECTION_ASSET_PATHS = [
   HOMEPAGE_AMBIENT_ASSETS.gameModesSection,
   HOMEPAGE_AMBIENT_ASSETS.liveIntelligenceSection,
   ...Object.values(HOMEPAGE_AMBIENT_ASSETS.gameModeCards),
@@ -430,6 +431,16 @@ const HOMEPAGE_AMBIENT_ASSET_PATHS = [
   ...Object.values(HOMEPAGE_AMBIENT_ASSETS.pulseCards),
   ...Object.values(HOMEPAGE_AMBIENT_ASSETS.icons),
 ] as const;
+const HOMEPAGE_AMBIENT_ASSET_PATHS = {
+  critical: [HOMEPAGE_AMBIENT_ASSETS.background],
+  motion: HOMEPAGE_MOTION_AMBIENT_ASSET_PATHS,
+  featureSections: HOMEPAGE_FEATURE_SECTION_ASSET_PATHS,
+} as const;
+type PreloadHomepageAmbientAssetsOptions = {
+  includeMotionIcons?: boolean;
+  includeFeatureSections?: boolean;
+};
+const preloadedHomepageAmbientAssets = new Set<string>();
 const BUILD_IMAGE_ASSETS = {
   hero: "/dzn/build/build-hero.webp",
   walls: "/dzn/build/full-walls.webp",
@@ -453,10 +464,23 @@ function preloadBuildLeaderboardImages() {
   }
 }
 
-function preloadHomepageAmbientAssets() {
+function preloadHomepageAmbientAssets(options: PreloadHomepageAmbientAssetsOptions = {}) {
   if (typeof window === "undefined") return;
 
-  for (const src of HOMEPAGE_AMBIENT_ASSET_PATHS) {
+  const paths = new Set<string>(HOMEPAGE_AMBIENT_ASSET_PATHS.critical);
+
+  if (options.includeMotionIcons) {
+    HOMEPAGE_AMBIENT_ASSET_PATHS.motion.forEach((src) => paths.add(src));
+  }
+
+  if (options.includeFeatureSections) {
+    HOMEPAGE_AMBIENT_ASSET_PATHS.featureSections.forEach((src) => paths.add(src));
+  }
+
+  for (const src of paths) {
+    if (preloadedHomepageAmbientAssets.has(src)) continue;
+    preloadedHomepageAmbientAssets.add(src);
+
     const image = new Image();
     image.decoding = "async";
     image.onerror = () => {
@@ -952,8 +976,14 @@ export function DznLandingPage() {
     console.log("DZN HOMEPAGE AMBIENT UI ASSETS LOADED");
     console.log("DZN ADM SYSTEM UNTOUCHED");
     preloadBuildLeaderboardImages();
-    preloadHomepageAmbientAssets();
   }, []);
+
+  useEffect(() => {
+    preloadHomepageAmbientAssets({
+      includeMotionIcons: !reduceMotion,
+      includeFeatureSections: !isAuthLoading && !isPreviewMode,
+    });
+  }, [isAuthLoading, isPreviewMode, reduceMotion]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIsLoading(false), reduceMotion ? 120 : 950);

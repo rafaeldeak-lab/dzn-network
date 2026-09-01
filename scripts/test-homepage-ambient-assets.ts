@@ -53,7 +53,14 @@ const componentRequirements = [
   "HOMEPAGE_AMBIENT_ASSETS",
   "HOME_AMBIENT_ICONS",
   "HOMEPAGE_AMBIENT_ASSET_PATHS",
+  "HOMEPAGE_MOTION_AMBIENT_ASSET_PATHS",
+  "HOMEPAGE_FEATURE_SECTION_ASSET_PATHS",
   "preloadHomepageAmbientAssets",
+  "preloadedHomepageAmbientAssets",
+  "includeMotionIcons",
+  "includeFeatureSections",
+  "includeFeatureSections: !isAuthLoading && !isPreviewMode",
+  "includeMotionIcons: !reduceMotion",
   'HOMEPAGE_UI_ASSET_BASE = "/media/homepage-ui"',
   "master-site-background.webp",
   "dzn-home-floating-icon",
@@ -71,6 +78,15 @@ const componentRequirements = [
 for (const marker of componentRequirements) {
   assert(componentSource.includes(marker), `Homepage ambient wiring marker missing: ${marker}`);
 }
+
+assert(
+  !componentSource.includes("const HOMEPAGE_AMBIENT_ASSET_PATHS = ["),
+  "Homepage ambient preloads must stay grouped by currently rendered page state, not a single eager asset list.",
+);
+assert(
+  !componentSource.includes("for (const src of HOMEPAGE_AMBIENT_ASSET_PATHS)"),
+  "Homepage ambient preload must not loop across every ambient asset on mount.",
+);
 
 const cssRequirements = [
   "dzn-home-haze::before",
