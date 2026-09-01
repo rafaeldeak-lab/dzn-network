@@ -71,7 +71,7 @@ assert.doesNotMatch(
   "Refresh UI must not touch owner, payment, profile-publication, analytics, or competitive systems.",
 );
 
-assert.equal(migrationFiles.at(-1), "0061_player_discord_community_memberships.sql", "Refresh/status UX slice must not add another migration.");
+assert.ok(migrationFiles.includes("0061_player_discord_community_memberships.sql"), "Refresh/status UX slice must keep its original membership migration.");
 assert.match(platformSpec, /Player Hub Discord Membership Refresh\/Status UX/i, "Master spec must document the refresh/status slice.");
 assert.match(packageJson, /"test:player-community-refresh-status": "tsx scripts\/test-player-community-refresh-status\.ts"/, "Dedicated refresh/status test script must be registered.");
 

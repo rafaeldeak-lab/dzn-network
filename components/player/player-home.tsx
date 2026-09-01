@@ -22,6 +22,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
+import { PlayerProfilePrivacySettings } from "@/components/player/profile-privacy-settings";
 import { SiteHeaderAuthState } from "@/components/site-header";
 import type { AuthResponse } from "@/components/onboarding/types";
 
@@ -572,7 +573,10 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
         )}
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-          <ProfileProgressionPanel state={hubState} />
+          <div className="space-y-4">
+            <ProfileProgressionPanel state={hubState} />
+            {mode === "profile" && authState.status === "logged_in" ? <PlayerProfilePrivacySettings /> : null}
+          </div>
 
           <section className="rounded-lg border border-amber-300/25 bg-slate-950/78 p-5 backdrop-blur">
             <div className="flex items-center gap-3">
@@ -962,7 +966,7 @@ function ProfileProgressionPanel({ state }: { state: PlayerHubState }) {
           </div>
 
           <p className="rounded-md border border-amber-300/20 bg-amber-300/8 p-3 text-sm font-semibold leading-6 text-amber-50">
-            This panel is private and read-only. It cannot write privacy settings, grant awards, change billing, alter scores, change rankings, edit reviews, change events, affect Server Wars or CTF, or change competitive eligibility.
+            This profile summary is private and read-only. It cannot grant awards, change billing, alter scores, change rankings, edit reviews, change events, affect Server Wars or CTF, or change competitive eligibility.
           </p>
         </div>
       ) : (

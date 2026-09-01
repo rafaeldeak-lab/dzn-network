@@ -28,7 +28,7 @@ assert.match(playerHome, /Current Profile Signals/, "Player Hub UI must render s
 assert.match(playerHome, /profile\.public_profile_status\.replace/, "Player Hub UI must show public profile status without publishing a profile.");
 assert.match(playerHome, /progression\.tracks\.map/, "Player Hub UI must render earned progression track readiness.");
 assert.match(playerHome, /future_earned_runtime/, "Player Hub UI must keep earned progression runtime marked as future.");
-assert.match(playerHome, /This panel is private and read-only/, "Player Hub UI must show the private/read-only boundary.");
+assert.match(playerHome, /This profile summary is private and read-only/, "Player Hub UI must show the private/read-only boundary.");
 assert.match(playerHome, /Owner Setup Stays Gated/, "Player Hub UI must keep owner setup separated.");
 assert.match(playerHome, /\/pricing\?intent=owner_setup&returnTo=%2Fsetup/, "Player Hub owner action must remain routed through pricing.");
 assert.doesNotMatch(playerHome, /\b(?:sendBeacon|analytics|localStorage|sessionStorage)\b/i, "Player Hub profile/progression UI must not add tracking or browser storage.");

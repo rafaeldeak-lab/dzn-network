@@ -43,7 +43,7 @@ const scenarios = {
       "Current Profile Signals",
       "421m",
       "future earned runtime",
-      "This panel is private and read-only.",
+      "This profile summary is private and read-only.",
     ],
     mustNotContain: [
       "200000000000000001",
@@ -51,6 +51,30 @@ const scenarios = {
       "owner_user_id",
       "STRIPE",
       "checkout.session",
+    ],
+  },
+  profilePrivacy: {
+    auth: authPayload("Rafael DZN"),
+    hub: richHubPayload(),
+    privacy: profilePrivacyPayload(),
+    mustContain: [
+      "Personal Player Profile",
+      "Profile & Progression",
+      "Profile Privacy Preferences",
+      "Public profile",
+      "Gameplay summary",
+      "Calling cards",
+      "Private by default",
+      "Last saved: not saved yet",
+      "public profile viewer, handle generation, and profile attribution remain blocked",
+      "These settings do not write public profile routes",
+    ],
+    mustNotContain: [
+      "public_profile_href: /players",
+      "STRIPE",
+      "checkout.session",
+      "DZN-SUP",
+      "PrivatePlayerName",
     ],
   },
   empty: {
@@ -111,6 +135,7 @@ const scenarios = {
 const captures = [
   { scenario: "rich", viewport: "desktop", width: 1440, height: 1180 },
   { scenario: "rich", viewport: "mobile", width: 390, height: 1280, mobile: true },
+  { scenario: "profilePrivacy", viewport: "desktop", width: 1440, height: 1380, path: "/player/profile" },
   { scenario: "empty", viewport: "desktop", width: 1440, height: 1050 },
   { scenario: "unavailable", viewport: "desktop", width: 1440, height: 900 },
   { scenario: "storageFallback", viewport: "desktop", width: 1440, height: 1050 },
@@ -155,6 +180,7 @@ async function main() {
           { urlPattern: `${BASE_URL}/api/auth/me*`, requestStage: "Request" },
           { urlPattern: `${BASE_URL}/api/dzn-pulse/config*`, requestStage: "Request" },
           { urlPattern: `${BASE_URL}/api/player/hub*`, requestStage: "Request" },
+          { urlPattern: `${BASE_URL}/api/player/profile/privacy*`, requestStage: "Request" },
           { urlPattern: `${BASE_URL}/api/player/community-memberships/refresh*`, requestStage: "Request" },
         ],
       });
@@ -165,7 +191,7 @@ async function main() {
         mobile: Boolean(capture.mobile),
       });
 
-      await page.send("Page.navigate", { url: `${BASE_URL}/player?qa=${capture.scenario}-${capture.viewport}` });
+      await page.send("Page.navigate", { url: `${BASE_URL}${capture.path ?? "/player"}?qa=${capture.scenario}-${capture.viewport}` });
       await waitForText(page, scenario.mustContain[0]);
       await waitForText(page, scenario.mustContain.at(-1));
 
@@ -295,6 +321,10 @@ async function fulfillOrContinue(page, event, scenario) {
   }
   if (url.startsWith(`${BASE_URL}/api/player/hub`)) {
     await page.send("Fetch.fulfillRequest", jsonResponse(event.requestId, scenario.hubStatus ?? 200, scenario.hub));
+    return;
+  }
+  if (url.startsWith(`${BASE_URL}/api/player/profile/privacy`)) {
+    await page.send("Fetch.fulfillRequest", jsonResponse(event.requestId, scenario.privacyStatus ?? 200, scenario.privacy ?? profilePrivacyPayload()));
     return;
   }
   if (url.startsWith(`${BASE_URL}/api/player/community-memberships/refresh`)) {
@@ -598,6 +628,91 @@ function storageFallbackHubPayload() {
   });
 }
 
+function profilePrivacyPayload() {
+  return {
+    ok: true,
+    settings: {
+      public_profile_enabled: false,
+      show_display_name: true,
+      show_gameplay_summary: true,
+      show_featured_server: true,
+      show_xp_progress: true,
+      show_challenge_progress: true,
+      show_calling_cards: true,
+      show_award_dates: false,
+    },
+    sections: [
+      {
+        key: "public_profile_enabled",
+        label: "Public profile",
+        description: "Allow a future public-safe profile route to show approved sections after a handle exists.",
+        default_value: false,
+        enabled: false,
+      },
+      {
+        key: "show_display_name",
+        label: "Display name",
+        description: "Show your chosen DZN display name on approved public profile surfaces.",
+        default_value: true,
+        enabled: true,
+      },
+      {
+        key: "show_gameplay_summary",
+        label: "Gameplay summary",
+        description: "Show safe aggregate gameplay totals, never raw identifiers or raw evidence.",
+        default_value: true,
+        enabled: true,
+      },
+      {
+        key: "show_featured_server",
+        label: "Featured server",
+        description: "Show a public-safe linked server highlight when one is available.",
+        default_value: true,
+        enabled: true,
+      },
+      {
+        key: "show_xp_progress",
+        label: "XP progress",
+        description: "Show earned XP progress after trusted award rules exist.",
+        default_value: true,
+        enabled: true,
+      },
+      {
+        key: "show_challenge_progress",
+        label: "Challenge progress",
+        description: "Show earned challenge progress after challenge participation exists.",
+        default_value: true,
+        enabled: true,
+      },
+      {
+        key: "show_calling_cards",
+        label: "Calling cards",
+        description: "Show earned account-bound calling cards after that runtime exists.",
+        default_value: true,
+        enabled: true,
+      },
+      {
+        key: "show_award_dates",
+        label: "Award dates",
+        description: "Show public-safe earned award dates. Raw award evidence stays private.",
+        default_value: false,
+        enabled: false,
+      },
+    ],
+    public_profile_status: "private_by_default",
+    public_profile_href: null,
+    source: "defaults",
+    updated_at: null,
+    private: true,
+    presentation_only: true,
+    message: "Your profile is private by default. Public profile publishing remains blocked until the dedicated viewer slice.",
+    fairness_boundary: [
+      "Profile privacy preferences are player-owned display settings only.",
+      "These settings do not write public profile routes, handles, awards, billing, rankings, discovery, reviews, events, Server Wars, CTF, or competitive eligibility.",
+    ],
+  };
+}
+
 function baseHubPayload({
   accountName,
   saved_servers,
@@ -837,7 +952,7 @@ async function writeReport(results) {
   const report = [
     "# Player Hub Rendered QA - 2026-09-01",
     "",
-    "This local artifact proves the rendered `/player` Player Hub states for the profile/progression entry-point polish slice. It uses a headless browser against the local Next app and intercepts only `/api/auth/me`, `/api/dzn-pulse/config`, `/api/player/hub`, and `/api/player/community-memberships/refresh` with sanitized representative JSON.",
+    "This local artifact proves the rendered `/player` and `/player/profile` Player Hub states for the profile/privacy preferences slice. It uses a headless browser against the local Next app and intercepts only `/api/auth/me`, `/api/dzn-pulse/config`, `/api/player/hub`, `/api/player/profile/privacy`, and `/api/player/community-memberships/refresh` with sanitized representative JSON.",
     "",
     "No production D1, Stripe, Cloudflare secret/config, Nitrado, Discord runtime, Store/payment, live checkout, retained export, analytics, scoring, ranking, discovery, review, progression, or competitive-system mutation is used by this QA harness.",
     "",
@@ -850,6 +965,7 @@ async function writeReport(results) {
     "## Verified States",
     "",
     "- Rich current-player data: followed servers, matched Discord communities, suggested events, relevance badges, profile entry points, and private profile/progression summaries render from the private Player Hub payload.",
+    "- Profile privacy proof: `/player/profile` renders saved public-profile display preferences from the private privacy API without publishing handles, public viewer routes, raw identifiers, or award evidence.",
     "- Profile/progression proof: safe current-user gameplay summary metrics render without raw player names, raw player ids, public profile handles, privacy-setting writes, or award runtime writes.",
     "- Crowded-event proof: the matched-community event renders as `451/512 servers` and still shows `Matched community`, proving irrelevant registered servers do not hide a relevant private match.",
     "- Empty state proof: followed servers, matched communities, and suggested events show useful empty states.",

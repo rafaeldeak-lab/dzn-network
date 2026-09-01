@@ -188,6 +188,12 @@ Challenges, XP, and calling cards are earned player-side systems:
 
 Public profiles must respect saved privacy preferences:
 
+- Player-owned privacy preferences live in `player_profile_privacy_preferences` as one row per authenticated DZN user.
+- Private `GET/PATCH /api/player/profile/privacy` is the canonical settings surface for public profile visibility and per-section display choices.
+- Preference reads are private/no-store, default without implicit writes, and never return public handles.
+- Preference writes are same-origin, current-user-only, bounded, boolean-only, and idempotent through `UNIQUE(user_id)`.
+- The current saved section choices are `public_profile_enabled`, `show_display_name`, `show_gameplay_summary`, `show_featured_server`, `show_xp_progress`, `show_challenge_progress`, `show_calling_cards`, and `show_award_dates`.
+- Saving preferences does not publish a profile, generate a handle, reveal private identifiers, or expose raw award evidence.
 - Public profile routes/APIs show only approved sections.
 - Hidden sections, private identifiers, and raw award evidence stay private.
 - Public profile links are opt-in and only shown where a generated public handle exists.
@@ -261,7 +267,8 @@ Completed or active foundation slices:
 - Player Hub event relevance query cap fix: private relevance server-link reads are now filtered to the current player's followed or matched-community server ids so crowded event registrations cannot hide a relevant match.
 - Player Hub rendered QA/release polish: local browser artifact captures representative saved-server, matched-community, crowded-event, empty, unavailable, and storage-fallback states before the next Player Hub product feature.
 - Player Hub profile/progression entry-point real-data polish: private current-user `player_profiles` summaries now feed `/player` and `/player/profile` entry panels without exposing raw player identifiers, profile privacy settings, public handles, hidden rows, other-user rows, award writes, billing, owner workflows, scoring, ranking, discovery, reviews, events, Server Wars, CTF, or competitive eligibility.
+- Player profile privacy settings model: persistent player-owned public profile visibility and per-section display preferences now live behind private settings APIs and the logged-in `/player/profile` panel, without publishing handles, exposing hidden sections, or touching billing, rankings, discovery, reviews, badges, seasons, events, Server Wars, XP awards, calling-card awards, CTF, or competitive eligibility.
 
-Next recommended product slice after Player Hub profile/progression polish:
+Next recommended product slice after player profile privacy preferences:
 
-- Player profile privacy settings model: add persistent player-owned public profile visibility and per-section display preferences behind private settings APIs, with tests proving those settings do not affect billing, rankings, discovery, reviews, badges, seasons, events, Server Wars, XP awards, calling-card awards, or competitive eligibility.
+- Public profile publishing/viewer foundation: add the actual public-safe profile route/API that respects saved `player_profile_privacy_preferences`, shows only approved profile sections, keeps private identifiers and raw award evidence hidden, and proves visibility choices remain presentation-only with no billing, rankings, discovery, reviews, badges, seasons, events, Server Wars, XP awards, calling-card awards, CTF, or competitive eligibility effect.
