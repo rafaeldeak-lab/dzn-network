@@ -78,6 +78,13 @@ type PlayerHubPayload = {
     message: string;
   };
   suggested_events: PlayerHubEvent[];
+  suggested_event_relevance: {
+    private: true;
+    presentation_only: true;
+    uses_followed_servers: boolean;
+    uses_matched_communities: boolean;
+    message: string;
+  };
   profile_entries: PlayerHubProfileEntry[];
   owner_setup: {
     href: string;
@@ -148,6 +155,12 @@ type PlayerHubEvent = {
   ends_at: string | null;
   registered_servers: number;
   server_limit: number | null;
+  relevance: {
+    level: "followed_server" | "matched_community" | "public_network";
+    label: string;
+    reasons: string[];
+    presentation_only: true;
+  };
 };
 
 type PlayerHubProfileEntry = {
@@ -741,11 +754,12 @@ function SuggestedEventsPanel({ events, source }: { events: PlayerHubEvent[]; so
     <section className="rounded-lg border border-amber-300/24 bg-slate-950/78 p-5 backdrop-blur">
       <PanelHeader
         title="Suggested Events"
-        body="Public upcoming and live events surfaced without changing scores or eligibility."
+        body="Private suggestions prioritise followed servers and matched communities without changing scores or eligibility."
         icon={<Sparkles aria-hidden="true" className="h-5 w-5" />}
         tone="amber"
       />
       {source === "unavailable" ? <InlineNotice text="Event storage is not available in this environment yet." /> : null}
+      {source !== "unavailable" ? <InlineNotice text="These suggestions are private to your Player Hub and stay presentation-only." /> : null}
       {events.length ? (
         <ul className="mt-4 divide-y divide-white/10">
           {events.map((event) => (
@@ -754,7 +768,12 @@ function SuggestedEventsPanel({ events, source }: { events: PlayerHubEvent[]; so
                 <span className="flex items-start justify-between gap-3">
                   <span>
                     <span className="block text-sm font-black text-white transition group-hover:text-amber-100">{event.name}</span>
-                    <span className="mt-1 block text-xs font-semibold uppercase text-amber-100">{event.status_label}</span>
+                    <span className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-semibold uppercase text-amber-100">{event.status_label}</span>
+                      <span className={`inline-flex items-center rounded-md border px-2 py-1 text-[0.68rem] font-black uppercase tracking-normal ${eventRelevanceClasses(event.relevance.level)}`}>
+                        {event.relevance.label}
+                      </span>
+                    </span>
                   </span>
                   <ChevronRight aria-hidden="true" className="mt-1 h-4 w-4 shrink-0 text-slate-500 transition group-hover:text-amber-100" />
                 </span>
@@ -764,6 +783,13 @@ function SuggestedEventsPanel({ events, source }: { events: PlayerHubEvent[]; so
                   <span>{event.server_limit ? `${event.registered_servers}/${event.server_limit} servers` : `${event.registered_servers} servers`}</span>
                 </span>
                 <span className="mt-2 block text-sm font-semibold text-slate-400">{formatEventTime(event.starts_at)}</span>
+                <span className="mt-2 grid gap-1">
+                  {event.relevance.reasons.map((reason) => (
+                    <span key={reason} className="block text-xs font-semibold leading-5 text-slate-300">
+                      {reason}
+                    </span>
+                  ))}
+                </span>
               </Link>
             </li>
           ))}
@@ -1042,6 +1068,12 @@ function communityRelationshipCopy(relationship: PlayerHubCommunityRelationship)
   if (relationship === "administrator") return "Your Discord account can manage this community, but this match does not unlock owner tools.";
   if (relationship === "member") return "You are a normal member of this Discord community, matched privately to public DZN servers.";
   return "Matched from safe cached Discord context and shown only inside your private Player Hub.";
+}
+
+function eventRelevanceClasses(level: PlayerHubEvent["relevance"]["level"]) {
+  if (level === "followed_server") return "border-cyan-300/35 bg-cyan-300/12 text-cyan-100";
+  if (level === "matched_community") return "border-violet-300/35 bg-violet-300/12 text-violet-100";
+  return "border-white/15 bg-white/8 text-slate-200";
 }
 
 function initialsFromName(name: string) {

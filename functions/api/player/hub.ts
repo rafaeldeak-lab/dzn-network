@@ -75,12 +75,34 @@ type PlayerHubEventRow = {
   server_limit: number | null;
   team_limit: number | null;
   registered_servers: number | null;
+  created_at: string | null;
+};
+
+type PlayerHubEventServerRow = {
+  event_id: string;
+  server_id: string;
+};
+
+type PlayerHubSuggestedEventRelevanceLevel = "followed_server" | "matched_community" | "public_network";
+
+type PlayerHubSuggestedEventRelevance = {
+  level: PlayerHubSuggestedEventRelevanceLevel;
+  label: string;
+  reasons: string[];
+  presentation_only: true;
+};
+
+type PlayerHubSuggestedEventContext = {
+  savedServerIds: string[];
+  matchedCommunityServerIds: string[];
 };
 
 const MAX_MATCHED_COMMUNITIES = 8;
 const MAX_COMMUNITY_MATCH_CANDIDATES = 200;
 const MAX_COMMUNITY_SERVER_PREVIEWS = 3;
 const MAX_SUGGESTED_EVENTS = 5;
+const MAX_SUGGESTED_EVENT_CANDIDATES = 24;
+const MAX_SUGGESTED_EVENT_SERVER_ROWS = 400;
 
 const ownerSetupHref = "/pricing?intent=owner_setup&returnTo=%2Fsetup";
 const communityMembershipRefreshHref = "/api/player/community-memberships/refresh";
@@ -104,11 +126,15 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     );
   }
 
-  const [savedServers, communities, events] = await Promise.all([
+  const [savedServers, communities] = await Promise.all([
     readSafeSavedServers(env, user.id),
     readMatchedCommunities(env, user.id),
-    readSuggestedEvents(env),
   ]);
+  const communityServerIds = matchedCommunityServerIds(communities.communities);
+  const events = await readSuggestedEvents(env, {
+    savedServerIds: savedServers.savedServerIds,
+    matchedCommunityServerIds: communityServerIds,
+  });
 
   return json(
     {
@@ -168,6 +194,13 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
         saved_servers: savedServers.source,
         matched_communities: communities.source,
         suggested_events: events.source,
+      },
+      suggested_event_relevance: {
+        private: true,
+        presentation_only: true,
+        uses_followed_servers: savedServers.savedServerIds.length > 0,
+        uses_matched_communities: communityServerIds.length > 0,
+        message: "Suggested events are privately ordered for this Player Hub only.",
       },
       fairness_boundary: [
         "Saved servers are private player preferences only.",
@@ -452,9 +485,16 @@ function uniqueCommunityServers(rows: PlayerHubCommunityServerRow[]) {
   return unique;
 }
 
-async function readSuggestedEvents(env: Env) {
+function matchedCommunityServerIds(communities: PlayerHubCommunitiesReadModel["communities"]) {
+  return [...new Set(
+    communities.flatMap((community) => community.matched_servers.map((server) => server.linked_server_id).filter(Boolean)),
+  )];
+}
+
+async function readSuggestedEvents(env: Env, context: PlayerHubSuggestedEventContext) {
   try {
-    const events = await requireDb(env)
+    const db = requireDb(env);
+    const events = await db
       .prepare(
         `SELECT
           competitive_events.id,
@@ -468,6 +508,7 @@ async function readSuggestedEvents(env: Env) {
           competitive_events.ends_at,
           competitive_events.server_limit,
           competitive_events.team_limit,
+          competitive_events.created_at,
           (SELECT COUNT(*) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS registered_servers
          FROM competitive_events
          WHERE lower(COALESCE(competitive_events.visibility, 'public')) != 'private'
@@ -482,11 +523,17 @@ async function readSuggestedEvents(env: Env) {
          END, datetime(COALESCE(competitive_events.starts_at, competitive_events.created_at)) ASC
          LIMIT ?`,
       )
-      .bind(MAX_SUGGESTED_EVENTS)
+      .bind(MAX_SUGGESTED_EVENT_CANDIDATES)
       .all<PlayerHubEventRow>();
 
+    const eventRows = events.results ?? [];
+    const eventServerRows = await readSuggestedEventServerRows(db, eventRows.map((event) => event.id)).catch(() => []);
+    const serverRowsByEvent = groupSuggestedEventServerRows(eventServerRows);
+    const suggestedEvents = orderSuggestedEventsByPrivateRelevance(eventRows, serverRowsByEvent, context)
+      .slice(0, MAX_SUGGESTED_EVENTS);
+
     return {
-      events: (events.results ?? []).map((event) => ({
+      events: suggestedEvents.map(({ event, relevance }) => ({
         id: event.id,
         name: event.name,
         slug: event.slug,
@@ -502,12 +549,84 @@ async function readSuggestedEvents(env: Env) {
         ends_at: event.ends_at,
         registered_servers: normalizeNullableNumber(event.registered_servers) ?? 0,
         server_limit: normalizeNullableNumber(event.server_limit ?? event.team_limit),
+        relevance,
       })),
       source: "public_competitive_events" as const,
     };
   } catch {
     return { events: [], source: "unavailable" as const };
   }
+}
+
+async function readSuggestedEventServerRows(db: D1Database, eventIds: string[]) {
+  const ids = [...new Set(eventIds.filter(Boolean))].slice(0, MAX_SUGGESTED_EVENT_CANDIDATES);
+  if (!ids.length) return [];
+
+  const result = await db
+    .prepare(
+      `SELECT event_id, server_id
+       FROM competitive_event_servers
+       WHERE event_id IN (${ids.map(() => "?").join(", ")})
+       LIMIT ?`,
+    )
+    .bind(...ids, MAX_SUGGESTED_EVENT_SERVER_ROWS)
+    .all<PlayerHubEventServerRow>();
+
+  return result.results ?? [];
+}
+
+function groupSuggestedEventServerRows(rows: PlayerHubEventServerRow[]) {
+  const groups = new Map<string, string[]>();
+  for (const row of rows) {
+    if (!row.event_id || !row.server_id) continue;
+    const group = groups.get(row.event_id) ?? [];
+    group.push(row.server_id);
+    groups.set(row.event_id, group);
+  }
+  return groups;
+}
+
+function orderSuggestedEventsByPrivateRelevance(
+  events: PlayerHubEventRow[],
+  serverRowsByEvent: Map<string, string[]>,
+  context: PlayerHubSuggestedEventContext,
+) {
+  const savedServerIds = new Set(context.savedServerIds.filter(Boolean));
+  const communityServerIds = new Set(context.matchedCommunityServerIds.filter(Boolean));
+
+  return events
+    .map((event, baseOrder) => {
+      const eventServerIds = serverRowsByEvent.get(event.id) ?? [];
+      const hasFollowedServer = eventServerIds.some((serverId) => savedServerIds.has(serverId));
+      const hasMatchedCommunity = eventServerIds.some((serverId) => communityServerIds.has(serverId));
+      const relevance = suggestedEventRelevance(hasFollowedServer, hasMatchedCommunity);
+      return { event, baseOrder, relevance };
+    })
+    .sort((left, right) => {
+      const relevanceDifference = suggestedEventRelevancePriority(left.relevance.level) - suggestedEventRelevancePriority(right.relevance.level);
+      return relevanceDifference || left.baseOrder - right.baseOrder;
+    });
+}
+
+function suggestedEventRelevance(hasFollowedServer: boolean, hasMatchedCommunity: boolean): PlayerHubSuggestedEventRelevance {
+  const reasons: string[] = [];
+  if (hasFollowedServer) reasons.push("A server you follow is entered.");
+  if (hasMatchedCommunity) reasons.push("A public server from one of your private Discord matches is entered.");
+  if (!reasons.length) reasons.push("General public DZN event suggestion.");
+
+  if (hasFollowedServer) {
+    return { level: "followed_server", label: "Followed server", reasons, presentation_only: true };
+  }
+  if (hasMatchedCommunity) {
+    return { level: "matched_community", label: "Matched community", reasons, presentation_only: true };
+  }
+  return { level: "public_network", label: "Public network", reasons, presentation_only: true };
+}
+
+function suggestedEventRelevancePriority(value: PlayerHubSuggestedEventRelevanceLevel) {
+  if (value === "followed_server") return 0;
+  if (value === "matched_community") return 1;
+  return 2;
 }
 
 function normalizeNullableNumber(value: unknown) {
