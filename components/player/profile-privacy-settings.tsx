@@ -1,6 +1,7 @@
 "use client";
 
-import { Eye, EyeOff, Loader2, ShieldCheck, ToggleLeft, ToggleRight } from "lucide-react";
+import { ExternalLink, Eye, EyeOff, Loader2, ShieldCheck, ToggleLeft, ToggleRight } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 type PrivacyPreferenceKey =
@@ -27,7 +28,8 @@ type PrivacyPayload = {
   ok: true;
   settings: PrivacyPreferences;
   sections: PrivacySection[];
-  public_profile_status: "preferences_saved" | "private_by_default";
+  public_profile_status: "published" | "preferences_saved" | "private_by_default";
+  public_profile_handle: string | null;
   public_profile_href: string | null;
   source: "player_profile_privacy_preferences" | "defaults" | "unavailable";
   updated_at: string | null;
@@ -95,8 +97,11 @@ export function PlayerProfilePrivacySettings() {
   const publicStatus = useMemo(() => {
     const data = state.data;
     if (!data) return { label: "Checking", tone: "border-slate-300/20 bg-white/8 text-slate-100" };
+    if (data.public_profile_status === "published") {
+      return { label: "Published", tone: "border-emerald-300/35 bg-emerald-300/12 text-emerald-100" };
+    }
     if (data.settings.public_profile_enabled) {
-      return { label: "Preferences saved", tone: "border-emerald-300/35 bg-emerald-300/12 text-emerald-100" };
+      return { label: "Preferences saved", tone: "border-cyan-300/35 bg-cyan-300/12 text-cyan-100" };
     }
     return { label: "Private by default", tone: "border-amber-300/35 bg-amber-300/12 text-amber-100" };
   }, [state.data]);
@@ -129,7 +134,7 @@ export function PlayerProfilePrivacySettings() {
           <div>
             <h2 className="text-lg font-black uppercase text-white">Profile Privacy Preferences</h2>
             <p className="mt-1 max-w-3xl text-sm font-semibold leading-6 text-slate-300">
-              Save the public profile sections DZN may use later. The public profile viewer, handle generation, and profile attribution remain blocked until their own approval slices.
+              Choose which approved sections can appear on your public DZN profile link. Profile attribution across other DZN surfaces remains blocked until its own approval slice.
             </p>
           </div>
         </div>
@@ -162,6 +167,15 @@ export function PlayerProfilePrivacySettings() {
           <div className="rounded-md border border-violet-300/20 bg-violet-300/8 p-4">
             <p className="text-xs font-black uppercase text-violet-100">Saved Preference Boundary</p>
             <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">{state.data.message}</p>
+            {state.data.public_profile_href ? (
+              <Link
+                href={state.data.public_profile_href}
+                className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-md border border-cyan-200/45 bg-cyan-300/12 px-3 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-100/70 hover:bg-cyan-300/18"
+              >
+                <ExternalLink aria-hidden="true" className="h-4 w-4" />
+                View Public Profile
+              </Link>
+            ) : null}
             <p className="mt-2 text-sm font-semibold leading-6 text-slate-400">
               Last saved: {formatSavedAt(state.data.updated_at)}. Source: {state.data.source.replace(/_/g, " ")}.
             </p>
@@ -216,7 +230,7 @@ function PrivacyToggle({
           : "border-white/10 bg-white/6 hover:border-white/25"
       }`}
       aria-pressed={enabled}
-      aria-label={`${enabled ? "Hide" : "Show"} ${section.label} on future public profile surfaces`}
+      aria-label={`${enabled ? "Hide" : "Show"} ${section.label} on public profile surfaces`}
     >
       <span className="min-w-0">
         <span className="block text-sm font-black uppercase text-white">{section.label}</span>

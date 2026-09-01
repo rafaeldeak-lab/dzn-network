@@ -66,8 +66,10 @@ const scenarios = {
       "Calling cards",
       "Private by default",
       "Last saved: not saved yet",
-      "public profile viewer, handle generation, and profile attribution remain blocked",
-      "These settings do not write public profile routes",
+      "Choose which approved sections can appear on your public DZN profile link",
+      "Profile attribution across other DZN surfaces remains blocked",
+      "Turn on public profile only when you want approved sections",
+      "Generated profile handles are presentation-only",
     ],
     mustNotContain: [
       "public_profile_href: /players",
@@ -700,15 +702,17 @@ function profilePrivacyPayload() {
       },
     ],
     public_profile_status: "private_by_default",
+    public_profile_handle: null,
     public_profile_href: null,
     source: "defaults",
     updated_at: null,
     private: true,
     presentation_only: true,
-    message: "Your profile is private by default. Public profile publishing remains blocked until the dedicated viewer slice.",
+    message: "Your profile is private by default. Turn on public profile only when you want approved sections to appear on your DZN profile link.",
     fairness_boundary: [
       "Profile privacy preferences are player-owned display settings only.",
-      "These settings do not write public profile routes, handles, awards, billing, rankings, discovery, reviews, events, Server Wars, CTF, or competitive eligibility.",
+      "Generated profile handles are presentation-only and do not bypass saved visibility controls.",
+      "These settings and handles do not write awards, billing, rankings, discovery, reviews, events, Server Wars, CTF, or competitive eligibility.",
     ],
   };
 }

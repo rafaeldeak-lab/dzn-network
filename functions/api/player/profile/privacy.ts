@@ -2,6 +2,11 @@ import { ensureMockUser, getSessionUser, requireDb } from "../../../_lib/db";
 import { json, methodNotAllowed, readBoundedJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
 import { privateNoStoreHeaders } from "../../../_lib/performance";
+import {
+  ensureCurrentPublicProfileHandle,
+  readCurrentPublicProfileHandle,
+  type PlayerPublicProfileHandle,
+} from "../../../_lib/player-public-profiles";
 import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
 
 const preferenceFields = [
@@ -84,7 +89,10 @@ async function handleGet(request: Request, env: Env) {
   }
 
   const result = await readPreferences(env, user.id);
-  return json(preferencePayload(result.preferences, result.source, result.updatedAt), { headers: privateNoStoreHeaders() });
+  const publicProfile = result.source === "unavailable" ? null : await readPublicProfileHandleForPayload(env, user.id);
+  return json(preferencePayload(result.preferences, result.source, result.updatedAt, publicProfile), {
+    headers: privateNoStoreHeaders(),
+  });
 }
 
 async function handlePatch(request: Request, env: Env) {
@@ -127,8 +135,11 @@ async function handlePatch(request: Request, env: Env) {
       );
     }
     const next = { ...current.preferences, ...parsed.settings };
+    const publicProfile = next.public_profile_enabled
+      ? await ensureCurrentPublicProfileHandle(env, user)
+      : await readPublicProfileHandleForPayload(env, user.id);
     await writePreferences(env, user.id, next);
-    return json(preferencePayload(next, "player_profile_privacy_preferences", new Date().toISOString()), {
+    return json(preferencePayload(next, "player_profile_privacy_preferences", new Date().toISOString(), publicProfile), {
       headers: privateNoStoreHeaders(),
     });
   } catch {
@@ -136,6 +147,14 @@ async function handlePatch(request: Request, env: Env) {
       { ok: false, error: "SETTINGS_UNAVAILABLE", message: "Profile privacy settings are unavailable in this environment." },
       { status: 503, headers: privateNoStoreHeaders() },
     );
+  }
+}
+
+async function readPublicProfileHandleForPayload(env: Env, userId: string) {
+  try {
+    return await readCurrentPublicProfileHandle(env, userId);
+  } catch {
+    return null;
   }
 }
 
@@ -239,7 +258,9 @@ function preferencePayload(
   preferences: PrivacyPreferences,
   source: "player_profile_privacy_preferences" | "defaults" | "unavailable",
   updatedAt: string | null,
+  publicProfile: PlayerPublicProfileHandle | null,
 ) {
+  const activePublicProfile = preferences.public_profile_enabled && publicProfile?.status === "active" ? publicProfile : null;
   return {
     ok: true,
     settings: preferences,
@@ -250,18 +271,26 @@ function preferencePayload(
       default_value: defaultValue,
       enabled: preferences[key],
     })),
-    public_profile_status: preferences.public_profile_enabled ? "preferences_saved" : "private_by_default",
-    public_profile_href: null,
+    public_profile_status: activePublicProfile
+      ? "published"
+      : preferences.public_profile_enabled
+        ? "preferences_saved"
+        : "private_by_default",
+    public_profile_handle: activePublicProfile?.handle ?? null,
+    public_profile_href: activePublicProfile?.href ?? null,
     source,
     updated_at: updatedAt,
     private: true,
     presentation_only: true,
-    message: preferences.public_profile_enabled
-      ? "Your public profile display choices are saved, but public profile publishing remains blocked until the dedicated viewer slice."
-      : "Your profile is private by default. Public profile publishing remains blocked until the dedicated viewer slice.",
+    message: activePublicProfile
+      ? `Your public profile is live at ${activePublicProfile.href}. Only the sections enabled here can appear there.`
+      : preferences.public_profile_enabled
+        ? "Your public profile display choices are saved, but a generated profile handle is not available in this environment yet."
+        : "Your profile is private by default. Turn on public profile only when you want approved sections to appear on your DZN profile link.",
     fairness_boundary: [
       "Profile privacy preferences are player-owned display settings only.",
-      "These settings do not write public profile routes, handles, awards, billing, rankings, discovery, reviews, events, Server Wars, CTF, or competitive eligibility.",
+      "Generated profile handles are presentation-only and do not bypass saved visibility controls.",
+      "These settings and handles do not write awards, billing, rankings, discovery, reviews, events, Server Wars, CTF, or competitive eligibility.",
     ],
   };
 }

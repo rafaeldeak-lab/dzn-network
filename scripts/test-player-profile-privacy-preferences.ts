@@ -43,7 +43,8 @@ assert.match(route, /FROM player_profile_privacy_preferences[\s\S]+WHERE user_id
 assert.match(route, /INSERT INTO player_profile_privacy_preferences[\s\S]+ON CONFLICT\(user_id\)/, "Privacy writes must target only the preference table.");
 assert.match(route, /ON CONFLICT\(user_id\) DO UPDATE SET/, "Privacy writes must be idempotent per current user.");
 assert.match(route, /current\.source === "unavailable"/, "Privacy PATCH must stop when the preference table cannot be read.");
-assert.match(route, /public_profile_href: null/, "Privacy settings must not publish or invent public profile handles.");
+assert.match(route, /ensureCurrentPublicProfileHandle/, "Opted-in public profiles must use the canonical generated handle helper.");
+assert.match(route, /public_profile_href: activePublicProfile\?\.href/, "Privacy settings must only expose an active current-user public profile href.");
 assert.match(route, /privateNoStoreHeaders\(\)/, "Privacy route must return private no-store data.");
 assert.doesNotMatch(
   route,
@@ -54,8 +55,9 @@ assert.doesNotMatch(
 assert.match(component, /fetch\("\/api\/player\/profile\/privacy"/, "Profile UI must read the private privacy API.");
 assert.match(component, /method: "PATCH"/, "Profile UI must save preferences through the approved PATCH API.");
 assert.match(component, /credentials: "include"/, "Profile UI must send same-session credentials.");
-assert.match(component, /Save the public profile sections DZN may use later/, "Profile UI must explain this is a saved future-display preference.");
-assert.match(component, /public profile viewer, handle generation, and profile attribution remain blocked/i, "Profile UI must preserve the future-publication boundary.");
+assert.match(component, /Choose which approved sections can appear on your public DZN profile link/, "Profile UI must explain approved public profile display settings.");
+assert.match(component, /View Public Profile/, "Profile UI must expose the public profile link only from the private current-user payload.");
+assert.match(component, /Profile attribution across other DZN surfaces remains blocked/i, "Profile UI must preserve the future attribution boundary.");
 assert.doesNotMatch(component, /\b(?:sendBeacon|analytics|localStorage|sessionStorage)\b/i, "Profile UI must not add tracking or browser storage.");
 assert.doesNotMatch(
   component,
@@ -97,6 +99,7 @@ async function testPrivacyRouteRuntimeContract() {
   assert.equal(defaultPayload.settings.public_profile_enabled, false, "Public profile should default private.");
   assert.equal(defaultPayload.settings.show_award_dates, false, "Award dates should default hidden.");
   assert.equal(defaultPayload.public_profile_href, null, "Privacy preferences must not create a public profile URL.");
+  assert.equal(defaultPayload.public_profile_handle, null, "Private default preferences must not expose a public profile handle.");
   assert.equal(db.preferences.has("mock-user"), false, "GET must not persist defaults implicitly.");
 
   const crossOrigin = await callPrivacyRoute(db, { DB: db, MOCK_AUTH: "true" } as unknown as Env, "PATCH", {
@@ -137,7 +140,8 @@ async function testPrivacyRouteRuntimeContract() {
   assert.equal(savedPayload.settings.show_gameplay_summary, false, "Gameplay section preference should persist.");
   assert.equal(savedPayload.settings.show_featured_server, true, "Unspecified section preferences should keep defaults.");
   assert.equal(savedPayload.settings.show_award_dates, true, "Award date preference should persist.");
-  assert.equal(savedPayload.public_profile_href, null, "Saving preferences still must not publish a public profile URL.");
+  assert.match(savedPayload.public_profile_href ?? "", /^\/players\/[a-z0-9][a-z0-9-]*-[a-z0-9]{6,8}$/, "Opting in should expose the generated current-user public profile URL.");
+  assert.match(savedPayload.public_profile_handle ?? "", /^[a-z0-9][a-z0-9-]*-[a-z0-9]{6,8}$/, "Opting in should expose the generated current-user public profile handle.");
 
   const persisted = db.preferences.get("mock-user");
   assert.equal(persisted?.public_profile_enabled, 1, "Current-user preferences must be stored as constrained integers.");
@@ -157,11 +161,12 @@ async function testPrivacyRouteRuntimeContract() {
   const reread = await callPrivacyRoute(db, { DB: db, MOCK_AUTH: "true" } as unknown as Env, "GET");
   const rereadPayload = await reread.json() as PrivacyPayload;
   assert.equal(rereadPayload.settings.show_display_name, false, "GET must return the current user's saved settings.");
+  assert.match(rereadPayload.public_profile_href ?? "", /^\/players\/[a-z0-9][a-z0-9-]*-[a-z0-9]{6,8}$/, "GET must return the existing current-user public profile link.");
   assert.equal(rereadPayload.private, true, "Preference payload must be marked private.");
   assert.equal(rereadPayload.presentation_only, true, "Preference payload must be marked presentation-only.");
-  assert.ok(rereadPayload.fairness_boundary.some((line) => /do not write public profile routes/i.test(line)), "Preference payload must state the public publishing boundary.");
+  assert.ok(rereadPayload.fairness_boundary.some((line) => /do not bypass saved visibility controls/i.test(line)), "Preference payload must state the visibility control boundary.");
 
-  assert.deepEqual([...db.writeTargets].sort(), ["discord_guilds", "player_profile_privacy_preferences", "users"], "Privacy route writes must be limited to mock auth bootstrap and preference rows.");
+  assert.deepEqual([...db.writeTargets].sort(), ["discord_guilds", "player_profile_privacy_preferences", "player_public_profiles", "users"], "Privacy route writes must be limited to mock auth bootstrap, preference rows, and generated profile handles.");
   assert.deepEqual(db.protectedWrites, [], "Privacy route must not write protected billing, owner, progression, review, event, scoring, or competitive tables.");
 }
 
@@ -189,6 +194,7 @@ async function callPrivacyRoute(
 type PrivacyPayload = {
   source: string;
   settings: Record<string, boolean>;
+  public_profile_handle: string | null;
   public_profile_href: string | null;
   private: boolean;
   presentation_only: boolean;
@@ -207,8 +213,17 @@ type FakePreferenceRow = {
   updated_at: string;
 };
 
+type FakePublicProfileRow = {
+  handle: string;
+  status: "active" | "disabled";
+  created_at: string;
+  updated_at: string;
+};
+
 class FakeD1Database {
   readonly preferences = new Map<string, FakePreferenceRow>();
+  readonly publicProfilesByUser = new Map<string, FakePublicProfileRow>();
+  readonly publicProfileOwnersByHandle = new Map<string, string>();
   readonly writeTargets = new Set<string>();
   readonly protectedWrites: string[] = [];
   failPreferenceReads = false;
@@ -246,6 +261,14 @@ class FakeD1PreparedStatement {
       const row = this.db.preferences.get(String(this.bindings[0]));
       return (row ?? null) as T | null;
     }
+    if (query.includes("from player_public_profiles") && query.includes("where user_id = ?")) {
+      const row = this.db.publicProfilesByUser.get(String(this.bindings[0]));
+      return (row ?? null) as T | null;
+    }
+    if (query.includes("from player_public_profiles") && query.includes("where handle = ?")) {
+      const userId = this.db.publicProfileOwnersByHandle.get(String(this.bindings[0]));
+      return (userId ? { user_id: userId } : null) as T | null;
+    }
     return null as T | null;
   }
 
@@ -278,6 +301,23 @@ class FakeD1PreparedStatement {
         updated_at: String(this.bindings[11]),
       };
       this.db.preferences.set(userId, next);
+      return d1Ok();
+    }
+
+    if (query.includes("insert into player_public_profiles")) {
+      this.db.writeTargets.add("player_public_profiles");
+      const userId = String(this.bindings[1]);
+      const candidate = String(this.bindings[2]);
+      const now = String(this.bindings[4]);
+      const existing = this.db.publicProfilesByUser.get(userId);
+      const handle = existing?.handle ?? candidate;
+      this.db.publicProfilesByUser.set(userId, {
+        handle,
+        status: "active",
+        created_at: existing?.created_at ?? now,
+        updated_at: now,
+      });
+      this.db.publicProfileOwnersByHandle.set(handle, userId);
       return d1Ok();
     }
 
