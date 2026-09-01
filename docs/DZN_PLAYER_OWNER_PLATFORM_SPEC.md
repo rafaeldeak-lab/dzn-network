@@ -101,6 +101,17 @@ The ordinary-member matching slice adds `player_discord_community_memberships` a
 - Public profile visibility and handles are not read or changed by this bridge.
 - Owner setup, Nitrado linking, server ownership, Discord posting, moderation, billing, rankings, discovery, reviews, events, progression, and competitive eligibility remain isolated.
 
+### Player Hub Community Matching UI Polish
+
+The Player Hub matched-community panel should make the bridge understandable without exposing extra data or adding new workflows:
+
+- Distinguish ordinary `Member`, `Admin`, and `Owner` relationship labels visually.
+- Show relationship-specific copy that makes clear the match is private and presentation-only.
+- Explain that a community match is not owner setup authority and does not unlock owner tools.
+- Show only private matches that connect to public DZN server profiles; do not expose a raw Discord guild list.
+- Provide source-aware empty states for unavailable matching, legacy manageable-guild fallback, and no public DZN matches.
+- Keep the panel UI/read-only only: no setup action, no public directory, no profile opt-in bypass, no billing, no ranking/discovery/review/event/progression/scoring effect.
+
 ## Reviews Roadmap
 
 Reviews are free logged-in player actions:
@@ -189,7 +200,8 @@ Completed or active foundation slices:
 - Saved/followed server interaction foundation: private player saved-server actions behind `player_saved_servers`.
 - Player Hub real-data foundation: private read-only hub payload plus `/player` panels for followed/saved servers, matched cached Discord communities, public event/tournament suggestions, and profile entry points while keeping owner setup behind `/pricing` and entitlement gates.
 - Broader player-community matching model: private ordinary-member Discord membership bridge for Player Hub community matching.
+- Player Hub community matching UI polish: clearer private matched-community cards, relationship badges, source-aware empty states, and presentation-only boundary copy.
 
-Next recommended product slice after broader player-community matching:
+Next recommended product slice after community matching UI polish:
 
-- Player Hub community matching UI polish: make the matched-community panel clearer for ordinary members, admins, and owners, while keeping the bridge private and presentation-only.
+- Review/merge/release the stacked community matching PRs in order, then build a player-controlled Discord membership refresh/status slice if the released UX needs clearer account refresh feedback.
