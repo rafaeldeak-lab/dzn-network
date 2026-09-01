@@ -54,7 +54,8 @@ assert.match(publicApi, /noStoreForErrorHeaders\(\{ vary: "Cookie" \}\)/, "Publi
 assert.doesNotMatch(publicApi, /publicCacheHeaders/, "Public profile payloads must not use stale public cache headers.");
 assert.doesNotMatch(publicApi, /\b(?:getSessionUser|ensureMockUser|INSERT INTO|UPDATE\s+[a-z_]+|DELETE FROM)\b/i, "Public profile API must not require sessions or write data.");
 assert.match(shellRoute, /env\.ASSETS\.fetch/, "Dynamic public profile pages must serve the static players shell through Pages assets.");
-assert.match(shellRoute, /\/players\.html/, "Dynamic public profile shell must serve the exported players page.");
+assert.match(shellRoute, /\/players"/, "Dynamic public profile shell must serve the exported players page.");
+assert.doesNotMatch(shellRoute, /\/players\.html/, "Dynamic public profile shell must avoid the redirected .html asset path on Pages.");
 assert.match(page, /generateStaticParams/, "The exported dynamic player route must include a static shell path.");
 assert.match(component, /fetch\(`\/api\/public\/players\/\$\{encodeURIComponent\(handle\)\}`/, "Public profile UI must read the public-safe profile API.");
 assert.match(component, /credentials: "omit"/, "Public profile UI must not send player cookies to the public profile API.");
