@@ -112,6 +112,15 @@ The Player Hub matched-community panel should make the bridge understandable wit
 - Provide source-aware empty states for unavailable matching, legacy manageable-guild fallback, and no public DZN matches.
 - Keep the panel UI/read-only only: no setup action, no public directory, no profile opt-in bypass, no billing, no ranking/discovery/review/event/progression/scoring effect.
 
+### Player Hub Suggested Event/Tournament Relevance Polish
+
+After the Player Hub Discord membership refresh/status UX is reviewed, merged, and released separately, the next clean product slice should make `/player` event suggestions more useful:
+
+- Prioritise public events connected to the player's privately followed servers.
+- Prioritise public events connected to the player's privately matched Discord communities.
+- Keep suggestions presentation-only.
+- Do not write event registrations, owner workflow state, scoring rows, eligibility rows, billing, discovery formulas, rankings, reviews, progression, XP awards, calling-card awards, badges, seasons, Server Wars, CTF, or competitive eligibility.
+
 ## Reviews Roadmap
 
 Reviews are free logged-in player actions:
@@ -202,6 +211,7 @@ Completed or active foundation slices:
 - Broader player-community matching model: private ordinary-member Discord membership bridge for Player Hub community matching.
 - Player Hub community matching UI polish: clearer private matched-community cards, relationship badges, source-aware empty states, and presentation-only boundary copy.
 
-Next recommended product slice after community matching UI polish:
+Next recommended product slices after community matching UI polish:
 
-- Review/merge/release the stacked community matching PRs in order, then build a player-controlled Discord membership refresh/status slice if the released UX needs clearer account refresh feedback.
+- Review/merge/release PR `#129` separately for Player Hub Discord membership refresh/status UX.
+- Then build Player Hub suggested event/tournament relevance polish so `/player` can prioritise public events connected to followed servers and privately matched Discord communities while remaining presentation-only.
