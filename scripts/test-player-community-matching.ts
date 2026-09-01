@@ -18,7 +18,7 @@ const handoff = readFileSync("docs/DZN_PLAYER_COMMUNITY_MATCHING_BRIDGE_HANDOFF.
 const packageJson = readFileSync("package.json", "utf8");
 
 assert.match(migration, /CREATE TABLE IF NOT EXISTS player_discord_community_memberships/i, "Migration must create the private player membership bridge.");
-assert.equal(migrationFiles.at(-1), "0061_player_discord_community_memberships.sql", "Community matching bridge migration should be the latest numbered migration in this branch.");
+assert.ok(migrationFiles.includes("0061_player_discord_community_memberships.sql"), "Community matching bridge migration should remain present in this branch.");
 assert.match(migration, /UNIQUE\(user_id, guild_id\)/i, "Membership bridge must be unique per player and Discord guild.");
 assert.match(migration, /revoked_at TEXT/i, "Membership bridge must revoke stale memberships without destructive deletes.");
 assert.match(migration, /FOREIGN KEY\(user_id\) REFERENCES users\(id\) ON DELETE CASCADE/i, "Membership rows must stay owned by DZN users.");

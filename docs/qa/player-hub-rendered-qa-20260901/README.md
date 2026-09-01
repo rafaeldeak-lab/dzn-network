@@ -1,6 +1,6 @@
 # Player Hub Rendered QA - 2026-09-01
 
-This local artifact proves the rendered `/player` Player Hub states for the profile/progression entry-point polish slice. It uses a headless browser against the local Next app and intercepts only `/api/auth/me`, `/api/dzn-pulse/config`, `/api/player/hub`, and `/api/player/community-memberships/refresh` with sanitized representative JSON.
+This local artifact proves the rendered `/player` and `/player/profile` Player Hub states for the profile/privacy preferences slice. It uses a headless browser against the local Next app and intercepts only `/api/auth/me`, `/api/dzn-pulse/config`, `/api/player/hub`, `/api/player/profile/privacy`, and `/api/player/community-memberships/refresh` with sanitized representative JSON.
 
 No production D1, Stripe, Cloudflare secret/config, Nitrado, Discord runtime, Store/payment, live checkout, retained export, analytics, scoring, ranking, discovery, review, progression, or competitive-system mutation is used by this QA harness.
 
@@ -10,6 +10,7 @@ No production D1, Stripe, Cloudflare secret/config, Nitrado, Discord runtime, St
 | --- | --- | --- | --- |
 | rich | desktop | [screenshots/rich-desktop.png](screenshots/rich-desktop.png) | 25 text/boundary/overlap checks |
 | rich | mobile | [screenshots/rich-mobile.png](screenshots/rich-mobile.png) | 25 text/boundary/overlap checks |
+| profilePrivacy | desktop | [screenshots/profilePrivacy-desktop.png](screenshots/profilePrivacy-desktop.png) | 16 text/boundary/overlap checks |
 | empty | desktop | [screenshots/empty-desktop.png](screenshots/empty-desktop.png) | 10 text/boundary/overlap checks |
 | unavailable | desktop | [screenshots/unavailable-desktop.png](screenshots/unavailable-desktop.png) | 7 text/boundary/overlap checks |
 | storageFallback | desktop | [screenshots/storageFallback-desktop.png](screenshots/storageFallback-desktop.png) | 11 text/boundary/overlap checks |
@@ -17,6 +18,7 @@ No production D1, Stripe, Cloudflare secret/config, Nitrado, Discord runtime, St
 ## Verified States
 
 - Rich current-player data: followed servers, matched Discord communities, suggested events, relevance badges, profile entry points, and private profile/progression summaries render from the private Player Hub payload.
+- Profile privacy proof: `/player/profile` renders saved public-profile display preferences from the private privacy API without publishing handles, public viewer routes, raw identifiers, or award evidence.
 - Profile/progression proof: safe current-user gameplay summary metrics render without raw player names, raw player ids, public profile handles, privacy-setting writes, or award runtime writes.
 - Crowded-event proof: the matched-community event renders as `451/512 servers` and still shows `Matched community`, proving irrelevant registered servers do not hide a relevant private match.
 - Empty state proof: followed servers, matched communities, and suggested events show useful empty states.
@@ -40,6 +42,12 @@ Console warnings/errors: none captured.
 Network failures: none captured.
 
 ### rich / mobile
+
+Console warnings/errors: none captured.
+
+Network failures: none captured.
+
+### profilePrivacy / desktop
 
 Console warnings/errors: none captured.
 

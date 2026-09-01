@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-01T14:24:57.476Z",
+  "generated_at": "2026-09-01T15:03:06.477Z",
   "results": [
     {
       "scenario": "rich",
@@ -27,7 +27,7 @@
         "Current Profile Signals",
         "421m",
         "future earned runtime",
-        "This panel is private and read-only."
+        "This profile summary is private and read-only."
       ]
     },
     {
@@ -56,7 +56,27 @@
         "Current Profile Signals",
         "421m",
         "future earned runtime",
-        "This panel is private and read-only."
+        "This profile summary is private and read-only."
+      ]
+    },
+    {
+      "scenario": "profilePrivacy",
+      "viewport": "desktop",
+      "screenshot": "screenshots/profilePrivacy-desktop.png",
+      "assertions": 16,
+      "consoleMessages": [],
+      "failedRequests": [],
+      "textChecks": [
+        "Personal Player Profile",
+        "Profile & Progression",
+        "Profile Privacy Preferences",
+        "Public profile",
+        "Gameplay summary",
+        "Calling cards",
+        "Private by default",
+        "Last saved: not saved yet",
+        "public profile viewer, handle generation, and profile attribution remain blocked",
+        "These settings do not write public profile routes"
       ]
     },
     {
