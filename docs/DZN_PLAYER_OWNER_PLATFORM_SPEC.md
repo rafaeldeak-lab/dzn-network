@@ -130,11 +130,14 @@ This slice adds a current-user-only refresh/status contract:
 
 ### Player Hub Suggested Event/Tournament Relevance Polish
 
-After the Player Hub Discord membership refresh/status UX is reviewed, merged, and released separately, the next clean product slice should make `/player` event suggestions more useful:
+This slice makes `/player` event suggestions more useful inside the private Player Hub read model:
 
 - Prioritise public events connected to the player's privately followed servers.
 - Prioritise public events connected to the player's privately matched Discord communities.
-- Keep suggestions presentation-only.
+- Keep suggestions presentation-only with visible `Followed server`, `Matched community`, and `Public network` labels.
+- Read a bounded set of public eligible events from `competitive_events`, then read only `competitive_event_servers` server links for those candidate events.
+- Derive private relevance from the current user's `player_saved_servers` rows and already-filtered matched-community server previews.
+- Return private no-store relevance metadata only to the logged-in player; do not expose raw Discord guild ids through event suggestions.
 - Do not write event registrations, owner workflow state, scoring rows, eligibility rows, billing, discovery formulas, rankings, reviews, progression, XP awards, calling-card awards, badges, seasons, Server Wars, CTF, or competitive eligibility.
 
 ## Reviews Roadmap
@@ -228,7 +231,8 @@ Completed or active foundation slices:
 - Player Hub community matching UI polish: clearer private matched-community cards, relationship badges, source-aware empty states, and presentation-only boundary copy.
 - Player Hub Discord membership refresh/status UX: current-user-only refresh button/status copy backed by a same-origin player membership refresh route, without owner guild-cache, payment, profile-publication, analytics, production migration, or competitive-system changes.
 - Shared header command bar visual polish: DZN command-deck styling for the root header, animated corner logo preserved, icon-based nav/action controls, hover/focus highlighting, and bright red DZN Pulse unread badges; visual only with no payment, Store, chat runtime, production, or competitive-system changes.
+- Player Hub suggested event/tournament relevance polish: private no-store suggestions now prioritise public events connected to followed servers and matched-community server previews, with presentation-only labels and no event registration, scoring, eligibility, billing, owner workflow, progression, review, ranking, discovery, or competitive-system changes.
 
-Next recommended product slice after Discord membership refresh/status UX:
+Next recommended product slice after Player Hub event relevance:
 
-- Player Hub suggested event/tournament relevance polish: make suggested events more useful by prioritising public events connected to followed servers and privately matched communities, while keeping suggestions presentation-only and isolated from scoring, eligibility, billing, owner workflows, progression, reviews, rankings, and discovery formulas.
+- Player Hub suggested event/tournament rendered QA and release review: run `/player` locally with representative saved-server and matched-community data, capture desktop/mobile proof of relevance badges and fallback states, then approve merge/release separately.
