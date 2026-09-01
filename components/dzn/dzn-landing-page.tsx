@@ -279,8 +279,6 @@ type PricingComparisonCell = {
   note?: string;
 };
 
-type CssVariableProperties = CSSProperties & Record<`--${string}`, string | number | undefined>;
-
 const emptyHomeStats: HomeStats = {
   totals: {
     serversLinked: 0,
@@ -355,92 +353,7 @@ const HOME_STATS_REFRESH_MS = 30000;
 const HOME_STATS_LAST_GOOD_KEY = "dzn:lastGoodHomeStats";
 const HOME_STATS_LAST_GOOD_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 type HomeStatsLoadState = "loading_initial" | "loaded" | "refreshing" | "refresh_failed" | "error_initial";
-const HOMEPAGE_UI_ASSET_BASE = "/media/homepage-ui";
-const HOMEPAGE_AMBIENT_ASSETS = {
-  background: `${HOMEPAGE_UI_ASSET_BASE}/master-site-background.webp`,
-  gameModesSection: `${HOMEPAGE_UI_ASSET_BASE}/game-modes-section-background.webp`,
-  liveIntelligenceSection: `${HOMEPAGE_UI_ASSET_BASE}/live-intelligence-section.webp`,
-  gameModeCards: {
-    pvp: `${HOMEPAGE_UI_ASSET_BASE}/game-mode-pvp-card.webp`,
-    deathmatch: `${HOMEPAGE_UI_ASSET_BASE}/game-mode-deathmatch-card.webp`,
-    pve: `${HOMEPAGE_UI_ASSET_BASE}/game-mode-pve-card.webp`,
-    hybrid: `${HOMEPAGE_UI_ASSET_BASE}/game-mode-hybrid-card.webp`,
-  },
-  statCards: {
-    players: `${HOMEPAGE_UI_ASSET_BASE}/stat-players-online.webp`,
-    servers: `${HOMEPAGE_UI_ASSET_BASE}/stat-servers-linked.webp`,
-    kills: `${HOMEPAGE_UI_ASSET_BASE}/stat-kills.webp`,
-    longest: `${HOMEPAGE_UI_ASSET_BASE}/stat-longest-kill.webp`,
-  },
-  pulseCards: {
-    active: `${HOMEPAGE_UI_ASSET_BASE}/pulse-active-servers.webp`,
-    events: `${HOMEPAGE_UI_ASSET_BASE}/pulse-events-tracked.webp`,
-    top: `${HOMEPAGE_UI_ASSET_BASE}/pulse-top-server.webp`,
-    event: `${HOMEPAGE_UI_ASSET_BASE}/pulse-current-event.webp`,
-  },
-  icons: {
-    pvp: `${HOMEPAGE_UI_ASSET_BASE}/icon-pvp.webp`,
-    deathmatch: `${HOMEPAGE_UI_ASSET_BASE}/icon-deathmatch.webp`,
-    pve: `${HOMEPAGE_UI_ASSET_BASE}/icon-pve.webp`,
-    hybrid: `${HOMEPAGE_UI_ASSET_BASE}/icon-hybrid.webp`,
-    players: `${HOMEPAGE_UI_ASSET_BASE}/icon-players.webp`,
-    servers: `${HOMEPAGE_UI_ASSET_BASE}/icon-servers.webp`,
-    crosshair: `${HOMEPAGE_UI_ASSET_BASE}/icon-crosshair.webp`,
-    trophy: `${HOMEPAGE_UI_ASSET_BASE}/icon-trophy.webp`,
-    wifi: `${HOMEPAGE_UI_ASSET_BASE}/icon-wifi.webp`,
-    events: `${HOMEPAGE_UI_ASSET_BASE}/icon-events.webp`,
-    timer: `${HOMEPAGE_UI_ASSET_BASE}/icon-timer.webp`,
-    crown: `${HOMEPAGE_UI_ASSET_BASE}/icon-crown.webp`,
-  },
-} as const;
-const CINEMATIC_BG = HOMEPAGE_AMBIENT_ASSETS.background;
-const HOME_AMBIENT_ICONS = [
-  {
-    key: "players",
-    src: HOMEPAGE_AMBIENT_ASSETS.icons.players,
-    style: { left: "5%", top: "22%", animationDelay: "0s", animationDuration: "26s" },
-  },
-  {
-    key: "pvp",
-    src: HOMEPAGE_AMBIENT_ASSETS.icons.pvp,
-    style: { left: "18%", top: "74%", animationDelay: "2.8s", animationDuration: "31s" },
-  },
-  {
-    key: "servers",
-    src: HOMEPAGE_AMBIENT_ASSETS.icons.servers,
-    style: { left: "72%", top: "18%", animationDelay: "1.1s", animationDuration: "29s" },
-  },
-  {
-    key: "trophy",
-    src: HOMEPAGE_AMBIENT_ASSETS.icons.trophy,
-    style: { left: "89%", top: "68%", animationDelay: "3.6s", animationDuration: "34s" },
-  },
-  {
-    key: "events",
-    src: HOMEPAGE_AMBIENT_ASSETS.icons.events,
-    style: { left: "62%", top: "84%", animationDelay: "5.1s", animationDuration: "28s" },
-  },
-] satisfies Array<{ key: string; src: string; style: CSSProperties }>;
-
-const HOMEPAGE_MOTION_AMBIENT_ASSET_PATHS = HOME_AMBIENT_ICONS.map((icon) => icon.src);
-const HOMEPAGE_FEATURE_SECTION_ASSET_PATHS = [
-  HOMEPAGE_AMBIENT_ASSETS.gameModesSection,
-  HOMEPAGE_AMBIENT_ASSETS.liveIntelligenceSection,
-  ...Object.values(HOMEPAGE_AMBIENT_ASSETS.gameModeCards),
-  ...Object.values(HOMEPAGE_AMBIENT_ASSETS.statCards),
-  ...Object.values(HOMEPAGE_AMBIENT_ASSETS.pulseCards),
-  ...Object.values(HOMEPAGE_AMBIENT_ASSETS.icons),
-] as const;
-const HOMEPAGE_AMBIENT_ASSET_PATHS = {
-  critical: [HOMEPAGE_AMBIENT_ASSETS.background],
-  motion: HOMEPAGE_MOTION_AMBIENT_ASSET_PATHS,
-  featureSections: HOMEPAGE_FEATURE_SECTION_ASSET_PATHS,
-} as const;
-type PreloadHomepageAmbientAssetsOptions = {
-  includeMotionIcons?: boolean;
-  includeFeatureSections?: boolean;
-};
-const preloadedHomepageAmbientAssets = new Set<string>();
+const CINEMATIC_BG = "/media/dzn-cinematic-survivor.png";
 const BUILD_IMAGE_ASSETS = {
   hero: "/dzn/build/build-hero.webp",
   walls: "/dzn/build/full-walls.webp",
@@ -459,32 +372,6 @@ function preloadBuildLeaderboardImages() {
     image.decoding = "async";
     image.onerror = () => {
       console.warn(`DZN BUILD IMAGE ASSET MISSING: ${src}`);
-    };
-    image.src = src;
-  }
-}
-
-function preloadHomepageAmbientAssets(options: PreloadHomepageAmbientAssetsOptions = {}) {
-  if (typeof window === "undefined") return;
-
-  const paths = new Set<string>(HOMEPAGE_AMBIENT_ASSET_PATHS.critical);
-
-  if (options.includeMotionIcons) {
-    HOMEPAGE_AMBIENT_ASSET_PATHS.motion.forEach((src) => paths.add(src));
-  }
-
-  if (options.includeFeatureSections) {
-    HOMEPAGE_AMBIENT_ASSET_PATHS.featureSections.forEach((src) => paths.add(src));
-  }
-
-  for (const src of paths) {
-    if (preloadedHomepageAmbientAssets.has(src)) continue;
-    preloadedHomepageAmbientAssets.add(src);
-
-    const image = new Image();
-    image.decoding = "async";
-    image.onerror = () => {
-      console.warn(`DZN HOMEPAGE AMBIENT ASSET MISSING: ${src}`);
     };
     image.src = src;
   }
@@ -973,17 +860,9 @@ export function DznLandingPage() {
     console.log("DZN PUBLIC DATA LOADING HARDENED");
     console.log("DZN LAST GOOD PUBLIC DATA PRESERVED");
     console.log("DZN PUBLIC PAGES FIRST LOAD STABILISED");
-    console.log("DZN HOMEPAGE AMBIENT UI ASSETS LOADED");
     console.log("DZN ADM SYSTEM UNTOUCHED");
     preloadBuildLeaderboardImages();
   }, []);
-
-  useEffect(() => {
-    preloadHomepageAmbientAssets({
-      includeMotionIcons: !reduceMotion,
-      includeFeatureSections: !isAuthLoading && !isPreviewMode,
-    });
-  }, [isAuthLoading, isPreviewMode, reduceMotion]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIsLoading(false), reduceMotion ? 120 : 950);
@@ -1063,18 +942,6 @@ function HomeAliveBackground({ reducedMotion }: { reducedMotion: boolean }) {
                 animationDelay: `${(index % 16) * 0.32}s`,
                 animationDuration: `${12 + (index % 9)}s`,
               }}
-            />
-          ))}
-          {HOME_AMBIENT_ICONS.map((icon) => (
-            <span
-              key={icon.key}
-              className={`dzn-home-floating-icon dzn-home-floating-icon--${icon.key}`}
-              style={
-                {
-                  "--dzn-floating-icon": `url("${icon.src}")`,
-                  ...icon.style,
-                } as CssVariableProperties
-              }
             />
           ))}
         </>
@@ -1934,8 +1801,6 @@ function GameModeGrid({ counts }: { counts: HomeStats["gameModes"] }) {
       description: "High-risk servers competing on confirmed kills, K/D, and longest shots.",
       icon: Crosshair,
       theme: "pvp",
-      assetIcon: HOMEPAGE_AMBIENT_ASSETS.icons.pvp,
-      skin: HOMEPAGE_AMBIENT_ASSETS.gameModeCards.pvp,
     },
     {
       title: "DEATHMATCH",
@@ -1943,8 +1808,6 @@ function GameModeGrid({ counts }: { counts: HomeStats["gameModes"] }) {
       description: "Fast combat communities pushing activity, volume, and clean kill tracking.",
       icon: Skull,
       theme: "deathmatch",
-      assetIcon: HOMEPAGE_AMBIENT_ASSETS.icons.deathmatch,
-      skin: HOMEPAGE_AMBIENT_ASSETS.gameModeCards.deathmatch,
     },
     {
       title: "PVE",
@@ -1952,8 +1815,6 @@ function GameModeGrid({ counts }: { counts: HomeStats["gameModes"] }) {
       description: "Survival-focused servers building longevity, events, and community reputation.",
       icon: Shield,
       theme: "pve",
-      assetIcon: HOMEPAGE_AMBIENT_ASSETS.icons.pve,
-      skin: HOMEPAGE_AMBIENT_ASSETS.gameModeCards.pve,
     },
     {
       title: "PVP / PVE",
@@ -1961,17 +1822,11 @@ function GameModeGrid({ counts }: { counts: HomeStats["gameModes"] }) {
       description: "Hybrid worlds where factions, raids, survival, and competition all count.",
       icon: Swords,
       theme: "hybrid",
-      assetIcon: HOMEPAGE_AMBIENT_ASSETS.icons.hybrid,
-      skin: HOMEPAGE_AMBIENT_ASSETS.gameModeCards.hybrid,
     },
   ];
 
   return (
-    <motion.section
-      variants={fadeUp}
-      className="dzn-home-panel dzn-game-modes-section rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl"
-      style={{ "--dzn-section-skin": `url("${HOMEPAGE_AMBIENT_ASSETS.gameModesSection}")` } as CssVariableProperties}
-    >
+    <motion.section variants={fadeUp} className="dzn-home-panel dzn-game-modes-section rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl">
       <div className="mb-3 flex items-end justify-between gap-3">
         <div>
           <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-violet-200">Game Modes</p>
@@ -1990,12 +1845,6 @@ function GameModeGrid({ counts }: { counts: HomeStats["gameModes"] }) {
               key={mode.title}
               href="/servers"
               className={`dzn-game-mode-card dzn-game-mode-card--${mode.theme} group`}
-              style={
-                {
-                  "--mode-skin": `url("${mode.skin}")`,
-                  "--mode-icon": `url("${mode.assetIcon}")`,
-                } as CssVariableProperties
-              }
             >
               <div className="relative z-10 flex h-full flex-col">
                 <div className="flex items-start justify-between gap-3">
@@ -2031,32 +1880,24 @@ function NetworkOverview({ homeStats, dataPending = false }: { homeStats: HomeSt
       value: dataPending ? "Syncing" : formatNumber(playersOnline),
       detail: "Live across connected servers",
       theme: "players",
-      assetIcon: HOMEPAGE_AMBIENT_ASSETS.icons.players,
-      skin: HOMEPAGE_AMBIENT_ASSETS.statCards.players,
     },
     {
       icon: Server,
       label: "Servers Linked",
       value: dataPending ? "Syncing" : formatNumber(homeStats.totals.serversLinked),
       theme: "servers",
-      assetIcon: HOMEPAGE_AMBIENT_ASSETS.icons.servers,
-      skin: HOMEPAGE_AMBIENT_ASSETS.statCards.servers,
     },
     {
       icon: Crosshair,
       label: "Kills",
       value: dataPending ? "Syncing" : formatNumber(homeStats.totals.killsTracked),
       theme: "kills",
-      assetIcon: HOMEPAGE_AMBIENT_ASSETS.icons.crosshair,
-      skin: HOMEPAGE_AMBIENT_ASSETS.statCards.kills,
     },
     {
       icon: Trophy,
       label: "Longest Kill",
       value: dataPending ? "Syncing" : longestKill > 0 ? `${formatDecimal(longestKill)}m` : "No long kill yet",
       theme: "longest",
-      assetIcon: HOMEPAGE_AMBIENT_ASSETS.icons.trophy,
-      skin: HOMEPAGE_AMBIENT_ASSETS.statCards.longest,
     },
   ];
 
@@ -2075,16 +1916,7 @@ function NetworkOverview({ homeStats, dataPending = false }: { homeStats: HomeSt
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
-            <div
-              key={stat.label}
-              className={`dzn-stat-card dzn-stat-card--${stat.theme}`}
-              style={
-                {
-                  "--stat-skin": `url("${stat.skin}")`,
-                  "--stat-icon": `url("${stat.assetIcon}")`,
-                } as CssVariableProperties
-              }
-            >
+            <div key={stat.label} className={`dzn-stat-card dzn-stat-card--${stat.theme}`}>
               <span className="dzn-stat-icon" aria-hidden="true">
                 <Icon className="h-5 w-5" />
               </span>
@@ -2115,8 +1947,6 @@ function NetworkPulse({ homeStats, dataPending = false }: { homeStats: HomeStats
       value: dataPending ? "Syncing" : `${formatNumber(homeStats.network_pulse.active_servers || homeStats.syncHealth.active)} active`,
       detail: "Live and online right now",
       theme: "active",
-      assetIcon: HOMEPAGE_AMBIENT_ASSETS.icons.wifi,
-      skin: HOMEPAGE_AMBIENT_ASSETS.pulseCards.active,
     },
     {
       icon: Activity,
@@ -2124,8 +1954,6 @@ function NetworkPulse({ homeStats, dataPending = false }: { homeStats: HomeStats
       value: dataPending ? "Syncing events" : `${formatNumber(totalEventsTracked)} events`,
       detail: "All-time ADM events tracked",
       theme: "events",
-      assetIcon: HOMEPAGE_AMBIENT_ASSETS.icons.events,
-      skin: HOMEPAGE_AMBIENT_ASSETS.pulseCards.events,
     },
     {
       icon: Trophy,
@@ -2133,8 +1961,6 @@ function NetworkPulse({ homeStats, dataPending = false }: { homeStats: HomeStats
       value: topServer ? formatServerDisplayName(topServer.server_name) : "No ranked server yet",
       detail: topServer ? `Score: ${topServer.score_label ?? formatNumber(topServer.score ?? 0)} | K/D: ${topKd}` : "Waiting for leaderboard data",
       theme: "top",
-      assetIcon: HOMEPAGE_AMBIENT_ASSETS.icons.crown,
-      skin: HOMEPAGE_AMBIENT_ASSETS.pulseCards.top,
     },
     {
       icon: Timer,
@@ -2142,17 +1968,11 @@ function NetworkPulse({ homeStats, dataPending = false }: { homeStats: HomeStats
       value: currentEvent ? currentEvent.title : "No event live",
       detail: currentEvent?.description ?? "Next event coming soon",
       theme: "event",
-      assetIcon: HOMEPAGE_AMBIENT_ASSETS.icons.timer,
-      skin: HOMEPAGE_AMBIENT_ASSETS.pulseCards.event,
     },
   ];
 
   return (
-    <motion.section
-      variants={fadeUp}
-      className="dzn-home-panel dzn-network-pulse rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl"
-      style={{ "--dzn-section-skin": `url("${HOMEPAGE_AMBIENT_ASSETS.liveIntelligenceSection}")` } as CssVariableProperties}
-    >
+    <motion.section variants={fadeUp} className="dzn-home-panel dzn-network-pulse rounded-xl border border-white/10 bg-[#050914]/66 p-4 backdrop-blur-xl">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <p className="text-[0.66rem] font-black uppercase tracking-[0.18em] text-violet-200">Network Pulse</p>
@@ -2164,16 +1984,7 @@ function NetworkPulse({ homeStats, dataPending = false }: { homeStats: HomeStats
         {pulseCards.map((card) => {
           const Icon = card.icon;
           return (
-            <article
-              key={card.eyebrow}
-              className={`dzn-pulse-card dzn-pulse-card--${card.theme}`}
-              style={
-                {
-                  "--pulse-skin": `url("${card.skin}")`,
-                  "--pulse-icon": `url("${card.assetIcon}")`,
-                } as CssVariableProperties
-              }
-            >
+            <article key={card.eyebrow} className={`dzn-pulse-card dzn-pulse-card--${card.theme}`}>
               <span className="dzn-pulse-icon" aria-hidden="true">
                 <Icon className="h-4 w-4" />
               </span>
