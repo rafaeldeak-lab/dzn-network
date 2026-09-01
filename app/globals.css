@@ -4639,14 +4639,14 @@ button.dzn-header-action {
 
 .dzn-home-bg-image {
   position: absolute;
-  inset: -3%;
+  inset: -7%;
   background-image: var(--dzn-home-bg, none);
   background-size: cover;
   background-position: 50% 46%;
-  opacity: 0.46;
-  filter: saturate(1.18) contrast(1.12) brightness(0.72);
+  opacity: 0.58;
+  filter: saturate(1.22) contrast(1.14) brightness(0.66);
   transform-origin: center;
-  animation: dznHomeBgDrift 28s ease-in-out infinite alternate;
+  animation: dznHomeBgDrift 34s ease-in-out infinite alternate;
 }
 
 .dzn-home-haze {
@@ -4657,6 +4657,35 @@ button.dzn-header-action {
     radial-gradient(circle at 68% 16%, rgba(59, 130, 246, 0.18), transparent 28%),
     radial-gradient(circle at 84% 72%, rgba(168, 85, 247, 0.18), transparent 30%),
     linear-gradient(180deg, rgba(2, 3, 10, 0.18), rgba(2, 3, 10, 0.68) 55%, rgba(2, 3, 10, 0.96));
+}
+
+.dzn-home-haze::before,
+.dzn-home-haze::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.dzn-home-haze::before {
+  background:
+    linear-gradient(118deg, transparent 0 48%, rgba(125, 211, 252, 0.18) 51%, transparent 55%),
+    linear-gradient(102deg, transparent 0 62%, rgba(168, 85, 247, 0.14) 65%, transparent 69%),
+    radial-gradient(circle at 12% 78%, rgba(251, 146, 60, 0.24), transparent 18%),
+    radial-gradient(circle at 92% 26%, rgba(56, 189, 248, 0.18), transparent 20%);
+  mix-blend-mode: screen;
+  opacity: 0.24;
+  animation: dznHomeLightningFlicker 13s ease-in-out infinite;
+}
+
+.dzn-home-haze::after {
+  background:
+    radial-gradient(circle at 20% 86%, rgba(251, 146, 60, 0.2), transparent 22%),
+    radial-gradient(circle at 72% 70%, rgba(217, 70, 239, 0.14), transparent 24%),
+    radial-gradient(circle at 86% 18%, rgba(14, 165, 233, 0.18), transparent 20%),
+    linear-gradient(90deg, rgba(251, 146, 60, 0.08), transparent 34%, rgba(56, 189, 248, 0.08));
+  opacity: 0.52;
+  animation: dznHomeEmberGlow 18s ease-in-out infinite alternate;
 }
 
 .dzn-home-grid {
@@ -4721,6 +4750,30 @@ button.dzn-header-action {
     0 0 18px rgba(168, 85, 247, 0.42);
   opacity: 0;
   animation: dznHomeParticleFloat 15s linear infinite;
+}
+
+.dzn-home-floating-icon {
+  position: absolute;
+  width: clamp(2.4rem, 4vw, 4.7rem);
+  aspect-ratio: 1;
+  background-image: var(--dzn-floating-icon, none);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  filter:
+    drop-shadow(0 0 14px rgba(103, 232, 249, 0.32))
+    drop-shadow(0 0 28px rgba(168, 85, 247, 0.24));
+  opacity: 0.2;
+  transform-origin: 50% 52%;
+  animation: dznHomeAmbientIconFloat 28s ease-in-out infinite;
+}
+
+.dzn-home-floating-icon--trophy,
+.dzn-home-floating-icon--events {
+  opacity: 0.16;
+  filter:
+    drop-shadow(0 0 12px rgba(251, 191, 36, 0.24))
+    drop-shadow(0 0 26px rgba(168, 85, 247, 0.22));
 }
 
 .dzn-home-hero-card {
@@ -6540,6 +6593,7 @@ button.dzn-header-action {
   background:
     radial-gradient(circle at 50% 0%, rgba(124, 58, 237, 0.16), transparent 34%),
     linear-gradient(180deg, rgba(6, 11, 27, 0.78), rgba(3, 7, 18, 0.72));
+  overflow: hidden;
 }
 
 .dzn-game-modes-section::after {
@@ -6547,10 +6601,17 @@ button.dzn-header-action {
   position: absolute;
   inset: 0;
   background:
+    linear-gradient(180deg, rgba(3, 7, 18, 0.18), rgba(3, 7, 18, 0.72)),
     linear-gradient(90deg, transparent, rgba(168, 85, 247, 0.18), transparent),
-    radial-gradient(circle at 82% 10%, rgba(103, 232, 249, 0.12), transparent 24%);
-  opacity: 0.5;
+    radial-gradient(circle at 82% 10%, rgba(103, 232, 249, 0.12), transparent 24%),
+    var(--dzn-section-skin, none);
+  background-position: center;
+  background-size: auto, auto, auto, cover;
+  opacity: 0.58;
   pointer-events: none;
+  transform-origin: center;
+  z-index: 0;
+  animation: dznHomeCardSkinDrift 24s ease-in-out infinite alternate;
 }
 
 .dzn-game-modes-section > * {
@@ -6592,9 +6653,13 @@ button.dzn-header-action {
   text-decoration: none;
   isolation: isolate;
   background:
+    linear-gradient(180deg, rgba(3, 7, 18, 0.16), rgba(3, 7, 18, 0.76)),
+    var(--mode-skin, none),
     radial-gradient(circle at 18% 16%, var(--mode-accent-soft), transparent 28%),
     radial-gradient(circle at 92% 88%, rgba(255, 255, 255, 0.045), transparent 26%),
     linear-gradient(145deg, rgba(8, 13, 31, 0.95), rgba(3, 7, 18, 0.96));
+  background-position: center;
+  background-size: auto, cover, auto, auto, auto;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     inset 0 -1px 0 color-mix(in srgb, var(--mode-accent) 28%, transparent),
@@ -6611,11 +6676,12 @@ button.dzn-header-action {
   position: absolute;
   inset: 0;
   background:
+    radial-gradient(circle at 50% 20%, color-mix(in srgb, var(--mode-accent) 18%, transparent), transparent 36%),
     linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.026) 1px, transparent 1px);
-  background-size: 22px 22px;
+  background-size: auto, 22px 22px, 22px 22px;
   mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.65), transparent 88%);
-  opacity: 0.34;
+  opacity: 0.42;
   pointer-events: none;
 }
 
@@ -6683,6 +6749,7 @@ button.dzn-header-action {
 }
 
 .dzn-game-mode-icon {
+  position: relative;
   display: grid;
   width: 3.25rem;
   height: 3.25rem;
@@ -6700,6 +6767,26 @@ button.dzn-header-action {
     transform 240ms ease,
     color 240ms ease,
     box-shadow 240ms ease;
+}
+
+.dzn-game-mode-icon::before {
+  content: "";
+  position: absolute;
+  inset: 0.44rem;
+  background-image: var(--mode-icon, none);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--mode-accent) 42%, transparent));
+  opacity: 0.98;
+  transform-origin: 50% 50%;
+  animation: dznHomeIconOrbitFloat 16s ease-in-out infinite;
+}
+
+.dzn-game-mode-icon svg {
+  position: relative;
+  z-index: 1;
+  opacity: 0.34;
 }
 
 .dzn-game-mode-card:hover .dzn-game-mode-icon {
@@ -6808,8 +6895,12 @@ button.dzn-header-action {
   border-radius: 1rem;
   padding: 1rem;
   background:
+    linear-gradient(90deg, rgba(3, 7, 18, 0.08), rgba(3, 7, 18, 0.74)),
+    var(--stat-skin, none),
     radial-gradient(circle at 14% 22%, var(--stat-soft), transparent 32%),
     linear-gradient(135deg, rgba(8, 14, 34, 0.92), rgba(4, 8, 21, 0.86));
+  background-position: center;
+  background-size: auto, cover, auto, auto;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     inset 0 -1px 0 color-mix(in srgb, var(--stat-accent) 22%, transparent),
@@ -6928,6 +7019,20 @@ button.dzn-header-action {
     box-shadow 240ms ease;
 }
 
+.dzn-stat-icon::before {
+  content: "";
+  position: absolute;
+  inset: 0.48rem;
+  background-image: var(--stat-icon, none);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--stat-accent) 42%, transparent));
+  opacity: 0.98;
+  transform-origin: 50% 50%;
+  animation: dznHomeIconOrbitFloat 18s ease-in-out infinite reverse;
+}
+
 .dzn-stat-icon::after {
   content: "";
   position: absolute;
@@ -6936,6 +7041,12 @@ button.dzn-header-action {
   border-radius: 0.58rem;
   clip-path: inherit;
   opacity: 0.62;
+}
+
+.dzn-stat-icon svg {
+  position: relative;
+  z-index: 1;
+  opacity: 0.3;
 }
 
 .dzn-stat-card:hover .dzn-stat-icon {
@@ -6989,6 +7100,24 @@ button.dzn-header-action {
     radial-gradient(circle at 12% 0%, rgba(168, 85, 247, 0.18), transparent 32%),
     radial-gradient(circle at 86% 20%, rgba(34, 211, 238, 0.12), transparent 30%),
     linear-gradient(180deg, rgba(4, 9, 24, 0.82), rgba(3, 7, 18, 0.74));
+  overflow: hidden;
+}
+
+.dzn-network-pulse::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(3, 7, 18, 0.24), rgba(3, 7, 18, 0.72)),
+    radial-gradient(circle at 18% 8%, rgba(251, 146, 60, 0.11), transparent 20%),
+    var(--dzn-section-skin, none);
+  background-position: center;
+  background-size: auto, auto, cover;
+  opacity: 0.48;
+  pointer-events: none;
+  transform-origin: center;
+  z-index: 0;
+  animation: dznHomeCardSkinDrift 28s ease-in-out infinite alternate-reverse;
 }
 
 .dzn-network-pulse > *,
@@ -7035,8 +7164,12 @@ button.dzn-header-action {
   border-radius: 1rem;
   padding: 1rem;
   background:
+    linear-gradient(90deg, rgba(3, 7, 18, 0.08), rgba(3, 7, 18, 0.78)),
+    var(--pulse-skin, none),
     radial-gradient(circle at 16% 18%, color-mix(in srgb, var(--pulse-accent) 18%, transparent), transparent 34%),
     linear-gradient(145deg, rgba(8, 14, 34, 0.88), rgba(3, 7, 18, 0.84));
+  background-position: center;
+  background-size: auto, cover, auto, auto;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.07),
     0 14px 32px rgba(0, 0, 0, 0.24);
@@ -7089,6 +7222,7 @@ button.dzn-header-action {
 }
 
 .dzn-pulse-icon {
+  position: relative;
   display: grid;
   width: 2.35rem;
   height: 2.35rem;
@@ -7101,6 +7235,26 @@ button.dzn-header-action {
   box-shadow:
     inset 0 0 16px color-mix(in srgb, var(--pulse-accent) 16%, transparent),
     0 0 22px color-mix(in srgb, var(--pulse-accent) 28%, transparent);
+}
+
+.dzn-pulse-icon::before {
+  content: "";
+  position: absolute;
+  inset: 0.42rem;
+  background-image: var(--pulse-icon, none);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  filter: drop-shadow(0 0 9px color-mix(in srgb, var(--pulse-accent) 42%, transparent));
+  opacity: 0.96;
+  transform-origin: 50% 50%;
+  animation: dznHomeIconOrbitFloat 17s ease-in-out infinite;
+}
+
+.dzn-pulse-icon svg {
+  position: relative;
+  z-index: 1;
+  opacity: 0.28;
 }
 
 .dzn-pulse-eyebrow,
@@ -7825,10 +7979,42 @@ button.dzn-header-action {
 
 @keyframes dznHomeBgDrift {
   0% {
-    transform: scale(1.02) translate3d(-0.6%, -0.4%, 0);
+    transform: scale(1.03) translate3d(-0.8%, -0.5%, 0);
+  }
+  48% {
+    transform: scale(1.08) translate3d(0.6%, -0.2%, 0);
   }
   100% {
-    transform: scale(1.08) translate3d(0.8%, 0.5%, 0);
+    transform: scale(1.12) translate3d(1.1%, 0.7%, 0);
+  }
+}
+
+@keyframes dznHomeLightningFlicker {
+  0%,
+  61%,
+  68%,
+  100% {
+    opacity: 0.16;
+  }
+  63% {
+    opacity: 0.58;
+  }
+  65% {
+    opacity: 0.22;
+  }
+  67% {
+    opacity: 0.44;
+  }
+}
+
+@keyframes dznHomeEmberGlow {
+  0% {
+    opacity: 0.34;
+    transform: translate3d(-0.4%, 0.2%, 0) scale(1);
+  }
+  100% {
+    opacity: 0.58;
+    transform: translate3d(0.5%, -0.3%, 0) scale(1.05);
   }
 }
 
@@ -7859,6 +8045,42 @@ button.dzn-header-action {
   100% {
     opacity: 0;
     transform: translate3d(26px, -78px, 0) scale(1.15);
+  }
+}
+
+@keyframes dznHomeAmbientIconFloat {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(-4deg) scale(0.92);
+  }
+  45% {
+    transform: translate3d(16px, -22px, 0) rotate(9deg) scale(1.04);
+  }
+  100% {
+    transform: translate3d(-10px, 14px, 0) rotate(18deg) scale(0.96);
+  }
+}
+
+@keyframes dznHomeCardSkinDrift {
+  0% {
+    background-position: 50% 50%;
+    transform: scale(1);
+  }
+  100% {
+    background-position: 48% 52%;
+    transform: scale(1.045);
+  }
+}
+
+@keyframes dznHomeIconOrbitFloat {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg) scale(0.98);
+  }
+  42% {
+    transform: translateY(-3px) rotate(8deg) scale(1.04);
+  }
+  72% {
+    transform: translateY(2px) rotate(15deg) scale(1);
   }
 }
 
@@ -8114,9 +8336,12 @@ button.dzn-header-action {
   .dzn-logo-frame::after,
   .dzn-logo-sparkle,
   .dzn-home-bg-image,
+  .dzn-home-haze::before,
+  .dzn-home-haze::after,
   .dzn-home-grid,
   .dzn-home-smoke,
   .dzn-home-particle,
+  .dzn-home-floating-icon,
   .dzn-home-hero-card::before,
   .dzn-home-energy-beam,
   .dzn-home-energy-beam::before,
@@ -8125,7 +8350,12 @@ button.dzn-header-action {
   .dzn-operational-globe-floor-glow,
   .dzn-operational-globe-placeholder-sphere::after,
   .dzn-home-cta::after,
+  .dzn-game-modes-section::after,
   .dzn-game-mode-card::after,
+  .dzn-game-mode-icon::before,
+  .dzn-stat-icon::before,
+  .dzn-network-pulse::after,
+  .dzn-pulse-icon::before,
   .dzn-leaderboard-hero::before,
   .dzn-leaderboard-hero__signal::before,
   .dzn-leaderboard-hero__signal span,
@@ -8141,7 +8371,9 @@ button.dzn-header-action {
   .dzn-stat-card,
   .dzn-stat-card::before,
   .dzn-stat-icon,
+  .dzn-stat-icon::before,
   .dzn-pulse-card,
+  .dzn-pulse-icon::before,
   .dzn-top-servers-panel::after,
   .dzn-top-servers-view,
   .dzn-top-servers-view svg,
@@ -8151,12 +8383,14 @@ button.dzn-header-action {
   .dzn-leaderboard-row td,
   .dzn-game-mode-card::after,
   .dzn-game-mode-icon,
+  .dzn-game-mode-icon::before,
   .dzn-game-mode-action svg,
   .dzn-game-modes-view-all svg {
     transition: none !important;
   }
 
   .dzn-game-mode-card:hover,
+  .dzn-home-floating-icon,
   .dzn-stat-card:hover,
   .dzn-stat-card:hover::before,
   .dzn-stat-card:hover .dzn-stat-icon,
@@ -8167,6 +8401,9 @@ button.dzn-header-action {
   .dzn-top-server-row:hover::before,
   .dzn-leaderboard-row:hover,
   .dzn-game-mode-card:hover .dzn-game-mode-icon,
+  .dzn-game-mode-icon::before,
+  .dzn-stat-icon::before,
+  .dzn-pulse-icon::before,
   .dzn-game-mode-card:hover::after,
   .dzn-game-mode-card:hover .dzn-game-mode-action svg,
   .dzn-game-modes-view-all:hover svg {
