@@ -35,6 +35,8 @@ assert.match(playerHubRouteSource, /WHERE user_id = \?/, "Player Hub membership 
 assert.match(playerHubRouteSource, /linked_servers\.guild_id IN/, "Player Hub must match ordinary Discord memberships through public server guild ids.");
 assert.match(playerHubRouteSource, /discord_guilds/, "Player Hub must preserve manageable guild fallback for older sessions.");
 assert.match(playerHubRouteSource, /privateNoStoreHeaders\(\)/, "Player Hub must keep private no-store headers.");
+assert.match(playerHubRouteSource, /MAX_COMMUNITY_MATCH_CANDIDATES = 200/, "Player Hub should read a bounded candidate set before filtering to matched public communities.");
+assert.match(playerHubRouteSource, /\.filter\(\(community\) => community\.public_server_count > 0\)\s+\.slice\(0, MAX_MATCHED_COMMUNITIES\)/, "Player Hub should cap visible matches only after filtering to public DZN server matches.");
 assert.match(playerHubRouteSource, /request\.method !== "GET"/, "Player Hub route must stay read-only.");
 assert.doesNotMatch(playerHubRouteSource, /\b(?:INSERT INTO|UPDATE\s+[a-z_]+|DELETE FROM)\b/i, "Player Hub route must not directly write from the read model.");
 assert.doesNotMatch(playerHubRouteSource.replace(/public_profile/g, ""), /\b(?:STRIPE|checkout_session|checkout\.session|nitrado_connections|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns|server_reviews|review_score|badge_awards|user_badges|dzn_season|server_war_events|ctf_tournaments|xp_award|calling_card_awards|dynamic_visibility_score|network_rank|public_handle|profile_privacy|profile_visibility)\b/i, "Player Hub community matching must stay out of payment, owner, profile-privacy, review, progression, and competitive systems.");
@@ -86,7 +88,16 @@ async function testMembershipStorageAndPlayerHubRuntime() {
     display_name: "Other User Community",
   });
 
+  const fillerGuilds = Array.from({ length: 10 }, (_, index) => ({
+    id: `3000000000000000${String(index + 10).padStart(2, "0")}`,
+    name: `A Nonmatching Guild ${String(index).padStart(2, "0")}`,
+    icon: null,
+    owner: false,
+    permissions: "0",
+  }));
+
   await storePlayerDiscordCommunityMemberships({ DB: db } as unknown as Env, "mock-user", [
+    ...fillerGuilds,
     { id: "300000000000000001", name: "Ordinary Members", icon: "abcdefgh", owner: false, permissions: "0" },
     { id: "300000000000000002", name: "Admin Crew", icon: null, owner: false, permissions: "8" },
   ]);
@@ -97,6 +108,7 @@ async function testMembershipStorageAndPlayerHubRuntime() {
   assert.equal(db.playerDiscordCommunityMemberships.get("mock-user:300000000000000002")?.relationship, "administrator", "Manageable Discord guilds may be represented as administrator relationships in the private bridge.");
 
   await storePlayerDiscordCommunityMemberships({ DB: db } as unknown as Env, "mock-user", [
+    ...fillerGuilds,
     { id: "300000000000000001", name: "Ordinary Members Renamed", icon: null, owner: false, permissions: "0" },
   ]);
   assert.equal(db.playerDiscordCommunityMemberships.get("mock-user:300000000000000001")?.revoked_at, null, "Current memberships must remain active.");
@@ -131,6 +143,7 @@ async function testMembershipStorageAndPlayerHubRuntime() {
   assert.equal(payload.sources.matched_communities, "player_discord_community_memberships", "Player Hub should prefer the private membership bridge when it is available.");
   const ordinaryCommunity = payload.matched_communities.find((community) => community.guild_id === "300000000000000001");
   assert.ok(ordinaryCommunity, "Player Hub must include the active current-user ordinary membership.");
+  assert.equal(payload.matched_communities.some((community) => community.name.startsWith("A Nonmatching Guild")), false, "Player Hub must not expose unmatched private Discord memberships.");
   assert.equal(payload.matched_communities.every((community) => community.public_server_count > 0), true, "Player Hub must show matched communities only, not a raw Discord guild list.");
   assert.equal(ordinaryCommunity.relationship, "member", "Ordinary member relationship should be visible as presentation context only.");
   assert.equal(ordinaryCommunity.relationship_label, "Member", "Ordinary member label should be safe and clear.");
@@ -333,6 +346,7 @@ class FakeD1PreparedStatement {
 
     if (query.includes("from player_discord_community_memberships")) {
       const userId = String(this.bindings[0]);
+      const limit = Number(this.bindings[1]);
       const rows = [...this.db.playerDiscordCommunityMemberships.values()]
         .filter((membership) => membership.user_id === userId && membership.revoked_at === null)
         .sort((a, b) => a.guild_name.localeCompare(b.guild_name))
@@ -342,15 +356,18 @@ class FakeD1PreparedStatement {
           icon_url: membership.guild_icon_url,
           relationship: membership.relationship,
           last_seen_at: membership.last_seen_at,
-        }));
+        }))
+        .slice(0, Number.isFinite(limit) ? limit : 8);
       return d1Ok<T>(rows as T[]);
     }
 
     if (query.includes("from discord_guilds")) {
       const userId = String(this.bindings[0]);
+      const limit = Number(this.bindings[1]);
       const rows = [...this.db.discordGuilds.values()]
         .filter((guild) => guild.owner_user_id === userId)
-        .sort((a, b) => a.name.localeCompare(b.name));
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .slice(0, Number.isFinite(limit) ? limit : 8);
       return d1Ok<T>(rows as T[]);
     }
 
