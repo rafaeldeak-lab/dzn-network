@@ -85,9 +85,21 @@ The first real-data Player Hub slice adds a private read-only `/api/player/hub` 
 - `profile_entries`: private `/player` and `/player/profile` entry points for current and future profile/progression controls.
 - `owner_setup`: a pricing-only CTA to `/pricing?intent=owner_setup&returnTo=%2Fsetup`.
 
-The current Discord guild cache stores manageable/admin guild context from the Discord OAuth flow. Broader ordinary-member community matching needs a later data-model slice before it can truthfully show non-admin memberships.
+The Player Hub now has a private ordinary-member bridge from Discord OAuth guild data. The older manageable/admin guild cache remains a compatibility fallback for setup-era sessions.
 
 The Player Hub read model is `GET` only, returns private no-store responses, and must not write or alter billing, owner entitlement, Nitrado, server ownership, reviews, public discovery, rankings, badges, seasons, Server Wars, CTF scoring, XP awards, calling-card awards, event outcomes, or competitive eligibility.
+
+### Broader Player-Community Matching Model
+
+The ordinary-member matching slice adds `player_discord_community_memberships` as a private current-user bridge populated from the existing Discord OAuth `guilds` scope during login or explicit guild refresh.
+
+- The bridge stores the current DZN user, Discord guild id, safe guild display name/icon, relationship (`member`, `administrator`, or `owner`), source, last-seen timestamp, and revocation timestamp.
+- The bridge is private player context only. It is not a public member directory, not an owner/admin import table, and not a profile attribution table.
+- Player Hub may read active rows for the current user and match them to public DZN server profiles through `linked_servers.guild_id`; unmatched memberships are not surfaced as a raw Discord guild list.
+- Hidden, deleted, merged, or slugless server profiles stay hidden.
+- Revoked or other-user membership rows must not appear.
+- Public profile visibility and handles are not read or changed by this bridge.
+- Owner setup, Nitrado linking, server ownership, Discord posting, moderation, billing, rankings, discovery, reviews, events, progression, and competitive eligibility remain isolated.
 
 ## Reviews Roadmap
 
@@ -176,7 +188,8 @@ Completed or active foundation slices:
 - Player navigation access polish: `/player`, `/player/profile`, and logged-in Player Hub navigation.
 - Saved/followed server interaction foundation: private player saved-server actions behind `player_saved_servers`.
 - Player Hub real-data foundation: private read-only hub payload plus `/player` panels for followed/saved servers, matched cached Discord communities, public event/tournament suggestions, and profile entry points while keeping owner setup behind `/pricing` and entitlement gates.
+- Broader player-community matching model: private ordinary-member Discord membership bridge for Player Hub community matching.
 
-Next recommended product slice after Player Hub real data:
+Next recommended product slice after broader player-community matching:
 
-- Broader player-community matching model: add a trusted, privacy-aware ordinary-member community bridge so non-admin Discord memberships can appear in Player Hub without exposing hidden players, bypassing opt-in public profile controls, or affecting owner workflows and competitive systems.
+- Player Hub community matching UI polish: make the matched-community panel clearer for ordinary members, admins, and owners, while keeping the bridge private and presentation-only.

@@ -65,7 +65,7 @@ type PlayerHubPayload = {
   };
   sources: {
     saved_servers: "player_saved_servers" | "unavailable";
-    matched_communities: "cached_discord_manageable_guilds" | "unavailable";
+    matched_communities: "player_discord_community_memberships" | "cached_discord_manageable_guilds" | "unavailable";
     suggested_events: "public_competitive_events" | "unavailable";
   };
   fairness_boundary: string[];
@@ -101,7 +101,7 @@ type PlayerHubCommunity = {
   guild_id: string;
   name: string;
   icon_url: string | null;
-  relationship: "owner" | "administrator" | "matched";
+  relationship: "member" | "owner" | "administrator" | "matched";
   relationship_label: string;
   public_server_count: number;
   matched_servers: PlayerHubCommunityServer[];
@@ -313,7 +313,7 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
               <p className="mt-4 max-w-2xl text-base font-semibold leading-7 text-slate-200">
                 {mode === "profile"
                   ? "Your private profile entry point keeps personal player tools separate from owner setup, billing, and competitive scoring."
-                  : "Your logged-in player home now pulls in followed servers, matched Discord communities, event suggestions, and profile entry points without needing an owner plan."}
+                  : "Your logged-in player home now pulls in followed servers, private Discord membership matches, event suggestions, and profile entry points without needing an owner plan."}
               </p>
             </div>
 
@@ -532,7 +532,7 @@ function MatchedCommunitiesPanel({ communities, source }: { communities: PlayerH
     <section className="rounded-lg border border-violet-300/24 bg-slate-950/78 p-5 backdrop-blur">
       <PanelHeader
         title="Matched Communities"
-        body="Cached Discord communities matched to public DZN server profiles."
+        body="Private Discord membership matches connected to public DZN server profiles."
         icon={<Users aria-hidden="true" className="h-5 w-5" />}
         tone="violet"
       />
@@ -564,7 +564,7 @@ function MatchedCommunitiesPanel({ communities, source }: { communities: PlayerH
                   ))}
                 </div>
               ) : (
-                <p className="mt-3 text-sm font-semibold leading-6 text-slate-400">No public DZN server profile matched this cached Discord community yet.</p>
+                <p className="mt-3 text-sm font-semibold leading-6 text-slate-400">No public DZN server profile matched this private Discord community yet.</p>
               )}
             </li>
           ))}
@@ -572,7 +572,7 @@ function MatchedCommunitiesPanel({ communities, source }: { communities: PlayerH
       ) : (
         <EmptyList
           title="No community matches yet"
-          body="DZN will show cached Discord communities here when they match public DZN server profiles."
+          body="DZN will show private Discord membership matches here when they connect to public DZN server profiles."
           href="/servers"
           action="View Server Network"
         />

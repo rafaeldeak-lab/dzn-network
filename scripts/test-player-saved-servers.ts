@@ -16,7 +16,7 @@ const publicNetwork = readFileSync("components/network/public-network.tsx", "utf
 const packageJson = readFileSync("package.json", "utf8");
 const forbiddenSideEffectTokens = /\b(?:owner_billing_accounts|account_entitlements|server_subscriptions|STRIPE_SECRET|STRIPE_PRICE|checkout_session|checkout-session|nitrado_connections|nitrado_|server_reviews|event_|tournament|leaderboard|rank|score|discovery|badge_awards|user_badges|dzn_season|server_war|ctf|earned_xp|xp_award|calling_card|eligibility|competitive_eligibility)\b/i;
 
-assert.equal(migrationFiles.at(-1), migrationName, "Player saved servers migration should be the latest numbered migration in this branch.");
+assert.equal(migrationFiles.includes(migrationName), true, "Player saved servers migration should remain present in this branch.");
 assert.match(migration, /CREATE TABLE IF NOT EXISTS player_saved_servers/i, "Migration must create the private player saved servers table.");
 assert.match(migration, /user_id TEXT NOT NULL/i, "Saved server rows must be owned by a DZN user.");
 assert.match(migration, /linked_server_id TEXT NOT NULL/i, "Saved server rows must target a linked server.");
