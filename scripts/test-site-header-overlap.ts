@@ -73,6 +73,7 @@ assert.match(headerTabletBlock, /grid-template-columns:\s*repeat\(3, minmax\(104
 assert.match(headerMobileBlock, /grid-template-columns:\s*1fr;/, "Mobile command bar must stack instead of squeezing controls.");
 assert.match(headerMobileBlock, /\.dzn-header-links[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/, "Mobile nav links must use two readable columns.");
 assert.match(headerMobileBlock, /\.dzn-header-actions[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/, "Mobile actions must use two readable columns before the smallest fallback.");
+assert.match(headerMobileBlock, /\.dzn-header-pulse-bell[\s\S]*min-height:\s*42px;[\s\S]*height:\s*42px !important;/, "Mobile DZN Pulse button must remain a touch-sized notification target.");
 
 assert.equal(siteHeaderSource.includes("Player Hub"), true, "Logged-in player access must remain in the shared header.");
 assert.equal(siteHeaderSource.includes("DznPulseBell"), true, "DZN Pulse bell must remain available for authenticated users.");

@@ -3553,7 +3553,8 @@ button.dzn-header-action {
   }
 
   .dzn-header-pulse-bell {
-    height: 34px !important;
+    min-height: 42px;
+    height: 42px !important;
   }
 
   .dzn-header-plan {
