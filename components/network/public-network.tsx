@@ -342,6 +342,8 @@ type PublicLeaderboardPlayer = {
   kd_label: string;
   longest_kill: number;
   last_seen: string | null;
+  public_profile_handle?: string | null;
+  public_profile_href?: string | null;
 };
 
 type PublicStats = {
@@ -401,6 +403,8 @@ type PublicReview = {
   body: string;
   created_at: string;
   updated_at: string;
+  public_profile_handle?: string | null;
+  public_profile_href?: string | null;
   is_own_review?: boolean;
 };
 
@@ -2106,6 +2110,10 @@ function currentPageReturnTo(fallback: string) {
   return `${window.location.pathname}${window.location.search}`;
 }
 
+function safePublicProfileHref(value: string | null | undefined) {
+  return typeof value === "string" && /^\/players\/[a-z0-9-]{3,48}$/.test(value) ? value : null;
+}
+
 function GlassPanel({ title, icon: Icon, children }: { title: string; icon: typeof Activity; children: React.ReactNode }) {
   return (
     <section className="glass-surface animated-border rounded-xl p-4 transition duration-300 hover:-translate-y-0.5 hover:border-violet-300/30 sm:p-5">
@@ -2475,7 +2483,12 @@ function ReviewCard({ review, onReported }: { review: PublicReview; onReported: 
             <span className="grid h-10 w-10 rounded-full border border-violet-300/25 bg-violet-500/15 place-items-center text-sm font-black text-violet-100">{(review.reviewer_name ?? "P")[0]}</span>
           )}
           <div className="min-w-0">
-            <p className="break-words text-sm font-black text-white">{review.reviewer_name ?? "DZN player"}</p>
+            <PublicPlayerProfileName
+              name={review.reviewer_name ?? "DZN player"}
+              href={review.public_profile_href}
+              className="break-words text-sm font-black text-white [overflow-wrap:anywhere]"
+              showBadge
+            />
             <p className="mt-1 text-[10px] font-black uppercase text-zinc-500">{formatRelativeTime(review.created_at)}</p>
           </div>
         </div>
@@ -2571,7 +2584,13 @@ function PvpLeaderboardPanel({ players }: { players: PublicLeaderboardPlayer[] }
                 {players.slice(0, 6).map((player) => (
                   <tr key={`pvp-${player.rank}-${player.player_name}`} className="bg-black/24">
                     <td className="rounded-l-lg border-y border-l border-white/10 px-2 py-2 text-sm font-black text-violet-200">#{player.rank}</td>
-                    <td className="border-y border-white/10 px-2 py-2 text-sm font-black text-white">{player.player_name}</td>
+                    <td className="border-y border-white/10 px-2 py-2">
+                      <PublicPlayerProfileName
+                        name={player.player_name}
+                        href={player.public_profile_href}
+                        className="text-sm font-black text-white"
+                      />
+                    </td>
                     <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-zinc-200">{player.kills}</td>
                     <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-zinc-300">{player.deaths}</td>
                     <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-cyan-100">{formatKdLabel(player)}</td>
@@ -2658,7 +2677,12 @@ function TopPlayersPanel({ players }: { players: PublicLeaderboardPlayer[] }) {
               <PlayerAvatar player={player} />
               <div className="min-w-0">
                 <p className="text-[10px] font-black uppercase text-violet-200">#{player.rank}</p>
-                <p className="mt-1 break-words text-sm font-black text-white [overflow-wrap:anywhere]">{player.player_name}</p>
+                <PublicPlayerProfileName
+                  name={player.player_name}
+                  href={player.public_profile_href}
+                  className="mt-1 break-words text-sm font-black text-white [overflow-wrap:anywhere]"
+                  showBadge
+                />
               </div>
             </div>
             <span className="rounded-md border border-emerald-300/20 bg-emerald-400/10 px-2 py-1 text-xs font-black text-emerald-100">
@@ -2673,6 +2697,38 @@ function TopPlayersPanel({ players }: { players: PublicLeaderboardPlayer[] }) {
         </div>
       ))}
     </div>
+  );
+}
+
+function PublicPlayerProfileName({
+  name,
+  href,
+  className = "",
+  showBadge = false,
+}: {
+  name: string;
+  href?: string | null;
+  className?: string;
+  showBadge?: boolean;
+}) {
+  const safeHref = safePublicProfileHref(href);
+  if (!safeHref) return <span className={className}>{name}</span>;
+
+  return (
+    <Link
+      href={safeHref}
+      aria-label={`View public profile for ${name}`}
+      className={`inline-flex max-w-full flex-wrap items-center gap-1.5 transition hover:text-cyan-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 ${className}`}
+    >
+      <span className="break-words [overflow-wrap:anywhere]">{name}</span>
+      {showBadge ? (
+        <span className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-normal text-cyan-100">
+          Profile
+        </span>
+      ) : (
+        <ExternalLink className="h-3 w-3 shrink-0 text-cyan-100" aria-hidden="true" />
+      )}
+    </Link>
   );
 }
 
@@ -2966,10 +3022,30 @@ function loadPublicNetworkCache(slug: string | null): PublicNetworkCachePayload 
 function savePublicNetworkCache(slug: string | null, payload: PublicNetworkCachePayload) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(publicNetworkCacheKey(slug), JSON.stringify({ ...payload, cached_at: new Date().toISOString() }));
+    const snapshot = stripVolatilePublicNetworkProfileLinks({ ...payload, cached_at: new Date().toISOString() });
+    window.localStorage.setItem(publicNetworkCacheKey(slug), JSON.stringify(snapshot));
   } catch {
     // Storage can be unavailable in private/hardened contexts.
   }
+}
+
+function stripVolatilePublicNetworkProfileLinks(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripVolatilePublicNetworkProfileLinks);
+  if (!value || typeof value !== "object") return value;
+
+  const stripped: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (isVolatilePublicNetworkProfileLinkKey(key)) continue;
+    stripped[key] = stripVolatilePublicNetworkProfileLinks(child);
+  }
+  return stripped;
+}
+
+function isVolatilePublicNetworkProfileLinkKey(key: string) {
+  return key === "public_profile_handle"
+    || key === "public_profile_href"
+    || key === "player_public_profile_handle"
+    || key === "player_public_profile_href";
 }
 
 async function fetchPublicServerFallback(slug: string, signal?: AbortSignal) {
