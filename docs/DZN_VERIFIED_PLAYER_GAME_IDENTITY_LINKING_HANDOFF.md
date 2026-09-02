@@ -9,7 +9,8 @@ This slice adds the first verified Discord-to-ADM player identity bridge so play
 ## Implementation Contract
 
 - Players use private `GET/POST /api/player/game-identities`.
-- A claim targets one public-safe server by public slug or DZN server id and one exact ADM `player_id`.
+- A claim targets one public-safe server and one exact ADM `player_id`.
+- Player-facing UI should hide the technical "slug" concept behind a simple public server picker/search, then ask only for the game ID or proof code supplied by the owner.
 - Claims are stored in `player_game_identity_claims`.
 - Server owners and DZN admins use private owner/admin routes:
   - `GET /api/owner/player-game-identity-claims`
@@ -18,7 +19,8 @@ This slice adds the first verified Discord-to-ADM player identity bridge so play
 - Approval may backfill `player_profiles.discord_id` for the exact `id + linked_server_id + player_id` row for compatibility.
 - The shared stat bridge now reads active verified links first and keeps the older direct `player_profiles.discord_id` path as compatibility.
 - Public leaderboard profile attribution can resolve handles through active verified links, but ranking/order/score calculations remain unchanged.
-- `/player/profile` now includes a private "Verified Game Identity" panel with link status and claim creation.
+- `/player/profile` now includes a private "Link My Game Stats" panel with link status and claim creation.
+- Normal players should see "choose server", "game ID", and "owner/admin check" language. Internal `server_slug`, `linked_server_id`, and ADM `player_id` wording should remain limited to code, tests, docs, or owner/admin technical surfaces.
 
 ## Release Notes
 

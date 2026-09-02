@@ -95,10 +95,17 @@ assert.doesNotMatch(rankSortBlock, /player_game_identity_links|publicProfile|pro
 
 assert.match(playerHome, /PlayerGameIdentityLinks/, "Private profile page must render the verified game identity panel.");
 assert.match(identityPanel, /\/api\/player\/game-identities/, "Identity panel must use the private current-user API.");
-assert.match(identityPanel, /Request Approval/, "Identity panel must make the approval flow explicit.");
-assert.match(identityPanel, /Names are never enough/, "Identity UI must tell players name-only matching is not accepted.");
-assert.match(identityPanel, /server_slug/, "Identity UI must submit a safe public server slug reference.");
-assert.match(identityPanel, /player_id/, "Identity UI must submit an exact ADM player ID.");
+assert.match(identityPanel, /\/api\/public\/servers\?limit=120/, "Identity panel must load public server choices for a simpler player picker.");
+assert.match(identityPanel, /Link My Game Stats/, "Identity panel must use simple player-facing wording.");
+assert.match(identityPanel, /Choose server/, "Identity panel must ask players to choose a server instead of understanding slugs.");
+assert.match(identityPanel, /Search for your server/, "Identity panel must support searchable server selection.");
+assert.match(identityPanel, /Game ID or proof code from owner/, "Identity panel must ask for the owner-supplied game ID/proof code.");
+assert.match(identityPanel, /Send For Check/, "Identity panel must make the owner/admin check flow explicit.");
+assert.match(identityPanel, /server_slug/, "Identity UI must still submit a safe public server slug reference internally.");
+assert.match(identityPanel, /player_id/, "Identity UI must still submit an exact player ID internally.");
+assert.doesNotMatch(identityPanel, /Server slug or DZN server ID/, "Player-facing UI must not ask normal players to understand server slugs.");
+assert.doesNotMatch(identityPanel, /Use the public server slug from the server page/, "Player-facing UI must not expose the old slug instructions.");
+assert.doesNotMatch(identityPanel, /Private Proof Flow/, "Player-facing UI should use owner-checked language instead of technical proof-flow copy.");
 assert.doesNotMatch(identityPanel, /\b(?:localStorage|sessionStorage|sendBeacon|analytics|checkout|STRIPE|nitrado_connections|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns)\b/i, "Identity UI must avoid browser storage, analytics, payment, owner-token, Store, and wheel systems.");
 
 assert.match(platformSpec, /Verified Player Game-Identity Linking\/Reconciliation/i, "Master spec must document the identity-linking slice.");
