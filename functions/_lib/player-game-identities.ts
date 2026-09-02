@@ -138,8 +138,8 @@ export function sanitizePlayerGameIdentityPlayerId(value: unknown) {
 export function parsePlayerGameIdentityClaimInput(input: CreateClaimInput) {
   const serverRef = sanitizePlayerGameIdentityServerRef(input.linked_server_id ?? input.server_id ?? input.public_slug ?? input.server_slug);
   const playerId = sanitizePlayerGameIdentityPlayerId(input.player_id);
-  if (!serverRef) return { ok: false as const, error: "INVALID_SERVER_ID", message: "Choose a valid public DZN server." };
-  if (!playerId) return { ok: false as const, error: "INVALID_PLAYER_ID", message: "Enter the exact ADM player ID shown by the server owner." };
+  if (!serverRef) return { ok: false as const, error: "INVALID_SERVER_ID", message: "Choose a valid DZN server." };
+  if (!playerId) return { ok: false as const, error: "INVALID_PLAYER_ID", message: "Enter the exact game ID or proof code shown by the server owner." };
   return { ok: true as const, serverRef, playerId };
 }
 
@@ -216,12 +216,12 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
       active_links: sanitizeLinkRows(linksResult.results ?? []),
       claims: sanitizeClaimRows(claimsResult.results ?? []),
       proof_flow: {
-        player_step: "Submit the exact server and ADM player ID from the server owner or approved evidence.",
-        owner_step: "A matching server owner or DZN admin approves the claim from the private review queue.",
-        match_rule: "DZN links stats only by exact linked_server_id plus ADM player_id. Display names and public handles are never proof.",
+        player_step: "Choose the server you play on and paste the exact game ID or proof code from the server owner.",
+        owner_step: "A matching server owner or DZN admin approves the request from the private review queue.",
+        match_rule: "DZN links stats only after a server-side exact server plus game ID match. Display names and public handles are never proof.",
       },
       boundary:
-        "Verified game identity links are private account bridges for stats display only. They do not affect billing, ownership, scoring, rankings, discovery, reviews, events, XP, calling cards, Server Wars, CTF, or competitive eligibility.",
+        "Verified game links only decide which stats appear on your profile. They do not affect billing, ownership, scoring, rankings, discovery, reviews, events, XP, calling cards, Server Wars, CTF, or competitive eligibility.",
     };
   } catch {
     return {
@@ -232,12 +232,12 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
       active_links: [] as PlayerGameIdentityLinkRow[],
       claims: [] as PlayerGameIdentityClaimRow[],
       proof_flow: {
-        player_step: "Submit the exact server and ADM player ID from the server owner or approved evidence.",
-        owner_step: "A matching server owner or DZN admin approves the claim from the private review queue.",
-        match_rule: "DZN links stats only by exact linked_server_id plus ADM player_id. Display names and public handles are never proof.",
+        player_step: "Choose the server you play on and paste the exact game ID or proof code from the server owner.",
+        owner_step: "A matching server owner or DZN admin approves the request from the private review queue.",
+        match_rule: "DZN links stats only after a server-side exact server plus game ID match. Display names and public handles are never proof.",
       },
       boundary:
-        "Verified game identity link storage is unavailable in this environment. Existing direct Discord-linked profiles remain the compatibility path.",
+        "Game stat linking storage is unavailable in this environment. Existing direct Discord-linked profiles remain the compatibility path.",
     };
   }
 }
@@ -258,7 +258,7 @@ export async function createPlayerGameIdentityClaim(
         ok: false,
         status: 404,
         error: "SERVER_NOT_FOUND",
-        message: "No public DZN server matched that slug or server ID.",
+        message: "No public DZN server matched that choice. Pick another server or ask the owner for the server code.",
       };
     }
 
@@ -269,7 +269,7 @@ export async function createPlayerGameIdentityClaim(
         status: 200,
         already_linked: true,
         claim: claimFromProfile(existingDirect, "approved"),
-        message: "This ADM player profile is already linked to your Discord account.",
+        message: "This game profile is already linked to your Discord account.",
       };
     }
 
@@ -281,7 +281,7 @@ export async function createPlayerGameIdentityClaim(
           status: 200,
           already_linked: true,
           claim: claimFromActiveLink(activeLink, activeLink.linked_server_id, parsed.playerId),
-          message: "This ADM player profile is already verified for your account.",
+          message: "This game profile is already verified for your account.",
         };
       }
       await writeGameIdentityAudit(env, {
@@ -291,13 +291,13 @@ export async function createPlayerGameIdentityClaim(
         actorUserId: user.id,
         linkedServerId: server.linked_server_id,
         playerId: parsed.playerId,
-        note: "Rejected because the ADM player profile already has an active verified link.",
+        note: "Rejected because the game profile already has an active verified link.",
       });
       return {
         ok: false,
         status: 409,
         error: "PLAYER_ID_ALREADY_LINKED",
-        message: "That ADM player ID is already verified for another DZN account.",
+        message: "That game ID is already verified for another DZN account.",
       };
     }
 
@@ -318,13 +318,13 @@ export async function createPlayerGameIdentityClaim(
         actorUserId: user.id,
         linkedServerId: server.linked_server_id,
         playerId: parsed.playerId,
-        note: "Ambiguous ADM player ID claim rejected because more than one public profile row matched.",
+        note: "Ambiguous game ID claim rejected because more than one public profile row matched.",
       });
       return {
         ok: false,
         status: 409,
         error: "AMBIGUOUS_PLAYER_ID",
-        message: "More than one ADM player profile matched that server/player ID pair. DZN will not guess.",
+        message: "More than one game profile matched that server and game ID. DZN will not guess.",
       };
     }
 
@@ -337,13 +337,13 @@ export async function createPlayerGameIdentityClaim(
         actorUserId: user.id,
         linkedServerId: server.linked_server_id,
         playerId: parsed.playerId,
-        note: "No exact public ADM player profile row matched the requested server and player ID.",
+        note: "No exact public game profile row matched the requested server and game ID.",
       });
       return {
         ok: false,
         status: 404,
         error: "PLAYER_ID_NOT_FOUND",
-        message: "No exact ADM player ID was found for that public server. DZN will not match by player name.",
+        message: "No exact game ID was found for that public server. DZN will not guess from a player name.",
       };
     }
 
@@ -356,13 +356,13 @@ export async function createPlayerGameIdentityClaim(
         linkedServerId: profile.linked_server_id,
         playerProfileId: profile.id,
         playerId: profile.player_id,
-        note: "Rejected because the ADM player profile already has another Discord ID attached.",
+        note: "Rejected because the game profile already has another Discord ID attached.",
       });
       return {
         ok: false,
         status: 409,
         error: "PLAYER_ID_ALREADY_LINKED",
-        message: "That ADM player ID is already linked to another Discord account.",
+        message: "That game ID is already linked to another Discord account.",
       };
     }
 
@@ -398,12 +398,12 @@ export async function createPlayerGameIdentityClaim(
       linkedServerId: profile.linked_server_id,
       playerProfileId: profile.id,
       playerId: profile.player_id,
-      note: "Pending exact ADM player ID claim created for owner/admin review.",
+      note: "Pending exact game ID claim created for owner/admin review.",
     });
 
     const claim = await readPlayerGameIdentityClaimById(db, claimId, user.id, user.discord_id);
     if (!claim) throw new Error("Claim was not readable after creation.");
-    return { ok: true, status: 201, claim, message: "Identity claim created. A server owner or DZN admin must approve it before stats link to your account." };
+    return { ok: true, status: 201, claim, message: "Link request sent. A server owner or DZN admin must approve it before stats link to your account." };
   } catch {
     return {
       ok: false,
@@ -453,7 +453,7 @@ export async function readOwnerPlayerGameIdentityClaims(env: Env, user: SessionU
       private: true as const,
       owner_or_admin_only: true as const,
       claims: sanitizeOwnerClaimRows(result.results ?? []),
-      boundary: "Claim review can approve only an exact linked_server_id plus ADM player_id match. It is not a billing, scoring, ranking, review, event, or progression control.",
+      boundary: "Claim review can approve only an exact server plus game ID match. It is not a billing, scoring, ranking, review, event, or progression control.",
     };
   } catch {
     return {
@@ -535,9 +535,9 @@ export async function reviewPlayerGameIdentityClaim(
         linkedServerId: claim.linked_server_id,
         playerProfileId: claim.player_profile_id,
         playerId: claim.player_id,
-        note: "Approval blocked because the exact ADM player profile row no longer exists.",
+        note: "Approval blocked because the exact game profile row no longer exists.",
       });
-      return { ok: false, status: 409, error: "PLAYER_PROFILE_NOT_FOUND", message: "The exact ADM player profile row no longer exists." };
+      return { ok: false, status: 409, error: "PLAYER_PROFILE_NOT_FOUND", message: "The exact game profile row no longer exists." };
     }
 
     const activeLink = await readActiveGameIdentityLink(db, claim.linked_server_id, claim.player_id);
@@ -551,9 +551,9 @@ export async function reviewPlayerGameIdentityClaim(
         linkedServerId: claim.linked_server_id,
         playerProfileId: claim.player_profile_id,
         playerId: claim.player_id,
-        note: "Approval blocked because the ADM player ID is already actively linked to another account.",
+        note: "Approval blocked because the game ID is already actively linked to another account.",
       });
-      return { ok: false, status: 409, error: "PLAYER_ID_ALREADY_LINKED", message: "That ADM player ID is already actively linked." };
+      return { ok: false, status: 409, error: "PLAYER_ID_ALREADY_LINKED", message: "That game ID is already actively linked." };
     }
 
     const linkId = activeLink?.id ?? crypto.randomUUID();
@@ -623,7 +623,7 @@ export async function reviewPlayerGameIdentityClaim(
       note: parsed.note,
     });
 
-    return { ok: true, status: 200, claim_id: claim.id, link_id: linkId, action: "approved", message: "Identity claim approved and linked by exact ADM player ID." };
+    return { ok: true, status: 200, claim_id: claim.id, link_id: linkId, action: "approved", message: "Link request approved and connected by exact game ID." };
   } catch {
     return {
       ok: false,
