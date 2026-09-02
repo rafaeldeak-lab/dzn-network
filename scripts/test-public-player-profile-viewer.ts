@@ -11,6 +11,7 @@ import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
 
 const migration = readFileSync("migrations/0063_player_public_profiles.sql", "utf8");
 const helper = readFileSync("functions/_lib/player-public-profiles.ts", "utf8");
+const statBridgeHelper = readFileSync("functions/_lib/player-stat-bridge.ts", "utf8");
 const publicApi = readFileSync("functions/api/public/players/[handle].ts", "utf8");
 const shellRoute = readFileSync("functions/players/[handle].ts", "utf8");
 const page = readFileSync("app/players/[handle]/page.tsx", "utf8");
@@ -41,10 +42,20 @@ assert.match(helper, /visiblePublicProfileSections/, "Public profile payload mus
 assert.match(helper, /private_identifiers_exposed: false/, "Public profile payload must mark private identifiers as hidden.");
 assert.match(helper, /raw_award_evidence_exposed: false/, "Public profile payload must mark raw award evidence as hidden.");
 assert.match(helper, /Profile visibility cannot alter billing, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF, XP awards, calling-card awards, or competitive eligibility/, "Public profile helper must keep the fairness boundary explicit.");
+assert.match(helper, /readTrustedPlayerGameplayAggregate/, "Public profile gameplay summaries must use the shared trusted stat bridge.");
 assert.doesNotMatch(
   helper,
   /\b(?:account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns|nitrado_connections|server_reviews|review_score|badge_awards|user_badges|dzn_season|server_war_events|ctf_tournaments|xp_award|calling_card_awards|dynamic_visibility_score|network_rank|rankServers|competitive_event_servers)\b/i,
   "Public profile helper must stay out of payment, owner, review, award, event, ranking, discovery, and competitive systems.",
+);
+assert.match(statBridgeHelper, /player_profiles\.discord_id = \?/, "Trusted stat bridge must scope reads to the owning Discord account.");
+assert.match(statBridgeHelper, /kill_events\.killer_id = trusted_public_player_profiles\.player_id/, "Trusted stat bridge must mirror leaderboard kill rows through the per-server player ID bridge.");
+assert.match(statBridgeHelper, /kill_events\.victim_id = trusted_public_player_profiles\.player_id/, "Trusted stat bridge must mirror leaderboard death rows through the per-server player ID bridge.");
+assert.doesNotMatch(statBridgeHelper, /lower\([^)]*(?:player_name|killer_name|victim_name)|(?:player_profiles\.player_name|kill_events\.killer_name|kill_events\.victim_name)\s*=/i, "Trusted stat bridge must not attach gameplay rows by ambiguous public player names.");
+assert.doesNotMatch(
+  statBridgeHelper,
+  /\b(?:INSERT\s+INTO|UPDATE\s+[a-z_]+|DELETE\s+FROM|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns|nitrado_connections|server_reviews|review_score|badge_awards|user_badges|dzn_season|server_war_events|ctf_tournaments|xp_award|calling_card_awards|dynamic_visibility_score|network_rank|rankServers|competitive_event_servers)\b/i,
+  "Trusted stat bridge must stay read-only and out of payment, owner, review, award, event, ranking, discovery, and competitive systems.",
 );
 
 assert.match(publicApi, /request\.method !== "GET"/, "Public profile API must be read-only.");
@@ -127,10 +138,11 @@ async function testPublicProfileRuntimeContract() {
     show_award_dates: 1,
   }));
   db.aggregates.set("discord-1", {
+    linked_game_profiles: 2,
     linked_public_servers: 2,
-    kills: 44,
-    deaths: 12,
-    suicides: 1,
+    total_kills: 44,
+    total_deaths: 12,
+    total_suicides: 1,
     longest_kill_distance: 760,
     last_seen_at: "2026-08-31T21:00:00.000Z",
   });
@@ -241,10 +253,11 @@ type FakePreferenceRow = {
 };
 
 type FakeAggregateRow = {
+  linked_game_profiles: number;
   linked_public_servers: number;
-  kills: number;
-  deaths: number;
-  suicides: number;
+  total_kills: number;
+  total_deaths: number;
+  total_suicides: number;
   longest_kill_distance: number;
   last_seen_at: string | null;
 };
@@ -330,11 +343,17 @@ class FakeD1PreparedStatement {
       } as T;
     }
 
-    if (query.includes("count(distinct player_profiles.linked_server_id)")) {
+    if (query.includes("from trusted_public_player_profile_resolved_stats") && query.includes("count(trusted_public_player_profile_resolved_stats.id)")) {
+      assert.equal(String(this.bindings[0]), "discord-1", "Public gameplay aggregate reads must bind the owning Discord ID.");
+      assert.match(query, /kill_events\.killer_id = trusted_public_player_profiles\.player_id/, "Public gameplay aggregate reads must use the trusted player ID bridge.");
+      assert.doesNotMatch(query, /lower\([^)]*(?:player_name|killer_name|victim_name)|(?:player_profiles\.player_name|kill_events\.killer_name|kill_events\.victim_name)\s*=/i, "Public gameplay aggregate reads must not match by player name.");
       return (this.db.aggregates.get(String(this.bindings[0])) ?? null) as T | null;
     }
 
-    if (query.includes("linked_servers.public_slug")) {
+    if (query.includes("from trusted_public_player_profile_resolved_stats") && query.includes("linked_servers.public_slug")) {
+      assert.equal(String(this.bindings[0]), "discord-1", "Public featured-server reads must bind the owning Discord ID.");
+      assert.match(query, /kill_events\.killer_id = trusted_public_player_profiles\.player_id/, "Public featured-server reads must use the trusted player ID bridge.");
+      assert.doesNotMatch(query, /lower\([^)]*(?:player_name|killer_name|victim_name)|(?:player_profiles\.player_name|kill_events\.killer_name|kill_events\.victim_name)\s*=/i, "Public featured-server reads must not match by player name.");
       return (this.db.featuredServers.get(String(this.bindings[0])) ?? null) as T | null;
     }
 
