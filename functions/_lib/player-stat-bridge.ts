@@ -29,7 +29,23 @@ export const PUBLIC_PLAYER_STAT_SERVER_WHERE = `
   AND trim(linked_servers.public_slug) != ''
 `;
 
-const trustedPublicPlayerProfileStatsCte = `
+function trustedPublicPlayerProfileStatsCte(includeVerifiedLinks: boolean) {
+  const verifiedLinkJoin = includeVerifiedLinks
+    ? `LEFT JOIN player_game_identity_links
+      ON player_game_identity_links.linked_server_id = player_profiles.linked_server_id
+      AND player_game_identity_links.player_profile_id = player_profiles.id
+      AND player_game_identity_links.player_id = player_profiles.player_id
+      AND player_game_identity_links.status = 'active'
+      AND player_game_identity_links.revoked_at IS NULL`
+    : "";
+  const discordScope = includeVerifiedLinks
+    ? `(
+        (player_profiles.discord_id = ? AND player_profiles.discord_id IS NOT NULL AND trim(player_profiles.discord_id) != '')
+        OR (player_game_identity_links.discord_id = ? AND player_game_identity_links.discord_id IS NOT NULL AND trim(player_game_identity_links.discord_id) != '')
+      )`
+    : "(player_profiles.discord_id = ? AND player_profiles.discord_id IS NOT NULL AND trim(player_profiles.discord_id) != '')";
+
+  return `
   trusted_public_player_profiles AS (
     SELECT
       player_profiles.id,
@@ -42,9 +58,8 @@ const trustedPublicPlayerProfileStatsCte = `
       COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at) AS profile_last_seen_at
     FROM player_profiles
     INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
-    WHERE player_profiles.discord_id = ?
-      AND player_profiles.discord_id IS NOT NULL
-      AND trim(player_profiles.discord_id) != ''
+    ${verifiedLinkJoin}
+    WHERE ${discordScope}
       AND ${PUBLIC_PLAYER_STAT_SERVER_WHERE}
   ),
   trusted_public_player_profile_event_stats AS (
@@ -96,33 +111,51 @@ const trustedPublicPlayerProfileStatsCte = `
       ON trusted_public_player_profile_event_stats.id = trusted_public_player_profiles.id
   )
 `;
+}
 
 export async function readTrustedPlayerGameplayAggregate(db: D1Database, discordId: string) {
-  const result = await db
-    .prepare(
-      `WITH
-       ${trustedPublicPlayerProfileStatsCte}
-       SELECT
-        COUNT(trusted_public_player_profile_resolved_stats.id) AS linked_game_profiles,
-        COUNT(DISTINCT trusted_public_player_profile_resolved_stats.linked_server_id) AS linked_public_servers,
-        COALESCE(SUM(trusted_public_player_profile_resolved_stats.resolved_kills), 0) AS total_kills,
-        COALESCE(SUM(trusted_public_player_profile_resolved_stats.resolved_deaths), 0) AS total_deaths,
-        COALESCE(SUM(trusted_public_player_profile_resolved_stats.resolved_suicides), 0) AS total_suicides,
-        COALESCE(MAX(trusted_public_player_profile_resolved_stats.resolved_longest_kill_distance), 0) AS longest_kill_distance,
-        MAX(trusted_public_player_profile_resolved_stats.resolved_last_seen_at) AS last_seen_at
-       FROM trusted_public_player_profile_resolved_stats`,
-    )
-    .bind(discordId)
+  try {
+    return await readTrustedPlayerGameplayAggregateWithScope(db, discordId, true);
+  } catch (error) {
+    if (!isMissingVerifiedIdentityLinkTable(error)) throw error;
+    return readTrustedPlayerGameplayAggregateWithScope(db, discordId, false);
+  }
+}
+
+export async function readTrustedPlayerFeaturedServer(db: D1Database, discordId: string) {
+  try {
+    return await readTrustedPlayerFeaturedServerWithScope(db, discordId, true);
+  } catch (error) {
+    if (!isMissingVerifiedIdentityLinkTable(error)) throw error;
+    return readTrustedPlayerFeaturedServerWithScope(db, discordId, false);
+  }
+}
+
+async function readTrustedPlayerGameplayAggregateWithScope(db: D1Database, discordId: string, includeVerifiedLinks: boolean) {
+  const statement = db.prepare(
+    `WITH
+     ${trustedPublicPlayerProfileStatsCte(includeVerifiedLinks)}
+     SELECT
+      COUNT(trusted_public_player_profile_resolved_stats.id) AS linked_game_profiles,
+      COUNT(DISTINCT trusted_public_player_profile_resolved_stats.linked_server_id) AS linked_public_servers,
+      COALESCE(SUM(trusted_public_player_profile_resolved_stats.resolved_kills), 0) AS total_kills,
+      COALESCE(SUM(trusted_public_player_profile_resolved_stats.resolved_deaths), 0) AS total_deaths,
+      COALESCE(SUM(trusted_public_player_profile_resolved_stats.resolved_suicides), 0) AS total_suicides,
+      COALESCE(MAX(trusted_public_player_profile_resolved_stats.resolved_longest_kill_distance), 0) AS longest_kill_distance,
+      MAX(trusted_public_player_profile_resolved_stats.resolved_last_seen_at) AS last_seen_at
+     FROM trusted_public_player_profile_resolved_stats`,
+  );
+  const result = await (includeVerifiedLinks ? statement.bind(discordId, discordId) : statement.bind(discordId))
     .first<TrustedPlayerGameplayAggregateRow>();
 
   return result ?? null;
 }
 
-export async function readTrustedPlayerFeaturedServer(db: D1Database, discordId: string) {
-  const result = await db
+async function readTrustedPlayerFeaturedServerWithScope(db: D1Database, discordId: string, includeVerifiedLinks: boolean) {
+  const statement = db
     .prepare(
       `WITH
-       ${trustedPublicPlayerProfileStatsCte}
+       ${trustedPublicPlayerProfileStatsCte(includeVerifiedLinks)}
        SELECT
         linked_servers.id AS linked_server_id,
         linked_servers.public_slug,
@@ -140,9 +173,14 @@ export async function readTrustedPlayerFeaturedServer(db: D1Database, discordId:
          COALESCE(trusted_public_player_profile_resolved_stats.resolved_longest_kill_distance, 0) DESC,
          datetime(trusted_public_player_profile_resolved_stats.resolved_last_seen_at) DESC
        LIMIT 1`,
-    )
-    .bind(discordId)
+    );
+  const result = await (includeVerifiedLinks ? statement.bind(discordId, discordId) : statement.bind(discordId))
     .first<TrustedPlayerFeaturedServerRow>();
 
   return result ?? null;
+}
+
+function isMissingVerifiedIdentityLinkTable(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /player_game_identity_links/i.test(message) && /no such table|not found|does not exist/i.test(message);
 }
