@@ -1,6 +1,6 @@
 # DZN Player + Owner Platform Specification
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
 
 This document is the durable product and engineering contract for DZN's split player and server-owner platform. Chat history is not the source of truth once this spec exists.
 
@@ -166,6 +166,27 @@ This slice makes `/player` and `/player/profile` more useful without introducing
 - Keep XP, challenges, and calling cards marked as future earned runtime tracks until trusted server-side award sources and ledgers exist.
 - Keep owner setup behind `/pricing?intent=owner_setup&returnTo=%2Fsetup`.
 - Do not add migrations, write profile/privacy/award rows, grant awards, alter billing, alter owner entitlement, alter scoring, alter rankings, alter discovery, alter reviews, alter events, alter Server Wars/CTF, or alter competitive eligibility.
+
+### Verified Player Game-Identity Linking/Reconciliation
+
+Public leaderboard/player stats must be connected to Discord accounts through a verified game identity bridge, not display-name matching.
+
+The identity linking model is:
+
+- `player_game_identity_claims`: current-user private claims for a specific public DZN server and exact ADM `player_id`.
+- `player_game_identity_links`: approved active links from a DZN user/Discord ID to one exact `linked_server_id + player_profile_id + player_id` row.
+- `player_game_identity_audit_log`: append-only audit facts for claim requests, approvals, rejections, link creation, and future revocation.
+
+The first implementation slice allows a logged-in player to request a link from `/player/profile` by submitting a public server slug or DZN server ID plus the exact ADM `player_id`. DZN validates the request against one public-safe `player_profiles` row for that server and rejects missing, already-linked, duplicate, or ambiguous matches. A server owner for that `linked_server_id` or a DZN admin must approve or reject the pending claim through private owner/admin API routes. Approval creates exactly one active verified link and may backfill the matching `player_profiles.discord_id` row only by exact `id + linked_server_id + player_id` for compatibility with existing public profile attribution.
+
+Rules:
+
+- Never infer a game identity from `player_name`, public profile handle, display name, review name, Discord username, or leaderboard text.
+- Approved links are private account bridges used to read existing public-safe gameplay facts for the right person.
+- `/player`, `/player/profile`, and public `/players/[handle]` may show linked leaderboard/server stats only after the Discord account has an existing direct profile link or an approved active verified game identity link.
+- Claim/read APIs must return private no-store responses and must not expose raw Discord IDs or unmasked player IDs to public surfaces.
+- Owner/admin claim review is scoped by `requireServerOwnerOrDznAdmin`; cross-owner claim review is denied.
+- Identity linking does not grant server ownership, Nitrado access, owner setup, billing entitlements, Store access, reviews, event decisions, XP, calling cards, badges, seasons, Server Wars/CTF scoring, rankings, discovery score changes, or competitive eligibility.
 
 ## Reviews Roadmap
 
