@@ -16,7 +16,7 @@ export function publicServerStatusPresentation(server: PublicStatusInput): {
   const checked = [server.metadata_last_checked_at, server.player_count_last_checked_at]
     .some((value) => Boolean(value) && Number.isFinite(Date.parse(value!)));
   if (!checked) return { label: "Status not checked", tone: "zinc" };
-  return server.is_online
-    ? { label: "Online at last check", tone: "emerald" }
-    : { label: "Offline at last check", tone: "zinc" };
+  // These timestamps also advance on failures and player-count-only refreshes.
+  // There is no separate successful online-status timestamp in this payload.
+  return { label: "Status unavailable", tone: "zinc" };
 }

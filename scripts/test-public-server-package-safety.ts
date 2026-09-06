@@ -158,8 +158,16 @@ async function main() {
     assert.equal(publicServerStatusPresentation(pending).label, "Setup incomplete");
     assert.equal(publicServerStatusPresentation({ ...pending, status: "live" }).label, "Status not checked");
     assert.equal(publicServerStatusPresentation({ ...pending, status: "live", metadata_last_checked_at: "invalid" }).label, "Status not checked");
-    assert.equal(publicServerStatusPresentation({ ...pending, status: "live", metadata_last_checked_at: "2026-01-01T10:00:00Z" }).label, "Online at last check");
-    assert.equal(publicServerStatusPresentation({ ...pending, status: "live", is_online: false, metadata_last_checked_at: "2026-01-01T10:00:00Z" }).label, "Offline at last check");
+    for (const is_online of [true, false]) {
+      for (const player_count_source of ["nitrado", "adm_playerlist", null]) {
+        for (const player_count_status of ["fresh", "stale", "unavailable", null]) {
+          const checked = { ...pending, status: "live", is_online, player_count_source, player_count_status,
+            metadata_last_checked_at: "2026-01-01T10:00:00Z", player_count_last_checked_at: "2026-01-01T10:00:00Z" };
+          assert.deepEqual(publicServerStatusPresentation(checked), { label: "Status unavailable", tone: "zinc" },
+            "Failures, ADM fallbacks and Nitrado player-count-only refreshes cannot confirm retained online state");
+        }
+      }
+    }
     assert.equal(publicServerStatusPresentation({ ...pending, lifecycle: { historical: true, label: "Legacy / Offline" } }).label, "Legacy / Offline");
     assert.equal(getPublicServerLifecycleDisplay("active_live", "pending").label, "Setup incomplete");
     assert.doesNotMatch(getServerLifecycleDisplay("active_live").message, /Full sync is enabled/);

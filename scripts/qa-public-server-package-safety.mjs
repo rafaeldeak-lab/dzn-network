@@ -87,10 +87,10 @@ if (process.argv.includes("--serve")) {
       await page.screenshot({ path: path.join(output, "latest-diagnostic.png"), fullPage: true });
       await writeFile(path.join(output, "latest-diagnostic.json"), JSON.stringify({ errors, prohibited, text: await page.locator("body").innerText() }, null, 2));
       await page.getByText("Example community server", { exact: true }).first().waitFor();
-      const expected = state === "live-pro" ? "Online at last check" : "Setup incomplete";
+      const expected = state === "live-pro" ? "Status unavailable" : "Setup incomplete";
       await page.getByText(expected, { exact: true }).first().waitFor();
       const body = await page.locator("body").innerText();
-      assert.doesNotMatch(body, /Verified Owner|DZN Verified|Network online/);
+      assert.doesNotMatch(body, /Verified Owner|DZN Verified|Network online|Online at last check|Offline at last check/);
       if (route.endsWith("preview") && state === "pending") assert.equal(await page.getByText("Pro required", { exact: true }).count(), 4);
       if (state === "live-pro") assert.equal(await page.getByText("Pro required", { exact: true }).count(), 0);
       const metrics = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth, brokenImages: [...document.images].filter(image => !image.complete || !image.naturalWidth).length }));
