@@ -181,12 +181,14 @@ The first implementation slice allows a logged-in player to request a link from 
 
 Player-facing copy should avoid technical terms such as "slug", "linked_server_id", and "ADM player_id" unless the user is in an owner/admin technical surface. The safe mental model for normal players is: choose the server, paste the game ID/proof code from the owner, wait for owner/admin approval. The safety model remains unchanged: never infer a game identity from `player_name`, display name, public profile handle, Discord username, or leaderboard row text.
 
+The owner/admin troubleshooting polish adds `/owner/player-game-identity-claims` as a private review queue. That queue may show the exact submitted game ID because it is only available to the matching server owner or a DZN admin through the same owner/admin API gate. The player-facing claim API and public profile APIs must continue to return masked game IDs only. The review UI should show the submitted account label, selected server, imported game profile name, exact submitted game ID, checklist guidance, approve/reject rules, and missing-evidence copy. Approval or rejection still writes only claim/link/audit state through the canonical review helper.
+
 Rules:
 
 - Never infer a game identity from `player_name`, public profile handle, display name, review name, Discord username, or leaderboard text.
 - Approved links are private account bridges used to read existing public-safe gameplay facts for the right person.
 - `/player`, `/player/profile`, and public `/players/[handle]` may show linked leaderboard/server stats only after the Discord account has an existing direct profile link or an approved active verified game identity link.
-- Claim/read APIs must return private no-store responses and must not expose raw Discord IDs or unmasked player IDs to public surfaces.
+- Claim/read APIs must return private no-store responses and must not expose raw Discord IDs or unmasked player IDs to public surfaces. Exact submitted game IDs are allowed only in the private owner/admin review queue.
 - Owner/admin claim review is scoped by `requireServerOwnerOrDznAdmin`; cross-owner claim review is denied.
 - Identity linking does not grant server ownership, Nitrado access, owner setup, billing entitlements, Store access, reviews, event decisions, XP, calling cards, badges, seasons, Server Wars/CTF scoring, rankings, discovery score changes, or competitive eligibility.
 

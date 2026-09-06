@@ -8,6 +8,7 @@ import {
   sanitizePlayerGameIdentityServerRef,
 } from "../functions/_lib/player-game-identities";
 import { rankPublicPlayers } from "../functions/_lib/public-leaderboards";
+import { testPlayerGameIdentityReadModels } from "./test-player-game-identity-read-model";
 
 const migration = readFileSync("migrations/0064_player_game_identity_links.sql", "utf8");
 const helper = readFileSync("functions/_lib/player-game-identities.ts", "utf8");
@@ -18,6 +19,9 @@ const statBridge = readFileSync("functions/_lib/player-stat-bridge.ts", "utf8");
 const leaderboards = readFileSync("functions/_lib/public-leaderboards.ts", "utf8");
 const playerHome = readFileSync("components/player/player-home.tsx", "utf8");
 const identityPanel = readFileSync("components/player/player-game-identity-links.tsx", "utf8");
+const ownerClaimPage = readFileSync("components/owner/player-game-identity-claims-page.tsx", "utf8");
+const ownerClaimRoutePage = readFileSync("app/owner/player-game-identity-claims/page.tsx", "utf8");
+const ownerConsole = readFileSync("components/owner/owner-console.tsx", "utf8");
 const platformSpec = readFileSync("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md", "utf8");
 const handoff = readFileSync("docs/DZN_VERIFIED_PLAYER_GAME_IDENTITY_LINKING_HANDOFF.md", "utf8");
 const packageJson = readFileSync("package.json", "utf8");
@@ -50,11 +54,17 @@ assert.match(ownerReviewRoute, /request\.method !== "PATCH"/, "Owner/admin claim
 assert.match(ownerReviewRoute, /isSameOriginMutation/, "Owner/admin claim reviews must reject cross-origin mutations.");
 assert.match(ownerReviewRoute, /reviewPlayerGameIdentityClaim/, "Owner/admin claim route must use the canonical review helper.");
 assert.match(ownerReviewRoute, /privateNoStoreHeaders\(\)/, "Owner/admin review responses must be private no-store.");
+assert.match(ownerClaimRoutePage, /PlayerGameIdentityClaimsPage/, "Owners/admins need a durable review queue route.");
+assert.match(ownerConsole, /\/owner\/player-game-identity-claims/, "Owner console must expose the player stat claim review queue.");
 
 assert.match(helper, /parsePlayerGameIdentityClaimInput/, "Helper must parse claim inputs centrally.");
 assert.match(helper, /public_slug/, "Players should be able to reference a public server slug without exposing raw internals.");
 assert.match(helper, /LIMIT 2/, "Exact ADM profile lookups must reject ambiguous matches.");
 assert.match(helper, /AMBIGUOUS_PLAYER_ID/, "Ambiguous identity matches must fail closed.");
+assert.match(helper, /submitted_player_id:\s*row\.player_id/, "Private owner/admin review payloads must expose the exact submitted game ID for troubleshooting.");
+assert.match(helper, /review_context/, "Owner/admin claim rows must include review troubleshooting context.");
+assert.match(helper, /missing_evidence_guidance/, "Owner/admin review context must explain what evidence is missing.");
+assert.match(helper, /Only this server owner or a DZN admin can review that claim/, "Cross-owner claim reviews must stay denied server-side.");
 assert.match(helper, /linked_servers\.id = \? OR linked_servers\.public_slug = \?/, "Claim creation must resolve one public server by exact id or public slug before writing.");
 assert.match(helper, /WHERE player_profiles\.linked_server_id = \?[\s\S]*AND player_profiles\.player_id = \?/, "Claim creation must validate one exact ADM profile after server resolution.");
 assert.match(helper, /player_profiles\.player_id = \?/, "Claim creation must match the exact ADM player ID.");
@@ -108,10 +118,33 @@ assert.doesNotMatch(identityPanel, /Use the public server slug from the server p
 assert.doesNotMatch(identityPanel, /Private Proof Flow/, "Player-facing UI should use owner-checked language instead of technical proof-flow copy.");
 assert.doesNotMatch(identityPanel, /\b(?:localStorage|sessionStorage|sendBeacon|analytics|checkout|STRIPE|nitrado_connections|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns)\b/i, "Identity UI must avoid browser storage, analytics, payment, owner-token, Store, and wheel systems.");
 
+assert.match(ownerClaimPage, /\/api\/owner\/player-game-identity-claims/, "Owner/admin troubleshooting UI must read the private claim queue.");
+assert.match(ownerClaimPage, /method: "PATCH"/, "Owner/admin troubleshooting UI must use the existing review PATCH route.");
+assert.match(ownerClaimPage, /Submitted game ID/, "Owner/admin troubleshooting UI must show the exact submitted game ID.");
+assert.match(ownerClaimPage, /Public-safe masked ID/, "Owner/admin troubleshooting UI must distinguish masked player-safe IDs from owner-only exact IDs.");
+assert.match(ownerClaimPage, /Approve Link/, "Owner/admin troubleshooting UI must make approval clear.");
+assert.match(ownerClaimPage, /Reject Request/, "Owner/admin troubleshooting UI must make rejection clear.");
+assert.match(ownerClaimPage, /Names are only context/, "Owner/admin troubleshooting UI must warn that names are not proof.");
+assert.match(ownerClaimPage, /Missing evidence/, "Owner/admin troubleshooting UI must explain missing evidence.");
+assert.match(ownerClaimPage, /credentials: "include"/, "Owner/admin troubleshooting UI must preserve authenticated private requests.");
+assert.doesNotMatch(
+  ownerClaimPage,
+  /\b(?:localStorage|sessionStorage|sendBeacon|analytics|STRIPE|checkout_session|server_subscriptions|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns|nitrado_connections|server_reviews|review_score|badge_awards|user_badges|dzn_season|server_war_events|ctf_tournaments|competitive_events|xp_award|calling_card_awards|dynamic_visibility_score|network_rank|rankServers)\b/i,
+  "Owner/admin troubleshooting UI must avoid browser storage, analytics, payment, owner-token, review, award, event, ranking, discovery, and competitive systems.",
+);
+assert.doesNotMatch(
+  ownerClaimPage,
+  /\/api\/(?:billing|checkout|stripe|nitrado|reviews|events|leaderboards|public|player\/profile)/i,
+  "Owner/admin troubleshooting UI must only call the private identity-claim owner API.",
+);
+
 assert.match(platformSpec, /Verified Player Game-Identity Linking\/Reconciliation/i, "Master spec must document the identity-linking slice.");
 assert.match(platformSpec, /Never infer a game identity from `player_name`/, "Master spec must keep the no-name-matching rule explicit.");
 assert.match(platformSpec, /does not grant server ownership, Nitrado access, owner setup, billing entitlements/i, "Master spec must keep owner/payment boundaries explicit.");
+assert.match(platformSpec, /\/owner\/player-game-identity-claims/, "Master spec must document the private owner/admin troubleshooting queue.");
+assert.match(platformSpec, /Exact submitted game IDs are allowed only in the private owner\/admin review queue/, "Master spec must document the exact-ID exposure boundary.");
 assert.match(handoff, /PR `#144` currently also uses migration number `0064`/, "Handoff must flag the migration-number conflict with the queued Comms PR.");
+assert.match(handoff, /private troubleshooting queue/, "Handoff must document the owner/admin troubleshooting queue.");
 assert.match(packageJson, /"test:player-game-identity-linking": "tsx scripts\/test-player-game-identity-linking\.ts"/, "Dedicated game identity test script must be registered.");
 
 assert.equal(sanitizePlayerGameIdentityServerRef(" pandora-network "), "pandora-network");
@@ -182,4 +215,9 @@ assert.deepEqual(
 assert.equal(rankedWithLinks[0].public_profile_href, "/players/linked-ace");
 assert.equal(JSON.stringify(rankedWithLinks).includes("verified-discord"), false, "Leaderboard payloads must not expose Discord IDs.");
 
-console.log("Player game identity linking guardrail tests passed.");
+void testPlayerGameIdentityReadModels().then(() => {
+  console.log("Player game identity linking guardrails and database privacy tests passed.");
+}).catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
