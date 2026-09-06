@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const route = readFileSync("functions/api/player/hub.ts", "utf8");
+const statBridge = readFileSync("functions/_lib/player-stat-bridge.ts", "utf8");
 const playerHome = readFileSync("components/player/player-home.tsx", "utf8");
 const platformSpec = readFileSync("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md", "utf8");
 const packageJson = readFileSync("package.json", "utf8");
@@ -9,8 +10,13 @@ const packageJson = readFileSync("package.json", "utf8");
 assert.match(route, /readPlayerProfileProgression/, "Player Hub must build a private profile/progression read model.");
 assert.match(route, /profile_summary: profileProgression\.profileSummary/, "Player Hub payload must expose a profile summary.");
 assert.match(route, /progression_summary: profileProgression\.progressionSummary/, "Player Hub payload must expose a progression summary.");
-assert.match(route, /FROM player_profiles/, "Profile/progression summary may read existing gameplay profile rows.");
-assert.match(route, /player_profiles\.discord_id = \?/, "Profile/progression summary must be scoped to the current Discord user.");
+assert.match(route, /readTrustedPlayerGameplayAggregate/, "Player Hub profile/progression summary must use the shared trusted stat bridge.");
+assert.match(route, /readTrustedPlayerFeaturedServer/, "Player Hub featured server summary must use the shared trusted stat bridge.");
+assert.match(statBridge, /FROM player_profiles/, "Profile/progression summary may read existing gameplay profile rows.");
+assert.match(statBridge, /player_profiles\.discord_id = \?/, "Profile/progression summary must be scoped to the current Discord user.");
+assert.match(statBridge, /kill_events\.killer_id = trusted_public_player_profiles\.player_id/, "Profile/progression summary must mirror leaderboard kill rows through the per-server player ID bridge.");
+assert.match(statBridge, /kill_events\.victim_id = trusted_public_player_profiles\.player_id/, "Profile/progression summary must mirror leaderboard death rows through the per-server player ID bridge.");
+assert.doesNotMatch(statBridge, /lower\([^)]*(?:player_name|killer_name|victim_name)|(?:player_profiles\.player_name|kill_events\.killer_name|kill_events\.victim_name)\s*=/i, "Profile/progression summary must not attach gameplay rows by ambiguous public names.");
 assert.match(route, /public_profile_href: null/, "Player Hub must not invent public profile handles.");
 assert.match(route, /future_earned_runtime/, "XP, challenge, and calling-card runtime must remain future earned systems.");
 assert.match(route, /private: true/, "Profile/progression payload must carry private flags.");
@@ -21,6 +27,11 @@ assert.doesNotMatch(
   route,
   /\b(?:STRIPE|checkout_session|checkout\.session|nitrado_connections|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns|server_reviews|review_score|badge_awards|user_badges|dzn_season|server_war_events|ctf_tournaments|xp_award|calling_card_awards|dynamic_visibility_score|network_rank|profile_privacy|profile_visibility|public_handle)\b/i,
   "Profile/progression summary must stay out of payment, owner, review, award, privacy-publication, and competitive systems.",
+);
+assert.doesNotMatch(
+  statBridge,
+  /\b(?:STRIPE|checkout_session|checkout\.session|nitrado_connections|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns|server_reviews|review_score|badge_awards|user_badges|dzn_season|server_war_events|ctf_tournaments|xp_award|calling_card_awards|dynamic_visibility_score|network_rank|profile_privacy|profile_visibility|public_handle|INSERT\s+INTO|UPDATE\s+[a-z_]+|DELETE\s+FROM)\b/i,
+  "Trusted profile/stat bridge must stay read-only and out of payment, owner, review, award, privacy-publication, and competitive systems.",
 );
 
 assert.match(playerHome, /Profile & Progression/, "Player Hub UI must render the profile/progression panel.");

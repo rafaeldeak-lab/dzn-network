@@ -86,7 +86,7 @@ const scenarios = {
       "No followed servers yet",
       "No public DZN matches yet",
       "No suggested events yet",
-      "No Discord-linked public gameplay profile rows were found for this account yet.",
+      "No trusted Discord-linked public gameplay profile rows were found for this account yet. DZN does not attach leaderboard stats by display name alone.",
       "Presentation Only",
       "Owner Setup Stays Gated",
     ],
@@ -575,7 +575,7 @@ function richHubPayload() {
         longest_kill_distance: 421.4,
         last_seen_at: "2026-09-01T10:30:00.000Z",
       },
-      message: "This private summary is read from Discord-linked gameplay profile rows and is presentation-only.",
+      message: "This private summary is read from trusted Discord-linked gameplay rows and existing public leaderboard event data. It is presentation-only.",
     }),
   });
 }
@@ -849,7 +849,7 @@ function defaultProgressionSummary(overrides = {}) {
         description: "Calling-card awards remain account-bound earned cosmetics when that runtime lands.",
       },
     ],
-    message: "No Discord-linked public gameplay profile rows were found for this account yet.",
+    message: "No trusted Discord-linked public gameplay profile rows were found for this account yet. DZN does not attach leaderboard stats by display name alone.",
     private: true,
     presentation_only: true,
     ...overrides,

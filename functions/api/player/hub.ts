@@ -3,6 +3,12 @@ import { canManageDiscordGuild } from "../../_lib/discord";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth } from "../../_lib/mock";
 import { readPlayerSavedServersForUser } from "../../_lib/player-saved-servers";
+import {
+  readTrustedPlayerFeaturedServer,
+  readTrustedPlayerGameplayAggregate,
+  type TrustedPlayerFeaturedServerRow,
+  type TrustedPlayerGameplayAggregateRow,
+} from "../../_lib/player-stat-bridge";
 import { privateNoStoreHeaders } from "../../_lib/performance";
 import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 
@@ -95,29 +101,6 @@ type PlayerHubSuggestedEventRelevance = {
 type PlayerHubSuggestedEventContext = {
   savedServerIds: string[];
   matchedCommunityServerIds: string[];
-};
-
-type PlayerHubProfileAggregateRow = {
-  linked_game_profiles: number | null;
-  linked_public_servers: number | null;
-  total_kills: number | null;
-  total_deaths: number | null;
-  total_suicides: number | null;
-  longest_kill_distance: number | null;
-  last_seen_at: string | null;
-};
-
-type PlayerHubFeaturedProfileServerRow = {
-  linked_server_id: string;
-  public_slug: string;
-  server_name: string;
-  server_type: string | null;
-  platform: string | null;
-  map_name: string | null;
-  kills: number | null;
-  deaths: number | null;
-  longest_kill_distance: number | null;
-  last_seen_at: string | null;
 };
 
 type PlayerHubProfileProgressionReadModel = {
@@ -304,51 +287,11 @@ async function readPlayerProfileProgression(env: Env, user: SessionUser): Promis
   const displayName = user.username || "DZN Player";
   try {
     const db = requireDb(env);
-    const [aggregateRows, featuredRows] = await Promise.all([
-      db
-        .prepare(
-          `SELECT
-            COUNT(player_profiles.id) AS linked_game_profiles,
-            COUNT(DISTINCT player_profiles.linked_server_id) AS linked_public_servers,
-            COALESCE(SUM(COALESCE(player_profiles.kills, 0)), 0) AS total_kills,
-            COALESCE(SUM(COALESCE(player_profiles.deaths, 0)), 0) AS total_deaths,
-            COALESCE(SUM(COALESCE(player_profiles.suicides, 0)), 0) AS total_suicides,
-            COALESCE(MAX(COALESCE(player_profiles.longest_kill_distance, 0)), 0) AS longest_kill_distance,
-            MAX(COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at)) AS last_seen_at
-           FROM player_profiles
-           INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
-           WHERE player_profiles.discord_id = ?
-             AND ${publicServerWhere}`,
-        )
-        .bind(user.discord_id)
-        .all<PlayerHubProfileAggregateRow>(),
-      db
-        .prepare(
-          `SELECT
-            player_profiles.linked_server_id,
-            linked_servers.public_slug,
-            COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-            COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
-            linked_servers.platform,
-            linked_servers.map_name,
-            player_profiles.kills,
-            player_profiles.deaths,
-            player_profiles.longest_kill_distance,
-            COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at) AS last_seen_at
-           FROM player_profiles
-           INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
-           WHERE player_profiles.discord_id = ?
-             AND ${publicServerWhere}
-           ORDER BY COALESCE(player_profiles.kills, 0) DESC,
-             COALESCE(player_profiles.longest_kill_distance, 0) DESC,
-             datetime(COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at)) DESC
-           LIMIT 1`,
-        )
-        .bind(user.discord_id)
-        .all<PlayerHubFeaturedProfileServerRow>(),
+    const [aggregate, featuredServer] = await Promise.all([
+      readTrustedPlayerGameplayAggregate(db, user.discord_id),
+      readTrustedPlayerFeaturedServer(db, user.discord_id),
     ]);
 
-    const aggregate = aggregateRows.results?.[0] ?? null;
     const linkedGameProfiles = normalizeNullableNumber(aggregate?.linked_game_profiles) ?? 0;
 
     return buildProfileProgressionReadModel({
@@ -356,7 +299,7 @@ async function readPlayerProfileProgression(env: Env, user: SessionUser): Promis
       source: "player_profiles",
       status: linkedGameProfiles > 0 ? "stats_available" : "empty",
       aggregate,
-      featuredServer: featuredRows.results?.[0] ?? null,
+      featuredServer,
     });
   } catch {
     return buildProfileProgressionReadModel({
@@ -373,8 +316,8 @@ function buildProfileProgressionReadModel(input: {
   displayName: string;
   source: "player_profiles" | "unavailable";
   status: PlayerHubProfileProgressionReadModel["progressionSummary"]["status"];
-  aggregate: PlayerHubProfileAggregateRow | null;
-  featuredServer: PlayerHubFeaturedProfileServerRow | null;
+  aggregate: TrustedPlayerGameplayAggregateRow | null;
+  featuredServer: TrustedPlayerFeaturedServerRow | null;
 }): PlayerHubProfileProgressionReadModel {
   const linkedGameProfiles = normalizeNullableNumber(input.aggregate?.linked_game_profiles) ?? 0;
   const linkedPublicServers = normalizeNullableNumber(input.aggregate?.linked_public_servers) ?? 0;
@@ -476,9 +419,9 @@ function profileProgressionMessage(status: PlayerHubProfileProgressionReadModel[
     return "Profile/progression summary storage is unavailable in this environment, so DZN shows safe private fallback copy only.";
   }
   if (status === "empty") {
-    return "No Discord-linked public gameplay profile rows were found for this account yet.";
+    return "No trusted Discord-linked public gameplay profile rows were found for this account yet. DZN does not attach leaderboard stats by display name alone.";
   }
-  return "This private summary is read from Discord-linked gameplay profile rows and is presentation-only.";
+  return "This private summary is read from trusted Discord-linked gameplay rows and existing public leaderboard event data. It is presentation-only.";
 }
 
 async function readMatchedCommunities(env: Env, userId: string): Promise<PlayerHubCommunitiesReadModel> {

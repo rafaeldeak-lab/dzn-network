@@ -1,4 +1,5 @@
 import { requireDb } from "./db";
+import { readTrustedPlayerFeaturedServer, readTrustedPlayerGameplayAggregate } from "./player-stat-bridge";
 import type { Env, SessionUser } from "./types";
 
 export type PlayerPublicProfilePreferences = {
@@ -129,29 +130,9 @@ type PublicPlayerAggregateRow = {
   last_seen_at: string | null;
 };
 
-type PublicPlayerFeaturedServerRow = {
-  public_slug: string;
-  server_name: string | null;
-  server_type: string | null;
-  platform: string | null;
-  map_name: string | null;
-  kills: number | null;
-  deaths: number | null;
-  longest_kill_distance: number | null;
-  last_seen_at: string | null;
-};
-
 const fallbackHandlePrefix = "dzn-player";
 const maxPublicProfileLinkLookupIds = 100;
 const publicProfileLinkLookupChunkSize = 50;
-const publicServerWhere = `
-  lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
-  AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
-  AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-  AND linked_servers.public_slug IS NOT NULL
-  AND trim(linked_servers.public_slug) != ''
-`;
-
 export function publicProfileHref(handle: string) {
   return `/players/${handle}`;
 }
@@ -431,52 +412,20 @@ function rowToPreferences(row: PublicPlayerProfileOwnerRow): PlayerPublicProfile
 }
 
 async function readPublicPlayerAggregate(db: D1Database, discordId: string) {
-  const result = await db
-    .prepare(
-      `SELECT
-        COUNT(DISTINCT player_profiles.linked_server_id) AS linked_public_servers,
-        COALESCE(SUM(COALESCE(player_profiles.kills, 0)), 0) AS kills,
-        COALESCE(SUM(COALESCE(player_profiles.deaths, 0)), 0) AS deaths,
-        COALESCE(SUM(COALESCE(player_profiles.suicides, 0)), 0) AS suicides,
-        COALESCE(MAX(COALESCE(player_profiles.longest_kill_distance, 0)), 0) AS longest_kill_distance,
-        MAX(COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at)) AS last_seen_at
-       FROM player_profiles
-       INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
-       WHERE player_profiles.discord_id = ?
-         AND ${publicServerWhere}`,
-    )
-    .bind(discordId)
-    .first<PublicPlayerAggregateRow>();
-
-  return result ?? null;
+  const result = await readTrustedPlayerGameplayAggregate(db, discordId);
+  if (!result) return null;
+  return {
+    linked_public_servers: result.linked_public_servers,
+    kills: result.total_kills,
+    deaths: result.total_deaths,
+    suicides: result.total_suicides,
+    longest_kill_distance: result.longest_kill_distance,
+    last_seen_at: result.last_seen_at,
+  } satisfies PublicPlayerAggregateRow;
 }
 
 async function readPublicPlayerFeaturedServer(db: D1Database, discordId: string) {
-  const result = await db
-    .prepare(
-      `SELECT
-        linked_servers.public_slug,
-        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-        COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
-        linked_servers.platform,
-        linked_servers.map_name,
-        player_profiles.kills,
-        player_profiles.deaths,
-        player_profiles.longest_kill_distance,
-        COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at) AS last_seen_at
-       FROM player_profiles
-       INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
-       WHERE player_profiles.discord_id = ?
-         AND ${publicServerWhere}
-       ORDER BY COALESCE(player_profiles.kills, 0) DESC,
-         COALESCE(player_profiles.longest_kill_distance, 0) DESC,
-         datetime(COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at)) DESC
-       LIMIT 1`,
-    )
-    .bind(discordId)
-    .first<PublicPlayerFeaturedServerRow>();
-
-  return result ?? null;
+  return await readTrustedPlayerFeaturedServer(db, discordId);
 }
 
 function futureEarnedSection(visible: boolean, visibleMessage: string) {

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { readdirSync, readFileSync } from "node:fs";
 
 import { dznCommsReadHistoryBoundary, readDznCommsReadHistoryFlags } from "../functions/_lib/dzn-comms-read-history";
 import type { Env, PagesContext } from "../functions/_lib/types";
 import { onRequest as messageHistoryRoute } from "../functions/api/comms/message-history";
 
-const migrationName = "0064_dzn_comms_read_history.sql";
+const migrationName = "0065_dzn_comms_read_history.sql";
 const migrationFiles = readdirSync("migrations")
   .filter((name) => /^\d{4}_.+\.sql$/.test(name))
   .sort();
@@ -94,6 +95,25 @@ async function main() {
 }
 
 async function testRuntimeContracts() {
+  for (const kind of ["public", "private_group", "support"] as const) {
+    for (const visibility of ["public", "private_group", "support_private"] as const) {
+      if (visibility === (kind === "support" ? "support_private" : kind)) continue;
+      const inconsistentDb = seededDb();
+      inconsistentDb.channels.get("global-chat")!.kind = kind;
+      inconsistentDb.channels.get("global-chat")!.visibility = visibility;
+      const response = await callMessageHistoryRoute(inconsistentDb, "GET", "https://dzn.test/api/comms/message-history", enabledEnv(inconsistentDb));
+      assert.equal(response.status, 404, "Inconsistent channel privacy must fail closed");
+      assert.equal(inconsistentDb.queries.some(query => query.includes("FROM dzn_comms_messages")), false);
+    }
+  }
+  const paginationDb = seededDb();
+  paginationDb.messages.splice(0, paginationDb.messages.length,
+    message({ id: "older", channelId: "channel-global", body: "Older", createdAt: "2026-09-01 10:29:59" }),
+    message({ id: "newer", channelId: "channel-global", body: "Newer", createdAt: "2026-09-01 11:00:00" }),
+    message({ id: "expired-state", channelId: "channel-global", body: "Expired", createdAt: "2026-09-01 10:29:59.900", visibilityState: "expired" }),
+  );
+  const paged = await callMessageHistoryRoute(paginationDb, "GET", "https://dzn.test/api/comms/message-history?limit=1&before=2026-09-01T10:30:00.000Z", enabledEnv(paginationDb));
+  assert.deepEqual(((await paged.json()) as CommsPayload).messages.map(row => row.id), ["older"], "SQLite timestamps and expired-state rows must respect the cursor and limit");
   const disabledDb = new FakeD1Database();
   const disabled = await callMessageHistoryRoute(disabledDb, "GET", "https://dzn.test/api/comms/message-history");
   assert.equal(disabled.status, 404, "Unset flags must keep the read-history route disabled.");
@@ -371,15 +391,20 @@ class FakeD1PreparedStatement {
 
   async all<T>() {
     if (this.query.includes("FROM dzn_comms_messages")) {
-      const [channelId, before] = this.bindings;
-      const beforeTime = typeof before === "string" ? Date.parse(before) : null;
-      const rows = this.db.messages
-        .filter((row) => row.channel_id === channelId)
-        .filter((row) => beforeTime === null || Date.parse(row.created_at) < beforeTime)
-        .filter((row) => !row.expires_at || Date.parse(row.expires_at) > Date.now())
-        .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id.localeCompare(a.id))
-        .slice(0, Number(this.bindings[3]) || 30);
-      return { results: rows as T[], success: true, meta: {} };
+      const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
+        DatabaseSync: new (file: string) => {
+          exec(sql: string): void;
+          prepare(sql: string): { run(...values: unknown[]): void; all(...values: unknown[]): T[] };
+          close(): void;
+        };
+      };
+      const sqlite = new DatabaseSync(":memory:");
+      try {
+        sqlite.exec("CREATE TABLE dzn_comms_messages (id TEXT, channel_id TEXT, author_display_name TEXT, author_role_label TEXT, body TEXT, visibility_state TEXT, created_at TEXT, edited_at TEXT, expires_at TEXT)");
+        const insert = sqlite.prepare("INSERT INTO dzn_comms_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        for (const row of this.db.messages) insert.run(row.id, row.channel_id, row.author_display_name, row.author_role_label, row.body, row.visibility_state, row.created_at, row.edited_at, row.expires_at);
+        return { results: sqlite.prepare(this.query).all(...this.bindings), success: true, meta: {} };
+      } finally { sqlite.close(); }
     }
 
     return { results: [] as T[], success: true, meta: {} };

@@ -203,6 +203,8 @@ async function readChannel(db: D1Database, slug: string): Promise<DznCommsReadab
   const kind = normalizeChannelKind(row.kind);
   const visibility = normalizeChannelVisibility(row.visibility);
   if (!kind || !visibility || !row.id || !row.slug || !row.name) return null;
+  const expectedVisibility = kind === "support" ? "support_private" : kind;
+  if (visibility !== expectedVisibility) return null;
 
   return {
     id: row.id,
@@ -232,9 +234,10 @@ async function readMessages(db: D1Database, channelId: string, limit: number, be
       `SELECT id, author_display_name, author_role_label, body, visibility_state, created_at, edited_at, expires_at
        FROM dzn_comms_messages
        WHERE channel_id = ?
-         AND (? IS NULL OR created_at < ?)
-         AND (expires_at IS NULL OR expires_at = '' OR expires_at > datetime('now'))
-       ORDER BY datetime(created_at) DESC, id DESC
+         AND (? IS NULL OR julianday(created_at) < julianday(?))
+         AND visibility_state != 'expired'
+         AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
+       ORDER BY julianday(created_at) DESC, id DESC
        LIMIT ?`,
     )
     .bind(channelId, before, before, limit)

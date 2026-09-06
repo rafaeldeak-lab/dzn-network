@@ -1,6 +1,6 @@
 # DZN Player + Owner Platform Specification
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
 
 This document is the durable product and engineering contract for DZN's split player and server-owner platform. Chat history is not the source of truth once this spec exists.
 
@@ -156,6 +156,8 @@ This slice makes `/player` and `/player/profile` more useful without introducing
 
 - Add a private read-only current-user profile/progression summary to `GET /api/player/hub`.
 - Read only Discord-scoped `player_profiles` rows for the current logged-in user.
+- Profile stats use the trusted Discord/stat bridge: `player_profiles.discord_id` must match the current user and leaderboard-style event totals may be mirrored only through the same per-server `player_profiles.player_id` bridge used by public leaderboard attribution.
+- DZN must not attach gameplay rows to a Discord account by display name, profile handle, leaderboard name, review name, or any other public text alone.
 - Join those rows only to public-safe server display fields, so hidden/deleted/merged/slugless server rows do not appear.
 - Expose aggregate gameplay profile signals such as linked profile count, linked public-server count, total kills/deaths/suicides, longest kill distance, latest seen timestamp, and one public-safe featured server.
 - Do not expose raw `player_name`, `player_id`, private Discord identifiers, hidden server rows, other-user rows, profile privacy settings, or public profile handles.
@@ -164,6 +166,31 @@ This slice makes `/player` and `/player/profile` more useful without introducing
 - Keep XP, challenges, and calling cards marked as future earned runtime tracks until trusted server-side award sources and ledgers exist.
 - Keep owner setup behind `/pricing?intent=owner_setup&returnTo=%2Fsetup`.
 - Do not add migrations, write profile/privacy/award rows, grant awards, alter billing, alter owner entitlement, alter scoring, alter rankings, alter discovery, alter reviews, alter events, alter Server Wars/CTF, or alter competitive eligibility.
+
+### Verified Player Game-Identity Linking/Reconciliation
+
+Public leaderboard/player stats must be connected to Discord accounts through a verified game identity bridge, not display-name matching.
+
+The identity linking model is:
+
+- `player_game_identity_claims`: current-user private claims for a specific public DZN server and exact ADM `player_id`.
+- `player_game_identity_links`: approved active links from a DZN user/Discord ID to one exact `linked_server_id + player_profile_id + player_id` row.
+- `player_game_identity_audit_log`: append-only audit facts for claim requests, approvals, rejections, link creation, and future revocation.
+
+The first implementation slice allows a logged-in player to request a link from `/player/profile` without needing to understand internal server slugs. The player-facing UI should present a simple server picker/search from public DZN servers, then ask for the exact game ID or proof code supplied by the server owner. Internally, the request still submits the selected public server identifier plus the exact ADM `player_id`. DZN validates the request against one public-safe `player_profiles` row for that server and rejects missing, already-linked, duplicate, or ambiguous matches. A server owner for that `linked_server_id` or a DZN admin must approve or reject the pending claim through private owner/admin API routes. Approval creates exactly one active verified link and may backfill the matching `player_profiles.discord_id` row only by exact `id + linked_server_id + player_id` for compatibility with existing public profile attribution.
+
+Player-facing copy should avoid technical terms such as "slug", "linked_server_id", and "ADM player_id" unless the user is in an owner/admin technical surface. The safe mental model for normal players is: choose the server, paste the game ID/proof code from the owner, wait for owner/admin approval. The safety model remains unchanged: never infer a game identity from `player_name`, display name, public profile handle, Discord username, or leaderboard row text.
+
+The owner/admin troubleshooting polish adds `/owner/player-game-identity-claims` as a private review queue. That queue may show the exact submitted game ID because it is only available to the matching server owner or a DZN admin through the same owner/admin API gate. The player-facing claim API and public profile APIs must continue to return masked game IDs only. The review UI should show the submitted account label, selected server, imported game profile name, exact submitted game ID, checklist guidance, approve/reject rules, and missing-evidence copy. Approval or rejection still writes only claim/link/audit state through the canonical review helper.
+
+Rules:
+
+- Never infer a game identity from `player_name`, public profile handle, display name, review name, Discord username, or leaderboard text.
+- Approved links are private account bridges used to read existing public-safe gameplay facts for the right person.
+- `/player`, `/player/profile`, and public `/players/[handle]` may show linked leaderboard/server stats only after the Discord account has an existing direct profile link or an approved active verified game identity link.
+- Claim/read APIs must return private no-store responses and must not expose raw Discord IDs or unmasked player IDs to public surfaces. Exact submitted game IDs are allowed only in the private owner/admin review queue.
+- Owner/admin claim review is scoped by `requireServerOwnerOrDznAdmin`; cross-owner claim review is denied.
+- Identity linking does not grant server ownership, Nitrado access, owner setup, billing entitlements, Store access, reviews, event decisions, XP, calling cards, badges, seasons, Server Wars/CTF scoring, rankings, discovery score changes, or competitive eligibility.
 
 ## Reviews Roadmap
 
@@ -197,6 +224,8 @@ Public profiles must respect saved privacy preferences:
 - Enabling public profile publishing may generate or reactivate only the current user's handle. Handles are presentation-only and cannot grant authority or competitive effect.
 - Public `GET /api/public/players/[handle]` and `/players/[handle]` show only approved sections.
 - Hidden sections, private identifiers, and raw award evidence stay private.
+- Public profile gameplay totals and featured-server cards reuse the trusted Discord/stat bridge. They may show existing public leaderboard-style ADM event facts only when a Discord-linked `player_profiles` row and per-server `player_id` prove the account-to-gameplay relationship.
+- If no trusted Discord-linked gameplay row exists, public profiles may show a safe empty state; they must not infer stats from a matching display name or handle.
 - Public profile links are opt-in and only shown where a generated public handle exists.
 - Public profile discovery/linking uses the trusted current-user bridge from Discord ID to DZN user to active `player_public_profiles` handle, and also requires `player_profile_privacy_preferences.public_profile_enabled = 1`.
 - Kill-event and leaderboard attribution also require a trusted per-server `player_profiles.player_id` bridge; player-name matching alone must not create profile links.
@@ -277,6 +306,7 @@ Completed or active foundation slices:
 - Public profile discovery/linking polish: review author rows, public server profile player leaderboards, top-player cards, global leaderboard player rows, and longest-kill player mentions can link to `/players/[handle]` only when an active generated public handle exists and saved privacy preferences keep the profile public. These links are stripped from public API fallback snapshots and remain presentation-only with no payment, owner, review score, ranking, discovery, event, award, Server Wars, CTF, XP, calling-card, or eligibility effect.
 - Public Profile Owner Preview And Share Polish: the logged-in `/player/profile` privacy panel now shows a private "How My Public Profile Looks" visitor-view mirror, owner copy/share controls, handle copy, open-public-page action, hidden/not-yet-earned section states, and current-page-session-only action feedback. It reads only the current user's private privacy payload plus the public read-only profile endpoint. Copy/share controls cannot affect profile privacy settings, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility.
 - DZN Comms read-history foundation: additive local/test schema for Comms channels, read-history messages, and private group membership proof; disabled-by-default `GET /api/comms/message-history`; static `/community` fallback with disabled composer; public-channel read proof and private-group membership denial proof. No sending, reactions, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, analytics/tracking, Store/payment/live checkout, production D1 writes, retained exports, issue `#49`, or competitive-system effects.
+- Trusted Player Stat Bridge: `/player` and public `/players/[handle]` share a read-only gameplay/stat bridge that scopes by Discord ID and mirrors existing public leaderboard ADM event totals only through the per-server player ID relationship. It keeps display names/handles out of identity proof, keeps hidden/merged/slugless server rows out, writes nothing, and cannot affect billing, ownership, scoring, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF, XP awards, calling-card awards, public profile visibility, or competitive eligibility.
 
 Next recommended product area after public profile owner preview/share polish:
 

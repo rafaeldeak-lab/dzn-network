@@ -95,4 +95,12 @@ npm run test:ctf-tournament-engine
 
 ## Next Slice
 
+### Main reconciliation (2026-09-06)
+
+- Updated this existing PR branch with `main` through PR #148, preserving both the Comms and player game-identity test suites and specification entries.
+- Renumbered the unapplied Comms schema to `0065_dzn_comms_read_history.sql`. `0064_player_game_identity_links.sql` is already reserved for the released identity feature. The Comms migration contents are unchanged.
+- No production migration or flag change is part of this reconciliation. Production D1 application of `0065_dzn_comms_read_history.sql` still needs its own explicit approval.
+- Read history and the UI remain disabled by default. Reconciliation adds no message sending, reactions, moderation writes, AI runtime or provider spend.
+- Review fixes reject all mismatched channel kind/visibility combinations before history reads. SQL uses normalized timestamp comparison and omits expired-state rows before limiting results. The route tests execute the actual message SQL in local SQLite, including mixed timestamp formats and limit starvation.
+
 After this is reviewed/merged/released, the next Comms slice should be the message sending contract preflight, not runtime sending. That preflight should define send attempt payloads, rate limits, profanity filtering, warning/timeout state, moderation review hooks, private-group membership proofs, retention/logging rules, rollback, and the same proof matrix before any send route or message write path exists.

@@ -3286,6 +3286,7 @@ function ServerDashboard({
             </label>
             <div className="flex flex-wrap items-center gap-2">
               <Link href="/servers" className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-200">View Network</Link>
+              <Link href="/owner/player-game-identity-claims" className="rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50">Review Player Stat Links</Link>
               <Link href="/setup" className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-200">Setup</Link>
               <DznPulseBell />
               <button type="button" onClick={onLogout} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-200">

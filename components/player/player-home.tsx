@@ -22,6 +22,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
+import { PlayerGameIdentityLinks } from "@/components/player/player-game-identity-links";
 import { PlayerProfilePrivacySettings } from "@/components/player/profile-privacy-settings";
 import { SiteHeaderAuthState } from "@/components/site-header";
 import type { AuthResponse } from "@/components/onboarding/types";
@@ -575,6 +576,7 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
         <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
           <div className="space-y-4">
             <ProfileProgressionPanel state={hubState} />
+            {mode === "profile" && authState.status === "logged_in" ? <PlayerGameIdentityLinks /> : null}
             {mode === "profile" && authState.status === "logged_in" ? <PlayerProfilePrivacySettings /> : null}
           </div>
 
