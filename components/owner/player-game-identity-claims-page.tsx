@@ -92,6 +92,9 @@ export function PlayerGameIdentityClaimsPage() {
     }
 
     const payload = (await response.json()) as ClaimsPayload;
+    if (!payload.ok || payload.source !== "player_game_identity_claims" || !Array.isArray(payload.claims)) {
+      throw new Error("The review queue is temporarily unavailable. Refresh to try again.");
+    }
     return {
       state: "ready",
       claims: payload.claims ?? [],
@@ -112,7 +115,6 @@ export function PlayerGameIdentityClaimsPage() {
 
   const loadClaims = useCallback(async () => {
     setError(null);
-    setActionMessage(null);
     setState("loading");
 
     try {
@@ -274,6 +276,7 @@ function StatusBanner({ tone, message }: { tone: "success" | "error"; message: s
   const Icon = tone === "success" ? CheckCircle2 : AlertTriangle;
   return (
     <div
+      role={tone === "success" ? "status" : "alert"}
       className={`flex items-start gap-3 rounded-lg border px-4 py-3 text-sm font-bold ${
         tone === "success"
           ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-100"
@@ -361,8 +364,8 @@ function ClaimCard({
         </span>
       </div>
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-        <div className="grid gap-3">
+      <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+        <div className="grid min-w-0 gap-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <DetailBox label="Server" value={claim.server_name || "DZN Server"} href={serverHref} />
             <DetailBox label="Imported game profile" value={claim.player_name || "Name not available"} />
@@ -447,11 +450,11 @@ function DetailBox({ label, value, href, emphasis = false }: { label: string; va
       <ExternalLink className="size-3.5 shrink-0" aria-hidden="true" />
     </Link>
   ) : (
-    <span className="block truncate">{value}</span>
+    <span className="block whitespace-normal [overflow-wrap:anywhere]">{value}</span>
   );
 
   return (
-    <div className={`rounded-lg border p-3 ${emphasis ? "border-cyan-300/25 bg-cyan-300/10" : "border-white/10 bg-white/[0.035]"}`}>
+    <div className={`min-w-0 rounded-lg border p-3 ${emphasis ? "border-cyan-300/25 bg-cyan-300/10" : "border-white/10 bg-white/[0.035]"}`}>
       <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">{label}</p>
       <p className={`mt-2 min-w-0 text-sm font-black ${emphasis ? "text-cyan-50" : "text-white"}`}>{content}</p>
     </div>

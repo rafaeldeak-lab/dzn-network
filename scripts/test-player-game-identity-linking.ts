@@ -8,6 +8,7 @@ import {
   sanitizePlayerGameIdentityServerRef,
 } from "../functions/_lib/player-game-identities";
 import { rankPublicPlayers } from "../functions/_lib/public-leaderboards";
+import { testPlayerGameIdentityReadModels } from "./test-player-game-identity-read-model";
 
 const migration = readFileSync("migrations/0064_player_game_identity_links.sql", "utf8");
 const helper = readFileSync("functions/_lib/player-game-identities.ts", "utf8");
@@ -214,4 +215,9 @@ assert.deepEqual(
 assert.equal(rankedWithLinks[0].public_profile_href, "/players/linked-ace");
 assert.equal(JSON.stringify(rankedWithLinks).includes("verified-discord"), false, "Leaderboard payloads must not expose Discord IDs.");
 
-console.log("Player game identity linking guardrail tests passed.");
+void testPlayerGameIdentityReadModels().then(() => {
+  console.log("Player game identity linking guardrails and database privacy tests passed.");
+}).catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

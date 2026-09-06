@@ -36,6 +36,16 @@ The follow-up troubleshooting slice adds no migration. It exposes the existing p
 
 Exact submitted game IDs remain blocked from public/player-facing payloads. They are visible only in the private owner/admin queue, which uses private no-store responses and server-side owner/admin claim review gates.
 
+### PR #148 review fixes (2026-09-06)
+
+- Server owners can open the queue from the `/dashboard` toolbar; `/owner` remains the platform-owner console.
+- Storage unavailable is an error state, never an empty-queue confirmation.
+- Approval/rejection confirmation remains visible after the refreshed queue loads and is announced through an accessible status region.
+- Full submitted IDs wrap on narrow screens, including the maximum 160-character input.
+- The identity guardrail suite executes real SQLite queries with the approved migration. It verifies owner A/B isolation, admin scope, stranger denial, current-player/Discord scope, exact owner IDs versus masked player IDs, storage failure, and cross-owner approval denial without writes.
+- `scripts/qa-player-game-identity-claims.mjs` serves exported assets on loopback and mocks all APIs. It tests pending, denied approval, successful approval, empty, unavailable and logged-out states at 1440/900/390 pixels. Set `DZN_QA_PLAYWRIGHT_PATH` to an installed Playwright `index.mjs` if not available locally; screenshots default to a temporary folder or `DZN_CLAIMS_QA_OUTPUT` outside OneDrive.
+- Local validation: database privacy tests, non-incremental TypeScript, lint (four pre-existing warnings), build, rendered QA and diff checks passed. Local fixtures never create or review production claims.
+
 ## Non-Goals
 
 - No production D1 migration was applied by this slice.
