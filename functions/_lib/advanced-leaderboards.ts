@@ -141,7 +141,7 @@ const SERVER_ADVANCED_CACHE_TTL_MS = 30_000;
 const MAX_ADVANCED_CACHE_ENTRIES = 80;
 const PUBLIC_ADVANCED_POSITION_SAMPLE_LIMIT = 4_000;
 const publicAdvancedPayloadCache = new Map<string, CachedAdvancedValue>();
-const serverAdvancedPayloadCache = new Map<string, CachedAdvancedValue>();
+const serverAdvancedPayloadCaches = new WeakMap<NonNullable<Env["DB"]>, Map<string, CachedAdvancedValue>>();
 
 export async function getPublicAdvancedLeaderboardsPayload(env: Env, options: { limit?: number } = {}) {
   const limit = safeLimit(options.limit, 8, 20);
@@ -181,9 +181,18 @@ export async function getServerAdvancedShowcasePayload(
   serverRef: string,
   options: { ownerScoped?: boolean; overlayLimit?: number } = {},
 ): Promise<ServerAdvancedShowcasePayload | null> {
+  if (!env.DB) return null;
+  // Recheck visibility and current entitlement before consulting any cached presentation.
+  const server = await resolveAdvancedServer(env, serverRef, Boolean(options.ownerScoped));
+  if (!server) return null;
   const overlayLimit = safeLimit(options.overlayLimit, 220, 500);
-  const cacheKey = `${options.ownerScoped ? "owner" : "public"}:${serverRef}:${overlayLimit}`;
-  return cachedAdvancedPayload(serverAdvancedPayloadCache, cacheKey, SERVER_ADVANCED_CACHE_TTL_MS, () => buildServerAdvancedShowcasePayload(env, serverRef, {
+  const cacheKey = JSON.stringify([Boolean(options.ownerScoped), overlayLimit, server]);
+  let cache = serverAdvancedPayloadCaches.get(env.DB);
+  if (!cache) {
+    cache = new Map();
+    serverAdvancedPayloadCaches.set(env.DB, cache);
+  }
+  return cachedAdvancedPayload(cache, cacheKey, SERVER_ADVANCED_CACHE_TTL_MS, () => buildServerAdvancedShowcasePayload(env, server, {
     ...options,
     overlayLimit,
   }));
@@ -191,14 +200,11 @@ export async function getServerAdvancedShowcasePayload(
 
 async function buildServerAdvancedShowcasePayload(
   env: Env,
-  serverRef: string,
+  server: PublicServerMeta,
   options: { ownerScoped?: boolean; overlayLimit?: number } = {},
 ): Promise<ServerAdvancedShowcasePayload | null> {
   if (!env.DB) return null;
-  await ensureAdvancedReadSchema(env);
   const db = requireDb(env);
-  const server = await resolveAdvancedServer(env, serverRef, Boolean(options.ownerScoped));
-  if (!server) return null;
 
   const [canonical, pvpPlayers, buildPlayers, samples, eventCounts] = await Promise.all([
     getCanonicalServerStats(db, server.id).catch(() => null),
@@ -224,11 +230,11 @@ async function buildServerAdvancedShowcasePayload(
   const ownerScoped = Boolean(options.ownerScoped);
   const lockedTop15 = !access.publicServerTop15 && !ownerScoped;
   const lockedOwnerAnalytics = ownerScoped && !access.dashboardAnalytics;
-  const canShowExplorationSummary = access.publicExplorationSummary || ownerScoped;
-  const canShowMapOverlay = access.publicMapOverlay || ownerScoped;
+  const canShowExplorationSummary = access.publicExplorationSummary;
+  const canShowMapOverlay = access.publicMapOverlay;
   const safeExploration = canShowExplorationSummary
     ? canShowMapOverlay ? exploration : { ...exploration, overlayCells: [] }
-    : { ...exploration, overlayCells: [] };
+    : summarizeMapExploration(server.map_name ?? server.mission, []);
 
   return {
     ok: true,
@@ -248,15 +254,15 @@ async function buildServerAdvancedShowcasePayload(
       disconnects: canonical?.disconnects ?? 0,
       uniquePlayers: canonical?.uniquePlayers ?? 0,
       eventsTracked: eventCounts.eventsTracked,
-      buildScore: buildSummary.buildScore,
-      structuresBuilt: buildSummary.structuresBuilt,
-      raidScore: buildSummary.raidScore,
-      totalDistanceM: serverTravel.totalValidDistanceM,
-      onFootDistanceM: serverTravel.totalOnFootDistanceM,
-      fastTravelEstimatedDistanceM: serverTravel.totalFastTravelEstimatedDistanceM,
-      explorationPercent: exploration.explorationPercent,
+      buildScore: access.publicBuildShowcase ? buildSummary.buildScore : 0,
+      structuresBuilt: access.publicBuildShowcase ? buildSummary.structuresBuilt : 0,
+      raidScore: access.publicBuildShowcase ? buildSummary.raidScore : 0,
+      totalDistanceM: access.publicTravelShowcase ? serverTravel.totalValidDistanceM : 0,
+      onFootDistanceM: access.publicTravelShowcase ? serverTravel.totalOnFootDistanceM : 0,
+      fastTravelEstimatedDistanceM: access.publicTravelShowcase ? serverTravel.totalFastTravelEstimatedDistanceM : 0,
+      explorationPercent: safeExploration.explorationPercent,
       estimated: true,
-      lastUpdatedAt,
+      lastUpdatedAt: access.dashboardAnalytics ? lastUpdatedAt : canonical?.lastEventAt ?? null,
     },
     boards: [
       boardFromPlayerRows("server_top_kills", "Top 15 Kills", "Confirmed PvP kills on this server.", "pvp", pvpPlayers, "kills", lockedTop15 || lockedOwnerAnalytics, access),
