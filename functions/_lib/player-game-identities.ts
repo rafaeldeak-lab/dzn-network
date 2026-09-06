@@ -40,6 +40,27 @@ export type OwnerPlayerGameIdentityClaimRow = PlayerGameIdentityClaimRow & {
   account_name: string | null;
 };
 
+export type OwnerPlayerGameIdentityClaimPayloadRow = PlayerGameIdentityClaimRow & {
+  user_id: string;
+  account_name: string | null;
+  submitted_player_id: string;
+  review_context: {
+    evidence_status: "ready_for_owner_review";
+    account_label: string;
+    server_label: string;
+    game_profile_label: string;
+    checks: Array<{
+      label: string;
+      detail: string;
+      status: "ready" | "warning";
+    }>;
+    approve_when: string[];
+    reject_when: string[];
+    missing_evidence_guidance: string;
+    boundary: string;
+  };
+};
+
 type PlayerProfileCandidateRow = {
   id: string;
   linked_server_id: string;
@@ -848,6 +869,46 @@ function sanitizeOwnerClaimRows(rows: OwnerPlayerGameIdentityClaimRow[]) {
     ...sanitizeClaimRows([row])[0],
     user_id: row.user_id,
     account_name: row.account_name || "DZN Player",
+    submitted_player_id: row.player_id,
+    review_context: {
+      evidence_status: "ready_for_owner_review" as const,
+      account_label: row.account_name || "DZN Player",
+      server_label: row.server_name || "DZN Server",
+      game_profile_label: row.player_name || "Imported ADM profile",
+      checks: [
+        {
+          label: "Owner scoped",
+          detail: "This queue only returns pending claims for servers owned by the current user, or for DZN admins.",
+          status: "ready" as const,
+        },
+        {
+          label: "Exact server match",
+          detail: "The request was matched to one public DZN server before it entered review.",
+          status: "ready" as const,
+        },
+        {
+          label: "Exact game ID match",
+          detail: "The submitted game ID matched one imported ADM player row for that server when the request was created.",
+          status: "ready" as const,
+        },
+        {
+          label: "Name is context only",
+          detail: "Display names, Discord names, leaderboard names, and public profile handles are never proof.",
+          status: "warning" as const,
+        },
+      ],
+      approve_when: [
+        "The owner or DZN admin has confirmed the exact submitted game ID belongs to this account.",
+        "The server and imported game profile shown here match the evidence supplied to the player.",
+      ],
+      reject_when: [
+        "The player pasted the wrong game ID or selected the wrong server.",
+        "The owner or DZN admin cannot confirm the evidence from this claim.",
+      ],
+      missing_evidence_guidance: "Ask the player to get the exact game ID or proof code from the server owner again. Do not approve from names alone.",
+      boundary:
+        "This review can only connect existing stats display to the right account. It does not change billing, ownership, scoring, rankings, discovery, reviews, progression, events, or competitive eligibility.",
+    },
   }));
 }
 

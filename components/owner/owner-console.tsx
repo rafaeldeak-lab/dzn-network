@@ -564,6 +564,9 @@ function OwnerShell({ activeView, setActiveView, children }: {
             <Link href="/dashboard" className="block rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-bold text-zinc-300 hover:border-cyan-300/30 hover:text-white">
               View Server Owner Dashboard
             </Link>
+            <Link href="/owner/player-game-identity-claims" className="block rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-2 text-sm font-bold text-cyan-100 hover:border-cyan-300/40 hover:text-white">
+              Review Player Stat Claims
+            </Link>
           </div>
         </aside>
 
