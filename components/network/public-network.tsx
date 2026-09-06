@@ -38,6 +38,7 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
+import { publicServerStatusPresentation } from "@/lib/public-server-status";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
 import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner } from "@/components/badges/server-visuals";
@@ -212,6 +213,8 @@ type ServerAdvancedPayload = {
     effectivePlan?: string;
     dashboardAnalytics?: boolean;
     publicServerTop15?: boolean;
+    publicBuildShowcase?: boolean;
+    publicTravelShowcase?: boolean;
     publicExplorationSummary?: boolean;
     publicMapOverlay?: boolean;
     lockedModules?: Array<{ key: string; requiredPlan: string; reason: string }>;
@@ -1197,7 +1200,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
               <GuildIcon server={server} size="md" />
             </ServerProfileFrame>
             <div className="min-w-0">
-              <p className="truncate text-xs font-black uppercase text-violet-200/70">{server.guild_name ?? "Verified Discord"}</p>
+              <p className="truncate text-xs font-black uppercase text-violet-200/70">{server.guild_name ?? "Discord community"}</p>
               <h2 className="mt-1 truncate text-2xl font-black text-white">{server.server_name}</h2>
               <p className="mt-1 truncate text-sm font-bold text-zinc-400">{server.nitrado_service_name ?? server.server_name}</p>
               <ServerRatingChip server={server} />
@@ -1207,7 +1210,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
           </div>
           <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
             {server.advertising?.badge_label ? <BoostedBadge server={server} /> : null}
-            <StatusPill label="Live" tone="emerald" />
+            <StatusPill {...publicServerStatusPresentation(server)} />
           </div>
         </div>
         {isAdvertised ? (
@@ -1217,8 +1220,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
         ) : null}
 
         <div className="mt-5 flex flex-wrap gap-2">
-          <StatusPill label="Verified Owner" tone="cyan" />
-          <StatusPill label="DZN Verified" tone="violet" />
+          <StatusPill label="Public Listing" tone="cyan" />
           <StatusPill label={server.server_type} tone="violet" />
           <StatusPill label={server.rank ? `Rank #${server.rank}` : "Rank Pending"} tone={server.rank ? "emerald" : "zinc"} />
           {server.reputation ? <StatusPill label={`${server.reputation.tier} Reputation`} tone="cyan" /> : null}
@@ -1599,7 +1601,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full border border-violet-300/25 bg-violet-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-violet-100">DZN Network</span>
-                <StatusPill label={historicalLifecycle ? (server.lifecycle?.label ?? "Legacy / Offline") : "Live"} tone={historicalLifecycle ? "zinc" : "emerald"} pulse={!historicalLifecycle} />
+                <StatusPill {...publicServerStatusPresentation(server)} />
               </div>
               <h1 className="mt-3 max-w-full break-words text-4xl font-black uppercase leading-none text-white [overflow-wrap:anywhere] sm:text-5xl lg:text-6xl">
                 {server.server_name}
@@ -1609,11 +1611,10 @@ function ServerProfile({ server }: { server: PublicServer }) {
                 <MetaChip icon={Gamepad2} label={server.platform ?? "Platform awaiting data"} />
                 <MetaChip icon={Target} label={server.server_type} />
                 <MetaChip icon={Map} label={server.map_name ?? server.mission ?? "Map awaiting data"} />
-                <MetaChip icon={MapPin} label={server.server_status ?? "Network online"} />
+                <MetaChip icon={MapPin} label={publicServerStatusPresentation(server).label} />
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <StatusPill label="Verified Owner" tone="cyan" />
-                <StatusPill label="DZN Verified" tone="violet" />
+                <StatusPill label="Public Listing" tone="cyan" />
                 <StatusPill label={server.server_type} tone="violet" />
                 <StatusPill label={server.adm_status === "Connected" ? "ADM Connected" : server.adm_status === "Discovered" ? "ADM Discovered" : "ADM Needs Review"} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
                 <StatusPill label={historicalLifecycle ? "Stats Preserved" : `Stats Sync ${server.stats_sync}`} tone={historicalLifecycle ? "zinc" : server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
@@ -1814,14 +1815,14 @@ function ServerAdvancedShowcasePanel({
 
       {summary ? (
         <div className="dzn-advanced-summary">
-          <AdvancedSummaryStat label="Build Score" value={formatNumber(summary.buildScore)} icon={Hammer} />
-          <AdvancedSummaryStat label="Raid Score" value={formatNumber(summary.raidScore)} icon={ShieldCheck} />
-          <AdvancedSummaryStat label="Distance" value={formatAdvancedDistance(summary.totalDistanceM)} icon={Route} />
-          <AdvancedSummaryStat label="Explored" value={`${summary.explorationPercent.toFixed(2)}%`} icon={Compass} />
+          <AdvancedSummaryStat label="Build Score" value={payload?.access?.publicBuildShowcase ? formatNumber(summary.buildScore) : "Pro required"} icon={Hammer} />
+          <AdvancedSummaryStat label="Raid Score" value={payload?.access?.publicBuildShowcase ? formatNumber(summary.raidScore) : "Pro required"} icon={ShieldCheck} />
+          <AdvancedSummaryStat label="Distance" value={payload?.access?.publicTravelShowcase ? formatAdvancedDistance(summary.totalDistanceM) : "Pro required"} icon={Route} />
+          <AdvancedSummaryStat label="Explored" value={payload?.access?.publicExplorationSummary ? `${summary.explorationPercent.toFixed(2)}%` : "Pro required"} icon={Compass} />
         </div>
       ) : null}
 
-      {exploration?.supported ? (
+      {exploration?.supported && payload?.access?.publicExplorationSummary ? (
         <div className="dzn-exploration-preview" aria-label="Aggregate map exploration preview">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-200">Map Exploration</p>

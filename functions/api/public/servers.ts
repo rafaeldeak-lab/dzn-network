@@ -999,7 +999,7 @@ async function toSafePublicServer(
     lifecycle_status: row.lifecycle_status,
     status: row.status,
   });
-  const lifecycleDisplay = getPublicServerLifecycleDisplay(lifecycleStatus);
+  const lifecycleDisplay = getPublicServerLifecycleDisplay(lifecycleStatus, row.status);
   const historicalLifecycle = isPublicHistoricalServerLifecycle(lifecycleStatus);
   const publicStatsActive = !historicalLifecycle && (ranking?.stats_sync_active ?? statsSync === "Active");
   const publicIsOnline = !historicalLifecycle && Number(row.is_online) === 1;
@@ -1260,7 +1260,7 @@ async function toSafePublicServerPreview(
     lifecycle_status: row.lifecycle_status,
     status: row.status,
   });
-  const lifecycleDisplay = getPublicServerLifecycleDisplay(lifecycleStatus);
+  const lifecycleDisplay = getPublicServerLifecycleDisplay(lifecycleStatus, row.status);
   const historicalLifecycle = isPublicHistoricalServerLifecycle(lifecycleStatus);
   const publicStatsActive = !historicalLifecycle && statsSync === "Active";
   const publicIsOnline = !historicalLifecycle && Number(row.is_online) === 1;
