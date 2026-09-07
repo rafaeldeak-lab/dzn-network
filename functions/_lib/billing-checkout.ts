@@ -75,21 +75,35 @@ export async function createOrResumeCheckout(env: Env, request: Request, input: 
       .bind(input.discordUserId).first<Attempt>();
     if (!attempt) throw retryError();
   }
+  const assignedCustomer = attempt.stripe_customer_id === null && Boolean(account?.stripe_customer_id);
   if (attempt.stripe_key_fingerprint !== fingerprint || attempt.stripe_mode !== mode ||
-      (account?.stripe_customer_id ?? null) !== attempt.stripe_customer_id) {
+      ((account?.stripe_customer_id ?? null) !== attempt.stripe_customer_id &&
+        !(assignedCustomer && attempt.stripe_session_id && account?.stripe_subscription_id))) {
     throw new CheckoutRecoveryError("Your earlier checkout needs a support check before another can be started.", "CHECKOUT_REVIEW_REQUIRED");
   }
   if (attempt.stripe_session_id) {
     const session = await stripeGetRequest<StripeCheckoutSession>(env, `/checkout/sessions/${encodeURIComponent(attempt.stripe_session_id)}`).catch(() => { throw retryError(); });
     verifySession(attempt, session);
+    // Stripe can assign a new customer at completion. Only inspect that exact completed checkout;
+    // never rewrite the frozen request or use its old idempotency key with a different customer.
+    if (assignedCustomer && (session.status !== "complete" || stripeId(session.customer) !== account?.stripe_customer_id ||
+        stripeId(session.subscription) !== account?.stripe_subscription_id)) {
+      throw new CheckoutRecoveryError("Your earlier checkout needs a support check before another can be started.", "CHECKOUT_REVIEW_REQUIRED");
+    }
     if (session.status === "expired") {
       await closeExpiredAttempt(env, attempt);
       throw new CheckoutRecoveryError("Your previous checkout expired without completing. Please choose your plan again.", "CHECKOUT_EXPIRED");
     }
     if (session.status === "complete") {
       if (account?.stripe_subscription_id && account.stripe_subscription_id === stripeId(session.subscription) && ["canceled", "incomplete_expired"].includes(account.plan_status)) {
-        await db.prepare("UPDATE billing_checkout_attempts SET state = 'closed', updated_at = ? WHERE id = ? AND discord_user_id = ? AND stripe_session_id = ?")
-          .bind(now(), attempt.id, input.discordUserId, session.id).run();
+        const closed = await db.prepare(`UPDATE billing_checkout_attempts SET state = 'closed', updated_at = ?
+          WHERE id = ? AND discord_user_id = ? AND stripe_session_id = ? AND state = 'session_ready'
+          AND EXISTS (SELECT 1 FROM owner_billing_accounts WHERE discord_user_id = ?
+            AND stripe_customer_id IS ? AND stripe_subscription_id = ? AND plan_status IN ('canceled', 'incomplete_expired'))
+          AND NOT EXISTS (SELECT 1 FROM owner_billing_accounts WHERE stripe_customer_id = ? AND discord_user_id != ?)`)
+          .bind(now(), attempt.id, input.discordUserId, session.id, input.discordUserId,
+            stripeId(session.customer), stripeId(session.subscription), stripeId(session.customer), input.discordUserId).run();
+        if (closed.meta.changes !== 1) throw retryError();
       }
       throw new CheckoutRecoveryError("This checkout has completed. Check Manage billing before starting another payment.", "CHECKOUT_COMPLETED");
     }

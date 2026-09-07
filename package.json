@@ -99,7 +99,7 @@
     "test:billing-plans": "tsx scripts/test-billing-plans.ts && npm run test:billing-payment-recovery && npm run test:checkout-retry-safety && npm run test:billing-webhook-atomic",
     "test:billing-webhook-atomic": "tsx scripts/test-billing-webhook-atomic.ts",
     "test:billing-webhook-d1-local": "tsx scripts/test-billing-webhook-d1-local.ts",
-    "test:checkout-retry-safety": "tsx scripts/test-checkout-retry-safety.ts",
+    "test:checkout-retry-safety": "tsx scripts/test-checkout-retry-safety.ts && tsx scripts/test-checkout-first-customer-recovery.ts",
     "test:billing-payment-recovery": "tsx scripts/test-billing-payment-recovery.ts",
     "test:stripe-live-readiness": "tsx scripts/test-stripe-live-readiness.ts",
     "test:stripe-live-activation-checklist": "tsx scripts/test-stripe-live-activation-checklist.ts",
