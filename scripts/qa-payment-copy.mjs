@@ -46,7 +46,7 @@ if (!process.argv.includes("--serve")) {
       const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: width <= 390 ? "reduce" : "no-preference" });
       const page = await context.newPage();
       const errors = [], writes = [], external = [];
-      let availability = "paused", authenticated = false, authFailure = 0;
+      let availability = "paused", authenticated = false, authFailure = 0, rejectPrice = false;
       page.on("pageerror", error => errors.push(error.message));
       await page.route("**/*", async route => {
         const req = route.request(), url = new URL(req.url());
@@ -61,6 +61,7 @@ if (!process.argv.includes("--serve")) {
           assert.equal(url.pathname, "/api/billing/create-checkout-session");
           const body = req.postDataJSON(); writes.push(body);
           assert.deepEqual(Object.keys(body).sort(), body.accepted_offer ? ["accepted_offer","plan_key","returnTo"] : ["plan_key","returnTo"]);
+          if (rejectPrice) return route.fulfill({ status: 503, json: { error: "Plan pricing needs a support check before checkout. No new payment has been started.", errorCode: "CHECKOUT_PRICE_REVIEW_REQUIRED" } });
           if (body.plan_key === "starter" && !body.accepted_offer) return route.fulfill({ status: 409, json: { error: "Confirmation required", errorCode: "STARTER_PAID_CONFIRMATION_REQUIRED", offer: { id: "starter-gbp-2-month-no-trial-v1", confirmation: "a".repeat(64) } } });
           return route.fulfill({ json: { url: base + "/qa-stripe" } });
         }
@@ -119,9 +120,18 @@ if (!process.argv.includes("--serve")) {
       await page.getByRole("button", { name: "Choose Pro", exact: true }).click();
       await page.waitForURL(base + "/qa-stripe");
       assert.deepEqual(writes.at(-1), { plan_key: "pro", returnTo: "/setup" });
+      rejectPrice = true;
+      for (const plan of ["Starter", "Pro"]) {
+        await page.goto(base + "/pricing");
+        await page.getByRole("button", { name: `Choose ${plan}`, exact: true }).click();
+        await page.getByRole("alert").filter({ hasText: "Plan pricing needs a support check" }).waitFor();
+        assert.equal(new URL(page.url()).pathname, "/pricing", "Price denial must not redirect to a payment page");
+        assert.equal(await page.getByRole("dialog").count(), 0, "No paid offer on a rejected Price");
+        await page.screenshot({ path: path.join(evidence, `price-denied-${plan.toLowerCase()}-${width}.png`), fullPage: true });
+      }
       assert.deepEqual(external, []);
       assert.deepEqual(errors, []);
-      results.push({ width, status: "passed", states: ["paused","unknown","unavailable","retry","anonymous","returning-confirmation","safe-return-path"], realPayments: false });
+      results.push({ width, status: "passed", states: ["paused","unknown","unavailable","retry","anonymous-401","auth-failure","returning-confirmation","safe-return-path","price-denied"], realPayments: false });
       await context.close();
     }
     await writeFile(path.join(evidence, "results.json"), JSON.stringify(results, null, 2));

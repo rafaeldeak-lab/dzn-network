@@ -45,7 +45,7 @@ async function run() {
     const key = new Headers(init?.headers).get("Idempotency-Key"); calls.push({ url, method, params, key });
     if (url.includes("/prices/")) {
       assert.equal(method, "GET"); beforePrice?.(); beforePrice = null;
-      return Response.json({ id: url.split("/").at(-1), object: "price", active: true, livemode: false, currency: "gbp", unit_amount: 200,
+      return Response.json({ id: url.split("/").at(-1), object: "price", active: true, livemode: false, currency: "gbp", unit_amount: url.endsWith("price_pro_fixture") ? 1000 : 200,
         type: "recurring", billing_scheme: "per_unit", recurring: { interval: "month", interval_count: 1, usage_type: "licensed" }, ...priceOverride });
     }
     if (method === "GET") return Response.json([...sessions.values()].find(s => url.endsWith(`/${s.id}`)));

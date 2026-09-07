@@ -4,7 +4,7 @@ import { createSession } from "../functions/_lib/db";
 import { CHECKOUT_RETRY_SECONDS } from "../functions/_lib/billing-checkout";
 import { ensureBillingSchema, ensureStarterTrialClaimSchema, upsertBillingAccount } from "../functions/_lib/plans";
 import { onRequest } from "../functions/api/billing/create-checkout-session";
-import { checkoutResponseFromRequest, createCheckoutFixture } from "./fixtures/billing-checkout";
+import { checkoutResponseFromRequest, checkoutPriceFixture, createCheckoutFixture } from "./fixtures/billing-checkout";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 type Row = Record<string, unknown>;
@@ -49,6 +49,10 @@ function claim(f: Fixture) { return f.db.sqlite.prepare("SELECT * FROM owner_sta
 
 async function run() {
   globalThis.fetch = async (input, init) => {
+    if (/^https:\/\/api\.stripe\.com\/v1\/prices\/price_(starter|pro)_fixture$/.test(String(input))) {
+      assert.equal(init?.method ?? "GET", "GET");
+      return Response.json(checkoutPriceFixture(String(input).split("/").at(-1)!));
+    }
     assert.match(String(input), /^https:\/\/api\.stripe\.com\/v1\/checkout\/sessions(?:\/cs_fixture_\d+)?$/);
     const method = init?.method ?? "GET";
     const headers = new Headers(init?.headers);

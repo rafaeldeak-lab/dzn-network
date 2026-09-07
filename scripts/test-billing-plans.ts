@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createCheckoutFixture, checkoutResponseFromRequest } from "./fixtures/billing-checkout";
+import { createCheckoutFixture, checkoutResponseFromRequest, checkoutPriceFixture } from "./fixtures/billing-checkout";
 import { createWebhookFixture } from "./fixtures/billing-webhook";
 
 import { evaluateBumpEligibility, publicAdvertisingFromState } from "../functions/_lib/advertising";
@@ -439,6 +439,7 @@ async function run() {
   let capturedStripeBody = "";
   const proCheckoutFixture = createCheckoutFixture();
   globalThis.fetch = async (_input, init) => {
+    if (String(_input).includes("/prices/")) return Response.json({ ...checkoutPriceFixture("price_pro_fixture"), id: String(_input).split("/").at(-1) });
     capturedStripeBody = String(init?.body ?? "");
     return new Response(JSON.stringify(checkoutResponseFromRequest(init)), {
       status: 200,
@@ -474,6 +475,7 @@ async function run() {
   let capturedLiveEnabledBody = "";
   const liveCheckoutFixture = createCheckoutFixture();
   globalThis.fetch = async (_input, init) => {
+    if (String(_input).includes("/prices/")) return Response.json({ ...checkoutPriceFixture("price_pro_fixture", true), id: String(_input).split("/").at(-1) });
     capturedLiveEnabledBody = String(init?.body ?? "");
     return new Response(JSON.stringify(checkoutResponseFromRequest(init)), {
       status: 200,
@@ -518,6 +520,11 @@ async function run() {
     pro: "",
   };
   globalThis.fetch = async (_input, init) => {
+    if (String(_input).includes("/prices/")) {
+      const id = String(_input).split("/").at(-1)!;
+      assert.ok(Object.values(activeCheckoutPrices).includes(id as typeof activeCheckoutPrices.starter));
+      return Response.json({ ...checkoutPriceFixture(id === activeCheckoutPrices.starter ? "price_starter_fixture" : "price_pro_fixture"), id });
+    }
     const body = String(init?.body ?? "");
     const matchedPlan = (Object.keys(activeCheckoutPrices) as Array<keyof typeof activeCheckoutPrices>)
       .find((planKey) => body.includes(`metadata%5Bplan_key%5D=${planKey}`));

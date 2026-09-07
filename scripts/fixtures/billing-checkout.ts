@@ -72,3 +72,10 @@ export function checkoutResponseFromRequest(init?: RequestInit, overrides: Recor
       dzn_checkout_attempt_id: params.get("metadata[dzn_checkout_attempt_id]") }, ...overrides,
   };
 }
+
+export function checkoutPriceFixture(id: string, livemode = false) {
+  if (!["price_starter_fixture", "price_pro_fixture"].includes(id)) throw new Error("Unexpected synthetic Price ID");
+  return { id, object: "price", active: true, livemode, currency: "gbp", unit_amount: id === "price_starter_fixture" ? 200 : 1000,
+    type: "recurring", billing_scheme: "per_unit", custom_unit_amount: null, transform_quantity: null,
+    recurring: { interval: "month", interval_count: 1, usage_type: "licensed" } };
+}
