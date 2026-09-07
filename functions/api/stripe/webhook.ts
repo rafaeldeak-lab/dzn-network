@@ -52,18 +52,19 @@ async function handleCheckoutCompleted(env: Env, object: Record<string, unknown>
   const metadata = metadataRecord(object.metadata);
   const discordUserId = metadata.discord_user_id;
   if (!discordUserId) return;
+  if (object.mode !== "subscription") throw new Error("Expected subscription checkout.");
   const subscriptionId = stripeId(object.subscription);
   const subscription = await resolveSubscription(env, object);
-  const pricePlan = subscription ? getPlanFromStripePriceId(env, stripeSubscriptionPriceId(subscription)) : "free";
-  const planKey = pricePlan === "free" ? normalizePlanKey(metadata.plan_key) : pricePlan;
-  const customerId = stripeId(subscription?.customer) ?? stripeId(object.customer);
+  const planKey = getPlanFromStripePriceId(env, stripeSubscriptionPriceId(subscription));
+  if (planKey === "free") throw new Error("Checkout subscription price is not configured for DZN.");
+  const customerId = stripeId(subscription.customer);
   if (planKey === "starter") {
     await upsertStarterTrialClaimFromStripe(env, {
       discordUserId,
       stripeCustomerId: customerId,
       stripeSubscriptionId: subscriptionId,
       checkoutSessionId: stripeId(object.id),
-      status: subscription?.status || "checkout_completed",
+      status: subscription.status,
     });
   }
   await upsertBillingAccount(env, {
@@ -71,20 +72,20 @@ async function handleCheckoutCompleted(env: Env, object: Record<string, unknown>
     stripeCustomerId: customerId,
     stripeSubscriptionId: subscriptionId,
     planKey,
-    planStatus: subscription?.status || "active",
-    currentPeriodStart: subscription ? stripeSubscriptionPeriodStart(subscription) : null,
-    currentPeriodEnd: subscription ? stripeSubscriptionPeriodEnd(subscription) : null,
-    cancelAtPeriodEnd: Boolean(subscription?.cancel_at_period_end),
+    planStatus: subscription.status,
+    currentPeriodStart: stripeSubscriptionPeriodStart(subscription),
+    currentPeriodEnd: stripeSubscriptionPeriodEnd(subscription),
+    cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
   });
   await syncServerSubscriptionsForOwner(env, discordUserId, {
     stripeCustomerId: customerId,
     stripeSubscriptionId: subscriptionId,
-    stripePriceId: subscription ? stripeSubscriptionPriceId(subscription) : null,
+    stripePriceId: stripeSubscriptionPriceId(subscription),
     planKey,
-    status: subscription?.status || "active",
-    currentPeriodStart: subscription ? stripeSubscriptionPeriodStart(subscription) : null,
-    currentPeriodEnd: subscription ? stripeSubscriptionPeriodEnd(subscription) : null,
-    cancelAtPeriodEnd: Boolean(subscription?.cancel_at_period_end),
+    status: subscription.status,
+    currentPeriodStart: stripeSubscriptionPeriodStart(subscription),
+    currentPeriodEnd: stripeSubscriptionPeriodEnd(subscription),
+    cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
   });
 }
 
@@ -186,15 +187,21 @@ function subscriptionFromEventObject(object: Record<string, unknown>): StripeSub
   return null;
 }
 
-async function resolveSubscription(env: Env, object: Record<string, unknown>): Promise<StripeSubscription | null> {
-  const expanded = subscriptionFromEventObject(object);
-  if (expanded) return expanded;
+async function resolveSubscription(env: Env, object: Record<string, unknown>): Promise<StripeSubscription> {
   const subscriptionId = stripeId(object.subscription);
-  if (!subscriptionId) return null;
-  return retrieveStripeSubscription(env, subscriptionId).catch((error) => {
-    console.warn("DZN Stripe subscription retrieval skipped", error instanceof Error ? error.message : "unknown error");
-    return null;
+  const customerId = stripeId(object.customer);
+  if (!subscriptionId || !customerId) throw new Error("Checkout subscription identity is missing.");
+  // Re-read even expanded snapshots: a delayed checkout event may describe old access.
+  const subscription = await retrieveStripeSubscription(env, subscriptionId).catch(() => {
+    throw new Error("Checkout subscription could not be verified. Retry delivery.");
   });
+  if (!subscription || subscription.id !== subscriptionId || stripeId(subscription.customer) !== customerId) {
+    throw new Error("Checkout subscription identity could not be verified.");
+  }
+  if (!["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"].includes(subscription.status)) {
+    throw new Error("Checkout subscription status could not be verified.");
+  }
+  return subscription;
 }
 
 function metadataRecord(value: unknown) {
