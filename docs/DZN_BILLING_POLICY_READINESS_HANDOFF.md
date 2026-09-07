@@ -45,6 +45,28 @@ The support flow identifies an account using the signed-in Discord username and
 Discord user ID. The Stripe receipt email is requested separately as a payment
 reference because DZN does not store an email address for every Discord account.
 
+## Required Stripe customer-facing updates
+
+The live Stripe products currently have the correct GBP 2 and GBP 10 monthly
+Prices, but their short descriptions do not state the complete renewal and fair
+access contract. Before checkout activation, update only the descriptions to:
+
+- Starter: `Optional DZN server-owner tools. GBP 0 for an eligible two-day
+  trial, then GBP 2/month until cancelled. Payment method required. No
+  competitive advantage.`
+- Pro: `Optional DZN server-owner tools. GBP 10/month from confirmation, with
+  no free trial, until cancelled. No competitive advantage.`
+
+Keep the existing Price objects unchanged. The Starter trial is created by the
+verified DZN Checkout Session rather than as a reusable product-level default.
+The completed Stripe test Checkout proves the test path only; it did not charge
+a live customer or enable production checkout.
+
+After the public policy pages are complete and live, configure Stripe Checkout
+to show the Terms and Privacy links and DZN support contact. Enable customer
+refund emails as a separate setting. Do not enable the refund-policy checkbox
+until Stripe's displayed refund text has been reviewed against `/refunds`.
+
 ## Validation
 
 - `npm run test:payment-copy` passed.
