@@ -1,6 +1,6 @@
 import { json, methodNotAllowed } from "../../_lib/http";
 import {
-  findBillingAccountByCustomerOrSubscription,
+  ensureBillingSchema,
   getPlanFromStripePriceId,
   normalizePlanKey,
   upsertStarterTrialClaimFromStripe,
@@ -32,12 +32,12 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   try {
     if (event.type === "checkout.session.completed") {
       await handleCheckoutCompleted(env, event.data.object);
+    } else if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded" || event.type === "invoice.payment_failed") {
+      await handleInvoiceEvent(env, event.data.object);
     } else if (
       event.type === "customer.subscription.created" ||
       event.type === "customer.subscription.updated" ||
-      event.type === "customer.subscription.deleted" ||
-      event.type === "invoice.payment_succeeded" ||
-      event.type === "invoice.payment_failed"
+      event.type === "customer.subscription.deleted"
     ) {
       await handleSubscriptionLikeEvent(env, event.data.object, event.type);
     }
@@ -90,23 +90,72 @@ async function handleCheckoutCompleted(env: Env, object: Record<string, unknown>
 }
 
 async function handleSubscriptionLikeEvent(env: Env, object: Record<string, unknown>, eventType: string) {
-  const subscription = subscriptionFromEventObject(object);
-  if (!subscription) {
-    if (eventType === "invoice.payment_succeeded" || eventType === "invoice.payment_failed") {
-      await handleInvoiceEvent(env, object, eventType);
-    }
-    return;
+  if (object.object !== "subscription") throw new Error("Expected subscription event.");
+  const subscription = await resolveSubscription(env, {
+    subscription: object.id,
+    customer: object.customer,
+  });
+  if (eventType === "customer.subscription.deleted" && subscription.status !== "canceled") {
+    throw new Error("Subscription cancellation could not be verified. Retry delivery.");
   }
-  const customerId = stripeId(subscription.customer);
+  await reconcileSubscription(env, subscription, false);
+}
+
+async function handleInvoiceEvent(env: Env, object: Record<string, unknown>) {
+  const legacyId = stripeId(object.subscription);
+  const nestedId = nestedInvoiceSubscriptionId(object);
+  if (legacyId && nestedId && legacyId !== nestedId) throw new Error("Invoice subscription identity is ambiguous.");
+  const subscriptionId = legacyId ?? nestedId;
+  // One-off invoices must never change subscription access by matching a customer alone.
+  if (!subscriptionId) return;
+  const subscription = await resolveSubscription(env, { subscription: subscriptionId, customer: object.customer });
+  await reconcileSubscription(env, subscription, true);
+}
+
+async function reconcileSubscription(env: Env, subscription: StripeSubscription, requireExistingSubscription: boolean) {
+  const customerId = stripeId(subscription.customer)!;
   const subscriptionId = subscription.id;
-  const account = await findBillingAccountByCustomerOrSubscription(env, { customerId, subscriptionId });
-  const metadata = metadataRecord((object as { metadata?: unknown }).metadata);
-  const discordUserId = metadata.discord_user_id || stringOrNull(account?.discord_user_id);
+  let planKey = getPlanFromStripePriceId(env, stripeSubscriptionPriceId(subscription));
+  if (planKey === "free" && ["active", "trialing"].includes(subscription.status)) {
+    throw new Error("Subscription price is not configured for DZN.");
+  }
+  const currentPeriodStart = stripeSubscriptionPeriodStart(subscription);
+  const currentPeriodEnd = stripeSubscriptionPeriodEnd(subscription);
+  const terminal = subscription.status === "canceled" || subscription.status === "incomplete_expired";
+  if ((!terminal && (!currentPeriodStart || !currentPeriodEnd)) ||
+      (currentPeriodStart && currentPeriodEnd && currentPeriodStart >= currentPeriodEnd) ||
+      (subscription.cancel_at_period_end !== undefined && typeof subscription.cancel_at_period_end !== "boolean")) {
+    throw new Error("Subscription billing period could not be verified.");
+  }
+  const metadataOwner = stringOrNull(metadataRecord(subscription.metadata).discord_user_id);
+  await ensureBillingSchema(env);
+  // Check every matching identity, not a customer/subscription OR query with LIMIT 1.
+  const accounts = await env.DB!.prepare(
+    `SELECT discord_user_id, stripe_customer_id, stripe_subscription_id, plan_key FROM owner_billing_accounts
+     WHERE stripe_customer_id = ? OR stripe_subscription_id = ? OR discord_user_id = ? LIMIT 2`,
+  ).bind(customerId, subscriptionId, metadataOwner).all<{
+    discord_user_id: string; stripe_customer_id: string | null; stripe_subscription_id: string | null; plan_key: string;
+  }>();
+  if (!accounts.success || !accounts.results) throw new Error("Subscription account lookup failed. Retry delivery.");
+  const matches = accounts.results;
+  if (matches.length > 1) throw new Error("Subscription account identity is ambiguous.");
+  const account = matches[0];
+  if (account && ((metadataOwner && metadataOwner !== account.discord_user_id) ||
+      (account.stripe_customer_id && account.stripe_customer_id !== customerId))) {
+    throw new Error("Subscription account identity could not be verified.");
+  }
+  // A replaced subscription cannot overwrite the account's current subscription.
+  if (account?.stripe_subscription_id && account.stripe_subscription_id !== subscriptionId) return;
+  if (requireExistingSubscription && account?.stripe_subscription_id !== subscriptionId) return;
+  if (planKey === "free") {
+    // Removed Price bindings must not prevent revocation of an exact existing subscription.
+    if (account?.stripe_subscription_id !== subscriptionId) throw new Error("Subscription price is not configured for DZN.");
+    planKey = normalizePlanKey(account.plan_key);
+  }
+  const discordUserId = account?.discord_user_id ?? metadataOwner;
   if (!discordUserId) return;
-  const pricePlan = getPlanFromStripePriceId(env, stripeSubscriptionPriceId(subscription));
-  const metadataPlan = normalizePlanKey(metadata.plan_key);
-  const planKey = pricePlan === "free" ? metadataPlan : pricePlan;
-  const status = eventType === "customer.subscription.deleted" ? "canceled" : subscription.status || "unknown";
+  if (!account?.stripe_subscription_id && !metadataOwner) throw new Error("Subscription account proof is missing.");
+  const status = subscription.status;
   if (planKey === "starter") {
     await upsertStarterTrialClaimFromStripe(env, {
       discordUserId,
@@ -121,8 +170,8 @@ async function handleSubscriptionLikeEvent(env: Env, object: Record<string, unkn
     stripeSubscriptionId: subscriptionId,
     planKey,
     planStatus: status,
-    currentPeriodStart: stripeSubscriptionPeriodStart(subscription),
-    currentPeriodEnd: stripeSubscriptionPeriodEnd(subscription),
+    currentPeriodStart,
+    currentPeriodEnd,
     cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
   });
   await syncServerSubscriptionsForOwner(env, discordUserId, {
@@ -131,60 +180,10 @@ async function handleSubscriptionLikeEvent(env: Env, object: Record<string, unkn
     stripePriceId: stripeSubscriptionPriceId(subscription),
     planKey,
     status,
-    currentPeriodStart: stripeSubscriptionPeriodStart(subscription),
-    currentPeriodEnd: stripeSubscriptionPeriodEnd(subscription),
+    currentPeriodStart,
+    currentPeriodEnd,
     cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
   });
-}
-
-async function handleInvoiceEvent(env: Env, object: Record<string, unknown>, eventType: string) {
-  const customerId = stripeId(object.customer);
-  const subscriptionId = stripeId(object.subscription) ?? nestedInvoiceSubscriptionId(object);
-  const account = await findBillingAccountByCustomerOrSubscription(env, { customerId, subscriptionId });
-  const discordUserId = stringOrNull(account?.discord_user_id);
-  if (!discordUserId) return;
-
-  const planKey = normalizePlanKey(account?.plan_key);
-  const nextStatus = eventType === "invoice.payment_failed" ? "past_due" : stringOrNull(account?.plan_status) ?? "active";
-  if (planKey === "starter") {
-    await upsertStarterTrialClaimFromStripe(env, {
-      discordUserId,
-      stripeCustomerId: customerId,
-      stripeSubscriptionId: subscriptionId,
-      status: nextStatus,
-    });
-  }
-  await upsertBillingAccount(env, {
-    discordUserId,
-    stripeCustomerId: customerId,
-    stripeSubscriptionId: subscriptionId,
-    planKey,
-    planStatus: nextStatus,
-    currentPeriodStart: stringOrNull(account?.current_period_start),
-    currentPeriodEnd: stringOrNull(account?.current_period_end),
-    cancelAtPeriodEnd: Number(account?.cancel_at_period_end ?? 0) === 1,
-  });
-  await syncServerSubscriptionsForOwner(env, discordUserId, {
-    stripeCustomerId: customerId,
-    stripeSubscriptionId: subscriptionId,
-    stripePriceId: null,
-    planKey,
-    status: nextStatus,
-    currentPeriodStart: stringOrNull(account?.current_period_start),
-    currentPeriodEnd: stringOrNull(account?.current_period_end),
-    cancelAtPeriodEnd: Number(account?.cancel_at_period_end ?? 0) === 1,
-  });
-}
-
-function subscriptionFromEventObject(object: Record<string, unknown>): StripeSubscription | null {
-  if (typeof object.id === "string" && object.object === "subscription") {
-    return object as StripeSubscription;
-  }
-  const subscription = object.subscription;
-  if (subscription && typeof subscription === "object" && "id" in subscription) {
-    return subscription as StripeSubscription;
-  }
-  return null;
 }
 
 async function resolveSubscription(env: Env, object: Record<string, unknown>): Promise<StripeSubscription> {
@@ -220,6 +219,7 @@ function stringOrNull(value: unknown) {
 function nestedInvoiceSubscriptionId(object: Record<string, unknown>) {
   const parent = object.parent;
   if (!parent || typeof parent !== "object") return null;
+  if ((parent as { type?: unknown }).type !== "subscription_details") return null;
   const details = (parent as { subscription_details?: unknown }).subscription_details;
   if (!details || typeof details !== "object") return null;
   return stripeId((details as { subscription?: unknown }).subscription);
