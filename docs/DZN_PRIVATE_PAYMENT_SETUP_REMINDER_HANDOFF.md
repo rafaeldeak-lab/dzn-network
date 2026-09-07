@@ -53,6 +53,10 @@ the optional billing notice on reads; the refresh route returns a sanitized 503.
 
 ## Intentionally unfinished
 
+Subsequent implementation: `DZN_VERIFIED_TRIAL_REMINDER_HANDOFF.md` defines the
+new separately disabled exact-deadline/last-day reminder slice and its 0068
+migration gate. The following describes the original PR 159 boundary.
+
 The one-day-left reminder is NOT implemented. The current billing projection
 does not retain Stripe's exact verified `trial_end`. Do not derive it from the
 billing-period end, first visit, checkout creation time, a default two days, or

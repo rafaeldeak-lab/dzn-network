@@ -30,6 +30,9 @@ export type StripeSubscription = {
   current_period_start?: number | null;
   current_period_end?: number | null;
   cancel_at_period_end?: boolean;
+  cancel_at?: number | null;
+  pause_collection?: unknown;
+  trial_end?: number | null;
   items?: {
     data?: Array<{
       current_period_start?: number | null;
