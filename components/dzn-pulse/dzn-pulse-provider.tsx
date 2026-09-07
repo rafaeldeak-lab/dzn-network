@@ -10,6 +10,7 @@ import {
   CircleAlert,
   Clock,
   Crown,
+  CreditCard,
   Radio,
   Sparkles,
   Trophy,
@@ -38,10 +39,11 @@ const PENDING_DISMISSALS_KEY = "dzn:pulse:pending-dismissals:v1";
 type PulseConfig = {
   ok: boolean;
   dznPulseEnabled: boolean;
+  billingRemindersEnabled?: boolean;
   discordNotificationsEnabled: boolean;
 };
 
-export type PulseFilter = "all" | "events" | "scores" | "achievements" | "news";
+export type PulseFilter = "all" | "events" | "scores" | "achievements" | "news" | "billing";
 
 export type PulseNotification = {
   id: string;
@@ -149,6 +151,7 @@ export function DznPulseProvider({
 }) {
   const [mounted, setMounted] = useState(false);
   const [enabled, setEnabled] = useState(false);
+  const [billingRemindersEnabled, setBillingRemindersEnabled] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [filter, setFilter] = useState<PulseFilter>("all");
@@ -178,7 +181,10 @@ export function DznPulseProvider({
     let cancelled = false;
     loadPulseConfig()
       .then((config) => {
-        if (!cancelled) setEnabled(Boolean(config.dznPulseEnabled));
+        if (!cancelled) {
+          setEnabled(Boolean(config.dznPulseEnabled));
+          setBillingRemindersEnabled(config.billingRemindersEnabled === true);
+        }
       })
       .catch(() => {
         if (!cancelled) setEnabled(false);
@@ -192,6 +198,12 @@ export function DznPulseProvider({
     if (!mounted || !enabled || unreadInFlightRef.current || document.visibilityState === "hidden") return;
     unreadInFlightRef.current = true;
     try {
+      if (billingRemindersEnabled) {
+        await fetchJsonWithRetry("/api/dzn-pulse/notifications/refresh-billing", {
+          method: "POST", cache: "no-store", credentials: "include", retries: 0, timeoutMs: 8000,
+          headers: { accept: "application/json", "content-type": "application/json" }, body: "{}",
+        }).catch(() => undefined);
+      }
       const response = await fetchJsonWithRetry<{ ok: boolean; unreadCount: number }>("/api/dzn-pulse/notifications/unread-count", {
         cache: "no-store",
         credentials: "include",
@@ -200,12 +212,13 @@ export function DznPulseProvider({
         timeoutMs: 8000,
       });
       setUnreadCount(Math.max(0, Number(response.unreadCount ?? 0) || 0));
+      if (drawerOpen) void refreshNotificationsRef.current?.();
     } catch {
       setUnreadCount(0);
     } finally {
       unreadInFlightRef.current = false;
     }
-  }, [enabled, mounted]);
+  }, [billingRemindersEnabled, drawerOpen, enabled, mounted]);
 
   const refreshNotifications = useCallback(async () => {
     if (!mounted || !enabled) return;
@@ -450,7 +463,7 @@ function DznPulseDrawer() {
       document.removeEventListener("keydown", onKey);
       previous?.focus();
     };
-  }, [pulse]);
+  }, [pulse.closeDrawer, pulse.drawerOpen]);
 
   if (!pulse.drawerOpen) return null;
 
@@ -517,15 +530,17 @@ function NotificationTabs() {
     { key: "scores", label: "Scores" },
     { key: "achievements", label: "Achievements" },
     { key: "news", label: "News" },
+    { key: "billing", label: "Billing" },
   ];
   return (
-    <div className="mt-4 flex gap-1 overflow-x-auto rounded-lg border border-white/10 bg-black/30 p-1">
+    <div className="mt-4 grid grid-cols-2 gap-1 rounded-lg border border-white/10 bg-black/30 p-1 min-[380px]:grid-cols-3">
       {tabs.map((tab) => (
         <button
           key={tab.key}
           type="button"
+          aria-pressed={pulse.filter === tab.key}
           onClick={() => pulse.setFilter(tab.key)}
-          className={`rounded-md px-3 py-2 text-[10px] font-black uppercase transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/60 ${pulse.filter === tab.key ? "bg-violet-500/35 text-white" : "text-zinc-500 hover:text-white"}`}
+          className={`min-w-0 rounded-md px-2 py-2 text-[10px] font-black uppercase transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/60 ${pulse.filter === tab.key ? "bg-violet-500/35 text-white" : "text-zinc-500 hover:text-white"}`}
         >
           {tab.label}
         </button>
@@ -854,6 +869,7 @@ function NotificationErrorState({ message, onRetry }: { message: string; onRetry
 }
 
 function NotificationIcon({ type, className }: { type: string; className: string }) {
+  if (type === "billing_payment_setup") return <CreditCard className={className} />;
   if (type.includes("achievement") || type.includes("prize")) return <Trophy className={className} />;
   if (type.includes("rank") || type.includes("score")) return <Crown className={className} />;
   if (type.includes("news") || type.includes("announcement")) return <Radio className={className} />;
@@ -862,6 +878,7 @@ function NotificationIcon({ type, className }: { type: string; className: string
 }
 
 function toneForNotification(category: PulseFilter) {
+  if (category === "billing") return tone("border-emerald-300/24", "bg-emerald-400/8", "border-emerald-300/28", "bg-emerald-400/12", "text-emerald-100", "text-emerald-200");
   if (category === "scores") return tone("border-cyan-300/24", "bg-cyan-400/8", "border-cyan-300/28", "bg-cyan-400/12", "text-cyan-100", "text-cyan-200");
   if (category === "achievements") return tone("border-amber-300/28", "bg-amber-400/8", "border-amber-300/30", "bg-amber-400/12", "text-amber-100", "text-amber-200");
   if (category === "news") return tone("border-blue-300/24", "bg-blue-400/8", "border-blue-300/28", "bg-blue-400/12", "text-blue-100", "text-blue-200");

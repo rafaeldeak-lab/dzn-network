@@ -18,6 +18,10 @@ export function isDznPulseEnabled(env: Partial<Env> | Record<string, unknown> = 
   return readDznFeatureFlags(env).dznPulseEnabled;
 }
 
+export function isBillingRemindersEnabled(env: Partial<Env> = {}) {
+  return isDznPulseEnabled(env) && parseBooleanFlag(env.DZN_BILLING_REMINDERS_ENABLED);
+}
+
 export function isDiscordNotificationsEnabled(env: Partial<Env> | Record<string, unknown> = {}) {
   return readDznFeatureFlags(env).discordNotificationsEnabled;
 }
