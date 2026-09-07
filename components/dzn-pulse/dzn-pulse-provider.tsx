@@ -869,7 +869,7 @@ function NotificationErrorState({ message, onRetry }: { message: string; onRetry
 }
 
 function NotificationIcon({ type, className }: { type: string; className: string }) {
-  if (type === "billing_payment_setup") return <CreditCard className={className} />;
+  if (type === "billing_payment_setup" || type === "billing_trial_ending") return <CreditCard className={className} />;
   if (type.includes("achievement") || type.includes("prize")) return <Trophy className={className} />;
   if (type.includes("rank") || type.includes("score")) return <Crown className={className} />;
   if (type.includes("news") || type.includes("announcement")) return <Radio className={className} />;

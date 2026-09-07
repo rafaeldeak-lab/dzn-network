@@ -1,6 +1,7 @@
 import { requireDb } from "./db";
 import { isBillingRemindersEnabled } from "./feature-flags";
 import { getBillingPlanSummaries } from "./plans";
+import { canRefreshTrialReminders, trialEndingNoticeStatement } from "./billing-trial-reminders";
 import type { Env, SessionUser } from "./types";
 
 export const PAYMENT_SETUP_NOTIFICATION_TYPE = "billing_payment_setup";
@@ -48,10 +49,13 @@ export async function canShowPaymentSetupNotice(env: Env, user: SessionUser) {
 export async function refreshPaymentSetupNotice(env: Env, user: SessionUser) {
   if (!isBillingRemindersEnabled(env)) return;
   const copy = paymentSetupNoticeCopy(env);
-  await requireDb(env).prepare(`INSERT OR IGNORE INTO user_notifications
+  const db = requireDb(env);
+  const statements = [db.prepare(`INSERT OR IGNORE INTO user_notifications
     (id, user_id, type, title, body, action_url, priority, dedupe_key, metadata, created_at)
     SELECT ?, ?, ?, ?, ?, ?, 100, ?, '{}', CURRENT_TIMESTAMP
     WHERE EXISTS (${eligibleOwnerSql})`)
     .bind(crypto.randomUUID(), user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, copy.title, copy.body, copy.action_url,
-      PAYMENT_SETUP_DEDUPE_KEY, user.id, user.discord_id).run();
+      PAYMENT_SETUP_DEDUPE_KEY, user.id, user.discord_id)];
+  if (canRefreshTrialReminders(env)) statements.push(trialEndingNoticeStatement(env, user));
+  await db.batch(statements);
 }

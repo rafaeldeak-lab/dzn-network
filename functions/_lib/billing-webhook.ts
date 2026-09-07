@@ -1,5 +1,7 @@
 import { serverSubscriptionStatements } from "./automation";
 import { requireDb } from "./db";
+import { isBillingTrialRemindersEnabled } from "./feature-flags";
+import { trialReminderStateStatement } from "./billing-trial-reminders";
 import { billingAccountStatement, getPlanFromStripePriceId,
   normalizePlanKey, ownerEntitlementsStatement, starterTrialClaimStatement } from "./plans";
 import { retrieveStripeSubscription, stripeId, stripeSubscriptionPeriodEnd, stripeSubscriptionPeriodStart,
@@ -115,6 +117,10 @@ export async function reconcileBillingWebhook(env: Env, event: StripeEvent) {
     for (const guildId of guilds) statements.push(...serverSubscriptionStatements(env, {
       guildId, ownerDiscordId: owner, ...values, stripePriceId: stripeSubscriptionPriceId(subscription), forceDue: ["active", "trialing"].includes(subscription.status),
     }));
+    if (isBillingTrialRemindersEnabled(env)) {
+      statements.push(trialReminderStateStatement(env, { mode, owner, customerId, subscription,
+        planKey, revision: (revision?.version ?? 0) + 1, eventId: event.id }));
+    }
   }
   try {
     await db.batch(statements);

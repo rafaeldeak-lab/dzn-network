@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
 
 const evidence = process.env.DZN_REMINDER_QA_OUTPUT ?? path.join(tmpdir(), "dzn-payment-reminder-qa");
+const trialMode = process.argv.includes("--trial");
 await mkdir(evidence, { recursive: true });
 const root = path.resolve("out");
 const dashboard = await readFile(path.join(root, "dashboard.html"), "utf8");
@@ -36,6 +37,16 @@ function item(available = false) { return {
   server_id: null, event_id: null, server_name: null, event_name: null, image_url: null, read_at: null,
   created_at: new Date().toISOString(), expires_at: null, metadata: { checkout_available: available },
 }; }
+const trialEnd = new Date(Math.floor(Date.now() / 1000) * 1000 + 3600000).toISOString();
+const deadline = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(trialEnd));
+const trialTitle = "Your Starter trial ends within one day";
+const trialSource = await readFile("functions/_lib/billing-trial-reminders.ts", "utf8");
+assert.ok(trialSource.includes(trialTitle) && trialSource.includes('action_url: "/dashboard"'));
+function visibleItem(available = false) {
+  return trialMode ? { ...item(available), type: "billing_trial_ending", title: trialTitle,
+    body: `Your trial ends on ${deadline} UTC. Review your Starter billing and cancellation options in your dashboard before it ends.`,
+    action_url: "/dashboard", metadata: { trial_ends_at: trialEnd } } : item(available);
+}
 let previewRead = false, previewCleared = false;
 const server = createServer(async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
@@ -49,11 +60,11 @@ const server = createServer(async (req, res) => {
       else if (url.pathname.endsWith("/unread-count")) payload = { ok: true, unreadCount: count };
       else if (url.pathname.endsWith("/read-all") || url.pathname.endsWith("/read")) previewRead = true;
       else if (url.pathname.endsWith("/clear-read")) previewCleared = previewRead;
-      else if (url.pathname.endsWith("/notifications")) payload = { ok: true, items: previewCleared ? [] : [{ ...item(), read_at: previewRead ? new Date().toISOString() : null }], unreadCount: count };
+      else if (url.pathname.endsWith("/notifications")) payload = { ok: true, items: previewCleared ? [] : [{ ...visibleItem(), read_at: previewRead ? new Date().toISOString() : null }], unreadCount: count };
       else if (!url.pathname.endsWith("/refresh-billing")) { res.statusCode = 404; payload = { ok: false }; }
       res.end(JSON.stringify(payload)); return;
     }
-    if (url.pathname === "/" || url.pathname === "/pricing") { res.setHeader("Content-Type", "text/html"); res.end(html); return; }
+    if (["/", "/pricing", "/dashboard"].includes(url.pathname)) { res.setHeader("Content-Type", "text/html"); res.end(html); return; }
     if (url.pathname === "/preview.js") { res.setHeader("Content-Type", "text/javascript"); res.end(bundle.outputFiles[0].text); return; }
     const file = path.resolve(root, `.${url.pathname}`);
     if (!file.startsWith(`${root}${path.sep}`) || !file.endsWith(".css")) throw new Error("Invalid asset");
@@ -83,7 +94,7 @@ if (!process.argv.includes("--serve")) {
         if (url.pathname.endsWith("/config")) payload = { ok: true, dznPulseEnabled: true, billingRemindersEnabled: flag };
         else if (url.pathname.endsWith("/refresh-billing")) { assert.equal(request.method(), "POST"); assert.deepEqual(request.postDataJSON(), {}); status = refreshFailure ? 503 : 200; }
         else if (url.pathname.endsWith("/unread-count")) payload = { ok: true, unreadCount: count };
-        else if (url.pathname.endsWith("/notifications")) { status = listFailure ? 503 : 200; payload = listFailure ? { error: "Notifications are temporarily unavailable." } : { ok: true, items: visible ? [{ ...item(available), read_at: read ? new Date().toISOString() : null }] : [], unreadCount: count }; }
+        else if (url.pathname.endsWith("/notifications")) { status = listFailure ? 503 : 200; payload = listFailure ? { error: "Notifications are temporarily unavailable." } : { ok: true, items: visible ? [{ ...visibleItem(available), read_at: read ? new Date().toISOString() : null }] : [], unreadCount: count }; }
         else if (url.pathname.endsWith("/read-all") || url.pathname.endsWith("/read")) read = true;
         else if (url.pathname.endsWith("/clear-read")) cleared = read;
         else assert.fail(`Unexpected request: ${url.pathname}`);
@@ -91,7 +102,7 @@ if (!process.argv.includes("--serve")) {
       });
       const bell = page.getByRole("button", { name: /Open DZN Pulse notifications/ });
       const dialog = page.getByRole("dialog");
-      const notice = page.getByRole("button", { name: /Please set up payment/ });
+      const notice = page.getByRole("button", { name: trialMode ? /Your Starter trial ends within one day/ : /Please set up payment/ });
       await page.goto(base); await bell.click(); await page.getByText("You're all caught up.", { exact: true }).waitFor();
       assert.equal(requests.filter(r => r.path.endsWith("refresh-billing")).length, 0, "A page loaded with the flag off cannot refresh billing");
       flag = true; await page.reload(); await page.getByRole("button", { name: /1 unread/ }).waitFor();
@@ -99,7 +110,7 @@ if (!process.argv.includes("--serve")) {
       assert.notEqual(badgeColor, "rgba(0, 0, 0, 0)");
       await bell.focus(); await page.keyboard.press("Enter"); await dialog.waitFor();
       await notice.waitFor(); await page.getByRole("button", { name: "Billing", exact: true }).click();
-      await notice.waitFor(); assert.match(await notice.textContent(), /trial has not started/);
+      await notice.waitFor(); assert.match(await notice.textContent(), trialMode ? /UTC/ : /trial has not started/);
       assert.equal(await page.getByRole("button", { name: "Billing", exact: true }).getAttribute("aria-pressed"), "true");
       for (const name of ["All", "Events", "Scores", "Achievements", "News", "Billing"]) {
         assert.equal(await page.getByRole("button", { name, exact: true }).evaluate(el => el.scrollWidth <= el.clientWidth), true, `${name} must fit without clipping`);
@@ -120,9 +131,9 @@ if (!process.argv.includes("--serve")) {
       await page.getByText("You're all caught up.", { exact: true }).waitFor();
       await page.screenshot({ path: path.join(evidence, `cleared-${width}.png`), fullPage: true, animations: "disabled" });
       cleared = false; read = false; available = true;
-      await page.reload(); await bell.click(); await notice.waitFor(); assert.match(await notice.textContent(), /GBP 2\/month/);
+      await page.reload(); await bell.click(); await notice.waitFor(); assert.match(await notice.textContent(), trialMode ? /cancellation options/ : /GBP 2\/month/);
       await page.screenshot({ path: path.join(evidence, `available-${width}.png`), fullPage: true, animations: "disabled" });
-      await notice.focus(); await page.keyboard.press("Enter"); await page.waitForURL(`${base}/pricing?intent=owner_setup&returnTo=%2Fsetup`);
+      await notice.focus(); await page.keyboard.press("Enter"); await page.waitForURL(`${base}${trialMode ? "/dashboard" : "/pricing?intent=owner_setup&returnTo=%2Fsetup"}`);
       assert.equal(read, true);
       eligible = false; await page.reload(); await bell.click(); await page.getByText("You're all caught up.", { exact: true }).waitFor();
       eligible = true; refreshFailure = true;
@@ -132,10 +143,10 @@ if (!process.argv.includes("--serve")) {
       listFailure = false; await page.getByRole("button", { name: /retry/i }).click(); await notice.waitFor();
       assert.deepEqual(errors, []);
       assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
-      results.push({ width, passed: true, badgeColor, pageErrors: errors, apiRequests: requests.length, scenarios: ["keyboard-open-close-focus", "billing-filter", "paused-copy", "no-overflow", "read-clear-repeat-visit", "available-copy", "pricing-navigation-only", "ineligible-hidden", "flag-off-no-write", "refresh-failure-isolated", "list-error-retry", "no-storage-or-external-network"] });
+      results.push({ width, passed: true, badgeColor, pageErrors: errors, apiRequests: requests.length, scenarios: ["keyboard-open-close-focus", "billing-filter", trialMode ? "verified-deadline-copy" : "paused-copy", "no-overflow", "read-clear-repeat-visit", trialMode ? "cancellation-options-copy" : "available-copy", trialMode ? "dashboard-navigation-only" : "pricing-navigation-only", "ineligible-hidden", "flag-off-no-write", "refresh-failure-isolated", "list-error-retry", "no-storage-or-external-network"] });
       await context.close();
     }
-    await writeFile(path.join(evidence, "results.json"), JSON.stringify({ localMockOnly: true, generatedAt: new Date().toISOString(), results }, null, 2));
+    await writeFile(path.join(evidence, "results.json"), JSON.stringify({ localMockOnly: true, reminder: trialMode ? "trial-ending" : "payment-setup", trialEnd: trialMode ? trialEnd : null, generatedAt: new Date().toISOString(), results }, null, 2));
     console.log(`Private billing reminder rendered QA passed. Evidence: ${evidence}`);
   } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
 }
