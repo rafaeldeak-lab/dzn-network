@@ -4,7 +4,7 @@ import { createSession } from "../functions/_lib/db";
 import { upsertBillingAccount } from "../functions/_lib/plans";
 import { onRequest as checkout } from "../functions/api/billing/create-checkout-session";
 import { onRequest as webhook } from "../functions/api/stripe/webhook";
-import { checkoutResponseFromRequest } from "./fixtures/billing-checkout";
+import { checkoutResponseFromRequest, checkoutPriceFixture } from "./fixtures/billing-checkout";
 import { createWebhookFixture } from "./fixtures/billing-webhook";
 
 type Row = Record<string, unknown>;
@@ -72,12 +72,10 @@ async function run() {
   globalThis.fetch = async (input, init) => {
     const url = String(input);
     const method = init?.method ?? "GET";
-    assert.match(url, /^https:\/\/api\.stripe\.com\/v1\/(checkout\/sessions(?:\/cs_fixture_\d+)?|subscriptions\/sub_fixture_\d+|prices\/price_starter_fixture)$/);
+    assert.match(url, /^https:\/\/api\.stripe\.com\/v1\/(checkout\/sessions(?:\/cs_fixture_\d+)?|subscriptions\/sub_fixture_\d+|prices\/price_(starter|pro)_fixture)$/);
     const params = new URLSearchParams(String(init?.body ?? ""));
     calls.push({ method, params, key: new Headers(init?.headers).get("Idempotency-Key") });
-    if (url.includes("/prices/")) return Response.json({ id: "price_starter_fixture", active: true, livemode: false,
-      currency: "gbp", unit_amount: 200, type: "recurring", billing_scheme: "per_unit",
-      recurring: { interval: "month", interval_count: 1, usage_type: "licensed" } });
+    if (url.includes("/prices/")) return Response.json(checkoutPriceFixture(url.split("/").at(-1)!));
     if (url.includes("/subscriptions/")) { assert.equal(method, "GET"); return Response.json(subscriptions.get(url.split("/").at(-1)!)); }
     if (method === "GET") return Response.json(sessionOverride ?? sessions.get(url.split("/").at(-1)!));
     assert.equal(method, "POST");

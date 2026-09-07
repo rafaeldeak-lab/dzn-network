@@ -35,6 +35,14 @@ export async function createOrResumeCheckout(env: Env, request: Request, input: 
   }
   const fingerprint = await keyFingerprint(env.STRIPE_SECRET_KEY!);
   const mode = env.STRIPE_SECRET_KEY!.startsWith("sk_live_") ? "live" : "test";
+  const verifiedPrices = new Set<string>();
+  async function checkPrice(planKey: PurchasablePlanKey, priceId: unknown) {
+    if (typeof priceId !== "string" || !/^price_[a-zA-Z0-9_]+$/.test(priceId)) throw priceError();
+    const key = `${planKey}:${priceId}`;
+    if (verifiedPrices.has(key)) return;
+    await verifyCheckoutPrice(env, priceId, planKey, mode);
+    verifiedPrices.add(key);
+  }
   if (account?.stripe_customer_id) {
     const foreignAccount = await db.prepare("SELECT discord_user_id FROM owner_billing_accounts WHERE stripe_customer_id = ? AND discord_user_id != ? LIMIT 1")
       .bind(account.stripe_customer_id, input.discordUserId).first();
@@ -53,7 +61,7 @@ export async function createOrResumeCheckout(env: Env, request: Request, input: 
           claim.stripe_customer_id !== account.stripe_customer_id || !claim.stripe_subscription_id || claim.status === "checkout_created") {
         throw new CheckoutRecoveryError("Starter trial has already been used or reserved for this account or Stripe customer. Use Manage billing or contact support.", "STARTER_TRIAL_UNAVAILABLE");
       }
-      await verifyReturningPrice(env, input.priceId, mode);
+      await checkPrice("starter", input.priceId);
       paidConfirmation = await keyFingerprint(JSON.stringify([RETURNING_STARTER_OFFER, input.discordUserId,
         account.stripe_customer_id, account.stripe_subscription_id, claim.id, input.priceId, fingerprint]));
       requirePaidConfirmation(input.acceptedOffer, paidConfirmation);
@@ -61,6 +69,8 @@ export async function createOrResumeCheckout(env: Env, request: Request, input: 
   }
   if (!attempt) {
     if (!paidConfirmation && input.acceptedOffer !== undefined) throw offerChanged();
+    // Check the provider's immutable price fields before reserving an attempt or trial.
+    await checkPrice(input.planKey, input.priceId);
     const customerId = account?.stripe_customer_id ?? null;
     const id = crypto.randomUUID();
     const params = {
@@ -142,10 +152,17 @@ export async function createOrResumeCheckout(env: Env, request: Request, input: 
       throw new CheckoutRecoveryError("This checkout has completed. Check Manage billing before starting another payment.", "CHECKOUT_COMPLETED");
     }
     if (attempt.plan_key !== input.planKey) throw planConflict();
+    await checkPrice(attempt.plan_key, frozen["line_items[0][price]"]);
     await attachTrialSession(env, attempt, session);
     return { url: openSessionUrl(session) };
   }
   if (attempt.plan_key !== input.planKey) throw planConflict();
+  if (attempt.first_requested_at !== null &&
+      (now() - attempt.first_requested_at >= CHECKOUT_RETRY_SECONDS || now() < attempt.first_requested_at)) {
+    throw new CheckoutRecoveryError("Your earlier checkout needs a support check. We will not risk creating a second payment.", "CHECKOUT_REVIEW_REQUIRED");
+  }
+  // Retries verify the frozen price, never a newly configured replacement or caller price.
+  await checkPrice(attempt.plan_key, frozen["line_items[0][price]"]);
   if (hasStarterTrial(attempt)) await reserveAttemptTrial(env, attempt);
   await db.prepare(`UPDATE billing_checkout_attempts SET state = 'request_started',
     first_requested_at = COALESCE(first_requested_at, ?), updated_at = ?
@@ -225,16 +242,21 @@ function requirePaidConfirmation(accepted: unknown, confirmation: string) {
 function offerChanged() {
   return new CheckoutRecoveryError("Your checkout terms have changed. Please choose your plan again.", "CHECKOUT_OFFER_CHANGED");
 }
-async function verifyReturningPrice(env: Env, priceId: string, mode: string) {
+function priceError() {
+  return new CheckoutRecoveryError("Plan pricing needs a support check before checkout. No new payment has been started.", "CHECKOUT_PRICE_REVIEW_REQUIRED", 503);
+}
+async function verifyCheckoutPrice(env: Env, priceId: string, planKey: PurchasablePlanKey, mode: string) {
   const price = await stripeGetRequest<{
     id: string; active: boolean; livemode: boolean; currency: string; unit_amount: number; type: string;
-    billing_scheme: string; transform_quantity?: unknown;
+    billing_scheme: string; transform_quantity?: unknown; custom_unit_amount?: unknown;
     recurring?: { interval: string; interval_count: number; usage_type: string };
-  }>(env, `/prices/${encodeURIComponent(priceId)}`).catch(() => { throw retryError(); });
+  }>(env, `/prices/${encodeURIComponent(priceId)}`).catch(() => {
+    throw new CheckoutRecoveryError("We could not verify the plan price. Checkout is unavailable; please try again.", "CHECKOUT_PRICE_UNAVAILABLE", 503);
+  });
   if (!price || price.id !== priceId || price.active !== true || price.livemode !== (mode === "live") ||
-      price.currency !== "gbp" || price.unit_amount !== 200 || price.type !== "recurring" || price.billing_scheme !== "per_unit" ||
-      price.transform_quantity || price.recurring?.interval !== "month" || price.recurring.interval_count !== 1 || price.recurring.usage_type !== "licensed") {
-    throw new CheckoutRecoveryError("Starter pricing needs a support check before checkout. No payment has been started.", "CHECKOUT_PRICE_REVIEW_REQUIRED", 503);
+      price.currency !== "gbp" || price.unit_amount !== (planKey === "starter" ? 200 : 1000) || price.type !== "recurring" || price.billing_scheme !== "per_unit" ||
+      price.transform_quantity || price.custom_unit_amount || price.recurring?.interval !== "month" || price.recurring.interval_count !== 1 || price.recurring.usage_type !== "licensed") {
+    throw priceError();
   }
 }
 
