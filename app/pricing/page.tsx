@@ -5,6 +5,7 @@ import { getSubscriptionPlanPublicContracts } from "../../lib/billing/plans";
 import { PAYMENT_COPY, PAYMENT_FAQS } from "../../lib/billing/payment-copy";
 import { PricingCheckout } from "../../components/onboarding/pricing-checkout";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "../../lib/public-discord";
+import { DZN_SUPPORT_EMAIL, DZN_SUPPORT_EMAIL_HREF } from "../../lib/support";
 
 export const metadata: Metadata = {
   title: "DZN Pricing | Starter and Pro owner plans",
@@ -65,8 +66,14 @@ export default function PricingPage() {
       <section aria-labelledby="billing-answers" className="border-t border-white/15 py-8">
         <h2 id="billing-answers" className="text-xl font-black">Payment and trial questions</h2>
         <div className="mt-4 divide-y divide-white/15">{PAYMENT_FAQS.map(faq => <details key={faq.question} className="py-4"><summary className="cursor-pointer text-sm font-bold">{faq.question}</summary><p className="mt-3 max-w-4xl text-sm leading-6 text-zinc-300">{faq.answer}</p></details>)}</div>
-        <p className="mt-5 text-sm leading-6 text-zinc-400">Review the amount, currency and billing schedule shown in Stripe before agreeing to pay. For a billing problem, contact DZN through Discord. Do not post card details or invoices in public channels.</p>
-        <a href={DZN_PUBLIC_DISCORD_INVITE_URL} className="mt-3 inline-flex min-h-11 items-center text-sm font-bold text-cyan-200 underline underline-offset-4">Contact DZN on Discord</a>
+        <p className="mt-5 text-sm leading-6 text-zinc-400">Review the amount, currency and billing schedule shown in Stripe before agreeing to pay. For a private billing problem, email DZN support. Do not post card details or invoices in public channels.</p>
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-3 text-sm font-bold text-cyan-200">
+          <a href={DZN_SUPPORT_EMAIL_HREF} className="inline-flex min-h-11 items-center underline underline-offset-4">Email {DZN_SUPPORT_EMAIL}</a>
+          <a href={DZN_PUBLIC_DISCORD_INVITE_URL} className="inline-flex min-h-11 items-center underline underline-offset-4">DZN community Discord</a>
+          <Link href="/terms" className="inline-flex min-h-11 items-center underline underline-offset-4">Terms</Link>
+          <Link href="/privacy" className="inline-flex min-h-11 items-center underline underline-offset-4">Privacy</Link>
+          <Link href="/refunds" className="inline-flex min-h-11 items-center underline underline-offset-4">Cancellations and refunds</Link>
+        </div>
       </section>
     </div>
   </main>;

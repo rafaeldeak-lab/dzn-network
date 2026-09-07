@@ -17,8 +17,9 @@ assert.match(PAYMENT_COPY.returningStarter, /no second trial.*separate confirmat
 assert.match(PAYMENT_COPY.proTerms, /no free trial.*£10.*£10\/month.*cancelled/i);
 assert.match(PAYMENT_COPY.player, /Player access is free/);
 assert.match(PAYMENT_COPY.cancellation, /Manage Billing.*before.*trial deadline.*does not itself refund/i);
+assert.match(PAYMENT_COPY.refunds, /refund.*applicable law.*statutory consumer rights/i);
 assert.match(PAYMENT_COPY.recovery, /fails.*recovery.*does not start another trial/i);
-assert.equal(PAYMENT_FAQS.length, 7);
+assert.equal(PAYMENT_FAQS.length, 8);
 for (const value of [null, "//evil.example", "https://evil.example", "/setup?paid=true", "/owner", "/dashboard/other"]) {
   assert.equal(pricingReturnTo(value), "/setup");
 }
@@ -27,6 +28,26 @@ assert.equal(pricingReturnTo("/setup"), "/setup");
 const route = readFileSync("app/pricing/page.tsx", "utf8");
 const checkout = readFileSync("components/onboarding/pricing-checkout.tsx", "utf8");
 assert.ok(route.includes("PAYMENT_FAQS") && route.includes("PAYMENT_COPY.consent"));
+for (const policyRoute of ["terms", "privacy", "refunds"]) {
+  const policy = readFileSync(`app/${policyRoute}/page.tsx`, "utf8");
+  assert.match(policy, /DZN_SUPPORT_EMAIL/);
+  assert.doesNotMatch(policy, /no refunds|non-refundable|waive all|tax included/i);
+  assert.ok(route.includes(`href=\"/${policyRoute}\"`), `Pricing should link to /${policyRoute}.`);
+}
+const terms = readFileSync("app/terms/page.tsx", "utf8");
+assert.match(terms, /GBP 0.*two-day trial.*GBP 2 per month/i);
+assert.match(terms, /Pro[\s\S]*GBP 10[\s\S]*no free trial[\s\S]*GBP 10 per month/i);
+assert.match(terms, /Manage Billing[\s\S]*turn off renewal/i);
+assert.match(terms, /does not itself create paid access/i);
+assert.match(terms, /cannot lawfully be excluded/i);
+const refunds = readFileSync("app/refunds/page.tsx", "utf8");
+assert.match(refunds, /cancel before the trial deadline.*avoid the first GBP 2 payment/i);
+assert.match(refunds, /does not automatically refund.*already completed/i);
+assert.match(refunds, /required by law[\s\S]*does not limit statutory consumer rights/i);
+const privacy = readFileSync("app/privacy/page.tsx", "utf8");
+assert.match(privacy, /Stripe handles payment-card information/i);
+assert.match(privacy, /does not store full card numbers/i);
+assert.match(privacy, /does not sell personal data/i);
 assert.ok(checkout.includes("plan?.configured !== true || plan.checkout_enabled !== true"));
 assert.ok(checkout.includes("StarterCheckoutButton") && checkout.includes("inFlight.current"));
 assert.ok(checkout.includes("failure instanceof ApiRequestError") && checkout.includes("failure.status !== 401"));

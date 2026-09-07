@@ -100,6 +100,7 @@
     "test:payment-copy": "tsx scripts/test-payment-copy.ts",
     "test:checkout-price-contract": "tsx scripts/test-checkout-price-contract.ts",
     "qa:payment-copy": "node scripts/qa-payment-copy.mjs",
+    "qa:billing-policy-readiness": "node scripts/qa-billing-policy-readiness.mjs",
     "test:billing-reminders": "tsx scripts/test-billing-reminders.ts && npm run test:billing-trial-reminders",
     "test:billing-trial-reminders": "tsx scripts/test-billing-trial-reminders.ts",
     "test:billing-webhook-atomic": "tsx scripts/test-billing-webhook-atomic.ts",

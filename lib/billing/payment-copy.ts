@@ -8,6 +8,7 @@ export const PAYMENT_COPY = {
   proPrice: "\u00a310/month",
   proTerms: "Pro has no free trial. Your first \u00a310 payment is due when you confirm payment in Stripe, then Pro renews at \u00a310/month until cancelled.",
   cancellation: "Open Dashboard > Billing & Plan > Manage Billing to review your subscription, update payment details or cancel. Cancel before your trial deadline to avoid the first subscription payment. Cancelling renewal does not itself refund payments already made.",
+  refunds: "Refund requests and billing errors are reviewed under the DZN cancellations and refunds policy and applicable law. This does not limit statutory consumer rights.",
   recovery: "If a payment fails, paid owner tools may be unavailable until payment recovery is confirmed. Update your payment method through Manage Billing. A retry, a website visit or a return from Stripe does not start another trial or grant paid access by itself.",
   consent: "Only the account owner should enter payment details and accept recurring billing in Stripe. Opening this page or signing in does not start a trial or take payment.",
   fairness: "Subscriptions pay for server-owner tools and presentation, not player progress or competitive advantage. They do not buy rankings, review scores, badges, season wins, XP, calling-card awards, Server Wars or CTF results, or competitive eligibility.",
@@ -20,6 +21,7 @@ export const PAYMENT_FAQS = [
   { question: "What if I have already used my trial?", answer: PAYMENT_COPY.returningStarter },
   { question: "When is Pro charged?", answer: PAYMENT_COPY.proTerms },
   { question: "How do I cancel or change my payment method?", answer: PAYMENT_COPY.cancellation },
+  { question: "Can I request a refund?", answer: PAYMENT_COPY.refunds },
   { question: "What happens if payment fails?", answer: PAYMENT_COPY.recovery },
   { question: "Does paying give a competitive advantage?", answer: PAYMENT_COPY.fairness },
 ] as const;

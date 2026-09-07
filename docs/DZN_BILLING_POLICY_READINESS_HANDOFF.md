@@ -1,0 +1,74 @@
+# DZN Billing Policy Readiness
+
+## Scope
+
+This 2026-09-07 slice prepares public customer information needed before live
+Starter and Pro checkout. It is based on production `main` at
+`3c57c990a4d23d97b346582743bfea66371795fb` after the billing safety series.
+It does not enable checkout, reminders, charge a customer, start a trial, change
+Stripe or Cloudflare configuration, or write production D1.
+
+## Public contract
+
+- `/terms` explains free player access, the eligible two-day Starter trial,
+  GBP 2 monthly renewal, GBP 10 Pro with no trial, verified Stripe fulfilment,
+  cancellation, payment-state restrictions, fair competition, support, and
+  preserved statutory rights.
+- `/refunds` explains self-service cancellation, the Starter deadline, when a
+  scheduled cancellation normally takes effect, private support, individual
+  refund review, billing-error correction, original-method refunds, and the
+  relationship between refunds or disputes and paid owner access.
+- `/privacy` explains the account, Discord, server, ADM, public-profile,
+  technical, notification, and billing data boundaries. Stripe handles card
+  details; DZN stores only limited billing identifiers and state needed for
+  verified access, recovery, duplicate protection, and audit.
+- `/pricing` links all three policies and the private billing support email. The
+  homepage footer links the policies without changing the DZN visual system.
+- Payment FAQ copy now states that refunds are reviewed under the published
+  policy and applicable law; it does not invent a blanket no-refund term or say
+  prices include tax.
+
+The wording is deliberately conservative. It is product copy and technical
+readiness evidence, not a solicitor's certification of every legal obligation.
+The owner should obtain professional review when practical, especially before
+selling broadly outside the UK or changing tax/VAT status.
+
+## Validation
+
+- `npm run test:payment-copy` passed.
+- `npm run test:billing-plans` passed, including duplicate/interrupted Checkout,
+  exact Price validation, webhook atomicity, payment recovery, renewal,
+  cancellation, first-time and returning Starter, private setup reminders, and
+  verified trial reminders.
+- Nonincremental TypeScript passed.
+- ESLint passed with zero errors and five pre-existing warnings.
+- `next build --webpack` and the Cloudflare Pages route patch passed. The normal
+  Turbopack build cannot follow the external shared `node_modules` junction in
+  this isolated Windows worktree; this is an environment limitation, not a
+  source failure.
+- `npm run qa:billing-policy-readiness` passed `/pricing`, `/terms`, `/privacy`,
+  and `/refunds` at 1440x900 and 390x844 with status 200, no page errors, no
+  horizontal overflow, expected policy links, and exact payment copy. Sanitized
+  screenshots and `results.json` are outside OneDrive at
+  `C:/Users/rafae/Desktop/DZN-Audits/evidence/dzn-billing-policy-readiness-20260907`.
+
+## Activation and rollback boundary
+
+Release this code before changing Stripe Checkout policy links or enabling live
+checkout. After the pages are live, Stripe can point its public Terms and Privacy
+links at them and display DZN support details. Refund emails can be enabled as a
+separate provider setting. Recheck production billing readiness and public plan
+copy after those changes.
+
+Live checkout still requires an explicit controlled production flag change.
+Enabling `DZN_LIVE_CHECKOUT_ENABLED` permits real Checkout Session creation; it
+does not itself charge an existing account. Each owner must personally choose a
+plan, review Stripe's hosted terms, enter a payment method, and confirm recurring
+billing. The private payment-setup and one-day-left reminders have separate flags
+and should be enabled only after their production schema and live Checkout are
+confirmed.
+
+Rollback is code/config flag based. Disable new checkout and reminder flags to
+stop new attempts and notices. Do not delete trial claims, checkout attempts,
+webhook receipts, billing accounts, or existing subscriptions. Turning checkout
+off does not cancel subscriptions already confirmed by Stripe.
