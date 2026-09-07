@@ -1,57 +1,15 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { createRequire } from "node:module";
-import { ensureAutomationSchema, syncServerSubscriptionsForOwner } from "../functions/_lib/automation";
-import { ensureBillingSchema, ensureStarterTrialClaimSchema, upsertBillingAccount } from "../functions/_lib/plans";
+import { syncServerSubscriptionsForOwner } from "../functions/_lib/automation";
+import { upsertBillingAccount } from "../functions/_lib/plans";
+import { createWebhookFixture, type WebhookFixtureDb } from "./fixtures/billing-webhook";
 import { onRequest } from "../functions/api/stripe/webhook";
 import type { Env } from "../functions/_lib/types";
 
 type Row = Record<string, unknown>;
-type Sqlite = {
-  exec(sql: string): void;
-  prepare(sql: string): { run(...values: unknown[]): { changes: number }; get(...values: unknown[]): Row | undefined; all(...values: unknown[]): Row[] };
-  close(): void;
-};
-const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: new (path: string) => Sqlite };
-
-class LocalDatabase {
-  sqlite = new DatabaseSync(":memory:");
-  writes: string[] = [];
-  failNextServerWrite = false;
-  failAccountLookup = false;
-  prepare(sql: string) {
-    const statement = (values: unknown[] = []) => ({
-      bind: (...bindings: unknown[]) => statement(bindings),
-      run: async () => {
-        if (this.failNextServerWrite && /INSERT INTO server_subscriptions/.test(sql)) {
-          this.failNextServerWrite = false;
-          throw new Error("Simulated local write failure.");
-        }
-        const result = this.sqlite.prepare(sql).run(...values);
-        // The existing automation schema helper also repairs legacy cron rows.
-        if (/^UPDATE automation_cron_runs\b/.test(sql)) assert.equal(result.changes, 0);
-        else if (/^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(sql)) this.writes.push(sql);
-        return { success: true, meta: result };
-      },
-      first: async () => this.sqlite.prepare(sql).get(...values) ?? null,
-      all: async () => this.failAccountLookup && /FROM owner_billing_accounts/.test(sql)
-        ? { success: false }
-        : { success: true, results: this.sqlite.prepare(sql).all(...values) },
-    });
-    return statement();
-  }
-}
-
-const db = new LocalDatabase();
-const env = {
-  DB: db as unknown as D1Database,
-  STRIPE_SECRET_KEY: "sk_test_local_recovery_fixture",
-  STRIPE_WEBHOOK_SECRET: "whsec_local_recovery_fixture",
-  STRIPE_PRICE_STARTER: "price_starter_fixture",
-  STRIPE_PRICE_PRO: "price_pro_fixture",
-  STRIPE_PRICE_PARTNER: "price_legacy_fixture",
-  DZN_LIVE_CHECKOUT_ENABLED: "false",
-} as Env;
+let db: WebhookFixtureDb;
+let env: Env;
+let eventSequence = 0;
 const periodStart = 1788220800;
 const periodEnd = 1790812800;
 const renewedEnd = 1793491200;
@@ -72,7 +30,7 @@ const entitlement = () => row("owner_plan_entitlements", "discord_user_id", "dis
 const server = () => row("server_subscriptions", "guild_id", "guild-owner");
 
 async function deliver(type: string, object: Row = invoice, expected = 200, signatureValid = true) {
-  const body = JSON.stringify({ id: "evt_repeated_fixture", type, data: { object } });
+  const body = JSON.stringify({ id: `evt_recovery_${++eventSequence}`, livemode: false, type, data: { object } });
   const timestamp = Math.floor(Date.now() / 1000);
   const signature = createHmac("sha256", signatureValid ? env.STRIPE_WEBHOOK_SECRET! : "wrong").update(`${timestamp}.${body}`).digest("hex");
   const response = await onRequest({
@@ -106,16 +64,7 @@ async function unchanged(type: string, object: Row, expected = 500) {
 }
 
 async function main() {
-  db.sqlite.exec(`
-    CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT UNIQUE);
-    CREATE TABLE linked_servers (id TEXT PRIMARY KEY, user_id TEXT, guild_id TEXT, status TEXT, merged_into_server_id TEXT, listing_visibility TEXT);
-    INSERT INTO users VALUES ('user-owner', 'discord-owner'), ('user-other', 'discord-other');
-    INSERT INTO linked_servers VALUES ('server-owner', 'user-owner', 'guild-owner', 'pending', NULL, 'private'),
-      ('server-other', 'user-other', 'guild-other', 'active', NULL, 'public');
-  `);
-  await ensureBillingSchema(env);
-  await ensureStarterTrialClaimSchema(env);
-  await ensureAutomationSchema(env);
+  ({ db, env } = await createWebhookFixture());
   for (const owner of ["owner", "other"]) {
     const values = {
       stripeCustomerId: `cus_${owner}`, stripeSubscriptionId: `sub_${owner}`, planKey: "starter" as const,
@@ -160,7 +109,7 @@ async function main() {
   await deliver("customer.subscription.updated", subscription({ status: "past_due" }));
   expectState("active", renewedEnd);
   assert.deepEqual([account().id, server().id], stableIds);
-  console.log("PASS renewal uses provider periods; duplicate/expanded/delayed invoice and subscription snapshots do not regress recovered access");
+  console.log("PASS renewal uses provider periods; repeated/expanded/delayed invoice and subscription snapshots do not regress recovered access");
 
   provider = subscription({ cancel_at_period_end: true });
   await deliver("customer.subscription.updated", subscription());
@@ -220,10 +169,10 @@ async function main() {
   db.failNextServerWrite = true;
   provider = subscription();
   await deliver("invoice.payment_succeeded", invoice, 500);
-  assert.equal(server().status, "past_due");
+  expectState("past_due");
   await deliver("invoice.payment_succeeded");
   expectState("active");
-  console.log("PASS fresh delivery repairs provider-read failure and partial downstream database failure");
+  console.log("PASS downstream failure rolls back all billing writes; fresh delivery recovers from database/provider failure");
 
   provider = subscription({ metadata: undefined });
   await deliver("invoice.paid");
@@ -246,7 +195,7 @@ async function main() {
   expectState("active");
 
   provider = subscription({ id: "sub_new", customer: "cus_new", metadata: { discord_user_id: "discord-new" } });
-  await unchanged("invoice.payment_succeeded", { ...invoice, customer: "cus_new", subscription: "sub_new" }, 200);
+  await unchanged("invoice.payment_succeeded", { ...invoice, customer: "cus_new", subscription: "sub_new" }, 500);
   assert.equal(db.sqlite.prepare("SELECT * FROM owner_billing_accounts WHERE discord_user_id = 'discord-new'").get(), undefined);
   await deliver("customer.subscription.created", { ...provider, metadata: { discord_user_id: "discord-other" } });
   assert.equal(row("owner_billing_accounts", "discord_user_id", "discord-new").stripe_subscription_id, "sub_new");

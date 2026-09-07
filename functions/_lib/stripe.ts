@@ -22,6 +22,7 @@ export type StripePortalSession = {
 };
 
 export type StripeSubscription = {
+  livemode?: boolean;
   id: string;
   customer: string | { id: string };
   status: string;
@@ -45,6 +46,7 @@ export type StripeSubscription = {
 };
 
 export type StripeEvent = {
+  livemode?: boolean;
   id: string;
   type: string;
   data: {
