@@ -9,6 +9,11 @@ export type StripeCheckoutSession = {
   customer?: string | null;
   subscription?: string | null;
   metadata?: Record<string, string | null> | null;
+  mode?: string;
+  status?: string;
+  livemode?: boolean;
+  client_reference_id?: string | null;
+  expires_at?: number;
 };
 
 export type StripePortalSession = {
@@ -62,7 +67,7 @@ export function billingRedirectUrl(env: Env, request: Request, returnTo: string 
   return url.toString();
 }
 
-export async function stripeFormRequest<T>(env: Env, path: string, params: Record<string, string | number | boolean | null | undefined>): Promise<T> {
+export async function stripeFormRequest<T>(env: Env, path: string, params: Record<string, string | number | boolean | null | undefined>, options: { idempotencyKey?: string; apiVersion?: string } = {}): Promise<T> {
   const secret = env.STRIPE_SECRET_KEY;
   if (!secret) throw new Error("Stripe is not configured.");
   const body = new URLSearchParams();
@@ -76,7 +81,8 @@ export async function stripeFormRequest<T>(env: Env, path: string, params: Recor
     headers: {
       authorization: `Bearer ${secret}`,
       "content-type": "application/x-www-form-urlencoded",
-      "stripe-version": STRIPE_API_VERSION,
+      "stripe-version": options.apiVersion ?? STRIPE_API_VERSION,
+      ...(options.idempotencyKey ? { "idempotency-key": options.idempotencyKey } : {}),
     },
     body,
   });
