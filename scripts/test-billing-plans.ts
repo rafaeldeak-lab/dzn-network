@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createCheckoutFixture, checkoutResponseFromRequest } from "./fixtures/billing-checkout";
 
 import { evaluateBumpEligibility, publicAdvertisingFromState } from "../functions/_lib/advertising";
-import { getBillingPlanSummaries, getBillingReadinessStatus, getCheckoutConfigured, getCheckoutSafetyStatus, getOwnerBillingStatus, getPlanConfig, getPlanFromStripePriceId, upsertOwnerEntitlements } from "../functions/_lib/plans";
+import { ensureStarterTrialClaimSchema, getBillingPlanSummaries, getBillingReadinessStatus, getCheckoutConfigured, getCheckoutSafetyStatus, getOwnerBillingStatus, getPlanConfig, getPlanFromStripePriceId, upsertBillingAccount, upsertOwnerEntitlements } from "../functions/_lib/plans";
 import { onRequest as billingPlansHandler } from "../functions/api/billing/plans";
 import { onRequest as checkoutHandler } from "../functions/api/billing/create-checkout-session";
 import { onRequest as billingReadinessHandler } from "../functions/api/billing/readiness";
@@ -482,9 +483,10 @@ async function run() {
   }
 
   let capturedStripeBody = "";
+  const proCheckoutFixture = createCheckoutFixture();
   globalThis.fetch = async (_input, init) => {
     capturedStripeBody = String(init?.body ?? "");
-    return new Response(JSON.stringify({ id: "cs_test", url: "https://checkout.stripe.test/session" }), {
+    return new Response(JSON.stringify(checkoutResponseFromRequest(init)), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -498,9 +500,10 @@ async function run() {
         headers: { "content-type": "application/json" },
       }),
       {
-        ...fakeEnv,
+        ...proCheckoutFixture.env,
         MOCK_AUTH: "true",
         STRIPE_SECRET_KEY: "sk_test_placeholder",
+        STRIPE_PRICE_PRO: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
         NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
         NEXT_PUBLIC_APP_URL: "https://dzn-network.pages.dev",
       } as Env,
@@ -511,12 +514,14 @@ async function run() {
     assert.match(capturedStripeBody, /metadata%5Bplan_key%5D=pro/);
   } finally {
     globalThis.fetch = originalFetch;
+    proCheckoutFixture.db.sqlite.close();
   }
 
   let capturedLiveEnabledBody = "";
+  const liveCheckoutFixture = createCheckoutFixture();
   globalThis.fetch = async (_input, init) => {
     capturedLiveEnabledBody = String(init?.body ?? "");
-    return new Response(JSON.stringify({ id: "cs_live_enabled", url: "https://checkout.stripe.test/live-enabled" }), {
+    return new Response(JSON.stringify(checkoutResponseFromRequest(init)), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -530,7 +535,7 @@ async function run() {
         headers: { "content-type": "application/json" },
       }),
       {
-        ...fakeEnv,
+        ...liveCheckoutFixture.env,
         MOCK_AUTH: "true",
         STRIPE_SECRET_KEY: "sk_live_placeholder",
         STRIPE_WEBHOOK_SECRET: "whsec_live_placeholder",
@@ -545,6 +550,7 @@ async function run() {
     assert.match(capturedLiveEnabledBody, /metadata%5Bplan_key%5D=pro/);
   } finally {
     globalThis.fetch = originalFetch;
+    liveCheckoutFixture.db.sqlite.close();
   }
 
   const activeCheckoutPrices = {
@@ -553,10 +559,6 @@ async function run() {
   } as const;
   const activeCheckoutStatements: string[] = [];
   const activeCheckoutBindings: unknown[][] = [];
-  const activeCheckoutEnv = createFakeEnv({
-    statements: activeCheckoutStatements,
-    bindings: activeCheckoutBindings,
-  }) as Env;
   const capturedActiveCheckoutBodies: Record<keyof typeof activeCheckoutPrices, string> = {
     starter: "",
     pro: "",
@@ -566,13 +568,14 @@ async function run() {
     const matchedPlan = (Object.keys(activeCheckoutPrices) as Array<keyof typeof activeCheckoutPrices>)
       .find((planKey) => body.includes(`metadata%5Bplan_key%5D=${planKey}`));
     if (matchedPlan) capturedActiveCheckoutBodies[matchedPlan] = body;
-    return new Response(JSON.stringify({ id: "cs_test", url: "https://checkout.stripe.test/session" }), {
+    return new Response(JSON.stringify(checkoutResponseFromRequest(init)), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
   };
   try {
     for (const planKey of Object.keys(activeCheckoutPrices) as Array<keyof typeof activeCheckoutPrices>) {
+      const activeCheckoutFixture = createCheckoutFixture({ statements: activeCheckoutStatements, bindings: activeCheckoutBindings });
       const checkoutResponse = await checkoutHandler(makeContext(
         checkoutHandler,
         new Request("https://local.test/api/billing/create-checkout-session", {
@@ -581,7 +584,7 @@ async function run() {
           headers: { "content-type": "application/json" },
         }),
         {
-          ...activeCheckoutEnv,
+          ...activeCheckoutFixture.env,
           MOCK_AUTH: "true",
           STRIPE_SECRET_KEY: "sk_test_placeholder",
           STRIPE_PRICE_STARTER: activeCheckoutPrices.starter,
@@ -590,6 +593,7 @@ async function run() {
         } as Env,
       ));
       assert.equal(checkoutResponse.status, 200);
+      activeCheckoutFixture.db.sqlite.close();
       assert.match(capturedActiveCheckoutBodies[planKey], new RegExp(`line_items%5B0%5D%5Bprice%5D=${activeCheckoutPrices[planKey]}`));
       assert.match(capturedActiveCheckoutBodies[planKey], new RegExp(`metadata%5Bplan_key%5D=${planKey}`));
       assert.match(capturedActiveCheckoutBodies[planKey], /payment_method_collection=always/);
@@ -654,6 +658,13 @@ async function run() {
   }
 
   let blockedCustomerFetchCalled = false;
+  const blockedCustomerFixture = createCheckoutFixture();
+  await upsertBillingAccount(blockedCustomerFixture.env, { discordUserId: "mock-discord-user", stripeCustomerId: "cus_existing", planKey: "free", planStatus: "free" });
+  await ensureStarterTrialClaimSchema(blockedCustomerFixture.env);
+  blockedCustomerFixture.db.sqlite.exec(`INSERT INTO owner_starter_trial_claims
+    (id, discord_user_id, stripe_customer_id, stripe_subscription_id, checkout_session_id, status, claimed_at, updated_at)
+    VALUES ('claim-customer-used', 'other-discord-user', 'cus_existing', 'sub_existing', 'cs_existing', 'trialing',
+      '2026-05-17T00:00:00.000Z', '2026-05-17T00:00:00.000Z')`);
   globalThis.fetch = async () => {
     blockedCustomerFetchCalled = true;
     return new Response(JSON.stringify({ id: "cs_blocked_customer", url: "https://checkout.stripe.test/blocked-customer" }), {
@@ -670,19 +681,7 @@ async function run() {
         headers: { "content-type": "application/json" },
       }),
       {
-        ...createFakeEnv({
-          account: { stripe_customer_id: "cus_existing" },
-          trialClaim: {
-            id: "claim-customer-used",
-            discord_user_id: "other-discord-user",
-            stripe_customer_id: "cus_existing",
-            stripe_subscription_id: "sub_existing",
-            checkout_session_id: "cs_existing",
-            status: "trialing",
-            claimed_at: "2026-05-17T00:00:00.000Z",
-            updated_at: "2026-05-17T00:00:00.000Z",
-          },
-        }),
+        ...blockedCustomerFixture.env,
         MOCK_AUTH: "true",
         STRIPE_SECRET_KEY: "sk_test_placeholder",
         STRIPE_PRICE_STARTER: activeCheckoutPrices.starter,
@@ -693,6 +692,7 @@ async function run() {
     assert.equal(blockedCustomerFetchCalled, false, "Used Starter trials must also be blocked by known Stripe customer.");
   } finally {
     globalThis.fetch = originalFetch;
+    blockedCustomerFixture.db.sqlite.close();
   }
 
   const invalidWebhook = await webhookHandler(makeContext(

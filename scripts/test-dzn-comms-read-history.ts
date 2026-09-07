@@ -25,7 +25,8 @@ const cloudflareEnv = readFileSync("cloudflare-env.d.ts", "utf8");
 const platformSpec = readFileSync("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md", "utf8");
 const packageJson = readFileSync("package.json", "utf8");
 
-assert.equal(migrationFiles.at(-1), migrationName, "DZN Comms read-history migration should be the only newest migration in this slice.");
+assert.ok(migrationFiles.includes(migrationName), "The approved Comms migration must remain available.");
+assert.equal(new Set(migrationFiles.map((name) => name.slice(0, 4))).size, migrationFiles.length, "Migration numbers must stay unique, including later non-Comms migrations.");
 assert.match(migration, /CREATE TABLE IF NOT EXISTS dzn_comms_channels/i, "Migration must define Comms channels.");
 assert.match(migration, /CREATE TABLE IF NOT EXISTS dzn_comms_messages/i, "Migration must define the read-only message-history table.");
 assert.match(migration, /CREATE TABLE IF NOT EXISTS dzn_comms_private_group_members/i, "Migration must define private group membership proof.");
