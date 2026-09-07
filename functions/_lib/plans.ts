@@ -728,8 +728,12 @@ export async function upsertStarterTrialClaimFromStripe(env: Env, input: {
   status: string;
 }) {
   await ensureStarterTrialClaimSchema(env);
+  await starterTrialClaimStatement(env, input).run();
+}
+
+export function starterTrialClaimStatement(env: Env, input: Parameters<typeof upsertStarterTrialClaimFromStripe>[1]): D1PreparedStatement {
   const now = new Date().toISOString();
-  await requireDb(env)
+  return requireDb(env)
     .prepare(
       `INSERT INTO owner_starter_trial_claims (
         id, discord_user_id, stripe_customer_id, stripe_subscription_id, checkout_session_id,
@@ -751,16 +755,20 @@ export async function upsertStarterTrialClaimFromStripe(env: Env, input: {
       cleanOptionalString(input.status) ?? "unknown",
       now,
       now,
-    )
-    .run();
+    );
 }
 
 export async function upsertOwnerEntitlements(env: Env, discordUserId: string, planKey: PlanKey, status: string) {
   await ensureBillingSchema(env);
+  await ownerEntitlementsStatement(env, discordUserId, planKey, status).run();
+  return getPlanConfig(effectiveEntitlementPlan(planKey, status));
+}
+
+export function ownerEntitlementsStatement(env: Env, discordUserId: string, planKey: PlanKey, status: string): D1PreparedStatement {
   const effectivePlan = effectiveEntitlementPlan(planKey, status);
   const config = getPlanConfig(effectivePlan);
   const now = new Date().toISOString();
-  await requireDb(env)
+  return requireDb(env)
     .prepare(
       `INSERT INTO owner_plan_entitlements (
         discord_user_id, plan_key, max_linked_servers, can_use_reviews, can_use_public_listing,
@@ -800,9 +808,7 @@ export async function upsertOwnerEntitlements(env: Env, discordUserId: string, p
       config.public_publish_interval_minutes,
       config.visibility_weight,
       now,
-    )
-    .run();
-  return config;
+    );
 }
 
 export async function getOwnerEntitlements(env: Env, discordUserId: string): Promise<PlanEntitlements> {
@@ -811,7 +817,7 @@ export async function getOwnerEntitlements(env: Env, discordUserId: string): Pro
     .prepare("SELECT * FROM owner_plan_entitlements WHERE discord_user_id = ? LIMIT 1")
     .bind(discordUserId)
     .first<Record<string, unknown>>();
-  if (!row) return upsertOwnerEntitlements(env, discordUserId, "free", "free");
+  if (!row) return getPlanConfig("free");
   return entitlementsFromRow(row);
 }
 
@@ -824,7 +830,7 @@ export async function getOwnerBillingStatus(env: Env, user: SessionUser): Promis
     .first<Record<string, unknown>>();
   const planKey = canonicalPlanKey(account?.plan_key);
   const planStatus = typeof account?.plan_status === "string" ? account.plan_status : planKey === "free" ? "free" : "unknown";
-  const entitlements = await upsertOwnerEntitlements(env, user.discord_id, planKey, planStatus);
+  const entitlements = getPlanConfig(effectiveEntitlementPlan(planKey, planStatus));
   const allowanceUsage = await getLinkedServerAllowanceUsageForUser(env, {
     userId: user.id,
     discordUserId: user.discord_id,
@@ -856,9 +862,14 @@ export async function upsertBillingAccount(env: Env, input: {
   cancelAtPeriodEnd?: boolean;
 }) {
   await ensureBillingSchema(env);
+  await billingAccountStatement(env, input).run();
+  return upsertOwnerEntitlements(env, input.discordUserId, canonicalPlanKey(input.planKey), input.planStatus);
+}
+
+export function billingAccountStatement(env: Env, input: Parameters<typeof upsertBillingAccount>[1]): D1PreparedStatement {
   const now = new Date().toISOString();
   const normalizedPlanKey = canonicalPlanKey(input.planKey);
-  await requireDb(env)
+  return requireDb(env)
     .prepare(
       `INSERT INTO owner_billing_accounts (
         id, discord_user_id, stripe_customer_id, stripe_subscription_id, plan_key, plan_status,
@@ -886,9 +897,7 @@ export async function upsertBillingAccount(env: Env, input: {
       boolInt(Boolean(input.cancelAtPeriodEnd)),
       now,
       now,
-    )
-    .run();
-  return upsertOwnerEntitlements(env, input.discordUserId, normalizedPlanKey, input.planStatus);
+    );
 }
 
 export async function findBillingAccountByCustomerOrSubscription(env: Env, input: { customerId?: string | null; subscriptionId?: string | null }) {
