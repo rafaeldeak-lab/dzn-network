@@ -172,7 +172,7 @@
     "d3-geo": "^3.1.1",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.14.0",
-    "next": "16.2.6",
+    "next": "16.3.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "three": "^0.184.0",
@@ -188,10 +188,13 @@
     "@types/three": "^0.184.1",
     "@types/topojson-client": "^3.1.5",
     "eslint": "^9",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
     "tsx": "^4.22.0",
     "typescript": "^5",
-    "wrangler": "^4.90.1"
+    "wrangler": "4.116.0"
+  },
+  "overrides": {
+    "undici": "7.29.0"
   }
 }
