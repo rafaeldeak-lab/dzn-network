@@ -214,12 +214,12 @@ async function run() {
   await request(complete, "pro", { expected: 200 });
   const completeSession = sessions.get(String(attempt(complete).stripe_session_id))!;
   completeSession.status = "complete";
-  Object.assign(completeSession, { subscription: "sub_completed" });
+  Object.assign(completeSession, { subscription: "sub_completed", customer: "cus_first_checkout" });
   const completePosts = calls.filter(call => call.method === "POST").length;
   await request(complete, "pro", { expected: 409 });
   assert.equal(calls.filter(call => call.method === "POST").length, completePosts);
   assert.equal(complete.db.sqlite.prepare("SELECT count(*) AS n FROM owner_plan_entitlements").get()?.n, 0);
-  await upsertBillingAccount(complete.env, { discordUserId: "discord-owner", stripeSubscriptionId: "sub_completed", planKey: "pro", planStatus: "canceled" });
+  await upsertBillingAccount(complete.env, { discordUserId: "discord-owner", stripeCustomerId: "cus_first_checkout", stripeSubscriptionId: "sub_completed", planKey: "pro", planStatus: "canceled" });
   await request(complete, "pro", { expected: 409 });
   assert.equal(attempt(complete), undefined);
   await request(complete, "pro", { expected: 200 });
