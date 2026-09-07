@@ -706,12 +706,74 @@ async function run() {
   ));
   assert.equal(invalidWebhook.status, 400);
 
+  const safeCheckoutObject = { id: "cs_safety", mode: "subscription", customer: "cus_safety", subscription: "sub_safety",
+    metadata: { discord_user_id: "discord-safety", plan_key: "pro", source: "dzn-network" } };
+  const safeSubscription = { id: "sub_safety", customer: "cus_safety", status: "active",
+    items: { data: [{ price: { id: "price_safe" } }] } };
+  const rejectedCases = [
+    { name: "provider unavailable", providerStatus: 503 },
+    { name: "network failure", networkFailure: true },
+    { name: "missing subscription", object: { ...safeCheckoutObject, subscription: null }, expectedFetches: 0 },
+    { name: "missing customer", object: { ...safeCheckoutObject, customer: null }, expectedFetches: 0 },
+    { name: "one-time checkout", object: { ...safeCheckoutObject, mode: "payment" }, expectedFetches: 0 },
+    { name: "wrong subscription", subscription: { ...safeSubscription, id: "sub_other" } },
+    { name: "wrong customer", subscription: { ...safeSubscription, customer: "cus_other" } },
+    { name: "missing status", subscription: { ...safeSubscription, status: undefined } },
+    { name: "invalid status", subscription: { ...safeSubscription, status: "confirmed" } },
+    { name: "unknown price cannot use metadata Pro", subscription: { ...safeSubscription, items: { data: [{ price: { id: "price_unknown" } }] } } },
+    { name: "missing price cannot use metadata Pro", subscription: { ...safeSubscription, items: { data: [] } } },
+    { name: "expanded snapshot still requires retrieval", object: { ...safeCheckoutObject, subscription: safeSubscription }, providerStatus: 503 },
+  ];
+  try {
+    for (const item of rejectedCases) {
+      let dbCalls = 0;
+      let fetches = 0;
+      globalThis.fetch = async (input, init) => {
+        fetches++;
+        assert.equal(String(input), "https://api.stripe.com/v1/subscriptions/sub_safety");
+        assert.equal(init?.method, "GET");
+        if (item.networkFailure) throw new Error("private-provider-diagnostic");
+        return new Response(JSON.stringify(item.providerStatus ? { error: { message: "private-provider-diagnostic" } } : item.subscription ?? safeSubscription), { status: item.providerStatus ?? 200 });
+      };
+      const payload = JSON.stringify({ id: "evt_safety", type: "checkout.session.completed", data: { object: item.object ?? safeCheckoutObject } });
+      const response = await webhookHandler(makeContext(webhookHandler, new Request("https://local.test/api/stripe/webhook", {
+        method: "POST", body: payload, headers: { "stripe-signature": await stripeSignatureHeader(payload, "whsec_test") },
+      }), { STRIPE_SECRET_KEY: "sk_test_local", STRIPE_WEBHOOK_SECRET: "whsec_test", STRIPE_PRICE_PRO: "price_safe",
+        DB: { prepare() { dbCalls++; throw new Error("No database access allowed for unverified checkout"); } } } as unknown as Env));
+      assert.equal(response.status, 500, item.name);
+      assert.equal(dbCalls, 0, `${item.name}: no trial, entitlement, subscription, scheduling or other database writes`);
+      assert.equal(fetches, item.expectedFetches ?? 1, item.name);
+      assert.doesNotMatch(await response.text(), /private-provider-diagnostic|cus_other|sub_other|price_unknown/);
+    }
+    for (const timestamp of [String(Math.floor(Date.now() / 1000) - 600), String(Math.floor(Date.now() / 1000) + 600), "NaN", "0", "1e12"]) {
+      let touched = false;
+      globalThis.fetch = async () => { touched = true; throw new Error("Unexpected network request"); };
+      const payload = JSON.stringify({ id: "evt_replay", type: "checkout.session.completed", data: { object: safeCheckoutObject } });
+      const response = await webhookHandler(makeContext(webhookHandler, new Request("https://local.test/api/stripe/webhook", {
+        method: "POST", body: payload, headers: { "stripe-signature": await stripeSignatureHeader(payload, "whsec_test", timestamp) },
+      }), { STRIPE_WEBHOOK_SECRET: "whsec_test", DB: { prepare() { touched = true; throw new Error("Unexpected database request"); } } } as unknown as Env));
+      assert.equal(response.status, 400, "Even a correctly signed stale/future/malformed timestamp must fail");
+      assert.equal(touched, false);
+    }
+    const bindings: unknown[][] = [];
+    globalThis.fetch = async () => new Response(JSON.stringify({ ...safeSubscription, status: "canceled" }));
+    const payload = JSON.stringify({ id: "evt_delayed", type: "checkout.session.completed", data: { object: { ...safeCheckoutObject, subscription: safeSubscription } } });
+    const delayed = await webhookHandler(makeContext(webhookHandler, new Request("https://local.test/api/stripe/webhook", {
+      method: "POST", body: payload, headers: { "stripe-signature": await stripeSignatureHeader(payload, "whsec_test") },
+    }), { ...createFakeEnv({ bindings }), STRIPE_SECRET_KEY: "sk_test_local", STRIPE_WEBHOOK_SECRET: "whsec_test", STRIPE_PRICE_PRO: "price_safe" } as Env));
+    assert.equal(delayed.status, 200);
+    assert.ok(bindings.some(values => values.includes("discord-safety") && values.includes("canceled")));
+    assert.equal(bindings.some(values => values.includes("discord-safety") && values.includes("active")), false,
+      "Delayed expanded checkout must not resurrect access canceled at Stripe");
+  } finally { globalThis.fetch = originalFetch; }
+
   const webhookPayload = JSON.stringify({
     id: "evt_checkout",
     type: "checkout.session.completed",
     data: {
       object: {
         id: "cs_test",
+        mode: "subscription",
         customer: "cus_test",
         subscription: "sub_test",
         metadata: { discord_user_id: "discord-webhook", plan_key: "pro" },
@@ -767,6 +829,7 @@ async function run() {
     data: {
       object: {
         id: "cs_starter",
+        mode: "subscription",
         customer: "cus_starter",
         subscription: "sub_starter",
         metadata: { discord_user_id: "discord-starter-webhook", plan_key: "starter" },
@@ -1017,8 +1080,7 @@ function makeContext(handler: PagesFunction, request: Request, env: Env): Parame
   };
 }
 
-async function stripeSignatureHeader(payload: string, secret: string) {
-  const timestamp = "1770000000";
+async function stripeSignatureHeader(payload: string, secret: string, timestamp = String(Math.floor(Date.now() / 1000))) {
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),

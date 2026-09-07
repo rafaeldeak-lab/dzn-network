@@ -125,6 +125,10 @@ export async function verifyStripeWebhook(request: Request, webhookSecret: strin
     .filter((part) => part.startsWith("v1="))
     .map((part) => part.slice(3));
   if (!timestamp || expected.length === 0) throw new Error("Invalid Stripe signature.");
+  const signedAt = Number(timestamp);
+  if (!/^\d+$/.test(timestamp) || !Number.isSafeInteger(signedAt) || Math.abs(Math.floor(Date.now() / 1000) - signedAt) > 300) {
+    throw new Error("Stripe signature timestamp is outside the allowed window.");
+  }
 
   const signedPayload = `${timestamp}.${body}`;
   const key = await crypto.subtle.importKey(
