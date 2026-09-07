@@ -20,6 +20,7 @@ export type StripeSubscription = {
   id: string;
   customer: string | { id: string };
   status: string;
+  metadata?: Record<string, string | null> | null;
   current_period_start?: number | null;
   current_period_end?: number | null;
   cancel_at_period_end?: boolean;

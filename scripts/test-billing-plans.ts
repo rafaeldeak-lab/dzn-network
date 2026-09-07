@@ -905,6 +905,7 @@ async function run() {
       },
     },
   });
+  globalThis.fetch = async () => Response.json(JSON.parse(rootPeriodPayload).data.object);
   const rootPeriodResponse = await webhookHandler(makeContext(
     webhookHandler,
     new Request("https://local.test/api/stripe/webhook", {
@@ -914,10 +915,12 @@ async function run() {
     }),
     {
       ...createFakeEnv({ bindings: rootPeriodBindings }),
+      STRIPE_SECRET_KEY: "sk_test_placeholder",
       STRIPE_WEBHOOK_SECRET: "whsec_test",
       NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
     } as Env,
   ));
+  globalThis.fetch = originalFetch;
   assert.equal(rootPeriodResponse.status, 200);
   assert.equal(rootPeriodBindings.some((values) => values.includes("2026-06-17T00:00:00.000Z")), true);
   assert.equal(rootPeriodBindings.some((values) => values.includes(1)), true);
@@ -926,6 +929,8 @@ async function run() {
   const deletedEnv = createFakeEnv({
     account: {
       discord_user_id: "discord-deleted",
+      stripe_customer_id: "cus_deleted",
+      stripe_subscription_id: "sub_deleted",
       plan_key: "pro",
       plan_status: "active",
       current_period_start: "2026-05-01T00:00:00.000Z",
@@ -950,6 +955,7 @@ async function run() {
       },
     },
   });
+  globalThis.fetch = async () => Response.json(JSON.parse(deletedPayload).data.object);
   const deletedResponse = await webhookHandler(makeContext(
     webhookHandler,
     new Request("https://local.test/api/stripe/webhook", {
@@ -959,10 +965,12 @@ async function run() {
     }),
     {
       ...deletedEnv,
+      STRIPE_SECRET_KEY: "sk_test_placeholder",
       STRIPE_WEBHOOK_SECRET: "whsec_test",
       NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
     } as Env,
   ));
+  globalThis.fetch = originalFetch;
   assert.equal(deletedResponse.status, 200);
   assert.equal(deletedBindings.some((values) => values.includes("discord-deleted") && values.includes("free")), true);
 
@@ -1052,6 +1060,7 @@ function createFakeEnv(options: {
             return null;
           },
           async all() {
+            if (/FROM owner_billing_accounts/i.test(query) && options.account) return { success: true, meta: {}, results: [options.account] };
             return { success: true, meta: {}, results: [] };
           },
           async raw() {
