@@ -76,6 +76,7 @@ export async function createOrResumeCheckout(env: Env, request: Request, input: 
     const params = {
       mode: "subscription", "line_items[0][price]": input.priceId, "line_items[0][quantity]": 1,
       ...(customerId ? { customer: customerId } : {}), payment_method_collection: "always",
+      "payment_method_types[0]": "card", "adaptive_pricing[enabled]": false,
       client_reference_id: input.discordUserId,
       success_url: billingRedirectUrl(env, request, input.returnTo, "success"),
       cancel_url: billingRedirectUrl(env, request, input.returnTo, "cancelled"),

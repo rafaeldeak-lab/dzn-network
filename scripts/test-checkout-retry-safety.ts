@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { createSession } from "../functions/_lib/db";
 import { CHECKOUT_RETRY_SECONDS } from "../functions/_lib/billing-checkout";
@@ -146,6 +147,26 @@ async function run() {
   assert.throws(() => interrupted.db.sqlite.prepare("UPDATE billing_checkout_attempts SET params_json = '{}' WHERE state != 'closed'").run(), /immutable/);
   assert.throws(() => interrupted.db.sqlite.prepare("UPDATE billing_checkout_attempts SET discord_user_id = 'someone-else'").run(), /immutable/);
   console.log("PASS post-provider database failure resumes same immutable request across changed prices/redirects");
+
+  const legacy = await fixture();
+  const legacyParams = JSON.parse(String(savedParams)) as Record<string, unknown>;
+  delete legacyParams["payment_method_types[0]"];
+  delete legacyParams["adaptive_pricing[enabled]"];
+  const legacyId = randomUUID();
+  legacyParams["metadata[dzn_checkout_attempt_id]"] = legacyId;
+  const legacyRow = { ...attempt(interrupted), id: legacyId, params_json: JSON.stringify(legacyParams),
+    state: "request_started", stripe_session_id: null };
+  const columns = Object.keys(legacyRow);
+  legacy.db.sqlite.prepare(`INSERT INTO billing_checkout_attempts (${columns.join(",")}) VALUES (${columns.map(() => "?").join(",")})`)
+    .run(...Object.values(legacyRow));
+  await request(legacy, "pro", { expected: 200 });
+  const legacyPost = calls.filter(call => call.method === "POST").at(-1)!;
+  const legacyBody = new URLSearchParams(legacyPost.body);
+  assert.equal(legacyBody.has("payment_method_types[0]"), false);
+  assert.equal(legacyBody.has("adaptive_pricing[enabled]"), false);
+  assert.equal(attempt(legacy).params_json, legacyRow.params_json);
+  assert.equal(legacyPost.key, `dzn-checkout-${legacyId}`);
+  console.log("PASS pre-release uncertain attempts retain their original method/currency parameters and key without retroactive changes");
 
   const expiredWindow = await fixture();
   failAfterCreate = true;

@@ -26,7 +26,8 @@ const ledgerRows = (f: Fixture) => ["billing_checkout_attempts", "owner_starter_
 async function request(f: Fixture, plan: "starter" | "pro", status: number, token = f.token) {
   const response = await onRequest({ env: f.env, request: new Request("https://local.test/api/billing/create-checkout-session", {
     method: "POST", headers: { cookie: `dzn_session=${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ plan_key: plan, returnTo: "/setup", price: "price_forged", amount: 1, currency: "usd", trial_period_days: 99 }),
+    body: JSON.stringify({ plan_key: plan, returnTo: "/setup", price: "price_forged", amount: 1, currency: "usd", trial_period_days: 99,
+      payment_method_types: ["klarna"], adaptive_pricing: { enabled: true } }),
   }), params: {}, data: {}, waitUntil() {}, next: async () => new Response(null, { status: 404 }) });
   const body = await response.json() as { errorCode?: string; url?: string };
   assert.equal(response.status, status, JSON.stringify(body));
@@ -89,6 +90,9 @@ async function run() {
     const params = new URLSearchParams([...sessions.values()].at(-1)!.body);
     assert.equal(params.get("line_items[0][price]"), `price_${plan}_fixture`);
     assert.equal(params.get("line_items[0][quantity]"), "1"); assert.equal(params.get("payment_method_collection"), "always");
+    assert.equal(params.get("payment_method_types[0]"), "card");
+    assert.equal(params.has("payment_method_types[1]"), false);
+    assert.equal(params.get("adaptive_pricing[enabled]"), "false");
     assert.equal(params.get("subscription_data[trial_period_days]"), plan === "starter" ? "2" : null);
     assert.equal(params.has("amount"), false); assert.equal(params.get("allow_promotion_codes"), "false");
     assert.deepEqual(protectedRows(f), [[], []]);
