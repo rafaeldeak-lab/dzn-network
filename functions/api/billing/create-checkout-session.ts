@@ -12,6 +12,7 @@ import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 type CheckoutBody = {
   plan_key?: string;
   returnTo?: string;
+  accepted_offer?: unknown;
 };
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -38,13 +39,13 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   try {
     const result = await createOrResumeCheckout(env, request, {
-      discordUserId: user.discord_id, planKey, priceId, returnTo: body.returnTo ?? "/dashboard",
+      discordUserId: user.discord_id, planKey, priceId, returnTo: body.returnTo ?? "/dashboard", acceptedOffer: body.accepted_offer,
     });
     return json(result, { headers: { "Cache-Control": "private, no-store", Vary: "Cookie" } });
   } catch (error) {
     const known = error instanceof CheckoutRecoveryError;
     return json({ error: known ? error.message : "Checkout is temporarily unavailable. Please try again later.",
-      errorCode: known ? error.code : "CHECKOUT_UNAVAILABLE" }, {
+      errorCode: known ? error.code : "CHECKOUT_UNAVAILABLE", ...(known && error.offer ? { offer: error.offer } : {}) }, {
       status: known ? error.status : 503,
       headers: { "Cache-Control": "private, no-store", Vary: "Cookie" },
     });

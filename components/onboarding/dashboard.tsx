@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { StarterCheckoutButton } from "./starter-checkout-button";
 import {
   Activity,
   AlertTriangle,
@@ -5182,7 +5183,7 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
   const [portalBusy, setPortalBusy] = useState(false);
   const planKey = billing?.plan_key ?? "free";
   const displayPlans = plans.length ? plans : billingPlans.map((plan) => fallbackBillingPlan(plan));
-  const visiblePlans = displayPlans.filter((plan) => plan.plan_key === "pro" || plan.plan_key === planKey);
+  const visiblePlans = displayPlans.filter((plan) => plan.plan_key === "pro" || plan.plan_key === "starter");
 
   async function upgrade(planKey: "starter" | "pro") {
     setBusyPlan(planKey);
@@ -5236,8 +5237,8 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
           const checkoutState = billingPlanCheckoutState(plan, readiness);
           return (
             <div key={plan.plan_key} className="rounded-lg border border-white/10 bg-black/24 p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
+              <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
+                <div className="min-w-0">
                   <p className="text-sm font-black uppercase text-white">{billingPlanDisplayName(plan)} <span className="text-violet-200">{billingPlanDisplayPrice(plan)}</span></p>
                   <p className="mt-1 text-xs leading-5 text-zinc-400">
                     {billingPlanListingSummary(plan)}
@@ -5254,14 +5255,17 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
                     {checkoutState.statusLabel}
                   </p>
                 </div>
-                <button
+                {plan.plan_key === "starter" ? <StarterCheckoutButton
+                  disabled={busyPlan !== null || plan.plan_key === planKey || !checkoutState.enabled}
+                  label={plan.plan_key === planKey ? "Current Plan" : !checkoutState.enabled ? checkoutState.buttonLabel : "Choose Starter"}
+                /> : <button
                   type="button"
                   disabled={busyPlan !== null || plan.plan_key === planKey || !checkoutState.enabled}
                   onClick={() => upgrade(plan.plan_key)}
                   className="shrink-0 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {plan.plan_key === planKey ? "Current Plan" : !checkoutState.enabled ? checkoutState.buttonLabel : busyPlan === plan.plan_key ? "Opening..." : "Upgrade"}
-                </button>
+                </button>}
               </div>
             </div>
           );
@@ -5294,6 +5298,7 @@ function billingPlanDisplayName(plan: BillingPlanSummary) {
 }
 
 function billingPlanDisplayPrice(plan: BillingPlanSummary) {
+  if (plan.plan_key === "starter") return "£2/month; 2-day free trial for eligible accounts";
   return plan.price_label;
 }
 

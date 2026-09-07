@@ -139,10 +139,10 @@ export async function getBillingReadiness() {
   return request<BillingReadinessResponse>("/api/billing/readiness", { cache: "no-store" });
 }
 
-export async function createCheckoutSession(planKey: "starter" | "pro", returnTo = "/dashboard") {
+export async function createCheckoutSession(planKey: "starter" | "pro", returnTo = "/dashboard", acceptedOffer?: string) {
   return request<{ url: string }>("/api/billing/create-checkout-session", {
     method: "POST",
-    body: JSON.stringify({ plan_key: planKey, returnTo }),
+    body: JSON.stringify({ plan_key: planKey, returnTo, ...(acceptedOffer ? { accepted_offer: acceptedOffer } : {}) }),
   });
 }
 
@@ -557,6 +557,10 @@ export async function logoutAndRedirect() {
   window.location.href = "/";
 }
 
+export class ApiRequestError extends Error {
+  constructor(message: string, readonly errorCode?: string, readonly offer?: unknown) { super(message); }
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     cache: init.cache ?? "no-store",
@@ -568,8 +572,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     ...init,
   });
 
-  const data = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) throw new Error(data.error || `Request failed: ${response.status}`);
+  const data = (await response.json().catch(() => ({}))) as T & { error?: string; errorCode?: string; offer?: unknown };
+  if (!response.ok) throw new ApiRequestError(data.error || `Request failed: ${response.status}`, data.errorCode, data.offer);
   return data;
 }
 
