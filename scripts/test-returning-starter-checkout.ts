@@ -82,6 +82,8 @@ async function run() {
     assert.equal(call.params.has("subscription_data[trial_period_days]"), false);
     assert.equal(call.params.has("subscription_data[trial_settings][end_behavior][missing_payment_method]"), false);
     assert.equal(call.params.get("allow_promotion_codes"), "false");
+    assert.equal(call.params.get("payment_method_types[0]"), "card");
+    assert.equal(call.params.get("adaptive_pricing[enabled]"), "false");
     assert.match(call.params.get("custom_text[submit][message]")!, /No new free trial/);
   }
   assert.deepEqual(rows(f, "owner_starter_trial_claims"), prior);
