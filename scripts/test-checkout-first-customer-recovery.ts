@@ -29,12 +29,12 @@ async function fixture() {
   f.db.allWrites = [];
   return { ...f, token: session.token };
 }
-async function request(f: Fixture, plan = "pro", expected = 200, authenticated = true) {
+async function request(f: Fixture, plan = "pro", expected = 200, authenticated = true, acceptedOffer?: string) {
   const response = await checkout({ env: f.env, request: new Request("https://local.test/api/billing/create-checkout-session", {
     method: "POST", headers: { "Content-Type": "application/json", ...(authenticated ? { cookie: `dzn_session=${f.token}` } : {}) },
-    body: JSON.stringify({ plan_key: plan, returnTo: "/setup", discord_user_id: "discord-other", stripe_customer_id: "cus_forged" }),
+    body: JSON.stringify({ plan_key: plan, returnTo: "/setup", discord_user_id: "discord-other", stripe_customer_id: "cus_forged", accepted_offer: acceptedOffer }),
   }), params: {}, data: {}, waitUntil() {}, next: async () => new Response(null, { status: 404 }) });
-  const body = await response.json() as { errorCode?: string; url?: string };
+  const body = await response.json() as { errorCode?: string; url?: string; offer?: { confirmation: string } };
   assert.equal(response.status, expected, JSON.stringify(body));
   assert.doesNotMatch(JSON.stringify(body), /cus_|sub_|discord-|params_json|whsec|sk_test|fingerprint/);
   if (authenticated) assert.match(response.headers.get("Cache-Control") ?? "", /private, no-store/);
@@ -72,9 +72,12 @@ async function run() {
   globalThis.fetch = async (input, init) => {
     const url = String(input);
     const method = init?.method ?? "GET";
-    assert.match(url, /^https:\/\/api\.stripe\.com\/v1\/(checkout\/sessions(?:\/cs_fixture_\d+)?|subscriptions\/sub_fixture_\d+)$/);
+    assert.match(url, /^https:\/\/api\.stripe\.com\/v1\/(checkout\/sessions(?:\/cs_fixture_\d+)?|subscriptions\/sub_fixture_\d+|prices\/price_starter_fixture)$/);
     const params = new URLSearchParams(String(init?.body ?? ""));
     calls.push({ method, params, key: new Headers(init?.headers).get("Idempotency-Key") });
+    if (url.includes("/prices/")) return Response.json({ id: "price_starter_fixture", active: true, livemode: false,
+      currency: "gbp", unit_amount: 200, type: "recurring", billing_scheme: "per_unit",
+      recurring: { interval: "month", interval_count: 1, usage_type: "licensed" } });
     if (url.includes("/subscriptions/")) { assert.equal(method, "GET"); return Response.json(subscriptions.get(url.split("/").at(-1)!)); }
     if (method === "GET") return Response.json(sessionOverride ?? sessions.get(url.split("/").at(-1)!));
     assert.equal(method, "POST");
@@ -83,7 +86,7 @@ async function run() {
     if (throwAfterCreate) { throwAfterCreate = false; throw new Error("synthetic lost response"); }
     return Response.json(session);
   };
-  for (const plan of ["starter", "pro"]) {
+  for (const [plan, replacement] of [["starter", "pro"], ["pro", "pro"], ["starter", "starter"]]) {
     const f = await fixture();
     const linked = f.db.sqlite.prepare("SELECT * FROM linked_servers ORDER BY 1").all();
     const { session, sub } = await completeAndCancel(f, plan);
@@ -100,22 +103,23 @@ async function run() {
     assert.equal(account(f)?.plan_status, "canceled");
     assert.equal(f.db.sqlite.prepare("SELECT plan_key FROM owner_plan_entitlements").get()?.plan_key, "free");
     assert.deepEqual(f.db.sqlite.prepare("SELECT * FROM owner_starter_trial_claims").all(), claim);
-    if (plan === "starter") assert.equal((await request(f, "starter", 409)).errorCode, "STARTER_TRIAL_UNAVAILABLE");
-    await request(f, "pro");
+    if (plan === "starter") assert.equal((await request(f, "starter", 409)).errorCode, "STARTER_PAID_CONFIRMATION_REQUIRED");
+    const paidOffer = replacement === "starter" ? (await request(f, "starter", 409)).offer!.confirmation : undefined;
+    await request(f, replacement, 200, true, paidOffer);
     const newPost = calls.filter(call => call.method === "POST").at(-1)!;
     assert.equal(newPost.params.get("customer"), session.customer);
     assert.notEqual(newPost.key, oldPosts.at(-1)!.key);
     assert.equal(newPost.params.has("subscription_data[trial_period_days]"), false);
     const next = sessions.get(`cs_fixture_${created}`)!;
-    const nextSub = { ...sub, id: `sub_fixture_${created}`, status: "active", items: { data: [{ price: { id: "price_pro_fixture" } }] } };
+    const nextSub = { ...sub, id: `sub_fixture_${created}`, status: "active", items: { data: [{ price: { id: replacement === "starter" ? "price_starter_fixture" : "price_pro_fixture" } }] } };
     Object.assign(next, { status: "complete", subscription: nextSub.id });
     subscriptions.set(nextSub.id, nextSub);
     await paymentEvent(f, "checkout.session.completed", next);
     assert.equal(account(f)?.stripe_subscription_id, nextSub.id);
-    assert.equal(account(f)?.plan_key, "pro");
+    assert.equal(account(f)?.plan_key, replacement);
     assert.deepEqual(f.db.sqlite.prepare("SELECT * FROM linked_servers ORDER BY 1").all(), linked);
     assert.equal(account(f)?.discord_user_id, "discord-owner");
-    console.log(`PASS first-time ${plan}: signed completion/customer assignment/cancellation, GET-only close, fresh deliberate Pro checkout and verified replacement; no reused trial`);
+    console.log(`PASS first-time ${plan}: signed completion/customer assignment/cancellation, GET-only close, fresh deliberate ${replacement} checkout and verified replacement; no reused trial`);
   }
 
   const denied = await fixture();
