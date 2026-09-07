@@ -4,7 +4,7 @@ import { isBillingTrialRemindersEnabled } from "./feature-flags";
 import { trialReminderStateStatement } from "./billing-trial-reminders";
 import { billingAccountStatement, getPlanFromStripePriceId,
   normalizePlanKey, ownerEntitlementsStatement, starterTrialClaimStatement } from "./plans";
-import { retrieveStripeSubscription, stripeId, stripeSubscriptionPeriodEnd, stripeSubscriptionPeriodStart,
+import { retrieveStripeSubscription, stripeId, stripeTimestamp, stripeSubscriptionPeriodEnd, stripeSubscriptionPeriodStart,
   stripeSubscriptionPriceId, type StripeEvent } from "./stripe";
 import type { Env } from "./types";
 
@@ -53,6 +53,11 @@ export async function reconcileBillingWebhook(env: Env, event: StripeEvent) {
   if (planKey === "free" && ["active", "trialing"].includes(subscription.status)) throw new Error("Unknown active Price");
   const currentPeriodStart = stripeSubscriptionPeriodStart(subscription);
   const currentPeriodEnd = stripeSubscriptionPeriodEnd(subscription);
+  if (subscription.cancel_at != null && (typeof subscription.cancel_at !== "number" ||
+      !Number.isSafeInteger(subscription.cancel_at) || subscription.cancel_at <= 0)) throw new Error("Invalid cancellation date");
+  const cancelAt = stripeTimestamp(subscription.cancel_at);
+  // Stripe's hosted portal can use a cancellation date without setting its boolean.
+  const cancelAtPeriodEnd = subscription.cancel_at_period_end === true || (cancelAt !== null && cancelAt === currentPeriodEnd);
   const terminal = ["canceled", "incomplete_expired"].includes(subscription.status);
   if ((!terminal && (!currentPeriodStart || !currentPeriodEnd)) || (currentPeriodStart && currentPeriodEnd && currentPeriodStart >= currentPeriodEnd) ||
       (subscription.cancel_at_period_end !== undefined && typeof subscription.cancel_at_period_end !== "boolean")) throw new Error("Invalid billing period");
@@ -108,7 +113,7 @@ export async function reconcileBillingWebhook(env: Env, event: StripeEvent) {
     ON CONFLICT(stripe_mode, stripe_customer_id) DO UPDATE SET version = billing_webhook_versions.version + 1`).bind(mode, customerId)];
   if (!superseded) {
     const values = { stripeCustomerId: customerId, stripeSubscriptionId: subscriptionId, planKey, status: subscription.status,
-      currentPeriodStart, currentPeriodEnd, cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end) };
+      currentPeriodStart, currentPeriodEnd, cancelAtPeriodEnd };
     if (planKey === "starter") {
       statements.push(starterTrialClaimStatement(env, { discordUserId: owner, ...values, checkoutSessionId: checkout ? stripeId(object.id) : null }));
     }

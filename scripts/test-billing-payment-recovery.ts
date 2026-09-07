@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { syncServerSubscriptionsForOwner } from "../functions/_lib/automation";
-import { upsertBillingAccount } from "../functions/_lib/plans";
+import { getOwnerBillingStatus, upsertBillingAccount } from "../functions/_lib/plans";
 import { createWebhookFixture, type WebhookFixtureDb } from "./fixtures/billing-webhook";
 import { onRequest } from "../functions/api/stripe/webhook";
 import type { Env } from "../functions/_lib/types";
@@ -65,6 +65,7 @@ async function unchanged(type: string, object: Row, expected = 500) {
 
 async function main() {
   ({ db, env } = await createWebhookFixture());
+  db.sqlite.exec("ALTER TABLE linked_servers ADD COLUMN nitrado_service_id TEXT");
   for (const owner of ["owner", "other"]) {
     const values = {
       stripeCustomerId: `cus_${owner}`, stripeSubscriptionId: `sub_${owner}`, planKey: "starter" as const,
@@ -117,6 +118,31 @@ async function main() {
   provider = subscription();
   await deliver("customer.subscription.updated", subscription({ cancel_at_period_end: true }));
   expectState("active");
+  // The hosted portal can schedule the exact period end using cancel_at alone.
+  for (const status of ["active", "trialing"]) {
+    provider = subscription({ status, current_period_start: undefined, current_period_end: undefined,
+      cancel_at_period_end: false, cancel_at: periodEnd,
+      items: { data: [{ price: { id: "price_starter_fixture" }, current_period_start: periodStart, current_period_end: periodEnd }] } });
+    await deliver("customer.subscription.updated", subscription());
+    expectState(status, periodEnd, true);
+    const published = await getOwnerBillingStatus(env, { id: "user-owner", discord_id: "discord-owner", username: "Synthetic owner", avatar: null });
+    assert.equal(published.cancel_at_period_end, true);
+    assert.equal(published.current_period_end, iso(periodEnd));
+    assert.equal(published.plan_key, "starter", "Scheduled cancellation does not revoke the remaining period.");
+    const claimedTrial = row("owner_starter_trial_claims", "discord_user_id", "discord-owner");
+    assert.equal(typeof claimedTrial.claimed_at, "string");
+    provider = subscription({ status, cancel_at_period_end: false, cancel_at: null });
+    await deliver("customer.subscription.updated", subscription({ cancel_at: periodEnd }));
+    expectState(status);
+    assert.equal(row("owner_starter_trial_claims", "discord_user_id", "discord-owner").claimed_at, claimedTrial.claimed_at);
+  }
+  provider = subscription({ cancel_at: renewedEnd });
+  await deliver("customer.subscription.updated", subscription());
+  expectState("active", periodEnd, false);
+  provider = subscription({ status: "canceled", cancel_at: periodEnd });
+  await deliver("customer.subscription.deleted", subscription({ status: "canceled" }));
+  expectState("canceled", periodEnd, true);
+  console.log("PASS portal cancel_at at the current period end, undo, later-date distinction and terminal revocation preserve account ownership and trial dates");
   for (const status of ["trialing", "past_due", "unpaid", "paused", "incomplete", "incomplete_expired", "canceled"]) {
     provider = subscription({ status });
     await deliver(status === "canceled" ? "customer.subscription.deleted" : "customer.subscription.updated", subscription({ status }));
@@ -153,6 +179,7 @@ async function main() {
     null, subscription({ id: "sub_other" }), subscription({ customer: "cus_other" }),
     subscription({ status: "invented" }), subscription({ current_period_end: null }),
     subscription({ current_period_end: periodStart - 1 }), subscription({ cancel_at_period_end: "false" }),
+    ...["1790812800", true, 0, -1, 1790812800.5, {}, 8640000000001].map(cancel_at => subscription({ cancel_at })),
     subscription({ items: { data: [{ price: { id: "price_unknown" } }] }, metadata: { discord_user_id: "discord-owner", plan_key: "pro" } }),
     subscription({ metadata: { discord_user_id: "discord-other" } }),
   ]) {
