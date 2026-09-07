@@ -18,12 +18,12 @@ export default function RefundsPage() {
 
       <PolicySection title="When cancellation takes effect">
         <p>Turning off renewal normally keeps the subscription available until the end of its current trial or paid billing period, then prevents the next scheduled renewal. Cancellation does not automatically refund a payment already completed.</p>
-        <p>If Manage Billing is unavailable, contact DZN support before the next renewal and include the email address used for the DZN account. Do not send card details or passwords.</p>
+        <p>If Manage Billing is unavailable, contact DZN support before the next renewal and include your DZN Discord username and Discord user ID. You may separately include the email shown on the relevant Stripe receipt. Do not send card details or passwords.</p>
       </PolicySection>
 
       <PolicySection title="Refund requests and billing errors">
         <p>Refund requests are reviewed individually under these terms and applicable law. DZN will correct confirmed duplicate charges or billing errors and will provide a refund where required by law. This policy does not limit statutory consumer rights.</p>
-        <p>For an unauthorised payment, duplicate charge, service failure, or other billing problem, contact <a className="font-bold text-cyan-200 underline underline-offset-4" href={DZN_SUPPORT_EMAIL_HREF}>{DZN_SUPPORT_EMAIL}</a> promptly with the DZN account email, date, amount, and a short description. Do not include full card details.</p>
+        <p>For an unauthorised payment, duplicate charge, service failure, or other billing problem, contact <a className="font-bold text-cyan-200 underline underline-offset-4" href={DZN_SUPPORT_EMAIL_HREF}>{DZN_SUPPORT_EMAIL}</a> promptly with your DZN Discord username and Discord user ID, the email shown on the relevant Stripe receipt, the date, amount, and a short description. Do not include full card details.</p>
         <p>Approved refunds are returned through Stripe to the original payment method. Bank processing times are outside DZN&apos;s control.</p>
       </PolicySection>
 

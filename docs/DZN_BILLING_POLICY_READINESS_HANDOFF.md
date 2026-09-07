@@ -33,6 +33,18 @@ readiness evidence, not a solicitor's certification of every legal obligation.
 The owner should obtain professional review when practical, especially before
 selling broadly outside the UK or changing tax/VAT status.
 
+## Unresolved public seller disclosure
+
+Live checkout remains blocked until the owner confirms the exact legal seller
+name and a geographic business correspondence address that may be published to
+customers. DZN Network is a trading name and must not be substituted for an
+unconfirmed legal identity. A private or home address must not be inferred from
+provider records or published without the owner's explicit decision.
+
+The support flow identifies an account using the signed-in Discord username and
+Discord user ID. The Stripe receipt email is requested separately as a payment
+reference because DZN does not store an email address for every Discord account.
+
 ## Validation
 
 - `npm run test:payment-copy` passed.
@@ -54,11 +66,13 @@ selling broadly outside the UK or changing tax/VAT status.
 
 ## Activation and rollback boundary
 
-Release this code before changing Stripe Checkout policy links or enabling live
-checkout. After the pages are live, Stripe can point its public Terms and Privacy
-links at them and display DZN support details. Refund emails can be enabled as a
-separate provider setting. Recheck production billing readiness and public plan
-copy after those changes.
+Do not release this code as checkout-ready or enable live checkout until the
+public legal seller identity and geographic business correspondence address are
+confirmed and included in the customer terms. After that blocker is resolved
+and the pages are live, Stripe can point its public Terms and Privacy links at
+them and display DZN support details. Refund emails can be enabled as a separate
+provider setting. Recheck production billing readiness and public plan copy
+after those changes.
 
 Live checkout still requires an explicit controlled production flag change.
 Enabling `DZN_LIVE_CHECKOUT_ENABLED` permits real Checkout Session creation; it
