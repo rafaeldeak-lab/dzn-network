@@ -71,7 +71,7 @@ Private player APIs are not public APIs. `/api/player/saved-servers` requires a 
 Post-merge verification should expect:
 
 - `/` returns `200`.
-- `/pricing` returns `200` and opens the homepage pricing comparison.
+- `/pricing` returns `200` with a dedicated server-rendered owner comparison and payment FAQ. The homepage only contains a short pricing teaser.
 - Logged-out direct app pages such as `/player`, `/player/profile`, `/events`, `/leaderboards`, `/servers`, `/dashboard`, `/setup`, `/dzn-pulse`, and `/seasons` return a login redirect.
 - Logged-out header/navigation does not expose app/product controls, while authenticated headers show package-appropriate Starter/Pro actions.
 - The dashboard sidebar shows package-aware guidance: trial-safe tools, Pro locks/upgrade prompts, or active Pro tools based on the authenticated account summary.

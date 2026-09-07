@@ -231,10 +231,12 @@ const PLAN_MARKETING: Record<PurchasablePlanKey, {
 }> = {
   starter: {
     name: "Starter",
-    price_label: "£0 today, then £2/month",
+    price_label: "£2/month; eligible accounts get a 2-day free trial",
     monthly_price_gbp: 2,
     features: [
-      "2-day free trial",
+      "2-day free trial for eligible accounts",
+      "Payment method required; monthly renewal until cancelled",
+      "Used trials do not restart; returning accounts confirm £2 now",
       "Then £2/month",
       "Standard listing",
       "1 linked DayZ server",
@@ -249,8 +251,9 @@ const PLAN_MARKETING: Record<PurchasablePlanKey, {
     price_label: "£10/month",
     monthly_price_gbp: 10,
     features: [
-      "Full DZN Access",
-      "Charged immediately",
+      "Advanced server-owner tools",
+      "£10 due when payment is confirmed; no free trial",
+      "Renews at £10/month until cancelled",
       "Up to 3 linked DayZ servers",
       "Public/advert publication every 24h",
       "Enhanced discovery and profile tools",

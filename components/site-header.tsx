@@ -73,7 +73,7 @@ const rootHeaderHiddenPrefixes = [
 
 const loggedOutHeaderLinks: HeaderNavLink[] = [
   { href: "/#features", label: "Features", active: "features", icon: Sparkles },
-  { href: "/#pricing", label: "Pricing", active: "pricing", icon: Crown },
+  { href: "/pricing", label: "Pricing", active: "pricing", icon: Crown },
 ];
 
 const starterHeaderLinks: HeaderNavLink[] = [
@@ -233,7 +233,7 @@ export function SiteHeader({
               <span className={`dzn-header-plan dzn-header-plan--${planTier}`} title={headerPlanTitle(resolvedNavigation)}>
                 <Crown className="dzn-header-plan-icon" aria-hidden="true" />
                 <span className="dzn-header-plan-copy">
-                  <span>{resolvedNavigation?.plan_label ?? "Free"}</span>
+                  <span>{planTier === "free" ? "Free Player" : resolvedNavigation?.plan_label ?? "Free Player"}</span>
                   <small>{headerPlanDetail(resolvedNavigation)}</small>
                 </span>
               </span>
@@ -380,8 +380,8 @@ function normalizeHeaderNavigation(value: unknown): AuthNavigationSummary | null
 
 function defaultPrimaryActionForTier(tier: HeaderPlanTier): HeaderPrimaryAction {
   if (tier === "pro") return { label: "Pro Tools", href: "/dashboard", tone: "pro" };
-  if (tier === "starter") return { label: "Upgrade to Pro", href: "/#pricing", tone: "upgrade" };
-  return { label: "Start Trial", href: "/#pricing", tone: "trial" };
+  if (tier === "starter") return { label: "Upgrade to Pro", href: "/pricing", tone: "upgrade" };
+  return { label: "Owner Plans", href: "/pricing", tone: "trial" };
 }
 
 function headerPlanTitle(navigation: AuthNavigationSummary | null) {
@@ -393,5 +393,5 @@ function headerPlanDetail(navigation: AuthNavigationSummary | null) {
   if (!navigation) return "Account";
   if (navigation.plan_tier === "pro") return "Pro tools";
   if (navigation.plan_tier === "starter") return navigation.plan_status.toLowerCase() === "trialing" ? "Trial access" : "Starter access";
-  return "Trial ready";
+  return "Player access";
 }
