@@ -7,7 +7,7 @@ import { X } from "lucide-react";
 const STORAGE_KEY = "dzn:beta-ticker:hidden:v1";
 const TICKER_HEIGHT = "48px";
 const TICKER_COPY =
-  "DZN Network is live and actively being improved - Basic server listings are free during beta - Some features may change as the platform grows - Found a bug or have an idea? Send feedback";
+  "DZN Network is live and actively being improved - Player access is free; server-owner plans are listed on the Pricing page - Some features may change as the platform grows - Found a bug or have an idea? Send feedback";
 
 export function BetaTicker() {
   const pathname = usePathname() ?? "";

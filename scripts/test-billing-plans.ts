@@ -38,7 +38,7 @@ assert.equal(getPlanConfig("partner").monthly_price, 10);
 
 const publicContracts = getSubscriptionPlanPublicContracts();
 assert.deepEqual(publicContracts.map((contract) => contract.key), ["starter", "pro"]);
-assert.deepEqual(publicContracts.map((contract) => contract.priceLabel), ["£0 today, then £2/month", "£10/month"]);
+assert.deepEqual(publicContracts.map((contract) => contract.priceLabel), ["£2/month; eligible accounts get a 2-day free trial", "£10/month"]);
 assert.deepEqual(publicContracts.map((contract) => contract.trialDays), [2, 0]);
 assert.deepEqual(publicContracts.map((contract) => contract.publicPublishingIntervalMinutes), [4320, 1440]);
 assert.deepEqual(publicContracts.map((contract) => contract.visibilityWeight), [1, 4]);
@@ -168,7 +168,7 @@ assert.equal(planSummaries.find((plan) => plan.plan_key === "pro")?.features.inc
 assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.public_contract.promotionCreditsPerMonth, 0);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "pro")?.public_contract.promotionCreditsPerMonth, 2);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "pro")?.public_contract.discoveryTreatment, "full_dzn_access");
-assert.equal(planSummaries.every((plan) => plan.public_contract.trackingGuarantee.includes("All ADM tracking continues unchanged")), true);
+assert.equal(planSummaries.every((plan) => plan.public_contract.trackingGuarantee.includes("Automatic sync needs completed server setup")), true);
 const planSummaryKeys = planSummaries.map((plan) => String(plan.plan_key));
 assert.equal(planSummaryKeys.includes("network"), false);
 assert.equal(planSummaryKeys.includes("partner"), false);
@@ -244,67 +244,20 @@ assert.equal(JSON.stringify(completeReadiness).includes("whsec_secret_value_must
 assert.equal(JSON.stringify(completeReadiness).includes("price_premium"), false);
 
 const landingSource = readFileSync("components/dzn/dzn-landing-page.tsx", "utf8");
-const pricingSection = landingSource.slice(landingSource.indexOf("const pricingPlans"), landingSource.indexOf("function GameModeGrid"));
-for (const snippet of [
-  "Starter",
-  "Pro",
-  "£0 today, then £2/month",
-  "£10/month",
-  "2-day free trial",
-  "Cancel before trial expiry to pay nothing",
-  "Start Starter trial",
-  "Unlock Pro",
-  "Full DZN Access",
-  "Up to 3 linked DayZ servers",
-  "Payment method required",
-  "Open Pricing Comparison",
-  "role=\"dialog\"",
-  "aria-modal=\"true\"",
-  "Close pricing comparison",
-  "dzn-pricing-modal",
-  "dzn-pricing-modal-open",
-  "createPortal(pricingModal, document.body)",
-  "CheckCircle2",
-  "XCircle",
-  "Pro Launch Advantage",
-  "Pro recommended",
-  "Description limit",
-  "Gallery images",
-  "Custom banner",
-  "Bump cooldown",
-  "Discord channels",
-  "Discord auto posts",
-  "Embed design",
-  "Owner announcement",
-  "Event promotion",
-  "Featured and spotlight eligibility",
-  "Leaderboard/stat advantage",
-  "No paid advantage",
-  "Pro helps your server look better, advertise better and understand performance better.",
-  "Make the server look worth joining",
-  "Quick Answers",
-  "Clear answers about Starter and Pro",
-  "pricingEntrySignals",
-  "pricingValuePillars",
-  "pricingTrustPills",
-  "Fair competition",
-  "Trial first",
-  "Powerful tools",
-  "Community driven",
-  "Leaderboard rankings remain 100% skill-based.",
-  "Does Pro affect leaderboard rank?",
-  "What does Pro improve?",
-  "Do Starter servers still compete?",
-  "Can badges be bought?",
-]) {
-  assert.equal(pricingSection.includes(snippet), true, `Public pricing section should include ${snippet}.`);
+const pricingSection = readFileSync("app/pricing/page.tsx", "utf8");
+for (const snippet of ["Starter", "Pro", "PAYMENT_COPY.starterOffer", "PAYMENT_COPY.proTerms",
+  "PAYMENT_COPY.returningStarter", "PAYMENT_FAQS", "PricingCheckout", "<table", 'scope="row"',
+  "text-green-400", "text-red-400", "Paid competitive advantage", "Eligible, not guaranteed"]) {
+  assert.ok(pricingSection.includes(snippet), `Dedicated pricing must contain ${snippet}`);
 }
-assert.equal(/Premium|Network Listing|Partner Listing|Network plan|Partner plan/.test(pricingSection), false, "Public pricing section must only show Starter/Pro plans.");
-assert.equal(/paid leaderboard rank|leaderboard rank boost|improves leaderboard rank|buy better leaderboard/i.test(pricingSection), false, "Pro pricing copy must not claim paid leaderboard rank.");
-assert.equal(landingSource.includes("import { createPortal } from \"react-dom\";"), true, "Pricing modal should portal to document.body instead of rendering inside the animated pricing section.");
+assert.equal(/Premium|Partner Listing|Network plan|Partner plan/.test(pricingSection), false);
+assert.equal(/paid leaderboard rank|leaderboard rank boost|buy better leaderboard/i.test(pricingSection), false);
+assert.ok(landingSource.includes('href="/pricing"'));
+assert.equal(landingSource.includes("createPortal(pricingModal"), false);
+assert.equal(landingSource.includes("const pricingPlans"), false, "Homepage must not carry a conflicting duplicate plan catalogue");
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
-assert.equal(dashboardSource.includes("Full DZN Access, up to 3 linked servers, custom advert visuals, weekly bumping, enhanced Discord posts, featured and spotlight eligibility, and listing analytics"), true, "Owner billing cards should explain Pro value.");
+assert.equal(dashboardSource.includes("Advanced server-owner tools, up to 3 linked servers, custom advert visuals, weekly bumping, enhanced Discord posts, featured and spotlight eligibility, and listing analytics"), true, "Owner billing cards should explain Pro value.");
 assert.equal(dashboardSource.includes("Upgrade to Premium"), false, "Owner billing and Discord fallback cards should not present Premium as an advertising upgrade.");
 assert.equal(dashboardSource.includes("Promo Credits"), true, "Owner dashboard billing summary should show promotion credit language.");
 assert.equal(dashboardSource.includes("Admin billing readiness warning"), true, "Owner dashboard should include an admin-only billing readiness warning.");

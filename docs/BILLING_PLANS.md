@@ -6,21 +6,24 @@ Only these plans may be shown as new customer-facing checkout options:
 
 | Plan | Public label | Price | Trial | Public/advert publication | Linked servers | Promotion credits |
 | --- | --- | ---: | --- | --- | ---: | ---: |
-| Starter | 2-day free trial | £0 today, then £2/month | 2 days | Every 72 hours after a successful publication | 1 | 0 |
-| Pro | Full DZN Access | £10/month | None | Every 24 hours after a successful publication | 3 | 2 per Stripe billing period |
+| Starter | Server-owner subscription | £2/month | 2 days for eligible accounts only | Every 72 hours after a successful publication | 1 | 0 |
+| Pro | Advanced server-owner tools | £10/month | None | Every 24 hours after a successful publication | 3 | 2 per Stripe billing period |
 
 Starter must not be described simply as free. Customer-facing copy must clearly say:
 
-- "Starter - 2-day free trial"
-- "£0 today, then £2/month."
-- "First payment: £2 after the two-day trial. Cancel before trial expiry to pay nothing."
+- "Eligible accounts: £0 for a 2-day trial, then £2/month."
+- "Payment method required. Your trial starts when you complete checkout in Stripe. DZN verifies the subscription before unlocking owner access."
+- "Cancel before trial expiry to avoid the first subscription payment."
 - "Charged automatically every month until cancelled."
+- "Already used your trial? After separate confirmation, £2 is due when you confirm payment in Stripe, then £2/month, with no new trial."
+
+Player access remains free. It is not the same thing as the Starter owner subscription. Viewing pricing, signing in, requesting checkout or following a success redirect does not grant a trial or owner entitlement.
 
 Pro customer-facing copy must clearly say:
 
-- "Pro - Full DZN Access"
+- "Pro - Advanced server-owner tools"
 - "£10/month."
-- "Charged immediately and renewed monthly until cancelled."
+- "No free trial. First payment is due when you confirm payment in Stripe; renewed monthly until cancelled."
 
 ## Starter Trial Abuse Protection
 
@@ -30,7 +33,7 @@ Before live billing is enabled, DZN must enforce one Starter trial claim per DZN
 
 The durable trial claim is stored in `owner_starter_trial_claims`. A Starter checkout attempt reserves the claim before creating a Stripe Checkout Session so concurrent requests cannot create multiple trial sessions for the same DZN user. After Stripe confirms checkout or subscription state, webhook handling attaches the Stripe customer, subscription, checkout session, and current status to the same claim.
 
-Cancelled, expired, failed, or completed Starter trials still count as used. A customer who has already claimed Starter should choose Pro or manage their existing billing account rather than starting another Starter trial.
+Consumed trial claims remain consumed after cancellation or payment failure. Existing active subscriptions use Manage Billing, not another checkout. Returning customers with no active subscription can explicitly confirm the separate no-trial Starter offer; it never restarts the trial. Checkout retries follow the frozen-attempt and claim lifecycle rules, not a blanket new trial reservation.
 
 Trial enforcement is billing-sensitive. Applying the trial-claim migration, enabling live Stripe prices, changing checkout/webhook behavior, importing existing Stripe customers, or repairing production trial claims remains high-risk billing work requiring human review and explicit approval.
 
@@ -58,6 +61,10 @@ Use `docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md` with Issue #46 before any future 
 ## Public Subscription Contract
 
 The active non-production-mutation contract is stored in `lib/billing/plans.ts` as `SUBSCRIPTION_PLAN_PUBLIC_CONTRACT`. It is safe public metadata for UI, docs, and tests. It does not create Stripe Prices, change live Stripe state, apply production migrations, or mutate production data.
+
+`lib/billing/payment-copy.ts` supplies shared trial, returning-customer, cancellation and recovery disclosures. `/pricing` is the dedicated, server-rendered comparison and payment FAQ page. The homepage has a short teaser only. Both missing and false checkout-readiness fields keep its actions disabled; the backend remains authoritative on every attempt. Legacy `/#pricing` links reach the teaser, not an automatic checkout or modal.
+
+Before launch, separately verify the legal seller, billing contact, tax treatment, purchase/refund terms, receipt configuration and hosted Stripe disclosures. Do not invent refund promises or tax-inclusive/exclusive claims. The local copy audit is not evidence that those commercial settings are complete.
 
 | Plan | Discovery treatment | Badge showcase | Organic bump cooldown |
 | --- | --- | ---: | --- |

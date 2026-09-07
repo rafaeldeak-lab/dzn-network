@@ -558,7 +558,7 @@ export async function logoutAndRedirect() {
 }
 
 export class ApiRequestError extends Error {
-  constructor(message: string, readonly errorCode?: string, readonly offer?: unknown) { super(message); }
+  constructor(message: string, readonly errorCode?: string, readonly offer?: unknown, readonly status?: number) { super(message); }
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -573,7 +573,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
 
   const data = (await response.json().catch(() => ({}))) as T & { error?: string; errorCode?: string; offer?: unknown };
-  if (!response.ok) throw new ApiRequestError(data.error || `Request failed: ${response.status}`, data.errorCode, data.offer);
+  if (!response.ok) throw new ApiRequestError(data.error || `Request failed: ${response.status}`, data.errorCode, data.offer, response.status);
   return data;
 }
 
