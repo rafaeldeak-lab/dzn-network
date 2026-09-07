@@ -60,11 +60,18 @@ recorded as failing, not overwritten with a pass. Cleanup then cancelled only
 the synthetic subscription immediately and verified genuine revocation delivery.
 The receiver stopped and the dedicated CLI context was logged out.
 
-Those external-service results used the original PR #163 runtime. The corrected
-scheduled-cancellation display still needs a connected rerun after review; the
-real scheduled period-end clock advancement was not completed. Local retries of
-original signed events handled concurrency collisions; this does not prove
-Stripe's automatic redelivery schedule, production D1, or live secret bindings.
+The corrected commit was then rerun with a fresh disposable Stripe TEST-clock
+subscription and actual DZN handlers. DZN recognised the portal's date-only
+cancellation shape, retained Starter through the paid period, and moved the
+synthetic owner to Free/canceled when the clock reached that period end. The
+unrelated synthetic account and linked-server rows stayed unchanged. The local
+receiver stopped and its dedicated CLI context was logged out after completion.
+
+This corrected rerun did not repeat the separate failed-renewal/recovery stages;
+those remain covered by the preceding connected original-runtime run and the
+updated local regression suite. Local retries of original signed events handled
+concurrency collisions; this does not prove Stripe's automatic redelivery
+schedule, production D1, or live secret bindings.
 
 ## Release
 
