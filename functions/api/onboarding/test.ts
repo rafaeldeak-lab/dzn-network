@@ -1,9 +1,9 @@
-import { getCurrentLinkedServer, getSessionUser, requireDb, saveServerAdmPath } from "../../_lib/db";
+import { getCurrentLinkedServer, getSessionUser, saveServerAdmPath } from "../../_lib/db";
 import { DiscordChannelFetchError, fetchDiscordPostingChannels } from "../../_lib/discord-posting";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, isMockNitrado } from "../../_lib/mock";
 import { detectNitradoAdmLogs, getAdmLogStoragePath, mockAdmLogDetection, testExactNitradoAdmPath } from "../../_lib/nitrado";
-import { getNitradoTokenForLinkedServer } from "../../_lib/onboarding";
+import { getOnboardingServiceProof, onboardingProofStillCurrent, saveOnboardingServiceChecks } from "../../_lib/onboarding-service-proof";
 import { planAdmBackfillJobsForServer, type AdmImportJobProgressResult } from "../../_lib/adm-sync";
 import { refreshNitradoServerMetadata } from "../../_lib/server-metadata";
 import type { Env, PagesFunction } from "../../_lib/types";
@@ -23,29 +23,15 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     return json({ error: "No Nitrado service selected" }, { status: 400 });
   }
 
-  let tokenValid = true;
-  let tokenErrorCode: string | null = null;
-  let tokenErrorMessage: string | null = null;
-  let nitradoToken = "";
-  if (!isMockNitrado(env.MOCK_NITRADO)) {
-    try {
-      const serverToken = await getNitradoTokenForLinkedServer(env, user.id, linkedServer.id);
-      if (!serverToken) {
-        tokenValid = false;
-        tokenErrorCode = "missing_nitrado_token";
-        tokenErrorMessage = "No saved Nitrado token was found. Paste your Nitrado long-life token and validate this service again.";
-      } else {
-        nitradoToken = serverToken;
-      }
-    } catch (error) {
-      tokenValid = false;
-      const classified = classifyNitradoTokenError(error);
-      tokenErrorCode = classified.code;
-      tokenErrorMessage = classified.message;
-    }
+  const proof = await getOnboardingServiceProof(env, user.id, linkedServer.id, linkedServer.nitrado_service_id);
+  const { tokenValid, serviceAccess, dayzServiceDetected, errorCode: tokenErrorCode, errorMessage: tokenErrorMessage } = proof.checks;
+  const serviceVerified = tokenValid && serviceAccess && dayzServiceDetected;
+  const nitradoToken = proof.token;
+  if (!await onboardingProofStillCurrent(env, proof)) {
+    return json({ error: "Your server connection changed during the check. Run setup checks again." }, { status: 409 });
   }
 
-  const metadataResult = tokenValid
+  const metadataResult = serviceVerified
     ? await refreshNitradoServerMetadata(env, {
         linkedServerId: linkedServer.id,
         userId: user.id,
@@ -53,7 +39,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       }).catch(() => null)
     : null;
   const savedAdmPath = typeof linkedServer.adm_path === "string" ? linkedServer.adm_path : "";
-  const admLog = !tokenValid
+  const admLog = !serviceVerified
     ? null
     : isMockNitrado(env.MOCK_NITRADO)
       ? mockAdmLogDetection()
@@ -66,7 +52,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     await saveServerAdmPath(env, linkedServer.id, admStoragePath.replace(/^\/+/, ""));
   }
   let admBackfill = null;
-  if (tokenValid && (admLog?.admFileExists || admLog?.found)) {
+  if (serviceVerified && (admLog?.admFileExists || admLog?.found)) {
     admBackfill = isMockNitrado(env.MOCK_NITRADO)
       ? {
           ok: true,
@@ -102,63 +88,17 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   }
   const discordCheck = await verifyDiscordBotForSetup(env, linkedServer.guild_id);
 
-  const checks = {
-    token_valid: tokenValid ? 1 : 0,
-    service_access: tokenValid ? 1 : 0,
-    adm_logs_found: admLog?.found ? 1 : 0,
-    dayz_service_detected: tokenValid ? 1 : 0,
-  };
-
-  const db = requireDb(env);
-  const existing = await db
-    .prepare("SELECT id FROM onboarding_checks WHERE linked_server_id = ? LIMIT 1")
-    .bind(linkedServer.id)
-    .first<{ id: string }>();
-
-  if (existing) {
-    await db
-      .prepare(
-        `UPDATE onboarding_checks SET
-          token_valid = ?,
-          service_access = ?,
-          adm_logs_found = ?,
-          dayz_service_detected = ?,
-          last_tested_at = CURRENT_TIMESTAMP
-        WHERE id = ?`,
-      )
-      .bind(
-        checks.token_valid,
-        checks.service_access,
-        checks.adm_logs_found,
-        checks.dayz_service_detected,
-        existing.id,
-      )
-      .run();
-  } else {
-    await db
-      .prepare(
-        `INSERT INTO onboarding_checks (
-          id, linked_server_id, token_valid, service_access, adm_logs_found, dayz_service_detected, last_tested_at
-        ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-      )
-      .bind(
-        crypto.randomUUID(),
-        linkedServer.id,
-        checks.token_valid,
-        checks.service_access,
-        checks.adm_logs_found,
-        checks.dayz_service_detected,
-      )
-      .run();
+  if (!await saveOnboardingServiceChecks(env, proof, Boolean(admLog?.found))) {
+    return json({ error: "Your server connection changed during the check. Run setup checks again." }, { status: 409 });
   }
 
   return json({
     ok: true,
     checks: {
       tokenValid,
-      serviceAccess: tokenValid,
-      admLogsFound: Boolean(checks.adm_logs_found),
-      dayzServiceDetected: Boolean(checks.dayz_service_detected),
+      serviceAccess,
+      admLogsFound: Boolean(admLog?.found),
+      dayzServiceDetected,
       metadataSynced: Boolean(metadataResult?.ok),
       discordBotConnected: discordCheck.botConnected,
       discordChannelsAvailable: discordCheck.channelsAvailable,
@@ -279,25 +219,5 @@ function classifyDiscordSetupError(error: unknown) {
   return {
     code: "discord_api_error",
     message: error instanceof Error ? error.message : "Discord bot verification failed. Try again shortly.",
-  };
-}
-
-function classifyNitradoTokenError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  if (/TOKEN_ENCRYPTION_KEY is not configured/i.test(message)) {
-    return {
-      code: "missing_token_encryption_key",
-      message: "Token encryption key is missing in production. Add TOKEN_ENCRYPTION_KEY in Cloudflare Pages and redeploy.",
-    };
-  }
-  if (/decrypt|operation|authentication|tag|cipher|iv|key/i.test(message)) {
-    return {
-      code: "token_decrypt_failed",
-      message: "Your saved Nitrado token cannot be decrypted. Re-save your Nitrado long-life token.",
-    };
-  }
-  return {
-    code: "nitrado_token_unavailable",
-    message: "DZN could not read the saved Nitrado token. Re-save your Nitrado long-life token and try again.",
   };
 }

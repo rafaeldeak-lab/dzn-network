@@ -343,7 +343,7 @@ export async function getNitradoTokenForLinkedServer(env: Env, userId: string, l
   return decryptToken(row.encrypted_token, row.token_iv, row.token_auth_tag, env.TOKEN_ENCRYPTION_KEY);
 }
 
-async function getLatestNitradoConnectionForLinkedServer(env: Env, userId: string, linkedServerId: string) {
+export async function getLatestNitradoConnectionForLinkedServer(env: Env, userId: string, linkedServerId: string) {
   return requireDb(env)
     .prepare(
       `SELECT id, encrypted_token, token_iv, token_auth_tag
