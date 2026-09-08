@@ -51,9 +51,13 @@ try {
         if (!body.includes("dznnetworksupport@gmail.com")) throw new Error(`${route} is missing private support contact`);
       }
       if (route === "/terms") {
-        if (!body.includes("Live subscription checkout remains unavailable")) {
-          throw new Error("/terms must retain its warning even when unpublished private seller values are configured");
+        if (!body.includes("Rafael Deak trading as DZN Network") || !body.includes("individual operating as a sole trader") ||
+            !body.includes("Current plans and checkout availability")) {
+          throw new Error("/terms must publish the approved seller and use current pricing for availability");
         }
+        if (body.includes("Live subscription checkout remains unavailable")) throw new Error("/terms freezes stale checkout availability");
+      } else if (body.includes("Rafael Deak")) {
+        throw new Error(`${route} must retain DZN branding without republishing the legal name`);
       }
       const name = `${viewport.name}-${route.slice(1)}`;
       await page.screenshot({ path: path.join(output, `${name}.png`), fullPage: true });

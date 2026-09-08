@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { PolicyPage, PolicySection } from "@/components/site/policy-page";
-import { getPublicLegalSellerDisclosure } from "@/lib/legal-seller";
+import Link from "next/link";
+import { DZN_PUBLISHED_SELLER } from "@/lib/published-seller";
 import { DZN_SUPPORT_EMAIL, DZN_SUPPORT_EMAIL_HREF } from "@/lib/support";
 
 export const metadata: Metadata = {
@@ -10,11 +11,6 @@ export const metadata: Metadata = {
 };
 
 export default function TermsPage() {
-  const seller = getPublicLegalSellerDisclosure({
-    DZN_PUBLIC_LEGAL_SELLER_NAME: process.env.DZN_PUBLIC_LEGAL_SELLER_NAME,
-    DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: process.env.DZN_PUBLIC_LEGAL_CONTACT_ADDRESS,
-  });
-
   return (
     <PolicyPage eyebrow="DZN Network policies" title="Terms of Service" updated="8 September 2026">
       <PolicySection title="About DZN">
@@ -22,11 +18,17 @@ export default function TermsPage() {
         <p>Player access, including Discord sign-in, Player Hub, and personal profiles, is free. Starter and Pro are optional subscriptions for server-owner tools and presentation features.</p>
       </PolicySection>
 
-      {!seller.complete && (
-        <PolicySection title="Subscription availability">
-          <p>Live subscription checkout remains unavailable while DZN completes its seller-disclosure and payment-launch checks. Viewing this page, signing in, or choosing a plan does not start a trial or take payment.</p>
-        </PolicySection>
-      )}
+      <PolicySection title="Seller details">
+        <p>The seller is <strong className="text-white">{DZN_PUBLISHED_SELLER.name}</strong>, an individual operating as a sole trader.</p>
+        <address className="not-italic">
+          {DZN_PUBLISHED_SELLER.addressLines.map((line) => <p key={line}>{line}</p>)}
+          <a className="font-bold text-cyan-200 underline underline-offset-4" href={DZN_SUPPORT_EMAIL_HREF}>{DZN_SUPPORT_EMAIL}</a>
+        </address>
+      </PolicySection>
+
+      <PolicySection title="Subscription availability">
+        <p>Current plans and checkout availability are shown on the <Link className="font-bold text-cyan-200 underline underline-offset-4" href="/pricing">pricing page</Link>. Viewing this page, signing in, or choosing a plan does not start a trial or take payment.</p>
+      </PolicySection>
 
       <PolicySection title="Owner subscriptions">
         <p><strong className="text-white">Starter:</strong> eligible accounts pay GBP 0 for a two-day trial, then GBP 2 per month until cancelled. A payment method is required. The trial starts only after the account owner completes Stripe Checkout and DZN verifies the subscription. Starter trial eligibility is limited and a previous trial is not repeated.</p>

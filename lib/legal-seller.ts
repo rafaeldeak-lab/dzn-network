@@ -1,4 +1,4 @@
-import { DZN_PUBLIC_CONTACT } from "./support";
+import { DZN_PUBLISHED_SELLER } from "./published-seller";
 
 type LegalSellerEnvironment = {
   DZN_PUBLIC_LEGAL_SELLER_NAME?: string;
@@ -27,7 +27,7 @@ const PLACEHOLDER_VALUES = new Set([
 
 export function getPublicLegalSellerDisclosure(
   env: LegalSellerEnvironment,
-  publishedContact: PublishedSellerContact = DZN_PUBLIC_CONTACT,
+  publishedContact: PublishedSellerContact = DZN_PUBLISHED_SELLER,
 ): PublicLegalSellerDisclosure {
   const legalSellerName = cleanValue(env.DZN_PUBLIC_LEGAL_SELLER_NAME);
   const contactAddress = cleanValue(env.DZN_PUBLIC_LEGAL_CONTACT_ADDRESS);

@@ -246,7 +246,7 @@ function offerChanged() {
 function priceError() {
   return new CheckoutRecoveryError("Plan pricing needs a support check before checkout. No new payment has been started.", "CHECKOUT_PRICE_REVIEW_REQUIRED", 503);
 }
-async function verifyCheckoutPrice(env: Env, priceId: string, planKey: PurchasablePlanKey, mode: string) {
+export async function verifyCheckoutPrice(env: Env, priceId: string, planKey: PurchasablePlanKey, mode: string) {
   const price = await stripeGetRequest<{
     id: string; active: boolean; livemode: boolean; currency: string; unit_amount: number; type: string;
     billing_scheme: string; transform_quantity?: unknown; custom_unit_amount?: unknown;

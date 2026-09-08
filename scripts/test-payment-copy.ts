@@ -7,6 +7,7 @@ import { getPublicLegalSellerDisclosure } from "../lib/legal-seller";
 import { getBillingPlanSummaries } from "../functions/_lib/plans";
 import type { Env } from "../functions/_lib/types";
 import { DZN_PUBLIC_CONTACT, DZN_SUPPORT_EMAIL, DZN_SUPPORT_EMAIL_HREF } from "../lib/support";
+import { DZN_PUBLISHED_SELLER } from "../lib/published-seller";
 
 const contracts = getSubscriptionPlanPublicContracts();
 const plans = getBillingPlanSummaries({} as Env);
@@ -42,8 +43,12 @@ assert.match(terms, /Pro[\s\S]*GBP 10[\s\S]*no free trial[\s\S]*GBP 10 per month
 assert.match(terms, /Manage Billing[\s\S]*turn off renewal/i);
 assert.match(terms, /does not itself create paid access/i);
 assert.match(terms, /cannot lawfully be excluded/i);
-assert.match(terms, /getPublicLegalSellerDisclosure/);
-assert.match(terms, /Live subscription checkout remains unavailable/);
+assert.match(terms, /DZN_PUBLISHED_SELLER\.name/);
+assert.match(terms, /DZN_PUBLISHED_SELLER\.addressLines/);
+assert.match(terms, /individual operating as a sole trader/);
+assert.match(terms, /Current plans and checkout availability/);
+assert.doesNotMatch(terms, /process\.env|Live subscription checkout remains unavailable/,
+  "Static terms must not expose arbitrary environment values or freeze a stale checkout state.");
 assert.doesNotMatch(terms, /seller\.(?:legalSellerName|contactAddressLines)|Legal seller:/,
   "Public terms must not render private identity or arbitrary environment address values.");
 assert.deepEqual(DZN_PUBLIC_CONTACT, {
@@ -113,8 +118,17 @@ const brandOnlySeller = getPublicLegalSellerDisclosure({
   DZN_PUBLIC_LEGAL_SELLER_NAME: DZN_PUBLIC_CONTACT.name,
   DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: DZN_PUBLIC_CONTACT.addressLines.join(" | "),
 });
-assert.equal(brandOnlySeller.publishedContactMatches, true);
+assert.equal(brandOnlySeller.publishedContactMatches, false);
 assert.equal(brandOnlySeller.complete, false, "Publication matching must not weaken existing seller-name validation.");
+assert.notEqual(DZN_PUBLISHED_SELLER.name, DZN_PUBLIC_CONTACT.name);
+assert.equal(getPublicLegalSellerDisclosure({
+  DZN_PUBLIC_LEGAL_SELLER_NAME: DZN_PUBLISHED_SELLER.name,
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: DZN_PUBLISHED_SELLER.addressLines.join(" | "),
+}).complete, true, "Only the explicitly published legal contact can satisfy the release gate.");
+for (const sourcePath of ["app/pricing/page.tsx", "app/privacy/page.tsx", "app/refunds/page.tsx", "components/site/public-contact.tsx", "lib/support.ts"]) {
+  assert.doesNotMatch(readFileSync(sourcePath, "utf8"), /DZN_PUBLISHED_SELLER|Rafael Deak/,
+    "General branding/contact components must not republish the legal identity.");
+}
 const refunds = readFileSync("app/refunds/page.tsx", "utf8");
 assert.match(refunds, /cancel before the trial deadline.*avoid the first GBP 2 payment/i);
 assert.match(refunds, /does not automatically refund.*already completed/i);
