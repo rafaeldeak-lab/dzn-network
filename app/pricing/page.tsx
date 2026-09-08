@@ -6,6 +6,7 @@ import { PAYMENT_COPY, PAYMENT_FAQS } from "../../lib/billing/payment-copy";
 import { PricingCheckout } from "../../components/onboarding/pricing-checkout";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "../../lib/public-discord";
 import { DZN_SUPPORT_EMAIL, DZN_SUPPORT_EMAIL_HREF } from "../../lib/support";
+import { PublicContact } from "../../components/site/public-contact";
 
 export const metadata: Metadata = {
   title: "DZN Pricing | Starter and Pro owner plans",
@@ -75,6 +76,7 @@ export default function PricingPage() {
           <Link href="/refunds" className="inline-flex min-h-11 items-center underline underline-offset-4">Cancellations and refunds</Link>
         </div>
       </section>
+      <PublicContact />
     </div>
   </main>;
 }

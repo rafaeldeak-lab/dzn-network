@@ -16,25 +16,17 @@ export default function TermsPage() {
   });
 
   return (
-    <PolicyPage eyebrow="DZN Network policies" title="Terms of Service" updated="7 September 2026">
+    <PolicyPage eyebrow="DZN Network policies" title="Terms of Service" updated="8 September 2026">
       <PolicySection title="About DZN">
         <p>DZN Network is a UK-operated online platform for DayZ players, communities, and server owners. These terms apply when you use the website, connect an account or server, or buy a DZN owner subscription.</p>
         <p>Player access, including Discord sign-in, Player Hub, and personal profiles, is free. Starter and Pro are optional subscriptions for server-owner tools and presentation features.</p>
       </PolicySection>
 
-      <PolicySection title="Seller details">
-        {seller.complete ? (
-          <>
-            <p><strong className="text-white">Legal seller:</strong> {seller.legalSellerName}, trading as DZN Network.</p>
-            <address className="not-italic">
-              <strong className="text-white">Business correspondence address:</strong><br />
-              {seller.contactAddressLines.map((line) => <span key={line}>{line}<br /></span>)}
-            </address>
-          </>
-        ) : (
-          <p>Live subscription checkout remains unavailable while DZN confirms and publishes the legal seller and business correspondence address. Viewing this page, signing in, or choosing a plan does not start a trial or take payment.</p>
-        )}
-      </PolicySection>
+      {!seller.complete && (
+        <PolicySection title="Subscription availability">
+          <p>Live subscription checkout remains unavailable while DZN completes its seller-disclosure and payment-launch checks. Viewing this page, signing in, or choosing a plan does not start a trial or take payment.</p>
+        </PolicySection>
+      )}
 
       <PolicySection title="Owner subscriptions">
         <p><strong className="text-white">Starter:</strong> eligible accounts pay GBP 0 for a two-day trial, then GBP 2 per month until cancelled. A payment method is required. The trial starts only after the account owner completes Stripe Checkout and DZN verifies the subscription. Starter trial eligibility is limited and a previous trial is not repeated.</p>

@@ -6,6 +6,7 @@ import { getSubscriptionPlanPublicContracts } from "../lib/billing/plans";
 import { getPublicLegalSellerDisclosure } from "../lib/legal-seller";
 import { getBillingPlanSummaries } from "../functions/_lib/plans";
 import type { Env } from "../functions/_lib/types";
+import { DZN_PUBLIC_CONTACT, DZN_SUPPORT_EMAIL, DZN_SUPPORT_EMAIL_HREF } from "../lib/support";
 
 const contracts = getSubscriptionPlanPublicContracts();
 const plans = getBillingPlanSummaries({} as Env);
@@ -43,6 +44,33 @@ assert.match(terms, /does not itself create paid access/i);
 assert.match(terms, /cannot lawfully be excluded/i);
 assert.match(terms, /getPublicLegalSellerDisclosure/);
 assert.match(terms, /Live subscription checkout remains unavailable/);
+assert.doesNotMatch(terms, /seller\.(?:legalSellerName|contactAddressLines)|Legal seller:/,
+  "Public terms must not render private identity or arbitrary environment address values.");
+assert.deepEqual(DZN_PUBLIC_CONTACT, {
+  name: "DZN Network",
+  addressLines: ["Suite RA01, 195-197 Wood Street", "London", "E17 3NU", "United Kingdom"],
+});
+assert.equal(DZN_SUPPORT_EMAIL, "dznnetworksupport@gmail.com");
+assert.equal(DZN_SUPPORT_EMAIL_HREF, "mailto:dznnetworksupport@gmail.com");
+const publicContact = readFileSync("components/site/public-contact.tsx", "utf8");
+assert.match(publicContact, /DZN_PUBLIC_CONTACT\.name/);
+assert.match(publicContact, /DZN_PUBLIC_CONTACT\.addressLines/);
+assert.match(publicContact, /DZN_SUPPORT_EMAIL_HREF/);
+assert.doesNotMatch(publicContact, /process\.env|legalSeller|phone|tel:|fetch\(|useEffect/);
+assert.match(readFileSync("components/site/policy-page.tsx", "utf8"), /<PublicContact\s*\/>/);
+assert.match(route, /<PublicContact\s*\/>/);
+const tradingContactOnly = getBillingPlanSummaries({
+  DZN_PUBLIC_LEGAL_SELLER_NAME: DZN_PUBLIC_CONTACT.name,
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: DZN_PUBLIC_CONTACT.addressLines.join(" | "),
+  STRIPE_PRICE_STARTER: "price_fixture_starter",
+  STRIPE_PRICE_PRO: "price_fixture_pro",
+  STRIPE_SECRET_KEY: "sk_live_fixture_not_a_secret",
+  STRIPE_WEBHOOK_SECRET: "whsec_fixture_not_a_secret",
+  DZN_APP_URL: "https://dayz-network.com",
+  DZN_LIVE_CHECKOUT_ENABLED: "true",
+} as Env);
+assert.ok(tradingContactOnly.every(p => p.checkout_enabled === false),
+  "Publishing the approved trading contact must not bypass seller readiness, even with checkout requested.");
 assert.equal(getPublicLegalSellerDisclosure({}).complete, false);
 assert.equal(getPublicLegalSellerDisclosure({
   DZN_PUBLIC_LEGAL_SELLER_NAME: "DZN Network",
