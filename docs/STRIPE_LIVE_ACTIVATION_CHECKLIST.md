@@ -81,7 +81,7 @@ These steps are manual, deliberate production operations. They must not be conve
    - `DZN_PUBLIC_LEGAL_SELLER_NAME`
    - `DZN_PUBLIC_LEGAL_CONTACT_ADDRESS`
 10. Confirm the seller name is the real legal seller behind the DZN Network trading name and the address is a legitimate public correspondence address that the owner has approved for publication. Do not infer or publish a home address from Stripe or any private account record.
-    The configured name and ordered address lines must also match the approved `DZN_PUBLIC_CONTACT` rendered by the released customer pages. Configuration alone is not publication. The currently approved brand-only contact is not a completed legal-seller disclosure and cannot pass the existing seller-name validation. Do not change private records, copy private identity into public constants, weaken validation, or add an enable flag to bypass this unresolved launch condition; resolve it in a separately reviewed and approved seller-disclosure slice.
+    The configured name and ordered address lines must also match `DZN_PUBLISHED_SELLER`, the explicitly approved legal contact rendered on `/terms`. Configuration alone is not publication. General `DZN_PUBLIC_CONTACT` branding remains separate and cannot satisfy legal-seller validation. The owner approved limited sole-trader disclosure in this slice; that approval does not permit publishing a home address or personal phone, changing private verification records, or making the enable flag bypass validation.
 11. Run the read-only readiness check as an authenticated admin/support/dev user.
 12. Confirm `liveConfigurationReady: true`, `humanApprovalRequiredForLiveBilling: true`, and `productionMutationAllowedByReadinessCheck: false`.
 13. Keep `DZN_LIVE_CHECKOUT_ENABLED` unset while performing sandbox/test readiness. In this state, live checkout should report `checkoutSessionCreationAllowed: false`.
@@ -89,6 +89,20 @@ These steps are manual, deliberate production operations. They must not be conve
 15. Run read-only production smoke after activation.
 
 ## Evidence Rules
+
+The authenticated operator can use `/dashboard/admin/billing` or call `GET /api/billing/provider-readiness?expected_account=acct_...`
+using the account shown in their Stripe dashboard. This bounded, read-only probe checks the actual
+production-bound key, account capability flags, Starter/Pro Price contracts, default customer portal,
+and canonical webhook destination/events. It returns boolean checks only, uses private no-store
+responses, rejects mock authentication, and never creates sessions or changes billing state.
+An optional `expected_webhook_fingerprint` accepts only a lowercase SHA-256 digest calculated locally
+from the existing canonical Stripe endpoint secret. Never send the raw secret to this route. A
+matching fingerprint verifies the saved signing-secret association without returning either value;
+omitted, invalid, missing or mismatched proof cannot pass. This is not signed delivery evidence.
+`providerConfigurationVerified` does not prove a completed payment: `endToEndPaymentVerified`
+deliberately remains false. Keep separate delivery evidence before declaring end-to-end payment
+verification complete. Never paste the account query, fingerprint or raw Stripe records
+into public reports; retain the boolean result only.
 
 Record evidence without secrets:
 

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 import { getBillingReadinessStatus } from "../functions/_lib/plans";
 import type { Env } from "../functions/_lib/types";
+import { DZN_PUBLISHED_SELLER } from "../lib/published-seller";
 
 const publicSeller = {
   DZN_PUBLIC_LEGAL_SELLER_NAME: "Example Legal Seller",
@@ -141,6 +142,26 @@ assert.equal(missingSellerDisclosure.missingLiveRequiredVars.includes("DZN_PUBLI
 assert.equal(missingSellerDisclosure.missingLiveRequiredVars.includes("DZN_PUBLIC_LEGAL_CONTACT_ADDRESS"), true);
 assert.equal(liveEnabled.missingLiveRequiredVars.includes("DZN_PUBLIC_LEGAL_SELLER_NAME"), false);
 assert.equal(liveEnabled.missingLiveRequiredVars.includes("DZN_PUBLIC_LEGAL_CONTACT_ADDRESS"), false);
+
+const approvedSellerEnv = {
+  STRIPE_PRICE_STARTER: "price_server_starter",
+  STRIPE_PRICE_PRO: "price_server_pro",
+  STRIPE_SECRET_KEY: "sk_live_secret_value_must_not_leak",
+  STRIPE_WEBHOOK_SECRET: "whsec_live_value_must_not_leak",
+  DZN_APP_URL: "https://dayz-network.com",
+  DZN_PUBLIC_LEGAL_SELLER_NAME: DZN_PUBLISHED_SELLER.name,
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: DZN_PUBLISHED_SELLER.addressLines.join(" | "),
+} as Env;
+const approvedButPaused = getBillingReadinessStatus(approvedSellerEnv);
+assert.equal(approvedButPaused.liveConfigurationReady, true);
+assert.equal(approvedButPaused.checkoutSessionCreationAllowed, false);
+const approvedAndEnabled = getBillingReadinessStatus({ ...approvedSellerEnv, DZN_LIVE_CHECKOUT_ENABLED: "true" });
+assert.equal(approvedAndEnabled.checkoutSessionCreationAllowed, true);
+assert.ok(approvedAndEnabled.activePlans.every(plan => plan.checkout_enabled));
+assert.equal(approvedAndEnabled.productionMutationAllowedByReadinessCheck, false);
+assert.equal(getBillingReadinessStatus({ ...approvedSellerEnv, DZN_LIVE_CHECKOUT_ENABLED: "true",
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: "An unpublished private address | Somewhere",
+}).checkoutSessionCreationAllowed, false);
 
 for (const [label, payload] of Object.entries({ fallbackOnly, testMode, previewUrl, liveReady, liveEnabled })) {
   const text = JSON.stringify(payload);

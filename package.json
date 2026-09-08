@@ -108,7 +108,7 @@
     "test:returning-starter-d1-local": "tsx scripts/test-returning-starter-d1-local.ts",
     "test:checkout-retry-safety": "tsx scripts/test-checkout-retry-safety.ts && tsx scripts/test-checkout-first-customer-recovery.ts && tsx scripts/test-returning-starter-checkout.ts",
     "test:billing-payment-recovery": "tsx scripts/test-billing-payment-recovery.ts",
-    "test:stripe-live-readiness": "tsx scripts/test-stripe-live-readiness.ts",
+    "test:stripe-live-readiness": "tsx scripts/test-stripe-live-readiness.ts && tsx scripts/test-billing-provider-readiness.ts",
     "test:stripe-live-activation-checklist": "tsx scripts/test-stripe-live-activation-checklist.ts",
     "test:billing-integrity": "tsx scripts/test-billing-integrity.ts",
     "test:onboarding-service-proof": "tsx scripts/test-onboarding-service-proof.ts",
