@@ -6,8 +6,8 @@ import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 
 type NavigationPlanTier = "free" | "starter" | "pro";
 type NavigationPrimaryAction = {
-  label: "Start Trial" | "Upgrade to Pro" | "Pro Tools";
-  href: "/#pricing" | "/dashboard";
+  label: "Owner Plans" | "Upgrade to Pro" | "Pro Tools";
+  href: "/pricing" | "/dashboard";
   tone: "trial" | "upgrade" | "pro";
 };
 
@@ -90,8 +90,8 @@ function navigationPlanLabel(planKey: PlanKey, planStatus: string) {
 
 function navigationPrimaryActionForTier(tier: NavigationPlanTier): NavigationPrimaryAction {
   if (tier === "pro") return { label: "Pro Tools", href: "/dashboard", tone: "pro" };
-  if (tier === "starter") return { label: "Upgrade to Pro", href: "/#pricing", tone: "upgrade" };
-  return { label: "Start Trial", href: "/#pricing", tone: "trial" };
+  if (tier === "starter") return { label: "Upgrade to Pro", href: "/pricing", tone: "upgrade" };
+  return { label: "Owner Plans", href: "/pricing", tone: "trial" };
 }
 
 function stringOrDefault(value: unknown, fallback: string) {

@@ -53,8 +53,8 @@ assert.equal(headerActionBlock.includes("planTier === \"free\" ? \"Start Setup\"
 assert.equal(headerActionBlock.includes("dzn-header-action--package-${primaryAction.tone}"), true);
 
 for (const action of [
-  "{ label: \"Start Trial\", href: \"/#pricing\", tone: \"trial\" }",
-  "{ label: \"Upgrade to Pro\", href: \"/#pricing\", tone: \"upgrade\" }",
+  "{ label: \"Owner Plans\", href: \"/pricing\", tone: \"trial\" }",
+  "{ label: \"Upgrade to Pro\", href: \"/pricing\", tone: \"upgrade\" }",
   "{ label: \"Pro Tools\", href: \"/dashboard\", tone: \"pro\" }",
 ]) {
   assert.equal(siteHeaderSource.includes(action), true, `Header must define package action: ${action}`);
@@ -67,7 +67,7 @@ assert.equal(homepageSource.includes("navigation={authState.navigation}"), true)
 assert.equal(authTypesSource.includes("export type AuthNavigationSummary"), true);
 assert.equal(authTypesSource.includes("navigation?: AuthNavigationSummary;"), true);
 assert.equal(authTypesSource.includes("plan_tier: \"free\" | \"starter\" | \"pro\""), true);
-assert.equal(authTypesSource.includes("label: \"Start Trial\" | \"Upgrade to Pro\" | \"Pro Tools\""), true);
+assert.equal(authTypesSource.includes("label: \"Owner Plans\" | \"Upgrade to Pro\" | \"Pro Tools\""), true);
 
 assert.equal(authMeSource.includes("SELECT plan_key, plan_status FROM owner_billing_accounts"), true);
 assert.equal(authMeSource.includes("effectiveEntitlementPlan(storedPlanKey, planStatus)"), true);

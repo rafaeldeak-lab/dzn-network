@@ -483,9 +483,13 @@ export async function upsertServerSubscription(env: Env, input: {
   forceDue?: boolean;
 }) {
   await ensureAutomationSchema(env);
+  for (const statement of serverSubscriptionStatements(env, input)) await statement.run();
+}
+
+export function serverSubscriptionStatements(env: Env, input: Parameters<typeof upsertServerSubscription>[1]): D1PreparedStatement[] {
   const db = requireDb(env);
   const now = new Date().toISOString();
-  await db
+  const subscription = db
     .prepare(
       `INSERT INTO server_subscriptions (
         id, guild_id, owner_discord_id, stripe_customer_id, stripe_subscription_id, stripe_price_id,
@@ -517,10 +521,9 @@ export async function upsertServerSubscription(env: Env, input: {
       input.cancelAtPeriodEnd ? 1 : 0,
       now,
       now,
-    )
-    .run();
+    );
 
-  await db
+  const sync = db
     .prepare(
       `INSERT INTO server_sync_state (
         id, guild_id, next_status_check_due_at, next_adm_discovery_due_at, next_adm_pull_due_at, status_data_freshness,
@@ -560,8 +563,8 @@ export async function upsertServerSubscription(env: Env, input: {
       input.forceDue ? 1 : 0,
       now,
       now,
-    )
-    .run();
+    );
+  return [subscription, sync];
 }
 
 export async function syncServerSubscriptionsForOwner(env: Env, discordUserId: string, values: {

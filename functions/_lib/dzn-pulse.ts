@@ -3,6 +3,8 @@ import { isDiscordNotificationsEnabled, isDznPulseEnabled } from "./feature-flag
 import { rankServers, type RankedServer } from "./server-ranking";
 import { getServerCategoryLabel, normalizeServerCategory } from "./server-categories";
 import type { Env, SessionUser } from "./types";
+import { canShowPaymentSetupNotice, paymentSetupNoticeCopy, PAYMENT_SETUP_DEDUPE_KEY, PAYMENT_SETUP_NOTIFICATION_TYPE } from "./billing-reminders";
+import { currentTrialEndingNotice, TRIAL_ENDING_NOTIFICATION_TYPE } from "./billing-trial-reminders";
 
 export const PULSE_NO_STORE_HEADERS = {
   "cache-control": "private, no-store, no-cache, must-revalidate",
@@ -22,10 +24,12 @@ export const PULSE_NOTIFICATION_TYPES = [
   "prize_unlocked",
   "dzn_news",
   "dzn_announcement",
+  "billing_payment_setup",
+  "billing_trial_ending",
 ] as const;
 
 export type PulseNotificationType = typeof PULSE_NOTIFICATION_TYPES[number];
-export type PulseNotificationFilter = "all" | "events" | "scores" | "achievements" | "news";
+export type PulseNotificationFilter = "all" | "events" | "scores" | "achievements" | "news" | "billing";
 
 export type PulseNotification = {
   id: string;
@@ -287,11 +291,17 @@ export async function listUserNotifications(env: Env, user: SessionUser, options
   const filter = normalizeNotificationFilter(options.filter);
   const limit = sanitizeLimit(options.limit, 20, 50);
   const cursor = parseCursor(options.cursor);
+  const paymentNoticeVisible = await canShowPaymentSetupNotice(env, user);
+  const trialNotice = await currentTrialEndingNotice(env, user);
   const bindings: unknown[] = [user.id];
   const conditions = [
     "user_notifications.user_id = ?",
     "(user_notifications.expires_at IS NULL OR datetime(user_notifications.expires_at) > datetime('now'))",
+    "(user_notifications.type != ? OR (? = 1 AND user_notifications.dedupe_key = ?))",
+    "(user_notifications.type != ? OR (? != '' AND user_notifications.dedupe_key = ?))",
   ];
+  bindings.push(PAYMENT_SETUP_NOTIFICATION_TYPE, Number(paymentNoticeVisible), PAYMENT_SETUP_DEDUPE_KEY);
+  bindings.push(TRIAL_ENDING_NOTIFICATION_TYPE, trialNotice?.dedupeKey ?? "", trialNotice?.dedupeKey ?? "");
 
   if (filter !== "all") {
     conditions.push(`user_notifications.type IN (${notificationTypesForFilter(filter).map(() => "?").join(", ")})`);
@@ -324,7 +334,15 @@ export async function listUserNotifications(env: Env, user: SessionUser, options
 
   return {
     ok: true,
-    items: visibleRows.map(toNotification),
+    items: visibleRows.map((row) => {
+      const item = toNotification(row);
+      if (row.type === TRIAL_ENDING_NOTIFICATION_TYPE && trialNotice) {
+        return { ...item, ...trialNotice.copy, image_url: null, server_id: null, server_name: null, event_id: null, event_name: null };
+      }
+      return row.type === PAYMENT_SETUP_NOTIFICATION_TYPE
+        ? { ...item, ...paymentSetupNoticeCopy(env), image_url: null, server_id: null, server_name: null, event_id: null, event_name: null }
+        : item;
+    }),
     unreadCount: await countUnreadNotifications(env, user),
     nextCursor: nextRow ? makeCursor(nextRow) : null,
     generated_at: new Date().toISOString(),
@@ -333,15 +351,20 @@ export async function listUserNotifications(env: Env, user: SessionUser, options
 
 export async function countUnreadNotifications(env: Env, user: SessionUser) {
   if (!isDznPulseEnabled(env)) return 0;
+  const paymentNoticeVisible = await canShowPaymentSetupNotice(env, user);
+  const trialNotice = await currentTrialEndingNotice(env, user);
   const row = await requireDb(env)
     .prepare(
       `SELECT COUNT(*) AS count
        FROM user_notifications
        WHERE user_id = ?
          AND read_at IS NULL
-         AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`,
+         AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
+         AND (type != ? OR (? = 1 AND dedupe_key = ?))
+         AND (type != ? OR (? != '' AND dedupe_key = ?))`,
     )
-    .bind(user.id)
+    .bind(user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, Number(paymentNoticeVisible), PAYMENT_SETUP_DEDUPE_KEY,
+      TRIAL_ENDING_NOTIFICATION_TYPE, trialNotice?.dedupeKey ?? "", trialNotice?.dedupeKey ?? "")
     .first<{ count: number | null }>()
     .catch(() => ({ count: 0 }));
   return Math.max(0, Number(row?.count ?? 0) || 0);
@@ -381,11 +404,17 @@ export async function markAllNotificationsRead(env: Env, user: SessionUser) {
 
 export async function clearReadNotifications(env: Env, user: SessionUser) {
   if (!isDznPulseEnabled(env)) return { status: 404, ...pulseFeatureDisabledPayload() };
-  const result = await requireDb(env)
-    .prepare("DELETE FROM user_notifications WHERE user_id = ? AND read_at IS NOT NULL")
-    .bind(user.id)
-    .run<{ changes?: number }>();
-  return { ok: true, status: 200, cleared: Number(result.meta?.changes ?? 0) || 0, unreadCount: await countUnreadNotifications(env, user) };
+  const db = requireDb(env);
+  // Preserve the single delivery receipt so clearing a payment notice cannot recreate it on every visit.
+  const results = await db.batch([
+    db.prepare(`UPDATE user_notifications SET expires_at = CURRENT_TIMESTAMP
+      WHERE user_id = ? AND type IN (?, ?) AND read_at IS NOT NULL
+        AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`)
+      .bind(user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE),
+    db.prepare("DELETE FROM user_notifications WHERE user_id = ? AND read_at IS NOT NULL AND type NOT IN (?, ?)")
+      .bind(user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE),
+  ]);
+  return { ok: true, status: 200, cleared: results.reduce((sum, result) => sum + (Number(result.meta?.changes) || 0), 0), unreadCount: await countUnreadNotifications(env, user) };
 }
 
 export async function createNotification(env: Env, input: {
@@ -1069,6 +1098,7 @@ function toNotification(row: NotificationRow): PulseNotification {
 }
 
 function notificationTypesForFilter(filter: PulseNotificationFilter): PulseNotificationType[] {
+  if (filter === "billing") return [PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE];
   if (filter === "events") return ["upcoming_event", "event_starting", "event_started", "event_countdown", "event_entry_confirmed", "event_result", "prize_unlocked"];
   if (filter === "scores") return ["event_score_update", "event_rank_update", "monthly_global_rank"];
   if (filter === "achievements") return ["achievement_unlocked"];
@@ -1077,6 +1107,7 @@ function notificationTypesForFilter(filter: PulseNotificationFilter): PulseNotif
 }
 
 function categoryForNotificationType(type: PulseNotificationType): PulseNotificationFilter {
+  if (type === PAYMENT_SETUP_NOTIFICATION_TYPE || type === TRIAL_ENDING_NOTIFICATION_TYPE) return "billing";
   if (notificationTypesForFilter("events").includes(type)) return "events";
   if (notificationTypesForFilter("scores").includes(type)) return "scores";
   if (notificationTypesForFilter("achievements").includes(type)) return "achievements";
@@ -1085,6 +1116,7 @@ function categoryForNotificationType(type: PulseNotificationType): PulseNotifica
 }
 
 function categoryLabel(category: PulseNotificationFilter) {
+  if (category === "billing") return "Billing";
   if (category === "events") return "Events";
   if (category === "scores") return "Scores";
   if (category === "achievements") return "Achievements";
@@ -1094,7 +1126,7 @@ function categoryLabel(category: PulseNotificationFilter) {
 
 function normalizeNotificationFilter(value: unknown): PulseNotificationFilter {
   const normalized = String(value ?? "all").trim().toLowerCase();
-  return normalized === "events" || normalized === "scores" || normalized === "achievements" || normalized === "news" ? normalized : "all";
+  return normalized === "events" || normalized === "scores" || normalized === "achievements" || normalized === "news" || normalized === "billing" ? normalized : "all";
 }
 
 function normalizeNotificationType(value: unknown): PulseNotificationType {

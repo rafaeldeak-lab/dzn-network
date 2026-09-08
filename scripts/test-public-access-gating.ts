@@ -530,7 +530,7 @@ const featureCardsBlock = homepageSource.slice(
 );
 const previewConversionStepsBlock = homepageSource.slice(
   homepageSource.indexOf("const previewConversionSteps"),
-  homepageSource.indexOf("const pricingPlans"),
+  homepageSource.indexOf("function useHomeStats"),
 );
 const featureStripBlock = homepageSource.slice(
   homepageSource.indexOf("function FeatureStrip"),
@@ -659,23 +659,14 @@ assert.equal(routesPatchSource.includes("\"/owner\""), true);
 assert.equal(routesPatchSource.includes("\"/owner/*\""), true);
 assert.equal(productionSmokeSource.includes("Protected app page redirected logged-out navigation to login."), true);
 assert.equal(productionSmokeSource.includes("[\"/dashboard\", \"/events\", \"/leaderboards\", \"/servers\", \"/setup\", \"/dzn-pulse\", \"/seasons\"]"), true);
-assert.equal(pricingUpgradeBlock.includes("Open Pricing Comparison"), true);
-assert.equal(pricingUpgradeBlock.includes("role=\"dialog\""), true);
-assert.equal(pricingUpgradeBlock.includes("aria-modal=\"true\""), true);
-assert.equal(pricingPageSource.includes("window.location.replace(\"/#pricing\")"), true, "Direct /pricing must bridge into the homepage pricing section.");
-assert.equal(pricingPageSource.includes("Open Pricing Comparison"), true, "Direct /pricing must expose a manual pricing comparison fallback.");
-assert.equal(publicAccessPolicyDoc.includes("`/pricing`"), true, "Public access policy must register the direct pricing entry point.");
-assert.equal(pricingUpgradeBlock.includes("Close pricing comparison"), true);
-assert.equal(pricingUpgradeBlock.includes("createPortal(pricingModal, document.body)"), true);
-assert.equal(pricingUpgradeBlock.includes("document.body.classList.add(\"dzn-pricing-modal-open\")"), true);
-assert.equal(pricingUpgradeBlock.includes("pricingEntrySignals.map"), true);
-assert.equal(pricingUpgradeBlock.includes("pricingValuePillars.map"), true);
-assert.equal(pricingUpgradeBlock.includes("pricingTrustPills.map"), true);
-assert.equal(pricingUpgradeBlock.includes("dzn-pricing-entry__hero"), true);
-assert.equal(pricingUpgradeBlock.includes("dzn-pricing-value-card"), true);
-assert.equal(pricingUpgradeBlock.includes("dzn-pricing-quick-answers"), true);
-assert.equal(pricingUpgradeBlock.includes("dzn-pricing-quick-answers__grid"), true);
-assert.equal(pricingUpgradeBlock.includes("dzn-pricing-answer-card--${item.tone}"), true);
+assert.equal(pricingUpgradeBlock.includes('href="/pricing"'), true);
+assert.equal(pricingUpgradeBlock.includes("PAYMENT_COPY.starterOffer"), true);
+assert.equal(pricingUpgradeBlock.includes('role="dialog"'), false);
+assert.equal(pricingPageSource.includes("window.location.replace"), false, "Pricing remains a dedicated page");
+assert.equal(pricingPageSource.includes("PricingCheckout"), true);
+assert.equal(pricingPageSource.includes("PAYMENT_FAQS"), true);
+assert.equal(pricingPageSource.includes('canonical: "/pricing"'), true);
+assert.equal(publicAccessPolicyDoc.includes("`/pricing`"), true);
 assert.equal(globalsSource.includes("body.dzn-pricing-modal-open .dzn-beta-ticker"), true);
 assert.equal(pricingEntryCssBlock.includes("url(\"/media/dzn-cinematic-survivor.png\")"), true);
 assert.equal(pricingEntryCssBlock.includes("grid-template-columns: minmax(0, 1.12fr) minmax(360px, 0.88fr);"), true);
@@ -724,13 +715,13 @@ assert.equal(previewConversionStepsBlock.includes("Start Setup"), true);
 assert.equal(previewConversionStepsBlock.includes("Compare Plans"), true);
 assert.equal(previewConversionStepsBlock.includes("Join Community"), true);
 assert.equal(previewConversionStepsBlock.includes("href: \"/login?returnTo=/setup\""), true);
-assert.equal(previewConversionStepsBlock.includes("href: \"#pricing\""), true);
+assert.equal(previewConversionStepsBlock.includes("href: \"/pricing\""), true);
 assert.equal(previewConversionStepsBlock.includes("href: DZN_PUBLIC_DISCORD_INVITE_URL"), true);
 assert.equal(previewBannerBlock.includes("dzn-preview-conversion"), true);
 assert.equal(previewBannerBlock.includes("dzn-preview-conversion__steps"), true);
 assert.equal(previewBannerBlock.includes("previewConversionSteps.map"), true);
 assert.equal(previewBannerBlock.includes("Build your DZN profile in minutes."), true);
-assert.equal(previewBannerBlock.includes("Starter trial available"), true);
+assert.equal(previewBannerBlock.includes("Starter trial for eligible accounts"), true);
 assert.equal(previewBannerBlock.includes("Login with Discord"), false);
 assert.equal(previewBannerBlock.includes("href=\"/login?returnTo=/\""), false);
 assert.equal(lockedPreviewPanelBlock.includes("Login to unlock"), false);

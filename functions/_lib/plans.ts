@@ -34,6 +34,7 @@ import {
   type PurchasablePlanKey,
   type SubscriptionPlanPublicContract,
 } from "../../lib/billing/plans";
+import { getPublicLegalSellerDisclosure } from "../../lib/legal-seller";
 import { getLinkedServerAllowanceUsageForUser } from "./onboarding";
 
 export type PaidPlanKey = "starter" | "pro" | "premium";
@@ -231,10 +232,12 @@ const PLAN_MARKETING: Record<PurchasablePlanKey, {
 }> = {
   starter: {
     name: "Starter",
-    price_label: "£0 today, then £2/month",
+    price_label: "£2/month; eligible accounts get a 2-day free trial",
     monthly_price_gbp: 2,
     features: [
-      "2-day free trial",
+      "2-day free trial for eligible accounts",
+      "Payment method required; monthly renewal until cancelled",
+      "Used trials do not restart; returning accounts confirm £2 now",
       "Then £2/month",
       "Standard listing",
       "1 linked DayZ server",
@@ -249,8 +252,9 @@ const PLAN_MARKETING: Record<PurchasablePlanKey, {
     price_label: "£10/month",
     monthly_price_gbp: 10,
     features: [
-      "Full DZN Access",
-      "Charged immediately",
+      "Advanced server-owner tools",
+      "£10 due when payment is confirmed; no free trial",
+      "Renews at £10/month until cancelled",
       "Up to 3 linked DayZ servers",
       "Public/advert publication every 24h",
       "Enhanced discovery and profile tools",
@@ -728,8 +732,12 @@ export async function upsertStarterTrialClaimFromStripe(env: Env, input: {
   status: string;
 }) {
   await ensureStarterTrialClaimSchema(env);
+  await starterTrialClaimStatement(env, input).run();
+}
+
+export function starterTrialClaimStatement(env: Env, input: Parameters<typeof upsertStarterTrialClaimFromStripe>[1]): D1PreparedStatement {
   const now = new Date().toISOString();
-  await requireDb(env)
+  return requireDb(env)
     .prepare(
       `INSERT INTO owner_starter_trial_claims (
         id, discord_user_id, stripe_customer_id, stripe_subscription_id, checkout_session_id,
@@ -751,16 +759,20 @@ export async function upsertStarterTrialClaimFromStripe(env: Env, input: {
       cleanOptionalString(input.status) ?? "unknown",
       now,
       now,
-    )
-    .run();
+    );
 }
 
 export async function upsertOwnerEntitlements(env: Env, discordUserId: string, planKey: PlanKey, status: string) {
   await ensureBillingSchema(env);
+  await ownerEntitlementsStatement(env, discordUserId, planKey, status).run();
+  return getPlanConfig(effectiveEntitlementPlan(planKey, status));
+}
+
+export function ownerEntitlementsStatement(env: Env, discordUserId: string, planKey: PlanKey, status: string): D1PreparedStatement {
   const effectivePlan = effectiveEntitlementPlan(planKey, status);
   const config = getPlanConfig(effectivePlan);
   const now = new Date().toISOString();
-  await requireDb(env)
+  return requireDb(env)
     .prepare(
       `INSERT INTO owner_plan_entitlements (
         discord_user_id, plan_key, max_linked_servers, can_use_reviews, can_use_public_listing,
@@ -800,9 +812,7 @@ export async function upsertOwnerEntitlements(env: Env, discordUserId: string, p
       config.public_publish_interval_minutes,
       config.visibility_weight,
       now,
-    )
-    .run();
-  return config;
+    );
 }
 
 export async function getOwnerEntitlements(env: Env, discordUserId: string): Promise<PlanEntitlements> {
@@ -811,7 +821,7 @@ export async function getOwnerEntitlements(env: Env, discordUserId: string): Pro
     .prepare("SELECT * FROM owner_plan_entitlements WHERE discord_user_id = ? LIMIT 1")
     .bind(discordUserId)
     .first<Record<string, unknown>>();
-  if (!row) return upsertOwnerEntitlements(env, discordUserId, "free", "free");
+  if (!row) return getPlanConfig("free");
   return entitlementsFromRow(row);
 }
 
@@ -824,7 +834,7 @@ export async function getOwnerBillingStatus(env: Env, user: SessionUser): Promis
     .first<Record<string, unknown>>();
   const planKey = canonicalPlanKey(account?.plan_key);
   const planStatus = typeof account?.plan_status === "string" ? account.plan_status : planKey === "free" ? "free" : "unknown";
-  const entitlements = await upsertOwnerEntitlements(env, user.discord_id, planKey, planStatus);
+  const entitlements = getPlanConfig(effectiveEntitlementPlan(planKey, planStatus));
   const allowanceUsage = await getLinkedServerAllowanceUsageForUser(env, {
     userId: user.id,
     discordUserId: user.discord_id,
@@ -856,9 +866,14 @@ export async function upsertBillingAccount(env: Env, input: {
   cancelAtPeriodEnd?: boolean;
 }) {
   await ensureBillingSchema(env);
+  await billingAccountStatement(env, input).run();
+  return upsertOwnerEntitlements(env, input.discordUserId, canonicalPlanKey(input.planKey), input.planStatus);
+}
+
+export function billingAccountStatement(env: Env, input: Parameters<typeof upsertBillingAccount>[1]): D1PreparedStatement {
   const now = new Date().toISOString();
   const normalizedPlanKey = canonicalPlanKey(input.planKey);
-  await requireDb(env)
+  return requireDb(env)
     .prepare(
       `INSERT INTO owner_billing_accounts (
         id, discord_user_id, stripe_customer_id, stripe_subscription_id, plan_key, plan_status,
@@ -886,9 +901,7 @@ export async function upsertBillingAccount(env: Env, input: {
       boolInt(Boolean(input.cancelAtPeriodEnd)),
       now,
       now,
-    )
-    .run();
-  return upsertOwnerEntitlements(env, input.discordUserId, normalizedPlanKey, input.planStatus);
+    );
 }
 
 export async function findBillingAccountByCustomerOrSubscription(env: Env, input: { customerId?: string | null; subscriptionId?: string | null }) {
@@ -1022,6 +1035,9 @@ function getMissingLiveRequiredVars(env: Env, priceSources: BillingReadinessStat
   if (getStripeModeHint(env) !== "live") missing.add("STRIPE_SECRET_KEY");
   if (!cleanEnvString(env.STRIPE_WEBHOOK_SECRET)) missing.add("STRIPE_WEBHOOK_SECRET");
   if (!hasProductionAppUrl(env)) missing.add("DZN_APP_URL");
+  const legalSeller = getPublicLegalSellerDisclosure(env);
+  if (!legalSeller.legalSellerNameReady) missing.add("DZN_PUBLIC_LEGAL_SELLER_NAME");
+  if (!legalSeller.contactAddressReady) missing.add("DZN_PUBLIC_LEGAL_CONTACT_ADDRESS");
   return [...missing];
 }
 
@@ -1033,7 +1049,15 @@ function buildBillingReadinessChecks(
   checkoutSafety: CheckoutSafetyStatus,
 ): BillingReadinessStatus["readinessChecks"] {
   const publicFallbackVars = getDetectedPublicFallbackPriceVars(env);
+  const legalSeller = getPublicLegalSellerDisclosure(env);
   return [
+    {
+      key: "public-legal-seller-disclosure",
+      label: "Public legal seller disclosure",
+      ok: legalSeller.complete,
+      severity: "blocker",
+      detail: "Live billing requires the confirmed legal seller name and a publishable business correspondence address in the customer terms. Do not use a home address without the owner's explicit decision.",
+    },
     {
       key: "starter-server-price",
       label: "Starter live price",
@@ -1113,7 +1137,8 @@ function getLiveCheckoutPrerequisitesReady(env: Env) {
   const priceSources = getBillingPriceSources(env);
   return PAID_PLAN_KEYS.every((planKey) => priceSources[planKey].liveReady)
     && Boolean(cleanEnvString(env.STRIPE_WEBHOOK_SECRET))
-    && hasProductionAppUrl(env);
+    && hasProductionAppUrl(env)
+    && getPublicLegalSellerDisclosure(env).complete;
 }
 
 function hasProductionAppUrl(env: Env) {

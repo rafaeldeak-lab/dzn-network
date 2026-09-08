@@ -1,6 +1,8 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { StarterCheckoutButton } from "./starter-checkout-button";
+import { PAYMENT_COPY } from "../../lib/billing/payment-copy";
 import {
   Activity,
   AlertTriangle,
@@ -4076,7 +4078,7 @@ function DashboardPackageGuide({
   onProTools: () => void;
 }) {
   const isPro = packageState.tier === "pro";
-  const primaryAction = isPro ? "Open Pro tools" : packageState.tier === "free" ? "Start trial / Pro" : "Compare Pro";
+  const primaryAction = isPro ? "Open Pro tools" : packageState.tier === "free" ? "Compare owner plans" : "Compare Pro";
 
   return (
     <section className={`mt-4 rounded-xl border p-3 ${isPro ? "border-emerald-300/25 bg-emerald-400/10" : "border-cyan-300/20 bg-cyan-400/8"}`}>
@@ -5173,8 +5175,8 @@ type DashboardReviewSummary = {
 };
 
 const billingPlans = [
-  { key: "starter", label: "Starter", price: "£0 today, then £2/month", detail: "2-day free trial, one linked server, public profile, basic Discord advert posts, and one bump every 30 days" },
-  { key: "pro", label: "Pro", price: "£10/month", detail: "Full DZN Access, up to 3 linked servers, custom advert visuals, weekly bumping, enhanced Discord posts, featured and spotlight eligibility, and listing analytics" },
+  { key: "starter", label: "Starter", price: "£2/month", detail: "Eligible accounts get a two-day trial with a payment method, then £2/month until cancelled; one linked server, public profile, basic Discord advert posts, and one bump every 30 days" },
+  { key: "pro", label: "Pro", price: "£10/month", detail: "Advanced server-owner tools, up to 3 linked servers, custom advert visuals, weekly bumping, enhanced Discord posts, featured and spotlight eligibility, and listing analytics" },
 ] as const;
 
 function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { billing: BillingStatus | null; plans: BillingPlanSummary[]; readiness: BillingReadinessResponse | null; message: string; onRefresh: () => Promise<void> }) {
@@ -5182,7 +5184,7 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
   const [portalBusy, setPortalBusy] = useState(false);
   const planKey = billing?.plan_key ?? "free";
   const displayPlans = plans.length ? plans : billingPlans.map((plan) => fallbackBillingPlan(plan));
-  const visiblePlans = displayPlans.filter((plan) => plan.plan_key === "pro" || plan.plan_key === planKey);
+  const visiblePlans = displayPlans.filter((plan) => plan.plan_key === "pro" || plan.plan_key === "starter");
 
   async function upgrade(planKey: "starter" | "pro") {
     setBusyPlan(planKey);
@@ -5230,14 +5232,22 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
       </div>
 
       <BillingReadinessWarning readiness={readiness} />
+      <div className="mt-4 space-y-2 text-sm leading-6 text-zinc-300">
+        <p>{PAYMENT_COPY.starterTerms}</p>
+        <p>{PAYMENT_COPY.returningStarter}</p>
+        <p>{PAYMENT_COPY.proTerms}</p>
+        <p>{PAYMENT_COPY.cancellation}</p>
+        <p>{PAYMENT_COPY.recovery}</p>
+        <a href="/pricing" className="inline-flex min-h-10 items-center text-cyan-200 underline">All payment and trial details</a>
+      </div>
 
       <div className="mt-4 grid gap-2">
         {visiblePlans.map((plan) => {
           const checkoutState = billingPlanCheckoutState(plan, readiness);
           return (
             <div key={plan.plan_key} className="rounded-lg border border-white/10 bg-black/24 p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
+              <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
+                <div className="min-w-0">
                   <p className="text-sm font-black uppercase text-white">{billingPlanDisplayName(plan)} <span className="text-violet-200">{billingPlanDisplayPrice(plan)}</span></p>
                   <p className="mt-1 text-xs leading-5 text-zinc-400">
                     {billingPlanListingSummary(plan)}
@@ -5246,7 +5256,7 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
                     {billingPlanDisplayFeatures(plan).map((feature) => (
                       <p key={feature}><span className="font-black uppercase text-zinc-400">Value:</span> {feature}</p>
                     ))}
-                    <p><span className="font-black uppercase text-zinc-400">Tracking:</span> ADM ingestion and statistics collection continue normally on every plan.</p>
+                    <p><span className="font-black uppercase text-zinc-400">Sync:</span> Automatic stats sync requires completed setup, supported logs and eligible owner access. Plans do not change imported stat formulas.</p>
                     <p><span className="font-black uppercase text-zinc-400">Fairness:</span> Pro never changes leaderboard rank, K/D, score, reviews, crowns, season wins, or gameplay results.</p>
                     <p><span className="font-black uppercase text-zinc-400">Bumps:</span> {isBillingPlanPro(plan.plan_key) ? "one bump every 7 days" : "one bump every 30 days"}.</p>
                   </div>
@@ -5254,14 +5264,17 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
                     {checkoutState.statusLabel}
                   </p>
                 </div>
-                <button
+                {plan.plan_key === "starter" ? <StarterCheckoutButton
+                  disabled={busyPlan !== null || plan.plan_key === planKey || !checkoutState.enabled}
+                  label={plan.plan_key === planKey ? "Current Plan" : !checkoutState.enabled ? checkoutState.buttonLabel : "Choose Starter"}
+                /> : <button
                   type="button"
                   disabled={busyPlan !== null || plan.plan_key === planKey || !checkoutState.enabled}
                   onClick={() => upgrade(plan.plan_key)}
                   className="shrink-0 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {plan.plan_key === planKey ? "Current Plan" : !checkoutState.enabled ? checkoutState.buttonLabel : busyPlan === plan.plan_key ? "Opening..." : "Upgrade"}
-                </button>
+                </button>}
               </div>
             </div>
           );
@@ -5294,6 +5307,7 @@ function billingPlanDisplayName(plan: BillingPlanSummary) {
 }
 
 function billingPlanDisplayPrice(plan: BillingPlanSummary) {
+  if (plan.plan_key === "starter") return "£2/month; 2-day free trial for eligible accounts";
   return plan.price_label;
 }
 
@@ -9095,9 +9109,9 @@ function getDashboardPackageVisibility({
     status,
     loaded,
     title: "Start with Starter",
-    detail: "This account can begin with the Starter trial before any Pro upgrade is offered.",
+    detail: "Player access is free. Compare owner plans for server setup; Starter trial eligibility is checked on your account.",
     included: [
-      "Public setup, server linking, and the Starter trial path are the visible next steps.",
+      "Eligible Starter accounts can use a two-day trial with a payment method, then £2/month until cancelled.",
       "Pro-only dashboard areas stay presented as upgrade previews until an active Pro package is confirmed.",
     ],
     proUpsell: [

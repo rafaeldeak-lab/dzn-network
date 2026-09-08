@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createCheckoutFixture, checkoutResponseFromRequest, checkoutPriceFixture } from "./fixtures/billing-checkout";
+import { createWebhookFixture } from "./fixtures/billing-webhook";
 
 import { evaluateBumpEligibility, publicAdvertisingFromState } from "../functions/_lib/advertising";
-import { getBillingPlanSummaries, getBillingReadinessStatus, getCheckoutConfigured, getCheckoutSafetyStatus, getOwnerBillingStatus, getPlanConfig, getPlanFromStripePriceId, upsertOwnerEntitlements } from "../functions/_lib/plans";
+import { ensureStarterTrialClaimSchema, getBillingPlanSummaries, getBillingReadinessStatus, getCheckoutConfigured, getCheckoutSafetyStatus, getOwnerBillingStatus, getPlanConfig, getPlanFromStripePriceId, upsertBillingAccount, upsertOwnerEntitlements } from "../functions/_lib/plans";
 import { onRequest as billingPlansHandler } from "../functions/api/billing/plans";
 import { onRequest as checkoutHandler } from "../functions/api/billing/create-checkout-session";
 import { onRequest as billingReadinessHandler } from "../functions/api/billing/readiness";
@@ -10,6 +12,11 @@ import { onRequest as webhookHandler } from "../functions/api/stripe/webhook";
 import { sortPublicServersForDiscovery } from "../functions/api/public/servers";
 import { canUseProFeature, getBumpCooldownDays, getListingLimits, getSubscriptionPlanPublicContract, getSubscriptionPlanPublicContracts, hasListingAutoPost, isProListing, normalizeListingPlanKey } from "../lib/billing/plans";
 import type { Env, PagesFunction } from "../functions/_lib/types";
+
+const publicSeller = {
+  DZN_PUBLIC_LEGAL_SELLER_NAME: "Example Legal Seller",
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: "1 Example Street | London | AB1 2CD | United Kingdom",
+};
 
 const starter = getPlanConfig("starter");
 const pro = getPlanConfig("pro");
@@ -36,7 +43,7 @@ assert.equal(getPlanConfig("partner").monthly_price, 10);
 
 const publicContracts = getSubscriptionPlanPublicContracts();
 assert.deepEqual(publicContracts.map((contract) => contract.key), ["starter", "pro"]);
-assert.deepEqual(publicContracts.map((contract) => contract.priceLabel), ["£0 today, then £2/month", "£10/month"]);
+assert.deepEqual(publicContracts.map((contract) => contract.priceLabel), ["£2/month; eligible accounts get a 2-day free trial", "£10/month"]);
 assert.deepEqual(publicContracts.map((contract) => contract.trialDays), [2, 0]);
 assert.deepEqual(publicContracts.map((contract) => contract.publicPublishingIntervalMinutes), [4320, 1440]);
 assert.deepEqual(publicContracts.map((contract) => contract.visibilityWeight), [1, 4]);
@@ -166,7 +173,7 @@ assert.equal(planSummaries.find((plan) => plan.plan_key === "pro")?.features.inc
 assert.equal(planSummaries.find((plan) => plan.plan_key === "starter")?.public_contract.promotionCreditsPerMonth, 0);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "pro")?.public_contract.promotionCreditsPerMonth, 2);
 assert.equal(planSummaries.find((plan) => plan.plan_key === "pro")?.public_contract.discoveryTreatment, "full_dzn_access");
-assert.equal(planSummaries.every((plan) => plan.public_contract.trackingGuarantee.includes("All ADM tracking continues unchanged")), true);
+assert.equal(planSummaries.every((plan) => plan.public_contract.trackingGuarantee.includes("Automatic sync needs completed server setup")), true);
 const planSummaryKeys = planSummaries.map((plan) => String(plan.plan_key));
 assert.equal(planSummaryKeys.includes("network"), false);
 assert.equal(planSummaryKeys.includes("partner"), false);
@@ -189,6 +196,7 @@ assert.equal(pausedLiveCheckoutSafety.checkoutSessionCreationAllowed, false);
 assert.equal(pausedLiveCheckoutSafety.checkoutSafetyMode, "live_checkout_paused");
 
 const enabledLiveCheckoutSafety = getCheckoutSafetyStatus({
+  ...publicSeller,
   STRIPE_PRICE_STARTER: "price_starter",
   STRIPE_PRICE_PRO: "price_pro",
   STRIPE_SECRET_KEY: "sk_live_checkout_safety",
@@ -242,67 +250,20 @@ assert.equal(JSON.stringify(completeReadiness).includes("whsec_secret_value_must
 assert.equal(JSON.stringify(completeReadiness).includes("price_premium"), false);
 
 const landingSource = readFileSync("components/dzn/dzn-landing-page.tsx", "utf8");
-const pricingSection = landingSource.slice(landingSource.indexOf("const pricingPlans"), landingSource.indexOf("function GameModeGrid"));
-for (const snippet of [
-  "Starter",
-  "Pro",
-  "£0 today, then £2/month",
-  "£10/month",
-  "2-day free trial",
-  "Cancel before trial expiry to pay nothing",
-  "Start Starter trial",
-  "Unlock Pro",
-  "Full DZN Access",
-  "Up to 3 linked DayZ servers",
-  "Payment method required",
-  "Open Pricing Comparison",
-  "role=\"dialog\"",
-  "aria-modal=\"true\"",
-  "Close pricing comparison",
-  "dzn-pricing-modal",
-  "dzn-pricing-modal-open",
-  "createPortal(pricingModal, document.body)",
-  "CheckCircle2",
-  "XCircle",
-  "Pro Launch Advantage",
-  "Pro recommended",
-  "Description limit",
-  "Gallery images",
-  "Custom banner",
-  "Bump cooldown",
-  "Discord channels",
-  "Discord auto posts",
-  "Embed design",
-  "Owner announcement",
-  "Event promotion",
-  "Featured and spotlight eligibility",
-  "Leaderboard/stat advantage",
-  "No paid advantage",
-  "Pro helps your server look better, advertise better and understand performance better.",
-  "Make the server look worth joining",
-  "Quick Answers",
-  "Clear answers about Starter and Pro",
-  "pricingEntrySignals",
-  "pricingValuePillars",
-  "pricingTrustPills",
-  "Fair competition",
-  "Trial first",
-  "Powerful tools",
-  "Community driven",
-  "Leaderboard rankings remain 100% skill-based.",
-  "Does Pro affect leaderboard rank?",
-  "What does Pro improve?",
-  "Do Starter servers still compete?",
-  "Can badges be bought?",
-]) {
-  assert.equal(pricingSection.includes(snippet), true, `Public pricing section should include ${snippet}.`);
+const pricingSection = readFileSync("app/pricing/page.tsx", "utf8");
+for (const snippet of ["Starter", "Pro", "PAYMENT_COPY.starterOffer", "PAYMENT_COPY.proTerms",
+  "PAYMENT_COPY.returningStarter", "PAYMENT_FAQS", "PricingCheckout", "<table", 'scope="row"',
+  "text-green-400", "text-red-400", "Paid competitive advantage", "Eligible, not guaranteed"]) {
+  assert.ok(pricingSection.includes(snippet), `Dedicated pricing must contain ${snippet}`);
 }
-assert.equal(/Premium|Network Listing|Partner Listing|Network plan|Partner plan/.test(pricingSection), false, "Public pricing section must only show Starter/Pro plans.");
-assert.equal(/paid leaderboard rank|leaderboard rank boost|improves leaderboard rank|buy better leaderboard/i.test(pricingSection), false, "Pro pricing copy must not claim paid leaderboard rank.");
-assert.equal(landingSource.includes("import { createPortal } from \"react-dom\";"), true, "Pricing modal should portal to document.body instead of rendering inside the animated pricing section.");
+assert.equal(/Premium|Partner Listing|Network plan|Partner plan/.test(pricingSection), false);
+assert.equal(/paid leaderboard rank|leaderboard rank boost|buy better leaderboard/i.test(pricingSection), false);
+assert.ok(landingSource.includes('href="/pricing"'));
+assert.equal(landingSource.includes("createPortal(pricingModal"), false);
+assert.equal(landingSource.includes("const pricingPlans"), false, "Homepage must not carry a conflicting duplicate plan catalogue");
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
-assert.equal(dashboardSource.includes("Full DZN Access, up to 3 linked servers, custom advert visuals, weekly bumping, enhanced Discord posts, featured and spotlight eligibility, and listing analytics"), true, "Owner billing cards should explain Pro value.");
+assert.equal(dashboardSource.includes("Advanced server-owner tools, up to 3 linked servers, custom advert visuals, weekly bumping, enhanced Discord posts, featured and spotlight eligibility, and listing analytics"), true, "Owner billing cards should explain Pro value.");
 assert.equal(dashboardSource.includes("Upgrade to Premium"), false, "Owner billing and Discord fallback cards should not present Premium as an advertising upgrade.");
 assert.equal(dashboardSource.includes("Promo Credits"), true, "Owner dashboard billing summary should show promotion credit language.");
 assert.equal(dashboardSource.includes("Admin billing readiness warning"), true, "Owner dashboard should include an admin-only billing readiness warning.");
@@ -482,9 +443,11 @@ async function run() {
   }
 
   let capturedStripeBody = "";
+  const proCheckoutFixture = createCheckoutFixture();
   globalThis.fetch = async (_input, init) => {
+    if (String(_input).includes("/prices/")) return Response.json({ ...checkoutPriceFixture("price_pro_fixture"), id: String(_input).split("/").at(-1) });
     capturedStripeBody = String(init?.body ?? "");
-    return new Response(JSON.stringify({ id: "cs_test", url: "https://checkout.stripe.test/session" }), {
+    return new Response(JSON.stringify(checkoutResponseFromRequest(init)), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -498,9 +461,10 @@ async function run() {
         headers: { "content-type": "application/json" },
       }),
       {
-        ...fakeEnv,
+        ...proCheckoutFixture.env,
         MOCK_AUTH: "true",
         STRIPE_SECRET_KEY: "sk_test_placeholder",
+        STRIPE_PRICE_PRO: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
         NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
         NEXT_PUBLIC_APP_URL: "https://dzn-network.pages.dev",
       } as Env,
@@ -511,12 +475,15 @@ async function run() {
     assert.match(capturedStripeBody, /metadata%5Bplan_key%5D=pro/);
   } finally {
     globalThis.fetch = originalFetch;
+    proCheckoutFixture.db.sqlite.close();
   }
 
   let capturedLiveEnabledBody = "";
+  const liveCheckoutFixture = createCheckoutFixture();
   globalThis.fetch = async (_input, init) => {
+    if (String(_input).includes("/prices/")) return Response.json({ ...checkoutPriceFixture("price_pro_fixture", true), id: String(_input).split("/").at(-1) });
     capturedLiveEnabledBody = String(init?.body ?? "");
-    return new Response(JSON.stringify({ id: "cs_live_enabled", url: "https://checkout.stripe.test/live-enabled" }), {
+    return new Response(JSON.stringify(checkoutResponseFromRequest(init)), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -530,7 +497,8 @@ async function run() {
         headers: { "content-type": "application/json" },
       }),
       {
-        ...fakeEnv,
+        ...liveCheckoutFixture.env,
+        ...publicSeller,
         MOCK_AUTH: "true",
         STRIPE_SECRET_KEY: "sk_live_placeholder",
         STRIPE_WEBHOOK_SECRET: "whsec_live_placeholder",
@@ -545,6 +513,7 @@ async function run() {
     assert.match(capturedLiveEnabledBody, /metadata%5Bplan_key%5D=pro/);
   } finally {
     globalThis.fetch = originalFetch;
+    liveCheckoutFixture.db.sqlite.close();
   }
 
   const activeCheckoutPrices = {
@@ -553,26 +522,28 @@ async function run() {
   } as const;
   const activeCheckoutStatements: string[] = [];
   const activeCheckoutBindings: unknown[][] = [];
-  const activeCheckoutEnv = createFakeEnv({
-    statements: activeCheckoutStatements,
-    bindings: activeCheckoutBindings,
-  }) as Env;
   const capturedActiveCheckoutBodies: Record<keyof typeof activeCheckoutPrices, string> = {
     starter: "",
     pro: "",
   };
   globalThis.fetch = async (_input, init) => {
+    if (String(_input).includes("/prices/")) {
+      const id = String(_input).split("/").at(-1)!;
+      assert.ok(Object.values(activeCheckoutPrices).includes(id as typeof activeCheckoutPrices.starter));
+      return Response.json({ ...checkoutPriceFixture(id === activeCheckoutPrices.starter ? "price_starter_fixture" : "price_pro_fixture"), id });
+    }
     const body = String(init?.body ?? "");
     const matchedPlan = (Object.keys(activeCheckoutPrices) as Array<keyof typeof activeCheckoutPrices>)
       .find((planKey) => body.includes(`metadata%5Bplan_key%5D=${planKey}`));
     if (matchedPlan) capturedActiveCheckoutBodies[matchedPlan] = body;
-    return new Response(JSON.stringify({ id: "cs_test", url: "https://checkout.stripe.test/session" }), {
+    return new Response(JSON.stringify(checkoutResponseFromRequest(init)), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
   };
   try {
     for (const planKey of Object.keys(activeCheckoutPrices) as Array<keyof typeof activeCheckoutPrices>) {
+      const activeCheckoutFixture = createCheckoutFixture({ statements: activeCheckoutStatements, bindings: activeCheckoutBindings });
       const checkoutResponse = await checkoutHandler(makeContext(
         checkoutHandler,
         new Request("https://local.test/api/billing/create-checkout-session", {
@@ -581,7 +552,7 @@ async function run() {
           headers: { "content-type": "application/json" },
         }),
         {
-          ...activeCheckoutEnv,
+          ...activeCheckoutFixture.env,
           MOCK_AUTH: "true",
           STRIPE_SECRET_KEY: "sk_test_placeholder",
           STRIPE_PRICE_STARTER: activeCheckoutPrices.starter,
@@ -590,6 +561,7 @@ async function run() {
         } as Env,
       ));
       assert.equal(checkoutResponse.status, 200);
+      activeCheckoutFixture.db.sqlite.close();
       assert.match(capturedActiveCheckoutBodies[planKey], new RegExp(`line_items%5B0%5D%5Bprice%5D=${activeCheckoutPrices[planKey]}`));
       assert.match(capturedActiveCheckoutBodies[planKey], new RegExp(`metadata%5Bplan_key%5D=${planKey}`));
       assert.match(capturedActiveCheckoutBodies[planKey], /payment_method_collection=always/);
@@ -654,6 +626,13 @@ async function run() {
   }
 
   let blockedCustomerFetchCalled = false;
+  const blockedCustomerFixture = createCheckoutFixture();
+  await upsertBillingAccount(blockedCustomerFixture.env, { discordUserId: "mock-discord-user", stripeCustomerId: "cus_existing", planKey: "free", planStatus: "free" });
+  await ensureStarterTrialClaimSchema(blockedCustomerFixture.env);
+  blockedCustomerFixture.db.sqlite.exec(`INSERT INTO owner_starter_trial_claims
+    (id, discord_user_id, stripe_customer_id, stripe_subscription_id, checkout_session_id, status, claimed_at, updated_at)
+    VALUES ('claim-customer-used', 'other-discord-user', 'cus_existing', 'sub_existing', 'cs_existing', 'trialing',
+      '2026-05-17T00:00:00.000Z', '2026-05-17T00:00:00.000Z')`);
   globalThis.fetch = async () => {
     blockedCustomerFetchCalled = true;
     return new Response(JSON.stringify({ id: "cs_blocked_customer", url: "https://checkout.stripe.test/blocked-customer" }), {
@@ -670,19 +649,7 @@ async function run() {
         headers: { "content-type": "application/json" },
       }),
       {
-        ...createFakeEnv({
-          account: { stripe_customer_id: "cus_existing" },
-          trialClaim: {
-            id: "claim-customer-used",
-            discord_user_id: "other-discord-user",
-            stripe_customer_id: "cus_existing",
-            stripe_subscription_id: "sub_existing",
-            checkout_session_id: "cs_existing",
-            status: "trialing",
-            claimed_at: "2026-05-17T00:00:00.000Z",
-            updated_at: "2026-05-17T00:00:00.000Z",
-          },
-        }),
+        ...blockedCustomerFixture.env,
         MOCK_AUTH: "true",
         STRIPE_SECRET_KEY: "sk_test_placeholder",
         STRIPE_PRICE_STARTER: activeCheckoutPrices.starter,
@@ -693,6 +660,7 @@ async function run() {
     assert.equal(blockedCustomerFetchCalled, false, "Used Starter trials must also be blocked by known Stripe customer.");
   } finally {
     globalThis.fetch = originalFetch;
+    blockedCustomerFixture.db.sqlite.close();
   }
 
   const invalidWebhook = await webhookHandler(makeContext(
@@ -706,12 +674,78 @@ async function run() {
   ));
   assert.equal(invalidWebhook.status, 400);
 
+  const safeCheckoutObject = { id: "cs_safety", mode: "subscription", customer: "cus_safety", subscription: "sub_safety",
+    metadata: { discord_user_id: "discord-safety", plan_key: "pro", source: "dzn-network" } };
+  const safeSubscription = { id: "sub_safety", customer: "cus_safety", status: "active",
+    current_period_start: 1788220800, current_period_end: 1790812800,
+    items: { data: [{ price: { id: "price_safe" } }] } };
+  const rejectedCases = [
+    { name: "provider unavailable", providerStatus: 503 },
+    { name: "network failure", networkFailure: true },
+    { name: "missing subscription", object: { ...safeCheckoutObject, subscription: null }, expectedFetches: 0 },
+    { name: "missing customer", object: { ...safeCheckoutObject, customer: null }, expectedFetches: 0 },
+    { name: "one-time checkout", object: { ...safeCheckoutObject, mode: "payment" }, expectedFetches: 0 },
+    { name: "wrong subscription", subscription: { ...safeSubscription, id: "sub_other" } },
+    { name: "wrong customer", subscription: { ...safeSubscription, customer: "cus_other" } },
+    { name: "missing status", subscription: { ...safeSubscription, status: undefined } },
+    { name: "invalid status", subscription: { ...safeSubscription, status: "confirmed" } },
+    { name: "unknown price cannot use metadata Pro", subscription: { ...safeSubscription, items: { data: [{ price: { id: "price_unknown" } }] } } },
+    { name: "missing price cannot use metadata Pro", subscription: { ...safeSubscription, items: { data: [] } } },
+    { name: "expanded snapshot still requires retrieval", object: { ...safeCheckoutObject, subscription: safeSubscription }, providerStatus: 503 },
+  ];
+  try {
+    for (const item of rejectedCases) {
+      const fixture = await createWebhookFixture();
+      let fetches = 0;
+      globalThis.fetch = async (input, init) => {
+        fetches++;
+        assert.equal(String(input), "https://api.stripe.com/v1/subscriptions/sub_safety");
+        assert.equal(init?.method, "GET");
+        if (item.networkFailure) throw new Error("private-provider-diagnostic");
+        return new Response(JSON.stringify(item.providerStatus ? { error: { message: "private-provider-diagnostic" } } : item.subscription ?? safeSubscription), { status: item.providerStatus ?? 200 });
+      };
+      const payload = JSON.stringify({ id: "evt_safety", livemode: false, type: "checkout.session.completed", data: { object: item.object ?? safeCheckoutObject } });
+      const response = await webhookHandler(makeContext(webhookHandler, new Request("https://local.test/api/stripe/webhook", {
+        method: "POST", body: payload, headers: { "stripe-signature": await stripeSignatureHeader(payload, "whsec_test") },
+      }), { ...fixture.env, STRIPE_SECRET_KEY: "sk_test_local", STRIPE_WEBHOOK_SECRET: "whsec_test", STRIPE_PRICE_PRO: "price_safe" }));
+      assert.equal(response.status, 500, item.name);
+      assert.equal(fixture.db.allWrites.length, 0, `${item.name}: no receipt, trial, entitlement, subscription, scheduling or other database writes`);
+      assert.equal(fetches, item.expectedFetches ?? 1, item.name);
+      assert.doesNotMatch(await response.text(), /private-provider-diagnostic|cus_other|sub_other|price_unknown/);
+      fixture.db.sqlite.close();
+    }
+    for (const timestamp of [String(Math.floor(Date.now() / 1000) - 600), String(Math.floor(Date.now() / 1000) + 600), "NaN", "0", "1e12"]) {
+      let touched = false;
+      globalThis.fetch = async () => { touched = true; throw new Error("Unexpected network request"); };
+      const payload = JSON.stringify({ id: "evt_replay", type: "checkout.session.completed", data: { object: safeCheckoutObject } });
+      const response = await webhookHandler(makeContext(webhookHandler, new Request("https://local.test/api/stripe/webhook", {
+        method: "POST", body: payload, headers: { "stripe-signature": await stripeSignatureHeader(payload, "whsec_test", timestamp) },
+      }), { STRIPE_WEBHOOK_SECRET: "whsec_test", DB: { prepare() { touched = true; throw new Error("Unexpected database request"); } } } as unknown as Env));
+      assert.equal(response.status, 400, "Even a correctly signed stale/future/malformed timestamp must fail");
+      assert.equal(touched, false);
+    }
+    const delayedFixture = await createWebhookFixture();
+    const bindings = delayedFixture.db.bindings;
+    globalThis.fetch = async () => new Response(JSON.stringify({ ...safeSubscription, status: "canceled" }));
+    const payload = JSON.stringify({ id: "evt_delayed", livemode: false, type: "checkout.session.completed", data: { object: { ...safeCheckoutObject, subscription: safeSubscription } } });
+    const delayed = await webhookHandler(makeContext(webhookHandler, new Request("https://local.test/api/stripe/webhook", {
+      method: "POST", body: payload, headers: { "stripe-signature": await stripeSignatureHeader(payload, "whsec_test") },
+    }), { ...delayedFixture.env, STRIPE_SECRET_KEY: "sk_test_local", STRIPE_WEBHOOK_SECRET: "whsec_test", STRIPE_PRICE_PRO: "price_safe" } as Env));
+    assert.equal(delayed.status, 200);
+    assert.ok(bindings.some(values => values.includes("discord-safety") && values.includes("canceled")));
+    assert.equal(bindings.some(values => values.includes("discord-safety") && values.includes("active")), false,
+      "Delayed expanded checkout must not resurrect access canceled at Stripe");
+    delayedFixture.db.sqlite.close();
+  } finally { globalThis.fetch = originalFetch; }
+
   const webhookPayload = JSON.stringify({
     id: "evt_checkout",
+    livemode: false,
     type: "checkout.session.completed",
     data: {
       object: {
         id: "cs_test",
+        mode: "subscription",
         customer: "cus_test",
         subscription: "sub_test",
         metadata: { discord_user_id: "discord-webhook", plan_key: "pro" },
@@ -720,8 +754,9 @@ async function run() {
   });
   const checkoutPeriodStart = Math.floor(Date.parse("2026-05-17T00:00:00.000Z") / 1000);
   const checkoutPeriodEnd = Math.floor(Date.parse("2026-06-17T00:00:00.000Z") / 1000);
-  const webhookBindings: unknown[][] = [];
-  const webhookEnv = createFakeEnv({ bindings: webhookBindings }) as Env;
+  const webhookFixture = await createWebhookFixture();
+  const webhookBindings = webhookFixture.db.bindings;
+  const webhookEnv = webhookFixture.env;
   globalThis.fetch = async () => new Response(JSON.stringify({
     id: "sub_test",
     object: "subscription",
@@ -749,6 +784,7 @@ async function run() {
       }),
       {
         ...webhookEnv,
+        STRIPE_PRICE_PRO: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
         STRIPE_SECRET_KEY: "sk_test_placeholder",
         STRIPE_WEBHOOK_SECRET: "whsec_test",
         NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
@@ -760,21 +796,25 @@ async function run() {
   }
   assert.equal(webhookBindings.some((values) => values.includes("discord-webhook") && values.includes("pro")), true);
   assert.equal(webhookBindings.some((values) => values.includes("2026-06-17T00:00:00.000Z")), true);
+  webhookFixture.db.sqlite.close();
 
   const starterWebhookPayload = JSON.stringify({
     id: "evt_checkout_starter",
+    livemode: false,
     type: "checkout.session.completed",
     data: {
       object: {
         id: "cs_starter",
+        mode: "subscription",
         customer: "cus_starter",
         subscription: "sub_starter",
         metadata: { discord_user_id: "discord-starter-webhook", plan_key: "starter" },
       },
     },
   });
-  const starterWebhookBindings: unknown[][] = [];
-  const starterWebhookEnv = createFakeEnv({ bindings: starterWebhookBindings }) as Env;
+  const starterWebhookFixture = await createWebhookFixture();
+  const starterWebhookBindings = starterWebhookFixture.db.bindings;
+  const starterWebhookEnv = starterWebhookFixture.env;
   globalThis.fetch = async () => new Response(JSON.stringify({
     id: "sub_starter",
     object: "subscription",
@@ -823,10 +863,13 @@ async function run() {
     "Starter checkout webhooks should attach Stripe identifiers to the durable trial claim.",
   );
   assert.equal(starterWebhookBindings.some((values) => values.includes("discord-starter-webhook") && values.includes("starter")), true);
+  starterWebhookFixture.db.sqlite.close();
 
-  const rootPeriodBindings: unknown[][] = [];
+  const rootPeriodFixture = await createWebhookFixture();
+  const rootPeriodBindings = rootPeriodFixture.db.bindings;
   const rootPeriodPayload = JSON.stringify({
     id: "evt_created",
+    livemode: false,
     type: "customer.subscription.created",
     data: {
       object: {
@@ -842,6 +885,7 @@ async function run() {
       },
     },
   });
+  globalThis.fetch = async () => Response.json(JSON.parse(rootPeriodPayload).data.object);
   const rootPeriodResponse = await webhookHandler(makeContext(
     webhookHandler,
     new Request("https://local.test/api/stripe/webhook", {
@@ -850,29 +894,27 @@ async function run() {
       headers: { "stripe-signature": await stripeSignatureHeader(rootPeriodPayload, "whsec_test") },
     }),
     {
-      ...createFakeEnv({ bindings: rootPeriodBindings }),
+      ...rootPeriodFixture.env,
+      STRIPE_PRICE_PRO: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
+      STRIPE_SECRET_KEY: "sk_test_placeholder",
       STRIPE_WEBHOOK_SECRET: "whsec_test",
       NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
     } as Env,
   ));
+  globalThis.fetch = originalFetch;
   assert.equal(rootPeriodResponse.status, 200);
   assert.equal(rootPeriodBindings.some((values) => values.includes("2026-06-17T00:00:00.000Z")), true);
   assert.equal(rootPeriodBindings.some((values) => values.includes(1)), true);
+  rootPeriodFixture.db.sqlite.close();
 
-  const deletedBindings: unknown[][] = [];
-  const deletedEnv = createFakeEnv({
-    account: {
-      discord_user_id: "discord-deleted",
-      plan_key: "pro",
-      plan_status: "active",
-      current_period_start: "2026-05-01T00:00:00.000Z",
-      current_period_end: "2026-06-01T00:00:00.000Z",
-      cancel_at_period_end: 0,
-    },
-    bindings: deletedBindings,
-  }) as Env;
+  const deletedFixture = await createWebhookFixture();
+  const deletedBindings = deletedFixture.db.bindings;
+  const deletedEnv = deletedFixture.env;
+  await upsertBillingAccount(deletedEnv, { discordUserId: "discord-deleted", stripeCustomerId: "cus_deleted", stripeSubscriptionId: "sub_deleted",
+    planKey: "pro", planStatus: "active", currentPeriodStart: "2026-05-01T00:00:00.000Z", currentPeriodEnd: "2026-06-01T00:00:00.000Z" });
   const deletedPayload = JSON.stringify({
     id: "evt_deleted",
+    livemode: false,
     type: "customer.subscription.deleted",
     data: {
       object: {
@@ -887,6 +929,7 @@ async function run() {
       },
     },
   });
+  globalThis.fetch = async () => Response.json(JSON.parse(deletedPayload).data.object);
   const deletedResponse = await webhookHandler(makeContext(
     webhookHandler,
     new Request("https://local.test/api/stripe/webhook", {
@@ -896,12 +939,16 @@ async function run() {
     }),
     {
       ...deletedEnv,
+      STRIPE_PRICE_PRO: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
+      STRIPE_SECRET_KEY: "sk_test_placeholder",
       STRIPE_WEBHOOK_SECRET: "whsec_test",
       NEXT_PUBLIC_STRIPE_PRO_PRICE_ID: "price_1TY4dDJPrnZ0cnkH4OhfEHmW",
     } as Env,
   ));
+  globalThis.fetch = originalFetch;
   assert.equal(deletedResponse.status, 200);
   assert.equal(deletedBindings.some((values) => values.includes("discord-deleted") && values.includes("free")), true);
+  deletedFixture.db.sqlite.close();
 
   const activeStatus = await getOwnerBillingStatus(createFakeEnv({
     account: {
@@ -989,6 +1036,7 @@ function createFakeEnv(options: {
             return null;
           },
           async all() {
+            if (/FROM owner_billing_accounts/i.test(query) && options.account) return { success: true, meta: {}, results: [options.account] };
             return { success: true, meta: {}, results: [] };
           },
           async raw() {
@@ -1017,8 +1065,7 @@ function makeContext(handler: PagesFunction, request: Request, env: Env): Parame
   };
 }
 
-async function stripeSignatureHeader(payload: string, secret: string) {
-  const timestamp = "1770000000";
+async function stripeSignatureHeader(payload: string, secret: string, timestamp = String(Math.floor(Date.now() / 1000))) {
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),
