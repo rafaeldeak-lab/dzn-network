@@ -94,7 +94,7 @@ type SourceStateRow = {
 };
 
 const serviceIds = parseServiceIds(process.argv.slice(2));
-const baseUrl = (process.env.DZN_APP_URL || "https://dzn-network.pages.dev").replace(/\/$/, "");
+const baseUrl = (process.env.DZN_APP_URL || "https://dayz-network.com").replace(/\/$/, "");
 const cronSecret = process.env.DZN_CRON_SECRET || process.env.SYNC_CRON_SECRET || "";
 const checks: Check[] = [];
 const NOFTP_SOURCE_NAME = "gameserver_details_log_files_noftp_download";
@@ -127,6 +127,10 @@ function sqlString(value: string) {
 
 function d1<T>(sql: string): T[] {
   const compactSql = sql.replace(/\s+/g, " ").trim();
+  const mutatingSql = /\b(?:ALTER|ATTACH|CREATE|DELETE|DETACH|DROP|INSERT|PRAGMA|REPLACE|UPDATE|UPSERT|VACUUM)\b/i;
+  if (!/^(?:SELECT|WITH)\b/i.test(compactSql) || mutatingSql.test(compactSql)) {
+    throw new Error("Refusing non-read-only production D1 statement.");
+  }
   const result = spawnSync(process.execPath, ["node_modules/wrangler/bin/wrangler.js", "d1", "execute", "dzn_network_db", "--remote", "--json", "--command", compactSql], {
     encoding: "utf8",
     cwd: process.cwd(),

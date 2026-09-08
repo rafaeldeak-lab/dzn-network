@@ -27,7 +27,7 @@ jobs:
       - name: Watch ADM cycle
         id: adm-watch
         env:
-          DZN_APP_URL: ${{ vars.DZN_APP_URL }}
+          DZN_APP_URL: ${{ vars.DZN_APP_URL || 'https://dayz-network.com' }}
           DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
           AUTODEV_WATCH_MINUTES: ${{ inputs.watchMinutes || '90' }}
@@ -40,9 +40,11 @@ jobs:
       - name: Verify live ADM import evidence
         id: adm-live
         env:
-          DZN_APP_URL: ${{ vars.DZN_APP_URL }}
+          DZN_APP_URL: ${{ vars.DZN_APP_URL || 'https://dayz-network.com' }}
           DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set +e
           npm run verify:adm-live

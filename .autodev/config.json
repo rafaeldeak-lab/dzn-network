@@ -22,7 +22,7 @@
     "forbidMeteredAiProvidersByDefault": true,
     "overrideRequires": "high_risk_human_approved_redesign"
   },
-  "productionUrl": "https://dzn-network.pages.dev",
+  "productionUrl": "https://dayz-network.com",
   "deployPreviewRequired": true,
   "watchAdmCycles": true,
   "watchMinutesAfterDeploy": 90,
