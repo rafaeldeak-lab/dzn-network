@@ -62,6 +62,13 @@ async function run() {
   await request(400, owner, "GET", "?expected_account=acct_expected&expected_webhook_fingerprint=whsec_do_not_send_raw_secrets");
   f.env.MOCK_AUTH = "true"; await request(403); delete f.env.MOCK_AUTH;
   assert.equal(calls.length, 0, "Auth, method and input gates must precede provider contact");
+  f.env.MOCK_AUTH = "false";
+  await request(401, ""); await request(403, other);
+  assert.equal(calls.length, 0, "Explicitly disabled mock auth must still require a real operator");
+  const explicitFalse = await request(200) as Awaited<ReturnType<typeof getBillingProviderReadiness>>;
+  assert.equal(explicitFalse.providerConfigurationVerified, true);
+  assert.equal(calls.length, 5);
+  calls.length = 0; delete f.env.MOCK_AUTH;
   const success = await request(200) as Awaited<ReturnType<typeof getBillingProviderReadiness>>;
   assert.equal(success.providerConfigurationVerified, true);
   assert.equal(calls.length, 5);
