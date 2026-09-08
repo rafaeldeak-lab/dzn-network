@@ -34,6 +34,7 @@ import {
   type PurchasablePlanKey,
   type SubscriptionPlanPublicContract,
 } from "../../lib/billing/plans";
+import { getPublicLegalSellerDisclosure } from "../../lib/legal-seller";
 import { getLinkedServerAllowanceUsageForUser } from "./onboarding";
 
 export type PaidPlanKey = "starter" | "pro" | "premium";
@@ -1034,6 +1035,9 @@ function getMissingLiveRequiredVars(env: Env, priceSources: BillingReadinessStat
   if (getStripeModeHint(env) !== "live") missing.add("STRIPE_SECRET_KEY");
   if (!cleanEnvString(env.STRIPE_WEBHOOK_SECRET)) missing.add("STRIPE_WEBHOOK_SECRET");
   if (!hasProductionAppUrl(env)) missing.add("DZN_APP_URL");
+  const legalSeller = getPublicLegalSellerDisclosure(env);
+  if (!legalSeller.legalSellerNameReady) missing.add("DZN_PUBLIC_LEGAL_SELLER_NAME");
+  if (!legalSeller.contactAddressReady) missing.add("DZN_PUBLIC_LEGAL_CONTACT_ADDRESS");
   return [...missing];
 }
 
@@ -1045,7 +1049,15 @@ function buildBillingReadinessChecks(
   checkoutSafety: CheckoutSafetyStatus,
 ): BillingReadinessStatus["readinessChecks"] {
   const publicFallbackVars = getDetectedPublicFallbackPriceVars(env);
+  const legalSeller = getPublicLegalSellerDisclosure(env);
   return [
+    {
+      key: "public-legal-seller-disclosure",
+      label: "Public legal seller disclosure",
+      ok: legalSeller.complete,
+      severity: "blocker",
+      detail: "Live billing requires the confirmed legal seller name and a publishable business correspondence address in the customer terms. Do not use a home address without the owner's explicit decision.",
+    },
     {
       key: "starter-server-price",
       label: "Starter live price",
@@ -1125,7 +1137,8 @@ function getLiveCheckoutPrerequisitesReady(env: Env) {
   const priceSources = getBillingPriceSources(env);
   return PAID_PLAN_KEYS.every((planKey) => priceSources[planKey].liveReady)
     && Boolean(cleanEnvString(env.STRIPE_WEBHOOK_SECRET))
-    && hasProductionAppUrl(env);
+    && hasProductionAppUrl(env)
+    && getPublicLegalSellerDisclosure(env).complete;
 }
 
 function hasProductionAppUrl(env: Env) {

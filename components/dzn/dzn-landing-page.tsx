@@ -1930,7 +1930,14 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
 function Footer() {
   return (
     <footer className="relative z-10 mx-auto w-full max-w-[1440px] border-t border-white/8 px-4 pb-7 pt-4 text-xs text-zinc-500 sm:px-6 lg:px-8">
-      <p>Copyright {new Date().getFullYear()} DZN Network. Server competition intelligence for connected DayZ communities.</p>
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+        <p>Copyright {new Date().getFullYear()} DZN Network. Server competition intelligence for connected DayZ communities.</p>
+        <nav aria-label="DZN policies" className="flex flex-wrap gap-x-4 gap-y-2 font-bold text-zinc-400">
+          <Link href="/terms" className="hover:text-cyan-200 focus-visible:text-cyan-200">Terms</Link>
+          <Link href="/privacy" className="hover:text-cyan-200 focus-visible:text-cyan-200">Privacy</Link>
+          <Link href="/refunds" className="hover:text-cyan-200 focus-visible:text-cyan-200">Cancellations and refunds</Link>
+        </nav>
+      </div>
     </footer>
   );
 }
