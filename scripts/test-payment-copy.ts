@@ -80,8 +80,41 @@ const completeSeller = getPublicLegalSellerDisclosure({
   DZN_PUBLIC_LEGAL_SELLER_NAME: "Example Legal Seller",
   DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: "1 Example Street | London | AB1 2CD | United Kingdom",
 });
-assert.equal(completeSeller.complete, true);
+assert.equal(completeSeller.complete, false, "Configured but unpublished seller details must not satisfy readiness.");
+assert.equal(completeSeller.legalSellerNameReady, true);
+assert.equal(completeSeller.contactAddressReady, true);
+assert.equal(completeSeller.publishedContactMatches, false);
 assert.deepEqual(completeSeller.contactAddressLines, ["1 Example Street", "London", "AB1 2CD", "United Kingdom"]);
+const publishedFixture = {
+  name: "Example Legal Seller",
+  addressLines: ["1 Example Street", "London", "AB1 2CD", "United Kingdom"],
+};
+const sellerFixture = {
+  DZN_PUBLIC_LEGAL_SELLER_NAME: publishedFixture.name,
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: publishedFixture.addressLines.join(" | "),
+};
+assert.equal(getPublicLegalSellerDisclosure(sellerFixture, publishedFixture).complete, true,
+  "The pure helper must accept valid seller details only when they match its explicit published-contact fixture.");
+assert.equal(getPublicLegalSellerDisclosure({
+  ...sellerFixture,
+  DZN_PUBLIC_LEGAL_SELLER_NAME: ` ${publishedFixture.name} `,
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: publishedFixture.addressLines.join("\r\n"),
+}, publishedFixture).complete, true, "Existing whitespace and address separator handling is preserved.");
+for (const mismatch of [
+  { ...publishedFixture, name: "Different Legal Seller" },
+  { ...publishedFixture, name: publishedFixture.name.toLowerCase() },
+  { ...publishedFixture, addressLines: [...publishedFixture.addressLines, "Extra line"] },
+  { ...publishedFixture, addressLines: publishedFixture.addressLines.slice(1) },
+  { ...publishedFixture, addressLines: [...publishedFixture.addressLines].reverse() },
+]) {
+  assert.equal(getPublicLegalSellerDisclosure(sellerFixture, mismatch).complete, false);
+}
+const brandOnlySeller = getPublicLegalSellerDisclosure({
+  DZN_PUBLIC_LEGAL_SELLER_NAME: DZN_PUBLIC_CONTACT.name,
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: DZN_PUBLIC_CONTACT.addressLines.join(" | "),
+});
+assert.equal(brandOnlySeller.publishedContactMatches, true);
+assert.equal(brandOnlySeller.complete, false, "Publication matching must not weaken existing seller-name validation.");
 const refunds = readFileSync("app/refunds/page.tsx", "utf8");
 assert.match(refunds, /cancel before the trial deadline.*avoid the first GBP 2 payment/i);
 assert.match(refunds, /does not automatically refund.*already completed/i);

@@ -51,9 +51,8 @@ try {
         if (!body.includes("dznnetworksupport@gmail.com")) throw new Error(`${route} is missing private support contact`);
       }
       if (route === "/terms") {
-        const shouldShowSellerWarning = process.env.DZN_QA_COMPLETE_SELLER_FIXTURE !== "true";
-        if (body.includes("Live subscription checkout remains unavailable") !== shouldShowSellerWarning) {
-          throw new Error("/terms seller-readiness warning must match the synthetic build fixture");
+        if (!body.includes("Live subscription checkout remains unavailable")) {
+          throw new Error("/terms must retain its warning even when unpublished private seller values are configured");
         }
       }
       const name = `${viewport.name}-${route.slice(1)}`;
