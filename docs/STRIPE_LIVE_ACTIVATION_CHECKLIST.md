@@ -81,6 +81,7 @@ These steps are manual, deliberate production operations. They must not be conve
    - `DZN_PUBLIC_LEGAL_SELLER_NAME`
    - `DZN_PUBLIC_LEGAL_CONTACT_ADDRESS`
 10. Confirm the seller name is the real legal seller behind the DZN Network trading name and the address is a legitimate public correspondence address that the owner has approved for publication. Do not infer or publish a home address from Stripe or any private account record.
+    The configured name and ordered address lines must also match the approved `DZN_PUBLIC_CONTACT` rendered by the released customer pages. Configuration alone is not publication. The currently approved brand-only contact is not a completed legal-seller disclosure and cannot pass the existing seller-name validation. Do not change private records, copy private identity into public constants, weaken validation, or add an enable flag to bypass this unresolved launch condition; resolve it in a separately reviewed and approved seller-disclosure slice.
 11. Run the read-only readiness check as an authenticated admin/support/dev user.
 12. Confirm `liveConfigurationReady: true`, `humanApprovalRequiredForLiveBilling: true`, and `productionMutationAllowedByReadinessCheck: false`.
 13. Keep `DZN_LIVE_CHECKOUT_ENABLED` unset while performing sandbox/test readiness. In this state, live checkout should report `checkoutSessionCreationAllowed: false`.

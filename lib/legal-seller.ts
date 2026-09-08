@@ -1,3 +1,5 @@
+import { DZN_PUBLIC_CONTACT } from "./support";
+
 type LegalSellerEnvironment = {
   DZN_PUBLIC_LEGAL_SELLER_NAME?: string;
   DZN_PUBLIC_LEGAL_CONTACT_ADDRESS?: string;
@@ -9,8 +11,11 @@ export type PublicLegalSellerDisclosure = {
   contactAddressLines: string[];
   legalSellerNameReady: boolean;
   contactAddressReady: boolean;
+  publishedContactMatches: boolean;
   complete: boolean;
 };
+
+type PublishedSellerContact = { name: string; addressLines: readonly string[] };
 
 const PLACEHOLDER_VALUES = new Set([
   "dzn network",
@@ -20,7 +25,10 @@ const PLACEHOLDER_VALUES = new Set([
   "uk",
 ]);
 
-export function getPublicLegalSellerDisclosure(env: LegalSellerEnvironment): PublicLegalSellerDisclosure {
+export function getPublicLegalSellerDisclosure(
+  env: LegalSellerEnvironment,
+  publishedContact: PublishedSellerContact = DZN_PUBLIC_CONTACT,
+): PublicLegalSellerDisclosure {
   const legalSellerName = cleanValue(env.DZN_PUBLIC_LEGAL_SELLER_NAME);
   const contactAddress = cleanValue(env.DZN_PUBLIC_LEGAL_CONTACT_ADDRESS);
   const contactAddressLines = contactAddress
@@ -28,6 +36,10 @@ export function getPublicLegalSellerDisclosure(env: LegalSellerEnvironment): Pub
     : [];
   const legalSellerNameReady = isUsableValue(legalSellerName);
   const contactAddressReady = isUsableValue(contactAddress) && contactAddressLines.length >= 2;
+  // Configuration is not publication. Match the same approved contact rendered by the site.
+  const publishedContactMatches = legalSellerName === publishedContact.name
+    && contactAddressLines.length === publishedContact.addressLines.length
+    && contactAddressLines.every((line, index) => line === publishedContact.addressLines[index]);
 
   return {
     legalSellerName,
@@ -35,7 +47,8 @@ export function getPublicLegalSellerDisclosure(env: LegalSellerEnvironment): Pub
     contactAddressLines,
     legalSellerNameReady,
     contactAddressReady,
-    complete: legalSellerNameReady && contactAddressReady,
+    publishedContactMatches,
+    complete: legalSellerNameReady && contactAddressReady && publishedContactMatches,
   };
 }
 

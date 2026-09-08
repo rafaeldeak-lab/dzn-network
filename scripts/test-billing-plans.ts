@@ -7,6 +7,8 @@ import { evaluateBumpEligibility, publicAdvertisingFromState } from "../function
 import { ensureStarterTrialClaimSchema, getBillingPlanSummaries, getBillingReadinessStatus, getCheckoutConfigured, getCheckoutSafetyStatus, getOwnerBillingStatus, getPlanConfig, getPlanFromStripePriceId, upsertBillingAccount, upsertOwnerEntitlements } from "../functions/_lib/plans";
 import { onRequest as billingPlansHandler } from "../functions/api/billing/plans";
 import { onRequest as checkoutHandler } from "../functions/api/billing/create-checkout-session";
+import { onRequest as portalHandler } from "../functions/api/billing/create-portal-session";
+import { ensureMockUser } from "../functions/_lib/db";
 import { onRequest as billingReadinessHandler } from "../functions/api/billing/readiness";
 import { onRequest as webhookHandler } from "../functions/api/stripe/webhook";
 import { sortPublicServersForDiscovery } from "../functions/api/public/servers";
@@ -204,8 +206,8 @@ const enabledLiveCheckoutSafety = getCheckoutSafetyStatus({
   DZN_APP_URL: "https://dayz-network.com",
   DZN_LIVE_CHECKOUT_ENABLED: "true",
 } as Env);
-assert.equal(enabledLiveCheckoutSafety.checkoutSessionCreationAllowed, true);
-assert.equal(enabledLiveCheckoutSafety.checkoutSafetyMode, "live_checkout_enabled");
+assert.equal(enabledLiveCheckoutSafety.checkoutSessionCreationAllowed, false, "Configured but unpublished seller data cannot enable checkout.");
+assert.equal(enabledLiveCheckoutSafety.checkoutSafetyMode, "live_checkout_paused");
 
 const incompleteLiveCheckoutSafety = getCheckoutSafetyStatus({
   NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID: "price_public_starter",
@@ -478,39 +480,68 @@ async function run() {
     proCheckoutFixture.db.sqlite.close();
   }
 
-  let capturedLiveEnabledBody = "";
-  const liveCheckoutFixture = createCheckoutFixture();
-  globalThis.fetch = async (_input, init) => {
-    if (String(_input).includes("/prices/")) return Response.json({ ...checkoutPriceFixture("price_pro_fixture", true), id: String(_input).split("/").at(-1) });
-    capturedLiveEnabledBody = String(init?.body ?? "");
-    return new Response(JSON.stringify(checkoutResponseFromRequest(init)), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
+  const portalFixture = createCheckoutFixture();
+  const portalEnv = { ...portalFixture.env, ...publicSeller, MOCK_AUTH: "true", STRIPE_SECRET_KEY: "sk_live_portal_fixture" } as Env;
+  let portalCalls = 0;
+  globalThis.fetch = async (input, init) => {
+    portalCalls += 1;
+    assert.equal(String(input), "https://api.stripe.com/v1/billing_portal/sessions");
+    const body = new URLSearchParams(String(init?.body ?? ""));
+    assert.equal(body.get("customer"), "cus_existing_owner_fixture");
+    assert.equal(body.get("return_url"), "https://local.test/dashboard");
+    return Response.json({ id: "bps_fixture", url: "https://billing.stripe.com/p/session/fixture" });
   };
   try {
-    const liveEnabledCheckout = await checkoutHandler(makeContext(
-      checkoutHandler,
-      new Request("https://local.test/api/billing/create-checkout-session", {
-        method: "POST",
-        body: JSON.stringify({ plan_key: "pro", returnTo: "/dashboard" }),
-        headers: { "content-type": "application/json" },
-      }),
-      {
-        ...liveCheckoutFixture.env,
-        ...publicSeller,
-        MOCK_AUTH: "true",
-        STRIPE_SECRET_KEY: "sk_live_placeholder",
-        STRIPE_WEBHOOK_SECRET: "whsec_live_placeholder",
-        STRIPE_PRICE_STARTER: "price_live_starter_enabled",
-        STRIPE_PRICE_PRO: "price_live_pro_enabled",
-        DZN_LIVE_CHECKOUT_ENABLED: "true",
-        DZN_APP_URL: "https://dayz-network.com",
-      } as Env,
-    ));
-    assert.equal(liveEnabledCheckout.status, 200);
-    assert.match(capturedLiveEnabledBody, /line_items%5B0%5D%5Bprice%5D=price_live_pro_enabled/);
-    assert.match(capturedLiveEnabledBody, /metadata%5Bplan_key%5D=pro/);
+    const request = () => new Request("https://local.test/api/billing/create-portal-session", { method: "POST" });
+    const unauthPortal = await portalHandler(makeContext(portalHandler, request(), { ...portalEnv, MOCK_AUTH: "false" }));
+    assert.equal(unauthPortal.status, 401);
+    assert.equal(portalCalls, 0);
+    const mock = await ensureMockUser(portalEnv);
+    await upsertBillingAccount(portalEnv, { discordUserId: mock.user.id, stripeCustomerId: "cus_existing_owner_fixture", planKey: "starter", planStatus: "active" });
+    assert.equal(getCheckoutSafetyStatus(portalEnv).checkoutSessionCreationAllowed, false);
+    const portalResponse = await portalHandler(makeContext(portalHandler, request(), portalEnv));
+    assert.equal(portalResponse.status, 200, "Pausing new checkout must not strand an existing customer's billing management.");
+    assert.deepEqual(await portalResponse.json(), { url: "https://billing.stripe.com/p/session/fixture" });
+    assert.equal(portalCalls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    portalFixture.db.sqlite.close();
+  }
+
+  let liveConfiguredProviderCalls = 0;
+  const liveCheckoutFixture = createCheckoutFixture();
+  globalThis.fetch = async () => {
+    liveConfiguredProviderCalls += 1;
+    throw new Error("Unpublished seller checkout must stop before contacting Stripe");
+  };
+  try {
+    for (const planKey of ["starter", "pro"]) {
+      const liveEnabledCheckout = await checkoutHandler(makeContext(
+        checkoutHandler,
+        new Request("https://local.test/api/billing/create-checkout-session", {
+          method: "POST",
+          body: JSON.stringify({ plan_key: planKey, returnTo: "/dashboard", publishedContact: publicSeller, sellerDisclosureApproved: true }),
+          headers: { "content-type": "application/json" },
+        }),
+        {
+          ...liveCheckoutFixture.env,
+          ...publicSeller,
+          MOCK_AUTH: "true",
+          STRIPE_SECRET_KEY: "sk_live_placeholder",
+          STRIPE_WEBHOOK_SECRET: "whsec_live_placeholder",
+          STRIPE_PRICE_STARTER: "price_live_starter_enabled",
+          STRIPE_PRICE_PRO: "price_live_pro_enabled",
+          DZN_LIVE_CHECKOUT_ENABLED: "true",
+          DZN_APP_URL: "https://dayz-network.com",
+        } as Env,
+      ));
+      assert.equal(liveEnabledCheckout.status, 403);
+      assert.equal((await liveEnabledCheckout.json() as { errorCode: string }).errorCode, "LIVE_CHECKOUT_PAUSED");
+    }
+    assert.equal(liveConfiguredProviderCalls, 0);
+    assert.equal(liveCheckoutFixture.db.statements.some(sql => /billing_checkout_attempts|owner_starter_trial_claims/.test(sql)), false,
+      "Both plans must stop before checkout-attempt or trial-reservation access.");
+    assert.equal(liveCheckoutFixture.db.sqlite.prepare("SELECT COUNT(*) AS count FROM billing_checkout_attempts").get()?.count, 0);
   } finally {
     globalThis.fetch = originalFetch;
     liveCheckoutFixture.db.sqlite.close();

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { PublicContact } from "./public-contact";
 
 export function PolicyPage({ eyebrow, title, updated, children }: {
   eyebrow: string;
@@ -16,6 +17,7 @@ export function PolicyPage({ eyebrow, title, updated, children }: {
           <p className="mt-3 text-sm text-zinc-400">Last updated: {updated}</p>
         </header>
         <div className="policy-copy py-8 text-sm leading-7 text-zinc-300">{children}</div>
+        <PublicContact />
         <nav aria-label="DZN policies" className="flex flex-wrap gap-x-5 gap-y-3 border-t border-white/15 py-6 text-sm font-bold text-cyan-200">
           <Link href="/terms" className="underline underline-offset-4">Terms</Link>
           <Link href="/privacy" className="underline underline-offset-4">Privacy</Link>

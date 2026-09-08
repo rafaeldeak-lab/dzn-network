@@ -1056,7 +1056,7 @@ function buildBillingReadinessChecks(
       label: "Public legal seller disclosure",
       ok: legalSeller.complete,
       severity: "blocker",
-      detail: "Live billing requires the confirmed legal seller name and a publishable business correspondence address in the customer terms. Do not use a home address without the owner's explicit decision.",
+      detail: "Live billing requires the confirmed legal seller name and a publishable business correspondence address in the customer terms. Configured values must match the approved contact actually published by this release; private configuration alone cannot unlock checkout. Do not use a home address without the owner's explicit decision.",
     },
     {
       key: "starter-server-price",

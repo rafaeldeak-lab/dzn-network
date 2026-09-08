@@ -9,15 +9,17 @@ const output = process.env.DZN_BILLING_POLICY_QA_OUTPUT ?? path.join(process.cwd
 const routes = ["/pricing", "/terms", "/privacy", "/refunds"];
 const viewports = [
   { name: "desktop", width: 1440, height: 900 },
+  { name: "mid-width", width: 900, height: 900 },
   { name: "mobile", width: 390, height: 844 },
+  { name: "small-mobile", width: 320, height: 780 },
 ];
 const results = [];
 
 await mkdir(output, { recursive: true });
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, ...(process.env.DZN_QA_BROWSER_CHANNEL ? { channel: process.env.DZN_QA_BROWSER_CHANNEL } : {}) });
 try {
   for (const viewport of viewports) {
-    const context = await browser.newContext({ viewport });
+    const context = await browser.newContext({ viewport, reducedMotion: viewport.width <= 390 ? "reduce" : "no-preference" });
     const page = await context.newPage();
     for (const route of routes) {
       const pageErrors = [];
@@ -30,6 +32,14 @@ try {
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
       if (overflow) throw new Error(`${route} overflows at ${viewport.width}px`);
       if (pageErrors.length) throw new Error(`${route} page error: ${pageErrors.join("; ")}`);
+      const contact = page.getByRole("region", { name: "DZN Network contact", exact: true });
+      const contactText = await contact.innerText();
+      for (const text of ["DZN Network", "Suite RA01, 195-197 Wood Street", "London", "E17 3NU", "United Kingdom", "dznnetworksupport@gmail.com"]) {
+        if (!contactText.includes(text)) throw new Error(`${route} is missing approved public contact: ${text}`);
+      }
+      if (await contact.locator('a[href="mailto:dznnetworksupport@gmail.com"]').count() !== 1) throw new Error(`${route} has an incorrect support email link`);
+      const html = await page.content();
+      if (/QA_PRIVATE_SELLER_DO_NOT_PUBLISH|QA_PRIVATE_ADDRESS_DO_NOT_PUBLISH|href="tel:/i.test(html)) throw new Error(`${route} exposes a private identity fixture or phone link`);
       if (route === "/pricing") {
         for (const text of ["Eligible accounts: £0 for a 2-day trial, then £2/month", "Pro has no free trial", "Cancellations and refunds"]) {
           if (!body.includes(text)) throw new Error(`/pricing is missing: ${text}`);
@@ -40,11 +50,14 @@ try {
         }
         if (!body.includes("dznnetworksupport@gmail.com")) throw new Error(`${route} is missing private support contact`);
       }
-      if (route === "/terms" && !body.includes("Live subscription checkout remains unavailable")) {
-        throw new Error("/terms must explain that checkout stays paused without confirmed seller details");
+      if (route === "/terms") {
+        if (!body.includes("Live subscription checkout remains unavailable")) {
+          throw new Error("/terms must retain its warning even when unpublished private seller values are configured");
+        }
       }
       const name = `${viewport.name}-${route.slice(1)}`;
       await page.screenshot({ path: path.join(output, `${name}.png`), fullPage: true });
+      await contact.screenshot({ path: path.join(output, `${name}-contact.png`) });
       results.push({ route, viewport: viewport.name, width: viewport.width, status: response.status(), overflow, pageErrors: [] });
       page.off("pageerror", recordPageError);
     }
