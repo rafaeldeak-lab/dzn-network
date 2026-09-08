@@ -29,6 +29,8 @@ Set these Cloudflare production vars for the Pages project:
 - `STRIPE_PRICE_PRO`
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
+- `DZN_PUBLIC_LEGAL_SELLER_NAME`
+- `DZN_PUBLIC_LEGAL_CONTACT_ADDRESS`
 
 For live billing readiness, Starter and Pro must use the server-side `STRIPE_PRICE_*` names above. `NEXT_PUBLIC_STRIPE_*_PRICE_ID` values are compatibility fallbacks only and must not be treated as proof that live billing is ready.
 
@@ -80,6 +82,8 @@ For live billing, `liveConfigurationReady` is only true when all blocker checks 
 - `STRIPE_SECRET_KEY` looks like live mode.
 - `STRIPE_WEBHOOK_SECRET` is configured.
 - `DZN_APP_URL` or `NEXT_PUBLIC_APP_URL` points to the production DZN domain, not a preview deployment.
+- `DZN_PUBLIC_LEGAL_SELLER_NAME` identifies the confirmed legal seller behind the DZN Network trading name.
+- `DZN_PUBLIC_LEGAL_CONTACT_ADDRESS` contains the owner-approved public business correspondence address shown in the customer terms.
 
 Even when `liveConfigurationReady` is true, the endpoint is read-only. Creating live Stripe products, changing live Price IDs, changing webhook endpoints, setting production secrets, importing customers, applying D1 migrations, or enabling live payments still requires a separate explicit high-risk human approval.
 

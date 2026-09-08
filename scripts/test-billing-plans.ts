@@ -13,6 +13,11 @@ import { sortPublicServersForDiscovery } from "../functions/api/public/servers";
 import { canUseProFeature, getBumpCooldownDays, getListingLimits, getSubscriptionPlanPublicContract, getSubscriptionPlanPublicContracts, hasListingAutoPost, isProListing, normalizeListingPlanKey } from "../lib/billing/plans";
 import type { Env, PagesFunction } from "../functions/_lib/types";
 
+const publicSeller = {
+  DZN_PUBLIC_LEGAL_SELLER_NAME: "Example Legal Seller",
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: "1 Example Street | London | AB1 2CD | United Kingdom",
+};
+
 const starter = getPlanConfig("starter");
 const pro = getPlanConfig("pro");
 const premium = getPlanConfig("premium");
@@ -191,6 +196,7 @@ assert.equal(pausedLiveCheckoutSafety.checkoutSessionCreationAllowed, false);
 assert.equal(pausedLiveCheckoutSafety.checkoutSafetyMode, "live_checkout_paused");
 
 const enabledLiveCheckoutSafety = getCheckoutSafetyStatus({
+  ...publicSeller,
   STRIPE_PRICE_STARTER: "price_starter",
   STRIPE_PRICE_PRO: "price_pro",
   STRIPE_SECRET_KEY: "sk_live_checkout_safety",
@@ -492,6 +498,7 @@ async function run() {
       }),
       {
         ...liveCheckoutFixture.env,
+        ...publicSeller,
         MOCK_AUTH: "true",
         STRIPE_SECRET_KEY: "sk_live_placeholder",
         STRIPE_WEBHOOK_SECRET: "whsec_live_placeholder",

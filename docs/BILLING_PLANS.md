@@ -46,6 +46,7 @@ Live billing must not be enabled because the public pricing UI looks correct or 
 - `STRIPE_SECRET_KEY` is live mode.
 - `STRIPE_WEBHOOK_SECRET` belongs to the live production webhook endpoint.
 - `DZN_APP_URL` or `NEXT_PUBLIC_APP_URL` points at the production DZN domain, not a preview URL.
+- `DZN_PUBLIC_LEGAL_SELLER_NAME` and `DZN_PUBLIC_LEGAL_CONTACT_ADDRESS` publish the confirmed seller identity and owner-approved business correspondence address in the customer terms.
 - `/api/billing/readiness` reports `liveConfigurationReady: true` without exposing secret values or Price IDs.
 
 `NEXT_PUBLIC_STRIPE_*_PRICE_ID` variables are compatibility fallbacks only. They can keep old checkout paths working during rollout, but they are not valid evidence for live billing readiness.

@@ -19,11 +19,13 @@ try {
   for (const viewport of viewports) {
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();
-    const pageErrors = [];
-    page.on("pageerror", (error) => pageErrors.push(error.message));
     for (const route of routes) {
-      const response = await page.goto(`${baseUrl}${route}`, { waitUntil: "networkidle" });
+      const pageErrors = [];
+      const recordPageError = (error) => pageErrors.push(error.message);
+      page.on("pageerror", recordPageError);
+      const response = await page.goto(`${baseUrl}${route}`, { waitUntil: "domcontentloaded" });
       if (!response?.ok()) throw new Error(`${route} returned ${response?.status() ?? "no response"}`);
+      await page.locator("main").waitFor({ state: "visible" });
       const body = await page.locator("body").innerText();
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
       if (overflow) throw new Error(`${route} overflows at ${viewport.width}px`);
@@ -38,9 +40,13 @@ try {
         }
         if (!body.includes("dznnetworksupport@gmail.com")) throw new Error(`${route} is missing private support contact`);
       }
+      if (route === "/terms" && !body.includes("Live subscription checkout remains unavailable")) {
+        throw new Error("/terms must explain that checkout stays paused without confirmed seller details");
+      }
       const name = `${viewport.name}-${route.slice(1)}`;
       await page.screenshot({ path: path.join(output, `${name}.png`), fullPage: true });
       results.push({ route, viewport: viewport.name, width: viewport.width, status: response.status(), overflow, pageErrors: [] });
+      page.off("pageerror", recordPageError);
     }
     await context.close();
   }

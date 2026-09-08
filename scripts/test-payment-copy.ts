@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { PAYMENT_COPY, PAYMENT_FAQS, pricingReturnTo } from "../lib/billing/payment-copy";
 import { getSubscriptionPlanPublicContracts } from "../lib/billing/plans";
+import { getPublicLegalSellerDisclosure } from "../lib/legal-seller";
 import { getBillingPlanSummaries } from "../functions/_lib/plans";
 import type { Env } from "../functions/_lib/types";
 
@@ -40,6 +41,19 @@ assert.match(terms, /Pro[\s\S]*GBP 10[\s\S]*no free trial[\s\S]*GBP 10 per month
 assert.match(terms, /Manage Billing[\s\S]*turn off renewal/i);
 assert.match(terms, /does not itself create paid access/i);
 assert.match(terms, /cannot lawfully be excluded/i);
+assert.match(terms, /getPublicLegalSellerDisclosure/);
+assert.match(terms, /Live subscription checkout remains unavailable/);
+assert.equal(getPublicLegalSellerDisclosure({}).complete, false);
+assert.equal(getPublicLegalSellerDisclosure({
+  DZN_PUBLIC_LEGAL_SELLER_NAME: "DZN Network",
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: "United Kingdom",
+}).complete, false, "Trading-name and country placeholders must not satisfy the live seller disclosure.");
+const completeSeller = getPublicLegalSellerDisclosure({
+  DZN_PUBLIC_LEGAL_SELLER_NAME: "Example Legal Seller",
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: "1 Example Street | London | AB1 2CD | United Kingdom",
+});
+assert.equal(completeSeller.complete, true);
+assert.deepEqual(completeSeller.contactAddressLines, ["1 Example Street", "London", "AB1 2CD", "United Kingdom"]);
 const refunds = readFileSync("app/refunds/page.tsx", "utf8");
 assert.match(refunds, /cancel before the trial deadline.*avoid the first GBP 2 payment/i);
 assert.match(refunds, /does not automatically refund.*already completed/i);

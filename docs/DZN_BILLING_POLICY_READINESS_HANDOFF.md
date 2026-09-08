@@ -41,6 +41,12 @@ customers. DZN Network is a trading name and must not be substituted for an
 unconfirmed legal identity. A private or home address must not be inferred from
 provider records or published without the owner's explicit decision.
 
+The shared seller-disclosure guard now requires
+`DZN_PUBLIC_LEGAL_SELLER_NAME` and `DZN_PUBLIC_LEGAL_CONTACT_ADDRESS` before a
+live-mode Checkout Session can be created, even if `DZN_LIVE_CHECKOUT_ENABLED`
+is switched on. The terms page shows an honest paused-checkout notice while
+either value is absent. Test-mode Checkout remains available for validation.
+
 The support flow identifies an account using the signed-in Discord username and
 Discord user ID. The Stripe receipt email is requested separately as a payment
 reference because DZN does not store an email address for every Discord account.

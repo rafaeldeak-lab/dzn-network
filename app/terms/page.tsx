@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { PolicyPage, PolicySection } from "@/components/site/policy-page";
+import { getPublicLegalSellerDisclosure } from "@/lib/legal-seller";
 import { DZN_SUPPORT_EMAIL, DZN_SUPPORT_EMAIL_HREF } from "@/lib/support";
 
 export const metadata: Metadata = {
@@ -9,11 +10,30 @@ export const metadata: Metadata = {
 };
 
 export default function TermsPage() {
+  const seller = getPublicLegalSellerDisclosure({
+    DZN_PUBLIC_LEGAL_SELLER_NAME: process.env.DZN_PUBLIC_LEGAL_SELLER_NAME,
+    DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: process.env.DZN_PUBLIC_LEGAL_CONTACT_ADDRESS,
+  });
+
   return (
     <PolicyPage eyebrow="DZN Network policies" title="Terms of Service" updated="7 September 2026">
       <PolicySection title="About DZN">
         <p>DZN Network is a UK-operated online platform for DayZ players, communities, and server owners. These terms apply when you use the website, connect an account or server, or buy a DZN owner subscription.</p>
         <p>Player access, including Discord sign-in, Player Hub, and personal profiles, is free. Starter and Pro are optional subscriptions for server-owner tools and presentation features.</p>
+      </PolicySection>
+
+      <PolicySection title="Seller details">
+        {seller.complete ? (
+          <>
+            <p><strong className="text-white">Legal seller:</strong> {seller.legalSellerName}, trading as DZN Network.</p>
+            <address className="not-italic">
+              <strong className="text-white">Business correspondence address:</strong><br />
+              {seller.contactAddressLines.map((line) => <span key={line}>{line}<br /></span>)}
+            </address>
+          </>
+        ) : (
+          <p>Live subscription checkout remains unavailable while DZN confirms and publishes the legal seller and business correspondence address. Viewing this page, signing in, or choosing a plan does not start a trial or take payment.</p>
+        )}
       </PolicySection>
 
       <PolicySection title="Owner subscriptions">
