@@ -295,6 +295,39 @@ export async function getOwnerServerWarsPayload(env: Env, user: SessionUser, ser
   };
 }
 
+export async function getServerWarOpponentOptions(env: Env, user: SessionUser, serverId: string, search: string, rulesetKey: string, offset = 0) {
+  const access = await requireServerOwnerOrDznAdmin(env, user, serverId);
+  if (!access.allowed) return { ok: false as const, status: access.reason === "not_found" ? 404 : 403, error: "server_access_denied" };
+  const challenger = await readServerForWars(env, serverId);
+  if (!challenger) return { ok: false as const, status: 404, error: "server_not_found" };
+  if (!getServerWarsAccess(challenger.plan_key, challenger.subscription_status).canCreateChallenge) return { ok: false as const, status: 403, error: "plan_locked" };
+  const ruleset = getServerWarRulesetOptions().find(option => option.key === rulesetKey);
+  if (!ruleset) return { ok: false as const, status: 400, error: "invalid_ruleset" };
+  try { assertServerWarCategoryEligible(challenger, ruleset.key); }
+  catch { return { ok: false as const, status: 400, error: "ineligible_category" }; }
+  const pageOffset = Math.max(0, Math.min(10000, Math.trunc(offset) || 0));
+  const term = `%${search.trim().slice(0, 80).replace(/[!%_]/g, value => `!${value}`)}%`;
+  // Bounded read-only discovery; challenge submission rechecks eligibility.
+  const result = await requireDb(env).prepare(`
+    SELECT id, server_name, display_name, hostname, nitrado_service_name, public_slug,
+           server_category, server_type, server_mode, status, listing_visibility, lifecycle_status
+    FROM linked_servers
+    WHERE id != ? AND lower(trim(COALESCE(status, 'pending'))) = 'live'
+      AND lower(trim(COALESCE(listing_visibility, 'public'))) NOT IN ('private', 'unlisted', 'hidden', 'deleted', 'archived')
+      AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
+      AND lower(COALESCE(NULLIF(display_name, ''), NULLIF(server_name, ''), NULLIF(hostname, ''), nitrado_service_name, '')) LIKE lower(?) ESCAPE '!'
+    ORDER BY id LIMIT 100 OFFSET ?
+  `).bind(challenger.id, term, pageOffset).all<ServerWarServerRow>();
+  const rows = result.results ?? [];
+  const servers = rows.filter(row => {
+    if (!isPublicServerWarsEligibleServer(row)) return false;
+    try { assertSameCategoryChallenge(challenger, row, ruleset.key); return true; }
+    catch { return false; }
+  }).map(row => ({ id: row.id, name: serverName(row), category: normalizeWarServerCategory(row) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return { ok: true as const, servers, nextOffset: rows.length === 100 && pageOffset < 10000 ? pageOffset + 100 : null };
+}
+
 export async function createServerWarChallenge(
   env: Env,
   user: SessionUser,

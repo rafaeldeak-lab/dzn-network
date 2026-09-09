@@ -9406,22 +9406,20 @@ button.dzn-header-action {
 
 .dzn-advanced-board__rows strong {
   display: block;
-  overflow: hidden;
+  overflow-wrap: anywhere;
   color: white;
   font-size: 0.78rem;
   font-weight: 950;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .dzn-advanced-board__rows small {
   display: block;
-  overflow: hidden;
+  overflow-wrap: anywhere;
   color: rgba(226, 232, 240, 0.55);
   font-size: 0.66rem;
   font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .dzn-advanced-board__rows b {
@@ -9516,17 +9514,22 @@ button.dzn-header-action {
   aspect-ratio: 1;
   overflow: hidden;
   border: 1px solid rgba(34, 211, 238, 0.25);
-  border-radius: 0.75rem;
+  border-radius: 8px;
   background:
-    radial-gradient(circle at 50% 50%, rgba(34, 211, 238, 0.12), transparent 60%),
-    linear-gradient(135deg, rgba(8, 47, 73, 0.6), rgba(30, 41, 59, 0.36));
+    repeating-linear-gradient(0deg, transparent 0 calc(12.5% - 1px), rgba(255, 255, 255, 0.1) calc(12.5% - 1px) 12.5%),
+    repeating-linear-gradient(90deg, transparent 0 calc(12.5% - 1px), rgba(255, 255, 255, 0.1) calc(12.5% - 1px) 12.5%),
+    #081b22;
 }
+
+.dzn-exploration-figure { min-width: 0; margin: 0; }
+.dzn-exploration-figure figcaption { margin-top: 8px; font-size: 11px; line-height: 1.5; color: #a1a1aa; }
 
 .dzn-exploration-mini-grid span {
   position: absolute;
   width: 4px;
   height: 4px;
-  border-radius: 999px;
+  border-radius: 1px;
+  transform: translate(-50%, -50%);
   background: rgba(34, 211, 238, var(--dzn-cell-alpha, 0.4));
   box-shadow: 0 0 10px rgba(34, 211, 238, 0.45);
 }

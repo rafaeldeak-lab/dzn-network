@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { StarterCheckoutButton } from "./starter-checkout-button";
+import { OpponentPicker } from "@/components/server-wars/opponent-picker";
 import { PAYMENT_COPY } from "../../lib/billing/payment-copy";
 import {
   Activity,
@@ -4141,13 +4142,19 @@ function renderDashboardTabAccessBadge(access: DashboardTabAccess, tier: Dashboa
   return <span className="shrink-0 rounded border border-cyan-300/20 bg-cyan-400/10 px-1.5 py-0.5 text-[8px] font-black uppercase text-cyan-100">Trial-safe</span>;
 }
 
-function DashboardServerWarsPanel({ wars, loading, error }: {
+type DashboardServerWarsPanelProps = {
   wars: DashboardServerWarsResult | null;
   loading: boolean;
   error: string;
-}) {
-  const [opponentServerId, setOpponentServerId] = useState("");
-  const [rulesetKey, setRulesetKey] = useState("deathmatch_war");
+};
+
+export function DashboardServerWarsPanel(props: DashboardServerWarsPanelProps) {
+  return <DashboardServerWarsContent key={props.wars?.server?.id ?? "unselected"} {...props} />;
+}
+
+function DashboardServerWarsContent({ wars, loading, error }: DashboardServerWarsPanelProps) {
+  const [opponentSelection, setOpponentSelection] = useState({ scope: "", id: "" });
+  const [rulesetKey, setRulesetKey] = useState(() => wars?.eligibility?.eligibleRulesets?.[0]?.key ?? "deathmatch_war");
   const [challengeTitle, setChallengeTitle] = useState("");
   const [challengeBusy, setChallengeBusy] = useState(false);
   const [challengeMessage, setChallengeMessage] = useState("");
@@ -4157,6 +4164,9 @@ function DashboardServerWarsPanel({ wars, loading, error }: {
   const pendingChallenges = wars?.pendingChallenges ?? [];
   const serverId = wars?.server?.id ?? "";
   const rulesets = wars?.eligibility?.eligibleRulesets ?? [];
+  const opponentScope = `${serverId}:${rulesetKey}`;
+  const opponentServerId = opponentSelection.scope === opponentScope ? opponentSelection.id : "";
+  const setOpponentServerId = (id: string) => setOpponentSelection({ scope: opponentScope, id });
 
   async function submitChallenge(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -4240,14 +4250,11 @@ function DashboardServerWarsPanel({ wars, loading, error }: {
           <p className="text-sm font-bold leading-6 text-emerald-50">
             Challenge creation is available for this server. Opponents must be eligible live public servers in the same category.
           </p>
-          <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
-            <label className="grid gap-1 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-100/70">
-              Opponent server id or slug
-              <input value={opponentServerId} onChange={(event) => setOpponentServerId(event.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case tracking-normal text-white outline-none focus:border-cyan-300/50" placeholder="server id or public slug" />
-            </label>
+          <div className="grid items-start gap-3 lg:grid-cols-[1fr_220px]">
+            <OpponentPicker key={`${serverId}:${rulesetKey}`} serverId={serverId} rulesetKey={rulesetKey} value={opponentServerId} onChange={setOpponentServerId} disabled={challengeBusy} />
             <label className="grid gap-1 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-100/70">
               Ruleset
-              <select value={rulesetKey} onChange={(event) => setRulesetKey(event.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case tracking-normal text-white outline-none focus:border-cyan-300/50">
+              <select aria-label="Ruleset" disabled={challengeBusy} value={rulesetKey} onChange={(event) => { setOpponentServerId(""); setRulesetKey(event.target.value); }} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case tracking-normal text-white outline-none focus:border-cyan-300/50">
                 {(rulesets.length ? rulesets : [{ key: "deathmatch_war", title: "Deathmatch War" }]).map((ruleset) => (
                   <option key={ruleset.key} value={ruleset.key}>{ruleset.title}</option>
                 ))}
