@@ -20,3 +20,6 @@ API: GET /api/owner/player-game-identity-links, optional exact link or keyset af
 SQL transaction semantics: https://developers.cloudflare.com/d1/worker-api/d1-database/#batch
 
 Validation: real in-memory SQLite exercises interruption at every statement, wrong owners/admin/mock access, exact link and ownership races, duplicate decisions, legacy attribution preservation, pending cancellation, private notice deduplication, read-model removal, independent attribution and private route bounds. Browser QA uses synthetic data only at 1440, 900, 390 and 320 pixels. A populated live customer decision remains a separate operation, never a smoke test.
+# Review Correction
+
+Revocation notices are private account messages and do not retain a restrictive server foreign key. Account deletion removes that recipient's notifications before deleting their user row, without touching other recipients. Foreign-key-enabled tests cover revoke followed by player deletion, owner server deletion, wrong-owner rejection and preservation of unrelated notices. Existing broader deletion behavior is not redesigned by this correction.

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { deleteOwnedAccountData, deleteOwnedLinkedServerData } from "../functions/_lib/deletion";
 import { identityTransactionFixture, identityTestUser } from "./test-player-game-identity-transactions";
 import { readPlayerGameIdentityReadModel, reviewPlayerGameIdentityClaim } from "../functions/_lib/player-game-identities";
 import { readManagedGameIdentityLinks, revokePlayerGameIdentityLink } from "../functions/_lib/player-game-identity-revocation";
@@ -146,5 +147,33 @@ export async function testPlayerGameIdentityRevocation() {
     assert.equal(routes.sqlite.prepare("SELECT status FROM player_game_identity_links").get()?.status, "active");
     assert.equal(routes.sqlite.prepare("SELECT count(*) AS count FROM player_game_identity_audit_log").get()?.count, clean.audit.length);
   } finally { routes.close(); }
-  console.log("Game link revocation: permissions, legacy preservation, fresh guards, rollback, races, private notices and stats removal passed.");
+  for (const remove of ["player", "server"] as const) {
+    const fixture = await approvedFixture();
+    try {
+      assert.equal((await revokePlayerGameIdentityLink(fixture.env, owner, fixture.linkId, input)).status, 200);
+      assert.equal(fixture.state().notifications[0].server_id, null, "Private notice must not prevent server deletion.");
+      fixture.sqlite.exec(`CREATE TABLE nitrado_connections (user_id TEXT, linked_server_id TEXT);
+        CREATE TABLE sessions (user_id TEXT);
+        CREATE TABLE discord_guilds (id TEXT, owner_user_id TEXT);
+        ALTER TABLE linked_servers ADD COLUMN discord_guild_id TEXT;
+        INSERT INTO user_notifications (id,user_id,type,title,body,dedupe_key)
+        VALUES ('unrelated-notice','player-b','news','Other notice','Other private notice','unrelated');`);
+      if (remove === "player") {
+        assert.equal((await deleteOwnedAccountData(fixture.env, "player-a")).ok, true);
+        assert.equal(fixture.sqlite.prepare("SELECT id FROM users WHERE id='player-a'").get(), undefined);
+        assert.equal(fixture.sqlite.prepare("SELECT id FROM linked_servers WHERE id='server-a'").get()?.id, "server-a");
+        assert.equal(fixture.state().notifications.length, 1);
+      } else {
+        const before = fixture.state();
+        assert.equal((await deleteOwnedLinkedServerData(fixture.env, "owner-b", "server-a")).status, 403);
+        assert.deepEqual(fixture.state(), before, "Wrong-owner deletion cannot touch notices or links.");
+        assert.equal((await deleteOwnedLinkedServerData(fixture.env, "owner-a", "server-a")).ok, true);
+        assert.equal(fixture.sqlite.prepare("SELECT id FROM linked_servers WHERE id='server-a'").get(), undefined);
+        assert.equal(fixture.state().notifications.length, 2, "Server removal preserves private recipient notices.");
+      }
+      assert.equal(fixture.sqlite.prepare("SELECT id FROM user_notifications WHERE id='unrelated-notice'").get()?.id, "unrelated-notice");
+      assert.deepEqual(fixture.sqlite.prepare("PRAGMA foreign_key_check").all(), []);
+    } finally { fixture.close(); }
+  }
+  console.log("Game link revocation: permissions, legacy preservation, fresh guards, rollback, races, private notices, deletion compatibility and stats removal passed.");
 }
