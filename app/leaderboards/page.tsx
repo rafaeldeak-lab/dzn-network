@@ -154,9 +154,9 @@ export default function LeaderboardsPage() {
     access_level: "full" | "preview";
     is_locked: boolean;
     locked_reason: string | null;
-  }>(() => loadLastGoodLeaderboard() ?? emptyPayload);
-  const [loading, setLoading] = useState(() => !loadLastGoodLeaderboard());
-  const [loadState, setLoadState] = useState<LeaderboardLoadState>(() => loadLastGoodLeaderboard() ? "loaded" : "loading_initial");
+  }>(emptyPayload);
+  const [loading, setLoading] = useState(true);
+  const [loadState, setLoadState] = useState<LeaderboardLoadState>("loading_initial");
   const [error, setError] = useState("");
   const inFlight = useRef(false);
   const latestRequestId = useRef(0);
@@ -190,6 +190,8 @@ export default function LeaderboardsPage() {
       latestRequestId.current = requestId;
       const cached = loadLastGoodLeaderboard();
       const hasVisibleData = Boolean(cached) || visiblePayloadRef.current;
+      // The server and first browser render must agree before restoring local data.
+      if (cached && !visiblePayloadRef.current) setPayload(cached);
       setLoading(!hasVisibleData);
       setLoadState(!hasVisibleData ? "loading_initial" : "refreshing");
       try {
@@ -538,7 +540,7 @@ function PersonalBestTable({ personalBests }: { personalBests: LongestKill[] }) 
         </div>
         {personalBests.length ? (
           <div className="dzn-leaderboard-table-wrap mt-3 overflow-x-auto">
-            <table className="leaderboard-ref-table dzn-leaderboard-table min-w-full border-separate border-spacing-y-2 text-left">
+            <table role="table" aria-label="Personal best kills" className="leaderboard-ref-table dzn-leaderboard-table min-w-full border-separate border-spacing-y-2 text-left">
               <thead>
                 <tr>
                   {["Rank", "Player", "Victim", "Server", "Weapon", "Best Distance", "Time"].map((header) => (
@@ -551,19 +553,19 @@ function PersonalBestTable({ personalBests }: { personalBests: LongestKill[] }) 
               <tbody>
                 {personalBests.map((kill, index) => (
                   <tr key={`${kill.rank}-${kill.player_name}-${kill.distance}`} className="dzn-leaderboard-row rounded-lg bg-black/24">
-                    <td className="border-y border-l border-white/10 px-3 py-2 first:rounded-l">
+                    <td data-label="Rank" className="border-y border-l border-white/10 px-3 py-2 first:rounded-l">
                       <span className={`leaderboard-ref-rank dzn-rank-badge dzn-rank-badge--${rankTone(index)}`}>#{kill.rank}</span>
                     </td>
-                    <td className="border-y border-white/10 px-3 py-2 text-sm font-black text-white">
+                    <td data-label="Player" className="border-y border-white/10 px-3 py-2 text-sm font-black text-white">
                       <PlayerName name={kill.player_name} index={index} href={kill.player_public_profile_href} />
                     </td>
-                    <td className="border-y border-white/10 px-3 py-2 text-sm font-bold text-zinc-200">{kill.victim_name}</td>
-                    <td className="border-y border-white/10 px-3 py-2 text-sm font-bold text-zinc-200">
+                    <td data-label="Victim" className="border-y border-white/10 px-3 py-2 text-sm font-bold text-zinc-200">{kill.victim_name}</td>
+                    <td data-label="Server" className="border-y border-white/10 px-3 py-2 text-sm font-bold text-zinc-200">
                       <ServerLink slug={kill.server_slug} label={kill.server_name} />
                     </td>
-                    <td className="border-y border-white/10 px-3 py-2 text-sm font-bold text-zinc-200">{kill.weapon}</td>
-                    <td className="border-y border-white/10 px-3 py-2 text-sm font-black text-cyan-100">{formatDistance(kill.distance)}</td>
-                    <td className="rounded-r border-y border-r border-white/10 px-3 py-2 text-sm font-bold text-zinc-300">{formatDateTime(kill.occurred_at)}</td>
+                    <td data-label="Weapon" className="border-y border-white/10 px-3 py-2 text-sm font-bold text-zinc-200">{kill.weapon}</td>
+                    <td data-label="Best Distance" className="border-y border-white/10 px-3 py-2 text-sm font-black text-cyan-100">{formatDistance(kill.distance)}</td>
+                    <td data-label="Time" className="rounded-r border-y border-r border-white/10 px-3 py-2 text-sm font-bold text-zinc-300">{formatDateTime(kill.occurred_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -685,7 +687,7 @@ function LeaderboardTable({
         </div>
         {rows.length ? (
           <div className="dzn-leaderboard-table-wrap mt-3 overflow-x-auto">
-            <table className="leaderboard-ref-table dzn-leaderboard-table min-w-full border-separate border-spacing-y-2 text-left">
+            <table role="table" aria-label={title} className="leaderboard-ref-table dzn-leaderboard-table min-w-full border-separate border-spacing-y-2 text-left">
               <thead>
                 <tr>
                   {headers.map((header) => (
@@ -699,7 +701,7 @@ function LeaderboardTable({
                 {rows.map((row, rowIndex) => (
                   <tr key={rowIndex} className="dzn-leaderboard-row rounded-lg bg-black/24">
                     {row.map((cell, cellIndex) => (
-                      <td key={cellIndex} className="border-y border-white/10 px-3 py-2 first:rounded-l last:rounded-r">
+                      <td key={cellIndex} data-label={headers[cellIndex]} className="border-y border-white/10 px-3 py-2 first:rounded-l last:rounded-r">
                         <span className={cellIndex === 0 ? `leaderboard-ref-rank dzn-rank-badge dzn-rank-badge--${rankTone(rowIndex)}` : "text-sm font-bold text-zinc-100"}>
                           {cell}
                         </span>
