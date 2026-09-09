@@ -7,6 +7,7 @@ import Link from "next/link";
 import { AnimatedBullet, KillProjectileAccent } from "@/components/leaderboards/animated-bullet";
 import { ServerWarsTeaser } from "@/components/server-wars/server-wars-platform";
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
+import { publicMapLabel, showcasePlanLabel } from "@/lib/showcase-labels";
 
 type LeaderboardServer = {
   rank: number;
@@ -394,7 +395,7 @@ function AdvancedShowcaseSection({ payload, loading, error }: { payload: Advance
     <section className="dzn-advanced-showcase leaderboard-ref-panel glass-surface animated-border rounded p-4" aria-labelledby="advanced-showcase-title">
       <div className="dzn-advanced-showcase__header">
         <div>
-          <p className="dzn-advanced-showcase__eyebrow">Premium Advanced Showcase</p>
+          <p className="dzn-advanced-showcase__eyebrow">Advanced Server Stats</p>
           <h2 id="advanced-showcase-title">Server-first ADM intelligence beyond K/D</h2>
           <p>
             Global server boards for combat, builds, hybrid activity, travel, and exploration. Travel and map coverage are estimated from bounded ADM position samples.
@@ -454,7 +455,7 @@ function AdvancedBoardCard({ board }: { board: AdvancedBoard }) {
       </div>
       <div className="dzn-advanced-board__badges">
         <span>{formatCategory(board.category)}</span>
-        <span>{board.packageRequired === "free" ? "Core" : `${board.packageRequired.toUpperCase()}+`}</span>
+        <span>{showcasePlanLabel(board.packageRequired)}</span>
         {board.estimated ? <span>Estimated</span> : null}
       </div>
       {board.locked ? (
@@ -470,7 +471,7 @@ function AdvancedBoardCard({ board }: { board: AdvancedBoard }) {
               <div>
                 <strong>{row.serverName ?? row.playerName ?? "Awaiting data"}</strong>
                 <small>
-                  {[row.serverMode, row.mapName, row.topPlayer ? `Top: ${row.topPlayer}` : null].filter(Boolean).join(" · ")}
+                  {[row.serverMode, row.mapName ? publicMapLabel(row.mapName) : null, row.topPlayer ? `Top: ${row.topPlayer}` : null].filter(Boolean).join(" · ")}
                 </small>
               </div>
               <b>{row.displayValue}</b>
@@ -984,6 +985,7 @@ function rankTone(index: number) {
 }
 
 function formatCategory(value: string) {
+  if (value === "premium_showcase") return "Advanced Showcase";
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 

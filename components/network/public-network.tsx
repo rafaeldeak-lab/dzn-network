@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { explorationPreviewCells, publicMapLabel, showcasePlanLabel } from "@/lib/showcase-labels";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -1610,7 +1611,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
               <div className="mt-4 flex flex-wrap gap-3 text-xs font-bold uppercase text-zinc-400">
                 <MetaChip icon={Gamepad2} label={server.platform ?? "Platform awaiting data"} />
                 <MetaChip icon={Target} label={server.server_type} />
-                <MetaChip icon={Map} label={server.map_name ?? server.mission ?? "Map awaiting data"} />
+                <MetaChip icon={Map} label={publicMapLabel(server.map_name ?? server.mission)} />
                 <MetaChip icon={MapPin} label={publicServerStatusPresentation(server).label} />
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -1782,7 +1783,7 @@ function ProProfileAdvertPanel({ server }: { server: PublicServer }) {
   );
 }
 
-function ServerAdvancedShowcasePanel({
+export function ServerAdvancedShowcasePanel({
   payload,
   loading,
   error,
@@ -1808,7 +1809,7 @@ function ServerAdvancedShowcasePanel({
           </p>
         </div>
         <div className="dzn-advanced-showcase__meta">
-          <span>{payload?.access?.effectivePlan ? `${payload.access.effectivePlan.toUpperCase()} package` : "Package pending"}</span>
+          <span>{payload?.access?.effectivePlan ? `${showcasePlanLabel(payload.access.effectivePlan)} plan` : "Plan pending"}</span>
           <span>{summary?.lastUpdatedAt ? `Updated ${formatRelativeTime(summary.lastUpdatedAt)}` : "Awaiting data"}</span>
         </div>
       </div>
@@ -1825,11 +1826,11 @@ function ServerAdvancedShowcasePanel({
       {exploration?.supported && payload?.access?.publicExplorationSummary ? (
         <div className="dzn-exploration-preview" aria-label="Aggregate map exploration preview">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-200">Map Exploration</p>
-            <h3>{exploration.mapDisplayName ?? "Supported map"}</h3>
+            <p className="text-[10px] font-black uppercase tracking-normal text-violet-200">Map Exploration</p>
+            <h3>{publicMapLabel(exploration.mapDisplayName)}</h3>
             <p>
-              {exploration.exploredCellsCount.toLocaleString("en-GB")} of {exploration.totalExplorableCells.toLocaleString("en-GB")} aggregate cells explored.
-              {exploration.estimated ? " Bounds are estimated until verified map masks/assets are added." : ""}
+              {exploration.exploredCellsCount.toLocaleString("en-GB")} of {exploration.totalExplorableCells.toLocaleString("en-GB")} grid areas visited.
+              {exploration.estimated ? " Estimated coverage, not a verified percentage of playable land." : ""}
             </p>
           </div>
           <ExplorationMiniGrid exploration={exploration} />
@@ -1935,7 +1936,7 @@ function ServerAdvancedBoardCard({ board }: { board: AdvancedBoard }) {
       </div>
       <div className="dzn-advanced-board__badges">
         <span>{formatAdvancedCategory(board.category)}</span>
-        <span>{board.packageRequired === "free" ? "Core" : `${board.packageRequired.toUpperCase()}+`}</span>
+        <span>{showcasePlanLabel(board.packageRequired)}</span>
         {board.estimated ? <span>Estimated</span> : null}
       </div>
       {board.locked ? (
@@ -1973,20 +1974,24 @@ function AdvancedBoardIcon({ category }: { category: string }) {
 
 function ExplorationMiniGrid({ exploration }: { exploration: NonNullable<ServerAdvancedPayload["exploration"]> }) {
   const gridSize = exploration.gridSize ?? 128;
-  const cells = exploration.overlayCells.slice(0, 120);
+  const cells = explorationPreviewCells(exploration.overlayCells, gridSize);
   return (
-    <div className="dzn-exploration-mini-grid">
-      {cells.map((cell) => (
-        <span
-          key={`${cell.cellX}:${cell.cellY}`}
-          style={{
-            left: `${(cell.cellX / Math.max(1, gridSize)) * 100}%`,
-            top: `${(cell.cellY / Math.max(1, gridSize)) * 100}%`,
-            "--dzn-cell-alpha": Math.min(0.88, 0.24 + cell.visits / 12),
-          } as CSSProperties}
-        />
-      ))}
-    </div>
+    <figure className="dzn-exploration-figure">
+      <div className="dzn-exploration-mini-grid" role="img" aria-label={`${cells.length} highlighted aggregate areas. Schematic grid, not a terrain map or player route.`}>
+        {cells.map((cell) => (
+          <span
+            key={cell.key}
+            aria-hidden="true"
+            style={{
+              left: `${cell.left}%`,
+              top: `${cell.top}%`,
+              "--dzn-cell-alpha": cell.alpha,
+            } as CSSProperties}
+          />
+        ))}
+      </div>
+      <figcaption>{cells.length ? `Showing ${cells.length} sampled areas. Brighter areas have more visits.` : "No activity areas available yet."} Schematic only; player locations and routes stay private.</figcaption>
+    </figure>
   );
 }
 
@@ -3111,6 +3116,7 @@ function formatAdvancedDistance(value: number) {
 }
 
 function formatAdvancedCategory(value: string) {
+  if (value === "premium_showcase") return "Advanced Showcase";
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
