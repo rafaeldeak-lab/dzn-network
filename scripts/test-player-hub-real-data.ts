@@ -37,10 +37,10 @@ assert.match(playerHome, /Suggested Events/, "Player Hub UI must show suggested 
 assert.match(playerHome, /event\.relevance\.label/, "Player Hub UI must render suggested event relevance labels from the private API payload.");
 assert.match(playerHome, /event\.relevance\.reasons/, "Player Hub UI must render suggested event relevance reasons from the private API payload.");
 assert.match(playerHome, /presentation-only/, "Player Hub UI must explain event suggestions remain presentation-only.");
-assert.match(playerHome, /Profile & Progression/, "Player Hub UI must show private profile/progression summaries.");
-assert.match(playerHome, /Current Profile Signals/, "Player Hub UI must show current-user profile signal metrics.");
+assert.match(playerHome, /My Profile/, "Player Hub UI must show private profile summaries.");
+assert.match(playerHome, /My Server Stats/, "Player Hub UI must show current-user statistics.");
 assert.match(playerHome, /future_earned_runtime/, "Player Hub UI must keep XP/challenge/calling-card runtime disconnected.");
-assert.match(playerHome, /Profile Entry Points/, "Player Hub UI must show profile entry points.");
+assert.match(playerHome, /My profile actions/, "Player Hub UI must show direct profile actions.");
 assert.match(playerHome, /Owner Setup Stays Gated/, "Player Hub UI must keep the owner setup boundary visible.");
 assert.match(playerHome, /\/pricing\?intent=owner_setup&returnTo=%2Fsetup/, "Player Hub UI owner action must point to pricing, not setup bypass.");
 const approvedRefreshStart = playerHome.indexOf("async function refreshCommunityMatches");
@@ -373,7 +373,7 @@ async function testPlayerHubRouteRuntimeContract() {
   assert.equal(payload.profile_summary.private, true, "Profile summary must be private.");
   assert.equal(payload.profile_summary.presentation_only, true, "Profile summary must be presentation-only.");
   assert.equal(payload.profile_summary.public_profile_href, null, "Player Hub must not invent or expose a public profile handle.");
-  assert.equal(payload.profile_summary.public_profile_status, "not_configured", "Public profile publishing should remain a separate privacy slice.");
+  assert.equal(payload.profile_summary.public_profile_status, "private", "An account with no saved publishing preference remains private.");
   assert.equal(payload.profile_summary.linked_game_profiles, 2, "Profile summary must include only current-user public linked gameplay profiles.");
   assert.equal(payload.profile_summary.linked_public_servers, 2, "Profile summary must count only current-user public servers.");
   assert.equal(payload.profile_summary.last_seen_at, "2026-08-31T12:00:00.000Z", "Profile summary must ignore hidden and other-user profile rows.");
@@ -393,7 +393,7 @@ async function testPlayerHubRouteRuntimeContract() {
     "future_earned_runtime",
     "future_earned_runtime",
   ], "XP, challenge, and calling-card runtimes must stay disconnected in this slice.");
-  assert.deepEqual(payload.profile_entries.map((entry) => entry.key), ["private_profile", "public_profile", "progression"], "Profile entries must remain private player entry points.");
+  assert.deepEqual(payload.profile_entries.map((entry) => entry.key), ["private_profile", "public_profile", "game_account"], "Profile entries must point to existing profile and linking tools.");
   assert.equal(payload.owner_setup.href, "/pricing?intent=owner_setup&returnTo=%2Fsetup", "Owner setup must stay routed through pricing.");
   assert.equal(payload.owner_setup.gated, true, "Owner setup must stay marked as gated.");
   assert.equal(payload.owner_setup.requires_entitlement, true, "Owner setup must require entitlement after pricing.");
