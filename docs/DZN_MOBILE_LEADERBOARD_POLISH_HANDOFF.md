@@ -21,4 +21,11 @@
 
 ## Follow-ups
 
+## Release Review Correction
+
+- Review thread PRRT_kwDOScgf886gj-1k identified mobile login/signup scrolling that still measured the beta ticker as a fixed bottom boundary.
+- Reproduced on the pre-fix built signup page at 320px: expanded details scrolled above the viewport.
+- The briefing helper now uses the actual viewport boundary, with a small edge margin, while preserving mobile-only, reduced-motion and expansion-settle behavior. No authentication or OAuth behavior changed.
+- Added eight built login/signup checks at 320/390px with the notice shown/hidden. All 18 combined browser cases passed after the fix. Targeted auth regression, changed-file lint, production build/typecheck and diff check passed.
+
 Map labels/presentation, advanced plan labels, Server Wars named opponent selection, public-profile empty-stat placeholders, and initial cross-page profile-anchor scrolling are separate changes. No real game identity claim has been fabricated or approved.

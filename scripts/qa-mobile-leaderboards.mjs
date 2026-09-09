@@ -44,7 +44,7 @@ if (process.argv.includes("--serve")) {
   const browser = await chromium.launch({ headless: true });
   const results = [];
   try {
-    for (const width of [320, 390, 760, 900, 1440]) {
+    for (const width of process.argv.includes("--auth-only") ? [] : [320, 390, 760, 900, 1440]) {
       for (const reducedMotion of ["reduce", "no-preference"]) {
         const context = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion, timezoneId: "America/Los_Angeles" });
         const page = await context.newPage();
@@ -94,6 +94,42 @@ if (process.argv.includes("--serve")) {
         assert.deepEqual(errors, []); assert.deepEqual(failed, []); assert.deepEqual(writes, []);
         results.push({ width, reducedMotion, ...layout, errors, failed, writes });
         await context.close();
+      }
+    }
+    for (const width of [320, 390]) {
+      for (const routeName of ["login", "signup"]) {
+        for (const hideTicker of [false, true]) {
+          const context = await browser.newContext({ viewport: { width, height: 844 }, reducedMotion: "reduce" });
+          const page = await context.newPage();
+          const errors = [], writes = [];
+          page.on("pageerror", error => errors.push(error.message));
+          await page.route("**/*", route => {
+            const request = route.request(), url = new URL(request.url());
+            if (!["GET", "HEAD"].includes(request.method())) { writes.push(request.method()); return route.abort(); }
+            if (url.origin !== origin) return route.abort();
+            if (url.pathname === "/api/auth/me") return route.fulfill({ json: { authenticated: false, user: null } });
+            return route.continue();
+          });
+          await page.goto(`${origin}/${routeName}`, { waitUntil: "networkidle" });
+          if (hideTicker) await page.getByRole("button", { name: "Hide beta notice" }).click();
+          const cards = page.locator('button[aria-describedby^="mission-briefing-intel-"]');
+          assert.ok(await cards.count() > 0);
+          for (const card of await cards.all()) {
+            await card.click();
+            await page.waitForTimeout(900);
+            const bounds = await card.evaluate(element => {
+              const panel = element.querySelector('[data-briefing-intel]');
+              const box = panel.getBoundingClientRect();
+              return { top: box.top, bottom: box.bottom, viewport: innerHeight, open: element.getAttribute('aria-expanded') };
+            });
+            assert.equal(bounds.open, "true");
+            assert.ok(bounds.top >= 0 && bounds.bottom <= bounds.viewport, `${routeName}/${width}/hidden=${hideTicker}: expanded details scrolled outside viewport ${JSON.stringify(bounds)}`);
+          }
+          assert.deepEqual(errors, []); assert.deepEqual(writes, []);
+          await page.screenshot({ path: path.join(output, `${routeName}-${width}-ticker-hidden-${hideTicker}.png`) });
+          results.push({ route: routeName, width, hideTicker, errors, writes });
+          await context.close();
+        }
       }
     }
     await writeFile(path.join(output, "results.json"), JSON.stringify(results, null, 2));
