@@ -38,7 +38,7 @@ function api(pathname, publicState = "published", statsState = "stats_available"
   if (pathname === "/api/auth/me") return { authenticated: true, user: { id: "profile-qa", username: name, avatar: null }, linkedServers: [], linkedServer: null };
   if (pathname === "/api/player/hub") return hub(publicState, statsState);
   if (pathname === "/api/player/profile/privacy") return privacy(publicState === "published");
-  if (pathname === "/api/player/game-identities") return { ok: true, source: "player_game_identity_links", active_links: [], claims: [], proof_flow: { player_step: "Choose your server.", owner_step: "Request approval.", match_rule: "A server owner checks the link." }, boundary: "Fixture game account data" };
+  if (pathname === "/api/player/game-identities") return { ok: true, source: "player_game_identity_links", active_links: [], claims: [], revoked_links: [{ id: "revoked-fixture", player_name: "Example Game Account", server_name: "Example Server", revoked_at: "2026-09-09 12:00:00", reason: "The proof did not match this game account. Contact support to submit current evidence." }], proof_flow: { player_step: "Choose your server.", owner_step: "Request approval.", match_rule: "A server owner checks the link." }, boundary: "Fixture game account data" };
   if (pathname === "/api/public/servers") return { ok: true, servers: [] };
   if (pathname === "/api/public/players/profile-qa-player") return { ok: true, handle: "profile-qa-player", href: "/players/profile-qa-player", display_name: name, published_at: null, updated_at: null,
     sections: { display_name: { visible: true, value: name }, gameplay_summary: { visible: true, totals: { kills: 25, deaths: 0, suicides: 0, longest_kill_distance: 106.7, linked_public_servers: 1 }, last_seen_at: null }, featured_server: { visible: false, server: null },
@@ -117,6 +117,10 @@ if (process.argv.includes("--serve")) {
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Page overflow at ${width}`);
           assert.deepEqual(mutations, [], "Reading the hub must not mutate anything");
           if (routePath === "/player/profile") {
+            const revoked = page.getByRole("region", { name: "Revoked game stats links" });
+            await revoked.getByText("The proof did not match this game account. Contact support to submit current evidence.").waitFor();
+            assert.equal(await revoked.getByRole("link", { name: "Contact support" }).getAttribute("href"), "mailto:dznnetworksupport@gmail.com");
+            assert.ok(await revoked.evaluate(el => el.scrollWidth <= el.clientWidth));
             for (const [label, id] of [["Edit profile", "profile-settings"], ["Game account", "game-account"]]) {
               await panel.getByRole("link", { name: label, exact: true }).click();
               await page.waitForFunction(expected => location.hash === `#${expected}` && document.getElementById(expected)?.getBoundingClientRect().top < innerHeight, id);

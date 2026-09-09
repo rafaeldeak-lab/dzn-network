@@ -46,13 +46,15 @@ export async function readPlayerRequestSupport(db: D1Database, params: URLSearch
     const request = await db.prepare(`SELECT ${requestColumns} ${requestJoins} WHERE c.id = ? LIMIT 1`)
       .bind(requestId).first<PlayerSupportRequest>();
     if (!request) return { ok: false, status: 404, message: "Request not found." };
-    const bindings: unknown[] = [requestId];
+    const bindings: unknown[] = [requestId, requestId];
     const cursorSql = cursor ? "AND (a.created_at < ? OR (a.created_at = ? AND a.id < ?))" : "";
     if (cursor) bindings.push(cursor.at, cursor.at, cursor.id);
     const result = await db.prepare(`SELECT a.id, a.action, a.result, a.actor_user_id, actor.username AS actor_name,
       a.note, a.link_id, a.created_at FROM player_game_identity_audit_log a
       LEFT JOIN users actor ON actor.id = a.actor_user_id
-      WHERE a.claim_id = ? ${cursorSql} ORDER BY a.created_at DESC, a.id DESC LIMIT 51`)
+      WHERE (a.claim_id = ? OR a.link_id IN (SELECT link_id FROM player_game_identity_audit_log
+        WHERE claim_id = ? AND action = 'link_created' AND result IN ('accepted', 'already_linked')))
+        ${cursorSql} ORDER BY a.created_at DESC, a.id DESC LIMIT 51`)
       .bind(...bindings).all<PlayerSupportEvent>();
     const rows = result.results ?? [];
     return { ok: true, request: safeRequest(request), history: rows.slice(0, 50).map(row => ({ ...row, actor_name: safeText(row.actor_name), note: safeText(row.note) })),

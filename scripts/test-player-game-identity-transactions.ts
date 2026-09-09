@@ -28,6 +28,8 @@ export function identityTransactionFixture() {
     INSERT INTO player_profiles (id,linked_server_id,player_id,player_name) VALUES ('profile-a','server-a','game-a','Survivor');
   `);
   sqlite.exec(readFileSync("migrations/0064_player_game_identity_links.sql", "utf8"));
+  sqlite.exec("CREATE TABLE competitive_events (id TEXT PRIMARY KEY)");
+  sqlite.exec(readFileSync("migrations/0052_dzn_pulse.sql", "utf8"));
   sqlite.exec(`INSERT INTO player_game_identity_claims
     (id,user_id,discord_id,linked_server_id,player_profile_id,player_id,player_name)
     VALUES ('claim-a','player-a','discord-a','server-a','profile-a','game-a','Survivor')`);
@@ -65,7 +67,8 @@ export function identityTransactionFixture() {
     state: () => ({ claim: sqlite.prepare("SELECT * FROM player_game_identity_claims").all(),
       links: sqlite.prepare("SELECT * FROM player_game_identity_links").all(),
       profiles: sqlite.prepare("SELECT * FROM player_profiles").all(),
-      audit: sqlite.prepare("SELECT * FROM player_game_identity_audit_log").all() }),
+      audit: sqlite.prepare("SELECT * FROM player_game_identity_audit_log").all(),
+      notifications: sqlite.prepare("SELECT * FROM user_notifications").all() }),
   };
 }
 
@@ -80,7 +83,7 @@ export async function testPlayerGameIdentityTransactions() {
       assert.equal(state.claim[0].status, action === "approve" ? "approved" : "rejected");
       assert.equal(state.audit.length, action === "approve" ? 2 : 1);
       assert.equal(state.links.length, action === "approve" ? 1 : 0);
-      assert.equal(state.profiles[0].discord_id, action === "approve" ? "discord-a" : null);
+      assert.equal(state.profiles[0].discord_id, null, "New links must not overwrite legacy attribution");
       if (result.ok && action === "approve") assert.equal(result.link_id, state.links[0].id);
       const before = f.state();
       const repeat = await reviewPlayerGameIdentityClaim(f.env, owner, "claim-a", { action });
@@ -89,7 +92,7 @@ export async function testPlayerGameIdentityTransactions() {
     } finally { f.close(); }
   }
   for (const action of ["approve", "reject"] as const) {
-    for (let failure = 0; failure < (action === "approve" ? 6 : 2); failure++) {
+    for (let failure = 0; failure < (action === "approve" ? 5 : 2); failure++) {
       const f = identityTransactionFixture();
       try {
         const before = f.state(); f.failAt(failure);

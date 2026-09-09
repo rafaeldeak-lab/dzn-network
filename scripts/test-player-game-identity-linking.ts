@@ -69,7 +69,7 @@ assert.match(helper, /linked_servers\.id = \? OR linked_servers\.public_slug = \
 assert.match(helper, /WHERE player_profiles\.linked_server_id = \?[\s\S]*AND player_profiles\.player_id = \?/, "Claim creation must validate one exact ADM profile after server resolution.");
 assert.match(helper, /player_profiles\.player_id = \?/, "Claim creation must match the exact ADM player ID.");
 assert.match(helper, /requireServerOwnerOrDznAdmin/, "Claim approval must be scoped to the matching owner or DZN admin.");
-assert.match(helper, /UPDATE player_profiles[\s\S]*WHERE id = \?[\s\S]*AND linked_server_id = \?[\s\S]*AND player_id = \?/, "Compatibility backfill must update player_profiles only by exact row/server/player ID.");
+assert.doesNotMatch(helper, /UPDATE player_profiles|SET discord_id/, "New approvals must not create an untracked second stats attribution.");
 assert.doesNotMatch(helper, /WHERE[\s\S]{0,500}player_profiles\.player_name\s*=/i, "Identity linking must not attach accounts by player name.");
 assert.doesNotMatch(helper, /lower\(player_profiles\.player_name|lower\(kill_events\.killer_name|lower\(kill_events\.victim_name/i, "Identity linking must not add case-folded name matching.");
 assert.doesNotMatch(
