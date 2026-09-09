@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./test-public-profile-gameplay-presentation";
 import { readFileSync } from "node:fs";
 
 import { onRequest as publicProfileRoute } from "../functions/api/public/players/[handle]";
