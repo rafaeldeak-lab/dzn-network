@@ -30,7 +30,6 @@ html {
 body {
   min-height: 100%;
   margin: 0;
-  padding-bottom: var(--dzn-beta-ticker-height, 0px);
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
@@ -117,14 +116,13 @@ body.dzn-pricing-modal-open .dzn-beta-ticker {
 }
 
 .dzn-beta-ticker {
-  position: fixed;
-  inset-inline: 0;
-  bottom: 0;
-  z-index: 70;
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   min-height: 48px;
+  padding-block: 4px;
   border-top: 1px solid rgba(251, 191, 36, 0.22);
   background: rgba(3, 6, 18, 0.9);
   box-shadow: 0 -14px 40px rgba(0, 0, 0, 0.38), 0 -1px 20px rgba(168, 85, 247, 0.14);
@@ -206,8 +204,8 @@ body.dzn-pricing-modal-open .dzn-beta-ticker {
 }
 
 .dzn-beta-ticker__close {
-  min-height: 32px;
-  width: 34px;
+  min-height: 44px;
+  width: 44px;
 }
 
 .dzn-beta-ticker__feedback:focus-visible,
@@ -2513,10 +2511,101 @@ body.dzn-pricing-modal-open .dzn-beta-ticker {
   }
 }
 
-@media (max-width: 460px) {
-  .leaderboard-ref-kill-card p,
-  .leaderboard-ref-kill-card div {
-    max-width: 72% !important;
+/* Mobile records keep every metric visible without sideways table scrolling. */
+@media (max-width: 760px) {
+  .leaderboard-reference-page .dzn-leaderboard-table {
+    display: block;
+    min-width: 0 !important;
+  }
+
+  .leaderboard-reference-page .dzn-leaderboard-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .leaderboard-reference-page .dzn-leaderboard-table tbody {
+    display: block;
+  }
+
+  .leaderboard-reference-page .dzn-leaderboard-table tr.dzn-leaderboard-row {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 8px 4px;
+    padding-block: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+    background: transparent;
+  }
+
+  .leaderboard-reference-page .dzn-leaderboard-table td {
+    display: block;
+    grid-column: span 2;
+    min-width: 0;
+    border: 0;
+    white-space: normal;
+    overflow: visible;
+    overflow-wrap: anywhere;
+  }
+
+  .leaderboard-reference-page .dzn-leaderboard-table td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 4px;
+    color: #a1a1aa;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .leaderboard-reference-page .dzn-leaderboard-table td:first-child { grid-column: span 1; }
+  .leaderboard-reference-page .dzn-leaderboard-table td:nth-child(2) { grid-column: span 5; }
+  .leaderboard-reference-page .dzn-leaderboard-table td[data-label="Server"],
+  .leaderboard-reference-page .dzn-leaderboard-table td[data-label="Victim"],
+  .leaderboard-reference-page .dzn-leaderboard-table td[data-label="Time"] { grid-column: span 6; }
+  .leaderboard-reference-page .dzn-leaderboard-table td:nth-child(2)[data-label="Server"] { grid-column: span 5; }
+  .leaderboard-reference-page .dzn-leaderboard-table td:first-child::before,
+  .leaderboard-reference-page .dzn-leaderboard-table td:nth-child(2)::before { display: none; }
+
+  .leaderboard-reference-page .dzn-leaderboard-table a,
+  .leaderboard-reference-page .leaderboard-reference-player > span:last-child {
+    white-space: normal;
+    overflow: visible;
+    overflow-wrap: anywhere;
+  }
+
+  .leaderboard-reference-page .dzn-leaderboard-row td span:not(.dzn-rank-badge):not(.leaderboard-reference-avatar) {
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .leaderboard-reference-page .leaderboard-reference-avatar,
+  .leaderboard-reference-page .dzn-leaderboard-table a > svg { flex-shrink: 0; }
+  .leaderboard-reference-page .leaderboard-reference-panel-header { flex-wrap: wrap; }
+
+  /* Artwork has its own full-width band; text is never compressed beside it. */
+  .leaderboard-ref-page .leaderboard-ref-kill-card {
+    padding-top: 126px !important;
+    background-image: none !important;
+    background-color: #080b16 !important;
+  }
+  .leaderboard-ref-page .leaderboard-ref-kill-art,
+  .leaderboard-ref-page .leaderboard-ref-kill-card--bullet .leaderboard-ref-kill-card-bg {
+    inset: 0 0 auto !important;
+    width: 100% !important;
+    height: 116px !important;
+    max-width: none !important;
+    background-size: cover;
+    background-position: right center;
+    opacity: 1;
+  }
+  .leaderboard-ref-page .leaderboard-ref-kill-card::after { display: none; }
+  .leaderboard-ref-page .leaderboard-ref-bullet-effects { height: 116px; bottom: auto; }
+  .leaderboard-ref-page .leaderboard-ref-kill-card-content,
+  .leaderboard-ref-page .leaderboard-ref-kill-card-content p,
+  .leaderboard-ref-page .leaderboard-ref-kill-card-content div {
+    max-width: none !important;
+    overflow-wrap: anywhere;
   }
 }
 
