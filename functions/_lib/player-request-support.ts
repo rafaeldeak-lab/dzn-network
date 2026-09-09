@@ -63,9 +63,11 @@ export async function readPlayerRequestSupport(db: D1Database, params: URLSearch
   if (status) { clauses.push("c.status = ?"); bindings.push(status); }
   if (search) {
     const pattern = `%${search.replace(/[\\%_]/g, "\\$&")}%`;
-    clauses.push(`(${["c.id", "c.user_id", "c.discord_id", "c.player_id", "c.player_name", "c.linked_server_id", "s.guild_id", "s.server_name", "s.display_name", "u.username"]
+    const searchColumns = ["c.id", "c.user_id", "c.discord_id", "c.player_id", "c.player_name", "c.linked_server_id", "s.guild_id",
+      "s.server_name", "s.display_name", "s.hostname", "s.nitrado_service_name", "u.username"];
+    clauses.push(`(${searchColumns
       .map(column => `${column} LIKE ? ESCAPE '\\'`).join(" OR ")})`);
-    bindings.push(...Array(10).fill(pattern));
+    bindings.push(...Array(searchColumns.length).fill(pattern));
   }
   if (cursor) { clauses.push("(c.requested_at < ? OR (c.requested_at = ? AND c.id < ?))"); bindings.push(cursor.at, cursor.at, cursor.id); }
   const result = await db.prepare(`SELECT ${requestColumns} ${requestJoins}

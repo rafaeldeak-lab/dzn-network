@@ -525,6 +525,7 @@ export async function reviewPlayerGameIdentityClaim(
     }
 
     const reviewerIsAdmin = isDznAdminDiscordId(env, actor.discord_id);
+    const reviewerHasGlobalAccess = reviewerIsAdmin || env.MOCK_AUTH === "1" || env.MOCK_AUTH === "true";
     const currentOwnerGuard = `EXISTS (
       SELECT 1 FROM linked_servers s WHERE s.id = player_game_identity_claims.linked_server_id
         AND (? = 1 OR s.user_id = ?)
@@ -537,7 +538,7 @@ export async function reviewPlayerGameIdentityClaim(
           `UPDATE player_game_identity_claims
            SET status = 'rejected', reviewed_by_user_id = ?, reviewed_at = CURRENT_TIMESTAMP, review_note = ?, updated_at = CURRENT_TIMESTAMP
            WHERE id = ? AND status = 'pending' AND ${currentOwnerGuard}`,
-        ).bind(actor.id, parsed.note, claim.id, reviewerIsAdmin ? 1 : 0, actor.id),
+        ).bind(actor.id, parsed.note, claim.id, reviewerHasGlobalAccess ? 1 : 0, actor.id),
         prepareGameIdentityAudit(db, {
           action: "claim_rejected",
           result: "accepted",
@@ -612,7 +613,7 @@ export async function reviewPlayerGameIdentityClaim(
                AND (l.user_id != player_game_identity_claims.user_id OR l.discord_id != player_game_identity_claims.discord_id
                  OR l.player_profile_id != player_game_identity_claims.player_profile_id)
            )`,
-      ).bind(actor.id, parsed.note, claim.id, reviewerIsAdmin ? 1 : 0, actor.id),
+      ).bind(actor.id, parsed.note, claim.id, reviewerHasGlobalAccess ? 1 : 0, actor.id),
       prepareGameIdentityAudit(db, {
         action: "claim_approved", result: "accepted", claimId: claim.id, userId: claim.user_id,
         actorUserId: actor.id, linkedServerId: claim.linked_server_id,

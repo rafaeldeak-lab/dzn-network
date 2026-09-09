@@ -41,6 +41,14 @@ export async function testPlayerRequestSupport() {
     assert.ok(!missing.ok && missing.status === 404);
     assert.deepEqual(f.state(), before);
     assert.equal(f.writes(), 0, "Support reads must not mutate state");
+    for (const column of ["hostname", "nitrado_service_name"]) {
+      f.sqlite.exec("UPDATE linked_servers SET display_name=NULL,server_name=NULL,hostname=NULL,nitrado_service_name=NULL");
+      f.sqlite.prepare(`UPDATE linked_servers SET ${column}=?`).run("Fallback Server Name");
+      const fallback = await readPlayerRequestSupport(f.env.DB, new URLSearchParams({ q: "Fallback Server Name" }));
+      assert.ok(fallback.ok && "items" in fallback);
+      assert.equal(fallback.items.length, 1, `Search must include the displayed ${column}`);
+      assert.equal(fallback.items[0].server_name, "Fallback Server Name");
+    }
 
     const invoke = (request: Request) => onRequest({ env: f.env, request, params: {}, data: {},
       waitUntil: () => {}, next: async () => new Response() });
@@ -57,6 +65,9 @@ export async function testPlayerRequestSupport() {
     const ownerRequest = await session("owner-a", "local-owner-session");
     const normalOwner = await invoke(ownerRequest);
     assert.equal(normalOwner.status, 403);
+    f.env.MOCK_AUTH = "true";
+    assert.equal((await invoke(ownerRequest)).status, 403, "Mock review access must not grant platform support access");
+    f.env.MOCK_AUTH = undefined;
     const dznAdmin = await invoke(await session("admin", "local-admin-session"));
     assert.equal(dznAdmin.status, 403, "DZN admin is not automatically a platform owner");
     f.env.DZN_PLATFORM_OWNER_DISCORD_IDS = "123456789001";

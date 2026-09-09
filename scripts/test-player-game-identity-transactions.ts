@@ -128,6 +128,18 @@ export async function testPlayerGameIdentityTransactions() {
     assert.equal((await reviewPlayerGameIdentityClaim(denied.env, identityTestUser("owner-b"), "claim-a", { action: "approve" })).status, 403);
     assert.equal(denied.writes(), 0);
   } finally { denied.close(); }
+  for (const mockAuth of [undefined, "false", "true", "1"]) {
+    for (const action of ["approve", "reject"]) {
+      const f = identityTransactionFixture();
+      try {
+        f.env.MOCK_AUTH = mockAuth;
+        const before = f.state();
+        const result = await reviewPlayerGameIdentityClaim(f.env, identityTestUser("owner-b"), "claim-a", { action });
+        assert.equal(result.status, mockAuth === "true" || mockAuth === "1" ? 200 : 403);
+        if (!result.ok) assert.deepEqual(f.state(), before, "Disabled mock access must preserve real tenant isolation");
+      } finally { f.close(); }
+    }
+  }
   const conflict = identityTransactionFixture();
   try {
     conflict.sqlite.exec("UPDATE player_profiles SET discord_id='discord-b'");
