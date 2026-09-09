@@ -23,6 +23,7 @@ Step 1 of the product follow-up backlog. Base: `412eb02b5de63fd82f7c067367fbbbf7
 - Scoped security review found no reportable issue. Scan `dbc3c562-587f-41ec-bcd6-4f145a025769` is sealed with partial coverage: its original snapshot preceded final native-anchor/QA refinements and this handoff. The parent separately reviewed the final source delta; do not represent the scan as an immutable review of the final commit or an independent architecture review. Production verification remains excluded.
 - Built browser QA: 48 combinations across `/player` and `/player/profile`, six publishing/stat states and widths 1440, 900, 390 and 320. Includes native-anchor navigation, privacy-save refresh, failed-save preservation, no mutations during reads, no page-width overflow, and reduced-motion mobile configurations.
 - Rendered QA uses synthetic accounts/API responses and compiled local assets only. No live login, owner claim, provider call, customer charge or database mutation is performed.
+- Automated PR #170 review identified stale expectations in the separately registered `qa:player-hub-rendered` harness. Its existing rich/private/empty/unavailable fixtures and assertions now match the new contract, with extra private-link and missing-total checks. All six existing captures passed with no console messages or network failures, using the compiled loopback preview. Optional `DZN_PLAYER_HUB_QA_REUSE_SERVER=1`, port and output overrides avoid a duplicate dev server and overwriting historical evidence; default startup is unchanged.
 
 ## Local Build Notes
 
