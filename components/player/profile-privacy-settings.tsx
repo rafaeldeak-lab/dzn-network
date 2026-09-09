@@ -128,7 +128,7 @@ export function PlayerProfilePrivacySettings({ onSaved }: { onSaved?: () => void
   }
 
   return (
-    <section id="profile-settings" className="scroll-mt-32 rounded-lg border border-cyan-300/25 bg-slate-950/78 p-5 shadow-[0_0_42px_rgba(34,211,238,0.1)] backdrop-blur">
+    <section id="profile-settings" aria-busy={state.status === "loading"} className="scroll-mt-32 rounded-lg border border-cyan-300/25 bg-slate-950/78 p-5 shadow-[0_0_42px_rgba(34,211,238,0.1)] backdrop-blur">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-cyan-300/35 bg-cyan-300/10 text-cyan-100">

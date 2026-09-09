@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
+import { publicGameplayPresentation } from "@/lib/public-profile-gameplay";
 
 type OwnerPreviewSection = {
   key: string;
@@ -239,6 +240,7 @@ export function PublicProfileOwnerPreviewPanel({
   const sectionRows = previewState.status === "ready"
     ? publicProfileSectionRows(previewState.data)
     : settingsPreviewRows(sections);
+  const gameplay = previewState.status === "ready" ? publicGameplayPresentation(previewState.data.sections.gameplay_summary) : null;
 
   return (
     <section className="rounded-lg border border-cyan-300/25 bg-[radial-gradient(circle_at_18%_0%,rgba(34,211,238,0.14),transparent_34%),radial-gradient(circle_at_92%_18%,rgba(168,85,247,0.13),transparent_30%),rgba(2,6,23,0.84)] p-5 shadow-[0_0_42px_rgba(34,211,238,0.12)] backdrop-blur">
@@ -261,11 +263,11 @@ export function PublicProfileOwnerPreviewPanel({
         <div className="min-w-0 rounded-lg border border-white/10 bg-slate-950/70 p-4">
           <PreviewHero state={previewState} handle={validatedHandle} href={validatedHref} />
 
-          {previewState.status === "ready" ? (
-            <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              <MiniMetric label="Public Servers" value={String(previewState.data.sections.gameplay_summary.totals?.linked_public_servers ?? 0)} visible={previewState.data.sections.gameplay_summary.visible} />
-              <MiniMetric label="Kills" value={String(previewState.data.sections.gameplay_summary.totals?.kills ?? 0)} visible={previewState.data.sections.gameplay_summary.visible} />
-              <MiniMetric label="Longest" value={formatDistance(previewState.data.sections.gameplay_summary.totals?.longest_kill_distance ?? 0)} visible={previewState.data.sections.gameplay_summary.visible} />
+          {gameplay ? (
+            <div aria-label="Visitor preview statistics" className="mt-4 grid gap-3 sm:grid-cols-3">
+              <MiniMetric label="Public Servers" value={gameplay.publicServers} visible={gameplay.status !== "hidden"} />
+              <MiniMetric label="Kills" value={gameplay.kills} visible={gameplay.status !== "hidden"} />
+              <MiniMetric label="Longest" value={gameplay.longest} visible={gameplay.status !== "hidden"} />
             </div>
           ) : null}
 
@@ -572,7 +574,7 @@ function publicProfileSectionRows(data: PublicPlayerProfilePayload): PreviewSect
       key: "gameplay_summary",
       label: "Gameplay Summary",
       visible: data.sections.gameplay_summary.visible,
-      detail: data.sections.gameplay_summary.totals ? "Visitors can see safe aggregate gameplay totals." : "Gameplay totals are hidden or not available.",
+      detail: publicGameplayPresentation(data.sections.gameplay_summary).message,
     },
     {
       key: "featured_server",
@@ -655,11 +657,6 @@ function initialsFromName(value: string) {
     .slice(0, 2)
     .map((part) => part.charAt(0).toUpperCase())
     .join("") || "D";
-}
-
-function formatDistance(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return "0m";
-  return `${Math.round(value)}m`;
 }
 
 function formatDate(value: string | null) {

@@ -4,7 +4,7 @@ import { readFile, mkdir, writeFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
 
-const root = path.resolve("out");
+const root = path.resolve(process.env.DZN_PROFILE_QA_BUILD_ROOT ?? "out");
 const output = path.resolve(process.env.DZN_PROFILE_QA_OUTPUT ?? "artifacts/player-hub-profile-state-qa");
 const port = Number(process.env.DZN_PROFILE_QA_PORT ?? 3102);
 const origin = `http://127.0.0.1:${port}`;
@@ -78,7 +78,8 @@ if (process.argv.includes("--serve")) {
   const browser = await chromium.launch({ headless: true });
   const results = [];
   try {
-    for (const width of [1440, 900, 390, 320]) {
+    if (process.argv.includes("--followup-only")) results.push(...await checkProfileFollowups(browser));
+    for (const width of process.argv.includes("--followup-only") ? [] : [1440, 900, 390, 320]) {
       for (const [publicState, statsState] of [["published", "stats_available"], ["private", "zero"], ["private", "empty"], ["not_published", "empty"], ["unavailable", "stats_available"], ["published", "unavailable"]]) {
         const context = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion: width < 400 ? "reduce" : "no-preference", timezoneId: "America/Los_Angeles" });
         const page = await context.newPage();
@@ -142,6 +143,102 @@ if (process.argv.includes("--serve")) {
       }
     }
     await writeFile(path.join(output, "results.json"), JSON.stringify({ synthetic: true, productionActions: false, checkedAt: new Date().toISOString(), results }, null, 2));
-    console.log(`Passed ${results.length * 2} built route/viewport/state checks, including privacy-save refresh and failure handling.`);
+    console.log(`Passed ${results.length} built scenarios (${process.argv.includes("--followup-only") ? "profile empty states and delayed navigation" : "two routes per scenario, privacy-save refresh and failure handling"}).`);
   } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
+}
+
+async function checkProfileFollowups(browser) {
+  const results = [];
+  for (const width of [1440, 900, 390, 320]) {
+    for (const scenario of process.argv.includes("--navigation-only") ? ["empty"] : ["empty", "zero", "populated", "hidden", "unavailable"]) {
+      const context = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion: width < 400 ? "reduce" : "no-preference" });
+      const page = await context.newPage();
+      const errors = [], mutations = [];
+      let holdIdentity = false;
+      page.on("pageerror", error => errors.push(error.message));
+      page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+      await page.route("**/*", async route => {
+        const request = route.request(), url = new URL(request.url());
+        if (url.origin !== origin) { await route.abort(); return; }
+        if (!url.pathname.startsWith("/api/")) { await route.continue(); return; }
+        if (request.method() !== "GET") { mutations.push(`${request.method()} ${url.pathname}`); await route.fulfill({ status: 405, json: { ok: false } }); return; }
+        // Deliberately let native navigation run before authentication and panel data arrive.
+        const delay = { "/api/auth/me": 350, "/api/player/hub": 750, "/api/player/game-identities": holdIdentity ? 4000 : 1100, "/api/player/profile/privacy": 500 }[url.pathname] ?? 0;
+        if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+        const payload = api(url.pathname, "published", scenario === "populated" ? "stats_available" : scenario);
+        if (url.pathname === "/api/public/players/profile-qa-player" && payload) {
+          const summary = payload.sections.gameplay_summary;
+          summary.visible = scenario !== "hidden";
+          if (scenario === "unavailable") summary.totals = null;
+          else if (scenario !== "populated" && scenario !== "hidden") {
+            summary.totals = { kills: 0, deaths: 0, suicides: 0, longest_kill_distance: 0, linked_public_servers: scenario === "zero" ? 1 : 0 };
+          }
+        }
+        if (!payload) errors.push(`Unexpected API request: ${url.pathname}`);
+        await route.fulfill({ status: payload ? 200 : 404, json: payload ?? { ok: false } });
+      });
+      try {
+        await page.goto(`${origin}/players/profile-qa-player`, { waitUntil: "networkidle" });
+        const metrics = page.getByText("Public Servers", { exact: true }).locator("xpath=ancestor::section[1]");
+        await metrics.waitFor();
+        const publicText = await metrics.innerText();
+        if (["empty", "unavailable"].includes(scenario)) assert.equal((publicText.match(/--/g) ?? []).length, 4);
+        if (scenario === "hidden") { assert.equal((publicText.match(/Hidden/g) ?? []).length, 4); assert.doesNotMatch(publicText, /25|107m/); }
+        if (scenario === "zero") { assert.doesNotMatch(publicText, /--|Hidden/); assert.match(publicText, /0m/); }
+        if (scenario === "populated") { assert.match(publicText, /25/); assert.match(publicText, /107m/); }
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+        await metrics.screenshot({ path: path.join(output, `public-${scenario}-${width}.png`) });
+
+        await page.goto(`${origin}/player/profile#profile-settings`, { waitUntil: "networkidle" });
+        const preview = page.getByLabel("Visitor preview statistics", { exact: true });
+        await preview.waitFor();
+        const previewText = await preview.innerText();
+        if (["empty", "unavailable"].includes(scenario)) assert.equal((previewText.match(/--/g) ?? []).length, 3);
+        if (scenario === "hidden") assert.equal((previewText.match(/Hidden/g) ?? []).length, 3);
+        if (scenario === "zero") { assert.doesNotMatch(previewText, /--|Hidden/); assert.match(previewText, /0m/); }
+        if (scenario === "populated") { assert.match(previewText, /25/); assert.match(previewText, /107m/); }
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+        await preview.screenshot({ path: path.join(output, `preview-${scenario}-${width}.png`) });
+
+        if (scenario === "empty") {
+          await page.goto(`${origin}/player#profile-summary`, { waitUntil: "networkidle" });
+          for (const [name, id] of [["Game account", "game-account"], ["Edit profile", "profile-settings"]]) {
+            if (id === "profile-settings") await page.goto(`${origin}/player#profile-summary`, { waitUntil: "networkidle" });
+            await page.locator("#profile-summary").getByRole("link", { name, exact: true }).click();
+            await page.waitForLoadState("networkidle");
+            await assertAnchorInView(page, id);
+            await page.screenshot({ path: path.join(output, `first-navigation-${id}-${width}.png`) });
+            await page.reload({ waitUntil: "networkidle" });
+            await assertAnchorInView(page, id);
+          }
+          await page.goto(`${origin}/player/profile`, { waitUntil: "networkidle" });
+          assert.equal(await page.evaluate(() => scrollY), 0, "No fragment must not trigger an unsolicited scroll");
+          await page.goto(`${origin}/player/profile#unknown-section`, { waitUntil: "networkidle" });
+          assert.equal(await page.evaluate(() => scrollY), 0, "Unknown fragments must not trigger a fallback scroll");
+          await page.goto(`${origin}/player`, { waitUntil: "networkidle" });
+          holdIdentity = true;
+          await page.goto(`${origin}/player/profile#profile-settings`, { waitUntil: "domcontentloaded" });
+          await page.waitForFunction(() => document.querySelector("#profile-summary")?.textContent.includes("No linked server stats yet."));
+          assert.equal(await page.locator('#game-account [aria-busy="true"]').count(), 1);
+          await page.keyboard.press("Control+Home");
+          await page.waitForLoadState("networkidle");
+          assert.equal(await page.evaluate(() => scrollY), 0, "A late panel response must not override the user's scroll");
+        }
+        assert.deepEqual(errors, []);
+        assert.deepEqual(mutations, []);
+        results.push({ width, scenario, publicAndPreview: true, delayedNavigation: scenario === "empty", errors, mutations });
+      } catch (error) {
+        await page.screenshot({ path: path.join(output, `failure-${scenario}-${width}.png`) }).catch(() => {});
+        throw error;
+      } finally { await context.close(); }
+    }
+  }
+  return results;
+}
+
+async function assertAnchorInView(page, id) {
+  await page.waitForFunction(expected => {
+    const top = document.getElementById(expected)?.getBoundingClientRect().top;
+    return location.hash === `#${expected}` && top >= 90 && top < innerHeight / 2;
+  }, id, { timeout: 5000 });
 }

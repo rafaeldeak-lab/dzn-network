@@ -315,6 +315,42 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
 
   useEffect(() => {
+    if (mode !== "profile" || authState.status !== "logged_in" || hubState.status === "idle" || hubState.status === "loading") return;
+    let frame = 0;
+    let pending = true;
+    const alignProfileSection = () => {
+      if (!pending) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (!pending) return;
+        const id = window.location.hash.slice(1);
+        if (id !== "game-account" && id !== "profile-settings" && id !== "profile-summary") return;
+        if (id === "profile-settings" && document.querySelector('#game-account [aria-busy="true"], #profile-settings[aria-busy="true"]')) return;
+        // The first native fragment scroll can run before the signed-in panels exist.
+        const target = document.getElementById(id);
+        if (!target) return;
+        target.scrollIntoView({ block: "start", behavior: "instant" });
+        pending = false;
+      });
+    };
+    const onHashChange = () => { pending = true; alignProfileSection(); };
+    const cancelPendingScroll = () => { pending = false; cancelAnimationFrame(frame); };
+    alignProfileSection();
+    // Settings sit below the game-link panel, whose late response changes their position.
+    const panels = document.getElementById("game-account")?.parentElement;
+    const observer = new MutationObserver(alignProfileSection);
+    if (panels) observer.observe(panels, { subtree: true, attributes: true, attributeFilter: ["aria-busy"] });
+    window.addEventListener("hashchange", onHashChange);
+    for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) window.addEventListener(event, cancelPendingScroll, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("hashchange", onHashChange);
+      for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) window.removeEventListener(event, cancelPendingScroll);
+    };
+  }, [mode, authState.status, hubState.status]);
+
+  useEffect(() => {
     let activeRequest = true;
 
     fetch("/api/auth/me", { cache: "no-store", credentials: "include" })
