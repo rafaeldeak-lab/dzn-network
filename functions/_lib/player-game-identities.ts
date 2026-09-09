@@ -37,11 +37,13 @@ export type PlayerGameIdentityLinkRow = {
 
 export type OwnerPlayerGameIdentityClaimRow = PlayerGameIdentityClaimRow & {
   user_id: string;
+  requester_discord_id: string;
   account_name: string | null;
 };
 
 export type OwnerPlayerGameIdentityClaimPayloadRow = PlayerGameIdentityClaimRow & {
   user_id: string;
+  requester_discord_id: string;
   account_name: string | null;
   submitted_player_id: string;
   review_context: {
@@ -401,26 +403,25 @@ export async function createPlayerGameIdentityClaim(
     }
 
     const claimId = crypto.randomUUID();
-    await db
-      .prepare(
+    await db.batch([
+      db.prepare(
         `INSERT INTO player_game_identity_claims (
           id, user_id, discord_id, linked_server_id, player_profile_id, player_id, player_name, status, requested_at, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       )
-      .bind(claimId, user.id, user.discord_id, profile.linked_server_id, profile.id, profile.player_id, profile.player_name)
-      .run();
-
-    await writeGameIdentityAudit(env, {
-      action: "claim_requested",
-      result: "accepted",
-      claimId,
-      userId: user.id,
-      actorUserId: user.id,
-      linkedServerId: profile.linked_server_id,
-      playerProfileId: profile.id,
-      playerId: profile.player_id,
-      note: "Pending exact game ID claim created for owner/admin review.",
-    });
+      .bind(claimId, user.id, user.discord_id, profile.linked_server_id, profile.id, profile.player_id, profile.player_name),
+      prepareGameIdentityAudit(db, {
+        action: "claim_requested",
+        result: "accepted",
+        claimId,
+        userId: user.id,
+        actorUserId: user.id,
+        linkedServerId: profile.linked_server_id,
+        playerProfileId: profile.id,
+        playerId: profile.player_id,
+        note: "Pending exact game ID claim created for owner/admin review.",
+      }),
+    ]);
 
     const claim = await readPlayerGameIdentityClaimById(db, claimId, user.id, user.discord_id);
     if (!claim) throw new Error("Claim was not readable after creation.");
@@ -444,6 +445,7 @@ export async function readOwnerPlayerGameIdentityClaims(env: Env, user: SessionU
         `SELECT
           player_game_identity_claims.id,
           player_game_identity_claims.user_id,
+          player_game_identity_claims.discord_id AS requester_discord_id,
           player_game_identity_claims.linked_server_id,
           player_game_identity_claims.player_profile_id,
           player_game_identity_claims.player_id,
@@ -522,26 +524,33 @@ export async function reviewPlayerGameIdentityClaim(
       return { ok: false, status: 409, error: "CLAIM_ALREADY_REVIEWED", message: "This identity claim has already been reviewed." };
     }
 
+    const reviewerIsAdmin = isDznAdminDiscordId(env, actor.discord_id);
+    const currentOwnerGuard = `EXISTS (
+      SELECT 1 FROM linked_servers s WHERE s.id = player_game_identity_claims.linked_server_id
+        AND (? = 1 OR s.user_id = ?)
+        AND lower(COALESCE(s.status, 'pending')) NOT IN ('deleted', 'merged')
+        AND (s.merged_into_server_id IS NULL OR s.merged_into_server_id = '')
+    )`;
     if (parsed.action === "reject") {
-      await db
-        .prepare(
+      const results = await db.batch([
+        db.prepare(
           `UPDATE player_game_identity_claims
            SET status = 'rejected', reviewed_by_user_id = ?, reviewed_at = CURRENT_TIMESTAMP, review_note = ?, updated_at = CURRENT_TIMESTAMP
-           WHERE id = ? AND status = 'pending'`,
-        )
-        .bind(actor.id, parsed.note, claim.id)
-        .run();
-      await writeGameIdentityAudit(env, {
-        action: "claim_rejected",
-        result: "accepted",
-        claimId: claim.id,
-        userId: claim.user_id,
-        actorUserId: actor.id,
-        linkedServerId: claim.linked_server_id,
-        playerProfileId: claim.player_profile_id,
-        playerId: claim.player_id,
-        note: parsed.note,
-      });
+           WHERE id = ? AND status = 'pending' AND ${currentOwnerGuard}`,
+        ).bind(actor.id, parsed.note, claim.id, reviewerIsAdmin ? 1 : 0, actor.id),
+        prepareGameIdentityAudit(db, {
+          action: "claim_rejected",
+          result: "accepted",
+          claimId: claim.id,
+          userId: claim.user_id,
+          actorUserId: actor.id,
+          linkedServerId: claim.linked_server_id,
+          playerProfileId: claim.player_profile_id,
+          playerId: claim.player_id,
+          note: parsed.note,
+        }, { previousWrite: true }),
+      ]);
+      if (results[0].meta.changes !== 1) return reviewChangedResult();
       return { ok: true, status: 200, claim_id: claim.id, link_id: null, action: "rejected", message: "Identity claim rejected." };
     }
 
@@ -562,7 +571,8 @@ export async function reviewPlayerGameIdentityClaim(
     }
 
     const activeLink = await readActiveGameIdentityLink(db, claim.linked_server_id, claim.player_id);
-    if (activeLink && activeLink.user_id !== claim.user_id) {
+    if ((activeLink && (activeLink.user_id !== claim.user_id || activeLink.discord_id !== claim.discord_id))
+      || (exactProfile.discord_id && exactProfile.discord_id.trim() && exactProfile.discord_id !== claim.discord_id)) {
       await writeGameIdentityAudit(env, {
         action: "claim_approved",
         result: "conflict",
@@ -577,14 +587,45 @@ export async function reviewPlayerGameIdentityClaim(
       return { ok: false, status: 409, error: "PLAYER_ID_ALREADY_LINKED", message: "That game ID is already actively linked." };
     }
 
-    const linkId = activeLink?.id ?? crypto.randomUUID();
-    const verifiedSource = isDznAdminDiscordId(env, actor.discord_id) ? "dzn_admin_approved" : "owner_approved";
-    if (!activeLink) {
-      await db
-        .prepare(
+    const linkId = crypto.randomUUID();
+    const decisionId = crypto.randomUUID();
+    const verifiedSource = reviewerIsAdmin ? "dzn_admin_approved" : "owner_approved";
+    // The conditional transition and its unique audit event fence every later write in this transaction.
+    const decisionGate = `EXISTS (SELECT 1 FROM player_game_identity_audit_log WHERE id = ?)`;
+    const results = await db.batch([
+      db.prepare(
+        `UPDATE player_game_identity_claims
+         SET status = 'approved', reviewed_by_user_id = ?, reviewed_at = CURRENT_TIMESTAMP, review_note = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND status = 'pending' AND ${currentOwnerGuard}
+           AND EXISTS (
+             SELECT 1 FROM player_profiles p
+             WHERE p.id = player_game_identity_claims.player_profile_id
+               AND p.linked_server_id = player_game_identity_claims.linked_server_id
+               AND p.player_id = player_game_identity_claims.player_id
+               AND (p.discord_id IS NULL OR trim(p.discord_id) = '' OR p.discord_id = player_game_identity_claims.discord_id)
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM player_game_identity_links l
+             WHERE l.linked_server_id = player_game_identity_claims.linked_server_id
+               AND l.player_id = player_game_identity_claims.player_id
+               AND l.status = 'active' AND l.revoked_at IS NULL
+               AND (l.user_id != player_game_identity_claims.user_id OR l.discord_id != player_game_identity_claims.discord_id
+                 OR l.player_profile_id != player_game_identity_claims.player_profile_id)
+           )`,
+      ).bind(actor.id, parsed.note, claim.id, reviewerIsAdmin ? 1 : 0, actor.id),
+      prepareGameIdentityAudit(db, {
+        action: "claim_approved", result: "accepted", claimId: claim.id, userId: claim.user_id,
+        actorUserId: actor.id, linkedServerId: claim.linked_server_id,
+        playerProfileId: claim.player_profile_id, playerId: claim.player_id, note: parsed.note,
+      }, { previousWrite: true, id: decisionId }),
+      db.prepare(
           `INSERT INTO player_game_identity_links (
             id, user_id, discord_id, linked_server_id, player_profile_id, player_id, player_name, status, verified_source, verified_by_user_id, verified_at, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          ) SELECT ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          WHERE ${decisionGate} AND NOT EXISTS (
+            SELECT 1 FROM player_game_identity_links WHERE linked_server_id = ? AND player_id = ?
+              AND status = 'active' AND revoked_at IS NULL
+          )`,
         )
         .bind(
           linkId,
@@ -596,55 +637,36 @@ export async function reviewPlayerGameIdentityClaim(
           exactProfile.player_name,
           verifiedSource,
           actor.id,
-        )
-        .run();
-    }
-
-    await db
-      .prepare(
+          decisionId, claim.linked_server_id, claim.player_id,
+        ),
+      db.prepare(
         `UPDATE player_profiles
          SET discord_id = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?
            AND linked_server_id = ?
            AND player_id = ?
-           AND (discord_id IS NULL OR trim(discord_id) = '' OR discord_id = ?)`,
+           AND (discord_id IS NULL OR trim(discord_id) = '' OR discord_id = ?)
+           AND ${decisionGate}`,
       )
-      .bind(claim.discord_id, exactProfile.id, exactProfile.linked_server_id, exactProfile.player_id, claim.discord_id)
-      .run();
-    await db
-      .prepare(
-        `UPDATE player_game_identity_claims
-         SET status = 'approved', reviewed_by_user_id = ?, reviewed_at = CURRENT_TIMESTAMP, review_note = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND status = 'pending'`,
-      )
-      .bind(actor.id, parsed.note, claim.id)
-      .run();
-    await writeGameIdentityAudit(env, {
-      action: "link_created",
-      result: activeLink ? "already_linked" : "accepted",
-      claimId: claim.id,
-      linkId,
-      userId: claim.user_id,
-      actorUserId: actor.id,
-      linkedServerId: claim.linked_server_id,
-      playerProfileId: claim.player_profile_id,
-      playerId: claim.player_id,
-      note: parsed.note,
-    });
-    await writeGameIdentityAudit(env, {
-      action: "claim_approved",
-      result: "accepted",
-      claimId: claim.id,
-      linkId,
-      userId: claim.user_id,
-      actorUserId: actor.id,
-      linkedServerId: claim.linked_server_id,
-      playerProfileId: claim.player_profile_id,
-      playerId: claim.player_id,
-      note: parsed.note,
-    });
-
-    return { ok: true, status: 200, claim_id: claim.id, link_id: linkId, action: "approved", message: "Link request approved and connected by exact game ID." };
+      .bind(claim.discord_id, exactProfile.id, exactProfile.linked_server_id, exactProfile.player_id, claim.discord_id, decisionId),
+      db.prepare(
+        `INSERT INTO player_game_identity_audit_log (
+          id, claim_id, link_id, user_id, actor_user_id, linked_server_id, player_profile_id, player_id, action, result, note, created_at
+        ) SELECT ?, ?, l.id, l.user_id, ?, l.linked_server_id, l.player_profile_id, l.player_id,
+          'link_created', CASE WHEN l.id = ? THEN 'accepted' ELSE 'already_linked' END, ?, CURRENT_TIMESTAMP
+          FROM player_game_identity_links l
+          WHERE l.linked_server_id = ? AND l.player_id = ? AND l.status = 'active' AND l.revoked_at IS NULL
+            AND ${decisionGate}`,
+      ).bind(crypto.randomUUID(), claim.id, actor.id, linkId, parsed.note, claim.linked_server_id, claim.player_id, decisionId),
+      db.prepare(
+        `SELECT id FROM player_game_identity_links
+         WHERE linked_server_id = ? AND player_id = ? AND status = 'active' AND revoked_at IS NULL AND ${decisionGate}`,
+      ).bind(claim.linked_server_id, claim.player_id, decisionId),
+    ]);
+    if (results[0].meta.changes !== 1) return reviewChangedResult();
+    const linkedId = (results[results.length - 1]?.results?.[0] as { id?: string } | undefined)?.id;
+    if (!linkedId) throw new Error("Committed link result unavailable");
+    return { ok: true, status: 200, claim_id: claim.id, link_id: linkedId, action: "approved", message: "Link request approved and connected by exact game ID." };
   } catch {
     return {
       ok: false,
@@ -808,9 +830,7 @@ async function readPlayerGameIdentityClaimById(db: D1Database, claimId: string, 
     .first<PlayerGameIdentityClaimRow>();
 }
 
-async function writeGameIdentityAudit(
-  env: Env,
-  input: {
+type GameIdentityAuditInput = {
     action: "claim_requested" | "claim_approved" | "claim_rejected" | "claim_cancelled" | "link_created" | "link_revoked";
     result: "accepted" | "denied" | "already_linked" | "conflict" | "not_found";
     userId: string;
@@ -821,17 +841,16 @@ async function writeGameIdentityAudit(
     playerProfileId?: string | null;
     playerId?: string | null;
     note?: string | null;
-  },
-) {
-  const db = requireDb(env);
-  await db
-    .prepare(
+};
+
+function prepareGameIdentityAudit(db: D1Database, input: GameIdentityAuditInput, options: { previousWrite?: boolean; id?: string } = {}) {
+  return db.prepare(
       `INSERT INTO player_game_identity_audit_log (
         id, claim_id, link_id, user_id, actor_user_id, linked_server_id, player_profile_id, player_id, action, result, note, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP ${options.previousWrite ? "WHERE changes() = 1" : ""}`,
     )
     .bind(
-      crypto.randomUUID(),
+      options.id ?? crypto.randomUUID(),
       input.claimId ?? null,
       input.linkId ?? null,
       input.userId,
@@ -842,8 +861,15 @@ async function writeGameIdentityAudit(
       input.action,
       input.result,
       sanitizeReviewNote(input.note),
-    )
-    .run();
+    );
+}
+
+async function writeGameIdentityAudit(env: Env, input: GameIdentityAuditInput) {
+  await prepareGameIdentityAudit(requireDb(env), input).run();
+}
+
+function reviewChangedResult(): ReviewPlayerGameIdentityClaimResult {
+  return { ok: false, status: 409, error: "CLAIM_CHANGED", message: "This request, account or server access changed. Refresh before reviewing it again." };
 }
 
 function sanitizeReviewNote(value: unknown) {
