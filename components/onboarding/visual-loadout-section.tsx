@@ -37,6 +37,7 @@ type VisualLoadoutResponse = {
       animationsAllowed: boolean;
     };
     updatedAt: string | null;
+    access?: { source: "billing" | "complimentary_showcase" };
   };
   availableFrames: ProfileFrameVisual[];
   availableThemes: ServerThemeBannerVisual[];
@@ -117,7 +118,8 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
     animationEnabled !== payload.loadout.animationEnabled ||
     JSON.stringify(selectedBadgeCodes) !== JSON.stringify(payload.loadout.showcaseBadgeCodes)
   ));
-  const planLabel = formatPlan(limits.planKey || planKey);
+  const planLabel = payload?.loadout.access?.source === "complimentary_showcase"
+    ? "Pro (complimentary)" : formatPlan(limits.planKey || planKey);
 
   function toggleBadge(code: string) {
     if (!availableBadgeCodes.has(code)) return;
@@ -157,10 +159,10 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
     <section id="visual-loadout" className="glass-surface animated-border mt-5 rounded-lg p-5">
       <div className="relative z-10">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-lg border border-cyan-300/25 bg-cyan-400/12 text-cyan-100"><Sparkles className="h-5 w-5" /></span>
-              <div>
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-cyan-300/25 bg-cyan-400/12 text-cyan-100"><Sparkles className="h-5 w-5" /></span>
+              <div className="min-w-0">
                 <h2 className="text-xl font-black text-white">Server Visual Loadout</h2>
                 <p className="mt-1 text-sm leading-6 text-zinc-300">Choose the earned badges, frame, and theme shown on your public presentation.</p>
               </div>
@@ -181,18 +183,18 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
 
         {payload ? (
           <>
-            <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-              <div className="grid gap-3">
+            <div className="mt-4 grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+              <div className="grid min-w-0 grid-cols-1 content-start gap-3">
                 <PreviewCard title="Current public card preview">
                   <div className="rounded-lg border border-white/10 bg-[#050813] p-3">
                     <ServerThemeBanner theme={selectedTheme}>
                       <div className="min-h-[132px] p-4">
-                        <div className="flex items-start gap-3">
-                          <ServerProfileFrame frame={selectedFrame} compact>
+                        <div className="flex min-w-0 flex-col items-start gap-3 sm:flex-row">
+                          <ServerProfileFrame frame={selectedFrame} compact className="shrink-0">
                             <div className="grid h-14 w-14 place-items-center rounded-lg bg-black/50 text-lg font-black text-white">{serverInitials(serverName)}</div>
                           </ServerProfileFrame>
                           <div className="min-w-0">
-                            <p className="truncate text-base font-black text-white">{serverName}</p>
+                            <p className="break-words text-base font-black text-white">{serverName}</p>
                             <p className="mt-1 text-[11px] font-black uppercase text-cyan-100">{selectedTheme?.label ?? "Default"} theme</p>
                             <ServerCardBadges badges={selectedBadges} max={limits.maxShowcaseBadges} className="mt-3" />
                           </div>
@@ -204,13 +206,13 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
 
                 <PreviewCard title="Current profile header preview">
                   <ServerThemeBanner theme={selectedTheme}>
-                    <div className="flex min-h-[154px] items-end justify-between gap-4 p-5">
-                      <div className="flex min-w-0 items-end gap-4">
-                        <ServerProfileFrame frame={selectedFrame}>
+                    <div className="flex min-h-[154px] min-w-0 items-end gap-4 p-5">
+                      <div className="flex min-w-0 flex-col items-start gap-4 sm:flex-row sm:items-end">
+                        <ServerProfileFrame frame={selectedFrame} className="shrink-0">
                           <div className="grid h-20 w-20 place-items-center rounded-xl bg-black/56 text-2xl font-black text-white">{serverInitials(serverName)}</div>
                         </ServerProfileFrame>
                         <div className="min-w-0 pb-1">
-                          <p className="truncate text-2xl font-black text-white">{serverName}</p>
+                          <p className="break-words text-xl font-black text-white">{serverName}</p>
                           <p className="mt-1 text-xs font-black uppercase text-zinc-300">{selectedFrame?.label ?? "Default frame"} / {selectedTheme?.label ?? "Default theme"}</p>
                         </div>
                       </div>
@@ -219,7 +221,7 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
                 </PreviewCard>
               </div>
 
-              <div className="grid gap-4">
+              <div className="grid min-w-0 grid-cols-1 gap-4">
                 <SelectorPanel title="Showcase badge selector" helper={`${selectedCount}/${limits.maxShowcaseBadges} selected. Only earned badges can be selected; locked crowns, founder rewards, and seasonal wins are previews until awarded.`}>
                   <div className="grid max-h-[230px] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                     {(payload.availableShowcaseBadges.length ? payload.availableShowcaseBadges : []).map((badge) => {
@@ -251,10 +253,10 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
                       </button>
                     ))}
                   </div>
-                  {!payload.availableShowcaseBadges.length ? <p className="text-xs font-bold text-zinc-400">Earn badges through activity, reputation, events, and admin-awarded milestones before selecting a showcase.</p> : null}
+                  {!payload.availableShowcaseBadges.length ? <p className="mt-3 text-xs font-bold text-zinc-400">Earn badges through activity, reputation, events, and admin-awarded milestones before selecting a showcase.</p> : null}
                 </SelectorPanel>
 
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
                   <SelectorPanel title="Frame selector" helper="Unavailable frames stay locked by plan or earned status.">
                     <div className="grid max-h-[210px] gap-2 overflow-y-auto pr-1">
                       {ALL_FRAMES.map((frame) => {
@@ -310,7 +312,7 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
             </div>
 
             <div className="mt-4 flex flex-col gap-3 rounded-lg border border-white/10 bg-black/24 p-4 lg:flex-row lg:items-center lg:justify-between">
-              <div className="grid gap-1 text-sm font-bold text-zinc-300">
+              <div className="grid min-w-0 grid-cols-1 gap-1 text-sm font-bold text-zinc-300">
                 <span>{planLabel} can display {limits.maxShowcaseBadges} showcase badges. You are using {selectedCount} slot{selectedCount === 1 ? "" : "s"}.</span>
                 {limits.animationsAllowed ? <span className="text-cyan-100">Pro visual loadout unlocked: 8 slots, animations, premium-style frames, premium-style themes, and stronger public presentation.</span> : <span className="text-amber-100">Pro unlocks 8 slots, animated frames, all theme banners, and full visual loadout benefits. Earned competitive badges still cannot be faked.</span>}
               </div>
@@ -344,7 +346,7 @@ export function VisualLoadoutSection({ serverId, serverName, planKey }: { server
 
 function SelectorPanel({ title, helper, children }: { title: string; helper: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+    <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.035] p-4">
       <p className="text-sm font-black text-white">{title}</p>
       <p className="mt-1 text-xs leading-5 text-zinc-400">{helper}</p>
       <div className="mt-3">{children}</div>
@@ -354,7 +356,7 @@ function SelectorPanel({ title, helper, children }: { title: string; helper: str
 
 function PreviewCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+    <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.035] p-4">
       <p className="mb-3 text-xs font-black uppercase text-zinc-400">{title}</p>
       {children}
     </div>

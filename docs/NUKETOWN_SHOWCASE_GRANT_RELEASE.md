@@ -1,6 +1,6 @@
 # NukeTown Showcase Grant: Backend Review Boundary
 
-This branch is the first bounded implementation, not the complete NukeTown Pro rollout. Do not activate the production grant until the remaining server capability consumers and release gates below are complete.
+The backend foundation was merged in PR #178. The visual-loadout follow-up connects the owner controls and public visual resolver, not the complete NukeTown Pro rollout. Do not activate the production grant until the remaining server capability consumers and release gates below are complete.
 
 ## Delivered In This Branch
 
@@ -10,6 +10,10 @@ This branch is the first bounded implementation, not the complete NukeTown Pro r
 - Grant and revocation audit events are committed by database triggers with the underlying change. Audit failure aborts the change. Grant bindings and audit history are immutable. Expiry is supported; replacement of an expired or revoked grant requires a separate reviewed action.
 - Protected owner listing settings and gallery reads/writes resolve the exact-server grant. Responses expose `serverAccess.source = complimentary_showcase` separately from unchanged billing fields.
 - Protected saves recheck the current association and capability source at write time. Gallery replacement is one atomic batch, preserving existing images when authorization changes or an insert fails.
+- Visual loadouts resolve current server access for frames, themes, animation and eight earned-badge slots. Inactive subscriptions do not grant paid visuals; active legacy plans retain their visual choices. The visual panel labels the exception `Pro (complimentary)` independently of raw billing.
+- A visual save and its audit record form one transaction, guarded by the current owner, grant/billing source and prior saved selection. Revocation, transfer, subscription change or competing edits reject stale saves without overwriting the previous selection. Audit or save failure rolls back both.
+- Public visual choices are revalidated for the exact showcase server on each resolver call. Revoked/invalid grants fall back to current billing; unavailable associations use free visuals. Saved media is retained. Fallback badges remain earned and slot-limited, and fallback frames/themes cannot bypass current visual access.
+- The owner visual panel constrains mobile grid columns and wraps server names. This presentation correction does not change entitlement or award decisions.
 - Platform-owner-only support endpoint `GET /api/owner/server-showcase-access` returns the exact scope, effective grant, latest 20 grant records and paginated audit history. `?before=<nextAuditCursor>` continues the 50-event history pages.
 - Its explicit POST grant/revoke operations require a real platform-owner session, same-origin request, bounded JSON, exact-server confirmation, and a request UUID or grant ID. Revocation requires an enumerated support reason. No action is automatically run by installation, reads, webhooks or reconciliation.
 
@@ -21,9 +25,11 @@ No Nitrado commands, bot changes, ADM replay, new gameplay, production Discord d
 
 ## Not Yet Connected
 
-The grant does not yet govern scheduler eligibility/cadence, guild-scoped sync state, metadata/ADM consumer selection, public listing/gallery visibility, advanced showcase availability, promotions/bump allowance, visual loadouts, event-host tools or Discord publishing. The existing settings and public-page clients also need a coherent visible complimentary-access label. Therefore saving media through this backend is not proof that the public page will display it with the grant.
+The grant does not yet govern scheduler eligibility/cadence, guild-scoped sync state, metadata/ADM consumer selection, public listing/gallery visibility, advanced showcase availability, promotions/bump allowance, event-host tools or Discord publishing. The other settings and public-page clients also need a coherent visible complimentary-access label. Visual-loadout integration does not establish public listing eligibility or gallery visibility.
 
 The platform owner console has the protected grant history API, not a new rendered grant-management panel. This is not the complete cross-DZN player-link/request support experience.
+
+Public snapshot recovery and HTTP caching are separate freshness boundaries: a previously rendered cosmetic selection may remain visible without a new resolver call. Review that behavior before grant activation; protected writes always recheck current access. The saved-selection guard protects races during a PUT, not a browser version carried from an earlier GET.
 
 Complete these consumers with exact-server resolution before activation. Do not replace guild billing with Pro to bypass the missing integrations, and do not enable this partial grant as if all Pro features are complete.
 

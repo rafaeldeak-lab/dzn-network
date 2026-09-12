@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createRequire } from "node:module";
 import { Miniflare } from "miniflare";
 import { createSession, ensureLinkedServerMetadataColumns } from "../functions/_lib/db";
@@ -11,6 +12,9 @@ import { categoryPolicyForPlan, readOwnerServerSettings, updateServerListing } f
 import { onRequest as gallery } from "../functions/api/servers/[serverId]/gallery";
 import { onRequest as ownerApi } from "../functions/api/owner/server-showcase-access";
 import type { Env, PagesFunction, SessionUser } from "../functions/_lib/types";
+import { onRequestGet as visualGet, onRequestPut as visualPut } from "../functions/api/servers/[serverId]/visual-loadout";
+import { getAvailableShowcaseBadgesForServer, resolvePublicServerVisualLoadout, resolveServerVisualLoadout, saveServerVisualLoadout, validateServerVisualLoadout } from "../functions/_lib/server-visual-loadouts";
+import { getAvailableFrameVisuals, getAvailableThemeBannerVisuals } from "../lib/badges/visuals";
 
 type Row = Record<string, unknown>;
 type Sqlite = { exec(sql: string): void; close(): void; prepare(sql: string): {
@@ -52,6 +56,10 @@ const actor: SessionUser = { id: scope.ownerUserId, discord_id: scope.ownerDisco
 const other: SessionUser = { id: "other-owner", discord_id: "99990000", username: "Synthetic other", avatar: null };
 const inactive = { plan_key: "pro", subscription_status: "canceled" };
 const image = { url: "https://local.test/synthetic.jpg", width: 1600, height: 900, sizeBytes: 1000, mimeType: "image/jpeg" };
+const proVisual = { showcaseBadges: [], profileFrameKey: "diamond", themeBannerKey: "space", animationEnabled: true };
+const freeVisual = { showcaseBadges: [], profileFrameKey: "bronze", themeBannerKey: "apocalypse", animationEnabled: false };
+const visualFallback = { showcaseBadges: [], profileFrame: getAvailableFrameVisuals().diamond,
+  themeBanner: getAvailableThemeBannerVisuals().space, cardStyle: "premium" as const };
 const originalFetch = globalThis.fetch;
 let passed = 0;
 
@@ -299,7 +307,140 @@ async function run() {
     assert.equal((await readShowcaseGrantSupport(env, other)).status, 403);
     assert.deepEqual(db.sqlite.prepare("PRAGMA foreign_key_check").all(), []);
   });
+  await test("visual access uses exact grant, real sessions and canonical service aliases", async ({ db, env }) => {
+    await grant(env);
+    const before = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    assert.equal((await invoke(visualGet, env, null, "GET")).status, 401);
+    assert.equal((await invoke(visualPut, env, other, "PUT", proVisual)).status, 403);
+    const response = await invoke(visualGet, env, actor, "GET", undefined, scope.nitradoServiceId);
+    assert.equal(response.status, 200);
+    const body = await response.json() as { loadout: { access: Row }; limits: Row; server: Row; availableFrames: unknown[] };
+    assert.equal(body.limits.maxShowcaseBadges, 8); assert.equal(body.availableFrames.length, Object.keys(getAvailableFrameVisuals()).length);
+    assert.equal(body.loadout.access.source, "complimentary_showcase");
+    assert.equal(body.server.subscriptionStatus, "canceled");
+    assert.equal("grantId" in body.loadout.access, false);
+    assert.equal((await invoke(visualPut, env, actor, "PUT", proVisual, scope.nitradoServiceId)).status, 200);
+    assert.equal(db.sqlite.prepare("SELECT server_id FROM server_visual_loadouts").get()?.server_id, scope.linkedServerId);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_customisation_audit_log").get()?.n, 1);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), before);
+  });
+  await test("visual grant never changes same-guild or other-owner server access", async ({ env }) => {
+    await grant(env);
+    for (const id of ["same-guild-other-server", "same-owner-other-guild", "foreign-owner-server"]) {
+      const loadout = await resolveServerVisualLoadout(env, id);
+      assert.equal(loadout.limits.maxShowcaseBadges, 3, id); assert.equal(loadout.animationEnabled, false, id);
+      await assert.rejects(validateServerVisualLoadout(env, id, proVisual), /frame is not available/);
+    }
+    await assert.rejects(validateServerVisualLoadout(env, scope.linkedServerId, { ...proVisual, showcaseBadges: ["first_blood"] }), /must be earned/);
+  });
+  await test("inactive paid visual access fails closed and legacy paid plans remain supported", async ({ db, env }) => {
+    for (const status of ["canceled", "past_due", "unpaid", "incomplete"]) {
+      db.sqlite.prepare("UPDATE server_subscriptions SET status = ?").run(status);
+      assert.equal((await resolveServerVisualLoadout(env, scope.linkedServerId)).limits.animationsAllowed, false);
+    }
+    for (const plan of ["pro", "premium", "network", "partner"]) {
+      db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = ?, status = 'active'").run(plan);
+      assert.equal((await resolveServerVisualLoadout(env, "same-guild-other-server")).limits.maxShowcaseBadges, 8);
+      assert.equal((await invoke(visualPut, env, actor, "PUT", proVisual, "same-guild-other-server")).status, 200);
+    }
+  });
+  await test("visual grant grants slots, never badges or competitive progress", async ({ db, env }) => {
+    const id = await grant(env);
+    const codes = ["death_dealer", "long_shot_legend", "warlord", "trusted_server", "legacy_server", "veteran", "verified_server", "active_server"];
+    assert.deepEqual(await getAvailableShowcaseBadgesForServer(env, scope.linkedServerId), []);
+    for (const code of codes) db.sqlite.prepare(`INSERT INTO server_badge_awards
+      (id, server_id, badge_code, awarded_at, award_type, source) VALUES (?, ?, ?, '2026-01-01', 'system', 'synthetic_test')`)
+      .run(randomUUID(), scope.linkedServerId, code);
+    const earned = await getAvailableShowcaseBadgesForServer(env, scope.linkedServerId);
+    assert.equal(earned.length, 8);
+    const before = db.sqlite.prepare("SELECT * FROM server_badge_awards ORDER BY id").all();
+    const loadout = await saveServerVisualLoadout(env, scope.linkedServerId, actor.id, { ...proVisual, showcaseBadges: codes });
+    assert.equal(loadout.showcaseBadges.length, 8);
+    revokeSql(db, id);
+    const publicLoadout = await resolvePublicServerVisualLoadout(env, scope.linkedServerId, "pro", earned, { ...visualFallback, showcaseBadges: earned });
+    assert.equal(publicLoadout.showcaseBadges.length, 3);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_badge_awards ORDER BY id").all(), before);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM kill_events").get()?.n, 0);
+  });
+  await test("unapplied grant migration does not break ordinary visual access", async ({ env }) => {
+    assert.equal((await resolveServerVisualLoadout(env, scope.linkedServerId)).limits.animationsAllowed, false);
+    assert.equal((await invoke(visualPut, env, actor, "PUT", freeVisual)).status, 200);
+  }, false);
+  await test("saved public Pro visuals downgrade on revoke without deleting selections", async ({ db, env }) => {
+    const id = await grant(env);
+    await saveServerVisualLoadout(env, scope.linkedServerId, actor.id, proVisual);
+    const before = db.sqlite.prepare("SELECT * FROM server_visual_loadouts").get();
+    const active = await resolvePublicServerVisualLoadout(env, scope.linkedServerId, "free", [], visualFallback);
+    assert.equal(active.profileFrame.key, "diamond"); assert.equal(active.themeBanner.key, "space");
+    assert.equal(active.animationEnabled, true); assert.equal(active.cardStyle, "premium");
+    revokeSql(db, id);
+    const revoked = await resolvePublicServerVisualLoadout(env, scope.linkedServerId, "premium", [], visualFallback);
+    assert.equal(revoked.profileFrame.key, "bronze"); assert.equal(revoked.themeBanner.key, "apocalypse");
+    assert.equal(revoked.animationEnabled, false); assert.equal(revoked.cardStyle, "standard");
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_visual_loadouts").get(), before);
+    assert.equal((await invoke(visualPut, env, actor, "PUT", proVisual)).status, 400);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'suspended' WHERE id = ?").run(scope.linkedServerId);
+    assert.equal((await resolvePublicServerVisualLoadout(env, scope.linkedServerId, "pro", [], visualFallback)).animationEnabled, false);
+  });
+  await test("public visual fallback obeys plan limits and earned badge provenance", async ({ env }) => {
+    const unearned = { code: "not-earned", isPublic: true } as Awaited<ReturnType<typeof getAvailableShowcaseBadgesForServer>>[number];
+    const fallback = { ...visualFallback, showcaseBadges: [unearned] };
+    const result = await resolvePublicServerVisualLoadout(env, "same-guild-other-server", "free", [], fallback);
+    assert.deepEqual(result.showcaseBadges, []); assert.equal(result.profileFrame.key, "bronze");
+    assert.equal(result.animationEnabled, false);
+  });
+  for (const mutation of ["revoke", "owner", "billing", "selection"]) {
+    await test(`visual transaction rejects changed ${mutation} without audit or overwrite`, async ({ db, env }) => {
+      const id = await grant(env);
+      if (mutation === "billing") {
+        revokeSql(db, id); db.sqlite.exec("UPDATE server_subscriptions SET status = 'active'");
+      }
+      await saveServerVisualLoadout(env, scope.linkedServerId, actor.id, proVisual);
+      db.beforeBatch = () => {
+        db.beforeBatch = null;
+        if (mutation === "revoke") revokeSql(db, id);
+        if (mutation === "owner") db.sqlite.prepare("UPDATE linked_servers SET user_id = ? WHERE id = ?").run(other.id, scope.linkedServerId);
+        if (mutation === "billing") db.sqlite.exec("UPDATE server_subscriptions SET status = 'canceled'");
+        if (mutation === "selection") db.sqlite.exec("UPDATE server_visual_loadouts SET theme_banner_key = 'chernarus'");
+      };
+      const response = await invoke(visualPut, env, actor, "PUT", { ...proVisual, profileFrameKey: "gold" });
+      assert.equal(response.status, 409);
+      assert.equal(db.sqlite.prepare("SELECT profile_frame_key FROM server_visual_loadouts").get()?.profile_frame_key, "diamond");
+      assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_customisation_audit_log").get()?.n, 1);
+    });
+  }
+  await test("visual save checks owner snapshot from route authorization", async ({ db, env }) => {
+    await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET user_id = ? WHERE id = ?").run(other.id, scope.linkedServerId);
+    await assert.rejects(saveServerVisualLoadout(env, scope.linkedServerId, actor.id, freeVisual, actor.id), /access changed/);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_visual_loadouts").get()?.n, 0);
+  });
+  for (const failedTable of ["server_customisation_audit_log", "server_visual_loadouts"]) {
+    await test(`visual save rolls back fully when ${failedTable} fails`, async ({ db, env }) => {
+      await grant(env);
+      await saveServerVisualLoadout(env, scope.linkedServerId, actor.id, proVisual);
+      const before = db.sqlite.prepare("SELECT * FROM server_visual_loadouts").get();
+      db.sqlite.exec(`CREATE TRIGGER synthetic_visual_failure BEFORE INSERT ON ${failedTable} BEGIN SELECT RAISE(ABORT, 'synthetic save failure'); END`);
+      await assert.rejects(saveServerVisualLoadout(env, scope.linkedServerId, actor.id, { ...proVisual, profileFrameKey: "gold" }), /synthetic save failure/);
+      assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_visual_loadouts").get(), before);
+      assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_customisation_audit_log").get()?.n, 1);
+    });
+  }
   console.log(`PASS ${passed} populated showcase test scenarios; no external calls`);
+  if (process.env.DZN_SHOWCASE_QA_OUTPUT) {
+    const f = await fixture();
+    try {
+      const dir = process.env.DZN_SHOWCASE_QA_OUTPUT;
+      mkdirSync(dir, { recursive: true });
+      const id = await grant(f.env);
+      for (const state of ["complimentary", "revoked", "paid"]) {
+        if (state === "revoked") revokeSql(f.db, id);
+        if (state === "paid") f.db.sqlite.exec("UPDATE server_subscriptions SET status = 'active'");
+        const payload = await (await invoke(visualGet, f.env, actor, "GET")).json();
+        writeFileSync(join(dir, `${state}.json`), JSON.stringify(payload, null, 2));
+      }
+    } finally { f.db.sqlite.close(); }
+  }
   await runLocalD1();
 }
 
@@ -315,7 +456,8 @@ async function runLocalD1() {
   try {
     const db = await mf.getD1Database("DB");
     const tables = ["users", "discord_guilds", "linked_servers", "server_subscriptions", "sessions",
-      "server_gallery_images", "server_showcase_grants", "server_showcase_grant_audit"];
+      "server_gallery_images", "server_showcase_grants", "server_showcase_grant_audit",
+      "server_visual_loadouts", "server_customisation_audit_log", "server_badge_awards"];
     const schema = fixtureDb.db.sqlite.prepare(`SELECT name, tbl_name, type, sql FROM sqlite_master WHERE sql IS NOT NULL
       ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, name`).all();
     for (const row of schema) if (tables.includes(String(row.tbl_name))) await db.prepare(String(row.sql)).run();
@@ -334,6 +476,12 @@ async function runLocalD1() {
     const access = await readServerShowcaseAccess(env, scope.linkedServerId, inactive);
     assert.equal(access.source, "complimentary_showcase");
     assert.equal((await invoke(gallery, env, actor, "PUT", { images: [image] })).status, 200);
+    assert.equal((await invoke(visualPut, env, actor, "PUT", proVisual)).status, 200);
+    const visualBefore = (await db.prepare("SELECT * FROM server_visual_loadouts").all()).results;
+    await db.prepare("CREATE TRIGGER synthetic_visual_failure BEFORE INSERT ON server_visual_loadouts BEGIN SELECT RAISE(ABORT, 'synthetic save failure'); END").run();
+    await assert.rejects(saveServerVisualLoadout(env, scope.linkedServerId, actor.id, { ...proVisual, profileFrameKey: "gold" }), /synthetic save failure/);
+    assert.equal((await db.prepare("SELECT count(*) AS n FROM server_customisation_audit_log").first())?.n, 1);
+    await db.prepare("DROP TRIGGER synthetic_visual_failure").run();
     const imagesBefore = (await db.prepare("SELECT * FROM server_gallery_images").all()).results;
     const grantsBefore = (await db.prepare("SELECT * FROM server_showcase_grants").all()).results;
     await db.prepare("CREATE TRIGGER synthetic_audit_failure BEFORE INSERT ON server_showcase_grant_audit BEGIN SELECT RAISE(ABORT, 'synthetic audit failure'); END").run();
@@ -345,11 +493,19 @@ async function runLocalD1() {
       return db.batch(statements as unknown as Parameters<typeof db.batch>[0]);
     } } as unknown as D1Database;
     assert.equal((await invoke(gallery, { ...env, DB: wrapper }, actor, "PUT", { images: [] })).status, 409);
+    const visualGrantId = await grant(env);
+    const visualWrapper = { prepare: db.prepare.bind(db), batch: async (statements: D1PreparedStatement[]) => {
+      await changeShowcaseGrant(env, actor, { action: "revoke", grantId: visualGrantId, reason: "owner_request" });
+      return db.batch(statements as unknown as Parameters<typeof db.batch>[0]);
+    } } as unknown as D1Database;
+    assert.equal((await invoke(visualPut, { ...env, DB: visualWrapper }, actor, "PUT", { ...proVisual, profileFrameKey: "gold" })).status, 409);
+    assert.deepEqual((await db.prepare("SELECT * FROM server_visual_loadouts").all()).results, visualBefore);
+    assert.equal((await db.prepare("SELECT count(*) AS n FROM server_customisation_audit_log").first())?.n, 1);
     assert.deepEqual((await db.prepare("SELECT * FROM server_gallery_images").all()).results, imagesBefore);
-    assert.equal((await db.prepare("SELECT count(*) AS n FROM server_showcase_grant_audit").first())?.n, 2);
+    assert.equal((await db.prepare("SELECT count(*) AS n FROM server_showcase_grant_audit").first())?.n, 4);
     assert.equal((await db.prepare("SELECT status FROM server_subscriptions").first())?.status, "canceled");
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
-    console.log("PASS local workerd/D1: concurrent exact grants, atomic audit rollback, gallery writes and revocation race; billing untouched");
+    console.log("PASS local workerd/D1: concurrent grants, gallery/visual writes, atomic audit rollback and revocation races; billing untouched");
   } finally { await mf.dispose(); fixtureDb.db.sqlite.close(); }
 }
 
