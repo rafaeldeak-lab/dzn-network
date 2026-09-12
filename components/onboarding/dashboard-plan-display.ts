@@ -9,9 +9,15 @@ function knownPlan(value: string | undefined): ListingPlanKey | null {
   return normalizeListingPlanKey(value, "active");
 }
 
+function knownStatusPlan(plan: string | undefined, status: string | undefined): ListingPlanKey | null {
+  const recognized = ["active", "trialing", "none", "inactive", "canceled", "cancelled", "expired", "unpaid", "past_due", "incomplete", "incomplete_expired", "paused"];
+  const normalizedStatus = status?.trim().toLowerCase();
+  if (knownPlan(plan) === null || !normalizedStatus || !recognized.includes(normalizedStatus)) return null;
+  return normalizeListingPlanKey(plan, normalizedStatus);
+}
+
 export function dashboardBillingPlan(billing: BillingPlan): ListingPlanKey | null {
-  if (!billing || knownPlan(billing.plan_key) === null) return null;
-  return normalizeListingPlanKey(billing.plan_key, billing.plan_status);
+  return knownStatusPlan(billing?.plan_key, billing?.plan_status);
 }
 
 // Display only. Selected-server access is not proof of an account subscription.
@@ -23,6 +29,5 @@ export function dashboardServerPlan(serverId: string, health: ServerPlan, billin
   const billingPlan = dashboardBillingPlan(billing);
   if (billingPlan !== null) return billingPlan;
   // Auth navigation already supplies effective account access without an extra billing request.
-  if (knownPlan(account?.plan_tier) === null || !account?.plan_status) return null;
-  return normalizeListingPlanKey(account.plan_tier, account.plan_status);
+  return knownStatusPlan(account?.plan_tier, account?.plan_status);
 }

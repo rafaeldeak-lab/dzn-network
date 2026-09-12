@@ -1,5 +1,7 @@
 # Dashboard Plan Display
 
+Review corrections: unknown/unrecognized subscription statuses remain pending, never Free. Selected-server health stops being authoritative after a failed refresh; retained health remains useful for historical diagnostics, not a fresh plan decision. Browser regressions exercise success followed by failure plus unknown account status at 1440, 900, 390 and 320 pixels.
+
 The dashboard must distinguish an unavailable billing response from a confirmed Free plan.
 
 - Server badge/theme previews use the selected server's fresh effective plan when available, then the existing account billing or authenticated navigation plan. Legacy Premium/Network/Partner access is displayed as Pro.

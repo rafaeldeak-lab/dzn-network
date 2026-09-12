@@ -24,11 +24,20 @@ assert.equal(dashboardBillingPlan({ plan_key: "free", plan_status: "none" }), "f
 assert.equal(dashboardBillingPlan({ plan_key: "starter", plan_status: "trialing" }), "starter");
 assert.equal(dashboardBillingPlan({ plan_key: "pro", plan_status: "past_due" }), "free");
 assert.equal(dashboardBillingPlan({ plan_key: "unexpected", plan_status: "active" }), null);
+for (const status of ["unknown", "checking", "", "not-recognized"]) {
+  assert.equal(dashboardBillingPlan({ plan_key: "premium", plan_status: status }), null);
+  assert.equal(dashboardServerPlan("showcase", null, null, { plan_tier: "pro", plan_status: status }), null);
+}
+const canceledBilling = { plan_key: "pro", plan_status: "canceled" };
+assert.equal(dashboardServerPlan("showcase", health, canceledBilling), "pro", "Fresh server-specific access remains authoritative.");
+assert.equal(dashboardServerPlan("showcase", null, canceledBilling), "free", "Failed refresh must stop using retained live health.");
 const visuals = getServerVisualShowcase({ planKey: dashboardServerPlan("showcase", health, null), reputationTier: "Bronze" });
 assert.equal(visuals.planVisualTreatment.label, "Pro");
 
 const source = readFileSync("components/onboarding/dashboard.tsx", "utf8");
-assert.ok(source.includes('dashboardServerPlan(server.id, effectiveDashboardHealth, effectiveBillingStatus, navigation)'));
+assert.ok(source.includes('dashboardServerPlan(server.id, dashboardHealthFresh ? effectiveDashboardHealth : null, effectiveBillingStatus, navigation)'));
+assert.ok(source.includes("setDashboardHealthFresh(true);"));
+assert.match(source, /setFailedEndpoint\("dashboard-health"\);\s*setDashboardHealthFresh\(false\);/);
 assert.equal(source.includes('effectiveBillingStatus?.plan_key ?? "starter"'), false);
 assert.ok(source.includes('serverDisplayPlan === null ? <p'));
 assert.ok(source.includes('planKey === null ? "Checking billing..." : planLabel(planKey)'));

@@ -28,17 +28,19 @@ const results = [];
 try {
   for (const width of [1440, 900, 390, 320]) {
     const context = await browser.newContext({ viewport: { width, height: 950 }, reducedMotion: "reduce" });
-    const page = await context.newPage(); const errors = []; const writes = [];
+    const page = await context.newPage(); const errors = []; const writes = []; const reads = [];
     page.on("pageerror", error => errors.push(error.message));
     page.on("console", message => { if (/hydration|did not match/i.test(message.text())) errors.push(message.text()); });
     let currentPlan = "premium"; let healthAvailable = true;
+    let accountPlan = "pro"; let accountStatus = "active"; let accountAvailable = true;
     await page.route("**/*", async route => {
       const req = route.request(); const url = new URL(req.url());
       if (url.origin !== base) return route.abort();
       if (!url.pathname.startsWith("/api/")) return route.continue();
       if (req.method() !== "GET") { writes.push(url.pathname); return route.abort(); }
+      reads.push(url.pathname);
       if (url.pathname === "/api/auth/me") return route.fulfill({ json: { authenticated: true, user: { id: "owner", username: "Example Owner", discord_id: "123456789012345678" }, linkedServers: [sample], linkedServer: sample,
-        navigation: healthAvailable ? { plan_tier: currentPlan === "premium" ? "pro" : currentPlan, plan_status: "active" } : null } });
+        navigation: accountAvailable ? { plan_tier: accountPlan, plan_status: accountStatus } : null } });
       if (url.pathname.endsWith("/dashboard/health") && healthAvailable) return route.fulfill({ json: {
         ok: true, generated_at: new Date().toISOString(), stale: false, source: "live", server_id: sample.id, server_name: sample.server_name,
         server: sample, current_plan: currentPlan, configured_plan: currentPlan, subscription_status: "active",
@@ -72,18 +74,40 @@ try {
     await billingButtons.first().scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(evidence, `billing-pending-${width}.png`) });
     currentPlan = "free";
+    accountPlan = "free";
     await page.reload();
     await page.getByText("Free visual treatment", { exact: true }).waitFor();
+    // A selected server can have Pro access while the account fallback is Free.
+    currentPlan = "premium";
+    const healthSuccess = page.waitForResponse(res => new URL(res.url()).pathname.endsWith("/dashboard/health") && res.status() === 200).catch(async error => {
+      await writeFile(path.join(evidence, "health-failure.json"), JSON.stringify({ errors, reads, body: await page.locator("body").innerText() }, null, 2));
+      return error;
+    });
+    await page.getByRole("button", { name: /^Sync Health/i }).click();
+    assert.ok(!(await healthSuccess instanceof Error));
+    await page.getByRole("button", { name: /^Overview/i }).click();
+    await page.getByText("Pro visual treatment", { exact: true }).waitFor();
     healthAvailable = false;
+    const healthFailure = page.waitForResponse(res => new URL(res.url()).pathname.endsWith("/dashboard/health") && res.status() === 503).catch(error => error);
+    await page.getByRole("button", { name: /^Sync Health/i }).click();
+    assert.ok(!(await healthFailure instanceof Error));
+    await page.getByRole("button", { name: /^Overview/i }).click();
+    await page.getByText("Free visual treatment", { exact: true }).waitFor();
+    accountPlan = "pro";
+    accountStatus = "unknown";
     await context.clearCookies();
     await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+    await page.reload();
+    await page.getByText("Checking server plan...", { exact: true }).waitFor();
+    assert.equal(await page.getByText(/^(Pro|Starter|Free) visual treatment$/).count(), 0);
+    accountAvailable = false;
     await page.reload();
     await page.getByText("Checking server plan...", { exact: true }).waitFor();
     assert.equal(await page.getByText(/^(Pro|Starter|Free) visual treatment$/).count(), 0);
     assert.deepEqual(writes, []);
     assert.deepEqual(errors, []);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-    results.push({ width, scenarios: ["pro-with-billing-unavailable", "billing-unknown-disabled", "confirmed-free-retained", "all-unavailable-not-a-downgrade"], errors, writes });
+    results.push({ width, scenarios: ["pro-with-billing-unavailable", "billing-unknown-disabled", "confirmed-free-retained", "health-success-then-failure-drops-stale-plan", "unknown-account-status-not-free", "all-unavailable-not-a-downgrade"], errors, writes });
     await context.close();
   }
   await writeFile(path.join(evidence, "results.json"), JSON.stringify({ syntheticOnly: true, results }, null, 2));

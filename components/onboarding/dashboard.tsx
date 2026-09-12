@@ -501,6 +501,7 @@ function ServerDashboard({
   const [lastSyncResult, setLastSyncResult] = useState<AdmSyncRunResult | null>(null);
   const [dashboardHealth, setDashboardHealth] = useState<DashboardHealthResult | null>(() => loadDashboardHealthCache(serverProp.id));
   const [lastGoodDashboardHealth, setLastGoodDashboardHealth] = useState<DashboardHealthResult | null>(() => loadDashboardHealthCache(serverProp.id));
+  const [dashboardHealthFresh, setDashboardHealthFresh] = useState(false);
   const [dashboardLiveStats, setDashboardLiveStats] = useState<DashboardLiveStatsResult | null>(null);
   const [lastGoodDashboardLiveStats, setLastGoodDashboardLiveStats] = useState<DashboardLiveStatsResult | null>(() => loadDashboardLiveStatsCache(serverProp.id));
   const [liveStatsError, setLiveStatsError] = useState("");
@@ -772,6 +773,7 @@ function ServerDashboard({
       if (cancelled) return;
       setDashboardHealth(cachedHealth);
       setLastGoodDashboardHealth(cachedHealth);
+      setDashboardHealthFresh(false);
       setDashboardLiveStats(null);
       setLastGoodDashboardLiveStats(cachedLiveStats);
       setLastGoodDashboardStats(cachedStats);
@@ -1187,6 +1189,7 @@ function ServerDashboard({
       lastAppliedDashboardHealthGeneratedAtRef.current = response.generated_at;
       setDashboardHealth(response);
       setLastGoodDashboardHealth(response);
+      setDashboardHealthFresh(true);
       setLastGoodDashboardStats(dashboardStatsCacheFromHealth(response));
       saveDashboardHealthCache(requestServerId, response);
       if (response.latest_events.length && !recentEventsRef.current.length) {
@@ -1204,6 +1207,7 @@ function ServerDashboard({
         return false;
       }
       setFailedEndpoint("dashboard-health");
+      setDashboardHealthFresh(false);
       setLastRefreshError(isAbortError(error) ? "Dashboard health refresh timed out." : error instanceof Error ? error.message : "Dashboard health snapshot failed.");
       setFailedRefreshCount((count) => count + 1);
       const cached = lastGoodDashboardHealthRef.current;
@@ -1396,7 +1400,7 @@ function ServerDashboard({
     dashboardPlayerCount.status,
   );
   const effectiveBillingStatus = billingStatus ?? lastGoodBilling;
-  const serverDisplayPlan = dashboardServerPlan(server.id, effectiveDashboardHealth, effectiveBillingStatus, navigation);
+  const serverDisplayPlan = dashboardServerPlan(server.id, dashboardHealthFresh ? effectiveDashboardHealth : null, effectiveBillingStatus, navigation);
   const effectivePlanLabel = effectiveBillingStatus ? planLabel(effectiveBillingStatus.plan_key) : effectiveDashboardHealth?.current_plan ? planLabel(effectiveDashboardHealth.current_plan) : "Loading";
   const effectiveAutomationHealth = automationHealth ?? lastGoodAutomationHealth;
   const effectivePublicCacheDebug = publicCacheDebug ?? lastGoodPublicCache;
