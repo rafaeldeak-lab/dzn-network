@@ -53,7 +53,8 @@ export async function testPlayerGameIdentityRevocation() {
     const notices = f.state().notifications;
     assert.equal(notices.length, 1); assert.equal(notices[0].user_id, player.id);
     assert.equal(notices[0].type, "player_link_revoked");
-    assert.doesNotMatch(String(notices[0].body), /discord-a|game-a|supplied proof/);
+    assert.doesNotMatch(String(notices[0].body), /discord-a|game-a/);
+    assert.ok(String(notices[0].body).includes(input.reason), "The notice retains only the same reason already visible to this player.");
     const after = f.state();
     assert.equal((await revokePlayerGameIdentityLink(f.env, owner, f.linkId, input)).status, 409);
     assert.deepEqual(f.state(), after, "Replayed decisions must not duplicate notices or audit events");
@@ -170,6 +171,9 @@ export async function testPlayerGameIdentityRevocation() {
         assert.equal((await deleteOwnedLinkedServerData(fixture.env, "owner-a", "server-a")).ok, true);
         assert.equal(fixture.sqlite.prepare("SELECT id FROM linked_servers WHERE id='server-a'").get(), undefined);
         assert.equal(fixture.state().notifications.length, 2, "Server removal preserves private recipient notices.");
+        const notice = fixture.sqlite.prepare("SELECT body FROM user_notifications WHERE user_id='player-a' AND type='player_link_revoked'").get();
+        assert.ok(String(notice?.body).includes(input.reason), "The player-visible reason survives server/link/audit deletion.");
+        assert.equal(String(notice?.body).includes("Review the reason in your player profile"), false);
       }
       assert.equal(fixture.sqlite.prepare("SELECT id FROM user_notifications WHERE id='unrelated-notice'").get()?.id, "unrelated-notice");
       assert.deepEqual(fixture.sqlite.prepare("PRAGMA foreign_key_check").all(), []);

@@ -23,3 +23,5 @@ Validation: real in-memory SQLite exercises interruption at every statement, wro
 # Review Correction
 
 Revocation notices are private account messages and do not retain a restrictive server foreign key. Account deletion removes that recipient's notifications before deleting their user row, without touching other recipients. Foreign-key-enabled tests cover revoke followed by player deletion, owner server deletion, wrong-owner rejection and preservation of unrelated notices. Existing broader deletion behavior is not redesigned by this correction.
+
+The notice includes the same bounded, player-visible revocation reason as the profile. It stays available to that recipient after server deletion cascades the link and audit records; the notice does not promise that deleted history remains in the profile. Account deletion still removes the notice. This is not an immutable support archive.
