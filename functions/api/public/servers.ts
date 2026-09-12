@@ -25,10 +25,11 @@ import { getPublicBadgeAwardMap, type ServerBadgeAwardRow } from "../../_lib/bad
 import { getPublicServerLeaderboardById, getRankedPublicServers, type PublicLeaderboardPlayer, type PublicLeaderboardServer } from "../../_lib/public-leaderboards";
 import { buildAchievementShowcase, buildServerReputationSummary, type AchievementShowcase, type ReputationSummary } from "../../_lib/reputation";
 import { resolvePublicServerVisualLoadout, type PublicServerVisualLoadout } from "../../_lib/server-visual-loadouts";
+import { NUKETOWN_SHOWCASE_SCOPE, readServerShowcaseAccess } from "../../_lib/server-showcase-access";
 import { explainServerVisibility, getFeaturedServerCandidates, getRecommendedServers, getServerDiscoveryScore, getServerVisibilityConfig, getSpotlightEligibleServers, type VisibilityExplanation, type VisibilityTier } from "../../_lib/server-visibility";
 import { calculateServerScoreBreakdown, type ServerScoreBreakdown } from "../../_lib/server-ranking";
 import type { Env, PagesFunction } from "../../_lib/types";
-import { getServerVisualShowcase, type PlanVisualTreatment, type ProfileFrameVisual, type ServerThemeBannerVisual, type VisualBadge } from "../../../lib/badges/visuals";
+import { getPlanVisualTreatment, getServerVisualShowcase, type PlanVisualTreatment, type ProfileFrameVisual, type ServerThemeBannerVisual, type VisualBadge } from "../../../lib/badges/visuals";
 import { buildServerBadgeCollection, type PublicLockedBadge, type ServerBadgeCollection } from "../../../lib/badges/rules";
 import { normalizeListingPlanKey } from "../../../lib/billing/plans";
 import {
@@ -215,6 +216,7 @@ type SafePublicServer = {
   rating_breakdown: RatingBreakdown;
   advertising: PublicAdvertising;
   plan_key: "free" | "starter" | "pro";
+  server_access?: { source: "billing" | "complimentary_showcase" };
   premium_status: "standard" | "premium";
   visibility_weight: number;
   visibilityWeight: number;
@@ -308,8 +310,9 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     logPublicApiLoadFailed(endpoint, 503, error, requestId);
     const cached = await readPublicApiCache<Record<string, unknown>>(env, cacheKey).catch(() => null);
     if (cached) {
+      const payload = await refreshPublicShowcaseSnapshot(env, cached.payload, viewerLoggedIn);
       logPublicApiSnapshotFallbackServed(endpoint, cacheKey, requestId);
-      return json(withPublicApiMetadata(cached.payload, {
+      return json(withPublicApiMetadata(payload, {
         generated_at: cached.generated_at,
         source: "snapshot",
         stale: true,
@@ -418,6 +421,10 @@ async function getPublicServerProfileFastPayload(env: Env, slug: string, viewerL
     return { ok: true, server: null, access_level: viewerLoggedIn ? "full" : "preview", is_locked: !viewerLoggedIn };
   }
 
+  return getPublicServerProfileFromRow(env, row, viewerLoggedIn);
+}
+
+async function getPublicServerProfileFromRow(env: Env, row: PublicServerRow, viewerLoggedIn: boolean) {
   const reviewSummaries = await getPublicServerRatingSummaries(env, [row.id]).catch(() => new Map<string, PublicServerRatingSummary>());
   const badgeAwardMap = await getPublicBadgeAwardMap(env, [row.id]).catch(() => new Map<string, { awards: ServerBadgeAwardRow[]; crownCodes: string[] }>());
   const server = await toSafePublicServer(
@@ -434,6 +441,39 @@ async function getPublicServerProfileFastPayload(env: Env, slug: string, viewerL
     server ? applyPublicServerAccess(server, viewerLoggedIn) : null,
     viewerLoggedIn,
   );
+}
+
+export async function refreshPublicShowcaseSnapshot(env: Env, payload: Record<string, unknown>, viewerLoggedIn: boolean) {
+  const isTarget = (value: unknown): boolean => Boolean(value && typeof value === "object"
+    && (value as Record<string, unknown>).linked_server_id === NUKETOWN_SHOWCASE_SCOPE.linkedServerId);
+  const containsTarget = (value: unknown): boolean => isTarget(value)
+    || Boolean(value && typeof value === "object" && Object.values(value).some(containsTarget));
+  if (!containsTarget(payload)) return payload;
+
+  // Rebuild only the exact server, never trust cached entitlement or a reused slug.
+  let replacement: SafePublicServer | null = null;
+  try {
+    const row = await queryPublicServerById(env, NUKETOWN_SHOWCASE_SCOPE.linkedServerId);
+    if (row) replacement = (await getPublicServerProfileFromRow(env, row, viewerLoggedIn)).server;
+  } catch {
+    // Preserve unrelated last-known servers when the target cannot be verified.
+  }
+  const rewrite = (value: unknown): unknown => {
+    if (isTarget(value)) return replacement;
+    if (Array.isArray(value)) return value.filter(item => replacement || !isTarget(item)).map(rewrite);
+    if (!value || typeof value !== "object") return value;
+    const result = Object.fromEntries(Object.entries(value).map(([key, child]) => [key, rewrite(child)]));
+    if (Array.isArray(result.servers)) {
+      const servers = sortPublicServersForDiscovery(result.servers as SafePublicServer[]);
+      Object.assign(result, buildPublicServerVisibilityGroups(servers), { stats: buildPublicStats(servers) });
+    }
+    if (result.server === null) {
+      result.selected_server_id = null;
+      result.selected_service_id = null;
+    }
+    return result;
+  };
+  return rewrite(payload) as Record<string, unknown>;
 }
 
 async function queryPublicServerBySlug(env: Env, slug: string) {
@@ -994,7 +1034,9 @@ async function toSafePublicServer(
     score: ranking?.score ?? 0,
     score_label: ranking?.score_label ?? "Pending",
   };
-  const planKey = publicPlanKey(row.plan_key, row.subscription_status);
+  const billingPlanKey = publicPlanKey(row.plan_key, row.subscription_status);
+  const serverAccess = await readServerShowcaseAccess(env, row.id, row);
+  const planKey = serverAccess.listing.listingPlanKey;
   const lifecycleStatus = normalizeServerLifecycleStatus({
     lifecycle_status: row.lifecycle_status,
     status: row.status,
@@ -1005,7 +1047,7 @@ async function toSafePublicServer(
   const publicIsOnline = !historicalLifecycle && Number(row.is_online) === 1;
   const publicCurrentPlayers = historicalLifecycle ? null : row.current_players;
   const reputation = buildServerReputationSummary({
-    planKey,
+    planKey: billingPlanKey,
     createdAt: row.created_at,
     totalKills: stats.total_kills,
     totalDeaths: stats.total_deaths,
@@ -1018,7 +1060,7 @@ async function toSafePublicServer(
     active: publicStatsActive,
   });
   const achievementShowcase = buildAchievementShowcase({
-    planKey,
+    planKey: billingPlanKey,
     createdAt: row.created_at,
     totalKills: stats.total_kills,
     totalDeaths: stats.total_deaths,
@@ -1041,7 +1083,7 @@ async function toSafePublicServer(
   });
   const activePromotions = historicalLifecycle ? [] : parsePublicPromotions(row.active_promotions_json);
   const visualShowcase = getServerVisualShowcase({
-    planKey,
+    planKey: billingPlanKey,
     reputationTier: reputation.tier,
     category: row.server_type,
     mapName: row.map_name ?? row.mission,
@@ -1050,7 +1092,7 @@ async function toSafePublicServer(
   const badgeCollection = buildPublicBadgeCollection({
     row,
     stats,
-    planKey,
+    planKey: billingPlanKey,
     statsSync,
     awardData: badgeAwardData,
     publicLifecycleActive: !historicalLifecycle,
@@ -1169,6 +1211,7 @@ async function toSafePublicServer(
     rating_breakdown: reviewSummary.rating_breakdown,
     advertising,
     plan_key: planKey,
+    server_access: { source: serverAccess.source },
     premium_status: reputation.premiumStatus,
     visibility_weight: visibilityConfig.visibilityWeight,
     visibilityWeight: visibilityConfig.visibilityWeight,
@@ -1181,6 +1224,8 @@ async function toSafePublicServer(
     reputation,
     achievement_showcase: achievementShowcase,
     ...visualShowcase,
+    planVisualTreatment: { ...getPlanVisualTreatment(planKey),
+      ...(serverAccess.source === "complimentary_showcase" ? { label: "Pro (complimentary)" } : {}) },
     badges: publicVisualLoadout.showcaseBadges,
     earnedBadges: badgeCollection.earnedBadges,
     lockedBadges: badgeCollection.lockedBadges,
@@ -1255,7 +1300,9 @@ async function toSafePublicServerPreview(
     score: 0,
     score_label: readable ? "ADM synced" : "Pending",
   };
-  const planKey = publicPlanKey(row.plan_key, row.subscription_status);
+  const billingPlanKey = publicPlanKey(row.plan_key, row.subscription_status);
+  const serverAccess = await readServerShowcaseAccess(env, row.id, row);
+  const planKey = serverAccess.listing.listingPlanKey;
   const lifecycleStatus = normalizeServerLifecycleStatus({
     lifecycle_status: row.lifecycle_status,
     status: row.status,
@@ -1266,7 +1313,7 @@ async function toSafePublicServerPreview(
   const publicIsOnline = !historicalLifecycle && Number(row.is_online) === 1;
   const publicCurrentPlayers = historicalLifecycle ? null : row.current_players;
   const reputation = buildServerReputationSummary({
-    planKey,
+    planKey: billingPlanKey,
     createdAt: row.created_at,
     totalKills: stats.total_kills,
     totalDeaths: stats.total_deaths,
@@ -1279,7 +1326,7 @@ async function toSafePublicServerPreview(
     active: publicStatsActive,
   });
   const achievementShowcase = buildAchievementShowcase({
-    planKey,
+    planKey: billingPlanKey,
     createdAt: row.created_at,
     totalKills: stats.total_kills,
     totalDeaths: stats.total_deaths,
@@ -1292,7 +1339,7 @@ async function toSafePublicServerPreview(
     active: publicStatsActive,
   });
   const visualShowcase = getServerVisualShowcase({
-    planKey,
+    planKey: billingPlanKey,
     reputationTier: reputation.tier,
     category: row.server_type,
     mapName: row.map_name ?? row.mission,
@@ -1311,7 +1358,7 @@ async function toSafePublicServerPreview(
   const badgeCollection = buildPublicBadgeCollection({
     row,
     stats,
-    planKey,
+    planKey: billingPlanKey,
     statsSync,
     awardData: badgeAwardData,
     publicLifecycleActive: !historicalLifecycle,
@@ -1428,6 +1475,7 @@ async function toSafePublicServerPreview(
     ...emptyPublicServerRatingSummary(),
     advertising,
     plan_key: planKey,
+    server_access: { source: serverAccess.source },
     premium_status: reputation.premiumStatus,
     visibility_weight: visibilityConfig.visibilityWeight,
     visibilityWeight: visibilityConfig.visibilityWeight,
@@ -1440,6 +1488,8 @@ async function toSafePublicServerPreview(
     reputation,
     achievement_showcase: achievementShowcase,
     ...visualShowcase,
+    planVisualTreatment: { ...getPlanVisualTreatment(planKey),
+      ...(serverAccess.source === "complimentary_showcase" ? { label: "Pro (complimentary)" } : {}) },
     badges: publicVisualLoadout.showcaseBadges,
     earnedBadges: badgeCollection.earnedBadges,
     lockedBadges: badgeCollection.lockedBadges,
