@@ -1,6 +1,7 @@
 import { isDznAdminDiscordId } from "./admin";
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
-import { canUseProFeature, getListingLimits, normalizeListingPlanKey, normalizePlanKey } from "./plans";
+import { normalizePlanKey } from "./plans";
+import { canUseShowcaseFeature, readServerShowcaseAccess, serializeShowcaseAccess, showcaseWriteGuard } from "./server-showcase-access";
 import { getServerCategoryLabel, normalizeServerCategory } from "./server-categories";
 import type { Env, SessionUser } from "./types";
 
@@ -205,8 +206,9 @@ export async function readOwnerServerSettings(env: Env, user: SessionUser | null
   const monthlyChangesUsed = await countCategoryChangesInLast30Days(env, resolvedLinkedServerId);
   const eventLock = await getCategoryEventLockStatus(env, resolvedLinkedServerId, now, server);
   const policy = categoryPolicyForPlan(server.plan_key, server.subscription_status);
-  const listingPlanKey = normalizeListingPlanKey(server.plan_key, server.subscription_status);
-  const listingLimits = getListingLimits(server.plan_key, server.subscription_status);
+  const showcaseAccess = await readServerShowcaseAccess(env, resolvedLinkedServerId, server);
+  const listingLimits = showcaseAccess.listing;
+  const listingPlanKey = listingLimits.listingPlanKey;
   const cooldownUntil = futureIso(server.category_cooldown_until, now);
   const graceAvailable = isGraceAvailable(server, now);
   const tagsEditCount = await countListingChanges(env, resolvedLinkedServerId, "tags", "-7 days");
@@ -234,12 +236,13 @@ export async function readOwnerServerSettings(env: Env, user: SessionUser | null
         listing_plan_key: listingPlanKey,
         listing_label: listingLimits.publicLabel,
       },
+      serverAccess: serializeShowcaseAccess(showcaseAccess),
       listing: {
         ...listingLimits,
-        canUseCustomBanner: canUseProFeature(server, "custom_banner"),
-        canUseGallery: canUseProFeature(server, "gallery_images"),
-        canUseOwnerAnnouncement: canUseProFeature(server, "owner_announcement"),
-        canUseProDiscordEmbeds: canUseProFeature(server, "discord_pro_embeds"),
+        canUseCustomBanner: canUseShowcaseFeature(showcaseAccess, "custom_banner"),
+        canUseGallery: canUseShowcaseFeature(showcaseAccess, "gallery_images"),
+        canUseOwnerAnnouncement: canUseShowcaseFeature(showcaseAccess, "owner_announcement"),
+        canUseProDiscordEmbeds: canUseShowcaseFeature(showcaseAccess, "discord_pro_embeds"),
       },
       categoryPolicy: {
         cooldownDays: policy.cooldownDays,
@@ -407,9 +410,11 @@ export async function updateServerListing(env: Env, user: SessionUser | null, li
   if (!user) return { status: 401, payload: { ok: false, error: "NOT_AUTHENTICATED", message: "Log in to update listing settings." } };
   if (!server) return { status: 404, payload: { ok: false, error: "SERVER_NOT_FOUND", message: "Server not found." } };
   if (!canManageServer(env, user, server)) return { status: 403, payload: { ok: false, error: "NOT_AUTHORIZED", message: "You do not have access to this server." } };
+  if (isServerSuspended(server)) return { status: 403, payload: { ok: false, error: "SERVER_SUSPENDED", message: "Listing changes are unavailable for this server." } };
   const resolvedLinkedServerId = server.id;
 
-  const listingLimits = getListingLimits(server.plan_key, server.subscription_status);
+  const showcaseAccess = await readServerShowcaseAccess(env, resolvedLinkedServerId, server);
+  const listingLimits = showcaseAccess.listing;
   const description = input.description === undefined ? server.public_description : sanitizePublicDescription(input.description);
   if (description && (description.length < 40 || description.length > listingLimits.descriptionLimit)) {
     return { status: 400, payload: { ok: false, error: "VALIDATION_FAILED", message: `Description must be 40 to ${listingLimits.descriptionLimit} characters for ${listingLimits.publicLabel}.` } };
@@ -440,17 +445,18 @@ export async function updateServerListing(env: Env, user: SessionUser | null, li
   const freshWipePromo = input.freshWipePromo === undefined ? server.fresh_wipe_promo : sanitizeShortText(input.freshWipePromo, 180);
   const discordEmbedAccentColor = input.discordEmbedAccentColor === undefined ? server.discord_embed_accent_color : sanitizeHexColour(input.discordEmbedAccentColor);
 
-  if ((input.advertBannerUrl !== undefined || input.discordEmbedBannerUrl !== undefined) && !canUseProFeature(server, "custom_banner")) {
+  if ((input.advertBannerUrl !== undefined || input.discordEmbedBannerUrl !== undefined) && !canUseShowcaseFeature(showcaseAccess, "custom_banner")) {
     return { status: 403, payload: { ok: false, error: "PRO_REQUIRED", message: "Custom advert and Discord banners require Pro Listing." } };
   }
-  if ((input.ownerAnnouncement !== undefined || input.freshWipePromo !== undefined || input.discordEmbedAccentColor !== undefined) && !canUseProFeature(server, "owner_announcement")) {
+  if ((input.ownerAnnouncement !== undefined || input.freshWipePromo !== undefined || input.discordEmbedAccentColor !== undefined) && !canUseShowcaseFeature(showcaseAccess, "owner_announcement")) {
     return { status: 403, payload: { ok: false, error: "PRO_REQUIRED", message: "Owner announcements, fresh wipe promos, and custom Discord embed styling require Pro Listing." } };
   }
   if (advertBannerUrl === false || discordEmbedBannerUrl === false || advertBannerAlt === false || ownerAnnouncement === false || freshWipePromo === false || discordEmbedAccentColor === false) {
     return { status: 400, payload: { ok: false, error: "VALIDATION_FAILED", message: "Listing media fields contain an invalid or unsafe value." } };
   }
 
-  await requireDb(env).prepare(
+  const writeGuard = showcaseWriteGuard(resolvedLinkedServerId, server.user_id ?? "", showcaseAccess);
+  const update = await requireDb(env).prepare(
     `UPDATE linked_servers SET
       public_description = ?,
       listing_visibility = ?,
@@ -462,7 +468,7 @@ export async function updateServerListing(env: Env, user: SessionUser | null, li
       discord_embed_accent_color = ?,
       public_listing_updated_at = ?,
       updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`,
+     WHERE id = ? AND ${writeGuard.sql}`,
   ).bind(
     description || null,
     visibility,
@@ -474,7 +480,9 @@ export async function updateServerListing(env: Env, user: SessionUser | null, li
     discordEmbedAccentColor || null,
     now,
     resolvedLinkedServerId,
+    ...writeGuard.values,
   ).run();
+  if (!Number(update.meta.changes)) return { status: 409, payload: { ok: false, error: "SERVER_ACCESS_CHANGED", message: "Server access changed. Refresh before saving again." } };
   await insertListingChangeEvent(env, resolvedLinkedServerId, user.id, "listing", { description: server.public_description, visibility: server.listing_visibility }, { description, visibility }, now);
   if (visibilityChanged) {
     await insertListingChangeEvent(env, resolvedLinkedServerId, user.id, "visibility", server.listing_visibility, visibility, now);
