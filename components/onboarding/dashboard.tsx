@@ -1795,6 +1795,23 @@ function ServerDashboard({
   }, [refreshDashboardLiveStats]);
 
   useEffect(() => {
+    let started = false;
+    const refreshInitialServerHealth = () => {
+      if (started || document.visibilityState === "hidden") return;
+      started = true;
+      void refreshDashboardHealth();
+    };
+    const initialRefresh = window.setTimeout(refreshInitialServerHealth, 0);
+    document.addEventListener("visibilitychange", refreshInitialServerHealth);
+
+    return () => {
+      started = true;
+      window.clearTimeout(initialRefresh);
+      document.removeEventListener("visibilitychange", refreshInitialServerHealth);
+    };
+  }, [refreshDashboardHealth]);
+
+  useEffect(() => {
     if (activeTab !== "sync-health") return;
 
     let active = true;

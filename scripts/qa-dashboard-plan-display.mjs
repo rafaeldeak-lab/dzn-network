@@ -94,17 +94,19 @@ try {
     assert.equal(await page.getByRole("button", { name: "Choose Starter", exact: true }).isEnabled(), true);
     assert.equal(await page.getByRole("button", { name: "Upgrade", exact: true }).isEnabled(), true);
     assert.equal(await page.getByRole("button", { name: "Checking billing...", exact: true }).count(), 0);
-    billingAvailable = false;
-    // A selected server can have Pro access while the account fallback is Free.
+    // Direct Overview must fetch server access even with actual Free account billing.
     currentPlan = "premium";
     const healthSuccess = page.waitForResponse(res => new URL(res.url()).pathname.endsWith("/dashboard/health") && res.status() === 200).catch(async error => {
       await writeFile(path.join(evidence, "health-failure.json"), JSON.stringify({ errors, reads, body: await page.locator("body").innerText() }, null, 2));
       return error;
     });
-    await page.getByRole("button", { name: /^Sync Health/i }).click();
+    await page.reload();
     assert.ok(!(await healthSuccess instanceof Error));
-    await page.getByRole("button", { name: /^Overview/i }).click();
     await page.getByText("Pro visual treatment", { exact: true }).waitFor();
+    await page.getByRole("button", { name: /Billing & Boosts/ }).click();
+    assert.equal(await page.getByRole("button", { name: "Choose Starter", exact: true }).isEnabled(), true);
+    assert.equal(await page.getByRole("button", { name: "Upgrade", exact: true }).isEnabled(), true);
+    billingAvailable = false;
     healthAvailable = false;
     const healthFailure = page.waitForResponse(res => new URL(res.url()).pathname.endsWith("/dashboard/health") && res.status() === 503).catch(error => error);
     await page.getByRole("button", { name: /^Sync Health/i }).click();
@@ -125,7 +127,7 @@ try {
     assert.deepEqual(writes, []);
     assert.deepEqual(errors, []);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-    results.push({ width, scenarios: ["pro-with-billing-unavailable", "billing-unknown-disabled", "production-free-status-checkout-enabled", "health-success-then-failure-drops-stale-plan", "unknown-account-status-not-free", "all-unavailable-not-a-downgrade"], errors, writes });
+    results.push({ width, scenarios: ["pro-with-billing-unavailable", "billing-unknown-disabled", "production-free-status-checkout-enabled", "direct-overview-server-pro-account-free", "health-success-then-failure-drops-stale-plan", "unknown-account-status-not-free", "all-unavailable-not-a-downgrade"], errors, writes });
     await context.close();
   }
   await writeFile(path.join(evidence, "results.json"), JSON.stringify({ syntheticOnly: true, results }, null, 2));

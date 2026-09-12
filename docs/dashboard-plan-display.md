@@ -2,6 +2,8 @@
 
 Review corrections: unknown/unrecognized subscription statuses remain pending, never Free. Selected-server health stops being authoritative after a failed refresh; retained health remains useful for historical diagnostics, not a fresh plan decision. Browser regressions exercise success followed by failure plus unknown account status at 1440, 900, 390 and 320 pixels.
 
+Overview now requests health once on direct load and server changes, waiting for visibility when necessary, not only after visiting Sync Health. Regular heavy health polling remains restricted to Sync Health. A direct-load regression proves server-specific Pro presentation with actual Free account billing; the billing buttons still represent that Free account. The real no-subscription `free` status remains a known state, not pending.
+
 The dashboard must distinguish an unavailable billing response from a confirmed Free plan.
 
 - Server badge/theme previews use the selected server's fresh effective plan when available, then the existing account billing or authenticated navigation plan. Legacy Premium/Network/Partner access is displayed as Pro.
