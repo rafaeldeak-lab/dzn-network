@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { explorationPreviewCells, formatPublicVisibilitySummary, publicListingPlanLabel, publicMapLabel, publicVisibilityTierLabel, showcasePlanLabel } from "@/lib/showcase-labels";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -38,6 +39,7 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
+import { publicServerStatusPresentation } from "@/lib/public-server-status";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
 import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner } from "@/components/badges/server-visuals";
@@ -125,6 +127,7 @@ type PublicServer = {
     badge_label: "FEATURED" | "BOOSTED" | "SPONSORED" | null;
   };
   plan_key?: string;
+  server_access?: { source: "billing" | "complimentary_showcase" };
   premium_status?: "standard" | "premium";
   visibility_weight?: number;
   visibilityWeight?: number;
@@ -212,6 +215,8 @@ type ServerAdvancedPayload = {
     effectivePlan?: string;
     dashboardAnalytics?: boolean;
     publicServerTop15?: boolean;
+    publicBuildShowcase?: boolean;
+    publicTravelShowcase?: boolean;
     publicExplorationSummary?: boolean;
     publicMapOverlay?: boolean;
     lockedModules?: Array<{ key: string; requiredPlan: string; reason: string }>;
@@ -342,6 +347,8 @@ type PublicLeaderboardPlayer = {
   kd_label: string;
   longest_kill: number;
   last_seen: string | null;
+  public_profile_handle?: string | null;
+  public_profile_href?: string | null;
 };
 
 type PublicStats = {
@@ -401,6 +408,8 @@ type PublicReview = {
   body: string;
   created_at: string;
   updated_at: string;
+  public_profile_handle?: string | null;
+  public_profile_href?: string | null;
   is_own_review?: boolean;
 };
 
@@ -434,6 +443,23 @@ type VisualAccentStyle = CSSProperties & {
   "--dzn-profile-accent"?: string;
 };
 
+type SavedServersStatus = "loading" | "ready" | "logged_out" | "error";
+
+type SavedServersContextValue = {
+  savedServerIds: Set<string>;
+  savingServerIds: Set<string>;
+  status: SavedServersStatus;
+  error: string;
+  toggleSavedServer: (linkedServerId: string) => Promise<void>;
+};
+
+type SavedServersPayload = {
+  ok?: boolean;
+  saved_server_ids?: unknown;
+};
+
+const SavedServersContext = createContext<SavedServersContextValue | null>(null);
+
 export function PublicNetwork() {
   const slug = useSyncExternalStore(subscribeToPath, getCurrentSlug, getServerSlugSnapshot);
   const initialCache = loadPublicNetworkCache(slug);
@@ -446,6 +472,10 @@ export function PublicNetwork() {
   const [loadState, setLoadState] = useState<PublicLoadState>(() => initialCache ? "loaded" : "loading_initial");
   const [error, setError] = useState("");
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [savedServerIds, setSavedServerIds] = useState<Set<string>>(() => new Set());
+  const [savingServerIds, setSavingServerIds] = useState<Set<string>>(() => new Set());
+  const [savedServersStatus, setSavedServersStatus] = useState<SavedServersStatus>("loading");
+  const [savedServersError, setSavedServersError] = useState("");
   const visibleDataRef = useRef(Boolean(initialCache));
 
   useEffect(() => {
@@ -565,20 +595,139 @@ export function PublicNetwork() {
     [filter, sortedServers],
   );
   const calculatedStats = useMemo(() => stats ?? buildStats(servers), [stats, servers]);
+  const visibleSavedServerIdsKey = useMemo(() => {
+    const ids = new Set<string>();
+    if (server?.linked_server_id) ids.add(server.linked_server_id);
+    for (const item of servers) {
+      if (item.linked_server_id) ids.add(item.linked_server_id);
+    }
+    return [...ids].sort().join(",");
+  }, [server, servers]);
+
+  useEffect(() => {
+    const ids = visibleSavedServerIdsKey.split(",").filter(Boolean);
+    if (!ids.length) {
+      let active = true;
+      queueMicrotask(() => {
+        if (!active) return;
+        setSavedServerIds(new Set());
+        setSavedServersStatus("ready");
+        setSavedServersError("");
+      });
+      return () => {
+        active = false;
+      };
+    }
+
+    const controller = new AbortController();
+
+    async function loadSavedServers() {
+      try {
+        const response = await fetch(`/api/player/saved-servers?server_ids=${encodeURIComponent(ids.join(","))}`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: { accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        if (response.status === 401) {
+          setSavedServerIds(new Set());
+          setSavedServersStatus("logged_out");
+          setSavedServersError("");
+          return;
+        }
+        if (!response.ok) throw new Error("Saved servers are unavailable right now.");
+
+        const payload = (await response.json().catch(() => null)) as SavedServersPayload | null;
+        const nextSavedIds = Array.isArray(payload?.saved_server_ids)
+          ? payload.saved_server_ids.filter((value): value is string => typeof value === "string")
+          : [];
+        setSavedServerIds(new Set(nextSavedIds));
+        setSavedServersStatus("ready");
+        setSavedServersError("");
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setSavedServersStatus("error");
+        setSavedServersError(error instanceof Error ? error.message : "Saved servers are unavailable right now.");
+      }
+    }
+
+    loadSavedServers();
+    return () => controller.abort();
+  }, [visibleSavedServerIdsKey]);
+
+  const toggleSavedServer = useCallback(async (linkedServerId: string) => {
+    if (!linkedServerId || savingServerIds.has(linkedServerId)) return;
+    if (savedServersStatus === "logged_out") {
+      window.location.href = `/login?returnTo=${encodeURIComponent(currentPageReturnTo("/servers"))}`;
+      return;
+    }
+    if (savedServersStatus !== "ready" && savedServersStatus !== "error") return;
+
+    const currentlySaved = savedServerIds.has(linkedServerId);
+    setSavingServerIds((current) => new Set(current).add(linkedServerId));
+
+    try {
+      const response = await fetch("/api/player/saved-servers", {
+        method: currentlySaved ? "DELETE" : "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ linked_server_id: linkedServerId }),
+      });
+      if (response.status === 401) {
+        setSavedServersStatus("logged_out");
+        setSavedServersError("");
+        return;
+      }
+      if (!response.ok) throw new Error(currentlySaved ? "Could not remove this saved server." : "Could not save this server.");
+
+      setSavedServerIds((current) => {
+        const next = new Set(current);
+        if (currentlySaved) next.delete(linkedServerId);
+        else next.add(linkedServerId);
+        return next;
+      });
+      setSavedServersStatus("ready");
+      setSavedServersError("");
+    } catch (error) {
+      setSavedServersStatus("error");
+      setSavedServersError(error instanceof Error ? error.message : "Saved servers are unavailable right now.");
+    } finally {
+      setSavingServerIds((current) => {
+        const next = new Set(current);
+        next.delete(linkedServerId);
+        return next;
+      });
+    }
+  }, [savedServerIds, savedServersStatus, savingServerIds]);
+
+  const savedServersContext = useMemo<SavedServersContextValue>(() => ({
+    savedServerIds,
+    savingServerIds,
+    status: savedServersStatus,
+    error: savedServersError,
+    toggleSavedServer,
+  }), [savedServerIds, savedServersError, savedServersStatus, savingServerIds, toggleSavedServer]);
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#02030a] text-white">
-      <AnimatedBackground />
-      <div className="relative z-10 flex min-h-screen flex-col">
-        <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-5 py-6 sm:px-6 lg:px-8">
-          {slug ? (
-            <ServerProfileShell server={server} loading={loading} error={error} loadState={loadState} onRetry={() => setReloadNonce((value) => value + 1)} />
-          ) : (
-            <ServerBrowser servers={filteredServers} allServers={servers} groups={serverGroups} stats={calculatedStats} filter={filter} setFilter={setFilter} loading={loading} loadState={loadState} error={error} onRetry={() => setReloadNonce((value) => value + 1)} />
-          )}
+    <SavedServersContext.Provider value={savedServersContext}>
+      <main className="relative min-h-screen overflow-hidden bg-[#02030a] text-white">
+        <AnimatedBackground />
+        <div className="relative z-10 flex min-h-screen flex-col">
+          <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-5 py-6 sm:px-6 lg:px-8">
+            {slug ? (
+              <ServerProfileShell server={server} loading={loading} error={error} loadState={loadState} onRetry={() => setReloadNonce((value) => value + 1)} />
+            ) : (
+              <ServerBrowser servers={filteredServers} allServers={servers} groups={serverGroups} stats={calculatedStats} filter={filter} setFilter={setFilter} loading={loading} loadState={loadState} error={error} onRetry={() => setReloadNonce((value) => value + 1)} />
+            )}
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </SavedServersContext.Provider>
   );
 }
 
@@ -818,24 +967,24 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
     >
       {isSpotlight ? <ServerThemeBanner theme={server.themeBanner} overlay /> : null}
       <div className="relative z-10 flex h-full flex-col gap-4">
-        <div className="flex min-w-0 items-start justify-between gap-3">
-          <div className="flex min-w-0 gap-3">
+        <div className="flex min-w-0 flex-col gap-3">
+          <div className="flex min-w-0 items-start gap-3">
             <ServerProfileFrame frame={server.profileFrame} compact>
               <GuildIcon server={server} size="md" />
             </ServerProfileFrame>
             <div className="min-w-0">
               <p className="truncate text-[10px] font-black uppercase tracking-[0.14em] text-violet-100/70">{server.guild_name ?? "DZN Network"}</p>
-              <h3 className={`${isSpotlight ? "text-2xl" : "text-xl"} mt-1 truncate font-black uppercase text-white`}>{server.server_name}</h3>
               <p className="mt-1 truncate text-xs font-bold text-zinc-400">{server.server_type}</p>
-              <ServerRatingChip server={server} />
             </div>
           </div>
+          <h3 className="break-words text-xl font-black uppercase text-white">{server.server_name}</h3>
+          <ServerRatingChip server={server} />
           <VisibilityLabels server={server} />
         </div>
 
         <ServerCardBadges badges={server.showcaseBadges ?? server.badges} max={isSpotlight ? 6 : 4} />
 
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(100px,1fr))] gap-2">
           <MiniMetric label="Kills" value={formatNumber(server.total_kills)} />
           <MiniMetric label="Players" value={formatPlayers(server)} />
           <MiniMetric label="Reputation" value={server.reputation?.tier ?? "Bronze"} />
@@ -851,16 +1000,19 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
           </div>
         ) : null}
 
-        <div className="mt-auto flex items-center justify-between gap-3 border-t border-white/10 pt-3">
-          <p className="min-w-0 truncate text-[10px] font-bold uppercase text-zinc-500">{formatPublicVisibilitySummary(server.visibilityExplanation?.summary) ?? "Discovery placement"}</p>
-          <Link
-            href={publicServerProfileHref(server.public_slug)}
-            onClick={() => trackPromotionEvent(server.linked_server_id, activePromotionId, "click", trackingSource)}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400"
-          >
-            View
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+        <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-3">
+          <p className="min-w-0 break-words text-[10px] font-bold uppercase text-zinc-500">{formatPublicVisibilitySummary(server.visibilityExplanation?.summary, server.server_access?.source) ?? "Discovery placement"}</p>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <SavedServerButton server={server} variant="compact" />
+            <Link
+              href={publicServerProfileHref(server.public_slug)}
+              onClick={() => trackPromotionEvent(server.linked_server_id, activePromotionId, "click", trackingSource)}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400"
+            >
+              View
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
         </div>
       </div>
     </motion.article>
@@ -869,7 +1021,7 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
 
 function VisibilityLabels({ server }: { server: PublicServer }) {
   const tier = server.visibilityTier ?? (server.premium_status === "premium" ? "premium" : server.isFeaturedEligible ? "enhanced" : "standard");
-  const label = tier === "premium" ? "Pro" : tier === "enhanced" ? "Enhanced" : "Standard";
+  const label = publicVisibilityTierLabel(tier, server.server_access?.source);
   const className = tier === "premium"
     ? "border-amber-300/30 bg-amber-300/12 text-amber-100"
     : tier === "enhanced"
@@ -877,8 +1029,8 @@ function VisibilityLabels({ server }: { server: PublicServer }) {
       : "border-white/10 bg-white/[0.04] text-zinc-200";
 
   return (
-    <div className="flex shrink-0 flex-col items-end gap-1.5">
-      <span className={`rounded-md border px-2.5 py-1 text-[10px] font-black uppercase ${className}`}>{label}</span>
+    <div className="flex min-w-0 flex-wrap items-start gap-1.5">
+      <span className={`max-w-full break-words rounded-md border px-2.5 py-1 text-[10px] font-black uppercase ${className}`}>{label}</span>
       {server.isSpotlightEligible ? (
         <span className="rounded-md border border-violet-300/25 bg-violet-400/10 px-2.5 py-1 text-[10px] font-black uppercase text-violet-100">
           Spotlight Eligible
@@ -886,11 +1038,6 @@ function VisibilityLabels({ server }: { server: PublicServer }) {
       ) : null}
     </div>
   );
-}
-
-function formatPublicVisibilitySummary(value: string | null | undefined) {
-  if (!value) return null;
-  return value.replace(/\bPremium\b/g, "Pro");
 }
 
 function StatsRow({ stats }: { stats: PublicStats }) {
@@ -967,6 +1114,63 @@ function LoginToUnlockBanner({
   );
 }
 
+function SavedServerButton({ server, variant = "card" }: { server: PublicServer; variant?: "card" | "compact" | "profile" }) {
+  const savedServers = useContext(SavedServersContext);
+  if (!savedServers) return null;
+
+  const isSaved = savedServers.savedServerIds.has(server.linked_server_id);
+  const isBusy = savedServers.savingServerIds.has(server.linked_server_id);
+  const isLoading = savedServers.status === "loading";
+  const isLoggedOut = savedServers.status === "logged_out";
+  const isUnavailable = savedServers.status === "error";
+  const label = isLoggedOut
+    ? "Login to Save"
+    : isBusy
+      ? "Saving"
+      : isSaved
+        ? "Saved"
+        : isUnavailable
+          ? "Save Unavailable"
+          : "Save Server";
+  const title = isLoggedOut
+    ? "Log in with Discord to save this server privately."
+    : isSaved
+      ? "Remove this server from your private saved list."
+      : "Save this server to your private player list.";
+  const sizeClass = variant === "profile"
+    ? "min-h-11 px-4 py-2 text-xs"
+    : variant === "compact"
+      ? "px-3 py-2 text-[10px]"
+      : "px-4 py-2 text-xs";
+  const stateClass = isSaved
+    ? "border-cyan-200/60 bg-cyan-300/18 text-cyan-50 shadow-[0_0_18px_rgba(34,211,238,0.16)]"
+    : "border-white/12 bg-white/[0.05] text-zinc-200 hover:border-cyan-200/45 hover:bg-cyan-300/12 hover:text-white";
+  const className = `inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border font-black uppercase transition ${sizeClass} ${stateClass}`;
+
+  if (isLoggedOut) {
+    return (
+      <Link href={`/login?returnTo=${encodeURIComponent(currentPageReturnTo("/servers"))}`} className={className} title={title}>
+        <Star className="h-4 w-4" aria-hidden="true" />
+        {label}
+      </Link>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      aria-pressed={isSaved}
+      disabled={isBusy || isLoading || isUnavailable}
+      onClick={() => savedServers.toggleSavedServer(server.linked_server_id)}
+      className={`${className} disabled:cursor-not-allowed disabled:opacity-55`}
+      title={isUnavailable && savedServers.error ? savedServers.error : title}
+    >
+      <Star className="h-4 w-4" aria-hidden="true" fill={isSaved ? "currentColor" : "none"} />
+      {label}
+    </button>
+  );
+}
+
 function ServerCard({ server, index }: { server: PublicServer; index: number }) {
   const tags = parseTags(server.tags_json);
   const scoreTitle = scoreBreakdownTitle(server.score_breakdown);
@@ -993,7 +1197,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
               <GuildIcon server={server} size="md" />
             </ServerProfileFrame>
             <div className="min-w-0">
-              <p className="truncate text-xs font-black uppercase text-violet-200/70">{server.guild_name ?? "Verified Discord"}</p>
+              <p className="truncate text-xs font-black uppercase text-violet-200/70">{server.guild_name ?? "Discord community"}</p>
               <h2 className="mt-1 truncate text-2xl font-black text-white">{server.server_name}</h2>
               <p className="mt-1 truncate text-sm font-bold text-zinc-400">{server.nitrado_service_name ?? server.server_name}</p>
               <ServerRatingChip server={server} />
@@ -1003,7 +1207,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
           </div>
           <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
             {server.advertising?.badge_label ? <BoostedBadge server={server} /> : null}
-            <StatusPill label="Live" tone="emerald" />
+            <StatusPill {...publicServerStatusPresentation(server)} />
           </div>
         </div>
         {isAdvertised ? (
@@ -1013,12 +1217,11 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
         ) : null}
 
         <div className="mt-5 flex flex-wrap gap-2">
-          <StatusPill label="Verified Owner" tone="cyan" />
-          <StatusPill label="DZN Verified" tone="violet" />
+          <StatusPill label="Public Listing" tone="cyan" />
           <StatusPill label={server.server_type} tone="violet" />
           <StatusPill label={server.rank ? `Rank #${server.rank}` : "Rank Pending"} tone={server.rank ? "emerald" : "zinc"} />
           {server.reputation ? <StatusPill label={`${server.reputation.tier} Reputation`} tone="cyan" /> : null}
-          {server.plan_key === "pro" ? <StatusPill label="Pro Listing" tone="violet" /> : null}
+          {server.plan_key === "pro" ? <StatusPill label={publicListingPlanLabel(server.server_access?.source)} tone="violet" /> : null}
           <span title={scoreTitle} className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300/25 bg-emerald-400/10 px-3 py-1.5 text-xs font-black uppercase text-emerald-100">
             Score {server.score_label}
           </span>
@@ -1040,12 +1243,15 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
           {tags.length ? tags.map((tag) => <span key={tag} className="rounded-md border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-bold text-cyan-100">{tag}</span>) : <span className="text-sm text-zinc-500">No tags listed</span>}
         </div>
 
-        <div className="mt-6 flex items-center justify-between border-t border-white/10 pt-4">
+        <div className="mt-6 flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs font-bold uppercase text-zinc-500">{publicCardFooter(server)}</p>
-          <Link href={publicServerProfileHref(server.public_slug)} className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.3)] transition hover:bg-violet-400">
-            View Server
-            <ArrowRight className="h-4 w-4" />
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <SavedServerButton server={server} />
+            <Link href={publicServerProfileHref(server.public_slug)} className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-2 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(139,92,246,0.3)] transition hover:bg-violet-400">
+              View Server
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
         </div>
       </div>
     </motion.article>
@@ -1121,7 +1327,7 @@ function ServerReputationBadges({ server, compact = false }: { server: PublicSer
       {server.plan_key === "pro" ? (
         <span className="inline-flex items-center gap-1.5 rounded-md border border-violet-300/20 bg-violet-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-normal text-violet-100">
           <Sparkles className="h-3.5 w-3.5" />
-          Pro Listing
+          {publicListingPlanLabel(server.server_access?.source)}
         </span>
       ) : null}
       {visualBadges.map((badge) => (
@@ -1205,7 +1411,7 @@ function ServerAchievementPanel({ server }: { server: PublicServer }) {
 
         {hasRows ? (
           <div className="grid gap-3">
-            {earnedBadges.length === 0 && server.plan_key === "pro" ? <AchievementRow icon={Sparkles} name="Pro Listing" description="Enhanced advertising presentation is active. Competitive stats remain earned only." /> : null}
+            {earnedBadges.length === 0 && server.plan_key === "pro" ? <AchievementRow icon={Sparkles} name={publicListingPlanLabel(server.server_access?.source)} description="Enhanced advertising presentation is active. Competitive stats remain earned only." /> : null}
             {groups.map((group) =>
               earnedBadges.length === 0 ? group.rows.slice(0, 4).map((badge) => (
                 <AchievementRow key={badge.key} icon={group.icon} name={badge.name} description={badge.description} />
@@ -1374,10 +1580,13 @@ function ServerProfile({ server }: { server: PublicServer }) {
   return (
     <div className="relative pb-12 pt-6">
       <div className="pointer-events-none absolute inset-x-[-12vw] top-10 -z-10 h-[520px] bg-[radial-gradient(circle_at_18%_18%,rgba(139,92,246,0.28),transparent_34%),radial-gradient(circle_at_88%_12%,rgba(34,211,238,0.16),transparent_28%)] blur-2xl" />
-      <Link href="/servers" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white">
-        <ArrowLeft className="h-4 w-4" />
-        Back to servers
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link href="/servers" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white">
+          <ArrowLeft className="h-4 w-4" />
+          Back to servers
+        </Link>
+        <SavedServerButton server={server} variant="profile" />
+      </div>
 
       <motion.header initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.42 }} className={`relative mt-5 overflow-hidden rounded-xl border border-white/10 bg-[#050815]/78 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl ${visualCardStyle !== "standard" ? `dzn-profile-header--visual-${visualCardStyle}` : ""}`} style={profileAccentStyle}>
         <ServerThemeBanner theme={server.themeBanner} overlay />
@@ -1389,7 +1598,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full border border-violet-300/25 bg-violet-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-violet-100">DZN Network</span>
-                <StatusPill label={historicalLifecycle ? (server.lifecycle?.label ?? "Legacy / Offline") : "Live"} tone={historicalLifecycle ? "zinc" : "emerald"} pulse={!historicalLifecycle} />
+                <StatusPill {...publicServerStatusPresentation(server)} />
               </div>
               <h1 className="mt-3 max-w-full break-words text-4xl font-black uppercase leading-none text-white [overflow-wrap:anywhere] sm:text-5xl lg:text-6xl">
                 {server.server_name}
@@ -1398,12 +1607,11 @@ function ServerProfile({ server }: { server: PublicServer }) {
               <div className="mt-4 flex flex-wrap gap-3 text-xs font-bold uppercase text-zinc-400">
                 <MetaChip icon={Gamepad2} label={server.platform ?? "Platform awaiting data"} />
                 <MetaChip icon={Target} label={server.server_type} />
-                <MetaChip icon={Map} label={server.map_name ?? server.mission ?? "Map awaiting data"} />
-                <MetaChip icon={MapPin} label={server.server_status ?? "Network online"} />
+                <MetaChip icon={Map} label={publicMapLabel(server.map_name ?? server.mission)} />
+                <MetaChip icon={MapPin} label={publicServerStatusPresentation(server).label} />
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <StatusPill label="Verified Owner" tone="cyan" />
-                <StatusPill label="DZN Verified" tone="violet" />
+                <StatusPill label="Public Listing" tone="cyan" />
                 <StatusPill label={server.server_type} tone="violet" />
                 <StatusPill label={server.adm_status === "Connected" ? "ADM Connected" : server.adm_status === "Discovered" ? "ADM Discovered" : "ADM Needs Review"} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
                 <StatusPill label={historicalLifecycle ? "Stats Preserved" : `Stats Sync ${server.stats_sync}`} tone={historicalLifecycle ? "zinc" : server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
@@ -1571,7 +1779,7 @@ function ProProfileAdvertPanel({ server }: { server: PublicServer }) {
   );
 }
 
-function ServerAdvancedShowcasePanel({
+export function ServerAdvancedShowcasePanel({
   payload,
   loading,
   error,
@@ -1597,28 +1805,28 @@ function ServerAdvancedShowcasePanel({
           </p>
         </div>
         <div className="dzn-advanced-showcase__meta">
-          <span>{payload?.access?.effectivePlan ? `${payload.access.effectivePlan.toUpperCase()} package` : "Package pending"}</span>
+          <span>{payload?.access?.effectivePlan ? `${showcasePlanLabel(payload.access.effectivePlan)} plan` : "Plan pending"}</span>
           <span>{summary?.lastUpdatedAt ? `Updated ${formatRelativeTime(summary.lastUpdatedAt)}` : "Awaiting data"}</span>
         </div>
       </div>
 
       {summary ? (
         <div className="dzn-advanced-summary">
-          <AdvancedSummaryStat label="Build Score" value={formatNumber(summary.buildScore)} icon={Hammer} />
-          <AdvancedSummaryStat label="Raid Score" value={formatNumber(summary.raidScore)} icon={ShieldCheck} />
-          <AdvancedSummaryStat label="Distance" value={formatAdvancedDistance(summary.totalDistanceM)} icon={Route} />
-          <AdvancedSummaryStat label="Explored" value={`${summary.explorationPercent.toFixed(2)}%`} icon={Compass} />
+          <AdvancedSummaryStat label="Build Score" value={payload?.access?.publicBuildShowcase ? formatNumber(summary.buildScore) : "Pro required"} icon={Hammer} />
+          <AdvancedSummaryStat label="Raid Score" value={payload?.access?.publicBuildShowcase ? formatNumber(summary.raidScore) : "Pro required"} icon={ShieldCheck} />
+          <AdvancedSummaryStat label="Distance" value={payload?.access?.publicTravelShowcase ? formatAdvancedDistance(summary.totalDistanceM) : "Pro required"} icon={Route} />
+          <AdvancedSummaryStat label="Explored" value={payload?.access?.publicExplorationSummary ? `${summary.explorationPercent.toFixed(2)}%` : "Pro required"} icon={Compass} />
         </div>
       ) : null}
 
-      {exploration?.supported ? (
+      {exploration?.supported && payload?.access?.publicExplorationSummary ? (
         <div className="dzn-exploration-preview" aria-label="Aggregate map exploration preview">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-200">Map Exploration</p>
-            <h3>{exploration.mapDisplayName ?? "Supported map"}</h3>
+            <p className="text-[10px] font-black uppercase tracking-normal text-violet-200">Map Exploration</p>
+            <h3>{publicMapLabel(exploration.mapDisplayName)}</h3>
             <p>
-              {exploration.exploredCellsCount.toLocaleString("en-GB")} of {exploration.totalExplorableCells.toLocaleString("en-GB")} aggregate cells explored.
-              {exploration.estimated ? " Bounds are estimated until verified map masks/assets are added." : ""}
+              {exploration.exploredCellsCount.toLocaleString("en-GB")} of {exploration.totalExplorableCells.toLocaleString("en-GB")} grid areas visited.
+              {exploration.estimated ? " Estimated coverage, not a verified percentage of playable land." : ""}
             </p>
           </div>
           <ExplorationMiniGrid exploration={exploration} />
@@ -1724,7 +1932,7 @@ function ServerAdvancedBoardCard({ board }: { board: AdvancedBoard }) {
       </div>
       <div className="dzn-advanced-board__badges">
         <span>{formatAdvancedCategory(board.category)}</span>
-        <span>{board.packageRequired === "free" ? "Core" : `${board.packageRequired.toUpperCase()}+`}</span>
+        <span>{showcasePlanLabel(board.packageRequired)}</span>
         {board.estimated ? <span>Estimated</span> : null}
       </div>
       {board.locked ? (
@@ -1762,20 +1970,24 @@ function AdvancedBoardIcon({ category }: { category: string }) {
 
 function ExplorationMiniGrid({ exploration }: { exploration: NonNullable<ServerAdvancedPayload["exploration"]> }) {
   const gridSize = exploration.gridSize ?? 128;
-  const cells = exploration.overlayCells.slice(0, 120);
+  const cells = explorationPreviewCells(exploration.overlayCells, gridSize);
   return (
-    <div className="dzn-exploration-mini-grid">
-      {cells.map((cell) => (
-        <span
-          key={`${cell.cellX}:${cell.cellY}`}
-          style={{
-            left: `${(cell.cellX / Math.max(1, gridSize)) * 100}%`,
-            top: `${(cell.cellY / Math.max(1, gridSize)) * 100}%`,
-            "--dzn-cell-alpha": Math.min(0.88, 0.24 + cell.visits / 12),
-          } as CSSProperties}
-        />
-      ))}
-    </div>
+    <figure className="dzn-exploration-figure">
+      <div className="dzn-exploration-mini-grid" role="img" aria-label={`${cells.length} highlighted aggregate areas. Schematic grid, not a terrain map or player route.`}>
+        {cells.map((cell) => (
+          <span
+            key={cell.key}
+            aria-hidden="true"
+            style={{
+              left: `${cell.left}%`,
+              top: `${cell.top}%`,
+              "--dzn-cell-alpha": cell.alpha,
+            } as CSSProperties}
+          />
+        ))}
+      </div>
+      <figcaption>{cells.length ? `Showing ${cells.length} sampled areas. Brighter areas have more visits.` : "No activity areas available yet."} Schematic only; player locations and routes stay private.</figcaption>
+    </figure>
   );
 }
 
@@ -1893,6 +2105,15 @@ function getSlugFromPath(pathname: string) {
   const parts = pathname.split("/").filter(Boolean);
   if (parts[0] === "servers" && parts[1] === "profile") return null;
   return parts[0] === "servers" && parts[1] ? decodeURIComponent(parts[1]) : null;
+}
+
+function currentPageReturnTo(fallback: string) {
+  if (typeof window === "undefined") return fallback;
+  return `${window.location.pathname}${window.location.search}`;
+}
+
+function safePublicProfileHref(value: string | null | undefined) {
+  return typeof value === "string" && /^\/players\/[a-z0-9-]{3,48}$/.test(value) ? value : null;
 }
 
 function GlassPanel({ title, icon: Icon, children }: { title: string; icon: typeof Activity; children: React.ReactNode }) {
@@ -2264,7 +2485,12 @@ function ReviewCard({ review, onReported }: { review: PublicReview; onReported: 
             <span className="grid h-10 w-10 rounded-full border border-violet-300/25 bg-violet-500/15 place-items-center text-sm font-black text-violet-100">{(review.reviewer_name ?? "P")[0]}</span>
           )}
           <div className="min-w-0">
-            <p className="break-words text-sm font-black text-white">{review.reviewer_name ?? "DZN player"}</p>
+            <PublicPlayerProfileName
+              name={review.reviewer_name ?? "DZN player"}
+              href={review.public_profile_href}
+              className="break-words text-sm font-black text-white [overflow-wrap:anywhere]"
+              showBadge
+            />
             <p className="mt-1 text-[10px] font-black uppercase text-zinc-500">{formatRelativeTime(review.created_at)}</p>
           </div>
         </div>
@@ -2360,7 +2586,13 @@ function PvpLeaderboardPanel({ players }: { players: PublicLeaderboardPlayer[] }
                 {players.slice(0, 6).map((player) => (
                   <tr key={`pvp-${player.rank}-${player.player_name}`} className="bg-black/24">
                     <td className="rounded-l-lg border-y border-l border-white/10 px-2 py-2 text-sm font-black text-violet-200">#{player.rank}</td>
-                    <td className="border-y border-white/10 px-2 py-2 text-sm font-black text-white">{player.player_name}</td>
+                    <td className="border-y border-white/10 px-2 py-2">
+                      <PublicPlayerProfileName
+                        name={player.player_name}
+                        href={player.public_profile_href}
+                        className="text-sm font-black text-white"
+                      />
+                    </td>
                     <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-zinc-200">{player.kills}</td>
                     <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-zinc-300">{player.deaths}</td>
                     <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-cyan-100">{formatKdLabel(player)}</td>
@@ -2447,7 +2679,12 @@ function TopPlayersPanel({ players }: { players: PublicLeaderboardPlayer[] }) {
               <PlayerAvatar player={player} />
               <div className="min-w-0">
                 <p className="text-[10px] font-black uppercase text-violet-200">#{player.rank}</p>
-                <p className="mt-1 break-words text-sm font-black text-white [overflow-wrap:anywhere]">{player.player_name}</p>
+                <PublicPlayerProfileName
+                  name={player.player_name}
+                  href={player.public_profile_href}
+                  className="mt-1 break-words text-sm font-black text-white [overflow-wrap:anywhere]"
+                  showBadge
+                />
               </div>
             </div>
             <span className="rounded-md border border-emerald-300/20 bg-emerald-400/10 px-2 py-1 text-xs font-black text-emerald-100">
@@ -2462,6 +2699,38 @@ function TopPlayersPanel({ players }: { players: PublicLeaderboardPlayer[] }) {
         </div>
       ))}
     </div>
+  );
+}
+
+function PublicPlayerProfileName({
+  name,
+  href,
+  className = "",
+  showBadge = false,
+}: {
+  name: string;
+  href?: string | null;
+  className?: string;
+  showBadge?: boolean;
+}) {
+  const safeHref = safePublicProfileHref(href);
+  if (!safeHref) return <span className={className}>{name}</span>;
+
+  return (
+    <Link
+      href={safeHref}
+      aria-label={`View public profile for ${name}`}
+      className={`inline-flex max-w-full flex-wrap items-center gap-1.5 transition hover:text-cyan-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 ${className}`}
+    >
+      <span className="break-words [overflow-wrap:anywhere]">{name}</span>
+      {showBadge ? (
+        <span className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-normal text-cyan-100">
+          Profile
+        </span>
+      ) : (
+        <ExternalLink className="h-3 w-3 shrink-0 text-cyan-100" aria-hidden="true" />
+      )}
+    </Link>
   );
 }
 
@@ -2755,10 +3024,30 @@ function loadPublicNetworkCache(slug: string | null): PublicNetworkCachePayload 
 function savePublicNetworkCache(slug: string | null, payload: PublicNetworkCachePayload) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(publicNetworkCacheKey(slug), JSON.stringify({ ...payload, cached_at: new Date().toISOString() }));
+    const snapshot = stripVolatilePublicNetworkProfileLinks({ ...payload, cached_at: new Date().toISOString() });
+    window.localStorage.setItem(publicNetworkCacheKey(slug), JSON.stringify(snapshot));
   } catch {
     // Storage can be unavailable in private/hardened contexts.
   }
+}
+
+function stripVolatilePublicNetworkProfileLinks(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripVolatilePublicNetworkProfileLinks);
+  if (!value || typeof value !== "object") return value;
+
+  const stripped: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (isVolatilePublicNetworkProfileLinkKey(key)) continue;
+    stripped[key] = stripVolatilePublicNetworkProfileLinks(child);
+  }
+  return stripped;
+}
+
+function isVolatilePublicNetworkProfileLinkKey(key: string) {
+  return key === "public_profile_handle"
+    || key === "public_profile_href"
+    || key === "player_public_profile_handle"
+    || key === "player_public_profile_href";
 }
 
 async function fetchPublicServerFallback(slug: string, signal?: AbortSignal) {
@@ -2823,6 +3112,7 @@ function formatAdvancedDistance(value: number) {
 }
 
 function formatAdvancedCategory(value: string) {
+  if (value === "premium_showcase") return "Advanced Showcase";
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 

@@ -20,6 +20,7 @@ interface D1Database {
 }
 
 interface CloudflareEnv {
+  DZN_GAMES_HUB_ENABLED?: string;
   ASSETS?: {
     fetch(input: Request | string, init?: RequestInit): Promise<Response>;
   };
@@ -32,8 +33,12 @@ interface CloudflareEnv {
   DZN_CRON_SECRET?: string;
   SYNC_CRON_SECRET?: string;
   DZN_PULSE_ENABLED?: string;
+  DZN_BILLING_REMINDERS_ENABLED?: string;
+  DZN_BILLING_TRIAL_REMINDERS_ENABLED?: string;
   DZN_DISCORD_NOTIFICATIONS_ENABLED?: string;
   DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED?: string;
+  DZN_COMMS_MESSAGE_HISTORY_READ_ENABLED?: string;
+  DZN_COMMS_MESSAGE_HISTORY_READ_SCOPE?: string;
   DZN_DISCORD_ADVERT_CHANNEL_ID?: string;
   DZN_DISCORD_SHOWCASE_CHANNEL_ID?: string;
   DZN_PULSE_PREVIEW_AUTH_DIAGNOSTICS?: string;
@@ -51,6 +56,8 @@ interface CloudflareEnv {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   DZN_LIVE_CHECKOUT_ENABLED?: string;
+  DZN_PUBLIC_LEGAL_SELLER_NAME?: string;
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS?: string;
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_PRICE_STARTER?: string;
   STRIPE_PRICE_PRO?: string;
@@ -60,5 +67,6 @@ interface CloudflareEnv {
   NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID?: string;
   NEXT_PUBLIC_STRIPE_PRO_PRICE_ID?: string;
   NEXT_PUBLIC_STRIPE_PREMIUM_PRICE_ID?: string;
+  NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED?: string;
   NEXT_PUBLIC_APP_URL?: string;
 }

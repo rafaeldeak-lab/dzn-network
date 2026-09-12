@@ -9,6 +9,11 @@ export type StripeCheckoutSession = {
   customer?: string | null;
   subscription?: string | null;
   metadata?: Record<string, string | null> | null;
+  mode?: string;
+  status?: string;
+  livemode?: boolean;
+  client_reference_id?: string | null;
+  expires_at?: number;
 };
 
 export type StripePortalSession = {
@@ -17,12 +22,17 @@ export type StripePortalSession = {
 };
 
 export type StripeSubscription = {
+  livemode?: boolean;
   id: string;
   customer: string | { id: string };
   status: string;
+  metadata?: Record<string, string | null> | null;
   current_period_start?: number | null;
   current_period_end?: number | null;
   cancel_at_period_end?: boolean;
+  cancel_at?: number | null;
+  pause_collection?: unknown;
+  trial_end?: number | null;
   items?: {
     data?: Array<{
       current_period_start?: number | null;
@@ -39,6 +49,7 @@ export type StripeSubscription = {
 };
 
 export type StripeEvent = {
+  livemode?: boolean;
   id: string;
   type: string;
   data: {
@@ -61,7 +72,7 @@ export function billingRedirectUrl(env: Env, request: Request, returnTo: string 
   return url.toString();
 }
 
-export async function stripeFormRequest<T>(env: Env, path: string, params: Record<string, string | number | boolean | null | undefined>): Promise<T> {
+export async function stripeFormRequest<T>(env: Env, path: string, params: Record<string, string | number | boolean | null | undefined>, options: { idempotencyKey?: string; apiVersion?: string } = {}): Promise<T> {
   const secret = env.STRIPE_SECRET_KEY;
   if (!secret) throw new Error("Stripe is not configured.");
   const body = new URLSearchParams();
@@ -75,7 +86,8 @@ export async function stripeFormRequest<T>(env: Env, path: string, params: Recor
     headers: {
       authorization: `Bearer ${secret}`,
       "content-type": "application/x-www-form-urlencoded",
-      "stripe-version": STRIPE_API_VERSION,
+      "stripe-version": options.apiVersion ?? STRIPE_API_VERSION,
+      ...(options.idempotencyKey ? { "idempotency-key": options.idempotencyKey } : {}),
     },
     body,
   });
@@ -125,6 +137,10 @@ export async function verifyStripeWebhook(request: Request, webhookSecret: strin
     .filter((part) => part.startsWith("v1="))
     .map((part) => part.slice(3));
   if (!timestamp || expected.length === 0) throw new Error("Invalid Stripe signature.");
+  const signedAt = Number(timestamp);
+  if (!/^\d+$/.test(timestamp) || !Number.isSafeInteger(signedAt) || Math.abs(Math.floor(Date.now() / 1000) - signedAt) > 300) {
+    throw new Error("Stripe signature timestamp is outside the allowed window.");
+  }
 
   const signedPayload = `${timestamp}.${body}`;
   const key = await crypto.subtle.importKey(

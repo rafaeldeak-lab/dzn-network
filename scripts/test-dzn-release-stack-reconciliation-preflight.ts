@@ -13,6 +13,20 @@ assert.equal(existsSync(handoffPath), true, "Release stack handoff doc must exis
 
 const preflight = read(preflightPath);
 const handoff = read(handoffPath);
+const inventory = read("docs/DZN_RELEASE_BACKLOG_2026-09-12.md");
+assert.match(preflight, /## Current Reconciliation: 2026-09-12/);
+assert.match(preflight, /## Archived Snapshot: 2026-08-31/);
+assert.ok(preflight.indexOf("## Current Reconciliation: 2026-09-12") < preflight.indexOf("## Archived Snapshot: 2026-08-31"));
+assert.match(preflight, /DZN Trivia is next/);
+assert.match(preflight, /Preserve the exact-server complimentary Pro access and existing bot reset schedule/);
+assert.match(preflight, /FED & FERAL setup, genuine identity linking and customer billing proof/);
+assert.match(preflight, /Main merges trigger the configured Pages deployment/);
+assert.match(handoff, /## Current Handoff: 2026-09-12/);
+const inventoriedPrs = [...inventory.matchAll(/^\| #(\d+) \|/gm)].map(match => Number(match[1]));
+assert.equal(inventoriedPrs.length, 76, "Retain the complete initial snapshot, not only Games/Comms.");
+assert.equal(new Set(inventoriedPrs).size, 76, "Inventory rows must be unique.");
+assert.deepEqual([...inventoriedPrs].sort((a, b) => a - b), [...Array.from({ length: 74 }, (_, i) => 50 + i), 141, 149]);
+assert.match(inventory, /File equality is not semantic feature equivalence or production activation proof/);
 const autodevConfig = JSON.parse(read(".autodev/config.json"));
 const autodevDoc = read("docs/CODEX_AUTODEV.md");
 const publicAccessPolicy = read("docs/PUBLIC_ACCESS_POLICY.md");

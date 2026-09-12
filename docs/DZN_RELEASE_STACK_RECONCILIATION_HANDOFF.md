@@ -1,5 +1,25 @@
 # DZN Release Stack Reconciliation Handoff
 
+## Current Handoff: 2026-09-12
+
+PR #123 is refreshed onto the current release. The new current section in
+`DZN_RELEASE_STACK_RECONCILIATION_PREFLIGHT.md` supersedes the recommendations in
+the historical record below. Player navigation and the first playable Games Hub
+are already released; they must not be rebuilt from the old stack.
+
+`DZN_RELEASE_BACKLOG_2026-09-12.md` records the initial 76-request comparison.
+The remaining original #50-#122 stack must be assessed feature by feature;
+file equality is not a semantic implementation or live activation test.
+The backlog keeps Games/XP, moderation/support, maps, exact-server access, ADM,
+FED & FERAL, real account linking and customer billing proof visible.
+
+The refresh changes documentation, the existing documentation check and its test
+registration only. It adds no runtime, migration, setting, provider dependency or
+paid operation. Later authorized main merges use the existing Pages release
+path; the old statement below about no merge/deployment describes August 31 only.
+
+## Historical Handoff: 2026-08-31
+
 Date: 2026-08-31
 
 ## What This Slice Did

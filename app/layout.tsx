@@ -37,8 +37,8 @@ export default function RootLayout({
           <NavigationProgress />
         </Suspense>
         <SiteHeaderRoot />
-        {children}
         <BetaTicker />
+        {children}
       </body>
     </html>
   );

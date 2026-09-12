@@ -38,8 +38,20 @@ export async function writePublicApiCache(env: Env, cacheKey: string, payload: u
          expires_at = excluded.expires_at,
          updated_at = CURRENT_TIMESTAMP`,
     )
-    .bind(cacheKey, accessLevel, JSON.stringify(payload), generatedAt, generatedAt)
+    .bind(cacheKey, accessLevel, JSON.stringify(stripVolatilePublicProfileLinks(payload)), generatedAt, generatedAt)
     .run();
+}
+
+export function stripVolatilePublicProfileLinks(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => stripVolatilePublicProfileLinks(item));
+  if (!value || typeof value !== "object") return value;
+
+  const next: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (isVolatilePublicProfileLinkKey(key)) continue;
+    next[key] = stripVolatilePublicProfileLinks(child);
+  }
+  return next;
 }
 
 export async function readPublicApiCache<T>(env: Env, cacheKey: string): Promise<{ payload: T; generated_at: string } | null> {
@@ -179,4 +191,11 @@ async function ensurePublicApiCacheSchema(env: Env) {
 
 function accessLevelFromCacheKey(cacheKey: string): "preview" | "full" {
   return cacheKey.includes(":full") ? "full" : "preview";
+}
+
+function isVolatilePublicProfileLinkKey(key: string) {
+  return key === "public_profile_handle"
+    || key === "public_profile_href"
+    || key === "player_public_profile_handle"
+    || key === "player_public_profile_href";
 }

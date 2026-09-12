@@ -1,4 +1,5 @@
 import { requireDb } from "./db";
+import { readPublicProfileLinksByDiscordIds, type PublicProfileLink } from "./player-public-profiles";
 import { reviewCooldownUntil } from "./review-moderation";
 import type { Env, SessionUser } from "./types";
 
@@ -35,6 +36,8 @@ export type PublicReview = {
   body: string;
   created_at: string;
   updated_at: string;
+  public_profile_handle: string | null;
+  public_profile_href: string | null;
   is_own_review?: boolean;
 };
 
@@ -105,15 +108,21 @@ export async function getApprovedReviewSummary(env: Env, linkedServerId: string,
        WHERE linked_server_id = ?
          AND status = 'approved'
        ORDER BY created_at DESC
-       LIMIT 50`,
+      LIMIT 50`,
     )
     .bind(linkedServerId)
     .all<ServerReviewRow>();
 
-  return buildPublicReviewSummary(result.results ?? [], viewer?.discord_id ?? null);
+  const rows = result.results ?? [];
+  const publicProfileLinksByDiscordId = await readPublicProfileLinksByDiscordIds(env, rows.map((row) => row.reviewer_discord_id));
+  return buildPublicReviewSummary(rows, viewer?.discord_id ?? null, publicProfileLinksByDiscordId);
 }
 
-export function buildPublicReviewSummary(rows: ServerReviewRow[], viewerDiscordId?: string | null): PublicReviewSummary {
+export function buildPublicReviewSummary(
+  rows: ServerReviewRow[],
+  viewerDiscordId?: string | null,
+  publicProfileLinksByDiscordId: ReadonlyMap<string, PublicProfileLink> = new Map(),
+): PublicReviewSummary {
   const approved = rows.filter((row) => row.status === "approved");
   const breakdown: Record<1 | 2 | 3 | 4 | 5, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   let ratingTotal = 0;
@@ -128,17 +137,22 @@ export function buildPublicReviewSummary(rows: ServerReviewRow[], viewerDiscordI
     average_rating: approved.length ? Math.round((ratingTotal / approved.length) * 10) / 10 : 0,
     review_count: approved.length,
     rating_breakdown: breakdown,
-    reviews: approved.map((row) => ({
-      id: row.id,
-      reviewer_name: row.reviewer_name,
-      reviewer_avatar_url: row.reviewer_avatar_url,
-      rating: clampRating(row.rating),
-      title: row.title,
-      body: row.body,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      is_own_review: Boolean(viewerDiscordId && row.reviewer_discord_id === viewerDiscordId),
-    })),
+    reviews: approved.map((row) => {
+      const publicProfile = publicProfileLinksByDiscordId.get(row.reviewer_discord_id);
+      return {
+        id: row.id,
+        reviewer_name: row.reviewer_name,
+        reviewer_avatar_url: row.reviewer_avatar_url,
+        rating: clampRating(row.rating),
+        title: row.title,
+        body: row.body,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        public_profile_handle: publicProfile?.handle ?? null,
+        public_profile_href: publicProfile?.href ?? null,
+        is_own_review: Boolean(viewerDiscordId && row.reviewer_discord_id === viewerDiscordId),
+      };
+    }),
   };
 }
 

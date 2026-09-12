@@ -1,5 +1,61 @@
 # DZN Release Stack Reconciliation Preflight
 
+## Current Reconciliation: 2026-09-12
+
+This section supersedes the operational recommendations in the archived August
+31 snapshot below. That snapshot is historical evidence, not a current release
+checklist or authority to undo later releases.
+
+- Comparison baseline: `e612c66e6fabed1f1f607da8d517b05d8328d6aa`, PR #184.
+- Initial GitHub inventory: 76 open requests. Four target main (#50, #123, #141,
+  #149); the other 72 target old feature branches. The original #50-#122 stack
+  remains 73 requests, including five drafts. A green merge indicator on an old
+  feature branch is not evidence of readiness for today's production main.
+- A file-by-file comparison covers all 76 requests. None has every changed file
+  identical to this baseline. File differences alone do not prove a feature is
+  absent; newer implementations, renamed files and security corrections exist.
+  See `DZN_RELEASE_BACKLOG_2026-09-12.md` for the bounded inventory.
+- Later main-based releases, not the old stack, delivered the Player Hub
+  (#124-#133), profile settings/viewer (#137-#143), stat-link workflow (#145-#148,
+  #170, #173-#175), billing corrections (#152-#169), mobile/map/opponent changes
+  (#171-#172), dashboard/showcase fixes (#176-#181), and Games Hub (#182-#184).
+  This is source-delivery evidence, not blanket live customer verification.
+- The standalone #141 session roadmap and #149 Comms contract are now merged
+  independently with current checks and review, at `6bc77f373d95d300a2fee9c8193eb71c35406114`
+  and `2b938daeee60fe54d1fca9d0bcb483a0e080338e` respectively. Neither activates
+  session timers or chat. This #123 refresh records the remaining work.
+
+### Remaining Feature Order
+
+| Area | Current boundary and next concrete work |
+| --- | --- |
+| Games Hub | Minesweeper, earned website XP/parts, daily wins, workshop prestige, original insignia, animated outpost and original home button are released. DZN Trivia is next, followed by Word Chain and Hide & Seek, with server-validated outcomes and repeat-safe rewards. |
+| Multi-game progression | Add lobby/mission categories and equipment collections as real games land. Keep website XP separate from verified DayZ progression and paid plans; no fabricated unlocks, cash rewards or online counts. |
+| Global Chat/support | #144/#150 provide disabled read-history foundation; #149 records sending requirements. Next is an isolated local/test sender with atomic concurrency, CSRF, moderation, retention and staff handling before real-user posting. |
+| Legacy reviews/progression/community | Review #54-#90 by feature against current main. Preserve useful unique work, reconcile identity/privacy changes and do not restore superseded player/owner gates. Old XP/calling-card code is not proof of genuine player awards. |
+| Store and random rewards | #96-#114 remain separate payment-adjacent work. Do not enable old sandbox paths or paid random rewards during reconciliation. A cooldown is not legal or processor clearance. |
+| NukeTown/ADM | Preserve the exact-server complimentary Pro access and existing bot reset schedule. Continue genuine automatic import and sustained-sync verification without invented subscriptions or events. |
+| Customer recovery | FED & FERAL setup, genuine identity linking and customer billing proof remain individually verified workflows, not inferred from source merges or public Live labels. |
+| Maps and badges | Correct Chernarus/Livonia/Sakhal assets and usage rights; continue other badge surfaces and genuine gameplay XP without confusing them with website-game rewards. |
+| Owner oversight | Server-scoped approve/decline/revoke reasons and notifications; purpose-limited platform-owner support timelines with audited access. No credential exposure, implicit Discord messages or cross-server identity changes. |
+
+### Current Release Rules
+
+Use narrow current-main releases for unique remaining features. Never retarget an
+entire old stacked tip to main as a shortcut, mass-resolve conflicts by choosing
+the old tree, or call every old request superseded without semantic review.
+Preserve unfinished branches and the dirty OneDrive checkout.
+
+The user has approved merges; each exact candidate still needs its applicable
+checks and review. Main merges trigger the configured Pages deployment, so report
+that release honestly. AutoDev policy does not itself grant deployment authority.
+Do not infer that all repository migrations must be applied: name and verify only
+the exact approved migration for its feature. Schema availability and production
+activation are separate from source presence. Keep payments, credentials, Nitrado
+reset timing, Discord messaging and unrelated runtime settings unchanged.
+
+## Archived Snapshot: 2026-08-31
+
 Date: 2026-08-31
 
 This preflight records the safe release decision before attempting to put the recent DZN Player, Store, profile, community, and Comms work onto the live site. It is intentionally a non-mutating handoff: no merge, deployment, production migration, Stripe change, Cloudflare secret/config change, Nitrado call, Discord production action, Durable Object/WebSocket runtime, analytics/tracking, AI provider credential, metered model call, or issue/PR #49 change is approved here.

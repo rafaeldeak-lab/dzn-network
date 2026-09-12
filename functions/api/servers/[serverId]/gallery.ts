@@ -1,6 +1,7 @@
 import { getSessionUser, requireDb } from "../../../_lib/db";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
-import { canUseProFeature, getListingLimits } from "../../../_lib/plans";
+import { getListingLimits } from "../../../_lib/plans";
+import { canUseShowcaseFeature, readServerShowcaseAccess, serializeShowcaseAccess, showcaseWriteGuard } from "../../../_lib/server-showcase-access";
 import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
 
 type GalleryImageInput = {
@@ -35,22 +36,24 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   await ensureGallerySchema(env);
   const server = await getOwnedServer(env, user, linkedServerId);
   if (!server) return json({ error: "Server not found" }, { status: 404 });
+  const access = await readServerShowcaseAccess(env, server.id, server);
 
   if (request.method === "GET") {
     const images = await listGalleryImages(env, linkedServerId);
     return json({
       ok: true,
       images,
-      listing: getListingLimits(server),
-      canPublishGallery: canUseProFeature(server, "gallery_images"),
+      listing: access.listing,
+      serverAccess: serializeShowcaseAccess(access),
+      canPublishGallery: canUseShowcaseFeature(access, "gallery_images"),
     });
   }
 
-  if (!canUseProFeature(server, "gallery_images")) {
+  if (!canUseShowcaseFeature(access, "gallery_images")) {
     return json({ error: "Pro Listing is required to publish gallery images.", code: "PRO_REQUIRED" }, { status: 403 });
   }
 
-  const limits = getListingLimits(server);
+  const limits = access.listing;
   const body = await readJson<{ images?: GalleryImageInput[] }>(request);
   if (!Array.isArray(body.images)) return json({ error: "Images must be an array." }, { status: 400 });
   if (body.images.length > limits.galleryLimit) {
@@ -68,13 +71,17 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
 
   const db = requireDb(env);
   const now = new Date().toISOString();
-  await db.prepare("DELETE FROM server_gallery_images WHERE server_id = ?").bind(linkedServerId).run();
+  const guard = showcaseWriteGuard(server.id, server.user_id, access);
+  const statements = [
+    db.prepare(`SELECT 1 AS allowed WHERE ${guard.sql}`).bind(...guard.values),
+    db.prepare(`DELETE FROM server_gallery_images WHERE server_id = ? AND ${guard.sql}`).bind(linkedServerId, ...guard.values),
+  ];
   for (const image of normalized) {
-    await db.prepare(
+    statements.push(db.prepare(
       `INSERT INTO server_gallery_images (
         id, server_id, url, storage_path, width, height, size_bytes, mime_type,
         sort_order, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${guard.sql}`,
     ).bind(
       crypto.randomUUID(),
       linkedServerId,
@@ -87,8 +94,11 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
       image.sortOrder,
       now,
       now,
-    ).run();
+      ...guard.values,
+    ));
   }
+  const result = await db.batch(statements);
+  if (!result[0].results?.length) return json({ ok: false, error: "Server access changed. Refresh before saving again.", code: "SERVER_ACCESS_CHANGED" }, { status: 409 });
 
   return json({ ok: true, images: await listGalleryImages(env, linkedServerId), listing: limits });
 };
@@ -122,7 +132,7 @@ async function getOwnedServer(env: Env, user: SessionUser, linkedServerId: strin
        LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
       WHERE linked_servers.id = ?
         AND linked_servers.user_id = ?
-        AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
+        AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')
         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
       LIMIT 1`,
   ).bind(linkedServerId, user.id).first<{ id: string; user_id: string; plan_key: string | null; subscription_status: string | null }>();

@@ -193,7 +193,7 @@ assert.equal(dashboardSource.includes("Latest Scheduled Job"), true);
 assert.equal(dashboardSource.includes("Active ADM Jobs"), true);
 assert.equal(dashboardSource.includes("Completed ADM Today"), true);
 assert.equal(dashboardSource.includes("Automatic ADM Import Job"), true);
-assert.equal(dashboardSource.includes("Tracking:"), true);
+assert.equal(dashboardSource.includes("Sync:"), true);
 assert.equal(dashboardSource.includes("Fairness:"), true);
 assert.equal(dashboardSource.includes("Bumps:"), true);
 assert.equal(dashboardSource.includes("Check Nitrado Log Settings"), true);

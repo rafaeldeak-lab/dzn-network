@@ -97,7 +97,7 @@ const rainStreaks = Array.from({ length: 18 }, (_, index) => ({
 }));
 
 const MOBILE_BRIEFING_BREAKPOINT_PX = 768;
-const MOBILE_TICKER_CLEARANCE_PX = 18;
+const MOBILE_VIEWPORT_CLEARANCE_PX = 18;
 const BRIEFING_EXPAND_SETTLE_MS = 360;
 
 export function AuthShell({
@@ -392,9 +392,9 @@ function BriefingCard({
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const behavior: ScrollBehavior = prefersReducedMotion ? "auto" : "smooth";
     window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => ensureBriefingDetailsClearOfTicker(target, detailsId, behavior));
+      window.requestAnimationFrame(() => ensureBriefingDetailsInViewport(target, detailsId, behavior));
     });
-    window.setTimeout(() => ensureBriefingDetailsClearOfTicker(target, detailsId, behavior), BRIEFING_EXPAND_SETTLE_MS);
+    window.setTimeout(() => ensureBriefingDetailsInViewport(target, detailsId, behavior), BRIEFING_EXPAND_SETTLE_MS);
   }
 
   return (
@@ -403,7 +403,7 @@ function BriefingCard({
       aria-describedby={detailsId}
       aria-expanded={isOpen}
       onClick={handleCardClick}
-      className={`group relative w-full scroll-mt-6 scroll-mb-28 rounded-lg p-3.5 text-left transition duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200/60 sm:p-4 ${
+      className={`group relative w-full scroll-mt-6 scroll-mb-6 rounded-lg p-3.5 text-left transition duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200/60 sm:p-4 ${
         isOpen
           ? "border border-violet-300/50 bg-violet-500/10 shadow-[0_0_30px_rgba(139,92,246,0.18)]"
           : "border border-white/10 bg-black/28 hover:border-violet-300/45 hover:bg-violet-500/10 hover:shadow-[0_0_30px_rgba(139,92,246,0.18)] focus:border-violet-300/60 focus:bg-violet-500/12 focus:shadow-[0_0_34px_rgba(139,92,246,0.22)] active:border-cyan-200/55 active:bg-cyan-300/8"
@@ -463,21 +463,19 @@ function BriefingCard({
   );
 }
 
-function ensureBriefingDetailsClearOfTicker(card: HTMLElement, detailsId: string, behavior: ScrollBehavior) {
+function ensureBriefingDetailsInViewport(card: HTMLElement, detailsId: string, behavior: ScrollBehavior) {
   const details = document.getElementById(detailsId);
   const detailsRect = details?.getBoundingClientRect();
   const cardRect = card.getBoundingClientRect();
-  const ticker = document.querySelector<HTMLElement>(".dzn-beta-ticker");
-  const tickerTop = ticker?.getBoundingClientRect().top ?? window.innerHeight;
-  const visibleBottom = Math.min(window.innerHeight, tickerTop) - MOBILE_TICKER_CLEARANCE_PX;
+  const visibleBottom = window.innerHeight - MOBILE_VIEWPORT_CLEARANCE_PX;
 
   if (detailsRect && detailsRect.height > 0 && detailsRect.bottom > visibleBottom) {
     window.scrollBy({ top: Math.ceil(detailsRect.bottom - visibleBottom), behavior });
     return;
   }
 
-  if (cardRect.top < MOBILE_TICKER_CLEARANCE_PX) {
-    window.scrollBy({ top: Math.floor(cardRect.top - MOBILE_TICKER_CLEARANCE_PX), behavior });
+  if (cardRect.top < MOBILE_VIEWPORT_CLEARANCE_PX) {
+    window.scrollBy({ top: Math.floor(cardRect.top - MOBILE_VIEWPORT_CLEARANCE_PX), behavior });
   }
 }
 

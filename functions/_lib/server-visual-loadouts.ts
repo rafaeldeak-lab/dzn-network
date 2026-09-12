@@ -13,6 +13,7 @@ import { isDznAdminDiscordId } from "./admin";
 import { getEarnedServerBadges } from "./badge-awards";
 import { ensureMockUser, getSessionUser, requireDb } from "./db";
 import { isMockAuth } from "./mock";
+import { NUKETOWN_SHOWCASE_SCOPE, readServerShowcaseAccess, serializeShowcaseAccess, showcaseWriteGuard, type ServerShowcaseAccess } from "./server-showcase-access";
 import type { Env, SessionUser } from "./types";
 
 export type VisualLoadoutInput = {
@@ -39,6 +40,7 @@ export type ServerVisualLoadout = {
   themeBannerKey: string;
   animationEnabled: boolean;
   limits: VisualLoadoutPlanLimits;
+  access: ReturnType<typeof serializeShowcaseAccess>;
   updatedAt: string | null;
 };
 
@@ -92,6 +94,8 @@ type ValidatedLoadoutSelection = {
   animationEnabled: boolean;
   reason: string | null;
   limits: VisualLoadoutPlanLimits;
+  server: OwnerVisualLoadoutServer;
+  access: ServerShowcaseAccess;
 };
 
 type AuthResolution =
@@ -148,16 +152,14 @@ export async function getServerVisualLoadout(env: Env, serverId: string) {
 
 export async function resolveServerVisualLoadout(env: Env, serverId: string): Promise<ServerVisualLoadout> {
   await ensureServerVisualLoadoutSchema(env);
-  const [server, saved, earned, availableFrames, availableThemes] = await Promise.all([
-    findLinkedServer(env, serverId),
+  const [visualAccess, saved, earned] = await Promise.all([
+    readVisualAccess(env, serverId),
     getServerVisualLoadout(env, serverId),
     getEarnedServerBadges(env, serverId).catch(() => []),
-    getAvailableFramesForServer(env, serverId),
-    getAvailableThemesForServer(env, serverId),
   ]);
-  if (!server) throw new VisualLoadoutError("SERVER_NOT_FOUND", "Server not found.", 404);
-
-  const limits = getVisualLoadoutPlanLimits(server.plan_key);
+  const { server, access, limits } = visualAccess;
+  const availableFrames = publicFrameVisualsForPlan(limits.planKey);
+  const availableThemes = publicThemeBannerVisualsForPlan(limits.planKey);
   const availableBadges = earnedAwardsToShowcaseBadges(earned);
   const availableBadgeByCode = new Map(availableBadges.map((badge) => [badge.code, badge]));
   const savedBadgeCodes = parseSavedBadgeCodes(saved?.showcase_badges_json).filter((code) => availableBadgeByCode.has(code));
@@ -180,6 +182,7 @@ export async function resolveServerVisualLoadout(env: Env, serverId: string): Pr
     themeBannerKey: themeKey,
     animationEnabled,
     limits,
+    access: serializeShowcaseAccess(access),
     updatedAt: saved?.updated_at ?? null,
   };
 }
@@ -191,7 +194,11 @@ export async function resolvePublicServerVisualLoadout(
   earnedShowcaseBadges: VisualBadge[],
   fallback: PublicServerVisualLoadoutFallback,
 ): Promise<PublicServerVisualLoadout> {
-  const limits = getVisualLoadoutPlanLimits(planKey);
+  // Only the exact showcase server needs an authoritative exception lookup on public reads.
+  const exactShowcaseServer = serverId === NUKETOWN_SHOWCASE_SCOPE.linkedServerId;
+  const publicServer = exactShowcaseServer ? await findLinkedServer(env, serverId) : null;
+  const visualAccess = publicServer ? await readVisualAccess(env, serverId) : null;
+  const limits = visualAccess?.limits ?? getVisualLoadoutPlanLimits(exactShowcaseServer ? "free" : planKey);
   const saved = await readPublicServerVisualLoadout(env, serverId);
   const source = saved ? "saved" : "fallback";
   const earnedBadgeByCode = new Map(earnedShowcaseBadges.filter((badge) => badge.isPublic).map((badge) => [badge.code, badge]));
@@ -204,14 +211,17 @@ export async function resolvePublicServerVisualLoadout(
     .map((code) => earnedBadgeByCode.get(code))
     .filter(Boolean) as VisualBadge[] | undefined;
   const savedBadgeSelectionIsInvalid = Boolean(savedBadgeCodes?.length && !validSavedBadges?.length);
-  const selectedBadges = savedBadgeCodes === null || savedBadgeSelectionIsInvalid ? fallback.showcaseBadges : validSavedBadges ?? [];
+  const selectedBadges = (savedBadgeCodes === null || savedBadgeSelectionIsInvalid ? fallback.showcaseBadges : validSavedBadges ?? [])
+    .filter(badge => earnedBadgeByCode.has(badge.code)).slice(0, limits.maxShowcaseBadges);
 
   const frames = publicFrameVisualsForPlan(limits.planKey);
   const themes = publicThemeBannerVisualsForPlan(limits.planKey);
   const savedFrameKey = normalizeVisualKey(saved?.profile_frame_key);
   const savedThemeKey = normalizeVisualKey(saved?.theme_banner_key);
-  const profileFrame = frames.find((frame) => frame.key === savedFrameKey) ?? fallback.profileFrame ?? frames[0];
-  const themeBanner = themes.find((theme) => theme.key === savedThemeKey) ?? fallback.themeBanner ?? themes[0];
+  const profileFrame = frames.find((frame) => frame.key === savedFrameKey)
+    ?? frames.find((frame) => frame.key === fallback.profileFrame?.key) ?? frames[0];
+  const themeBanner = themes.find((theme) => theme.key === savedThemeKey)
+    ?? themes.find((theme) => theme.key === fallback.themeBanner?.key) ?? themes[0];
   const animationEnabled = Boolean(limits.animationsAllowed && saved?.animation_enabled !== 0);
   const accentColour = fallback.accentColour || profileFrame?.glowColour || themeBanner?.palette?.[0] || "#22d3ee";
 
@@ -220,7 +230,8 @@ export async function resolvePublicServerVisualLoadout(
     profileFrame,
     themeBanner,
     animationEnabled,
-    cardStyle: fallback.cardStyle ?? (limits.planKey === "premium" || limits.planKey === "pro" ? "premium" : "standard"),
+    cardStyle: !limits.animationsAllowed ? "standard" : visualAccess?.access.source === "complimentary_showcase"
+      ? "premium" : fallback.cardStyle ?? "premium",
     accentColour,
     source,
   };
@@ -228,16 +239,14 @@ export async function resolvePublicServerVisualLoadout(
 
 export async function validateServerVisualLoadout(env: Env, serverId: string, input: VisualLoadoutInput): Promise<ValidatedLoadoutSelection> {
   await ensureServerVisualLoadoutSchema(env);
-  const server = await findLinkedServer(env, serverId);
-  if (!server) throw new VisualLoadoutError("SERVER_NOT_FOUND", "Server not found.", 404);
+  const { server, access, limits } = await readVisualAccess(env, serverId);
 
-  const [saved, availableBadges, availableFrames, availableThemes] = await Promise.all([
+  const [saved, availableBadges] = await Promise.all([
     getServerVisualLoadout(env, server.id),
     getAvailableShowcaseBadgesForServer(env, server.id),
-    getAvailableFramesForServer(env, server.id),
-    getAvailableThemesForServer(env, server.id),
   ]);
-  const limits = getVisualLoadoutPlanLimits(server.plan_key);
+  const availableFrames = publicFrameVisualsForPlan(limits.planKey);
+  const availableThemes = publicThemeBannerVisualsForPlan(limits.planKey);
   const existingCodes = parseSavedBadgeCodes(saved?.showcase_badges_json);
   const requestedCodes = input.showcaseBadges === undefined ? existingCodes : parseInputBadgeCodes(input.showcaseBadges);
   const uniqueCodes = dedupe(requestedCodes);
@@ -275,13 +284,18 @@ export async function validateServerVisualLoadout(env: Env, serverId: string, in
     animationEnabled: Boolean(requestedAnimation && limits.animationsAllowed),
     reason: typeof input.reason === "string" ? input.reason.trim().slice(0, 300) || null : null,
     limits,
+    server,
+    access,
   };
 }
 
-export async function saveServerVisualLoadout(env: Env, serverId: string, actorUserId: string, input: VisualLoadoutInput): Promise<ServerVisualLoadout> {
+export async function saveServerVisualLoadout(env: Env, serverId: string, actorUserId: string, input: VisualLoadoutInput, expectedOwnerUserId?: string | null): Promise<ServerVisualLoadout> {
   await ensureServerVisualLoadoutSchema(env);
   const current = await getServerVisualLoadout(env, serverId);
   const validated = await validateServerVisualLoadout(env, serverId, input);
+  if (!validated.server.user_id || (expectedOwnerUserId !== undefined && validated.server.user_id !== expectedOwnerUserId)) {
+    throw new VisualLoadoutError("VISUAL_LOADOUT_ACCESS_CHANGED", "Server access changed. Refresh before saving again.", 409);
+  }
   const now = new Date().toISOString();
   const id = current?.id ?? crypto.randomUUID();
   const newValue = {
@@ -292,12 +306,21 @@ export async function saveServerVisualLoadout(env: Env, serverId: string, actorU
   };
 
   const db = requireDb(env);
-  await db
+  const accessGuard = showcaseWriteGuard(serverId, validated.server.user_id, validated.access);
+  const currentGuard = current
+    ? { sql: `EXISTS (SELECT 1 FROM server_visual_loadouts WHERE server_id = ? AND id = ?
+        AND showcase_badges_json IS ? AND profile_frame_key IS ? AND theme_banner_key IS ?
+        AND animation_enabled IS ? AND updated_at IS ?)`,
+      values: [serverId, current.id, current.showcase_badges_json, current.profile_frame_key, current.theme_banner_key, current.animation_enabled, current.updated_at] }
+    : { sql: "NOT EXISTS (SELECT 1 FROM server_visual_loadouts WHERE server_id = ?)", values: [serverId] };
+  const guard = `${accessGuard.sql} AND ${currentGuard.sql}`;
+  const guardValues = [...accessGuard.values, ...currentGuard.values];
+  const save = db
     .prepare(
       `INSERT INTO server_visual_loadouts (
         id, server_id, showcase_badges_json, profile_frame_key, theme_banner_key,
         animation_enabled, updated_by_user_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${guard}
       ON CONFLICT(server_id) DO UPDATE SET
         showcase_badges_json = excluded.showcase_badges_json,
         profile_frame_key = excluded.profile_frame_key,
@@ -316,14 +339,14 @@ export async function saveServerVisualLoadout(env: Env, serverId: string, actorU
       actorUserId,
       current?.created_at ?? now,
       now,
-    )
-    .run();
+      ...guardValues,
+    );
 
-  await db
+  const audit = db
     .prepare(
       `INSERT INTO server_customisation_audit_log (
         id, server_id, actor_user_id, action, old_value_json, new_value_json, reason, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE ${guard}`,
     )
     .bind(
       crypto.randomUUID(),
@@ -339,23 +362,27 @@ export async function saveServerVisualLoadout(env: Env, serverId: string, actorU
       JSON.stringify(newValue),
       validated.reason,
       now,
-    )
-    .run();
+      ...guardValues,
+    );
+
+  // Audit the validated snapshot before replacing it, in the same transaction.
+  const results = await db.batch([audit, save]);
+  if (Number(results[1]?.meta?.changes ?? 0) !== 1) {
+    throw new VisualLoadoutError("VISUAL_LOADOUT_ACCESS_CHANGED", "Server access or the saved loadout changed. Refresh before saving again.", 409);
+  }
 
   return resolveServerVisualLoadout(env, serverId);
 }
 
 export async function getAvailableFramesForServer(env: Env, serverId: string): Promise<ProfileFrameVisual[]> {
-  const server = await findLinkedServer(env, serverId);
-  const plan = getVisualLoadoutPlanLimits(server?.plan_key).planKey;
+  const plan = (await readVisualAccess(env, serverId)).limits.planKey;
   const frames = getAvailableFrameVisuals();
   if (plan === "premium" || plan === "pro") return Object.values(frames);
   return [frames[DEFAULT_FRAME_KEY]].filter(Boolean);
 }
 
 export async function getAvailableThemesForServer(env: Env, serverId: string): Promise<ServerThemeBannerVisual[]> {
-  const server = await findLinkedServer(env, serverId);
-  const plan = getVisualLoadoutPlanLimits(server?.plan_key).planKey;
+  const plan = (await readVisualAccess(env, serverId)).limits.planKey;
   const themes = getAvailableThemeBannerVisuals();
   const keys = plan === "premium" || plan === "pro" ? Object.keys(themes) : [DEFAULT_THEME_KEY];
   return keys.map((key) => themes[key]).filter(Boolean);
@@ -370,6 +397,15 @@ export function getVisualLoadoutPlanLimits(planKey: unknown): VisualLoadoutPlanL
   const normalized = normalizePlanKey(planKey);
   const limit = VISUAL_LOADOUT_PLAN_LIMITS[normalized] ?? VISUAL_LOADOUT_PLAN_LIMITS.free;
   return { planKey: normalized, ...limit };
+}
+
+async function readVisualAccess(env: Env, serverId: string) {
+  const server = await findLinkedServer(env, serverId);
+  if (!server) throw new VisualLoadoutError("SERVER_NOT_FOUND", "Server not found.", 404);
+  const access = await readServerShowcaseAccess(env, server.id, server);
+  const planKey = access.source === "complimentary_showcase" ? "pro"
+    : access.listing.listingPlanKey === "free" ? "free" : server.plan_key;
+  return { server, access, limits: getVisualLoadoutPlanLimits(planKey) };
 }
 
 export async function ensureServerVisualLoadoutSchema(env: Env) {

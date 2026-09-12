@@ -84,6 +84,7 @@ export const VALIDATION_PROFILES: Record<ValidationProfileName, ValidationProfil
     commands: [
       npm("test:billing-plans", "Plan and Stripe readiness tests."),
       npm("test:billing-integrity", "Billing integrity and allowance tests."),
+      npm("test:onboarding-service-proof", "Trusted service proof and activation snapshot guards."),
       npm("test:autodev", "AutoDev policy invariants."),
       typecheck("TypeScript validation."),
       npm("lint", "Lint validation."),
@@ -98,6 +99,7 @@ export const VALIDATION_PROFILES: Record<ValidationProfileName, ValidationProfil
     requiresSecurityReview: true,
     commands: [
       npm("test:nitrado-diagnostics", "Nitrado ADM diagnostics tests."),
+      npm("test:onboarding-service-proof", "Trusted service proof and activation snapshot guards."),
       npm("test:adm-parser", "ADM parser tests."),
       npm("test:adm-import-pipeline", "ADM import pipeline tests."),
       npm("test:adm-sync-runner", "ADM sync runner tests."),

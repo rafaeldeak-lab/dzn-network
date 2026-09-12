@@ -2,6 +2,23 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  Activity,
+  CalendarDays,
+  Crown,
+  Gamepad2,
+  LayoutDashboard,
+  LogIn,
+  LogOut,
+  MessageCircle,
+  Plus,
+  Server,
+  Sparkles,
+  Trophy,
+  User,
+  Wrench,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { DznPulseBell, DznPulseProvider } from "@/components/dzn-pulse/dzn-pulse-provider";
@@ -9,7 +26,7 @@ import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding
 import type { AuthNavigationSummary } from "@/components/onboarding/types";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
 
-type SiteHeaderActive = "features" | "leaderboards" | "servers" | "pricing" | "stats" | "events" | "dashboard";
+type SiteHeaderActive = "features" | "player" | "games" | "leaderboards" | "servers" | "pricing" | "stats" | "events" | "dashboard";
 
 type SiteHeaderProps = {
   active?: SiteHeaderActive;
@@ -25,6 +42,7 @@ type HeaderNavLink = {
   href: string;
   label: string;
   active?: SiteHeaderActive;
+  icon: LucideIcon;
 };
 type HeaderAuthProbeState = {
   authenticated: boolean;
@@ -44,6 +62,7 @@ const logoSources = {
 };
 
 const rootHeaderHiddenPrefixes = [
+  "/games",
   "/dashboard",
   "/dzn-pulse",
   "/login",
@@ -55,23 +74,27 @@ const rootHeaderHiddenPrefixes = [
 ];
 
 const loggedOutHeaderLinks: HeaderNavLink[] = [
-  { href: "/#features", label: "Features", active: "features" },
-  { href: "/#pricing", label: "Pricing", active: "pricing" },
+  { href: "/#features", label: "Features", active: "features", icon: Sparkles },
+  { href: "/pricing", label: "Pricing", active: "pricing", icon: Crown },
 ];
 
 const starterHeaderLinks: HeaderNavLink[] = [
-  { href: "/#features", label: "Features", active: "features" },
-  { href: "/leaderboards", label: "Leaderboards", active: "leaderboards" },
-  { href: "/servers", label: "Servers", active: "servers" },
-  { href: "/events", label: "Events", active: "events" },
+  { href: "/#features", label: "Features", active: "features", icon: Sparkles },
+  { href: "/player", label: "Player Hub", active: "player", icon: User },
+  { href: "/games", label: "Games", active: "games", icon: Gamepad2 },
+  { href: "/leaderboards", label: "Leaderboards", active: "leaderboards", icon: Trophy },
+  { href: "/servers", label: "Servers", active: "servers", icon: Server },
+  { href: "/events", label: "Events", active: "events", icon: CalendarDays },
 ];
 
 const proHeaderLinks: HeaderNavLink[] = [
-  { href: "/#features", label: "Features", active: "features" },
-  { href: "/leaderboards", label: "Leaderboards", active: "leaderboards" },
-  { href: "/servers", label: "Servers", active: "servers" },
-  { href: "/#stats", label: "Stats", active: "stats" },
-  { href: "/events", label: "Events", active: "events" },
+  { href: "/#features", label: "Features", active: "features", icon: Sparkles },
+  { href: "/player", label: "Player Hub", active: "player", icon: User },
+  { href: "/games", label: "Games", active: "games", icon: Gamepad2 },
+  { href: "/leaderboards", label: "Leaderboards", active: "leaderboards", icon: Trophy },
+  { href: "/servers", label: "Servers", active: "servers", icon: Server },
+  { href: "/#stats", label: "Stats", active: "stats", icon: Activity },
+  { href: "/events", label: "Events", active: "events", icon: CalendarDays },
 ];
 
 let pageHeaderAuthState: SiteHeaderAuthStateProps | null = null;
@@ -185,53 +208,62 @@ export function SiteHeader({
         aria-busy={authProbePending}
         data-auth-state={resolvedAuthenticated ? "authenticated" : authProbePending ? "checking-public" : "anonymous"}
       >
-        <Link href="/" className="dzn-header-logo" aria-label="DZN Network home">
-          <span className="dzn-header-logo-frame">
-            <HeaderLogoVideo />
-          </span>
-        </Link>
+        <SiteHomeLink />
 
         <div className="dzn-header-links">
-          {navLinks.map((link) => (
-            <Link key={link.href} href={link.href} aria-current={active === link.active ? "page" : undefined}>
-              {link.label}
-            </Link>
-          ))}
+          {navLinks.map((link) => {
+            const LinkIcon = link.icon;
+            return (
+              <Link key={link.href} href={link.href} aria-current={active === link.active ? "page" : undefined}>
+                <LinkIcon className="dzn-header-link-icon" aria-hidden="true" />
+                <span>{link.label}</span>
+              </Link>
+            );
+          })}
         </div>
 
         <div className="dzn-header-actions">
           {resolvedAuthenticated ? <DznPulseBell className="dzn-header-pulse-bell" /> : null}
           <a href={DZN_PUBLIC_DISCORD_INVITE_URL} target="_blank" rel="noopener noreferrer" className="dzn-header-action dzn-header-action--discord">
-            Discord
+            <MessageCircle className="dzn-header-action-icon" aria-hidden="true" />
+            <span>Discord</span>
           </a>
           {resolvedAuthenticated ? (
             <>
               <span className={`dzn-header-plan dzn-header-plan--${planTier}`} title={headerPlanTitle(resolvedNavigation)}>
-                <span>{resolvedNavigation?.plan_label ?? "Free"}</span>
-                <small>{headerPlanDetail(resolvedNavigation)}</small>
+                <Crown className="dzn-header-plan-icon" aria-hidden="true" />
+                <span className="dzn-header-plan-copy">
+                  <span>{planTier === "free" ? "Free Player" : resolvedNavigation?.plan_label ?? "Free Player"}</span>
+                  <small>{headerPlanDetail(resolvedNavigation)}</small>
+                </span>
               </span>
               {primaryAction.href === "/dashboard" ? null : (
                 <Link href="/dashboard" className="dzn-header-action">
-                  Dashboard
+                  <LayoutDashboard className="dzn-header-action-icon" aria-hidden="true" />
+                  <span>Dashboard</span>
                 </Link>
               )}
               {showAddServer ? (
                 <Link href="/setup" className="dzn-header-action dzn-header-action--primary">
-                  {planTier === "free" ? "Start Setup" : "Add Your Server"}
+                  <Plus className="dzn-header-action-icon" aria-hidden="true" />
+                  <span>{planTier === "free" ? "Start Setup" : "Add Your Server"}</span>
                 </Link>
               ) : null}
               <Link href={primaryAction.href} className={`dzn-header-action dzn-header-action--package dzn-header-action--package-${primaryAction.tone}`}>
-                {primaryAction.label}
+                <Wrench className="dzn-header-action-icon" aria-hidden="true" />
+                <span>{primaryAction.label}</span>
               </Link>
             </>
           ) : null}
           {resolvedAuthenticated && showLogout ? (
             <button type="button" onClick={signOut} className="dzn-header-action dzn-header-action--logout">
-              Logout
+              <LogOut className="dzn-header-action-icon" aria-hidden="true" />
+              <span>Logout</span>
             </button>
           ) : (
             <Link href={`/login?returnTo=${encodeURIComponent(returnTo)}`} className="dzn-header-action dzn-header-action--logout">
-              Login
+              <LogIn className="dzn-header-action-icon" aria-hidden="true" />
+              <span>Login</span>
             </Link>
           )}
         </div>
@@ -239,6 +271,12 @@ export function SiteHeader({
       </header>
     </DznPulseProvider>
   );
+}
+
+export function SiteHomeLink({ className = "" }: { className?: string }) {
+  return <Link href="/" className={`dzn-header-logo ${className}`.trim()} aria-label="DZN Network home">
+    <span className="dzn-header-logo-frame"><HeaderLogoVideo /></span>
+  </Link>;
 }
 
 function HeaderLogoVideo() {
@@ -266,7 +304,6 @@ function HeaderLogoVideo() {
     const play = () => {
       video.play().catch(() => {
         video.pause();
-        setUseVideo(false);
       });
     };
     const syncVisibility = () => {
@@ -320,6 +357,8 @@ function HeaderLogoVideo() {
 }
 
 function activeFromPathname(pathname: string): SiteHeaderActive | undefined {
+  if (pathname.startsWith("/games")) return "games";
+  if (pathname.startsWith("/player")) return "player";
   if (pathname.startsWith("/leaderboards")) return "leaderboards";
   if (pathname.startsWith("/servers")) return "servers";
   if (pathname.startsWith("/events")) return "events";
@@ -348,8 +387,8 @@ function normalizeHeaderNavigation(value: unknown): AuthNavigationSummary | null
 
 function defaultPrimaryActionForTier(tier: HeaderPlanTier): HeaderPrimaryAction {
   if (tier === "pro") return { label: "Pro Tools", href: "/dashboard", tone: "pro" };
-  if (tier === "starter") return { label: "Upgrade to Pro", href: "/#pricing", tone: "upgrade" };
-  return { label: "Start Trial", href: "/#pricing", tone: "trial" };
+  if (tier === "starter") return { label: "Upgrade to Pro", href: "/pricing", tone: "upgrade" };
+  return { label: "Owner Plans", href: "/pricing", tone: "trial" };
 }
 
 function headerPlanTitle(navigation: AuthNavigationSummary | null) {
@@ -361,5 +400,5 @@ function headerPlanDetail(navigation: AuthNavigationSummary | null) {
   if (!navigation) return "Account";
   if (navigation.plan_tier === "pro") return "Pro tools";
   if (navigation.plan_tier === "starter") return navigation.plan_status.toLowerCase() === "trialing" ? "Trial access" : "Starter access";
-  return "Trial ready";
+  return "Player access";
 }

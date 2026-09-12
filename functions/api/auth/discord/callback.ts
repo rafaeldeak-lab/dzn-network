@@ -9,6 +9,7 @@ import {
 import { isCronSecretAuthorized } from "../../../_lib/cron-auth";
 import { methodNotAllowed, readCookie, redirect, secureHeaders, setCookie } from "../../../_lib/http";
 import { isValidOAuthState, OAUTH_RETURN_COOKIE, OAUTH_STATE_COOKIE, safeReturnTo } from "../../../_lib/oauth";
+import { storePlayerDiscordCommunityMemberships } from "../../../_lib/player-community-memberships";
 import type { Env, PagesFunction } from "../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -44,6 +45,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     const guilds = await fetchDiscordGuilds(token.access_token);
     const userId = await upsertUser(env, user);
     await storeDiscordOAuthToken(env, userId, token);
+    await storePlayerDiscordCommunityMemberships(env, userId, guilds).catch(logOptionalPlayerCommunityMembershipFailure);
     await storeGuilds(env, userId, filterAdminGuilds(guilds));
     const session = await createSession(env, userId);
 
@@ -71,6 +73,12 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     return redirect(callbackFailurePath(request, env, classifyCallbackFailure(error), "discord_callback"), headers);
   }
 };
+
+function logOptionalPlayerCommunityMembershipFailure(error: unknown) {
+  console.warn("DZN_PLAYER_COMMUNITY_MEMBERSHIP_STORE_SKIPPED", {
+    reason: error instanceof Error ? error.name : "unknown",
+  });
+}
 
 type CallbackFailure = {
   stage: string;

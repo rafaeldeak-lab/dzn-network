@@ -119,8 +119,8 @@ export function getServerLifecycleDisplay(status: ServerLifecycleStatus) {
     case "active_live":
       return {
         label: "Active live",
-        message: "Full sync is enabled.",
-        ownerAction: "No action needed.",
+        message: "Normal sync is configured; completed setup and account access are still required.",
+        ownerAction: "Check setup and the latest sync result.",
       };
     case "active_degraded":
       return {
@@ -189,8 +189,11 @@ export function isPublicHistoricalServerLifecycle(status: ServerLifecycleStatus)
   return SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES.includes(status) && !SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES.includes(status);
 }
 
-export function getPublicServerLifecycleDisplay(status: ServerLifecycleStatus): { label: string; message: string; ownerAction: string | null } {
+export function getPublicServerLifecycleDisplay(status: ServerLifecycleStatus, onboardingStatus?: string | null): { label: string; message: string; ownerAction: string | null } {
   if (!isPublicHistoricalServerLifecycle(status)) {
+    if (onboardingStatus !== undefined && onboardingStatus?.toLowerCase() !== "live") {
+      return { label: "Setup incomplete", message: "This server has not completed its setup checks.", ownerAction: null };
+    }
     const display = getServerLifecycleDisplay(status);
     return {
       label: display.label,

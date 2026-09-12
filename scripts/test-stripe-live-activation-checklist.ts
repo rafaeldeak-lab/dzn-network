@@ -36,6 +36,9 @@ for (const snippet of [
   "Starter trial abuse protection is present and reviewed before live billing is enabled.",
   "Live checkout remains paused until the final approved go-live step sets `DZN_LIVE_CHECKOUT_ENABLED=true`.",
   "`NEXT_PUBLIC_STRIPE_*_PRICE_ID` values are fallback compatibility aliases only.",
+  "`DZN_PUBLIC_LEGAL_SELLER_NAME`",
+  "`DZN_PUBLIC_LEGAL_CONTACT_ADDRESS`",
+  "Do not infer or publish a home address from Stripe or any private account record.",
   "AutoDev must treat these as blocked",
   "`stripe products create`",
   "`stripe prices create`",
@@ -51,6 +54,8 @@ for (const snippet of [
   "Live billing remains a high-risk human-approved operation.",
   "docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md",
   "Issue #46",
+  "DZN_PUBLIC_LEGAL_SELLER_NAME",
+  "DZN_PUBLIC_LEGAL_CONTACT_ADDRESS",
 ]) {
   assert.equal(stripeSetupDoc.includes(snippet), true, `Stripe live setup doc should link checklist: ${snippet}`);
 }
@@ -59,6 +64,8 @@ const billingPlansDoc = read("docs/BILLING_PLANS.md");
 for (const snippet of [
   "docs/STRIPE_LIVE_ACTIVATION_CHECKLIST.md",
   "Issue #46",
+  "DZN_PUBLIC_LEGAL_SELLER_NAME",
+  "DZN_PUBLIC_LEGAL_CONTACT_ADDRESS",
   "Live Stripe product/price creation, webhook endpoint changes, Cloudflare secret changes, D1 migration application, customer import, checkout enablement, and payment enablement remain separate high-risk human-approved operations.",
 ]) {
   assert.equal(billingPlansDoc.includes(snippet), true, `Billing plans doc should include live activation boundary: ${snippet}`);

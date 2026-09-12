@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./test-dashboard-plan-display";
 import { readFileSync } from "node:fs";
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
