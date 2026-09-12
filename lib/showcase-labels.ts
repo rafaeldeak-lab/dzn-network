@@ -11,6 +11,16 @@ export function publicListingPlanLabel(source: unknown) {
   return source === "complimentary_showcase" ? "Pro Listing (complimentary)" : "Pro Listing";
 }
 
+export function publicVisibilityTierLabel(tier: unknown, source: unknown) {
+  if (tier === "premium") return source === "complimentary_showcase" ? publicListingPlanLabel(source) : "Pro";
+  return tier === "enhanced" ? "Enhanced" : "Standard";
+}
+
+export function formatPublicVisibilitySummary(value: string | null | undefined, source: unknown) {
+  if (!value) return null;
+  return value.replace(/\b(?:Premium|Pro)\b/g, source === "complimentary_showcase" ? "Pro (complimentary)" : "Pro");
+}
+
 export function publicMapLabel(value: unknown) {
   const map = resolveDznMapConfig(value);
   if (map) return map.key === "chernarusplus" ? "Chernarus" : map.displayName;
