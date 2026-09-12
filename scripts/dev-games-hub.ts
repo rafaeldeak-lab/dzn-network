@@ -10,7 +10,7 @@ async function main() {
   const root = resolve("out");
   await stat(resolve(root, "games.html"));
   const mime: Record<string, string> = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json",
-    ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".webm": "video/webm", ".mp4": "video/mp4", ".txt": "text/plain", ".ico": "image/x-icon" };
+    ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".webm": "video/webm", ".mp4": "video/mp4", ".txt": "text/plain", ".ico": "image/x-icon" };
   let origin = "";
   const server = createServer(async (req, res) => {
     try {

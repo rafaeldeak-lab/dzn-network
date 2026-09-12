@@ -23,9 +23,9 @@ This release implements `/games` with DZN Minesweeper, Recon/Patrol/Survival dif
 
 ## Release Gates
 
-Migration `0070_games_hub.sql` is additive and isolated. It has not been applied to production by this work. It creates only `dzn_game_sessions` and `dzn_game_reward_ledger`, both linked to existing users. No existing billing, DayZ stats, identity association, Nitrado, reset schedule or Discord record is updated.
+Migration `0070_games_hub.sql` is additive and isolated. Following explicit approval, it was applied to production on 12 September 2026 at 21:14:17 UTC. Both new tables, the reward-history index, the migration ledger and zero foreign-key violations were verified. Unrelated pending migrations 0065 and 0069 were not applied. It creates only `dzn_game_sessions` and `dzn_game_reward_ledger`, both linked to existing users. No existing billing, DayZ stats, identity association, Nitrado, reset schedule or Discord record is updated.
 
-The API is closed unless `DZN_GAMES_HUB_ENABLED` is exactly `true`. The default is disabled. Missing schema fails closed with a sanitized unavailable response. Merging source is not a production migration or feature activation.
+The API is closed unless `DZN_GAMES_HUB_ENABLED` is exactly `true`. Missing schema fails closed with a sanitized unavailable response. PR182 deployed successfully at merge e3eac7655d63c7458c7610b75a8d873bcca1a5b7, but the dashboard-only flag did not survive its Wrangler-managed deployment. Production now explicitly sets the approved flag in `wrangler.toml`; the same D1 binding is repeated because Pages non-inheritable overrides require it. Local/preview defaults remain disabled. No secret values are added to source. All 27 existing secret-type settings and the complete original configuration fingerprint were verified unchanged after PR182. The following activation release still requires live verification; a merge is not evidence of live gameplay.
 
 Before live activation: review the immutable patch; check the current migration ledger; apply only this approved migration separately; verify the new tables and foreign keys; enable the scoped flag; verify a genuine Free Discord account can play and earn once; verify a second account cannot read or move its board; verify mobile rendering and monitoring. Reverting the flag disables access without deleting rewards.
 

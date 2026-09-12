@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ArrowLeft, ArrowRight, Award, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, LoaderCircle,
-  LogIn, Microchip, MousePointer2, Play, Radio, RefreshCw, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
+  LogIn, Microchip, MousePointer2, Pause, Play, Radio, RefreshCw, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState } from "@/components/site-header";
 import { GAME_MODES, HUB_BADGES, WORKSHOP_PART_COST, WORKSHOP_STAGES, type GameMode, type GameView, type HubPayload } from "@/lib/games-hub";
 import styles from "./games-hub.module.css";
@@ -25,6 +26,9 @@ export function GamesHub() {
   const [help, setHelp] = useState(false);
   const [replace, setReplace] = useState(false);
   const [now, setNow] = useState(0);
+  const [motionReady, setMotionReady] = useState(false);
+  const [motionPaused, setMotionPaused] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
   const lock = useRef(false);
   const assemblyKey = useRef<string | null>(null);
   const generation = useRef(0);
@@ -46,9 +50,16 @@ export function GamesHub() {
     const controller = new AbortController();
     const timer = window.setInterval(() => { const clock = serverClock.current; if (clock.time) setNow(clock.time + performance.now() - clock.measuredAt); }, 1000);
     const syncHash = () => { const hash = location.hash.slice(1); if (views.some(item => item.id === hash)) setView(hash as View); };
-    const initial = window.setTimeout(() => { syncHash(); void refresh(controller.signal); }, 0);
+    const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const syncMotion = () => setReducedMotion(preference.matches);
+    const initial = window.setTimeout(() => {
+      syncHash(); syncMotion();
+      try { setMotionPaused(localStorage.getItem("dzn.games.motion") === "paused"); } catch { /* Storage may be disabled. */ }
+      setMotionReady(true); void refresh(controller.signal);
+    }, 0);
+    preference.addEventListener("change", syncMotion);
     window.addEventListener("hashchange", syncHash);
-    return () => { controller.abort(); clearTimeout(initial); clearInterval(timer); window.removeEventListener("hashchange", syncHash); };
+    return () => { controller.abort(); clearTimeout(initial); clearInterval(timer); window.removeEventListener("hashchange", syncHash); preference.removeEventListener("change", syncMotion); };
   }, [refresh]);
 
   useEffect(() => {
@@ -94,9 +105,17 @@ export function GamesHub() {
     void mutate({ action: "start", mode });
   }
 
-  return <main className={styles.hub}>
+  const motionRunning = motionReady && !motionPaused && !reducedMotion;
+  const motionLabel = reducedMotion ? "Background motion off: reduced motion preference" : motionPaused ? "Resume background motion" : "Pause background motion";
+
+  return <main className={styles.hub} data-motion={motionRunning ? "running" : "paused"}>
+    <div className={styles.environment} aria-hidden="true"><div className={styles.environmentImage} /></div>
+    <div className={styles.hubContent}>
     <SiteHeaderAuthState authenticated={phase === "ready"} checkingAccount={phase === "loading"} returnTo="/games" />
-    <nav className={styles.hubNav} aria-label="DZN Network"><Link href="/" prefetch={false}><ArrowLeft size={16} /><strong>DZN NETWORK</strong></Link><Link href="/player" prefetch={false}>Player Hub<ArrowRight size={16} /></Link></nav>
+    <nav className={styles.hubNav} aria-label="DZN Network"><Link href="/" prefetch={false}><ArrowLeft size={16} /><strong>DZN NETWORK</strong></Link><div className={styles.navActions}><button className={styles.iconButton} title={motionLabel} aria-label={motionLabel} aria-pressed={motionRunning} disabled={!motionReady || reducedMotion} onClick={() => {
+      const paused = !motionPaused; setMotionPaused(paused);
+      try { localStorage.setItem("dzn.games.motion", paused ? "paused" : "running"); } catch { /* Motion still works without storage. */ }
+    }}>{motionRunning ? <Pause size={16} /> : <Play size={16} />}</button><Link href="/player" prefetch={false}>Player Hub<ArrowRight size={16} /></Link></div></nav>
     <div className={styles.heading}>
       <div><span className={styles.eyebrow}>DZN / PLAYER ARCADE</span><h1>DZN Games Hub<span className={styles.dot}>.</span></h1></div>
       {summary && <div className={styles.identity}>{xp >= HUB_BADGES[0].xp ? <Insignia position={rank.position} small /> : <span className={styles.recruit}><Gamepad2 size={24} /></span>}<div><strong>{summary.username}</strong><span>{xp >= HUB_BADGES[0].xp ? rank.name : "New recruit"}</span></div><span className={styles.level}>LV {1 + Math.floor(xp / 150)}</span></div>}
@@ -130,7 +149,7 @@ export function GamesHub() {
               <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
                 {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Sector secured</strong><span>{summary?.today.includes(game.mode) ? `${GAME_MODES[game.mode].label} reward recorded for today. Further wins today are practice.` : "Daily rewards have reset. Start a new mission for today's reward."}</span></div></> : game.status === "lost" ? <><Target size={22} /><div><strong>Mine triggered</strong><span>Mission ended. Your earned XP and parts are unchanged.</span></div></> : !active ? <><Clock3 size={22} /><div><strong>Mission expired</strong><span>Start a new board when you are ready.</span></div></> : <><Radio size={20} /><div><strong>Mission in progress</strong><span>{tool === "flag" ? "Flag mode" : "Reveal mode"} / {game.cells.flat().filter(cell => typeof cell === "number").length} safe cells cleared</span></div></>}
               </div>
-            </> : <div className={styles.readyBoard}><Target size={42} /><h3>Recon standing by</h3><div className={styles.rewardPills}><span>{GAME_MODES[mode].mines} mines</span><span>+{GAME_MODES[mode].xp} XP</span><span>+{GAME_MODES[mode].parts} parts</span></div></div>}
+            </> : <div className={styles.readyBoard}><Image className={styles.scannerArt} src="/images/games/dzn-field-scanner.webp" alt="DZN field scanner, survey flags and equipment bag" width={960} height={640} loading="eager" /><h3>{GAME_MODES[mode].label} standing by</h3><div className={styles.rewardPills}><span>{GAME_MODES[mode].mines} mines</span><span>+{GAME_MODES[mode].xp} XP</span><span>+{GAME_MODES[mode].parts} parts</span></div></div>}
           </section>}
 
           {view === "workshop" && <section>
@@ -164,6 +183,7 @@ export function GamesHub() {
 
     {help && <Dialog title="Minesweeper rules" onClose={() => setHelp(false)}><p>Reveal every safe cell without triggering a mine. Numbers count mines in the eight neighbouring cells. Flags mark suspected mines. The first revealed cell is safe.</p><p>Each difficulty awards XP and parts once per UTC day. Boards expire after 30 minutes. Further wins are practice; rewards cannot be bought, transferred or exchanged for money.</p><p>Arrow keys move between cells. Enter reveals or flags with the selected tool; F toggles a flag.</p><button className={styles.primary} onClick={() => setHelp(false)}>Back to mission</button></Dialog>}
     {replace && <Dialog title="Start a new board?" onClose={() => setReplace(false)}><p>The current unfinished board will be replaced. Earned XP and parts are kept.</p><div className={styles.dialogActions}><button onClick={() => setReplace(false)}>Keep playing</button><button className={styles.primary} onClick={start}><RefreshCw size={17} />New board</button></div></Dialog>}
+    </div>
   </main>;
 }
 

@@ -20,6 +20,33 @@ try {
   checks.push("Anonymous route gates games and rewards behind Discord login");
   await page.goto(`${base}/__local-login`);
   await page.getByLabel("Difficulty", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Background motion off: reduced motion preference" }).isDisabled(), true);
+  assert.equal(await page.locator('main[data-motion]').getAttribute("data-motion"), "paused");
+  const scanner = page.getByAltText("DZN field scanner, survey flags and equipment bag");
+  if (await scanner.count()) {
+    await scanner.evaluate(image => image.decode());
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.screenshot({ path: `${output}/art-ready-${width}.png`, fullPage: true });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.getByRole("button", { name: "Pause background motion", exact: true }).waitFor();
+  assert.equal(await page.locator('main[data-motion]').getAttribute("data-motion"), "running");
+  const backdrop = page.locator('main[data-motion] > div[aria-hidden="true"] > div');
+  const startTransform = await backdrop.evaluate(element => getComputedStyle(element).transform);
+  await page.waitForTimeout(500);
+  assert.notEqual(await backdrop.evaluate(element => getComputedStyle(element).transform), startTransform);
+  await page.getByRole("button", { name: "Pause background motion", exact: true }).click();
+  await page.reload(); await page.getByLabel("Difficulty", { exact: true }).waitFor();
+  assert.equal(await page.locator('main[data-motion]').getAttribute("data-motion"), "paused");
+  await page.getByRole("button", { name: "Resume background motion", exact: true }).click();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByRole("button", { name: "Background motion off: reduced motion preference" }).waitFor();
+  assert.equal(await page.locator('main[data-motion]').getAttribute("data-motion"), "paused");
+  checks.push("Custom equipment artwork, moving backdrop, persistent pause and live reduced-motion preference");
   await page.getByLabel("Difficulty", { exact: true }).selectOption("recon");
   if (await page.getByRole("button", { name: "Start mission", exact: true }).count()) {
     await page.getByRole("button", { name: "Start mission", exact: true }).click();
@@ -82,7 +109,7 @@ try {
   await page.screenshot({ path: `${output}/mobile-survival.png`, fullPage: true });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   checks.push("20x20 board scrolls inside the board, not the entire phone page");
-  for (const asset of ["field-insignia.png", "field-relay.png"]) {
+  for (const asset of ["field-insignia.png", "field-relay.png", "dzn-outpost.webp", "dzn-field-scanner.webp"]) {
     const image = await context.request.get(`${base}/images/games/${asset}`); assert.equal(image.status(), 200); assert.ok((await image.body()).length > 1000);
   }
   for (const route of ["player/__next.player.__PAGE__.txt", "login/__next.login.__PAGE__.txt"]) {
