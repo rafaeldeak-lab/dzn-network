@@ -3,6 +3,10 @@ import { existsSync, readFileSync } from "node:fs";
 
 const section = read("components/onboarding/visual-loadout-section.tsx");
 const settingsPage = read("components/onboarding/server-settings-page.tsx");
+assert.equal(section.includes('payload?.loadout.access?.source === "complimentary_showcase"'), true, "Complimentary label must come from authoritative server access.");
+assert.equal(section.includes('"Pro (complimentary)"'), true, "Complimentary access must not be presented as a paid subscription.");
+assert.equal(section.includes('mt-4 grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-'), true, "Mobile preview columns must shrink within the panel.");
+assert.equal(section.includes('break-words text-xl font-black text-white'), true, "Preview server names must wrap instead of disappearing in a clipped column.");
 
 assert.equal(existsSync("components/onboarding/visual-loadout-section.tsx"), true, "Visual loadout dashboard section should exist.");
 assert.equal(settingsPage.includes("VisualLoadoutSection"), true, "Server Settings should render the visual loadout section.");
