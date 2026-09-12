@@ -113,6 +113,12 @@ try {
     assert.ok(!(await healthFailure instanceof Error));
     await page.getByRole("button", { name: /^Overview/i }).click();
     await page.getByText("Free visual treatment", { exact: true }).waitFor();
+    // /auth/me also returns free/free when its billing SELECT fails.
+    await context.clearCookies();
+    await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+    await page.reload();
+    await page.getByText("Checking server plan...", { exact: true }).waitFor();
+    assert.equal(await page.getByText(/^(Pro|Starter|Free) visual treatment$/).count(), 0);
     accountPlan = "pro";
     accountStatus = "unknown";
     await context.clearCookies();
@@ -127,7 +133,7 @@ try {
     assert.deepEqual(writes, []);
     assert.deepEqual(errors, []);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-    results.push({ width, scenarios: ["pro-with-billing-unavailable", "billing-unknown-disabled", "production-free-status-checkout-enabled", "direct-overview-server-pro-account-free", "health-success-then-failure-drops-stale-plan", "unknown-account-status-not-free", "all-unavailable-not-a-downgrade"], errors, writes });
+    results.push({ width, scenarios: ["pro-with-billing-unavailable", "billing-unknown-disabled", "production-free-status-checkout-enabled", "direct-overview-server-pro-account-free", "health-success-then-failure-drops-stale-plan", "auth-billing-lookup-failure-not-free", "unknown-account-status-not-free", "all-unavailable-not-a-downgrade"], errors, writes });
     await context.close();
   }
   await writeFile(path.join(evidence, "results.json"), JSON.stringify({ syntheticOnly: true, results }, null, 2));

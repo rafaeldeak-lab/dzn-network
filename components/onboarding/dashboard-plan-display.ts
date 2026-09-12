@@ -28,6 +28,8 @@ export function dashboardServerPlan(serverId: string, health: ServerPlan, billin
   }
   const billingPlan = dashboardBillingPlan(billing);
   if (billingPlan !== null) return billingPlan;
-  // Auth navigation already supplies effective account access without an extra billing request.
-  return knownStatusPlan(account?.plan_tier, account?.plan_status);
+  // Auth reports Free both for no account and for a failed billing lookup.
+  // Only a successful billing/health response can confirm Free here.
+  const accountPlan = knownStatusPlan(account?.plan_tier, account?.plan_status);
+  return accountPlan === "free" ? null : accountPlan;
 }

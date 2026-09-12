@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dashboardBillingPlan, dashboardServerPlan } from "../components/onboarding/dashboard-plan-display";
 import { getServerVisualShowcase } from "../lib/badges/visuals";
+import { onRequest as authMe } from "../functions/api/auth/me";
 
 const health = { server_id: "showcase", current_plan: "premium", source: "live", stale: false };
 assert.equal(dashboardServerPlan("showcase", health, null), "pro");
@@ -18,11 +19,12 @@ assert.equal(dashboardServerPlan("showcase", { ...health, current_plan: "free" }
 assert.equal(dashboardServerPlan("showcase", null, { plan_key: "premium", plan_status: "active" }), "pro");
 assert.equal(dashboardBillingPlan(null), null, "A server plan cannot populate account billing.");
 assert.equal(dashboardServerPlan("showcase", null, null, { plan_tier: "pro", plan_status: "active" }), "pro");
-assert.equal(dashboardServerPlan("showcase", null, null, { plan_tier: "pro", plan_status: "past_due" }), "free");
+assert.equal(dashboardServerPlan("showcase", null, null, { plan_tier: "pro", plan_status: "past_due" }), null);
 assert.equal(dashboardServerPlan("showcase", null, null, { plan_tier: "pro" }), null);
 assert.equal(dashboardBillingPlan({ plan_key: "free", plan_status: "none" }), "free");
 assert.equal(dashboardBillingPlan({ plan_key: "free", plan_status: "free" }), "free");
-assert.equal(dashboardServerPlan("showcase", null, null, { plan_tier: "free", plan_status: "free" }), "free");
+assert.equal(dashboardServerPlan("showcase", null, null, { plan_tier: "free", plan_status: "free" }), null, "Auth lookup failures use the same Free navigation as a missing account.");
+assert.equal(dashboardServerPlan("showcase", null, { plan_key: "free", plan_status: "free" }, { plan_tier: "free", plan_status: "free" }), "free");
 assert.equal(dashboardBillingPlan({ plan_key: "starter", plan_status: "trialing" }), "starter");
 assert.equal(dashboardBillingPlan({ plan_key: "pro", plan_status: "past_due" }), "free");
 assert.equal(dashboardBillingPlan({ plan_key: "unexpected", plan_status: "active" }), null);
@@ -51,4 +53,34 @@ assert.ok(source.includes('planKey === null ? "Checking billing..." : planLabel(
 assert.equal((source.match(/disabled=\{planKey === null \|\| busyPlan/g) ?? []).length, 2);
 assert.ok(source.includes('if (dashboardBillingPlan(billing) === null) return;'));
 assert.ok(source.includes('dashboardBillingPlan(billing) === null ? "Checking plan..."'));
-console.log("Dashboard plan display tests passed.");
+async function testAuthBillingFailure() {
+  for (const fail of [false, true]) {
+    let billingLookupReached = false;
+    const env = { SESSION_SECRET: "synthetic-display-test", DB: { prepare(sql: string) {
+      assert.match(sql.trim(), /^SELECT/i, "Auth display regression must be read-only.");
+      return {
+        bind() { return this; },
+        async all() { return { results: [] }; },
+        async first() {
+          if (sql.includes("FROM sessions")) return { id: "owner", discord_id: "123456789012345678", username: "Example", avatar: null };
+          assert.ok(sql.includes("FROM owner_billing_accounts"));
+          billingLookupReached = true;
+          if (fail) throw new Error("Synthetic billing lookup failure");
+          return null;
+        },
+      };
+    } } };
+    const response = await authMe({ env, request: new Request("https://example.test/api/auth/me", { headers: { cookie: "dzn_session=synthetic" } }) } as unknown as Parameters<typeof authMe>[0]);
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { navigation: { plan_tier: string; plan_status: string } };
+    assert.equal(billingLookupReached, true);
+    assert.equal(payload.navigation.plan_tier, "free");
+    assert.equal(payload.navigation.plan_status, "free");
+    assert.equal(dashboardServerPlan("showcase", null, null, payload.navigation), null, "Neither ambiguous auth outcome proves Free.");
+  }
+}
+
+void testAuthBillingFailure().then(() => console.log("Dashboard plan display and auth-failure tests passed.")).catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

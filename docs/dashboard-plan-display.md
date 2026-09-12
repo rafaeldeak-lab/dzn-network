@@ -7,6 +7,7 @@ Overview now requests health once on direct load and server changes, waiting for
 The dashboard must distinguish an unavailable billing response from a confirmed Free plan.
 
 - Server badge/theme previews use the selected server's fresh effective plan when available, then the existing account billing or authenticated navigation plan. Legacy Premium/Network/Partner access is displayed as Pro.
+- Auth navigation Free is ambiguous because its billing lookup failure uses the same Free response as no account. Do not use it to confirm a Free server plan; wait for successful health/billing instead. Positive known Starter/Pro navigation remains a display-only fallback. The shared auth response is unchanged.
 - Ignore another server's health, stale health and browser-only fallback health for this decision.
 - Hide plan-dependent previews while every source is unknown instead of silently choosing Starter.
 - Billing comparison uses actual billing state only. Unknown billing stays pending and cannot start checkout from its buttons. A confirmed legacy Pro-equivalent subscription marks Pro as current.
