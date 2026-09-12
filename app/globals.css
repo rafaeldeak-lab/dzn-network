@@ -3084,7 +3084,7 @@ body.dzn-pricing-modal-open .dzn-beta-ticker {
   min-height: 64px;
   position: relative;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   align-items: center;
   justify-content: center;
   gap: 0;
@@ -3118,13 +3118,13 @@ body.dzn-pricing-modal-open .dzn-beta-ticker {
   gap: 6px;
   min-width: 0;
   min-height: 46px;
-  padding: 7px 8px;
+  padding: 7px 4px;
   border-left: 1px solid rgba(96, 165, 250, 0.2);
   color: rgba(226, 232, 240, 0.72);
   text-decoration: none;
   font-size: 0.62rem;
   font-weight: 1000;
-  letter-spacing: 0.16em;
+  letter-spacing: 0;
   line-height: 1.1;
   text-align: center;
   text-transform: uppercase;
@@ -3538,7 +3538,7 @@ button.dzn-header-action {
   }
 
   .dzn-header-links {
-    grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   }
 
   .dzn-header-action {

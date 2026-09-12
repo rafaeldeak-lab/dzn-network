@@ -20,6 +20,7 @@ interface D1Database {
 }
 
 interface CloudflareEnv {
+  DZN_GAMES_HUB_ENABLED?: string;
   ASSETS?: {
     fetch(input: Request | string, init?: RequestInit): Promise<Response>;
   };

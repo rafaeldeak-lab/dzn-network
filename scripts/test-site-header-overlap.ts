@@ -39,7 +39,8 @@ assert.equal(siteHeaderSource.includes("dzn-server-wars-logo-poster-v2.jpg"), tr
 assert.equal(siteHeaderSource.includes("setUseVideo(false);"), false, "Transient autoplay failures must not permanently replace the animated logo with the still poster.");
 
 assert.match(headerLinksBlock, /display:\s*grid;/, "Header links must sit in their own framed grid.");
-assert.match(headerLinksBlock, /grid-template-columns:\s*repeat\(auto-fit, minmax\(78px, 1fr\)\);/, "Header links must distribute evenly inside compact cells instead of overlapping.");
+assert.match(headerLinksBlock, /grid-template-columns:\s*repeat\(auto-fit, minmax\(96px, 1fr\)\);/, "The added Games link must retain enough column width for complete Leaderboards labels.");
+assert.match(headerLinkItemBlock, /letter-spacing:\s*0;/, "Header labels must not be expanded beyond the measured game-navigation cells.");
 assert.match(headerLinksBlock, /clip-path:\s*polygon/, "Header links should keep the angular command-panel shape.");
 assert.match(headerLinkItemBlock, /flex-direction:\s*column;/, "Header links must use icon-over-label controls like the reference.");
 assert.match(headerLinkItemBlock, /min-height:\s*46px;/, "Header link controls should stay smaller than the original oversized command bar.");
