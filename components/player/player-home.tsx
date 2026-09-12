@@ -8,8 +8,10 @@ import {
   CircleAlert,
   Crown,
   ExternalLink,
+  Gamepad2,
   Loader2,
   LockKeyhole,
+  Pencil,
   Radio,
   RefreshCw,
   ShieldCheck,
@@ -22,6 +24,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
+import { PlayerGameIdentityLinks } from "@/components/player/player-game-identity-links";
 import { PlayerProfilePrivacySettings } from "@/components/player/profile-privacy-settings";
 import { SiteHeaderAuthState } from "@/components/site-header";
 import type { AuthResponse } from "@/components/onboarding/types";
@@ -180,10 +183,10 @@ type PlayerHubProfileSummary = {
   display_name: string;
   private_profile_href: string;
   public_profile_href: string | null;
-  public_profile_status: "not_configured";
+  public_profile_status: "published" | "private" | "not_published" | "unavailable";
   public_profile_message: string;
-  linked_game_profiles: number;
-  linked_public_servers: number;
+  linked_game_profiles: number | null;
+  linked_public_servers: number | null;
   last_seen_at: string | null;
   source: "player_profiles" | "unavailable";
   private: true;
@@ -194,10 +197,10 @@ type PlayerHubProgressionSummary = {
   status: "stats_available" | "empty" | "unavailable";
   source: "player_profiles" | "unavailable";
   gameplay_totals: {
-    kills: number;
-    deaths: number;
-    suicides: number;
-    longest_kill_distance: number;
+    kills: number | null;
+    deaths: number | null;
+    suicides: number | null;
+    longest_kill_distance: number | null;
   };
   featured_server: {
     linked_server_id: string;
@@ -309,6 +312,43 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
     requiresRelogin: false,
   });
   const hubUserId = authState.status === "logged_in" ? authState.user.id : null;
+  const [profileRefreshKey, setProfileRefreshKey] = useState(0);
+
+  useEffect(() => {
+    if (mode !== "profile" || authState.status !== "logged_in" || hubState.status === "idle" || hubState.status === "loading") return;
+    let frame = 0;
+    let pending = true;
+    const alignProfileSection = () => {
+      if (!pending) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (!pending) return;
+        const id = window.location.hash.slice(1);
+        if (id !== "game-account" && id !== "profile-settings" && id !== "profile-summary") return;
+        if (id === "profile-settings" && document.querySelector('#game-account [aria-busy="true"], #profile-settings[aria-busy="true"]')) return;
+        // The first native fragment scroll can run before the signed-in panels exist.
+        const target = document.getElementById(id);
+        if (!target) return;
+        target.scrollIntoView({ block: "start", behavior: "instant" });
+        pending = false;
+      });
+    };
+    const onHashChange = () => { pending = true; alignProfileSection(); };
+    const cancelPendingScroll = () => { pending = false; cancelAnimationFrame(frame); };
+    alignProfileSection();
+    // Settings sit below the game-link panel, whose late response changes their position.
+    const panels = document.getElementById("game-account")?.parentElement;
+    const observer = new MutationObserver(alignProfileSection);
+    if (panels) observer.observe(panels, { subtree: true, attributes: true, attributeFilter: ["aria-busy"] });
+    window.addEventListener("hashchange", onHashChange);
+    for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) window.addEventListener(event, cancelPendingScroll, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("hashchange", onHashChange);
+      for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) window.removeEventListener(event, cancelPendingScroll);
+    };
+  }, [mode, authState.status, hubState.status]);
 
   useEffect(() => {
     let activeRequest = true;
@@ -365,7 +405,12 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
     return () => {
       activeRequest = false;
     };
-  }, [hubUserId]);
+  }, [hubUserId, profileRefreshKey]);
+
+  function refreshProfileSummary() {
+    setHubState({ status: "loading", data: null, message: null });
+    setProfileRefreshKey((value) => value + 1);
+  }
 
   async function refreshCommunityMatches() {
     if (communityRefresh.status === "refreshing") return;
@@ -575,7 +620,8 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
         <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
           <div className="space-y-4">
             <ProfileProgressionPanel state={hubState} />
-            {mode === "profile" && authState.status === "logged_in" ? <PlayerProfilePrivacySettings /> : null}
+            {mode === "profile" && authState.status === "logged_in" ? <div id="game-account" className="scroll-mt-32"><PlayerGameIdentityLinks /></div> : null}
+            {mode === "profile" && authState.status === "logged_in" ? <PlayerProfilePrivacySettings onSaved={refreshProfileSummary} /> : null}
           </div>
 
           <section className="rounded-lg border border-amber-300/25 bg-slate-950/78 p-5 backdrop-blur">
@@ -862,56 +908,70 @@ function SuggestedEventsPanel({ events, source }: { events: PlayerHubEvent[]; so
 
 function ProfileProgressionPanel({ state }: { state: PlayerHubState }) {
   const data = state.status === "ready" ? state.data : null;
-  const entries = data?.profile_entries ?? [];
   const profile = data?.profile_summary ?? null;
   const progression = data?.progression_summary ?? null;
+  const hasStats = progression?.status === "stats_available";
+  const publicStatus = profile?.public_profile_status === "published" ? "Public"
+    : profile?.public_profile_status === "private" ? "Private"
+      : profile?.public_profile_status === "unavailable" ? "Status unavailable" : "Not published";
 
   return (
-    <section className="rounded-lg border border-emerald-300/25 bg-slate-950/78 p-5 backdrop-blur">
+    <section id="profile-summary" aria-labelledby="profile-summary-title" className="min-w-0 rounded-lg border border-emerald-300/25 bg-slate-950/78 p-4 backdrop-blur sm:p-5">
       <div className="flex items-center gap-3">
         <span className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-emerald-300/35 bg-emerald-300/10 text-emerald-100">
           <UserRound aria-hidden="true" className="h-5 w-5" />
         </span>
         <div>
-          <h2 className="text-lg font-black uppercase text-white">Profile & Progression</h2>
-          <p className="text-sm font-semibold text-slate-300">Private current-user summaries stay separate from owner setup, paid plans, and competitive systems.</p>
+          <h2 id="profile-summary-title" className="text-lg font-black uppercase text-white">My Profile</h2>
         </div>
       </div>
 
       {profile && progression ? (
         <div className="mt-5 space-y-4">
-          <div className="rounded-md border border-emerald-300/20 bg-emerald-300/8 p-4">
+          <div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-xs font-black uppercase text-emerald-100">Private Player Profile</p>
-                <p className="mt-1 text-lg font-black text-white">{profile.display_name}</p>
+                <p className="break-words text-lg font-black text-white [overflow-wrap:anywhere]">{profile.display_name}</p>
                 <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">{profile.public_profile_message}</p>
               </div>
               <span className="inline-flex w-fit items-center gap-2 rounded-md border border-emerald-300/25 bg-emerald-300/10 px-3 py-1.5 text-xs font-black uppercase text-emerald-100">
-                {profile.public_profile_status.replace(/_/g, " ")}
+                {publicStatus}
               </span>
             </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <MetricTile label="Game Profiles" value={String(profile.linked_game_profiles)} />
-              <MetricTile label="Public Servers" value={String(profile.linked_public_servers)} />
+            <nav aria-label="My profile actions" className="mt-4 flex flex-wrap gap-2">
+              <a href="/player/profile#profile-settings" className="inline-flex min-h-11 items-center gap-2 rounded-md border border-emerald-300/30 px-3 py-2 text-sm font-bold text-emerald-100 hover:bg-emerald-300/10">
+                <Pencil aria-hidden="true" className="h-4 w-4 shrink-0" /> Edit profile
+              </a>
+              <a href="/player/profile#game-account" className="inline-flex min-h-11 items-center gap-2 rounded-md border border-cyan-300/30 px-3 py-2 text-sm font-bold text-cyan-100 hover:bg-cyan-300/10">
+                <Gamepad2 aria-hidden="true" className="h-4 w-4 shrink-0" /> Game account
+              </a>
+              {profile.public_profile_status === "published" && profile.public_profile_href ? (
+                <Link href={profile.public_profile_href} className="inline-flex min-h-11 items-center gap-2 rounded-md border border-white/25 px-3 py-2 text-sm font-bold text-white hover:bg-white/10">
+                  <ExternalLink aria-hidden="true" className="h-4 w-4 shrink-0" /> View public profile
+                </Link>
+              ) : null}
+            </nav>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <MetricTile label="Game Profiles" value={profile.linked_game_profiles === null ? "--" : String(profile.linked_game_profiles)} />
+              <MetricTile label="Public Servers" value={profile.linked_public_servers === null ? "--" : String(profile.linked_public_servers)} />
             </div>
           </div>
 
-          <div className="rounded-md border border-cyan-300/20 bg-cyan-300/8 p-4">
+          <div className="border-t border-white/10 pt-4">
             <div className="flex items-start gap-3">
               <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-cyan-300/30 bg-cyan-300/10 text-cyan-100">
                 <Activity aria-hidden="true" className="h-5 w-5" />
               </span>
               <div>
-                <p className="text-sm font-black uppercase text-white">Current Profile Signals</p>
+                <h3 className="text-sm font-black uppercase text-white">My Server Stats</h3>
                 <p className="mt-1 text-sm font-semibold leading-6 text-slate-300">{progression.message}</p>
               </div>
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <MetricTile label="Kills" value={String(progression.gameplay_totals.kills)} />
-              <MetricTile label="Deaths" value={String(progression.gameplay_totals.deaths)} />
-              <MetricTile label="Suicides" value={String(progression.gameplay_totals.suicides)} />
-              <MetricTile label="Longest" value={formatDistance(progression.gameplay_totals.longest_kill_distance)} />
+            <div aria-label="Server statistics" className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <MetricTile label="Kills" value={hasStats && progression.gameplay_totals.kills !== null ? String(progression.gameplay_totals.kills) : "--"} />
+              <MetricTile label="Deaths" value={hasStats && progression.gameplay_totals.deaths !== null ? String(progression.gameplay_totals.deaths) : "--"} />
+              <MetricTile label="Suicides" value={hasStats && progression.gameplay_totals.suicides !== null ? String(progression.gameplay_totals.suicides) : "--"} />
+              <MetricTile label="Longest" value={hasStats && progression.gameplay_totals.longest_kill_distance !== null ? formatDistance(progression.gameplay_totals.longest_kill_distance) : "--"} />
             </div>
             {progression.featured_server ? (
               <Link
@@ -934,40 +994,17 @@ function ProfileProgressionPanel({ state }: { state: PlayerHubState }) {
             ) : null}
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="border-t border-white/10 pt-4">
+            <h3 className="text-sm font-black uppercase text-white">Player Progression</h3>
+            <ul className="mt-2 divide-y divide-white/10">
             {progression.tracks.map((track) => (
-              <div key={track.key} className="rounded-md border border-violet-300/20 bg-violet-300/8 p-3">
-                <p className="text-xs font-black uppercase text-violet-100">{track.label}</p>
-                <p className="mt-1 text-[10px] font-black uppercase text-slate-400">{track.status.replace(/_/g, " ")}</p>
-                <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">{track.description}</p>
-              </div>
+              <li key={track.key} className="flex flex-wrap justify-between gap-x-3 gap-y-1 py-2 text-sm">
+                <span className="font-bold text-violet-100">{track.label}</span>
+                <span className="text-slate-400">Not available yet</span>
+              </li>
             ))}
+            </ul>
           </div>
-
-          <div>
-            <h3 className="text-sm font-black uppercase text-white">Profile Entry Points</h3>
-            {entries.length ? (
-              <ul className="mt-3 divide-y divide-white/10 rounded-md border border-white/10 bg-white/6">
-                {entries.map((entry) => (
-                  <li key={entry.key} className="p-3">
-                    <Link href={entry.href} className="group flex items-start justify-between gap-3">
-                      <span>
-                        <span className="block text-sm font-black uppercase text-white transition group-hover:text-emerald-100">{entry.label}</span>
-                        <span className="mt-1 block text-sm font-semibold leading-6 text-slate-300">{entry.description}</span>
-                      </span>
-                      <span className="mt-1 inline-flex shrink-0 items-center gap-2 rounded-md border border-emerald-300/25 bg-emerald-300/10 px-2 py-1 text-xs font-black uppercase text-emerald-100">
-                        {entry.status.replace(/_/g, " ")}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-
-          <p className="rounded-md border border-amber-300/20 bg-amber-300/8 p-3 text-sm font-semibold leading-6 text-amber-50">
-            This profile summary is private and read-only. It cannot grant awards, change billing, alter scores, change rankings, edit reviews, change events, affect Server Wars or CTF, or change competitive eligibility.
-          </p>
         </div>
       ) : (
         <div className="mt-5 grid gap-3">

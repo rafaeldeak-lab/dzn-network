@@ -1,4 +1,4 @@
-import { readDznFeatureFlags } from "../../_lib/feature-flags";
+import { isBillingRemindersEnabled, readDznFeatureFlags } from "../../_lib/feature-flags";
 import { json } from "../../_lib/http";
 import { hasPrivateRequestSignal, privateNoStoreHeaders, publicCacheHeaders } from "../../_lib/performance";
 import type { PagesFunction } from "../../_lib/types";
@@ -8,6 +8,7 @@ export const onRequestGet: PagesFunction = ({ env, request }) => {
   return json({
     ok: true,
     dznPulseEnabled: flags.dznPulseEnabled,
+    billingRemindersEnabled: isBillingRemindersEnabled(env),
     discordNotificationsEnabled: flags.discordNotificationsEnabled,
   }, {
     headers: hasPrivateRequestSignal(request)

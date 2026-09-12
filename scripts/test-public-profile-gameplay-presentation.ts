@@ -1,0 +1,23 @@
+import assert from "node:assert/strict";
+import { publicGameplayPresentation } from "../lib/public-profile-gameplay";
+
+const zero = { kills: 0, deaths: 0, suicides: 0, longest_kill_distance: 0, linked_public_servers: 0 };
+const empty = publicGameplayPresentation({ visible: true, totals: zero });
+assert.equal(empty.status, "empty");
+for (const key of ["publicServers", "kills", "deaths", "suicides", "longest"] as const) assert.equal(empty[key], "--");
+const realZero = publicGameplayPresentation({ visible: true, totals: { ...zero, linked_public_servers: 1 } });
+assert.equal(realZero.status, "available");
+assert.equal(realZero.kills, "0");
+assert.equal(realZero.longest, "0m");
+assert.equal(realZero.publicServers, "1");
+const populated = { ...zero, linked_public_servers: 2, kills: 25, longest_kill_distance: 106.7 };
+assert.equal(publicGameplayPresentation({ visible: true, totals: populated }).longest, "107m");
+const hidden = publicGameplayPresentation({ visible: false, totals: populated });
+assert.equal(hidden.status, "hidden");
+assert.equal(hidden.kills, "Hidden", "Hidden visibility must override even populated payloads");
+assert.equal(hidden.longest, "Hidden");
+const unavailable = publicGameplayPresentation({ visible: true, totals: null });
+assert.equal(unavailable.status, "unavailable");
+assert.equal(unavailable.kills, "--");
+assert.notEqual(unavailable.message, empty.message);
+console.log("Public gameplay presentation: missing, hidden, unavailable and real zero states passed.");

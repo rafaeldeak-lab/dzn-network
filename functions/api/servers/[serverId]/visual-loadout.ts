@@ -43,7 +43,7 @@ export const onRequestPut: PagesFunction = async ({ request, env, params }) => {
 
   try {
     const body = await readJson<VisualLoadoutInput>(request);
-    const loadout = await saveServerVisualLoadout(env, access.server.id, access.user.id, body);
+    const loadout = await saveServerVisualLoadout(env, access.server.id, access.user.id, body, access.server.user_id);
     const [availableFrames, availableThemes, availableShowcaseBadges] = await Promise.all([
       getAvailableFramesForServer(env, access.server.id),
       getAvailableThemesForServer(env, access.server.id),

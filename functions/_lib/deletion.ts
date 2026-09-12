@@ -143,6 +143,9 @@ export async function deleteOwnedAccountData(env: Env, userId: string) {
        )`,
     [userId],
   );
+  if (await tableExists(db, "user_notifications")) {
+    await deleteRows(db, "DELETE FROM user_notifications WHERE user_id = ?", [userId]);
+  }
   deleted.users += await deleteRows(db, "DELETE FROM users WHERE id = ?", [userId]);
 
   return { ok: true as const, deleted };

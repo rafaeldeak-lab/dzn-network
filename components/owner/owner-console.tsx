@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { PlayerRequestSupportPanel } from "./player-request-support-panel";
 
 type LifecycleStatus =
   | "active_live"
@@ -339,6 +340,7 @@ const NAV_ITEMS = [
   "Resource Control",
   "Discord Control",
   "Event Control",
+  "Player Requests",
   "Audit Log",
   "Settings / Access",
 ] as const;
@@ -353,6 +355,14 @@ export function OwnerConsole() {
   const [discordControl, setDiscordControl] = useState<DiscordControlData | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "unauthorized" | "forbidden" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const syncView = () => {
+      setActiveView(new URLSearchParams(location.search).get("view") === "player-requests" ? "Player Requests" : "Overview");
+    };
+    syncView(); window.addEventListener("popstate", syncView);
+    return () => window.removeEventListener("popstate", syncView);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -475,6 +485,10 @@ export function OwnerConsole() {
     }));
   }, [overview]);
 
+  if (activeView === "Player Requests") {
+    return <OwnerShell activeView={activeView} setActiveView={setActiveView}><PlayerRequestSupportPanel /></OwnerShell>;
+  }
+
   if (status === "loading") {
     return <OwnerShell activeView={activeView} setActiveView={setActiveView}><LoadingPanel /></OwnerShell>;
   }
@@ -534,19 +548,25 @@ function OwnerShell({ activeView, setActiveView, children }: {
     <main className="h-dvh overflow-hidden bg-[#02030a] text-zinc-100">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_32%),radial-gradient(circle_at_80%_10%,rgba(168,85,247,0.14),transparent_30%)]" />
       <div className="relative grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)] lg:grid-rows-1">
-        <aside className="z-10 flex min-h-0 flex-col border-b border-white/10 bg-black/45 p-3 backdrop-blur-xl lg:h-dvh lg:border-b-0 lg:border-r">
+        <aside className="z-10 flex min-h-0 min-w-0 flex-col border-b border-white/10 bg-black/45 p-3 backdrop-blur-xl lg:h-dvh lg:border-b-0 lg:border-r">
           <Link href="/" className="block rounded-lg border border-cyan-300/20 bg-cyan-300/5 p-3">
             <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">DZN Owner</p>
             <h1 className="mt-1 text-xl font-black text-white">Command Centre</h1>
           </Link>
 
-          <nav className="mt-4 grid gap-1.5 overflow-auto pr-1">
+          <nav className="mt-3 flex shrink-0 gap-1.5 overflow-x-auto pb-1 lg:mt-4 lg:grid lg:shrink lg:overflow-auto lg:pr-1">
             {NAV_ITEMS.map((item) => (
               <button
                 key={item}
                 type="button"
-                onClick={() => setActiveView(item)}
-                className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-bold transition ${
+                onClick={() => {
+                  const url = new URL(location.href);
+                  for (const key of ["view", "q", "status", "request", "cursor"]) url.searchParams.delete(key);
+                  if (item === "Player Requests") url.searchParams.set("view", "player-requests");
+                  window.history.pushState(null, "", url.pathname + url.search);
+                  setActiveView(item);
+                }}
+                className={`w-auto shrink-0 whitespace-nowrap rounded-lg border px-3 py-2 text-left text-sm font-bold transition lg:w-full ${
                   activeView === item
                     ? "border-cyan-300/40 bg-cyan-300/[0.12] text-white shadow-[0_0_24px_rgba(34,211,238,0.12)]"
                     : "border-white/10 bg-white/[0.03] text-zinc-400 hover:border-white/20 hover:text-white"
@@ -557,12 +577,15 @@ function OwnerShell({ activeView, setActiveView, children }: {
             ))}
           </nav>
 
-          <div className="mt-auto grid gap-1.5 pt-3">
+          <div className="mt-auto flex flex-wrap gap-1.5 pt-3 lg:grid">
             <Link href="/" className="block rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-bold text-zinc-300 hover:border-cyan-300/30 hover:text-white">
               View Public Site
             </Link>
             <Link href="/dashboard" className="block rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-bold text-zinc-300 hover:border-cyan-300/30 hover:text-white">
               View Server Owner Dashboard
+            </Link>
+            <Link href="/owner/player-game-identity-claims" className="block rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-2 text-sm font-bold text-cyan-100 hover:border-cyan-300/40 hover:text-white">
+              Review Player Stat Claims
             </Link>
           </div>
         </aside>

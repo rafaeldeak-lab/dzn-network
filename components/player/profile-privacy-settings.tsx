@@ -4,6 +4,8 @@ import { ExternalLink, Eye, EyeOff, Loader2, ShieldCheck, ToggleLeft, ToggleRigh
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { PublicProfileOwnerPreviewPanel } from "@/components/player/public-profile-owner-preview-panel";
+
 type PrivacyPreferenceKey =
   | "public_profile_enabled"
   | "show_display_name"
@@ -76,7 +78,7 @@ async function updatePrivacyPreference(key: PrivacyPreferenceKey, enabled: boole
   return payload as PrivacyPayload;
 }
 
-export function PlayerProfilePrivacySettings() {
+export function PlayerProfilePrivacySettings({ onSaved }: { onSaved?: () => void } = {}) {
   const [state, setState] = useState<PrivacyState>({ status: "loading", data: null, message: null });
 
   useEffect(() => {
@@ -119,13 +121,14 @@ export function PlayerProfilePrivacySettings() {
     try {
       const next = await updatePrivacyPreference(key, enabled);
       setState({ status: "ready", data: next, message: "Profile display preferences saved." });
+      onSaved?.();
     } catch (error) {
       setState({ status: "error", data: previous, message: errorMessage(error) });
     }
   }
 
   return (
-    <section className="rounded-lg border border-cyan-300/25 bg-slate-950/78 p-5 shadow-[0_0_42px_rgba(34,211,238,0.1)] backdrop-blur">
+    <section id="profile-settings" aria-busy={state.status === "loading"} className="scroll-mt-32 rounded-lg border border-cyan-300/25 bg-slate-950/78 p-5 shadow-[0_0_42px_rgba(34,211,238,0.1)] backdrop-blur">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-cyan-300/35 bg-cyan-300/10 text-cyan-100">
@@ -163,6 +166,13 @@ export function PlayerProfilePrivacySettings() {
               />
             ))}
           </div>
+
+          <PublicProfileOwnerPreviewPanel
+            publicProfileEnabled={state.data.settings.public_profile_enabled}
+            publicProfileHref={state.data.public_profile_href}
+            publicProfileHandle={state.data.public_profile_handle}
+            sections={state.data.sections}
+          />
 
           <div className="rounded-md border border-violet-300/20 bg-violet-300/8 p-4">
             <p className="text-xs font-black uppercase text-violet-100">Saved Preference Boundary</p>

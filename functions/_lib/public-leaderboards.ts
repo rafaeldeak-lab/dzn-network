@@ -1,5 +1,6 @@
 import { getRankedBuildServers, type PublicBuildLeaderboardRow } from "./build-events";
 import { requireDb } from "./db";
+import { readPublicProfileLinksByDiscordIds, type PublicProfileLink } from "./player-public-profiles";
 import { calculateServerScore, calculateServerScoreBreakdown, rankServers, type ServerScoreBreakdown } from "./server-ranking";
 import type { Env } from "./types";
 import {
@@ -25,6 +26,8 @@ export type PublicLeaderboardPlayer = {
   kd_label: string;
   longest_kill: number;
   last_seen: string | null;
+  public_profile_handle?: string | null;
+  public_profile_href?: string | null;
   highest_killstreak?: number;
   total_time_alive_seconds?: number;
   headshots?: number;
@@ -62,6 +65,8 @@ export type PublicLongestKill = {
   weapon: string;
   distance: number;
   occurred_at: string | null;
+  player_public_profile_handle?: string | null;
+  player_public_profile_href?: string | null;
 };
 
 export type PublicKillHighlight = Omit<PublicLongestKill, "rank">;
@@ -76,6 +81,7 @@ export type PublicPlayerStatInput = {
   deaths: number | null;
   longestKill: number | null;
   lastSeen: string | null;
+  discordId?: string | null;
 };
 
 type PublicServerStatRow = {
@@ -102,6 +108,7 @@ type PublicPlayerKillRow = {
   kills: number | null;
   longest_kill: number | null;
   last_seen: string | null;
+  discord_id?: string | null;
 };
 
 type PublicPlayerDeathRow = {
@@ -112,6 +119,7 @@ type PublicPlayerDeathRow = {
   server_slug: string | null;
   deaths: number | null;
   last_seen: string | null;
+  discord_id?: string | null;
 };
 
 export type PublicLeaderboardMetric =
@@ -150,6 +158,7 @@ export type PublicLongestKillRow = {
   distance: number | null;
   occurred_at: string | null;
   created_at?: string | null;
+  discord_id?: string | null;
 };
 
 type PublicServerLookupRow = {
@@ -333,129 +342,153 @@ export async function getRankedPublicServers(env: Env, limit: number) {
   });
 }
 
-async function getTopPlayers(env: Env, limit: number, linkedServerId?: string, offset = 0) {
+async function getTopPlayers(env: Env, limit: number, linkedServerId?: string, offset = 0, includeVerifiedLinks = true): Promise<PublicLeaderboardPlayer[]> {
   const db = requireDb(env);
   const serverFilter = linkedServerId ? "AND kill_events.linked_server_id = ?" : "";
   const queryLimit = Math.max(1, Math.min(Math.trunc(limit) || 10, 500));
   const queryOffset = Math.max(0, Math.trunc(offset) || 0);
 
-  const killStatement = db.prepare(
-    `SELECT
-        kill_events.linked_server_id,
-        COALESCE(kill_events.killer_id, lower(kill_events.killer_name)) AS player_key,
-        MAX(kill_events.killer_name) AS player_name,
-        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-        linked_servers.public_slug AS server_slug,
-        COUNT(*) AS kills,
-        MAX(COALESCE(kill_events.distance, 0)) AS longest_kill,
-        MAX(COALESCE(kill_events.occurred_at, kill_events.created_at)) AS last_seen
-       FROM kill_events
-       INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
-       WHERE lower(linked_servers.status) = 'live'
-         AND ${PUBLIC_LIFECYCLE_SQL}
-         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-         AND kill_events.killer_name IS NOT NULL
-         AND ${mockNameFilterSql("kill_events.killer_name")}
-         ${serverFilter}
-       GROUP BY kill_events.linked_server_id, player_key, linked_servers.public_slug
-       ORDER BY kills DESC, longest_kill DESC, last_seen DESC
-       LIMIT ? OFFSET ?`,
-  );
-  const killRows = linkedServerId
-    ? await killStatement.bind(linkedServerId, queryLimit, queryOffset).all<PublicPlayerKillRow>()
-    : await killStatement.bind(queryLimit, queryOffset).all<PublicPlayerKillRow>();
+  try {
+    const killStatement = db.prepare(
+      `SELECT
+          kill_events.linked_server_id,
+          COALESCE(kill_events.killer_id, lower(kill_events.killer_name)) AS player_key,
+          MAX(kill_events.killer_name) AS player_name,
+          COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+          linked_servers.public_slug AS server_slug,
+          COUNT(*) AS kills,
+          MAX(COALESCE(kill_events.distance, 0)) AS longest_kill,
+          MAX(COALESCE(kill_events.occurred_at, kill_events.created_at)) AS last_seen,
+          ${playerProfileDiscordLookupSql("kill_events", "killer_id", includeVerifiedLinks)} AS discord_id
+         FROM kill_events
+         INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
+         WHERE lower(linked_servers.status) = 'live'
+           AND ${PUBLIC_LIFECYCLE_SQL}
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND kill_events.killer_name IS NOT NULL
+           AND ${mockNameFilterSql("kill_events.killer_name")}
+           ${serverFilter}
+         GROUP BY kill_events.linked_server_id, player_key, linked_servers.public_slug
+         ORDER BY kills DESC, longest_kill DESC, last_seen DESC
+         LIMIT ? OFFSET ?`,
+    );
+    const killRows = linkedServerId
+      ? await killStatement.bind(linkedServerId, queryLimit, queryOffset).all<PublicPlayerKillRow>()
+      : await killStatement.bind(queryLimit, queryOffset).all<PublicPlayerKillRow>();
 
-  const deathStatement = db.prepare(
-    `SELECT
-        kill_events.linked_server_id,
-        COALESCE(kill_events.victim_id, lower(kill_events.victim_name)) AS player_key,
-        MAX(kill_events.victim_name) AS player_name,
-        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-        linked_servers.public_slug AS server_slug,
-        COUNT(*) AS deaths,
-        MAX(COALESCE(kill_events.occurred_at, kill_events.created_at)) AS last_seen
-       FROM kill_events
-       INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
-       WHERE lower(linked_servers.status) = 'live'
-         AND ${PUBLIC_LIFECYCLE_SQL}
-         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-         AND kill_events.victim_name IS NOT NULL
-         AND ${mockNameFilterSql("kill_events.victim_name")}
-         ${serverFilter}
-       GROUP BY kill_events.linked_server_id, player_key, linked_servers.public_slug
-       ORDER BY deaths DESC, last_seen DESC
-       LIMIT ? OFFSET ?`,
-  );
-  const deathRows = linkedServerId
-    ? await deathStatement.bind(linkedServerId, queryLimit, queryOffset).all<PublicPlayerDeathRow>()
-    : await deathStatement.bind(queryLimit, queryOffset).all<PublicPlayerDeathRow>();
+    const deathStatement = db.prepare(
+      `SELECT
+          kill_events.linked_server_id,
+          COALESCE(kill_events.victim_id, lower(kill_events.victim_name)) AS player_key,
+          MAX(kill_events.victim_name) AS player_name,
+          COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+          linked_servers.public_slug AS server_slug,
+          COUNT(*) AS deaths,
+          MAX(COALESCE(kill_events.occurred_at, kill_events.created_at)) AS last_seen,
+          ${playerProfileDiscordLookupSql("kill_events", "victim_id", includeVerifiedLinks)} AS discord_id
+         FROM kill_events
+         INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
+         WHERE lower(linked_servers.status) = 'live'
+           AND ${PUBLIC_LIFECYCLE_SQL}
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND kill_events.victim_name IS NOT NULL
+           AND ${mockNameFilterSql("kill_events.victim_name")}
+           ${serverFilter}
+         GROUP BY kill_events.linked_server_id, player_key, linked_servers.public_slug
+         ORDER BY deaths DESC, last_seen DESC
+         LIMIT ? OFFSET ?`,
+    );
+    const deathRows = linkedServerId
+      ? await deathStatement.bind(linkedServerId, queryLimit, queryOffset).all<PublicPlayerDeathRow>()
+      : await deathStatement.bind(queryLimit, queryOffset).all<PublicPlayerDeathRow>();
 
-  return rankPublicPlayers(mergePlayerRows(killRows.results ?? [], deathRows.results ?? []), queryLimit);
+    const mergedPlayers = mergePlayerRows(killRows.results ?? [], deathRows.results ?? []);
+    const publicProfileLinksByDiscordId = await readPublicProfileLinksByDiscordIds(env, mergedPlayers.map((player) => player.discordId));
+    return rankPublicPlayers(mergedPlayers, queryLimit, publicProfileLinksByDiscordId);
+  } catch (error) {
+    if (includeVerifiedLinks && isMissingVerifiedIdentityLinkTable(error)) return getTopPlayers(env, limit, linkedServerId, offset, false);
+    throw error;
+  }
 }
 
-async function getLongestKillSummary(env: Env, limit: number) {
+async function getLongestKillSummary(env: Env, limit: number, includeVerifiedLinks = true): Promise<{
+  bestOverallKill: PublicKillHighlight | null;
+  latestKill: PublicKillHighlight | null;
+  personalBestKills: PublicLongestKill[];
+}> {
   const db = requireDb(env);
-  const distanceResult = await db
-    .prepare(
-      `SELECT
-        COALESCE(kill_events.killer_id, lower(kill_events.killer_name)) AS player_key,
-        kill_events.killer_name AS player_name,
-        kill_events.victim_name,
-        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-        linked_servers.public_slug AS server_slug,
-        kill_events.weapon,
-        kill_events.distance,
-        COALESCE(kill_events.occurred_at, kill_events.created_at) AS occurred_at,
-        kill_events.created_at
-       FROM kill_events
-       INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
-       WHERE lower(linked_servers.status) = 'live'
-         AND ${PUBLIC_LIFECYCLE_SQL}
-         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-         AND kill_events.killer_name IS NOT NULL
-         AND kill_events.victim_name IS NOT NULL
-         AND COALESCE(kill_events.distance, 0) > 0
-         AND ${mockNameFilterSql("kill_events.killer_name")}
-         AND ${mockNameFilterSql("kill_events.victim_name")}
-       ORDER BY kill_events.distance DESC, occurred_at DESC
-       LIMIT ?`,
-    )
-    .bind(Math.max(limit * 8, 100))
-    .all<PublicLongestKillRow>();
+  try {
+    const distanceResult = await db
+      .prepare(
+        `SELECT
+          COALESCE(kill_events.killer_id, lower(kill_events.killer_name)) AS player_key,
+          kill_events.killer_name AS player_name,
+          kill_events.victim_name,
+          COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+          linked_servers.public_slug AS server_slug,
+          kill_events.weapon,
+          kill_events.distance,
+          COALESCE(kill_events.occurred_at, kill_events.created_at) AS occurred_at,
+          kill_events.created_at,
+          ${playerProfileDiscordLookupSql("kill_events", "killer_id", includeVerifiedLinks)} AS discord_id
+         FROM kill_events
+         INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
+         WHERE lower(linked_servers.status) = 'live'
+           AND ${PUBLIC_LIFECYCLE_SQL}
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND kill_events.killer_name IS NOT NULL
+           AND kill_events.victim_name IS NOT NULL
+           AND COALESCE(kill_events.distance, 0) > 0
+           AND ${mockNameFilterSql("kill_events.killer_name")}
+           AND ${mockNameFilterSql("kill_events.victim_name")}
+         ORDER BY kill_events.distance DESC, occurred_at DESC
+         LIMIT ?`,
+      )
+      .bind(Math.max(limit * 8, 100))
+      .all<PublicLongestKillRow>();
 
-  const latestKill = await db
-    .prepare(
-      `SELECT
-        COALESCE(kill_events.killer_id, lower(kill_events.killer_name)) AS player_key,
-        kill_events.killer_name AS player_name,
-        kill_events.victim_name,
-        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-        linked_servers.public_slug AS server_slug,
-        kill_events.weapon,
-        kill_events.distance,
-        COALESCE(kill_events.occurred_at, kill_events.created_at) AS occurred_at,
-        kill_events.created_at
-       FROM kill_events
-       INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
-       WHERE lower(linked_servers.status) = 'live'
-         AND ${PUBLIC_LIFECYCLE_SQL}
-         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-         AND kill_events.killer_name IS NOT NULL
-         AND kill_events.victim_name IS NOT NULL
-         AND ${mockNameFilterSql("kill_events.killer_name")}
-         AND ${mockNameFilterSql("kill_events.victim_name")}
-       ORDER BY datetime(COALESCE(kill_events.occurred_at, kill_events.created_at)) DESC, kill_events.created_at DESC
-       LIMIT 1`,
-    )
-    .first<PublicLongestKillRow>();
+    const latestKill = await db
+      .prepare(
+        `SELECT
+          COALESCE(kill_events.killer_id, lower(kill_events.killer_name)) AS player_key,
+          kill_events.killer_name AS player_name,
+          kill_events.victim_name,
+          COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+          linked_servers.public_slug AS server_slug,
+          kill_events.weapon,
+          kill_events.distance,
+          COALESCE(kill_events.occurred_at, kill_events.created_at) AS occurred_at,
+          kill_events.created_at,
+          ${playerProfileDiscordLookupSql("kill_events", "killer_id", includeVerifiedLinks)} AS discord_id
+         FROM kill_events
+         INNER JOIN linked_servers ON linked_servers.id = kill_events.linked_server_id
+         WHERE lower(linked_servers.status) = 'live'
+           AND ${PUBLIC_LIFECYCLE_SQL}
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND kill_events.killer_name IS NOT NULL
+           AND kill_events.victim_name IS NOT NULL
+           AND ${mockNameFilterSql("kill_events.killer_name")}
+           AND ${mockNameFilterSql("kill_events.victim_name")}
+         ORDER BY datetime(COALESCE(kill_events.occurred_at, kill_events.created_at)) DESC, kill_events.created_at DESC
+         LIMIT 1`,
+      )
+      .first<PublicLongestKillRow>();
 
-  const rows = distanceResult.results ?? [];
-  const bestOverall = rows[0] ? toKillHighlight(rows[0]) : null;
-  return {
-    bestOverallKill: bestOverall,
-    latestKill: latestKill ? toKillHighlight(latestKill) : null,
-    personalBestKills: rankLongestKills(rows, limit),
-  };
+    const rows = distanceResult.results ?? [];
+    const publicProfileLinksByDiscordId = await readPublicProfileLinksByDiscordIds(env, [
+      ...rows.map((row) => row.discord_id),
+      latestKill?.discord_id,
+    ]);
+    const bestOverall = rows[0] ? toKillHighlight(rows[0], publicProfileLinksByDiscordId) : null;
+    return {
+      bestOverallKill: bestOverall,
+      latestKill: latestKill ? toKillHighlight(latestKill, publicProfileLinksByDiscordId) : null,
+      personalBestKills: rankLongestKills(rows, limit, publicProfileLinksByDiscordId),
+    };
+  } catch (error) {
+    if (includeVerifiedLinks && isMissingVerifiedIdentityLinkTable(error)) return getLongestKillSummary(env, limit, false);
+    throw error;
+  }
 }
 
 function mergePlayerRows(kills: PublicPlayerKillRow[], deaths: PublicPlayerDeathRow[]) {
@@ -475,6 +508,7 @@ function mergePlayerRows(kills: PublicPlayerKillRow[], deaths: PublicPlayerDeath
       deaths: 0,
       longestKill: numberOrZero(row.longest_kill),
       lastSeen: row.last_seen,
+      discordId: row.discord_id ?? null,
     });
   }
 
@@ -484,6 +518,7 @@ function mergePlayerRows(kills: PublicPlayerKillRow[], deaths: PublicPlayerDeath
     if (existing) {
       existing.deaths = numberOrZero(row.deaths);
       existing.lastSeen = latestDateString(existing.lastSeen, row.last_seen);
+      existing.discordId = existing.discordId ?? row.discord_id ?? null;
     } else {
       players.set(id, {
         playerName: row.player_name,
@@ -493,6 +528,7 @@ function mergePlayerRows(kills: PublicPlayerKillRow[], deaths: PublicPlayerDeath
         deaths: numberOrZero(row.deaths),
         longestKill: 0,
         lastSeen: row.last_seen,
+        discordId: row.discord_id ?? null,
       });
     }
   }
@@ -500,7 +536,11 @@ function mergePlayerRows(kills: PublicPlayerKillRow[], deaths: PublicPlayerDeath
   return [...players.values()];
 }
 
-export function rankPublicPlayers(players: PublicPlayerStatInput[], limit = 50) {
+export function rankPublicPlayers(
+  players: PublicPlayerStatInput[],
+  limit = 50,
+  publicProfileLinksByDiscordId: ReadonlyMap<string, PublicProfileLink> = new Map(),
+) {
   return players
     .filter((player) => Boolean(player.playerName) && (numberOrZero(player.kills) > 0 || numberOrZero(player.deaths) > 0))
     .sort((a, b) => {
@@ -517,6 +557,7 @@ export function rankPublicPlayers(players: PublicPlayerStatInput[], limit = 50) 
       const kills = numberOrZero(player.kills);
       const deaths = numberOrZero(player.deaths);
       const kd = calculateKd(kills, deaths);
+      const publicProfile = player.discordId ? publicProfileLinksByDiscordId.get(player.discordId) : null;
       return {
         rank: index + 1,
         player_name: player.playerName ?? "Unknown Player",
@@ -529,11 +570,17 @@ export function rankPublicPlayers(players: PublicPlayerStatInput[], limit = 50) 
         kd_label: kd.label,
         longest_kill: roundOne(numberOrZero(player.longestKill)),
         last_seen: player.lastSeen ?? null,
+        public_profile_handle: publicProfile?.handle ?? null,
+        public_profile_href: publicProfile?.href ?? null,
       } satisfies PublicLeaderboardPlayer;
     });
 }
 
-export function rankLongestKills(rows: PublicLongestKillRow[], limit = 50) {
+export function rankLongestKills(
+  rows: PublicLongestKillRow[],
+  limit = 50,
+  publicProfileLinksByDiscordId: ReadonlyMap<string, PublicProfileLink> = new Map(),
+) {
   const seenKillers = new Set<string>();
   const personalBests: PublicLongestKillRow[] = [];
 
@@ -562,6 +609,8 @@ export function rankLongestKills(rows: PublicLongestKillRow[], limit = 50) {
       weapon: row.weapon ?? "Unknown weapon",
       distance: roundOne(numberOrZero(row.distance)),
       occurred_at: row.occurred_at ?? null,
+      player_public_profile_handle: row.discord_id ? publicProfileLinksByDiscordId.get(row.discord_id)?.handle ?? null : null,
+      player_public_profile_href: row.discord_id ? publicProfileLinksByDiscordId.get(row.discord_id)?.href ?? null : null,
     } satisfies PublicLongestKill));
 }
 
@@ -670,65 +719,95 @@ async function getAllTelemetryLeaderboards(env: Env, limit: number, offset = 0) 
   return Object.fromEntries(entries) as Record<PublicLeaderboardMetric, PublicTelemetryLeaderboardRow[]>;
 }
 
-async function getTelemetryLeaderboard(env: Env, metric: PublicLeaderboardMetric, limit: number, offset = 0) {
+async function getTelemetryLeaderboard(env: Env, metric: PublicLeaderboardMetric, limit: number, offset = 0, includeVerifiedLinks = true): Promise<PublicTelemetryLeaderboardRow[]> {
   const db = requireDb(env);
   const mapping = PUBLIC_LEADERBOARD_METRICS[metric];
   const queryLimit = Math.max(1, Math.min(Math.trunc(limit) || 10, 500));
   const queryOffset = Math.max(0, Math.trunc(offset) || 0);
-  const result = await db
-    .prepare(
-      `SELECT
-        player_profiles.player_name,
-        player_profiles.player_id,
-        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-        linked_servers.public_slug AS server_slug,
-        COALESCE(player_profiles.kills, 0) AS kills,
-        COALESCE(player_profiles.deaths, 0) AS deaths,
-        COALESCE(player_profiles.longest_kill_distance, 0) AS longest_kill,
-        COALESCE(player_profiles.highest_killstreak, 0) AS highest_killstreak,
-        COALESCE(player_profiles.total_time_alive_seconds, 0) AS total_time_alive_seconds,
-        COALESCE(player_profiles.headshots, 0) AS headshots,
-        COALESCE(NULLIF(player_profiles.favourite_weapon, ''), 'Unknown') AS favourite_weapon,
-        COALESCE(player_profiles.combat_logs_count, 0) AS combat_logs_count,
-        COALESCE(player_profiles.rage_quits_count, 0) AS rage_quits_count,
-        COALESCE(player_profiles.spawn_kills_count, 0) AS spawn_kills_count,
-        player_profiles.last_seen_at AS last_seen,
-        ${mapping.valueExpression} AS metric_value
-       FROM player_profiles
-       INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
-       WHERE lower(linked_servers.status) = 'live'
-         AND ${PUBLIC_LIFECYCLE_SQL}
-         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
-         AND player_profiles.player_name IS NOT NULL
-         AND ${mockNameFilterSql("player_profiles.player_name")}
-       ORDER BY ${mapping.orderExpression} DESC, COALESCE(player_profiles.kills, 0) DESC, datetime(COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at)) DESC
-       LIMIT ? OFFSET ?`,
-    )
-    .bind(queryLimit, queryOffset)
-    .all<{
-      player_name: string | null;
-      player_id: string | null;
-      server_name: string | null;
-      server_slug: string | null;
-      kills: number | null;
-      deaths: number | null;
-      longest_kill: number | null;
-      highest_killstreak: number | null;
-      total_time_alive_seconds: number | null;
-      headshots: number | null;
-      favourite_weapon: string | null;
-      combat_logs_count: number | null;
-      rage_quits_count: number | null;
-      spawn_kills_count: number | null;
-      last_seen: string | null;
-      metric_value: number | string | null;
-    }>();
+  let result: D1Result<{
+    player_name: string | null;
+    player_id: string | null;
+    discord_id: string | null;
+    server_name: string | null;
+    server_slug: string | null;
+    kills: number | null;
+    deaths: number | null;
+    longest_kill: number | null;
+    highest_killstreak: number | null;
+    total_time_alive_seconds: number | null;
+    headshots: number | null;
+    favourite_weapon: string | null;
+    combat_logs_count: number | null;
+    rage_quits_count: number | null;
+    spawn_kills_count: number | null;
+    last_seen: string | null;
+    metric_value: number | string | null;
+  }>;
+  try {
+    result = await db
+      .prepare(
+        `SELECT
+          player_profiles.player_name,
+          player_profiles.player_id,
+          ${playerProfileDiscordColumnSql(includeVerifiedLinks)} AS discord_id,
+          COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+          linked_servers.public_slug AS server_slug,
+          COALESCE(player_profiles.kills, 0) AS kills,
+          COALESCE(player_profiles.deaths, 0) AS deaths,
+          COALESCE(player_profiles.longest_kill_distance, 0) AS longest_kill,
+          COALESCE(player_profiles.highest_killstreak, 0) AS highest_killstreak,
+          COALESCE(player_profiles.total_time_alive_seconds, 0) AS total_time_alive_seconds,
+          COALESCE(player_profiles.headshots, 0) AS headshots,
+          COALESCE(NULLIF(player_profiles.favourite_weapon, ''), 'Unknown') AS favourite_weapon,
+          COALESCE(player_profiles.combat_logs_count, 0) AS combat_logs_count,
+          COALESCE(player_profiles.rage_quits_count, 0) AS rage_quits_count,
+          COALESCE(player_profiles.spawn_kills_count, 0) AS spawn_kills_count,
+          player_profiles.last_seen_at AS last_seen,
+          ${mapping.valueExpression} AS metric_value
+         FROM player_profiles
+         INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
+         WHERE lower(linked_servers.status) = 'live'
+           AND ${PUBLIC_LIFECYCLE_SQL}
+           AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
+           AND player_profiles.player_name IS NOT NULL
+           AND ${mockNameFilterSql("player_profiles.player_name")}
+         ORDER BY ${mapping.orderExpression} DESC, COALESCE(player_profiles.kills, 0) DESC, datetime(COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at)) DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .bind(queryLimit, queryOffset)
+      .all<{
+        player_name: string | null;
+        player_id: string | null;
+        discord_id: string | null;
+        server_name: string | null;
+        server_slug: string | null;
+        kills: number | null;
+        deaths: number | null;
+        longest_kill: number | null;
+        highest_killstreak: number | null;
+        total_time_alive_seconds: number | null;
+        headshots: number | null;
+        favourite_weapon: string | null;
+        combat_logs_count: number | null;
+        rage_quits_count: number | null;
+        spawn_kills_count: number | null;
+        last_seen: string | null;
+        metric_value: number | string | null;
+      }>();
+  } catch (error) {
+    if (includeVerifiedLinks && isMissingVerifiedIdentityLinkTable(error)) return getTelemetryLeaderboard(env, metric, limit, offset, false);
+    throw error;
+  }
 
-  return (result.results ?? []).map((row, index) => {
+  const rows = result.results ?? [];
+  const publicProfileLinksByDiscordId = await readPublicProfileLinksByDiscordIds(env, rows.map((row) => row.discord_id));
+
+  return rows.map((row, index) => {
     const kills = numberOrZero(row.kills);
     const deaths = numberOrZero(row.deaths);
     const kd = calculateKd(kills, deaths);
     const metricValue = normalizeMetricValue(metric, row.metric_value);
+    const publicProfile = row.discord_id ? publicProfileLinksByDiscordId.get(row.discord_id) : null;
     return {
       rank: queryOffset + index + 1,
       player_name: row.player_name ?? "Unknown Player",
@@ -748,6 +827,8 @@ async function getTelemetryLeaderboard(env: Env, metric: PublicLeaderboardMetric
       combat_logs_count: numberOrZero(row.combat_logs_count),
       rage_quits_count: numberOrZero(row.rage_quits_count),
       spawn_kills_count: numberOrZero(row.spawn_kills_count),
+      public_profile_handle: publicProfile?.handle ?? null,
+      public_profile_href: publicProfile?.href ?? null,
       metric,
       metric_value: metricValue,
       metric_label: formatMetricLabel(metric, metricValue),
@@ -782,7 +863,11 @@ function isPublicLeaderboardMetric(value: string): value is PublicLeaderboardMet
   return Object.prototype.hasOwnProperty.call(PUBLIC_LEADERBOARD_METRICS, value);
 }
 
-function toKillHighlight(row: PublicLongestKillRow): PublicKillHighlight {
+function toKillHighlight(
+  row: PublicLongestKillRow,
+  publicProfileLinksByDiscordId: ReadonlyMap<string, PublicProfileLink> = new Map(),
+): PublicKillHighlight {
+  const publicProfile = row.discord_id ? publicProfileLinksByDiscordId.get(row.discord_id) : null;
   return {
     player_name: row.player_name ?? "Unknown Player",
     victim_name: row.victim_name ?? "Unknown Player",
@@ -791,6 +876,8 @@ function toKillHighlight(row: PublicLongestKillRow): PublicKillHighlight {
     weapon: row.weapon ?? "Unknown weapon",
     distance: roundOne(numberOrZero(row.distance)),
     occurred_at: row.occurred_at ?? row.created_at ?? null,
+    player_public_profile_handle: publicProfile?.handle ?? null,
+    player_public_profile_href: publicProfile?.href ?? null,
   };
 }
 
@@ -858,6 +945,65 @@ function sanitizeSlug(value: string | null) {
   if (!value) return null;
   const slug = value.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 90);
   return slug || null;
+}
+
+function playerProfileDiscordLookupSql(eventTable: "kill_events", playerIdColumn: string, includeVerifiedLinks: boolean) {
+  if (!includeVerifiedLinks) {
+    return `(
+      SELECT player_profiles.discord_id
+      FROM player_profiles
+      WHERE player_profiles.linked_server_id = ${eventTable}.linked_server_id
+        AND player_profiles.discord_id IS NOT NULL
+        AND trim(player_profiles.discord_id) != ''
+        AND ${eventTable}.${playerIdColumn} IS NOT NULL
+        AND player_profiles.player_id = ${eventTable}.${playerIdColumn}
+      ORDER BY datetime(COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at)) DESC
+      LIMIT 1
+    )`;
+  }
+
+  return `(
+    SELECT COALESCE(NULLIF(trim(player_profiles.discord_id), ''), NULLIF(trim(player_game_identity_links.discord_id), ''))
+    FROM player_profiles
+    LEFT JOIN player_game_identity_links
+      ON player_game_identity_links.linked_server_id = player_profiles.linked_server_id
+      AND player_game_identity_links.player_profile_id = player_profiles.id
+      AND player_game_identity_links.player_id = player_profiles.player_id
+      AND player_game_identity_links.status = 'active'
+      AND player_game_identity_links.revoked_at IS NULL
+    WHERE player_profiles.linked_server_id = ${eventTable}.linked_server_id
+      AND ${eventTable}.${playerIdColumn} IS NOT NULL
+      AND player_profiles.player_id = ${eventTable}.${playerIdColumn}
+      AND (
+        (player_profiles.discord_id IS NOT NULL AND trim(player_profiles.discord_id) != '')
+        OR (player_game_identity_links.discord_id IS NOT NULL AND trim(player_game_identity_links.discord_id) != '')
+      )
+    ORDER BY datetime(COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at)) DESC
+    LIMIT 1
+  )`;
+}
+
+function playerProfileDiscordColumnSql(includeVerifiedLinks: boolean) {
+  if (!includeVerifiedLinks) return "player_profiles.discord_id";
+
+  return `COALESCE(
+    NULLIF(trim(player_profiles.discord_id), ''),
+    (
+      SELECT NULLIF(trim(player_game_identity_links.discord_id), '')
+      FROM player_game_identity_links
+      WHERE player_game_identity_links.linked_server_id = player_profiles.linked_server_id
+        AND player_game_identity_links.player_profile_id = player_profiles.id
+        AND player_game_identity_links.player_id = player_profiles.player_id
+        AND player_game_identity_links.status = 'active'
+        AND player_game_identity_links.revoked_at IS NULL
+      LIMIT 1
+    )
+  )`;
+}
+
+function isMissingVerifiedIdentityLinkTable(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /player_game_identity_links/i.test(message) && /no such table|not found|does not exist/i.test(message);
 }
 
 function normalizeMode(value: string | null) {

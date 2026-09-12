@@ -1,6 +1,6 @@
 # DZN Player + Owner Platform Specification
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
 
 This document is the durable product and engineering contract for DZN's split player and server-owner platform. Chat history is not the source of truth once this spec exists.
 
@@ -156,6 +156,8 @@ This slice makes `/player` and `/player/profile` more useful without introducing
 
 - Add a private read-only current-user profile/progression summary to `GET /api/player/hub`.
 - Read only Discord-scoped `player_profiles` rows for the current logged-in user.
+- Profile stats use the trusted Discord/stat bridge: `player_profiles.discord_id` must match the current user and leaderboard-style event totals may be mirrored only through the same per-server `player_profiles.player_id` bridge used by public leaderboard attribution.
+- DZN must not attach gameplay rows to a Discord account by display name, profile handle, leaderboard name, review name, or any other public text alone.
 - Join those rows only to public-safe server display fields, so hidden/deleted/merged/slugless server rows do not appear.
 - Expose aggregate gameplay profile signals such as linked profile count, linked public-server count, total kills/deaths/suicides, longest kill distance, latest seen timestamp, and one public-safe featured server.
 - Do not expose raw `player_name`, `player_id`, private Discord identifiers, hidden server rows, other-user rows, profile privacy settings, or public profile handles.
@@ -164,6 +166,31 @@ This slice makes `/player` and `/player/profile` more useful without introducing
 - Keep XP, challenges, and calling cards marked as future earned runtime tracks until trusted server-side award sources and ledgers exist.
 - Keep owner setup behind `/pricing?intent=owner_setup&returnTo=%2Fsetup`.
 - Do not add migrations, write profile/privacy/award rows, grant awards, alter billing, alter owner entitlement, alter scoring, alter rankings, alter discovery, alter reviews, alter events, alter Server Wars/CTF, or alter competitive eligibility.
+
+### Verified Player Game-Identity Linking/Reconciliation
+
+Public leaderboard/player stats must be connected to Discord accounts through a verified game identity bridge, not display-name matching.
+
+The identity linking model is:
+
+- `player_game_identity_claims`: current-user private claims for a specific public DZN server and exact ADM `player_id`.
+- `player_game_identity_links`: approved active links from a DZN user/Discord ID to one exact `linked_server_id + player_profile_id + player_id` row.
+- `player_game_identity_audit_log`: append-only audit facts for claim requests, approvals, rejections, link creation, and future revocation.
+
+The first implementation slice allows a logged-in player to request a link from `/player/profile` without needing to understand internal server slugs. The player-facing UI should present a simple server picker/search from public DZN servers, then ask for the exact game ID or proof code supplied by the server owner. Internally, the request still submits the selected public server identifier plus the exact ADM `player_id`. DZN validates the request against one public-safe `player_profiles` row for that server and rejects missing, already-linked, duplicate, or ambiguous matches. A server owner for that `linked_server_id` or a DZN admin must approve or reject the pending claim through private owner/admin API routes. Approval creates exactly one active verified link and may backfill the matching `player_profiles.discord_id` row only by exact `id + linked_server_id + player_id` for compatibility with existing public profile attribution.
+
+Player-facing copy should avoid technical terms such as "slug", "linked_server_id", and "ADM player_id" unless the user is in an owner/admin technical surface. The safe mental model for normal players is: choose the server, paste the game ID/proof code from the owner, wait for owner/admin approval. The safety model remains unchanged: never infer a game identity from `player_name`, display name, public profile handle, Discord username, or leaderboard row text.
+
+The owner/admin troubleshooting polish adds `/owner/player-game-identity-claims` as a private review queue. That queue may show the exact submitted game ID because it is only available to the matching server owner or a DZN admin through the same owner/admin API gate. The player-facing claim API and public profile APIs must continue to return masked game IDs only. The review UI should show the submitted account label, selected server, imported game profile name, exact submitted game ID, checklist guidance, approve/reject rules, and missing-evidence copy. Approval or rejection still writes only claim/link/audit state through the canonical review helper.
+
+Rules:
+
+- Never infer a game identity from `player_name`, public profile handle, display name, review name, Discord username, or leaderboard text.
+- Approved links are private account bridges used to read existing public-safe gameplay facts for the right person.
+- `/player`, `/player/profile`, and public `/players/[handle]` may show linked leaderboard/server stats only after the Discord account has an existing direct profile link or an approved active verified game identity link.
+- Claim/read APIs must return private no-store responses and must not expose raw Discord IDs or unmasked player IDs to public surfaces. Exact submitted game IDs are allowed only in the private owner/admin review queue.
+- Owner/admin claim review is scoped by `requireServerOwnerOrDznAdmin`; cross-owner claim review is denied.
+- Identity linking does not grant server ownership, Nitrado access, owner setup, billing entitlements, Store access, reviews, event decisions, XP, calling cards, badges, seasons, Server Wars/CTF scoring, rankings, discovery score changes, or competitive eligibility.
 
 ## Reviews Roadmap
 
@@ -197,7 +224,12 @@ Public profiles must respect saved privacy preferences:
 - Enabling public profile publishing may generate or reactivate only the current user's handle. Handles are presentation-only and cannot grant authority or competitive effect.
 - Public `GET /api/public/players/[handle]` and `/players/[handle]` show only approved sections.
 - Hidden sections, private identifiers, and raw award evidence stay private.
+- Public profile gameplay totals and featured-server cards reuse the trusted Discord/stat bridge. They may show existing public leaderboard-style ADM event facts only when a Discord-linked `player_profiles` row and per-server `player_id` prove the account-to-gameplay relationship.
+- If no trusted Discord-linked gameplay row exists, public profiles may show a safe empty state; they must not infer stats from a matching display name or handle.
 - Public profile links are opt-in and only shown where a generated public handle exists.
+- Public profile discovery/linking uses the trusted current-user bridge from Discord ID to DZN user to active `player_public_profiles` handle, and also requires `player_profile_privacy_preferences.public_profile_enabled = 1`.
+- Kill-event and leaderboard attribution also require a trusted per-server `player_profiles.player_id` bridge; player-name matching alone must not create profile links.
+- Public API snapshots must strip profile attribution link fields so stale cache fallback cannot keep showing links after a player hides their profile.
 - Attribution is presentation-only across review author rows, player-safe challenge/member rows, leaderboard/player mentions, public-safe community directories, and non-scoring member rows.
 - CTF scoring rows, owner workflow rows, approval decisions, bracket outcomes, and competitive systems stay isolated unless a dedicated proof slice allows presentation-only linking.
 
@@ -218,6 +250,7 @@ DZN Comms is a future site-wide support and community communication system:
 - Site-wide support launcher available across major pages.
 - Logged-in global player chat.
 - Private group chat.
+- Read-history foundation comes first: `GET /api/comms/message-history` is disabled by default, local/test scoped, read-only, public-safe for public channels, and membership-gated for private groups. `/community` must keep a static fallback and disabled composer unless the approved local/test UI flag is enabled.
 - Public-DZN-info-only AI support bot for website/setup help.
 - Profanity filtering, warnings, timed timeouts, report actions, moderation hooks, owner/admin scope, retention rules, and rollback controls.
 - Public-safe aggregate online counter may appear on `/community` or global chat surfaces behind disabled-by-default flags.
@@ -282,9 +315,13 @@ Completed or active foundation slices:
 - Player Hub profile/progression entry-point real-data polish: private current-user `player_profiles` summaries now feed `/player` and `/player/profile` entry panels without exposing raw player identifiers, profile privacy settings, public handles, hidden rows, other-user rows, award writes, billing, owner workflows, scoring, ranking, discovery, reviews, events, Server Wars, CTF, or competitive eligibility.
 - Player profile privacy settings model: persistent player-owned public profile visibility and per-section display preferences now live behind private settings APIs and the logged-in `/player/profile` panel, without publishing handles, exposing hidden sections, or touching billing, rankings, discovery, reviews, badges, seasons, events, Server Wars, XP awards, calling-card awards, CTF, or competitive eligibility.
 - Public profile publishing/viewer foundation: opt-in current-user handles now live in `player_public_profiles`, private `/player/profile` can expose the user's active profile link, and public `/players/[handle]` plus `GET /api/public/players/[handle]` render only saved visible sections without private identifiers, raw award evidence, payment state, owner state, billing, rankings, discovery, reviews, badges, seasons, events, Server Wars, XP awards, calling-card awards, CTF, or competitive eligibility effect.
+- Public profile discovery/linking polish: review author rows, public server profile player leaderboards, top-player cards, global leaderboard player rows, and longest-kill player mentions can link to `/players/[handle]` only when an active generated public handle exists and saved privacy preferences keep the profile public. These links are stripped from public API fallback snapshots and remain presentation-only with no payment, owner, review score, ranking, discovery, event, award, Server Wars, CTF, XP, calling-card, or eligibility effect.
+- Public Profile Owner Preview And Share Polish: the logged-in `/player/profile` privacy panel now shows a private "How My Public Profile Looks" visitor-view mirror, owner copy/share controls, handle copy, open-public-page action, hidden/not-yet-earned section states, and current-page-session-only action feedback. It reads only the current user's private privacy payload plus the public read-only profile endpoint. Copy/share controls cannot affect profile privacy settings, billing, scoring, rankings, reviews, badges, seasons, Server Wars, XP awards, calling-card awards, events, or competitive eligibility.
+- DZN Comms read-history foundation: additive local/test schema for Comms channels, read-history messages, and private group membership proof; disabled-by-default `GET /api/comms/message-history`; static `/community` fallback with disabled composer; public-channel read proof and private-group membership denial proof. No sending, reactions, moderation mutations, DZN Assist AI runtime, Durable Objects/WebSockets, analytics/tracking, Store/payment/live checkout, production D1 writes, retained exports, issue `#49`, or competitive-system effects.
+- Trusted Player Stat Bridge: `/player` and public `/players/[handle]` share a read-only gameplay/stat bridge that scopes by Discord ID and mirrors existing public leaderboard ADM event totals only through the per-server player ID relationship. It keeps display names/handles out of identity proof, keeps hidden/merged/slugless server rows out, writes nothing, and cannot affect billing, ownership, scoring, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF, XP awards, calling-card awards, public profile visibility, or competitive eligibility.
 
-Next recommended product slice after public profile publishing/viewer foundation:
+Next recommended product area after public profile owner preview/share polish:
 
-- Public profile discovery/linking polish: add public profile entry links from relevant player-facing surfaces, copy/share controls for the profile owner, and richer empty states for hidden or not-yet-earned sections, while keeping public profiles read-only and isolated from billing, rankings, discovery score, reviews, badges, seasons, events, Server Wars scoring, XP awards, calling-card awards, and competitive eligibility.
-- Keep the queued DZN Comms/support work separate: the site-wide support launcher, logged-in global chat, private groups, reactions, live presence counter, profanity warning/timeouts, moderation hooks, and public-DZN-info-only AI support bot still need their approved preflight/runtime slices before any real chat sending, persistence, AI credentials, vector stores, analytics/tracking, metered calls, or production mutations are added.
+- DZN Comms/support remains the next queued product area: continue in the safe order of sending contract, reactions, moderation/timeouts, presence counter, support launcher, then the public-DZN-info-only AI support bot.
+- Keep the queued DZN Comms/support work separate: the site-wide support launcher, logged-in global chat, private groups, reactions, live presence counter, profanity warning/timeouts, moderation hooks, and public-DZN-info-only AI support bot still need their approved preflight/runtime slices before any real chat sending, persistence, AI credentials, vector stores, analytics/tracking, metered calls, live checkout, Store/payment changes, D1 production writes, or other production mutations are added.
 - Keep the queued session inactivity UX separate: warning/countdown refresh prompts and optional auto logout still need their own approval/preflight/runtime slice before any activity tracking, session mutation, forced logout, cross-tab sync, or protected-page timeout enforcement is added.

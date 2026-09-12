@@ -40,9 +40,9 @@ const placeholderItems: RailItem[] = [
   {
     id: "placeholder-free",
     slug: null,
-    name: "Free listings are open",
+    name: "Compare Starter and Pro",
     logoUrl: null,
-    category: "Free Listing",
+    category: "Owner plans",
     currentPlayers: null,
     maxPlayers: null,
     ratingAverage: null,

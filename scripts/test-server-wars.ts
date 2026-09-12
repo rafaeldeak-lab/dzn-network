@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { testServerWarOpponentPicker } from "./test-server-war-opponent-picker";
 
 const migration = readFileSync("migrations/0051_server_wars_mvp.sql", "utf8");
 for (const table of [
@@ -148,3 +149,4 @@ assert.match(dashboardSource, /challenge\.canRespond/);
 assert.match(dashboardSource, /Awaiting opponent/);
 
 console.log("Server Wars MVP route/schema/privacy/fallback tests passed.");
+testServerWarOpponentPicker().catch(error => { console.error(error); process.exitCode = 1; });

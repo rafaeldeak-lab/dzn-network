@@ -3,6 +3,13 @@ import { canManageDiscordGuild } from "../../_lib/discord";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth } from "../../_lib/mock";
 import { readPlayerSavedServersForUser } from "../../_lib/player-saved-servers";
+import { publicProfileHref } from "../../_lib/player-public-profiles";
+import {
+  readTrustedPlayerFeaturedServer,
+  readTrustedPlayerGameplayAggregate,
+  type TrustedPlayerFeaturedServerRow,
+  type TrustedPlayerGameplayAggregateRow,
+} from "../../_lib/player-stat-bridge";
 import { privateNoStoreHeaders } from "../../_lib/performance";
 import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 
@@ -97,38 +104,15 @@ type PlayerHubSuggestedEventContext = {
   matchedCommunityServerIds: string[];
 };
 
-type PlayerHubProfileAggregateRow = {
-  linked_game_profiles: number | null;
-  linked_public_servers: number | null;
-  total_kills: number | null;
-  total_deaths: number | null;
-  total_suicides: number | null;
-  longest_kill_distance: number | null;
-  last_seen_at: string | null;
-};
-
-type PlayerHubFeaturedProfileServerRow = {
-  linked_server_id: string;
-  public_slug: string;
-  server_name: string;
-  server_type: string | null;
-  platform: string | null;
-  map_name: string | null;
-  kills: number | null;
-  deaths: number | null;
-  longest_kill_distance: number | null;
-  last_seen_at: string | null;
-};
-
 type PlayerHubProfileProgressionReadModel = {
   profileSummary: {
     display_name: string;
     private_profile_href: string;
     public_profile_href: string | null;
-    public_profile_status: "not_configured";
+    public_profile_status: "published" | "private" | "not_published" | "unavailable";
     public_profile_message: string;
-    linked_game_profiles: number;
-    linked_public_servers: number;
+    linked_game_profiles: number | null;
+    linked_public_servers: number | null;
     last_seen_at: string | null;
     source: "player_profiles" | "unavailable";
     private: true;
@@ -138,10 +122,10 @@ type PlayerHubProfileProgressionReadModel = {
     status: "stats_available" | "empty" | "unavailable";
     source: "player_profiles" | "unavailable";
     gameplay_totals: {
-      kills: number;
-      deaths: number;
-      suicides: number;
-      longest_kill_distance: number;
+      kills: number | null;
+      deaths: number | null;
+      suicides: number | null;
+      longest_kill_distance: number | null;
     };
     featured_server: {
       linked_server_id: string;
@@ -302,65 +286,28 @@ async function readSafeSavedServers(env: Env, userId: string) {
 
 async function readPlayerProfileProgression(env: Env, user: SessionUser): Promise<PlayerHubProfileProgressionReadModel> {
   const displayName = user.username || "DZN Player";
+  const publicProfile = await readPlayerPublicProfileState(env, user.id);
   try {
     const db = requireDb(env);
-    const [aggregateRows, featuredRows] = await Promise.all([
-      db
-        .prepare(
-          `SELECT
-            COUNT(player_profiles.id) AS linked_game_profiles,
-            COUNT(DISTINCT player_profiles.linked_server_id) AS linked_public_servers,
-            COALESCE(SUM(COALESCE(player_profiles.kills, 0)), 0) AS total_kills,
-            COALESCE(SUM(COALESCE(player_profiles.deaths, 0)), 0) AS total_deaths,
-            COALESCE(SUM(COALESCE(player_profiles.suicides, 0)), 0) AS total_suicides,
-            COALESCE(MAX(COALESCE(player_profiles.longest_kill_distance, 0)), 0) AS longest_kill_distance,
-            MAX(COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at)) AS last_seen_at
-           FROM player_profiles
-           INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
-           WHERE player_profiles.discord_id = ?
-             AND ${publicServerWhere}`,
-        )
-        .bind(user.discord_id)
-        .all<PlayerHubProfileAggregateRow>(),
-      db
-        .prepare(
-          `SELECT
-            player_profiles.linked_server_id,
-            linked_servers.public_slug,
-            COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-            COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
-            linked_servers.platform,
-            linked_servers.map_name,
-            player_profiles.kills,
-            player_profiles.deaths,
-            player_profiles.longest_kill_distance,
-            COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at) AS last_seen_at
-           FROM player_profiles
-           INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
-           WHERE player_profiles.discord_id = ?
-             AND ${publicServerWhere}
-           ORDER BY COALESCE(player_profiles.kills, 0) DESC,
-             COALESCE(player_profiles.longest_kill_distance, 0) DESC,
-             datetime(COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at)) DESC
-           LIMIT 1`,
-        )
-        .bind(user.discord_id)
-        .all<PlayerHubFeaturedProfileServerRow>(),
+    const [aggregate, featuredServer] = await Promise.all([
+      readTrustedPlayerGameplayAggregate(db, user.discord_id),
+      readTrustedPlayerFeaturedServer(db, user.discord_id),
     ]);
 
-    const aggregate = aggregateRows.results?.[0] ?? null;
     const linkedGameProfiles = normalizeNullableNumber(aggregate?.linked_game_profiles) ?? 0;
 
     return buildProfileProgressionReadModel({
       displayName,
+      publicProfile,
       source: "player_profiles",
       status: linkedGameProfiles > 0 ? "stats_available" : "empty",
       aggregate,
-      featuredServer: featuredRows.results?.[0] ?? null,
+      featuredServer,
     });
   } catch {
     return buildProfileProgressionReadModel({
       displayName,
+      publicProfile,
       source: "unavailable",
       status: "unavailable",
       aggregate: null,
@@ -369,19 +316,46 @@ async function readPlayerProfileProgression(env: Env, user: SessionUser): Promis
   }
 }
 
+type PlayerHubPublicProfileState = Pick<PlayerHubProfileProgressionReadModel["profileSummary"],
+  "public_profile_href" | "public_profile_status" | "public_profile_message">;
+
+async function readPlayerPublicProfileState(env: Env, userId: string): Promise<PlayerHubPublicProfileState> {
+  try {
+    const row = await requireDb(env).prepare(
+      `SELECT preferences.public_profile_enabled, profiles.handle, profiles.status
+       FROM player_profile_privacy_preferences AS preferences
+       LEFT JOIN player_public_profiles AS profiles ON profiles.user_id = preferences.user_id
+       WHERE preferences.user_id = ?
+       LIMIT 1`,
+    ).bind(userId).first<{ public_profile_enabled: number; handle: string | null; status: string | null }>();
+
+    if (row?.public_profile_enabled !== 1) {
+      return { public_profile_href: null, public_profile_status: "private", public_profile_message: "Your public profile is switched off." };
+    }
+    if (row.status === "active" && row.handle) {
+      return { public_profile_href: publicProfileHref(row.handle), public_profile_status: "published", public_profile_message: "Your public profile shows only the sections you have chosen to share." };
+    }
+    return { public_profile_href: null, public_profile_status: "not_published", public_profile_message: "Your profile is not published yet. Check your profile settings to finish." };
+  } catch {
+    return { public_profile_href: null, public_profile_status: "unavailable", public_profile_message: "We could not check your public profile right now. Your saved settings have not changed." };
+  }
+}
+
 function buildProfileProgressionReadModel(input: {
   displayName: string;
+  publicProfile: PlayerHubPublicProfileState;
   source: "player_profiles" | "unavailable";
   status: PlayerHubProfileProgressionReadModel["progressionSummary"]["status"];
-  aggregate: PlayerHubProfileAggregateRow | null;
-  featuredServer: PlayerHubFeaturedProfileServerRow | null;
+  aggregate: TrustedPlayerGameplayAggregateRow | null;
+  featuredServer: TrustedPlayerFeaturedServerRow | null;
 }): PlayerHubProfileProgressionReadModel {
-  const linkedGameProfiles = normalizeNullableNumber(input.aggregate?.linked_game_profiles) ?? 0;
-  const linkedPublicServers = normalizeNullableNumber(input.aggregate?.linked_public_servers) ?? 0;
-  const kills = normalizeNullableNumber(input.aggregate?.total_kills) ?? 0;
-  const deaths = normalizeNullableNumber(input.aggregate?.total_deaths) ?? 0;
-  const suicides = normalizeNullableNumber(input.aggregate?.total_suicides) ?? 0;
-  const longestKillDistance = normalizeNullableNumber(input.aggregate?.longest_kill_distance) ?? 0;
+  const linkedGameProfiles = input.status === "unavailable" ? null : normalizeNullableNumber(input.aggregate?.linked_game_profiles) ?? 0;
+  const linkedPublicServers = input.status === "unavailable" ? null : normalizeNullableNumber(input.aggregate?.linked_public_servers) ?? 0;
+  const hasStats = input.status === "stats_available";
+  const kills = hasStats ? normalizeNullableNumber(input.aggregate?.total_kills) ?? 0 : null;
+  const deaths = hasStats ? normalizeNullableNumber(input.aggregate?.total_deaths) ?? 0 : null;
+  const suicides = hasStats ? normalizeNullableNumber(input.aggregate?.total_suicides) ?? 0 : null;
+  const longestKillDistance = hasStats ? normalizeNullableNumber(input.aggregate?.longest_kill_distance) ?? 0 : null;
   const featured = input.featuredServer
     ? {
         linked_server_id: input.featuredServer.linked_server_id,
@@ -401,9 +375,7 @@ function buildProfileProgressionReadModel(input: {
     profileSummary: {
       display_name: input.displayName,
       private_profile_href: "/player/profile",
-      public_profile_href: null,
-      public_profile_status: "not_configured",
-      public_profile_message: "Public profile publishing and visibility controls stay in the dedicated profile privacy slices.",
+      ...input.publicProfile,
       linked_game_profiles: linkedGameProfiles,
       linked_public_servers: linkedPublicServers,
       last_seen_at: input.aggregate?.last_seen_at ?? null,
@@ -426,19 +398,19 @@ function buildProfileProgressionReadModel(input: {
           key: "xp",
           label: "XP",
           status: "future_earned_runtime",
-          description: "XP stays blocked until trusted server-side award sources are connected.",
+          description: "XP is not available yet.",
         },
         {
           key: "challenges",
           label: "Challenges",
           status: "future_earned_runtime",
-          description: "Challenge progress will be earned player-side and cannot be paid into.",
+          description: "Player challenges are not available yet.",
         },
         {
           key: "calling_cards",
           label: "Calling cards",
           status: "future_earned_runtime",
-          description: "Calling-card awards remain account-bound earned cosmetics when that runtime lands.",
+          description: "Earned calling cards are not available yet.",
         },
       ],
       message: profileProgressionMessage(input.status),
@@ -448,24 +420,24 @@ function buildProfileProgressionReadModel(input: {
     profileEntries: [
       {
         key: "private_profile",
-        label: "Personal profile",
-        href: "/player/profile",
+        label: "Edit profile",
+        href: "/player/profile#profile-settings",
         status: "available",
-        description: "Open the private player profile entry point for account-specific profile tools.",
+        description: "Choose what appears on your public profile.",
       },
       {
         key: "public_profile",
-        label: "Public profile controls",
-        href: "/player/profile",
-        status: "not_configured",
-        description: "Public profile publishing still requires saved privacy preferences and never bypasses opt-in controls.",
+        label: input.publicProfile.public_profile_href ? "View public profile" : "Public profile settings",
+        href: input.publicProfile.public_profile_href ?? "/player/profile#profile-settings",
+        status: input.publicProfile.public_profile_status,
+        description: input.publicProfile.public_profile_message,
       },
       {
-        key: "progression",
-        label: "Progression summary",
-        href: "/player/profile",
-        status: input.status === "stats_available" ? "stats_ready" : input.status,
-        description: "Current-player gameplay summaries are read-only; XP and calling cards remain earned-only future runtimes.",
+        key: "game_account",
+        label: "Game account",
+        href: "/player/profile#game-account",
+        status: "available",
+        description: "Link your game account or check an existing request.",
       },
     ],
   };
@@ -473,12 +445,12 @@ function buildProfileProgressionReadModel(input: {
 
 function profileProgressionMessage(status: PlayerHubProfileProgressionReadModel["progressionSummary"]["status"]) {
   if (status === "unavailable") {
-    return "Profile/progression summary storage is unavailable in this environment, so DZN shows safe private fallback copy only.";
+    return "Your server stats are temporarily unavailable. Please try again later.";
   }
   if (status === "empty") {
-    return "No Discord-linked public gameplay profile rows were found for this account yet.";
+    return "No linked server stats yet. Check your game account link. Once approved, stats appear here after your server imports activity.";
   }
-  return "This private summary is read from Discord-linked gameplay profile rows and is presentation-only.";
+  return "Your linked stats from public servers. Only the sections you choose to share appear on your public profile.";
 }
 
 async function readMatchedCommunities(env: Env, userId: string): Promise<PlayerHubCommunitiesReadModel> {

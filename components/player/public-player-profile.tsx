@@ -4,6 +4,7 @@ import { Activity, AlertTriangle, EyeOff, Loader2, Radio, ShieldCheck, Trophy } 
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { publicGameplayPresentation } from "@/lib/public-profile-gameplay";
 
 type PublicPlayerProfilePayload = {
   ok: true;
@@ -171,27 +172,34 @@ export function PublicPlayerProfile({ handle: initialHandle = null }: { handle?:
 }
 
 function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
-  const totals = data.sections.gameplay_summary.totals;
+  const gameplay = publicGameplayPresentation(data.sections.gameplay_summary);
 
   return (
     <>
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Public Servers" value={totals ? String(totals.linked_public_servers) : "Hidden"} icon={<Radio aria-hidden="true" className="h-5 w-5" />} />
-        <MetricCard label="Kills" value={totals ? String(totals.kills) : "Hidden"} icon={<Trophy aria-hidden="true" className="h-5 w-5" />} />
-        <MetricCard label="Deaths" value={totals ? String(totals.deaths) : "Hidden"} icon={<Activity aria-hidden="true" className="h-5 w-5" />} />
-        <MetricCard label="Longest" value={totals ? formatDistance(totals.longest_kill_distance) : "Hidden"} icon={<ShieldCheck aria-hidden="true" className="h-5 w-5" />} />
+      <section aria-label="Public gameplay statistics" className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="Public Servers" value={gameplay.publicServers} icon={<Radio aria-hidden="true" className="h-5 w-5" />} />
+        <MetricCard label="Kills" value={gameplay.kills} icon={<Trophy aria-hidden="true" className="h-5 w-5" />} />
+        <MetricCard label="Deaths" value={gameplay.deaths} icon={<Activity aria-hidden="true" className="h-5 w-5" />} />
+        <MetricCard label="Longest" value={gameplay.longest} icon={<ShieldCheck aria-hidden="true" className="h-5 w-5" />} />
       </section>
 
       <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-5">
           <Panel title="Gameplay Summary" visible={data.sections.gameplay_summary.visible}>
-            {totals ? (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <DetailTile label="Linked public servers" value={String(totals.linked_public_servers)} />
-                <DetailTile label="Last seen" value={formatDate(data.sections.gameplay_summary.last_seen_at)} />
-                <DetailTile label="Suicides" value={String(totals.suicides)} />
-                <DetailTile label="Longest kill" value={formatDistance(totals.longest_kill_distance)} />
-              </div>
+            {gameplay.status !== "hidden" ? (
+              <>
+                {gameplay.status !== "available" ? (
+                  <p className="mb-3 rounded-md border border-amber-300/24 bg-amber-300/10 p-3 text-sm font-semibold leading-6 text-amber-50">
+                    {gameplay.message}
+                  </p>
+                ) : null}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <DetailTile label="Linked public servers" value={gameplay.publicServers} />
+                  <DetailTile label="Last seen" value={gameplay.status === "available" ? formatDate(data.sections.gameplay_summary.last_seen_at) : "--"} />
+                  <DetailTile label="Suicides" value={gameplay.suicides} />
+                  <DetailTile label="Longest kill" value={gameplay.longest} />
+                </div>
+              </>
             ) : (
               <HiddenCopy />
             )}

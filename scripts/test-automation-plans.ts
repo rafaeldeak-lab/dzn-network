@@ -331,7 +331,8 @@ assert.equal(dashboardSource.includes("selectedPostTypes.includes(option.key)"),
 assert.equal(dashboardSource.includes("BOT MODE"), true);
 assert.equal(dashboardSource.includes("WEBHOOK FALLBACK"), true);
 assert.equal(dashboardSource.includes("Active"), true);
-assert.equal(dashboardSource.includes("Tracking:"), true);
+assert.equal(dashboardSource.includes("Sync:"), true);
+assert.equal(dashboardSource.includes("Automatic stats sync requires completed setup, supported logs and eligible owner access."), true);
 assert.equal(dashboardSource.includes("Fairness:"), true);
 assert.equal(dashboardSource.includes("Bumps:"), true);
 assert.equal(dashboardSource.includes("Nitrado Log Settings"), true);

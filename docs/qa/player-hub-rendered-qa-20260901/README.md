@@ -10,7 +10,7 @@ No production D1, Stripe, Cloudflare secret/config, Nitrado, Discord runtime, St
 | --- | --- | --- | --- |
 | rich | desktop | [screenshots/rich-desktop.png](screenshots/rich-desktop.png) | 25 text/boundary/overlap checks |
 | rich | mobile | [screenshots/rich-mobile.png](screenshots/rich-mobile.png) | 25 text/boundary/overlap checks |
-| profilePrivacy | desktop | [screenshots/profilePrivacy-desktop.png](screenshots/profilePrivacy-desktop.png) | 16 text/boundary/overlap checks |
+| profilePrivacy | desktop | [screenshots/profilePrivacy-desktop.png](screenshots/profilePrivacy-desktop.png) | 18 text/boundary/overlap checks |
 | empty | desktop | [screenshots/empty-desktop.png](screenshots/empty-desktop.png) | 10 text/boundary/overlap checks |
 | unavailable | desktop | [screenshots/unavailable-desktop.png](screenshots/unavailable-desktop.png) | 7 text/boundary/overlap checks |
 | storageFallback | desktop | [screenshots/storageFallback-desktop.png](screenshots/storageFallback-desktop.png) | 11 text/boundary/overlap checks |

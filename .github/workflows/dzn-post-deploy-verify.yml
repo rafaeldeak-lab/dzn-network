@@ -24,7 +24,7 @@ jobs:
       - name: Production smoke
         id: smoke
         env:
-          DZN_APP_URL: ${{ vars.DZN_APP_URL }}
+          DZN_APP_URL: ${{ vars.DZN_APP_URL || 'https://dayz-network.com' }}
           DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
         run: |
@@ -36,7 +36,7 @@ jobs:
       - name: ADM health snapshot
         id: adm
         env:
-          DZN_APP_URL: ${{ vars.DZN_APP_URL }}
+          DZN_APP_URL: ${{ vars.DZN_APP_URL || 'https://dayz-network.com' }}
           DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
           AUTODEV_WATCH_MINUTES: "0"
@@ -49,7 +49,7 @@ jobs:
       - name: ADM live import evidence
         id: adm-live
         env:
-          DZN_APP_URL: ${{ vars.DZN_APP_URL }}
+          DZN_APP_URL: ${{ vars.DZN_APP_URL || 'https://dayz-network.com' }}
           DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
           SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
         run: |
