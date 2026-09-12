@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { StarterCheckoutButton } from "./starter-checkout-button";
 import { dashboardBillingPlan, dashboardServerPlan } from "./dashboard-plan-display";
+import { dashboardAccessLabel, dashboardAdvancedStatsMessage, dashboardBillingPeriod, dashboardBumpCount, dashboardPromotionCredits } from "./dashboard-detail-display";
 import { OpponentPicker } from "@/components/server-wars/opponent-picker";
 import { PAYMENT_COPY } from "../../lib/billing/payment-copy";
 import {
@@ -816,7 +817,7 @@ function ServerDashboard({
       if (activeServerIdRef.current !== requestServerId) return false;
       setAdvancedStats(data);
       setAdvancedStatsError(data.available === false
-        ? friendlyAdvancedStatsReason(data.reason)
+        ? dashboardAdvancedStatsMessage(data.reason)
         : "");
       return true;
     } catch (error) {
@@ -853,6 +854,7 @@ function ServerDashboard({
   }, [runOptionalDashboardRequest, server.id]);
 
   useEffect(() => {
+    if (activeTab !== "overview") return;
     if (typeof IntersectionObserver === "undefined") {
       const handle = window.setTimeout(() => {
         setAdvancedStatsVisible(true);
@@ -872,7 +874,7 @@ function ServerDashboard({
     if (advancedStatsPanelRef.current) observer.observe(advancedStatsPanelRef.current);
     if (serverWarsPanelRef.current) observer.observe(serverWarsPanelRef.current);
     return () => observer.disconnect();
-  }, [server.id]);
+  }, [server.id, activeTab]);
 
   useEffect(() => {
     if (!advancedStatsVisible || advancedStatsRequestedRef.current) return;
@@ -3483,8 +3485,8 @@ function ServerDashboard({
             <p className="mt-4 text-2xl font-black uppercase text-violet-100">{currentPlanName}</p>
             <div className="mt-4 grid grid-cols-3 gap-3">
               <MiniInfo label="Servers Used" value={effectiveBillingStatus ? `${effectiveBillingStatus.linked_server_count} / ${effectiveBillingStatus.entitlements.max_linked_servers}` : "Loading"} />
-              <MiniInfo label="Bumps This Month" value={advertisingStatus ? `${advertisingStatus.bump_count_current_period} / ${advertisingStatus.included_bumps_per_month}` : String(effectiveBillingStatus?.entitlements.included_bumps_per_month ?? "Loading")} />
-              <MiniInfo label="Renews" value={billingRenewalLabel(effectiveBillingStatus)} />
+              <MiniInfo label="Bumps This Period" value={dashboardBumpCount(advertisingStatus?.bump_count_current_period)} />
+              <MiniInfo {...dashboardBillingPeriod(effectiveBillingStatus)} />
             </div>
           </DashboardPanel>
           <DashboardPanel className="p-4">
@@ -4261,14 +4263,14 @@ function DashboardServerWarsContent({ wars, loading, error }: DashboardServerWar
         <p className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-4 text-sm font-bold text-cyan-50">{error}</p>
       ) : null}
       <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <DashboardMiniMetric label="Plan Access" value={wars?.access?.effectivePlan ?? "free"} />
+        <DashboardMiniMetric label="Plan Access" value={dashboardAccessLabel(wars?.access?.effectivePlan)} />
         <DashboardMiniMetric label="Eligible Rules" value={String(wars?.eligibility?.eligibleRulesets?.length ?? 0)} />
         <DashboardMiniMetric label="Active Wars" value={String(activeEvents.length)} />
         <DashboardMiniMetric label="Trophies" value={String(trophies.length)} />
       </div>
       {!canCreateChallenge ? (
         <div className="mt-4 rounded-lg border border-violet-300/20 bg-violet-400/10 p-4 text-sm font-bold leading-6 text-violet-50">
-          {wars?.access?.lockedReason ?? "Pro is required to create Server VS Server challenges."}
+          {wars?.access?.lockedReason ?? "Challenge availability is not confirmed for this server."}
         </div>
       ) : (
         <form onSubmit={submitChallenge} className="mt-4 grid gap-3 rounded-lg border border-emerald-300/20 bg-emerald-400/10 p-4">
@@ -4366,7 +4368,7 @@ function DashboardAdvancedShowcasePanel({
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <PanelHeader icon={<Compass className="h-5 w-5" />} title="Advanced Showcase Preview" />
         <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase">
-          <span className="rounded border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-cyan-100">{stats?.access?.effectivePlan ? `${stats.access.effectivePlan} plan` : "Plan pending"}</span>
+          <span className="rounded border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-cyan-100">{dashboardAccessLabel(stats?.access?.effectivePlan)}</span>
           <span className="rounded border border-violet-300/20 bg-violet-400/10 px-2 py-1 text-violet-100">No raw coordinates</span>
           <span className="rounded border border-orange-300/20 bg-orange-400/10 px-2 py-1 text-orange-100">Estimated travel</span>
         </div>
@@ -4416,7 +4418,7 @@ function DashboardAdvancedShowcasePanel({
           </div>
         </>
       ) : (
-        <p className="mt-4 rounded-lg border border-white/10 bg-black/24 p-4 text-sm font-bold text-zinc-300">Advanced showcase data is awaiting enough imported ADM events.</p>
+        <p className="mt-4 rounded-lg border border-white/10 bg-black/24 p-4 text-sm font-bold text-zinc-300">Advanced showcase has not loaded.</p>
       )}
     </DashboardPanel>
   );
@@ -5260,8 +5262,8 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
       <div className="mt-4 grid grid-cols-2 gap-3">
         <MiniInfo label="Servers Used" value={billing ? `${billing.linked_server_count} / ${billing.entitlements.max_linked_servers}` : "Loading"} />
         <MiniInfo label="Plan Status" value={billing?.plan_status ?? "Loading"} />
-        <MiniInfo label="Promo Credits" value={billing ? String(planPromotionCreditLimit(billing.plan_key)) : "Loading"} />
-        <MiniInfo label={billing?.cancel_at_period_end ? "Cancels On" : "Renews"} value={billingRenewalLabel(billing)} />
+        <MiniInfo label="Promo Credits" value={dashboardPromotionCredits(billing)} />
+        <MiniInfo {...dashboardBillingPeriod(billing)} />
       </div>
 
       <BillingReadinessWarning readiness={readiness} />
@@ -9258,18 +9260,6 @@ function isNitradoLogSettingsComplete(settings: NitradoLogSettingsConfirmation |
   return true;
 }
 
-function billingRenewalLabel(billing: BillingStatus | null) {
-  if (!billing) return "Loading";
-  return billing.current_period_end_label || (billing.current_period_end ? formatDashboardDate(billing.current_period_end) : "Awaiting Stripe update");
-}
-
-function planPromotionCreditLimit(planKey: string) {
-  const normalized = planKey.toLowerCase();
-  if (normalized === "premium" || normalized === "network" || normalized === "partner") return 8;
-  if (normalized === "pro") return 2;
-  return 0;
-}
-
 function formatStripeModeHint(modeHint: BillingReadinessResponse["modeHint"]) {
   if (modeHint === "live") return "live";
   if (modeHint === "test") return "test";
@@ -10689,16 +10679,6 @@ function formatStatusLabel(value: string) {
   return value
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function friendlyAdvancedStatsReason(value: string | null | undefined) {
-  if (!value || value === "advanced_stats_snapshot_pending") {
-    return "Advanced stats snapshot pending. DZN found ADM logs. Stats will appear after the next readable activity import.";
-  }
-  if (value === "advanced_stats_snapshot_unavailable") {
-    return "Advanced stats snapshot unavailable. DZN will retry after the next readable activity import.";
-  }
-  return formatStatusLabel(value);
 }
 
 function getAdmCursorValidationMessage(status: string | null | undefined) {

@@ -1,10 +1,35 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dashboardBillingPlan, dashboardServerPlan } from "../components/onboarding/dashboard-plan-display";
+import { dashboardAccessLabel, dashboardAdvancedStatsMessage, dashboardBillingPeriod, dashboardBumpCount, dashboardPromotionCredits } from "../components/onboarding/dashboard-detail-display";
 import { getServerVisualShowcase } from "../lib/badges/visuals";
 import { onRequest as authMe } from "../functions/api/auth/me";
 
 const health = { server_id: "showcase", current_plan: "premium", source: "live", stale: false };
+const now = Date.parse("2026-09-12T12:00:00Z");
+const period = { plan_key: "pro", plan_status: "active", cancel_at_period_end: false, current_period_end: "2026-07-18T12:00:00Z" };
+assert.deepEqual(dashboardBillingPeriod(period, now), { label: "Last Period Ended", value: "18 Jul 2026" });
+assert.equal(dashboardBillingPeriod({ ...period, current_period_end: "2026-09-12T12:00:00Z" }, now).label, "Last Period Ended");
+assert.equal(dashboardBillingPeriod({ ...period, current_period_end: "2026-10-12T12:00:00Z" }, now).label, "Renews");
+assert.equal(dashboardBillingPeriod({ ...period, cancel_at_period_end: true, current_period_end: "2026-10-12T12:00:00Z" }, now).label, "Cancels On");
+assert.equal(dashboardBillingPeriod({ ...period, plan_status: "canceled", current_period_end: "2026-10-12T12:00:00Z" }, now).label, "Billing Period End");
+for (const end of [null, "", "invalid"]) assert.equal(dashboardBillingPeriod({ ...period, current_period_end: end }, now).value, "Awaiting Stripe update");
+assert.equal(dashboardBillingPeriod(null, now).value, "Checking billing...");
+for (const count of [null, undefined, "2", -1, 1.5, NaN, Infinity]) assert.equal(dashboardBumpCount(count), "Checking");
+assert.equal(dashboardBumpCount(0), "0");
+assert.equal(dashboardBumpCount(3), "3", "Bumps are cooldown-limited, not promotion-credit quota use.");
+for (const plan of ["pro", "premium", "network", "partner"]) {
+  assert.equal(dashboardAccessLabel(plan), "Pro");
+  assert.equal(dashboardPromotionCredits({ plan_key: plan, plan_status: "active" }), "2");
+  assert.equal(dashboardPromotionCredits({ plan_key: plan, plan_status: "canceled" }), "0");
+}
+for (const plan of [null, undefined, "", "unexpected"]) assert.equal(dashboardAccessLabel(plan), "Checking access");
+assert.equal(dashboardAccessLabel("free"), "Free");
+assert.equal(dashboardAccessLabel("starter"), "Starter");
+assert.equal(dashboardPromotionCredits(null), "Checking");
+assert.equal(dashboardPromotionCredits({ plan_key: "starter", plan_status: "active" }), "0");
+assert.match(dashboardAdvancedStatsMessage("advanced_stats_snapshot_pending"), /not available yet/);
+assert.equal(dashboardAdvancedStatsMessage("advanced_stats_snapshot_pending").includes("next readable"), false);
 assert.equal(dashboardServerPlan("showcase", health, null), "pro");
 for (const plan of ["pro", "premium", "network", "partner"]) {
   assert.equal(dashboardServerPlan("showcase", { ...health, current_plan: plan }, null), "pro");
@@ -39,6 +64,12 @@ const visuals = getServerVisualShowcase({ planKey: dashboardServerPlan("showcase
 assert.equal(visuals.planVisualTreatment.label, "Pro");
 
 const source = readFileSync("components/onboarding/dashboard.tsx", "utf8");
+assert.ok(source.includes('label="Bumps This Period" value={dashboardBumpCount(advertisingStatus?.bump_count_current_period)}'));
+assert.equal(source.includes('advertisingStatus.included_bumps_per_month'), false);
+assert.ok(source.includes('dashboardAccessLabel(wars?.access?.effectivePlan)'));
+assert.ok(source.includes('dashboardAccessLabel(stats?.access?.effectivePlan)'));
+assert.ok(source.includes('}, [server.id, activeTab]);'));
+assert.equal(source.includes('Stats will appear after the next readable activity import'), false);
 assert.ok(source.includes('dashboardServerPlan(server.id, dashboardHealthFresh ? effectiveDashboardHealth : null, effectiveBillingStatus, navigation)'));
 assert.ok(source.includes("setDashboardHealthFresh(true);"));
 const initialHealth = source.slice(source.indexOf("const refreshInitialServerHealth = () => {"), source.indexOf("}, [refreshDashboardHealth]);"));

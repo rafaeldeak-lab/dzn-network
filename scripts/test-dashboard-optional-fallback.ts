@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { dashboardAdvancedStatsMessage } from "../components/onboarding/dashboard-detail-display";
 
 function source(path: string) {
   return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
@@ -34,14 +35,14 @@ assert.equal(
   "Advanced Stats optional snapshot reads must not fail the dashboard with HTTP 503.",
 );
 assert.equal(
-  dashboardSource.includes("friendlyAdvancedStatsReason"),
+  dashboardSource.includes("dashboardAdvancedStatsMessage(data.reason)"),
   true,
   "Dashboard must map internal advanced stats reason keys to user-facing copy.",
 );
 assert.equal(
-  dashboardSource.includes("Advanced stats snapshot pending. DZN found ADM logs. Stats will appear after the next readable activity import."),
-  true,
-  "Dashboard must show friendly copy for pending advanced stats snapshots.",
+  dashboardAdvancedStatsMessage("advanced_stats_snapshot_pending"),
+  "Advanced showcase is not available yet. Core gameplay statistics remain available.",
+  "Pending snapshots must not promise an unimplemented publisher will run after another import.",
 );
 assert.equal(
   dashboardSource.includes('data.reason ?? "advanced_stats_snapshot_pending"'),
