@@ -1,0 +1,672 @@
+{
+  "as_of": "2026-09-13",
+  "compared_main": "d36da3945241ed38a6115ebb212d0569fbad0ee6",
+  "ui_release": "ee43f3f1f445af92ffd423409441b42d9e7b257d",
+  "original_count": 73,
+  "closed_superseded": 7,
+  "open_legacy": 66,
+  "notes": [
+    "A disposition is not a claim of implementation or production activation.",
+    "Closed requests have per-request GitHub comments and preserved branches. Open original branches remain unchanged.",
+    "Historical migration numbers collide with current releases; port unique behavior instead of merging old trees."
+  ],
+  "requests": [
+    {
+      "number": 50,
+      "title": "Add player vs owner access foundation",
+      "original_head": "e2843c233e98b03227a39033eebea6406dd16839",
+      "original_branch": "codex/player-owner-access-foundation-20260825",
+      "original_base": "main",
+      "status": "port_required",
+      "disposition": "Reconcile owner access against current per-server capabilities; do not restore blanket paywalls or override exact-server complimentary access."
+    },
+    {
+      "number": 51,
+      "title": "Add Player Hub foundation",
+      "original_head": "48ac1f7633048bf829ac2aae3c5f47cfc97df490",
+      "original_branch": "codex/player-hub-foundation-20260825",
+      "original_base": "codex/player-owner-access-foundation-20260825",
+      "status": "partial",
+      "disposition": "Player Hub released in #124-#133. Old owner-access dependency and old community route differ; retain only verified missing behavior after #50 reconciliation."
+    },
+    {
+      "number": 52,
+      "title": "Add player saved server interactions",
+      "original_head": "ea7dccd95cc42b44ab24e65579e874452d6e10be",
+      "original_branch": "codex/player-saved-servers-20260825",
+      "original_base": "codex/player-hub-foundation-20260825",
+      "status": "closed_superseded",
+      "disposition": "#125: private saved-server API and UI"
+    },
+    {
+      "number": 53,
+      "title": "Upgrade pricing comparison visuals",
+      "original_head": "7146b6f3879e63b270d353325a64bcd97095e16b",
+      "original_branch": "codex/pricing-visual-upgrade-20260825",
+      "original_base": "codex/player-saved-servers-20260825",
+      "status": "port_required",
+      "disposition": "Pricing artwork/comparison presentation is absent from the newer implementation. Preserve current prices, checkout copy and entitlements."
+    },
+    {
+      "number": 54,
+      "title": "Add reviews foundation",
+      "original_head": "ed3bbe24034e00d902559ce9a0de45067f60761c",
+      "original_branch": "codex/reviews-foundation-20260825",
+      "original_base": "codex/pricing-visual-upgrade-20260825",
+      "status": "port_required",
+      "disposition": "Review reports, replies and moderation model remain distinct from current basic server reviews. Reconcile schema numbering and author/owner scopes."
+    },
+    {
+      "number": 55,
+      "title": "Add reviews moderation dashboard",
+      "original_head": "69562a55fd4bdb4e10a39411bd7d992cbf157585",
+      "original_branch": "codex/reviews-moderation-dashboard-20260825",
+      "original_base": "codex/reviews-foundation-20260825",
+      "status": "port_required",
+      "disposition": "Owner moderation queue, actions and audit trail need a current-model implementation after #54."
+    },
+    {
+      "number": 56,
+      "title": "Polish review moderation workflow",
+      "original_head": "8d168f694868788f09fbe20e2aba4cef19ef15bd",
+      "original_branch": "codex/review-notifications-polish-20260825",
+      "original_base": "codex/reviews-moderation-dashboard-20260825",
+      "status": "port_required",
+      "disposition": "Bulk review actions need per-item authorization and partial-result handling after #54/#55."
+    },
+    {
+      "number": 57,
+      "title": "Add review notification read state",
+      "original_head": "0714d2eccbb84a39e725fb478b7c2db7a55b2223",
+      "original_branch": "codex/review-notification-read-state-20260825",
+      "original_base": "codex/review-notifications-polish-20260825",
+      "status": "port_required",
+      "disposition": "Review notification read-state needs current-user isolation and retention tests."
+    },
+    {
+      "number": 58,
+      "title": "Add Challenges / XP / Calling Cards foundation",
+      "original_head": "9de0606373fb9c6b51ddea87e5abd1d564d861e2",
+      "original_branch": "codex/challenges-xp-calling-cards-foundation-20260825",
+      "original_base": "codex/review-notification-read-state-20260825",
+      "status": "port_required",
+      "disposition": "Verified DayZ challenges, XP and calling cards are not replaced by website Minesweeper XP. Reconcile award schema and provenance."
+    },
+    {
+      "number": 59,
+      "title": "Add trusted player progression awards",
+      "original_head": "2c4932931f5f1fb7a2df7513c049b88732d48793",
+      "original_branch": "codex/progression-awards-foundation-20260825",
+      "original_base": "codex/challenges-xp-calling-cards-foundation-20260825",
+      "status": "port_required",
+      "disposition": "Trusted gameplay award writes and idempotent source keys remain needed; no display-name-only linking or fabricated awards."
+    },
+    {
+      "number": 60,
+      "title": "Add verified progression source adapters and award audit",
+      "original_head": "042a21aabd2ea848f8eb6e29efbe63a64a24f88c",
+      "original_branch": "codex/verified-activity-adapters-audit-20260825",
+      "original_base": "codex/progression-awards-foundation-20260825",
+      "status": "port_required",
+      "disposition": "Trusted-source adapters and award audit need current ingestion/link provenance and revoke behavior."
+    },
+    {
+      "number": 61,
+      "title": "Add progression award audit UI",
+      "original_head": "9012639a56ce52bcd316036c78622ef459d7b10d",
+      "original_branch": "codex/progression-award-audit-ui-20260825",
+      "original_base": "codex/verified-activity-adapters-audit-20260825",
+      "status": "port_required",
+      "disposition": "Platform-owner progression audit views need purpose-limited access and audit records."
+    },
+    {
+      "number": 62,
+      "title": "Add player profile progression showcase",
+      "original_head": "33aaeea54498275283e6e87bfefcb8137792c57c",
+      "original_branch": "codex/player-profile-progression-showcase-20260825",
+      "original_base": "codex/progression-award-audit-ui-20260825",
+      "status": "port_required",
+      "disposition": "Gameplay progression showcase needs actual earned awards; website-game insignia are a separate system."
+    },
+    {
+      "number": 63,
+      "title": "Add player profile privacy preferences",
+      "original_head": "11aeb235b5f042232f347af648bd1c87df74a70a",
+      "original_branch": "codex/player-profile-privacy-preferences-20260825",
+      "original_base": "codex/player-profile-progression-showcase-20260825",
+      "status": "closed_superseded",
+      "disposition": "#138/#139/#170: profile privacy settings"
+    },
+    {
+      "number": 64,
+      "title": "Add public player profile viewer",
+      "original_head": "70d2d2294de40ea911c4466f25bf266cf5398cdc",
+      "original_branch": "codex/public-profile-viewer-20260825",
+      "original_base": "codex/player-profile-privacy-preferences-20260825",
+      "status": "closed_superseded",
+      "disposition": "#139/#140/#145/#173: public profile viewer"
+    },
+    {
+      "number": 65,
+      "title": "Polish public profile discovery links",
+      "original_head": "02a2a46bb10a06dfc99b64eff74b02fe50c1f706",
+      "original_branch": "codex/public-profile-discovery-linking-polish-20260825",
+      "original_base": "codex/public-profile-viewer-20260825",
+      "status": "partial",
+      "disposition": "Current opt-in public discovery (#142) does not cover all original own-profile links from Challenges and DZN Pulse."
+    },
+    {
+      "number": 66,
+      "title": "Add public profile attribution controls polish",
+      "original_head": "4b78c73a79f5846ab1f1dd7fee28b71279099db5",
+      "original_branch": "codex/public-profile-attribution-expansion-controls-polish-20260825",
+      "original_base": "codex/public-profile-cross-surface-attribution-20260825",
+      "status": "port_required",
+      "disposition": "Attribution preview, hide-all behavior and trusted event-suggestion author links need current privacy integration."
+    },
+    {
+      "number": 67,
+      "title": "Add CTF roster attribution proof",
+      "original_head": "07aa6253718fc337d8a9ee0c5445a924a13ef7c6",
+      "original_branch": "codex/ctf-event-roster-attribution-proof-20260825",
+      "original_base": "codex/public-profile-attribution-expansion-controls-polish-20260825",
+      "status": "port_required",
+      "disposition": "CTF roster attribution requires exact trusted server/player association; name matching is insufficient."
+    },
+    {
+      "number": 68,
+      "title": "Add public-safe event member attribution",
+      "original_head": "9d4298d928a2dd5d53dcf0b02bcbf8384015a620",
+      "original_branch": "codex/event-roster-member-public-safe-expansion-20260825",
+      "original_base": "codex/ctf-event-roster-attribution-proof-20260825",
+      "status": "port_required",
+      "disposition": "Event host/creator public attribution requires current opt-in profile and provenance checks."
+    },
+    {
+      "number": 69,
+      "title": "Add public community member directory foundation",
+      "original_head": "2e243b609215c3c2ff589b5b656999d01b86e9aa",
+      "original_branch": "codex/community-member-directory-foundation-20260826",
+      "original_base": "codex/event-roster-member-public-safe-expansion-20260825",
+      "status": "port_required",
+      "disposition": "A public opt-in member directory is not the existing private Discord community-matching table. Requires new current-model schema/privacy review."
+    },
+    {
+      "number": 70,
+      "title": "Add community member source management audit",
+      "original_head": "b1f5c32b49bc19c073445e1beadff8b539027aa6",
+      "original_branch": "codex/community-member-source-management-audit-20260826",
+      "original_base": "codex/community-member-directory-foundation-20260826",
+      "status": "port_required",
+      "disposition": "Trusted member source imports, source management and owner audit remain required after #69."
+    },
+    {
+      "number": 71,
+      "title": "Polish community member import previews",
+      "original_head": "64e5d3754dd0f3743db93320cb8c2dd53ee5d027",
+      "original_branch": "codex/community-member-import-usability-polish-20260826",
+      "original_base": "codex/community-member-source-management-audit-20260826",
+      "status": "port_required",
+      "disposition": "Import snapshot previews, notifications and filters depend on trusted-source permissions and current schema."
+    },
+    {
+      "number": 72,
+      "title": "Polish community member import workflow execution",
+      "original_head": "3db6477594f967ba12619ec0c1ca7a81cee5bdf2",
+      "original_branch": "codex/community-member-import-workflow-execution-polish-20260826",
+      "original_base": "codex/community-member-import-usability-polish-20260826",
+      "status": "port_required",
+      "disposition": "Bulk member import execution and notification state require per-row reauthorization and partial outcomes."
+    },
+    {
+      "number": 73,
+      "title": "Polish community member import audit history",
+      "original_head": "31debf55ab4748aed20fa405c796532b59f71be7",
+      "original_branch": "codex/community-member-import-audit-history-polish-20260826",
+      "original_base": "codex/community-member-import-workflow-execution-polish-20260826",
+      "status": "port_required",
+      "disposition": "Import audit history filters and safe result exports remain required."
+    },
+    {
+      "number": 74,
+      "title": "Polish community member import audit exports",
+      "original_head": "65c90b88ebf93223a23f80093e7d1e82837d06b2",
+      "original_branch": "codex/community-member-import-export-workflow-polish-20260826",
+      "original_base": "codex/community-member-import-audit-history-polish-20260826",
+      "status": "port_required",
+      "disposition": "Private bounded CSV exports need authorization, field allowlists and spreadsheet-injection protection."
+    },
+    {
+      "number": 75,
+      "title": "Polish community member export UX retention",
+      "original_head": "4e6dd8203d4638886bf5c340c5827ecf1838ea57",
+      "original_branch": "codex/community-member-export-ux-retention-controls-20260826",
+      "original_base": "codex/community-member-import-export-workflow-polish-20260826",
+      "status": "port_required",
+      "disposition": "Session-only recent export UX remains separate from server retention; do not persist private export contents in the browser."
+    },
+    {
+      "number": 76,
+      "title": "Add community member export policy surface",
+      "original_head": "5320a093c3cd83b434164dfc5cefc97385c7d274",
+      "original_branch": "codex/community-member-export-policy-retention-settings-20260826",
+      "original_base": "codex/community-member-export-ux-retention-controls-20260826",
+      "status": "port_required",
+      "disposition": "Export-policy surface must accurately describe implemented retention; it must not silently enable storage."
+    },
+    {
+      "number": 77,
+      "title": "Add community member export admin guardrails",
+      "original_head": "383212339cefd5990c736b1866834c403560c8b8",
+      "original_branch": "codex/community-member-export-policy-admin-guardrails-20260826",
+      "original_base": "codex/community-member-export-policy-retention-settings-20260826",
+      "status": "port_required",
+      "disposition": "Platform-admin-only export-policy review requires sensitive-access auditing."
+    },
+    {
+      "number": 78,
+      "title": "Add retained export approval design guardrails",
+      "original_head": "9de98b7fd74dd4f27b8e287735e2d77c5877c66c",
+      "original_branch": "codex/community-member-retained-export-approval-design-20260826",
+      "original_base": "codex/community-member-export-policy-admin-guardrails-20260826",
+      "status": "design_reconcile",
+      "disposition": "Retained export design only, not implemented storage. Reassess private storage, retention, deletion and access before building."
+    },
+    {
+      "number": 79,
+      "title": "Polish community member directory surfacing",
+      "original_head": "e9f946234caa180c4efd1f04e1e2150cb85a9db4",
+      "original_branch": "codex/community-member-directory-player-hub-polish-20260826",
+      "original_base": "codex/community-member-retained-export-approval-design-20260826",
+      "status": "port_required",
+      "disposition": "Public community directory discovery/surfacing depends on #69, not private guild matching."
+    },
+    {
+      "number": 80,
+      "title": "Polish public community directory discovery",
+      "original_head": "79474285c4258620dbf7b85c2d1154f972f21977",
+      "original_branch": "codex/public-community-directory-discovery-polish-20260826",
+      "original_base": "codex/community-member-directory-player-hub-polish-20260826",
+      "status": "port_required",
+      "disposition": "Directory sort/group controls must operate only on already-public permitted rows."
+    },
+    {
+      "number": 81,
+      "title": "Polish public community member card previews",
+      "original_head": "bb9de504215651042e38c959736fa5be36383381",
+      "original_branch": "codex/public-community-member-card-preview-polish-20260826",
+      "original_base": "codex/public-community-directory-discovery-polish-20260826",
+      "status": "port_required",
+      "disposition": "Public member-card previews and section privacy need public directory/profile projections."
+    },
+    {
+      "number": 82,
+      "title": "Polish public player profile visuals",
+      "original_head": "b3b1567e6ba1f7f86efdbd264a5505746af63252",
+      "original_branch": "codex/player-public-profile-visual-polish-20260826",
+      "original_base": "codex/public-community-member-card-preview-polish-20260826",
+      "status": "partial",
+      "disposition": "Public profile functionality exists, but richer visual cards/timelines need deliberate visual-port review."
+    },
+    {
+      "number": 83,
+      "title": "Polish public profile owner preview sharing",
+      "original_head": "95445e18261222dce71d8f9bde07713282bef8f7",
+      "original_branch": "codex/public-profile-owner-preview-share-polish-20260826",
+      "original_base": "codex/player-public-profile-visual-polish-20260826",
+      "status": "closed_superseded",
+      "disposition": "#143: owner preview and share panel"
+    },
+    {
+      "number": 84,
+      "title": "Add public profile share session feedback",
+      "original_head": "956fcad90c8c71f20112dcbebf6554c9e6159432",
+      "original_branch": "codex/public-profile-share-session-feedback-20260826",
+      "original_base": "codex/public-profile-owner-preview-share-polish-20260826",
+      "status": "closed_superseded",
+      "disposition": "#143: mounted share feedback state"
+    },
+    {
+      "number": 85,
+      "title": "Improve public profile share accessibility",
+      "original_head": "4f39e01dfbe7b1d38b8363d280e924357647e1cb",
+      "original_branch": "codex/public-profile-share-a11y-fallback-polish-20260826",
+      "original_base": "codex/public-profile-share-session-feedback-20260826",
+      "status": "closed_superseded",
+      "disposition": "#143: clipboard/native sharing accessibility"
+    },
+    {
+      "number": 86,
+      "title": "Add public profile share preview metadata",
+      "original_head": "a00f4abfc9ea388a20df99aeb8f02802cf11b83c",
+      "original_branch": "codex/public-profile-share-preview-metadata-polish-20260826",
+      "original_base": "codex/public-profile-share-a11y-fallback-polish-20260826",
+      "status": "port_required",
+      "disposition": "Per-handle crawler metadata is absent: current Functions route serves the shared static profile shell. Build privacy-safe metadata on the current public projection."
+    },
+    {
+      "number": 87,
+      "title": "Add public profile share preview crawler QA",
+      "original_head": "6274f713760f025db2a127d2b5b1370d4ec2f1e4",
+      "original_branch": "codex/public-profile-share-preview-crawler-qa-20260826",
+      "original_base": "codex/public-profile-share-preview-metadata-polish-20260826",
+      "status": "port_required",
+      "disposition": "Crawler response tests must target the current profile route after #86, including missing/private profiles."
+    },
+    {
+      "number": 88,
+      "title": "Add public profile share preview image card QA",
+      "original_head": "6a4b6a99a713546eb9bc263792be17fdb859f184",
+      "original_branch": "codex/public-profile-share-preview-image-card-polish-20260826",
+      "original_base": "codex/public-profile-share-preview-crawler-qa-20260826",
+      "status": "port_required",
+      "disposition": "Share image-card rendering and artwork QA must use permitted public data only."
+    },
+    {
+      "number": 89,
+      "title": "Add public profile share card crawler visual QA",
+      "original_head": "f2bab6184714651d9e9a2b51ee29e0d025336ce8",
+      "original_branch": "codex/public-profile-share-card-crawler-visual-qa-20260826",
+      "original_base": "codex/public-profile-share-preview-image-card-polish-20260826",
+      "status": "port_required",
+      "disposition": "Crawler visual QA must run against the replacement share metadata/image implementation."
+    },
+    {
+      "number": 90,
+      "title": "Add public profile social preview validation package",
+      "original_head": "a986a8effc422a5506452d835e6d6ba96419228e",
+      "original_branch": "codex/public-profile-social-preview-validation-package-20260826",
+      "original_base": "codex/public-profile-share-card-crawler-visual-qa-20260826",
+      "status": "port_required",
+      "disposition": "Social-preview validation package must describe tested current behavior, not old stack evidence."
+    },
+    {
+      "number": 91,
+      "title": "Add DZN chat support architecture preflight",
+      "original_head": "3d0989ef7ec1bd19e2da1ea67be7db7d040c5848",
+      "original_branch": "codex/dzn-chat-support-architecture-preflight-20260826",
+      "original_base": "codex/public-profile-social-preview-validation-package-20260826",
+      "status": "design_reconcile",
+      "disposition": "Reconcile chat/support architecture with current #144 read history and #149 sending contract; live chat/support is not enabled."
+    },
+    {
+      "number": 92,
+      "title": "Add DZN Comms visual shell prototype",
+      "original_head": "45e36c6f6103eb0a2393e4f1f0ad10b9782e6d55",
+      "original_branch": "codex/dzn-comms-visual-shell-20260826",
+      "original_base": "codex/dzn-chat-support-architecture-preflight-20260826",
+      "status": "partial",
+      "disposition": "Current /community is a read-only shell. Old multi-room/group/support layouts are not all present."
+    },
+    {
+      "number": 93,
+      "title": "Add DZN Comms interaction contract preflight",
+      "original_head": "633eae9454cebe9cffbcbf890abcdb34e99724c9",
+      "original_branch": "codex/dzn-comms-contract-preflight-20260826",
+      "original_base": "codex/dzn-comms-visual-shell-20260826",
+      "status": "design_reconcile",
+      "disposition": "Port applicable interaction contracts to current shell without representing disabled controls as live."
+    },
+    {
+      "number": 94,
+      "title": "Add DZN Comms runtime approval preflight",
+      "original_head": "413c6299c729d0f98db3c12a29269ab8f5aad20f",
+      "original_branch": "codex/dzn-comms-runtime-approval-preflight-20260826",
+      "original_base": "codex/dzn-comms-contract-preflight-20260826",
+      "status": "design_reconcile",
+      "disposition": "Runtime design/approval notes must reconcile moderation, privacy and operating controls before activation."
+    },
+    {
+      "number": 95,
+      "title": "Add DZN Comms live presence counter foundation",
+      "original_head": "54b17a1cd9048ea296ff67d66401733d482bdfad",
+      "original_branch": "codex/dzn-comms-live-presence-counter-foundation-20260826",
+      "original_base": "codex/dzn-comms-runtime-approval-preflight-20260826",
+      "status": "port_required",
+      "disposition": "Real presence counter is not implemented by static channel labels. Old migration numbering conflicts with current releases."
+    },
+    {
+      "number": 96,
+      "title": "Add DZN safe monetisation preflight",
+      "original_head": "a27ab99dfd93976cf6a370d085baaaf5bfbce7ec",
+      "original_branch": "codex/dzn-safe-monetisation-supporter-preflight-20260826",
+      "original_base": "codex/dzn-comms-live-presence-counter-foundation-20260826",
+      "status": "design_reconcile",
+      "disposition": "Reconcile safe monetisation design with current billing and website-game economy; no paid random rewards or fake subscription grants."
+    },
+    {
+      "number": 97,
+      "title": "Add DZN store catalog draft model",
+      "original_head": "2a2de04d76f34b1395ab99328a2060f5855044d0",
+      "original_branch": "codex/dzn-store-catalog-admin-draft-20260826",
+      "original_base": "codex/dzn-safe-monetisation-supporter-preflight-20260826",
+      "status": "port_required",
+      "disposition": "Store catalog draft and price validation are separate from owner subscriptions and need current schemas."
+    },
+    {
+      "number": 98,
+      "title": "Add DZN store public preview contract",
+      "original_head": "d83e1856c4a5f7ac0512bcfb52fd550ada878884",
+      "original_branch": "codex/dzn-store-public-preview-contract-20260826",
+      "original_base": "codex/dzn-store-catalog-admin-draft-20260826",
+      "status": "port_required",
+      "disposition": "Store preview is absent; disabled preview must not imply purchasable inventory or live checkout."
+    },
+    {
+      "number": 99,
+      "title": "Add DZN Store sandbox checkout approval preflight",
+      "original_head": "1bd43139a11322d558ed27e5e30eb55c397381dc",
+      "original_branch": "codex/dzn-store-sandbox-checkout-preflight-20260827",
+      "original_base": "codex/dzn-store-public-preview-contract-20260826",
+      "status": "design_reconcile",
+      "disposition": "Checkout preflight needs current products, currency, account scope and explicit financial review."
+    },
+    {
+      "number": 100,
+      "title": "Add DZN Store sandbox order ledger schema",
+      "original_head": "b95c52f1efbbeaad8dda9aeb98684b392eaf7c3a",
+      "original_branch": "codex/dzn-store-order-ledger-schema-20260827",
+      "original_base": "codex/dzn-store-sandbox-checkout-preflight-20260827",
+      "status": "port_required",
+      "disposition": "Draft order/item/webhook receipt schema needs new canonical migration numbers and test-only isolation."
+    },
+    {
+      "number": 101,
+      "title": "Add DZN Store sandbox order route guard",
+      "original_head": "309e0fa0766f963e8f0d93e452fb9089602861c0",
+      "original_branch": "codex/dzn-store-sandbox-order-route-approval-20260827",
+      "original_base": "codex/dzn-store-order-ledger-schema-20260827",
+      "status": "port_required",
+      "disposition": "Draft order route guard needs current session/ownership checks and idempotency; do not activate historical test routes on production."
+    },
+    {
+      "number": 102,
+      "title": "Add DZN Store sandbox Checkout Session approval",
+      "original_head": "72ffe1d8cb3aa650b7fbd3355a3bd82b0c51f1b1",
+      "original_branch": "codex/dzn-store-sandbox-checkout-session-approval-20260827",
+      "original_base": "codex/dzn-store-sandbox-order-route-approval-20260827",
+      "status": "port_required",
+      "disposition": "Test-only one-time checkout requires current Stripe compatibility and safeguards. No production payment-setting changes in this reconciliation."
+    },
+    {
+      "number": 103,
+      "title": "Add DZN Store sandbox webhook receipt ledger",
+      "original_head": "cb4aae9716548e294eee6a3866d77e7addd64984",
+      "original_branch": "codex/dzn-store-sandbox-webhook-ledger-receipt-20260828",
+      "original_base": "codex/dzn-store-sandbox-checkout-session-approval-20260827",
+      "status": "port_required",
+      "disposition": "Signed test webhook receipt ledger and dedupe must stay isolated from existing subscription webhooks."
+    },
+    {
+      "number": 104,
+      "title": "Add Store webhook fulfilment approval preflight",
+      "original_head": "a28706da104863a9e6926ab0d2fec812b60f9935",
+      "original_branch": "codex/dzn-store-webhook-fulfilment-approval-preflight-20260828",
+      "original_base": "codex/dzn-store-sandbox-webhook-ledger-receipt-20260828",
+      "status": "design_reconcile",
+      "disposition": "Fulfilment approval contract must be updated after order/receipt model is reconciled."
+    },
+    {
+      "number": 105,
+      "title": "Add Store fulfilment ledger schema preflight",
+      "original_head": "a6921336f40b1bd4193e3071f355dd9fa713c74d",
+      "original_branch": "codex/dzn-store-fulfilment-ledger-schema-preflight-20260828",
+      "original_base": "codex/dzn-store-webhook-fulfilment-approval-preflight-20260828",
+      "status": "design_reconcile",
+      "disposition": "Fulfilment ledger schema design needs current ownership, source and refund/revoke invariants."
+    },
+    {
+      "number": 106,
+      "title": "Add DZN Store fulfilment ledger schema",
+      "original_head": "f3089b924a196437a44160cde8d067b129539761",
+      "original_branch": "codex/dzn-store-fulfilment-ledger-schema-migration-20260828",
+      "original_base": "codex/dzn-store-fulfilment-ledger-schema-preflight-20260828",
+      "status": "port_required",
+      "disposition": "Entitlement/supporter-card/fulfilment history schema needs current isolated implementation, not paid-plan fabrication."
+    },
+    {
+      "number": 107,
+      "title": "Add DZN Store fulfilment runtime preflight",
+      "original_head": "1bc16535d4aa7d1095241360a4a61bd51b556add",
+      "original_branch": "codex/dzn-store-fulfilment-runtime-preflight-20260828",
+      "original_base": "codex/dzn-store-fulfilment-ledger-schema-migration-20260828",
+      "status": "design_reconcile",
+      "disposition": "Runtime preflight must match the replacement order and ledger implementation."
+    },
+    {
+      "number": 108,
+      "title": "Add disabled Store fulfilment runtime",
+      "original_head": "9ac2a92cd4b622823ff0bae0e3f10054101c651e",
+      "original_branch": "codex/dzn-store-fulfilment-runtime-implementation-20260828",
+      "original_base": "codex/dzn-store-fulfilment-runtime-preflight-20260828",
+      "status": "port_required",
+      "disposition": "Verified test fulfilment, refund/dispute revoke and dedupe are unfinished; no live fulfilment is inferred."
+    },
+    {
+      "number": 109,
+      "title": "Add Store fulfilment reconciliation preflight",
+      "original_head": "fe1a668b5abacc6f9fd85dc06cb936fcf28116f3",
+      "original_branch": "codex/dzn-store-fulfilment-reconciliation-preflight-20260829",
+      "original_base": "codex/dzn-store-fulfilment-runtime-implementation-20260828",
+      "status": "design_reconcile",
+      "disposition": "Private purchases/admin reconciliation contract requires current ledger and audited platform-owner support."
+    },
+    {
+      "number": 110,
+      "title": "Add Store account purchases read model",
+      "original_head": "388be9fc28ef5851f07b7464b9088f9ea6698e90",
+      "original_branch": "codex/dzn-store-account-purchases-read-model-20260829",
+      "original_base": "codex/dzn-store-fulfilment-reconciliation-preflight-20260829",
+      "status": "port_required",
+      "disposition": "Current-user purchases read model is absent and must not expose other customers' orders."
+    },
+    {
+      "number": 111,
+      "title": "Add Store account purchases UI shell",
+      "original_head": "c023a3fe2bb1fd0278b2f312e3e9bd409653d034",
+      "original_branch": "codex/dzn-store-account-purchases-ui-shell-20260831",
+      "original_base": "codex/dzn-store-account-purchases-read-model-20260829",
+      "status": "port_required",
+      "disposition": "Purchases UI depends on genuine current-user orders, not seeded live purchases."
+    },
+    {
+      "number": 112,
+      "title": "Add Store Supporter Card reveal preflight",
+      "original_head": "15da99a1b3ba3b7e0ceb2a002c95dc40c06301db",
+      "original_branch": "codex/dzn-store-supporter-card-reveal-preflight-20260831",
+      "original_base": "codex/dzn-store-account-purchases-ui-shell-20260831",
+      "status": "design_reconcile",
+      "disposition": "Supporter Card reveal preflight must preserve ownership, provenance and private defaults."
+    },
+    {
+      "number": 113,
+      "title": "Add private Supporter Card reveal",
+      "original_head": "c82af969b6d5e88b09a0ccd69284f94a0f03248c",
+      "original_branch": "codex/dzn-store-supporter-card-private-reveal-implementation-20260831",
+      "original_base": "codex/dzn-store-supporter-card-reveal-preflight-20260831",
+      "status": "port_required",
+      "disposition": "Private verified owned-card reveal is absent; no public ownership leakage or fabricated card awards."
+    },
+    {
+      "number": 114,
+      "title": "Polish Supporter Card reveal and Comms reactions",
+      "original_head": "5f0c5c09e2b9fcad8ddef736920816264c4f67cb",
+      "original_branch": "codex/dzn-store-supporter-card-reveal-visual-qa-20260831",
+      "original_base": "codex/dzn-store-supporter-card-private-reveal-implementation-20260831",
+      "status": "port_required",
+      "disposition": "Supporter-card styling and Comms reaction chips are separate unfinished work; static chips do not enable reaction writes."
+    },
+    {
+      "number": 115,
+      "title": "Add player navigation access polish",
+      "original_head": "0c1672de134b2692442aa36ca7f8c6a7bbdbf232",
+      "original_branch": "codex/dzn-player-nav-access-polish-20260831",
+      "original_base": "codex/dzn-store-supporter-card-reveal-visual-qa-20260831",
+      "status": "closed_superseded",
+      "disposition": "#124/#137/#173: Player Hub and profile navigation"
+    },
+    {
+      "number": 116,
+      "title": "Add DZN Comms reaction contract preflight",
+      "original_head": "4b5958f49361c87e8b809c2fd5b7e29951a72834",
+      "original_branch": "codex/dzn-comms-reaction-contract-preflight-20260831",
+      "original_base": "codex/dzn-player-nav-access-polish-20260831",
+      "status": "design_reconcile",
+      "disposition": "Reaction contract must reconcile with current #149 message-sending plan; no reaction runtime exists."
+    },
+    {
+      "number": 117,
+      "title": "Add DZN Comms reaction runtime approval preflight",
+      "original_head": "2c6c2e36202cb188f65707b1893deb633070c417",
+      "original_branch": "codex/dzn-comms-reaction-runtime-approval-preflight-20260831",
+      "original_base": "codex/dzn-comms-reaction-contract-preflight-20260831",
+      "status": "design_reconcile",
+      "disposition": "Reaction runtime approval needs schema, moderation, access and abuse controls before release."
+    },
+    {
+      "number": 118,
+      "title": "Add DZN Comms message/read model approval preflight",
+      "original_head": "fc9bb80c10a0bc2e07fea7635e31e95a48be126f",
+      "original_branch": "codex/dzn-comms-message-read-model-approval-preflight-20260831",
+      "original_base": "codex/dzn-comms-reaction-runtime-approval-preflight-20260831",
+      "status": "partial",
+      "disposition": "Current #144 read-history model differs from the old authenticated-public/id-cursor design. Retain login-only intent and tie-safe cursor work."
+    },
+    {
+      "number": 119,
+      "title": "Add DZN Comms message/read local test foundation",
+      "original_head": "552ea2230cead831c96ad8a60243c7eb03920adc",
+      "original_branch": "codex/dzn-comms-message-read-model-local-read-foundation-20260831",
+      "original_base": "codex/dzn-comms-message-read-model-approval-preflight-20260831",
+      "status": "partial",
+      "disposition": "Read-only API exists in #144; original login-only public reads and opaque tie-safe pagination are not equivalent. Do not close as fully superseded."
+    },
+    {
+      "number": 120,
+      "title": "Add DZN Comms message-history UI integration preflight",
+      "original_head": "6057c16b16b6c5c920c4f7f21e39cead1442302f",
+      "original_branch": "codex/dzn-comms-message-history-ui-integration-approval-preflight-20260831",
+      "original_base": "codex/dzn-comms-message-read-model-local-read-foundation-20260831",
+      "status": "in_progress",
+      "disposition": "Adapt UI read contract to current #144 Global Chat projection, including bounded reads, cancellation, private-channel rejection and safe fallback."
+    },
+    {
+      "number": 121,
+      "title": "Add DZN Comms message-history UI integration",
+      "original_head": "b2b138f4df45e198f4986ca5ad72c7cee7274f99",
+      "original_branch": "codex/dzn-comms-message-history-ui-integration-implementation-20260831",
+      "original_base": "codex/dzn-comms-message-history-ui-integration-approval-preflight-20260831",
+      "status": "in_progress",
+      "disposition": "Current-branch client implementation adds strict projection, 512-KiB cap sized for full Unicode pages, 5-second timeout, abort cleanup and safe hidden-message handling. Not yet released."
+    },
+    {
+      "number": 122,
+      "title": "Add DZN Comms message-history rendered QA",
+      "original_head": "fb05b2b36925e4a355195db7bca4bed4fa01dfc2",
+      "original_branch": "codex/dzn-comms-message-history-rendered-qa-20260831",
+      "original_base": "codex/dzn-comms-message-history-ui-integration-implementation-20260831",
+      "status": "in_progress",
+      "disposition": "Current-branch rendered QA covers successful/empty/malformed/private/hidden/oversized/offline/timeout responses at phone and desktop widths. Not yet validated/released."
+    }
+  ]
+}

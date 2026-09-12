@@ -1,5 +1,8 @@
 # Open PR Reconciliation Snapshot
 
+Historical snapshot. See `DZN_RELEASE_BACKLOG_2026-09-13.md` and its per-request
+disposition manifest for current closures, retained gaps and implementation work.
+
 Compared with main e612c66e6fabed1f1f607da8d517b05d8328d6aa.
 
 File equality is not semantic feature equivalence or production activation proof. Historical bases are the PR metadata snapshot. No branches or PRs are changed.

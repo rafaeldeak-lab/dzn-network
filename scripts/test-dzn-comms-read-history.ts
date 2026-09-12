@@ -6,6 +6,7 @@ import { renderToString } from "react-dom/server";
 
 import { CommsMessageTime } from "../components/comms/comms-message-time";
 import { DznCommsShell } from "../components/comms/dzn-comms-shell";
+import { loadCommsHistory, parseCommsHistory } from "../components/comms/comms-history-client";
 
 import { dznCommsReadHistoryBoundary, readDznCommsReadHistoryFlags } from "../functions/_lib/dzn-comms-read-history";
 import type { Env, PagesContext } from "../functions/_lib/types";
@@ -19,6 +20,7 @@ const migration = readFileSync(`migrations/${migrationName}`, "utf8");
 const helper = readFileSync("functions/_lib/dzn-comms-read-history.ts", "utf8");
 const route = readFileSync("functions/api/comms/message-history.ts", "utf8");
 const shell = readFileSync("components/comms/dzn-comms-shell.tsx", "utf8");
+const historyClient = readFileSync("components/comms/comms-history-client.ts", "utf8");
 const communityPage = readFileSync("app/community/page.tsx", "utf8");
 const envExample = readFileSync(".env.example", "utf8");
 const cloudflareEnv = readFileSync("cloudflare-env.d.ts", "utf8");
@@ -71,13 +73,14 @@ assert.doesNotMatch(helper + route, /\b(?:\.run\(|batch\(|exec\(|fetch\(|WebSock
 assert.match(route, /handleDznCommsMessageHistoryRequest/, "Function route should delegate to the read-history helper.");
 assert.match(communityPage, /DznCommsShell/, "The /community route must render the DZN Comms shell.");
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED/, "The /community shell must fetch only behind the public UI flag.");
-assert.match(shell, /fetch\("\/api\/comms\/message-history\?channel=global-chat&limit=30"/, "The UI should only fetch the read-only history route.");
-assert.match(shell, /credentials: "include"/, "The UI should preserve current-user cookies for future private read checks.");
+assert.match(shell, /loadCommsHistory\(controller.signal\)/, "The UI must use the bounded history client.");
+assert.match(historyClient, /"\/api\/comms\/message-history\?channel=global-chat&limit=30"/, "The client should only fetch the read-only history route.");
+assert.match(historyClient, /credentials: "include"/, "The client should preserve current-user cookies for read checks.");
 assert.match(shell, /Sending remains disabled/i, "The UI must clearly keep sending disabled.");
 assert.match(shell, /disabled/i, "The composer controls must remain disabled.");
 assert.doesNotMatch(shell, /\b(?:method:\s*["']POST["']|method:\s*["']DELETE["']|sendBeacon|analytics|localStorage|sessionStorage|WebSocket|EventSource|DurableObject|OPENAI_API_KEY|AI_GATEWAY|stripe|checkout|DZN_LIVE_CHECKOUT_ENABLED)\b/i, "The /community shell must not send, persist, track, call AI, or touch checkout.");
 assert.match(platformSpec, /DZN Comms\/support remains the next queued product area/i, "Master spec must keep DZN Comms in the queued product area.");
-assert.match(packageJson, /"test:dzn-comms-read-history": "tsx scripts\/test-dzn-comms-read-history\.ts"/, "Dedicated Comms read-history test must be registered.");
+assert.match(packageJson, /"test:dzn-comms-read-history": "tsx scripts\/test-dzn-comms-read-history\.ts && npm run test:dzn-comms-history-client"/, "Dedicated Comms read-history and client tests must be registered.");
 
 assert.equal(readDznCommsReadHistoryFlags({} as Env).enabled, false, "Read-history route must default disabled.");
 assert.equal(
@@ -143,6 +146,15 @@ function testMessageTimestamps() {
 }
 
 async function testRuntimeContracts() {
+  const unicodeDb = seededDb();
+  unicodeDb.messages.splice(0, unicodeDb.messages.length, ...Array.from({ length: 30 }, (_, index) =>
+    message({ id: `unicode-${index}`, channelId: "channel-global", body: "\u4e2d".repeat(2_000), createdAt: "2026-09-01T10:00:00.000Z" })));
+  const unicodeRead = await callMessageHistoryRoute(unicodeDb, "GET", "https://dzn.test/api/comms/message-history?channel=global-chat&limit=30", enabledEnv(unicodeDb));
+  assert.equal(unicodeRead.status, 200);
+  assert.ok((await unicodeRead.clone().arrayBuffer()).byteLength > 128_000);
+  const unicodePayload = await loadCommsHistory(new AbortController().signal, { fetcher: async () => unicodeRead });
+  assert.equal(unicodePayload.messages.length, 30, "A real API page of long Unicode messages must not fall back to static content.");
+  assert.ok(unicodePayload.messages.every(row => row.body === "\u4e2d".repeat(2_000)));
   for (const kind of ["public", "private_group", "support"] as const) {
     for (const visibility of ["public", "private_group", "support_private"] as const) {
       if (visibility === (kind === "support" ? "support_private" : kind)) continue;
@@ -184,6 +196,7 @@ async function testRuntimeContracts() {
   assert.equal(publicRead.headers.get("cache-control")?.includes("private, no-store"), true, "Comms history responses must not be cached.");
   assert.equal(publicRead.headers.get("vary"), "Cookie", "Comms history responses must vary by Cookie.");
   const publicPayload = await publicRead.json() as CommsPayload;
+  assert.equal(parseCommsHistory(publicPayload).messages.length, publicPayload.messages.length, "The current public API projection must pass the client contract.");
   assert.equal(publicPayload.read_only, true);
   assert.equal(publicPayload.presentation_only, true);
   assert.equal(publicPayload.feature_flags.sending_enabled, false);

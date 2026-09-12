@@ -13,55 +13,13 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { CommsMessageTime } from "./comms-message-time";
+import { loadCommsHistory, type CommsHistoryMessage, type CommsHistoryPayload } from "./comms-history-client";
 
 type CommsHistoryState =
   | { status: "static"; payload: CommsHistoryPayload; message: string }
   | { status: "loading"; payload: CommsHistoryPayload; message: string }
   | { status: "ready"; payload: CommsHistoryPayload; message: string }
   | { status: "fallback"; payload: CommsHistoryPayload; message: string };
-
-type CommsHistoryPayload = {
-  ok: true;
-  generated_at: string;
-  read_only: true;
-  presentation_only: true;
-  channel: {
-    slug: string;
-    kind: "public" | "private_group" | "support";
-    name: string;
-    description: string | null;
-    visibility: "public" | "private_group" | "support_private";
-  };
-  access: {
-    public_channel: boolean;
-    private_group_membership_required: boolean;
-    current_user_member_role: string | null;
-  };
-  messages: CommsHistoryMessage[];
-  feature_flags: {
-    route_enabled: boolean;
-    sending_enabled: false;
-    reactions_enabled: false;
-    report_actions_enabled: false;
-    moderation_mutations_enabled: false;
-    ai_assist_runtime_enabled: false;
-    durable_objects_or_websockets_enabled: false;
-    analytics_or_tracking_enabled: false;
-  };
-  fairness_boundary: string[];
-};
-
-type CommsHistoryMessage = {
-  id: string;
-  author_display_name: string;
-  author_role_label: string;
-  body: string;
-  visibility_state: "visible" | "hidden" | "deleted" | "quarantined" | "expired";
-  created_at: string | null;
-  edited_at: string | null;
-  public_safe: true;
-  read_only: true;
-};
 
 const historyUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED === "true";
 
@@ -145,33 +103,10 @@ export function DznCommsShell() {
   useEffect(() => {
     if (!historyUiEnabled) return;
 
-    let active = true;
-    fetch("/api/comms/message-history?channel=global-chat&limit=30", {
-      cache: "no-store",
-      credentials: "include",
-      headers: { accept: "application/json" },
-    })
-      .then(async (response) => {
-        if (!active) return;
-        if (!response.ok) {
-          setHistory({
-            status: "fallback",
-            payload: staticPayload,
-            message: "Message history is unavailable, so DZN is showing the static read-only fallback.",
-          });
-          return;
-        }
-
-        const payload = (await response.json().catch(() => null)) as CommsHistoryPayload | null;
-        if (!payload?.ok || !payload.read_only || !payload.presentation_only) {
-          setHistory({
-            status: "fallback",
-            payload: staticPayload,
-            message: "The read-history payload was not accepted, so DZN is showing the static fallback.",
-          });
-          return;
-        }
-
+    const controller = new AbortController();
+    loadCommsHistory(controller.signal)
+      .then((payload) => {
+        if (controller.signal.aborted) return;
         setHistory({
           status: "ready",
           payload,
@@ -179,7 +114,7 @@ export function DznCommsShell() {
         });
       })
       .catch(() => {
-        if (!active) return;
+        if (controller.signal.aborted) return;
         setHistory({
           status: "fallback",
           payload: staticPayload,
@@ -188,7 +123,7 @@ export function DznCommsShell() {
       });
 
     return () => {
-      active = false;
+      controller.abort();
     };
   }, []);
 
@@ -247,7 +182,7 @@ export function DznCommsShell() {
                 </span>
               </div>
 
-              <div className="mt-4 rounded-lg border border-cyan-300/18 bg-cyan-300/8 px-4 py-3">
+              <div role="status" aria-live="polite" className="mt-4 rounded-lg border border-cyan-300/18 bg-cyan-300/8 px-4 py-3">
                 <p className="text-sm font-bold leading-6 text-cyan-50">{history.message}</p>
               </div>
 
@@ -319,13 +254,13 @@ function MessageRow({ message }: { message: CommsHistoryMessage }) {
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-black text-white">{message.author_display_name}</h3>
+            <h3 className="text-sm font-black text-white [overflow-wrap:anywhere]">{message.author_display_name}</h3>
             <span className="rounded border border-cyan-300/20 bg-cyan-400/10 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-cyan-100">
               {message.author_role_label}
             </span>
             <CommsMessageTime value={message.created_at} />
           </div>
-          <p className={`mt-2 text-sm font-semibold leading-6 ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
+          <p className={`mt-2 text-sm font-semibold leading-6 [overflow-wrap:anywhere] ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
         </div>
       </div>
     </article>
