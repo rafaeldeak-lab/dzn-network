@@ -9,6 +9,7 @@ import {
 import type { Env, SessionUser } from "../functions/_lib/types";
 import { testPlayerGameIdentityTransactions } from "./test-player-game-identity-transactions";
 import { testPlayerRequestSupport } from "./test-player-request-support";
+import { testPlayerGameIdentityRevocation } from "./test-player-game-identity-revocation";
 
 type Sqlite = {
   exec(sql: string): void;
@@ -24,6 +25,7 @@ const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: st
 export async function testPlayerGameIdentityReadModels() {
   await testPlayerGameIdentityTransactions();
   await testPlayerRequestSupport();
+  await testPlayerGameIdentityRevocation();
   const sqlite = new DatabaseSync(":memory:");
   try {
     sqlite.exec(`

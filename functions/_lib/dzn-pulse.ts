@@ -26,6 +26,7 @@ export const PULSE_NOTIFICATION_TYPES = [
   "dzn_announcement",
   "billing_payment_setup",
   "billing_trial_ending",
+  "player_link_revoked",
 ] as const;
 
 export type PulseNotificationType = typeof PULSE_NOTIFICATION_TYPES[number];

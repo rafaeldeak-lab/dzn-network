@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ManagedGameIdentityLinks } from "./managed-game-identity-links";
 
 type ReviewCheck = {
   label: string;
@@ -260,6 +261,7 @@ export function PlayerGameIdentityClaimsPage() {
           </section>
         ) : null}
       </div>
+      <div className="mx-auto w-full max-w-6xl"><ManagedGameIdentityLinks /></div>
     </main>
   );
 }

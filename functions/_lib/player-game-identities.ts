@@ -178,7 +178,7 @@ export function parsePlayerGameIdentityReviewInput(input: ReviewClaimInput) {
 export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUser) {
   try {
     const db = requireDb(env);
-    const [linksResult, claimsResult] = await Promise.all([
+    const [linksResult, claimsResult, revokedResult] = await Promise.all([
       db
         .prepare(
           `SELECT
@@ -229,6 +229,14 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
         )
         .bind(user.id, user.discord_id)
         .all<PlayerGameIdentityClaimRow>(),
+      db.prepare(`SELECT l.id, l.player_name, l.revoked_at,
+          COALESCE(NULLIF(s.display_name,''), NULLIF(s.hostname,''), s.server_name, s.nitrado_service_name) AS server_name,
+          (SELECT a.note FROM player_game_identity_audit_log a WHERE a.link_id = l.id
+            AND a.action = 'link_revoked' AND a.result = 'accepted' ORDER BY a.created_at DESC, a.id DESC LIMIT 1) AS reason
+        FROM player_game_identity_links l JOIN linked_servers s ON s.id = l.linked_server_id
+        WHERE l.user_id = ? AND l.discord_id = ? AND l.status = 'revoked' AND l.revoked_at IS NOT NULL
+        ORDER BY l.revoked_at DESC, l.id DESC LIMIT 20`).bind(user.id, user.discord_id)
+        .all<{ id: string; player_name: string | null; server_name: string | null; revoked_at: string; reason: string | null }>(),
     ]);
 
     return {
@@ -237,6 +245,7 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
       private: true as const,
       presentation_only: true as const,
       active_links: sanitizeLinkRows(linksResult.results ?? []),
+      revoked_links: revokedResult.results ?? [],
       claims: sanitizeClaimRows(claimsResult.results ?? []),
       proof_flow: {
         player_step: "Choose the server you play on and paste the exact game ID or proof code from the server owner.",
@@ -253,6 +262,7 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
       private: true as const,
       presentation_only: true as const,
       active_links: [] as PlayerGameIdentityLinkRow[],
+      revoked_links: [],
       claims: [] as PlayerGameIdentityClaimRow[],
       proof_flow: {
         player_step: "Choose the server you play on and paste the exact game ID or proof code from the server owner.",
@@ -640,16 +650,6 @@ export async function reviewPlayerGameIdentityClaim(
           actor.id,
           decisionId, claim.linked_server_id, claim.player_id,
         ),
-      db.prepare(
-        `UPDATE player_profiles
-         SET discord_id = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?
-           AND linked_server_id = ?
-           AND player_id = ?
-           AND (discord_id IS NULL OR trim(discord_id) = '' OR discord_id = ?)
-           AND ${decisionGate}`,
-      )
-      .bind(claim.discord_id, exactProfile.id, exactProfile.linked_server_id, exactProfile.player_id, claim.discord_id, decisionId),
       db.prepare(
         `INSERT INTO player_game_identity_audit_log (
           id, claim_id, link_id, user_id, actor_user_id, linked_server_id, player_profile_id, player_id, action, result, note, created_at

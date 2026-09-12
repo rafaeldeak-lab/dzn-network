@@ -3,6 +3,7 @@
 import { ArrowLeft, ArrowRight, RefreshCw, Search } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import type { PlayerSupportDetail, PlayerSupportList, PlayerSupportRequest } from "@/functions/_lib/player-request-support";
+import { ManagedGameIdentityLinks } from "./managed-game-identity-links";
 
 const stateLabels: Record<string, string> = { pending: "Awaiting review", approved: "Approved", rejected: "Declined", cancelled: "Cancelled" };
 const actionLabels: Record<string, string> = { claim_requested: "Link requested", claim_approved: "Request approved", claim_rejected: "Request declined",
@@ -125,6 +126,7 @@ export function PlayerRequestSupportPanel() {
           <span className="text-sm font-semibold text-cyan-100">{stateLabels[details.request.status] ?? details.request.status}</span>
         </div>
         <RequestFacts request={details.request} />
+        {details.request.active_link_id ? <ManagedGameIdentityLinks linkId={details.request.active_link_id} onChanged={() => setRevision(value => value + 1)} /> : null}
         <h3 className="mt-6 border-b border-white/15 pb-3 text-base font-bold text-white">Recorded history</h3>
         <ol className="divide-y divide-white/10">
           {details.history.map(event => <li key={event.id} className="py-4 text-sm">
