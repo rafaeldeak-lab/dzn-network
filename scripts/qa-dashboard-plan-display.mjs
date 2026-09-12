@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { chromium } from "playwright";
 
 const root = path.resolve("out");
-const evidence = path.join(tmpdir(), "dzn-dashboard-plan-display-qa");
+const evidence = path.join(tmpdir(), "dzn-dashboard-details-20260912-qa");
 await mkdir(evidence, { recursive: true });
 const server = createServer(async (req, res) => {
   try {
@@ -33,12 +33,27 @@ try {
     page.on("console", message => { if (/hydration|did not match/i.test(message.text())) errors.push(message.text()); });
     let currentPlan = "premium"; let healthAvailable = true;
     let accountPlan = "pro"; let accountStatus = "active"; let accountAvailable = true; let billingAvailable = false;
+    let details = false; let releaseWars;
     await page.route("**/*", async route => {
       const req = route.request(); const url = new URL(req.url());
       if (url.origin !== base) return route.abort();
       if (!url.pathname.startsWith("/api/")) return route.continue();
       if (req.method() !== "GET") { writes.push(url.pathname); return route.abort(); }
       reads.push(url.pathname);
+      if (details && url.pathname === "/api/billing/status") return route.fulfill({ json: {
+        plan_key: "premium", plan_status: "active", current_period_start: "2026-06-18T12:00:00Z", current_period_end: "2026-07-18T12:00:00Z",
+        current_period_end_label: "18 Jul 2026", cancel_at_period_end: false, linked_server_count: 1,
+        can_link_more_servers: true, stripe_customer_exists: true, checkout_configured: { starter: true, pro: true },
+        entitlements: { plan_key: "premium", max_linked_servers: 3, included_bumps_per_month: 2 }
+      } });
+      if (details && url.pathname.endsWith("/advertising/bump")) return route.fulfill({ json: { ok: true, advertising: {
+        bump_count_current_period: 0, last_bumped_at: null, next_bump_at: null, bump_period_start: "2026-09-12", bump_period_end: "2026-10-12", bump_cooldown_days: 7
+      } } });
+      if (details && url.pathname.endsWith("/dashboard/advanced-stats")) return route.fulfill({ json: { ok: true, available: false, reason: "advanced_stats_snapshot_pending", data: null } });
+      if (details && url.pathname.endsWith("/wars")) {
+        await new Promise(resolve => { releaseWars = resolve; });
+        return route.fulfill({ json: { ok: true, available: true, server: { id: sample.id }, access: { effectivePlan: "premium", canCreateChallenge: false }, eligibility: { eligibleRulesets: [] }, events: [], pendingChallenges: [], trophies: [] } });
+      }
       if (billingAvailable && url.pathname === "/api/billing/status") return route.fulfill({ json: {
         plan_key: "free", plan_status: "free", current_period_start: null, current_period_end: null,
         current_period_end_label: "Not subscribed", cancel_at_period_end: false, linked_server_count: 1,
@@ -119,6 +134,39 @@ try {
     await page.reload();
     await page.getByText("Checking server plan...", { exact: true }).waitFor();
     assert.equal(await page.getByText(/^(Pro|Starter|Free) visual treatment$/).count(), 0);
+    details = true; billingAvailable = true; healthAvailable = true; accountAvailable = true; accountPlan = "pro"; accountStatus = "active";
+    await page.reload();
+    await page.getByRole("button", { name: /Billing & Boosts/ }).click();
+    await page.getByText("Last Period Ended", { exact: true }).waitFor();
+    assert.equal(await page.getByText("Renews", { exact: true }).count(), 0);
+    const promoMetric = page.getByText("Promo Credits", { exact: true }).locator("..");
+    assert.match(await promoMetric.innerText(), /\b2\b/);
+    assert.doesNotMatch(await promoMetric.innerText(), /\b8\b/);
+    await promoMetric.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(evidence, `period-and-credits-${width}.png`) });
+    // Remounting Overview must attach visibility observers to the new panels.
+    await page.getByRole("button", { name: /^Overview/i }).click();
+    const bumps = page.getByText("Bumps This Period", { exact: true }).locator("..");
+    await bumps.scrollIntoViewIfNeeded();
+    assert.match(await bumps.innerText(), /\b0\b/);
+    assert.doesNotMatch(await bumps.innerText(), /undefined|\//);
+    await page.getByText("Advanced Showcase Preview", { exact: true }).scrollIntoViewIfNeeded();
+    await page.getByText("Advanced showcase is not available yet. Core gameplay statistics remain available.", { exact: true }).waitFor();
+    assert.equal(await page.getByText(/Stats will appear after the next readable/).count(), 0);
+    await page.screenshot({ path: path.join(evidence, `advanced-unavailable-${width}.png`) });
+    await page.getByText("Plan Access", { exact: true }).scrollIntoViewIfNeeded();
+    const accessMetric = page.getByText("Plan Access", { exact: true }).locator("..");
+    assert.match(await accessMetric.innerText(), /Checking access/i);
+    assert.doesNotMatch(await accessMetric.innerText(), /\bfree\b/i);
+    assert.equal(typeof releaseWars, "function");
+    const warsResponse = page.waitForResponse(response => response.url().endsWith("/wars"));
+    releaseWars();
+    await warsResponse;
+    await accessMetric.getByText("Pro", { exact: true }).waitFor();
+    assert.doesNotMatch(await accessMetric.innerText(), /premium|free/i);
+    assert.equal(await page.getByText("Pro is required to create Server VS Server challenges.", { exact: true }).count(), 0);
+    await page.screenshot({ path: path.join(evidence, `wars-pro-${width}.png`) });
+    details = false; billingAvailable = false; healthAvailable = false;
     accountPlan = "pro";
     accountStatus = "unknown";
     await context.clearCookies();
@@ -133,7 +181,7 @@ try {
     assert.deepEqual(writes, []);
     assert.deepEqual(errors, []);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-    results.push({ width, scenarios: ["pro-with-billing-unavailable", "billing-unknown-disabled", "production-free-status-checkout-enabled", "direct-overview-server-pro-account-free", "health-success-then-failure-drops-stale-plan", "auth-billing-lookup-failure-not-free", "unknown-account-status-not-free", "all-unavailable-not-a-downgrade"], errors, writes });
+    results.push({ width, scenarios: ["pro-with-billing-unavailable", "billing-unknown-disabled", "production-free-status-checkout-enabled", "direct-overview-server-pro-account-free", "health-success-then-failure-drops-stale-plan", "auth-billing-lookup-failure-not-free", "unknown-account-status-not-free", "all-unavailable-not-a-downgrade", "historical-period-not-renewal", "legacy-pro-two-credits", "real-bump-response-no-undefined", "overview-remount-loads-unavailable-snapshot", "wars-loading-then-pro"], errors, writes });
     await context.close();
   }
   await writeFile(path.join(evidence, "results.json"), JSON.stringify({ syntheticOnly: true, results }, null, 2));
