@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { StarterCheckoutButton } from "./starter-checkout-button";
+import { dashboardBillingPlan, dashboardServerPlan } from "./dashboard-plan-display";
 import { OpponentPicker } from "@/components/server-wars/opponent-picker";
 import { PAYMENT_COPY } from "../../lib/billing/payment-copy";
 import {
@@ -500,6 +501,7 @@ function ServerDashboard({
   const [lastSyncResult, setLastSyncResult] = useState<AdmSyncRunResult | null>(null);
   const [dashboardHealth, setDashboardHealth] = useState<DashboardHealthResult | null>(() => loadDashboardHealthCache(serverProp.id));
   const [lastGoodDashboardHealth, setLastGoodDashboardHealth] = useState<DashboardHealthResult | null>(() => loadDashboardHealthCache(serverProp.id));
+  const [dashboardHealthFresh, setDashboardHealthFresh] = useState(false);
   const [dashboardLiveStats, setDashboardLiveStats] = useState<DashboardLiveStatsResult | null>(null);
   const [lastGoodDashboardLiveStats, setLastGoodDashboardLiveStats] = useState<DashboardLiveStatsResult | null>(() => loadDashboardLiveStatsCache(serverProp.id));
   const [liveStatsError, setLiveStatsError] = useState("");
@@ -771,6 +773,7 @@ function ServerDashboard({
       if (cancelled) return;
       setDashboardHealth(cachedHealth);
       setLastGoodDashboardHealth(cachedHealth);
+      setDashboardHealthFresh(false);
       setDashboardLiveStats(null);
       setLastGoodDashboardLiveStats(cachedLiveStats);
       setLastGoodDashboardStats(cachedStats);
@@ -1186,6 +1189,7 @@ function ServerDashboard({
       lastAppliedDashboardHealthGeneratedAtRef.current = response.generated_at;
       setDashboardHealth(response);
       setLastGoodDashboardHealth(response);
+      setDashboardHealthFresh(true);
       setLastGoodDashboardStats(dashboardStatsCacheFromHealth(response));
       saveDashboardHealthCache(requestServerId, response);
       if (response.latest_events.length && !recentEventsRef.current.length) {
@@ -1203,6 +1207,7 @@ function ServerDashboard({
         return false;
       }
       setFailedEndpoint("dashboard-health");
+      setDashboardHealthFresh(false);
       setLastRefreshError(isAbortError(error) ? "Dashboard health refresh timed out." : error instanceof Error ? error.message : "Dashboard health snapshot failed.");
       setFailedRefreshCount((count) => count + 1);
       const cached = lastGoodDashboardHealthRef.current;
@@ -1395,6 +1400,7 @@ function ServerDashboard({
     dashboardPlayerCount.status,
   );
   const effectiveBillingStatus = billingStatus ?? lastGoodBilling;
+  const serverDisplayPlan = dashboardServerPlan(server.id, dashboardHealthFresh ? effectiveDashboardHealth : null, effectiveBillingStatus, navigation);
   const effectivePlanLabel = effectiveBillingStatus ? planLabel(effectiveBillingStatus.plan_key) : effectiveDashboardHealth?.current_plan ? planLabel(effectiveDashboardHealth.current_plan) : "Loading";
   const effectiveAutomationHealth = automationHealth ?? lastGoodAutomationHealth;
   const effectivePublicCacheDebug = publicCacheDebug ?? lastGoodPublicCache;
@@ -1415,7 +1421,7 @@ function ServerDashboard({
   const ownerReputationTier = inferDashboardReputationTier(canonicalStats?.score ?? server.score ?? 0);
   const ownerBadgeCollection = useMemo(() => buildServerBadgeCollection({
     serverId: server.id,
-    planKey: effectiveBillingStatus?.plan_key ?? "starter",
+    planKey: serverDisplayPlan ?? "free",
     createdAt: server.created_at,
     totalKills: dashboardStatValues.kills,
     totalDeaths: dashboardStatValues.deaths,
@@ -1437,7 +1443,7 @@ function ServerDashboard({
     dashboardStatValues.joins,
     dashboardStatValues.kills,
     dashboardStatValues.uniquePlayers,
-    effectiveBillingStatus?.plan_key,
+    serverDisplayPlan,
     effectiveServerMode,
     normalizedServerCategory,
     server.created_at,
@@ -1450,12 +1456,12 @@ function ServerDashboard({
     statsSyncActive,
   ]);
   const ownerVisuals = useMemo(() => getServerVisualShowcase({
-    planKey: effectiveBillingStatus?.plan_key ?? "starter",
+    planKey: serverDisplayPlan ?? "free",
     reputationTier: ownerReputationTier,
     category: normalizedServerCategory ?? effectiveServerMode,
     mapName: server.map_name ?? server.mission,
     maxBadges: 7,
-  }), [effectiveBillingStatus?.plan_key, effectiveServerMode, normalizedServerCategory, ownerReputationTier, server.map_name, server.mission]);
+  }), [serverDisplayPlan, effectiveServerMode, normalizedServerCategory, ownerReputationTier, server.map_name, server.mission]);
   const ownerEarnedBadges = ownerBadgeCollection.showcaseBadges.length ? ownerBadgeCollection.showcaseBadges : ownerVisuals.badges;
   const ownerLockedBadges = ownerBadgeCollection.lockedBadges.slice(0, 4);
   const badgeEvaluationLastAt = badgeStatus?.lastEvaluationAt ?? null;
@@ -1787,6 +1793,23 @@ function ServerDashboard({
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [refreshDashboardLiveStats]);
+
+  useEffect(() => {
+    let started = false;
+    const refreshInitialServerHealth = () => {
+      if (started || document.visibilityState === "hidden") return;
+      started = true;
+      void refreshDashboardHealth();
+    };
+    const initialRefresh = window.setTimeout(refreshInitialServerHealth, 0);
+    document.addEventListener("visibilitychange", refreshInitialServerHealth);
+
+    return () => {
+      started = true;
+      window.clearTimeout(initialRefresh);
+      document.removeEventListener("visibilitychange", refreshInitialServerHealth);
+    };
+  }, [refreshDashboardHealth]);
 
   useEffect(() => {
     if (activeTab !== "sync-health") return;
@@ -3466,6 +3489,7 @@ function ServerDashboard({
           </DashboardPanel>
           <DashboardPanel className="p-4">
             <PanelHeader icon={<ShieldCheck className="h-5 w-5" />} title="Badge & Theme Preview" />
+            {serverDisplayPlan === null ? <p className="mt-4 text-sm text-zinc-400" role="status">Checking server plan...</p> : <>
             <ServerThemeBanner theme={ownerVisuals.themeBanner} className="mt-4">
               <div className="grid gap-3 p-3">
                 <div className="flex items-center gap-3">
@@ -3502,6 +3526,7 @@ function ServerDashboard({
               </div>
               <p className="mt-3 text-xs leading-5 text-zinc-400">Owners can preview rewards here. Automatic badges are evaluated in safe DZN batches, while protected crowns, founder, seasonal, and support badges can only be granted by DZN admin/support tooling.</p>
             </div>
+            </>}
           </DashboardPanel>
           <DashboardPanel className="p-4">
             <PanelHeader icon={<Wrench className="h-5 w-5" />} title="Quick Actions" />
@@ -5189,11 +5214,12 @@ const billingPlans = [
 function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { billing: BillingStatus | null; plans: BillingPlanSummary[]; readiness: BillingReadinessResponse | null; message: string; onRefresh: () => Promise<void> }) {
   const [busyPlan, setBusyPlan] = useState<string | null>(null);
   const [portalBusy, setPortalBusy] = useState(false);
-  const planKey = billing?.plan_key ?? "free";
+  const planKey = dashboardBillingPlan(billing);
   const displayPlans = plans.length ? plans : billingPlans.map((plan) => fallbackBillingPlan(plan));
   const visiblePlans = displayPlans.filter((plan) => plan.plan_key === "pro" || plan.plan_key === "starter");
 
   async function upgrade(planKey: "starter" | "pro") {
+    if (dashboardBillingPlan(billing) === null) return;
     setBusyPlan(planKey);
     try {
       const session = await createCheckoutSession(planKey, "/dashboard");
@@ -5223,7 +5249,7 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
         <div>
           <PanelHeader icon={<Gauge className="h-5 w-5" />} title="Billing & Plan" />
           <p className="mt-2 text-sm leading-6 text-zinc-400">
-            Current plan: <span className="font-black uppercase text-white">{planLabel(planKey)}</span>
+            Current plan: <span className="font-black uppercase text-white">{planKey === null ? "Checking billing..." : planLabel(planKey)}</span>
           </p>
         </div>
         <button type="button" onClick={onRefresh} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-200">
@@ -5272,15 +5298,15 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
                   </p>
                 </div>
                 {plan.plan_key === "starter" ? <StarterCheckoutButton
-                  disabled={busyPlan !== null || plan.plan_key === planKey || !checkoutState.enabled}
-                  label={plan.plan_key === planKey ? "Current Plan" : !checkoutState.enabled ? checkoutState.buttonLabel : "Choose Starter"}
+                  disabled={planKey === null || busyPlan !== null || plan.plan_key === planKey || !checkoutState.enabled}
+                  label={planKey === null ? "Checking billing..." : plan.plan_key === planKey ? "Current Plan" : !checkoutState.enabled ? checkoutState.buttonLabel : "Choose Starter"}
                 /> : <button
                   type="button"
-                  disabled={busyPlan !== null || plan.plan_key === planKey || !checkoutState.enabled}
+                  disabled={planKey === null || busyPlan !== null || plan.plan_key === planKey || !checkoutState.enabled}
                   onClick={() => upgrade(plan.plan_key)}
                   className="shrink-0 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {plan.plan_key === planKey ? "Current Plan" : !checkoutState.enabled ? checkoutState.buttonLabel : busyPlan === plan.plan_key ? "Opening..." : "Upgrade"}
+                  {planKey === null ? "Checking billing..." : plan.plan_key === planKey ? "Current Plan" : !checkoutState.enabled ? checkoutState.buttonLabel : busyPlan === plan.plan_key ? "Opening..." : "Upgrade"}
                 </button>}
               </div>
             </div>
@@ -5435,7 +5461,7 @@ function AdvertisingBoostPanel({
   const [error, setError] = useState("");
   const listingTier = dashboardPackageTierFromPlanKey(billing?.plan_key ?? null, billing?.plan_status ?? null);
   const isProListing = listingTier === "pro";
-  const listingLabel = isProListing ? "Pro Listing" : listingTier === "starter" ? "Starter Listing" : "Free Listing";
+  const listingLabel = dashboardBillingPlan(billing) === null ? "Checking plan..." : isProListing ? "Pro Listing" : listingTier === "starter" ? "Starter Listing" : "Free Listing";
   const canBump = true;
   const proCheckoutConfigured = Boolean(billing?.checkout_configured?.pro);
   const cooldownDays = advertising?.bump_cooldown_days ?? (isProListing ? 7 : 30);
@@ -5474,7 +5500,7 @@ function AdvertisingBoostPanel({
             <MiniInfo label="Listing Plan" value={listingLabel} />
             <MiniInfo label="Next Bump" value={nextAvailable} />
             <MiniInfo label="Last Bumped" value={advertising?.last_bumped_at ? formatRelativeTime(advertising.last_bumped_at) : "Never"} />
-            <MiniInfo label="Cooldown" value={`${cooldownDays} days`} />
+            <MiniInfo label="Cooldown" value={advertising || billing ? `${cooldownDays} days` : "Checking..."} />
           </div>
           <button
             type="button"
