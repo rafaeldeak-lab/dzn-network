@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "pretest": "npm run test:games-hub",
+    "dev:games-hub": "tsx scripts/dev-games-hub.ts",
+    "test:games-hub": "tsx scripts/test-games-hub.ts",
     "dev": "next dev",
     "prebuild": "tsx scripts/autodev/typecheck-cache.ts",
     "build": "next build && node scripts/patch-pages-routes.mjs",
@@ -172,6 +175,7 @@
     "test:dzn-comms-read-history": "tsx scripts/test-dzn-comms-read-history.ts"
   },
   "dependencies": {
+    "@taros-minesweeper/lib": "1.1.2",
     "d3-geo": "^3.1.1",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.14.0",
