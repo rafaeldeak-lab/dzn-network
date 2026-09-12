@@ -1,4 +1,13 @@
-.hub { --cyan: #56e4d4; --amber: #ffc66b; --red: #f26f70; --muted: #a8b0b4; color: #f1f3f4; background: #101314; min-height: calc(100dvh - 90px); padding: 32px max(20px, calc((100% - 1220px) / 2)) 100px; letter-spacing: 0; }
+.hub { --cyan: #56e4d4; --amber: #ffc66b; --red: #f26f70; --muted: #b5bdc0; position: relative; isolation: isolate; color: #f1f3f4; background: #101314; min-height: calc(100dvh - 90px); padding: 32px max(20px, calc((100% - 1220px) / 2)) 100px; letter-spacing: 0; }
+.environment { position: absolute; inset: 0 0 auto; height: 650px; overflow: hidden; pointer-events: none; z-index: -1; }
+.environmentImage { position: absolute; inset: -12px; background: #101314 url('/images/games/dzn-outpost.webp') center 44% / cover no-repeat; animation: outpost-drift 24s ease-in-out infinite alternate; animation-play-state: paused; }
+.environment::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, #090d1059 0%, #10131438 28%, #101314e6 64%, #101314 100%); }
+.hub[data-motion=running] .environmentImage { animation-play-state: running; }
+.hubContent { position: relative; }
+.navActions { display: flex; gap: 16px; align-items: center; }
+.heading { text-shadow: 0 2px 10px #000; }
+.heading .eyebrow { color: #e2e9e7; }
+@keyframes outpost-drift { from { transform: scale(1.025) translateX(-5px); } to { transform: scale(1.06) translateX(5px); } }
 .hub *, .dialog * { box-sizing: border-box; }
 .hub button, .hub select, .hub a, .dialog button { -webkit-tap-highlight-color: transparent; }
 .hub button, .dialog button { cursor: pointer; }
@@ -11,7 +20,7 @@
 .hub p { color: var(--muted); font-size: 14px; line-height: 1.65; }
 .hub a { color: inherit; text-decoration: none; }
 .heading, .identity, .topline, .balances, .sectionTitle, .gameTools, .boardStatus, .projectLine, .asideHeading, .dialogActions { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.heading { min-height: 86px; padding-bottom: 24px; flex-wrap: wrap; }
+.heading { min-height: 160px; padding-bottom: 24px; flex-wrap: wrap; }
 .eyebrow { font-size: 10px; font-weight: 750; color: var(--muted); line-height: 1.5; }
 .dot { color: #ef6b6c; }
 .hubNav { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #303738; padding-bottom: 18px; margin-bottom: 25px; }
@@ -23,7 +32,7 @@
 .identity strong { font-size: 14px; overflow-wrap: anywhere; }
 .identity div > span { color: var(--muted); font-size: 12px; }
 .level { color: var(--cyan); border-left: 1px solid #373e41; padding-left: 14px; white-space: nowrap; font-size: 12px; font-weight: 800; }
-.topline { border-block: 1px solid #303738; margin-bottom: 30px; flex-wrap: wrap; }
+.topline { border-block: 1px solid #4d5b59; margin-bottom: 30px; flex-wrap: wrap; background: #101314d9; }
 .tabs { display: flex; gap: 25px; min-width: 0; }
 .tabs a { display: inline-flex; align-items: center; gap: 8px; color: #aab2b6; border-bottom: 2px solid transparent; min-height: 58px; font-size: 13px; font-weight: 700; }
 .tabs a[aria-current=page] { color: var(--cyan); border-color: var(--cyan); }
@@ -68,7 +77,8 @@
 .result strong { font-size: 14px; color: #f1f4f4; }
 .result span { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .won > svg { color: var(--cyan); }
-.readyBoard { min-height: 340px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; border-bottom: 1px solid #303738; color: var(--cyan); }
+.readyBoard { min-height: 340px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding-bottom: 24px; border-bottom: 1px solid #303738; color: var(--cyan); }
+.scannerArt { display: block; width: min(100%, 570px); height: auto; aspect-ratio: 1.5; object-fit: contain; }
 .rewardPills { display: flex; gap: 16px; color: #c0c9cc; font: 12px var(--font-geist-mono), monospace; flex-wrap: wrap; justify-content: center; }
 .asideHeading { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
 .asideHeading > .eyebrow { color: #ecf3f1; }
@@ -142,4 +152,5 @@
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1000px) { .layout { grid-template-columns: minmax(0, 1fr) 260px; gap: 24px; } .sidebar { padding-left: 20px; } .topline { gap: 0; } .balances { padding: 13px 0; } .tabs { gap: 18px; } .badges { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .hub { padding: 22px 18px 100px; } .hub h1 { font-size: 29px; } .heading { gap: 16px; } .identity { width: 100%; } .identity .smallInsignia { width: 46px; } .identity > div { flex: 1; max-width: none; } .topline { margin-bottom: 24px; } .tabs { width: 100%; justify-content: space-between; gap: 8px; } .tabs a { font-size: 12px; gap: 5px; } .balances { width: 100%; justify-content: flex-end; border-top: 1px solid #293234; } .layout { display: flex; flex-direction: column; gap: 30px; } .mainColumn, .sidebar { width: 100%; } .sidebar { padding: 25px 0 0; border-left: 0; border-top: 1px solid #303738; } .gameTools { gap: 10px; } .gameTools label { min-width: 135px; } .gameTools .primary { flex: 1; } .gameTools > .primary { font-size: 12px; padding: 10px; } .gameTools > label { flex-basis: 100%; } .gameTools > .primary, .toolSwitch { margin-top: 0; } .boardStatus { gap: 14px; font-size: 11px; } .boardScroll { padding-inline: 2px; } .board { gap: 2px; padding: 5px; } .cell { font-size: 12px; } .cell svg { width: 13px; height: 13px; } .gate { flex-direction: column; align-items: flex-start; gap: 0; padding: 10px 0 45px; } .gateArt .insignia { width: 150px; } .gate h2 { font-size: 23px; } .projectTeaser { max-width: 420px; } .badges { gap: 12px; } .badges h3 { font-size: 13px; } .badgeState { font-size: 9px; } .readyBoard { min-height: 300px; } }
-@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+@media (max-width: 760px) { .environment { height: 600px; } .environmentImage { background-position: 63% top; } .heading { min-height: 190px; align-content: center; } .navActions { gap: 10px; } }
+@media (prefers-reduced-motion: reduce) { .spinner, .environmentImage { animation: none; } }

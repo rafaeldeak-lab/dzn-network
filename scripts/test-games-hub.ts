@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
+import { unstable_readConfig } from "wrangler";
 import { hasMine, hasFlag, isRevealed, setIsRevealed, setHasFlag } from "@taros-minesweeper/lib";
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import { createGameBoard, gameView, moveGame, type GameRow } from "../functions/_lib/games-hub-engine";
@@ -38,6 +39,16 @@ function seedParts(f: Fixture, count = 12) {
 }
 
 async function run() {
+  await test("approved production flag persists in Pages config without enabling preview", async () => {
+    const base = unstable_readConfig({ config: "wrangler.toml" });
+    const production = unstable_readConfig({ config: "wrangler.toml", env: "production" });
+    const preview = unstable_readConfig({ config: "wrangler.toml", env: "preview" });
+    assert.deepEqual(production.vars, { DZN_GAMES_HUB_ENABLED: "true" });
+    assert.deepEqual(preview.vars, {});
+    assert.deepEqual(base.vars, {});
+    assert.deepEqual(production.d1_databases, base.d1_databases);
+    assert.deepEqual(preview.d1_databases, base.d1_databases);
+  });
   await test("anonymous access and cross-origin mutations are rejected", async f => {
     assert.equal((await call(f, undefined, { cookie: "" })).status, 401);
     assert.equal((await call(f, { action: "start", mode: "recon" }, { cookie: "" })).status, 401);
