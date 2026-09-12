@@ -19,6 +19,14 @@ try {
   assert.equal(await page.getByRole("button", { name: "Start mission" }).count(), 0);
   await page.screenshot({ path: `${output}/anonymous.png`, fullPage: true });
   checks.push("Anonymous route gates games and rewards behind Discord login");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.locator('main[data-motion="running"]').waitFor();
+  await page.getByText("Display", { exact: true }).click();
+  await page.getByRole("checkbox", { name: "Animated scenery", exact: true }).uncheck();
+  await page.locator('main[data-motion="paused"]').waitFor();
+  await page.getByRole("checkbox", { name: "Animated scenery", exact: true }).check();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  checks.push("Signed-out visitors can stop scenery without a game, account or header pause button");
   await page.goto(`${base}/__local-login`);
   await page.getByLabel("Difficulty", { exact: true }).waitFor();
   const homeLink = page.getByRole("link", { name: "DZN Network home", exact: true });
@@ -26,10 +34,10 @@ try {
   await homeLink.locator("img").evaluate(image => image.decode());
   assert.equal(await homeLink.locator("video").count(), 0);
   assert.equal(await page.getByRole("navigation", { name: "DZN Network", exact: true }).getByRole("button").count(), 0);
-  await page.getByRole("button", { name: "Game rules", exact: true }).click();
+  await page.getByText("Display", { exact: true }).click();
   assert.equal(await page.getByRole("checkbox", { name: /Animated scenery/ }).isDisabled(), true);
-  await page.getByRole("button", { name: "Back to mission", exact: true }).click();
-  checks.push("Header has no pause button; scenery preference remains accessible in the rules dialog");
+  await page.getByText("Display", { exact: true }).click();
+  checks.push("Header has no pause button; reduced-motion preference remains accessible in Display");
   assert.equal(await page.locator('main[data-motion]').getAttribute("data-motion"), "paused");
   const scanner = page.getByAltText("DZN field scanner, survey flags and equipment bag");
   if (await scanner.count()) {
@@ -85,19 +93,19 @@ try {
     await page.screenshot({ path: `${output}/live-layout-${width}.png`, fullPage: true });
   }
   checks.push("Rain and equipment move independently of the camera, with changed-pixel proof at desktop, tablet and both phone widths");
-  await page.getByRole("button", { name: "Game rules", exact: true }).click();
+  await page.getByText("Display", { exact: true }).click();
   await page.getByRole("checkbox", { name: "Animated scenery", exact: true }).uncheck();
-  await page.getByRole("button", { name: "Back to mission", exact: true }).click();
+  await page.getByText("Display", { exact: true }).click();
   await page.waitForTimeout(100);
   const pausedFrame = await captureScene(); await page.waitForTimeout(450);
   assert.equal(await changedPixels(pausedFrame, await captureScene()), 0);
   assert.ok(await backdrop.evaluate(element => element.getAnimations({ subtree: true }).every(animation => animation.playState === "paused")));
   await page.reload(); await page.getByLabel("Difficulty", { exact: true }).waitFor();
   assert.equal(await page.locator('main[data-motion]').getAttribute("data-motion"), "paused");
-  await page.getByRole("button", { name: "Game rules", exact: true }).click();
+  await page.getByText("Display", { exact: true }).click();
   assert.equal(await page.getByRole("checkbox", { name: "Animated scenery", exact: true }).isChecked(), false);
   await page.getByRole("checkbox", { name: "Animated scenery", exact: true }).check();
-  await page.getByRole("button", { name: "Back to mission", exact: true }).click();
+  await page.getByText("Display", { exact: true }).click();
   await page.evaluate(() => { Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" }); document.dispatchEvent(new Event("visibilitychange")); });
   await page.locator('main[data-motion="paused"]').waitFor();
   assert.ok(await backdrop.evaluate(element => element.getAnimations({ subtree: true }).every(animation => animation.playState === "paused")));
@@ -169,6 +177,8 @@ try {
     await page.screenshot({ path: `${output}/${label}-play.png`, fullPage: true });
     const overflow = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
     assert.ok(overflow.scroll <= overflow.client + 1, `${label} page overflow: ${JSON.stringify(overflow)}`);
+    const cellBox = await first.boundingBox();
+    assert.ok(cellBox.width >= 24 && cellBox.height >= 24, `${label}: cells retain at least 24px touch targets`);
     checks.push(`${label}: board rendered without page-level horizontal overflow`);
   }
   await page.setViewportSize({ width: 390, height: 844 });
@@ -201,6 +211,14 @@ try {
   checks.push("Windows nested segment-prefetch files resolve to actual exported bytes");
   await page.route("**/api/games/hub", route => route.abort());
   await page.reload(); await page.getByRole("button", { name: "Retry", exact: true }).waitFor();
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.getByText("Display", { exact: true }).click();
+  await page.getByRole("checkbox", { name: "Animated scenery", exact: true }).uncheck();
+  await page.locator('main[data-motion="paused"]').waitFor();
+  await page.getByRole("checkbox", { name: "Animated scenery", exact: true }).check();
+  await page.getByText("Display", { exact: true }).click();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  checks.push("Unavailable screen keeps Display accessible and scenery controllable");
   await page.screenshot({ path: `${output}/offline.png`, fullPage: true });
   await page.unroute("**/api/games/hub"); await page.getByRole("button", { name: "Retry", exact: true }).click();
   await page.getByRole("group", { name: "Survival Minesweeper board" }).waitFor();

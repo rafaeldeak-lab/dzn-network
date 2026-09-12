@@ -181,7 +181,10 @@
 .dialog { margin: auto; max-width: 480px; width: calc(100% - 36px); max-height: calc(100dvh - 40px); padding: 26px; background: #171f21; color: #eaf1f3; border: 1px solid #536566; border-radius: 8px; }
 .dialog::backdrop { background: #06090cdf; }
 .dialog p { font-size: 14px; line-height: 1.7; color: #b6c1c5; margin: 18px 0; }
-.motionSetting { display: flex; align-items: center; gap: 12px; padding: 16px 0; margin: 18px 0; border-block: 1px solid #394547; font-size: 14px; }
+.displaySettings { margin-top: 28px; padding-top: 16px; border-top: 1px solid #394547; color: var(--muted); }
+.displaySettings summary { display: flex; align-items: center; gap: 8px; width: fit-content; min-height: 36px; cursor: pointer; font-size: 12px; }
+.displaySettings summary:focus-visible { outline: 2px solid var(--amber); outline-offset: 4px; }
+.motionSetting { display: flex; align-items: center; gap: 12px; padding: 16px 0; font-size: 14px; }
 .motionSetting input { width: 18px; height: 18px; accent-color: var(--cyan); flex-shrink: 0; }
 .motionSetting small { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }
 .dialogActions { justify-content: flex-end; flex-wrap: wrap; }
@@ -191,4 +194,5 @@
 @media (max-width: 1000px) { .layout { grid-template-columns: minmax(0, 1fr) 260px; gap: 24px; } .sidebar { padding-left: 20px; } .topline { gap: 0; } .balances { padding: 13px 0; } .tabs { gap: 18px; } .badges { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .hub { padding: 22px 18px 100px; } .hub h1 { font-size: 29px; } .heading { gap: 16px; } .identity { width: 100%; } .identity .smallInsignia { width: 46px; } .identity > div { flex: 1; max-width: none; } .topline { margin-bottom: 24px; } .tabs { width: 100%; justify-content: space-between; gap: 8px; } .tabs a { font-size: 12px; gap: 5px; } .balances { width: 100%; justify-content: flex-end; border-top: 1px solid #293234; } .layout { display: flex; flex-direction: column; gap: 30px; } .mainColumn, .sidebar { width: 100%; } .sidebar { padding: 25px 0 0; border-left: 0; border-top: 1px solid #303738; } .gameTools { gap: 10px; } .gameTools label { min-width: 135px; } .gameTools .primary { flex: 1; } .gameTools > .primary { font-size: 12px; padding: 10px; } .gameTools > label { flex-basis: 100%; } .gameTools > .primary, .toolSwitch { margin-top: 0; } .boardStatus { gap: 14px; font-size: 11px; } .boardScroll { padding-inline: 2px; } .board { gap: 2px; padding: 5px; } .cell { font-size: 12px; } .cell svg { width: 13px; height: 13px; } .gate { flex-direction: column; align-items: flex-start; gap: 0; padding: 10px 0 45px; } .gateArt .insignia { width: 150px; } .gate h2 { font-size: 23px; } .projectTeaser { max-width: 420px; } .badges { gap: 12px; } .badges h3 { font-size: 13px; } .badgeState { font-size: 9px; } .readyBoard { min-height: 300px; } }
 @media (max-width: 760px) { .environment { height: 600px; } .environmentFrame { width: 960px; left: 55%; top: 0; transform: translateX(-55%); } .heading { min-height: 190px; align-content: center; } .navActions { gap: 8px; } .navActions a { font-size: 11px; gap: 5px; } .hubNav .homeButton { width: 140px; height: 54px; } }
+@media (max-width: 760px) { .boardChassis { padding-inline: 5px; } .board { padding: 3px; } }
 @media (prefers-reduced-motion: reduce) { .spinner, .environment [data-animated] { animation: none; } .weatherWindow, .radioSweep, .beacon, .workLight { display: none; } }
