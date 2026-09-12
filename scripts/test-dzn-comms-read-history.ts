@@ -6,7 +6,7 @@ import { renderToString } from "react-dom/server";
 
 import { CommsMessageTime } from "../components/comms/comms-message-time";
 import { DznCommsShell } from "../components/comms/dzn-comms-shell";
-import { parseCommsHistory } from "../components/comms/comms-history-client";
+import { loadCommsHistory, parseCommsHistory } from "../components/comms/comms-history-client";
 
 import { dznCommsReadHistoryBoundary, readDznCommsReadHistoryFlags } from "../functions/_lib/dzn-comms-read-history";
 import type { Env, PagesContext } from "../functions/_lib/types";
@@ -146,6 +146,15 @@ function testMessageTimestamps() {
 }
 
 async function testRuntimeContracts() {
+  const unicodeDb = seededDb();
+  unicodeDb.messages.splice(0, unicodeDb.messages.length, ...Array.from({ length: 30 }, (_, index) =>
+    message({ id: `unicode-${index}`, channelId: "channel-global", body: "\u4e2d".repeat(2_000), createdAt: "2026-09-01T10:00:00.000Z" })));
+  const unicodeRead = await callMessageHistoryRoute(unicodeDb, "GET", "https://dzn.test/api/comms/message-history?channel=global-chat&limit=30", enabledEnv(unicodeDb));
+  assert.equal(unicodeRead.status, 200);
+  assert.ok((await unicodeRead.clone().arrayBuffer()).byteLength > 128_000);
+  const unicodePayload = await loadCommsHistory(new AbortController().signal, { fetcher: async () => unicodeRead });
+  assert.equal(unicodePayload.messages.length, 30, "A real API page of long Unicode messages must not fall back to static content.");
+  assert.ok(unicodePayload.messages.every(row => row.body === "\u4e2d".repeat(2_000)));
   for (const kind of ["public", "private_group", "support"] as const) {
     for (const visibility of ["public", "private_group", "support_private"] as const) {
       if (visibility === (kind === "support" ? "support_private" : kind)) continue;

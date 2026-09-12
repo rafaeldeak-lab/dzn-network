@@ -12,6 +12,10 @@ Seven requests were verified against current source and closed as superseded:
 replacement releases and evidence. Their original branches and history remain.
 The remaining 66 older requests are still open because their unique requirements
 have not all been implemented. No blind old-stack merge or migration was performed.
+Each of those 66 descriptions now begins with a current, request-specific
+reconciliation note linking replacement work and this record. Every original
+description is retained below it, and every original head was checked before the
+update. The seven verified closures plus 66 updated descriptions account for all 73.
 
 Current source comparison: `d36da3945241ed38a6115ebb212d0569fbad0ee6`.
 Board UI release: PR #185, merge `ee43f3f1f445af92ffd423409441b42d9e7b257d`.

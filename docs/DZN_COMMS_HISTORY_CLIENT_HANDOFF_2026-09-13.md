@@ -12,23 +12,24 @@ rejects duplicate message IDs, strips unknown properties and substitutes canonic
 safe text/author details for non-visible messages. Long message/name strings wrap
 inside phone layouts. Loading results are announced by the existing status area.
 
-Reads are capped at 128,000 actual UTF-8 bytes, including chunked or falsely sized
+Reads are capped at 512 KiB of actual UTF-8 bytes, including chunked or falsely sized
 responses. The five-second deadline covers both headers and body. Unmount aborts
 the request; stale results cannot update the component. Bad responses, denial,
 network errors and timeout return to the existing clearly labelled static view.
 
 ## Validation
 
-- 27 client tests cover current projection, malformed fields, access/channel mismatch,
+- 28 client tests cover current projection, malformed fields, access/channel mismatch,
   hidden content, disabled-feature assertions, byte limits, UTF-8 boundaries,
-  headers/body timeout and unmount cancellation.
+  headers/body timeout, unmount cancellation, full Unicode pages and worst-case
+  JSON-escaped text. The byte cap fits the maximum valid 30-message projection.
 - Existing API tests pass the actual public projection through the client parser.
   Private history, support denial, feature-off and no-write behavior remain tested.
 - Five feature-off rendered scenarios pass across desktop, mid-width, mobile,
   different timezones and reduced motion, with zero Comms requests.
-- Fourteen feature-on loopback rendered scenarios pass at 1440, 900, 390 and
+- Fifteen feature-on loopback rendered scenarios pass at 1440, 900, 390 and
   320px: populated, empty, malformed, wrong-channel, hidden, long text, oversized,
-  401, 403, offline and timeout. No page errors, exposed sentinel data, failed
+  401, 403, offline, timeout and a full 30-message Unicode page. No page errors, exposed sentinel data, failed
   images, page overflow, external requests, message writes or WebSockets.
 - Production builds with the feature off and on pass. Release builds must retain
   the existing feature-off default; the enabled build is a local test only.

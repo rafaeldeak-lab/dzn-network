@@ -25,7 +25,8 @@ export type CommsHistoryPayload = {
 const disabledFeatures = ["sending_enabled", "reactions_enabled", "report_actions_enabled",
   "moderation_mutations_enabled", "ai_assist_runtime_enabled", "durable_objects_or_websockets_enabled",
   "analytics_or_tracking_enabled"] as const;
-export const COMMS_HISTORY_MAX_BYTES = 128_000;
+// Thirty 2,000-code-unit bodies plus bounded metadata must fit even with six-byte JSON escapes.
+export const COMMS_HISTORY_MAX_BYTES = 512 * 1_024;
 export const COMMS_HISTORY_TIMEOUT_MS = 5_000;
 const unavailable = () => new Error("Comms history unavailable");
 

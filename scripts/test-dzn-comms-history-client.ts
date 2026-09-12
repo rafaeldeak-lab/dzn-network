@@ -57,6 +57,20 @@ test("masks non-visible author and body even if the response incorrectly supplie
   }
 });
 
+test("accepts full Unicode and worst-case JSON-escaped pages within the bounded contract", async () => {
+  for (const character of ["\u4e2d", "\ud800"]) {
+    const input = commsHistoryFixture();
+    input.messages = Array.from({ length: 30 }, (_, index) => ({ ...input.messages[0],
+      id: character.repeat(117) + index, body: character.repeat(2_000),
+      author_display_name: character.repeat(60), author_role_label: character.repeat(24) }));
+    input.fairness_boundary = Array.from({ length: 8 }, (_, index) => character.repeat(999) + index);
+    const bytes = encoder.encode(JSON.stringify(input));
+    assert.ok(bytes.byteLength > 128_000); assert.ok(bytes.byteLength < COMMS_HISTORY_MAX_BYTES);
+    const loaded = await load(async () => jsonResponse(input));
+    assert.equal(loaded.messages.length, 30); assert.equal(loaded.messages[0].body, character.repeat(2_000));
+  }
+});
+
 test("makes exactly one same-origin GET, no-store with session cookies and cancellation", async () => {
   let requests = 0;
   const result = await load(async (url, options) => {
@@ -87,7 +101,7 @@ test("rejects an oversized declared body without consuming the stream", async ()
 test("caps actual UTF-8 bytes for chunked responses despite a false small length", async () => {
   let cancelled = false;
   const body = new ReadableStream({ start(controller) {
-    for (let i = 0; i < 5; i++) controller.enqueue(encoder.encode("\u00e9".repeat(16_000)));
+    for (let i = 0; i <= Math.ceil(COMMS_HISTORY_MAX_BYTES / 32_000); i++) controller.enqueue(encoder.encode("\u00e9".repeat(16_000)));
   }, cancel() { cancelled = true; } });
   await assert.rejects(load(async () => new Response(body, { headers: { "content-type": "application/json", "content-length": "1" } })));
   assert.equal(cancelled, true);

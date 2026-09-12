@@ -657,7 +657,7 @@
       "original_branch": "codex/dzn-comms-message-history-ui-integration-implementation-20260831",
       "original_base": "codex/dzn-comms-message-history-ui-integration-approval-preflight-20260831",
       "status": "in_progress",
-      "disposition": "Current-branch client implementation adds strict projection, 128000-byte cap, 5-second timeout, abort cleanup and safe hidden-message handling. Not yet released."
+      "disposition": "Current-branch client implementation adds strict projection, 512-KiB cap sized for full Unicode pages, 5-second timeout, abort cleanup and safe hidden-message handling. Not yet released."
     },
     {
       "number": 122,

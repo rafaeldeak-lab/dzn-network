@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { chromium } from "playwright";
 import { commsHistoryFixture } from "./fixtures/comms-history";
+import { COMMS_HISTORY_MAX_BYTES } from "../components/comms/comms-history-client";
 
 async function main() {
 const root = path.resolve("out");
@@ -42,6 +43,7 @@ try {
     { name: "unbroken-text", width: 320, kind: "long" }, { name: "oversize", width: 390, kind: "oversize" },
     { name: "unauthorized", width: 390, kind: "401" }, { name: "forbidden", width: 390, kind: "403" },
     { name: "offline", width: 390, kind: "offline" }, { name: "timeout", width: 390, kind: "timeout" },
+    { name: "full-unicode-page", width: 390, kind: "unicode" },
   ]) {
     const context = await browser.newContext({ viewport: { width: scenario.width, height: 900 }, reducedMotion: "reduce", serviceWorkers: "block" });
     const page = await context.newPage(), errors: string[] = [], prohibited: string[] = [], sockets: string[] = [];
@@ -57,16 +59,17 @@ try {
       if (scenario.kind === "timeout") return; // Leave this local route pending until the client's own timeout aborts it.
       if (["401", "403"].includes(scenario.kind)) return route.fulfill({ status: Number(scenario.kind), contentType: "application/json", body: '{"private_error":"must not render"}' });
       const fixture = commsHistoryFixture();
+      if (scenario.kind === "unicode") fixture.messages = Array.from({ length: 30 }, (_, index) => ({ ...fixture.messages[0], id: `unicode-${index}`, body: "\u4e2d".repeat(2_000) }));
       if (scenario.kind === "empty") fixture.messages = [];
       if (scenario.kind === "private") { fixture.channel.slug = "private-group"; fixture.messages[0].body = "PRIVATE-LEAK-SENTINEL"; }
       if (scenario.kind === "hidden") Object.assign(fixture.messages[0], { visibility_state: "hidden", author_display_name: "PRIVATE-AUTHOR", body: "PRIVATE-LEAK-SENTINEL" });
       if (scenario.kind === "long") { fixture.messages[0].body = "X".repeat(2_000); fixture.messages[0].author_display_name = "N".repeat(60); }
       let body = scenario.kind === "malformed" ? '{"ok":true,"read_only":true,"presentation_only":true}' : JSON.stringify(fixture);
-      if (scenario.kind === "oversize") body += " ".repeat(128_001);
+      if (scenario.kind === "oversize") body += " ".repeat(COMMS_HISTORY_MAX_BYTES + 1);
       return route.fulfill({ status: 200, contentType: "application/json", body });
     });
     await page.goto(`${base}/community`);
-    const success = ["ready", "empty", "hidden", "long"].includes(scenario.kind);
+    const success = ["ready", "empty", "hidden", "long", "unicode"].includes(scenario.kind);
     await page.getByText(success ? "Local/test read-history payload loaded. Sending remains disabled."
       : "Message history could not be reached, so DZN is showing the static read-only fallback.", { exact: true }).waitFor({ timeout: 9_000 });
     await page.evaluate(() => document.fonts.ready);
@@ -80,7 +83,8 @@ try {
     assert.doesNotMatch(await page.locator("main").innerText(), /PRIVATE-LEAK-SENTINEL|PRIVATE-AUTHOR|must not render/);
     if (scenario.kind === "empty") assert.equal(await page.locator("main article").count(), 0);
     if (scenario.kind === "hidden") assert.equal(await page.getByText("Message hidden by DZN Safety.", { exact: true }).count(), 1);
-    await page.screenshot({ path: path.join(output, `${scenario.name}.png`), fullPage: true });
+    if (scenario.kind === "unicode") assert.equal(await page.locator("main article").count(), 30);
+    await page.screenshot({ path: path.join(output, `${scenario.name}.png`), fullPage: scenario.kind !== "unicode" });
     results.push({ scenario, metrics, reads, errors, prohibited, sockets });
     console.log(`PASS ${scenario.name}`);
     await context.close();
