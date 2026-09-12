@@ -15,6 +15,8 @@ import type { Env, PagesFunction, SessionUser } from "../functions/_lib/types";
 import { onRequestGet as visualGet, onRequestPut as visualPut } from "../functions/api/servers/[serverId]/visual-loadout";
 import { getAvailableShowcaseBadgesForServer, resolvePublicServerVisualLoadout, resolveServerVisualLoadout, saveServerVisualLoadout, validateServerVisualLoadout } from "../functions/_lib/server-visual-loadouts";
 import { getAvailableFrameVisuals, getAvailableThemeBannerVisuals } from "../lib/badges/visuals";
+import { getPublicServersPayload, onRequest as publicServers, refreshPublicShowcaseSnapshot } from "../functions/api/public/servers";
+import { publicListingPlanLabel } from "../lib/showcase-labels";
 
 type Row = Record<string, unknown>;
 type Sqlite = { exec(sql: string): void; close(): void; prepare(sql: string): {
@@ -110,6 +112,24 @@ async function invoke(handler: PagesFunction, env: Env, user: SessionUser | null
   return handler({ env, request: new Request("https://local.test/api/synthetic", { method, headers,
     body: method === "GET" ? undefined : JSON.stringify(body) }), params: { serverId }, waitUntil: () => {},
     next: async () => new Response(), data: {} } as Parameters<PagesFunction>[0]);
+}
+
+function seedPublicMedia(db: LocalD1) {
+  db.sqlite.exec(`UPDATE linked_servers SET advert_banner_url = 'https://local.test/synthetic.jpg',
+    owner_announcement = 'Synthetic owner announcement', fresh_wipe_promo = 'Synthetic wipe notice',
+    listing_visibility = 'public', is_online = 1, server_status = 'started', map_name = 'chernarusplus'`);
+  for (const server of db.sqlite.prepare("SELECT id FROM linked_servers").all()) {
+    db.sqlite.prepare(`INSERT INTO server_gallery_images (id, server_id, url, width, height, size_bytes, mime_type, sort_order, created_at, updated_at)
+      VALUES (?, ?, 'https://local.test/synthetic.jpg', 1600, 900, 1000, 'image/jpeg', 0, '2026-09-01', '2026-09-01')`).run(randomUUID(), server.id);
+    db.sqlite.prepare(`INSERT INTO kill_events (id, linked_server_id, killer_name, victim_name, weapon, distance, occurred_at)
+      VALUES (?, ?, 'Synthetic player', 'Synthetic opponent', 'Mosin9130', 150, '2026-09-01T12:00:00Z')`).run(randomUUID(), server.id);
+  }
+}
+
+async function publicProfile(env: Env, id: string = scope.linkedServerId, loggedIn = true) {
+  const payload = await getPublicServersPayload(env, id, loggedIn);
+  assert.ok("server" in payload && payload.server, `Populated public profile required for ${id}`);
+  return payload.server;
 }
 
 async function run() {
@@ -426,6 +446,113 @@ async function run() {
       assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_customisation_audit_log").get()?.n, 1);
     });
   }
+  await test("public grant unlocks exact media and discovery without billing, scores or badge awards", async ({ db, env }) => {
+    seedPublicMedia(db);
+    const before = await publicProfile(env);
+    const neighbors = await Promise.all(["same-guild-other-server", "same-owner-other-guild", "foreign-owner-server"].map(id => publicProfile(env, id)));
+    const billing = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const awards = db.sqlite.prepare("SELECT * FROM server_badge_awards").all();
+    assert.equal(before.plan_key, "free"); assert.equal(before.gallery_images.length, 0);
+    assert.ok(before.total_kills > 0);
+    await grant(env);
+    const active = await publicProfile(env);
+    assert.equal(active.plan_key, "pro"); assert.equal(active.server_access?.source, "complimentary_showcase");
+    assert.equal(active.gallery_images.length, 1); assert.equal(active.advert_banner_url, image.url);
+    assert.equal(active.owner_announcement, "Synthetic owner announcement");
+    assert.equal(active.isFeaturedEligible, true); assert.ok(active.discoveryScore > before.discoveryScore);
+    for (const key of ["score", "rank", "score_breakdown", "reputation", "earnedBadges", "achievement_showcase", "stats", "premium_status"] as const)
+      assert.deepEqual(active[key], before[key], key);
+    for (const neighbor of neighbors) assert.deepEqual(await publicProfile(env, neighbor.linked_server_id), neighbor);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), billing);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_badge_awards").all(), awards);
+    for (const privateValue of [scope.ownerUserId, scope.ownerDiscordId, "cus_synthetic", "sub_synthetic", "grantId", "billingStatus"])
+      assert.equal(JSON.stringify(active).includes(privateValue), false, privateValue);
+    assert.equal(publicListingPlanLabel(active.server_access?.source), "Pro Listing (complimentary)");
+    assert.equal(publicListingPlanLabel("billing"), "Pro Listing");
+  });
+  await test("public preview retains login locks while presenting complimentary media", async ({ db, env }) => {
+    seedPublicMedia(db); await grant(env);
+    const preview = await publicProfile(env, scope.linkedServerId, false);
+    assert.equal(preview.plan_key, "pro"); assert.equal(preview.is_locked, true);
+    assert.equal(preview.gallery_images.length, 1); assert.equal(preview.total_deaths, 0);
+    assert.deepEqual(preview.recent_events, []); assert.deepEqual(preview.pvp_leaderboard, []);
+    assert.equal(preview.public_discord_invite, null); assert.equal(preview.last_sync_at, null);
+    const directory = await getPublicServersPayload(env, null, false);
+    assert.ok("servers" in directory);
+    assert.equal(directory.servers.find(server => server.linked_server_id === scope.linkedServerId)?.plan_key, "pro");
+    assert.equal(directory.servers.find(server => server.linked_server_id === "same-guild-other-server")?.plan_key, "free");
+  });
+  await test("public grant revoke hides media but preserves it and real legacy paid access", async ({ db, env }) => {
+    seedPublicMedia(db); const id = await grant(env);
+    const stored = db.sqlite.prepare("SELECT * FROM server_gallery_images ORDER BY id").all();
+    revokeSql(db, id);
+    const revoked = await publicProfile(env);
+    assert.equal(revoked.plan_key, "free"); assert.equal(revoked.advert_banner_url, null);
+    assert.equal(revoked.owner_announcement, null); assert.deepEqual(revoked.gallery_images, []);
+    assert.equal(revoked.isFeaturedEligible, false);
+    for (const plan of ["pro", "premium", "network", "partner"]) {
+      db.sqlite.prepare("UPDATE server_subscriptions SET status = 'active', plan_key = ?").run(plan);
+      const paid = await publicProfile(env);
+      assert.equal(paid.plan_key, "pro"); assert.equal(paid.server_access?.source, "billing");
+      assert.equal(paid.gallery_images.length, 1);
+    }
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_gallery_images ORDER BY id").all(), stored);
+  });
+  await test("public reads tolerate unapplied grant migration without paid access", async ({ db, env }) => {
+    seedPublicMedia(db);
+    const value = await publicProfile(env);
+    assert.equal(value.plan_key, "free"); assert.deepEqual(value.gallery_images, []);
+  }, false);
+  for (const state of ["revoked", "hidden", "transferred", "expired", "unavailable"]) {
+    await test(`cached public showcase rechecks ${state} while retaining unrelated servers`, async ({ db, env }) => {
+      seedPublicMedia(db); const id = await grant(env);
+      const current = await publicProfile(env);
+      const neighbor = await publicProfile(env, "same-guild-other-server");
+      const cached = { servers: [current, neighbor], featuredServers: [current], stats: { totalServers: 2 }, data: { server: current } };
+      const original = JSON.stringify(cached);
+      if (state === "revoked") revokeSql(db, id);
+      if (state === "hidden") db.sqlite.prepare("UPDATE linked_servers SET listing_visibility = 'hidden' WHERE id = ?").run(scope.linkedServerId);
+      if (state === "transferred") db.sqlite.prepare("UPDATE linked_servers SET user_id = ? WHERE id = ?").run(other.id, scope.linkedServerId);
+      if (state === "expired") {
+        revokeSql(db, id);
+        db.sqlite.prepare(`INSERT INTO server_showcase_grants (id, linked_server_id, owner_user_id, owner_discord_id, guild_id,
+          nitrado_service_id, created_by_user_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, '2020-01-01', '2020-02-01')`)
+          .run(randomUUID(), scope.linkedServerId, scope.ownerUserId, scope.ownerDiscordId, scope.guildId, scope.nitradoServiceId, actor.id);
+      }
+      const checkedEnv = state === "unavailable" ? { ...env, DB: { prepare: () => { throw new Error("Synthetic database unavailable"); } } as unknown as D1Database } : env;
+      const result = await refreshPublicShowcaseSnapshot(checkedEnv, cached, false) as { servers: typeof current[]; featuredServers: typeof current[]; data: { server: typeof current | null }; stats: { totalServers: number } };
+      assert.equal(JSON.stringify(cached), original, "Do not mutate persisted snapshot input");
+      assert.deepEqual(result.servers.find(server => server.linked_server_id === neighbor.linked_server_id), neighbor);
+      const target = result.servers.find(server => server.linked_server_id === scope.linkedServerId);
+      if (state === "hidden" || state === "unavailable") {
+        assert.equal(target, undefined); assert.equal(result.data.server, null); assert.equal(result.stats.totalServers, 1);
+      } else {
+        assert.equal(target?.plan_key, "free"); assert.deepEqual(target?.gallery_images, []);
+        assert.equal(target?.is_locked, true); assert.equal(target?.total_deaths, 0);
+      }
+      assert.equal(result.featuredServers.some(server => server.linked_server_id === scope.linkedServerId), false);
+    });
+  }
+  await test("snapshot without target performs no added query", async () => {
+    const payload = { server: { linked_server_id: "unrelated", gallery_images: [null] } };
+    const env = { DB: { prepare: () => { throw new Error("Unexpected query"); } } as unknown as D1Database } as Env;
+    assert.equal(await refreshPublicShowcaseSnapshot(env, payload, false), payload);
+  });
+  await test("real public handler rebuilds stale target after a live slug query fails", async ({ db, env }) => {
+    seedPublicMedia(db); const id = await grant(env);
+    const request = new Request(`https://local.test/api/public/servers?slug=${scope.linkedServerId}`);
+    const invokePublic = (targetEnv: Env) => publicServers({ env: targetEnv, request, params: {}, waitUntil: () => {}, next: async () => new Response(), data: {} } as Parameters<PagesFunction>[0]);
+    assert.equal((await invokePublic(env)).status, 200);
+    revokeSql(db, id);
+    const wrapper = { prepare(sql: string) {
+      if (sql.includes("WHERE lower(linked_servers.public_slug) = ?")) throw new Error("Synthetic live slug query failure");
+      return db.prepare(sql);
+    } } as unknown as D1Database;
+    const response = await invokePublic({ ...env, DB: wrapper });
+    const body = await response.json() as { source: string; server: Awaited<ReturnType<typeof publicProfile>> };
+    assert.equal(body.source, "snapshot"); assert.equal(body.server.plan_key, "free");
+    assert.deepEqual(body.server.gallery_images, []); assert.equal(body.server.is_locked, true);
+  });
   console.log(`PASS ${passed} populated showcase test scenarios; no external calls`);
   if (process.env.DZN_SHOWCASE_QA_OUTPUT) {
     const f = await fixture();
@@ -438,6 +565,14 @@ async function run() {
         if (state === "paid") f.db.sqlite.exec("UPDATE server_subscriptions SET status = 'active'");
         const payload = await (await invoke(visualGet, f.env, actor, "GET")).json();
         writeFileSync(join(dir, `${state}.json`), JSON.stringify(payload, null, 2));
+      }
+      seedPublicMedia(f.db);
+      f.db.sqlite.exec("UPDATE server_subscriptions SET status = 'canceled'");
+      const publicGrant = await grant(f.env);
+      for (const state of ["public-complimentary", "public-revoked", "public-paid"]) {
+        if (state === "public-revoked") revokeSql(f.db, publicGrant);
+        if (state === "public-paid") f.db.sqlite.exec("UPDATE server_subscriptions SET status = 'active'");
+        writeFileSync(join(dir, `${state}.json`), JSON.stringify(await getPublicServersPayload(f.env, scope.linkedServerId, false), null, 2));
       }
     } finally { f.db.sqlite.close(); }
   }

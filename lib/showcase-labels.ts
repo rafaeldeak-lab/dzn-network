@@ -7,6 +7,10 @@ export function showcasePlanLabel(value: unknown) {
   return plan === "free" ? "Standard" : plan === "starter" ? "Starter" : "Pro";
 }
 
+export function publicListingPlanLabel(source: unknown) {
+  return source === "complimentary_showcase" ? "Pro Listing (complimentary)" : "Pro Listing";
+}
+
 export function publicMapLabel(value: unknown) {
   const map = resolveDznMapConfig(value);
   if (map) return map.key === "chernarusplus" ? "Chernarus" : map.displayName;

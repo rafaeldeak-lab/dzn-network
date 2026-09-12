@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { explorationPreviewCells, publicMapLabel, showcasePlanLabel } from "@/lib/showcase-labels";
+import { explorationPreviewCells, publicListingPlanLabel, publicMapLabel, showcasePlanLabel } from "@/lib/showcase-labels";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -127,6 +127,7 @@ type PublicServer = {
     badge_label: "FEATURED" | "BOOSTED" | "SPONSORED" | null;
   };
   plan_key?: string;
+  server_access?: { source: "billing" | "complimentary_showcase" };
   premium_status?: "standard" | "premium";
   visibility_weight?: number;
   visibilityWeight?: number;
@@ -1225,7 +1226,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
           <StatusPill label={server.server_type} tone="violet" />
           <StatusPill label={server.rank ? `Rank #${server.rank}` : "Rank Pending"} tone={server.rank ? "emerald" : "zinc"} />
           {server.reputation ? <StatusPill label={`${server.reputation.tier} Reputation`} tone="cyan" /> : null}
-          {server.plan_key === "pro" ? <StatusPill label="Pro Listing" tone="violet" /> : null}
+          {server.plan_key === "pro" ? <StatusPill label={publicListingPlanLabel(server.server_access?.source)} tone="violet" /> : null}
           <span title={scoreTitle} className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300/25 bg-emerald-400/10 px-3 py-1.5 text-xs font-black uppercase text-emerald-100">
             Score {server.score_label}
           </span>
@@ -1331,7 +1332,7 @@ function ServerReputationBadges({ server, compact = false }: { server: PublicSer
       {server.plan_key === "pro" ? (
         <span className="inline-flex items-center gap-1.5 rounded-md border border-violet-300/20 bg-violet-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-normal text-violet-100">
           <Sparkles className="h-3.5 w-3.5" />
-          Pro Listing
+          {publicListingPlanLabel(server.server_access?.source)}
         </span>
       ) : null}
       {visualBadges.map((badge) => (
@@ -1415,7 +1416,7 @@ function ServerAchievementPanel({ server }: { server: PublicServer }) {
 
         {hasRows ? (
           <div className="grid gap-3">
-            {earnedBadges.length === 0 && server.plan_key === "pro" ? <AchievementRow icon={Sparkles} name="Pro Listing" description="Enhanced advertising presentation is active. Competitive stats remain earned only." /> : null}
+            {earnedBadges.length === 0 && server.plan_key === "pro" ? <AchievementRow icon={Sparkles} name={publicListingPlanLabel(server.server_access?.source)} description="Enhanced advertising presentation is active. Competitive stats remain earned only." /> : null}
             {groups.map((group) =>
               earnedBadges.length === 0 ? group.rows.slice(0, 4).map((badge) => (
                 <AchievementRow key={badge.key} icon={group.icon} name={badge.name} description={badge.description} />
