@@ -172,7 +172,8 @@
     "autodev:propose-fix": "tsx scripts/autodev/propose-fix.ts",
     "autodev:all": "npm run autodev:audit && npm run autodev:quality && npm run autodev:production-smoke",
     "test:full-system": "npm run lint && npm run test && npm run build && npm run audit:system && npm run audit:adm-sync && npm run test:public-profile-sync && npm run check:automation-live",
-    "test:dzn-comms-read-history": "tsx scripts/test-dzn-comms-read-history.ts",
+    "test:dzn-comms-read-history": "tsx scripts/test-dzn-comms-read-history.ts && npm run test:dzn-comms-history-client",
+    "test:dzn-comms-history-client": "tsx --test scripts/test-dzn-comms-history-client.ts",
     "test:dzn-comms-message-sending-contract": "node --test scripts/test-dzn-comms-message-sending-contract.mjs",
     "test:dzn-release-stack-reconciliation-preflight": "tsx scripts/test-dzn-release-stack-reconciliation-preflight.ts"
   },

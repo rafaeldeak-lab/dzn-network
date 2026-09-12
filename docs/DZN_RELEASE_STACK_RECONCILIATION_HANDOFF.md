@@ -1,5 +1,14 @@
 # DZN Release Stack Reconciliation Handoff
 
+## Latest Reconciliation: 2026-09-13
+
+Use `DZN_RELEASE_BACKLOG_2026-09-13.md` and its complete 73-row JSON manifest for
+the current per-request disposition. Seven verified replacements are closed;
+66 older requests remain open with unique requirements retained. The original
+branches are preserved. PR #185's Games Hub header and board changes are live.
+The current Comms client validation work recovers a missing part of #120-#122
+without enabling chat, applying migrations or importing the incompatible stack.
+
 ## Current Handoff: 2026-09-12
 
 PR #123 is refreshed onto the current release. The new current section in

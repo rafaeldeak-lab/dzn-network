@@ -27,6 +27,27 @@ assert.equal(inventoriedPrs.length, 76, "Retain the complete initial snapshot, n
 assert.equal(new Set(inventoriedPrs).size, 76, "Inventory rows must be unique.");
 assert.deepEqual([...inventoriedPrs].sort((a, b) => a - b), [...Array.from({ length: 74 }, (_, i) => 50 + i), 141, 149]);
 assert.match(inventory, /File equality is not semantic feature equivalence or production activation proof/);
+const dispositions = JSON.parse(read("docs/dzn-legacy-request-dispositions-2026-09-13.json")) as {
+  original_count: number; closed_superseded: number; open_legacy: number;
+  requests: Array<{ number: number; original_head: string; original_branch: string; status: string; disposition: string }>;
+};
+assert.equal(dispositions.original_count, 73);
+assert.equal(dispositions.requests.length, 73);
+assert.deepEqual(dispositions.requests.map(row => row.number), Array.from({ length: 73 }, (_, i) => i + 50));
+const closed = dispositions.requests.filter(row => row.status === "closed_superseded").map(row => row.number);
+assert.deepEqual(closed, [52, 63, 64, 83, 84, 85, 115]);
+assert.equal(dispositions.closed_superseded, closed.length);
+assert.equal(dispositions.open_legacy, 73 - closed.length);
+for (const row of dispositions.requests) {
+  assert.match(row.original_head, /^[a-f0-9]{40}$/);
+  assert.ok(row.original_branch && row.disposition.length >= 20);
+  assert.ok(["closed_superseded", "port_required", "partial", "design_reconcile", "in_progress"].includes(row.status));
+}
+const currentBacklog = read("docs/DZN_RELEASE_BACKLOG_2026-09-13.md");
+assert.match(currentBacklog, /remaining 66 older requests are still open/);
+for (const subject of ["NukeTown", "FED & FERAL", "Nitrado", "Discord", "Customer billing", "Spin/reward", "DZN Games Hub"]) {
+  assert.ok(currentBacklog.includes(subject), `Retain wider user priority: ${subject}`);
+}
 const autodevConfig = JSON.parse(read(".autodev/config.json"));
 const autodevDoc = read("docs/CODEX_AUTODEV.md");
 const publicAccessPolicy = read("docs/PUBLIC_ACCESS_POLICY.md");
