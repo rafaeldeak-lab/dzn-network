@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ArrowRight, Award, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, LoaderCircle,
-  LogIn, Microchip, MousePointer2, Pause, Play, Radio, RefreshCw, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
+  LogIn, Microchip, MousePointer2, Play, Radio, RefreshCw, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
 import { GAME_MODES, HUB_BADGES, WORKSHOP_PART_COST, WORKSHOP_STAGES, type GameMode, type GameView, type HubPayload } from "@/lib/games-hub";
 import styles from "./games-hub.module.css";
@@ -109,16 +109,12 @@ export function GamesHub() {
   }
 
   const motionRunning = motionReady && pageVisible && !motionPaused && !reducedMotion;
-  const motionLabel = reducedMotion ? "Background motion off: reduced motion preference" : motionPaused ? "Resume background motion" : "Pause background motion";
 
   return <main className={styles.hub} data-motion={motionRunning ? "running" : "paused"}>
     <OutpostBackground />
     <div className={styles.hubContent}>
     <SiteHeaderAuthState authenticated={phase === "ready"} checkingAccount={phase === "loading"} returnTo="/games" />
-    <nav className={styles.hubNav} aria-label="DZN Network"><SiteHomeLink className={styles.homeButton} /><div className={styles.navActions}><button className={styles.iconButton} title={motionLabel} aria-label={motionLabel} aria-pressed={motionRunning} disabled={!motionReady || reducedMotion} onClick={() => {
-      const paused = !motionPaused; setMotionPaused(paused);
-      try { localStorage.setItem("dzn.games.motion", paused ? "paused" : "running"); } catch { /* Motion still works without storage. */ }
-    }}>{motionRunning ? <Pause size={16} /> : <Play size={16} />}</button><Link href="/player" prefetch={false}>Player Hub<ArrowRight size={16} /></Link></div></nav>
+    <nav className={styles.hubNav} aria-label="DZN Network"><SiteHomeLink className={styles.homeButton} /><div className={styles.navActions}><Link href="/player" prefetch={false}>Player Hub<ArrowRight size={16} /></Link></div></nav>
     <div className={styles.heading}>
       <div><span className={styles.eyebrow}>DZN / PLAYER ARCADE</span><h1>DZN Games Hub<span className={styles.dot}>.</span></h1></div>
       {summary && <div className={styles.identity}>{xp >= HUB_BADGES[0].xp ? <Insignia position={rank.position} small /> : <span className={styles.recruit}><Gamepad2 size={24} /></span>}<div><strong>{summary.username}</strong><span>{xp >= HUB_BADGES[0].xp ? rank.name : "New recruit"}</span></div><span className={styles.level}>LV {1 + Math.floor(xp / 150)}</span></div>}
@@ -184,6 +180,12 @@ export function GamesHub() {
       </div>
     </>}
 
+    <details className={styles.displaySettings}><summary><Settings2 size={15} aria-hidden="true" />Display</summary>
+      <label className={styles.motionSetting}><input type="checkbox" checked={!motionPaused && !reducedMotion} disabled={!motionReady || reducedMotion} onChange={event => {
+        const paused = !event.target.checked; setMotionPaused(paused);
+        try { localStorage.setItem("dzn.games.motion", paused ? "paused" : "running"); } catch { /* The preference still applies for this visit. */ }
+      }} /><span>Animated scenery{reducedMotion && <small>Off in your device motion settings</small>}</span></label>
+    </details>
     {help && <Dialog title="Minesweeper rules" onClose={() => setHelp(false)}><p>Reveal every safe cell without triggering a mine. Numbers count mines in the eight neighbouring cells. Flags mark suspected mines. The first revealed cell is safe.</p><p>Each difficulty awards XP and parts once per UTC day. Boards expire after 30 minutes. Further wins are practice; rewards cannot be bought, transferred or exchanged for money.</p><p>Arrow keys move between cells. Enter reveals or flags with the selected tool; F toggles a flag.</p><button className={styles.primary} onClick={() => setHelp(false)}>Back to mission</button></Dialog>}
     {replace && <Dialog title="Start a new board?" onClose={() => setReplace(false)}><p>The current unfinished board will be replaced. Earned XP and parts are kept.</p><div className={styles.dialogActions}><button onClick={() => setReplace(false)}>Keep playing</button><button className={styles.primary} onClick={start}><RefreshCw size={17} />New board</button></div></Dialog>}
     </div>
@@ -226,8 +228,10 @@ function MineBoard({ game, tool, disabled, onMove }: { game: GameView; tool: "re
     else return;
     event.preventDefault(); setFocus(target); grid.current?.querySelector<HTMLButtonElement>(`[data-index="${target}"]`)?.focus();
   }
-  return <div className={styles.boardScroll} tabIndex={-1}><div className={styles.board} ref={grid} role="group" aria-label={`${GAME_MODES[game.mode].label} Minesweeper board`} aria-busy={disabled && game.status === "playing"}
-    style={{ gridTemplateColumns: `repeat(${size}, 1fr)`, minWidth: size * 28, maxWidth: size * 44 }}>
+  return <div className={styles.boardScroll} tabIndex={-1}><div className={styles.boardChassis} data-field-board="dzn" style={{ minWidth: size * 28, maxWidth: size * 44 }}>
+    <div className={styles.boardPlate}><Image src="/media/dzn-logo.png" alt="DZN Network" width={610} height={445} /><div><strong>FIELD OPERATIONS</strong><span>{GAME_MODES[game.mode].label.toUpperCase()} / {size} x {size}</span></div><Target size={20} aria-hidden="true" /></div>
+    <div className={styles.board} ref={grid} role="group" aria-label={`${GAME_MODES[game.mode].label} Minesweeper board`} aria-busy={disabled && game.status === "playing"}
+    style={{ gridTemplateColumns: `repeat(${size}, 1fr)` }}>
     {game.cells.flatMap((line, y) => line.map((cell, x) => { const index = y * size + x; const label = cell === "hidden" ? "Unrevealed" : cell === "flag" ? "Flagged" : cell === "mine" ? "Mine" : `${cell} nearby mines`;
       return <button key={index} className={styles.cell} data-state={typeof cell === "number" ? "open" : cell} data-number={cell} data-index={index}
         aria-label={`Row ${y + 1}, column ${x + 1}: ${label}`} aria-disabled={disabled} tabIndex={Math.min(focus, size * size - 1) === index ? 0 : -1}
@@ -236,7 +240,7 @@ function MineBoard({ game, tool, disabled, onMove }: { game: GameView; tool: "re
         {cell === "flag" ? <Flag size={15} /> : cell === "mine" ? <Target size={17} /> : typeof cell === "number" && cell > 0 ? cell : null}
       </button>;
     }))}
-  </div></div>;
+  </div><div className={styles.boardRail} aria-hidden="true"><span />DZN / MINEFIELD<span /></div></div></div>;
 }
 
 function Dialog({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
