@@ -208,11 +208,7 @@ export function SiteHeader({
         aria-busy={authProbePending}
         data-auth-state={resolvedAuthenticated ? "authenticated" : authProbePending ? "checking-public" : "anonymous"}
       >
-        <Link href="/" className="dzn-header-logo" aria-label="DZN Network home">
-          <span className="dzn-header-logo-frame">
-            <HeaderLogoVideo />
-          </span>
-        </Link>
+        <SiteHomeLink />
 
         <div className="dzn-header-links">
           {navLinks.map((link) => {
@@ -275,6 +271,12 @@ export function SiteHeader({
       </header>
     </DznPulseProvider>
   );
+}
+
+export function SiteHomeLink({ className = "" }: { className?: string }) {
+  return <Link href="/" className={`dzn-header-logo ${className}`.trim()} aria-label="DZN Network home">
+    <span className="dzn-header-logo-frame"><HeaderLogoVideo /></span>
+  </Link>;
 }
 
 function HeaderLogoVideo() {

@@ -10,7 +10,13 @@ Generated specifically for the DZN Network Games Hub with the built-in image-gen
 
 ## Motion and Accessibility
 
-The backdrop is a bitmap with a slow CSS pan/zoom, not generated video. A labelled pause/resume icon persists the visitor's choice locally. Reduced-motion preferences force the backdrop still, including preference changes while the page is open. Motion starts only after preferences load. All game controls remain usable with missing artwork or disabled storage. The equipment illustration preserves its full aspect ratio. The main homepage and its existing media are unchanged.
+The backdrop is an animated scene composition, not generated video. The bespoke bitmap, rain beyond three windows, two scanning radio displays, a breathing signal lamp and a gently changing task light share one 3:2 coordinate plane. This keeps effects attached to the equipment and exterior openings through camera drift and phone cropping. Rain remains outside the room; no floating decorative orbs or competitor assets are used. Effects use CSS transforms and opacity, with no animation library, continuous JavaScript render loop, additional downloads or audio.
+
+A labelled pause/resume icon freezes every layer and persists the visitor's choice locally. Hidden tabs suspend all background animations without overwriting that preference. Reduced-motion preferences show the static artwork with the effects removed, including preference changes while the page is open. Motion starts only after preferences load. All game controls remain usable with missing artwork or disabled storage. The equipment illustration preserves its full aspect ratio. The main homepage and its existing media are unchanged.
+
+Browser QA compares scene pixels with the camera frozen at 1440, 900, 390 and 320 pixels, then verifies a complete freeze after Pause, reload persistence, reduced-motion changes and a simulated visibility lifecycle. Existing gameplay and reward checks run separately. This presentation change needs no database, billing, entitlement, Nitrado, Worker or runtime-configuration changes.
+
+The Games Hub also uses the site's existing V2 animated DZN home link, shared through `SiteHomeLink`. Its original WebM, MP4 and poster assets and playback behaviour are unchanged. The compact Hub placement preserves the same clickable brand mark on desktop and phones. QA verifies video playback, the reduced-motion poster, home navigation and saved mission recovery through browser Back.
 
 ## Environment Prompt
 
