@@ -16,7 +16,7 @@ import { onRequestGet as visualGet, onRequestPut as visualPut } from "../functio
 import { getAvailableShowcaseBadgesForServer, resolvePublicServerVisualLoadout, resolveServerVisualLoadout, saveServerVisualLoadout, validateServerVisualLoadout } from "../functions/_lib/server-visual-loadouts";
 import { getAvailableFrameVisuals, getAvailableThemeBannerVisuals } from "../lib/badges/visuals";
 import { getPublicServersPayload, onRequest as publicServers, refreshPublicShowcaseSnapshot } from "../functions/api/public/servers";
-import { publicListingPlanLabel } from "../lib/showcase-labels";
+import { formatPublicVisibilitySummary, publicListingPlanLabel, publicVisibilityTierLabel } from "../lib/showcase-labels";
 
 type Row = Record<string, unknown>;
 type Sqlite = { exec(sql: string): void; close(): void; prepare(sql: string): {
@@ -469,6 +469,22 @@ async function run() {
       assert.equal(JSON.stringify(active).includes(privateValue), false, privateValue);
     assert.equal(publicListingPlanLabel(active.server_access?.source), "Pro Listing (complimentary)");
     assert.equal(publicListingPlanLabel("billing"), "Pro Listing");
+    assert.equal(publicVisibilityTierLabel("premium", active.server_access?.source), "Pro Listing (complimentary)");
+    assert.equal(publicVisibilityTierLabel("premium", "billing"), "Pro");
+    assert.equal(publicVisibilityTierLabel("premium", undefined), "Pro");
+    assert.equal(publicVisibilityTierLabel("enhanced", "billing"), "Enhanced");
+    assert.equal(publicVisibilityTierLabel("standard", "billing"), "Standard");
+    assert.equal(formatPublicVisibilitySummary("Premium visibility", active.server_access?.source), "Pro (complimentary) visibility");
+    assert.equal(formatPublicVisibilitySummary("Pro visibility", active.server_access?.source), "Pro (complimentary) visibility");
+    assert.equal(formatPublicVisibilitySummary("Premium visibility", "billing"), "Pro visibility");
+    assert.equal(formatPublicVisibilitySummary("Standard visibility", undefined), "Standard visibility");
+    assert.equal(formatPublicVisibilitySummary(null, active.server_access?.source), null);
+    const directory = await getPublicServersPayload(env, null, false);
+    assert.ok("spotlightServers" in directory && "featuredServers" in directory);
+    const highlighted = [...directory.spotlightServers, ...directory.featuredServers].find(server => server.linked_server_id === scope.linkedServerId);
+    assert.ok(highlighted, "The real directory must exercise a featured or spotlight card");
+    assert.equal(publicVisibilityTierLabel(highlighted.visibilityTier, highlighted.server_access?.source), "Pro Listing (complimentary)");
+    assert.match(formatPublicVisibilitySummary(highlighted.visibilityExplanation.summary, highlighted.server_access?.source) ?? "", /Pro \(complimentary\)/);
   });
   await test("public preview retains login locks while presenting complimentary media", async ({ db, env }) => {
     seedPublicMedia(db); await grant(env);
@@ -573,6 +589,7 @@ async function run() {
         if (state === "public-revoked") revokeSql(f.db, publicGrant);
         if (state === "public-paid") f.db.sqlite.exec("UPDATE server_subscriptions SET status = 'active'");
         writeFileSync(join(dir, `${state}.json`), JSON.stringify(await getPublicServersPayload(f.env, scope.linkedServerId, false), null, 2));
+        writeFileSync(join(dir, `${state}-directory.json`), JSON.stringify(await getPublicServersPayload(f.env, null, false), null, 2));
       }
     } finally { f.db.sqlite.close(); }
   }

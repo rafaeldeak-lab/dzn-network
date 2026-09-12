@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { explorationPreviewCells, publicListingPlanLabel, publicMapLabel, showcasePlanLabel } from "@/lib/showcase-labels";
+import { explorationPreviewCells, formatPublicVisibilitySummary, publicListingPlanLabel, publicMapLabel, publicVisibilityTierLabel, showcasePlanLabel } from "@/lib/showcase-labels";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -967,24 +967,24 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
     >
       {isSpotlight ? <ServerThemeBanner theme={server.themeBanner} overlay /> : null}
       <div className="relative z-10 flex h-full flex-col gap-4">
-        <div className="flex min-w-0 items-start justify-between gap-3">
-          <div className="flex min-w-0 gap-3">
+        <div className="flex min-w-0 flex-col gap-3">
+          <div className="flex min-w-0 items-start gap-3">
             <ServerProfileFrame frame={server.profileFrame} compact>
               <GuildIcon server={server} size="md" />
             </ServerProfileFrame>
             <div className="min-w-0">
               <p className="truncate text-[10px] font-black uppercase tracking-[0.14em] text-violet-100/70">{server.guild_name ?? "DZN Network"}</p>
-              <h3 className={`${isSpotlight ? "text-2xl" : "text-xl"} mt-1 truncate font-black uppercase text-white`}>{server.server_name}</h3>
               <p className="mt-1 truncate text-xs font-bold text-zinc-400">{server.server_type}</p>
-              <ServerRatingChip server={server} />
             </div>
           </div>
+          <h3 className="break-words text-xl font-black uppercase text-white">{server.server_name}</h3>
+          <ServerRatingChip server={server} />
           <VisibilityLabels server={server} />
         </div>
 
         <ServerCardBadges badges={server.showcaseBadges ?? server.badges} max={isSpotlight ? 6 : 4} />
 
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(100px,1fr))] gap-2">
           <MiniMetric label="Kills" value={formatNumber(server.total_kills)} />
           <MiniMetric label="Players" value={formatPlayers(server)} />
           <MiniMetric label="Reputation" value={server.reputation?.tier ?? "Bronze"} />
@@ -1001,7 +1001,7 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
         ) : null}
 
         <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-3">
-          <p className="min-w-0 truncate text-[10px] font-bold uppercase text-zinc-500">{formatPublicVisibilitySummary(server.visibilityExplanation?.summary) ?? "Discovery placement"}</p>
+          <p className="min-w-0 break-words text-[10px] font-bold uppercase text-zinc-500">{formatPublicVisibilitySummary(server.visibilityExplanation?.summary, server.server_access?.source) ?? "Discovery placement"}</p>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <SavedServerButton server={server} variant="compact" />
             <Link
@@ -1021,7 +1021,7 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
 
 function VisibilityLabels({ server }: { server: PublicServer }) {
   const tier = server.visibilityTier ?? (server.premium_status === "premium" ? "premium" : server.isFeaturedEligible ? "enhanced" : "standard");
-  const label = tier === "premium" ? "Pro" : tier === "enhanced" ? "Enhanced" : "Standard";
+  const label = publicVisibilityTierLabel(tier, server.server_access?.source);
   const className = tier === "premium"
     ? "border-amber-300/30 bg-amber-300/12 text-amber-100"
     : tier === "enhanced"
@@ -1029,8 +1029,8 @@ function VisibilityLabels({ server }: { server: PublicServer }) {
       : "border-white/10 bg-white/[0.04] text-zinc-200";
 
   return (
-    <div className="flex shrink-0 flex-col items-end gap-1.5">
-      <span className={`rounded-md border px-2.5 py-1 text-[10px] font-black uppercase ${className}`}>{label}</span>
+    <div className="flex min-w-0 flex-wrap items-start gap-1.5">
+      <span className={`max-w-full break-words rounded-md border px-2.5 py-1 text-[10px] font-black uppercase ${className}`}>{label}</span>
       {server.isSpotlightEligible ? (
         <span className="rounded-md border border-violet-300/25 bg-violet-400/10 px-2.5 py-1 text-[10px] font-black uppercase text-violet-100">
           Spotlight Eligible
@@ -1038,11 +1038,6 @@ function VisibilityLabels({ server }: { server: PublicServer }) {
       ) : null}
     </div>
   );
-}
-
-function formatPublicVisibilitySummary(value: string | null | undefined) {
-  if (!value) return null;
-  return value.replace(/\bPremium\b/g, "Pro");
 }
 
 function StatsRow({ stats }: { stats: PublicStats }) {
