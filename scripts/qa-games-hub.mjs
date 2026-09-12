@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
+import sharp from "sharp";
 
 const base = process.env.GAMES_PREVIEW_URL;
 if (!base || new URL(base).hostname !== "127.0.0.1") throw new Error("Set GAMES_PREVIEW_URL to the loopback-only synthetic preview.");
@@ -20,6 +21,10 @@ try {
   checks.push("Anonymous route gates games and rewards behind Discord login");
   await page.goto(`${base}/__local-login`);
   await page.getByLabel("Difficulty", { exact: true }).waitFor();
+  const homeLink = page.getByRole("link", { name: "DZN Network home", exact: true });
+  assert.equal(await homeLink.getAttribute("href"), "/");
+  await homeLink.locator("img").evaluate(image => image.decode());
+  assert.equal(await homeLink.locator("video").count(), 0);
   assert.equal(await page.getByRole("button", { name: "Background motion off: reduced motion preference" }).isDisabled(), true);
   assert.equal(await page.locator('main[data-motion]').getAttribute("data-motion"), "paused");
   const scanner = page.getByAltText("DZN field scanner, survey flags and equipment bag");
@@ -34,18 +39,68 @@ try {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.getByRole("button", { name: "Pause background motion", exact: true }).waitFor();
+  await homeLink.locator("video").waitFor();
+  await page.waitForFunction(() => document.querySelector('.dzn-header-logo video')?.readyState >= 2);
+  const logoTime = await homeLink.locator("video").evaluate(video => video.currentTime);
+  await page.waitForTimeout(400);
+  assert.notEqual(await homeLink.locator("video").evaluate(video => video.currentTime), logoTime);
+  assert.ok(await homeLink.locator("video").evaluate(video => video.muted && video.loop && video.playsInline));
+  checks.push("Existing V2 animated DZN homepage button loads and plays, with reduced-motion poster fallback");
   assert.equal(await page.locator('main[data-motion]').getAttribute("data-motion"), "running");
-  const backdrop = page.locator('main[data-motion] > div[aria-hidden="true"] > div');
+  const backdrop = page.locator('[data-outpost="scene"]');
   const startTransform = await backdrop.evaluate(element => getComputedStyle(element).transform);
   await page.waitForTimeout(500);
   assert.notEqual(await backdrop.evaluate(element => getComputedStyle(element).transform), startTransform);
+  const rain = page.locator('[data-outpost="rain"]').first();
+  const rainTransform = await rain.evaluate(element => getComputedStyle(element).transform);
+  await page.waitForTimeout(250);
+  assert.notEqual(await rain.evaluate(element => getComputedStyle(element).transform), rainTransform);
+  // Freeze the camera and hide foreground text to measure scene effects, not UI timers.
+  const sceneStyle = '[data-outpost="scene"] { animation-play-state: paused !important; } [data-outpost="environment"] + div { visibility: hidden; }';
+  async function captureScene() {
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const top = await page.locator('main[data-motion]').evaluate(element => element.getBoundingClientRect().top);
+    return page.screenshot({ clip: { x: 0, y: Math.max(0, top), width: page.viewportSize().width, height: 320 }, style: sceneStyle });
+  }
+  async function changedPixels(first, second) {
+    const a = await sharp(first).removeAlpha().raw().toBuffer();
+    const b = await sharp(second).removeAlpha().raw().toBuffer();
+    assert.equal(a.length, b.length);
+    let changed = 0;
+    for (let i = 0; i < a.length; i += 3) if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 12) changed++;
+    return changed;
+  }
+  for (const width of [1440, 900, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    const firstFrame = await captureScene();
+    await page.waitForTimeout(450);
+    const secondFrame = await captureScene();
+    assert.ok(await changedPixels(firstFrame, secondFrame) > 150, `Independent outpost effects must visibly move at ${width}px`);
+    await writeFile(`${output}/live-scene-${width}-a.png`, firstFrame);
+    await writeFile(`${output}/live-scene-${width}-b.png`, secondFrame);
+    await page.screenshot({ path: `${output}/live-layout-${width}.png`, fullPage: true });
+  }
+  checks.push("Rain and equipment move independently of the camera, with changed-pixel proof at desktop, tablet and both phone widths");
   await page.getByRole("button", { name: "Pause background motion", exact: true }).click();
+  await page.waitForTimeout(100);
+  const pausedFrame = await captureScene(); await page.waitForTimeout(450);
+  assert.equal(await changedPixels(pausedFrame, await captureScene()), 0);
+  assert.ok(await backdrop.evaluate(element => element.getAnimations({ subtree: true }).every(animation => animation.playState === "paused")));
   await page.reload(); await page.getByLabel("Difficulty", { exact: true }).waitFor();
   assert.equal(await page.locator('main[data-motion]').getAttribute("data-motion"), "paused");
   await page.getByRole("button", { name: "Resume background motion", exact: true }).click();
+  await page.evaluate(() => { Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" }); document.dispatchEvent(new Event("visibilitychange")); });
+  await page.locator('main[data-motion="paused"]').waitFor();
+  assert.ok(await backdrop.evaluate(element => element.getAnimations({ subtree: true }).every(animation => animation.playState === "paused")));
+  await page.evaluate(() => { delete document.visibilityState; document.dispatchEvent(new Event("visibilitychange")); });
+  await page.locator('main[data-motion="running"]').waitFor();
+  checks.push("Pause freezes every effect and survives reload; simulated hidden-tab lifecycle suspends and resumes motion without changing preference");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.getByRole("button", { name: "Background motion off: reduced motion preference" }).waitFor();
+  assert.equal(await homeLink.locator("video").count(), 0);
   assert.equal(await page.locator('main[data-motion]').getAttribute("data-motion"), "paused");
+  assert.equal(await backdrop.evaluate(element => element.getAnimations({ subtree: true }).length), 0);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   checks.push("Custom equipment artwork, moving backdrop, persistent pause and live reduced-motion preference");
   await page.getByLabel("Difficulty", { exact: true }).selectOption("recon");
   if (await page.getByRole("button", { name: "Start mission", exact: true }).count()) {
@@ -68,6 +123,13 @@ try {
   await page.locator('button[data-state="flag"]').waitFor();
   const resumed = await (await context.request.get(`${base}/api/games/hub`)).json();
   assert.deepEqual(resumed.game, saved.game);
+  await homeLink.click();
+  await page.waitForURL(`${base}/`);
+  await page.getByRole("link", { name: "DZN Network home", exact: true }).waitFor();
+  await page.goBack();
+  await page.locator('button[data-state="flag"]').waitFor();
+  assert.deepEqual((await (await context.request.get(`${base}/api/games/hub`)).json()).game, saved.game);
+  checks.push("DZN logo navigates home and browser Back restores the saved mission");
   checks.push("Actual authenticated API: start, safe reveal, touch flag, saved state after reload");
   await page.getByRole("button", { name: "New board", exact: true }).click();
   await page.getByRole("dialog").waitFor();

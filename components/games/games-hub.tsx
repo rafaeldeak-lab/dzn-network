@@ -3,9 +3,9 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ArrowLeft, ArrowRight, Award, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, LoaderCircle,
+import { ArrowRight, Award, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, LoaderCircle,
   LogIn, Microchip, MousePointer2, Pause, Play, Radio, RefreshCw, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
-import { SiteHeaderAuthState } from "@/components/site-header";
+import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
 import { GAME_MODES, HUB_BADGES, WORKSHOP_PART_COST, WORKSHOP_STAGES, type GameMode, type GameView, type HubPayload } from "@/lib/games-hub";
 import styles from "./games-hub.module.css";
 
@@ -29,6 +29,7 @@ export function GamesHub() {
   const [motionReady, setMotionReady] = useState(false);
   const [motionPaused, setMotionPaused] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [pageVisible, setPageVisible] = useState(false);
   const lock = useRef(false);
   const assemblyKey = useRef<string | null>(null);
   const generation = useRef(0);
@@ -52,14 +53,16 @@ export function GamesHub() {
     const syncHash = () => { const hash = location.hash.slice(1); if (views.some(item => item.id === hash)) setView(hash as View); };
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
     const syncMotion = () => setReducedMotion(preference.matches);
+    const syncVisibility = () => setPageVisible(document.visibilityState === "visible");
     const initial = window.setTimeout(() => {
-      syncHash(); syncMotion();
+      syncHash(); syncMotion(); syncVisibility();
       try { setMotionPaused(localStorage.getItem("dzn.games.motion") === "paused"); } catch { /* Storage may be disabled. */ }
       setMotionReady(true); void refresh(controller.signal);
     }, 0);
     preference.addEventListener("change", syncMotion);
+    document.addEventListener("visibilitychange", syncVisibility);
     window.addEventListener("hashchange", syncHash);
-    return () => { controller.abort(); clearTimeout(initial); clearInterval(timer); window.removeEventListener("hashchange", syncHash); preference.removeEventListener("change", syncMotion); };
+    return () => { controller.abort(); clearTimeout(initial); clearInterval(timer); window.removeEventListener("hashchange", syncHash); preference.removeEventListener("change", syncMotion); document.removeEventListener("visibilitychange", syncVisibility); };
   }, [refresh]);
 
   useEffect(() => {
@@ -105,14 +108,14 @@ export function GamesHub() {
     void mutate({ action: "start", mode });
   }
 
-  const motionRunning = motionReady && !motionPaused && !reducedMotion;
+  const motionRunning = motionReady && pageVisible && !motionPaused && !reducedMotion;
   const motionLabel = reducedMotion ? "Background motion off: reduced motion preference" : motionPaused ? "Resume background motion" : "Pause background motion";
 
   return <main className={styles.hub} data-motion={motionRunning ? "running" : "paused"}>
-    <div className={styles.environment} aria-hidden="true"><div className={styles.environmentImage} /></div>
+    <OutpostBackground />
     <div className={styles.hubContent}>
     <SiteHeaderAuthState authenticated={phase === "ready"} checkingAccount={phase === "loading"} returnTo="/games" />
-    <nav className={styles.hubNav} aria-label="DZN Network"><Link href="/" prefetch={false}><ArrowLeft size={16} /><strong>DZN NETWORK</strong></Link><div className={styles.navActions}><button className={styles.iconButton} title={motionLabel} aria-label={motionLabel} aria-pressed={motionRunning} disabled={!motionReady || reducedMotion} onClick={() => {
+    <nav className={styles.hubNav} aria-label="DZN Network"><SiteHomeLink className={styles.homeButton} /><div className={styles.navActions}><button className={styles.iconButton} title={motionLabel} aria-label={motionLabel} aria-pressed={motionRunning} disabled={!motionReady || reducedMotion} onClick={() => {
       const paused = !motionPaused; setMotionPaused(paused);
       try { localStorage.setItem("dzn.games.motion", paused ? "paused" : "running"); } catch { /* Motion still works without storage. */ }
     }}>{motionRunning ? <Pause size={16} /> : <Play size={16} />}</button><Link href="/player" prefetch={false}>Player Hub<ArrowRight size={16} /></Link></div></nav>
@@ -185,6 +188,24 @@ export function GamesHub() {
     {replace && <Dialog title="Start a new board?" onClose={() => setReplace(false)}><p>The current unfinished board will be replaced. Earned XP and parts are kept.</p><div className={styles.dialogActions}><button onClick={() => setReplace(false)}>Keep playing</button><button className={styles.primary} onClick={start}><RefreshCw size={17} />New board</button></div></Dialog>}
     </div>
   </main>;
+}
+
+function OutpostBackground() {
+  return <div className={styles.environment} aria-hidden="true" data-outpost="environment">
+    <div className={styles.environmentFrame}>
+      <div className={styles.environmentImage} data-outpost="scene" data-animated="true">
+        {/* The image and effects share one 3:2 coordinate plane, including on phones. */}
+        {[styles.windowLeft, styles.windowCentre, styles.windowRight].map(windowClass => <div key={windowClass} className={`${styles.weatherWindow} ${windowClass}`}>
+          <span className={styles.rainFar} data-outpost="rain" data-animated="true" />
+          <span className={styles.rainNear} data-animated="true" />
+        </div>)}
+        <span className={styles.radioLeft}><span className={styles.radioSweep} data-outpost="radio" data-animated="true" /></span>
+        <span className={styles.radioRight}><span className={styles.radioSweep} data-animated="true" /></span>
+        <span className={styles.beacon} data-outpost="beacon" data-animated="true" />
+        <span className={styles.workLight} data-animated="true" />
+      </div>
+    </div>
+  </div>;
 }
 
 function Insignia({ position, small = false }: { position: string; small?: boolean }) {
