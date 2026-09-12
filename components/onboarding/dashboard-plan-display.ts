@@ -10,7 +10,7 @@ function knownPlan(value: string | undefined): ListingPlanKey | null {
 }
 
 function knownStatusPlan(plan: string | undefined, status: string | undefined): ListingPlanKey | null {
-  const recognized = ["active", "trialing", "none", "inactive", "canceled", "cancelled", "expired", "unpaid", "past_due", "incomplete", "incomplete_expired", "paused"];
+  const recognized = ["active", "trialing", "free", "none", "inactive", "canceled", "cancelled", "expired", "unpaid", "past_due", "incomplete", "incomplete_expired", "paused"];
   const normalizedStatus = status?.trim().toLowerCase();
   if (knownPlan(plan) === null || !normalizedStatus || !recognized.includes(normalizedStatus)) return null;
   return normalizeListingPlanKey(plan, normalizedStatus);

@@ -21,6 +21,8 @@ assert.equal(dashboardServerPlan("showcase", null, null, { plan_tier: "pro", pla
 assert.equal(dashboardServerPlan("showcase", null, null, { plan_tier: "pro", plan_status: "past_due" }), "free");
 assert.equal(dashboardServerPlan("showcase", null, null, { plan_tier: "pro" }), null);
 assert.equal(dashboardBillingPlan({ plan_key: "free", plan_status: "none" }), "free");
+assert.equal(dashboardBillingPlan({ plan_key: "free", plan_status: "free" }), "free");
+assert.equal(dashboardServerPlan("showcase", null, null, { plan_tier: "free", plan_status: "free" }), "free");
 assert.equal(dashboardBillingPlan({ plan_key: "starter", plan_status: "trialing" }), "starter");
 assert.equal(dashboardBillingPlan({ plan_key: "pro", plan_status: "past_due" }), "free");
 assert.equal(dashboardBillingPlan({ plan_key: "unexpected", plan_status: "active" }), null);

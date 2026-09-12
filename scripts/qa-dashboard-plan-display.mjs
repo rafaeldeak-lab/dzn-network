@@ -32,13 +32,23 @@ try {
     page.on("pageerror", error => errors.push(error.message));
     page.on("console", message => { if (/hydration|did not match/i.test(message.text())) errors.push(message.text()); });
     let currentPlan = "premium"; let healthAvailable = true;
-    let accountPlan = "pro"; let accountStatus = "active"; let accountAvailable = true;
+    let accountPlan = "pro"; let accountStatus = "active"; let accountAvailable = true; let billingAvailable = false;
     await page.route("**/*", async route => {
       const req = route.request(); const url = new URL(req.url());
       if (url.origin !== base) return route.abort();
       if (!url.pathname.startsWith("/api/")) return route.continue();
       if (req.method() !== "GET") { writes.push(url.pathname); return route.abort(); }
       reads.push(url.pathname);
+      if (billingAvailable && url.pathname === "/api/billing/status") return route.fulfill({ json: {
+        plan_key: "free", plan_status: "free", current_period_start: null, current_period_end: null,
+        current_period_end_label: "Not subscribed", cancel_at_period_end: false, linked_server_count: 1,
+        can_link_more_servers: false, stripe_customer_exists: false, checkout_configured: { starter: true, pro: true },
+        entitlements: { plan_key: "free", max_linked_servers: 1, adm_discovery_interval_minutes: 0, adm_pull_interval_minutes: 0 }
+      } });
+      if (billingAvailable && url.pathname === "/api/billing/plans") return route.fulfill({ json: {
+        plans: ["starter", "pro"].map(plan => ({ plan_key: plan, name: plan, price_label: plan === "starter" ? "GBP 2/month" : "GBP 10/month",
+          configured: true, checkout_enabled: true, checkout_blocked_reason: null, features: [] }))
+      } });
       if (url.pathname === "/api/auth/me") return route.fulfill({ json: { authenticated: true, user: { id: "owner", username: "Example Owner", discord_id: "123456789012345678" }, linkedServers: [sample], linkedServer: sample,
         navigation: accountAvailable ? { plan_tier: accountPlan, plan_status: accountStatus } : null } });
       if (url.pathname.endsWith("/dashboard/health") && healthAvailable) return route.fulfill({ json: {
@@ -75,8 +85,16 @@ try {
     await page.screenshot({ path: path.join(evidence, `billing-pending-${width}.png`) });
     currentPlan = "free";
     accountPlan = "free";
+    accountStatus = "free";
+    billingAvailable = true;
     await page.reload();
     await page.getByText("Free visual treatment", { exact: true }).waitFor();
+    await page.getByRole("button", { name: /Billing & Boosts/ }).click();
+    await page.getByRole("button", { name: "Choose Starter", exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Choose Starter", exact: true }).isEnabled(), true);
+    assert.equal(await page.getByRole("button", { name: "Upgrade", exact: true }).isEnabled(), true);
+    assert.equal(await page.getByRole("button", { name: "Checking billing...", exact: true }).count(), 0);
+    billingAvailable = false;
     // A selected server can have Pro access while the account fallback is Free.
     currentPlan = "premium";
     const healthSuccess = page.waitForResponse(res => new URL(res.url()).pathname.endsWith("/dashboard/health") && res.status() === 200).catch(async error => {
@@ -107,7 +125,7 @@ try {
     assert.deepEqual(writes, []);
     assert.deepEqual(errors, []);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-    results.push({ width, scenarios: ["pro-with-billing-unavailable", "billing-unknown-disabled", "confirmed-free-retained", "health-success-then-failure-drops-stale-plan", "unknown-account-status-not-free", "all-unavailable-not-a-downgrade"], errors, writes });
+    results.push({ width, scenarios: ["pro-with-billing-unavailable", "billing-unknown-disabled", "production-free-status-checkout-enabled", "health-success-then-failure-drops-stale-plan", "unknown-account-status-not-free", "all-unavailable-not-a-downgrade"], errors, writes });
     await context.close();
   }
   await writeFile(path.join(evidence, "results.json"), JSON.stringify({ syntheticOnly: true, results }, null, 2));

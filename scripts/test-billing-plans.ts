@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createCheckoutFixture, checkoutResponseFromRequest, checkoutPriceFixture } from "./fixtures/billing-checkout";
 import { createWebhookFixture } from "./fixtures/billing-webhook";
+import { dashboardBillingPlan, dashboardServerPlan } from "../components/onboarding/dashboard-plan-display";
 
 import { evaluateBumpEligibility, publicAdvertisingFromState } from "../functions/_lib/advertising";
 import { ensureStarterTrialClaimSchema, getBillingPlanSummaries, getBillingReadinessStatus, getCheckoutConfigured, getCheckoutSafetyStatus, getOwnerBillingStatus, getPlanConfig, getPlanFromStripePriceId, upsertBillingAccount, upsertOwnerEntitlements } from "../functions/_lib/plans";
@@ -980,6 +981,13 @@ async function run() {
   assert.equal(deletedResponse.status, 200);
   assert.equal(deletedBindings.some((values) => values.includes("discord-deleted") && values.includes("free")), true);
   deletedFixture.db.sqlite.close();
+
+  const freeStatus = await getOwnerBillingStatus(createFakeEnv({}) as Env, {
+    id: "user-free", discord_id: "discord-free", username: "Free", avatar: null,
+  });
+  assert.equal(freeStatus.plan_status, "free");
+  assert.equal(dashboardBillingPlan(freeStatus), "free", "The actual no-subscription response must not leave checkout pending.");
+  assert.equal(dashboardServerPlan("showcase", null, freeStatus), "free");
 
   const activeStatus = await getOwnerBillingStatus(createFakeEnv({
     account: {
