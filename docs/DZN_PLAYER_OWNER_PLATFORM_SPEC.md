@@ -255,6 +255,8 @@ DZN Comms is a future site-wide support and community communication system:
 - Profanity filtering, warnings, timed timeouts, report actions, moderation hooks, owner/admin scope, retention rules, and rollback controls.
 - Public-safe aggregate online counter may appear on `/community` or global chat surfaces behind disabled-by-default flags.
 
+Message sending is defined in [DZN Comms Message-Sending Contract Preflight](DZN_COMMS_MESSAGE_SENDING_CONTRACT.md), with a machine-checkable JSON companion. This is design only, stacked after PR #144: no route, schema, message write, moderation runtime, AI runtime or flag activation is authorized. Production migration `0065_dzn_comms_read_history.sql` remains a separate approval. The proposed first send pilot is local/test Global Chat only; atomic idempotency, server-side filtering/timeouts, retention and explicit moderation scope must be proven before sending can be released. Private sending needs its own membership/revocation proof. Preparing this contract does not imply PR #144 has merged or deployed.
+
 Do not implement runtime chat routes, sending, message persistence, reaction persistence, reports, moderation mutations, Durable Objects/WebSockets, AI provider credentials, vector stores, analytics/tracking, metered model calls, or production mutations until each part has its own approval slice.
 
 ## Session Inactivity And Refresh UX Roadmap

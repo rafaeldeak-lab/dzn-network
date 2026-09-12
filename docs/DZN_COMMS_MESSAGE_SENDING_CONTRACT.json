@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "status": "preflight_only",
+  "runtimeApproved": false,
+  "productionApproved": false,
+  "prerequisitePr": 144,
+  "productionMigrationRequiresSeparateApproval": "0065_dzn_comms_read_history.sql",
+  "proposedRoute": { "method": "POST", "path": "/api/comms/messages", "implemented": false },
+  "pilot": { "scope": "local_test", "channels": ["global-chat"], "transport": "https_request_response", "privateSending": false },
+  "request": {
+    "requiredFields": ["channelSlug", "clientRequestId", "body"],
+    "additionalFields": false,
+    "contentType": "application/json",
+    "maxRequestBytes": 12288,
+    "maxBodyCodePoints": 2000,
+    "maxBodyBytes": 8000,
+    "normalization": "NFC_CRLF_to_LF_trim",
+    "requestId": "lowercase_uuid_v4",
+    "identitySource": "server_session",
+    "originRequired": true,
+    "sessionBoundCsrfRequired": true
+  },
+  "flags": {
+    "DZN_COMMS_MESSAGE_SEND_ENABLED": false,
+    "NEXT_PUBLIC_DZN_COMMS_MESSAGE_SEND_UI_ENABLED": false
+  },
+  "decisions": {
+    "allow": { "publish": true, "status": 201, "code": "ACCEPTED" },
+    "block": { "publish": false, "status": 422, "code": "CONTENT_BLOCKED" },
+    "warn": { "publish": false, "status": 422, "code": "WARNING" },
+    "timeout": { "publish": false, "status": 423, "code": "TIMEOUT_ACTIVE" },
+    "escalate": { "publish": false, "status": 423, "code": "STAFF_REVIEW" }
+  },
+  "idempotency": {
+    "key": ["actor_id", "channel_id", "client_request_id"],
+    "conflictStatus": 409,
+    "replayStatus": 200,
+    "rejectedReplay": "original_status_without_message",
+    "pendingStatus": 202,
+    "receiptRetentionDays": 7,
+    "clientRetryHours": 24,
+    "maxClientRetries": 3,
+    "currentAccessRequiredForReplay": true,
+    "atomicDecisionRequired": true,
+    "replayExtendsExpiry": false,
+    "replayAddsStrike": false,
+    "replayAddsMessage": false
+  },
+  "rateLimits": {
+    "actorAttemptsPerRollingMinute": 30,
+    "actorAcceptedPerRollingMinute": 20,
+    "minimumAcceptedIntervalSeconds": 5,
+    "scope": "actor_all_channels",
+    "paidPlanBypass": false
+  },
+  "safety": {
+    "windowHours": 24,
+    "mildDecisions": ["block", "warn", "timeout", "escalate"],
+    "timeoutMinutes": 10,
+    "maxAutomaticStaffHoldHours": 24,
+    "outage": "deny_503",
+    "unknownDecision": "deny_503",
+    "rejectedTextRetention": "request_memory_only"
+  },
+  "retention": {
+    "messageDays": 30,
+    "receiptDays": 7,
+    "safetyMetadataDays": 30,
+    "deletedBody": "remove_immediately",
+    "browserStorage": false,
+    "backupsRequireSeparateReview": true
+  },
+  "support": { "runtime": false, "sources": "reviewed_public_dzn_help_only", "privateContext": false, "meteredSpend": false },
+  "protectedSystems": [
+    "billing", "owner_entitlement", "server_ownership", "scoring", "rankings",
+    "discovery", "reviews", "badges", "seasons", "events", "server_wars", "ctf",
+    "xp_awards", "calling_card_awards", "public_profile_visibility",
+    "retained_exports", "competitive_eligibility"
+  ],
+  "blockedInThisSlice": [
+    "send_routes", "message_writes", "schema_changes", "reactions", "reports",
+    "moderation_mutations", "private_sending", "websockets", "durable_objects",
+    "analytics", "tracking", "ai_runtime", "vector_stores", "provider_credentials",
+    "metered_calls", "live_checkout", "stripe_mutation", "cloudflare_mutation",
+    "production_d1", "deployment", "issue_49"
+  ]
+}
