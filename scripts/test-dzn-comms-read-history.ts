@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readdirSync, readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToString } from "react-dom/server";
+
+import { CommsMessageTime } from "../components/comms/comms-message-time";
+import { DznCommsShell } from "../components/comms/dzn-comms-shell";
 
 import { dznCommsReadHistoryBoundary, readDznCommsReadHistoryFlags } from "../functions/_lib/dzn-comms-read-history";
 import type { Env, PagesContext } from "../functions/_lib/types";
@@ -20,7 +25,8 @@ const cloudflareEnv = readFileSync("cloudflare-env.d.ts", "utf8");
 const platformSpec = readFileSync("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md", "utf8");
 const packageJson = readFileSync("package.json", "utf8");
 
-assert.equal(migrationFiles.at(-1), migrationName, "DZN Comms read-history migration should be the only newest migration in this slice.");
+assert.ok(migrationFiles.includes(migrationName), "The approved Comms migration must remain available.");
+assert.equal(new Set(migrationFiles.map((name) => name.slice(0, 4))).size, migrationFiles.length, "Migration numbers must stay unique, including later non-Comms migrations.");
 assert.match(migration, /CREATE TABLE IF NOT EXISTS dzn_comms_channels/i, "Migration must define Comms channels.");
 assert.match(migration, /CREATE TABLE IF NOT EXISTS dzn_comms_messages/i, "Migration must define the read-only message-history table.");
 assert.match(migration, /CREATE TABLE IF NOT EXISTS dzn_comms_private_group_members/i, "Migration must define private group membership proof.");
@@ -90,8 +96,50 @@ assert.equal(
 assert.ok(dznCommsReadHistoryBoundary().some((line) => /cannot send chat messages/i.test(line)), "Boundary copy must block sending.");
 
 async function main() {
+  testMessageTimestamps();
   await testRuntimeContracts();
   console.log("DZN Comms read-history foundation checks passed.");
+}
+
+function testMessageTimestamps() {
+  const previousTimezone = process.env.TZ;
+  const expectedShellTimes = ["10:12 UTC", "10:18 UTC", "10:24 UTC"];
+  const fixtures = [
+    ["2026-09-01T10:12:00.000Z", "2026-09-01T10:12:00.000Z", "10:12"],
+    ["2026-09-01 10:12:00", "2026-09-01T10:12:00.000Z", "10:12"],
+    ["2026-09-01T10:12:00", "2026-09-01T10:12:00.000Z", "10:12"],
+    ["2026-09-01T11:12:00+01:00", "2026-09-01T10:12:00.000Z", "10:12"],
+    ["2026-09-01T06:12:00-04:00", "2026-09-01T10:12:00.000Z", "10:12"],
+    ["2026-01-01T00:05:00+01:00", "2025-12-31T23:05:00.000Z", "23:05"],
+    ["2026-03-29T01:30:00Z", "2026-03-29T01:30:00.000Z", "01:30"],
+    ["2026-11-01T05:30:00Z", "2026-11-01T05:30:00.000Z", "05:30"],
+  ];
+  let baseline: string[] | undefined;
+  try {
+    for (const timezone of ["UTC", "Europe/London", "America/New_York", "Asia/Kathmandu", "Pacific/Kiritimati"]) {
+      process.env.TZ = timezone;
+      const rendered = fixtures.map(([value, canonical, label]) => {
+        const html = renderToString(createElement(CommsMessageTime, { value }));
+        assert.ok(html.includes(`dateTime="${canonical}"`), `${timezone}: canonical machine-readable date`);
+        assert.ok(html.includes(`title="${canonical}"`), `${timezone}: full timestamp available`);
+        assert.ok(html.includes(`>${label} UTC</time>`), `${timezone}: visible timezone label`);
+        return html;
+      });
+      baseline ??= rendered;
+      assert.deepEqual(rendered, baseline, `Timestamps must render byte-identically in ${timezone}.`);
+      for (const value of [null, "", "invalid", "09/01/2026 10:12", "2026-09-01T99:00:00Z"]) {
+        assert.equal(renderToString(createElement(CommsMessageTime, { value })), "", "Missing/invalid times must not invent a date.");
+      }
+      const html = renderToString(createElement(DznCommsShell));
+      assert.deepEqual([...html.matchAll(/<time[^>]*>(.*?)<\/time>/g)].map((match) => match[1]), expectedShellTimes);
+      assert.match(html, /Static fallback is active/);
+      assert.match(html, /aria-label="Send is unavailable"/);
+      assert.doesNotMatch(html, /suppressHydrationWarning/);
+    }
+  } finally {
+    if (previousTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTimezone;
+  }
 }
 
 async function testRuntimeContracts() {

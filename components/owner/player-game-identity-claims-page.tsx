@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ManagedGameIdentityLinks } from "./managed-game-identity-links";
 
 type ReviewCheck = {
   label: string;
@@ -32,6 +33,7 @@ type ClaimReviewContext = {
 type PlayerGameIdentityClaim = {
   id: string;
   user_id: string;
+  requester_discord_id?: string;
   account_name: string | null;
   linked_server_id: string;
   player_profile_id: string;
@@ -259,6 +261,7 @@ export function PlayerGameIdentityClaimsPage() {
           </section>
         ) : null}
       </div>
+      <div className="mx-auto w-full max-w-6xl"><ManagedGameIdentityLinks /></div>
     </main>
   );
 }
@@ -350,6 +353,7 @@ function ClaimCard({
   const context = claim.review_context ?? fallbackReviewContext(claim);
   const exactId = claim.submitted_player_id ?? "Not available";
   const serverHref = claim.public_slug ? `/servers/${claim.public_slug}` : null;
+  const requesterDiscordId = claim.requester_discord_id;
 
   return (
     <article className="rounded-lg border border-white/10 bg-black/45 p-4 shadow-[0_0_36px_rgba(0,0,0,0.28)]">
@@ -371,6 +375,10 @@ function ClaimCard({
             <DetailBox label="Imported game profile" value={claim.player_name || "Name not available"} />
             <DetailBox label="Submitted game ID" value={exactId} emphasis />
             <DetailBox label="Public-safe masked ID" value={claim.player_id || "Not available"} />
+            <DetailBox label="Request reference" value={claim.id} />
+            <DetailBox label="DZN account reference" value={claim.user_id} />
+            <DetailBox label="Requesting Discord account" value={requesterDiscordId || "Not recorded"} />
+            <DetailBox label="Requested action" value="Link this game account's statistics to this DZN account" />
           </div>
 
           <section className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.06] p-3">

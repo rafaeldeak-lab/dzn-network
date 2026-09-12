@@ -1,6 +1,11 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { StarterCheckoutButton } from "./starter-checkout-button";
+import { dashboardBillingPlan, dashboardServerPlan } from "./dashboard-plan-display";
+import { dashboardAccessLabel, dashboardAdvancedStatsMessage, dashboardBillingPeriod, dashboardBumpCount, dashboardPromotionCredits } from "./dashboard-detail-display";
+import { OpponentPicker } from "@/components/server-wars/opponent-picker";
+import { PAYMENT_COPY } from "../../lib/billing/payment-copy";
 import {
   Activity,
   AlertTriangle,
@@ -497,6 +502,7 @@ function ServerDashboard({
   const [lastSyncResult, setLastSyncResult] = useState<AdmSyncRunResult | null>(null);
   const [dashboardHealth, setDashboardHealth] = useState<DashboardHealthResult | null>(() => loadDashboardHealthCache(serverProp.id));
   const [lastGoodDashboardHealth, setLastGoodDashboardHealth] = useState<DashboardHealthResult | null>(() => loadDashboardHealthCache(serverProp.id));
+  const [dashboardHealthFresh, setDashboardHealthFresh] = useState(false);
   const [dashboardLiveStats, setDashboardLiveStats] = useState<DashboardLiveStatsResult | null>(null);
   const [lastGoodDashboardLiveStats, setLastGoodDashboardLiveStats] = useState<DashboardLiveStatsResult | null>(() => loadDashboardLiveStatsCache(serverProp.id));
   const [liveStatsError, setLiveStatsError] = useState("");
@@ -768,6 +774,7 @@ function ServerDashboard({
       if (cancelled) return;
       setDashboardHealth(cachedHealth);
       setLastGoodDashboardHealth(cachedHealth);
+      setDashboardHealthFresh(false);
       setDashboardLiveStats(null);
       setLastGoodDashboardLiveStats(cachedLiveStats);
       setLastGoodDashboardStats(cachedStats);
@@ -810,7 +817,7 @@ function ServerDashboard({
       if (activeServerIdRef.current !== requestServerId) return false;
       setAdvancedStats(data);
       setAdvancedStatsError(data.available === false
-        ? friendlyAdvancedStatsReason(data.reason)
+        ? dashboardAdvancedStatsMessage(data.reason)
         : "");
       return true;
     } catch (error) {
@@ -847,6 +854,7 @@ function ServerDashboard({
   }, [runOptionalDashboardRequest, server.id]);
 
   useEffect(() => {
+    if (activeTab !== "overview") return;
     if (typeof IntersectionObserver === "undefined") {
       const handle = window.setTimeout(() => {
         setAdvancedStatsVisible(true);
@@ -866,7 +874,7 @@ function ServerDashboard({
     if (advancedStatsPanelRef.current) observer.observe(advancedStatsPanelRef.current);
     if (serverWarsPanelRef.current) observer.observe(serverWarsPanelRef.current);
     return () => observer.disconnect();
-  }, [server.id]);
+  }, [server.id, activeTab]);
 
   useEffect(() => {
     if (!advancedStatsVisible || advancedStatsRequestedRef.current) return;
@@ -1183,6 +1191,7 @@ function ServerDashboard({
       lastAppliedDashboardHealthGeneratedAtRef.current = response.generated_at;
       setDashboardHealth(response);
       setLastGoodDashboardHealth(response);
+      setDashboardHealthFresh(true);
       setLastGoodDashboardStats(dashboardStatsCacheFromHealth(response));
       saveDashboardHealthCache(requestServerId, response);
       if (response.latest_events.length && !recentEventsRef.current.length) {
@@ -1200,6 +1209,7 @@ function ServerDashboard({
         return false;
       }
       setFailedEndpoint("dashboard-health");
+      setDashboardHealthFresh(false);
       setLastRefreshError(isAbortError(error) ? "Dashboard health refresh timed out." : error instanceof Error ? error.message : "Dashboard health snapshot failed.");
       setFailedRefreshCount((count) => count + 1);
       const cached = lastGoodDashboardHealthRef.current;
@@ -1392,6 +1402,7 @@ function ServerDashboard({
     dashboardPlayerCount.status,
   );
   const effectiveBillingStatus = billingStatus ?? lastGoodBilling;
+  const serverDisplayPlan = dashboardServerPlan(server.id, dashboardHealthFresh ? effectiveDashboardHealth : null, effectiveBillingStatus, navigation);
   const effectivePlanLabel = effectiveBillingStatus ? planLabel(effectiveBillingStatus.plan_key) : effectiveDashboardHealth?.current_plan ? planLabel(effectiveDashboardHealth.current_plan) : "Loading";
   const effectiveAutomationHealth = automationHealth ?? lastGoodAutomationHealth;
   const effectivePublicCacheDebug = publicCacheDebug ?? lastGoodPublicCache;
@@ -1412,7 +1423,7 @@ function ServerDashboard({
   const ownerReputationTier = inferDashboardReputationTier(canonicalStats?.score ?? server.score ?? 0);
   const ownerBadgeCollection = useMemo(() => buildServerBadgeCollection({
     serverId: server.id,
-    planKey: effectiveBillingStatus?.plan_key ?? "starter",
+    planKey: serverDisplayPlan ?? "free",
     createdAt: server.created_at,
     totalKills: dashboardStatValues.kills,
     totalDeaths: dashboardStatValues.deaths,
@@ -1434,7 +1445,7 @@ function ServerDashboard({
     dashboardStatValues.joins,
     dashboardStatValues.kills,
     dashboardStatValues.uniquePlayers,
-    effectiveBillingStatus?.plan_key,
+    serverDisplayPlan,
     effectiveServerMode,
     normalizedServerCategory,
     server.created_at,
@@ -1447,12 +1458,12 @@ function ServerDashboard({
     statsSyncActive,
   ]);
   const ownerVisuals = useMemo(() => getServerVisualShowcase({
-    planKey: effectiveBillingStatus?.plan_key ?? "starter",
+    planKey: serverDisplayPlan ?? "free",
     reputationTier: ownerReputationTier,
     category: normalizedServerCategory ?? effectiveServerMode,
     mapName: server.map_name ?? server.mission,
     maxBadges: 7,
-  }), [effectiveBillingStatus?.plan_key, effectiveServerMode, normalizedServerCategory, ownerReputationTier, server.map_name, server.mission]);
+  }), [serverDisplayPlan, effectiveServerMode, normalizedServerCategory, ownerReputationTier, server.map_name, server.mission]);
   const ownerEarnedBadges = ownerBadgeCollection.showcaseBadges.length ? ownerBadgeCollection.showcaseBadges : ownerVisuals.badges;
   const ownerLockedBadges = ownerBadgeCollection.lockedBadges.slice(0, 4);
   const badgeEvaluationLastAt = badgeStatus?.lastEvaluationAt ?? null;
@@ -1784,6 +1795,23 @@ function ServerDashboard({
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [refreshDashboardLiveStats]);
+
+  useEffect(() => {
+    let started = false;
+    const refreshInitialServerHealth = () => {
+      if (started || document.visibilityState === "hidden") return;
+      started = true;
+      void refreshDashboardHealth();
+    };
+    const initialRefresh = window.setTimeout(refreshInitialServerHealth, 0);
+    document.addEventListener("visibilitychange", refreshInitialServerHealth);
+
+    return () => {
+      started = true;
+      window.clearTimeout(initialRefresh);
+      document.removeEventListener("visibilitychange", refreshInitialServerHealth);
+    };
+  }, [refreshDashboardHealth]);
 
   useEffect(() => {
     if (activeTab !== "sync-health") return;
@@ -3457,12 +3485,13 @@ function ServerDashboard({
             <p className="mt-4 text-2xl font-black uppercase text-violet-100">{currentPlanName}</p>
             <div className="mt-4 grid grid-cols-3 gap-3">
               <MiniInfo label="Servers Used" value={effectiveBillingStatus ? `${effectiveBillingStatus.linked_server_count} / ${effectiveBillingStatus.entitlements.max_linked_servers}` : "Loading"} />
-              <MiniInfo label="Bumps This Month" value={advertisingStatus ? `${advertisingStatus.bump_count_current_period} / ${advertisingStatus.included_bumps_per_month}` : String(effectiveBillingStatus?.entitlements.included_bumps_per_month ?? "Loading")} />
-              <MiniInfo label="Renews" value={billingRenewalLabel(effectiveBillingStatus)} />
+              <MiniInfo label="Bumps This Period" value={dashboardBumpCount(advertisingStatus?.bump_count_current_period)} />
+              <MiniInfo {...dashboardBillingPeriod(effectiveBillingStatus)} />
             </div>
           </DashboardPanel>
           <DashboardPanel className="p-4">
             <PanelHeader icon={<ShieldCheck className="h-5 w-5" />} title="Badge & Theme Preview" />
+            {serverDisplayPlan === null ? <p className="mt-4 text-sm text-zinc-400" role="status">Checking server plan...</p> : <>
             <ServerThemeBanner theme={ownerVisuals.themeBanner} className="mt-4">
               <div className="grid gap-3 p-3">
                 <div className="flex items-center gap-3">
@@ -3499,6 +3528,7 @@ function ServerDashboard({
               </div>
               <p className="mt-3 text-xs leading-5 text-zinc-400">Owners can preview rewards here. Automatic badges are evaluated in safe DZN batches, while protected crowns, founder, seasonal, and support badges can only be granted by DZN admin/support tooling.</p>
             </div>
+            </>}
           </DashboardPanel>
           <DashboardPanel className="p-4">
             <PanelHeader icon={<Wrench className="h-5 w-5" />} title="Quick Actions" />
@@ -4076,7 +4106,7 @@ function DashboardPackageGuide({
   onProTools: () => void;
 }) {
   const isPro = packageState.tier === "pro";
-  const primaryAction = isPro ? "Open Pro tools" : packageState.tier === "free" ? "Start trial / Pro" : "Compare Pro";
+  const primaryAction = isPro ? "Open Pro tools" : packageState.tier === "free" ? "Compare owner plans" : "Compare Pro";
 
   return (
     <section className={`mt-4 rounded-xl border p-3 ${isPro ? "border-emerald-300/25 bg-emerald-400/10" : "border-cyan-300/20 bg-cyan-400/8"}`}>
@@ -4139,13 +4169,19 @@ function renderDashboardTabAccessBadge(access: DashboardTabAccess, tier: Dashboa
   return <span className="shrink-0 rounded border border-cyan-300/20 bg-cyan-400/10 px-1.5 py-0.5 text-[8px] font-black uppercase text-cyan-100">Trial-safe</span>;
 }
 
-function DashboardServerWarsPanel({ wars, loading, error }: {
+type DashboardServerWarsPanelProps = {
   wars: DashboardServerWarsResult | null;
   loading: boolean;
   error: string;
-}) {
-  const [opponentServerId, setOpponentServerId] = useState("");
-  const [rulesetKey, setRulesetKey] = useState("deathmatch_war");
+};
+
+export function DashboardServerWarsPanel(props: DashboardServerWarsPanelProps) {
+  return <DashboardServerWarsContent key={props.wars?.server?.id ?? "unselected"} {...props} />;
+}
+
+function DashboardServerWarsContent({ wars, loading, error }: DashboardServerWarsPanelProps) {
+  const [opponentSelection, setOpponentSelection] = useState({ scope: "", id: "" });
+  const [rulesetKey, setRulesetKey] = useState(() => wars?.eligibility?.eligibleRulesets?.[0]?.key ?? "deathmatch_war");
   const [challengeTitle, setChallengeTitle] = useState("");
   const [challengeBusy, setChallengeBusy] = useState(false);
   const [challengeMessage, setChallengeMessage] = useState("");
@@ -4155,6 +4191,9 @@ function DashboardServerWarsPanel({ wars, loading, error }: {
   const pendingChallenges = wars?.pendingChallenges ?? [];
   const serverId = wars?.server?.id ?? "";
   const rulesets = wars?.eligibility?.eligibleRulesets ?? [];
+  const opponentScope = `${serverId}:${rulesetKey}`;
+  const opponentServerId = opponentSelection.scope === opponentScope ? opponentSelection.id : "";
+  const setOpponentServerId = (id: string) => setOpponentSelection({ scope: opponentScope, id });
 
   async function submitChallenge(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -4224,28 +4263,25 @@ function DashboardServerWarsPanel({ wars, loading, error }: {
         <p className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-4 text-sm font-bold text-cyan-50">{error}</p>
       ) : null}
       <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <DashboardMiniMetric label="Plan Access" value={wars?.access?.effectivePlan ?? "free"} />
+        <DashboardMiniMetric label="Plan Access" value={dashboardAccessLabel(wars?.access?.effectivePlan)} />
         <DashboardMiniMetric label="Eligible Rules" value={String(wars?.eligibility?.eligibleRulesets?.length ?? 0)} />
         <DashboardMiniMetric label="Active Wars" value={String(activeEvents.length)} />
         <DashboardMiniMetric label="Trophies" value={String(trophies.length)} />
       </div>
       {!canCreateChallenge ? (
         <div className="mt-4 rounded-lg border border-violet-300/20 bg-violet-400/10 p-4 text-sm font-bold leading-6 text-violet-50">
-          {wars?.access?.lockedReason ?? "Pro is required to create Server VS Server challenges."}
+          {wars?.access?.lockedReason ?? "Challenge availability is not confirmed for this server."}
         </div>
       ) : (
         <form onSubmit={submitChallenge} className="mt-4 grid gap-3 rounded-lg border border-emerald-300/20 bg-emerald-400/10 p-4">
           <p className="text-sm font-bold leading-6 text-emerald-50">
             Challenge creation is available for this server. Opponents must be eligible live public servers in the same category.
           </p>
-          <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
-            <label className="grid gap-1 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-100/70">
-              Opponent server id or slug
-              <input value={opponentServerId} onChange={(event) => setOpponentServerId(event.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case tracking-normal text-white outline-none focus:border-cyan-300/50" placeholder="server id or public slug" />
-            </label>
+          <div className="grid items-start gap-3 lg:grid-cols-[1fr_220px]">
+            <OpponentPicker key={`${serverId}:${rulesetKey}`} serverId={serverId} rulesetKey={rulesetKey} value={opponentServerId} onChange={setOpponentServerId} disabled={challengeBusy} />
             <label className="grid gap-1 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-100/70">
               Ruleset
-              <select value={rulesetKey} onChange={(event) => setRulesetKey(event.target.value)} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case tracking-normal text-white outline-none focus:border-cyan-300/50">
+              <select aria-label="Ruleset" disabled={challengeBusy} value={rulesetKey} onChange={(event) => { setOpponentServerId(""); setRulesetKey(event.target.value); }} className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm font-bold normal-case tracking-normal text-white outline-none focus:border-cyan-300/50">
                 {(rulesets.length ? rulesets : [{ key: "deathmatch_war", title: "Deathmatch War" }]).map((ruleset) => (
                   <option key={ruleset.key} value={ruleset.key}>{ruleset.title}</option>
                 ))}
@@ -4332,7 +4368,7 @@ function DashboardAdvancedShowcasePanel({
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <PanelHeader icon={<Compass className="h-5 w-5" />} title="Advanced Showcase Preview" />
         <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase">
-          <span className="rounded border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-cyan-100">{stats?.access?.effectivePlan ? `${stats.access.effectivePlan} plan` : "Plan pending"}</span>
+          <span className="rounded border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-cyan-100">{dashboardAccessLabel(stats?.access?.effectivePlan)}</span>
           <span className="rounded border border-violet-300/20 bg-violet-400/10 px-2 py-1 text-violet-100">No raw coordinates</span>
           <span className="rounded border border-orange-300/20 bg-orange-400/10 px-2 py-1 text-orange-100">Estimated travel</span>
         </div>
@@ -4382,7 +4418,7 @@ function DashboardAdvancedShowcasePanel({
           </div>
         </>
       ) : (
-        <p className="mt-4 rounded-lg border border-white/10 bg-black/24 p-4 text-sm font-bold text-zinc-300">Advanced showcase data is awaiting enough imported ADM events.</p>
+        <p className="mt-4 rounded-lg border border-white/10 bg-black/24 p-4 text-sm font-bold text-zinc-300">Advanced showcase has not loaded.</p>
       )}
     </DashboardPanel>
   );
@@ -5173,18 +5209,19 @@ type DashboardReviewSummary = {
 };
 
 const billingPlans = [
-  { key: "starter", label: "Starter", price: "£0 today, then £2/month", detail: "2-day free trial, one linked server, public profile, basic Discord advert posts, and one bump every 30 days" },
-  { key: "pro", label: "Pro", price: "£10/month", detail: "Full DZN Access, up to 3 linked servers, custom advert visuals, weekly bumping, enhanced Discord posts, featured and spotlight eligibility, and listing analytics" },
+  { key: "starter", label: "Starter", price: "£2/month", detail: "Eligible accounts get a two-day trial with a payment method, then £2/month until cancelled; one linked server, public profile, basic Discord advert posts, and one bump every 30 days" },
+  { key: "pro", label: "Pro", price: "£10/month", detail: "Advanced server-owner tools, up to 3 linked servers, custom advert visuals, weekly bumping, enhanced Discord posts, featured and spotlight eligibility, and listing analytics" },
 ] as const;
 
 function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { billing: BillingStatus | null; plans: BillingPlanSummary[]; readiness: BillingReadinessResponse | null; message: string; onRefresh: () => Promise<void> }) {
   const [busyPlan, setBusyPlan] = useState<string | null>(null);
   const [portalBusy, setPortalBusy] = useState(false);
-  const planKey = billing?.plan_key ?? "free";
+  const planKey = dashboardBillingPlan(billing);
   const displayPlans = plans.length ? plans : billingPlans.map((plan) => fallbackBillingPlan(plan));
-  const visiblePlans = displayPlans.filter((plan) => plan.plan_key === "pro" || plan.plan_key === planKey);
+  const visiblePlans = displayPlans.filter((plan) => plan.plan_key === "pro" || plan.plan_key === "starter");
 
   async function upgrade(planKey: "starter" | "pro") {
+    if (dashboardBillingPlan(billing) === null) return;
     setBusyPlan(planKey);
     try {
       const session = await createCheckoutSession(planKey, "/dashboard");
@@ -5214,7 +5251,7 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
         <div>
           <PanelHeader icon={<Gauge className="h-5 w-5" />} title="Billing & Plan" />
           <p className="mt-2 text-sm leading-6 text-zinc-400">
-            Current plan: <span className="font-black uppercase text-white">{planLabel(planKey)}</span>
+            Current plan: <span className="font-black uppercase text-white">{planKey === null ? "Checking billing..." : planLabel(planKey)}</span>
           </p>
         </div>
         <button type="button" onClick={onRefresh} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-200">
@@ -5225,19 +5262,27 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
       <div className="mt-4 grid grid-cols-2 gap-3">
         <MiniInfo label="Servers Used" value={billing ? `${billing.linked_server_count} / ${billing.entitlements.max_linked_servers}` : "Loading"} />
         <MiniInfo label="Plan Status" value={billing?.plan_status ?? "Loading"} />
-        <MiniInfo label="Promo Credits" value={billing ? String(planPromotionCreditLimit(billing.plan_key)) : "Loading"} />
-        <MiniInfo label={billing?.cancel_at_period_end ? "Cancels On" : "Renews"} value={billingRenewalLabel(billing)} />
+        <MiniInfo label="Promo Credits" value={dashboardPromotionCredits(billing)} />
+        <MiniInfo {...dashboardBillingPeriod(billing)} />
       </div>
 
       <BillingReadinessWarning readiness={readiness} />
+      <div className="mt-4 space-y-2 text-sm leading-6 text-zinc-300">
+        <p>{PAYMENT_COPY.starterTerms}</p>
+        <p>{PAYMENT_COPY.returningStarter}</p>
+        <p>{PAYMENT_COPY.proTerms}</p>
+        <p>{PAYMENT_COPY.cancellation}</p>
+        <p>{PAYMENT_COPY.recovery}</p>
+        <a href="/pricing" className="inline-flex min-h-10 items-center text-cyan-200 underline">All payment and trial details</a>
+      </div>
 
       <div className="mt-4 grid gap-2">
         {visiblePlans.map((plan) => {
           const checkoutState = billingPlanCheckoutState(plan, readiness);
           return (
             <div key={plan.plan_key} className="rounded-lg border border-white/10 bg-black/24 p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
+              <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
+                <div className="min-w-0">
                   <p className="text-sm font-black uppercase text-white">{billingPlanDisplayName(plan)} <span className="text-violet-200">{billingPlanDisplayPrice(plan)}</span></p>
                   <p className="mt-1 text-xs leading-5 text-zinc-400">
                     {billingPlanListingSummary(plan)}
@@ -5246,7 +5291,7 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
                     {billingPlanDisplayFeatures(plan).map((feature) => (
                       <p key={feature}><span className="font-black uppercase text-zinc-400">Value:</span> {feature}</p>
                     ))}
-                    <p><span className="font-black uppercase text-zinc-400">Tracking:</span> ADM ingestion and statistics collection continue normally on every plan.</p>
+                    <p><span className="font-black uppercase text-zinc-400">Sync:</span> Automatic stats sync requires completed setup, supported logs and eligible owner access. Plans do not change imported stat formulas.</p>
                     <p><span className="font-black uppercase text-zinc-400">Fairness:</span> Pro never changes leaderboard rank, K/D, score, reviews, crowns, season wins, or gameplay results.</p>
                     <p><span className="font-black uppercase text-zinc-400">Bumps:</span> {isBillingPlanPro(plan.plan_key) ? "one bump every 7 days" : "one bump every 30 days"}.</p>
                   </div>
@@ -5254,14 +5299,17 @@ function BillingPlanPanel({ billing, plans, readiness, message, onRefresh }: { b
                     {checkoutState.statusLabel}
                   </p>
                 </div>
-                <button
+                {plan.plan_key === "starter" ? <StarterCheckoutButton
+                  disabled={planKey === null || busyPlan !== null || plan.plan_key === planKey || !checkoutState.enabled}
+                  label={planKey === null ? "Checking billing..." : plan.plan_key === planKey ? "Current Plan" : !checkoutState.enabled ? checkoutState.buttonLabel : "Choose Starter"}
+                /> : <button
                   type="button"
-                  disabled={busyPlan !== null || plan.plan_key === planKey || !checkoutState.enabled}
+                  disabled={planKey === null || busyPlan !== null || plan.plan_key === planKey || !checkoutState.enabled}
                   onClick={() => upgrade(plan.plan_key)}
                   className="shrink-0 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {plan.plan_key === planKey ? "Current Plan" : !checkoutState.enabled ? checkoutState.buttonLabel : busyPlan === plan.plan_key ? "Opening..." : "Upgrade"}
-                </button>
+                  {planKey === null ? "Checking billing..." : plan.plan_key === planKey ? "Current Plan" : !checkoutState.enabled ? checkoutState.buttonLabel : busyPlan === plan.plan_key ? "Opening..." : "Upgrade"}
+                </button>}
               </div>
             </div>
           );
@@ -5294,6 +5342,7 @@ function billingPlanDisplayName(plan: BillingPlanSummary) {
 }
 
 function billingPlanDisplayPrice(plan: BillingPlanSummary) {
+  if (plan.plan_key === "starter") return "£2/month; 2-day free trial for eligible accounts";
   return plan.price_label;
 }
 
@@ -5414,7 +5463,7 @@ function AdvertisingBoostPanel({
   const [error, setError] = useState("");
   const listingTier = dashboardPackageTierFromPlanKey(billing?.plan_key ?? null, billing?.plan_status ?? null);
   const isProListing = listingTier === "pro";
-  const listingLabel = isProListing ? "Pro Listing" : listingTier === "starter" ? "Starter Listing" : "Free Listing";
+  const listingLabel = dashboardBillingPlan(billing) === null ? "Checking plan..." : isProListing ? "Pro Listing" : listingTier === "starter" ? "Starter Listing" : "Free Listing";
   const canBump = true;
   const proCheckoutConfigured = Boolean(billing?.checkout_configured?.pro);
   const cooldownDays = advertising?.bump_cooldown_days ?? (isProListing ? 7 : 30);
@@ -5453,7 +5502,7 @@ function AdvertisingBoostPanel({
             <MiniInfo label="Listing Plan" value={listingLabel} />
             <MiniInfo label="Next Bump" value={nextAvailable} />
             <MiniInfo label="Last Bumped" value={advertising?.last_bumped_at ? formatRelativeTime(advertising.last_bumped_at) : "Never"} />
-            <MiniInfo label="Cooldown" value={`${cooldownDays} days`} />
+            <MiniInfo label="Cooldown" value={advertising || billing ? `${cooldownDays} days` : "Checking..."} />
           </div>
           <button
             type="button"
@@ -9095,9 +9144,9 @@ function getDashboardPackageVisibility({
     status,
     loaded,
     title: "Start with Starter",
-    detail: "This account can begin with the Starter trial before any Pro upgrade is offered.",
+    detail: "Player access is free. Compare owner plans for server setup; Starter trial eligibility is checked on your account.",
     included: [
-      "Public setup, server linking, and the Starter trial path are the visible next steps.",
+      "Eligible Starter accounts can use a two-day trial with a payment method, then £2/month until cancelled.",
       "Pro-only dashboard areas stay presented as upgrade previews until an active Pro package is confirmed.",
     ],
     proUpsell: [
@@ -9209,18 +9258,6 @@ function isNitradoLogSettingsComplete(settings: NitradoLogSettingsConfirmation |
     return settings.nitrado_admin_log_enabled !== false && settings.nitrado_server_log_enabled !== false;
   }
   return true;
-}
-
-function billingRenewalLabel(billing: BillingStatus | null) {
-  if (!billing) return "Loading";
-  return billing.current_period_end_label || (billing.current_period_end ? formatDashboardDate(billing.current_period_end) : "Awaiting Stripe update");
-}
-
-function planPromotionCreditLimit(planKey: string) {
-  const normalized = planKey.toLowerCase();
-  if (normalized === "premium" || normalized === "network" || normalized === "partner") return 8;
-  if (normalized === "pro") return 2;
-  return 0;
 }
 
 function formatStripeModeHint(modeHint: BillingReadinessResponse["modeHint"]) {
@@ -10642,16 +10679,6 @@ function formatStatusLabel(value: string) {
   return value
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function friendlyAdvancedStatsReason(value: string | null | undefined) {
-  if (!value || value === "advanced_stats_snapshot_pending") {
-    return "Advanced stats snapshot pending. DZN found ADM logs. Stats will appear after the next readable activity import.";
-  }
-  if (value === "advanced_stats_snapshot_unavailable") {
-    return "Advanced stats snapshot unavailable. DZN will retry after the next readable activity import.";
-  }
-  return formatStatusLabel(value);
 }
 
 function getAdmCursorValidationMessage(status: string | null | undefined) {

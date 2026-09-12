@@ -6,3 +6,13 @@ pages_build_output_dir = "./out"
 binding = "DB"
 database_name = "dzn_network_db"
 database_id = "37515c66-2787-49e4-8568-a461517e975e"
+
+# Production activation approved after the isolated 0070 migration was verified.
+[env.production.vars]
+DZN_GAMES_HUB_ENABLED = "true"
+
+# Pages requires every non-inheritable binding alongside environment overrides.
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "dzn_network_db"
+database_id = "37515c66-2787-49e4-8568-a461517e975e"

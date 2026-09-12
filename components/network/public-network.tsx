@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { explorationPreviewCells, formatPublicVisibilitySummary, publicListingPlanLabel, publicMapLabel, publicVisibilityTierLabel, showcasePlanLabel } from "@/lib/showcase-labels";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -38,6 +39,7 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
+import { publicServerStatusPresentation } from "@/lib/public-server-status";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
 import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner } from "@/components/badges/server-visuals";
@@ -125,6 +127,7 @@ type PublicServer = {
     badge_label: "FEATURED" | "BOOSTED" | "SPONSORED" | null;
   };
   plan_key?: string;
+  server_access?: { source: "billing" | "complimentary_showcase" };
   premium_status?: "standard" | "premium";
   visibility_weight?: number;
   visibilityWeight?: number;
@@ -212,6 +215,8 @@ type ServerAdvancedPayload = {
     effectivePlan?: string;
     dashboardAnalytics?: boolean;
     publicServerTop15?: boolean;
+    publicBuildShowcase?: boolean;
+    publicTravelShowcase?: boolean;
     publicExplorationSummary?: boolean;
     publicMapOverlay?: boolean;
     lockedModules?: Array<{ key: string; requiredPlan: string; reason: string }>;
@@ -962,24 +967,24 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
     >
       {isSpotlight ? <ServerThemeBanner theme={server.themeBanner} overlay /> : null}
       <div className="relative z-10 flex h-full flex-col gap-4">
-        <div className="flex min-w-0 items-start justify-between gap-3">
-          <div className="flex min-w-0 gap-3">
+        <div className="flex min-w-0 flex-col gap-3">
+          <div className="flex min-w-0 items-start gap-3">
             <ServerProfileFrame frame={server.profileFrame} compact>
               <GuildIcon server={server} size="md" />
             </ServerProfileFrame>
             <div className="min-w-0">
               <p className="truncate text-[10px] font-black uppercase tracking-[0.14em] text-violet-100/70">{server.guild_name ?? "DZN Network"}</p>
-              <h3 className={`${isSpotlight ? "text-2xl" : "text-xl"} mt-1 truncate font-black uppercase text-white`}>{server.server_name}</h3>
               <p className="mt-1 truncate text-xs font-bold text-zinc-400">{server.server_type}</p>
-              <ServerRatingChip server={server} />
             </div>
           </div>
+          <h3 className="break-words text-xl font-black uppercase text-white">{server.server_name}</h3>
+          <ServerRatingChip server={server} />
           <VisibilityLabels server={server} />
         </div>
 
         <ServerCardBadges badges={server.showcaseBadges ?? server.badges} max={isSpotlight ? 6 : 4} />
 
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(100px,1fr))] gap-2">
           <MiniMetric label="Kills" value={formatNumber(server.total_kills)} />
           <MiniMetric label="Players" value={formatPlayers(server)} />
           <MiniMetric label="Reputation" value={server.reputation?.tier ?? "Bronze"} />
@@ -996,7 +1001,7 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
         ) : null}
 
         <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-3">
-          <p className="min-w-0 truncate text-[10px] font-bold uppercase text-zinc-500">{formatPublicVisibilitySummary(server.visibilityExplanation?.summary) ?? "Discovery placement"}</p>
+          <p className="min-w-0 break-words text-[10px] font-bold uppercase text-zinc-500">{formatPublicVisibilitySummary(server.visibilityExplanation?.summary, server.server_access?.source) ?? "Discovery placement"}</p>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <SavedServerButton server={server} variant="compact" />
             <Link
@@ -1016,7 +1021,7 @@ function DiscoveryServerCard({ server, index, variant }: { server: PublicServer;
 
 function VisibilityLabels({ server }: { server: PublicServer }) {
   const tier = server.visibilityTier ?? (server.premium_status === "premium" ? "premium" : server.isFeaturedEligible ? "enhanced" : "standard");
-  const label = tier === "premium" ? "Pro" : tier === "enhanced" ? "Enhanced" : "Standard";
+  const label = publicVisibilityTierLabel(tier, server.server_access?.source);
   const className = tier === "premium"
     ? "border-amber-300/30 bg-amber-300/12 text-amber-100"
     : tier === "enhanced"
@@ -1024,8 +1029,8 @@ function VisibilityLabels({ server }: { server: PublicServer }) {
       : "border-white/10 bg-white/[0.04] text-zinc-200";
 
   return (
-    <div className="flex shrink-0 flex-col items-end gap-1.5">
-      <span className={`rounded-md border px-2.5 py-1 text-[10px] font-black uppercase ${className}`}>{label}</span>
+    <div className="flex min-w-0 flex-wrap items-start gap-1.5">
+      <span className={`max-w-full break-words rounded-md border px-2.5 py-1 text-[10px] font-black uppercase ${className}`}>{label}</span>
       {server.isSpotlightEligible ? (
         <span className="rounded-md border border-violet-300/25 bg-violet-400/10 px-2.5 py-1 text-[10px] font-black uppercase text-violet-100">
           Spotlight Eligible
@@ -1033,11 +1038,6 @@ function VisibilityLabels({ server }: { server: PublicServer }) {
       ) : null}
     </div>
   );
-}
-
-function formatPublicVisibilitySummary(value: string | null | undefined) {
-  if (!value) return null;
-  return value.replace(/\bPremium\b/g, "Pro");
 }
 
 function StatsRow({ stats }: { stats: PublicStats }) {
@@ -1197,7 +1197,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
               <GuildIcon server={server} size="md" />
             </ServerProfileFrame>
             <div className="min-w-0">
-              <p className="truncate text-xs font-black uppercase text-violet-200/70">{server.guild_name ?? "Verified Discord"}</p>
+              <p className="truncate text-xs font-black uppercase text-violet-200/70">{server.guild_name ?? "Discord community"}</p>
               <h2 className="mt-1 truncate text-2xl font-black text-white">{server.server_name}</h2>
               <p className="mt-1 truncate text-sm font-bold text-zinc-400">{server.nitrado_service_name ?? server.server_name}</p>
               <ServerRatingChip server={server} />
@@ -1207,7 +1207,7 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
           </div>
           <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
             {server.advertising?.badge_label ? <BoostedBadge server={server} /> : null}
-            <StatusPill label="Live" tone="emerald" />
+            <StatusPill {...publicServerStatusPresentation(server)} />
           </div>
         </div>
         {isAdvertised ? (
@@ -1217,12 +1217,11 @@ function ServerCard({ server, index }: { server: PublicServer; index: number }) 
         ) : null}
 
         <div className="mt-5 flex flex-wrap gap-2">
-          <StatusPill label="Verified Owner" tone="cyan" />
-          <StatusPill label="DZN Verified" tone="violet" />
+          <StatusPill label="Public Listing" tone="cyan" />
           <StatusPill label={server.server_type} tone="violet" />
           <StatusPill label={server.rank ? `Rank #${server.rank}` : "Rank Pending"} tone={server.rank ? "emerald" : "zinc"} />
           {server.reputation ? <StatusPill label={`${server.reputation.tier} Reputation`} tone="cyan" /> : null}
-          {server.plan_key === "pro" ? <StatusPill label="Pro Listing" tone="violet" /> : null}
+          {server.plan_key === "pro" ? <StatusPill label={publicListingPlanLabel(server.server_access?.source)} tone="violet" /> : null}
           <span title={scoreTitle} className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300/25 bg-emerald-400/10 px-3 py-1.5 text-xs font-black uppercase text-emerald-100">
             Score {server.score_label}
           </span>
@@ -1328,7 +1327,7 @@ function ServerReputationBadges({ server, compact = false }: { server: PublicSer
       {server.plan_key === "pro" ? (
         <span className="inline-flex items-center gap-1.5 rounded-md border border-violet-300/20 bg-violet-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-normal text-violet-100">
           <Sparkles className="h-3.5 w-3.5" />
-          Pro Listing
+          {publicListingPlanLabel(server.server_access?.source)}
         </span>
       ) : null}
       {visualBadges.map((badge) => (
@@ -1412,7 +1411,7 @@ function ServerAchievementPanel({ server }: { server: PublicServer }) {
 
         {hasRows ? (
           <div className="grid gap-3">
-            {earnedBadges.length === 0 && server.plan_key === "pro" ? <AchievementRow icon={Sparkles} name="Pro Listing" description="Enhanced advertising presentation is active. Competitive stats remain earned only." /> : null}
+            {earnedBadges.length === 0 && server.plan_key === "pro" ? <AchievementRow icon={Sparkles} name={publicListingPlanLabel(server.server_access?.source)} description="Enhanced advertising presentation is active. Competitive stats remain earned only." /> : null}
             {groups.map((group) =>
               earnedBadges.length === 0 ? group.rows.slice(0, 4).map((badge) => (
                 <AchievementRow key={badge.key} icon={group.icon} name={badge.name} description={badge.description} />
@@ -1599,7 +1598,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full border border-violet-300/25 bg-violet-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-violet-100">DZN Network</span>
-                <StatusPill label={historicalLifecycle ? (server.lifecycle?.label ?? "Legacy / Offline") : "Live"} tone={historicalLifecycle ? "zinc" : "emerald"} pulse={!historicalLifecycle} />
+                <StatusPill {...publicServerStatusPresentation(server)} />
               </div>
               <h1 className="mt-3 max-w-full break-words text-4xl font-black uppercase leading-none text-white [overflow-wrap:anywhere] sm:text-5xl lg:text-6xl">
                 {server.server_name}
@@ -1608,12 +1607,11 @@ function ServerProfile({ server }: { server: PublicServer }) {
               <div className="mt-4 flex flex-wrap gap-3 text-xs font-bold uppercase text-zinc-400">
                 <MetaChip icon={Gamepad2} label={server.platform ?? "Platform awaiting data"} />
                 <MetaChip icon={Target} label={server.server_type} />
-                <MetaChip icon={Map} label={server.map_name ?? server.mission ?? "Map awaiting data"} />
-                <MetaChip icon={MapPin} label={server.server_status ?? "Network online"} />
+                <MetaChip icon={Map} label={publicMapLabel(server.map_name ?? server.mission)} />
+                <MetaChip icon={MapPin} label={publicServerStatusPresentation(server).label} />
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <StatusPill label="Verified Owner" tone="cyan" />
-                <StatusPill label="DZN Verified" tone="violet" />
+                <StatusPill label="Public Listing" tone="cyan" />
                 <StatusPill label={server.server_type} tone="violet" />
                 <StatusPill label={server.adm_status === "Connected" ? "ADM Connected" : server.adm_status === "Discovered" ? "ADM Discovered" : "ADM Needs Review"} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
                 <StatusPill label={historicalLifecycle ? "Stats Preserved" : `Stats Sync ${server.stats_sync}`} tone={historicalLifecycle ? "zinc" : server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
@@ -1781,7 +1779,7 @@ function ProProfileAdvertPanel({ server }: { server: PublicServer }) {
   );
 }
 
-function ServerAdvancedShowcasePanel({
+export function ServerAdvancedShowcasePanel({
   payload,
   loading,
   error,
@@ -1807,28 +1805,28 @@ function ServerAdvancedShowcasePanel({
           </p>
         </div>
         <div className="dzn-advanced-showcase__meta">
-          <span>{payload?.access?.effectivePlan ? `${payload.access.effectivePlan.toUpperCase()} package` : "Package pending"}</span>
+          <span>{payload?.access?.effectivePlan ? `${showcasePlanLabel(payload.access.effectivePlan)} plan` : "Plan pending"}</span>
           <span>{summary?.lastUpdatedAt ? `Updated ${formatRelativeTime(summary.lastUpdatedAt)}` : "Awaiting data"}</span>
         </div>
       </div>
 
       {summary ? (
         <div className="dzn-advanced-summary">
-          <AdvancedSummaryStat label="Build Score" value={formatNumber(summary.buildScore)} icon={Hammer} />
-          <AdvancedSummaryStat label="Raid Score" value={formatNumber(summary.raidScore)} icon={ShieldCheck} />
-          <AdvancedSummaryStat label="Distance" value={formatAdvancedDistance(summary.totalDistanceM)} icon={Route} />
-          <AdvancedSummaryStat label="Explored" value={`${summary.explorationPercent.toFixed(2)}%`} icon={Compass} />
+          <AdvancedSummaryStat label="Build Score" value={payload?.access?.publicBuildShowcase ? formatNumber(summary.buildScore) : "Pro required"} icon={Hammer} />
+          <AdvancedSummaryStat label="Raid Score" value={payload?.access?.publicBuildShowcase ? formatNumber(summary.raidScore) : "Pro required"} icon={ShieldCheck} />
+          <AdvancedSummaryStat label="Distance" value={payload?.access?.publicTravelShowcase ? formatAdvancedDistance(summary.totalDistanceM) : "Pro required"} icon={Route} />
+          <AdvancedSummaryStat label="Explored" value={payload?.access?.publicExplorationSummary ? `${summary.explorationPercent.toFixed(2)}%` : "Pro required"} icon={Compass} />
         </div>
       ) : null}
 
-      {exploration?.supported ? (
+      {exploration?.supported && payload?.access?.publicExplorationSummary ? (
         <div className="dzn-exploration-preview" aria-label="Aggregate map exploration preview">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-200">Map Exploration</p>
-            <h3>{exploration.mapDisplayName ?? "Supported map"}</h3>
+            <p className="text-[10px] font-black uppercase tracking-normal text-violet-200">Map Exploration</p>
+            <h3>{publicMapLabel(exploration.mapDisplayName)}</h3>
             <p>
-              {exploration.exploredCellsCount.toLocaleString("en-GB")} of {exploration.totalExplorableCells.toLocaleString("en-GB")} aggregate cells explored.
-              {exploration.estimated ? " Bounds are estimated until verified map masks/assets are added." : ""}
+              {exploration.exploredCellsCount.toLocaleString("en-GB")} of {exploration.totalExplorableCells.toLocaleString("en-GB")} grid areas visited.
+              {exploration.estimated ? " Estimated coverage, not a verified percentage of playable land." : ""}
             </p>
           </div>
           <ExplorationMiniGrid exploration={exploration} />
@@ -1934,7 +1932,7 @@ function ServerAdvancedBoardCard({ board }: { board: AdvancedBoard }) {
       </div>
       <div className="dzn-advanced-board__badges">
         <span>{formatAdvancedCategory(board.category)}</span>
-        <span>{board.packageRequired === "free" ? "Core" : `${board.packageRequired.toUpperCase()}+`}</span>
+        <span>{showcasePlanLabel(board.packageRequired)}</span>
         {board.estimated ? <span>Estimated</span> : null}
       </div>
       {board.locked ? (
@@ -1972,20 +1970,24 @@ function AdvancedBoardIcon({ category }: { category: string }) {
 
 function ExplorationMiniGrid({ exploration }: { exploration: NonNullable<ServerAdvancedPayload["exploration"]> }) {
   const gridSize = exploration.gridSize ?? 128;
-  const cells = exploration.overlayCells.slice(0, 120);
+  const cells = explorationPreviewCells(exploration.overlayCells, gridSize);
   return (
-    <div className="dzn-exploration-mini-grid">
-      {cells.map((cell) => (
-        <span
-          key={`${cell.cellX}:${cell.cellY}`}
-          style={{
-            left: `${(cell.cellX / Math.max(1, gridSize)) * 100}%`,
-            top: `${(cell.cellY / Math.max(1, gridSize)) * 100}%`,
-            "--dzn-cell-alpha": Math.min(0.88, 0.24 + cell.visits / 12),
-          } as CSSProperties}
-        />
-      ))}
-    </div>
+    <figure className="dzn-exploration-figure">
+      <div className="dzn-exploration-mini-grid" role="img" aria-label={`${cells.length} highlighted aggregate areas. Schematic grid, not a terrain map or player route.`}>
+        {cells.map((cell) => (
+          <span
+            key={cell.key}
+            aria-hidden="true"
+            style={{
+              left: `${cell.left}%`,
+              top: `${cell.top}%`,
+              "--dzn-cell-alpha": cell.alpha,
+            } as CSSProperties}
+          />
+        ))}
+      </div>
+      <figcaption>{cells.length ? `Showing ${cells.length} sampled areas. Brighter areas have more visits.` : "No activity areas available yet."} Schematic only; player locations and routes stay private.</figcaption>
+    </figure>
   );
 }
 
@@ -3110,6 +3112,7 @@ function formatAdvancedDistance(value: number) {
 }
 
 function formatAdvancedCategory(value: string) {
+  if (value === "premium_showcase") return "Advanced Showcase";
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 

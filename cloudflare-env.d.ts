@@ -20,6 +20,7 @@ interface D1Database {
 }
 
 interface CloudflareEnv {
+  DZN_GAMES_HUB_ENABLED?: string;
   ASSETS?: {
     fetch(input: Request | string, init?: RequestInit): Promise<Response>;
   };
@@ -32,6 +33,8 @@ interface CloudflareEnv {
   DZN_CRON_SECRET?: string;
   SYNC_CRON_SECRET?: string;
   DZN_PULSE_ENABLED?: string;
+  DZN_BILLING_REMINDERS_ENABLED?: string;
+  DZN_BILLING_TRIAL_REMINDERS_ENABLED?: string;
   DZN_DISCORD_NOTIFICATIONS_ENABLED?: string;
   DZN_DISCORD_SERVER_ANNOUNCEMENTS_ENABLED?: string;
   DZN_COMMS_MESSAGE_HISTORY_READ_ENABLED?: string;
@@ -53,6 +56,8 @@ interface CloudflareEnv {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   DZN_LIVE_CHECKOUT_ENABLED?: string;
+  DZN_PUBLIC_LEGAL_SELLER_NAME?: string;
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS?: string;
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?: string;
   STRIPE_PRICE_STARTER?: string;
   STRIPE_PRICE_PRO?: string;

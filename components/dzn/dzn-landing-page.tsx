@@ -21,15 +21,13 @@ import {
   Trophy,
   Users,
   Wifi,
-  X,
-  XCircle,
   Timer,
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { createPortal } from "react-dom";
+import { PAYMENT_COPY } from "@/lib/billing/payment-copy";
 import {
   AnimatePresence,
   MotionConfig,
@@ -273,11 +271,6 @@ type ActivityPanelRow = {
   tone: string;
 };
 
-type PricingComparisonCell = {
-  text: string;
-  included: boolean;
-  note?: string;
-};
 
 const emptyHomeStats: HomeStats = {
   totals: {
@@ -451,7 +444,7 @@ const previewConversionSteps = [
     key: "setup",
     label: "Start Setup",
     title: "Claim your server slot",
-    text: "Connect Discord first, then start the Starter trial path for your public profile.",
+    text: "Personal player profiles are free. Server owners can compare Starter and Pro for server setup.",
     href: "/login?returnTo=/setup",
     icon: Server,
     tone: "violet",
@@ -461,7 +454,7 @@ const previewConversionSteps = [
     label: "Compare Plans",
     title: "See Starter vs Pro",
     text: "Open the pricing comparison before you commit so the upgrade choice is clear.",
-    href: "#pricing",
+    href: "/pricing",
     icon: Crown,
     tone: "gold",
   },
@@ -484,130 +477,6 @@ const previewConversionSteps = [
   icon: LucideIcon;
   tone: "violet" | "gold" | "cyan";
   external?: boolean;
-}>;
-
-const pricingPlans = [
-  {
-    key: "starter",
-    name: "Starter",
-    price: "£0 today, then £2/month",
-    badge: "Free trial",
-    bestFor: "Best for starting out",
-    summary: "Start with a 2-day free trial. After the trial, Starter keeps one DayZ server listed with a public profile, join link, ratings, reviews and basic network stats for £2/month.",
-    ctaLabel: "Start Starter trial",
-    ctaHref: "/login?returnTo=/setup",
-    features: ["2-day free trial", "Payment method required", "Cancel before trial expiry to pay nothing", "1 linked DayZ server", "Public server profile", "Basic discovery", "Ratings and reviews", "One Discord auto-post channel", "Basic server advert posts", "One bump every 30 days", "No leaderboard/stat advantage"],
-  },
-  {
-    key: "pro",
-    name: "Pro",
-    price: "£10/month",
-    badge: "Recommended",
-    bestFor: "Best for full access",
-    summary: "Pro is the full DZN experience: up to 3 linked DayZ servers, stronger profiles, custom visuals, promotion credits, advanced stats, Server Wars insights and all current premium-style tools.",
-    ctaLabel: "Unlock Pro",
-    ctaHref: "/login?returnTo=/setup",
-    features: ["Full DZN Access", "Up to 3 linked DayZ servers", "2 promotion credits per billing period", "Enhanced public profile", "Custom advert banner", "Up to 4 JPEG gallery images", "Owner announcement", "Fresh wipe and event promo", "More Discord advert post types", "One bump every 7 days", "Featured and spotlight eligibility", "No leaderboard/stat advantage"],
-  },
-] as const;
-
-const publicPricingPlans = pricingPlans;
-
-const listingComparisonRows = [
-  { label: "Price", starter: { text: "£0 today, then £2/month", included: true }, pro: { text: "£10/month", included: true } },
-  { label: "Trial", starter: { text: "2 days", included: true }, pro: { text: "No trial", included: false } },
-  { label: "Linked DayZ servers", starter: { text: "1", included: true }, pro: { text: "Up to 3", included: true } },
-  { label: "Public listing", starter: { text: "Included", included: true }, pro: { text: "Included", included: true } },
-  { label: "Description limit", starter: { text: "500 characters", included: true }, pro: { text: "2,500 characters", included: true } },
-  { label: "Gallery images", starter: { text: "Not included", included: false }, pro: { text: "Up to 4 JPEG images", included: true } },
-  { label: "Custom banner", starter: { text: "Not included", included: false }, pro: { text: "Included", included: true } },
-  { label: "Bump cooldown", starter: { text: "30 days", included: true }, pro: { text: "7 days", included: true } },
-  { label: "Ratings/reviews", starter: { text: "Included", included: true }, pro: { text: "Included", included: true } },
-  { label: "Discord channels", starter: { text: "1 channel", included: true }, pro: { text: "Multiple post-type channels", included: true } },
-  { label: "Discord auto posts", starter: { text: "Basic advert, bump, review", included: true }, pro: { text: "Events, leaderboard, longest kill, recaps, milestones", included: true } },
-  { label: "Embed design", starter: { text: "Standard DZN style", included: true }, pro: { text: "Enhanced Pro style", included: true } },
-  { label: "Analytics", starter: { text: "Limited", included: true }, pro: { text: "Views, clicks, bumps, Discord activity where available", included: true } },
-  { label: "Owner announcement", starter: { text: "Not included", included: false }, pro: { text: "Included", included: true } },
-  { label: "Event promotion", starter: { text: "Locked", included: false }, pro: { text: "Included", included: true } },
-  { label: "Featured and spotlight eligibility", starter: { text: "Standard listing", included: true }, pro: { text: "Eligible, not guaranteed", included: true } },
-  { label: "Leaderboard/stat advantage", starter: { text: "No paid advantage", included: false }, pro: { text: "No paid advantage", included: false } },
-  { label: "Review score advantage", starter: { text: "No paid advantage", included: false }, pro: { text: "No paid advantage", included: false } },
-  { label: "Season/crown advantage", starter: { text: "No paid advantage", included: false }, pro: { text: "No paid advantage", included: false } },
-] as const;
-
-const pricingEntrySignals = [
-  { label: "Starter trial available", icon: Zap },
-  { label: "Pro unlocks premium tools", icon: Crown },
-  { label: "No paid leaderboard advantage", icon: Shield },
-] satisfies Array<{
-  label: string;
-  icon: LucideIcon;
-}>;
-
-const pricingValuePillars = [
-  { label: "Visibility", description: "Featured, spotlight and advert exposure.", icon: Radio },
-  { label: "Analytics", description: "Track growth, clicks and engagement.", icon: BarChart3 },
-  { label: "Control", description: "Manage your server presence.", icon: Crosshair },
-  { label: "Discounts", description: "Run promotions and seasonal discounts.", icon: Sparkles },
-  { label: "Profiles", description: "Unlock richer public profile styling.", icon: Users },
-  { label: "Tools", description: "Access exclusive owner utilities.", icon: Hammer },
-] satisfies Array<{
-  label: string;
-  description: string;
-  icon: LucideIcon;
-}>;
-
-const pricingTrustPills = [
-  { label: "Fair competition", description: "No pay-to-win advantages", icon: Shield },
-  { label: "Trial first", description: "Try Starter before you upgrade", icon: Lock },
-  { label: "Powerful tools", description: "Built for server owners", icon: BarChart3 },
-  { label: "Community driven", description: "Better servers. Better DayZ.", icon: Users },
-] satisfies Array<{
-  label: string;
-  description: string;
-  icon: LucideIcon;
-}>;
-
-const listingPricingFaqs = [
-  {
-    question: "Does Pro affect leaderboard rank?",
-    answer: [
-      "No. Pro improves presentation, advertising tools, Discord embeds, and analytics only.",
-      "Leaderboard rankings remain 100% skill-based.",
-    ],
-    icon: Trophy,
-    tone: "violet",
-  },
-  {
-    question: "What does Pro improve?",
-    answer: [
-      "Pro unlocks advanced visibility, public profiles, weekly gallery images, custom banners, promotions, discounts, owner announcements, and deeper analytics.",
-    ],
-    icon: BarChart3,
-    tone: "blue",
-  },
-  {
-    question: "Do Starter servers still compete?",
-    answer: [
-      "Yes. Starter listings are included in public profiles, ratings, reviews, links, and fair competition.",
-      "Paid presentation never changes gameplay results.",
-    ],
-    icon: Swords,
-    tone: "cyan",
-  },
-  {
-    question: "Can badges be bought?",
-    answer: [
-      "No. Earned badges, crowns, reputation awards, event badges, and seasonal badges must be earned before they can be showcased.",
-    ],
-    icon: Shield,
-    tone: "gold",
-  },
-] satisfies Array<{
-  question: string;
-  answer: readonly string[];
-  icon: LucideIcon;
-  tone: "violet" | "blue" | "cyan" | "gold";
 }>;
 
 function useHomeStats() {
@@ -1178,7 +1047,7 @@ function HomepagePreviewUnlock() {
           Public visitors can see the network pitch. Discord login unlocks the setup flow, full profiles, rankings, reviews, activity, events, and owner tools.
         </p>
         <div className="dzn-preview-conversion__badges" aria-label="Public setup highlights">
-          <span><CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> Starter trial available</span>
+          <span><CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> Starter trial for eligible accounts</span>
           <span><Shield className="h-3.5 w-3.5" aria-hidden="true" /> Protected owner tools</span>
           <span><Zap className="h-3.5 w-3.5" aria-hidden="true" /> Pro upgrade path</span>
         </div>
@@ -1483,313 +1352,17 @@ function FeatureStrip({ className = "", locked }: { className?: string; locked: 
 }
 
 function PricingUpgradeSection() {
-  const [pricingModalOpen, setPricingModalOpen] = useState(false);
-  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    const openFromHash = () => {
-      if (window.location.hash === "#pricing") setPricingModalOpen(true);
-    };
-
-    openFromHash();
-    window.addEventListener("hashchange", openFromHash);
-
-    return () => {
-      window.removeEventListener("hashchange", openFromHash);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!pricingModalOpen) return;
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    document.body.classList.add("dzn-pricing-modal-open");
-    closeButtonRef.current?.focus();
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setPricingModalOpen(false);
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.body.classList.remove("dzn-pricing-modal-open");
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [pricingModalOpen]);
-
-  const pricingModal = (
-    <AnimatePresence>
-      {pricingModalOpen ? (
-        <motion.div
-          className="dzn-pricing-modal-backdrop"
-          role="presentation"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onMouseDown={() => setPricingModalOpen(false)}
-        >
-          <motion.div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="dzn-pricing-modal-title"
-            className="dzn-pricing-modal"
-            initial={{ opacity: 0, y: 28, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 18, scale: 0.98 }}
-            transition={{ duration: 0.22, ease: "easeOut" }}
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <button
-              ref={closeButtonRef}
-              type="button"
-              className="dzn-pricing-modal__close"
-              onClick={() => setPricingModalOpen(false)}
-              aria-label="Close pricing comparison"
-              title="Close pricing comparison"
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="dzn-pricing-modal__hero">
-              <div>
-                <p className="text-[0.66rem] font-black uppercase tracking-[0.2em] text-cyan-200">Plan comparison</p>
-                <h2 id="dzn-pricing-modal-title" className="mt-2 text-2xl font-black uppercase text-white sm:text-4xl">
-                  Choose the free trial, then grow into Pro
-                </h2>
-                <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-300">
-                  Starter gets a server online with a short free trial. Pro is built to sell the server: stronger profile visuals, more automation, promotion credits, analytics, and premium Discord publishing.
-                </p>
-              </div>
-              <div className="dzn-pricing-modal__meter" aria-hidden="true">
-                <Sparkles className="h-5 w-5" />
-                <span>Pro recommended</span>
-              </div>
-            </div>
-
-            <div className="dzn-pricing-modal__plans">
-              {publicPricingPlans.map((plan) => (
-                <PricingPlanCard key={plan.key} plan={plan} />
-              ))}
-            </div>
-
-            <div className="dzn-pricing-compare" aria-label="Starter and Pro feature comparison">
-              <div className="dzn-pricing-compare__head">
-                <span>Feature</span>
-                <span>Starter trial</span>
-                <span>Pro</span>
-              </div>
-              {listingComparisonRows.map((row) => (
-                <div key={row.label} className="dzn-pricing-compare__row">
-                  <span className="dzn-pricing-compare__label">{row.label}</span>
-                  <ComparisonValue value={row.starter} />
-                  <ComparisonValue value={row.pro} pro />
-                </div>
-              ))}
-            </div>
-
-            <div className="dzn-pricing-modal__footer">
-              <p>
-                Pro is for server owners who want the strongest public presentation. Competition remains fair: paid plans never buy leaderboard rank, review score, crowns, or gameplay stats.
-              </p>
-              <a href="/login?returnTo=/setup" className="dzn-pricing-modal__cta">
-                Start with Discord <ChevronRight className="h-4 w-4" />
-              </a>
-            </div>
-          </motion.div>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>
-  );
-
   return (
-    <>
-      <motion.section
-        variants={fadeUp}
-        id="pricing"
-        className="dzn-pricing-entry scroll-mt-24"
-      >
-        <div className="dzn-pricing-entry__hero">
-          <div className="dzn-pricing-entry__copy">
-            <p className="dzn-pricing-entry__eyebrow">
-              <Zap className="h-3.5 w-3.5" />
-              Pricing
-            </p>
-            <h2>
-              Upgrade the way players discover <span>your server</span>
-            </h2>
-            <p>
-              Starter and Pro keep competition fair while giving server owners clear options for trial access, public profiles, advertising tools, Discord promotion, and analytics.
-            </p>
-            <div className="dzn-pricing-entry__signals" aria-label="Pricing highlights">
-              {pricingEntrySignals.map((signal) => {
-                const Icon = signal.icon;
-                return (
-                  <span key={signal.label}>
-                    <Icon className="h-3.5 w-3.5" />
-                    {signal.label}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="dzn-pricing-entry__panel">
-            <div className="dzn-pricing-entry__pro-pulse" aria-hidden="true">
-              <Crown className="h-7 w-7" />
-            </div>
-            <p className="dzn-pricing-entry__panel-kicker">Pro Launch Advantage</p>
-            <p className="dzn-pricing-entry__panel-copy">
-              The modal breaks down what stays free/trial-safe and what makes Pro the serious owner upgrade.
-            </p>
-            <div className="dzn-pricing-entry__actions">
-              <button
-                type="button"
-                onClick={() => setPricingModalOpen(true)}
-                className="dzn-pricing-entry__button dzn-pricing-entry__button--primary"
-              >
-                <BarChart3 className="h-4 w-4" />
-                Open Pricing Comparison <ChevronRight className="h-4 w-4" />
-              </button>
-              <a
-                href="/login?returnTo=/setup"
-                className="dzn-pricing-entry__button dzn-pricing-entry__button--setup"
-              >
-                Start Setup <ChevronRight className="h-4 w-4" />
-              </a>
-            </div>
-          </div>
-        </div>
-
-        <div className="dzn-pricing-entry__body">
-          <article className="dzn-pricing-value-card">
-            <div className="dzn-pricing-value-card__heading">
-              <span aria-hidden="true">
-                <Radio className="h-6 w-6" />
-              </span>
-              <div>
-                <p>Fair Pro Advertising</p>
-                <h3>Make the server look worth joining</h3>
-              </div>
-            </div>
-            <p className="dzn-pricing-value-card__copy">
-              Pro helps your server look better, advertise better and understand performance better. It does not affect review scores, leaderboard stats, kill stats, K/D, longest kill, crowns, season wins, or gameplay results.
-            </p>
-            <div className="dzn-pricing-value-card__note">
-              <Shield className="h-5 w-5" />
-              <span>Featured and spotlight rotation are controlled visibility tools, not guaranteed permanent top rank.</span>
-            </div>
-            <div className="dzn-pricing-value-card__pillars">
-              {pricingValuePillars.map((pillar) => {
-                const Icon = pillar.icon;
-                return (
-                  <div key={pillar.label} className="dzn-pricing-value-card__pillar">
-                    <span aria-hidden="true">
-                      <Icon className="h-5 w-5" />
-                    </span>
-                    <strong>{pillar.label}</strong>
-                    <small>{pillar.description}</small>
-                  </div>
-                );
-              })}
-            </div>
-          </article>
-
-          <aside className="dzn-pricing-quick-answers" aria-labelledby="dzn-pricing-quick-answers-title">
-            <div className="dzn-pricing-quick-answers__header">
-              <span aria-hidden="true">
-                <Sparkles className="h-5 w-5" />
-              </span>
-              <div>
-                <p>Quick Answers</p>
-                <h3 id="dzn-pricing-quick-answers-title">Clear answers about Starter and Pro</h3>
-              </div>
-            </div>
-            <div className="dzn-pricing-quick-answers__grid">
-              {listingPricingFaqs.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <article key={item.question} className={`dzn-pricing-answer-card dzn-pricing-answer-card--${item.tone}`}>
-                    <span className="dzn-pricing-answer-card__icon" aria-hidden="true">
-                      <Icon className="h-6 w-6" />
-                    </span>
-                    <h4>{item.question}</h4>
-                    {item.answer.map((line) => (
-                      <p key={line}>{line}</p>
-                    ))}
-                  </article>
-                );
-              })}
-            </div>
-          </aside>
-        </div>
-
-        <div className="dzn-pricing-trust-strip" aria-label="Pricing trust guarantees">
-          {pricingTrustPills.map((item) => {
-            const Icon = item.icon;
-            return (
-              <div key={item.label}>
-                <Icon className="h-5 w-5" />
-                <span>
-                  <strong>{item.label}</strong>
-                  <small>{item.description}</small>
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </motion.section>
-      {typeof document !== "undefined" ? createPortal(pricingModal, document.body) : null}
-    </>
-  );
-}
-
-function PricingPlanCard({ plan }: { plan: (typeof publicPricingPlans)[number] }) {
-  const pro = plan.key === "pro";
-
-  return (
-    <motion.article
-      whileHover={{ y: -4 }}
-      className={`dzn-pricing-plan-card ${pro ? "dzn-pricing-plan-card--pro" : "dzn-pricing-plan-card--starter"}`}
-    >
-      <div className="dzn-pricing-plan-card__top">
-        <div>
-          <p className="dzn-pricing-plan-card__badge">{plan.badge}</p>
-          <h3>{plan.name}</h3>
-          <p className="dzn-pricing-plan-card__price">{plan.price}</p>
-        </div>
-        <span className="dzn-pricing-plan-card__icon" aria-hidden="true">
-          {pro ? <Crown className="h-5 w-5" /> : <Shield className="h-5 w-5" />}
-        </span>
-      </div>
-      <p className="dzn-pricing-plan-card__best">{plan.bestFor}</p>
-      <p className="dzn-pricing-plan-card__summary">{plan.summary}</p>
-      <ul className="dzn-pricing-plan-card__features">
-        {plan.features.slice(0, pro ? 8 : 7).map((feature) => (
-          <li key={feature}>
-            <CheckCircle2 className="h-4 w-4" />
-            <span>{feature}</span>
-          </li>
-        ))}
-      </ul>
-      <a href={plan.ctaHref} className="dzn-pricing-plan-card__cta">
-        {plan.ctaLabel} <ChevronRight className="h-4 w-4" />
-      </a>
-    </motion.article>
-  );
-}
-
-function ComparisonValue({ value, pro = false }: { value: PricingComparisonCell; pro?: boolean }) {
-  const Icon = value.included ? CheckCircle2 : XCircle;
-
-  return (
-    <span className={`dzn-pricing-compare__value ${value.included ? "dzn-pricing-compare__value--yes" : "dzn-pricing-compare__value--no"} ${pro ? "dzn-pricing-compare__value--pro" : ""}`}>
-      <Icon className="h-4 w-4" aria-hidden="true" />
-      <span>{value.text}</span>
-      {value.note ? <small>{value.note}</small> : null}
-    </span>
+    <motion.section variants={fadeUp} id="pricing" className="scroll-mt-24 border-y border-white/15 py-8">
+      <p className="text-xs font-black uppercase text-cyan-200">DZN owner plans</p>
+      <h2 className="mt-2 text-2xl font-black text-white">Starter and Pro</h2>
+      <p className="mt-3 text-sm leading-6 text-zinc-300">{PAYMENT_COPY.player}</p>
+      <p className="mt-2 text-sm leading-6 text-zinc-300">{PAYMENT_COPY.starterOffer}. Pro: {PAYMENT_COPY.proPrice}, no trial.</p>
+      <p className="mt-2 text-sm leading-6 text-zinc-400">Payment method required. Both plans renew monthly until cancelled. Trial eligibility is checked on your account.</p>
+      <Link href="/pricing" className="mt-4 inline-flex min-h-11 items-center gap-2 rounded border border-cyan-200/40 bg-cyan-400/10 px-4 py-3 text-sm font-bold text-cyan-100 hover:bg-cyan-400/20">
+        Compare owner plans <ChevronRight aria-hidden="true" className="h-4 w-4" />
+      </Link>
+    </motion.section>
   );
 }
 
@@ -2357,7 +1930,14 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
 function Footer() {
   return (
     <footer className="relative z-10 mx-auto w-full max-w-[1440px] border-t border-white/8 px-4 pb-7 pt-4 text-xs text-zinc-500 sm:px-6 lg:px-8">
-      <p>Copyright {new Date().getFullYear()} DZN Network. Server competition intelligence for connected DayZ communities.</p>
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+        <p>Copyright {new Date().getFullYear()} DZN Network. Server competition intelligence for connected DayZ communities.</p>
+        <nav aria-label="DZN policies" className="flex flex-wrap gap-x-4 gap-y-2 font-bold text-zinc-400">
+          <Link href="/terms" className="hover:text-cyan-200 focus-visible:text-cyan-200">Terms</Link>
+          <Link href="/privacy" className="hover:text-cyan-200 focus-visible:text-cyan-200">Privacy</Link>
+          <Link href="/refunds" className="hover:text-cyan-200 focus-visible:text-cyan-200">Cancellations and refunds</Link>
+        </nav>
+      </div>
     </footer>
   );
 }

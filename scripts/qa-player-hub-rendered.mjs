@@ -8,7 +8,8 @@ const ROOT = process.cwd();
 const NEXT_PORT = Number(process.env.DZN_PLAYER_HUB_QA_PORT ?? 3093);
 const CHROME_PORT = Number(process.env.DZN_PLAYER_HUB_QA_CHROME_PORT ?? 9229);
 const BASE_URL = `http://127.0.0.1:${NEXT_PORT}`;
-const OUT_DIR = path.join(ROOT, "docs", "qa", "player-hub-rendered-qa-20260901");
+const REUSE_SERVER = process.env.DZN_PLAYER_HUB_QA_REUSE_SERVER === "1";
+const OUT_DIR = path.resolve(process.env.DZN_PLAYER_HUB_QA_OUTPUT ?? path.join(ROOT, "docs", "qa", "player-hub-rendered-qa-20260901"));
 const SCREENSHOT_DIR = path.join(OUT_DIR, "screenshots");
 const CHROME_USER_DATA = path.join(tmpdir(), `dzn-player-hub-rendered-qa-${Date.now()}`);
 
@@ -39,11 +40,13 @@ const scenarios = {
       "Public Network Briefing",
       "Public network",
       "These suggestions are private to your Player Hub and stay presentation-only.",
-      "Profile & Progression",
-      "Current Profile Signals",
+      "My Profile",
+      "My Server Stats",
       "421m",
-      "future earned runtime",
-      "This profile summary is private and read-only.",
+      "Not available yet",
+      "Your public profile is switched off.",
+      "Edit profile",
+      "Game account",
     ],
     mustNotContain: [
       "200000000000000001",
@@ -59,7 +62,7 @@ const scenarios = {
     privacy: profilePrivacyPayload(),
     mustContain: [
       "Personal Player Profile",
-      "Profile & Progression",
+      "My Profile",
       "Profile Privacy Preferences",
       "Public profile",
       "Gameplay summary",
@@ -86,7 +89,7 @@ const scenarios = {
       "No followed servers yet",
       "No public DZN matches yet",
       "No suggested events yet",
-      "No trusted Discord-linked public gameplay profile rows were found for this account yet. DZN does not attach leaderboard stats by display name alone.",
+      "No linked server stats yet. Check your game account link.",
       "Presentation Only",
       "Owner Setup Stays Gated",
     ],
@@ -121,7 +124,7 @@ const scenarios = {
       "Saved-server storage is not available in this environment yet.",
       "Discord community matching is not available in this environment yet.",
       "Event storage is not available in this environment yet.",
-      "Profile/progression summary storage is unavailable in this environment",
+      "Your server stats are temporarily unavailable. Please try again later.",
       "No followed servers yet",
       "Community matching offline",
       "No suggested events yet",
@@ -144,10 +147,11 @@ const captures = [
 ];
 
 async function main() {
-  const next = await startNext();
+  const next = REUSE_SERVER ? null : await startNext();
   let chrome;
 
   try {
+    if (REUSE_SERVER) await waitForHttp(`${BASE_URL}/player`, 10_000);
     chrome = await startChrome();
     await mkdir(SCREENSHOT_DIR, { recursive: true });
     const browser = await connectToChrome();
@@ -205,6 +209,23 @@ async function main() {
         throw new Error(`${capture.scenario}/${capture.viewport} text assertion failed. Missing: ${missing.join(", ")}. Leaked: ${leaked.join(", ")}. Text: ${text.slice(0, 1600)}`);
       }
 
+      if (scenario.hub.profile_summary) {
+        const profileCheck = await page.send("Runtime.evaluate", {
+          expression: `(() => {
+            const panel = document.getElementById('profile-summary');
+            return {
+              publicLink: [...panel.querySelectorAll('a')].some(a => a.textContent.includes('View public profile')),
+              missingTotals: (panel.querySelector('[aria-label="Server statistics"]')?.textContent.match(/--/g) ?? []).length
+            };
+          })()`,
+          returnByValue: true,
+        });
+        const expectedMissing = scenario.hub.progression_summary.status === "stats_available" ? 0 : 4;
+        if (profileCheck.result?.value?.publicLink !== false || profileCheck.result?.value?.missingTotals !== expectedMissing) {
+          throw new Error(`${capture.scenario}: private profile link or missing-stat presentation mismatch`);
+        }
+      }
+
       const overlaps = await visibleOverlaps(page);
       if (overlaps.length > 0) {
         throw new Error(`${capture.scenario}/${capture.viewport} has ${overlaps.length} obvious visible element overlaps: ${JSON.stringify(overlaps.slice(0, 3))}`);
@@ -238,6 +259,10 @@ async function main() {
   } finally {
     await killProcessTree(next);
     await killProcessTree(chrome);
+    const profileDir = path.resolve(CHROME_USER_DATA);
+    if (path.dirname(profileDir) !== path.resolve(tmpdir()) || !path.basename(profileDir).startsWith("dzn-player-hub-rendered-qa-")) {
+      throw new Error("Refusing to remove a browser profile outside the QA temp directory");
+    }
     await rm(CHROME_USER_DATA, { recursive: true, force: true }).catch(() => undefined);
   }
 }
@@ -575,7 +600,7 @@ function richHubPayload() {
         longest_kill_distance: 421.4,
         last_seen_at: "2026-09-01T10:30:00.000Z",
       },
-      message: "This private summary is read from trusted Discord-linked gameplay rows and existing public leaderboard event data. It is presentation-only.",
+      message: "Your linked stats from public servers. Only the sections you choose to share appear on your public profile.",
     }),
   });
 }
@@ -611,11 +636,15 @@ function storageFallbackHubPayload() {
     },
     profile_summary: defaultProfileSummary("Fallback Scout", {
       source: "unavailable",
+      linked_game_profiles: null,
+      linked_public_servers: null,
+      public_profile_status: "unavailable",
+      public_profile_message: "We could not check your public profile right now. Your saved settings have not changed.",
     }),
     progression_summary: defaultProgressionSummary({
       source: "unavailable",
       status: "unavailable",
-      message: "Profile/progression summary storage is unavailable in this environment, so DZN shows safe private fallback copy only.",
+      message: "Your server stats are temporarily unavailable. Please try again later.",
     }),
     membershipStatus: {
       source: "unavailable",
@@ -761,24 +790,24 @@ function baseHubPayload({
     profile_entries: [
       {
         key: "private_profile",
-        label: "Personal profile",
-        href: "/player/profile",
+        label: "Edit profile",
+        href: "/player/profile#profile-settings",
         status: "available",
-        description: "Open the private player profile entry point for account-specific profile tools.",
+        description: "Choose what appears on your public profile.",
       },
       {
         key: "public_profile",
-        label: "Public profile controls",
-        href: "/player/profile",
-        status: "not_configured",
-        description: "Public profile publishing still requires saved privacy preferences and never bypasses opt-in controls.",
+        label: "Public profile settings",
+        href: "/player/profile#profile-settings",
+        status: profile_summary?.public_profile_status ?? "private",
+        description: profile_summary?.public_profile_message ?? "Your public profile is switched off.",
       },
       {
-        key: "progression",
-        label: "Progression summary",
-        href: "/player/profile",
-        status: progression_summary?.status === "stats_available" ? "stats_ready" : progression_summary?.status ?? "empty",
-        description: "Current-player gameplay summaries are read-only; XP and calling cards remain earned-only future runtimes.",
+        key: "game_account",
+        label: "Game account",
+        href: "/player/profile#game-account",
+        status: "available",
+        description: "Link your game account or check an existing request.",
       },
     ],
     profile_summary: profile_summary ?? defaultProfileSummary(accountName),
@@ -806,8 +835,8 @@ function defaultProfileSummary(accountName, overrides = {}) {
     display_name: accountName,
     private_profile_href: "/player/profile",
     public_profile_href: null,
-    public_profile_status: "not_configured",
-    public_profile_message: "Public profile publishing and visibility controls stay in the dedicated profile privacy slices.",
+    public_profile_status: "private",
+    public_profile_message: "Your public profile is switched off.",
     linked_game_profiles: 0,
     linked_public_servers: 0,
     last_seen_at: null,
@@ -823,10 +852,10 @@ function defaultProgressionSummary(overrides = {}) {
     status: "empty",
     source: "player_profiles",
     gameplay_totals: {
-      kills: 0,
-      deaths: 0,
-      suicides: 0,
-      longest_kill_distance: 0,
+      kills: null,
+      deaths: null,
+      suicides: null,
+      longest_kill_distance: null,
     },
     featured_server: null,
     tracks: [
@@ -834,22 +863,22 @@ function defaultProgressionSummary(overrides = {}) {
         key: "xp",
         label: "XP",
         status: "future_earned_runtime",
-        description: "XP stays blocked until trusted server-side award sources are connected.",
+        description: "XP is not available yet.",
       },
       {
         key: "challenges",
         label: "Challenges",
         status: "future_earned_runtime",
-        description: "Challenge progress will be earned player-side and cannot be paid into.",
+        description: "Player challenges are not available yet.",
       },
       {
         key: "calling_cards",
         label: "Calling cards",
         status: "future_earned_runtime",
-        description: "Calling-card awards remain account-bound earned cosmetics when that runtime lands.",
+        description: "Earned calling cards are not available yet.",
       },
     ],
-    message: "No trusted Discord-linked public gameplay profile rows were found for this account yet. DZN does not attach leaderboard stats by display name alone.",
+    message: "No linked server stats yet. Check your game account link. Once approved, stats appear here after your server imports activity.",
     private: true,
     presentation_only: true,
     ...overrides,

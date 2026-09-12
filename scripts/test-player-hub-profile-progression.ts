@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { testPlayerHubProfileState } from "./test-player-hub-profile-state";
 
 const route = readFileSync("functions/api/player/hub.ts", "utf8");
 const statBridge = readFileSync("functions/_lib/player-stat-bridge.ts", "utf8");
@@ -17,7 +18,9 @@ assert.match(statBridge, /player_profiles\.discord_id = \?/, "Profile/progressio
 assert.match(statBridge, /kill_events\.killer_id = trusted_public_player_profiles\.player_id/, "Profile/progression summary must mirror leaderboard kill rows through the per-server player ID bridge.");
 assert.match(statBridge, /kill_events\.victim_id = trusted_public_player_profiles\.player_id/, "Profile/progression summary must mirror leaderboard death rows through the per-server player ID bridge.");
 assert.doesNotMatch(statBridge, /lower\([^)]*(?:player_name|killer_name|victim_name)|(?:player_profiles\.player_name|kill_events\.killer_name|kill_events\.victim_name)\s*=/i, "Profile/progression summary must not attach gameplay rows by ambiguous public names.");
-assert.match(route, /public_profile_href: null/, "Player Hub must not invent public profile handles.");
+assert.match(route, /WHERE preferences\.user_id = \?/, "Saved publishing state must be scoped to the current account.");
+assert.match(route, /row\.status === "active" && row\.handle/, "Only an existing active public handle may be offered.");
+assert.doesNotMatch(route, /ensureCurrentPublicProfileHandle/, "A hub read must never create or activate a public handle.");
 assert.match(route, /future_earned_runtime/, "XP, challenge, and calling-card runtime must remain future earned systems.");
 assert.match(route, /private: true/, "Profile/progression payload must carry private flags.");
 assert.match(route, /presentation_only: true/, "Profile/progression payload must carry presentation-only flags.");
@@ -34,12 +37,16 @@ assert.doesNotMatch(
   "Trusted profile/stat bridge must stay read-only and out of payment, owner, review, award, privacy-publication, and competitive systems.",
 );
 
-assert.match(playerHome, /Profile & Progression/, "Player Hub UI must render the profile/progression panel.");
-assert.match(playerHome, /Current Profile Signals/, "Player Hub UI must render safe current-user profile signal metrics.");
-assert.match(playerHome, /profile\.public_profile_status\.replace/, "Player Hub UI must show public profile status without publishing a profile.");
+assert.match(playerHome, /My Profile/, "Player Hub UI must render the profile panel.");
+assert.match(playerHome, /My Server Stats/, "Player Hub UI must render current-user statistics.");
+assert.match(playerHome, /profile\.public_profile_status === "published" && profile\.public_profile_href/, "Public view actions require a confirmed published profile.");
+assert.match(playerHome, /hasStats && progression\.gameplay_totals\.kills !== null/, "Missing totals must not display as zero activity.");
+assert.match(playerHome, /onSaved=\{refreshProfileSummary\}/, "Saving privacy settings must refresh the hub summary.");
+assert.match(playerHome, /profileRefreshKey/, "Updated settings must trigger a cancellable hub refresh.");
+assert.match(playerHome, /id="game-account"/, "The game account action must have a real destination.");
+assert.doesNotMatch(playerHome, /dedicated profile privacy slices|Current Profile Signals|This profile summary is private and read-only/, "The summary must not expose internal development wording.");
 assert.match(playerHome, /progression\.tracks\.map/, "Player Hub UI must render earned progression track readiness.");
 assert.match(playerHome, /future_earned_runtime/, "Player Hub UI must keep earned progression runtime marked as future.");
-assert.match(playerHome, /This profile summary is private and read-only/, "Player Hub UI must show the private/read-only boundary.");
 assert.match(playerHome, /Owner Setup Stays Gated/, "Player Hub UI must keep owner setup separated.");
 assert.match(playerHome, /\/pricing\?intent=owner_setup&returnTo=%2Fsetup/, "Player Hub owner action must remain routed through pricing.");
 assert.doesNotMatch(playerHome, /\b(?:sendBeacon|analytics|localStorage|sessionStorage)\b/i, "Player Hub profile/progression UI must not add tracking or browser storage.");
@@ -51,3 +58,4 @@ assert.match(platformSpec, /does not publish public profile handles/i, "Master s
 assert.match(packageJson, /"test:player-hub-profile-progression": "tsx scripts\/test-player-hub-profile-progression\.ts"/, "Dedicated Player Hub profile/progression test script must be registered.");
 
 console.log("Player Hub profile/progression guardrail tests passed.");
+testPlayerHubProfileState().catch((error) => { console.error(error); process.exitCode = 1; });

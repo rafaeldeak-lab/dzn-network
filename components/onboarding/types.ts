@@ -22,8 +22,8 @@ export type AuthNavigationSummary = {
   can_link_more_servers: boolean;
   can_use_pro_tools: boolean;
   primary_action: {
-    label: "Start Trial" | "Upgrade to Pro" | "Pro Tools";
-    href: "/#pricing" | "/dashboard";
+    label: "Owner Plans" | "Upgrade to Pro" | "Pro Tools";
+    href: "/pricing" | "/dashboard";
     tone: "trial" | "upgrade" | "pro";
   };
 };

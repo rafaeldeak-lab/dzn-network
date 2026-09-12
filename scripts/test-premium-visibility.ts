@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { formatPublicVisibilitySummary, publicVisibilityTierLabel } from "../lib/showcase-labels";
 
 import { getBillingPlanSummaries } from "../functions/_lib/plans";
 import {
@@ -133,7 +134,11 @@ assert.equal(publicNetwork.includes("Featured Servers"), true, "Featured section
 assert.equal(publicNetwork.includes("Recommended Servers"), true, "Recommended section should render recommendedServers.");
 assert.equal(publicNetwork.includes("Recommended by activity, reputation, profile quality and visibility settings."), true, "Recommended copy should explain discovery placement.");
 assert.equal(publicNetwork.includes("All Public Servers"), true, "Standard server directory should still render.");
-assert.equal(publicNetwork.includes('tier === "premium" ? "Pro"'), true, "Premium visibility tier should render as Pro in public advertising UI.");
+assert.equal(publicNetwork.includes('publicVisibilityTierLabel(tier, server.server_access?.source)'), true, "Discovery cards must pass the server access source to the visibility label.");
+assert.equal(publicVisibilityTierLabel("premium", "billing"), "Pro", "Billing-backed premium visibility still renders as Pro.");
+assert.equal(publicVisibilityTierLabel("premium", "complimentary_showcase"), "Pro Listing (complimentary)");
+assert.equal(publicNetwork.includes('formatPublicVisibilitySummary(server.visibilityExplanation?.summary, server.server_access?.source)'), true, "Discovery summaries must identify complimentary access too.");
+assert.equal(formatPublicVisibilitySummary("Pro visibility for discovery surfaces.", "complimentary_showcase"), "Pro (complimentary) visibility for discovery surfaces.");
 assert.equal(publicNetwork.includes("Spotlight Eligible"), true, "Spotlight eligible label should be available for eligible servers.");
 assert.equal(publicNetwork.includes("do not change competitive rank"), true, "Public UI copy should preserve competitive ranking fairness.");
 for (const snippet of [

@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { CommsMessageTime } from "./comms-message-time";
+
 type CommsHistoryState =
   | { status: "static"; payload: CommsHistoryPayload; message: string }
   | { status: "loading"; payload: CommsHistoryPayload; message: string }
@@ -321,7 +323,7 @@ function MessageRow({ message }: { message: CommsHistoryMessage }) {
             <span className="rounded border border-cyan-300/20 bg-cyan-400/10 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-cyan-100">
               {message.author_role_label}
             </span>
-            {message.created_at ? <time className="text-xs font-semibold text-zinc-500">{formatTime(message.created_at)}</time> : null}
+            <CommsMessageTime value={message.created_at} />
           </div>
           <p className={`mt-2 text-sm font-semibold leading-6 ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
         </div>
@@ -398,13 +400,4 @@ function initials(value: string) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("") || "D";
-}
-
-function formatTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
 }

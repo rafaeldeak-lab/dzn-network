@@ -400,7 +400,7 @@ includesAll(siteHeader, [
   "/#features",
   "/leaderboards",
   "/servers",
-  "/#pricing",
+  "/pricing",
   "/#stats",
   "/events",
   "/dashboard",
@@ -611,4 +611,14 @@ includesAll(publicApiMigration, [
   "generated_at TEXT NOT NULL",
 ]);
 
-console.log("Dashboard/public loading last-good regression checks passed.");
+const betaTicker = source("components/site/beta-ticker.tsx");
+assert.ok(rootLayout.indexOf("<BetaTicker />") < rootLayout.indexOf("{children}"), "Beta notice belongs before page content, not over it.");
+assert.equal(betaTicker.includes("--dzn-beta-ticker-height"), false, "In-flow notice must not leave a fixed spacer behind.");
+assert.ok(betaTicker.includes("setHidden(true)"), "Dismissal must work even when persistent storage is unavailable.");
+const mobileLeaderboards = source("app/leaderboards/page.tsx");
+assert.ok(mobileLeaderboards.includes("data-label={headers[cellIndex]}"), "Responsive rows need visible metric labels.");
+assert.ok(mobileLeaderboards.includes('aria-label="Personal best kills"'), "Records retain an accessible table name.");
+assert.equal(mobileLeaderboards.includes("useState(() => !loadLastGoodLeaderboard())"), false, "Cached results must wait until after hydration.");
+assert.ok(mobileLeaderboards.includes("if (cached && !visiblePayloadRef.current) setPayload(cached)"), "Last-good fallback is still restored after mount.");
+
+console.log("Dashboard/public loading last-good and mobile presentation regression checks passed.");

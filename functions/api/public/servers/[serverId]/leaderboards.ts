@@ -1,6 +1,6 @@
 import { getServerAdvancedShowcasePayload } from "../../../../_lib/advanced-leaderboards";
 import { json, methodNotAllowed } from "../../../../_lib/http";
-import { isPublicViewerLoggedIn, publicAccessCacheHeaders, publicApiErrorHeaders } from "../../../../_lib/public-auth";
+import { publicApiErrorHeaders } from "../../../../_lib/public-auth";
 import type { PagesFunction } from "../../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env, params }) => {
@@ -8,16 +8,16 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
 
   const serverId = sanitizeParam(params.serverId);
   if (!serverId) {
-    return json({ ok: false, error: "invalid_server_id" }, { status: 400 });
+    return json({ ok: false, error: "invalid_server_id" }, { status: 400, headers: publicApiErrorHeaders() });
   }
 
-  const viewerLoggedIn = await isPublicViewerLoggedIn(request, env);
+  // Entitlement-sensitive payloads must not survive a plan downgrade in HTTP caches.
   try {
     const payload = await getServerAdvancedShowcasePayload(env, serverId, { ownerScoped: false, overlayLimit: 180 });
     if (!payload) {
-      return json({ ok: false, error: "server_not_found" }, { status: 404 });
+      return json({ ok: false, error: "server_not_found" }, { status: 404, headers: publicApiErrorHeaders() });
     }
-    return json(payload, { headers: publicAccessCacheHeaders(viewerLoggedIn) });
+    return json(payload, { headers: publicApiErrorHeaders() });
   } catch (error) {
     console.warn("DZN SERVER ADVANCED LEADERBOARDS LOAD FAILED", safeError(error));
     return json({

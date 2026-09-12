@@ -2,6 +2,7 @@
 
 import { AlertTriangle, CheckCircle2, Gamepad2, Loader2, Search, ShieldCheck } from "lucide-react";
 import Link from "next/link";
+import { DZN_SUPPORT_EMAIL_HREF } from "@/lib/support";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type IdentityLinkRow = {
@@ -39,6 +40,7 @@ type IdentityPayload = {
   private: true;
   presentation_only: true;
   active_links: IdentityLinkRow[];
+  revoked_links?: Array<{ id: string; player_name: string | null; server_name: string | null; revoked_at: string; reason: string | null }>;
   claims: IdentityClaimRow[];
   proof_flow: {
     player_step: string;
@@ -209,7 +211,7 @@ export function PlayerGameIdentityLinks() {
   }
 
   return (
-    <section className="rounded-lg border border-cyan-300/25 bg-slate-950/78 p-5 shadow-[0_0_36px_rgba(34,211,238,0.1)] backdrop-blur">
+    <section aria-busy={identityState.status === "loading" || serverPickerState.status === "loading"} className="rounded-lg border border-cyan-300/25 bg-slate-950/78 p-5 shadow-[0_0_36px_rgba(34,211,238,0.1)] backdrop-blur">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-cyan-300/35 bg-cyan-300/10 text-cyan-100">
@@ -246,6 +248,15 @@ export function PlayerGameIdentityLinks() {
       {data ? (
         <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.85fr)]">
           <div className="space-y-3">
+            {data.revoked_links?.length ? <section aria-label="Revoked game stats links" className="border-l-2 border-rose-400 pl-3">
+              <h3 className="text-sm font-bold text-white">Revoked links</h3>
+              {data.revoked_links.map(link => <div key={link.id} className="border-b border-white/10 py-3 text-sm [overflow-wrap:anywhere]">
+                <p className="font-bold text-rose-100">{link.server_name ?? "DZN server"} - {link.player_name ?? "Game account"}</p>
+                <p className="mt-1 text-zinc-300">{link.reason ?? "Contact DZN support for the recorded reason."}</p>
+                <p className="mt-1 text-xs text-zinc-400">Revoked {formatDate(link.revoked_at)}</p>
+                <a href={DZN_SUPPORT_EMAIL_HREF} className="mt-2 inline-block font-bold text-cyan-200 underline">Contact support</a>
+              </div>)}
+            </section> : null}
             {hasRows ? (
               <>
                 {activeLinks.map((link) => (

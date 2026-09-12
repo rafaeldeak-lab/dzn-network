@@ -3,7 +3,24 @@
 Date: 2026-09-06
 Branch: `codex/dzn-comms-message-sending-contract-20260906`
 Base: PR #144 head `7d6de24c0f1641727eb9f331d7fb25f031db6e95`
-Status: preflight only; draft/stacked review, not released
+Status: historical preparation record; see the current reconciliation below
+
+## Current Reconciliation: 2026-09-12
+
+- PR #144 and the PR #150 timestamp fix are already in main. The original
+  prerequisite/draft instructions below describe the September 6 preparation,
+  not a current blocker or a request to repeat those releases.
+- PR #149 is refreshed against the current release, preserving the Games Hub,
+  exact-server NukeTown access, newer billing checks and session UX backlog.
+- The resulting patch remains documentation, JSON and contract-test registration
+  only. No UI, API, migration, runtime flag or production setting changes.
+- Contract tests are design checks, not evidence of operational moderation,
+  working chat delivery, production schema or database concurrency guarantees.
+- Next implementation is a bounded, disabled local/test Global Chat sender with
+  real database transaction tests and moderation/retention controls. Any eventual
+  production schema or activation operation must name its exact target and scope.
+
+## Historical Preparation: 2026-09-06
 
 ## Delivered
 

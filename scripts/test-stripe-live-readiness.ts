@@ -3,6 +3,12 @@ import { readFileSync } from "node:fs";
 
 import { getBillingReadinessStatus } from "../functions/_lib/plans";
 import type { Env } from "../functions/_lib/types";
+import { DZN_PUBLISHED_SELLER } from "../lib/published-seller";
+
+const publicSeller = {
+  DZN_PUBLIC_LEGAL_SELLER_NAME: "Example Legal Seller",
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: "1 Example Street | London | AB1 2CD | United Kingdom",
+};
 
 const fallbackOnly = getBillingReadinessStatus({
   NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID: "price_public_starter_must_not_be_live_ready",
@@ -39,7 +45,11 @@ assert.equal(testMode.starterConfigured, true);
 assert.equal(testMode.proConfigured, true);
 assert.equal(testMode.modeHint, "test");
 assert.equal(testMode.liveConfigurationReady, false, "Test-mode Stripe secret must not pass live readiness.");
-assert.deepEqual(testMode.missingLiveRequiredVars, ["STRIPE_SECRET_KEY"]);
+assert.deepEqual(testMode.missingLiveRequiredVars, [
+  "STRIPE_SECRET_KEY",
+  "DZN_PUBLIC_LEGAL_SELLER_NAME",
+  "DZN_PUBLIC_LEGAL_CONTACT_ADDRESS",
+]);
 assert.equal(testMode.readinessChecks.find((check) => check.key === "stripe-live-secret")?.ok, false);
 assert.equal(testMode.checkoutSessionCreationAllowed, true, "Test-mode Stripe checkout should stay usable for sandbox validation.");
 assert.equal(testMode.checkoutSafetyMode, "test_mode_allowed");
@@ -57,6 +67,7 @@ assert.equal(previewUrl.missingLiveRequiredVars.includes("DZN_APP_URL"), true);
 assert.equal(previewUrl.readinessChecks.find((check) => check.key === "production-app-url")?.ok, false);
 
 const liveReady = getBillingReadinessStatus({
+  ...publicSeller,
   STRIPE_PRICE_STARTER: "price_server_starter",
   STRIPE_PRICE_PRO: "price_server_pro",
   STRIPE_PRICE_PREMIUM: "price_legacy_premium",
@@ -67,7 +78,7 @@ const liveReady = getBillingReadinessStatus({
   DZN_APP_URL: "https://dayz-network.com",
 } as Env);
 
-assert.equal(liveReady.liveConfigurationReady, true);
+assert.equal(liveReady.liveConfigurationReady, false, "Complete environment values are not proof of published seller disclosure.");
 assert.equal(liveReady.liveCheckoutEnabled, false);
 assert.equal(liveReady.checkoutSessionCreationAllowed, false, "Live checkout must stay paused until DZN_LIVE_CHECKOUT_ENABLED is explicitly set.");
 assert.equal(liveReady.checkoutSafetyMode, "live_checkout_paused");
@@ -78,11 +89,12 @@ assert.equal(liveReady.premiumConfigured, false);
 assert.deepEqual(liveReady.missingRequiredVars, []);
 assert.deepEqual(liveReady.missingLiveRequiredVars, []);
 assert.deepEqual(liveReady.legacyVarsDetected, ["STRIPE_PRICE_PREMIUM", "STRIPE_PRICE_NETWORK", "STRIPE_PRICE_PARTNER"]);
-assert.equal(liveReady.readinessChecks.filter((check) => check.severity === "blocker").every((check) => check.ok), true);
+assert.deepEqual(liveReady.readinessChecks.filter((check) => check.severity === "blocker" && !check.ok).map(check => check.key), ["public-legal-seller-disclosure"]);
 assert.equal(liveReady.readinessChecks.some((check) => check.key === "live-checkout-enable-flag" && check.severity === "info" && check.ok === false), true);
 assert.equal(liveReady.readinessChecks.find((check) => check.key === "human-approved-live-step")?.ok, false);
 
 const liveEnabled = getBillingReadinessStatus({
+  ...publicSeller,
   STRIPE_PRICE_STARTER: "price_server_starter",
   STRIPE_PRICE_PRO: "price_server_pro",
   STRIPE_SECRET_KEY: "sk_live_secret_value_must_not_leak",
@@ -91,11 +103,65 @@ const liveEnabled = getBillingReadinessStatus({
   DZN_LIVE_CHECKOUT_ENABLED: "true",
 } as Env);
 
-assert.equal(liveEnabled.liveConfigurationReady, true);
+assert.equal(liveEnabled.liveConfigurationReady, false);
 assert.equal(liveEnabled.liveCheckoutEnabled, true);
-assert.equal(liveEnabled.checkoutSessionCreationAllowed, true);
-assert.equal(liveEnabled.checkoutSafetyMode, "live_checkout_enabled");
+assert.equal(liveEnabled.checkoutSessionCreationAllowed, false, "An enable flag cannot substitute unpublished seller information.");
+assert.equal(liveEnabled.checkoutSafetyMode, "live_checkout_paused");
+assert.deepEqual(liveEnabled.readinessChecks.filter((check) => check.severity === "blocker" && !check.ok).map(check => check.key), ["public-legal-seller-disclosure"]);
+assert.ok(liveEnabled.activePlans.every(plan => !plan.checkout_enabled));
+for (const enabledFlag of ["1", "true", "yes", "on", " TRUE "]) {
+  const configuredButUnpublished = getBillingReadinessStatus({
+    ...publicSeller,
+    STRIPE_PRICE_STARTER: "price_server_starter",
+    STRIPE_PRICE_PRO: "price_server_pro",
+    STRIPE_SECRET_KEY: "sk_live_fixture",
+    STRIPE_WEBHOOK_SECRET: "whsec_fixture",
+    DZN_APP_URL: "https://dayz-network.com",
+    DZN_LIVE_CHECKOUT_ENABLED: enabledFlag,
+  } as Env);
+  assert.equal(configuredButUnpublished.liveCheckoutEnabled, true);
+  assert.equal(configuredButUnpublished.checkoutSessionCreationAllowed, false);
+  assert.equal(configuredButUnpublished.liveConfigurationReady, false);
+}
 assert.equal(liveEnabled.readinessChecks.find((check) => check.key === "live-checkout-enable-flag")?.ok, true);
+
+const missingSellerDisclosure = getBillingReadinessStatus({
+  STRIPE_PRICE_STARTER: "price_server_starter",
+  STRIPE_PRICE_PRO: "price_server_pro",
+  STRIPE_SECRET_KEY: "sk_live_secret_value_must_not_leak",
+  STRIPE_WEBHOOK_SECRET: "whsec_live_value_must_not_leak",
+  DZN_APP_URL: "https://dayz-network.com",
+  DZN_LIVE_CHECKOUT_ENABLED: "true",
+} as Env);
+
+assert.equal(missingSellerDisclosure.liveConfigurationReady, false);
+assert.equal(missingSellerDisclosure.checkoutSessionCreationAllowed, false);
+assert.equal(missingSellerDisclosure.checkoutSafetyMode, "live_checkout_paused");
+assert.equal(missingSellerDisclosure.readinessChecks.find((check) => check.key === "public-legal-seller-disclosure")?.ok, false);
+assert.equal(missingSellerDisclosure.missingLiveRequiredVars.includes("DZN_PUBLIC_LEGAL_SELLER_NAME"), true);
+assert.equal(missingSellerDisclosure.missingLiveRequiredVars.includes("DZN_PUBLIC_LEGAL_CONTACT_ADDRESS"), true);
+assert.equal(liveEnabled.missingLiveRequiredVars.includes("DZN_PUBLIC_LEGAL_SELLER_NAME"), false);
+assert.equal(liveEnabled.missingLiveRequiredVars.includes("DZN_PUBLIC_LEGAL_CONTACT_ADDRESS"), false);
+
+const approvedSellerEnv = {
+  STRIPE_PRICE_STARTER: "price_server_starter",
+  STRIPE_PRICE_PRO: "price_server_pro",
+  STRIPE_SECRET_KEY: "sk_live_secret_value_must_not_leak",
+  STRIPE_WEBHOOK_SECRET: "whsec_live_value_must_not_leak",
+  DZN_APP_URL: "https://dayz-network.com",
+  DZN_PUBLIC_LEGAL_SELLER_NAME: DZN_PUBLISHED_SELLER.name,
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: DZN_PUBLISHED_SELLER.addressLines.join(" | "),
+} as Env;
+const approvedButPaused = getBillingReadinessStatus(approvedSellerEnv);
+assert.equal(approvedButPaused.liveConfigurationReady, true);
+assert.equal(approvedButPaused.checkoutSessionCreationAllowed, false);
+const approvedAndEnabled = getBillingReadinessStatus({ ...approvedSellerEnv, DZN_LIVE_CHECKOUT_ENABLED: "true" });
+assert.equal(approvedAndEnabled.checkoutSessionCreationAllowed, true);
+assert.ok(approvedAndEnabled.activePlans.every(plan => plan.checkout_enabled));
+assert.equal(approvedAndEnabled.productionMutationAllowedByReadinessCheck, false);
+assert.equal(getBillingReadinessStatus({ ...approvedSellerEnv, DZN_LIVE_CHECKOUT_ENABLED: "true",
+  DZN_PUBLIC_LEGAL_CONTACT_ADDRESS: "An unpublished private address | Somewhere",
+}).checkoutSessionCreationAllowed, false);
 
 for (const [label, payload] of Object.entries({ fallbackOnly, testMode, previewUrl, liveReady, liveEnabled })) {
   const text = JSON.stringify(payload);

@@ -1,8 +1,8 @@
 # DZN Comms Message-Sending Contract Preflight
 
-Date: 2026-09-06
-Status: design only; runtime and production approval NOT granted
-Prerequisite: PR #144 at `7d6de24c0f1641727eb9f331d7fb25f031db6e95`
+Date: 2026-09-06; reconciled 2026-09-12
+Status: design contract only; no sending implementation or activation in this release
+Prerequisite: PR #144, merged at `42dc9fa0d1af42db9941b36d8cd4ffb5c3d6c3ea`
 
 ## 1. Scope And Approval Gates
 
@@ -11,9 +11,10 @@ not implement a send route, add a migration, enable flags, persist messages or
 moderation records, or authorize production. It supersedes ambiguous send-result
 choices in the older interaction preflight, not the current read API.
 
-PR #144 must be reviewed/released separately. Applying
-`0065_dzn_comms_read_history.sql` to production D1 requires explicit approval.
-The new contract PR stays draft and stacked until that prerequisite lands.
+PR #144 has landed, as has its timestamp hydration fix in PR #150. This contract
+is reconciled onto current main, not the historical stacked release branches.
+Applying `0065_dzn_comms_read_history.sql` to production D1 remains a separate
+operation; a code merge is not evidence that the schema or chat is active.
 
 The first proposed runtime is a disabled-by-default local/test text-only Global
 Chat pilot. HTTPS request/response only; the existing history GET remains the

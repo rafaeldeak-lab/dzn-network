@@ -259,6 +259,18 @@ Message sending is defined in [DZN Comms Message-Sending Contract Preflight](DZN
 
 Do not implement runtime chat routes, sending, message persistence, reaction persistence, reports, moderation mutations, Durable Objects/WebSockets, AI provider credentials, vector stores, analytics/tracking, metered model calls, or production mutations until each part has its own approval slice.
 
+## Session Inactivity And Refresh UX Roadmap
+
+Long-lived logged-in browser sessions should get a dedicated future UX/security slice:
+
+- Detect extended inactivity on the client without recording activity analytics or public presence.
+- Show a clear modal/countdown before the current page session becomes stale.
+- Let the logged-in user continue by interacting with the modal, refreshing account state, or returning to login when the session has expired.
+- Consider optional auto logout after a deliberately approved inactivity window for protected player/owner pages.
+- Keep idle warnings and logout behavior separate from billing, Store purchases, owner entitlement, server ownership, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF scoring, XP awards, calling-card awards, public profile visibility, retained exports, chat moderation decisions, and competitive eligibility.
+
+Do not implement session timeout mutations, global activity tracking, analytics calls, presence writes, forced logout timers, or cross-tab session controls until this slice has its own approval, route contract, rollback plan, and rendered accessibility QA.
+
 ## Store And Safe Monetisation Roadmap
 
 The safe monetisation direction supersedes any paid-spin idea:
@@ -314,3 +326,4 @@ Next recommended product area after public profile owner preview/share polish:
 
 - DZN Comms/support remains the next queued product area: continue in the safe order of sending contract, reactions, moderation/timeouts, presence counter, support launcher, then the public-DZN-info-only AI support bot.
 - Keep the queued DZN Comms/support work separate: the site-wide support launcher, logged-in global chat, private groups, reactions, live presence counter, profanity warning/timeouts, moderation hooks, and public-DZN-info-only AI support bot still need their approved preflight/runtime slices before any real chat sending, persistence, AI credentials, vector stores, analytics/tracking, metered calls, live checkout, Store/payment changes, D1 production writes, or other production mutations are added.
+- Keep the queued session inactivity UX separate: warning/countdown refresh prompts and optional auto logout still need their own approval/preflight/runtime slice before any activity tracking, session mutation, forced logout, cross-tab sync, or protected-page timeout enforcement is added.
