@@ -270,21 +270,24 @@ async function run() {
       assert.equal(board.rows.some((row) => row.serverId === "same-guild-other-server"), false, `${metricKey} grant must remain exact-server`);
     }
   });
-  await test("exact grant includes only NukeTown in Pro movement boards", async ({ db, env }) => {
+  await test("Free movement imports cannot exhaust the Pro movement sample window", async ({ db, env }) => {
     seedPublicMedia(db);
-    for (const [serverId, playerName, secondX, secondY] of [
-      [scope.linkedServerId, "NukeTown explorer", 1100, 1100],
-      ["same-guild-other-server", "Neighbour explorer", 1200, 1200],
-    ] as const) {
-      db.sqlite.prepare(`INSERT INTO player_events
+    db.sqlite.prepare(`INSERT INTO player_events
+      (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
+      VALUES ('nuketown-position-1', ?, 'NukeTown explorer', 'player_position', 1000, 1000, '2026-01-01T00:00:00Z')`)
+      .run(scope.linkedServerId);
+    db.sqlite.prepare(`INSERT INTO player_events
+      (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
+      VALUES ('nuketown-position-2', ?, 'NukeTown explorer', 'player_position', 1100, 1100, '2026-01-01T00:10:00Z')`)
+      .run(scope.linkedServerId);
+    db.sqlite.exec(`WITH RECURSIVE sequence(value) AS (
+        SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 4001
+      )
+      INSERT INTO player_events
         (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
-        VALUES (?, ?, ?, 'player_position', 1000, 1000, '2026-09-19T00:00:00Z')`)
-        .run(`${serverId}-position-1`, serverId, playerName);
-      db.sqlite.prepare(`INSERT INTO player_events
-        (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
-        VALUES (?, ?, ?, 'player_position', ?, ?, '2026-09-19T00:10:00Z')`)
-        .run(`${serverId}-position-2`, serverId, playerName, secondX, secondY);
-    }
+      SELECT 'newer-free-position-' || value, 'same-guild-other-server', 'Neighbour explorer',
+        'player_position', 1200 + (value % 10), 1200 + (value % 10), '2026-09-19T00:10:00Z'
+      FROM sequence;`);
     await grant(env);
 
     const payload = await getPublicAdvancedLeaderboardsPayload(env, { limit: 19 });

@@ -170,7 +170,10 @@ async function buildPublicAdvancedLeaderboardsPayload(env: Env, options: { limit
     queryPvpServerBoards(env, limit, accessByServer),
     queryBuildServerBoards(env, limit, accessByServer),
     queryHybridServerBoards(env, limit, accessByServer),
-    queryPositionSamples(env, { limit: PUBLIC_ADVANCED_POSITION_SAMPLE_LIMIT }),
+    queryPositionSamples(env, {
+      limit: PUBLIC_ADVANCED_POSITION_SAMPLE_LIMIT,
+      globalAdvancedAccessByServer: accessByServer,
+    }),
   ]);
   const metaById = new Map(serverMeta.map((server) => [server.id, server]));
   const travelBoards = buildTravelServerBoards(samples, metaById, accessByServer, limit);
@@ -363,7 +366,14 @@ function pruneAdvancedCache(cache: Map<string, CachedAdvancedValue>, now: number
   }
 }
 
-export async function queryPositionSamples(env: Env, options: { linkedServerId?: string | null; limit?: number } = {}): Promise<TravelPositionSample[]> {
+export async function queryPositionSamples(
+  env: Env,
+  options: {
+    linkedServerId?: string | null;
+    limit?: number;
+    globalAdvancedAccessByServer?: Map<string, AdvancedShowcaseAccess>;
+  } = {},
+): Promise<TravelPositionSample[]> {
   const db = requireDb(env);
   const limit = safeLimit(options.limit, 2_000, 20_000);
   if (options.linkedServerId) {
@@ -439,9 +449,23 @@ export async function queryPositionSamples(env: Env, options: { linkedServerId?:
     ).all<PositionSampleRow>();
     return positionRowsToSamples(result.results ?? []).sort((a, b) => timestampNumber(b.occurredAt) - timestampNumber(a.occurredAt)).slice(0, limit);
   }
-  const serverFilter = options.linkedServerId ? "WHERE linked_server_id = ?" : "";
+  const advancedEligibility = options.globalAdvancedAccessByServer
+    ? globalAdvancedEligibilitySql(options.globalAdvancedAccessByServer)
+    : null;
+  const eligibleServerCte = advancedEligibility
+    ? `WITH eligible_servers AS (
+         SELECT linked_servers.id
+         FROM linked_servers
+         WHERE ${publicServerWhereSql()}
+           AND ${advancedEligibility.sql}
+       )`
+    : "";
+  const eligibleServerFilter = advancedEligibility
+    ? "AND linked_server_id IN (SELECT id FROM eligible_servers)"
+    : "";
   const statement = db.prepare(
-    `SELECT linked_server_id, player_key, player_name, occurred_at, x, y, z, source_event_type
+    `${eligibleServerCte}
+     SELECT linked_server_id, player_key, player_name, occurred_at, x, y, z, source_event_type
      FROM (
        SELECT linked_server_id,
               COALESCE(player_id, lower(player_name)) AS player_key,
@@ -453,6 +477,7 @@ export async function queryPositionSamples(env: Env, options: { linkedServerId?:
               event_type AS source_event_type
        FROM player_events
        WHERE position_x IS NOT NULL AND position_y IS NOT NULL
+         ${eligibleServerFilter}
        UNION ALL
        SELECT linked_server_id,
               COALESCE(killer_id, lower(killer_name)) AS player_key,
@@ -464,6 +489,7 @@ export async function queryPositionSamples(env: Env, options: { linkedServerId?:
               'player_killed' AS source_event_type
        FROM kill_events
        WHERE position_x IS NOT NULL AND position_y IS NOT NULL AND killer_name IS NOT NULL
+         ${eligibleServerFilter}
        UNION ALL
        SELECT linked_server_id,
               COALESCE(player_id, lower(player_name)) AS player_key,
@@ -475,14 +501,12 @@ export async function queryPositionSamples(env: Env, options: { linkedServerId?:
               event_type AS source_event_type
        FROM build_events
        WHERE pos_x IS NOT NULL AND pos_y IS NOT NULL
+         ${eligibleServerFilter}
      )
-     ${serverFilter}
      ORDER BY occurred_at DESC
      LIMIT ?`,
   );
-  const result = options.linkedServerId
-    ? await statement.bind(options.linkedServerId, limit).all<PositionSampleRow>()
-    : await statement.bind(limit).all<PositionSampleRow>();
+  const result = await statement.bind(...(advancedEligibility?.bindings ?? []), limit).all<PositionSampleRow>();
 
   return positionRowsToSamples(result.results ?? []);
 }
