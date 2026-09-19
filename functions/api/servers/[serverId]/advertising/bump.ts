@@ -8,6 +8,7 @@ import type { Env, PagesFunction, SessionUser } from "../../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env, params, waitUntil }) => {
   if (request.method !== "POST" && request.method !== "GET") return methodNotAllowed();
+  const requestStartedAt = new Date().toISOString();
 
   const user = await resolveUser(env, request);
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
@@ -35,7 +36,8 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
                ORDER BY CASE WHEN lower(COALESCE(server_subscriptions.status, '')) IN ('active', 'trialing') THEN 0 ELSE 1 END,
                         server_subscriptions.updated_at DESC,
                         server_subscriptions.created_at DESC
-               LIMIT 1) AS server_subscription_status
+                LIMIT 1) AS server_subscription_status,
+              strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS billing_observed_at
        FROM linked_servers
        WHERE linked_servers.id = ?
          AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')
@@ -50,22 +52,46 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
       lifecycle_status: string | null;
       server_plan_key: string | null;
       server_subscription_status: string | null;
+      billing_observed_at: string | null;
     }>();
   if (!server) return json({ error: "Linked server not found" }, { status: 404 });
   if (server.user_id !== user.id) return json({ error: "No access to this linked server." }, { status: 403 });
 
+  const entitlementsReadStartedAt = new Date().toISOString();
   const entitlements = request.method === "GET"
     ? await getOwnerEntitlementsReadOnly(env, user.discord_id)
     : await getOwnerEntitlements(env, user.discord_id);
+  const entitlementsObservedAt = entitlementsReadStartedAt;
   const now = new Date(Date.now());
+  const ownerBillingReadStartedAt = new Date().toISOString();
   const billing = await readOwnerBillingProjection(env, user.discord_id, request.method === "GET");
-  const accessBaseline = {
+  const ownerBillingObservedAt = billing?.billing_observed_at ?? ownerBillingReadStartedAt;
+  const fallbackAccessBaseline = {
     plan_key: server.server_plan_key ?? billing?.plan_key ?? entitlements.plan_key,
     subscription_status: server.server_plan_key
       ? server.server_subscription_status
       : billing?.plan_status ?? (entitlements.plan_key === "free" ? "free" : "active"),
   };
+  const billingObservedAt = earliestObservation(
+    server.billing_observed_at ?? entitlementsReadStartedAt,
+    ownerBillingObservedAt,
+    entitlementsObservedAt,
+  );
+  const accessObservation = await readAdvertisingAccessObservation(env, {
+    linkedServerId,
+    ownerUserId: user.id,
+    ownerDiscordId: user.discord_id,
+    fallback: fallbackAccessBaseline,
+    fallbackObservedAt: billingObservedAt,
+    allowMissingSchema: request.method === "GET",
+  });
+  const accessBaseline = {
+    plan_key: accessObservation.planKey,
+    subscription_status: accessObservation.status,
+  };
   const serverAccess = await readServerShowcaseAccess(env, linkedServerId, accessBaseline);
+  const finalBillingObservedAt = accessObservation.observedAt;
+  const showcaseGrantObservedAt = serverAccess.observedAt;
   const listingLimits = serverAccess.listing;
   const serverPlan = getPlanConfig(listingLimits.listingPlanKey);
   const fallbackPeriod = defaultBumpPeriod(now);
@@ -95,7 +121,7 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
   if (request.method === "GET") {
     return json({
       ok: true,
-      generated_at: now.toISOString(),
+      generated_at: requestStartedAt,
       advertising: {
         last_bumped_at: typeof state?.last_bumped_at === "string" ? state.last_bumped_at : null,
         bump_count_current_period: Number(state?.bump_count_current_period ?? 0),
@@ -108,10 +134,16 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
         access_source: serverAccess.source,
         effective_listing_plan: listingLimits.listingPlanKey,
         listing_label: listingLimits.publicLabel,
+        billing_observed_at: finalBillingObservedAt,
+        showcase_grant_observed_at: showcaseGrantObservedAt,
       },
       listing: listingLimits,
       entitlements,
-      server_access: serializeShowcaseAccess(serverAccess),
+      server_access: {
+        ...serializeShowcaseAccess(serverAccess),
+        billingObservedAt: finalBillingObservedAt,
+        showcaseGrantObservedAt,
+      },
     });
   }
 
@@ -254,11 +286,91 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
       access_source: serverAccess.source,
       effective_listing_plan: listingLimits.listingPlanKey,
       listing_label: listingLimits.publicLabel,
+      billing_observed_at: finalBillingObservedAt,
+      showcase_grant_observed_at: showcaseGrantObservedAt,
     },
     listing: listingLimits,
-    server_access: serializeShowcaseAccess(serverAccess),
+    server_access: {
+      ...serializeShowcaseAccess(serverAccess),
+      billingObservedAt: finalBillingObservedAt,
+      showcaseGrantObservedAt,
+    },
   });
 };
+
+function earliestObservation(...values: string[]) {
+  return values.reduce((earliest, value) => Date.parse(value) < Date.parse(earliest) ? value : earliest);
+}
+
+type AdvertisingAccessObservation = {
+  server_plan_key: string | null;
+  server_subscription_status: string | null;
+  owner_plan_key: string | null;
+  owner_plan_status: string | null;
+  entitlement_plan_key: string | null;
+  billing_observed_at: string | null;
+};
+
+async function readAdvertisingAccessObservation(env: Env, input: {
+  linkedServerId: string;
+  ownerUserId: string;
+  ownerDiscordId: string;
+  fallback: { plan_key: string | null; subscription_status: string | null };
+  fallbackObservedAt: string;
+  allowMissingSchema: boolean;
+}) {
+  try {
+    const row = await requireDb(env)
+      .prepare(
+        `WITH selected_subscription AS (
+           SELECT subscription.plan_key, subscription.status
+           FROM server_subscriptions AS subscription
+           JOIN linked_servers AS subscription_server ON subscription_server.guild_id = subscription.guild_id
+           WHERE subscription_server.id = ? AND subscription.owner_discord_id = ?
+           ORDER BY CASE WHEN lower(COALESCE(subscription.status, '')) IN ('active', 'trialing') THEN 0 ELSE 1 END,
+                    subscription.updated_at DESC,
+                    subscription.created_at DESC
+           LIMIT 1
+         )
+         SELECT selected_subscription.plan_key AS server_plan_key,
+                selected_subscription.status AS server_subscription_status,
+                owner_billing_accounts.plan_key AS owner_plan_key,
+                owner_billing_accounts.plan_status AS owner_plan_status,
+                owner_plan_entitlements.plan_key AS entitlement_plan_key,
+                strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS billing_observed_at
+         FROM linked_servers
+         JOIN users ON users.id = linked_servers.user_id
+         LEFT JOIN selected_subscription ON 1 = 1
+         LEFT JOIN owner_billing_accounts ON owner_billing_accounts.discord_user_id = users.discord_id
+         LEFT JOIN owner_plan_entitlements ON owner_plan_entitlements.discord_user_id = users.discord_id
+         WHERE linked_servers.id = ? AND linked_servers.user_id = ? AND users.discord_id = ?
+         LIMIT 1`,
+      )
+      .bind(input.linkedServerId, input.ownerDiscordId, input.linkedServerId, input.ownerUserId, input.ownerDiscordId)
+      .first<AdvertisingAccessObservation>();
+    if (!row) return {
+      planKey: input.fallback.plan_key,
+      status: input.fallback.subscription_status,
+      observedAt: input.fallbackObservedAt,
+    };
+    const planKey = row.server_plan_key ?? row.owner_plan_key ?? row.entitlement_plan_key ?? "free";
+    const status = row.server_plan_key
+      ? row.server_subscription_status
+      : row.owner_plan_key
+        ? row.owner_plan_status
+        : planKey === "free" ? "free" : "active";
+    return { planKey, status, observedAt: row.billing_observed_at ?? input.fallbackObservedAt };
+  } catch (error) {
+    if (input.allowMissingSchema && /no such table: (?:main\.)?(?:owner_billing_accounts|owner_plan_entitlements)\b/i.test(error instanceof Error ? error.message : String(error))) {
+      return {
+        planKey: input.fallback.plan_key,
+        status: input.fallback.subscription_status,
+        observedAt: input.fallbackObservedAt,
+      };
+    }
+    throw error;
+  }
+}
 
 async function getOwnerEntitlementsReadOnly(env: Env, discordUserId: string): Promise<PlanEntitlements> {
   try {
@@ -277,12 +389,18 @@ type OwnerBillingProjection = {
   plan_status: string | null;
   current_period_start: string | null;
   current_period_end: string | null;
+  billing_observed_at: string | null;
 };
 
 async function readOwnerBillingProjection(env: Env, discordUserId: string, allowMissingSchema: boolean) {
   try {
     return await requireDb(env)
-      .prepare("SELECT plan_key, plan_status, current_period_start, current_period_end FROM owner_billing_accounts WHERE discord_user_id = ? LIMIT 1")
+      .prepare(`SELECT owner_billing_accounts.plan_key, owner_billing_accounts.plan_status,
+                       owner_billing_accounts.current_period_start, owner_billing_accounts.current_period_end,
+                       strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS billing_observed_at
+                FROM (SELECT 1) AS observation
+                LEFT JOIN owner_billing_accounts ON owner_billing_accounts.discord_user_id = ?
+                LIMIT 1`)
       .bind(discordUserId)
       .first<OwnerBillingProjection>();
   } catch (error) {

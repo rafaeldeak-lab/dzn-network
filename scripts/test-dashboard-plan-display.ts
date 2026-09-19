@@ -61,6 +61,82 @@ assert.deepEqual(
 );
 assert.deepEqual(
   dashboardSelectedServerAccess({
+    healthAccess: {
+      source: "billing",
+      effectiveListingPlan: "free",
+      billingObservedAt: "2026-09-19T12:00:00Z",
+      showcaseGrantObservedAt: "2026-09-19T12:02:00Z",
+    },
+    healthGeneratedAt: "2026-09-19T12:02:01Z",
+    advertisingAccess: {
+      access_source: "complimentary_showcase",
+      effective_listing_plan: "pro",
+      billing_observed_at: "2026-09-19T12:01:00Z",
+      showcase_grant_observed_at: "2026-09-19T12:01:00Z",
+    },
+    advertisingGeneratedAt: "2026-09-19T12:03:00Z",
+    serverDisplayPlan: "free",
+  }),
+  { source: "billing", effectivePlan: "free" },
+  "A later response cannot revive a grant observed before health saw its revocation.",
+);
+assert.deepEqual(
+  dashboardSelectedServerAccess({
+    healthAccess: {
+      source: "billing",
+      effectiveListingPlan: "pro",
+      billingObservedAt: "2026-09-19T12:00:00Z",
+      showcaseGrantObservedAt: "2026-09-19T12:03:00Z",
+    },
+    healthGeneratedAt: "2026-09-19T12:04:00Z",
+    advertisingAccess: {
+      access_source: "billing",
+      effective_listing_plan: "free",
+      billing_observed_at: "2026-09-19T12:02:00Z",
+      showcase_grant_observed_at: "2026-09-19T12:02:00Z",
+    },
+    advertisingGeneratedAt: "2026-09-19T12:02:01Z",
+    serverDisplayPlan: "free",
+  }),
+  { source: "billing", effectivePlan: "free" },
+  "A later health completion cannot revive billing observed before advertising saw cancellation.",
+);
+const retainedHealthAfterFailure = {
+  source: "billing" as const,
+  effectiveListingPlan: "pro",
+  billingObservedAt: "2026-09-19T12:00:00Z",
+  showcaseGrantObservedAt: "2026-09-19T12:04:00Z",
+};
+const advertisingAfterCancellation = {
+  access_source: "billing" as const,
+  effective_listing_plan: "free",
+  billing_observed_at: "2026-09-19T12:02:00Z",
+  showcase_grant_observed_at: "2026-09-19T12:02:01Z",
+};
+const accessAfterHealthFailure = dashboardSelectedServerAccess({
+  healthAccess: retainedHealthAfterFailure,
+  healthGeneratedAt: "2026-09-19T12:04:01Z",
+  advertisingAccess: advertisingAfterCancellation,
+  advertisingGeneratedAt: "2026-09-19T12:01:00Z",
+  serverDisplayPlan: "free",
+});
+assert.deepEqual(
+  accessAfterHealthFailure,
+  { source: "billing", effectivePlan: "free" },
+  "A failed health refresh must keep the retained observation clocks paired with health access.",
+);
+assert.equal(
+  dashboardCurrentAdvertisingDetails({
+    healthAccess: retainedHealthAfterFailure,
+    healthGeneratedAt: "2026-09-19T12:04:01Z",
+    advertisingAccess: advertisingAfterCancellation,
+    advertisingGeneratedAt: "2026-09-19T12:01:00Z",
+  }, accessAfterHealthFailure),
+  advertisingAfterCancellation,
+  "A failed health refresh must not hide a newer accepted advertising snapshot.",
+);
+assert.deepEqual(
+  dashboardSelectedServerAccess({
     healthAccess: null,
     healthGeneratedAt: null,
     advertisingAccess: { access_source: "complimentary_showcase", effective_listing_plan: "pro" },
@@ -100,6 +176,7 @@ const revokedAccess = dashboardSelectedServerAccess({
 });
 assert.equal(
   dashboardCurrentAdvertisingDetails({
+    healthAccess: { source: "billing", effectiveListingPlan: "free" },
     healthGeneratedAt: "2026-09-19T12:02:00Z",
     advertisingAccess: { access_source: "complimentary_showcase", effective_listing_plan: "pro" },
     advertisingGeneratedAt: "2026-09-19T12:01:00Z",
@@ -109,6 +186,7 @@ assert.equal(
 );
 assert.equal(
   dashboardCurrentAdvertisingDetails({
+    healthAccess: { source: "complimentary_showcase", effectiveListingPlan: "pro" },
     healthGeneratedAt: "2026-09-19T12:02:00Z",
     advertisingAccess: { access_source: "billing", effective_listing_plan: "free" },
     advertisingGeneratedAt: "2026-09-19T12:01:00Z",
@@ -158,8 +236,9 @@ assert.ok(source.includes('dashboardAccessLabel(wars?.access?.effectivePlan)'));
 assert.ok(source.includes('stats?.access?.source === "complimentary_showcase"'));
 assert.ok(source.includes('"Pro Listing (complimentary)"'));
 assert.ok(source.includes("dashboardSelectedServerAccess("));
-assert.ok(source.includes("healthAccess: dashboardHealthFresh ? effectiveDashboardHealth?.server_access ?? null : null"));
-assert.ok(source.includes('healthGeneratedAt: effectiveDashboardHealth?.source === "local_fallback"'));
+assert.ok(source.includes('const selectedServerHealth = effectiveDashboardHealth?.source === "local_fallback"'));
+assert.ok(source.includes("healthAccess: selectedServerHealth?.server_access ?? null"));
+assert.ok(source.includes("healthGeneratedAt: selectedServerHealth?.generated_at ?? null"));
 assert.ok(source.includes("advertisingGeneratedAt: advertisingStatusGeneratedAt"));
 assert.ok(source.includes("dashboardAdvertisingListing(advertising)"));
 assert.ok(source.includes('label: "Bump Cooldown"'));

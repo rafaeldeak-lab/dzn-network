@@ -44,13 +44,55 @@ export function dashboardAdvancedStatsMessage(reason: string | null | undefined)
 type SelectedServerAccess = {
   source?: "billing" | "complimentary_showcase" | null;
   effectiveListingPlan?: string | null;
+  billingObservedAt?: string | null;
+  showcaseGrantObservedAt?: string | null;
 } | null;
 
 type AdvertisingAccess = {
   access_source?: "billing" | "complimentary_showcase" | null;
   effective_listing_plan?: string | null;
   listing_label?: string | null;
+  billing_observed_at?: string | null;
+  showcase_grant_observed_at?: string | null;
 } | null;
+
+function advertisingAccessIsNewest(input: {
+  healthAccess: SelectedServerAccess;
+  healthGeneratedAt: string | null;
+  advertisingAccess: AdvertisingAccess;
+  advertisingGeneratedAt: string | null;
+}) {
+  const healthSource = input.healthAccess?.source;
+  const advertisingSource = input.advertisingAccess?.access_source;
+  const healthPlan = input.healthAccess?.effectiveListingPlan;
+  const advertisingPlan = input.advertisingAccess?.effective_listing_plan;
+  const sourcesDiffer = Boolean(healthSource && advertisingSource && healthSource !== advertisingSource);
+  const billingPlansDiffer = healthSource === "billing" && advertisingSource === "billing" &&
+    Boolean(healthPlan && advertisingPlan && healthPlan !== advertisingPlan);
+  const healthObservation = sourcesDiffer
+    ? input.healthAccess?.showcaseGrantObservedAt
+    : billingPlansDiffer
+      ? input.healthAccess?.billingObservedAt
+      : null;
+  const advertisingObservation = sourcesDiffer
+    ? input.advertisingAccess?.showcase_grant_observed_at
+    : billingPlansDiffer
+      ? input.advertisingAccess?.billing_observed_at
+      : null;
+  const healthObservationTime = healthObservation ? Date.parse(healthObservation) : NaN;
+  const advertisingObservationTime = advertisingObservation ? Date.parse(advertisingObservation) : NaN;
+  const useObservationTime = Number.isFinite(healthObservationTime) && Number.isFinite(advertisingObservationTime);
+  const healthTime = useObservationTime
+    ? healthObservationTime
+    : input.healthGeneratedAt ? Date.parse(input.healthGeneratedAt) : NaN;
+  const advertisingTime = useObservationTime
+    ? advertisingObservationTime
+    : input.advertisingGeneratedAt ? Date.parse(input.advertisingGeneratedAt) : NaN;
+  return Boolean(advertisingSource) && (
+    !Number.isFinite(healthTime) ||
+    (Number.isFinite(advertisingTime) && advertisingTime >= healthTime)
+  );
+}
 
 export function dashboardAdvertisingListing(advertising: AdvertisingAccess) {
   const advertisedPlan = advertising?.effective_listing_plan;
@@ -82,12 +124,7 @@ export function dashboardSelectedServerAccess(
     serverDisplayPlan: string | null;
   },
 ) {
-  const healthTime = input.healthGeneratedAt ? Date.parse(input.healthGeneratedAt) : NaN;
-  const advertisingTime = input.advertisingGeneratedAt ? Date.parse(input.advertisingGeneratedAt) : NaN;
-  const useAdvertising = Boolean(input.advertisingAccess?.access_source) && (
-    !Number.isFinite(healthTime) ||
-    (Number.isFinite(advertisingTime) && advertisingTime >= healthTime)
-  );
+  const useAdvertising = advertisingAccessIsNewest(input);
   if (useAdvertising && input.advertisingAccess?.access_source) {
     return {
       source: input.advertisingAccess.access_source,
@@ -108,6 +145,7 @@ export function dashboardSelectedServerAccess(
 
 export function dashboardCurrentAdvertisingDetails<T extends AdvertisingAccess>(
   input: {
+    healthAccess: SelectedServerAccess;
     healthGeneratedAt: string | null;
     advertisingAccess: T;
     advertisingGeneratedAt: string | null;
@@ -115,11 +153,10 @@ export function dashboardCurrentAdvertisingDetails<T extends AdvertisingAccess>(
   selectedAccess: ReturnType<typeof dashboardSelectedServerAccess>,
 ): T | null {
   if (!input.advertisingAccess?.access_source) return null;
-  const healthTime = input.healthGeneratedAt ? Date.parse(input.healthGeneratedAt) : NaN;
-  const advertisingTime = input.advertisingGeneratedAt ? Date.parse(input.advertisingGeneratedAt) : NaN;
-  const advertisingIsNewest = !Number.isFinite(healthTime) || (
-    Number.isFinite(advertisingTime) && advertisingTime >= healthTime
-  );
-  void selectedAccess;
+  const advertisingIsNewest = advertisingAccessIsNewest(input);
+  if (
+    selectedAccess.source !== input.advertisingAccess.access_source ||
+    selectedAccess.effectivePlan !== input.advertisingAccess.effective_listing_plan
+  ) return null;
   return advertisingIsNewest ? input.advertisingAccess : null;
 }

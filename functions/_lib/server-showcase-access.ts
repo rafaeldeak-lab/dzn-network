@@ -22,7 +22,8 @@ export function showcaseScopeBindings() {
   return [scope.linkedServerId, scope.ownerUserId, scope.ownerDiscordId, scope.guildId, scope.nitradoServiceId];
 }
 
-const ACTIVE_SHOWCASE_GRANT_FROM_SQL = `FROM server_showcase_grants AS grant_row
+function activeShowcaseGrantFromSql(nowExpression: string) {
+  return `FROM server_showcase_grants AS grant_row
   JOIN linked_servers ON linked_servers.id = grant_row.linked_server_id
   JOIN users ON users.id = linked_servers.user_id
   WHERE ${SHOWCASE_SCOPE_SQL}
@@ -32,8 +33,12 @@ const ACTIVE_SHOWCASE_GRANT_FROM_SQL = `FROM server_showcase_grants AS grant_row
     AND grant_row.nitrado_service_id = linked_servers.nitrado_service_id
     AND grant_row.plan_key = 'pro' AND grant_row.purpose = 'platform_owner_showcase'
     AND grant_row.revoked_at IS NULL
-    AND julianday(grant_row.created_at) <= julianday(?)
-    AND (grant_row.expires_at IS NULL OR julianday(grant_row.expires_at) > julianday(?))`;
+    AND julianday(grant_row.created_at) <= julianday(${nowExpression})
+    AND (grant_row.expires_at IS NULL OR julianday(grant_row.expires_at) > julianday(${nowExpression}))`;
+}
+
+const ACTIVE_SHOWCASE_GRANT_FROM_SQL = activeShowcaseGrantFromSql("?");
+const ACTIVE_SHOWCASE_GRANT_FROM_SQL_AT_DB_TIME = activeShowcaseGrantFromSql("'now'");
 export const ACTIVE_SHOWCASE_GRANT_SQL = `SELECT grant_row.id, grant_row.expires_at ${ACTIVE_SHOWCASE_GRANT_FROM_SQL} LIMIT 1`;
 
 type BillingInput = { plan_key: string | null; subscription_status: string | null };
@@ -41,27 +46,39 @@ export type ServerShowcaseAccess = {
   source: "complimentary_showcase" | "billing";
   grantId: string | null;
   expiresAt: string | null;
+  observedAt: string;
   billingPlan: string | null;
   billingStatus: string | null;
   listing: ReturnType<typeof getListingLimits>;
 };
 
+const ACTIVE_SHOWCASE_GRANT_OBSERVATION_SQL = `WITH active_grant AS (
+  SELECT grant_row.id, grant_row.expires_at ${ACTIVE_SHOWCASE_GRANT_FROM_SQL_AT_DB_TIME} LIMIT 1
+)
+SELECT active_grant.id, active_grant.expires_at,
+       strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS observed_at
+FROM (SELECT 1) AS observation
+LEFT JOIN active_grant ON 1 = 1
+LIMIT 1`;
+
 export async function readServerShowcaseAccess(env: Env, linkedServerId: string, billing: BillingInput): Promise<ServerShowcaseAccess> {
+  const fallbackObservedAt = new Date().toISOString();
   const base: ServerShowcaseAccess = { source: "billing", grantId: null, expiresAt: null,
-    billingPlan: billing.plan_key, billingStatus: billing.subscription_status, listing: getListingLimits(billing) };
+    observedAt: fallbackObservedAt, billingPlan: billing.plan_key, billingStatus: billing.subscription_status,
+    listing: getListingLimits(billing) };
   if (linkedServerId !== NUKETOWN_SHOWCASE_SCOPE.linkedServerId) return base;
-  const now = new Date().toISOString();
-  let grant: { id: string; expires_at: string | null } | null;
+  let grant: { id: string | null; expires_at: string | null; observed_at: string | null } | null;
   try {
-    grant = await requireDb(env).prepare(ACTIVE_SHOWCASE_GRANT_SQL)
-      .bind(...showcaseScopeBindings(), now, now).first<typeof grant>();
+    grant = await requireDb(env).prepare(ACTIVE_SHOWCASE_GRANT_OBSERVATION_SQL)
+      .bind(...showcaseScopeBindings()).first<typeof grant>();
   } catch (error) {
     // Additive rollout: an unapplied migration cannot grant access or break existing billing.
     if (isMissingShowcaseSchema(error)) return base;
     throw error;
   }
-  if (!grant) return base;
-  return { ...base, source: "complimentary_showcase", grantId: grant.id, expiresAt: grant.expires_at,
+  const observedAt = grant?.observed_at ?? fallbackObservedAt;
+  if (!grant?.id) return { ...base, observedAt };
+  return { ...base, source: "complimentary_showcase", grantId: grant.id, expiresAt: grant.expires_at, observedAt,
     listing: getListingLimits("pro", "active") };
 }
 

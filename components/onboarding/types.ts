@@ -910,6 +910,8 @@ export type AdvertisingBumpStatus = {
   access_source?: "billing" | "complimentary_showcase";
   effective_listing_plan?: "free" | "starter" | "pro";
   listing_label?: string;
+  billing_observed_at?: string;
+  showcase_grant_observed_at?: string;
 };
 
 export type NitradoLogSettingsConfirmation = {
@@ -1487,6 +1489,8 @@ export type DashboardHealthResult = {
     source: "billing" | "complimentary_showcase";
     effectiveListingPlan: "free" | "starter" | "pro";
     expiresAt: string | null;
+    billingObservedAt?: string;
+    showcaseGrantObservedAt?: string;
   };
   plan_limits: {
     status_interval_minutes: number;

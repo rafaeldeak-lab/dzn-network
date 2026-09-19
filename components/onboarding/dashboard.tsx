@@ -3368,11 +3368,12 @@ function ServerDashboard({
 
   const selectedServerLabel = serverDisplayName || server.guild_name || "DZN Server";
   const currentPlanName = effectivePlanLabel;
+  const selectedServerHealth = effectiveDashboardHealth?.source === "local_fallback"
+    ? null
+    : effectiveDashboardHealth;
   const selectedServerAccess = dashboardSelectedServerAccess({
-    healthAccess: dashboardHealthFresh ? effectiveDashboardHealth?.server_access ?? null : null,
-    healthGeneratedAt: effectiveDashboardHealth?.source === "local_fallback"
-      ? null
-      : effectiveDashboardHealth?.generated_at ?? null,
+    healthAccess: selectedServerHealth?.server_access ?? null,
+    healthGeneratedAt: selectedServerHealth?.generated_at ?? null,
     advertisingAccess: advertisingStatus,
     advertisingGeneratedAt: advertisingStatusGeneratedAt,
     serverDisplayPlan,
@@ -3380,9 +3381,8 @@ function ServerDashboard({
   const selectedServerAccessSource = selectedServerAccess.source;
   const selectedServerEffectivePlan = selectedServerAccess.effectivePlan;
   const selectedServerAdvertising = dashboardCurrentAdvertisingDetails({
-    healthGeneratedAt: effectiveDashboardHealth?.source === "local_fallback"
-      ? null
-      : effectiveDashboardHealth?.generated_at ?? null,
+    healthAccess: selectedServerHealth?.server_access ?? null,
+    healthGeneratedAt: selectedServerHealth?.generated_at ?? null,
     advertisingAccess: advertisingStatus,
     advertisingGeneratedAt: advertisingStatusGeneratedAt,
   }, selectedServerAccess);
