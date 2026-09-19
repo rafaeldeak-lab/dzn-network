@@ -60,6 +60,7 @@ export async function getGuilds(options: { fresh?: boolean } = {}) {
 export async function getDiscordBotStatus(guildId: string) {
   return request<DiscordBotStatusResponse>(`/api/discord/bot-status?guild_id=${encodeURIComponent(guildId)}`, {
     cache: "no-store",
+    signal: AbortSignal.timeout(12000),
   });
 }
 
@@ -451,6 +452,7 @@ export async function runAutoPostDispatcherNow(linkedServerId: string) {
 export async function getDiscordPostingChannels(linkedServerId: string, options: { refresh?: boolean } = {}) {
   const query = options.refresh ? "?refresh=1" : "";
   const response = await fetch(`/api/servers/${encodeURIComponent(linkedServerId)}/discord-channels${query}`, {
+    signal: AbortSignal.timeout(12000),
     cache: "no-store",
     credentials: "include",
     headers: {
@@ -461,6 +463,7 @@ export async function getDiscordPostingChannels(linkedServerId: string, options:
   if (!response.ok && !data.diagnostics && !data.error_code && !data.errorCode) {
     throw new Error(data.error || `Request failed: ${response.status}`);
   }
+  if (!Array.isArray(data.channels)) throw new Error("Discord channel response is unavailable.");
   return data;
 }
 
