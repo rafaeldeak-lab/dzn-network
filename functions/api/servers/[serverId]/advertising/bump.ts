@@ -57,7 +57,7 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
   const entitlements = request.method === "GET"
     ? await getOwnerEntitlementsReadOnly(env, user.discord_id)
     : await getOwnerEntitlements(env, user.discord_id);
-  const now = new Date();
+  const now = new Date(Date.now());
   const billing = await readOwnerBillingProjection(env, user.discord_id, request.method === "GET");
   const accessBaseline = {
     plan_key: server.server_plan_key ?? billing?.plan_key ?? entitlements.plan_key,
@@ -69,14 +69,21 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
   const listingLimits = serverAccess.listing;
   const serverPlan = getPlanConfig(listingLimits.listingPlanKey);
   const fallbackPeriod = defaultBumpPeriod(now);
-  const periodStart = billing?.current_period_start ?? fallbackPeriod.start;
-  const periodEnd = billing?.current_period_end ?? fallbackPeriod.end;
+  const billingPeriodCurrent = !periodExpired(billing?.current_period_end, now);
+  let periodStart = billingPeriodCurrent ? billing?.current_period_start ?? fallbackPeriod.start : fallbackPeriod.start;
+  let periodEnd = billingPeriodCurrent ? billing?.current_period_end ?? fallbackPeriod.end : fallbackPeriod.end;
 
   let state = await db
     .prepare("SELECT * FROM server_advertising_state WHERE linked_server_id = ? LIMIT 1")
     .bind(linkedServerId)
     .first<Record<string, unknown>>();
-  if (periodExpired(state?.bump_period_end as string | null | undefined, now)) {
+  const statePeriodEnd = typeof state?.bump_period_end === "string" ? state.bump_period_end : null;
+  const statePeriodCurrent = !periodExpired(statePeriodEnd, now);
+  if (!billingPeriodCurrent && statePeriodCurrent && statePeriodEnd) {
+    periodStart = typeof state?.bump_period_start === "string" ? state.bump_period_start : periodStart;
+    periodEnd = statePeriodEnd;
+  }
+  if (!statePeriodCurrent) {
     state = {
       ...state,
       bump_count_current_period: 0,
@@ -168,7 +175,7 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
           SET owner_discord_id = ?,
               last_bumped_at = ?,
               next_bump_at = ?,
-              bump_count_current_period = COALESCE(bump_count_current_period, 0) + 1,
+              bump_count_current_period = ?,
               bump_period_start = ?,
               bump_period_end = ?,
               updated_at = ?
@@ -182,6 +189,7 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
       user.discord_id,
       nowIso,
       nextBumpAt,
+      nextCount,
       periodStart,
       periodEnd,
       nowIso,

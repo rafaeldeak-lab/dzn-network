@@ -225,6 +225,64 @@ async function run() {
     assert.equal(advertisingBody.server_access.source, "complimentary_showcase");
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), billingBefore);
   });
+  await test("complimentary bump starts a fresh period when owner billing dates are stale", async ({ db, env }) => {
+    await upsertBillingAccount(env, {
+      discordUserId: actor.discord_id,
+      planKey: "free",
+      planStatus: "free",
+      currentPeriodStart: "2026-06-18T00:00:00.000Z",
+      currentPeriodEnd: "2026-07-18T00:00:00.000Z",
+    });
+    await grant(env);
+    const billingBefore = db.sqlite.prepare("SELECT * FROM owner_billing_accounts WHERE discord_user_id = ?").get(actor.discord_id);
+    db.sqlite.prepare(`INSERT INTO server_advertising_state (
+        linked_server_id, owner_discord_id, last_bumped_at, next_bump_at,
+        bump_count_current_period, bump_period_start, bump_period_end, updated_at
+      ) VALUES (?, ?, '2026-06-01T00:00:00.000Z', '2026-06-08T00:00:00.000Z', 2,
+        '2026-06-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z')`)
+      .run(scope.linkedServerId, actor.discord_id);
+
+    const originalNow = Date.now;
+    let now = originalNow();
+    Date.now = () => now;
+    try {
+      const bumpResponse = await invoke(advertisingBump, env, actor, "POST", {});
+      assert.equal(bumpResponse.status, 200);
+      const bump = await bumpResponse.json() as {
+        advertising: { bump_count_current_period: number; bump_period_start: string; bump_period_end: string };
+      };
+      assert.equal(bump.advertising.bump_count_current_period, 1);
+      assert.ok(Date.parse(bump.advertising.bump_period_start) <= now);
+      assert.ok(Date.parse(bump.advertising.bump_period_end) > now);
+
+      now += 7 * 24 * 60 * 60 * 1000;
+      const samePeriodResponse = await invoke(advertisingBump, env, actor, "POST", {});
+      assert.equal(samePeriodResponse.status, 200);
+      const samePeriod = await samePeriodResponse.json() as typeof bump;
+      assert.equal(samePeriod.advertising.bump_count_current_period, 2);
+      assert.equal(samePeriod.advertising.bump_period_start, bump.advertising.bump_period_start);
+      assert.equal(samePeriod.advertising.bump_period_end, bump.advertising.bump_period_end);
+
+      now = Date.parse(bump.advertising.bump_period_end) + 1000;
+      const rolloverResponse = await invoke(advertisingBump, env, actor, "POST", {});
+      assert.equal(rolloverResponse.status, 200);
+      const rollover = await rolloverResponse.json() as typeof bump;
+      assert.equal(rollover.advertising.bump_count_current_period, 1);
+      assert.ok(Date.parse(rollover.advertising.bump_period_start) > Date.parse(bump.advertising.bump_period_start));
+      assert.ok(Date.parse(rollover.advertising.bump_period_end) > Date.parse(bump.advertising.bump_period_end));
+
+      const readResponse = await invoke(advertisingBump, env, actor, "GET");
+      assert.equal(readResponse.status, 200);
+      const read = await readResponse.json() as typeof bump;
+      assert.deepEqual(read.advertising, rollover.advertising);
+      assert.deepEqual(
+        db.sqlite.prepare("SELECT * FROM owner_billing_accounts WHERE discord_user_id = ?").get(actor.discord_id),
+        billingBefore,
+      );
+    } finally {
+      Date.now = originalNow;
+    }
+  });
   await test("exact grant includes only NukeTown in Pro global advanced boards beyond the metadata window", async ({ db, env }) => {
     seedPublicMedia(db);
     for (let index = 0; index < 501; index += 1) {
