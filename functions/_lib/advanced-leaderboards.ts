@@ -737,11 +737,17 @@ function buildTravelServerBoards(
   limit: number,
 ): AdvancedBoard[] {
   const travel = computeTravelStats(samples);
-  const rows = travel.servers.map((server) => serverTravelToBoardRow(
-    server,
-    metaById.get(server.linkedServerId),
-    accessByServer.get(server.linkedServerId),
-  )).filter(Boolean) as AdvancedBoardRow[];
+  const rows = travel.servers
+    .filter((server) => {
+      const meta = metaById.get(server.linkedServerId);
+      return Boolean(meta && resolveAdvancedAccess(meta, accessByServer).globalAdvancedBoards);
+    })
+    .map((server) => serverTravelToBoardRow(
+      server,
+      metaById.get(server.linkedServerId),
+      accessByServer.get(server.linkedServerId),
+    ))
+    .filter(Boolean) as AdvancedBoardRow[];
   const byTotal = [...rows].sort((a, b) => numberOrZero(b.value) - numberOrZero(a.value)).slice(0, limit).map((row, index) => ({ ...row, rank: index + 1 }));
   const byOnFoot = [...rows].sort((a, b) => numberOrZero(b.supportingStats?.onFootDistanceM) - numberOrZero(a.supportingStats?.onFootDistanceM)).slice(0, limit).map((row, index) => ({
     ...row,
@@ -778,7 +784,9 @@ function buildExplorationServerBoards(
   limit: number,
 ): AdvancedBoard[] {
   const samplesByServer = groupSamplesByServer(samples);
-  const rows = servers.map((server) => {
+  const rows = servers
+    .filter((server) => resolveAdvancedAccess(server, accessByServer).globalAdvancedBoards)
+    .map((server) => {
     const exploration = summarizeMapExploration(server.map_name ?? server.mission, samplesByServer.get(server.id) ?? [], { overlayLimit: 0 });
     if (!exploration.supported || exploration.exploredCellsCount <= 0) return null;
     return {

@@ -270,6 +270,33 @@ async function run() {
       assert.equal(board.rows.some((row) => row.serverId === "same-guild-other-server"), false, `${metricKey} grant must remain exact-server`);
     }
   });
+  await test("exact grant includes only NukeTown in Pro movement boards", async ({ db, env }) => {
+    seedPublicMedia(db);
+    for (const [serverId, playerName, secondX, secondY] of [
+      [scope.linkedServerId, "NukeTown explorer", 1100, 1100],
+      ["same-guild-other-server", "Neighbour explorer", 1200, 1200],
+    ] as const) {
+      db.sqlite.prepare(`INSERT INTO player_events
+        (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
+        VALUES (?, ?, ?, 'player_position', 1000, 1000, '2026-09-19T00:00:00Z')`)
+        .run(`${serverId}-position-1`, serverId, playerName);
+      db.sqlite.prepare(`INSERT INTO player_events
+        (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
+        VALUES (?, ?, ?, 'player_position', ?, ?, '2026-09-19T00:10:00Z')`)
+        .run(`${serverId}-position-2`, serverId, playerName, secondX, secondY);
+    }
+    await grant(env);
+
+    const payload = await getPublicAdvancedLeaderboardsPayload(env, { limit: 19 });
+    for (const metricKey of ["most_travelled_server", "most_on_foot_distance", "map_exploration_percent"]) {
+      const board = payload.boards.find((candidate) => candidate.metricKey === metricKey);
+      assert.ok(board, `${metricKey} board required`);
+      const nuketown = board.rows.find((row) => row.serverId === scope.linkedServerId);
+      assert.ok(nuketown, `NukeTown must appear on ${metricKey}`);
+      assert.equal(nuketown.isPremiumShowcase, true, metricKey);
+      assert.equal(board.rows.some((row) => row.serverId === "same-guild-other-server"), false, `${metricKey} grant must remain exact-server`);
+    }
+  });
   await test("owner analytics use only durable headline totals and bounded event samples", async ({ db, env }) => {
     seedPublicMedia(db);
     await grant(env);
