@@ -1014,7 +1014,6 @@ function ServerDashboard({
   }) => {
     if (
       activeServerIdRef.current !== input.requestServerId ||
-      input.requestId < billingRequestIdRef.current ||
       input.requestId < lastAppliedBillingRequestIdRef.current
     ) {
       return false;
@@ -1034,7 +1033,6 @@ function ServerDashboard({
   }) => {
     if (
       activeServerIdRef.current !== input.requestServerId ||
-      input.requestId < advertisingRequestIdRef.current ||
       input.requestId < lastAppliedAdvertisingRequestIdRef.current ||
       isOlderGeneratedAt(input.generatedAt, lastAppliedAdvertisingGeneratedAtRef.current)
     ) {

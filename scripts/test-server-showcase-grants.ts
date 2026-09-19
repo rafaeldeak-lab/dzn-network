@@ -17,7 +17,7 @@ import { getAvailableShowcaseBadgesForServer, resolvePublicServerVisualLoadout, 
 import { getAvailableFrameVisuals, getAvailableThemeBannerVisuals } from "../lib/badges/visuals";
 import { getPublicServersPayload, onRequest as publicServers, refreshPublicShowcaseSnapshot } from "../functions/api/public/servers";
 import { formatPublicVisibilitySummary, publicListingPlanLabel, publicVisibilityTierLabel } from "../lib/showcase-labels";
-import { getServerAdvancedShowcasePayload, queryPositionSamples } from "../functions/_lib/advanced-leaderboards";
+import { getPublicAdvancedLeaderboardsPayload, getServerAdvancedShowcasePayload, queryPositionSamples } from "../functions/_lib/advanced-leaderboards";
 import { onRequestGet as dashboardAdvancedStats } from "../functions/api/servers/[serverId]/dashboard/advanced-stats";
 import { onRequestGet as dashboardHealth } from "../functions/api/servers/[serverId]/dashboard/health";
 import { onRequest as advertisingBump } from "../functions/api/servers/[serverId]/advertising/bump";
@@ -224,6 +224,38 @@ async function run() {
     assert.equal(advertisingBody.advertising.included_bumps_per_month, 2);
     assert.equal(advertisingBody.server_access.source, "complimentary_showcase");
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), billingBefore);
+  });
+  await test("exact grant includes only NukeTown in Pro global advanced boards beyond the metadata window", async ({ db, env }) => {
+    seedPublicMedia(db);
+    for (let index = 0; index < 501; index += 1) {
+      db.sqlite.prepare(`INSERT INTO linked_servers (id, user_id, guild_id, discord_guild_id, nitrado_service_id,
+        server_name, server_type, server_category, status, lifecycle_status, public_slug, listing_visibility)
+        VALUES (?, ?, 'extra-guild', 'synthetic-guild', ?, 'Synthetic extra', 'deathmatch', 'deathmatch',
+          'live', 'active_live', ?, 'public')`)
+        .run(`extra-${index}`, actor.id, `extra-service-${index}`, `extra-${index}`);
+    }
+    db.sqlite.prepare("UPDATE linked_servers SET rowid = 10000 WHERE id = ?").run(scope.linkedServerId);
+    assert.ok(Number(db.sqlite.prepare("SELECT count(*) AS count FROM linked_servers").get()?.count) > 500);
+    for (const [id, serverId, serviceId] of [
+      ["nuketown-build", scope.linkedServerId, scope.nitradoServiceId],
+      ["neighbor-build", "same-guild-other-server", "10000001"],
+    ]) {
+      db.sqlite.prepare(`INSERT INTO build_events (id, linked_server_id, nitrado_service_id, player_name, event_type,
+        source_adm_file, source_line_number, occurred_at, raw_line)
+        VALUES (?, ?, ?, 'Synthetic builder', 'built', 'synthetic.ADM', 1, '2026-09-19T00:00:00Z', 'synthetic')`)
+        .run(id, serverId, serviceId);
+    }
+    await grant(env);
+
+    const payload = await getPublicAdvancedLeaderboardsPayload(env, { limit: 20 });
+    for (const metricKey of ["build_score", "balanced_activity_score"]) {
+      const board = payload.boards.find((candidate) => candidate.metricKey === metricKey);
+      assert.ok(board, `${metricKey} board required`);
+      const nuketown = board.rows.find((row) => row.serverId === scope.linkedServerId);
+      assert.ok(nuketown, `NukeTown must appear on ${metricKey}`);
+      assert.equal(nuketown.isPremiumShowcase, true, metricKey);
+      assert.equal(board.rows.some((row) => row.serverId === "same-guild-other-server"), false, `${metricKey} grant must remain exact-server`);
+    }
   });
   await test("owner analytics use only durable headline totals and bounded event samples", async ({ db, env }) => {
     seedPublicMedia(db);

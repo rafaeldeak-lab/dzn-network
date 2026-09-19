@@ -5,7 +5,7 @@ import { getAdvancedShowcaseAccess, type AdvancedShowcaseAccess } from "./advanc
 import { summarizeMapExploration, type ExplorationSummary } from "./map-exploration";
 import { resolveDznMapConfig } from "./map-configs";
 import { computeTravelStats, type TravelPositionSample, type TravelPlayerStats, type TravelServerStats } from "./travel-stats";
-import { readServerShowcaseAccess } from "./server-showcase-access";
+import { NUKETOWN_SHOWCASE_SCOPE, readServerShowcaseAccess } from "./server-showcase-access";
 import type { Env } from "./types";
 import {
   SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES,
@@ -164,16 +164,17 @@ async function buildPublicAdvancedLeaderboardsPayload(env: Env, options: { limit
   if (!env.DB) return emptyAdvancedLeaderboardsPayload();
   await ensureAdvancedReadSchema(env);
   const limit = safeLimit(options.limit, 8, 20);
+  const accessByServer = await resolvePublicAdvancedAccess(env);
   const [serverMeta, pvpBoards, buildBoards, hybridBoards, samples] = await Promise.all([
     queryPublicServerMeta(env),
-    queryPvpServerBoards(env, limit),
-    queryBuildServerBoards(env, limit),
-    queryHybridServerBoards(env, limit),
+    queryPvpServerBoards(env, limit, accessByServer),
+    queryBuildServerBoards(env, limit, accessByServer),
+    queryHybridServerBoards(env, limit, accessByServer),
     queryPositionSamples(env, { limit: PUBLIC_ADVANCED_POSITION_SAMPLE_LIMIT }),
   ]);
   const metaById = new Map(serverMeta.map((server) => [server.id, server]));
-  const travelBoards = buildTravelServerBoards(samples, metaById, limit);
-  const explorationBoards = buildExplorationServerBoards(samples, serverMeta, limit);
+  const travelBoards = buildTravelServerBoards(samples, metaById, accessByServer, limit);
+  const explorationBoards = buildExplorationServerBoards(samples, serverMeta, accessByServer, limit);
 
   return {
     ok: true,
@@ -186,6 +187,20 @@ async function buildPublicAdvancedLeaderboardsPayload(env: Env, options: { limit
       "Public exploration data is aggregate-only; raw player coordinates and exact routes are not exposed.",
     ],
   };
+}
+
+async function resolvePublicAdvancedAccess(env: Env) {
+  const serverId = NUKETOWN_SHOWCASE_SCOPE.linkedServerId;
+  const showcaseAccess = await readServerShowcaseAccess(env, serverId, {
+    plan_key: null,
+    subscription_status: null,
+  });
+  if (showcaseAccess.source !== "complimentary_showcase") {
+    return new Map<string, AdvancedShowcaseAccess>();
+  }
+  return new Map<string, AdvancedShowcaseAccess>([[serverId, getAdvancedShowcaseAccess(null, null, {
+    source: showcaseAccess.source,
+  })]]);
 }
 
 export async function getServerAdvancedShowcasePayload(
@@ -535,7 +550,7 @@ async function resolveAdvancedServer(env: Env, serverRef: string, ownerScoped: b
     .first<PublicServerMeta>();
 }
 
-async function queryPvpServerBoards(env: Env, limit: number): Promise<AdvancedBoard[]> {
+async function queryPvpServerBoards(env: Env, limit: number, accessByServer: Map<string, AdvancedShowcaseAccess>): Promise<AdvancedBoard[]> {
   const db = requireDb(env);
   const [kills, kd, longest, uniquePlayers] = await Promise.all([
     db.prepare(serverMetricSql("COUNT(kill_events.id)", "kill_events", "kill_events.linked_server_id = linked_servers.id", "COUNT(kill_events.id) > 0", "COUNT(kill_events.id) DESC")).bind(limit * 3).all<ServerMetricRow>(),
@@ -590,14 +605,14 @@ async function queryPvpServerBoards(env: Env, limit: number): Promise<AdvancedBo
   ]);
 
   return [
-    serverBoard("most_kills", "Most Kills", "Servers ranked by confirmed PvP kill events.", "pvp", "free", kills.results ?? [], "kills", limit),
-    serverBoard("server_kd", "Highest Server K/D", "Requires at least 25 confirmed kills to avoid one-kill abuse.", "deathmatch", "free", kd.results ?? [], "ratio", limit),
-    serverBoard("longest_kill", "Longest Kill", "Longest confirmed ADM kill distance.", "pvp", "free", longest.results ?? [], "distance", limit),
-    serverBoard("unique_players", "Most Unique Players", "Unique imported player profiles per server.", "overall", "free", uniquePlayers.results ?? [], "count", limit),
+    serverBoard("most_kills", "Most Kills", "Servers ranked by confirmed PvP kill events.", "pvp", "free", kills.results ?? [], "kills", limit, accessByServer),
+    serverBoard("server_kd", "Highest Server K/D", "Requires at least 25 confirmed kills to avoid one-kill abuse.", "deathmatch", "free", kd.results ?? [], "ratio", limit, accessByServer),
+    serverBoard("longest_kill", "Longest Kill", "Longest confirmed ADM kill distance.", "pvp", "free", longest.results ?? [], "distance", limit, accessByServer),
+    serverBoard("unique_players", "Most Unique Players", "Unique imported player profiles per server.", "overall", "free", uniquePlayers.results ?? [], "count", limit, accessByServer),
   ];
 }
 
-async function queryBuildServerBoards(env: Env, limit: number): Promise<AdvancedBoard[]> {
+async function queryBuildServerBoards(env: Env, limit: number, accessByServer: Map<string, AdvancedShowcaseAccess>): Promise<AdvancedBoard[]> {
   const rows = await requireDb(env)
     .prepare(
       `SELECT linked_servers.id,
@@ -630,14 +645,14 @@ async function queryBuildServerBoards(env: Env, limit: number): Promise<Advanced
   const trapsRows = await queryBuildMetric(env, `SUM(CASE WHEN ${trapSql()} THEN 1 ELSE 0 END)`, "traps", limit);
 
   return [
-    serverBoard("build_score", "Highest Build Score", "Construction score from built, placed, repair, and defence actions. Raid/destruction is separate.", "builds", "pro", rows.results ?? [], "score", limit, true),
-    serverBoard("repairs", "Most Repairs", "Fence/gate repair and maintenance events.", "pve", "pro", repairRows, "count", limit, true),
-    serverBoard("raid_score", "Most Base Raiding / Dismantles", "Dismantle and destruction activity, separate from build score.", "pve", "pro", raidRows, "count", limit, true),
-    serverBoard("traps_explosives", "Most Traps & Explosives Placed", "ADM-derived trap/explosive placement events.", "builds", "pro", trapsRows, "count", limit, true),
+    serverBoard("build_score", "Highest Build Score", "Construction score from built, placed, repair, and defence actions. Raid/destruction is separate.", "builds", "pro", rows.results ?? [], "score", limit, accessByServer, true),
+    serverBoard("repairs", "Most Repairs", "Fence/gate repair and maintenance events.", "pve", "pro", repairRows, "count", limit, accessByServer, true),
+    serverBoard("raid_score", "Most Base Raiding / Dismantles", "Dismantle and destruction activity, separate from build score.", "pve", "pro", raidRows, "count", limit, accessByServer, true),
+    serverBoard("traps_explosives", "Most Traps & Explosives Placed", "ADM-derived trap/explosive placement events.", "builds", "pro", trapsRows, "count", limit, accessByServer, true),
   ];
 }
 
-async function queryHybridServerBoards(env: Env, limit: number): Promise<AdvancedBoard[]> {
+async function queryHybridServerBoards(env: Env, limit: number, accessByServer: Map<string, AdvancedShowcaseAccess>): Promise<AdvancedBoard[]> {
   const rows = await requireDb(env)
     .prepare(
       `SELECT *
@@ -706,14 +721,23 @@ async function queryHybridServerBoards(env: Env, limit: number): Promise<Advance
     .all<ServerMetricRow>();
 
   return [
-    serverBoard("balanced_activity_score", "Best Balanced Server Score", "Separate combined score using combat, event, and build activity.", "hybrid", "pro", rows.results ?? [], "score", limit, true),
-    serverBoard("events_tracked", "Most Events Tracked", "Canonical imported ADM event rows: kills + player events + build events.", "hybrid", "free", eventRows.results ?? [], "count", limit),
+    serverBoard("balanced_activity_score", "Best Balanced Server Score", "Separate combined score using combat, event, and build activity.", "hybrid", "pro", rows.results ?? [], "score", limit, accessByServer, true),
+    serverBoard("events_tracked", "Most Events Tracked", "Canonical imported ADM event rows: kills + player events + build events.", "hybrid", "free", eventRows.results ?? [], "count", limit, accessByServer),
   ];
 }
 
-function buildTravelServerBoards(samples: TravelPositionSample[], metaById: Map<string, PublicServerMeta>, limit: number): AdvancedBoard[] {
+function buildTravelServerBoards(
+  samples: TravelPositionSample[],
+  metaById: Map<string, PublicServerMeta>,
+  accessByServer: Map<string, AdvancedShowcaseAccess>,
+  limit: number,
+): AdvancedBoard[] {
   const travel = computeTravelStats(samples);
-  const rows = travel.servers.map((server) => serverTravelToBoardRow(server, metaById.get(server.linkedServerId))).filter(Boolean) as AdvancedBoardRow[];
+  const rows = travel.servers.map((server) => serverTravelToBoardRow(
+    server,
+    metaById.get(server.linkedServerId),
+    accessByServer.get(server.linkedServerId),
+  )).filter(Boolean) as AdvancedBoardRow[];
   const byTotal = [...rows].sort((a, b) => numberOrZero(b.value) - numberOrZero(a.value)).slice(0, limit).map((row, index) => ({ ...row, rank: index + 1 }));
   const byOnFoot = [...rows].sort((a, b) => numberOrZero(b.supportingStats?.onFootDistanceM) - numberOrZero(a.supportingStats?.onFootDistanceM)).slice(0, limit).map((row, index) => ({
     ...row,
@@ -743,7 +767,12 @@ function buildTravelServerBoards(samples: TravelPositionSample[], metaById: Map<
   ];
 }
 
-function buildExplorationServerBoards(samples: TravelPositionSample[], servers: PublicServerMeta[], limit: number): AdvancedBoard[] {
+function buildExplorationServerBoards(
+  samples: TravelPositionSample[],
+  servers: PublicServerMeta[],
+  accessByServer: Map<string, AdvancedShowcaseAccess>,
+  limit: number,
+): AdvancedBoard[] {
   const samplesByServer = groupSamplesByServer(samples);
   const rows = servers.map((server) => {
     const exploration = summarizeMapExploration(server.map_name ?? server.mission, samplesByServer.get(server.id) ?? [], { overlayLimit: 0 });
@@ -765,7 +794,7 @@ function buildExplorationServerBoards(samples: TravelPositionSample[], servers: 
       },
       dataFreshness: exploration.lastExplorationUpdateAt,
       estimated: exploration.estimated,
-      isPremiumShowcase: getAdvancedShowcaseAccess(server.plan_key, server.subscription_status).globalPremiumShowcase,
+      isPremiumShowcase: resolveAdvancedAccess(server, accessByServer).globalPremiumShowcase,
     } satisfies AdvancedBoardRow;
   }).filter(Boolean) as AdvancedBoardRow[];
 
@@ -1031,10 +1060,11 @@ function serverBoard(
   rows: ServerMetricRow[],
   valueType: "count" | "distance" | "score" | "ratio" | "kills",
   limit: number,
+  accessByServer: Map<string, AdvancedShowcaseAccess>,
   requireProPlus = false,
 ): AdvancedBoard {
   const ranked = rows
-    .filter((row) => !requireProPlus || ["pro", "premium"].includes(getAdvancedShowcaseAccess(row.plan_key, row.subscription_status).effectivePlan))
+    .filter((row) => !requireProPlus || resolveAdvancedAccess(row, accessByServer).globalAdvancedBoards)
     .slice(0, limit)
     .map((row, index) => ({
       rank: index + 1,
@@ -1052,11 +1082,15 @@ function serverBoard(
         secondary: row.supporting_c ?? null,
       },
       dataFreshness: row.data_freshness ?? null,
-      isPremiumShowcase: getAdvancedShowcaseAccess(row.plan_key, row.subscription_status).globalPremiumShowcase,
+      isPremiumShowcase: resolveAdvancedAccess(row, accessByServer).globalPremiumShowcase,
       estimated: false,
     }));
 
   return { metricKey, title, description, category, packageRequired, rows: ranked };
+}
+
+function resolveAdvancedAccess(server: PublicServerMeta, accessByServer: Map<string, AdvancedShowcaseAccess>) {
+  return accessByServer.get(server.id) ?? getAdvancedShowcaseAccess(server.plan_key, server.subscription_status);
 }
 
 function boardFromPlayerRows(
@@ -1188,7 +1222,11 @@ function summarizeCell(config: NonNullable<ReturnType<typeof resolveDznMapConfig
   return `${cellX}:${cellY}`;
 }
 
-function serverTravelToBoardRow(stats: TravelServerStats, meta: PublicServerMeta | undefined): AdvancedBoardRow | null {
+function serverTravelToBoardRow(
+  stats: TravelServerStats,
+  meta: PublicServerMeta | undefined,
+  access: AdvancedShowcaseAccess | undefined,
+): AdvancedBoardRow | null {
   if (!meta || stats.totalValidDistanceM <= 0) return null;
   return {
     rank: 0,
@@ -1207,7 +1245,7 @@ function serverTravelToBoardRow(stats: TravelServerStats, meta: PublicServerMeta
       suspiciousSegmentsIgnored: stats.suspiciousSegmentsCount,
     },
     dataFreshness: stats.lastTravelSampleAt,
-    isPremiumShowcase: getAdvancedShowcaseAccess(meta.plan_key, meta.subscription_status).globalPremiumShowcase,
+    isPremiumShowcase: (access ?? getAdvancedShowcaseAccess(meta.plan_key, meta.subscription_status)).globalPremiumShowcase,
     estimated: true,
   };
 }

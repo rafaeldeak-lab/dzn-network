@@ -30,7 +30,7 @@ assert.equal(dashboard.includes("lastAppliedAdvertisingGeneratedAtRef"), true, "
 assert.equal(dashboard.includes("billingRequestIdRef"), true, "Account billing must use request ordering across every dashboard loader.");
 assert.equal(dashboard.includes("lastAppliedBillingRequestIdRef"), true, "Account billing must retain the newest applied request.");
 assert.equal(dashboard.includes("input.requestId < lastAppliedBillingRequestIdRef.current"), true, "Older account-billing requests must be ignored.");
-assert.equal(dashboard.includes("input.requestId < billingRequestIdRef.current"), true, "A response superseded by a newer started billing request must be ignored.");
+assert.equal(dashboard.includes("input.requestId < billingRequestIdRef.current"), false, "A successful billing response must survive when a newer request merely started and then failed.");
 assert.equal(dashboard.includes("requestId: billing.requestId"), true, "The Billing tab must apply its account response through the shared ordering guard.");
 assert.equal(planSummaryBlock.includes("requestId: result.requestId"), true, "The Overview summary must apply its account response through the shared ordering guard.");
 const planSummaryBarrierIndex = planSummaryBlock.indexOf("await Promise.allSettled");
@@ -44,7 +44,7 @@ assert.equal(dashboard.includes("(!planSummaryVisible && activeTab !== \"billing
 assert.equal(dashboard.includes("!advertisingStatus ||\n      selectedServerAdvertising"), true, "Only an invalidated retained advertising snapshot should trigger recovery.");
 assert.equal(dashboard.includes("advertisingAccessRecoveryKeyRef.current === recoveryKey"), true, "Advertising recovery must run at most once per accepted access version.");
 assert.equal(dashboard.includes("input.requestId < lastAppliedAdvertisingRequestIdRef.current"), true, "Older advertising requests must be ignored.");
-assert.equal(dashboard.includes("input.requestId < advertisingRequestIdRef.current"), true, "A response superseded by a newer started advertising request must be ignored.");
+assert.equal(dashboard.includes("input.requestId < advertisingRequestIdRef.current"), false, "A successful advertising response must survive when a newer request merely started and then failed.");
 assert.equal(dashboard.includes("isOlderGeneratedAt(input.generatedAt, lastAppliedAdvertisingGeneratedAtRef.current)"), true, "Older advertising snapshots must be ignored.");
 assert.equal(dashboard.includes("applyAdvertisingStatus({ requestServerId: server.id, requestId, generatedAt, advertising: next })"), true, "A completed bump must invalidate earlier advertising reads.");
 assert.equal(dashboard.includes("isOlderGeneratedAt(response.generated_at, lastAppliedLiveStatsGeneratedAtRef.current)"), true, "Older live-stat responses must be ignored.");
