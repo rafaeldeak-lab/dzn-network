@@ -81,6 +81,7 @@ export type DashboardAdvancedStatsResult = {
   generated_at?: string;
   data?: DashboardAdvancedStatsResult | null;
   access?: {
+    source?: "billing" | "complimentary_showcase";
     effectivePlan?: string;
     dashboardAnalytics?: boolean;
     publicServerTop15?: boolean;
@@ -94,7 +95,7 @@ export type DashboardAdvancedStatsResult = {
     joins: number;
     disconnects: number;
     uniquePlayers: number;
-    eventsTracked: number;
+    eventsTracked: number | null;
     buildScore: number;
     structuresBuilt: number;
     raidScore: number;
@@ -906,6 +907,9 @@ export type AdvertisingBumpStatus = {
   included_bumps_per_month?: number;
   bump_cooldown_hours?: number;
   bump_cooldown_days?: number;
+  access_source?: "billing" | "complimentary_showcase";
+  effective_listing_plan?: "free" | "starter" | "pro";
+  listing_label?: string;
 };
 
 export type NitradoLogSettingsConfirmation = {
@@ -1479,6 +1483,11 @@ export type DashboardHealthResult = {
   current_plan: "free" | "starter" | "pro" | "premium" | "network" | "partner" | string;
   configured_plan: string;
   subscription_status: string | null;
+  server_access?: {
+    source: "billing" | "complimentary_showcase";
+    effectiveListingPlan: "free" | "starter" | "pro";
+    expiresAt: string | null;
+  };
   plan_limits: {
     status_interval_minutes: number;
     adm_discovery_interval_minutes: number;

@@ -35,19 +35,27 @@ async function fixture() {
     return statement([]);
   } } } as unknown as Env;
   sqlite.exec(`
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY, discord_id TEXT NOT NULL UNIQUE
+    );
     CREATE TABLE linked_servers (
-      id TEXT PRIMARY KEY, public_slug TEXT, nitrado_service_id TEXT, guild_id TEXT,
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, public_slug TEXT, nitrado_service_id TEXT, guild_id TEXT,
       display_name TEXT, hostname TEXT, server_name TEXT, nitrado_service_name TEXT,
       server_mode TEXT, server_type TEXT, map_name TEXT, mission TEXT, updated_at TEXT,
       status TEXT DEFAULT 'live', lifecycle_status TEXT DEFAULT 'active_live',
       listing_visibility TEXT DEFAULT 'public', merged_into_server_id TEXT
     );
     CREATE TABLE server_subscriptions (
-      id TEXT PRIMARY KEY, guild_id TEXT, plan_key TEXT, status TEXT, updated_at TEXT, created_at TEXT
+      id TEXT PRIMARY KEY, guild_id TEXT, owner_discord_id TEXT, plan_key TEXT, status TEXT, updated_at TEXT, created_at TEXT
     );
-    INSERT INTO linked_servers (id, public_slug, nitrado_service_id, guild_id, server_name, map_name)
-      VALUES ('sample-server', 'sample-public', 'sample-service', 'sample-guild', 'Example server', 'chernarus');
-    INSERT INTO server_subscriptions VALUES ('subscription', 'sample-guild', 'free', 'active', '2026-01-01', '2026-01-01');
+    CREATE TABLE owner_billing_accounts (
+      id TEXT PRIMARY KEY, discord_user_id TEXT NOT NULL UNIQUE, plan_key TEXT NOT NULL, plan_status TEXT NOT NULL
+    );
+    INSERT INTO users VALUES ('sample-owner', 'sample-discord-owner');
+    INSERT INTO linked_servers (id, user_id, public_slug, nitrado_service_id, guild_id, server_name, map_name)
+      VALUES ('sample-server', 'sample-owner', 'sample-public', 'sample-service', 'sample-guild', 'Example server', 'chernarus');
+    INSERT INTO server_subscriptions VALUES ('subscription', 'sample-guild', 'sample-discord-owner', 'free', 'active', '2026-01-01', '2026-01-01');
+    INSERT INTO owner_billing_accounts VALUES ('billing', 'sample-discord-owner', 'free', 'active');
   `);
   await ensureAdmSyncSchema(env);
   sqlite.exec(`
@@ -84,7 +92,7 @@ async function main() {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error("No provider/network calls permitted"); };
   const { env, sqlite, setPlan } = await fixture();
-  const snapshot = () => JSON.stringify(["linked_servers", "kill_events", "build_events", "player_events", "player_profiles"]
+  const snapshot = () => JSON.stringify(["users", "linked_servers", "kill_events", "build_events", "player_events", "player_profiles"]
     .map(table => sqlite.prepare(`SELECT * FROM ${table} ORDER BY id`).all()));
   const before = snapshot();
   const requestRoute = async (route: PagesFunction, serverId = "sample-server", method = "GET") => {

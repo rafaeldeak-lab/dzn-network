@@ -7,7 +7,7 @@ This display-only patch follows the selected-server plan work in PR #176. It doe
 - Legacy Premium/Network/Partner credit presentation uses the canonical Pro public contract, including inactive-plan handling.
 - Unknown Server Wars access is not Free. Known legacy Pro access is labelled Pro. Missing challenge denial reasons do not invent an upgrade requirement.
 - Overview remounts reattach visibility observers without adding polling or changing request-time analytics.
-- The advanced-stats route currently has no implemented durable snapshot reader. Do not promise another import will populate it; a background publisher/reader is separate work. Do not restore heavy raw-event reconstruction on dashboard GET.
+- The advanced-stats route does not present partial `server_stats` counters as the complete lifetime event total. That total remains unavailable until a dedicated durable aggregate exists. Other headline metrics use `server_stats` when present and a hard-bounded fallback otherwise. Unlocked player/build/travel/exploration boards are bounded, locked owner accounts skip raw event history entirely, and owner responses are never browser-cacheable. A future background publisher remains separate work, and dashboard GET must not regress to unbounded reconstruction.
 
 Verification: `npm test`, `npm run lint`, production webpack build and `node scripts/qa-dashboard-plan-display.mjs`. Browser QA uses a built local site, synthetic fixtures only, blocks external network and all non-GET API calls, checks 13 scenarios at 320/390/900/1440px, captures screenshots and checks overflow/browser errors. It does not test a real payment or new gameplay import.
 

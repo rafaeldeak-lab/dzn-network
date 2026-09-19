@@ -8,9 +8,11 @@ const publicExplorationApi = readFileSync("functions/api/public/servers/[serverI
 const ownerAdvancedApi = readFileSync("functions/api/servers/[serverId]/dashboard/advanced-stats.ts", "utf8");
 const previewSeed = readFileSync("scripts/seed-advanced-showcase-preview.ts", "utf8");
 
-assert.match(advancedSource, /getCanonicalServerStats/);
+assert.match(advancedSource, /queryServerStatsSnapshot/);
+assert.match(advancedSource, /queryBoundedServerStatsFallback/);
 assert.match(advancedSource, /queryPositionSamples/);
 assert.match(advancedSource, /PUBLIC_ADVANCED_POSITION_SAMPLE_LIMIT = 4_000/);
+assert.match(advancedSource, /SERVER_ADVANCED_EVENT_SAMPLE_LIMIT = 6_000/);
 assert.match(advancedSource, /cachedAdvancedPayload/);
 assert.match(advancedSource, /raw player coordinates and exact routes are not exposed/i);
 assert.match(advancedSource, /const canShowMapOverlay = access\.publicMapOverlay;/);
@@ -28,7 +30,8 @@ assert.match(publicServerAdvancedApi, /publicApiErrorHeaders/);
 assert.doesNotMatch(publicServerAdvancedApi + publicExplorationApi, /publicAccessCacheHeaders/);
 assert.match(ownerAdvancedApi, /requireServerOwnerOrDznAdmin/);
 assert.match(ownerAdvancedApi, /unauthenticated/);
-assert.match(ownerAdvancedApi, /private, max-age=20/);
+assert.doesNotMatch(ownerAdvancedApi, /max-age/);
+assert.doesNotMatch(advancedSource, /queryServerEventCounts/);
 assert.match(previewSeed, /local-preview only/i);
 assert.match(previewSeed, /"--local"/);
 assert.match(previewSeed, /must never run with --remote/);

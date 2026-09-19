@@ -224,7 +224,7 @@ type ServerAdvancedPayload = {
   summary?: {
     kills: number;
     deaths: number;
-    eventsTracked: number;
+    eventsTracked: number | null;
     buildScore: number;
     structuresBuilt: number;
     raidScore: number;

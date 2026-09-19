@@ -3,6 +3,7 @@ import { getPlanConfig, normalizePlanKey, type PlanKey } from "./plans";
 export type AdvancedShowcasePlan = "free" | "starter" | "pro" | "premium";
 
 export type AdvancedShowcaseAccess = {
+  source: "billing" | "complimentary_showcase";
   configuredPlan: AdvancedShowcasePlan;
   effectivePlan: AdvancedShowcasePlan;
   subscriptionActive: boolean;
@@ -37,20 +38,28 @@ export function advancedShowcasePlanFromSubscription(planKey: unknown, status: u
       : normalized === "starter"
         ? "starter"
         : "free";
-  if (configured === "free" || configured === "starter") return configured;
+  if (configured === "free") return configured;
   return hasActiveAdvancedSubscription(status) ? configured : "free";
 }
 
-export function getAdvancedShowcaseAccess(planKey: unknown, status: unknown): AdvancedShowcaseAccess {
+export function getAdvancedShowcaseAccess(
+  planKey: unknown,
+  status: unknown,
+  options: { source?: AdvancedShowcaseAccess["source"] } = {},
+): AdvancedShowcaseAccess {
+  const source = options.source ?? "billing";
   const configuredPlan = configuredAdvancedPlan(planKey);
-  const effectivePlan = advancedShowcasePlanFromSubscription(planKey, status);
+  const effectivePlan = source === "complimentary_showcase"
+    ? "pro"
+    : advancedShowcasePlanFromSubscription(planKey, status);
   const planConfig = getPlanConfig(effectivePlan);
   const proPlus = effectivePlan === "pro" || effectivePlan === "premium";
 
   return {
+    source,
     configuredPlan,
     effectivePlan,
-    subscriptionActive: effectivePlan === configuredPlan && hasActiveAdvancedSubscription(status),
+    subscriptionActive: source === "billing" && effectivePlan === configuredPlan && hasActiveAdvancedSubscription(status),
     dashboardAnalytics: proPlus && planConfig.can_use_advanced_analytics,
     publicServerTop15: proPlus,
     publicBuildShowcase: proPlus,

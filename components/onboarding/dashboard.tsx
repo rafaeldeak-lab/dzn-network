@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { StarterCheckoutButton } from "./starter-checkout-button";
 import { dashboardBillingPlan, dashboardServerPlan } from "./dashboard-plan-display";
 import { discordSetupEvidence, isCurrentDiscordCache, verifiedDiscordCache, type DiscordChannelCache } from "./dashboard-discord-state";
-import { dashboardAccessLabel, dashboardAdvancedStatsMessage, dashboardBillingPeriod, dashboardBumpCount, dashboardPromotionCredits } from "./dashboard-detail-display";
+import { dashboardAccessLabel, dashboardAdvertisingListing, dashboardAdvancedStatsMessage, dashboardBillingPeriod, dashboardBumpCount, dashboardCurrentAdvertisingDetails, dashboardPromotionCredits, dashboardSelectedServerAccess } from "./dashboard-detail-display";
 import { OpponentPicker } from "@/components/server-wars/opponent-picker";
 import { PAYMENT_COPY } from "../../lib/billing/payment-copy";
 import {
@@ -155,6 +155,7 @@ type OptionalDashboardRequestKey =
   | "advanced-stats"
   | "server-wars"
   | "billing"
+  | "advertising"
   | "discord-posts"
   | "sync-health-diagnostics"
   | "public-cache"
@@ -521,6 +522,7 @@ function ServerDashboard({
   const [billingPlans, setBillingPlans] = useState<BillingPlanSummary[]>([]);
   const [billingReadiness, setBillingReadiness] = useState<BillingReadinessResponse | null>(null);
   const [advertisingStatus, setAdvertisingStatus] = useState<AdvertisingBumpStatus | null>(null);
+  const [advertisingStatusGeneratedAt, setAdvertisingStatusGeneratedAt] = useState<string | null>(null);
   const [postingSetups, setPostingSetups] = useState<PostingChannelSetup[]>([]);
   const [postingOptions, setPostingOptions] = useState<PostingOptionSummary[]>([]);
   const [discordChannelCache, setDiscordChannelCache] = useState<DiscordChannelCache | null>(() => loadDiscordChannelCache(serverProp.id, serverProp.guild_id));
@@ -582,6 +584,7 @@ function ServerDashboard({
   const [advancedStatsError, setAdvancedStatsError] = useState("");
   const [advancedStatsLoading, setAdvancedStatsLoading] = useState(false);
   const [advancedStatsVisible, setAdvancedStatsVisible] = useState(false);
+  const [planSummaryVisible, setPlanSummaryVisible] = useState(false);
   const [serverWars, setServerWars] = useState<DashboardServerWarsResult | null>(null);
   const [serverWarsError, setServerWarsError] = useState("");
   const [serverWarsLoading, setServerWarsLoading] = useState(false);
@@ -592,8 +595,12 @@ function ServerDashboard({
   const discordRequestIdRef = useRef(0);
   const discordVerificationInFlightRef = useRef(false);
   const advancedStatsPanelRef = useRef<HTMLDivElement | null>(null);
+  const planSummaryPanelRef = useRef<HTMLDivElement | null>(null);
   const serverWarsPanelRef = useRef<HTMLDivElement | null>(null);
   const advancedStatsRequestedRef = useRef(false);
+  const advancedStatsRequestIdRef = useRef(0);
+  const advancedStatsAccessRecoveryKeyRef = useRef<string | null>(null);
+  const planSummaryRequestedRef = useRef(false);
   const serverWarsRequestedRef = useRef(false);
   const optionalRequestQueueRef = useRef<Array<OptionalDashboardRequest>>([]);
   const optionalRequestActiveCountRef = useRef(0);
@@ -607,6 +614,12 @@ function ServerDashboard({
   const lastAppliedLiveStatsGeneratedAtRef = useRef<string | null>(null);
   const dashboardHealthRequestIdRef = useRef(0);
   const lastAppliedDashboardHealthGeneratedAtRef = useRef<string | null>(null);
+  const billingRequestIdRef = useRef(0);
+  const lastAppliedBillingRequestIdRef = useRef(0);
+  const advertisingRequestIdRef = useRef(0);
+  const lastAppliedAdvertisingRequestIdRef = useRef(0);
+  const lastAppliedAdvertisingGeneratedAtRef = useRef<string | null>(null);
+  const advertisingAccessRecoveryKeyRef = useRef<string | null>(null);
   const lastGoodDashboardHealthRef = useRef(lastGoodDashboardHealth);
   const lastGoodDashboardLiveStatsRef = useRef(lastGoodDashboardLiveStats);
   const lastRefreshedAtRef = useRef<string | null>(lastRefreshedAt);
@@ -761,6 +774,12 @@ function ServerDashboard({
     syncRefreshPromiseRef.current = null;
     liveStatsRequestIdRef.current += 1;
     dashboardHealthRequestIdRef.current += 1;
+    billingRequestIdRef.current += 1;
+    lastAppliedBillingRequestIdRef.current = billingRequestIdRef.current;
+    advertisingRequestIdRef.current += 1;
+    lastAppliedAdvertisingRequestIdRef.current = advertisingRequestIdRef.current;
+    lastAppliedAdvertisingGeneratedAtRef.current = null;
+    advertisingAccessRecoveryKeyRef.current = null;
     const cachedHealth = loadDashboardHealthCache(serverProp.id);
     const cachedLiveStats = loadDashboardLiveStatsCache(serverProp.id);
     const cachedStats = loadDashboardStatsCache(serverProp.id);
@@ -787,6 +806,12 @@ function ServerDashboard({
       setAdvancedStatsLoading(false);
       setAdvancedStatsVisible(false);
       advancedStatsRequestedRef.current = false;
+      advancedStatsRequestIdRef.current += 1;
+      advancedStatsAccessRecoveryKeyRef.current = null;
+      setPlanSummaryVisible(false);
+      planSummaryRequestedRef.current = false;
+      setAdvertisingStatus(null);
+      setAdvertisingStatusGeneratedAt(null);
       setServerWars(null);
       setServerWarsError("");
       setServerWarsLoading(false);
@@ -809,6 +834,8 @@ function ServerDashboard({
 
   const refreshAdvancedStats = useCallback(async () => {
     const requestServerId = server.id;
+    const requestId = advancedStatsRequestIdRef.current + 1;
+    advancedStatsRequestIdRef.current = requestId;
     setAdvancedStatsLoading(true);
     try {
       const data = await runOptionalDashboardRequest(
@@ -816,18 +843,18 @@ function ServerDashboard({
         requestServerId,
         () => getDashboardAdvancedStats(requestServerId),
       );
-      if (activeServerIdRef.current !== requestServerId) return false;
+      if (activeServerIdRef.current !== requestServerId || advancedStatsRequestIdRef.current !== requestId) return false;
       setAdvancedStats(data);
       setAdvancedStatsError(data.available === false
         ? dashboardAdvancedStatsMessage(data.reason)
         : "");
       return true;
     } catch (error) {
-      if (activeServerIdRef.current !== requestServerId || isOptionalRequestCancelled(error)) return false;
+      if (activeServerIdRef.current !== requestServerId || advancedStatsRequestIdRef.current !== requestId || isOptionalRequestCancelled(error)) return false;
       setAdvancedStatsError(error instanceof Error ? error.message : "Advanced showcase data could not be loaded right now.");
       return false;
     } finally {
-      if (activeServerIdRef.current === requestServerId) setAdvancedStatsLoading(false);
+      if (activeServerIdRef.current === requestServerId && advancedStatsRequestIdRef.current === requestId) setAdvancedStatsLoading(false);
     }
   }, [runOptionalDashboardRequest, server.id]);
 
@@ -860,6 +887,7 @@ function ServerDashboard({
     if (typeof IntersectionObserver === "undefined") {
       const handle = window.setTimeout(() => {
         setAdvancedStatsVisible(true);
+        setPlanSummaryVisible(true);
         setServerWarsVisible(true);
       }, 0);
       return () => window.clearTimeout(handle);
@@ -869,11 +897,13 @@ function ServerDashboard({
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         if (entry.target === advancedStatsPanelRef.current) setAdvancedStatsVisible(true);
+        if (entry.target === planSummaryPanelRef.current) setPlanSummaryVisible(true);
         if (entry.target === serverWarsPanelRef.current) setServerWarsVisible(true);
       }
     }, { rootMargin: "220px 0px" });
 
     if (advancedStatsPanelRef.current) observer.observe(advancedStatsPanelRef.current);
+    if (planSummaryPanelRef.current) observer.observe(planSummaryPanelRef.current);
     if (serverWarsPanelRef.current) observer.observe(serverWarsPanelRef.current);
     return () => observer.disconnect();
   }, [server.id, activeTab]);
@@ -959,6 +989,64 @@ function ServerDashboard({
     }
   }, [runOptionalDashboardRequest, server.id, server.guild_id]);
 
+  const requestAdvertisingStatus = useCallback(async (requestServerId: string) => {
+    const requestId = advertisingRequestIdRef.current + 1;
+    advertisingRequestIdRef.current = requestId;
+    return {
+      requestId,
+      response: await getServerAdvertisingStatus(requestServerId),
+    };
+  }, []);
+
+  const requestBillingStatus = useCallback(async () => {
+    const requestId = billingRequestIdRef.current + 1;
+    billingRequestIdRef.current = requestId;
+    return {
+      requestId,
+      response: await getBillingStatus(),
+    };
+  }, []);
+
+  const applyBillingStatus = useCallback((input: {
+    requestServerId: string;
+    requestId: number;
+    billing: BillingStatus;
+  }) => {
+    if (
+      activeServerIdRef.current !== input.requestServerId ||
+      input.requestId < billingRequestIdRef.current ||
+      input.requestId < lastAppliedBillingRequestIdRef.current
+    ) {
+      return false;
+    }
+    lastAppliedBillingRequestIdRef.current = input.requestId;
+    setBillingStatus(input.billing);
+    setLastGoodBilling(input.billing);
+    setLastBillingRefreshAt(new Date().toISOString());
+    return true;
+  }, []);
+
+  const applyAdvertisingStatus = useCallback((input: {
+    requestServerId: string;
+    requestId: number;
+    generatedAt: string;
+    advertising: AdvertisingBumpStatus;
+  }) => {
+    if (
+      activeServerIdRef.current !== input.requestServerId ||
+      input.requestId < advertisingRequestIdRef.current ||
+      input.requestId < lastAppliedAdvertisingRequestIdRef.current ||
+      isOlderGeneratedAt(input.generatedAt, lastAppliedAdvertisingGeneratedAtRef.current)
+    ) {
+      return false;
+    }
+    lastAppliedAdvertisingRequestIdRef.current = input.requestId;
+    lastAppliedAdvertisingGeneratedAtRef.current = input.generatedAt;
+    setAdvertisingStatus(input.advertising);
+    setAdvertisingStatusGeneratedAt(input.generatedAt);
+    return true;
+  }, []);
+
   const refreshBilling = useCallback(async () => {
     const requestServerId = server.id;
     try {
@@ -967,8 +1055,8 @@ function ServerDashboard({
         requestServerId,
         async () => {
           const [billingResult, advertisingResult, plansResult, readinessResult] = await Promise.all([
-            getBillingStatus(),
-            getServerAdvertisingStatus(requestServerId).catch(() => null),
+            requestBillingStatus(),
+            requestAdvertisingStatus(requestServerId).catch(() => null),
             getBillingPlans().catch(() => null),
             getBillingReadiness().catch(() => null),
           ]);
@@ -981,10 +1069,19 @@ function ServerDashboard({
         },
       );
       if (activeServerIdRef.current !== requestServerId) return false;
-      setBillingStatus(billing);
-      setLastGoodBilling(billing);
-      setLastBillingRefreshAt(new Date().toISOString());
-      if (advertising?.advertising) setAdvertisingStatus(advertising.advertising);
+      applyBillingStatus({
+        requestServerId,
+        requestId: billing.requestId,
+        billing: billing.response,
+      });
+      if (advertising?.response.advertising) {
+        applyAdvertisingStatus({
+          requestServerId,
+          requestId: advertising.requestId,
+          generatedAt: advertising.response.generated_at,
+          advertising: advertising.response.advertising,
+        });
+      }
       if (plans?.plans?.length) setBillingPlans(plans.plans);
       setBillingReadiness(readiness);
       setBillingMessage("");
@@ -994,7 +1091,59 @@ function ServerDashboard({
       setBillingMessage(error instanceof Error ? error.message : "Billing status unavailable.");
       return false;
     }
-  }, [runOptionalDashboardRequest, server.id]);
+  }, [applyAdvertisingStatus, applyBillingStatus, requestAdvertisingStatus, requestBillingStatus, runOptionalDashboardRequest, server.id]);
+
+  const refreshPlanSummary = useCallback(async () => {
+    const requestServerId = server.id;
+    const billingRequest = runOptionalDashboardRequest(
+      "billing",
+      requestServerId,
+      () => requestBillingStatus(),
+    ).then((result) => {
+      applyBillingStatus({
+        requestServerId,
+        requestId: result.requestId,
+        billing: result.response,
+      });
+      return result;
+    });
+    const advertisingRequest = runOptionalDashboardRequest(
+      "advertising",
+      requestServerId,
+      () => requestAdvertisingStatus(requestServerId),
+    ).then((result) => {
+      if (result.response.advertising) {
+        applyAdvertisingStatus({
+          requestServerId,
+          requestId: result.requestId,
+          generatedAt: result.response.generated_at,
+          advertising: result.response.advertising,
+        });
+      }
+      return result;
+    });
+    const [billingResult, advertisingResult] = await Promise.allSettled([
+      billingRequest,
+      advertisingRequest,
+    ]);
+    if (activeServerIdRef.current !== requestServerId) return false;
+
+    const errors = [
+      billingResult.status === "rejected" && !isOptionalRequestCancelled(billingResult.reason)
+        ? billingResult.reason instanceof Error ? billingResult.reason.message : "Account billing details unavailable."
+        : "",
+      advertisingResult.status === "rejected" && !isOptionalRequestCancelled(advertisingResult.reason)
+        ? advertisingResult.reason instanceof Error ? advertisingResult.reason.message : "Selected server access unavailable."
+        : "",
+    ].filter(Boolean);
+    setBillingMessage(errors.join(" "));
+
+    const succeeded = billingResult.status === "fulfilled" || advertisingResult.status === "fulfilled";
+    if (!succeeded) {
+      planSummaryRequestedRef.current = false;
+    }
+    return succeeded;
+  }, [applyAdvertisingStatus, applyBillingStatus, requestAdvertisingStatus, requestBillingStatus, runOptionalDashboardRequest, server.id]);
 
   const refreshDiscordPostingSetup = useCallback(async (options: { liveChannels?: boolean } = {}) => {
     const requestId = discordRequestIdRef.current;
@@ -1093,6 +1242,12 @@ function ServerDashboard({
     }, 0);
     return () => window.clearTimeout(handle);
   }, [activeTab, refreshBilling]);
+
+  useEffect(() => {
+    if (!planSummaryVisible || planSummaryRequestedRef.current) return;
+    planSummaryRequestedRef.current = true;
+    void refreshPlanSummary();
+  }, [planSummaryVisible, refreshPlanSummary]);
 
   useEffect(() => {
     if (activeTab !== "discord-posts") return;
@@ -3187,29 +3342,6 @@ function ServerDashboard({
     URL.revokeObjectURL(url);
   }
 
-  async function openBillingPortal() {
-    await runDashboardAction({
-      actionKey: "manage-billing",
-      title: "Opening Billing Portal",
-      steps: ["Creating billing portal session", "Redirecting to Stripe"],
-      refreshAfterSuccess: false,
-      run: async (action) => {
-        try {
-          action.setStep(1, "Creating billing portal session.");
-          const session = await createPortalSession();
-          action.setStep(2, "Redirecting to Stripe billing.", 90);
-          window.location.assign(session.url);
-          return session;
-        } catch (error) {
-          setBillingMessage(error instanceof Error ? error.message : "Could not open billing portal.");
-          setActiveTab("billing");
-          throw error;
-        }
-      },
-      successSummary: () => "Billing portal opened.",
-    });
-  }
-
   async function refreshBillingWithAction() {
     await runDashboardAction({
       actionKey: "refresh-plan",
@@ -3228,6 +3360,124 @@ function ServerDashboard({
 
   const selectedServerLabel = serverDisplayName || server.guild_name || "DZN Server";
   const currentPlanName = effectivePlanLabel;
+  const selectedServerAccess = dashboardSelectedServerAccess({
+    healthAccess: dashboardHealthFresh ? effectiveDashboardHealth?.server_access ?? null : null,
+    healthGeneratedAt: effectiveDashboardHealth?.source === "local_fallback"
+      ? null
+      : effectiveDashboardHealth?.generated_at ?? null,
+    advertisingAccess: advertisingStatus,
+    advertisingGeneratedAt: advertisingStatusGeneratedAt,
+    serverDisplayPlan,
+  });
+  const selectedServerAccessSource = selectedServerAccess.source;
+  const selectedServerEffectivePlan = selectedServerAccess.effectivePlan;
+  const selectedServerAdvertising = dashboardCurrentAdvertisingDetails({
+    healthGeneratedAt: effectiveDashboardHealth?.source === "local_fallback"
+      ? null
+      : effectiveDashboardHealth?.generated_at ?? null,
+    advertisingAccess: advertisingStatus,
+    advertisingGeneratedAt: advertisingStatusGeneratedAt,
+  }, selectedServerAccess);
+  const advancedStatsMatchesSelectedAccess = !advancedStats || !selectedServerAccess.source || !selectedServerAccess.effectivePlan || (
+    advancedStats.access?.source === selectedServerAccess.source &&
+    dashboardAccessLabel(advancedStats.access?.effectivePlan) === dashboardAccessLabel(selectedServerAccess.effectivePlan)
+  );
+  const selectedServerAdvancedStats = advancedStatsMatchesSelectedAccess ? advancedStats : null;
+  useEffect(() => {
+    if (
+      !advancedStatsVisible ||
+      !dashboardHealthFresh ||
+      !advancedStats ||
+      advancedStatsMatchesSelectedAccess ||
+      !selectedServerAccess.source ||
+      !selectedServerAccess.effectivePlan
+    ) {
+      return;
+    }
+    const recoveryKey = [
+      server.id,
+      effectiveDashboardHealth?.generated_at ?? "unknown",
+      selectedServerAccess.source,
+      selectedServerAccess.effectivePlan,
+    ].join(":");
+    if (advancedStatsAccessRecoveryKeyRef.current === recoveryKey) return;
+    advancedStatsAccessRecoveryKeyRef.current = recoveryKey;
+    setAdvancedStats(null);
+    setAdvancedStatsError("");
+    advancedStatsRequestedRef.current = true;
+    void refreshAdvancedStats();
+  }, [
+    advancedStats,
+    advancedStatsMatchesSelectedAccess,
+    advancedStatsVisible,
+    dashboardHealthFresh,
+    effectiveDashboardHealth?.generated_at,
+    refreshAdvancedStats,
+    selectedServerAccess.effectivePlan,
+    selectedServerAccess.source,
+    server.id,
+  ]);
+  useEffect(() => {
+    const healthGeneratedAt = effectiveDashboardHealth?.source === "local_fallback"
+      ? null
+      : effectiveDashboardHealth?.generated_at ?? null;
+    if (
+      (!planSummaryVisible && activeTab !== "billing") ||
+      !dashboardHealthFresh ||
+      !healthGeneratedAt ||
+      !advertisingStatus ||
+      selectedServerAdvertising
+    ) {
+      return;
+    }
+    const recoveryKey = [
+      server.id,
+      healthGeneratedAt,
+      selectedServerAccess.source ?? "unknown",
+      selectedServerAccess.effectivePlan ?? "unknown",
+    ].join(":");
+    if (advertisingAccessRecoveryKeyRef.current === recoveryKey) return;
+    advertisingAccessRecoveryKeyRef.current = recoveryKey;
+    void runOptionalDashboardRequest(
+      "advertising",
+      server.id,
+      () => requestAdvertisingStatus(server.id),
+    ).then((result) => {
+      if (!result.response.advertising) return;
+      applyAdvertisingStatus({
+        requestServerId: server.id,
+        requestId: result.requestId,
+        generatedAt: result.response.generated_at,
+        advertising: result.response.advertising,
+      });
+    }).catch(() => undefined);
+  }, [
+    activeTab,
+    applyAdvertisingStatus,
+    dashboardHealthFresh,
+    effectiveDashboardHealth?.generated_at,
+    effectiveDashboardHealth?.source,
+    planSummaryVisible,
+    requestAdvertisingStatus,
+    runOptionalDashboardRequest,
+    selectedServerAccess.effectivePlan,
+    selectedServerAccess.source,
+    selectedServerAdvertising,
+    advertisingStatus,
+    server.id,
+  ]);
+  const selectedServerPlanName = selectedServerAccessSource === "complimentary_showcase"
+    ? "Pro Listing (complimentary)"
+    : dashboardAccessLabel(selectedServerEffectivePlan);
+  const accountServersUsed = effectiveBillingStatus
+    ? `${effectiveBillingStatus.linked_server_count} / ${effectiveBillingStatus.entitlements.max_linked_servers}`
+    : navigation && Number.isSafeInteger(navigation.linked_server_count) && Number.isSafeInteger(navigation.linked_server_limit)
+      ? `${navigation.linked_server_count} / ${navigation.linked_server_limit}`
+      : "Loading";
+  const selectedServerPeriod = {
+    label: "Bump Cooldown",
+    value: selectedServerAdvertising?.bump_cooldown_days === undefined ? "Loading" : `${selectedServerAdvertising.bump_cooldown_days} days`,
+  };
   const dashboardPackage = getDashboardPackageVisibility({
     navigation,
     billing: effectiveBillingStatus,
@@ -3445,7 +3695,7 @@ function ServerDashboard({
       ) : null}
       <div ref={advancedStatsPanelRef}>
         <DashboardAdvancedShowcasePanel
-          stats={advancedStats}
+          stats={selectedServerAdvancedStats}
           loading={advancedStatsVisible && advancedStatsLoading}
           error={advancedStatsError}
         />
@@ -3498,18 +3748,23 @@ function ServerDashboard({
           </Link>
         </DashboardPanel>
         <div className="grid gap-4">
+          <div ref={planSummaryPanelRef}>
           <DashboardPanel className="p-4">
             <div className="flex items-start justify-between gap-3">
-              <PanelHeader icon={<Gauge className="h-5 w-5" />} title="Current Plan" />
-              <button type="button" disabled={!effectiveBillingStatus?.stripe_customer_exists} onClick={openBillingPortal} className="rounded-lg border border-violet-300/25 bg-violet-400/10 px-3 py-2 text-[10px] font-black uppercase text-violet-50 disabled:opacity-55">Manage Billing</button>
+              <PanelHeader icon={<Gauge className="h-5 w-5" />} title="Selected Server Access" />
+              <button type="button" onClick={() => setActiveTab("billing")} className="rounded-lg border border-violet-300/25 bg-violet-400/10 px-3 py-2 text-[10px] font-black uppercase text-violet-50">Account Billing</button>
             </div>
-            <p className="mt-4 text-2xl font-black uppercase text-violet-100">{currentPlanName}</p>
-            <div className="mt-4 grid grid-cols-3 gap-3">
-              <MiniInfo label="Servers Used" value={effectiveBillingStatus ? `${effectiveBillingStatus.linked_server_count} / ${effectiveBillingStatus.entitlements.max_linked_servers}` : "Loading"} />
-              <MiniInfo label="Bumps This Period" value={dashboardBumpCount(advertisingStatus?.bump_count_current_period)} />
-              <MiniInfo {...dashboardBillingPeriod(effectiveBillingStatus)} />
+            <p className="mt-4 text-2xl font-black uppercase text-violet-100">{selectedServerPlanName}</p>
+            {selectedServerAccessSource === "complimentary_showcase" ? (
+              <p className="mt-2 text-xs font-bold leading-5 text-emerald-100">Exact-server DZN owner access. This does not create or represent a paid Stripe subscription.</p>
+            ) : null}
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <MiniInfo label="Account Servers" value={accountServersUsed} />
+              <MiniInfo label="Bumps This Period" value={dashboardBumpCount(selectedServerAdvertising?.bump_count_current_period)} />
+              <MiniInfo {...selectedServerPeriod} />
             </div>
           </DashboardPanel>
+          </div>
           <DashboardPanel className="p-4">
             <PanelHeader icon={<ShieldCheck className="h-5 w-5" />} title="Badge & Theme Preview" />
             {serverDisplayPlan === null ? <p className="mt-4 text-sm text-zinc-400" role="status">Checking server plan...</p> : <>
@@ -3534,7 +3789,7 @@ function ServerDashboard({
                 <ServerCardBadges badges={ownerEarnedBadges} max={5} />
               </div>
             </ServerThemeBanner>
-            <div className="mt-4 grid grid-cols-3 gap-2">
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
               <MiniInfo label="Reputation" value={ownerReputationTier} />
               <MiniInfo label="Frame" value={ownerVisuals.profileFrame.label} />
               <MiniInfo label="Theme" value={ownerVisuals.themeBanner.label} />
@@ -4010,9 +4265,11 @@ function ServerDashboard({
           <AdvertisingBoostPanel
             serverId={server.id}
             billing={effectiveBillingStatus}
-            advertising={advertisingStatus}
-            onBumped={(next) => {
-              setAdvertisingStatus(next);
+            advertising={selectedServerAdvertising}
+            onBumped={(next, generatedAt) => {
+              const requestId = advertisingRequestIdRef.current + 1;
+              advertisingRequestIdRef.current = requestId;
+              applyAdvertisingStatus({ requestServerId: server.id, requestId, generatedAt, advertising: next });
               setActionMessage("Server bumped. It will appear higher in public discovery.");
               void refreshBilling();
             }}
@@ -4383,13 +4640,17 @@ function DashboardAdvancedShowcasePanel({
   const boards = stats?.boards ?? [];
   const firstUnlockedBoard = boards.find((board) => !board.locked && board.rows.length > 0);
   const lockedModules = stats?.access?.lockedModules ?? [];
+  const analyticsUnlocked = stats?.access?.dashboardAnalytics === true;
+  const accessLabel = stats?.access?.source === "complimentary_showcase"
+    ? "Pro (complimentary)"
+    : dashboardAccessLabel(stats?.access?.effectivePlan);
 
   return (
     <DashboardPanel className="p-4">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <PanelHeader icon={<Compass className="h-5 w-5" />} title="Advanced Showcase Preview" />
         <div className="flex flex-wrap gap-2 text-[10px] font-black uppercase">
-          <span className="rounded border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-cyan-100">{dashboardAccessLabel(stats?.access?.effectivePlan)}</span>
+          <span className="rounded border border-cyan-300/20 bg-cyan-400/10 px-2 py-1 text-cyan-100">{accessLabel}</span>
           <span className="rounded border border-violet-300/20 bg-violet-400/10 px-2 py-1 text-violet-100">No raw coordinates</span>
           <span className="rounded border border-orange-300/20 bg-orange-400/10 px-2 py-1 text-orange-100">Estimated travel</span>
         </div>
@@ -4398,7 +4659,7 @@ function DashboardAdvancedShowcasePanel({
         <p className="mt-4 rounded-lg border border-white/10 bg-black/24 p-4 text-sm font-bold text-zinc-300">Loading advanced showcase data...</p>
       ) : error ? (
         <p className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-4 text-sm font-bold text-amber-100">{error}</p>
-      ) : summary ? (
+      ) : summary && analyticsUnlocked ? (
         <>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <MiniInfo label="Build Score" value={formatNullableDashboardNumber(summary.buildScore)} />
@@ -4438,6 +4699,20 @@ function DashboardAdvancedShowcasePanel({
             </div>
           </div>
         </>
+      ) : stats?.access?.dashboardAnalytics === false ? (
+        <div className="mt-4 rounded-lg border border-violet-300/20 bg-violet-400/10 p-4" role="status">
+          <p className="text-sm font-black uppercase text-violet-50">Pro analytics required</p>
+          <p className="mt-2 text-sm font-bold leading-6 text-zinc-300">
+            Advanced build, raid, travel, exploration, and Top 15 analytics are locked for this server. Core gameplay statistics remain available.
+          </p>
+          {lockedModules.length ? (
+            <div className="mt-3 grid gap-2">
+              {lockedModules.slice(0, 3).map((module) => (
+                <p key={module.key} className="rounded border border-white/10 bg-black/24 px-3 py-2 text-xs font-bold leading-5 text-violet-50">{module.reason}</p>
+              ))}
+            </div>
+          ) : null}
+        </div>
       ) : (
         <p className="mt-4 rounded-lg border border-white/10 bg-black/24 p-4 text-sm font-bold text-zinc-300">Advanced showcase has not loaded.</p>
       )}
@@ -5478,13 +5753,12 @@ function AdvertisingBoostPanel({
   serverId: string;
   billing: BillingStatus | null;
   advertising: AdvertisingBumpStatus | null;
-  onBumped: (state: AdvertisingBumpStatus) => void;
+  onBumped: (state: AdvertisingBumpStatus, generatedAt: string) => void;
 }) {
   const [bumping, setBumping] = useState(false);
   const [error, setError] = useState("");
-  const listingTier = dashboardPackageTierFromPlanKey(billing?.plan_key ?? null, billing?.plan_status ?? null);
-  const isProListing = listingTier === "pro";
-  const listingLabel = dashboardBillingPlan(billing) === null ? "Checking plan..." : isProListing ? "Pro Listing" : listingTier === "starter" ? "Starter Listing" : "Free Listing";
+  const listing = dashboardAdvertisingListing(advertising);
+  const isProListing = listing.listingTier === "pro";
   const canBump = true;
   const proCheckoutConfigured = Boolean(billing?.checkout_configured?.pro);
   const cooldownDays = advertising?.bump_cooldown_days ?? (isProListing ? 7 : 30);
@@ -5497,7 +5771,7 @@ function AdvertisingBoostPanel({
     setError("");
     try {
       const result = await bumpServer(serverId);
-      onBumped(result.advertising);
+      onBumped(result.advertising, result.generated_at);
     } catch (error) {
       setError(error instanceof Error ? error.message : "Could not bump server.");
     } finally {
@@ -5520,7 +5794,7 @@ function AdvertisingBoostPanel({
             </div>
           ) : null}
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <MiniInfo label="Listing Plan" value={listingLabel} />
+            <MiniInfo label="Listing Plan" value={listing.label} />
             <MiniInfo label="Next Bump" value={nextAvailable} />
             <MiniInfo label="Last Bumped" value={advertising?.last_bumped_at ? formatRelativeTime(advertising.last_bumped_at) : "Never"} />
             <MiniInfo label="Cooldown" value={advertising || billing ? `${cooldownDays} days` : "Checking..."} />
@@ -5535,7 +5809,9 @@ function AdvertisingBoostPanel({
             {bumping ? "Bumping..." : cooldownActive ? "Cooldown active" : "Bump Server"}
           </button>
           <p className="mt-3 text-xs leading-5 text-zinc-400">
-            Free and Starter listings can be bumped once every 30 days. Upgrade to Pro to bump once every 7 days. Bumps are visibility only and do not change organic rank or score.
+            {listing.complimentary
+              ? "This selected server has a 7-day complimentary DZN listing cooldown. It is not a paid Stripe subscription. Bumps are visibility only and do not change organic rank or score."
+              : "Free and Starter listings can be bumped once every 30 days. Upgrade to Pro to bump once every 7 days. Bumps are visibility only and do not change organic rank or score."}
           </p>
         </>
       ) : (
