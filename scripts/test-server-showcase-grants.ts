@@ -236,6 +236,19 @@ async function run() {
     }
     db.sqlite.prepare("UPDATE linked_servers SET rowid = 10000 WHERE id = ?").run(scope.linkedServerId);
     assert.ok(Number(db.sqlite.prepare("SELECT count(*) AS count FROM linked_servers").get()?.count) > 500);
+    db.sqlite.exec(`WITH ranked_free_servers AS (
+        SELECT id, nitrado_service_id
+        FROM linked_servers
+        WHERE id LIKE 'extra-%'
+        ORDER BY id
+        LIMIT 80
+      ), event_numbers(event_number) AS (VALUES (1), (2))
+      INSERT INTO build_events (id, linked_server_id, nitrado_service_id, player_name, event_type,
+        source_adm_file, source_line_number, occurred_at, raw_line)
+      SELECT 'higher-free-build-' || ranked_free_servers.id || '-' || event_numbers.event_number,
+        ranked_free_servers.id, ranked_free_servers.nitrado_service_id, 'Synthetic free builder', 'built',
+        'synthetic.ADM', event_numbers.event_number, '2026-09-19T00:00:00Z', 'synthetic'
+      FROM ranked_free_servers CROSS JOIN event_numbers;`);
     for (const [id, serverId, serviceId] of [
       ["nuketown-build", scope.linkedServerId, scope.nitradoServiceId],
       ["neighbor-build", "same-guild-other-server", "10000001"],

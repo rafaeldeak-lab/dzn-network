@@ -613,6 +613,7 @@ async function queryPvpServerBoards(env: Env, limit: number, accessByServer: Map
 }
 
 async function queryBuildServerBoards(env: Env, limit: number, accessByServer: Map<string, AdvancedShowcaseAccess>): Promise<AdvancedBoard[]> {
+  const advancedEligibility = globalAdvancedEligibilitySql(accessByServer);
   const rows = await requireDb(env)
     .prepare(
       `SELECT linked_servers.id,
@@ -632,17 +633,18 @@ async function queryBuildServerBoards(env: Env, limit: number, accessByServer: M
        FROM linked_servers
        LEFT JOIN build_events ON build_events.linked_server_id = linked_servers.id
        WHERE ${publicServerWhereSql()}
+         AND ${advancedEligibility.sql}
        GROUP BY linked_servers.id
        HAVING value > 0
        ORDER BY value DESC, supporting_a DESC, data_freshness DESC
        LIMIT ?`,
     )
-    .bind(limit * 3)
+    .bind(...advancedEligibility.bindings, limit)
     .all<ServerMetricRow>();
 
-  const repairRows = await queryBuildMetric(env, "SUM(CASE WHEN build_events.event_type = 'repaired' THEN 1 ELSE 0 END)", "repairs", limit);
-  const raidRows = await queryBuildMetric(env, `SUM(CASE WHEN ${raidSql()} THEN 1 ELSE 0 END)`, "raid", limit);
-  const trapsRows = await queryBuildMetric(env, `SUM(CASE WHEN ${trapSql()} THEN 1 ELSE 0 END)`, "traps", limit);
+  const repairRows = await queryBuildMetric(env, "SUM(CASE WHEN build_events.event_type = 'repaired' THEN 1 ELSE 0 END)", "repairs", limit, accessByServer);
+  const raidRows = await queryBuildMetric(env, `SUM(CASE WHEN ${raidSql()} THEN 1 ELSE 0 END)`, "raid", limit, accessByServer);
+  const trapsRows = await queryBuildMetric(env, `SUM(CASE WHEN ${trapSql()} THEN 1 ELSE 0 END)`, "traps", limit, accessByServer);
 
   return [
     serverBoard("build_score", "Highest Build Score", "Construction score from built, placed, repair, and defence actions. Raid/destruction is separate.", "builds", "pro", rows.results ?? [], "score", limit, accessByServer, true),
@@ -653,6 +655,7 @@ async function queryBuildServerBoards(env: Env, limit: number, accessByServer: M
 }
 
 async function queryHybridServerBoards(env: Env, limit: number, accessByServer: Map<string, AdvancedShowcaseAccess>): Promise<AdvancedBoard[]> {
+  const advancedEligibility = globalAdvancedEligibilitySql(accessByServer);
   const rows = await requireDb(env)
     .prepare(
       `SELECT *
@@ -681,12 +684,13 @@ async function queryHybridServerBoards(env: Env, limit: number, accessByServer: 
                 ) AS data_freshness
          FROM linked_servers
          WHERE ${publicServerWhereSql()}
+           AND ${advancedEligibility.sql}
        )
        WHERE value > 0
        ORDER BY value DESC, data_freshness DESC
        LIMIT ?`,
     )
-    .bind(limit * 3)
+    .bind(...advancedEligibility.bindings, limit)
     .all<ServerMetricRow>();
 
   const eventRows = await requireDb(env)
@@ -810,7 +814,14 @@ function buildExplorationServerBoards(
   }];
 }
 
-async function queryBuildMetric(env: Env, expression: string, mode: string, limit: number) {
+async function queryBuildMetric(
+  env: Env,
+  expression: string,
+  mode: string,
+  limit: number,
+  accessByServer: Map<string, AdvancedShowcaseAccess>,
+) {
+  const advancedEligibility = globalAdvancedEligibilitySql(accessByServer);
   const rows = await requireDb(env)
     .prepare(
       `SELECT linked_servers.id,
@@ -827,12 +838,13 @@ async function queryBuildMetric(env: Env, expression: string, mode: string, limi
        FROM linked_servers
        LEFT JOIN build_events ON build_events.linked_server_id = linked_servers.id
        WHERE ${publicServerWhereSql()}
+         AND ${advancedEligibility.sql}
        GROUP BY linked_servers.id
        HAVING value > 0
        ORDER BY value DESC, data_freshness DESC
        LIMIT ?`,
     )
-    .bind(limit * 3)
+    .bind(...advancedEligibility.bindings, limit)
     .all<ServerMetricRow & { mode?: string }>();
   return (rows.results ?? []).map((row) => ({ ...row, mode }));
 }
@@ -1310,6 +1322,21 @@ function subscriptionStatusSql() {
              )
              LIMIT 1)
           )`;
+}
+
+function globalAdvancedEligibilitySql(accessByServer: Map<string, AdvancedShowcaseAccess>) {
+  const complimentaryServerIds = [...accessByServer.entries()]
+    .filter(([, access]) => access.globalAdvancedBoards)
+    .map(([serverId]) => serverId);
+  const paidEligibility = `(lower(COALESCE(${subscriptionPlanSql()}, 'free')) IN ('pro', 'premium', 'network', 'partner')
+    AND lower(COALESCE(${subscriptionStatusSql()}, '')) IN ('active', 'trialing'))`;
+  if (complimentaryServerIds.length === 0) {
+    return { sql: paidEligibility, bindings: [] as string[] };
+  }
+  return {
+    sql: `(${paidEligibility} OR linked_servers.id IN (${complimentaryServerIds.map(() => "?").join(", ")}))`,
+    bindings: complimentaryServerIds,
+  };
 }
 
 function buildScoreCaseSql() {
