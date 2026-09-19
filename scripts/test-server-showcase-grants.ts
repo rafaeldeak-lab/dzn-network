@@ -326,10 +326,19 @@ async function run() {
         VALUES (?, ?, ?, 'Synthetic builder', 'built', 'synthetic.ADM', 1, '2026-09-19T00:00:00Z', 'synthetic')`)
         .run(id, serverId, serviceId);
     }
+    for (const [id, x, y, occurredAt] of [
+      ["nuketown-window-position-1", 1000, 1000, "2026-09-19T00:00:00Z"],
+      ["nuketown-window-position-2", 1100, 1100, "2026-09-19T00:10:00Z"],
+    ] as const) {
+      db.sqlite.prepare(`INSERT INTO player_events
+        (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
+        VALUES (?, ?, 'NukeTown window explorer', 'player_position', ?, ?, ?)`)
+        .run(id, scope.linkedServerId, x, y, occurredAt);
+    }
     await grant(env);
 
     const payload = await getPublicAdvancedLeaderboardsPayload(env, { limit: 20 });
-    for (const metricKey of ["build_score", "balanced_activity_score"]) {
+    for (const metricKey of ["build_score", "balanced_activity_score", "most_travelled_server", "most_on_foot_distance", "map_exploration_percent"]) {
       const board = payload.boards.find((candidate) => candidate.metricKey === metricKey);
       assert.ok(board, `${metricKey} board required`);
       const nuketown = board.rows.find((row) => row.serverId === scope.linkedServerId);

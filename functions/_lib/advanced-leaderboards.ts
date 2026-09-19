@@ -166,7 +166,7 @@ async function buildPublicAdvancedLeaderboardsPayload(env: Env, options: { limit
   const limit = safeLimit(options.limit, 8, 20);
   const accessByServer = await resolvePublicAdvancedAccess(env);
   const [serverMeta, pvpBoards, buildBoards, hybridBoards, samples] = await Promise.all([
-    queryPublicServerMeta(env),
+    queryPublicServerMeta(env, accessByServer),
     queryPvpServerBoards(env, limit, accessByServer),
     queryBuildServerBoards(env, limit, accessByServer),
     queryHybridServerBoards(env, limit, accessByServer),
@@ -526,7 +526,8 @@ async function ensureAdvancedReadSchema(env: Env) {
   await ensureBuildEventSchema(env);
 }
 
-async function queryPublicServerMeta(env: Env) {
+async function queryPublicServerMeta(env: Env, accessByServer: Map<string, AdvancedShowcaseAccess>) {
+  const advancedEligibility = globalAdvancedEligibilitySql(accessByServer);
   const result = await requireDb(env)
     .prepare(
       `SELECT linked_servers.id,
@@ -541,8 +542,10 @@ async function queryPublicServerMeta(env: Env) {
               ${subscriptionStatusSql()} AS subscription_status
        FROM linked_servers
        WHERE ${publicServerWhereSql()}
-       LIMIT 500`,
+         AND ${advancedEligibility.sql}
+       ORDER BY linked_servers.id`,
     )
+    .bind(...advancedEligibility.bindings)
     .all<PublicServerMeta>();
   return result.results ?? [];
 }
