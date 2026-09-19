@@ -25,11 +25,20 @@ accessible on every state. No rules, rewards, migration or payment settings chan
 
 ## Active Work
 
-The first recovered unique Comms work is #120-#122's response validation and
+The first recovered unique Comms work, released in PR #186 at
+`e3b98f405c870c475637018fae33f6d98b7c2a5e`, is #120-#122's response validation and
 rendered QA, adapted to the current #144 API rather than its incompatible old
 payload. It remains disabled by the existing production flags. This is not live
 chat, support delivery, presence or message sending. See
 `DZN_COMMS_HISTORY_CLIENT_HANDOFF_2026-09-13.md` for implementation and validation.
+
+The next implementation repairs Discord discovery/status in the owner dashboard.
+Live read-only onboarding verification on September 13 found the DZN bot and 26
+postable channels, while the dashboard's saved-destination-only read could not
+establish bot installation and offered no usable initial recheck. This is a
+dashboard verification defect, not evidence that the installed bot must be
+reinstalled. See `DZN_DISCORD_DISCOVERY_RECOVERY_2026-09-13.md`. Message delivery,
+automatic-post configuration and owner approval notifications remain separate.
 
 ## Remaining Work Groups
 
@@ -45,12 +54,13 @@ chat, support delivery, presence or message sending. See
 | #91-#95 | Multi-room Comms/support design, interaction/runtime contracts and presence | Existing read-only shell is not a live chat service |
 | #96-#114 | Store catalog, test orders/receipts/fulfilment, purchases and supporter cards | Separate financial review; no automatic live Stripe or customer mutations |
 | #116-#119 | Reactions, authenticated public history intent and tie-safe pagination | Current read API is not equivalent to every older contract |
-| #120-#122 | Current-model response handling and rendered regression checks | In progress; no production flags or schema changed |
+| #120-#122 | Remaining multi-room/runtime contracts beyond current-model response handling and rendered regression checks released in #186 | No production flags or schema changed; live Comms remains separate |
 
 ## Wider User Requests Retained
 
 - NukeTown service 18765761: durable exact-server Pro-equivalent access without a fake paid subscription, no grants to other servers, and preserve the user's normal bot-aligned restart schedule. Reverify live entitlement/protected-feature payloads before reporting current status.
-- Nitrado: resolve log discovery/read failures and prove a genuinely new gameplay event imports automatically. Historical imports and green labels alone are insufficient.
+- Nitrado: genuine automatic import was proved on September 12 by two persisted kill rows and five joins in one `scheduled_nitrado` job, matched to its exact server, service and stored source lines. This corrects the previous unproved-first-event wording. Sustained recovery remains open: the inspected lifecycle was still degraded, Discord queueing warned, and event timestamp normalization/hash coverage need review. Recheck current health; that point-in-time proof is not continuous-sync certification.
+- Bot host: September 13 read-only inspection found the working `pandora.service` active and the latest hourly reset completed, with the existing Europe/London schedule unchanged. A separate obsolete `pandora-bot.service` repeatedly fails because its virtualenv Python is missing. Root storage had only 202 MB free. Disabling only the obsolete unit was presented for specific approval; no service action or disk deletion accompanied this website change.
 - Dashboard: stale renewal date, undefined bump allowance, advanced showcase state and plan labels. Reverify current payloads and rendering before closing.
 - FED & FERAL: real owner setup/recovery, current token association, verification, lifecycle, scheduled import and continuing sync proof.
 - Genuine player account linking: exact server/player provenance, owner approval/decline with reason, server-scoped revocation, player notice and preserved history.

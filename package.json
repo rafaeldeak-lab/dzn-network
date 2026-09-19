@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "pretest": "npm run test:games-hub",
+    "pretest": "npm run test:games-hub && npm run test:discord-discovery-recovery",
+    "test:discord-discovery-recovery": "tsx scripts/test-discord-discovery-recovery.ts",
     "dev:games-hub": "tsx scripts/dev-games-hub.ts",
     "test:games-hub": "tsx scripts/test-games-hub.ts",
     "dev": "next dev",

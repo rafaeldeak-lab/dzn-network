@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { StarterCheckoutButton } from "./starter-checkout-button";
 import { dashboardBillingPlan, dashboardServerPlan } from "./dashboard-plan-display";
+import { discordSetupEvidence, isCurrentDiscordCache, verifiedDiscordCache, type DiscordChannelCache } from "./dashboard-discord-state";
 import { dashboardAccessLabel, dashboardAdvancedStatsMessage, dashboardBillingPeriod, dashboardBumpCount, dashboardPromotionCredits } from "./dashboard-detail-display";
 import { OpponentPicker } from "@/components/server-wars/opponent-picker";
 import { PAYMENT_COPY } from "../../lib/billing/payment-copy";
@@ -63,16 +64,6 @@ const SYNC_FEED_TIMEOUT_MS = 10000;
 const OPTIONAL_DASHBOARD_MAX_IN_FLIGHT = 2;
 const OPTIONAL_DASHBOARD_RETRY_LIMIT = 1;
 let hasLoggedMultiServerReady = false;
-
-type DiscordChannelCache = {
-  server_id: string;
-  channels: DiscordPostingChannel[];
-  last_channel_fetch_success_at: string;
-  last_channel_count: number;
-  last_postable_channel_count: number;
-  last_bot_connected_state: boolean | null;
-  guild_name: string | null;
-};
 
 type DiscordChannelFetchFailure = {
   error_code: string | null;
@@ -532,8 +523,8 @@ function ServerDashboard({
   const [advertisingStatus, setAdvertisingStatus] = useState<AdvertisingBumpStatus | null>(null);
   const [postingSetups, setPostingSetups] = useState<PostingChannelSetup[]>([]);
   const [postingOptions, setPostingOptions] = useState<PostingOptionSummary[]>([]);
-  const [discordChannelCache, setDiscordChannelCache] = useState<DiscordChannelCache | null>(() => loadDiscordChannelCache(serverProp.id));
-  const [discordPostingChannels, setDiscordPostingChannels] = useState<DiscordPostingChannel[]>(() => loadDiscordChannelCache(serverProp.id)?.channels ?? []);
+  const [discordChannelCache, setDiscordChannelCache] = useState<DiscordChannelCache | null>(() => loadDiscordChannelCache(serverProp.id, serverProp.guild_id));
+  const [discordPostingChannels, setDiscordPostingChannels] = useState<DiscordPostingChannel[]>(() => loadDiscordChannelCache(serverProp.id, serverProp.guild_id)?.channels ?? []);
   const [discordChannelsResponse, setDiscordChannelsResponse] = useState<DiscordChannelsResponse | null>(null);
   const [discordChannelsLoading, setDiscordChannelsLoading] = useState(false);
   const [discordChannelsWarning, setDiscordChannelsWarning] = useState("");
@@ -598,6 +589,8 @@ function ServerDashboard({
   const syncRefreshInFlightRef = useRef(false);
   const syncRefreshPromiseRef = useRef<Promise<boolean> | null>(null);
   const activeServerIdRef = useRef(serverProp.id);
+  const discordRequestIdRef = useRef(0);
+  const discordVerificationInFlightRef = useRef(false);
   const advancedStatsPanelRef = useRef<HTMLDivElement | null>(null);
   const serverWarsPanelRef = useRef<HTMLDivElement | null>(null);
   const advancedStatsRequestedRef = useRef(false);
@@ -756,6 +749,8 @@ function ServerDashboard({
     let cancelled = false;
     activeServerIdRef.current = serverProp.id;
     optionalRequestGenerationRef.current += 1;
+    discordRequestIdRef.current += 1;
+    discordVerificationInFlightRef.current = false;
     optionalRequestQueueRef.current = [];
     liveStatsAbortRef.current?.abort();
     dashboardHealthAbortRef.current?.abort();
@@ -773,6 +768,13 @@ function ServerDashboard({
     window.queueMicrotask(() => {
       if (cancelled) return;
       setDashboardHealth(cachedHealth);
+      const cachedDiscord = loadDiscordChannelCache(serverProp.id, serverProp.guild_id);
+      setDiscordChannelCache(cachedDiscord);
+      setDiscordPostingChannels(cachedDiscord?.channels ?? []);
+      setDiscordChannelsResponse(null);
+      setDiscordChannelFetchFailure(null);
+      setDiscordChannelsWarning("");
+      setDiscordChannelsLoading(false);
       setLastGoodDashboardHealth(cachedHealth);
       setDashboardHealthFresh(false);
       setDashboardLiveStats(null);
@@ -796,7 +798,7 @@ function ServerDashboard({
     return () => {
       cancelled = true;
     };
-  }, [serverProp.id]);
+  }, [serverProp.id, serverProp.guild_id]);
 
   useEffect(() => {
     dashboardActionRef.current = dashboardAction;
@@ -898,6 +900,9 @@ function ServerDashboard({
   const showInternalSyncSupportTools = process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_DZN_SUPPORT_MODE === "true";
 
   const refreshDiscordChannels = useCallback(async (options: { live?: boolean } = {}) => {
+    if (discordVerificationInFlightRef.current) return null;
+    discordVerificationInFlightRef.current = true;
+    const requestId = ++discordRequestIdRef.current;
     const requestServerId = server.id;
     setDiscordChannelsLoading(true);
     try {
@@ -906,31 +911,30 @@ function ServerDashboard({
         requestServerId,
         () => getDiscordPostingChannels(requestServerId, { refresh: options.live === true }),
       );
-      if (activeServerIdRef.current !== requestServerId) return null;
+      if (activeServerIdRef.current !== requestServerId || requestId !== discordRequestIdRef.current) return null;
       setDiscordChannelsResponse(channels);
       const errorCode = channels.error_code ?? channels.errorCode ?? null;
       if (channels.ok === false || errorCode) {
+        setDiscordPostingChannels([]);
+        setDiscordChannelCache(null);
+        saveDiscordChannelCache(requestServerId, null);
         const failure = buildChannelFetchFailure(channels);
         setDiscordChannelFetchFailure(failure);
         setDiscordChannelsWarning(friendlyChannelFetchWarning(channels, postingSetupsCountRef.current > 0));
-        if (channels.channels.length) {
-          setDiscordPostingChannels(channels.channels);
-          const nextCache = buildDiscordChannelCache(requestServerId, channels);
-          setDiscordChannelCache(nextCache);
-          saveDiscordChannelCache(requestServerId, nextCache);
-        }
         return channels;
       }
 
       setDiscordPostingChannels(channels.channels);
       setDiscordChannelsWarning(channels.warning ?? "");
       setDiscordChannelFetchFailure(null);
-      const nextCache = buildDiscordChannelCache(requestServerId, channels);
-      setDiscordChannelCache(nextCache);
-      saveDiscordChannelCache(requestServerId, nextCache);
+      const nextCache = verifiedDiscordCache(channels, requestServerId, server.guild_id);
+      if (nextCache) {
+        setDiscordChannelCache(nextCache);
+        saveDiscordChannelCache(requestServerId, nextCache);
+      }
       return channels;
     } catch (error) {
-      if (activeServerIdRef.current !== requestServerId || isOptionalRequestCancelled(error)) return null;
+      if (activeServerIdRef.current !== requestServerId || requestId !== discordRequestIdRef.current || isOptionalRequestCancelled(error)) return null;
       const failure: DiscordChannelFetchFailure = {
         error_code: "channel_fetch_unavailable",
         message: "Discord channel refresh is temporarily unavailable. Existing saved setups remain active.",
@@ -938,15 +942,22 @@ function ServerDashboard({
         retryable: true,
         attempted_at: new Date().toISOString(),
       };
+      setDiscordChannelsResponse(null);
       setDiscordChannelFetchFailure(failure);
+      setDiscordPostingChannels([]);
+      setDiscordChannelCache(null);
+      saveDiscordChannelCache(requestServerId, null);
       setDiscordChannelsWarning(postingSetupsCountRef.current > 0
         ? `${failure.message} Saved auto-post setups continue running even if channel refresh temporarily fails.`
         : failure.message);
       return null;
     } finally {
-      if (activeServerIdRef.current === requestServerId) setDiscordChannelsLoading(false);
+      if (activeServerIdRef.current === requestServerId && requestId === discordRequestIdRef.current) {
+        discordVerificationInFlightRef.current = false;
+        setDiscordChannelsLoading(false);
+      }
     }
-  }, [runOptionalDashboardRequest, server.id]);
+  }, [runOptionalDashboardRequest, server.id, server.guild_id]);
 
   const refreshBilling = useCallback(async () => {
     const requestServerId = server.id;
@@ -986,6 +997,7 @@ function ServerDashboard({
   }, [runOptionalDashboardRequest, server.id]);
 
   const refreshDiscordPostingSetup = useCallback(async (options: { liveChannels?: boolean } = {}) => {
+    const requestId = discordRequestIdRef.current;
     const requestServerId = server.id;
     try {
       const { posting, channels } = await runOptionalDashboardRequest(
@@ -1002,10 +1014,12 @@ function ServerDashboard({
       if (activeServerIdRef.current !== requestServerId) return false;
       if (posting?.setups) setPostingSetups(posting.setups);
       if (posting?.post_type_options) setPostingOptions(posting.post_type_options);
-      if (channels) {
+      if (channels && requestId === discordRequestIdRef.current && !discordVerificationInFlightRef.current) {
         setDiscordChannelsResponse(channels);
         const errorCode = channels.error_code ?? channels.errorCode ?? null;
         if (channels.ok === false || errorCode) {
+          setDiscordChannelCache(null);
+          saveDiscordChannelCache(requestServerId, null);
           const failure = buildChannelFetchFailure(channels);
           setDiscordChannelFetchFailure(failure);
           setDiscordChannelsWarning(friendlyChannelFetchWarning(channels, posting?.setups?.length ? true : postingSetupsCountRef.current > 0));
@@ -1015,9 +1029,11 @@ function ServerDashboard({
         }
         if (channels.channels.length) {
           setDiscordPostingChannels(channels.channels);
-          const nextCache = buildDiscordChannelCache(requestServerId, channels);
-          setDiscordChannelCache(nextCache);
-          saveDiscordChannelCache(requestServerId, nextCache);
+          const nextCache = verifiedDiscordCache(channels, requestServerId, server.guild_id);
+          if (nextCache) {
+            setDiscordChannelCache(nextCache);
+            saveDiscordChannelCache(requestServerId, nextCache);
+          }
         }
       }
       return true;
@@ -1026,9 +1042,9 @@ function ServerDashboard({
       setDiscordChannelsWarning(error instanceof Error ? error.message : "Discord posting setup is temporarily unavailable.");
       return false;
     } finally {
-      if (activeServerIdRef.current === requestServerId) setDiscordChannelsLoading(false);
+      if (activeServerIdRef.current === requestServerId && !discordVerificationInFlightRef.current) setDiscordChannelsLoading(false);
     }
-  }, [runOptionalDashboardRequest, server.id]);
+  }, [runOptionalDashboardRequest, server.id, server.guild_id]);
 
   const refreshSyncHealthDiagnostics = useCallback(async () => {
     const requestServerId = server.id;
@@ -1292,14 +1308,11 @@ function ServerDashboard({
 
   const serverDisplayName = server.display_name ?? server.hostname ?? server.server_name ?? server.nitrado_service_name;
   const effectiveServerMode = server.server_mode ?? server.server_type;
-  const normalizedStatus = server.status.toLowerCase();
   const admState = getAdmState(server);
-  const isDayzService = [server.game, serverDisplayName, server.nitrado_service_name].some((value) => /dayz/i.test(value ?? ""));
   const effectiveDiscordPostingChannels = discordPostingChannels.length ? discordPostingChannels : discordChannelCache?.channels ?? [];
-  const discordBotInstalled = discordChannelsResponse?.bot_connected === true || discordChannelCache?.last_bot_connected_state === true;
-  const discordChannelsDiscovered = effectiveDiscordPostingChannels.length > 0;
-  const coreSetupComplete = Boolean(server.guild_id && discordBotInstalled && discordChannelsDiscovered && server.nitrado_service_id && isDayzService && admState.isDiscovered);
-  const progress = coreSetupComplete ? 100 : normalizedStatus === "error" ? 72 : normalizedStatus === "live" ? 92 : 84;
+  const discordEvidence = discordSetupEvidence(discordChannelsResponse, discordChannelCache, server.id, server.guild_id, Boolean(discordChannelFetchFailure));
+  const discordBotInstalled = discordEvidence.connected;
+  const discordChannelsDiscovered = discordEvidence.channelsDiscovered;
   const networkAddress = server.ip_address ?? server.region ?? "Unknown";
   const networkAddressLabel = looksLikeIpAddress(networkAddress) ? "IP Address" : "Region";
   const effectiveDashboardHealth = dashboardHealth ?? lastGoodDashboardHealth;
@@ -3242,6 +3255,7 @@ function ServerDashboard({
     [`Nitrado Log Settings${logSettingsSourceLabel ? ` (${logSettingsSourceLabel})` : ""}`, nitradoLogSettingsComplete],
     ["Stats Sync Active", statsSyncActive],
   ] as const;
+  const progress = Math.round(setupChecks.slice(0, 7).filter(([, done]) => done).length / 7 * 100);
   const displayedBulkAdmImportResult = mergeActiveAdmImportJobIntoBulkResult(
     bulkAdmImportResult,
     syncStatus?.active_adm_import_job ?? null,
@@ -3470,8 +3484,15 @@ function ServerDashboard({
             <div className="h-full bg-gradient-to-r from-violet-300 via-cyan-300 to-emerald-300" style={{ width: `${progress}%` }} />
           </div>
           <div className="mt-4 grid gap-2">
-            {setupChecks.slice(0, 7).map(([label, done]) => <SetupCheck key={label} label={label} done={done} />)}
+            {setupChecks.slice(0, 7).map(([label, done]) => <SetupCheck key={label} label={label} done={done}
+              status={label === "DZN Bot Installed" ? discordEvidence.botLabel : label === "Channels Discovered" ? discordEvidence.channelLabel : undefined} />)}
           </div>
+          <button type="button" onClick={() => void refreshDiscordChannels({ live: true })} disabled={discordChannelsLoading || !server.guild_id}
+            className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-bold text-cyan-50 disabled:opacity-55">
+            <RefreshCw className={`h-4 w-4 ${discordChannelsLoading ? "animate-spin" : ""}`} />
+            {discordChannelsLoading ? "Checking Discord..." : "Verify Discord Connection"}
+          </button>
+          {discordChannelsWarning ? <p role="status" className="mt-2 text-xs leading-5 text-amber-100">{discordChannelsWarning}</p> : null}
           <Link href="/setup#review-test" className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-500 px-4 py-3 text-xs font-black uppercase text-white">
             View Setup Guide <LifeBuoy className="h-4 w-4" />
           </Link>
@@ -4037,8 +4058,8 @@ function ServerDashboard({
               </div>
               <div className="mt-3 grid gap-2">
                 <SetupCheck label="Discord Connected" done />
-                <SetupCheck label="DZN Bot Installed" done={discordBotInstalled} />
-                <SetupCheck label="Channels Discovered" done={discordChannelsDiscovered} />
+                <SetupCheck label="DZN Bot Installed" done={discordBotInstalled} status={discordEvidence.botLabel} />
+                <SetupCheck label="Channels Discovered" done={discordChannelsDiscovered} status={discordEvidence.channelLabel} />
                 <SetupCheck label="ADM Discovered" done={admState.isDiscovered} />
                 <SetupCheck label="Log Sync Active" done={statsSyncActive} />
                 <SetupCheck label="Events Processing" done={(syncStatus?.last_events_created ?? 0) > 0 || (syncStatus?.total_joins ?? 0) > 0} />
@@ -5625,9 +5646,9 @@ function DiscordAutoPostsPanel({
       effectiveChannelPermissions: diagnostics?.effective_channel_permissions ?? null,
     };
   }, [selectedChannel, selectedChannelId]);
-  const responseErrorCode = channelsResponse?.error_code ?? channelsResponse?.errorCode ?? null;
-  const channelFetchFailed = Boolean(channelsResponse?.manual_fallback || responseErrorCode || channelFetchFailure || channelsWarning);
-  const usingCachedChannelState = Boolean((channelFetchFailure || responseErrorCode) && channelCache?.channels.length);
+  const responseErrorCode = channelsResponse?.error_code ?? channelsResponse?.errorCode ?? channelFetchFailure?.error_code ?? null;
+  const channelFetchFailed = Boolean(responseErrorCode || channelFetchFailure);
+  const usingCachedChannelState = Boolean((channelsResponse?.diagnostics?.using_cached_channel_state || channelFetchFailure || responseErrorCode) && channelCache?.channels.length);
   const showManualFallback = advancedOpen || channelFetchFailed;
   const manualChannelValue = manualChannelId.trim();
   const channelForSave = selectedChannelId || manualChannelValue;
@@ -5649,7 +5670,6 @@ function DiscordAutoPostsPanel({
       ? `${channelCache.last_channel_count} (last known)`
       : String(channels.length);
   const channelWarningText = channelsWarning || (channelFetchFailure?.message ?? "");
-  const retryableChannelFetch = Boolean(channelFetchFailure?.retryable || channelsResponse?.retryable);
   const activeSetupCount = setups.filter((setup) => setup.status === "active").length;
   const saveHelperText = getDiscordAutoPostSaveHelper({
     hasChannel: Boolean(channelForSave),
@@ -5851,6 +5871,11 @@ function DiscordAutoPostsPanel({
         <MiniInfo label="Channels Found" value={channelCountLabel} />
         <MiniInfo label="Plan" value={planName} />
       </div>
+      <button type="button" onClick={() => void onChannelsRefresh()} disabled={channelsLoading}
+        className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-2 text-xs font-bold text-cyan-50 disabled:opacity-55">
+        <RefreshCw className={`h-4 w-4 ${channelsLoading ? "animate-spin" : ""}`} />
+        {channelsLoading ? "Checking Discord..." : "Recheck Channels"}
+      </button>
 
       {channelsLoading ? (
         <p className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-400/10 px-3 py-2 text-xs font-bold text-cyan-50">
@@ -5874,17 +5899,6 @@ function DiscordAutoPostsPanel({
                 </p>
               ) : null}
             </div>
-            {retryableChannelFetch ? (
-              <button
-                type="button"
-                onClick={() => void onChannelsRefresh()}
-                disabled={channelsLoading}
-                className="inline-flex items-center gap-2 rounded-lg border border-amber-200/30 bg-amber-300/15 px-3 py-2 text-[10px] font-black uppercase text-amber-50 disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                <RefreshCw className={`h-3 w-3 ${channelsLoading ? "animate-spin" : ""}`} />
-                Recheck Channels
-              </button>
-            ) : null}
           </div>
           {channelsResponse?.error_code === "bot_not_in_guild" && channelsResponse.bot_invite_url ? (
             <a href={channelsResponse.bot_invite_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-2 rounded-lg border border-amber-200/30 bg-amber-300/15 px-3 py-2 text-[10px] font-black uppercase text-amber-50">
@@ -7411,38 +7425,27 @@ function discordChannelCacheKey(serverId: string) {
   return `dzn_discord_channel_cache_${serverId}`;
 }
 
-function loadDiscordChannelCache(serverId: string): DiscordChannelCache | null {
+function loadDiscordChannelCache(serverId: string, guildId: string): DiscordChannelCache | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(discordChannelCacheKey(serverId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as DiscordChannelCache;
-    if (parsed?.server_id !== serverId || !Array.isArray(parsed.channels)) return null;
+    if (!isCurrentDiscordCache(parsed, serverId, guildId)) return null;
     return parsed;
   } catch {
     return null;
   }
 }
 
-function saveDiscordChannelCache(serverId: string, cache: DiscordChannelCache) {
+function saveDiscordChannelCache(serverId: string, cache: DiscordChannelCache | null) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(discordChannelCacheKey(serverId), JSON.stringify(cache));
+    if (cache) window.localStorage.setItem(discordChannelCacheKey(serverId), JSON.stringify(cache));
+    else window.localStorage.removeItem(discordChannelCacheKey(serverId));
   } catch {
     // Local storage can be unavailable in hardened/private browser contexts.
   }
-}
-
-function buildDiscordChannelCache(serverId: string, response: DiscordChannelsResponse): DiscordChannelCache {
-  return {
-    server_id: serverId,
-    channels: response.channels,
-    last_channel_fetch_success_at: response.fetched_at,
-    last_channel_count: response.channels.length,
-    last_postable_channel_count: response.channels.filter((channel) => channel.can_post).length,
-    last_bot_connected_state: response.bot_connected ?? null,
-    guild_name: response.guild_name ?? null,
-  };
 }
 
 function buildChannelFetchFailure(response: DiscordChannelsResponse): DiscordChannelFetchFailure {
@@ -7507,10 +7510,12 @@ function formatDiscordBotStatus(input: {
   hasPermissionWarnings: boolean;
 }) {
   if (input.responseErrorCode === "missing_bot_token") return "Not configured";
-  if (input.botConnected === true || input.usingCachedConnectedState) {
+  if (input.botConnected === false) return "Not installed";
+  if (input.responseErrorCode) return "Check unavailable";
+  if (input.botConnected === true) {
     return input.hasPermissionWarnings ? "Missing permissions" : "Connected";
   }
-  if (input.botConnected === false) return "Not configured";
+  if (input.usingCachedConnectedState) return "Last known connected";
   return "Not checked yet";
 }
 
@@ -7855,11 +7860,12 @@ function ActionLink({ href, icon, label, tone = "zinc" }: { href: string; icon: 
   );
 }
 
-function SetupCheck({ label, done }: { label: string; done: boolean }) {
+function SetupCheck({ label, done, status }: { label: string; done: boolean; status?: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2">
+    <div aria-label={`${label}: ${status ?? (done ? "Complete" : "Incomplete")}`} className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2">
       <span className="text-xs font-bold text-zinc-200">{label}</span>
-      <CircleCheck className={`h-4 w-4 ${done ? "text-emerald-200" : "text-zinc-600"}`} />
+      {status ? <span className="text-right text-[10px] font-bold text-zinc-400">{status}</span> : null}
+      <CircleCheck aria-hidden="true" className={`h-4 w-4 shrink-0 ${done ? "text-emerald-200" : "text-zinc-600"}`} />
     </div>
   );
 }
