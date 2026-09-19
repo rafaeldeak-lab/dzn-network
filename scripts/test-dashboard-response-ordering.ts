@@ -39,6 +39,10 @@ const planSummaryAdvertisingApplyIndex = planSummaryBlock.indexOf("applyAdvertis
 assert.ok(planSummaryBarrierIndex >= 0, "Overview must settle both requests before reporting the combined refresh result.");
 assert.ok(planSummaryBillingApplyIndex >= 0 && planSummaryBillingApplyIndex < planSummaryBarrierIndex, "Overview must apply account billing without waiting for selected-server access.");
 assert.ok(planSummaryAdvertisingApplyIndex >= 0 && planSummaryAdvertisingApplyIndex < planSummaryBarrierIndex, "Overview must apply selected-server access without waiting for account billing.");
+assert.equal(planSummaryBlock.includes('billingResult.status === "fulfilled" && advertisingResult.status === "fulfilled"'), true, "Overview must retry when either required plan-summary request fails.");
+assert.equal(planSummaryBlock.includes("planSummaryRequestedRef.current = false"), true, "A partial plan-summary failure must release the request latch.");
+assert.equal(planSummaryBlock.includes("setPlanSummaryRetryVersion((current) => current + 1)"), true, "A partial plan-summary failure must trigger one bounded automatic retry.");
+assert.equal(dashboard.includes("[planSummaryRetryVersion, planSummaryVisible, refreshPlanSummary]"), true, "The Overview summary effect must observe the bounded retry trigger.");
 assert.equal(dashboard.includes("advertisingAccessRecoveryKeyRef"), true, "An accepted access change must have a bounded advertising recovery guard.");
 assert.equal(dashboard.includes("(!planSummaryVisible && activeTab !== \"billing\")"), true, "Advertising recovery must remain active for the Billing tab as well as the Overview summary.");
 assert.equal(dashboard.includes("!advertisingStatus ||\n      selectedServerAdvertising"), true, "Only an invalidated retained advertising snapshot should trigger recovery.");

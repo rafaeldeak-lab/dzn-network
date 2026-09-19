@@ -585,6 +585,7 @@ function ServerDashboard({
   const [advancedStatsLoading, setAdvancedStatsLoading] = useState(false);
   const [advancedStatsVisible, setAdvancedStatsVisible] = useState(false);
   const [planSummaryVisible, setPlanSummaryVisible] = useState(false);
+  const [planSummaryRetryVersion, setPlanSummaryRetryVersion] = useState(0);
   const [serverWars, setServerWars] = useState<DashboardServerWarsResult | null>(null);
   const [serverWarsError, setServerWarsError] = useState("");
   const [serverWarsLoading, setServerWarsLoading] = useState(false);
@@ -601,6 +602,7 @@ function ServerDashboard({
   const advancedStatsRequestIdRef = useRef(0);
   const advancedStatsAccessRecoveryKeyRef = useRef<string | null>(null);
   const planSummaryRequestedRef = useRef(false);
+  const planSummaryRetryAttemptRef = useRef(0);
   const serverWarsRequestedRef = useRef(false);
   const optionalRequestQueueRef = useRef<Array<OptionalDashboardRequest>>([]);
   const optionalRequestActiveCountRef = useRef(0);
@@ -809,7 +811,9 @@ function ServerDashboard({
       advancedStatsRequestIdRef.current += 1;
       advancedStatsAccessRecoveryKeyRef.current = null;
       setPlanSummaryVisible(false);
+      setPlanSummaryRetryVersion(0);
       planSummaryRequestedRef.current = false;
+      planSummaryRetryAttemptRef.current = 0;
       setAdvertisingStatus(null);
       setAdvertisingStatusGeneratedAt(null);
       setServerWars(null);
@@ -1136,9 +1140,15 @@ function ServerDashboard({
     ].filter(Boolean);
     setBillingMessage(errors.join(" "));
 
-    const succeeded = billingResult.status === "fulfilled" || advertisingResult.status === "fulfilled";
+    const succeeded = billingResult.status === "fulfilled" && advertisingResult.status === "fulfilled";
     if (!succeeded) {
       planSummaryRequestedRef.current = false;
+      if (planSummaryRetryAttemptRef.current < OPTIONAL_DASHBOARD_RETRY_LIMIT) {
+        planSummaryRetryAttemptRef.current += 1;
+        setPlanSummaryRetryVersion((current) => current + 1);
+      }
+    } else {
+      planSummaryRetryAttemptRef.current = 0;
     }
     return succeeded;
   }, [applyAdvertisingStatus, applyBillingStatus, requestAdvertisingStatus, requestBillingStatus, runOptionalDashboardRequest, server.id]);
@@ -1245,7 +1255,7 @@ function ServerDashboard({
     if (!planSummaryVisible || planSummaryRequestedRef.current) return;
     planSummaryRequestedRef.current = true;
     void refreshPlanSummary();
-  }, [planSummaryVisible, refreshPlanSummary]);
+  }, [planSummaryRetryVersion, planSummaryVisible, refreshPlanSummary]);
 
   useEffect(() => {
     if (activeTab !== "discord-posts") return;
