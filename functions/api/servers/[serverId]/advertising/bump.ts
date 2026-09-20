@@ -88,6 +88,7 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
   const accessBaseline = {
     plan_key: accessObservation.planKey,
     subscription_status: accessObservation.status,
+    observed_at: accessObservation.observedAt,
   };
   const serverAccess = await readServerShowcaseAccess(env, linkedServerId, accessBaseline);
   const finalBillingObservedAt = accessObservation.observedAt;

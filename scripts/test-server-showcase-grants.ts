@@ -179,6 +179,48 @@ async function run() {
       assert.equal(isolated.source, "billing", id); assert.equal(canUseShowcaseFeature(isolated, "gallery_images"), false, id);
     }
   });
+  await test("active paid Pro takes precedence over a matching complimentary grant", async ({ db, env }) => {
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE server_subscriptions SET status = 'active'").run();
+
+    for (const planKey of ["pro", "premium", "network", "partner"]) {
+      const access = await readServerShowcaseAccess(env, scope.linkedServerId, {
+        plan_key: planKey,
+        subscription_status: "active",
+      });
+      assert.equal(access.source, "billing", planKey);
+      assert.equal(access.grantId, null, planKey);
+      assert.equal(access.listing.listingPlanKey, "pro", planKey);
+    }
+
+    const advanced = await (await invoke(dashboardAdvancedStats, env, actor, "GET")).json() as {
+      access: { source: string; subscriptionActive: boolean };
+    };
+    assert.equal(advanced.access.source, "billing");
+    assert.equal(advanced.access.subscriptionActive, true);
+
+    const health = await (await invoke(dashboardHealth, env, actor, "GET")).json() as {
+      server_access: { source: string };
+    };
+    assert.equal(health.server_access.source, "billing");
+
+    const advertising = await (await invoke(advertisingBump, env, actor, "GET")).json() as {
+      advertising: { access_source: string };
+    };
+    assert.equal(advertising.advertising.access_source, "billing");
+
+    let revoked = false;
+    db.beforeWrite = (sql) => {
+      if (revoked || !/INSERT INTO server_listing_events/.test(sql)) return;
+      revoked = true;
+      revokeSql(db, grantId);
+    };
+    const bumpResponse = await invoke(advertisingBump, env, actor, "POST", {});
+    db.beforeWrite = null;
+    assert.equal(revoked, true);
+    assert.equal(bumpResponse.status, 200);
+    assert.equal((await bumpResponse.json() as { server_access: { source: string } }).server_access.source, "billing");
+  });
   await test("exact grant unlocks bounded owner analytics and weekly bumps without changing billing", async ({ db, env }) => {
     seedPublicMedia(db);
     const billingBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
@@ -232,6 +274,17 @@ async function run() {
     assert.equal(advertisingBody.advertising.included_bumps_per_month, 2);
     assert.equal(advertisingBody.server_access.source, "complimentary_showcase");
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), billingBefore);
+  });
+  await test("owner analytics resolve only the exact server authorized by id", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE linked_servers SET public_slug = ? WHERE id = ?")
+      .run("same-guild-public", "same-guild-other-server");
+    db.sqlite.prepare("UPDATE linked_servers SET user_id = ?, public_slug = ? WHERE id = ?")
+      .run(other.id, "same-guild-other-server", scope.linkedServerId);
+
+    const response = await invoke(dashboardAdvancedStats, env, actor, "GET", undefined, "same-guild-other-server");
+    assert.equal(response.status, 200);
+    const body = await response.json() as { server: { id: string } };
+    assert.equal(body.server.id, "same-guild-other-server");
   });
   await test("complimentary bump starts a fresh period when owner billing dates are stale", async ({ db, env }) => {
     await upsertBillingAccount(env, {
@@ -782,6 +835,52 @@ async function run() {
       advertisingGeneratedAt: observed.advertising.generated_at,
       serverDisplayPlan: null,
     }), { source: "billing", effectivePlan: "free" });
+  });
+  await test("newer complimentary access outranks a delayed stale paid health snapshot", async ({ db, env }) => {
+    await grant(env);
+    db.sqlite.prepare("UPDATE server_subscriptions SET status = 'active'").run();
+    type AccessRead = {
+      generated_at: string;
+      server_access: {
+        source: "billing" | "complimentary_showcase";
+        effectiveListingPlan: string;
+        billingObservedAt: string;
+        showcaseGrantObservedAt: string;
+      };
+    };
+    type AdvertisingRead = {
+      generated_at: string;
+      advertising: {
+        access_source: "billing" | "complimentary_showcase";
+        effective_listing_plan: string;
+        billing_observed_at: string;
+        showcase_grant_observed_at: string;
+      };
+    };
+    const observed: { advertising?: AdvertisingRead } = {};
+    db.afterFirst = async (sql) => {
+      if (!sql.includes("COALESCE(server_subscriptions.plan_key, owner_billing_accounts.plan_key) AS plan_key")) return;
+      db.afterFirst = null;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      db.sqlite.prepare("UPDATE server_subscriptions SET status = 'canceled'").run();
+      observed.advertising = await (await invoke(advertisingBump, env, actor, "GET")).json() as AdvertisingRead;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    };
+
+    const health = await (await invoke(dashboardHealth, env, actor, "GET")).json() as AccessRead;
+    assert.ok(observed.advertising);
+    assert.equal(health.server_access.source, "billing");
+    assert.equal(observed.advertising.advertising.access_source, "complimentary_showcase");
+    assert.ok(Date.parse(observed.advertising.advertising.billing_observed_at) >
+      Date.parse(health.server_access.billingObservedAt));
+    assert.equal(health.server_access.showcaseGrantObservedAt, health.server_access.billingObservedAt);
+    assert.deepEqual(dashboardSelectedServerAccess({
+      healthAccess: health.server_access,
+      healthGeneratedAt: health.generated_at,
+      advertisingAccess: observed.advertising.advertising,
+      advertisingGeneratedAt: observed.advertising.generated_at,
+      serverDisplayPlan: null,
+    }), { source: "complimentary_showcase", effectivePlan: "pro" });
   });
   await test("the final billing snapshot sees a higher-priority subscription inserted during fallback reads", async ({ db, env }) => {
     const subscription = db.sqlite.prepare("SELECT * FROM server_subscriptions").get()!;

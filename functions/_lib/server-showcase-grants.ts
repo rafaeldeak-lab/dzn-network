@@ -1,6 +1,6 @@
 import { requireDb } from "./db";
 import { authorizePlatformOwnerUser } from "./platform-owner";
-import { ACTIVE_SHOWCASE_GRANT_SQL, NUKETOWN_SHOWCASE_SCOPE, SHOWCASE_SCOPE_SQL, showcaseScopeBindings } from "./server-showcase-access";
+import { ACTIVE_SHOWCASE_GRANT_AT_DB_TIME_SQL, NUKETOWN_SHOWCASE_SCOPE, SHOWCASE_SCOPE_SQL, showcaseScopeBindings } from "./server-showcase-access";
 import type { Env, SessionUser } from "./types";
 
 type GrantAction = { action: "grant"; requestId: string } | {
@@ -13,9 +13,8 @@ export async function readShowcaseGrantSupport(env: Env, actor: SessionUser, bef
   if (!authorizePlatformOwnerUser(env, actor).ok) return { status: 403, payload: { ok: false, error: "forbidden" } };
   if (beforeSequence !== null && (!Number.isSafeInteger(beforeSequence) || beforeSequence <= 0)) return invalidInput();
   const db = requireDb(env);
-  const now = new Date().toISOString();
-  const current = await db.prepare(ACTIVE_SHOWCASE_GRANT_SQL)
-    .bind(...showcaseScopeBindings(), now, now).first<{ id: string; expires_at: string | null }>();
+  const current = await db.prepare(ACTIVE_SHOWCASE_GRANT_AT_DB_TIME_SQL)
+    .bind(...showcaseScopeBindings()).first<{ id: string; expires_at: string | null }>();
   const grants = await db.prepare(`SELECT id, linked_server_id, owner_user_id, owner_discord_id, guild_id,
       nitrado_service_id, plan_key, purpose, created_by_user_id, created_at, expires_at,
       revoked_at, revoked_by_user_id, revocation_reason
@@ -43,13 +42,13 @@ export async function changeShowcaseGrant(env: Env, actor: SessionUser, input: G
         id, linked_server_id, owner_user_id, owner_discord_id, guild_id, nitrado_service_id,
         created_by_user_id, created_at)
       SELECT ?, linked_servers.id, linked_servers.user_id, users.discord_id, linked_servers.guild_id,
-        linked_servers.nitrado_service_id, ?, ?
+        linked_servers.nitrado_service_id, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       FROM linked_servers JOIN users ON users.id = linked_servers.user_id
       WHERE ${SHOWCASE_SCOPE_SQL}
       ON CONFLICT DO NOTHING`)
-      .bind(input.requestId, actor.id, now, ...showcaseScopeBindings()).run();
-    const current = await db.prepare(ACTIVE_SHOWCASE_GRANT_SQL)
-      .bind(...showcaseScopeBindings(), now, now).first<{ id: string }>();
+      .bind(input.requestId, actor.id, ...showcaseScopeBindings()).run();
+    const current = await db.prepare(ACTIVE_SHOWCASE_GRANT_AT_DB_TIME_SQL)
+      .bind(...showcaseScopeBindings()).first<{ id: string }>();
     if (!current) return { status: 409, payload: { ok: false, error: "SHOWCASE_SCOPE_OR_GRANT_CONFLICT" } };
     return { status: 200, payload: { ok: true, grantId: current.id, changed: Number(result.meta.changes) > 0 } };
   }

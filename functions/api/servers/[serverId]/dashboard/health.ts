@@ -363,6 +363,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     const serverAccess = await readServerShowcaseAccess(env, linkedServerId, {
       plan_key: server.plan_key,
       subscription_status: server.subscription_status,
+      observed_at: server.billing_observed_at,
     });
     const showcaseGrantObservedAt = serverAccess.observedAt;
     const currentPlan = effectiveEntitlementPlan(planKey, server.subscription_status);

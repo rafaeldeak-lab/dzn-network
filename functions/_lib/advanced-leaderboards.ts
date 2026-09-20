@@ -552,11 +552,12 @@ async function queryPublicServerMeta(env: Env, accessByServer: Map<string, Advan
 
 async function resolveAdvancedServer(env: Env, serverRef: string, ownerScoped: boolean) {
   const where = ownerScoped
-    ? `(linked_servers.id = ? OR linked_servers.public_slug = ? OR linked_servers.nitrado_service_id = ?)
+    ? `linked_servers.id = ?
        AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')
        AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`
     : `(linked_servers.id = ? OR linked_servers.public_slug = ? OR linked_servers.nitrado_service_id = ?)
        AND ${publicServerWhereSql()}`;
+  const bindings = ownerScoped ? [serverRef] : [serverRef, serverRef, serverRef];
   return requireDb(env)
     .prepare(
       `SELECT linked_servers.id,
@@ -573,7 +574,7 @@ async function resolveAdvancedServer(env: Env, serverRef: string, ownerScoped: b
        WHERE ${where}
        LIMIT 1`,
     )
-    .bind(serverRef, serverRef, serverRef)
+    .bind(...bindings)
     .first<PublicServerMeta>();
 }
 

@@ -39,9 +39,9 @@ function activeShowcaseGrantFromSql(nowExpression: string) {
 
 const ACTIVE_SHOWCASE_GRANT_FROM_SQL = activeShowcaseGrantFromSql("?");
 const ACTIVE_SHOWCASE_GRANT_FROM_SQL_AT_DB_TIME = activeShowcaseGrantFromSql("'now'");
-export const ACTIVE_SHOWCASE_GRANT_SQL = `SELECT grant_row.id, grant_row.expires_at ${ACTIVE_SHOWCASE_GRANT_FROM_SQL} LIMIT 1`;
+export const ACTIVE_SHOWCASE_GRANT_AT_DB_TIME_SQL = `SELECT grant_row.id, grant_row.expires_at ${ACTIVE_SHOWCASE_GRANT_FROM_SQL_AT_DB_TIME} LIMIT 1`;
 
-type BillingInput = { plan_key: string | null; subscription_status: string | null };
+type BillingInput = { plan_key: string | null; subscription_status: string | null; observed_at?: string | null };
 export type ServerShowcaseAccess = {
   source: "complimentary_showcase" | "billing";
   grantId: string | null;
@@ -64,9 +64,10 @@ LIMIT 1`;
 export async function readServerShowcaseAccess(env: Env, linkedServerId: string, billing: BillingInput): Promise<ServerShowcaseAccess> {
   const fallbackObservedAt = new Date().toISOString();
   const base: ServerShowcaseAccess = { source: "billing", grantId: null, expiresAt: null,
-    observedAt: fallbackObservedAt, billingPlan: billing.plan_key, billingStatus: billing.subscription_status,
+    observedAt: billing.observed_at ?? fallbackObservedAt, billingPlan: billing.plan_key, billingStatus: billing.subscription_status,
     listing: getListingLimits(billing) };
   if (linkedServerId !== NUKETOWN_SHOWCASE_SCOPE.linkedServerId) return base;
+  if (base.listing.listingPlanKey === "pro") return base;
   let grant: { id: string | null; expires_at: string | null; observed_at: string | null } | null;
   try {
     grant = await requireDb(env).prepare(ACTIVE_SHOWCASE_GRANT_OBSERVATION_SQL)
