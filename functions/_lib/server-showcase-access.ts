@@ -37,8 +37,8 @@ function activeShowcaseGrantFromSql(nowExpression: string) {
     AND (grant_row.expires_at IS NULL OR julianday(grant_row.expires_at) > julianday(${nowExpression}))`;
 }
 
-const ACTIVE_SHOWCASE_GRANT_FROM_SQL = activeShowcaseGrantFromSql("?");
 const ACTIVE_SHOWCASE_GRANT_FROM_SQL_AT_DB_TIME = activeShowcaseGrantFromSql("'now'");
+const ACTIVE_SHOWCASE_GRANT_FROM_SQL = activeShowcaseGrantFromSql("?");
 export const ACTIVE_SHOWCASE_GRANT_AT_DB_TIME_SQL = `SELECT grant_row.id, grant_row.expires_at ${ACTIVE_SHOWCASE_GRANT_FROM_SQL_AT_DB_TIME} LIMIT 1`;
 
 type BillingInput = { plan_key: string | null; subscription_status: string | null; observed_at?: string | null };
@@ -97,16 +97,18 @@ export function serializeShowcaseAccess(access: ServerShowcaseAccess) {
 }
 
 // Recheck identity and the capability source inside the transaction that saves a protected edit.
-export function showcaseWriteGuard(serverId: string, expectedOwnerUserId: string, access: ServerShowcaseAccess) {
+export async function showcaseWriteGuard(env: Env, serverId: string, expectedOwnerUserId: string, access: ServerShowcaseAccess) {
   const sql = `EXISTS (SELECT 1 FROM linked_servers AS write_server
     WHERE write_server.id = ? AND write_server.user_id = ?
       AND lower(COALESCE(write_server.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')
       AND COALESCE(write_server.merged_into_server_id, '') = '')`;
   const values: Array<string | null> = [serverId, expectedOwnerUserId];
   if (access.source === "complimentary_showcase") {
-    const now = new Date().toISOString();
+    const clock = await requireDb(env).prepare("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS observed_at")
+      .first<{ observed_at: string | null }>();
+    if (!clock?.observed_at) throw new Error("Database clock unavailable for showcase write authorization");
     return { sql: `${sql} AND EXISTS (SELECT 1 ${ACTIVE_SHOWCASE_GRANT_FROM_SQL} AND grant_row.id = ?)`,
-      values: [...values, ...showcaseScopeBindings(), now, now, access.grantId] };
+      values: [...values, ...showcaseScopeBindings(), clock.observed_at, clock.observed_at, access.grantId] };
   }
   return { sql: `${sql} AND EXISTS (SELECT 1 FROM linked_servers AS billing_server
       LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = billing_server.guild_id

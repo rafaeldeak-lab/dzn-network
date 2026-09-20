@@ -306,7 +306,7 @@ export async function saveServerVisualLoadout(env: Env, serverId: string, actorU
   };
 
   const db = requireDb(env);
-  const accessGuard = showcaseWriteGuard(serverId, validated.server.user_id, validated.access);
+  const accessGuard = await showcaseWriteGuard(env, serverId, validated.server.user_id, validated.access);
   const currentGuard = current
     ? { sql: `EXISTS (SELECT 1 FROM server_visual_loadouts WHERE server_id = ? AND id = ?
         AND showcase_badges_json IS ? AND profile_frame_key IS ? AND theme_banner_key IS ?

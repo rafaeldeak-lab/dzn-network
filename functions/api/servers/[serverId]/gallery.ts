@@ -71,7 +71,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
 
   const db = requireDb(env);
   const now = new Date().toISOString();
-  const guard = showcaseWriteGuard(server.id, server.user_id, access);
+  const guard = await showcaseWriteGuard(env, server.id, server.user_id, access);
   const statements = [
     db.prepare(`SELECT 1 AS allowed WHERE ${guard.sql}`).bind(...guard.values),
     db.prepare(`DELETE FROM server_gallery_images WHERE server_id = ? AND ${guard.sql}`).bind(linkedServerId, ...guard.values),

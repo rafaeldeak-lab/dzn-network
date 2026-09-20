@@ -555,6 +555,45 @@ async function run() {
     assert.equal(db.sqlite.prepare("SELECT COALESCE(bump_count_current_period, 0) AS count FROM server_advertising_state WHERE linked_server_id = ?").get(scope.linkedServerId)?.count ?? 0, 0);
     assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM server_ad_bump_events WHERE linked_server_id = ?").get(scope.linkedServerId)?.count, 0);
   });
+  await test("expired complimentary grant uses the database clock at the protected bump write", async ({ db, env }) => {
+    const grantId = randomUUID();
+    db.sqlite.prepare(`INSERT INTO server_showcase_grants (
+      id, linked_server_id, owner_user_id, owner_discord_id, guild_id, nitrado_service_id,
+      created_by_user_id, created_at, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 second'),
+      strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+1 second'))`)
+      .run(grantId, scope.linkedServerId, scope.ownerUserId, scope.ownerDiscordId, scope.guildId,
+        scope.nitradoServiceId, actor.id);
+    const expiresAt = String(db.sqlite.prepare("SELECT expires_at FROM server_showcase_grants WHERE id = ?").get(grantId)?.expires_at);
+    const OriginalDate = globalThis.Date;
+    const skewedNow = OriginalDate.parse(expiresAt) - 500;
+    class SkewedDate extends OriginalDate {
+      constructor(value?: string | number | Date) {
+        super(value === undefined ? skewedNow : value instanceof OriginalDate ? value.getTime() : value);
+      }
+      static now() { return skewedNow; }
+    }
+    let expired = false;
+    db.beforeWrite = (sql) => {
+      if (expired || !/INSERT INTO server_listing_events/.test(sql)) return;
+      expired = true;
+      const waitMs = Math.max(0, OriginalDate.parse(expiresAt) - OriginalDate.now() + 50);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+      globalThis.Date = SkewedDate as DateConstructor;
+    };
+    try {
+      const response = await invoke(advertisingBump, env, actor, "POST", {});
+      const body = await response.json() as { code?: string };
+      assert.equal(response.status, 409, JSON.stringify(body));
+      assert.equal(expired, true);
+      assert.equal(body.code, "access_changed");
+      assert.equal(db.sqlite.prepare("SELECT COALESCE(bump_count_current_period, 0) AS count FROM server_advertising_state WHERE linked_server_id = ?").get(scope.linkedServerId)?.count ?? 0, 0);
+      assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM server_ad_bump_events WHERE linked_server_id = ?").get(scope.linkedServerId)?.count, 0);
+    } finally {
+      db.beforeWrite = null;
+      globalThis.Date = OriginalDate;
+    }
+  });
   await test("paid downgrade cannot create or commit a queued weekly bump", async ({ db, env }) => {
     db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'pro', status = 'active'").run();
     let downgraded = false;
@@ -1175,6 +1214,36 @@ async function run() {
     assert.equal((await invoke(gallery, env, actor, "PUT", { images: [] })).status, 409);
     assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_gallery_images").get()?.n, 1);
   });
+  await test("gallery replacement uses one database time across its atomic batch", async ({ db, env }) => {
+    const grantId = randomUUID();
+    db.sqlite.prepare(`INSERT INTO server_showcase_grants (
+      id, linked_server_id, owner_user_id, owner_discord_id, guild_id, nitrado_service_id,
+      created_by_user_id, created_at, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 second'),
+      strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+1 second'))`)
+      .run(grantId, scope.linkedServerId, scope.ownerUserId, scope.ownerDiscordId, scope.guildId,
+        scope.nitradoServiceId, actor.id);
+    const expiresAt = String(db.sqlite.prepare("SELECT expires_at FROM server_showcase_grants WHERE id = ?").get(grantId)?.expires_at);
+    db.sqlite.prepare(`INSERT INTO server_gallery_images (
+      id, server_id, url, width, height, size_bytes, mime_type, sort_order, created_at, updated_at
+    ) VALUES ('previous-image', ?, 'https://local.test/previous.jpg', 1600, 900, 1000, 'image/jpeg', 0, '2026-09-01', '2026-09-01')`)
+      .run(scope.linkedServerId);
+    let expiredDuringBatch = false;
+    db.beforeWrite = (sql) => {
+      if (expiredDuringBatch || !/^\s*INSERT INTO server_gallery_images/i.test(sql)) return;
+      expiredDuringBatch = true;
+      const waitMs = Math.max(0, Date.parse(expiresAt) - Date.now() + 50);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+    };
+    try {
+      const response = await invoke(gallery, env, actor, "PUT", { images: [image] });
+      assert.equal(response.status, 200, JSON.stringify(await response.json()));
+      assert.equal(expiredDuringBatch, true);
+      assert.deepEqual(db.sqlite.prepare("SELECT id, url FROM server_gallery_images").all().map(row => row.url), [image.url]);
+    } finally {
+      db.beforeWrite = null;
+    }
+  });
   await test("gallery replacement rolls back if an image insert fails", async ({ db, env }) => {
     await grant(env); await invoke(gallery, env, actor, "PUT", { images: [image] });
     const before = db.sqlite.prepare("SELECT * FROM server_gallery_images").all();
@@ -1202,7 +1271,7 @@ async function run() {
   });
   await test("write guard rejects changed billing and transferred owner", async ({ db, env }) => {
     const access = await readServerShowcaseAccess(env, "same-guild-other-server", inactive);
-    const guard = showcaseWriteGuard("same-guild-other-server", actor.id, access);
+    const guard = await showcaseWriteGuard(env, "same-guild-other-server", actor.id, access);
     assert.equal(db.sqlite.prepare(`SELECT 1 AS allowed WHERE ${guard.sql}`).get(...guard.values)?.allowed, 1);
     db.sqlite.exec("UPDATE server_subscriptions SET status = 'active'");
     assert.equal(db.sqlite.prepare(`SELECT 1 AS allowed WHERE ${guard.sql}`).get(...guard.values), undefined);

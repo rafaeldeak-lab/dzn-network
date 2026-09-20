@@ -169,7 +169,7 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
   const nowIso = now.toISOString();
   const nextBumpAt = addDaysIso(nowIso, listingLimits.bumpCooldownDays);
   const accessGuard = serverAccess.source === "complimentary_showcase"
-    ? showcaseWriteGuard(linkedServerId, server.user_id, serverAccess)
+    ? await showcaseWriteGuard(env, linkedServerId, server.user_id, serverAccess)
     : billingAdvertisingWriteGuard(
         linkedServerId,
         server.user_id,
