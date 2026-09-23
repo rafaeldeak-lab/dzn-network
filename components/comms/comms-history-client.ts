@@ -18,12 +18,16 @@ export type CommsHistoryPayload = {
   channel: { slug: string; kind: "public"; name: string; description: string | null; visibility: "public" };
   access: { public_channel: true; private_group_membership_required: false; current_user_member_role: null };
   messages: CommsHistoryMessage[];
-  feature_flags: { route_enabled: boolean } & Record<(typeof disabledFeatures)[number], false>;
+  feature_flags: {
+    route_enabled: boolean;
+    sending_enabled: boolean;
+    report_actions_enabled: boolean;
+    moderation_mutations_enabled: boolean;
+  } & Record<(typeof disabledFeatures)[number], false>;
   fairness_boundary: string[];
 };
 
-const disabledFeatures = ["sending_enabled", "reactions_enabled", "report_actions_enabled",
-  "moderation_mutations_enabled", "ai_assist_runtime_enabled", "durable_objects_or_websockets_enabled",
+const disabledFeatures = ["reactions_enabled", "ai_assist_runtime_enabled", "durable_objects_or_websockets_enabled",
   "analytics_or_tracking_enabled"] as const;
 // Thirty 2,000-code-unit bodies plus bounded metadata must fit even with six-byte JSON escapes.
 export const COMMS_HISTORY_MAX_BYTES = 512 * 1_024;
@@ -58,6 +62,10 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
     || channel.slug !== "global-chat" || channel.kind !== "public" || channel.visibility !== "public"
     || access.public_channel !== true || access.private_group_membership_required !== false
     || access.current_user_member_role !== null || flags.route_enabled !== true
+    || typeof flags.sending_enabled !== "boolean" || typeof flags.report_actions_enabled !== "boolean"
+    || typeof flags.moderation_mutations_enabled !== "boolean"
+    || flags.report_actions_enabled !== flags.sending_enabled
+    || flags.moderation_mutations_enabled !== flags.sending_enabled
     || disabledFeatures.some(key => flags[key] !== false)) throw unavailable();
   const generatedAt = timestamp(input.generated_at);
   if (!generatedAt || !Array.isArray(input.messages) || input.messages.length > 30
@@ -88,9 +96,9 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
     access: { public_channel: true, private_group_membership_required: false, current_user_member_role: null },
     messages,
     feature_flags: {
-      route_enabled: true, sending_enabled: false, reactions_enabled: false, report_actions_enabled: false,
-      moderation_mutations_enabled: false, ai_assist_runtime_enabled: false,
-      durable_objects_or_websockets_enabled: false, analytics_or_tracking_enabled: false,
+      route_enabled: true, sending_enabled: flags.sending_enabled, reactions_enabled: false,
+      report_actions_enabled: flags.report_actions_enabled, moderation_mutations_enabled: flags.moderation_mutations_enabled,
+      ai_assist_runtime_enabled: false, durable_objects_or_websockets_enabled: false, analytics_or_tracking_enabled: false,
     },
     fairness_boundary: boundary,
   };
@@ -150,4 +158,24 @@ export async function loadCommsHistory(signal: AbortSignal, options: { fetcher?:
     signal.removeEventListener("abort", abort);
     controller.signal.removeEventListener("abort", rejectAbort);
   }
+}
+
+export async function sendCommsMessage(body: string, clientRequestId: string) {
+  const response = await fetch("/api/comms/messages", {
+    method: "POST", credentials: "include", redirect: "error",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ channelSlug: "global-chat", clientRequestId, body }),
+  });
+  const payload = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
+  if (!response.ok || !payload?.ok) throw new Error(payload?.message || "Message could not be sent.");
+}
+
+export async function reportCommsMessage(messageId: string, reason = "other") {
+  const response = await fetch("/api/comms/reports", {
+    method: "POST", credentials: "include", redirect: "error",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({ messageId, reason }),
+  });
+  const payload = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
+  if (!response.ok || !payload?.ok) throw new Error(payload?.message || "Report could not be sent.");
 }

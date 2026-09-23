@@ -1,104 +1,66 @@
 import assert from "node:assert/strict";
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const root = new URL("../", import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), "utf8");
-const contract = JSON.parse(read("docs/DZN_COMMS_MESSAGE_SENDING_CONTRACT.json"));
-const document = read("docs/DZN_COMMS_MESSAGE_SENDING_CONTRACT.md");
+const migration = read("migrations/0071_dzn_comms_live_moderation.sql");
+const runtime = read("functions/_lib/dzn-comms-live.ts");
+const shell = read("components/comms/dzn-comms-shell.tsx");
+const client = read("components/comms/comms-history-client.ts");
+const env = read(".env.example");
 
-// These check a design artifact and its inert integration, not future runtime behavior.
-test("preflight does not grant runtime, release or migration approval", () => {
-  assert.equal(contract.status, "preflight_only");
-  assert.equal(contract.runtimeApproved, false);
-  assert.equal(contract.productionApproved, false);
-  assert.equal(contract.prerequisitePr, 144);
-  assert.equal(contract.productionMigrationRequiresSeparateApproval, "0065_dzn_comms_read_history.sql");
-  assert.equal(contract.proposedRoute.implemented, false);
-  assert.equal(existsSync(new URL("functions/api/comms/messages.ts", root)), false);
-  assert.deepEqual(Object.values(contract.flags), [false, false]);
-  assert.equal(contract.pilot.scope, "local_test");
-  assert.equal(contract.pilot.privateSending, false);
+test("live Comms implementation remains default-off and migration-gated", () => {
+  assert.match(env, /^DZN_COMMS_LIVE_ENABLED=false$/m);
+  assert.match(env, /^DZN_COMMS_LIVE_SCOPE=local_test$/m);
+  assert.match(env, /^NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED=false$/m);
+  assert.ok(existsSync(new URL("functions/api/comms/messages.ts", root)));
+  assert.ok(existsSync(new URL("functions/api/comms/reports.ts", root)));
+  assert.ok(existsSync(new URL("functions/api/owner/comms/moderate.ts", root)));
+  assert.match(migration, /Production application remains a separate release operation/);
 });
 
-test("identity, payload bounds and browser-origin proof are server requirements", () => {
-  assert.deepEqual(contract.request.requiredFields, ["channelSlug", "clientRequestId", "body"]);
-  assert.equal(contract.request.additionalFields, false);
-  assert.equal(contract.request.identitySource, "server_session");
-  assert.equal(contract.request.originRequired, true);
-  assert.equal(contract.request.sessionBoundCsrfRequired, true);
-  assert.equal(contract.request.maxBodyCodePoints, 2000);
-  assert.equal(contract.request.maxBodyBytes, 8000);
-  assert.equal(contract.request.maxRequestBytes, 12288);
-});
-
-test("only allow can publish; other decisions have an unambiguous rejection", () => {
-  assert.deepEqual(Object.keys(contract.decisions).filter((key) => contract.decisions[key].publish), ["allow"]);
-  for (const [key, value] of Object.entries(contract.decisions)) {
-    assert.equal(value.status, key === "allow" ? 201 : ["block", "warn"].includes(key) ? 422 : 423);
-    assert.ok(document.includes(`\`${value.code}\``));
+test("schema supplies durable idempotency, quotas, reports, timeouts and audit", () => {
+  for (const table of ["dzn_comms_send_receipts", "dzn_comms_send_slots", "dzn_comms_attempt_slots", "dzn_comms_report_slots", "dzn_comms_timeouts", "dzn_comms_reports", "dzn_comms_moderation_audit"]) {
+    assert.match(migration, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
   }
-  assert.equal(contract.safety.outage, "deny_503");
-  assert.equal(contract.safety.unknownDecision, "deny_503");
-  assert.deepEqual(contract.safety.mildDecisions, ["block", "warn", "timeout", "escalate"]);
-  assert.equal(contract.safety.timeoutMinutes, 10);
-  assert.equal(contract.safety.maxAutomaticStaffHoldHours, 24);
+  assert.match(migration, /UNIQUE\(actor_user_id, channel_id, client_request_id\)/);
+  assert.match(migration, /UNIQUE\(actor_user_id, interval_bucket\)/);
+  assert.match(migration, /CHECK\(slot BETWEEN 1 AND 20\)/);
+  assert.match(migration, /CHECK\(slot BETWEEN 1 AND 30\)/);
+  assert.match(migration, /CHECK\(slot BETWEEN 1 AND 10\)/);
+  assert.doesNotMatch(migration, /\b(?:stripe|billing|subscription|nitrado|player_profiles|server_war|ranking|xp_award)\b/i);
 });
 
-test("bounded retries cannot add messages or strikes and must recheck current access", () => {
-  assert.deepEqual(contract.idempotency.key, ["actor_id", "channel_id", "client_request_id"]);
-  assert.equal(contract.idempotency.atomicDecisionRequired, true);
-  assert.equal(contract.idempotency.currentAccessRequiredForReplay, true);
-  for (const key of ["replayExtendsExpiry", "replayAddsStrike", "replayAddsMessage"]) assert.equal(contract.idempotency[key], false);
-  assert.equal(contract.idempotency.conflictStatus, 409);
-  assert.equal(contract.idempotency.replayStatus, 200);
-  assert.equal(contract.idempotency.rejectedReplay, "original_status_without_message");
-  assert.equal(contract.idempotency.pendingStatus, 202);
-  assert.ok(contract.idempotency.clientRetryHours < contract.idempotency.receiptRetentionDays * 24);
-  assert.equal(contract.idempotency.receiptRetentionDays, contract.retention.receiptDays);
-  assert.match(document, /In-memory mocks alone\s+cannot establish transaction or quota guarantees/);
+test("send and report routes are session-bound, same-origin and bounded", () => {
+  assert.match(runtime, /getSessionUser\(env, request\)/);
+  assert.match(runtime, /if \(!sameOrigin\(request\)\)/);
+  assert.match(runtime, /readBoundedJson<SendInput>\(request, MAX_REQUEST_BYTES\)/);
+  assert.match(runtime, /MAX_BODY_CODE_POINTS = 2_000/);
+  assert.match(runtime, /MAX_BODY_BYTES = 8_000/);
+  assert.match(runtime, /channelSlug !== "global-chat"/);
+  assert.match(runtime, /requirePlatformOwner\(env, request\)/);
+  assert.match(runtime, /db\.batch\(statements\)/);
+  assert.match(runtime, /channels\.slug = 'global-chat'/);
+  assert.match(runtime, /keyedDigest/);
+  assert.match(runtime, /secretReady/);
 });
 
-test("safety limits and retention stay finite, private and plan-neutral", () => {
-  assert.equal(contract.rateLimits.paidPlanBypass, false);
-  assert.equal(contract.rateLimits.scope, "actor_all_channels");
-  assert.equal(contract.rateLimits.actorAttemptsPerRollingMinute, 30);
-  assert.equal(contract.rateLimits.actorAcceptedPerRollingMinute, 20);
-  assert.equal(contract.rateLimits.minimumAcceptedIntervalSeconds, 5);
-  assert.equal(contract.safety.rejectedTextRetention, "request_memory_only");
-  assert.equal(contract.retention.messageDays, 30);
-  assert.equal(contract.retention.safetyMetadataDays, 30);
-  assert.equal(contract.retention.browserStorage, false);
-  assert.equal(contract.retention.backupsRequireSeparateReview, true);
-  assert.equal(contract.support.sources, "reviewed_public_dzn_help_only");
-  for (const key of ["runtime", "privateContext", "meteredSpend"]) assert.equal(contract.support[key], false);
+test("moderation publishes only allow decisions and never stores rejected text", () => {
+  assert.match(runtime, /moderated\.decision !== "allow"/);
+  assert.match(runtime, /SECRET_DETECTED/);
+  assert.match(runtime, /SPAM_BLOCKED/);
+  assert.match(runtime, /SAFETY_TIMEOUT/);
+  const rejected = runtime.slice(runtime.indexOf("async function storeRejected"));
+  assert.doesNotMatch(rejected, /moderated\.body|parsed\.value\.body/);
+  assert.match(runtime, /body = 'Message deleted\.'/);
 });
 
-test("protected systems and unrelated runtimes stay explicitly outside the slice", () => {
-  assert.deepEqual(contract.protectedSystems, [
-    "billing", "owner_entitlement", "server_ownership", "scoring", "rankings",
-    "discovery", "reviews", "badges", "seasons", "events", "server_wars", "ctf",
-    "xp_awards", "calling_card_awards", "public_profile_visibility",
-    "retained_exports", "competitive_eligibility",
-  ]);
-  for (const name of ["send_routes", "message_writes", "schema_changes", "reactions", "reports",
-    "moderation_mutations", "private_sending", "websockets", "durable_objects", "analytics", "tracking",
-    "ai_runtime", "vector_stores", "provider_credentials", "metered_calls", "live_checkout",
-    "stripe_mutation", "cloudflare_mutation", "production_d1", "deployment", "issue_49"]) {
-    assert.ok(contract.blockedInThisSlice.includes(name), name);
-  }
-});
-
-test("existing read-only integration is still off and has no sending wiring", () => {
-  const env = read(".env.example");
-  assert.match(env, /^DZN_COMMS_MESSAGE_HISTORY_READ_ENABLED=false$/m);
-  assert.match(env, /^NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED=false$/m);
-  const checkoutFlag = env.match(/^DZN_LIVE_CHECKOUT_ENABLED=(.*)$/m)?.[1]?.trim();
-  assert.ok(checkoutFlag === undefined || checkoutFlag === "false");
-  assert.match(read("functions/_lib/plans.ts"), /function isLiveCheckoutEnabled\(env: Env\)\s*\{\s*const value = cleanEnvString\(env\.DZN_LIVE_CHECKOUT_ENABLED\);\s*if \(!value\) return false;/);
-  assert.doesNotMatch(env, /^DZN_COMMS_MESSAGE_SEND_ENABLED=/m);
-  const shell = read("components/comms/dzn-comms-shell.tsx");
-  assert.match(shell, /aria-label="Send is unavailable"/);
-  assert.doesNotMatch(shell, /\/api\/comms\/messages|method:\s*["']POST["']/);
-  assert.match(read("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md"), /DZN_COMMS_MESSAGE_SENDING_CONTRACT\.md/);
+test("browser UI polls history, posts through protected routes and stays isolated", () => {
+  assert.match(shell, /window\.setInterval/);
+  assert.match(shell, /sendCommsMessage\(draft, crypto\.randomUUID\(\)\)/);
+  assert.match(shell, /reportCommsMessage\(message\.id\)/);
+  assert.match(client, /"\/api\/comms\/messages"/);
+  assert.match(client, /"\/api\/comms\/reports"/);
+  assert.doesNotMatch(runtime + shell + client, /STRIPE_SECRET|DZN_LIVE_CHECKOUT_ENABLED|NITRADO_TOKEN|DISCORD_BOT_TOKEN|WebSocket|DurableObject|OPENAI_API_KEY/);
 });
