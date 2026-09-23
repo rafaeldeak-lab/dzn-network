@@ -55,7 +55,7 @@ const proFeatureGroups = [
     icon: Megaphone,
     title: "Promotion and discovery",
     summary: "Give each connected server more ways to be found without buying competitive results.",
-    features: ["Featured and spotlight rotation eligibility", "Enhanced discovery and priority visibility", "Homepage feature and server spotlight eligibility", "2 promotion credits per billing period", "Public advert publishing every 24 hours", "Organic server bump every 7 days"],
+    features: ["Featured and spotlight rotation eligibility", "Enhanced discovery and priority visibility", "Server spotlight eligibility", "2 promotion credits per billing period", "Public advert publishing every 24 hours", "Organic server bump every 7 days"],
   },
   {
     icon: ImageIcon,
