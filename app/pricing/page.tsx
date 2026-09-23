@@ -73,7 +73,7 @@ const proFeatureGroups = [
     icon: Swords,
     title: "Events and Server Wars",
     summary: "Host community competition while keeping every score and result plan-neutral.",
-    features: ["Server Wars challenge-hosting tools", "Official event-hosting tools", "Event announcements and leaderboard posts", "Server-vs-server progress Discord posts", "Public network-ranking posts", "No paid score, rank or gameplay advantage"],
+    features: ["Server Wars challenge-hosting tools", "Event announcements and leaderboard posts", "Server-vs-server progress Discord posts", "Public network-ranking posts", "No paid score, rank or gameplay advantage"],
   },
   {
     icon: Radar,
