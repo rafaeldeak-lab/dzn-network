@@ -242,9 +242,9 @@ export default function PricingPage() {
 
       <section aria-labelledby="fairness-title" className="py-14">
         <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 sm:px-6 lg:grid-cols-[0.8fr_1.2fr] lg:px-8">
-          <div><p className="text-xs font-black uppercase text-emerald-200">Pay for tools, never results</p><h2 id="fairness-title" className="mt-2 text-3xl font-black uppercase">Pro helps you run and promote your server</h2><p className="mt-4 text-sm font-semibold leading-6 text-zinc-300">It never buys kills, ranks, badges, crowns, season wins or a stronger Server Wars score.</p></div>
+          <div><p className="text-xs font-black uppercase text-emerald-200">Pay for tools, never results</p><h2 id="fairness-title" className="mt-2 text-3xl font-black uppercase">Pro helps you run and promote your server</h2><p className="mt-4 text-sm font-semibold leading-6 text-zinc-300">Pro includes a plan-status badge, but never buys kills, leaderboard rank, earned competitive badges or crowns, season wins or a stronger Server Wars score.</p></div>
           <div className="grid gap-3 sm:grid-cols-2">
-            {["Imported statistics use the same formulas", "Leaderboard order stays plan-neutral", "Competitive scoring stays plan-neutral", "Badges and crowns must still be earned", "Feature rotation is eligible, not guaranteed", pro.trackingGuarantee].map((item) => <div key={item} className="flex items-start gap-3 border-l-2 border-emerald-300/45 bg-emerald-300/5 p-4 text-sm font-semibold leading-6 text-zinc-200"><Shield aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-emerald-200" />{item}</div>)}
+            {["Imported statistics use the same formulas", "Leaderboard order stays plan-neutral", "Competitive scoring stays plan-neutral", "Competitive badges and crowns must still be earned", "Feature rotation is eligible, not guaranteed", pro.trackingGuarantee].map((item) => <div key={item} className="flex items-start gap-3 border-l-2 border-emerald-300/45 bg-emerald-300/5 p-4 text-sm font-semibold leading-6 text-zinc-200"><Shield aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-emerald-200" />{item}</div>)}
           </div>
         </div>
       </section>

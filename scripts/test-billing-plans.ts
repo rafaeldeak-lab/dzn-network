@@ -268,6 +268,8 @@ assert.equal(pricingSection.includes("Homepage feature"), false, "Pricing must n
 assert.equal(pricingSection.includes("Server spotlight eligibility"), true, "Pricing should retain supported server-directory spotlight eligibility.");
 assert.equal(/manual (?:ADM )?refresh cooldown/i.test(pricingSection), false, "Pricing must not sell an unenforced manual-refresh cooldown tier.");
 assert.equal(/priority refresh/i.test(pricingSection), false, "Pricing must describe the priority-refresh entitlement as the Discord posting feature it actually unlocks.");
+assert.equal(pricingSection.includes("Pro includes a plan-status badge"), true, "Pricing must distinguish the paid plan-status badge from earned competitive badges.");
+assert.equal(pricingSection.includes("never buys kills, ranks, badges"), false, "Pricing must not claim that Pro grants no badges when it includes a plan-status badge.");
 assert.equal(pricingSection.includes("<table"), false, "Pricing comparison should use the responsive mobile-first layout, not the old fixed table.");
 assert.equal(pricingSection.includes('"Seasonal participation where events allow"'), false, "Pricing must not present shared seasonal participation as Pro-only.");
 assert.equal(pricingSection.includes('"Subscription billing portal"'), false, "Pricing must not present the shared billing portal as Pro-only.");
