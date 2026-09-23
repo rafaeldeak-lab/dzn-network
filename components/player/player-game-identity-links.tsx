@@ -102,8 +102,8 @@ const emptyPayload: IdentityPayload = {
   claims: [],
   proof_flow: {
     player_step: "Choose the DayZ server from the list.",
-    owner_step: "Paste the game ID or proof code the server owner gives you.",
-    match_rule: "A server owner or DZN admin checks it before stats connect. DZN never links stats just from a display name.",
+    owner_step: "The server owner or a DZN admin checks the matching imported profile before approving it.",
+    match_rule: "A gamertag only starts a review. DZN never links stats until an owner or DZN admin approves the exact server profile.",
   },
   boundary:
     "Verified game links only decide which stats appear on your profile. They do not affect payment, ownership, scoring, rankings, discovery, reviews, events, XP, calling cards, Server Wars, CTF, or eligibility.",
@@ -177,7 +177,7 @@ export function PlayerGameIdentityLinks() {
     event.preventDefault();
     if (!canSubmit) return;
 
-    setSubmitState({ status: "submitting", message: "Sending your game ID for owner/admin approval." });
+    setSubmitState({ status: "submitting", message: "Finding this gamertag on the selected server." });
     try {
       const response = await fetch("/api/player/game-identities", {
         method: "POST",
@@ -189,7 +189,7 @@ export function PlayerGameIdentityLinks() {
         },
         body: JSON.stringify({
           server_slug: resolvedServerRef,
-          player_id: normalizedPlayerId,
+          player_reference: normalizedPlayerId,
         }),
       });
       const payload = (await response.json().catch(() => null)) as { ok?: boolean; message?: string } | null;
@@ -220,7 +220,7 @@ export function PlayerGameIdentityLinks() {
           <div>
             <h2 className="text-lg font-black uppercase text-white">Link My Game Stats</h2>
             <p className="mt-1 text-sm font-semibold leading-6 text-slate-300">
-              Pick the server you play on, add the game ID the owner gives you, and DZN will check it before linking stats to your Discord account.
+              Pick the server you play on and enter the same DayZ gamertag shown in that server&apos;s leaderboard. The owner checks the exact imported profile before stats connect.
             </p>
           </div>
         </div>
@@ -299,7 +299,7 @@ export function PlayerGameIdentityLinks() {
           <form onSubmit={handleSubmit} className="rounded-md border border-cyan-300/20 bg-cyan-300/8 p-4">
             <p className="text-sm font-black uppercase text-white">Ask To Link Stats</p>
             <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">
-              You only need two things: the server you play on and the game ID or proof code the owner gives you.
+              Choose the server and enter your visible DayZ gamertag exactly as it appears there.
             </p>
 
             <div className="mt-4">
@@ -381,7 +381,7 @@ export function PlayerGameIdentityLinks() {
             </div>
 
             <label className="mt-4 block text-xs font-black uppercase text-cyan-100" htmlFor="game-identity-player-id">
-              Game ID or proof code from owner
+              DayZ gamertag on this server
             </label>
             <input
               id="game-identity-player-id"
@@ -389,7 +389,7 @@ export function PlayerGameIdentityLinks() {
               onChange={(event) => setPlayerId(event.target.value)}
               autoComplete="off"
               className="mt-2 min-h-11 w-full rounded-md border border-white/12 bg-slate-950/80 px-3 text-sm font-semibold text-white outline-none transition focus:border-cyan-200"
-              placeholder="Paste the code here"
+              placeholder="For example: xAKA-MINI_KickAs"
             />
             <button
               type="submit"
@@ -406,8 +406,8 @@ export function PlayerGameIdentityLinks() {
             ) : null}
             <div className="mt-4 grid gap-2">
               <ProofStep text="Choose the server you play on." />
-              <ProofStep text="Paste the game ID or proof code the owner gives you." />
-              <ProofStep text="A server owner or DZN admin checks it before your profile stats connect." />
+              <ProofStep text="Enter the exact gamertag shown in that server's leaderboard." />
+              <ProofStep text="DZN finds one matching imported profile, then the owner or a DZN admin checks it." />
               <ProofStep text="This only changes profile display. It never changes rankings, payments, or eligibility." />
             </div>
           </form>

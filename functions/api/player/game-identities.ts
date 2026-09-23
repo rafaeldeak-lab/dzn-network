@@ -14,6 +14,8 @@ type ClaimBody = {
   public_slug?: unknown;
   server_slug?: unknown;
   player_id?: unknown;
+  player_reference?: unknown;
+  player_name?: unknown;
 };
 
 export const onRequest: PagesFunction = async ({ request, env }) => {

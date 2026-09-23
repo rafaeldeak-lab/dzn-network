@@ -184,5 +184,32 @@ export async function testPlayerGameIdentityTransactions() {
       else { assert.equal(f.state().claim.length, 1); assert.equal(f.state().audit.length, 1); }
     } finally { f.close(); }
   }
+  const gamertag = identityTransactionFixture();
+  try {
+    gamertag.sqlite.exec("DELETE FROM player_game_identity_claims");
+    const result = await createPlayerGameIdentityClaim(
+      gamertag.env,
+      identityTestUser("player-a", "discord-a"),
+      { server_slug: "server-a", player_reference: "survivor" },
+    );
+    assert.equal(result.status, 201, "A unique server-scoped visible gamertag should create a review request.");
+    assert.equal(gamertag.state().claim[0].player_profile_id, "profile-a");
+    assert.equal(gamertag.state().claim[0].player_id, "game-a", "The pending claim must store the hidden exact ID resolved server-side.");
+  } finally { gamertag.close(); }
+  const ambiguousGamertag = identityTransactionFixture();
+  try {
+    ambiguousGamertag.sqlite.exec(`DELETE FROM player_game_identity_claims;
+      INSERT INTO player_profiles (id,linked_server_id,player_id,player_name)
+      VALUES ('profile-b','server-a','game-b','SURVIVOR')`);
+    const before = ambiguousGamertag.state();
+    const result = await createPlayerGameIdentityClaim(
+      ambiguousGamertag.env,
+      identityTestUser("player-a", "discord-a"),
+      { server_slug: "server-a", player_reference: "Survivor" },
+    );
+    assert.equal(result.status, 409, "Duplicate gamertags inside one server must fail closed.");
+    assert.equal(ambiguousGamertag.state().claim.length, before.claim.length, "Ambiguous names must not create a claim.");
+    assert.equal(ambiguousGamertag.state().links.length, 0, "Ambiguous names must never create a verified link.");
+  } finally { ambiguousGamertag.close(); }
   console.log("Identity claim transactions: rollback, conflicts, fresh ownership and concurrent decisions passed.");
 }

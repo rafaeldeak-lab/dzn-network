@@ -129,6 +129,8 @@ type CreateClaimInput = {
   public_slug?: unknown;
   server_slug?: unknown;
   player_id?: unknown;
+  player_reference?: unknown;
+  player_name?: unknown;
 };
 
 type ReviewClaimInput = {
@@ -182,10 +184,10 @@ export function sanitizePlayerGameIdentityPlayerId(value: unknown) {
 
 export function parsePlayerGameIdentityClaimInput(input: CreateClaimInput) {
   const serverRef = sanitizePlayerGameIdentityServerRef(input.linked_server_id ?? input.server_id ?? input.public_slug ?? input.server_slug);
-  const playerId = sanitizePlayerGameIdentityPlayerId(input.player_id);
+  const playerReference = sanitizePlayerGameIdentityPlayerId(input.player_reference ?? input.player_name ?? input.player_id);
   if (!serverRef) return { ok: false as const, error: "INVALID_SERVER_ID", message: "Choose a valid DZN server." };
-  if (!playerId) return { ok: false as const, error: "INVALID_PLAYER_ID", message: "Enter the exact game ID or proof code shown by the server owner." };
-  return { ok: true as const, serverRef, playerId };
+  if (!playerReference) return { ok: false as const, error: "INVALID_PLAYER_REFERENCE", message: "Enter the DayZ gamertag shown on this server." };
+  return { ok: true as const, serverRef, playerReference };
 }
 
 export function parsePlayerGameIdentityReviewInput(input: ReviewClaimInput) {
@@ -270,9 +272,9 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
       revoked_links: revokedResult.results ?? [],
       claims: sanitizeClaimRows(claimsResult.results ?? []),
       proof_flow: {
-        player_step: "Choose the server you play on and paste the exact game ID or proof code from the server owner.",
-        owner_step: "A matching server owner or DZN admin approves the request from the private review queue.",
-        match_rule: "DZN links stats only after a server-side exact server plus game ID match. Display names and public handles are never proof.",
+        player_step: "Choose the server you play on and enter the exact DayZ gamertag shown there.",
+        owner_step: "A matching server owner or DZN admin checks the resolved imported profile in the private review queue.",
+        match_rule: "A gamertag can only locate a review candidate. Stats link only after approval of the exact server profile and hidden game ID.",
       },
       boundary:
         "Verified game links only decide which stats appear on your profile. They do not affect billing, ownership, scoring, rankings, discovery, reviews, events, XP, calling cards, Server Wars, CTF, or competitive eligibility.",
@@ -287,9 +289,9 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
       revoked_links: [],
       claims: [] as PlayerGameIdentityClaimRow[],
       proof_flow: {
-        player_step: "Choose the server you play on and paste the exact game ID or proof code from the server owner.",
-        owner_step: "A matching server owner or DZN admin approves the request from the private review queue.",
-        match_rule: "DZN links stats only after a server-side exact server plus game ID match. Display names and public handles are never proof.",
+        player_step: "Choose the server you play on and enter the exact DayZ gamertag shown there.",
+        owner_step: "A matching server owner or DZN admin checks the resolved imported profile in the private review queue.",
+        match_rule: "A gamertag can only locate a review candidate. Stats link only after approval of the exact server profile and hidden game ID.",
       },
       boundary:
         "Game stat linking storage is unavailable in this environment. Existing direct Discord-linked profiles remain the compatibility path.",
@@ -317,54 +319,7 @@ export async function createPlayerGameIdentityClaim(
       };
     }
 
-    const existingDirect = await readDirectDiscordProfile(db, user.discord_id, server.linked_server_id, parsed.playerId);
-    if (existingDirect) {
-      return {
-        ok: true,
-        status: 200,
-        already_linked: true,
-        claim: claimFromProfile(existingDirect, "approved"),
-        message: "This game profile is already linked to your Discord account.",
-      };
-    }
-
-    const activeLink = await readActiveGameIdentityLink(db, server.linked_server_id, parsed.playerId);
-    if (activeLink) {
-      if (activeLink.user_id === user.id && activeLink.discord_id === user.discord_id) {
-        return {
-          ok: true,
-          status: 200,
-          already_linked: true,
-          claim: claimFromActiveLink(activeLink, activeLink.linked_server_id, parsed.playerId),
-          message: "This game profile is already verified for your account.",
-        };
-      }
-      await writeGameIdentityAudit(env, {
-        action: "claim_requested",
-        result: "conflict",
-        userId: user.id,
-        actorUserId: user.id,
-        linkedServerId: server.linked_server_id,
-        playerId: parsed.playerId,
-        note: "Rejected because the game profile already has an active verified link.",
-      });
-      return {
-        ok: false,
-        status: 409,
-        error: "PLAYER_ID_ALREADY_LINKED",
-        message: "That game ID is already verified for another DZN account.",
-      };
-    }
-
-    const pending = await readPendingProfileClaim(db, user.id, server.linked_server_id, parsed.playerId);
-    if (pending) {
-      const claim = await readPlayerGameIdentityClaimById(db, pending.id, user.id, user.discord_id);
-      if (claim) {
-        return { ok: true, status: 200, claim, message: "This identity claim is already waiting for owner/admin approval." };
-      }
-    }
-
-    const profileRows = await readExactPlayerProfileCandidates(db, server.linked_server_id, parsed.playerId);
+    const profileRows = await readPlayerProfileCandidates(db, server.linked_server_id, parsed.playerReference);
     if (profileRows.length > 1) {
       await writeGameIdentityAudit(env, {
         action: "claim_requested",
@@ -372,14 +327,13 @@ export async function createPlayerGameIdentityClaim(
         userId: user.id,
         actorUserId: user.id,
         linkedServerId: server.linked_server_id,
-        playerId: parsed.playerId,
-        note: "Ambiguous game ID claim rejected because more than one public profile row matched.",
+        note: "Ambiguous gamertag claim rejected because more than one profile row matched inside the selected server.",
       });
       return {
         ok: false,
         status: 409,
-        error: "AMBIGUOUS_PLAYER_ID",
-        message: "More than one game profile matched that server and game ID. DZN will not guess.",
+        error: "AMBIGUOUS_PLAYER_REFERENCE",
+        message: "More than one profile uses that gamertag on this server. Ask the server owner or DZN support to resolve it; DZN will not guess.",
       };
     }
 
@@ -391,15 +345,62 @@ export async function createPlayerGameIdentityClaim(
         userId: user.id,
         actorUserId: user.id,
         linkedServerId: server.linked_server_id,
-        playerId: parsed.playerId,
-        note: "No exact public game profile row matched the requested server and game ID.",
+        note: "No exact gamertag or game ID matched inside the selected server.",
       });
       return {
         ok: false,
         status: 404,
-        error: "PLAYER_ID_NOT_FOUND",
-        message: "No exact game ID was found for that public server. DZN will not guess from a player name.",
+        error: "PLAYER_REFERENCE_NOT_FOUND",
+        message: "That gamertag has not appeared in this server's imported logs yet. Check the spelling, play on the server, then try again after the next log import.",
       };
+    }
+
+    const existingDirect = await readDirectDiscordProfile(db, user.discord_id, server.linked_server_id, profile.player_id);
+    if (existingDirect) {
+      return {
+        ok: true,
+        status: 200,
+        already_linked: true,
+        claim: claimFromProfile(existingDirect, "approved"),
+        message: "This game profile is already linked to your Discord account.",
+      };
+    }
+
+    const activeLink = await readActiveGameIdentityLink(db, server.linked_server_id, profile.player_id);
+    if (activeLink) {
+      if (activeLink.user_id === user.id && activeLink.discord_id === user.discord_id) {
+        return {
+          ok: true,
+          status: 200,
+          already_linked: true,
+          claim: claimFromActiveLink(activeLink, activeLink.linked_server_id, profile.player_id),
+          message: "This game profile is already verified for your account.",
+        };
+      }
+      await writeGameIdentityAudit(env, {
+        action: "claim_requested",
+        result: "conflict",
+        userId: user.id,
+        actorUserId: user.id,
+        linkedServerId: server.linked_server_id,
+        playerProfileId: profile.id,
+        playerId: profile.player_id,
+        note: "Rejected because the resolved game profile already has an active verified link.",
+      });
+      return {
+        ok: false,
+        status: 409,
+        error: "PLAYER_ID_ALREADY_LINKED",
+        message: "That game profile is already verified for another DZN account.",
+      };
+    }
+
+    const pending = await readPendingProfileClaim(db, user.id, server.linked_server_id, profile.player_id);
+    if (pending) {
+      const claim = await readPlayerGameIdentityClaimById(db, pending.id, user.id, user.discord_id);
+      if (claim) {
+        return { ok: true, status: 200, claim, message: "This identity claim is already waiting for owner/admin approval." };
+      }
     }
 
     if (profile.discord_id && profile.discord_id !== user.discord_id) {
@@ -451,7 +452,7 @@ export async function createPlayerGameIdentityClaim(
         linkedServerId: profile.linked_server_id,
         playerProfileId: profile.id,
         playerId: profile.player_id,
-        note: "Pending exact game ID claim created for owner/admin review.",
+        note: "Pending server-scoped gamertag claim resolved to one exact imported profile for owner/admin review.",
       }),
     ]);
 
@@ -781,8 +782,8 @@ async function readPublicIdentityServer(db: D1Database, serverRef: string) {
   return rows.length === 1 ? rows[0] : null;
 }
 
-async function readExactPlayerProfileCandidates(db: D1Database, linkedServerId: string, playerId: string) {
-  const result = await db
+async function readPlayerProfileCandidates(db: D1Database, linkedServerId: string, playerReference: string) {
+  const exactIdResult = await db
     .prepare(
       `SELECT
         player_profiles.id,
@@ -802,10 +803,36 @@ async function readExactPlayerProfileCandidates(db: D1Database, linkedServerId: 
        ORDER BY datetime(COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at)) DESC
        LIMIT 2`,
     )
-    .bind(linkedServerId, playerId)
+    .bind(linkedServerId, playerReference)
     .all<PlayerProfileCandidateRow>();
-  const rows = result.results ?? [];
-  return rows;
+  const exactIdRows = exactIdResult.results ?? [];
+  if (exactIdRows.length > 0) return exactIdRows;
+
+  const gamertagResult = await db
+    .prepare(
+      `SELECT
+        player_profiles.id,
+        player_profiles.linked_server_id,
+        player_profiles.player_id,
+        player_profiles.player_name,
+        player_profiles.discord_id,
+        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+        linked_servers.public_slug
+       FROM player_profiles
+       INNER JOIN linked_servers ON linked_servers.id = player_profiles.linked_server_id
+       WHERE player_profiles.linked_server_id = ?
+         AND lower(trim(player_profiles.player_name)) = lower(trim(?))
+         AND player_profiles.player_name IS NOT NULL
+         AND trim(player_profiles.player_name) != ''
+         AND player_profiles.player_id IS NOT NULL
+         AND trim(player_profiles.player_id) != ''
+         AND ${publicServerWhere}
+       ORDER BY datetime(COALESCE(player_profiles.last_seen_at, player_profiles.updated_at, player_profiles.created_at)) DESC
+       LIMIT 2`,
+    )
+    .bind(linkedServerId, playerReference)
+    .all<PlayerProfileCandidateRow>();
+  return gamertagResult.results ?? [];
 }
 
 async function readExactPlayerProfileById(db: D1Database, claim: ReviewableClaimRow) {
