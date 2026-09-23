@@ -147,6 +147,7 @@ export type ReviewPlayerGameIdentityClaimResult =
 
 const MAX_PENDING_IDENTITY_CLAIMS_PER_USER = 5;
 const MAX_REVIEW_NOTE_LENGTH = 240;
+const OWNER_HISTORY_PAGE_SIZE = 50;
 const publicServerWhere = `
   lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged')
   AND lower(COALESCE(linked_servers.listing_visibility, 'public')) != 'hidden'
@@ -467,11 +468,18 @@ export async function createPlayerGameIdentityClaim(
   }
 }
 
-export async function readOwnerPlayerGameIdentityClaims(env: Env, user: SessionUser) {
+export async function readOwnerPlayerGameIdentityClaims(
+  env: Env,
+  user: SessionUser,
+  options: { historyOffset?: number } = {},
+) {
   try {
     const db = requireDb(env);
     const isAdmin = isDznAdminDiscordId(env, user.discord_id);
     const hasGlobalHistoryAccess = isPlatformOwnerDiscordId(env, user.discord_id);
+    const historyOffset = Number.isSafeInteger(options.historyOffset) && Number(options.historyOffset) >= 0
+      ? Math.min(Number(options.historyOffset), 100_000)
+      : 0;
     const [result, historyResult] = await Promise.all([db
       .prepare(
         `SELECT
@@ -511,7 +519,7 @@ export async function readOwnerPlayerGameIdentityClaims(env: Env, user: SessionU
           linked_servers.public_slug,
           audit.user_id,
           requesters.username AS account_name,
-          claims.discord_id AS requester_discord_id,
+          COALESCE(claims.discord_id, links.discord_id) AS requester_discord_id,
           COALESCE(NULLIF(audit.player_id, ''), claims.player_id, links.player_id, '') AS player_id,
           COALESCE(claims.player_name, links.player_name) AS player_name,
           audit.action,
@@ -530,9 +538,16 @@ export async function readOwnerPlayerGameIdentityClaims(env: Env, user: SessionU
            AND audit.result = 'accepted'
            AND (? = 1 OR linked_servers.user_id = ?)
          ORDER BY datetime(audit.created_at) DESC, audit.id DESC
-         LIMIT 100`,
-      ).bind(hasGlobalHistoryAccess ? 1 : 0, user.id).all<OwnerPlayerGameIdentityHistoryRow>(),
+         LIMIT ? OFFSET ?`,
+      ).bind(
+        hasGlobalHistoryAccess ? 1 : 0,
+        user.id,
+        OWNER_HISTORY_PAGE_SIZE + 1,
+        historyOffset,
+      ).all<OwnerPlayerGameIdentityHistoryRow>(),
     ]);
+    const historyRows = historyResult.results ?? [];
+    const historyHasMore = historyRows.length > OWNER_HISTORY_PAGE_SIZE;
 
     return {
       ok: true as const,
@@ -540,7 +555,9 @@ export async function readOwnerPlayerGameIdentityClaims(env: Env, user: SessionU
       private: true as const,
       owner_or_admin_only: true as const,
       claims: sanitizeOwnerClaimRows(result.results ?? []),
-      history: historyResult.results ?? [],
+      history: historyRows.slice(0, OWNER_HISTORY_PAGE_SIZE),
+      history_has_more: historyHasMore,
+      history_next_offset: historyHasMore ? historyOffset + OWNER_HISTORY_PAGE_SIZE : null,
       boundary: "Claim review can approve only an exact server plus game ID match. It is not a billing, scoring, ranking, review, event, or progression control.",
     };
   } catch {
@@ -551,6 +568,8 @@ export async function readOwnerPlayerGameIdentityClaims(env: Env, user: SessionU
       owner_or_admin_only: true as const,
       claims: [] as OwnerPlayerGameIdentityClaimRow[],
       history: [] as OwnerPlayerGameIdentityHistoryRow[],
+      history_has_more: false,
+      history_next_offset: null as number | null,
       boundary: "Game identity claim review storage is unavailable in this environment.",
     };
   }

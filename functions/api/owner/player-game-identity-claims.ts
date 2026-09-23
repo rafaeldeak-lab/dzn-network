@@ -16,8 +16,14 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     );
   }
 
-  return json(await readOwnerPlayerGameIdentityClaims(env, user), { headers: privateNoStoreHeaders() });
+  const historyOffset = parseHistoryOffset(new URL(request.url).searchParams.get("history_offset"));
+  return json(await readOwnerPlayerGameIdentityClaims(env, user, { historyOffset }), { headers: privateNoStoreHeaders() });
 };
+
+function parseHistoryOffset(value: string | null) {
+  if (!value || !/^\d{1,6}$/.test(value)) return 0;
+  return Math.min(Number(value), 100_000);
+}
 
 async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {
   const user = await getSessionUser(env, request);

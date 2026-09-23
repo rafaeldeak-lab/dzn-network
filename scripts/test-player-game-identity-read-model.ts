@@ -85,6 +85,7 @@ export async function testPlayerGameIdentityReadModels() {
     const ownerB = await readOwnerPlayerGameIdentityClaims(env, user("owner-b"));
     assert.deepEqual(ownerB.claims.map(row => row.id), ["claim-b"]);
     assert.deepEqual(ownerB.history.map(row => row.id), ["audit-b"]);
+    assert.equal(ownerB.history[0].requester_discord_id, "discord-b", "Revocation history must retain the linked Discord identity.");
     const stranger = await readOwnerPlayerGameIdentityClaims(env, user("stranger"));
     assert.deepEqual(stranger.claims, []);
     assert.deepEqual(stranger.history, []);
@@ -95,6 +96,20 @@ export async function testPlayerGameIdentityReadModels() {
     const platformOwner = await readOwnerPlayerGameIdentityClaims({ ...env, DZN_PLATFORM_OWNER_DISCORD_IDS: "123456789001" }, user("platform", "123456789001"));
     assert.deepEqual(platformOwner.claims, [], "Platform oversight does not expand claim approval authority.");
     assert.deepEqual(platformOwner.history.map(row => row.id).sort(), ["audit-a", "audit-b"]);
+
+    const insertAudit = sqlite.prepare(`INSERT INTO player_game_identity_audit_log
+      (id, link_id, user_id, actor_user_id, linked_server_id, player_profile_id, player_id, action, result, note, created_at)
+      VALUES (?, 'link-a', 'player-a', 'owner-a', 'server-a', 'profile-a', '76561198000000001', 'link_revoked', 'accepted', 'Paged history record.', CURRENT_TIMESTAMP)`);
+    for (let index = 0; index < 51; index++) insertAudit.all(`paged-${String(index).padStart(3, "0")}`);
+    const firstHistoryPage = await readOwnerPlayerGameIdentityClaims(env, user("owner-a"));
+    assert.equal(firstHistoryPage.history.length, 50);
+    assert.equal(firstHistoryPage.history_has_more, true);
+    assert.equal(firstHistoryPage.history_next_offset, 50);
+    const secondHistoryPage = await readOwnerPlayerGameIdentityClaims(env, user("owner-a"), { historyOffset: firstHistoryPage.history_next_offset ?? 0 });
+    assert.equal(secondHistoryPage.history.length, 2);
+    assert.equal(secondHistoryPage.history_has_more, false);
+    assert.equal(secondHistoryPage.history_next_offset, null);
+    assert.equal(new Set([...firstHistoryPage.history, ...secondHistoryPage.history].map(row => row.id)).size, 52);
 
     const player = await readPlayerGameIdentityReadModel(env, user("player-a", "discord-a"));
     assert.equal(player.source, "player_game_identity_links");
@@ -113,6 +128,7 @@ export async function testPlayerGameIdentityReadModels() {
     assert.equal(unavailable.source, "unavailable");
     assert.deepEqual(unavailable.claims, []);
     assert.deepEqual(unavailable.history, []);
+    assert.equal(unavailable.history_has_more, false);
   } finally {
     sqlite.close();
   }

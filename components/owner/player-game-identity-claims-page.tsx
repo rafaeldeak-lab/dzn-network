@@ -58,6 +58,8 @@ type ClaimsPayload = {
   owner_or_admin_only: boolean;
   claims: PlayerGameIdentityClaim[];
   history: PlayerGameIdentityHistory[];
+  history_has_more: boolean;
+  history_next_offset: number | null;
   boundary: string;
   message?: string;
   error?: string;
@@ -87,7 +89,14 @@ type LoadState = "loading" | "ready" | "unauthorized" | "error";
 type ReviewAction = "approve" | "reject";
 type ClaimLoadResult =
   | { state: "unauthorized" }
-  | { state: "ready"; claims: PlayerGameIdentityClaim[]; history: PlayerGameIdentityHistory[]; boundary: string };
+  | {
+      state: "ready";
+      claims: PlayerGameIdentityClaim[];
+      history: PlayerGameIdentityHistory[];
+      historyHasMore: boolean;
+      historyNextOffset: number | null;
+      boundary: string;
+    };
 
 const NOTE_LIMIT = 240;
 
@@ -95,6 +104,9 @@ export function PlayerGameIdentityClaimsPage() {
   const [state, setState] = useState<LoadState>("loading");
   const [claims, setClaims] = useState<PlayerGameIdentityClaim[]>([]);
   const [history, setHistory] = useState<PlayerGameIdentityHistory[]>([]);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyNextOffset, setHistoryNextOffset] = useState<number | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [view, setView] = useState<"pending" | "history">("pending");
   const [payloadBoundary, setPayloadBoundary] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -102,8 +114,11 @@ export function PlayerGameIdentityClaimsPage() {
   const [busyClaim, setBusyClaim] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  const fetchClaims = useCallback(async (): Promise<ClaimLoadResult> => {
-    const response = await fetch("/api/owner/player-game-identity-claims", {
+  const fetchClaims = useCallback(async (historyOffset = 0): Promise<ClaimLoadResult> => {
+    const endpoint = historyOffset > 0
+      ? `/api/owner/player-game-identity-claims?history_offset=${historyOffset}`
+      : "/api/owner/player-game-identity-claims";
+    const response = await fetch(endpoint, {
       cache: "no-store",
       credentials: "include",
       headers: { accept: "application/json" },
@@ -125,6 +140,8 @@ export function PlayerGameIdentityClaimsPage() {
       state: "ready",
       claims: payload.claims ?? [],
       history: payload.history ?? [],
+      historyHasMore: payload.history_has_more === true,
+      historyNextOffset: typeof payload.history_next_offset === "number" ? payload.history_next_offset : null,
       boundary: payload.boundary ?? "",
     };
   }, []);
@@ -137,6 +154,8 @@ export function PlayerGameIdentityClaimsPage() {
 
     setClaims(result.claims);
     setHistory(result.history);
+    setHistoryHasMore(result.historyHasMore);
+    setHistoryNextOffset(result.historyNextOffset);
     setPayloadBoundary(result.boundary);
     setState("ready");
   }, []);
@@ -152,6 +171,29 @@ export function PlayerGameIdentityClaimsPage() {
       setError(loadError instanceof Error ? loadError.message : "Player stat link checks could not be loaded.");
     }
   }, [applyLoadResult, fetchClaims]);
+
+  const loadOlderHistory = useCallback(async () => {
+    if (historyLoading || historyNextOffset === null) return;
+    setHistoryLoading(true);
+    setError(null);
+    try {
+      const result = await fetchClaims(historyNextOffset);
+      if (result.state === "unauthorized") {
+        setState("unauthorized");
+        return;
+      }
+      setHistory((current) => {
+        const knownIds = new Set(current.map((item) => item.id));
+        return [...current, ...result.history.filter((item) => !knownIds.has(item.id))];
+      });
+      setHistoryHasMore(result.historyHasMore);
+      setHistoryNextOffset(result.historyNextOffset);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Older decision history could not be loaded.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [fetchClaims, historyLoading, historyNextOffset]);
 
   useEffect(() => {
     let active = true;
@@ -274,7 +316,7 @@ export function PlayerGameIdentityClaimsPage() {
               Pending ({pendingCount})
             </button>
             <button type="button" onClick={() => setView("history")} aria-pressed={view === "history"} className={`rounded-md px-3 py-2 text-xs font-black uppercase ${view === "history" ? "bg-violet-300/15 text-violet-50" : "text-zinc-400 hover:text-white"}`}>
-              Decision History ({history.length})
+              Decision History
             </button>
           </div>
         ) : null}
@@ -299,9 +341,18 @@ export function PlayerGameIdentityClaimsPage() {
         ) : null}
         {state === "ready" && view === "history" && history.length === 0 ? <HistoryEmptyState /> : null}
         {state === "ready" && view === "history" && history.length > 0 ? (
-          <section className="grid gap-3" aria-label="Approval and revocation history">
-            {history.map((item) => <HistoryCard key={item.id} item={item} />)}
-          </section>
+          <div className="grid gap-3">
+            <p className="text-xs font-semibold text-zinc-500">Showing {history.length} most recent decisions{historyHasMore ? "; older records are available." : "."}</p>
+            <section className="grid gap-3" aria-label="Approval and revocation history">
+              {history.map((item) => <HistoryCard key={item.id} item={item} />)}
+            </section>
+            {historyHasMore ? (
+              <button type="button" onClick={() => void loadOlderHistory()} disabled={historyLoading} className="mx-auto inline-flex min-h-11 items-center gap-2 rounded-md border border-violet-300/30 bg-violet-300/10 px-4 py-2 text-xs font-black uppercase text-violet-50 transition hover:bg-violet-300/15 disabled:cursor-wait disabled:opacity-60">
+                <RefreshCw className={`size-4 ${historyLoading ? "animate-spin" : ""}`} aria-hidden="true" />
+                {historyLoading ? "Loading older decisions" : "Load older decisions"}
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
       <div className="mx-auto w-full max-w-6xl"><ManagedGameIdentityLinks /></div>
@@ -329,7 +380,7 @@ function HistoryCard({ item }: { item: PlayerGameIdentityHistory }) {
       <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <DetailBox label="Game profile" value={item.player_name || "Name not available"} />
         <DetailBox label="Exact submitted game ID" value={item.player_id || "Not recorded"} emphasis />
-        <DetailBox label="Requesting Discord account" value={item.requester_discord_id || "Not recorded"} />
+        <DetailBox label="Linked Discord account" value={item.requester_discord_id || "Not recorded"} />
         <DetailBox label="Decision by" value={item.actor_name || item.actor_user_id || "System actor unavailable"} />
       </div>
       <div className="mt-3 rounded-md border border-white/10 bg-white/[0.035] p-3">
