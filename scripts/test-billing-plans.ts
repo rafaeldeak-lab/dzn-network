@@ -263,6 +263,7 @@ for (const snippet of ["Starter", "Pro", "PAYMENT_COPY.starterOffer", "PAYMENT_C
 assert.equal(pricingSection.includes('["Network rankings", "Included", "Included"]'), true, "Shared network rankings must not be sold as a Pro-only feature.");
 assert.equal(pricingSection.includes('["Event leaderboard detail", null, "Included"]'), true, "Only the Pro-gated event detail should be presented as the upgrade.");
 assert.equal(pricingSection.includes("Event leaderboards and network rankings"), false, "Shared rankings must not be bundled into a Pro-only claim.");
+assert.equal(pricingSection.includes("Event and network leaderboards"), false, "The rendered Pro checklist must not bundle shared network rankings into paid value.");
 assert.equal(pricingSection.includes("<table"), false, "Pricing comparison should use the responsive mobile-first layout, not the old fixed table.");
 assert.equal(pricingSection.includes('"Seasonal participation where events allow"'), false, "Pricing must not present shared seasonal participation as Pro-only.");
 assert.equal(pricingSection.includes('"Subscription billing portal"'), false, "Pricing must not present the shared billing portal as Pro-only.");

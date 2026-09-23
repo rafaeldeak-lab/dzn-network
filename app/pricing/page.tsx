@@ -214,7 +214,7 @@ export default function PricingPage() {
               <div className="mt-5 flex flex-wrap items-end gap-x-3 gap-y-1"><p className="text-5xl font-black">{PAYMENT_COPY.proPrice}</p><p className="pb-1 text-sm font-bold uppercase text-zinc-400">cancel anytime</p></div>
               <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-300">{PAYMENT_COPY.proTerms}</p>
               <div className="my-7 grid gap-3 sm:grid-cols-2">
-                {["Up to 3 linked servers", "Advanced analytics and stats", "Custom banner and gallery", "24 Discord post and feed types", "Faster eligible sync cadences", "Featured and spotlight eligibility", "Server Wars hosting tools", "2 promotion credits per billing period", "Event and network leaderboards", "Up to 8 earned showcase badges"].map((feature) => <div key={feature} className="flex items-start gap-3 border-b border-white/10 pb-3 text-sm font-bold leading-5 text-white"><Sparkles aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" /><span>{feature}</span></div>)}
+                {["Up to 3 linked servers", "Advanced analytics and stats", "Custom banner and gallery", "24 Discord post and feed types", "Faster eligible sync cadences", "Featured and spotlight eligibility", "Server Wars hosting tools", "2 promotion credits per billing period", "Event leaderboard detail", "Up to 8 earned showcase badges"].map((feature) => <div key={feature} className="flex items-start gap-3 border-b border-white/10 pb-3 text-sm font-bold leading-5 text-white"><Sparkles aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" /><span>{feature}</span></div>)}
               </div>
               <div className="mt-auto"><PricingCheckout planKey="pro" /></div>
             </article>
