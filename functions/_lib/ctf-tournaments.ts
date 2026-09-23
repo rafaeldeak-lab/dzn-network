@@ -1,5 +1,11 @@
 import { requireDb } from "./db";
 import { normalizePlanKey, type PlanKey } from "./plans";
+import {
+  isShowcaseWriteAssertionError,
+  readServerShowcaseAccess,
+  showcaseWriteAssertionSql,
+  showcaseWriteGuard,
+} from "./server-showcase-access";
 import type { Env } from "./types";
 
 export type CtfTournamentPhase = "PRE_WAR_ROSTER" | "WAR_PREP_CONFIG" | "BATTLE_ACTIVE" | "CONCLUDED";
@@ -102,37 +108,62 @@ export async function saveBotOnboardingConfig(env: Env, input: {
 export async function processServerMatchmakingOptIn(env: Env, linkedServerId: string) {
   await ensureCtfTournamentSchema(env);
   const db = requireDb(env);
-  const row = await db
+  const result = await db
     .prepare(
-      `SELECT linked_servers.id, linked_servers.guild_id, server_subscriptions.plan_key, server_subscriptions.status
+      `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
+              server_subscriptions.plan_key, server_subscriptions.status
        FROM linked_servers
        LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
-       WHERE linked_servers.id = ?
-       LIMIT 1`,
+       WHERE linked_servers.id = ?`,
     )
     .bind(linkedServerId)
-    .first<{ id: string; guild_id: string | null; plan_key: string | null; status: string | null }>();
+    .all<{ id: string; user_id: string; guild_id: string | null; plan_key: string | null; status: string | null }>();
+  const rows = result.results ?? [];
+  const row = rows[0];
   if (!row) return { ok: false, status: "not_found" as const, reason: "Server not found." };
 
-  const planKey = normalizePlanKey(row.plan_key);
-  const active = isActiveSubscription(row.status);
+  const activeBilling = rows.find(candidate => isActiveSubscription(candidate.status)
+    && STRICT_MATCHMAKING_PLANS.includes(normalizePlanKey(candidate.plan_key)));
+  const billing = activeBilling ?? row;
+  const showcaseAccess = await readServerShowcaseAccess(env, row.id, {
+    plan_key: billing.plan_key,
+    subscription_status: billing.status,
+  });
+  const planKey = showcaseAccess.source === "complimentary_showcase" ? "pro" : normalizePlanKey(billing.plan_key);
+  const active = showcaseAccess.source === "complimentary_showcase" || isActiveSubscription(billing.status);
   if (!active || !STRICT_MATCHMAKING_PLANS.includes(planKey)) {
     return {
       ok: false,
       status: "plan_locked" as const,
       plan_key: planKey,
-      subscription_status: row.status ?? "inactive",
-      reason: "Matchmaking requires an active Pro subscription.",
+      subscription_status: billing.status ?? "inactive",
+      reason: "Matchmaking requires active Pro access.",
     };
   }
 
   const now = new Date().toISOString();
-  await db
-    .prepare("UPDATE linked_servers SET is_searching_for_match = 1, matchmaking_opt_in_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-    .bind(now, linkedServerId)
-    .run();
-  console.log("DZN PRO MATCHMAKING OPT IN ACCEPTED", { linkedServerId, planKey });
-  return { ok: true, status: "queued" as const, plan_key: planKey, matchmaking_opt_in_at: now };
+  const guard = await showcaseWriteGuard(env, row.id, row.user_id, showcaseAccess);
+  try {
+    await db.batch([
+      db.prepare(showcaseWriteAssertionSql(guard.sql)).bind(...guard.values),
+      db.prepare("UPDATE linked_servers SET is_searching_for_match = 1, matchmaking_opt_in_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .bind(now, linkedServerId),
+      db.prepare(showcaseWriteAssertionSql(guard.sql)).bind(...guard.values),
+    ]);
+  } catch (error) {
+    if (isShowcaseWriteAssertionError(error)) {
+      return {
+        ok: false,
+        status: "plan_locked" as const,
+        plan_key: planKey,
+        subscription_status: billing.status ?? "inactive",
+        reason: "Matchmaking access changed before the server was queued.",
+      };
+    }
+    throw error;
+  }
+  console.log("DZN PRO MATCHMAKING OPT IN ACCEPTED", { linkedServerId, planKey, accessSource: showcaseAccess.source });
+  return { ok: true, status: "queued" as const, plan_key: planKey, access_source: showcaseAccess.source, matchmaking_opt_in_at: now };
 }
 
 export async function dispatchUnifiedRegistrationEmbed(env: Env, linkedServerId: string, input: {

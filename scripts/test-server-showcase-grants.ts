@@ -23,6 +23,7 @@ import { onRequestGet as dashboardHealth } from "../functions/api/servers/[serve
 import { onRequest as advertisingBump } from "../functions/api/servers/[serverId]/advertising/bump";
 import { dashboardSelectedServerAccess } from "../components/onboarding/dashboard-detail-display";
 import { createServerWarChallenge, getOwnerServerWarsPayload, getServerWarOpponentOptions } from "../functions/_lib/server-wars";
+import { processServerMatchmakingOptIn } from "../functions/_lib/ctf-tournaments";
 
 type Row = Record<string, unknown>;
 type Sqlite = { exec(sql: string): void; close(): void; prepare(sql: string): {
@@ -235,6 +236,52 @@ async function run() {
     if (!unrelated.ok) throw new Error("Expected unrelated owner Server Wars payload");
     assert.equal(unrelated.access.accessSource, "billing");
     assert.equal(unrelated.access.canCreateChallenge, false);
+  });
+  await test("exact grant enables only NukeTown CTF matchmaking without fabricating billing", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const locked = await processServerMatchmakingOptIn(env, scope.linkedServerId);
+    assert.equal(locked.ok, false);
+    assert.equal(locked.status, "plan_locked");
+
+    await grant(env);
+    const queued = await processServerMatchmakingOptIn(env, scope.linkedServerId);
+    assert.equal(queued.ok, true);
+    if (!queued.ok) throw new Error("Expected exact grant CTF matchmaking access");
+    assert.equal(queued.plan_key, "pro");
+    assert.equal(queued.access_source, "complimentary_showcase");
+    assert.equal(db.sqlite.prepare("SELECT is_searching_for_match FROM linked_servers WHERE id = ?").get(scope.linkedServerId)?.is_searching_for_match, 1);
+
+    const unrelated = await processServerMatchmakingOptIn(env, "same-guild-other-server");
+    assert.equal(unrelated.ok, false);
+    assert.equal(unrelated.status, "plan_locked");
+    assert.equal(db.sqlite.prepare("SELECT is_searching_for_match FROM linked_servers WHERE id = ?").get("same-guild-other-server")?.is_searching_for_match, 0);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("revoked exact grant rolls back the CTF matchmaking opt-in", async ({ db, env }) => {
+    const grantId = await grant(env);
+    db.beforeBatch = () => revokeSql(db, grantId);
+    const result = await processServerMatchmakingOptIn(env, scope.linkedServerId);
+    db.beforeBatch = null;
+    assert.equal(result.ok, false);
+    assert.equal(result.status, "plan_locked");
+    assert.equal(db.sqlite.prepare("SELECT is_searching_for_match FROM linked_servers WHERE id = ?").get(scope.linkedServerId)?.is_searching_for_match, 0);
+    assert.equal(db.sqlite.prepare("SELECT status FROM server_subscriptions").get()?.status, "canceled");
+  });
+  await test("mid-batch exact grant expiry rolls back the CTF matchmaking opt-in", async ({ db, env }) => {
+    const { expiresAt } = grantExpiring(db, 1);
+    let waited = false;
+    db.beforeWrite = (sql) => {
+      if (waited || !/UPDATE linked_servers SET is_searching_for_match/.test(sql)) return;
+      waited = true;
+      waitUntilAfter(expiresAt);
+    };
+    const result = await processServerMatchmakingOptIn(env, scope.linkedServerId);
+    db.beforeWrite = null;
+    assert.equal(waited, true);
+    assert.equal(result.ok, false);
+    assert.equal(result.status, "plan_locked");
+    assert.equal(db.sqlite.prepare("SELECT is_searching_for_match FROM linked_servers WHERE id = ?").get(scope.linkedServerId)?.is_searching_for_match, 0);
+    assert.equal(db.sqlite.prepare("SELECT status FROM server_subscriptions").get()?.status, "canceled");
   });
   await test("revoked exact grant rolls back the complete Server Wars challenge write", async ({ db, env }) => {
     const grantId = await grant(env);
