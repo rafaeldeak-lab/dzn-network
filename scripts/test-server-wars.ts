@@ -140,6 +140,8 @@ assert.match(globalCss, /server-wars-bg-layer\.webp/);
 assert.match(globalCss, /server-wars-fog-ember-overlay\.webp/);
 assert.match(globalCss, /server-wars-banner-concept\.webp/);
 assert.match(globalCss, /dzn-server-wars-hero__video/);
+assert.match(globalCss, /\.dzn-server-wars-hero__video\s*\{[^}]*object-fit:\s*contain;/, "Server Wars motion artwork should keep the complete frame visible.");
+assert.doesNotMatch(globalCss, /\.dzn-server-wars-hero__video\s*\{[^}]*transform:\s*scale/, "Server Wars motion artwork should not be force-zoomed and cropped.");
 assert.match(globalCss, /dznServerWarsEmberDrift/);
 assert.match(globalCss, /prefers-reduced-motion: reduce/);
 assert.match(globalCss, /display: none !important/);
