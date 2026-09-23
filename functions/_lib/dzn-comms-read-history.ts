@@ -330,7 +330,7 @@ function cleanText(value: unknown, maxLength: number) {
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  return normalized.slice(0, maxLength);
+  return [...normalized].slice(0, maxLength).join("");
 }
 
 function isExpired(value: string | null) {

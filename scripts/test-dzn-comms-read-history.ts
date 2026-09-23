@@ -154,6 +154,12 @@ async function testRuntimeContracts() {
   const unicodePayload = await loadCommsHistory(new AbortController().signal, { fetcher: async () => unicodeRead });
   assert.equal(unicodePayload.messages.length, 30, "A real API page of long Unicode messages must not fall back to static content.");
   assert.ok(unicodePayload.messages.every(row => row.body === "\u4e2d".repeat(2_000)));
+  const astralDb = seededDb();
+  astralDb.messages.splice(0, astralDb.messages.length,
+    message({ id: "astral", channelId: "channel-global", body: "😀".repeat(2_000), createdAt: "2026-09-01T10:00:00.000Z" }));
+  const astralRead = await callMessageHistoryRoute(astralDb, "GET", "https://dzn.test/api/comms/message-history?channel=global-chat", enabledEnv(astralDb));
+  const astralPayload = await loadCommsHistory(new AbortController().signal, { fetcher: async () => astralRead });
+  assert.equal([...astralPayload.messages[0].body].length, 2_000, "Accepted astral characters must survive the API and client without truncation or split surrogates.");
   for (const kind of ["public", "private_group", "support"] as const) {
     for (const visibility of ["public", "private_group", "support_private"] as const) {
       if (visibility === (kind === "support" ? "support_private" : kind)) continue;

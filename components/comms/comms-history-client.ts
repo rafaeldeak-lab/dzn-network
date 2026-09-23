@@ -40,7 +40,7 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 function text(value: unknown, max: number, allowEmpty = false): string {
-  if (typeof value !== "string" || value.length > max || (!allowEmpty && !value.trim())) throw unavailable();
+  if (typeof value !== "string" || [...value].length > max || (!allowEmpty && !value.trim())) throw unavailable();
   return value;
 }
 

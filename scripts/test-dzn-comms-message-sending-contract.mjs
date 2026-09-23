@@ -50,6 +50,9 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /julianday\(accepted_at\) > julianday\(\?, '-5 seconds'\)/);
   assert.match(runtime, /exactKeys\(parsed\.value, \["messageId", "reason"\]\)/);
   assert.match(runtime, /exactKeys\(parsed\.value, \["messageId", "action", "reason"\]\)/);
+  assert.match(runtime, /concurrentReplay\) return error\(409, "REQUEST_ID_CONFLICT"/, "Concurrent different-body retries must preserve 409 conflict semantics.");
+  assert.match(runtime, /WHERE changes\(\) > 0/, "Moderation audit rows must depend on a real state transition.");
+  assert.match(runtime, /MODERATION_NO_CHANGE/, "No-op moderation must return a conflict instead of a false success.");
 });
 
 test("moderation publishes only allow decisions and never stores rejected text", () => {
@@ -68,6 +71,11 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /sendCommsMessage\(draft, pendingAttempt\.requestId\)/);
   assert.match(shell, /Message sent\. Chat history will refresh shortly\./);
   assert.match(shell, /reportCommsMessage\(message\.id\)/);
+  assert.match(shell, /reportActionsEnabled = liveUiEnabled && payload\.feature_flags\.report_actions_enabled/, "Report controls must stay behind the matching live UI gate.");
+  assert.match(shell, /sendingEnabled = liveUiEnabled && payload\.feature_flags\.sending_enabled/, "Composer controls must stay behind the matching live UI gate.");
+  assert.match(shell, /liveUiEnabled && payload\.feature_flags\.sending_enabled \? "Global Chat is live/, "Read-only history must not claim chat is live before the matching UI release gate.");
+  assert.match(shell, /Report received\./);
+  assert.match(shell, /Report failed\. Try again\./);
   assert.match(client, /"\/api\/comms\/messages"/);
   assert.match(client, /"\/api\/comms\/reports"/);
   assert.doesNotMatch(runtime + shell + client, /STRIPE_SECRET|DZN_LIVE_CHECKOUT_ENABLED|NITRADO_TOKEN|DISCORD_BOT_TOKEN|WebSocket|DurableObject|OPENAI_API_KEY/);

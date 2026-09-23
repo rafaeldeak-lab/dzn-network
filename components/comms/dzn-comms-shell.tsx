@@ -116,7 +116,7 @@ export function DznCommsShell() {
         setHistory({
           status: "ready",
           payload,
-          message: payload.feature_flags.sending_enabled ? "Global Chat is live. Keep it respectful and report abuse." : "Message history is available. Sending is not enabled yet.",
+          message: liveUiEnabled && payload.feature_flags.sending_enabled ? "Global Chat is live. Keep it respectful and report abuse." : "Message history is available. Sending is not enabled yet.",
         });
       })
       .catch(() => {
@@ -138,7 +138,9 @@ export function DznCommsShell() {
 
   const payload = history.payload;
   const statusLabel = useMemo(() => statusCopy(history.status), [history.status]);
-  const canSend = liveUiEnabled && payload.feature_flags.sending_enabled && draft.trim().length > 0 && !sending;
+  const sendingEnabled = liveUiEnabled && payload.feature_flags.sending_enabled;
+  const reportActionsEnabled = liveUiEnabled && payload.feature_flags.report_actions_enabled;
+  const canSend = sendingEnabled && draft.trim().length > 0 && !sending;
 
   async function handleSend(event: FormEvent) {
     event.preventDefault();
@@ -187,7 +189,7 @@ export function DznCommsShell() {
             </div>
             <div className="grid gap-2 sm:grid-cols-2 lg:w-[330px]">
               <StatusPill label="History" value={statusLabel} tone={history.status === "ready" ? "cyan" : "violet"} />
-              <StatusPill label="Runtime" value={payload.feature_flags.sending_enabled ? "Live" : "Read Only"} tone={payload.feature_flags.sending_enabled ? "cyan" : "gold"} />
+              <StatusPill label="Runtime" value={sendingEnabled ? "Live" : "Read Only"} tone={sendingEnabled ? "cyan" : "gold"} />
             </div>
           </div>
 
@@ -195,7 +197,7 @@ export function DznCommsShell() {
             <aside className="border-b border-white/10 bg-black/18 p-4 lg:border-b-0 lg:border-r">
               <PanelTitle icon={Hash} label="Channels" />
               <div className="mt-4 space-y-2">
-                <ChannelButton active icon={Hash} label="Global Chat" meta={payload.feature_flags.sending_enabled ? "Live" : "Read-only"} />
+                <ChannelButton active icon={Hash} label="Global Chat" meta={sendingEnabled ? "Live" : "Read-only"} />
                 <ChannelButton icon={Hash} label="New Players" meta="Future" />
                 <ChannelButton icon={Hash} label="Server Owners" meta="Future" />
                 <ChannelButton icon={LockKeyhole} label="Private Groups" meta="Blocked" />
@@ -225,7 +227,7 @@ export function DznCommsShell() {
 
               <div className="mt-4 space-y-3">
                 {payload.messages.map((message) => (
-                  <MessageRow key={message.id} message={message} reportEnabled={payload.feature_flags.report_actions_enabled} />
+                  <MessageRow key={message.id} message={message} reportEnabled={reportActionsEnabled} />
                 ))}
               </div>
 
@@ -239,18 +241,17 @@ export function DznCommsShell() {
                   <MessageCircle className="h-5 w-5" aria-hidden="true" />
                 </button>
                 <input
-                  disabled={!payload.feature_flags.sending_enabled || sending}
+                  disabled={!sendingEnabled || sending}
                   value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  maxLength={2000}
-                  placeholder={payload.feature_flags.sending_enabled ? "Message Global Chat" : "Message sending is not enabled yet."}
+                  onChange={(event) => setDraft([...event.target.value].slice(0, 2_000).join(""))}
+                  placeholder={sendingEnabled ? "Message Global Chat" : "Message sending is not enabled yet."}
                   className="min-w-0 flex-1 bg-transparent px-2 text-sm font-semibold text-zinc-300 placeholder:text-zinc-500 focus:outline-none"
                 />
                 <button
                   type="submit"
                   disabled={!canSend}
                   className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-cyan-300/20 bg-cyan-400/10 text-cyan-500 opacity-60"
-                  aria-label={payload.feature_flags.sending_enabled ? "Send message" : "Send is unavailable"}
+                  aria-label={sendingEnabled ? "Send message" : "Send is unavailable"}
                 >
                   <Send className="h-5 w-5" aria-hidden="true" />
                 </button>
@@ -284,6 +285,18 @@ export function DznCommsShell() {
 
 function MessageRow({ message, reportEnabled }: { message: CommsHistoryMessage; reportEnabled: boolean }) {
   const muted = message.visibility_state !== "visible";
+  const [reportState, setReportState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+
+  async function submitReport() {
+    if (reportState === "sending" || reportState === "sent") return;
+    setReportState("sending");
+    try {
+      await reportCommsMessage(message.id);
+      setReportState("sent");
+    } catch {
+      setReportState("error");
+    }
+  }
 
   return (
     <article className={`rounded-lg border p-4 ${muted ? "border-amber-300/18 bg-amber-300/6" : "border-white/10 bg-black/22"}`}>
@@ -301,9 +314,13 @@ function MessageRow({ message, reportEnabled }: { message: CommsHistoryMessage; 
           </div>
           <p className={`mt-2 text-sm font-semibold leading-6 [overflow-wrap:anywhere] ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
           {reportEnabled && !muted ? (
-            <button type="button" onClick={() => void reportCommsMessage(message.id).catch(() => undefined)} className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-zinc-400 hover:text-amber-200" title="Report this message to DZN moderation">
-              <Flag className="h-3.5 w-3.5" aria-hidden="true" /> Report
-            </button>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button type="button" disabled={reportState === "sending" || reportState === "sent"} onClick={() => void submitReport()} className="inline-flex items-center gap-1 text-xs font-bold text-zinc-400 hover:text-amber-200 disabled:cursor-not-allowed disabled:text-zinc-600" title="Report this message to DZN moderation">
+                <Flag className="h-3.5 w-3.5" aria-hidden="true" /> {reportState === "sending" ? "Sending" : reportState === "sent" ? "Reported" : "Report"}
+              </button>
+              {reportState === "sent" ? <span role="status" className="text-xs font-bold text-cyan-200">Report received.</span> : null}
+              {reportState === "error" ? <span role="alert" className="text-xs font-bold text-amber-200">Report failed. Try again.</span> : null}
+            </div>
           ) : null}
         </div>
       </div>

@@ -86,6 +86,7 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   } catch {
     const concurrentReplay = await readReceipt(db, user.id, channel.id, requestId);
     if (concurrentReplay?.body_hash === bodyHash) return receiptResponse(concurrentReplay, true);
+    if (concurrentReplay) return error(409, "REQUEST_ID_CONFLICT", "This retry ID was already used for different text.");
     return error(429, "RATE_LIMITED", "Wait five seconds before sending another message.");
   }
   return json({ ok: true, code: "MESSAGE_SENT", message_id: messageId, replayed: false }, { status: 201, headers: privateNoStoreHeaders() });
@@ -139,11 +140,14 @@ export async function handleDznCommsModeration(request: Request, env: Env) {
   const target = await db.prepare("SELECT messages.id FROM dzn_comms_messages AS messages JOIN dzn_comms_channels AS channels ON channels.id = messages.channel_id WHERE messages.id = ? AND channels.slug = 'global-chat' AND channels.kind = 'public' AND channels.visibility = 'public' LIMIT 1").bind(messageId).first<{ id: string }>();
   if (!target) return error(404, "MESSAGE_NOT_FOUND", "That Global Chat message is unavailable.");
   const statements: D1PreparedStatement[] = [];
-  if (state === "deleted") statements.push(db.prepare("UPDATE dzn_comms_messages SET body = 'Message deleted.', author_user_id = NULL, author_display_name = 'DZN Safety', author_role_label = 'System', visibility_state = 'deleted', edited_at = CURRENT_TIMESTAMP WHERE id = ?").bind(messageId));
-  else if (state) statements.push(db.prepare("UPDATE dzn_comms_messages SET visibility_state = ?, edited_at = CURRENT_TIMESTAMP WHERE id = ? AND visibility_state != 'deleted'").bind(state, messageId));
+  if (state === "deleted") statements.push(db.prepare("UPDATE dzn_comms_messages SET body = 'Message deleted.', author_user_id = NULL, author_display_name = 'DZN Safety', author_role_label = 'System', visibility_state = 'deleted', edited_at = CURRENT_TIMESTAMP WHERE id = ? AND visibility_state != 'deleted'").bind(messageId));
+  else if (state) statements.push(db.prepare("UPDATE dzn_comms_messages SET visibility_state = ?, edited_at = CURRENT_TIMESTAMP WHERE id = ? AND visibility_state != 'deleted' AND visibility_state != ?").bind(state, messageId, state));
   if (action === "resolve_report" || action === "dismiss_report") statements.push(db.prepare("UPDATE dzn_comms_reports SET status = ?, resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = ? WHERE message_id = ? AND status = 'open'").bind(action === "resolve_report" ? "resolved" : "dismissed", auth.user.id, messageId));
-  statements.push(db.prepare("INSERT INTO dzn_comms_moderation_audit (id, message_id, actor_user_id, action, reason_code) VALUES (?, ?, ?, ?, ?)").bind(crypto.randomUUID(), messageId, auth.user.id, action, reason));
-  await db.batch(statements);
+  statements.push(db.prepare("INSERT INTO dzn_comms_moderation_audit (id, message_id, actor_user_id, action, reason_code) SELECT ?, ?, ?, ?, ? WHERE changes() > 0").bind(crypto.randomUUID(), messageId, auth.user.id, action, reason));
+  const results = await db.batch(statements);
+  if (Number(results[0]?.meta?.changes ?? 0) < 1 || Number(results[1]?.meta?.changes ?? 0) !== 1) {
+    return error(409, "MODERATION_NO_CHANGE", "That moderation action no longer changes the current message or report state.");
+  }
   return json({ ok: true, code: "MODERATION_RECORDED" }, { headers: privateNoStoreHeaders() });
 }
 
@@ -161,6 +165,7 @@ async function storeRejected(db: D1Database, user: SessionUser, channelId: strin
   } catch {
     const replay = await readReceipt(db, user.id, channelId, requestId);
     if (replay?.body_hash === bodyHash) return receiptResponse(replay, true);
+    if (replay) return error(409, "REQUEST_ID_CONFLICT", "This retry ID was already used for different text.");
     return error(429, "RATE_LIMITED", "Too many chat attempts were made. Wait a moment and retry.");
   }
   return error(status, reason, decision === "timeout" ? "This account has a short chat timeout for a safety review." : "That message was blocked by DZN Safety.");

@@ -58,7 +58,7 @@ test("masks non-visible author and body even if the response incorrectly supplie
 });
 
 test("accepts full Unicode and worst-case JSON-escaped pages within the bounded contract", async () => {
-  for (const character of ["\u4e2d", "\ud800"]) {
+  for (const character of ["\u4e2d", "\ud800", "😀"]) {
     const input = commsHistoryFixture();
     input.messages = Array.from({ length: 30 }, (_, index) => ({ ...input.messages[0],
       id: character.repeat(117) + index, body: character.repeat(2_000),
