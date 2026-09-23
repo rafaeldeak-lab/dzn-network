@@ -1,12 +1,14 @@
 import { defaultBumpPeriod, evaluateListingBumpEligibility, periodExpired } from "../../../../_lib/advertising";
 import { getSessionUser, requireDb } from "../../../../_lib/db";
 import { json, methodNotAllowed } from "../../../../_lib/http";
-import { ensureBillingSchema, getListingLimits, getOwnerEntitlements, getPlanConfig, type PlanEntitlements } from "../../../../_lib/plans";
+import { ensureBillingSchema, getOwnerEntitlements, getPlanConfig, type PlanEntitlements } from "../../../../_lib/plans";
 import { recordDiscordServerAnnouncementEvent } from "../../../../_lib/discord-server-announcements";
+import { readServerShowcaseAccess, serializeShowcaseAccess, showcaseWriteGuard } from "../../../../_lib/server-showcase-access";
 import type { Env, PagesFunction, SessionUser } from "../../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env, params, waitUntil }) => {
   if (request.method !== "POST" && request.method !== "GET") return methodNotAllowed();
+  const requestStartedAt = new Date().toISOString();
 
   const user = await resolveUser(env, request);
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
@@ -14,41 +16,101 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
   const linkedServerId = sanitizeLinkedServerId(params.serverId);
   if (!linkedServerId) return json({ error: "Invalid server id" }, { status: 400 });
 
-  await ensureBillingSchema(env);
+  if (request.method === "POST") await ensureBillingSchema(env);
   const db = requireDb(env);
   const server = await db
     .prepare(
-      `SELECT id, user_id
+      `SELECT linked_servers.id, linked_servers.user_id, linked_servers.status, linked_servers.lifecycle_status,
+              (SELECT server_subscriptions.plan_key
+               FROM server_subscriptions
+               WHERE server_subscriptions.guild_id = linked_servers.guild_id
+                 AND server_subscriptions.owner_discord_id = ?
+               ORDER BY CASE WHEN lower(COALESCE(server_subscriptions.status, '')) IN ('active', 'trialing') THEN 0 ELSE 1 END,
+                        server_subscriptions.updated_at DESC,
+                        server_subscriptions.created_at DESC
+               LIMIT 1) AS server_plan_key,
+              (SELECT server_subscriptions.status
+               FROM server_subscriptions
+               WHERE server_subscriptions.guild_id = linked_servers.guild_id
+                 AND server_subscriptions.owner_discord_id = ?
+               ORDER BY CASE WHEN lower(COALESCE(server_subscriptions.status, '')) IN ('active', 'trialing') THEN 0 ELSE 1 END,
+                        server_subscriptions.updated_at DESC,
+                        server_subscriptions.created_at DESC
+                LIMIT 1) AS server_subscription_status,
+              strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS billing_observed_at
        FROM linked_servers
-       WHERE id = ?
-         AND lower(COALESCE(status, 'pending')) NOT IN ('deleted', 'merged')
-         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
+       WHERE linked_servers.id = ?
+         AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')
+         AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        LIMIT 1`,
     )
-    .bind(linkedServerId)
-    .first<{ id: string; user_id: string }>();
+    .bind(user.discord_id, user.discord_id, linkedServerId)
+    .first<{
+      id: string;
+      user_id: string;
+      status: string | null;
+      lifecycle_status: string | null;
+      server_plan_key: string | null;
+      server_subscription_status: string | null;
+      billing_observed_at: string | null;
+    }>();
   if (!server) return json({ error: "Linked server not found" }, { status: 404 });
   if (server.user_id !== user.id) return json({ error: "No access to this linked server." }, { status: 403 });
 
+  const entitlementsReadStartedAt = new Date().toISOString();
   const entitlements = request.method === "GET"
     ? await getOwnerEntitlementsReadOnly(env, user.discord_id)
     : await getOwnerEntitlements(env, user.discord_id);
-  const now = new Date();
-  const listingPlanInput = { plan_key: entitlements.plan_key, subscription_status: entitlements.plan_key === "free" ? "free" : "active" };
-  const listingLimits = getListingLimits(listingPlanInput);
-  const billing = await db
-    .prepare("SELECT current_period_start, current_period_end FROM owner_billing_accounts WHERE discord_user_id = ? LIMIT 1")
-    .bind(user.discord_id)
-    .first<{ current_period_start: string | null; current_period_end: string | null }>();
+  const entitlementsObservedAt = entitlementsReadStartedAt;
+  const now = new Date(Date.now());
+  const ownerBillingReadStartedAt = new Date().toISOString();
+  const billing = await readOwnerBillingProjection(env, user.discord_id, request.method === "GET");
+  const ownerBillingObservedAt = billing?.billing_observed_at ?? ownerBillingReadStartedAt;
+  const fallbackAccessBaseline = {
+    plan_key: server.server_plan_key ?? billing?.plan_key ?? entitlements.plan_key,
+    subscription_status: server.server_plan_key
+      ? server.server_subscription_status
+      : billing?.plan_status ?? (entitlements.plan_key === "free" ? "free" : "active"),
+  };
+  const billingObservedAt = earliestObservation(
+    server.billing_observed_at ?? entitlementsReadStartedAt,
+    ownerBillingObservedAt,
+    entitlementsObservedAt,
+  );
+  const accessObservation = await readAdvertisingAccessObservation(env, {
+    linkedServerId,
+    ownerUserId: user.id,
+    ownerDiscordId: user.discord_id,
+    fallback: fallbackAccessBaseline,
+    fallbackObservedAt: billingObservedAt,
+    allowMissingSchema: request.method === "GET",
+  });
+  const accessBaseline = {
+    plan_key: accessObservation.planKey,
+    subscription_status: accessObservation.status,
+    observed_at: accessObservation.observedAt,
+  };
+  const serverAccess = await readServerShowcaseAccess(env, linkedServerId, accessBaseline);
+  const finalBillingObservedAt = accessObservation.observedAt;
+  const showcaseGrantObservedAt = serverAccess.observedAt;
+  const listingLimits = serverAccess.listing;
+  const serverPlan = getPlanConfig(listingLimits.listingPlanKey);
   const fallbackPeriod = defaultBumpPeriod(now);
-  const periodStart = billing?.current_period_start ?? fallbackPeriod.start;
-  const periodEnd = billing?.current_period_end ?? fallbackPeriod.end;
+  const billingPeriodCurrent = !periodExpired(billing?.current_period_end, now);
+  let periodStart = billingPeriodCurrent ? billing?.current_period_start ?? fallbackPeriod.start : fallbackPeriod.start;
+  let periodEnd = billingPeriodCurrent ? billing?.current_period_end ?? fallbackPeriod.end : fallbackPeriod.end;
 
   let state = await db
     .prepare("SELECT * FROM server_advertising_state WHERE linked_server_id = ? LIMIT 1")
     .bind(linkedServerId)
     .first<Record<string, unknown>>();
-  if (periodExpired(state?.bump_period_end as string | null | undefined, now)) {
+  const statePeriodEnd = typeof state?.bump_period_end === "string" ? state.bump_period_end : null;
+  const statePeriodCurrent = !periodExpired(statePeriodEnd, now);
+  if (!billingPeriodCurrent && statePeriodCurrent && statePeriodEnd) {
+    periodStart = typeof state?.bump_period_start === "string" ? state.bump_period_start : periodStart;
+    periodEnd = statePeriodEnd;
+  }
+  if (!statePeriodCurrent) {
     state = {
       ...state,
       bump_count_current_period: 0,
@@ -60,16 +122,29 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
   if (request.method === "GET") {
     return json({
       ok: true,
+      generated_at: requestStartedAt,
       advertising: {
         last_bumped_at: typeof state?.last_bumped_at === "string" ? state.last_bumped_at : null,
         bump_count_current_period: Number(state?.bump_count_current_period ?? 0),
         bump_period_start: typeof state?.bump_period_start === "string" ? state.bump_period_start : periodStart,
         bump_period_end: typeof state?.bump_period_end === "string" ? state.bump_period_end : periodEnd,
         next_bump_at: typeof state?.next_bump_at === "string" ? state.next_bump_at : null,
+        included_bumps_per_month: serverPlan.included_bumps_per_month,
+        bump_cooldown_hours: listingLimits.bumpCooldownDays * 24,
         bump_cooldown_days: listingLimits.bumpCooldownDays,
+        access_source: serverAccess.source,
+        effective_listing_plan: listingLimits.listingPlanKey,
+        listing_label: listingLimits.publicLabel,
+        billing_observed_at: finalBillingObservedAt,
+        showcase_grant_observed_at: showcaseGrantObservedAt,
       },
       listing: listingLimits,
       entitlements,
+      server_access: {
+        ...serializeShowcaseAccess(serverAccess),
+        billingObservedAt: finalBillingObservedAt,
+        showcaseGrantObservedAt,
+      },
     });
   }
 
@@ -93,21 +168,38 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
 
   const nowIso = now.toISOString();
   const nextBumpAt = addDaysIso(nowIso, listingLimits.bumpCooldownDays);
-  await db
+  const accessGuard = serverAccess.source === "complimentary_showcase"
+    ? await showcaseWriteGuard(env, linkedServerId, server.user_id, serverAccess)
+    : billingAdvertisingWriteGuard(
+        linkedServerId,
+        server.user_id,
+        user.discord_id,
+        server.status,
+        server.lifecycle_status,
+        serverAccess,
+      );
+  const stateReady = await db
     .prepare(
       `INSERT INTO server_advertising_state (
         linked_server_id, owner_discord_id, last_bumped_at, next_bump_at,
         bump_count_current_period, bump_period_start, bump_period_end,
         featured_until, featured_label, updated_at
-      ) VALUES (?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, ?)
+      ) SELECT ?, ?, NULL, NULL, 0, ?, ?, NULL, NULL, ? WHERE ${accessGuard.sql}
       ON CONFLICT(linked_server_id) DO UPDATE SET
         owner_discord_id = excluded.owner_discord_id,
         bump_period_start = COALESCE(server_advertising_state.bump_period_start, excluded.bump_period_start),
         bump_period_end = COALESCE(server_advertising_state.bump_period_end, excluded.bump_period_end),
-        updated_at = excluded.updated_at`,
+        updated_at = excluded.updated_at
+      RETURNING linked_server_id`,
     )
-    .bind(linkedServerId, user.discord_id, periodStart, periodEnd, nowIso)
-    .run();
+    .bind(linkedServerId, user.discord_id, periodStart, periodEnd, nowIso, ...accessGuard.values)
+    .first<{ linked_server_id: string }>();
+  if (!stateReady) {
+    return json({
+      error: "Server access changed. Refresh before bumping again.",
+      code: "access_changed",
+    }, { status: 409 });
+  }
 
   const nextCount = Number(state?.bump_count_current_period ?? 0) + 1;
   const updated = await db
@@ -116,18 +208,41 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
           SET owner_discord_id = ?,
               last_bumped_at = ?,
               next_bump_at = ?,
-              bump_count_current_period = COALESCE(bump_count_current_period, 0) + 1,
+              bump_count_current_period = ?,
               bump_period_start = ?,
               bump_period_end = ?,
               updated_at = ?
         WHERE linked_server_id = ?
           AND owner_discord_id = ?
           AND (next_bump_at IS NULL OR datetime(next_bump_at) <= datetime(?))
+          AND ${accessGuard.sql}
         RETURNING last_bumped_at, next_bump_at, bump_count_current_period, bump_period_start, bump_period_end`,
     )
-    .bind(user.discord_id, nowIso, nextBumpAt, periodStart, periodEnd, nowIso, linkedServerId, user.discord_id, nowIso)
+    .bind(
+      user.discord_id,
+      nowIso,
+      nextBumpAt,
+      nextCount,
+      periodStart,
+      periodEnd,
+      nowIso,
+      linkedServerId,
+      user.discord_id,
+      nowIso,
+      ...accessGuard.values,
+    )
     .first<Record<string, unknown>>();
   if (!updated) {
+    const accessStillMatches = await db
+      .prepare(`SELECT 1 AS allowed WHERE ${accessGuard.sql}`)
+      .bind(...accessGuard.values)
+      .first<{ allowed: number }>();
+    if (!accessStillMatches) {
+      return json({
+        error: "Server access changed. Refresh before bumping again.",
+        code: "access_changed",
+      }, { status: 409 });
+    }
     const latestState = await db.prepare("SELECT * FROM server_advertising_state WHERE linked_server_id = ? LIMIT 1").bind(linkedServerId).first<Record<string, unknown>>();
     const latestEligibility = evaluateListingBumpEligibility({ limits: listingLimits, state: latestState, now });
     return json({
@@ -159,17 +274,104 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
   console.log("DZN SERVER BUMPED", { linkedServerId });
   return json({
     ok: true,
+    generated_at: new Date().toISOString(),
     advertising: {
       last_bumped_at: typeof updated.last_bumped_at === "string" ? updated.last_bumped_at : nowIso,
       next_bump_at: typeof updated.next_bump_at === "string" ? updated.next_bump_at : nextBumpAt,
       bump_count_current_period: Number(updated.bump_count_current_period ?? nextCount),
       bump_period_start: typeof updated.bump_period_start === "string" ? updated.bump_period_start : periodStart,
       bump_period_end: typeof updated.bump_period_end === "string" ? updated.bump_period_end : periodEnd,
+      included_bumps_per_month: serverPlan.included_bumps_per_month,
+      bump_cooldown_hours: listingLimits.bumpCooldownDays * 24,
       bump_cooldown_days: listingLimits.bumpCooldownDays,
+      access_source: serverAccess.source,
+      effective_listing_plan: listingLimits.listingPlanKey,
+      listing_label: listingLimits.publicLabel,
+      billing_observed_at: finalBillingObservedAt,
+      showcase_grant_observed_at: showcaseGrantObservedAt,
     },
     listing: listingLimits,
+    server_access: {
+      ...serializeShowcaseAccess(serverAccess),
+      billingObservedAt: finalBillingObservedAt,
+      showcaseGrantObservedAt,
+    },
   });
 };
+
+function earliestObservation(...values: string[]) {
+  return values.reduce((earliest, value) => Date.parse(value) < Date.parse(earliest) ? value : earliest);
+}
+
+type AdvertisingAccessObservation = {
+  server_plan_key: string | null;
+  server_subscription_status: string | null;
+  owner_plan_key: string | null;
+  owner_plan_status: string | null;
+  entitlement_plan_key: string | null;
+  billing_observed_at: string | null;
+};
+
+async function readAdvertisingAccessObservation(env: Env, input: {
+  linkedServerId: string;
+  ownerUserId: string;
+  ownerDiscordId: string;
+  fallback: { plan_key: string | null; subscription_status: string | null };
+  fallbackObservedAt: string;
+  allowMissingSchema: boolean;
+}) {
+  try {
+    const row = await requireDb(env)
+      .prepare(
+        `WITH selected_subscription AS (
+           SELECT subscription.plan_key, subscription.status
+           FROM server_subscriptions AS subscription
+           JOIN linked_servers AS subscription_server ON subscription_server.guild_id = subscription.guild_id
+           WHERE subscription_server.id = ? AND subscription.owner_discord_id = ?
+           ORDER BY CASE WHEN lower(COALESCE(subscription.status, '')) IN ('active', 'trialing') THEN 0 ELSE 1 END,
+                    subscription.updated_at DESC,
+                    subscription.created_at DESC
+           LIMIT 1
+         )
+         SELECT selected_subscription.plan_key AS server_plan_key,
+                selected_subscription.status AS server_subscription_status,
+                owner_billing_accounts.plan_key AS owner_plan_key,
+                owner_billing_accounts.plan_status AS owner_plan_status,
+                owner_plan_entitlements.plan_key AS entitlement_plan_key,
+                strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS billing_observed_at
+         FROM linked_servers
+         JOIN users ON users.id = linked_servers.user_id
+         LEFT JOIN selected_subscription ON 1 = 1
+         LEFT JOIN owner_billing_accounts ON owner_billing_accounts.discord_user_id = users.discord_id
+         LEFT JOIN owner_plan_entitlements ON owner_plan_entitlements.discord_user_id = users.discord_id
+         WHERE linked_servers.id = ? AND linked_servers.user_id = ? AND users.discord_id = ?
+         LIMIT 1`,
+      )
+      .bind(input.linkedServerId, input.ownerDiscordId, input.linkedServerId, input.ownerUserId, input.ownerDiscordId)
+      .first<AdvertisingAccessObservation>();
+    if (!row) return {
+      planKey: input.fallback.plan_key,
+      status: input.fallback.subscription_status,
+      observedAt: input.fallbackObservedAt,
+    };
+    const planKey = row.server_plan_key ?? row.owner_plan_key ?? row.entitlement_plan_key ?? "free";
+    const status = row.server_plan_key
+      ? row.server_subscription_status
+      : row.owner_plan_key
+        ? row.owner_plan_status
+        : planKey === "free" ? "free" : "active";
+    return { planKey, status, observedAt: row.billing_observed_at ?? input.fallbackObservedAt };
+  } catch (error) {
+    if (input.allowMissingSchema && /no such table: (?:main\.)?(?:owner_billing_accounts|owner_plan_entitlements)\b/i.test(error instanceof Error ? error.message : String(error))) {
+      return {
+        planKey: input.fallback.plan_key,
+        status: input.fallback.subscription_status,
+        observedAt: input.fallbackObservedAt,
+      };
+    }
+    throw error;
+  }
+}
 
 async function getOwnerEntitlementsReadOnly(env: Env, discordUserId: string): Promise<PlanEntitlements> {
   try {
@@ -180,6 +382,33 @@ async function getOwnerEntitlementsReadOnly(env: Env, discordUserId: string): Pr
     return row ? entitlementsFromReadonlyRow(row) : getPlanConfig("free");
   } catch {
     return getPlanConfig("free");
+  }
+}
+
+type OwnerBillingProjection = {
+  plan_key: string | null;
+  plan_status: string | null;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  billing_observed_at: string | null;
+};
+
+async function readOwnerBillingProjection(env: Env, discordUserId: string, allowMissingSchema: boolean) {
+  try {
+    return await requireDb(env)
+      .prepare(`SELECT owner_billing_accounts.plan_key, owner_billing_accounts.plan_status,
+                       owner_billing_accounts.current_period_start, owner_billing_accounts.current_period_end,
+                       strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS billing_observed_at
+                FROM (SELECT 1) AS observation
+                LEFT JOIN owner_billing_accounts ON owner_billing_accounts.discord_user_id = ?
+                LIMIT 1`)
+      .bind(discordUserId)
+      .first<OwnerBillingProjection>();
+  } catch (error) {
+    if (allowMissingSchema && /no such table: (?:main\.)?owner_billing_accounts\b/i.test(error instanceof Error ? error.message : String(error))) {
+      return null;
+    }
+    throw error;
   }
 }
 
@@ -254,4 +483,64 @@ async function recordListingEvent(env: Env, serverId: string, eventType: string,
 
 function addDaysIso(value: string, days: number) {
   return new Date(Date.parse(value) + days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function billingAdvertisingWriteGuard(
+  serverId: string,
+  expectedOwnerUserId: string,
+  expectedOwnerDiscordId: string,
+  expectedStatus: string | null,
+  expectedLifecycleStatus: string | null,
+  access: Awaited<ReturnType<typeof readServerShowcaseAccess>>,
+) {
+  const selectedPlan = `(SELECT current_subscription.plan_key
+    FROM server_subscriptions AS current_subscription
+    WHERE current_subscription.guild_id = write_server.guild_id
+      AND current_subscription.owner_discord_id = write_owner.discord_id
+    ORDER BY CASE WHEN lower(COALESCE(current_subscription.status, '')) IN ('active', 'trialing') THEN 0 ELSE 1 END,
+             current_subscription.updated_at DESC,
+             current_subscription.created_at DESC
+    LIMIT 1)`;
+  const selectedStatus = `(SELECT current_subscription.status
+    FROM server_subscriptions AS current_subscription
+    WHERE current_subscription.guild_id = write_server.guild_id
+      AND current_subscription.owner_discord_id = write_owner.discord_id
+    ORDER BY CASE WHEN lower(COALESCE(current_subscription.status, '')) IN ('active', 'trialing') THEN 0 ELSE 1 END,
+             current_subscription.updated_at DESC,
+             current_subscription.created_at DESC
+    LIMIT 1)`;
+  const ownerPlan = `(SELECT current_billing.plan_key FROM owner_billing_accounts AS current_billing
+    WHERE current_billing.discord_user_id = write_owner.discord_id LIMIT 1)`;
+  const ownerStatus = `(SELECT current_billing.plan_status FROM owner_billing_accounts AS current_billing
+    WHERE current_billing.discord_user_id = write_owner.discord_id LIMIT 1)`;
+  const entitlementPlan = `(SELECT current_entitlement.plan_key FROM owner_plan_entitlements AS current_entitlement
+    WHERE current_entitlement.discord_user_id = write_owner.discord_id LIMIT 1)`;
+  const resolvedPlan = `COALESCE(${selectedPlan}, ${ownerPlan}, ${entitlementPlan}, 'free')`;
+  const resolvedStatus = `CASE
+    WHEN ${selectedPlan} IS NOT NULL THEN ${selectedStatus}
+    ELSE COALESCE(${ownerStatus}, CASE WHEN COALESCE(${entitlementPlan}, 'free') = 'free' THEN 'free' ELSE 'active' END)
+  END`;
+  return {
+    sql: `EXISTS (SELECT 1
+      FROM linked_servers AS write_server
+      JOIN users AS write_owner ON write_owner.id = write_server.user_id
+      WHERE write_server.id = ?
+        AND write_server.user_id = ?
+        AND write_owner.discord_id = ?
+        AND lower(COALESCE(write_server.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')
+        AND lower(COALESCE(write_server.status, 'pending')) = lower(?)
+        AND COALESCE(write_server.lifecycle_status, '') = ?
+        AND COALESCE(write_server.merged_into_server_id, '') = ''
+        AND ${resolvedPlan} IS ?
+        AND ${resolvedStatus} IS ?)`,
+    values: [
+      serverId,
+      expectedOwnerUserId,
+      expectedOwnerDiscordId,
+      expectedStatus ?? "pending",
+      expectedLifecycleStatus ?? "",
+      access.billingPlan ?? "free",
+      access.billingStatus,
+    ],
+  };
 }

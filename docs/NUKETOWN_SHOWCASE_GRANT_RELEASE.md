@@ -16,16 +16,21 @@ The backend foundation was merged in PR #178. The visual-loadout follow-up conne
 - The owner visual panel constrains mobile grid columns and wraps server names. This presentation correction does not change entitlement or award decisions.
 - Platform-owner-only support endpoint `GET /api/owner/server-showcase-access` returns the exact scope, effective grant, latest 20 grant records and paginated audit history. `?before=<nextAuditCursor>` continues the 50-event history pages.
 - Its explicit POST grant/revoke operations require a real platform-owner session, same-origin request, bounded JSON, exact-server confirmation, and a request UUID or grant ID. Revocation requires an enumerated support reason. No action is automatically run by installation, reads, webhooks or reconciliation.
+- The owner dashboard health projection, Advanced Showcase aggregate boards and advertising/bump status now resolve the same exact-server grant. They expose `complimentary_showcase` separately, retain the real inactive billing status, and never convert the owner account or another server to Pro.
+- The exact Advanced Showcase lifetime event total remains unavailable until a dedicated durable aggregate exists; partial counters are not presented as that total. Other headline metrics use `server_stats` when present and a hard-bounded fallback otherwise; player, build, travel and exploration boards are bounded, locked owner accounts do not reconstruct raw event history, and owner responses use `no-store`.
+- A complimentary weekly bump rechecks the exact grant and association inside the conditional update. A concurrent revocation or scope change returns `access_changed` without incrementing the bump count or recording a successful bump.
+- The selected-server card loads its two read-only detail endpoints only when visible. It identifies `Pro Listing (complimentary)`, separates account server allowance from server access, shows the real bump count and seven-day cadence, and routes account billing details to their own tab.
+- A past date on an otherwise active account is labelled as needing billing review instead of being presented as a current renewal. This is display-only and does not rewrite Stripe or D1 billing state.
 
 ## Deliberately Unchanged
 
-Stripe/account status, renewal dates, customer IDs, paid subscriptions, account server-slot allowance, category rules/cooldowns, competitive eligibility, scoring, standings and event results are unchanged. A Pro catalogue lookup is an internal capability decision, never a fabricated active subscription. Existing Pro and legacy Premium/Network/Partner billing remains supported.
+Stripe/account status, renewal dates, customer IDs, paid subscriptions, account server-slot allowance, category rules, competitive eligibility, scoring, standings and event results are unchanged. The exact-server bump cooldown is resolved from the complimentary Pro listing capability; the owner account's subscription and other servers remain unchanged. A Pro catalogue lookup is an internal capability decision, never a fabricated active subscription. Existing Pro and legacy Premium/Network/Partner billing remains supported.
 
 No Nitrado commands, bot changes, ADM replay, new gameplay, production Discord delivery, customer charge, paid wheel, secret or configuration mutation is part of this branch. The bot's hourly Europe/London resets remain separate and must be preserved.
 
 ## Not Yet Connected
 
-The grant does not yet govern scheduler eligibility/cadence, guild-scoped sync state, metadata/ADM consumer selection, public listing/gallery visibility, advanced showcase availability, promotions/bump allowance, event-host tools or Discord publishing. The other settings and public-page clients also need a coherent visible complimentary-access label. Visual-loadout integration does not establish public listing eligibility or gallery visibility.
+The grant does not yet govern scheduler eligibility/cadence, guild-scoped sync state, metadata/ADM consumer selection, event-host tools or Discord publishing. Public listing/gallery visibility, visual loadouts, owner dashboard health, Advanced Showcase and advertising/bump access are connected. Remaining consumers still need the same explicit complimentary label and exact-server isolation before the grant can be described as the complete Pro-equivalent rollout.
 
 The platform owner console has the protected grant history API, not a new rendered grant-management panel. This is not the complete cross-DZN player-link/request support experience.
 
@@ -37,7 +42,7 @@ Complete these consumers with exact-server resolution before activation. Do not 
 
 `npm run test:server-showcase-grants` runs populated SQLite tests using all migrations plus the existing runtime metadata bootstrap, actual handler/session checks, and a local in-memory workerd/D1 test. It is included in `npm test` through the settings regression command.
 
-Coverage includes exact identity and same-owner/same-guild isolation, missing schema, missing/expired/revoked/future grants, association changes, legacy paid access, unchanged account entitlements, concurrent requests, immutable history, audit rollback, 401/403, same-origin/exact confirmation, pagination, real gallery validation/writes and revocation races. No external provider calls or Wrangler production configuration are loaded.
+Coverage includes exact identity and same-owner/same-guild isolation, missing schema, missing/expired/revoked/future grants, association changes, legacy paid access, unchanged account entitlements, bounded analytics reads, locked-account query suppression, concurrent requests, immutable history, audit rollback, 401/403, same-origin/exact confirmation, pagination, real gallery validation/writes and revocation races. No external provider calls or Wrangler production configuration are loaded.
 
 Run the full test suite, non-incremental type check, lint, build and system audit. On a Windows worktree using the existing dependency junction, use `npx next build --webpack` followed by `node scripts/patch-pages-routes.mjs`; Turbopack rejects dependency symlinks outside its root. Hosted CI uses a normal dependency install.
 

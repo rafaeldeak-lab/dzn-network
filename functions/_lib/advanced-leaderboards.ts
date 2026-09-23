@@ -5,7 +5,7 @@ import { getAdvancedShowcaseAccess, type AdvancedShowcaseAccess } from "./advanc
 import { summarizeMapExploration, type ExplorationSummary } from "./map-exploration";
 import { resolveDznMapConfig } from "./map-configs";
 import { computeTravelStats, type TravelPositionSample, type TravelPlayerStats, type TravelServerStats } from "./travel-stats";
-import { getCanonicalServerStats } from "./server-stats";
+import { NUKETOWN_SHOWCASE_SCOPE, readServerShowcaseAccess } from "./server-showcase-access";
 import type { Env } from "./types";
 import {
   SERVER_LIFECYCLE_PUBLIC_HISTORICAL_STATUSES,
@@ -72,7 +72,7 @@ export type ServerAdvancedShowcasePayload = {
     joins: number;
     disconnects: number;
     uniquePlayers: number;
-    eventsTracked: number;
+    eventsTracked: number | null;
     buildScore: number;
     structuresBuilt: number;
     raidScore: number;
@@ -131,6 +131,17 @@ type PlayerMetricRow = {
   last_event_at?: string | null;
 };
 
+type PositionSampleRow = {
+  linked_server_id: string;
+  player_key: string | null;
+  player_name: string | null;
+  occurred_at: string | null;
+  x: number | null;
+  y: number | null;
+  z: number | null;
+  source_event_type: string | null;
+};
+
 type CachedAdvancedValue = {
   expiresAt: number;
   promise: Promise<unknown>;
@@ -139,7 +150,7 @@ type CachedAdvancedValue = {
 const PUBLIC_ADVANCED_CACHE_TTL_MS = 15_000;
 const SERVER_ADVANCED_CACHE_TTL_MS = 30_000;
 const MAX_ADVANCED_CACHE_ENTRIES = 80;
-const PUBLIC_ADVANCED_POSITION_SAMPLE_LIMIT = 4_000;
+const SERVER_ADVANCED_EVENT_SAMPLE_LIMIT = 6_000;
 const publicAdvancedPayloadCache = new Map<string, CachedAdvancedValue>();
 const serverAdvancedPayloadCaches = new WeakMap<NonNullable<Env["DB"]>, Map<string, CachedAdvancedValue>>();
 
@@ -152,28 +163,38 @@ async function buildPublicAdvancedLeaderboardsPayload(env: Env, options: { limit
   if (!env.DB) return emptyAdvancedLeaderboardsPayload();
   await ensureAdvancedReadSchema(env);
   const limit = safeLimit(options.limit, 8, 20);
-  const [serverMeta, pvpBoards, buildBoards, hybridBoards, samples] = await Promise.all([
-    queryPublicServerMeta(env),
-    queryPvpServerBoards(env, limit),
-    queryBuildServerBoards(env, limit),
-    queryHybridServerBoards(env, limit),
-    queryPositionSamples(env, { limit: PUBLIC_ADVANCED_POSITION_SAMPLE_LIMIT }),
+  const accessByServer = await resolvePublicAdvancedAccess(env);
+  const [pvpBoards, buildBoards, hybridBoards] = await Promise.all([
+    queryPvpServerBoards(env, limit, accessByServer),
+    queryBuildServerBoards(env, limit, accessByServer),
+    queryHybridServerBoards(env, limit, accessByServer),
   ]);
-  const metaById = new Map(serverMeta.map((server) => [server.id, server]));
-  const travelBoards = buildTravelServerBoards(samples, metaById, limit);
-  const explorationBoards = buildExplorationServerBoards(samples, serverMeta, limit);
 
   return {
     ok: true,
     generated_at: new Date().toISOString(),
-    categories: ["overall", "pvp", "deathmatch", "pve", "hybrid", "builds", "survival", "travel", "exploration", "weapons", "premium_showcase"],
-    boards: [...pvpBoards, ...buildBoards, ...hybridBoards, ...travelBoards, ...explorationBoards],
+    categories: ["overall", "pvp", "deathmatch", "pve", "hybrid", "builds", "survival", "weapons", "premium_showcase"],
+    boards: [...pvpBoards, ...buildBoards, ...hybridBoards],
     notes: [
       "All values are derived from imported ADM kill, player, and build events.",
-      "Travel and exploration are estimated from bounded ADM position samples and exclude suspicious movement.",
-      "Public exploration data is aggregate-only; raw player coordinates and exact routes are not exposed.",
+      "Global travel and exploration ranks remain unavailable until durable plan-neutral aggregates can rank every eligible server fairly.",
+      "Server-specific travel and exploration remain estimated from bounded ADM samples; raw player coordinates and exact routes are not exposed.",
     ],
   };
+}
+
+async function resolvePublicAdvancedAccess(env: Env) {
+  const serverId = NUKETOWN_SHOWCASE_SCOPE.linkedServerId;
+  const showcaseAccess = await readServerShowcaseAccess(env, serverId, {
+    plan_key: null,
+    subscription_status: null,
+  });
+  if (showcaseAccess.source !== "complimentary_showcase") {
+    return new Map<string, AdvancedShowcaseAccess>();
+  }
+  return new Map<string, AdvancedShowcaseAccess>([[serverId, getAdvancedShowcaseAccess(null, null, {
+    source: showcaseAccess.source,
+  })]]);
 }
 
 export async function getServerAdvancedShowcasePayload(
@@ -185,14 +206,28 @@ export async function getServerAdvancedShowcasePayload(
   // Recheck visibility and current entitlement before consulting any cached presentation.
   const server = await resolveAdvancedServer(env, serverRef, Boolean(options.ownerScoped));
   if (!server) return null;
+  const serverAccess = await readServerShowcaseAccess(env, server.id, {
+    plan_key: server.plan_key,
+    subscription_status: server.subscription_status,
+  });
+  const access = getAdvancedShowcaseAccess(server.plan_key, server.subscription_status, {
+    source: serverAccess.source,
+  });
   const overlayLimit = safeLimit(options.overlayLimit, 220, 500);
-  const cacheKey = JSON.stringify([Boolean(options.ownerScoped), overlayLimit, server]);
+  const cacheKey = JSON.stringify([
+    Boolean(options.ownerScoped),
+    overlayLimit,
+    server,
+    serverAccess.source,
+    serverAccess.grantId,
+    serverAccess.expiresAt,
+  ]);
   let cache = serverAdvancedPayloadCaches.get(env.DB);
   if (!cache) {
     cache = new Map();
     serverAdvancedPayloadCaches.set(env.DB, cache);
   }
-  return cachedAdvancedPayload(cache, cacheKey, SERVER_ADVANCED_CACHE_TTL_MS, () => buildServerAdvancedShowcasePayload(env, server, {
+  return cachedAdvancedPayload(cache, cacheKey, SERVER_ADVANCED_CACHE_TTL_MS, () => buildServerAdvancedShowcasePayload(env, server, access, {
     ...options,
     overlayLimit,
   }));
@@ -201,19 +236,23 @@ export async function getServerAdvancedShowcasePayload(
 async function buildServerAdvancedShowcasePayload(
   env: Env,
   server: PublicServerMeta,
+  access: AdvancedShowcaseAccess,
   options: { ownerScoped?: boolean; overlayLimit?: number } = {},
 ): Promise<ServerAdvancedShowcasePayload | null> {
   if (!env.DB) return null;
-  const db = requireDb(env);
+  const ownerScoped = Boolean(options.ownerScoped);
+  const lockedOwnerAnalytics = ownerScoped && !access.dashboardAnalytics;
 
-  const [canonical, pvpPlayers, buildPlayers, samples, eventCounts] = await Promise.all([
-    getCanonicalServerStats(db, server.id).catch(() => null),
-    queryServerPvpPlayers(env, server.id, 15),
-    queryServerBuildPlayers(env, server.id, 15),
-    queryPositionSamples(env, { linkedServerId: server.id, limit: 6_000 }),
-    queryServerEventCounts(env, server.id),
-  ]);
-  const access = getAdvancedShowcaseAccess(server.plan_key, server.subscription_status);
+  const canonicalPromise = queryServerStatsSnapshot(env, server.id).catch(() => null);
+  const [canonicalSnapshot, pvpPlayers, buildPlayers, samples] = lockedOwnerAnalytics
+    ? [await canonicalPromise, [], [], []]
+    : await Promise.all([
+        canonicalPromise,
+        queryServerPvpPlayers(env, server.id, 15),
+        queryServerBuildPlayers(env, server.id, 15),
+        queryPositionSamples(env, { linkedServerId: server.id, limit: SERVER_ADVANCED_EVENT_SAMPLE_LIMIT }),
+      ]);
+  const canonical = canonicalSnapshot ?? (lockedOwnerAnalytics ? null : await queryBoundedServerStatsFallback(env, server.id));
   const travel = computeTravelStats(samples);
   const travelPlayers = travel.players.sort((a, b) => b.totalValidDistanceM - a.totalValidDistanceM).slice(0, 15);
   const serverTravel = travel.servers[0] ?? emptyServerTravelStats(server.id);
@@ -227,9 +266,7 @@ async function buildServerAdvancedShowcasePayload(
     buildPlayers[0]?.last_event_at ?? null,
   ]);
 
-  const ownerScoped = Boolean(options.ownerScoped);
   const lockedTop15 = !access.publicServerTop15 && !ownerScoped;
-  const lockedOwnerAnalytics = ownerScoped && !access.dashboardAnalytics;
   const canShowExplorationSummary = access.publicExplorationSummary;
   const canShowMapOverlay = access.publicMapOverlay;
   const safeExploration = canShowExplorationSummary
@@ -253,7 +290,7 @@ async function buildServerAdvancedShowcasePayload(
       joins: canonical?.joins ?? 0,
       disconnects: canonical?.disconnects ?? 0,
       uniquePlayers: canonical?.uniquePlayers ?? 0,
-      eventsTracked: eventCounts.eventsTracked,
+      eventsTracked: null,
       buildScore: access.publicBuildShowcase ? buildSummary.buildScore : 0,
       structuresBuilt: access.publicBuildShowcase ? buildSummary.structuresBuilt : 0,
       raidScore: access.publicBuildShowcase ? buildSummary.raidScore : 0,
@@ -276,7 +313,10 @@ async function buildServerAdvancedShowcasePayload(
     ],
     exploration: safeExploration,
     notes: [
-      "Travel and exploration are estimated from ADM position samples.",
+      canonicalSnapshot
+        ? "Lifetime headline totals use the durable server stats aggregate. Advanced player, travel, build and exploration boards use bounded ADM event samples."
+        : "The durable server stats aggregate is not available yet, so headline totals and advanced boards use bounded ADM event samples.",
+      "The exact lifetime event total is unavailable until it has a dedicated durable aggregate; partial counters are not presented as a complete total.",
       "Headshot kills are not shown as a kill stat until fatal hit-to-kill association is reliable.",
       "Map bounds are configurable and currently marked estimated where licensed map masks/assets are not present.",
     ],
@@ -317,84 +357,87 @@ function pruneAdvancedCache(cache: Map<string, CachedAdvancedValue>, now: number
   }
 }
 
-export async function queryPositionSamples(env: Env, options: { linkedServerId?: string | null; limit?: number } = {}): Promise<TravelPositionSample[]> {
+export async function queryPositionSamples(
+  env: Env,
+  options: {
+    linkedServerId?: string | null;
+    limit?: number;
+  } = {},
+): Promise<TravelPositionSample[]> {
   const db = requireDb(env);
   const limit = safeLimit(options.limit, 2_000, 20_000);
-  const serverFilter = options.linkedServerId ? "WHERE linked_server_id = ?" : "";
-  const statement = db.prepare(
-    `SELECT linked_server_id, player_key, player_name, occurred_at, x, y, z, source_event_type
-     FROM (
-       SELECT linked_server_id,
-              COALESCE(player_id, lower(player_name)) AS player_key,
-              player_name,
-              COALESCE(occurred_at, created_at) AS occurred_at,
-              position_x AS x,
-              position_y AS y,
-              position_z AS z,
-              event_type AS source_event_type
-       FROM player_events
-       WHERE position_x IS NOT NULL AND position_y IS NOT NULL
+  if (!options.linkedServerId) return [];
+    const perSourceLimit = Math.max(1, Math.ceil(limit / 3));
+    const sourceRowWindow = perSourceLimit * 4;
+    const result = await db.prepare(
+      `SELECT linked_server_id, player_key, player_name, occurred_at, x, y, z, source_event_type
+       FROM (
+         SELECT linked_server_id, player_key, player_name, occurred_at, x, y, z, source_event_type
+         FROM (
+           SELECT linked_server_id,
+                COALESCE(player_id, lower(player_name)) AS player_key,
+                player_name,
+                COALESCE(occurred_at, created_at) AS occurred_at,
+                position_x AS x,
+                position_y AS y,
+                position_z AS z,
+                event_type AS source_event_type
+           FROM player_events
+           WHERE linked_server_id = ?
+           ORDER BY rowid DESC
+           LIMIT ?
+         ) AS recent_player_events
+         WHERE x IS NOT NULL AND y IS NOT NULL
+       )
        UNION ALL
-       SELECT linked_server_id,
-              COALESCE(killer_id, lower(killer_name)) AS player_key,
-              killer_name AS player_name,
-              COALESCE(occurred_at, created_at) AS occurred_at,
-              position_x AS x,
-              position_y AS y,
-              position_z AS z,
-              'player_killed' AS source_event_type
-       FROM kill_events
-       WHERE position_x IS NOT NULL AND position_y IS NOT NULL AND killer_name IS NOT NULL
+       SELECT linked_server_id, player_key, player_name, occurred_at, x, y, z, source_event_type
+       FROM (
+         SELECT linked_server_id, player_key, player_name, occurred_at, x, y, z, source_event_type
+         FROM (
+           SELECT linked_server_id,
+                COALESCE(killer_id, lower(killer_name)) AS player_key,
+                killer_name AS player_name,
+                COALESCE(occurred_at, created_at) AS occurred_at,
+                position_x AS x,
+                position_y AS y,
+                position_z AS z,
+                'player_killed' AS source_event_type
+           FROM kill_events
+           WHERE linked_server_id = ?
+           ORDER BY rowid DESC
+           LIMIT ?
+         ) AS recent_kill_events
+         WHERE x IS NOT NULL AND y IS NOT NULL AND player_name IS NOT NULL
+       )
        UNION ALL
-       SELECT linked_server_id,
-              COALESCE(player_id, lower(player_name)) AS player_key,
-              player_name,
-              COALESCE(occurred_at, created_at) AS occurred_at,
-              pos_x AS x,
-              pos_y AS y,
-              pos_z AS z,
-              event_type AS source_event_type
-       FROM build_events
-       WHERE pos_x IS NOT NULL AND pos_y IS NOT NULL
-     )
-     ${serverFilter}
-     ORDER BY occurred_at DESC
-     LIMIT ?`,
-  );
-  const result = options.linkedServerId
-    ? await statement.bind(options.linkedServerId, limit).all<{
-        linked_server_id: string;
-        player_key: string | null;
-        player_name: string | null;
-        occurred_at: string | null;
-        x: number | null;
-        y: number | null;
-        z: number | null;
-        source_event_type: string | null;
-      }>()
-    : await statement.bind(limit).all<{
-        linked_server_id: string;
-        player_key: string | null;
-        player_name: string | null;
-        occurred_at: string | null;
-        x: number | null;
-        y: number | null;
-        z: number | null;
-        source_event_type: string | null;
-      }>();
-
-  return (result.results ?? [])
-    .filter((row) => row.player_key && row.x !== null && row.y !== null)
-    .map((row) => ({
-      linkedServerId: row.linked_server_id,
-      playerKey: row.player_key ?? "unknown",
-      playerName: row.player_name,
-      occurredAt: row.occurred_at,
-      x: numberOrZero(row.x),
-      y: numberOrZero(row.y),
-      z: row.z,
-      sourceEventType: row.source_event_type,
-    }));
+       SELECT linked_server_id, player_key, player_name, occurred_at, x, y, z, source_event_type
+       FROM (
+         SELECT linked_server_id, player_key, player_name, occurred_at, x, y, z, source_event_type
+         FROM (
+           SELECT linked_server_id,
+                COALESCE(player_id, lower(player_name)) AS player_key,
+                player_name,
+                COALESCE(occurred_at, created_at) AS occurred_at,
+                pos_x AS x,
+                pos_y AS y,
+                pos_z AS z,
+                event_type AS source_event_type
+           FROM build_events
+           WHERE linked_server_id = ?
+           ORDER BY rowid DESC
+           LIMIT ?
+         ) AS recent_build_events
+         WHERE x IS NOT NULL AND y IS NOT NULL
+       )`,
+    ).bind(
+      options.linkedServerId,
+      sourceRowWindow,
+      options.linkedServerId,
+      sourceRowWindow,
+      options.linkedServerId,
+      sourceRowWindow,
+    ).all<PositionSampleRow>();
+    return positionRowsToSamples(result.results ?? []).sort((a, b) => timestampNumber(b.occurredAt) - timestampNumber(a.occurredAt)).slice(0, limit);
 }
 
 function emptyAdvancedLeaderboardsPayload() {
@@ -412,34 +455,14 @@ async function ensureAdvancedReadSchema(env: Env) {
   await ensureBuildEventSchema(env);
 }
 
-async function queryPublicServerMeta(env: Env) {
-  const result = await requireDb(env)
-    .prepare(
-      `SELECT linked_servers.id,
-              linked_servers.public_slug,
-              COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-              linked_servers.server_mode,
-              linked_servers.server_type,
-              linked_servers.map_name,
-              linked_servers.mission,
-              linked_servers.updated_at,
-              ${subscriptionPlanSql()} AS plan_key,
-              ${subscriptionStatusSql()} AS subscription_status
-       FROM linked_servers
-       WHERE ${publicServerWhereSql()}
-       LIMIT 500`,
-    )
-    .all<PublicServerMeta>();
-  return result.results ?? [];
-}
-
 async function resolveAdvancedServer(env: Env, serverRef: string, ownerScoped: boolean) {
   const where = ownerScoped
-    ? `(linked_servers.id = ? OR linked_servers.public_slug = ? OR linked_servers.nitrado_service_id = ?)
+    ? `linked_servers.id = ?
        AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')
        AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')`
     : `(linked_servers.id = ? OR linked_servers.public_slug = ? OR linked_servers.nitrado_service_id = ?)
        AND ${publicServerWhereSql()}`;
+  const bindings = ownerScoped ? [serverRef] : [serverRef, serverRef, serverRef];
   return requireDb(env)
     .prepare(
       `SELECT linked_servers.id,
@@ -456,11 +479,11 @@ async function resolveAdvancedServer(env: Env, serverRef: string, ownerScoped: b
        WHERE ${where}
        LIMIT 1`,
     )
-    .bind(serverRef, serverRef, serverRef)
+    .bind(...bindings)
     .first<PublicServerMeta>();
 }
 
-async function queryPvpServerBoards(env: Env, limit: number): Promise<AdvancedBoard[]> {
+async function queryPvpServerBoards(env: Env, limit: number, accessByServer: Map<string, AdvancedShowcaseAccess>): Promise<AdvancedBoard[]> {
   const db = requireDb(env);
   const [kills, kd, longest, uniquePlayers] = await Promise.all([
     db.prepare(serverMetricSql("COUNT(kill_events.id)", "kill_events", "kill_events.linked_server_id = linked_servers.id", "COUNT(kill_events.id) > 0", "COUNT(kill_events.id) DESC")).bind(limit * 3).all<ServerMetricRow>(),
@@ -515,14 +538,14 @@ async function queryPvpServerBoards(env: Env, limit: number): Promise<AdvancedBo
   ]);
 
   return [
-    serverBoard("most_kills", "Most Kills", "Servers ranked by confirmed PvP kill events.", "pvp", "free", kills.results ?? [], "kills", limit),
-    serverBoard("server_kd", "Highest Server K/D", "Requires at least 25 confirmed kills to avoid one-kill abuse.", "deathmatch", "free", kd.results ?? [], "ratio", limit),
-    serverBoard("longest_kill", "Longest Kill", "Longest confirmed ADM kill distance.", "pvp", "free", longest.results ?? [], "distance", limit),
-    serverBoard("unique_players", "Most Unique Players", "Unique imported player profiles per server.", "overall", "free", uniquePlayers.results ?? [], "count", limit),
+    serverBoard("most_kills", "Most Kills", "Servers ranked by confirmed PvP kill events.", "pvp", "free", kills.results ?? [], "kills", limit, accessByServer),
+    serverBoard("server_kd", "Highest Server K/D", "Requires at least 25 confirmed kills to avoid one-kill abuse.", "deathmatch", "free", kd.results ?? [], "ratio", limit, accessByServer),
+    serverBoard("longest_kill", "Longest Kill", "Longest confirmed ADM kill distance.", "pvp", "free", longest.results ?? [], "distance", limit, accessByServer),
+    serverBoard("unique_players", "Most Unique Players", "Unique imported player profiles per server.", "overall", "free", uniquePlayers.results ?? [], "count", limit, accessByServer),
   ];
 }
 
-async function queryBuildServerBoards(env: Env, limit: number): Promise<AdvancedBoard[]> {
+async function queryBuildServerBoards(env: Env, limit: number, accessByServer: Map<string, AdvancedShowcaseAccess>): Promise<AdvancedBoard[]> {
   const rows = await requireDb(env)
     .prepare(
       `SELECT linked_servers.id,
@@ -547,7 +570,7 @@ async function queryBuildServerBoards(env: Env, limit: number): Promise<Advanced
        ORDER BY value DESC, supporting_a DESC, data_freshness DESC
        LIMIT ?`,
     )
-    .bind(limit * 3)
+    .bind(limit)
     .all<ServerMetricRow>();
 
   const repairRows = await queryBuildMetric(env, "SUM(CASE WHEN build_events.event_type = 'repaired' THEN 1 ELSE 0 END)", "repairs", limit);
@@ -555,14 +578,14 @@ async function queryBuildServerBoards(env: Env, limit: number): Promise<Advanced
   const trapsRows = await queryBuildMetric(env, `SUM(CASE WHEN ${trapSql()} THEN 1 ELSE 0 END)`, "traps", limit);
 
   return [
-    serverBoard("build_score", "Highest Build Score", "Construction score from built, placed, repair, and defence actions. Raid/destruction is separate.", "builds", "pro", rows.results ?? [], "score", limit, true),
-    serverBoard("repairs", "Most Repairs", "Fence/gate repair and maintenance events.", "pve", "pro", repairRows, "count", limit, true),
-    serverBoard("raid_score", "Most Base Raiding / Dismantles", "Dismantle and destruction activity, separate from build score.", "pve", "pro", raidRows, "count", limit, true),
-    serverBoard("traps_explosives", "Most Traps & Explosives Placed", "ADM-derived trap/explosive placement events.", "builds", "pro", trapsRows, "count", limit, true),
+    serverBoard("build_score", "Highest Build Score", "Construction score from built, placed, repair, and defence actions. Raid/destruction is separate.", "builds", "free", rows.results ?? [], "score", limit, accessByServer),
+    serverBoard("repairs", "Most Repairs", "Fence/gate repair and maintenance events.", "pve", "free", repairRows, "count", limit, accessByServer),
+    serverBoard("raid_score", "Most Base Raiding / Dismantles", "Dismantle and destruction activity, separate from build score.", "pve", "free", raidRows, "count", limit, accessByServer),
+    serverBoard("traps_explosives", "Most Traps & Explosives Placed", "ADM-derived trap/explosive placement events.", "builds", "free", trapsRows, "count", limit, accessByServer),
   ];
 }
 
-async function queryHybridServerBoards(env: Env, limit: number): Promise<AdvancedBoard[]> {
+async function queryHybridServerBoards(env: Env, limit: number, accessByServer: Map<string, AdvancedShowcaseAccess>): Promise<AdvancedBoard[]> {
   const rows = await requireDb(env)
     .prepare(
       `SELECT *
@@ -596,7 +619,7 @@ async function queryHybridServerBoards(env: Env, limit: number): Promise<Advance
        ORDER BY value DESC, data_freshness DESC
        LIMIT ?`,
     )
-    .bind(limit * 3)
+    .bind(limit)
     .all<ServerMetricRow>();
 
   const eventRows = await requireDb(env)
@@ -631,82 +654,17 @@ async function queryHybridServerBoards(env: Env, limit: number): Promise<Advance
     .all<ServerMetricRow>();
 
   return [
-    serverBoard("balanced_activity_score", "Best Balanced Server Score", "Separate combined score using combat, event, and build activity.", "hybrid", "pro", rows.results ?? [], "score", limit, true),
-    serverBoard("events_tracked", "Most Events Tracked", "Canonical imported ADM event rows: kills + player events + build events.", "hybrid", "free", eventRows.results ?? [], "count", limit),
+    serverBoard("balanced_activity_score", "Best Balanced Server Score", "Separate combined score using combat, event, and build activity.", "hybrid", "free", rows.results ?? [], "score", limit, accessByServer),
+    serverBoard("events_tracked", "Most Events Tracked", "Canonical imported ADM event rows: kills + player events + build events.", "hybrid", "free", eventRows.results ?? [], "count", limit, accessByServer),
   ];
 }
 
-function buildTravelServerBoards(samples: TravelPositionSample[], metaById: Map<string, PublicServerMeta>, limit: number): AdvancedBoard[] {
-  const travel = computeTravelStats(samples);
-  const rows = travel.servers.map((server) => serverTravelToBoardRow(server, metaById.get(server.linkedServerId))).filter(Boolean) as AdvancedBoardRow[];
-  const byTotal = [...rows].sort((a, b) => numberOrZero(b.value) - numberOrZero(a.value)).slice(0, limit).map((row, index) => ({ ...row, rank: index + 1 }));
-  const byOnFoot = [...rows].sort((a, b) => numberOrZero(b.supportingStats?.onFootDistanceM) - numberOrZero(a.supportingStats?.onFootDistanceM)).slice(0, limit).map((row, index) => ({
-    ...row,
-    rank: index + 1,
-    value: row.supportingStats?.onFootDistanceM as number,
-    displayValue: formatDistanceMeters(numberOrZero(row.supportingStats?.onFootDistanceM)),
-  }));
-  return [
-    {
-      metricKey: "most_travelled_server",
-      title: "Most Travelled Server",
-      description: "Estimated valid ADM movement distance, excluding suspicious jumps.",
-      category: "travel",
-      packageRequired: "premium",
-      rows: byTotal,
-      estimated: true,
-    },
-    {
-      metricKey: "most_on_foot_distance",
-      title: "Most On-Foot Distance",
-      description: "Conservative on-foot movement estimate.",
-      category: "travel",
-      packageRequired: "premium",
-      rows: byOnFoot,
-      estimated: true,
-    },
-  ];
-}
-
-function buildExplorationServerBoards(samples: TravelPositionSample[], servers: PublicServerMeta[], limit: number): AdvancedBoard[] {
-  const samplesByServer = groupSamplesByServer(samples);
-  const rows = servers.map((server) => {
-    const exploration = summarizeMapExploration(server.map_name ?? server.mission, samplesByServer.get(server.id) ?? [], { overlayLimit: 0 });
-    if (!exploration.supported || exploration.exploredCellsCount <= 0) return null;
-    return {
-      rank: 0,
-      serverId: server.id,
-      serverSlug: server.public_slug,
-      serverName: server.server_name,
-      serverMode: server.server_mode ?? server.server_type,
-      mapName: exploration.mapDisplayName,
-      value: exploration.explorationPercent,
-      displayValue: `${exploration.explorationPercent.toFixed(2)}%`,
-      topPlayer: exploration.topExplorerName,
-      supportingStats: {
-        exploredCells: exploration.exploredCellsCount,
-        activeExplorers: exploration.activeExplorersCount,
-        boundsConfidence: exploration.boundsConfidence,
-      },
-      dataFreshness: exploration.lastExplorationUpdateAt,
-      estimated: exploration.estimated,
-      isPremiumShowcase: getAdvancedShowcaseAccess(server.plan_key, server.subscription_status).globalPremiumShowcase,
-    } satisfies AdvancedBoardRow;
-  }).filter(Boolean) as AdvancedBoardRow[];
-
-  const ranked = rows.sort((a, b) => numberOrZero(b.value) - numberOrZero(a.value)).slice(0, limit).map((row, index) => ({ ...row, rank: index + 1 }));
-  return [{
-    metricKey: "map_exploration_percent",
-    title: "Best Explorer Server",
-    description: "Aggregate map grid coverage from valid ADM position samples. No raw coordinates or routes are exposed.",
-    category: "exploration",
-    packageRequired: "premium",
-    rows: ranked,
-    estimated: true,
-  }];
-}
-
-async function queryBuildMetric(env: Env, expression: string, mode: string, limit: number) {
+async function queryBuildMetric(
+  env: Env,
+  expression: string,
+  mode: string,
+  limit: number,
+) {
   const rows = await requireDb(env)
     .prepare(
       `SELECT linked_servers.id,
@@ -728,7 +686,7 @@ async function queryBuildMetric(env: Env, expression: string, mode: string, limi
        ORDER BY value DESC, data_freshness DESC
        LIMIT ?`,
     )
-    .bind(limit * 3)
+    .bind(limit)
     .all<ServerMetricRow & { mode?: string }>();
   return (rows.results ?? []).map((row) => ({ ...row, mode }));
 }
@@ -736,21 +694,28 @@ async function queryBuildMetric(env: Env, expression: string, mode: string, limi
 async function queryServerPvpPlayers(env: Env, linkedServerId: string, limit: number) {
   const rows = await requireDb(env)
     .prepare(
-      `WITH kills AS (
+      `WITH sampled_kill_events AS (
+         SELECT killer_id, killer_name, victim_id, victim_name, weapon, distance, occurred_at, created_at
+         FROM kill_events
+         WHERE linked_server_id = ?
+         ORDER BY rowid DESC
+         LIMIT ?
+       ),
+       kills AS (
          SELECT COALESCE(killer_id, lower(killer_name)) AS player_key,
                 MAX(killer_name) AS player_name,
                 COUNT(*) AS kills,
                 MAX(COALESCE(distance, 0)) AS longest_kill,
                 MAX(COALESCE(occurred_at, created_at)) AS last_event_at
-         FROM kill_events
-         WHERE linked_server_id = ? AND killer_name IS NOT NULL
+         FROM sampled_kill_events
+         WHERE killer_name IS NOT NULL
          GROUP BY player_key
        ),
        deaths AS (
          SELECT COALESCE(victim_id, lower(victim_name)) AS player_key,
                 COUNT(*) AS deaths
-         FROM kill_events
-         WHERE linked_server_id = ? AND victim_name IS NOT NULL
+         FROM sampled_kill_events
+         WHERE victim_name IS NOT NULL
          GROUP BY player_key
        ),
        weapons AS (
@@ -760,9 +725,9 @@ async function queryServerPvpPlayers(env: Env, linkedServerId: string, limit: nu
                   weapon,
                   COUNT(*) AS count,
                   ROW_NUMBER() OVER (PARTITION BY COALESCE(killer_id, lower(killer_name)) ORDER BY COUNT(*) DESC, weapon ASC) AS rank
-           FROM kill_events
-           WHERE linked_server_id = ? AND killer_name IS NOT NULL AND weapon IS NOT NULL
-           GROUP BY player_key, weapon
+            FROM sampled_kill_events
+            WHERE killer_name IS NOT NULL AND weapon IS NOT NULL
+            GROUP BY player_key, weapon
          )
          WHERE rank = 1
        )
@@ -780,7 +745,7 @@ async function queryServerPvpPlayers(env: Env, linkedServerId: string, limit: nu
        ORDER BY kills.kills DESC, kills.longest_kill DESC, kills.last_event_at DESC
        LIMIT ?`,
     )
-    .bind(linkedServerId, linkedServerId, linkedServerId, safeLimit(limit, 15, 50))
+    .bind(linkedServerId, SERVER_ADVANCED_EVENT_SAMPLE_LIMIT, safeLimit(limit, 15, 50))
     .all<PlayerMetricRow>();
   return rows.results ?? [];
 }
@@ -788,7 +753,14 @@ async function queryServerPvpPlayers(env: Env, linkedServerId: string, limit: nu
 async function queryServerBuildPlayers(env: Env, linkedServerId: string, limit: number) {
   const rows = await requireDb(env)
     .prepare(
-      `SELECT COALESCE(player_id, lower(player_name)) AS player_key,
+      `WITH sampled_build_events AS (
+         SELECT player_id, player_name, event_type, target_object, build_part, placed_class, placed_object, occurred_at, created_at
+         FROM build_events
+         WHERE linked_server_id = ?
+         ORDER BY rowid DESC
+         LIMIT ?
+       )
+       SELECT COALESCE(player_id, lower(player_name)) AS player_key,
               MAX(player_name) AS player_name,
               SUM(${buildScoreCaseSql()}) AS build_score,
               SUM(CASE WHEN event_type = 'built' THEN 1 ELSE 0 END) AS structures_built,
@@ -800,30 +772,115 @@ async function queryServerBuildPlayers(env: Env, linkedServerId: string, limit: 
               SUM(CASE WHEN ${raidSql()} THEN 1 ELSE 0 END) AS raid_score,
               SUM(CASE WHEN ${trapSql()} THEN 1 ELSE 0 END) AS traps_explosives,
               MAX(COALESCE(occurred_at, created_at)) AS last_event_at
-       FROM build_events
-       WHERE linked_server_id = ?
-         AND player_name IS NOT NULL
+       FROM sampled_build_events
+       WHERE player_name IS NOT NULL
        GROUP BY player_key
        ORDER BY build_score DESC, structures_built DESC, last_event_at DESC
        LIMIT ?`,
     )
-    .bind(linkedServerId, safeLimit(limit, 15, 50))
+    .bind(linkedServerId, SERVER_ADVANCED_EVENT_SAMPLE_LIMIT, safeLimit(limit, 15, 50))
     .all<PlayerMetricRow>();
   return rows.results ?? [];
 }
 
-async function queryServerEventCounts(env: Env, linkedServerId: string) {
+async function queryServerStatsSnapshot(env: Env, linkedServerId: string) {
   const row = await requireDb(env)
     .prepare(
-      `SELECT
-         (SELECT COUNT(*) FROM kill_events WHERE linked_server_id = ?) AS kills,
-         (SELECT COUNT(*) FROM player_events WHERE linked_server_id = ?) AS player_events,
-         (SELECT COUNT(*) FROM build_events WHERE linked_server_id = ?) AS build_events`,
+      `SELECT total_kills, total_deaths, total_joins, total_disconnects, unique_players, last_event_at
+       FROM server_stats
+       WHERE linked_server_id = ?
+       LIMIT 1`,
     )
-    .bind(linkedServerId, linkedServerId, linkedServerId)
-    .first<{ kills: number | null; player_events: number | null; build_events: number | null }>();
+    .bind(linkedServerId)
+    .first<{
+      total_kills: number | null;
+      total_deaths: number | null;
+      total_joins: number | null;
+      total_disconnects: number | null;
+      unique_players: number | null;
+      last_event_at: string | null;
+    }>();
+  if (!row) return null;
   return {
-    eventsTracked: numberOrZero(row?.kills) + numberOrZero(row?.player_events) + numberOrZero(row?.build_events),
+    kills: numberOrZero(row.total_kills),
+    deaths: numberOrZero(row.total_deaths),
+    joins: numberOrZero(row.total_joins),
+    disconnects: numberOrZero(row.total_disconnects),
+    uniquePlayers: numberOrZero(row.unique_players),
+    lastEventAt: row.last_event_at,
+  };
+}
+
+async function queryBoundedServerStatsFallback(env: Env, linkedServerId: string) {
+  const row = await requireDb(env)
+    .prepare(
+       `WITH sampled_kills AS (
+         SELECT victim_name, COALESCE(occurred_at, created_at) AS event_at
+         FROM kill_events
+         WHERE linked_server_id = ?
+         ORDER BY rowid DESC
+         LIMIT ?
+       ),
+       sampled_player_events AS (
+         SELECT event_type, COALESCE(occurred_at, created_at) AS event_at
+         FROM player_events
+         WHERE linked_server_id = ?
+         ORDER BY rowid DESC
+         LIMIT ?
+       ),
+       sampled_build_events AS (
+         SELECT id, COALESCE(occurred_at, created_at) AS event_at
+         FROM build_events
+         WHERE linked_server_id = ?
+         ORDER BY rowid DESC
+         LIMIT ?
+       ),
+       sampled_profiles AS (
+         SELECT id
+         FROM player_profiles
+         WHERE linked_server_id = ?
+         ORDER BY rowid DESC
+         LIMIT ?
+       )
+       SELECT
+         (SELECT COUNT(*) FROM sampled_kills) AS kills,
+         (SELECT COUNT(*) FROM sampled_kills WHERE victim_name IS NOT NULL)
+           + (SELECT COUNT(*) FROM sampled_player_events WHERE event_type IN ('player_suicide', 'player_killed_environment', 'player_died_stats')) AS deaths,
+         (SELECT COUNT(*) FROM sampled_player_events WHERE event_type = 'player_connected') AS joins,
+         (SELECT COUNT(*) FROM sampled_player_events WHERE event_type = 'player_disconnected') AS disconnects,
+         (SELECT COUNT(*) FROM sampled_profiles) AS unique_players,
+         (SELECT MAX(event_at)
+          FROM (
+            SELECT event_at FROM sampled_kills
+            UNION ALL SELECT event_at FROM sampled_player_events
+            UNION ALL SELECT event_at FROM sampled_build_events
+          )) AS last_event_at`,
+    )
+    .bind(
+      linkedServerId,
+      SERVER_ADVANCED_EVENT_SAMPLE_LIMIT,
+      linkedServerId,
+      SERVER_ADVANCED_EVENT_SAMPLE_LIMIT,
+      linkedServerId,
+      SERVER_ADVANCED_EVENT_SAMPLE_LIMIT,
+      linkedServerId,
+      SERVER_ADVANCED_EVENT_SAMPLE_LIMIT,
+    )
+    .first<{
+      kills: number | null;
+      deaths: number | null;
+      joins: number | null;
+      disconnects: number | null;
+      unique_players: number | null;
+      last_event_at: string | null;
+    }>();
+  return {
+    kills: numberOrZero(row?.kills),
+    deaths: numberOrZero(row?.deaths),
+    joins: numberOrZero(row?.joins),
+    disconnects: numberOrZero(row?.disconnects),
+    uniquePlayers: numberOrZero(row?.unique_players),
+    lastEventAt: row?.last_event_at ?? null,
   };
 }
 
@@ -857,10 +914,9 @@ function serverBoard(
   rows: ServerMetricRow[],
   valueType: "count" | "distance" | "score" | "ratio" | "kills",
   limit: number,
-  requireProPlus = false,
+  accessByServer: Map<string, AdvancedShowcaseAccess>,
 ): AdvancedBoard {
   const ranked = rows
-    .filter((row) => !requireProPlus || ["pro", "premium"].includes(getAdvancedShowcaseAccess(row.plan_key, row.subscription_status).effectivePlan))
     .slice(0, limit)
     .map((row, index) => ({
       rank: index + 1,
@@ -878,11 +934,15 @@ function serverBoard(
         secondary: row.supporting_c ?? null,
       },
       dataFreshness: row.data_freshness ?? null,
-      isPremiumShowcase: getAdvancedShowcaseAccess(row.plan_key, row.subscription_status).globalPremiumShowcase,
+      isPremiumShowcase: resolveAdvancedAccess(row, accessByServer).globalPremiumShowcase,
       estimated: false,
     }));
 
   return { metricKey, title, description, category, packageRequired, rows: ranked };
+}
+
+function resolveAdvancedAccess(server: PublicServerMeta, accessByServer: Map<string, AdvancedShowcaseAccess>) {
+  return accessByServer.get(server.id) ?? getAdvancedShowcaseAccess(server.plan_key, server.subscription_status);
 }
 
 function boardFromPlayerRows(
@@ -1014,46 +1074,12 @@ function summarizeCell(config: NonNullable<ReturnType<typeof resolveDznMapConfig
   return `${cellX}:${cellY}`;
 }
 
-function serverTravelToBoardRow(stats: TravelServerStats, meta: PublicServerMeta | undefined): AdvancedBoardRow | null {
-  if (!meta || stats.totalValidDistanceM <= 0) return null;
-  return {
-    rank: 0,
-    serverId: meta.id,
-    serverSlug: meta.public_slug,
-    serverName: meta.server_name,
-    serverMode: meta.server_mode ?? meta.server_type,
-    mapName: meta.map_name ?? meta.mission,
-    value: stats.totalValidDistanceM,
-    displayValue: formatDistanceMeters(stats.totalValidDistanceM),
-    topPlayer: stats.topExplorerPlayer,
-    supportingStats: {
-      onFootDistanceM: stats.totalOnFootDistanceM,
-      fastTravelEstimatedDistanceM: stats.totalFastTravelEstimatedDistanceM,
-      activeExplorers: stats.activeExplorersCount,
-      suspiciousSegmentsIgnored: stats.suspiciousSegmentsCount,
-    },
-    dataFreshness: stats.lastTravelSampleAt,
-    isPremiumShowcase: getAdvancedShowcaseAccess(meta.plan_key, meta.subscription_status).globalPremiumShowcase,
-    estimated: true,
-  };
-}
-
 function summarizeBuildRows(rows: PlayerMetricRow[]) {
   return rows.reduce((summary, row) => ({
     buildScore: summary.buildScore + numberOrZero(row.build_score),
     structuresBuilt: summary.structuresBuilt + numberOrZero(row.structures_built),
     raidScore: summary.raidScore + numberOrZero(row.raid_score),
   }), { buildScore: 0, structuresBuilt: 0, raidScore: 0 });
-}
-
-function groupSamplesByServer(samples: TravelPositionSample[]) {
-  const byServer = new Map<string, TravelPositionSample[]>();
-  for (const sample of samples) {
-    const rows = byServer.get(sample.linkedServerId) ?? [];
-    rows.push(sample);
-    byServer.set(sample.linkedServerId, rows);
-  }
-  return byServer;
 }
 
 function publicServerWhereSql() {
@@ -1063,23 +1089,41 @@ function publicServerWhereSql() {
 }
 
 function subscriptionPlanSql() {
-  return `(SELECT server_subscriptions.plan_key
-            FROM server_subscriptions
-            WHERE server_subscriptions.guild_id = linked_servers.guild_id
-            ORDER BY CASE WHEN lower(COALESCE(server_subscriptions.status, '')) IN ('active', 'trialing') THEN 0 ELSE 1 END,
-                     server_subscriptions.updated_at DESC,
-                     server_subscriptions.created_at DESC
-            LIMIT 1)`;
+  return `COALESCE(
+            (SELECT server_subscriptions.plan_key
+             FROM server_subscriptions
+             WHERE server_subscriptions.guild_id = linked_servers.guild_id
+               AND server_subscriptions.owner_discord_id = (
+                 SELECT users.discord_id FROM users WHERE users.id = linked_servers.user_id LIMIT 1
+               )
+             ORDER BY server_subscriptions.updated_at DESC, server_subscriptions.created_at DESC
+             LIMIT 1),
+            (SELECT owner_billing_accounts.plan_key
+             FROM owner_billing_accounts
+             WHERE owner_billing_accounts.discord_user_id = (
+               SELECT users.discord_id FROM users WHERE users.id = linked_servers.user_id LIMIT 1
+             )
+             LIMIT 1)
+          )`;
 }
 
 function subscriptionStatusSql() {
-  return `(SELECT server_subscriptions.status
-            FROM server_subscriptions
-            WHERE server_subscriptions.guild_id = linked_servers.guild_id
-            ORDER BY CASE WHEN lower(COALESCE(server_subscriptions.status, '')) IN ('active', 'trialing') THEN 0 ELSE 1 END,
-                     server_subscriptions.updated_at DESC,
-                     server_subscriptions.created_at DESC
-            LIMIT 1)`;
+  return `COALESCE(
+            (SELECT server_subscriptions.status
+             FROM server_subscriptions
+             WHERE server_subscriptions.guild_id = linked_servers.guild_id
+               AND server_subscriptions.owner_discord_id = (
+                 SELECT users.discord_id FROM users WHERE users.id = linked_servers.user_id LIMIT 1
+               )
+             ORDER BY server_subscriptions.updated_at DESC, server_subscriptions.created_at DESC
+             LIMIT 1),
+            (SELECT owner_billing_accounts.plan_status
+             FROM owner_billing_accounts
+             WHERE owner_billing_accounts.discord_user_id = (
+               SELECT users.discord_id FROM users WHERE users.id = linked_servers.user_id LIMIT 1
+             )
+             LIMIT 1)
+          )`;
 }
 
 function buildScoreCaseSql() {
@@ -1172,6 +1216,26 @@ function formatDistanceMeters(value: number) {
 
 function latestTimestamp(values: Array<string | null | undefined>) {
   return values.filter(Boolean).sort((a, b) => Date.parse(String(b)) - Date.parse(String(a)))[0] ?? null;
+}
+
+function timestampNumber(value: string | null) {
+  const parsed = value ? Date.parse(value) : 0;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function positionRowsToSamples(rows: PositionSampleRow[]): TravelPositionSample[] {
+  return rows
+    .filter((row) => row.player_key && row.x !== null && row.y !== null)
+    .map((row) => ({
+      linkedServerId: row.linked_server_id,
+      playerKey: row.player_key ?? "unknown",
+      playerName: row.player_name,
+      occurredAt: row.occurred_at,
+      x: numberOrZero(row.x),
+      y: numberOrZero(row.y),
+      z: row.z,
+      sourceEventType: row.source_event_type,
+    }));
 }
 
 function safeLimit(value: unknown, fallback: number, max: number) {
