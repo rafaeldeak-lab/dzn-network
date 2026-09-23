@@ -213,7 +213,7 @@ assert.equal(dashboardSource.includes("setActiveTab(\"sync-health\")"), true);
 
 const autoPostRunNowSource = readFileSync("functions/api/servers/[serverId]/auto-posts/run-now.ts", "utf8");
 assert.equal(autoPostRunNowSource.includes("dispatchDiscordPostsForGuild"), true);
-assert.equal(autoPostRunNowSource.includes("active DZN subscription"), true);
+assert.equal(autoPostRunNowSource.includes("Active DZN Pro access"), true);
 assert.equal(autoPostRunNowSource.includes("force: true"), true);
 
 const discordChannelsEndpointSource = readFileSync("functions/api/servers/[serverId]/discord-channels.ts", "utf8");
