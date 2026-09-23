@@ -119,6 +119,9 @@ assert.doesNotMatch(identityPanel, /Private Proof Flow/, "Player-facing UI shoul
 assert.doesNotMatch(identityPanel, /\b(?:localStorage|sessionStorage|sendBeacon|analytics|checkout|STRIPE|nitrado_connections|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns)\b/i, "Identity UI must avoid browser storage, analytics, payment, owner-token, Store, and wheel systems.");
 
 assert.match(ownerClaimPage, /\/api\/owner\/player-game-identity-claims/, "Owner/admin troubleshooting UI must read the private claim queue.");
+assert.match(ownerClaimPage, /Decision History/, "Authenticated owners need a visible approval and revocation history view.");
+assert.match(ownerClaimPage, /Exact submitted game ID/, "Decision history must identify the exact game account that was reviewed.");
+assert.match(ownerClaimPage, /Recorded reason/, "Decision history must expose the stored approval, rejection or revocation reason.");
 assert.match(ownerClaimPage, /method: "PATCH"/, "Owner/admin troubleshooting UI must use the existing review PATCH route.");
 assert.match(ownerClaimPage, /Submitted game ID/, "Owner/admin troubleshooting UI must show the exact submitted game ID.");
 assert.match(ownerClaimPage, /Public-safe masked ID/, "Owner/admin troubleshooting UI must distinguish masked player-safe IDs from owner-only exact IDs.");

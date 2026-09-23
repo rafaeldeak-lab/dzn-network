@@ -1,5 +1,6 @@
 import { isDznAdminDiscordId } from "./admin";
 import { requireDb } from "./db";
+import { isPlatformOwnerDiscordId } from "./platform-owner";
 import { requireServerOwnerOrDznAdmin } from "./public-cache";
 import type { Env, SessionUser } from "./types";
 
@@ -61,6 +62,26 @@ export type OwnerPlayerGameIdentityClaimPayloadRow = PlayerGameIdentityClaimRow 
     missing_evidence_guidance: string;
     boundary: string;
   };
+};
+
+export type OwnerPlayerGameIdentityHistoryRow = {
+  id: string;
+  claim_id: string | null;
+  link_id: string | null;
+  linked_server_id: string;
+  server_name: string | null;
+  public_slug: string | null;
+  user_id: string;
+  account_name: string | null;
+  requester_discord_id: string | null;
+  player_id: string;
+  player_name: string | null;
+  action: "claim_approved" | "claim_rejected" | "link_revoked";
+  result: string;
+  note: string | null;
+  actor_user_id: string | null;
+  actor_name: string | null;
+  created_at: string | null;
 };
 
 type PlayerProfileCandidateRow = {
@@ -450,7 +471,8 @@ export async function readOwnerPlayerGameIdentityClaims(env: Env, user: SessionU
   try {
     const db = requireDb(env);
     const isAdmin = isDznAdminDiscordId(env, user.discord_id);
-    const result = await db
+    const hasGlobalHistoryAccess = isPlatformOwnerDiscordId(env, user.discord_id);
+    const [result, historyResult] = await Promise.all([db
       .prepare(
         `SELECT
           player_game_identity_claims.id,
@@ -478,7 +500,39 @@ export async function readOwnerPlayerGameIdentityClaims(env: Env, user: SessionU
          LIMIT 100`,
       )
       .bind(isAdmin ? 1 : 0, user.id)
-      .all<OwnerPlayerGameIdentityClaimRow>();
+      .all<OwnerPlayerGameIdentityClaimRow>(),
+      db.prepare(
+        `SELECT
+          audit.id,
+          audit.claim_id,
+          audit.link_id,
+          audit.linked_server_id,
+          COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
+          linked_servers.public_slug,
+          audit.user_id,
+          requesters.username AS account_name,
+          claims.discord_id AS requester_discord_id,
+          COALESCE(NULLIF(audit.player_id, ''), claims.player_id, links.player_id, '') AS player_id,
+          COALESCE(claims.player_name, links.player_name) AS player_name,
+          audit.action,
+          audit.result,
+          audit.note,
+          audit.actor_user_id,
+          actors.username AS actor_name,
+          audit.created_at
+         FROM player_game_identity_audit_log audit
+         INNER JOIN linked_servers ON linked_servers.id = audit.linked_server_id
+         LEFT JOIN player_game_identity_claims claims ON claims.id = audit.claim_id
+         LEFT JOIN player_game_identity_links links ON links.id = audit.link_id
+         LEFT JOIN users requesters ON requesters.id = audit.user_id
+         LEFT JOIN users actors ON actors.id = audit.actor_user_id
+         WHERE audit.action IN ('claim_approved', 'claim_rejected', 'link_revoked')
+           AND audit.result = 'accepted'
+           AND (? = 1 OR linked_servers.user_id = ?)
+         ORDER BY datetime(audit.created_at) DESC, audit.id DESC
+         LIMIT 100`,
+      ).bind(hasGlobalHistoryAccess ? 1 : 0, user.id).all<OwnerPlayerGameIdentityHistoryRow>(),
+    ]);
 
     return {
       ok: true as const,
@@ -486,6 +540,7 @@ export async function readOwnerPlayerGameIdentityClaims(env: Env, user: SessionU
       private: true as const,
       owner_or_admin_only: true as const,
       claims: sanitizeOwnerClaimRows(result.results ?? []),
+      history: historyResult.results ?? [],
       boundary: "Claim review can approve only an exact server plus game ID match. It is not a billing, scoring, ranking, review, event, or progression control.",
     };
   } catch {
@@ -495,6 +550,7 @@ export async function readOwnerPlayerGameIdentityClaims(env: Env, user: SessionU
       private: true as const,
       owner_or_admin_only: true as const,
       claims: [] as OwnerPlayerGameIdentityClaimRow[],
+      history: [] as OwnerPlayerGameIdentityHistoryRow[],
       boundary: "Game identity claim review storage is unavailable in this environment.",
     };
   }

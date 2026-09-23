@@ -49,6 +49,10 @@ export async function testPlayerGameIdentityReadModels() {
       INSERT INTO player_game_identity_links (id, user_id, discord_id, linked_server_id, player_profile_id, player_id, verified_source, verified_by_user_id) VALUES
         ('link-a', 'player-a', 'discord-a', 'server-a', 'profile-a', '76561198000000001', 'owner_approved', 'owner-a'),
         ('link-b', 'player-b', 'discord-b', 'server-b', 'profile-b', '76561198000000002', 'owner_approved', 'owner-b');
+      INSERT INTO player_game_identity_audit_log
+        (id, claim_id, link_id, user_id, actor_user_id, linked_server_id, player_profile_id, player_id, action, result, note) VALUES
+        ('audit-a', 'claim-a', 'link-a', 'player-a', 'owner-a', 'server-a', 'profile-a', '76561198000000001', 'claim_approved', 'accepted', 'Server A proof checked.'),
+        ('audit-b', 'claim-b', 'link-b', 'player-b', 'owner-b', 'server-b', 'profile-b', '76561198000000002', 'link_revoked', 'accepted', 'Server B revocation reason.');
     `);
     let attemptedWrites = 0;
     const env = {
@@ -75,13 +79,22 @@ export async function testPlayerGameIdentityReadModels() {
     assert.deepEqual(ownerA.claims.map(row => row.id), ["claim-a"]);
     assert.equal((ownerA.claims[0] as { submitted_player_id?: string }).submitted_player_id, "76561198000000001");
     assert.notEqual(ownerA.claims[0].player_id, "76561198000000001");
+    assert.deepEqual(ownerA.history.map(row => row.id), ["audit-a"]);
+    assert.equal(ownerA.history[0].player_id, "76561198000000001");
+    assert.equal(ownerA.history[0].note, "Server A proof checked.");
     const ownerB = await readOwnerPlayerGameIdentityClaims(env, user("owner-b"));
     assert.deepEqual(ownerB.claims.map(row => row.id), ["claim-b"]);
+    assert.deepEqual(ownerB.history.map(row => row.id), ["audit-b"]);
     const stranger = await readOwnerPlayerGameIdentityClaims(env, user("stranger"));
     assert.deepEqual(stranger.claims, []);
+    assert.deepEqual(stranger.history, []);
     const admin = await readOwnerPlayerGameIdentityClaims(env, user("admin", "admin-discord"));
     assert.deepEqual(admin.claims.map(row => row.id).sort(), ["claim-a", "claim-b"]);
     assert.equal((admin.claims[1] as { submitted_player_id?: string }).submitted_player_id, "76561198000000002");
+    assert.deepEqual(admin.history, []);
+    const platformOwner = await readOwnerPlayerGameIdentityClaims({ ...env, DZN_PLATFORM_OWNER_DISCORD_IDS: "123456789001" }, user("platform", "123456789001"));
+    assert.deepEqual(platformOwner.claims, [], "Platform oversight does not expand claim approval authority.");
+    assert.deepEqual(platformOwner.history.map(row => row.id).sort(), ["audit-a", "audit-b"]);
 
     const player = await readPlayerGameIdentityReadModel(env, user("player-a", "discord-a"));
     assert.equal(player.source, "player_game_identity_links");
@@ -99,6 +112,7 @@ export async function testPlayerGameIdentityReadModels() {
     const unavailable = await readOwnerPlayerGameIdentityClaims(env, user("owner-a"));
     assert.equal(unavailable.source, "unavailable");
     assert.deepEqual(unavailable.claims, []);
+    assert.deepEqual(unavailable.history, []);
   } finally {
     sqlite.close();
   }
