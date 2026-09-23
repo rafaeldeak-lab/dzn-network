@@ -49,7 +49,7 @@ const proFeatureGroups = [
     icon: BarChart3,
     title: "Advanced server intelligence",
     summary: "Turn imported server activity into owner-ready insights and richer public proof.",
-    features: ["Advanced owner analytics where data is available", "Advanced stats and global showcase boards", "Event leaderboards and network rankings", "Enhanced achievement tracking", "30-minute eligible ADM pull cadence", "30-minute manual refresh cooldown"],
+    features: ["Advanced owner analytics where data is available", "Server-specific Advanced Showcase tools", "Event leaderboards and network rankings", "30-minute eligible ADM pull cadence", "30-minute manual refresh cooldown"],
   },
   {
     icon: Megaphone,
@@ -126,7 +126,7 @@ const comparisonGroups = [
       ["Advanced owner analytics", null, "Included where data is available"],
       ["Event leaderboards and network rankings", null, "Included"],
       ["Server Wars hosting tools", null, "Included"],
-      ["Advanced Showcase global boards", null, "Included"],
+      ["Advanced Showcase global boards", "Included", "Included"],
       ["Paid leaderboard or score advantage", null, null],
     ],
   },
