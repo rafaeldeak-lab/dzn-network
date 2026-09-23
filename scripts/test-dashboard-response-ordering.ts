@@ -47,6 +47,13 @@ assert.equal(dashboard.includes("advertisingAccessRecoveryKeyRef"), true, "An ac
 assert.equal(dashboard.includes("(!planSummaryVisible && activeTab !== \"billing\")"), true, "Advertising recovery must remain active for the Billing tab as well as the Overview summary.");
 assert.equal(dashboard.includes("!advertisingStatus ||\n      selectedServerAdvertising"), true, "Only an invalidated retained advertising snapshot should trigger recovery.");
 assert.equal(dashboard.includes("advertisingAccessRecoveryKeyRef.current === recoveryKey"), true, "Advertising recovery must run at most once per accepted access version.");
+assert.equal(dashboard.includes("advertisingAccessRecoveryKeyRef.current = null"), true, "A failed advertising recovery must release its in-flight latch.");
+assert.equal(dashboard.includes("advertisingAccessRetryKeyRef.current === recoveryKey"), true, "Advertising recovery must retry a failed access version at most once.");
+assert.equal(dashboard.includes("setAdvertisingAccessRetryVersion((current) => current + 1)"), true, "A failed advertising recovery must schedule its bounded retry.");
+assert.equal(dashboard.includes("advancedStatsAccessRecoveryKeyRef.current = null"), true, "A failed Advanced Showcase recovery must release its in-flight latch.");
+assert.equal(dashboard.includes("advancedStatsRequestedRef.current = false"), true, "A failed Advanced Showcase recovery must release the visibility request latch.");
+assert.equal(dashboard.includes("advancedStatsAccessRetryKeyRef.current === recoveryKey"), true, "Advanced Showcase recovery must retry a failed access version at most once.");
+assert.equal(dashboard.includes("setAdvancedStatsAccessRetryVersion((current) => current + 1)"), true, "A failed Advanced Showcase recovery must schedule its bounded retry.");
 assert.equal(dashboard.includes("input.requestId < lastAppliedAdvertisingRequestIdRef.current"), true, "Older advertising requests must be ignored.");
 assert.equal(dashboard.includes("input.requestId < advertisingRequestIdRef.current"), false, "A successful advertising response must survive when a newer request merely started and then failed.");
 assert.equal(dashboard.includes("isOlderGeneratedAt(input.generatedAt, lastAppliedAdvertisingGeneratedAtRef.current)"), true, "Older advertising snapshots must be ignored.");

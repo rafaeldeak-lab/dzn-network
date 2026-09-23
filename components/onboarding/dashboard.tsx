@@ -584,6 +584,8 @@ function ServerDashboard({
   const [advancedStatsError, setAdvancedStatsError] = useState("");
   const [advancedStatsLoading, setAdvancedStatsLoading] = useState(false);
   const [advancedStatsVisible, setAdvancedStatsVisible] = useState(false);
+  const [advancedStatsAccessRetryVersion, setAdvancedStatsAccessRetryVersion] = useState(0);
+  const [advertisingAccessRetryVersion, setAdvertisingAccessRetryVersion] = useState(0);
   const [planSummaryVisible, setPlanSummaryVisible] = useState(false);
   const [planSummaryRetryVersion, setPlanSummaryRetryVersion] = useState(0);
   const [serverWars, setServerWars] = useState<DashboardServerWarsResult | null>(null);
@@ -601,6 +603,7 @@ function ServerDashboard({
   const advancedStatsRequestedRef = useRef(false);
   const advancedStatsRequestIdRef = useRef(0);
   const advancedStatsAccessRecoveryKeyRef = useRef<string | null>(null);
+  const advancedStatsAccessRetryKeyRef = useRef<string | null>(null);
   const planSummaryRequestedRef = useRef(false);
   const planSummaryRetryAttemptRef = useRef(0);
   const serverWarsRequestedRef = useRef(false);
@@ -622,6 +625,7 @@ function ServerDashboard({
   const lastAppliedAdvertisingRequestIdRef = useRef(0);
   const lastAppliedAdvertisingGeneratedAtRef = useRef<string | null>(null);
   const advertisingAccessRecoveryKeyRef = useRef<string | null>(null);
+  const advertisingAccessRetryKeyRef = useRef<string | null>(null);
   const lastGoodDashboardHealthRef = useRef(lastGoodDashboardHealth);
   const lastGoodDashboardLiveStatsRef = useRef(lastGoodDashboardLiveStats);
   const lastRefreshedAtRef = useRef<string | null>(lastRefreshedAt);
@@ -782,6 +786,7 @@ function ServerDashboard({
     lastAppliedAdvertisingRequestIdRef.current = advertisingRequestIdRef.current;
     lastAppliedAdvertisingGeneratedAtRef.current = null;
     advertisingAccessRecoveryKeyRef.current = null;
+    advertisingAccessRetryKeyRef.current = null;
     const cachedHealth = loadDashboardHealthCache(serverProp.id);
     const cachedLiveStats = loadDashboardLiveStatsCache(serverProp.id);
     const cachedStats = loadDashboardStatsCache(serverProp.id);
@@ -810,6 +815,7 @@ function ServerDashboard({
       advancedStatsRequestedRef.current = false;
       advancedStatsRequestIdRef.current += 1;
       advancedStatsAccessRecoveryKeyRef.current = null;
+      advancedStatsAccessRetryKeyRef.current = null;
       setPlanSummaryVisible(false);
       setPlanSummaryRetryVersion(0);
       planSummaryRequestedRef.current = false;
@@ -916,7 +922,7 @@ function ServerDashboard({
     if (!advancedStatsVisible || advancedStatsRequestedRef.current) return;
     advancedStatsRequestedRef.current = true;
     void refreshAdvancedStats();
-  }, [advancedStatsVisible, refreshAdvancedStats]);
+  }, [advancedStatsAccessRetryVersion, advancedStatsVisible, refreshAdvancedStats]);
 
   useEffect(() => {
     if (!serverWarsVisible || serverWarsRequestedRef.current) return;
@@ -3413,7 +3419,20 @@ function ServerDashboard({
     setAdvancedStats(null);
     setAdvancedStatsError("");
     advancedStatsRequestedRef.current = true;
-    void refreshAdvancedStats();
+    void refreshAdvancedStats().then((refreshed) => {
+      if (
+        refreshed ||
+        activeServerIdRef.current !== server.id ||
+        advancedStatsAccessRecoveryKeyRef.current !== recoveryKey
+      ) {
+        return;
+      }
+      advancedStatsAccessRecoveryKeyRef.current = null;
+      advancedStatsRequestedRef.current = false;
+      if (advancedStatsAccessRetryKeyRef.current === recoveryKey) return;
+      advancedStatsAccessRetryKeyRef.current = recoveryKey;
+      setAdvancedStatsAccessRetryVersion((current) => current + 1);
+    });
   }, [
     advancedStats,
     advancedStatsMatchesSelectedAccess,
@@ -3458,7 +3477,18 @@ function ServerDashboard({
         generatedAt: result.response.generated_at,
         advertising: result.response.advertising,
       });
-    }).catch(() => undefined);
+    }).catch(() => {
+      if (
+        activeServerIdRef.current !== server.id ||
+        advertisingAccessRecoveryKeyRef.current !== recoveryKey
+      ) {
+        return;
+      }
+      advertisingAccessRecoveryKeyRef.current = null;
+      if (advertisingAccessRetryKeyRef.current === recoveryKey) return;
+      advertisingAccessRetryKeyRef.current = recoveryKey;
+      setAdvertisingAccessRetryVersion((current) => current + 1);
+    });
   }, [
     activeTab,
     applyAdvertisingStatus,
@@ -3472,6 +3502,7 @@ function ServerDashboard({
     selectedServerAccess.source,
     selectedServerAdvertising,
     advertisingStatus,
+    advertisingAccessRetryVersion,
     server.id,
   ]);
   const selectedServerPlanName = selectedServerAccessSource === "complimentary_showcase"
