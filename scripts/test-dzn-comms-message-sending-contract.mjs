@@ -84,6 +84,9 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(client, /body: JSON\.stringify\(body\), signal: controller\.signal/, "Every mutation request must carry the timeout signal.");
   assert.match(runtime, /CHAT_STORAGE_UNAVAILABLE/);
   assert.match(runtime, /REPORT_STORAGE_UNAVAILABLE/);
+  assert.match(runtime, /julianday\(expires_at\) > julianday\('now'\)/, "Expired idempotency receipts must not replay forever.");
+  assert.match(runtime, /DELETE FROM dzn_comms_send_receipts[^\n]+julianday\(expires_at\) <= julianday\('now'\)/, "An exact expired receipt must be replaceable atomically.");
   assert.match(runtime, /host === "\[::1\]"/, "Local activation must accept WHATWG bracketed IPv6 loopback hosts.");
+  assert.match(shell, /current\.status === "ready"[\s\S]*last received messages/, "A failed poll after a successful load must preserve real history.");
   assert.doesNotMatch(runtime + shell + client, /STRIPE_SECRET|DZN_LIVE_CHECKOUT_ENABLED|NITRADO_TOKEN|DISCORD_BOT_TOKEN|WebSocket|DurableObject|OPENAI_API_KEY/);
 });

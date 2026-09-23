@@ -164,18 +164,19 @@ async function postCommsMutation(path: string, body: unknown, fallbackMessage: s
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), COMMS_HISTORY_TIMEOUT_MS);
   let response: Response;
+  let payload: { ok?: boolean; message?: string } | null;
   try {
     response = await fetch(path, {
       method: "POST", credentials: "include", redirect: "error",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify(body), signal: controller.signal,
     });
+    payload = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
   } catch {
     throw new Error(fallbackMessage);
   } finally {
     clearTimeout(timer);
   }
-  const payload = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
   if (!response.ok || !payload?.ok) throw new Error(payload?.message || fallbackMessage);
 }
 

@@ -78,6 +78,7 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   const expires = new Date(now.getTime() + 7 * 86_400_000).toISOString();
   try {
     await db.batch([
+      deleteExpiredReceipt(db, user.id, channel.id, requestId),
       allocateAttemptSlot(db, user.id, minuteBucket),
       allocateSendSlot(db, user.id, minuteBucket, now.toISOString()),
       db.prepare("INSERT INTO dzn_comms_messages (id, channel_id, author_user_id, author_display_name, author_role_label, body, visibility_state, source_label) VALUES (?, ?, ?, ?, 'Member', ?, 'visible', 'authenticated_web_chat')").bind(messageId, channel.id, user.id, safeName(user), moderated.body),
@@ -158,6 +159,7 @@ async function storeRejected(db: D1Database, user: SessionUser, channelId: strin
   const receiptId = crypto.randomUUID();
   const now = Date.now();
   const statements = [
+    deleteExpiredReceipt(db, user.id, channelId, requestId),
     allocateAttemptSlot(db, user.id, minuteBucket),
     db.prepare("INSERT INTO dzn_comms_send_receipts (id, actor_user_id, channel_id, client_request_id, body_hash, decision, response_status, reason_code, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(receiptId, user.id, channelId, requestId, bodyHash, decision, status, reason, new Date(now + 7 * 86_400_000).toISOString()),
   ];
@@ -174,7 +176,11 @@ async function storeRejected(db: D1Database, user: SessionUser, channelId: strin
 }
 
 async function readReceipt(db: D1Database, actorId: string, channelId: string, requestId: string) {
-  return db.prepare("SELECT body_hash, decision, response_status, reason_code, message_id FROM dzn_comms_send_receipts WHERE actor_user_id = ? AND channel_id = ? AND client_request_id = ? LIMIT 1").bind(actorId, channelId, requestId).first<{ body_hash: string; decision: string; response_status: number; reason_code: string | null; message_id: string | null }>();
+  return db.prepare("SELECT body_hash, decision, response_status, reason_code, message_id FROM dzn_comms_send_receipts WHERE actor_user_id = ? AND channel_id = ? AND client_request_id = ? AND julianday(expires_at) > julianday('now') LIMIT 1").bind(actorId, channelId, requestId).first<{ body_hash: string; decision: string; response_status: number; reason_code: string | null; message_id: string | null }>();
+}
+
+function deleteExpiredReceipt(db: D1Database, actorId: string, channelId: string, requestId: string) {
+  return db.prepare("DELETE FROM dzn_comms_send_receipts WHERE actor_user_id = ? AND channel_id = ? AND client_request_id = ? AND julianday(expires_at) <= julianday('now')").bind(actorId, channelId, requestId);
 }
 
 function receiptResponse(row: { decision: string; response_status: number; reason_code: string | null; message_id: string | null }, replayed: boolean) {

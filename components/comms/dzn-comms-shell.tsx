@@ -121,11 +121,13 @@ export function DznCommsShell() {
       })
       .catch(() => {
         if (controller.signal.aborted) return;
-        setHistory({
-          status: "fallback",
-          payload: staticPayload,
-          message: "Message history could not be reached, so DZN is showing the static read-only fallback.",
-        });
+        setHistory((current) => current.status === "ready"
+          ? { ...current, message: "Global Chat could not refresh. Showing the last received messages while DZN reconnects." }
+          : {
+              status: "fallback",
+              payload: staticPayload,
+              message: "Message history could not be reached, so DZN is showing the static read-only fallback.",
+            });
       });
     void refresh();
     const poller = liveUiEnabled ? window.setInterval(() => void refresh(), 5_000) : undefined;

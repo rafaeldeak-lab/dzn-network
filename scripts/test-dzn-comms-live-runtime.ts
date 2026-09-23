@@ -123,9 +123,22 @@ async function testSendRuntime() {
     assert.equal(tooFast.status, 429, "The five-second send guard must reject an immediate second message.");
   } finally { f.close(); }
 
+  const expired = await fixture();
+  try {
+    expired.sqlite.prepare(`INSERT INTO dzn_comms_send_receipts
+      (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,reason_code,expires_at)
+      VALUES ('expired','player','dzn-global-chat','request-expired-1','old-hash','block',422,'SPAM_BLOCKED',datetime('now','-1 day'))`).run();
+    const replaced = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+      channelSlug: "global-chat", clientRequestId: "request-expired-1", body: "Fresh request after receipt expiry",
+    }), expired.env);
+    assert.equal(replaced.status, 201, "Expired idempotency receipts must not block a fresh request ID lifecycle.");
+    assert.equal(expired.count("dzn_comms_send_receipts"), 1);
+    assert.equal(expired.count("dzn_comms_messages"), 1);
+  } finally { expired.close(); }
+
   const rollback = await fixture();
   try {
-    rollback.failAt(2);
+    rollback.failAt(3);
     const result = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
       channelSlug: "global-chat", clientRequestId: "request-rollback-1", body: "Rollback me",
     }), rollback.env);
