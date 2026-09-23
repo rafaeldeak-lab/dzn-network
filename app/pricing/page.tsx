@@ -49,7 +49,7 @@ const proFeatureGroups = [
     icon: BarChart3,
     title: "Advanced server intelligence",
     summary: "Turn imported server activity into owner-ready insights and richer public proof.",
-    features: ["Advanced owner analytics where data is available", "Server-specific Advanced Showcase tools", "Event leaderboard detail", "30-minute eligible ADM pull cadence", "30-minute manual refresh cooldown"],
+    features: ["Advanced owner analytics where data is available", "Server-specific Advanced Showcase tools", "Event leaderboard detail", "30-minute eligible ADM pull cadence"],
   },
   {
     icon: Megaphone,
@@ -91,7 +91,6 @@ const comparisonGroups = [
       ["Server-status cadence", "7 minutes", "5 minutes"],
       ["ADM discovery cadence", "15 minutes", "10 minutes"],
       ["Eligible ADM pull cadence", "60 minutes", "30 minutes"],
-      ["Manual ADM refresh cooldown", "60 minutes", "30 minutes"],
     ],
   },
   {
