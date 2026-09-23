@@ -3,6 +3,7 @@
 import {
   AlertTriangle,
   CheckCircle2,
+  Clock3,
   ExternalLink,
   RefreshCw,
   ShieldCheck,
@@ -56,30 +57,68 @@ type ClaimsPayload = {
   private: boolean;
   owner_or_admin_only: boolean;
   claims: PlayerGameIdentityClaim[];
+  history: PlayerGameIdentityHistory[];
+  history_has_more: boolean;
+  history_next_cursor: string | null;
   boundary: string;
   message?: string;
   error?: string;
+};
+
+type PlayerGameIdentityHistory = {
+  id: string;
+  claim_id: string | null;
+  link_id: string | null;
+  linked_server_id: string;
+  server_name: string | null;
+  public_slug: string | null;
+  user_id: string;
+  account_name: string | null;
+  requester_discord_id: string | null;
+  player_id: string;
+  player_name: string | null;
+  action: "claim_approved" | "claim_rejected" | "link_revoked";
+  result: string;
+  note: string | null;
+  actor_user_id: string | null;
+  actor_name: string | null;
+  created_at: string | null;
 };
 
 type LoadState = "loading" | "ready" | "unauthorized" | "error";
 type ReviewAction = "approve" | "reject";
 type ClaimLoadResult =
   | { state: "unauthorized" }
-  | { state: "ready"; claims: PlayerGameIdentityClaim[]; boundary: string };
+  | {
+      state: "ready";
+      claims: PlayerGameIdentityClaim[];
+      history: PlayerGameIdentityHistory[];
+      historyHasMore: boolean;
+      historyNextCursor: string | null;
+      boundary: string;
+    };
 
 const NOTE_LIMIT = 240;
 
 export function PlayerGameIdentityClaimsPage() {
   const [state, setState] = useState<LoadState>("loading");
   const [claims, setClaims] = useState<PlayerGameIdentityClaim[]>([]);
+  const [history, setHistory] = useState<PlayerGameIdentityHistory[]>([]);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyNextCursor, setHistoryNextCursor] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [view, setView] = useState<"pending" | "history">("pending");
   const [payloadBoundary, setPayloadBoundary] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [busyClaim, setBusyClaim] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  const fetchClaims = useCallback(async (): Promise<ClaimLoadResult> => {
-    const response = await fetch("/api/owner/player-game-identity-claims", {
+  const fetchClaims = useCallback(async (historyCursor: string | null = null): Promise<ClaimLoadResult> => {
+    const endpoint = historyCursor
+      ? `/api/owner/player-game-identity-claims?${new URLSearchParams({ history_before: historyCursor })}`
+      : "/api/owner/player-game-identity-claims";
+    const response = await fetch(endpoint, {
       cache: "no-store",
       credentials: "include",
       headers: { accept: "application/json" },
@@ -100,6 +139,9 @@ export function PlayerGameIdentityClaimsPage() {
     return {
       state: "ready",
       claims: payload.claims ?? [],
+      history: payload.history ?? [],
+      historyHasMore: payload.history_has_more === true,
+      historyNextCursor: typeof payload.history_next_cursor === "string" ? payload.history_next_cursor : null,
       boundary: payload.boundary ?? "",
     };
   }, []);
@@ -111,6 +153,9 @@ export function PlayerGameIdentityClaimsPage() {
     }
 
     setClaims(result.claims);
+    setHistory(result.history);
+    setHistoryHasMore(result.historyHasMore);
+    setHistoryNextCursor(result.historyNextCursor);
     setPayloadBoundary(result.boundary);
     setState("ready");
   }, []);
@@ -126,6 +171,29 @@ export function PlayerGameIdentityClaimsPage() {
       setError(loadError instanceof Error ? loadError.message : "Player stat link checks could not be loaded.");
     }
   }, [applyLoadResult, fetchClaims]);
+
+  const loadOlderHistory = useCallback(async () => {
+    if (historyLoading || historyNextCursor === null) return;
+    setHistoryLoading(true);
+    setError(null);
+    try {
+      const result = await fetchClaims(historyNextCursor);
+      if (result.state === "unauthorized") {
+        setState("unauthorized");
+        return;
+      }
+      setHistory((current) => {
+        const knownIds = new Set(current.map((item) => item.id));
+        return [...current, ...result.history.filter((item) => !knownIds.has(item.id))];
+      });
+      setHistoryHasMore(result.historyHasMore);
+      setHistoryNextCursor(result.historyNextCursor);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Older decision history could not be loaded.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [fetchClaims, historyLoading, historyNextCursor]);
 
   useEffect(() => {
     let active = true;
@@ -242,11 +310,22 @@ export function PlayerGameIdentityClaimsPage() {
           <StatusBanner tone="error" message={error} />
         ) : null}
 
+        {state === "ready" ? (
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-white/10 bg-black/35 p-1.5" aria-label="Player link review views">
+            <button type="button" onClick={() => setView("pending")} aria-pressed={view === "pending"} className={`rounded-md px-3 py-2 text-xs font-black uppercase ${view === "pending" ? "bg-cyan-300/15 text-cyan-50" : "text-zinc-400 hover:text-white"}`}>
+              Pending ({pendingCount})
+            </button>
+            <button type="button" onClick={() => setView("history")} aria-pressed={view === "history"} className={`rounded-md px-3 py-2 text-xs font-black uppercase ${view === "history" ? "bg-violet-300/15 text-violet-50" : "text-zinc-400 hover:text-white"}`}>
+              Decision History
+            </button>
+          </div>
+        ) : null}
+
         {state === "loading" ? <LoadingState /> : null}
         {state === "unauthorized" ? <UnauthorizedState /> : null}
         {state === "error" ? <ErrorState message={error ?? "Player stat link checks could not be loaded."} /> : null}
-        {state === "ready" && claims.length === 0 ? <EmptyState boundary={payloadBoundary} /> : null}
-        {state === "ready" && claims.length > 0 ? (
+        {state === "ready" && view === "pending" && claims.length === 0 ? <EmptyState boundary={payloadBoundary} /> : null}
+        {state === "ready" && view === "pending" && claims.length > 0 ? (
           <section className="grid gap-4">
             {claims.map((claim) => (
               <ClaimCard
@@ -260,9 +339,65 @@ export function PlayerGameIdentityClaimsPage() {
             ))}
           </section>
         ) : null}
+        {state === "ready" && view === "history" && history.length === 0 ? <HistoryEmptyState /> : null}
+        {state === "ready" && view === "history" && history.length > 0 ? (
+          <div className="grid gap-3">
+            <p className="text-xs font-semibold text-zinc-500">Showing {history.length} most recent decisions{historyHasMore ? "; older records are available." : "."}</p>
+            <section className="grid gap-3" aria-label="Approval and revocation history">
+              {history.map((item) => <HistoryCard key={item.id} item={item} />)}
+            </section>
+            {historyHasMore ? (
+              <button type="button" onClick={() => void loadOlderHistory()} disabled={historyLoading} className="mx-auto inline-flex min-h-11 items-center gap-2 rounded-md border border-violet-300/30 bg-violet-300/10 px-4 py-2 text-xs font-black uppercase text-violet-50 transition hover:bg-violet-300/15 disabled:cursor-wait disabled:opacity-60">
+                <RefreshCw className={`size-4 ${historyLoading ? "animate-spin" : ""}`} aria-hidden="true" />
+                {historyLoading ? "Loading older decisions" : "Load older decisions"}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <div className="mx-auto w-full max-w-6xl"><ManagedGameIdentityLinks /></div>
     </main>
+  );
+}
+
+function HistoryCard({ item }: { item: PlayerGameIdentityHistory }) {
+  const labels = {
+    claim_approved: { title: "Link approved", tone: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100" },
+    claim_rejected: { title: "Request rejected", tone: "border-rose-300/25 bg-rose-300/10 text-rose-100" },
+    link_revoked: { title: "Link revoked", tone: "border-amber-300/25 bg-amber-300/10 text-amber-100" },
+  } as const;
+  const label = labels[item.action];
+  return (
+    <article className="rounded-lg border border-white/10 bg-black/45 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">Authenticated owner decision</p>
+          <h2 className="mt-1 text-xl font-black text-white">{item.account_name || "DZN Player"} <span className="text-zinc-500">on</span> {item.server_name || "DZN Server"}</h2>
+          <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-zinc-400"><Clock3 className="size-3.5" aria-hidden="true" />{formatDate(item.created_at)}</p>
+        </div>
+        <span className={`rounded-md border px-3 py-1.5 text-xs font-black uppercase ${label.tone}`}>{label.title}</span>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <DetailBox label="Game profile" value={item.player_name || "Name not available"} />
+        <DetailBox label="Exact submitted game ID" value={item.player_id || "Not recorded"} emphasis />
+        <DetailBox label="Linked Discord account" value={item.requester_discord_id || "Not recorded"} />
+        <DetailBox label="Decision by" value={item.actor_name || item.actor_user_id || "System actor unavailable"} />
+      </div>
+      <div className="mt-3 rounded-md border border-white/10 bg-white/[0.035] p-3">
+        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Recorded reason</p>
+        <p className="mt-1 text-sm font-semibold leading-6 text-zinc-200">{item.note || "No reason was recorded for this earlier decision."}</p>
+        <p className="mt-2 break-all text-[10px] font-semibold text-zinc-600">Audit reference: {item.id}</p>
+      </div>
+    </article>
+  );
+}
+
+function HistoryEmptyState() {
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
+      <h2 className="text-xl font-black text-white">No recorded decisions yet</h2>
+      <p className="mt-2 text-sm leading-6 text-zinc-400">Approvals, rejections and revocations for servers you are authorized to manage will appear here.</p>
+    </section>
   );
 }
 
