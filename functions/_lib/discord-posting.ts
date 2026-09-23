@@ -166,6 +166,13 @@ type DiscordDispatchBudget = {
   deadlineAtMs: number;
 };
 
+const DUE_POSTING_CURSOR = {
+  id: "dzn-discord-due-scan-cursor",
+  guildId: "__dzn_internal__",
+  postType: "__due_posting_scan__",
+  channelId: "__scheduler__",
+} as const;
+
 export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJobs?: number; deadlineMs?: number } = {}) {
   await ensureAutomationSchema(env);
   const maxJobs = Math.max(1, Math.min(Math.trunc(Number(options.maxJobs ?? 2)) || 2, 10));
@@ -403,11 +410,14 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
   const results: DiscordPostDispatchDetail[] = [];
   const accessByGuild = new Map<string, Awaited<ReturnType<typeof resolveDiscordPublishingAccessForGuild>>>();
   const pageSize = Math.max(4, Math.min(options.maxJobs * 4, 100));
-  let cursorEditedAt: string | null = null;
-  let cursorDestinationId = "";
-  let exhausted = false;
+  const maxAccessLookups = Math.max(4, Math.min(options.maxJobs * 8, 24));
+  const savedCursor = options.guildId ? null : await readDuePostingCursor(db);
+  let cursorEditedAt: string | null = savedCursor?.editedAt ?? null;
+  let cursorDestinationId = savedCursor?.destinationId ?? "";
+  let reachedEnd = false;
+  let scanLimitReached = false;
 
-  while (!exhausted && processed < options.maxJobs) {
+  while (!reachedEnd && !scanLimitReached && processed < options.maxJobs) {
     if (options.budget && isDiscordDispatchBudgetLow(options.budget)) {
       budgetExhausted = true;
       break;
@@ -447,12 +457,12 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
       )
       .all<DuePostingDestination>();
     const page: DuePostingDestination[] = pageResult.results ?? [];
-    exhausted = page.length < pageSize;
-    if (page.length === 0) break;
+    if (page.length === 0) {
+      reachedEnd = true;
+      break;
+    }
 
     for (const row of page) {
-      cursorEditedAt = row.cursor_edited_at;
-      cursorDestinationId = row.destination_id;
       if (options.budget && isDiscordDispatchBudgetLow(options.budget)) {
         budgetExhausted = true;
         break;
@@ -460,9 +470,15 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
       if (processed >= options.maxJobs) break;
       let publishingAccess = accessByGuild.get(row.guild_id);
       if (!publishingAccess) {
+        if (accessByGuild.size >= maxAccessLookups) {
+          scanLimitReached = true;
+          break;
+        }
         publishingAccess = await resolveDiscordPublishingAccessForGuild(env, row.guild_id);
         accessByGuild.set(row.guild_id, publishingAccess);
       }
+      cursorEditedAt = row.cursor_edited_at;
+      cursorDestinationId = row.destination_id;
       if (!["active_live", "active_degraded"].includes(publishingAccess.lifecycleStatus)) continue;
       const listingContext = { plan_key: publishingAccess.planKey, subscription_status: publishingAccess.subscriptionStatus };
       if (!hasListingAutoPost(listingContext, row.post_type)) continue;
@@ -487,6 +503,15 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
       }
     }
     if (budgetExhausted) break;
+    if (!scanLimitReached && processed < options.maxJobs && page.length < pageSize) reachedEnd = true;
+  }
+
+  if (!options.guildId) {
+    if (reachedEnd) {
+      await clearDuePostingCursor(db);
+    } else if (cursorEditedAt && cursorDestinationId) {
+      await saveDuePostingCursor(db, { editedAt: cursorEditedAt, destinationId: cursorDestinationId });
+    }
   }
 
   return { processed, edited, sent, posted: edited + sent, skipped, failed, budgetExhausted, results };
@@ -583,6 +608,56 @@ function createDiscordDispatchBudget(deadlineMs: unknown): DiscordDispatchBudget
 
 function isDiscordDispatchBudgetLow(budget: DiscordDispatchBudget) {
   return Date.now() >= budget.deadlineAtMs - 350;
+}
+
+async function readDuePostingCursor(db: D1Database) {
+  const row = await db
+    .prepare(
+      `SELECT last_payload_hash
+       FROM server_posting_state
+       WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ?
+       LIMIT 1`,
+    )
+    .bind(DUE_POSTING_CURSOR.guildId, DUE_POSTING_CURSOR.postType, DUE_POSTING_CURSOR.channelId)
+    .first<{ last_payload_hash: string | null }>();
+  if (!row?.last_payload_hash) return null;
+  try {
+    const parsed = JSON.parse(row.last_payload_hash) as { editedAt?: unknown; destinationId?: unknown };
+    if (typeof parsed.editedAt !== "string" || typeof parsed.destinationId !== "string") return null;
+    return { editedAt: parsed.editedAt, destinationId: parsed.destinationId };
+  } catch {
+    return null;
+  }
+}
+
+async function saveDuePostingCursor(db: D1Database, cursor: { editedAt: string; destinationId: string }) {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO server_posting_state (
+         id, guild_id, post_type, discord_channel_id, last_payload_hash, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(guild_id, post_type, discord_channel_id) DO UPDATE SET
+         last_payload_hash = excluded.last_payload_hash,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(
+      DUE_POSTING_CURSOR.id,
+      DUE_POSTING_CURSOR.guildId,
+      DUE_POSTING_CURSOR.postType,
+      DUE_POSTING_CURSOR.channelId,
+      JSON.stringify(cursor),
+      now,
+      now,
+    )
+    .run();
+}
+
+async function clearDuePostingCursor(db: D1Database) {
+  await db
+    .prepare("DELETE FROM server_posting_state WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ?")
+    .bind(DUE_POSTING_CURSOR.guildId, DUE_POSTING_CURSOR.postType, DUE_POSTING_CURSOR.channelId)
+    .run();
 }
 
 export async function sendDiscordTestPost(env: Env, destination: {

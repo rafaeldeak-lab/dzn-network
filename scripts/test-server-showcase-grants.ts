@@ -305,22 +305,27 @@ async function run() {
     assert.equal(priorityStatus?.allowed_by_plan, true);
     assert.equal(priorityStatus?.listing_plan_key, "pro");
 
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 9; index += 1) {
       db.sqlite.prepare(`INSERT INTO server_posting_destinations (
         id, guild_id, post_type, discord_channel_id, enabled, created_by_discord_id, created_at, updated_at
       ) VALUES (?, ?, 'priority_status_embed', ?, 1, ?, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`)
-        .run(randomUUID(), `ineligible-guild-${index}`, `9000000${index}`, actor.discord_id);
+        .run(`ineligible-${String(index).padStart(2, "0")}`, `ineligible-guild-${index}`, `9000000${index}`, actor.discord_id);
     }
     db.sqlite.prepare(`INSERT INTO server_posting_destinations (
       id, guild_id, post_type, discord_channel_id, enabled, created_by_discord_id, created_at, updated_at
     ) VALUES (?, ?, 'priority_status_embed', '99999999', 1, ?, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`)
-      .run(randomUUID(), scope.guildId, actor.discord_id);
+      .run("zz-eligible", scope.guildId, actor.discord_id);
 
-    const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
-    assert.equal(dispatched.ok, true);
-    assert.equal(dispatched.processed, 1);
-    assert.equal(dispatched.results[0]?.guild_id, scope.guildId);
-    assert.equal(dispatched.results[0]?.status, "no_message_id");
+    const firstTick = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    assert.equal(firstTick.ok, true);
+    assert.equal(firstTick.processed, 0);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_posting_state WHERE guild_id = '__dzn_internal__'").get()?.n, 1);
+
+    const resumedTick = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    assert.equal(resumedTick.ok, true);
+    assert.equal(resumedTick.processed, 1);
+    assert.equal(resumedTick.results[0]?.guild_id, scope.guildId);
+    assert.equal(resumedTick.results[0]?.status, "no_message_id");
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
   });
   await test("exact grant outranks active Starter only for NukeTown Discord dispatch", async ({ db, env }) => {
