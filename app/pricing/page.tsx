@@ -78,7 +78,7 @@ const proFeatureGroups = [
   {
     icon: Radar,
     title: "Faster owner operations",
-    summary: "Run more servers with shorter eligible refresh windows and one billing portal.",
+    summary: "Run more servers with shorter eligible refresh windows and deeper operational insight.",
     features: ["Up to 3 linked DayZ servers", "5-minute server-status cadence", "10-minute ADM discovery cadence", "Priority refresh capability", "Owner announcements", "Advanced listing analytics"],
   },
 ] as const;
@@ -147,7 +147,7 @@ export default function PricingPage() {
               Make your server impossible to overlook
             </h1>
             <p className="mt-6 max-w-3xl text-base font-semibold leading-7 text-zinc-200 sm:text-lg">
-              Pro combines advanced analytics, richer server profiles, discovery tools, Discord automation and event-hosting features for owners who want to grow an active DayZ community.
+              Pro combines advanced analytics, richer server profiles, discovery tools, Discord automation and Server Wars hosting for owners who want to grow an active DayZ community.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
               <a href="#choose-plan" className="inline-flex min-h-12 items-center justify-center gap-2 bg-amber-300 px-6 text-sm font-black uppercase text-slate-950 transition hover:bg-amber-200">

@@ -264,6 +264,8 @@ assert.equal(pricingSection.includes("<table"), false, "Pricing comparison shoul
 assert.equal(pricingSection.includes('"Seasonal participation where events allow"'), false, "Pricing must not present shared seasonal participation as Pro-only.");
 assert.equal(pricingSection.includes('"Subscription billing portal"'), false, "Pricing must not present the shared billing portal as Pro-only.");
 assert.equal(pricingSection.includes('"Official event-hosting tools"'), false, "Pricing must not sell creator-only official event administration as a customer Pro benefit.");
+assert.equal(pricingSection.includes("event-hosting features"), false, "Pricing hero copy must limit customer hosting claims to Server Wars.");
+assert.equal(pricingSection.includes("one billing portal"), false, "Pricing must not present the shared billing portal as Pro-only value.");
 assert.equal(pricingSection.includes("sm:sr-only"), true, "Desktop comparison values must retain accessible Starter and Pro labels.");
 assert.equal(/Premium|Partner Listing|Network plan|Partner plan/.test(pricingSection), false);
 assert.equal(/paid leaderboard rank|leaderboard rank boost|buy better leaderboard/i.test(pricingSection), false);
