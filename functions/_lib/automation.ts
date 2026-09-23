@@ -10,6 +10,7 @@ import {
   type PlanKey,
 } from "./plans";
 import { rankServers } from "./server-ranking";
+import { readServerShowcaseAccess } from "./server-showcase-access";
 import type { Env } from "./types";
 import type { AutoPostType } from "../../lib/billing/plans";
 import {
@@ -646,22 +647,32 @@ export async function getDueStatusAutomationServers(env: Env, maxServers: number
 }
 
 export async function getAutomationContextForLinkedServer(env: Env, linkedServerId: string) {
-  await ensureAutomationRowsForLinkedServers(env);
-  const row = await requireDb(env)
+  await ensureAutomationSchema(env);
+  const result = await requireDb(env)
     .prepare(
       `SELECT linked_servers.guild_id, server_subscriptions.plan_key, server_subscriptions.status
        FROM linked_servers
        LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
-       WHERE linked_servers.id = ?
-       LIMIT 1`,
+       WHERE linked_servers.id = ?`,
     )
     .bind(linkedServerId)
-    .first<{ guild_id: string | null; plan_key: string | null; status: string | null }>();
+    .all<{ guild_id: string | null; plan_key: string | null; status: string | null }>();
+  const rows = result.results ?? [];
+  const row = rows[0];
   if (!row?.guild_id) return null;
+  const activeBilling = rows
+    .filter((candidate) => isActiveSubscriptionStatus(candidate.status))
+    .sort((left, right) => getPlanPriority(normalizePlanKey(right.plan_key)) - getPlanPriority(normalizePlanKey(left.plan_key)))[0];
+  const billing = activeBilling ?? row;
+  const showcaseAccess = await readServerShowcaseAccess(env, linkedServerId, {
+    plan_key: billing.plan_key,
+    subscription_status: billing.status,
+  });
   return {
     guildId: row.guild_id,
-    planKey: normalizePlanKey(row.plan_key),
-    subscriptionStatus: row.status ?? "inactive",
+    planKey: showcaseAccess.source === "complimentary_showcase" ? "pro" : normalizePlanKey(billing.plan_key),
+    subscriptionStatus: showcaseAccess.source === "complimentary_showcase" ? "active" : billing.status ?? "inactive",
+    accessSource: showcaseAccess.source,
   };
 }
 
@@ -1373,12 +1384,25 @@ function numberOrZero(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export async function queueDiscordPostUpdatesForGuild(env: Env, guildId: string, planKey: PlanKey, postTypes: AutoPostType[], reason: string) {
+export async function queueDiscordPostUpdatesForGuild(
+  env: Env,
+  guildId: string,
+  planKey: PlanKey,
+  postTypes: AutoPostType[],
+  reason: string,
+  options: { linkedServerId?: string } = {},
+) {
   await ensureAutomationSchema(env);
+  let effectivePlanKey = planKey;
+  if (options.linkedServerId && postTypes.some((postType) => !hasAutoPost(planKey, postType))) {
+    const context = await getAutomationContextForLinkedServer(env, options.linkedServerId);
+    if (!context || context.guildId !== guildId || !isActiveSubscriptionStatus(context.subscriptionStatus)) return 0;
+    effectivePlanKey = context.planKey;
+  }
   const now = new Date().toISOString();
   let queued = 0;
   for (const postType of postTypes) {
-    if (!hasAutoPost(planKey, postType)) continue;
+    if (!hasAutoPost(effectivePlanKey, postType)) continue;
     const update = await requireDb(env)
       .prepare(
         `UPDATE automation_jobs SET

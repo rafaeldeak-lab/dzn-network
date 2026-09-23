@@ -24,6 +24,8 @@ import { onRequest as advertisingBump } from "../functions/api/servers/[serverId
 import { dashboardSelectedServerAccess } from "../components/onboarding/dashboard-detail-display";
 import { createServerWarChallenge, getOwnerServerWarsPayload, getServerWarOpponentOptions } from "../functions/_lib/server-wars";
 import { processServerMatchmakingOptIn } from "../functions/_lib/ctf-tournaments";
+import { getAutomationContextForLinkedServer, queueDiscordPostUpdatesForGuild } from "../functions/_lib/automation";
+import { dispatchQueuedDiscordPostUpdates } from "../functions/_lib/discord-posting";
 
 type Row = Record<string, unknown>;
 type Sqlite = { exec(sql: string): void; close(): void; prepare(sql: string): {
@@ -255,6 +257,51 @@ async function run() {
     assert.equal(unrelated.ok, false);
     assert.equal(unrelated.status, "plan_locked");
     assert.equal(db.sqlite.prepare("SELECT is_searching_for_match FROM linked_servers WHERE id = ?").get("same-guild-other-server")?.is_searching_for_match, 0);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("exact grant enables only NukeTown Discord queue access without fabricating billing", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const locked = await getAutomationContextForLinkedServer(env, scope.linkedServerId);
+    assert.equal(locked?.planKey, "pro");
+    assert.equal(locked?.subscriptionStatus, "canceled");
+    assert.equal(locked?.accessSource, "billing");
+
+    await grant(env);
+    const unlocked = await getAutomationContextForLinkedServer(env, scope.linkedServerId);
+    assert.equal(unlocked?.planKey, "pro");
+    assert.equal(unlocked?.subscriptionStatus, "active");
+    assert.equal(unlocked?.accessSource, "complimentary_showcase");
+    const queued = await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["priority_status_embed"], "exact-grant-test", {
+      linkedServerId: scope.linkedServerId,
+    });
+    assert.equal(queued, 1);
+
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    assert.equal(dispatched.ok, true);
+    assert.equal(dispatched.results[0]?.status, "skipped_disabled");
+    assert.equal(dispatched.results[0]?.reason, "No saved posting destination exists.");
+
+    const unrelated = await getAutomationContextForLinkedServer(env, "same-guild-other-server");
+    assert.equal(unrelated?.accessSource, "billing");
+    assert.equal(unrelated?.subscriptionStatus, "canceled");
+    const unrelatedQueued = await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["priority_status_embed"], "unrelated-test", {
+      linkedServerId: "same-guild-other-server",
+    });
+    assert.equal(unrelatedQueued, 0);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM automation_jobs WHERE job_type = 'discord-post-update'").get()?.n, 1);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("revoked exact grant blocks a previously queued Discord publish", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["priority_status_embed"], "revoke-test", {
+      linkedServerId: scope.linkedServerId,
+    }), 1);
+    revokeSql(db, grantId);
+    const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    assert.equal(dispatched.results[0]?.status, "skipped_plan_locked");
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
   });
   await test("revoked exact grant rolls back the CTF matchmaking opt-in", async ({ db, env }) => {

@@ -48,7 +48,9 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
         lastStatusUpdateAt: result.player_count_last_checked_at ?? result.metadata_last_checked_at ?? null,
       });
       if (result.changed) {
-        await queueDiscordPostUpdatesForGuild(env, context.guildId, context.planKey, ["basic_status_embed", "priority_status_embed"], "manual-status-refresh");
+        await queueDiscordPostUpdatesForGuild(env, context.guildId, context.planKey, ["basic_status_embed", "priority_status_embed"], "manual-status-refresh", {
+          linkedServerId,
+        });
       }
     }
     return json(result);

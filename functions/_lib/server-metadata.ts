@@ -961,7 +961,9 @@ export async function refreshLivePlayerCountsForActiveServers(
         }
       }
       if (result.ok && shouldQueueDiscordUpdates) {
-        await queueDiscordPostUpdatesForGuild(env, row.guild_id, row.plan_key, ["basic_status_embed", "priority_status_embed"], changed ? "status-change" : "status-check");
+        await queueDiscordPostUpdatesForGuild(env, row.guild_id, row.plan_key, ["basic_status_embed", "priority_status_embed"], changed ? "status-change" : "status-check", {
+          linkedServerId: row.id,
+        });
       }
       results.push({
         linked_server_id: row.id,

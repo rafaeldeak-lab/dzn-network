@@ -1,6 +1,7 @@
 import { ensureAutomationSchema } from "./automation";
 import { requireDb } from "./db";
 import { getAdmPullInterval, getServerStatusInterval, hasListingAutoPost, normalizeListingPlanKey, normalizePlanKey } from "./plans";
+import { readServerShowcaseAccess } from "./server-showcase-access";
 import type { Env } from "./types";
 import type { AutoPostType } from "../../lib/billing/plans";
 import { serverLifecycleSqlExpression } from "../../lib/server-lifecycle";
@@ -246,19 +247,8 @@ export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJ
 
 async function processPostJob(env: Env, job: QueuedPostJob): Promise<DiscordPostDispatchDetail> {
   const db = requireDb(env);
-  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
-  const subscription = await db
-    .prepare(
-      `SELECT server_subscriptions.plan_key, server_subscriptions.status,
-              ${lifecycleStatusSql} AS lifecycle_status
-       FROM server_subscriptions
-       LEFT JOIN linked_servers ON linked_servers.guild_id = server_subscriptions.guild_id
-       WHERE server_subscriptions.guild_id = ?
-       LIMIT 1`,
-    )
-    .bind(job.guild_id)
-    .first<{ plan_key: string | null; status: string | null; lifecycle_status: string | null }>();
-  if (!["active_live", "active_degraded"].includes(String(subscription?.lifecycle_status ?? "active_live"))) {
+  const publishingAccess = await resolveDiscordPublishingAccessForGuild(env, job.guild_id);
+  if (!["active_live", "active_degraded"].includes(publishingAccess.lifecycleStatus)) {
     return {
       guild_id: job.guild_id,
       post_type: job.post_type,
@@ -268,8 +258,7 @@ async function processPostJob(env: Env, job: QueuedPostJob): Promise<DiscordPost
       reason: "Server lifecycle is not eligible for Discord auto-posting.",
     };
   }
-  const planKey = normalizePlanKey(subscription?.plan_key);
-  const listingContext = { plan_key: planKey, subscription_status: subscription?.status ?? "inactive" };
+  const listingContext = { plan_key: publishingAccess.planKey, subscription_status: publishingAccess.subscriptionStatus };
   if (!hasListingAutoPost(listingContext, job.post_type)) {
     return {
       guild_id: job.guild_id,
@@ -399,30 +388,23 @@ async function processConfiguredPostingDestination(
 
 async function processDuePostingDestinations(env: Env, options: { maxJobs: number; guildId?: string; force?: boolean; budget?: DiscordDispatchBudget }) {
   const db = requireDb(env);
-  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
   const rows = await db
     .prepare(
       `SELECT destinations.guild_id, destinations.post_type, destinations.discord_channel_id,
               destinations.discord_webhook_url, destinations.enabled,
-              subscriptions.plan_key, subscriptions.status AS subscription_status,
-              ${lifecycleStatusSql} AS lifecycle_status,
               state.last_edited_at
        FROM server_posting_destinations AS destinations
-       JOIN server_subscriptions AS subscriptions ON subscriptions.guild_id = destinations.guild_id
-       LEFT JOIN linked_servers ON linked_servers.guild_id = destinations.guild_id
        LEFT JOIN server_posting_state AS state
          ON state.guild_id = destinations.guild_id
         AND state.post_type = destinations.post_type
         AND state.discord_channel_id = destinations.discord_channel_id
        WHERE (? IS NULL OR destinations.guild_id = ?)
-         AND lower(COALESCE(subscriptions.status, 'inactive')) IN ('active', 'trialing')
          AND COALESCE(destinations.enabled, 0) = 1
-         AND ${lifecycleStatusSql} IN ('active_live', 'active_degraded')
        ORDER BY COALESCE(state.last_edited_at, '1970-01-01T00:00:00.000Z') ASC
        LIMIT ?`,
     )
     .bind(options.guildId ?? null, options.guildId ?? null, Math.max(1, options.maxJobs * 4))
-    .all<PostingDestination & { plan_key: string | null; subscription_status: string | null; lifecycle_status: string | null; last_edited_at: string | null }>();
+    .all<PostingDestination & { last_edited_at: string | null }>();
 
   let processed = 0;
   let edited = 0;
@@ -431,6 +413,7 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
   let failed = 0;
   let budgetExhausted = false;
   const results: DiscordPostDispatchDetail[] = [];
+  const accessByGuild = new Map<string, Awaited<ReturnType<typeof resolveDiscordPublishingAccessForGuild>>>();
 
   for (const row of rows.results ?? []) {
     if (options.budget && isDiscordDispatchBudgetLow(options.budget)) {
@@ -438,8 +421,14 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
       break;
     }
     if (processed >= options.maxJobs) break;
-    const planKey = normalizePlanKey(row.plan_key);
-    const listingContext = { plan_key: planKey, subscription_status: row.subscription_status ?? "inactive" };
+    let publishingAccess = accessByGuild.get(row.guild_id);
+    if (!publishingAccess) {
+      publishingAccess = await resolveDiscordPublishingAccessForGuild(env, row.guild_id);
+      accessByGuild.set(row.guild_id, publishingAccess);
+    }
+    if (!["active_live", "active_degraded"].includes(publishingAccess.lifecycleStatus)) continue;
+    const listingContext = { plan_key: publishingAccess.planKey, subscription_status: publishingAccess.subscriptionStatus };
+    if (!hasListingAutoPost(listingContext, row.post_type)) continue;
     if (!options.force && !isAutoPostDue(row.post_type, normalizeListingPlanKey(listingContext), row.last_edited_at)) continue;
     processed += 1;
     try {
@@ -462,6 +451,57 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
   }
 
   return { processed, edited, sent, posted: edited + sent, skipped, failed, budgetExhausted, results };
+}
+
+async function resolveDiscordPublishingAccessForGuild(env: Env, guildId: string) {
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
+  const result = await requireDb(env)
+    .prepare(
+      `SELECT linked_servers.id, server_subscriptions.plan_key, server_subscriptions.status,
+              ${lifecycleStatusSql} AS lifecycle_status
+       FROM linked_servers
+       LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       WHERE linked_servers.guild_id = ?
+         AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')
+         AND COALESCE(linked_servers.merged_into_server_id, '') = ''`,
+    )
+    .bind(guildId)
+    .all<{ id: string; plan_key: string | null; status: string | null; lifecycle_status: string | null }>();
+  const rows = result.results ?? [];
+  const activeBillingRows = rows.filter((row) => ["active", "trialing"].includes(String(row.status ?? "").toLowerCase()));
+  const activeBilling = activeBillingRows.find((row) => normalizeListingPlanKey(row.plan_key, row.status) === "pro"
+    && ["active_live", "active_degraded"].includes(String(row.lifecycle_status ?? "active_live")))
+    ?? activeBillingRows.find((row) => ["active_live", "active_degraded"].includes(String(row.lifecycle_status ?? "active_live")))
+    ?? activeBillingRows[0];
+  if (activeBilling) {
+    return {
+      planKey: normalizePlanKey(activeBilling.plan_key),
+      subscriptionStatus: activeBilling.status ?? "inactive",
+      lifecycleStatus: String(activeBilling.lifecycle_status ?? "active_live"),
+      accessSource: "billing" as const,
+    };
+  }
+
+  const eligibleServerIds = [...new Set(rows
+    .filter((row) => ["active_live", "active_degraded"].includes(String(row.lifecycle_status ?? "active_live")))
+    .map((row) => row.id))];
+  if (eligibleServerIds.length !== 1) {
+    return { planKey: "free" as const, subscriptionStatus: "inactive", lifecycleStatus: "ineligible", accessSource: "billing" as const };
+  }
+  const baseline = rows.find((row) => row.id === eligibleServerIds[0]);
+  const access = await readServerShowcaseAccess(env, eligibleServerIds[0], {
+    plan_key: baseline?.plan_key ?? null,
+    subscription_status: baseline?.status ?? null,
+  });
+  if (access.source !== "complimentary_showcase") {
+    return {
+      planKey: normalizePlanKey(baseline?.plan_key),
+      subscriptionStatus: baseline?.status ?? "inactive",
+      lifecycleStatus: String(baseline?.lifecycle_status ?? "active_live"),
+      accessSource: "billing" as const,
+    };
+  }
+  return { planKey: "pro" as const, subscriptionStatus: "active", lifecycleStatus: "active_live", accessSource: access.source };
 }
 
 export async function dispatchDiscordPostsForGuild(env: Env, guildId: string, options: { maxJobs?: number; force?: boolean } = {}) {

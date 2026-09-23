@@ -2303,7 +2303,7 @@ export async function importReadableAdmLinesIntoDatabase(
           "build_feed_embed",
           "admin_alerts_embed",
           "admin_logs_embed",
-        ], "adm-data-change"), "Discord post queue");
+        ], "adm-data-change", { linkedServerId: context.linkedServerId }), "Discord post queue");
         discordQueueStatus = discordQueuesCreated > 0 ? "queued" : "skipped";
       } catch {
         discordQueueStatus = "failed";
@@ -4203,7 +4203,7 @@ async function finalizeAdmImportJob(
     });
   }
 
-  if (server.guild_id && isActiveSubscriptionStatus(server.subscription_status) && (Number(row.written_kills ?? 0) > 0 || Number(row.player_events ?? 0) > 0 || (!isScheduledNitradoImport && Number(row.raw_events ?? 0) > 0))) {
+  if (server.guild_id && (Number(row.written_kills ?? 0) > 0 || Number(row.player_events ?? 0) > 0 || (!isScheduledNitradoImport && Number(row.raw_events ?? 0) > 0))) {
     try {
       discordQueuesCreated = await withManualAdmPhaseTimeout(queueDiscordPostUpdatesForGuild(env, server.guild_id, server.plan_key, [
         "leaderboard_embed",
@@ -4218,7 +4218,7 @@ async function finalizeAdmImportJob(
         "build_feed_embed",
         "admin_alerts_embed",
         "admin_logs_embed",
-      ], "manual-adm-import"), "Discord post queue");
+      ], "manual-adm-import", { linkedServerId: server.id }), "Discord post queue");
       discordQueueStatus = discordQueuesCreated > 0 ? "queued" : "skipped";
     } catch (error) {
       discordQueueStatus = "failed";

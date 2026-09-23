@@ -20,7 +20,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   const context = await getAutomationContextForLinkedServer(env, linkedServerId);
   if (!context) return json({ error: "Automation is not ready for this server yet." }, { status: 409 });
   if (!isActiveSubscriptionStatus(context.subscriptionStatus)) {
-    return json({ error: "An active DZN subscription is required to run Discord auto-post dispatch." }, { status: 403 });
+    return json({ error: "Active DZN Pro access is required to run Discord auto-post dispatch." }, { status: 403 });
   }
 
   const result = await dispatchDiscordPostsForGuild(env, context.guildId, {
