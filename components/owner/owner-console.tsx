@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { ExternalLink, LifeBuoy, RefreshCw, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { PlayerRequestSupportPanel } from "./player-request-support-panel";
 
@@ -648,9 +649,35 @@ function OverviewPanel({ overview, lifecycleCounts }: { overview: OwnerOverview;
 }
 
 function ServersPanel({ servers }: { servers: OwnerServer[] }) {
+  const [supportServer, setSupportServer] = useState<OwnerServer | null>(null);
+  const [supportStatus, setSupportStatus] = useState<"idle" | "loading" | "error">("idle");
+  const supportRequestRef = useRef<AbortController | null>(null);
+
+  useEffect(() => () => supportRequestRef.current?.abort(), []);
+
+  async function openSupportView(server: OwnerServer) {
+    supportRequestRef.current?.abort();
+    const request = new AbortController();
+    supportRequestRef.current = request;
+    setSupportServer(server);
+    setSupportStatus("loading");
+    try {
+      const response = await fetch(`/api/owner/servers/${encodeURIComponent(server.id)}`, { cache: "no-store", signal: request.signal });
+      if (!response.ok) throw new Error(`support_server_${response.status}`);
+      const json = await response.json();
+      if (!json.server || json.server.id !== server.id) throw new Error("support_server_mismatch");
+      if (request.signal.aborted || supportRequestRef.current !== request) return;
+      setSupportServer(json.server);
+      setSupportStatus("idle");
+    } catch (error) {
+      if (request.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+      setSupportStatus("error");
+    }
+  }
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
-      <PanelHeader eyebrow="Server Management" title="All linked servers" description="Read-only operational inventory with lifecycle, token, ADM, player-count and public visibility state." />
+    <div className="relative flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+      <PanelHeader eyebrow="Server Management" title="All linked servers" description="Read-only operational inventory and support access for every connected DZN server. Customer credentials and private content stay hidden." />
       <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-white/10 bg-black/30">
         <div className="h-full overflow-auto">
           <table className="min-w-[1500px] w-full border-collapse text-left text-sm">
@@ -711,7 +738,14 @@ function ServersPanel({ servers }: { servers: OwnerServer[] }) {
                   <td className="px-4 py-4">
                     <div className="flex flex-col gap-2">
                       {server.publicProfileUrl ? <Link href={server.publicProfileUrl} className="text-xs font-bold text-cyan-200 hover:text-cyan-100">Public profile</Link> : null}
-                      <Link href={server.dashboardUrl} className="text-xs font-bold text-violet-200 hover:text-violet-100">Dashboard</Link>
+                      <button
+                        type="button"
+                        onClick={() => void openSupportView(server)}
+                        className="inline-flex items-center gap-1.5 text-left text-xs font-bold text-violet-200 hover:text-violet-100"
+                      >
+                        <LifeBuoy size={14} aria-hidden="true" />
+                        Support view
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -720,6 +754,135 @@ function ServersPanel({ servers }: { servers: OwnerServer[] }) {
           </table>
         </div>
       </div>
+      {supportServer ? (
+        <ServerSupportView
+          server={supportServer}
+          status={supportStatus}
+          onClose={() => {
+            supportRequestRef.current?.abort();
+            supportRequestRef.current = null;
+            setSupportServer(null);
+            setSupportStatus("idle");
+          }}
+          onRefresh={() => void openSupportView(supportServer)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ServerSupportView({ server, status, onClose, onRefresh }: {
+  server: OwnerServer;
+  status: "idle" | "loading" | "error";
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[70] grid bg-black/70 backdrop-blur-sm lg:grid-cols-[minmax(0,1fr)_minmax(520px,720px)]" role="dialog" aria-modal="true" aria-labelledby="owner-server-support-title">
+      <button type="button" aria-label="Close server support view" onClick={onClose} className="hidden lg:block" />
+      <section className="min-h-0 overflow-auto border-l border-cyan-300/20 bg-[#050814] p-4 shadow-[-24px_0_80px_rgba(0,0,0,0.55)] sm:p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-200">Platform-owner support view</p>
+            <h2 id="owner-server-support-title" className="mt-1 text-2xl font-black text-white">{server.serverName}</h2>
+            <p className="mt-1 text-xs text-zinc-500">Exact server ID: {server.id}</p>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" title="Refresh support data" aria-label="Refresh support data" onClick={onRefresh} disabled={status === "loading"} className="grid h-10 w-10 place-items-center rounded-lg border border-cyan-300/20 bg-cyan-300/10 text-cyan-100 disabled:opacity-50">
+              <RefreshCw size={17} className={status === "loading" ? "animate-spin" : ""} aria-hidden="true" />
+            </button>
+            <button type="button" title="Close support view" aria-label="Close support view" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-zinc-200">
+              <X size={18} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-300/[0.05] p-3 text-xs leading-5 text-emerald-100">
+          Read-only support access. Nitrado credentials, Discord private content, payment secrets and raw player locations are excluded. This view does not impersonate the server owner.
+        </div>
+        {status === "error" ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] p-3 text-xs font-bold text-amber-100">The live support record could not be refreshed. Showing the last inventory snapshot.</p> : null}
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <SupportSection title="Identity">
+            <SupportValue label="Owner" value={server.owner.username ?? "Unknown owner"} />
+            <SupportValue label="Owner Discord" value={server.owner.discordId ?? "Not linked"} />
+            <SupportValue label="Discord server" value={server.guild.name ?? "Unknown Discord server"} />
+            <SupportValue label="Discord server ID" value={server.guild.guildId ?? server.guild.discordGuildId ?? "Not linked"} />
+            <SupportValue label="Nitrado service" value={server.nitradoServiceId ?? "Not linked"} />
+          </SupportSection>
+          <SupportSection title="Lifecycle and access">
+            <SupportValue label="Lifecycle" value={server.lifecycleLabel} />
+            <SupportValue label="Reason" value={server.lifecycleReason ?? server.lifecycleMessage} />
+            <SupportValue label="Status / visibility" value={`${server.status ?? "unknown"} / ${server.listingVisibility ?? "default"}`} />
+            <SupportValue label="Plan" value={`${server.plan.key ?? "none"} / ${server.plan.status ?? "unknown"}`} />
+            <SupportValue label="Token health" value={server.tokenStatus} />
+          </SupportSection>
+          <SupportSection title="ADM and player count">
+            <SupportValue label="Latest ADM" value={server.adm.latestFile ?? "None discovered"} />
+            <SupportValue label="Processed ADM" value={server.adm.latestProcessedFile ?? "None processed"} />
+            <SupportValue label="Last import" value={formatDate(server.adm.lastSuccessfulImportAt)} />
+            <SupportValue label="Latest event" value={formatDate(server.adm.latestImportedEventAt)} />
+            <SupportValue label="Players" value={`${server.playerCount.current ?? "unknown"} / ${server.playerCount.max ?? "unknown"}`} />
+          </SupportSection>
+          <SupportSection title="Stored gameplay summary">
+            <SupportValue label="Kills / deaths" value={`${server.stats.totalKills} / ${server.stats.totalDeaths}`} />
+            <SupportValue label="Joins / disconnects" value={`${server.stats.totalJoins} / ${server.stats.totalDisconnects}`} />
+            <SupportValue label="Unique players" value={String(server.stats.uniquePlayers)} />
+            <SupportValue label="Build score" value={String(server.stats.buildScore)} />
+            <SupportValue label="Last event" value={formatDate(server.stats.lastEventAt)} />
+          </SupportSection>
+        </div>
+
+        <SupportSection title="Scheduled resource eligibility" className="mt-3">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <BooleanTile label="ADM sync" enabled={server.resource.admSyncEnabled} />
+            <BooleanTile label="Metadata refresh" enabled={server.resource.metadataRefreshEnabled} />
+            <BooleanTile label="Player-count polling" enabled={server.resource.playerCountPollingEnabled} />
+            <BooleanTile label="Discord posting" enabled={server.resource.discordPostingEnabled} />
+            <BooleanTile label="Server Wars eligibility" enabled={server.resource.serverWarsEligible} />
+            <BooleanTile label="Scheduled resources" enabled={server.resource.consumingScheduledResources} />
+          </div>
+          <p className="mt-3 text-xs text-zinc-500">Skip reason: {server.resource.skippedReason ?? server.lastSkipReason ?? "none"}</p>
+        </SupportSection>
+
+        {server.ownerActionRequired ? (
+          <section className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.05] p-3">
+            <h3 className="text-sm font-black text-amber-100">Owner action required</h3>
+            <p className="mt-1 text-xs leading-5 text-zinc-300">{server.ownerActionReason ?? "The server owner must complete a setup action."}</p>
+          </section>
+        ) : null}
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          {server.publicProfileUrl ? <Link href={server.publicProfileUrl} className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs font-black text-cyan-100"><ExternalLink size={14} aria-hidden="true" />Public profile</Link> : null}
+          <Link href="/owner/player-game-identity-claims" className="inline-flex items-center gap-2 rounded-lg border border-violet-300/20 bg-violet-300/10 px-3 py-2 text-xs font-black text-violet-100"><LifeBuoy size={14} aria-hidden="true" />Player account requests</Link>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SupportSection({ title, className = "", children }: { title: string; className?: string; children: ReactNode }) {
+  return (
+    <section className={`${className} rounded-lg border border-white/10 bg-white/[0.035] p-3`}>
+      <h3 className="text-sm font-black text-white">{title}</h3>
+      <div className="mt-2 grid gap-2">{children}</div>
+    </section>
+  );
+}
+
+function SupportValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] pb-2 text-xs last:border-0 last:pb-0">
+      <span className="text-zinc-500">{label}</span>
+      <span className="max-w-[65%] break-words text-right font-bold text-zinc-200">{value}</span>
     </div>
   );
 }

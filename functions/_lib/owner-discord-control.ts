@@ -1031,6 +1031,21 @@ async function insertOwnerDiscordAuditLog(env: Env, user: SessionUser, input: {
     .run();
 }
 
+export async function recordOwnerSupportAccess(env: Env, user: SessionUser, serverId: string, requestId: string | null) {
+  await insertOwnerDiscordAuditLog(env, user, {
+    action: "support_server_viewed",
+    targetType: "linked_server",
+    targetSlot: serverId,
+    guildId: null,
+    channelId: null,
+    before: null,
+    after: { serverId },
+    result: "success",
+    reason: "Platform owner opened the read-only connected-server support view.",
+    requestId,
+  });
+}
+
 async function tableExists(env: Env, tableName: string): Promise<boolean> {
   const row = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1").bind(tableName).first<{ name?: string }>();
   return row?.name === tableName;
