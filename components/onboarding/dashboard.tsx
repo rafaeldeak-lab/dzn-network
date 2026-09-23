@@ -4580,7 +4580,9 @@ function DashboardServerWarsContent({ wars, loading, error }: DashboardServerWar
         <p className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-4 text-sm font-bold text-cyan-50">{error}</p>
       ) : null}
       <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <DashboardMiniMetric label="Plan Access" value={dashboardAccessLabel(wars?.access?.effectivePlan)} />
+        <DashboardMiniMetric label="Plan Access" value={wars?.access?.accessSource === "complimentary_showcase"
+          ? "Pro (complimentary)"
+          : dashboardAccessLabel(wars?.access?.effectivePlan)} />
         <DashboardMiniMetric label="Eligible Rules" value={String(wars?.eligibility?.eligibleRulesets?.length ?? 0)} />
         <DashboardMiniMetric label="Active Wars" value={String(activeEvents.length)} />
         <DashboardMiniMetric label="Trophies" value={String(trophies.length)} />
