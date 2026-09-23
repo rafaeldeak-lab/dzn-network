@@ -23,10 +23,9 @@ CREATE TABLE IF NOT EXISTS dzn_comms_send_slots (
   actor_user_id TEXT NOT NULL,
   minute_bucket TEXT NOT NULL,
   slot INTEGER NOT NULL CHECK(slot BETWEEN 1 AND 20),
-  interval_bucket TEXT NOT NULL,
+  accepted_at TEXT NOT NULL,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY(actor_user_id, minute_bucket, slot),
-  UNIQUE(actor_user_id, interval_bucket),
   FOREIGN KEY(actor_user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -87,6 +86,8 @@ CREATE INDEX IF NOT EXISTS idx_dzn_comms_receipts_actor_created
   ON dzn_comms_send_receipts(actor_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_dzn_comms_slots_created
   ON dzn_comms_send_slots(created_at);
+CREATE INDEX IF NOT EXISTS idx_dzn_comms_slots_actor_accepted
+  ON dzn_comms_send_slots(actor_user_id, accepted_at DESC);
 CREATE INDEX IF NOT EXISTS idx_dzn_comms_attempt_slots_created
   ON dzn_comms_attempt_slots(created_at);
 CREATE INDEX IF NOT EXISTS idx_dzn_comms_report_slots_created

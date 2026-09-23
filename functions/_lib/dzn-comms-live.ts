@@ -17,11 +17,12 @@ type SendInput = { channelSlug?: unknown; clientRequestId?: unknown; body?: unkn
 type ReportInput = { messageId?: unknown; reason?: unknown };
 type ModerateInput = { messageId?: unknown; action?: unknown; reason?: unknown };
 
-export function readDznCommsLiveFlags(env: Env) {
+export function readDznCommsLiveFlags(env: Env, request?: Request) {
   const enabled = booleanFlag(env.DZN_COMMS_LIVE_ENABLED);
   const scope = clean(env.DZN_COMMS_LIVE_SCOPE, 32).toLowerCase();
   const secretReady = typeof env.SESSION_SECRET === "string" && env.SESSION_SECRET.length >= 32;
-  return { enabled: enabled && secretReady && (scope === "local_test" || scope === "production"), scope, secretReady };
+  const localRequest = request ? isLocalRequest(request) : false;
+  return { enabled: enabled && secretReady && (scope === "production" || (scope === "local_test" && localRequest)), scope, secretReady, localRequest };
 }
 
 export function moderateDznCommsBody(value: unknown) {
@@ -47,7 +48,7 @@ export function moderateDznCommsBody(value: unknown) {
 
 export async function handleDznCommsSend(request: Request, env: Env) {
   if (request.method !== "POST") return methodNotAllowed();
-  if (!readDznCommsLiveFlags(env).enabled) return unavailable();
+  if (!readDznCommsLiveFlags(env, request).enabled) return unavailable();
   if (!sameOrigin(request)) return error(403, "CROSS_ORIGIN", "Cross-origin chat requests are not allowed.");
   const user = await getSessionUser(env, request);
   if (!user) return error(401, "UNAUTHORIZED", "Log in with Discord to join Global Chat.");
@@ -71,17 +72,14 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   if (timeout) return error(423, "CHAT_TIMEOUT", "Chat is temporarily unavailable for this account.");
   const now = new Date();
   const minuteBucket = now.toISOString().slice(0, 16);
-  const intervalBucket = `${Math.floor(now.getTime() / 5_000)}`;
-  const attemptSlot = boundedSlot(requestId, ATTEMPTS_PER_MINUTE);
-  if (moderated.decision !== "allow") return storeRejected(db, user, channel.id, requestId, bodyHash, moderated.decision, moderated.code, minuteBucket, attemptSlot);
-  const slot = boundedSlot(requestId, SENDS_PER_MINUTE);
+  if (moderated.decision !== "allow") return storeRejected(db, user, channel.id, requestId, bodyHash, moderated.decision, moderated.code, minuteBucket);
   const messageId = crypto.randomUUID();
   const receiptId = crypto.randomUUID();
   const expires = new Date(now.getTime() + 7 * 86_400_000).toISOString();
   try {
     await db.batch([
-      db.prepare("INSERT INTO dzn_comms_attempt_slots (actor_user_id, minute_bucket, slot) VALUES (?, ?, ?)").bind(user.id, minuteBucket, attemptSlot),
-      db.prepare("INSERT INTO dzn_comms_send_slots (actor_user_id, minute_bucket, slot, interval_bucket) VALUES (?, ?, ?, ?)").bind(user.id, minuteBucket, slot, intervalBucket),
+      allocateAttemptSlot(db, user.id, minuteBucket),
+      allocateSendSlot(db, user.id, minuteBucket, now.toISOString()),
       db.prepare("INSERT INTO dzn_comms_messages (id, channel_id, author_user_id, author_display_name, author_role_label, body, visibility_state, source_label) VALUES (?, ?, ?, ?, 'Member', ?, 'visible', 'authenticated_web_chat')").bind(messageId, channel.id, user.id, safeName(user), moderated.body),
       db.prepare("INSERT INTO dzn_comms_send_receipts (id, actor_user_id, channel_id, client_request_id, body_hash, decision, response_status, reason_code, message_id, expires_at) VALUES (?, ?, ?, ?, ?, 'allow', 201, 'MESSAGE_ALLOWED', ?, ?)").bind(receiptId, user.id, channel.id, requestId, bodyHash, messageId, expires),
     ]);
@@ -95,12 +93,13 @@ export async function handleDznCommsSend(request: Request, env: Env) {
 
 export async function handleDznCommsReport(request: Request, env: Env) {
   if (request.method !== "POST") return methodNotAllowed();
-  if (!readDznCommsLiveFlags(env).enabled) return unavailable();
+  if (!readDznCommsLiveFlags(env, request).enabled) return unavailable();
   if (!sameOrigin(request)) return error(403, "CROSS_ORIGIN", "Cross-origin report requests are not allowed.");
   const user = await getSessionUser(env, request);
   if (!user) return error(401, "UNAUTHORIZED", "Log in with Discord to report a message.");
   const parsed = await readBoundedJson<ReportInput>(request, 2_048);
   if (!parsed.ok) return error(parsed.status, parsed.error, parsed.message);
+  if (!exactKeys(parsed.value, ["messageId", "reason"])) return error(400, "INVALID_REPORT", "Report request fields are invalid.");
   const messageId = clean(parsed.value.messageId, 80);
   const reason = clean(parsed.value.reason, 40);
   if (!messageId || !reportReasons.has(reason)) return error(400, "INVALID_REPORT", "Choose a valid report reason.");
@@ -112,7 +111,7 @@ export async function handleDznCommsReport(request: Request, env: Env) {
   const now = new Date();
   try {
     await db.batch([
-      db.prepare("INSERT INTO dzn_comms_report_slots (reporter_user_id, minute_bucket, slot) VALUES (?, ?, ?)").bind(user.id, now.toISOString().slice(0, 16), boundedSlot(messageId, REPORTS_PER_MINUTE)),
+      allocateReportSlot(db, user.id, now.toISOString().slice(0, 16)),
       db.prepare("INSERT INTO dzn_comms_reports (id, message_id, reporter_user_id, reason_code) VALUES (?, ?, ?, ?)").bind(crypto.randomUUID(), messageId, user.id, reason),
     ]);
   } catch {
@@ -124,12 +123,13 @@ export async function handleDznCommsReport(request: Request, env: Env) {
 
 export async function handleDznCommsModeration(request: Request, env: Env) {
   if (request.method !== "POST") return methodNotAllowed();
-  if (!readDznCommsLiveFlags(env).enabled) return unavailable();
+  if (!readDznCommsLiveFlags(env, request).enabled) return unavailable();
   if (!sameOrigin(request)) return error(403, "CROSS_ORIGIN", "Cross-origin moderation requests are not allowed.");
   const auth = await requirePlatformOwner(env, request);
   if (!auth.ok) return auth.response;
   const parsed = await readBoundedJson<ModerateInput>(request, 2_048);
   if (!parsed.ok) return error(parsed.status, parsed.error, parsed.message);
+  if (!exactKeys(parsed.value, ["messageId", "action", "reason"])) return error(400, "INVALID_MODERATION", "Moderation request fields are invalid.");
   const messageId = clean(parsed.value.messageId, 80);
   const action = clean(parsed.value.action, 32);
   const reason = clean(parsed.value.reason, 80);
@@ -147,12 +147,12 @@ export async function handleDznCommsModeration(request: Request, env: Env) {
   return json({ ok: true, code: "MODERATION_RECORDED" }, { headers: privateNoStoreHeaders() });
 }
 
-async function storeRejected(db: D1Database, user: SessionUser, channelId: string, requestId: string, bodyHash: string, decision: "block" | "timeout", reason: string, minuteBucket: string, attemptSlot: number) {
+async function storeRejected(db: D1Database, user: SessionUser, channelId: string, requestId: string, bodyHash: string, decision: "block" | "timeout", reason: string, minuteBucket: string) {
   const status = decision === "timeout" ? 423 : 422;
   const receiptId = crypto.randomUUID();
   const now = Date.now();
   const statements = [
-    db.prepare("INSERT INTO dzn_comms_attempt_slots (actor_user_id, minute_bucket, slot) VALUES (?, ?, ?)").bind(user.id, minuteBucket, attemptSlot),
+    allocateAttemptSlot(db, user.id, minuteBucket),
     db.prepare("INSERT INTO dzn_comms_send_receipts (id, actor_user_id, channel_id, client_request_id, body_hash, decision, response_status, reason_code, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(receiptId, user.id, channelId, requestId, bodyHash, decision, status, reason, new Date(now + 7 * 86_400_000).toISOString()),
   ];
   if (decision === "timeout") statements.push(db.prepare("INSERT INTO dzn_comms_timeouts (actor_user_id, reason_code, expires_at) VALUES (?, ?, ?) ON CONFLICT(actor_user_id) DO UPDATE SET reason_code = excluded.reason_code, expires_at = excluded.expires_at, updated_at = CURRENT_TIMESTAMP").bind(user.id, reason, new Date(now + 10 * 60_000).toISOString()));
@@ -181,5 +181,27 @@ function clean(value: unknown, max: number) { return typeof value === "string" ?
 function safeName(user: SessionUser) { return clean(user.username, 60).replace(/[\u0000-\u001f\u007f]/g, "") || "DZN Player"; }
 function exactKeys(value: unknown, keys: string[]) { return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value as object).sort().join("|") === [...keys].sort().join("|")); }
 function sameOrigin(request: Request) { const origin = request.headers.get("origin"); if (!origin) return false; try { return new URL(origin).origin === new URL(request.url).origin; } catch { return false; } }
-function boundedSlot(value: string, maximum: number) { let hash = 2166136261; for (const char of value) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619); return ((hash >>> 0) % maximum) + 1; }
+function isLocalRequest(request: Request) { try { const host = new URL(request.url).hostname.toLowerCase(); return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost"); } catch { return false; } }
+function allocateAttemptSlot(db: D1Database, actorId: string, minuteBucket: string) {
+  return db.prepare(slotAllocationSql("dzn_comms_attempt_slots", "actor_user_id", ATTEMPTS_PER_MINUTE)).bind(actorId, minuteBucket, actorId, minuteBucket);
+}
+function allocateReportSlot(db: D1Database, actorId: string, minuteBucket: string) {
+  return db.prepare(slotAllocationSql("dzn_comms_report_slots", "reporter_user_id", REPORTS_PER_MINUTE)).bind(actorId, minuteBucket, actorId, minuteBucket);
+}
+function allocateSendSlot(db: D1Database, actorId: string, minuteBucket: string, acceptedAt: string) {
+  return db.prepare(`WITH RECURSIVE slots(slot) AS (SELECT 1 UNION ALL SELECT slot + 1 FROM slots WHERE slot < ${SENDS_PER_MINUTE})
+    INSERT INTO dzn_comms_send_slots (actor_user_id, minute_bucket, slot, accepted_at)
+    SELECT ?, ?, CASE WHEN NOT EXISTS (
+      SELECT 1 FROM dzn_comms_send_slots WHERE actor_user_id = ? AND julianday(accepted_at) > julianday(?, '-5 seconds')
+    ) THEN (SELECT MIN(slot) FROM slots WHERE slot NOT IN (
+      SELECT slot FROM dzn_comms_send_slots WHERE actor_user_id = ? AND minute_bucket = ?
+    )) ELSE NULL END, ?`).bind(actorId, minuteBucket, actorId, acceptedAt, actorId, minuteBucket, acceptedAt);
+}
+function slotAllocationSql(table: "dzn_comms_attempt_slots" | "dzn_comms_report_slots", actorColumn: "actor_user_id" | "reporter_user_id", maximum: number) {
+  return `WITH RECURSIVE slots(slot) AS (SELECT 1 UNION ALL SELECT slot + 1 FROM slots WHERE slot < ${maximum})
+    INSERT INTO ${table} (${actorColumn}, minute_bucket, slot)
+    SELECT ?, ?, (SELECT MIN(slot) FROM slots WHERE slot NOT IN (
+      SELECT slot FROM ${table} WHERE ${actorColumn} = ? AND minute_bucket = ?
+    ))`;
+}
 async function keyedDigest(value: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value.normalize("NFKC"))))].map(byte => byte.toString(16).padStart(2, "0")).join(""); }

@@ -19,13 +19,15 @@ All three flags default off:
 
 Production activation requires a separately reviewed application of `0065_dzn_comms_read_history.sql` and `0071_dzn_comms_live_moderation.sql`, verification of their exact production ledger state, then server scope `production` and the matching UI flag. A source merge alone does not apply migrations or activate chat.
 
+The `local_test` scope is accepted only when the request host is loopback or a `.localhost` hostname. It cannot enable write routes on a preview or production hostname, even if the enable flag is set accidentally.
+
 ## Write Contract
 
 `POST /api/comms/messages` accepts exactly `channelSlug`, `clientRequestId` and `body`. The server requires an exact same-origin browser request and a current Discord-backed DZN session. Only `global-chat` is allowed. Request bodies are capped at 12,288 bytes; message bodies at 2,000 Unicode code points and 8,000 UTF-8 bytes.
 
 The server controls actor identity, author label, channel, timestamp, visibility and source. It blocks token-shaped secrets, external Discord invites, repeated-character spam and severe threat/doxxing language. Rejected text remains request-memory-only and is never written to D1.
 
-Accepted messages, quota slots and decision receipts are written in one D1 batch. The receipt key is `(actor_user_id, channel_id, client_request_id)`. Same-key retries return the original result and a different body returns conflict. Unique actor interval and minute-slot constraints enforce a hard upper bound even during concurrent sends.
+Accepted messages, quota slots and decision receipts are written in one D1 batch. The receipt key is `(actor_user_id, channel_id, client_request_id)`. Same-key retries return the original result and a different body returns conflict. Each quota write allocates the first free slot atomically, so unrelated request IDs cannot collide. The accepted timestamp is checked against the previous accepted send to enforce a full five elapsed seconds, while bounded minute slots enforce the hard ceiling during concurrent sends.
 
 ## Reporting And Moderation
 

@@ -26,6 +26,7 @@
   "rateLimits": {
     "acceptedPerMinuteHardCeiling": 20,
     "minimumAcceptedIntervalSeconds": 5,
+    "quotaAllocation": "atomic_first_free_slot",
     "paidPlanBypass": false
   },
   "moderation": {

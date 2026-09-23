@@ -25,7 +25,7 @@ test("schema supplies durable idempotency, quotas, reports, timeouts and audit",
     assert.match(migration, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
   }
   assert.match(migration, /UNIQUE\(actor_user_id, channel_id, client_request_id\)/);
-  assert.match(migration, /UNIQUE\(actor_user_id, interval_bucket\)/);
+  assert.match(migration, /accepted_at TEXT NOT NULL/);
   assert.match(migration, /CHECK\(slot BETWEEN 1 AND 20\)/);
   assert.match(migration, /CHECK\(slot BETWEEN 1 AND 30\)/);
   assert.match(migration, /CHECK\(slot BETWEEN 1 AND 10\)/);
@@ -44,6 +44,12 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /channels\.slug = 'global-chat'/);
   assert.match(runtime, /keyedDigest/);
   assert.match(runtime, /secretReady/);
+  assert.match(runtime, /scope === "local_test" && localRequest/);
+  assert.match(runtime, /WITH RECURSIVE slots\(slot\)/);
+  assert.doesNotMatch(runtime, /boundedSlot/);
+  assert.match(runtime, /julianday\(accepted_at\) > julianday\(\?, '-5 seconds'\)/);
+  assert.match(runtime, /exactKeys\(parsed\.value, \["messageId", "reason"\]\)/);
+  assert.match(runtime, /exactKeys\(parsed\.value, \["messageId", "action", "reason"\]\)/);
 });
 
 test("moderation publishes only allow decisions and never stores rejected text", () => {
@@ -58,7 +64,9 @@ test("moderation publishes only allow decisions and never stores rejected text",
 
 test("browser UI polls history, posts through protected routes and stays isolated", () => {
   assert.match(shell, /window\.setInterval/);
-  assert.match(shell, /sendCommsMessage\(draft, crypto\.randomUUID\(\)\)/);
+  assert.match(shell, /sendAttemptRef/);
+  assert.match(shell, /sendCommsMessage\(draft, pendingAttempt\.requestId\)/);
+  assert.match(shell, /Message sent\. Chat history will refresh shortly\./);
   assert.match(shell, /reportCommsMessage\(message\.id\)/);
   assert.match(client, /"\/api\/comms\/messages"/);
   assert.match(client, /"\/api\/comms\/reports"/);

@@ -58,7 +58,7 @@ const expiredBody = "Message expired.";
 export async function handleDznCommsMessageHistoryRequest(request: Request, env: Env) {
   if (request.method !== "GET") return methodNotAllowed();
 
-  const flags = readDznCommsReadHistoryFlags(env);
+  const flags = readDznCommsReadHistoryFlags(env, request);
   if (!flags.enabled) {
     return json(
       {
@@ -163,13 +163,14 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
   );
 }
 
-export function readDznCommsReadHistoryFlags(env: Env): DznCommsReadHistoryFlags {
+export function readDznCommsReadHistoryFlags(env: Env, request?: Request): DznCommsReadHistoryFlags {
   const readFlag = parseBooleanFlag(env.DZN_COMMS_MESSAGE_HISTORY_READ_ENABLED);
   const scope = cleanString(env.DZN_COMMS_MESSAGE_HISTORY_READ_SCOPE).toLowerCase();
   const localTestScope = scope === "local_test";
   const liveScope = cleanString(env.DZN_COMMS_LIVE_SCOPE).toLowerCase();
   const secretReady = typeof env.SESSION_SECRET === "string" && env.SESSION_SECRET.length >= 32;
-  const liveEnabled = parseBooleanFlag(env.DZN_COMMS_LIVE_ENABLED) && secretReady && (liveScope === "local_test" || liveScope === "production");
+  const localRequest = request ? isLocalRequest(request) : false;
+  const liveEnabled = parseBooleanFlag(env.DZN_COMMS_LIVE_ENABLED) && secretReady && (liveScope === "production" || (liveScope === "local_test" && localRequest));
 
   return {
     enabled: (readFlag && localTestScope) || liveEnabled,
@@ -180,6 +181,15 @@ export function readDznCommsReadHistoryFlags(env: Env): DznCommsReadHistoryFlags
     writeFeaturesEnabled: liveEnabled,
     aiRuntimeEnabled: false,
   };
+}
+
+function isLocalRequest(request: Request) {
+  try {
+    const host = new URL(request.url).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost");
+  } catch {
+    return false;
+  }
 }
 
 export function dznCommsReadHistoryBoundary() {

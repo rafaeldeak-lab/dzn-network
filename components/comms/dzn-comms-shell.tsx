@@ -11,7 +11,7 @@ import {
   ShieldCheck,
   Users,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { CommsMessageTime } from "./comms-message-time";
 import { loadCommsHistory, reportCommsMessage, sendCommsMessage, type CommsHistoryMessage, type CommsHistoryPayload } from "./comms-history-client";
@@ -97,6 +97,7 @@ export function DznCommsShell() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [composerMessage, setComposerMessage] = useState("");
+  const sendAttemptRef = useRef<{ draft: string; requestId: string } | null>(null);
   const [history, setHistory] = useState<CommsHistoryState>(() => ({
     status: historyUiEnabled || liveUiEnabled ? "loading" : "static",
     payload: staticPayload,
@@ -142,13 +143,23 @@ export function DznCommsShell() {
   async function handleSend(event: FormEvent) {
     event.preventDefault();
     if (!canSend) return;
+    const pendingAttempt = sendAttemptRef.current?.draft === draft
+      ? sendAttemptRef.current
+      : { draft, requestId: crypto.randomUUID() };
+    sendAttemptRef.current = pendingAttempt;
     setSending(true);
     setComposerMessage("");
     try {
-      await sendCommsMessage(draft, crypto.randomUUID());
+      await sendCommsMessage(draft, pendingAttempt.requestId);
+      sendAttemptRef.current = null;
       setDraft("");
-      const refreshed = await loadCommsHistory(new AbortController().signal);
-      setHistory({ status: "ready", payload: refreshed, message: "Message sent to Global Chat." });
+      setComposerMessage("Message sent to Global Chat.");
+      try {
+        const refreshed = await loadCommsHistory(new AbortController().signal);
+        setHistory({ status: "ready", payload: refreshed, message: "Message sent to Global Chat." });
+      } catch {
+        setHistory((current) => ({ ...current, message: "Message sent. Chat history will refresh shortly." }));
+      }
     } catch (error) {
       setComposerMessage(error instanceof Error ? error.message : "Message could not be sent.");
     } finally {
