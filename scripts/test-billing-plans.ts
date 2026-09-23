@@ -267,6 +267,7 @@ assert.equal(pricingSection.includes("Event and network leaderboards"), false, "
 assert.equal(pricingSection.includes("Homepage feature"), false, "Pricing must not promise an unimplemented Pro homepage placement.");
 assert.equal(pricingSection.includes("Server spotlight eligibility"), true, "Pricing should retain supported server-directory spotlight eligibility.");
 assert.equal(/manual (?:ADM )?refresh cooldown/i.test(pricingSection), false, "Pricing must not sell an unenforced manual-refresh cooldown tier.");
+assert.equal(/priority refresh/i.test(pricingSection), false, "Pricing must describe the priority-refresh entitlement as the Discord posting feature it actually unlocks.");
 assert.equal(pricingSection.includes("<table"), false, "Pricing comparison should use the responsive mobile-first layout, not the old fixed table.");
 assert.equal(pricingSection.includes('"Seasonal participation where events allow"'), false, "Pricing must not present shared seasonal participation as Pro-only.");
 assert.equal(pricingSection.includes('"Subscription billing portal"'), false, "Pricing must not present the shared billing portal as Pro-only.");

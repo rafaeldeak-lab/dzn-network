@@ -79,7 +79,7 @@ const proFeatureGroups = [
     icon: Radar,
     title: "Faster owner operations",
     summary: "Run more servers with shorter eligible refresh windows and deeper operational insight.",
-    features: ["Up to 3 linked DayZ servers", "5-minute server-status cadence", "10-minute ADM discovery cadence", "Priority refresh capability", "Owner announcements", "Advanced listing analytics"],
+    features: ["Up to 3 linked DayZ servers", "5-minute server-status cadence", "10-minute ADM discovery cadence", "Priority Discord posting", "Owner announcements", "Advanced listing analytics"],
   },
 ] as const;
 
