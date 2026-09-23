@@ -255,10 +255,12 @@ assert.equal(JSON.stringify(completeReadiness).includes("price_premium"), false)
 const landingSource = readFileSync("components/dzn/dzn-landing-page.tsx", "utf8");
 const pricingSection = readFileSync("app/pricing/page.tsx", "utf8");
 for (const snippet of ["Starter", "Pro", "PAYMENT_COPY.starterOffer", "PAYMENT_COPY.proTerms",
-  "PAYMENT_COPY.returningStarter", "PAYMENT_FAQS", "PricingCheckout", "<table", 'scope="row"',
-  "text-green-400", "text-red-400", "Paid competitive advantage", "Eligible, not guaranteed"]) {
+  "PAYMENT_COPY.returningStarter", "PAYMENT_FAQS", "PricingCheckout", "FeatureComparisonRow",
+  "Player access is free", "24 Discord post and feed types", "Paid leaderboard or score advantage",
+  "Eligible, not guaranteed", "No paid score, rank or gameplay advantage"]) {
   assert.ok(pricingSection.includes(snippet), `Dedicated pricing must contain ${snippet}`);
 }
+assert.equal(pricingSection.includes("<table"), false, "Pricing comparison should use the responsive mobile-first layout, not the old fixed table.");
 assert.equal(/Premium|Partner Listing|Network plan|Partner plan/.test(pricingSection), false);
 assert.equal(/paid leaderboard rank|leaderboard rank boost|buy better leaderboard/i.test(pricingSection), false);
 assert.ok(landingSource.includes('href="/pricing"'));
