@@ -186,7 +186,7 @@ export async function testPlayerGameIdentityTransactions() {
   }
   const gamertag = identityTransactionFixture();
   try {
-    gamertag.sqlite.exec("DELETE FROM player_game_identity_claims");
+    gamertag.sqlite.exec("DELETE FROM player_game_identity_claims; UPDATE player_profiles SET player_id='game-id-secret-123456' WHERE id='profile-a'");
     const result = await createPlayerGameIdentityClaim(
       gamertag.env,
       identityTestUser("player-a", "discord-a"),
@@ -194,7 +194,9 @@ export async function testPlayerGameIdentityTransactions() {
     );
     assert.equal(result.status, 201, "A unique server-scoped visible gamertag should create a review request.");
     assert.equal(gamertag.state().claim[0].player_profile_id, "profile-a");
-    assert.equal(gamertag.state().claim[0].player_id, "game-a", "The pending claim must store the hidden exact ID resolved server-side.");
+    assert.equal(gamertag.state().claim[0].player_id, "game-id-secret-123456", "The pending claim must store the hidden exact ID resolved server-side.");
+    assert.equal(result.ok && result.claim.player_id, "game...3456", "The player-facing response must mask the hidden exact ID.");
+    assert.match(String(gamertag.state().audit[0].note), /^request_source=gamertag_lookup;/, "The audit record must preserve gamertag provenance for owner review.");
   } finally { gamertag.close(); }
   const ambiguousGamertag = identityTransactionFixture();
   try {
