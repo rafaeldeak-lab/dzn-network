@@ -123,6 +123,20 @@ async function testSendRuntime() {
     assert.equal(tooFast.status, 429, "The five-second send guard must reject an immediate second message.");
   } finally { f.close(); }
 
+  const replayQuota = await fixture();
+  try {
+    const input = { channelSlug: "global-chat", clientRequestId: "request-replay-quota", body: "Replay quota" };
+    assert.equal((await handleDznCommsSend(request("/api/comms/messages", "player-token", input), replayQuota.env)).status, 201);
+    for (let index = 1; index < 30; index += 1) {
+      assert.equal((await handleDznCommsSend(request("/api/comms/messages", "player-token", input), replayQuota.env)).status, 200);
+    }
+    const limited = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), replayQuota.env);
+    assert.equal(limited.status, 429, "Idempotent replays must still consume the authenticated attempt quota.");
+    assert.equal((await payload(limited)).code, "RATE_LIMITED");
+    assert.equal(replayQuota.count("dzn_comms_attempt_slots"), 30);
+    assert.equal(replayQuota.count("dzn_comms_messages"), 1);
+  } finally { replayQuota.close(); }
+
   const expired = await fixture();
   try {
     expired.sqlite.prepare(`INSERT INTO dzn_comms_send_receipts
@@ -138,7 +152,7 @@ async function testSendRuntime() {
 
   const rollback = await fixture();
   try {
-    rollback.failAt(3);
+    rollback.failAt(2);
     const result = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
       channelSlug: "global-chat", clientRequestId: "request-rollback-1", body: "Rollback me",
     }), rollback.env);
@@ -146,7 +160,7 @@ async function testSendRuntime() {
     assert.equal((await payload(result)).code, "CHAT_STORAGE_UNAVAILABLE");
     assert.equal(rollback.count("dzn_comms_messages"), 0);
     assert.equal(rollback.count("dzn_comms_send_slots"), 0);
-    assert.equal(rollback.count("dzn_comms_attempt_slots"), 0);
+    assert.equal(rollback.count("dzn_comms_attempt_slots"), 1, "The authenticated attempt remains counted even when message storage fails.");
     assert.equal(rollback.count("dzn_comms_send_receipts"), 0);
   } finally { rollback.close(); }
 

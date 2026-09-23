@@ -47,6 +47,7 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /secretReady/);
   assert.match(runtime, /scope === "local_test" && localRequest/);
   assert.match(runtime, /WITH RECURSIVE slots\(slot\)/);
+  assert.match(runtime, /await allocateAttemptSlot\(db, user\.id, minuteBucket\)\.run\(\)[\s\S]*const replay = await readReceipt/, "Attempt quota must be reserved before an idempotency replay can return.");
   assert.doesNotMatch(runtime, /boundedSlot/);
   assert.match(runtime, /julianday\(accepted_at\) > julianday\(\?, '-5 seconds'\)/);
   assert.match(runtime, /exactKeys\(parsed\.value, \["messageId", "reason"\]\)/);

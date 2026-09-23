@@ -63,6 +63,14 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   const channel = await db.prepare("SELECT id FROM dzn_comms_channels WHERE slug = 'global-chat' AND kind = 'public' AND visibility = 'public' AND is_readable = 1 LIMIT 1").first<{ id: string }>();
   if (!channel?.id) return error(503, "CHAT_NOT_READY", "Global Chat is not ready yet.");
   const bodyHash = await keyedDigest(typeof parsed.value.body === "string" ? parsed.value.body : "", env.SESSION_SECRET!);
+  const now = new Date();
+  const minuteBucket = now.toISOString().slice(0, 16);
+  try {
+    await allocateAttemptSlot(db, user.id, minuteBucket).run();
+  } catch (cause) {
+    if (isQuotaConstraintError(cause)) return error(429, "RATE_LIMITED", "Too many chat attempts were made. Wait a moment and retry.");
+    return error(503, "CHAT_STORAGE_UNAVAILABLE", "Global Chat could not verify this attempt. Retry shortly.");
+  }
   const replay = await readReceipt(db, user.id, channel.id, requestId);
   if (replay) {
     if (replay.body_hash !== bodyHash) return error(409, "REQUEST_ID_CONFLICT", "This retry ID was already used for different text.");
@@ -70,16 +78,13 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   }
   const timeout = await db.prepare("SELECT expires_at FROM dzn_comms_timeouts WHERE actor_user_id = ? AND julianday(expires_at) > julianday('now') LIMIT 1").bind(user.id).first<{ expires_at: string }>();
   if (timeout) return error(423, "CHAT_TIMEOUT", "Chat is temporarily unavailable for this account.");
-  const now = new Date();
-  const minuteBucket = now.toISOString().slice(0, 16);
-  if (moderated.decision !== "allow") return storeRejected(db, user, channel.id, requestId, bodyHash, moderated.decision, moderated.code, minuteBucket);
+  if (moderated.decision !== "allow") return storeRejected(db, user, channel.id, requestId, bodyHash, moderated.decision, moderated.code);
   const messageId = crypto.randomUUID();
   const receiptId = crypto.randomUUID();
   const expires = new Date(now.getTime() + 7 * 86_400_000).toISOString();
   try {
     await db.batch([
       deleteExpiredReceipt(db, user.id, channel.id, requestId),
-      allocateAttemptSlot(db, user.id, minuteBucket),
       allocateSendSlot(db, user.id, minuteBucket, now.toISOString()),
       db.prepare("INSERT INTO dzn_comms_messages (id, channel_id, author_user_id, author_display_name, author_role_label, body, visibility_state, source_label) VALUES (?, ?, ?, ?, 'Member', ?, 'visible', 'authenticated_web_chat')").bind(messageId, channel.id, user.id, safeName(user), moderated.body),
       db.prepare("INSERT INTO dzn_comms_send_receipts (id, actor_user_id, channel_id, client_request_id, body_hash, decision, response_status, reason_code, message_id, expires_at) VALUES (?, ?, ?, ?, ?, 'allow', 201, 'MESSAGE_ALLOWED', ?, ?)").bind(receiptId, user.id, channel.id, requestId, bodyHash, messageId, expires),
@@ -154,13 +159,12 @@ export async function handleDznCommsModeration(request: Request, env: Env) {
   return json({ ok: true, code: "MODERATION_RECORDED" }, { headers: privateNoStoreHeaders() });
 }
 
-async function storeRejected(db: D1Database, user: SessionUser, channelId: string, requestId: string, bodyHash: string, decision: "block" | "timeout", reason: string, minuteBucket: string) {
+async function storeRejected(db: D1Database, user: SessionUser, channelId: string, requestId: string, bodyHash: string, decision: "block" | "timeout", reason: string) {
   const status = decision === "timeout" ? 423 : 422;
   const receiptId = crypto.randomUUID();
   const now = Date.now();
   const statements = [
     deleteExpiredReceipt(db, user.id, channelId, requestId),
-    allocateAttemptSlot(db, user.id, minuteBucket),
     db.prepare("INSERT INTO dzn_comms_send_receipts (id, actor_user_id, channel_id, client_request_id, body_hash, decision, response_status, reason_code, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(receiptId, user.id, channelId, requestId, bodyHash, decision, status, reason, new Date(now + 7 * 86_400_000).toISOString()),
   ];
   if (decision === "timeout") statements.push(db.prepare("INSERT INTO dzn_comms_timeouts (actor_user_id, reason_code, expires_at) VALUES (?, ?, ?) ON CONFLICT(actor_user_id) DO UPDATE SET reason_code = excluded.reason_code, expires_at = excluded.expires_at, updated_at = CURRENT_TIMESTAMP").bind(user.id, reason, new Date(now + 10 * 60_000).toISOString()));
@@ -170,7 +174,7 @@ async function storeRejected(db: D1Database, user: SessionUser, channelId: strin
     const replay = await readReceipt(db, user.id, channelId, requestId);
     if (replay?.body_hash === bodyHash) return receiptResponse(replay, true);
     if (replay) return error(409, "REQUEST_ID_CONFLICT", "This retry ID was already used for different text.");
-    return error(429, "RATE_LIMITED", "Too many chat attempts were made. Wait a moment and retry.");
+    return error(503, "CHAT_STORAGE_UNAVAILABLE", "Global Chat could not store that safety decision. Retry shortly.");
   }
   return error(status, reason, decision === "timeout" ? "This account has a short chat timeout for a safety review." : "That message was blocked by DZN Safety.");
 }
