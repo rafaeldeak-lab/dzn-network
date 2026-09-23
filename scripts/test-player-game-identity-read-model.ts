@@ -104,11 +104,14 @@ export async function testPlayerGameIdentityReadModels() {
     const firstHistoryPage = await readOwnerPlayerGameIdentityClaims(env, user("owner-a"));
     assert.equal(firstHistoryPage.history.length, 50);
     assert.equal(firstHistoryPage.history_has_more, true);
-    assert.equal(firstHistoryPage.history_next_offset, 50);
-    const secondHistoryPage = await readOwnerPlayerGameIdentityClaims(env, user("owner-a"), { historyOffset: firstHistoryPage.history_next_offset ?? 0 });
+    assert.equal(typeof firstHistoryPage.history_next_cursor, "string");
+    const [cursorCreatedAt, cursorId] = JSON.parse(firstHistoryPage.history_next_cursor ?? "[]") as [string, string];
+    const secondHistoryPage = await readOwnerPlayerGameIdentityClaims(env, user("owner-a"), {
+      historyCursor: { createdAt: cursorCreatedAt, id: cursorId },
+    });
     assert.equal(secondHistoryPage.history.length, 2);
     assert.equal(secondHistoryPage.history_has_more, false);
-    assert.equal(secondHistoryPage.history_next_offset, null);
+    assert.equal(secondHistoryPage.history_next_cursor, null);
     assert.equal(new Set([...firstHistoryPage.history, ...secondHistoryPage.history].map(row => row.id)).size, 52);
 
     const player = await readPlayerGameIdentityReadModel(env, user("player-a", "discord-a"));
@@ -129,6 +132,7 @@ export async function testPlayerGameIdentityReadModels() {
     assert.deepEqual(unavailable.claims, []);
     assert.deepEqual(unavailable.history, []);
     assert.equal(unavailable.history_has_more, false);
+    assert.equal(unavailable.history_next_cursor, null);
   } finally {
     sqlite.close();
   }

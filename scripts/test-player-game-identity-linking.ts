@@ -124,6 +124,7 @@ assert.match(ownerClaimPage, /Exact submitted game ID/, "Decision history must i
 assert.match(ownerClaimPage, /Recorded reason/, "Decision history must expose the stored approval, rejection or revocation reason.");
 assert.match(ownerClaimPage, /Load older decisions/, "Decision history must allow owners to inspect records beyond the first page.");
 assert.match(helper, /COALESCE\(claims\.discord_id, links\.discord_id\)/, "Revocation history must fall back to the linked Discord identity.");
+assert.match(helper, /datetime\(audit\.created_at\) < datetime\(\?\)/, "Decision history must use a stable keyset cursor instead of clamped offsets.");
 assert.match(ownerClaimPage, /method: "PATCH"/, "Owner/admin troubleshooting UI must use the existing review PATCH route.");
 assert.match(ownerClaimPage, /Submitted game ID/, "Owner/admin troubleshooting UI must show the exact submitted game ID.");
 assert.match(ownerClaimPage, /Public-safe masked ID/, "Owner/admin troubleshooting UI must distinguish masked player-safe IDs from owner-only exact IDs.");

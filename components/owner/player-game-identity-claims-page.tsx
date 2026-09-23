@@ -59,7 +59,7 @@ type ClaimsPayload = {
   claims: PlayerGameIdentityClaim[];
   history: PlayerGameIdentityHistory[];
   history_has_more: boolean;
-  history_next_offset: number | null;
+  history_next_cursor: string | null;
   boundary: string;
   message?: string;
   error?: string;
@@ -94,7 +94,7 @@ type ClaimLoadResult =
       claims: PlayerGameIdentityClaim[];
       history: PlayerGameIdentityHistory[];
       historyHasMore: boolean;
-      historyNextOffset: number | null;
+      historyNextCursor: string | null;
       boundary: string;
     };
 
@@ -105,7 +105,7 @@ export function PlayerGameIdentityClaimsPage() {
   const [claims, setClaims] = useState<PlayerGameIdentityClaim[]>([]);
   const [history, setHistory] = useState<PlayerGameIdentityHistory[]>([]);
   const [historyHasMore, setHistoryHasMore] = useState(false);
-  const [historyNextOffset, setHistoryNextOffset] = useState<number | null>(null);
+  const [historyNextCursor, setHistoryNextCursor] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [view, setView] = useState<"pending" | "history">("pending");
   const [payloadBoundary, setPayloadBoundary] = useState("");
@@ -114,9 +114,9 @@ export function PlayerGameIdentityClaimsPage() {
   const [busyClaim, setBusyClaim] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  const fetchClaims = useCallback(async (historyOffset = 0): Promise<ClaimLoadResult> => {
-    const endpoint = historyOffset > 0
-      ? `/api/owner/player-game-identity-claims?history_offset=${historyOffset}`
+  const fetchClaims = useCallback(async (historyCursor: string | null = null): Promise<ClaimLoadResult> => {
+    const endpoint = historyCursor
+      ? `/api/owner/player-game-identity-claims?${new URLSearchParams({ history_before: historyCursor })}`
       : "/api/owner/player-game-identity-claims";
     const response = await fetch(endpoint, {
       cache: "no-store",
@@ -141,7 +141,7 @@ export function PlayerGameIdentityClaimsPage() {
       claims: payload.claims ?? [],
       history: payload.history ?? [],
       historyHasMore: payload.history_has_more === true,
-      historyNextOffset: typeof payload.history_next_offset === "number" ? payload.history_next_offset : null,
+      historyNextCursor: typeof payload.history_next_cursor === "string" ? payload.history_next_cursor : null,
       boundary: payload.boundary ?? "",
     };
   }, []);
@@ -155,7 +155,7 @@ export function PlayerGameIdentityClaimsPage() {
     setClaims(result.claims);
     setHistory(result.history);
     setHistoryHasMore(result.historyHasMore);
-    setHistoryNextOffset(result.historyNextOffset);
+    setHistoryNextCursor(result.historyNextCursor);
     setPayloadBoundary(result.boundary);
     setState("ready");
   }, []);
@@ -173,11 +173,11 @@ export function PlayerGameIdentityClaimsPage() {
   }, [applyLoadResult, fetchClaims]);
 
   const loadOlderHistory = useCallback(async () => {
-    if (historyLoading || historyNextOffset === null) return;
+    if (historyLoading || historyNextCursor === null) return;
     setHistoryLoading(true);
     setError(null);
     try {
-      const result = await fetchClaims(historyNextOffset);
+      const result = await fetchClaims(historyNextCursor);
       if (result.state === "unauthorized") {
         setState("unauthorized");
         return;
@@ -187,13 +187,13 @@ export function PlayerGameIdentityClaimsPage() {
         return [...current, ...result.history.filter((item) => !knownIds.has(item.id))];
       });
       setHistoryHasMore(result.historyHasMore);
-      setHistoryNextOffset(result.historyNextOffset);
+      setHistoryNextCursor(result.historyNextCursor);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Older decision history could not be loaded.");
     } finally {
       setHistoryLoading(false);
     }
-  }, [fetchClaims, historyLoading, historyNextOffset]);
+  }, [fetchClaims, historyLoading, historyNextCursor]);
 
   useEffect(() => {
     let active = true;

@@ -471,15 +471,13 @@ export async function createPlayerGameIdentityClaim(
 export async function readOwnerPlayerGameIdentityClaims(
   env: Env,
   user: SessionUser,
-  options: { historyOffset?: number } = {},
+  options: { historyCursor?: { createdAt: string; id: string } | null } = {},
 ) {
   try {
     const db = requireDb(env);
     const isAdmin = isDznAdminDiscordId(env, user.discord_id);
     const hasGlobalHistoryAccess = isPlatformOwnerDiscordId(env, user.discord_id);
-    const historyOffset = Number.isSafeInteger(options.historyOffset) && Number(options.historyOffset) >= 0
-      ? Math.min(Number(options.historyOffset), 100_000)
-      : 0;
+    const historyCursor = options.historyCursor ?? null;
     const [result, historyResult] = await Promise.all([db
       .prepare(
         `SELECT
@@ -537,17 +535,27 @@ export async function readOwnerPlayerGameIdentityClaims(
          WHERE audit.action IN ('claim_approved', 'claim_rejected', 'link_revoked')
            AND audit.result = 'accepted'
            AND (? = 1 OR linked_servers.user_id = ?)
+           AND (
+             ? IS NULL
+             OR datetime(audit.created_at) < datetime(?)
+             OR (datetime(audit.created_at) = datetime(?) AND audit.id < ?)
+           )
          ORDER BY datetime(audit.created_at) DESC, audit.id DESC
-         LIMIT ? OFFSET ?`,
+         LIMIT ?`,
       ).bind(
         hasGlobalHistoryAccess ? 1 : 0,
         user.id,
+        historyCursor?.createdAt ?? null,
+        historyCursor?.createdAt ?? null,
+        historyCursor?.createdAt ?? null,
+        historyCursor?.id ?? null,
         OWNER_HISTORY_PAGE_SIZE + 1,
-        historyOffset,
       ).all<OwnerPlayerGameIdentityHistoryRow>(),
     ]);
     const historyRows = historyResult.results ?? [];
     const historyHasMore = historyRows.length > OWNER_HISTORY_PAGE_SIZE;
+    const historyPage = historyRows.slice(0, OWNER_HISTORY_PAGE_SIZE);
+    const lastHistoryRow = historyPage.at(-1);
 
     return {
       ok: true as const,
@@ -555,9 +563,11 @@ export async function readOwnerPlayerGameIdentityClaims(
       private: true as const,
       owner_or_admin_only: true as const,
       claims: sanitizeOwnerClaimRows(result.results ?? []),
-      history: historyRows.slice(0, OWNER_HISTORY_PAGE_SIZE),
+      history: historyPage,
       history_has_more: historyHasMore,
-      history_next_offset: historyHasMore ? historyOffset + OWNER_HISTORY_PAGE_SIZE : null,
+      history_next_cursor: historyHasMore && lastHistoryRow?.created_at
+        ? JSON.stringify([lastHistoryRow.created_at, lastHistoryRow.id])
+        : null,
       boundary: "Claim review can approve only an exact server plus game ID match. It is not a billing, scoring, ranking, review, event, or progression control.",
     };
   } catch {
@@ -569,7 +579,7 @@ export async function readOwnerPlayerGameIdentityClaims(
       claims: [] as OwnerPlayerGameIdentityClaimRow[],
       history: [] as OwnerPlayerGameIdentityHistoryRow[],
       history_has_more: false,
-      history_next_offset: null as number | null,
+      history_next_cursor: null as string | null,
       boundary: "Game identity claim review storage is unavailable in this environment.",
     };
   }
