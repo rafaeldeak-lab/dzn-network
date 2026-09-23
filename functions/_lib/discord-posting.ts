@@ -400,10 +400,9 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
         AND state.discord_channel_id = destinations.discord_channel_id
        WHERE (? IS NULL OR destinations.guild_id = ?)
          AND COALESCE(destinations.enabled, 0) = 1
-       ORDER BY COALESCE(state.last_edited_at, '1970-01-01T00:00:00.000Z') ASC
-       LIMIT ?`,
+       ORDER BY COALESCE(state.last_edited_at, '1970-01-01T00:00:00.000Z') ASC`,
     )
-    .bind(options.guildId ?? null, options.guildId ?? null, Math.max(1, options.maxJobs * 4))
+    .bind(options.guildId ?? null, options.guildId ?? null)
     .all<PostingDestination & { last_edited_at: string | null }>();
 
   let processed = 0;

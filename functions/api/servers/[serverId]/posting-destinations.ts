@@ -7,7 +7,7 @@ import {
   sendDiscordTestPost,
   verifyDiscordPostingChannel,
 } from "../../../_lib/discord-posting";
-import { ensureAutomationSchema } from "../../../_lib/automation";
+import { ensureAutomationSchema, getAutomationContextForLinkedServer } from "../../../_lib/automation";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
 import { AUTO_POST_OPTIONS, AUTO_POST_TYPES, getListingLimits, hasListingAutoPost, normalizeListingPlanKey } from "../../../_lib/plans";
@@ -516,24 +516,7 @@ async function getPostingDestinationPayload(env: Env, context: { guildId: string
 }
 
 async function getPostingContextForRead(env: Env, linkedServerId: string) {
-  const row = await requireDb(env)
-    .prepare(
-      `SELECT linked_servers.guild_id,
-              COALESCE(server_subscriptions.plan_key, 'free') AS plan_key,
-              server_subscriptions.status
-       FROM linked_servers
-       LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
-       WHERE linked_servers.id = ?
-       LIMIT 1`,
-    )
-    .bind(linkedServerId)
-    .first<{ guild_id: string | null; plan_key: string | null; status: string | null }>();
-  if (!row?.guild_id) return null;
-  return {
-    guildId: row.guild_id,
-    planKey: row.plan_key ?? "free",
-    subscriptionStatus: row.status ?? "inactive",
-  };
+  return getAutomationContextForLinkedServer(env, linkedServerId);
 }
 
 function savedPostingChannel(channelId: string) {

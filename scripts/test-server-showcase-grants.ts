@@ -26,6 +26,7 @@ import { createServerWarChallenge, getOwnerServerWarsPayload, getServerWarOppone
 import { processServerMatchmakingOptIn } from "../functions/_lib/ctf-tournaments";
 import { getAutomationContextForLinkedServer, queueDiscordPostUpdatesForGuild } from "../functions/_lib/automation";
 import { dispatchQueuedDiscordPostUpdates } from "../functions/_lib/discord-posting";
+import { onRequest as postingDestinations } from "../functions/api/servers/[serverId]/posting-destinations";
 
 type Row = Record<string, unknown>;
 type Sqlite = { exec(sql: string): void; close(): void; prepare(sql: string): {
@@ -290,6 +291,36 @@ async function run() {
     });
     assert.equal(unrelatedQueued, 0);
     assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM automation_jobs WHERE job_type = 'discord-post-update'").get()?.n, 1);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("exact grant unlocks destination controls and eligible due posts cannot be starved", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+
+    const response = await invoke(postingDestinations, env, actor, "GET");
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { post_type_options: Array<{ key: string; allowed_by_plan: boolean; listing_plan_key: string }> };
+    const priorityStatus = payload.post_type_options.find((option) => option.key === "priority_status_embed");
+    assert.equal(priorityStatus?.allowed_by_plan, true);
+    assert.equal(priorityStatus?.listing_plan_key, "pro");
+
+    for (let index = 0; index < 5; index += 1) {
+      db.sqlite.prepare(`INSERT INTO server_posting_destinations (
+        id, guild_id, post_type, discord_channel_id, enabled, created_by_discord_id, created_at, updated_at
+      ) VALUES (?, ?, 'priority_status_embed', ?, 1, ?, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`)
+        .run(randomUUID(), `ineligible-guild-${index}`, `9000000${index}`, actor.discord_id);
+    }
+    db.sqlite.prepare(`INSERT INTO server_posting_destinations (
+      id, guild_id, post_type, discord_channel_id, enabled, created_by_discord_id, created_at, updated_at
+    ) VALUES (?, ?, 'priority_status_embed', '99999999', 1, ?, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`)
+      .run(randomUUID(), scope.guildId, actor.discord_id);
+
+    const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    assert.equal(dispatched.ok, true);
+    assert.equal(dispatched.processed, 1);
+    assert.equal(dispatched.results[0]?.guild_id, scope.guildId);
+    assert.equal(dispatched.results[0]?.status, "no_message_id");
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
   });
   await test("revoked exact grant blocks a previously queued Discord publish", async ({ db, env }) => {
