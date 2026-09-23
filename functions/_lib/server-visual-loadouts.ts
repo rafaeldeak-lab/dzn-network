@@ -13,7 +13,7 @@ import { isDznAdminDiscordId } from "./admin";
 import { getEarnedServerBadges } from "./badge-awards";
 import { ensureMockUser, getSessionUser, requireDb } from "./db";
 import { isMockAuth } from "./mock";
-import { NUKETOWN_SHOWCASE_SCOPE, readServerShowcaseAccess, serializeShowcaseAccess, showcaseWriteGuard, type ServerShowcaseAccess } from "./server-showcase-access";
+import { isShowcaseWriteAssertionError, NUKETOWN_SHOWCASE_SCOPE, readServerShowcaseAccess, serializeShowcaseAccess, showcaseWriteAssertionSql, showcaseWriteGuard, type ServerShowcaseAccess } from "./server-showcase-access";
 import type { Env, SessionUser } from "./types";
 
 export type VisualLoadoutInput = {
@@ -320,7 +320,7 @@ export async function saveServerVisualLoadout(env: Env, serverId: string, actorU
       `INSERT INTO server_visual_loadouts (
         id, server_id, showcase_badges_json, profile_frame_key, theme_banner_key,
         animation_enabled, updated_by_user_id, created_at, updated_at
-      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${guard}
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(server_id) DO UPDATE SET
         showcase_badges_json = excluded.showcase_badges_json,
         profile_frame_key = excluded.profile_frame_key,
@@ -339,14 +339,13 @@ export async function saveServerVisualLoadout(env: Env, serverId: string, actorU
       actorUserId,
       current?.created_at ?? now,
       now,
-      ...guardValues,
     );
 
   const audit = db
     .prepare(
       `INSERT INTO server_customisation_audit_log (
         id, server_id, actor_user_id, action, old_value_json, new_value_json, reason, created_at
-      ) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE ${guard}`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       crypto.randomUUID(),
@@ -362,12 +361,15 @@ export async function saveServerVisualLoadout(env: Env, serverId: string, actorU
       JSON.stringify(newValue),
       validated.reason,
       now,
-      ...guardValues,
     );
 
-  // Audit the validated snapshot before replacing it, in the same transaction.
-  const results = await db.batch([audit, save]);
-  if (Number(results[1]?.meta?.changes ?? 0) !== 1) {
+  const assertion = db.prepare(showcaseWriteAssertionSql(guard)).bind(...guardValues);
+  const accessAssertion = db.prepare(showcaseWriteAssertionSql(accessGuard.sql)).bind(...accessGuard.values);
+  try {
+    // Recheck access after both writes so mid-batch expiry rolls the transaction back.
+    await db.batch([assertion, audit, save, accessAssertion]);
+  } catch (error) {
+    if (!isShowcaseWriteAssertionError(error)) throw error;
     throw new VisualLoadoutError("VISUAL_LOADOUT_ACCESS_CHANGED", "Server access or the saved loadout changed. Refresh before saving again.", 409);
   }
 

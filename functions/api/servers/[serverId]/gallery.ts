@@ -1,7 +1,7 @@
 import { getSessionUser, requireDb } from "../../../_lib/db";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { getListingLimits } from "../../../_lib/plans";
-import { canUseShowcaseFeature, readServerShowcaseAccess, serializeShowcaseAccess, showcaseWriteGuard } from "../../../_lib/server-showcase-access";
+import { canUseShowcaseFeature, isShowcaseWriteAssertionError, readServerShowcaseAccess, serializeShowcaseAccess, showcaseWriteAssertionSql, showcaseWriteGuard } from "../../../_lib/server-showcase-access";
 import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
 
 type GalleryImageInput = {
@@ -73,15 +73,15 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   const now = new Date().toISOString();
   const guard = await showcaseWriteGuard(env, server.id, server.user_id, access);
   const statements = [
-    db.prepare(`SELECT 1 AS allowed WHERE ${guard.sql}`).bind(...guard.values),
-    db.prepare(`DELETE FROM server_gallery_images WHERE server_id = ? AND ${guard.sql}`).bind(linkedServerId, ...guard.values),
+    db.prepare(showcaseWriteAssertionSql(guard.sql)).bind(...guard.values),
+    db.prepare("DELETE FROM server_gallery_images WHERE server_id = ?").bind(linkedServerId),
   ];
   for (const image of normalized) {
     statements.push(db.prepare(
       `INSERT INTO server_gallery_images (
         id, server_id, url, storage_path, width, height, size_bytes, mime_type,
         sort_order, created_at, updated_at
-      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${guard.sql}`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       crypto.randomUUID(),
       linkedServerId,
@@ -94,11 +94,17 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
       image.sortOrder,
       now,
       now,
-      ...guard.values,
     ));
   }
-  const result = await db.batch(statements);
-  if (!result[0].results?.length) return json({ ok: false, error: "Server access changed. Refresh before saving again.", code: "SERVER_ACCESS_CHANGED" }, { status: 409 });
+  statements.push(db.prepare(showcaseWriteAssertionSql(guard.sql)).bind(...guard.values));
+  try {
+    await db.batch(statements);
+  } catch (error) {
+    if (isShowcaseWriteAssertionError(error)) {
+      return json({ ok: false, error: "Server access changed. Refresh before saving again.", code: "SERVER_ACCESS_CHANGED" }, { status: 409 });
+    }
+    throw error;
+  }
 
   return json({ ok: true, images: await listGalleryImages(env, linkedServerId), listing: limits });
 };

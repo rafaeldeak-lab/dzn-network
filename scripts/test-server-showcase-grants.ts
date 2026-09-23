@@ -114,6 +114,22 @@ async function grant(env: Env) {
   assert.equal(result.status, 200);
   return requestId;
 }
+function grantExpiring(db: LocalD1, seconds = 1) {
+  const id = randomUUID();
+  db.sqlite.prepare(`INSERT INTO server_showcase_grants (
+    id, linked_server_id, owner_user_id, owner_discord_id, guild_id, nitrado_service_id,
+    created_by_user_id, created_at, expires_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 second'),
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?))`)
+    .run(id, scope.linkedServerId, scope.ownerUserId, scope.ownerDiscordId, scope.guildId,
+      scope.nitradoServiceId, actor.id, `+${seconds} seconds`);
+  const expiresAt = String(db.sqlite.prepare("SELECT expires_at FROM server_showcase_grants WHERE id = ?").get(id)?.expires_at);
+  return { id, expiresAt };
+}
+function waitUntilAfter(iso: string) {
+  const waitMs = Math.max(0, Date.parse(iso) - Date.now() + 50);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+}
 function revokeSql(db: LocalD1, id: string) {
   db.sqlite.prepare("UPDATE server_showcase_grants SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), revocation_reason = 'support_correction' WHERE id = ?").run(id);
 }
@@ -545,15 +561,7 @@ async function run() {
     assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM server_ad_bump_events WHERE linked_server_id = ?").get(scope.linkedServerId)?.count, 0);
   });
   await test("expired complimentary grant uses the database clock at the protected bump write", async ({ db, env }) => {
-    const grantId = randomUUID();
-    db.sqlite.prepare(`INSERT INTO server_showcase_grants (
-      id, linked_server_id, owner_user_id, owner_discord_id, guild_id, nitrado_service_id,
-      created_by_user_id, created_at, expires_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 second'),
-      strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+1 second'))`)
-      .run(grantId, scope.linkedServerId, scope.ownerUserId, scope.ownerDiscordId, scope.guildId,
-        scope.nitradoServiceId, actor.id);
-    const expiresAt = String(db.sqlite.prepare("SELECT expires_at FROM server_showcase_grants WHERE id = ?").get(grantId)?.expires_at);
+    const { expiresAt } = grantExpiring(db);
     const OriginalDate = globalThis.Date;
     const skewedNow = OriginalDate.parse(expiresAt) - 500;
     class SkewedDate extends OriginalDate {
@@ -563,11 +571,10 @@ async function run() {
       static now() { return skewedNow; }
     }
     let expired = false;
-    db.beforeWrite = (sql) => {
-      if (expired || !/INSERT INTO server_listing_events/.test(sql)) return;
+    db.beforeFirst = (sql) => {
+      if (expired || !/INSERT INTO server_advertising_state/.test(sql)) return;
       expired = true;
-      const waitMs = Math.max(0, OriginalDate.parse(expiresAt) - OriginalDate.now() + 50);
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+      waitUntilAfter(expiresAt);
       globalThis.Date = SkewedDate as DateConstructor;
     };
     try {
@@ -579,7 +586,7 @@ async function run() {
       assert.equal(db.sqlite.prepare("SELECT COALESCE(bump_count_current_period, 0) AS count FROM server_advertising_state WHERE linked_server_id = ?").get(scope.linkedServerId)?.count ?? 0, 0);
       assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM server_ad_bump_events WHERE linked_server_id = ?").get(scope.linkedServerId)?.count, 0);
     } finally {
-      db.beforeWrite = null;
+      db.beforeFirst = null;
       globalThis.Date = OriginalDate;
     }
   });
@@ -1203,16 +1210,19 @@ async function run() {
     assert.equal((await invoke(gallery, env, actor, "PUT", { images: [] })).status, 409);
     assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_gallery_images").get()?.n, 1);
   });
-  await test("gallery replacement uses one database time across its atomic batch", async ({ db, env }) => {
-    const grantId = randomUUID();
-    db.sqlite.prepare(`INSERT INTO server_showcase_grants (
-      id, linked_server_id, owner_user_id, owner_discord_id, guild_id, nitrado_service_id,
-      created_by_user_id, created_at, expires_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 second'),
-      strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+1 second'))`)
-      .run(grantId, scope.linkedServerId, scope.ownerUserId, scope.ownerDiscordId, scope.guildId,
-        scope.nitradoServiceId, actor.id);
-    const expiresAt = String(db.sqlite.prepare("SELECT expires_at FROM server_showcase_grants WHERE id = ?").get(grantId)?.expires_at);
+  await test("gallery rejects an expired grant at transaction start without deleting original images", async ({ db, env }) => {
+    const { expiresAt } = grantExpiring(db);
+    db.sqlite.prepare(`INSERT INTO server_gallery_images (
+      id, server_id, url, width, height, size_bytes, mime_type, sort_order, created_at, updated_at
+    ) VALUES ('previous-image', ?, 'https://local.test/previous.jpg', 1600, 900, 1000, 'image/jpeg', 0, '2026-09-01', '2026-09-01')`)
+      .run(scope.linkedServerId);
+    db.beforeBatch = () => { db.beforeBatch = null; waitUntilAfter(expiresAt); };
+    const response = await invoke(gallery, env, actor, "PUT", { images: [image] });
+    assert.equal(response.status, 409, JSON.stringify(await response.json()));
+    assert.deepEqual(db.sqlite.prepare("SELECT id, url FROM server_gallery_images").all().map(row => row.url), ["https://local.test/previous.jpg"]);
+  });
+  await test("gallery rolls back when its grant expires during atomic replacement", async ({ db, env }) => {
+    const { expiresAt } = grantExpiring(db);
     db.sqlite.prepare(`INSERT INTO server_gallery_images (
       id, server_id, url, width, height, size_bytes, mime_type, sort_order, created_at, updated_at
     ) VALUES ('previous-image', ?, 'https://local.test/previous.jpg', 1600, 900, 1000, 'image/jpeg', 0, '2026-09-01', '2026-09-01')`)
@@ -1221,14 +1231,13 @@ async function run() {
     db.beforeWrite = (sql) => {
       if (expiredDuringBatch || !/^\s*INSERT INTO server_gallery_images/i.test(sql)) return;
       expiredDuringBatch = true;
-      const waitMs = Math.max(0, Date.parse(expiresAt) - Date.now() + 50);
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+      waitUntilAfter(expiresAt);
     };
     try {
       const response = await invoke(gallery, env, actor, "PUT", { images: [image] });
-      assert.equal(response.status, 200, JSON.stringify(await response.json()));
+      assert.equal(response.status, 409, JSON.stringify(await response.json()));
       assert.equal(expiredDuringBatch, true);
-      assert.deepEqual(db.sqlite.prepare("SELECT id, url FROM server_gallery_images").all().map(row => row.url), [image.url]);
+      assert.deepEqual(db.sqlite.prepare("SELECT id, url FROM server_gallery_images").all().map(row => row.url), ["https://local.test/previous.jpg"]);
     } finally {
       db.beforeWrite = null;
     }
@@ -1263,6 +1272,13 @@ async function run() {
     const guard = await showcaseWriteGuard(env, "same-guild-other-server", actor.id, access);
     assert.equal(db.sqlite.prepare(`SELECT 1 AS allowed WHERE ${guard.sql}`).get(...guard.values)?.allowed, 1);
     db.sqlite.exec("UPDATE server_subscriptions SET status = 'active'");
+    assert.equal(db.sqlite.prepare(`SELECT 1 AS allowed WHERE ${guard.sql}`).get(...guard.values), undefined);
+  });
+  await test("write guard evaluates complimentary expiry when the protected statement executes", async ({ db, env }) => {
+    const { expiresAt } = grantExpiring(db);
+    const access = await readServerShowcaseAccess(env, scope.linkedServerId, inactive);
+    const guard = await showcaseWriteGuard(env, scope.linkedServerId, actor.id, access);
+    waitUntilAfter(expiresAt);
     assert.equal(db.sqlite.prepare(`SELECT 1 AS allowed WHERE ${guard.sql}`).get(...guard.values), undefined);
   });
   await test("legacy paid customers preserve the original listing contract", async ({ db, env }) => {
@@ -1488,6 +1504,34 @@ async function run() {
       assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_customisation_audit_log").get()?.n, 1);
     });
   }
+  await test("visual transaction rejects an expired grant before audit or overwrite", async ({ db, env }) => {
+    const { expiresAt } = grantExpiring(db);
+    await saveServerVisualLoadout(env, scope.linkedServerId, actor.id, proVisual);
+    db.beforeBatch = () => { db.beforeBatch = null; waitUntilAfter(expiresAt); };
+    const response = await invoke(visualPut, env, actor, "PUT", { ...proVisual, profileFrameKey: "gold" });
+    assert.equal(response.status, 409);
+    assert.equal(db.sqlite.prepare("SELECT profile_frame_key FROM server_visual_loadouts").get()?.profile_frame_key, "diamond");
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_customisation_audit_log").get()?.n, 1);
+  });
+  await test("visual transaction rolls back when its grant expires during the save", async ({ db, env }) => {
+    const { expiresAt } = grantExpiring(db);
+    await saveServerVisualLoadout(env, scope.linkedServerId, actor.id, proVisual);
+    let expiredDuringBatch = false;
+    db.beforeWrite = (sql) => {
+      if (expiredDuringBatch || !/^\s*INSERT INTO server_visual_loadouts/i.test(sql)) return;
+      expiredDuringBatch = true;
+      waitUntilAfter(expiresAt);
+    };
+    try {
+      const response = await invoke(visualPut, env, actor, "PUT", { ...proVisual, profileFrameKey: "gold" });
+      assert.equal(response.status, 409);
+      assert.equal(expiredDuringBatch, true);
+      assert.equal(db.sqlite.prepare("SELECT profile_frame_key FROM server_visual_loadouts").get()?.profile_frame_key, "diamond");
+      assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_customisation_audit_log").get()?.n, 1);
+    } finally {
+      db.beforeWrite = null;
+    }
+  });
   await test("visual save checks owner snapshot from route authorization", async ({ db, env }) => {
     await grant(env);
     db.sqlite.prepare("UPDATE linked_servers SET user_id = ? WHERE id = ?").run(other.id, scope.linkedServerId);

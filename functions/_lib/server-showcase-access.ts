@@ -38,8 +38,8 @@ function activeShowcaseGrantFromSql(nowExpression: string) {
 }
 
 const ACTIVE_SHOWCASE_GRANT_FROM_SQL_AT_DB_TIME = activeShowcaseGrantFromSql("'now'");
-const ACTIVE_SHOWCASE_GRANT_FROM_SQL = activeShowcaseGrantFromSql("?");
 export const ACTIVE_SHOWCASE_GRANT_AT_DB_TIME_SQL = `SELECT grant_row.id, grant_row.expires_at ${ACTIVE_SHOWCASE_GRANT_FROM_SQL_AT_DB_TIME} LIMIT 1`;
+const SHOWCASE_WRITE_ASSERTION_FAILURE = /integer overflow/i;
 
 type BillingInput = { plan_key: string | null; subscription_status: string | null; observed_at?: string | null };
 export type ServerShowcaseAccess = {
@@ -104,17 +104,23 @@ export async function showcaseWriteGuard(env: Env, serverId: string, expectedOwn
       AND COALESCE(write_server.merged_into_server_id, '') = '')`;
   const values: Array<string | null> = [serverId, expectedOwnerUserId];
   if (access.source === "complimentary_showcase") {
-    const clock = await requireDb(env).prepare("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS observed_at")
-      .first<{ observed_at: string | null }>();
-    if (!clock?.observed_at) throw new Error("Database clock unavailable for showcase write authorization");
-    return { sql: `${sql} AND EXISTS (SELECT 1 ${ACTIVE_SHOWCASE_GRANT_FROM_SQL} AND grant_row.id = ?)`,
-      values: [...values, ...showcaseScopeBindings(), clock.observed_at, clock.observed_at, access.grantId] };
+    return { sql: `${sql} AND EXISTS (SELECT 1 ${ACTIVE_SHOWCASE_GRANT_FROM_SQL_AT_DB_TIME} AND grant_row.id = ?)`,
+      values: [...values, ...showcaseScopeBindings(), access.grantId] };
   }
   return { sql: `${sql} AND EXISTS (SELECT 1 FROM linked_servers AS billing_server
       LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = billing_server.guild_id
       WHERE billing_server.id = ? AND COALESCE(server_subscriptions.plan_key, 'free') = ?
         AND server_subscriptions.status IS ?)`,
     values: [...values, serverId, access.billingPlan ?? "free", access.billingStatus] };
+}
+
+// A failed first statement aborts a D1 batch before any protected mutation runs.
+export function showcaseWriteAssertionSql(guardSql: string) {
+  return `SELECT CASE WHEN (${guardSql}) THEN 1 ELSE abs(-9223372036854775808) END AS allowed`;
+}
+
+export function isShowcaseWriteAssertionError(error: unknown) {
+  return SHOWCASE_WRITE_ASSERTION_FAILURE.test(error instanceof Error ? error.message : String(error));
 }
 
 export function isMissingShowcaseSchema(error: unknown) {
