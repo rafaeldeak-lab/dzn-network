@@ -255,10 +255,30 @@ assert.equal(JSON.stringify(completeReadiness).includes("price_premium"), false)
 const landingSource = readFileSync("components/dzn/dzn-landing-page.tsx", "utf8");
 const pricingSection = readFileSync("app/pricing/page.tsx", "utf8");
 for (const snippet of ["Starter", "Pro", "PAYMENT_COPY.starterOffer", "PAYMENT_COPY.proTerms",
-  "PAYMENT_COPY.returningStarter", "PAYMENT_FAQS", "PricingCheckout", "<table", 'scope="row"',
-  "text-green-400", "text-red-400", "Paid competitive advantage", "Eligible, not guaranteed"]) {
+  "PAYMENT_COPY.returningStarter", "PAYMENT_FAQS", "PricingCheckout", "FeatureComparisonRow",
+  "Player access is free", "24 Discord post and feed types", "Paid leaderboard or score advantage",
+  "Eligible, not guaranteed", "No paid score, rank or gameplay advantage"]) {
   assert.ok(pricingSection.includes(snippet), `Dedicated pricing must contain ${snippet}`);
 }
+assert.equal(pricingSection.includes('["Network rankings", "Included", "Included"]'), true, "Shared network rankings must not be sold as a Pro-only feature.");
+assert.equal(pricingSection.includes('["Event leaderboard detail", null, "Included"]'), true, "Only the Pro-gated event detail should be presented as the upgrade.");
+assert.equal(pricingSection.includes('["Listing analytics", "Included", "Included"]'), true, "Current listing analytics must be presented as shared until advanced fields are actually plan-gated.");
+assert.equal(pricingSection.includes("Advanced listing analytics"), false, "Pricing must not sell shared listing analytics as an advanced Pro feature.");
+assert.equal(pricingSection.includes("Event leaderboards and network rankings"), false, "Shared rankings must not be bundled into a Pro-only claim.");
+assert.equal(pricingSection.includes("Event and network leaderboards"), false, "The rendered Pro checklist must not bundle shared network rankings into paid value.");
+assert.equal(pricingSection.includes("Homepage feature"), false, "Pricing must not promise an unimplemented Pro homepage placement.");
+assert.equal(pricingSection.includes("Server spotlight eligibility"), true, "Pricing should retain supported server-directory spotlight eligibility.");
+assert.equal(/manual (?:ADM )?refresh cooldown/i.test(pricingSection), false, "Pricing must not sell an unenforced manual-refresh cooldown tier.");
+assert.equal(/priority refresh/i.test(pricingSection), false, "Pricing must describe the priority-refresh entitlement as the Discord posting feature it actually unlocks.");
+assert.equal(pricingSection.includes("Pro includes a plan-status badge"), true, "Pricing must distinguish the paid plan-status badge from earned competitive badges.");
+assert.equal(pricingSection.includes("never buys kills, ranks, badges"), false, "Pricing must not claim that Pro grants no badges when it includes a plan-status badge.");
+assert.equal(pricingSection.includes("<table"), false, "Pricing comparison should use the responsive mobile-first layout, not the old fixed table.");
+assert.equal(pricingSection.includes('"Seasonal participation where events allow"'), false, "Pricing must not present shared seasonal participation as Pro-only.");
+assert.equal(pricingSection.includes('"Subscription billing portal"'), false, "Pricing must not present the shared billing portal as Pro-only.");
+assert.equal(pricingSection.includes('"Official event-hosting tools"'), false, "Pricing must not sell creator-only official event administration as a customer Pro benefit.");
+assert.equal(pricingSection.includes("event-hosting features"), false, "Pricing hero copy must limit customer hosting claims to Server Wars.");
+assert.equal(pricingSection.includes("one billing portal"), false, "Pricing must not present the shared billing portal as Pro-only value.");
+assert.equal(pricingSection.includes("sm:sr-only"), true, "Desktop comparison values must retain accessible Starter and Pro labels.");
 assert.equal(/Premium|Partner Listing|Network plan|Partner plan/.test(pricingSection), false);
 assert.equal(/paid leaderboard rank|leaderboard rank boost|buy better leaderboard/i.test(pricingSection), false);
 assert.ok(landingSource.includes('href="/pricing"'));
