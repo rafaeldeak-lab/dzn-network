@@ -12,6 +12,12 @@ import {
 } from "./server-war-categories";
 import { getLatestServerWarStandings, type ServerWarStanding } from "./server-war-snapshots";
 import { ensureServerWarsSchema } from "./server-war-schema";
+import {
+  isShowcaseWriteAssertionError,
+  readServerShowcaseAccess,
+  showcaseWriteAssertionSql,
+  showcaseWriteGuard,
+} from "./server-showcase-access";
 import type { Env, SessionUser } from "./types";
 
 export type PublicServerWarEvent = {
@@ -55,6 +61,7 @@ export type PublicServerWarsPayload = {
 };
 
 export type ServerWarsAccess = {
+  accessSource: "billing" | "complimentary_showcase";
   configuredPlan: ServerWarsPlan;
   effectivePlan: ServerWarsPlan;
   subscriptionStatus: string | null;
@@ -266,7 +273,7 @@ export async function getOwnerServerWarsPayload(env: Env, user: SessionUser, ser
   if (!server) {
     return { ok: false as const, status: 404, error: "server_not_found" };
   }
-  const warAccess = getServerWarsAccess(server.plan_key, server.subscription_status);
+  const { warAccess } = await resolveServerWarsAccess(env, server);
   const category = normalizeWarServerCategory(server);
   const [events, pendingChallenges, trophies, titles] = await Promise.all([
     getServerWarEventsForServer(env, server.id, ["pending_acceptance", "scheduled", "live", "finalizing", "completed"], false, {
@@ -300,7 +307,7 @@ export async function getServerWarOpponentOptions(env: Env, user: SessionUser, s
   if (!access.allowed) return { ok: false as const, status: access.reason === "not_found" ? 404 : 403, error: "server_access_denied" };
   const challenger = await readServerForWars(env, serverId);
   if (!challenger) return { ok: false as const, status: 404, error: "server_not_found" };
-  if (!getServerWarsAccess(challenger.plan_key, challenger.subscription_status).canCreateChallenge) return { ok: false as const, status: 403, error: "plan_locked" };
+  if (!(await resolveServerWarsAccess(env, challenger)).warAccess.canCreateChallenge) return { ok: false as const, status: 403, error: "plan_locked" };
   const ruleset = getServerWarRulesetOptions().find(option => option.key === rulesetKey);
   if (!ruleset) return { ok: false as const, status: 400, error: "invalid_ruleset" };
   try { assertServerWarCategoryEligible(challenger, ruleset.key); }
@@ -362,7 +369,7 @@ export async function createServerWarChallenge(
       message: error instanceof Error ? error.message : lockedCategoryMessage(challenger.server_category, ruleset.key),
     };
   }
-  const warAccess = getServerWarsAccess(challenger.plan_key, challenger.subscription_status);
+  const { warAccess, showcaseAccess } = await resolveServerWarsAccess(env, challenger);
   const featured = Boolean(body.featured);
   if (!warAccess.canCreateChallenge || (featured && !warAccess.canCreateFeatured)) {
     return {
@@ -388,15 +395,13 @@ export async function createServerWarChallenge(
   const opponentCategory = assertServerWarCategoryEligible(opponent, ruleset.key);
   const packageRequired = featured ? "pro" : ruleset.packageRequired;
 
-  await db
-    .prepare(
+  const eventStatement = db.prepare(
       `INSERT INTO server_war_events (
         id, slug, title, description, event_type, category, eligible_categories, status,
         scoring_ruleset_key, starts_at, ends_at, created_by_user_id, created_by_server_id,
         visibility, package_required, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_acceptance', ?, ?, ?, ?, ?, 'public', ?, ?, ?)`,
-    )
-    .bind(
+    ).bind(
       eventId,
       slug,
       title,
@@ -412,9 +417,8 @@ export async function createServerWarChallenge(
       packageRequired,
       createdAt,
       createdAt,
-    )
-    .run();
-  await insertParticipant(env, {
+    );
+  const challengerParticipant = participantStatement(db, {
     eventId,
     serverId: challenger.id,
     ownerUserId: challenger.user_id,
@@ -422,22 +426,20 @@ export async function createServerWarChallenge(
     status: "accepted",
     acceptedAt: createdAt,
     joinedAt: createdAt,
-  });
-  await insertParticipant(env, {
+  }, createdAt);
+  const opponentParticipant = participantStatement(db, {
     eventId,
     serverId: opponent.id,
     ownerUserId: opponent.user_id,
     categoryAtEntry: opponentCategory,
     status: "pending",
-  });
-  await db
-    .prepare(
+  }, createdAt);
+  const challengeStatement = db.prepare(
       `INSERT INTO server_war_challenges (
         id, event_id, challenger_server_id, opponent_server_id, challenger_owner_user_id,
         opponent_owner_user_id, status, message, expires_at, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
-    )
-    .bind(
+    ).bind(
       challengeId,
       eventId,
       challenger.id,
@@ -448,8 +450,22 @@ export async function createServerWarChallenge(
       new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString(),
       createdAt,
       createdAt,
-    )
-    .run();
+    );
+  const guard = await showcaseWriteGuard(env, challenger.id, challenger.user_id, showcaseAccess);
+  try {
+    await db.batch([
+      db.prepare(showcaseWriteAssertionSql(guard.sql)).bind(...guard.values),
+      eventStatement,
+      challengerParticipant,
+      opponentParticipant,
+      challengeStatement,
+    ]);
+  } catch (error) {
+    if (isShowcaseWriteAssertionError(error)) {
+      return { ok: false as const, status: 403, error: "plan_locked", message: "Server Wars hosting access changed before this challenge was saved." };
+    }
+    throw error;
+  }
   return {
     ok: true as const,
     challenge: await getChallengeById(env, challengeId),
@@ -470,6 +486,7 @@ export function getServerWarsAccess(planKey: unknown, status: unknown): ServerWa
   const effectivePlan = toServerWarsPlan(effectiveEntitlementPlan(configuredPlan, typeof status === "string" ? status : null));
   const proPlus = effectivePlan === "pro" || effectivePlan === "premium";
   return {
+    accessSource: "billing",
     configuredPlan,
     effectivePlan,
     subscriptionStatus: typeof status === "string" ? status : null,
@@ -479,6 +496,25 @@ export function getServerWarsAccess(planKey: unknown, status: unknown): ServerWa
     canCreateFeatured: proPlus,
     lockedReason: proPlus ? null : "Pro is required to create Server VS Server challenges.",
   };
+}
+
+async function resolveServerWarsAccess(env: Env, server: ServerWarServerRow) {
+  const showcaseAccess = await readServerShowcaseAccess(env, server.id, {
+    plan_key: server.plan_key,
+    subscription_status: server.subscription_status,
+  });
+  const billingAccess = getServerWarsAccess(server.plan_key, server.subscription_status);
+  const warAccess: ServerWarsAccess = showcaseAccess.source === "complimentary_showcase"
+    ? {
+        ...billingAccess,
+        accessSource: "complimentary_showcase",
+        effectivePlan: "pro",
+        canCreateChallenge: true,
+        canCreateFeatured: true,
+        lockedReason: null,
+      }
+    : billingAccess;
+  return { warAccess, showcaseAccess };
 }
 
 function toServerWarsPlan(value: unknown): ServerWarsPlan {
@@ -611,7 +647,7 @@ async function readServerForWars(env: Env, serverIdOrSlug: string): Promise<Serv
     .first<ServerWarServerRow>();
 }
 
-async function insertParticipant(env: Env, input: {
+function participantStatement(db: D1Database, input: {
   eventId: string;
   serverId: string;
   ownerUserId: string | null;
@@ -619,10 +655,8 @@ async function insertParticipant(env: Env, input: {
   status: "accepted" | "pending" | "joined" | "invited";
   acceptedAt?: string | null;
   joinedAt?: string | null;
-}) {
-  const now = new Date().toISOString();
-  await requireDb(env)
-    .prepare(
+}, timestamp = new Date().toISOString()) {
+  return db.prepare(
       `INSERT INTO server_war_participants (
         id, event_id, server_id, owner_user_id, category_at_entry, status,
         joined_at, accepted_at, created_at, updated_at
@@ -633,8 +667,7 @@ async function insertParticipant(env: Env, input: {
         joined_at = COALESCE(server_war_participants.joined_at, excluded.joined_at),
         accepted_at = COALESCE(server_war_participants.accepted_at, excluded.accepted_at),
         updated_at = excluded.updated_at`,
-    )
-    .bind(
+    ).bind(
       crypto.randomUUID(),
       input.eventId,
       input.serverId,
@@ -643,10 +676,9 @@ async function insertParticipant(env: Env, input: {
       input.status,
       input.joinedAt ?? null,
       input.acceptedAt ?? null,
-      now,
-      now,
-    )
-    .run();
+      timestamp,
+      timestamp,
+    );
 }
 
 async function getEventParticipants(env: Env, eventId: string, options: { publicOnly: boolean }) {

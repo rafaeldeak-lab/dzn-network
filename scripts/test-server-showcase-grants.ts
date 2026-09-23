@@ -22,6 +22,7 @@ import { onRequestGet as dashboardAdvancedStats } from "../functions/api/servers
 import { onRequestGet as dashboardHealth } from "../functions/api/servers/[serverId]/dashboard/health";
 import { onRequest as advertisingBump } from "../functions/api/servers/[serverId]/advertising/bump";
 import { dashboardSelectedServerAccess } from "../components/onboarding/dashboard-detail-display";
+import { createServerWarChallenge, getOwnerServerWarsPayload, getServerWarOpponentOptions } from "../functions/_lib/server-wars";
 
 type Row = Record<string, unknown>;
 type Sqlite = { exec(sql: string): void; close(): void; prepare(sql: string): {
@@ -194,6 +195,63 @@ async function run() {
       const isolated = await readServerShowcaseAccess(env, id, inactive);
       assert.equal(isolated.source, "billing", id); assert.equal(canUseShowcaseFeature(isolated, "gallery_images"), false, id);
     }
+  });
+  await test("exact grant enables NukeTown Server Wars hosting without fabricating billing", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const locked = await getOwnerServerWarsPayload(env, actor, scope.linkedServerId);
+    assert.equal(locked.ok, true);
+    if (!locked.ok) throw new Error("Expected owner Server Wars payload");
+    assert.equal(locked.access.canCreateChallenge, false);
+    assert.equal(locked.access.accessSource, "billing");
+
+    await grant(env);
+    const unlocked = await getOwnerServerWarsPayload(env, actor, scope.linkedServerId);
+    assert.equal(unlocked.ok, true);
+    if (!unlocked.ok) throw new Error("Expected owner Server Wars payload");
+    assert.equal(unlocked.access.configuredPlan, "pro");
+    assert.equal(unlocked.access.effectivePlan, "pro");
+    assert.equal(unlocked.access.subscriptionStatus, "canceled");
+    assert.equal(unlocked.access.accessSource, "complimentary_showcase");
+    assert.equal(unlocked.access.canCreateChallenge, true);
+
+    const opponents = await getServerWarOpponentOptions(env, actor, scope.linkedServerId, "NukeTown", "deathmatch_war");
+    assert.equal(opponents.ok, true);
+    if (!opponents.ok) throw new Error("Expected Server Wars opponents");
+    assert.ok(opponents.servers.some(server => server.id === "foreign-owner-server"));
+
+    const created = await createServerWarChallenge(env, actor, scope.linkedServerId, {
+      opponentServerId: "foreign-owner-server",
+      rulesetKey: "deathmatch_war",
+      title: "NukeTown exact grant challenge",
+    });
+    assert.equal(created.ok, true);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_war_events").get()?.n, 1);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_war_participants").get()?.n, 2);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_war_challenges").get()?.n, 1);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+
+    const unrelated = await getOwnerServerWarsPayload(env, actor, "same-guild-other-server");
+    assert.equal(unrelated.ok, true);
+    if (!unrelated.ok) throw new Error("Expected unrelated owner Server Wars payload");
+    assert.equal(unrelated.access.accessSource, "billing");
+    assert.equal(unrelated.access.canCreateChallenge, false);
+  });
+  await test("revoked exact grant rolls back the complete Server Wars challenge write", async ({ db, env }) => {
+    const grantId = await grant(env);
+    db.beforeBatch = () => revokeSql(db, grantId);
+    const result = await createServerWarChallenge(env, actor, scope.linkedServerId, {
+      opponentServerId: "foreign-owner-server",
+      rulesetKey: "deathmatch_war",
+      title: "Revoked grant challenge",
+    });
+    db.beforeBatch = null;
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 403);
+    assert.equal(result.error, "plan_locked");
+    for (const table of ["server_war_events", "server_war_participants", "server_war_challenges"]) {
+      assert.equal(db.sqlite.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.n, 0, table);
+    }
+    assert.equal(db.sqlite.prepare("SELECT status FROM server_subscriptions").get()?.status, "canceled");
   });
   await test("active paid Pro takes precedence over a matching complimentary grant", async ({ db, env }) => {
     const grantId = await grant(env);
