@@ -22,6 +22,12 @@ type PostingDestination = {
   enabled: number;
 };
 
+type DuePostingDestination = PostingDestination & {
+  destination_id: string;
+  last_edited_at: string | null;
+  cursor_edited_at: string;
+};
+
 type PostingState = {
   discord_message_id: string | null;
   last_payload_hash: string | null;
@@ -388,23 +394,6 @@ async function processConfiguredPostingDestination(
 
 async function processDuePostingDestinations(env: Env, options: { maxJobs: number; guildId?: string; force?: boolean; budget?: DiscordDispatchBudget }) {
   const db = requireDb(env);
-  const rows = await db
-    .prepare(
-      `SELECT destinations.guild_id, destinations.post_type, destinations.discord_channel_id,
-              destinations.discord_webhook_url, destinations.enabled,
-              state.last_edited_at
-       FROM server_posting_destinations AS destinations
-       LEFT JOIN server_posting_state AS state
-         ON state.guild_id = destinations.guild_id
-        AND state.post_type = destinations.post_type
-        AND state.discord_channel_id = destinations.discord_channel_id
-       WHERE (? IS NULL OR destinations.guild_id = ?)
-         AND COALESCE(destinations.enabled, 0) = 1
-       ORDER BY COALESCE(state.last_edited_at, '1970-01-01T00:00:00.000Z') ASC`,
-    )
-    .bind(options.guildId ?? null, options.guildId ?? null)
-    .all<PostingDestination & { last_edited_at: string | null }>();
-
   let processed = 0;
   let edited = 0;
   let sent = 0;
@@ -413,40 +402,91 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
   let budgetExhausted = false;
   const results: DiscordPostDispatchDetail[] = [];
   const accessByGuild = new Map<string, Awaited<ReturnType<typeof resolveDiscordPublishingAccessForGuild>>>();
+  const pageSize = Math.max(4, Math.min(options.maxJobs * 4, 100));
+  let cursorEditedAt: string | null = null;
+  let cursorDestinationId = "";
+  let exhausted = false;
 
-  for (const row of rows.results ?? []) {
+  while (!exhausted && processed < options.maxJobs) {
     if (options.budget && isDiscordDispatchBudgetLow(options.budget)) {
       budgetExhausted = true;
       break;
     }
-    if (processed >= options.maxJobs) break;
-    let publishingAccess = accessByGuild.get(row.guild_id);
-    if (!publishingAccess) {
-      publishingAccess = await resolveDiscordPublishingAccessForGuild(env, row.guild_id);
-      accessByGuild.set(row.guild_id, publishingAccess);
+    const pageResult: D1Result<DuePostingDestination> = await db
+      .prepare(
+        `SELECT destinations.id AS destination_id, destinations.guild_id, destinations.post_type,
+                destinations.discord_channel_id, destinations.discord_webhook_url, destinations.enabled,
+                state.last_edited_at,
+                COALESCE(state.last_edited_at, '1970-01-01T00:00:00.000Z') AS cursor_edited_at
+         FROM server_posting_destinations AS destinations
+         LEFT JOIN server_posting_state AS state
+           ON state.guild_id = destinations.guild_id
+          AND state.post_type = destinations.post_type
+          AND state.discord_channel_id = destinations.discord_channel_id
+         WHERE (? IS NULL OR destinations.guild_id = ?)
+           AND COALESCE(destinations.enabled, 0) = 1
+           AND (
+             ? IS NULL
+             OR COALESCE(state.last_edited_at, '1970-01-01T00:00:00.000Z') > ?
+             OR (
+               COALESCE(state.last_edited_at, '1970-01-01T00:00:00.000Z') = ?
+               AND destinations.id > ?
+             )
+           )
+         ORDER BY cursor_edited_at ASC, destinations.id ASC
+         LIMIT ?`,
+      )
+      .bind(
+        options.guildId ?? null,
+        options.guildId ?? null,
+        cursorEditedAt,
+        cursorEditedAt,
+        cursorEditedAt,
+        cursorDestinationId,
+        pageSize,
+      )
+      .all<DuePostingDestination>();
+    const page: DuePostingDestination[] = pageResult.results ?? [];
+    exhausted = page.length < pageSize;
+    if (page.length === 0) break;
+
+    for (const row of page) {
+      cursorEditedAt = row.cursor_edited_at;
+      cursorDestinationId = row.destination_id;
+      if (options.budget && isDiscordDispatchBudgetLow(options.budget)) {
+        budgetExhausted = true;
+        break;
+      }
+      if (processed >= options.maxJobs) break;
+      let publishingAccess = accessByGuild.get(row.guild_id);
+      if (!publishingAccess) {
+        publishingAccess = await resolveDiscordPublishingAccessForGuild(env, row.guild_id);
+        accessByGuild.set(row.guild_id, publishingAccess);
+      }
+      if (!["active_live", "active_degraded"].includes(publishingAccess.lifecycleStatus)) continue;
+      const listingContext = { plan_key: publishingAccess.planKey, subscription_status: publishingAccess.subscriptionStatus };
+      if (!hasListingAutoPost(listingContext, row.post_type)) continue;
+      if (!options.force && !isAutoPostDue(row.post_type, normalizeListingPlanKey(listingContext), row.last_edited_at)) continue;
+      processed += 1;
+      try {
+        const result = await processConfiguredPostingDestination(env, row, listingContext, { force: options.force });
+        results.push(result);
+        if (result.status === "edited") edited += 1;
+        else if (result.status === "sent" || result.status === "success") sent += 1;
+        else skipped += 1;
+      } catch (error) {
+        failed += 1;
+        results.push({
+          guild_id: row.guild_id,
+          post_type: row.post_type,
+          channel_id: row.discord_channel_id,
+          status: "failed",
+          message_id: null,
+          reason: error instanceof Error ? error.message : "Discord post update failed",
+        });
+      }
     }
-    if (!["active_live", "active_degraded"].includes(publishingAccess.lifecycleStatus)) continue;
-    const listingContext = { plan_key: publishingAccess.planKey, subscription_status: publishingAccess.subscriptionStatus };
-    if (!hasListingAutoPost(listingContext, row.post_type)) continue;
-    if (!options.force && !isAutoPostDue(row.post_type, normalizeListingPlanKey(listingContext), row.last_edited_at)) continue;
-    processed += 1;
-    try {
-      const result = await processConfiguredPostingDestination(env, row, listingContext, { force: options.force });
-      results.push(result);
-      if (result.status === "edited") edited += 1;
-      else if (result.status === "sent" || result.status === "success") sent += 1;
-      else skipped += 1;
-    } catch (error) {
-      failed += 1;
-      results.push({
-        guild_id: row.guild_id,
-        post_type: row.post_type,
-        channel_id: row.discord_channel_id,
-        status: "failed",
-        message_id: null,
-        reason: error instanceof Error ? error.message : "Discord post update failed",
-      });
-    }
+    if (budgetExhausted) break;
   }
 
   return { processed, edited, sent, posted: edited + sent, skipped, failed, budgetExhausted, results };
@@ -468,9 +508,33 @@ async function resolveDiscordPublishingAccessForGuild(env: Env, guildId: string)
     .all<{ id: string; plan_key: string | null; status: string | null; lifecycle_status: string | null }>();
   const rows = result.results ?? [];
   const activeBillingRows = rows.filter((row) => ["active", "trialing"].includes(String(row.status ?? "").toLowerCase()));
-  const activeBilling = activeBillingRows.find((row) => normalizeListingPlanKey(row.plan_key, row.status) === "pro"
+  const activeProBilling = activeBillingRows.find((row) => normalizeListingPlanKey(row.plan_key, row.status) === "pro"
     && ["active_live", "active_degraded"].includes(String(row.lifecycle_status ?? "active_live")))
-    ?? activeBillingRows.find((row) => ["active_live", "active_degraded"].includes(String(row.lifecycle_status ?? "active_live")))
+    ?? activeBillingRows.find((row) => normalizeListingPlanKey(row.plan_key, row.status) === "pro");
+  if (activeProBilling) {
+    return {
+      planKey: normalizePlanKey(activeProBilling.plan_key),
+      subscriptionStatus: activeProBilling.status ?? "inactive",
+      lifecycleStatus: String(activeProBilling.lifecycle_status ?? "active_live"),
+      accessSource: "billing" as const,
+    };
+  }
+
+  const eligibleServerIds = [...new Set(rows
+    .filter((row) => ["active_live", "active_degraded"].includes(String(row.lifecycle_status ?? "active_live")))
+    .map((row) => row.id))];
+  const baseline = eligibleServerIds.length === 1 ? rows.find((row) => row.id === eligibleServerIds[0]) : undefined;
+  if (baseline) {
+    const access = await readServerShowcaseAccess(env, baseline.id, {
+      plan_key: baseline.plan_key,
+      subscription_status: baseline.status,
+    });
+    if (access.source === "complimentary_showcase") {
+      return { planKey: "pro" as const, subscriptionStatus: "active", lifecycleStatus: "active_live", accessSource: access.source };
+    }
+  }
+
+  const activeBilling = activeBillingRows.find((row) => ["active_live", "active_degraded"].includes(String(row.lifecycle_status ?? "active_live")))
     ?? activeBillingRows[0];
   if (activeBilling) {
     return {
@@ -480,27 +544,15 @@ async function resolveDiscordPublishingAccessForGuild(env: Env, guildId: string)
       accessSource: "billing" as const,
     };
   }
-
-  const eligibleServerIds = [...new Set(rows
-    .filter((row) => ["active_live", "active_degraded"].includes(String(row.lifecycle_status ?? "active_live")))
-    .map((row) => row.id))];
-  if (eligibleServerIds.length !== 1) {
+  if (!baseline) {
     return { planKey: "free" as const, subscriptionStatus: "inactive", lifecycleStatus: "ineligible", accessSource: "billing" as const };
   }
-  const baseline = rows.find((row) => row.id === eligibleServerIds[0]);
-  const access = await readServerShowcaseAccess(env, eligibleServerIds[0], {
-    plan_key: baseline?.plan_key ?? null,
-    subscription_status: baseline?.status ?? null,
-  });
-  if (access.source !== "complimentary_showcase") {
-    return {
-      planKey: normalizePlanKey(baseline?.plan_key),
-      subscriptionStatus: baseline?.status ?? "inactive",
-      lifecycleStatus: String(baseline?.lifecycle_status ?? "active_live"),
-      accessSource: "billing" as const,
-    };
-  }
-  return { planKey: "pro" as const, subscriptionStatus: "active", lifecycleStatus: "active_live", accessSource: access.source };
+  return {
+    planKey: normalizePlanKey(baseline.plan_key),
+    subscriptionStatus: baseline.status ?? "inactive",
+    lifecycleStatus: String(baseline.lifecycle_status ?? "active_live"),
+    accessSource: "billing" as const,
+  };
 }
 
 export async function dispatchDiscordPostsForGuild(env: Env, guildId: string, options: { maxJobs?: number; force?: boolean } = {}) {

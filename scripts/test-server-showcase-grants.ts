@@ -323,6 +323,22 @@ async function run() {
     assert.equal(dispatched.results[0]?.status, "no_message_id");
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
   });
+  await test("exact grant outranks active Starter only for NukeTown Discord dispatch", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'starter', status = 'active'").run();
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    db.sqlite.prepare(`INSERT INTO server_posting_destinations (
+      id, guild_id, post_type, discord_channel_id, enabled, created_by_discord_id, created_at, updated_at
+    ) VALUES (?, ?, 'priority_status_embed', '99999999', 1, ?, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`)
+      .run(randomUUID(), scope.guildId, actor.discord_id);
+
+    const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    assert.equal(dispatched.processed, 1);
+    assert.equal(dispatched.results[0]?.guild_id, scope.guildId);
+    assert.equal(dispatched.results[0]?.status, "no_message_id");
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
   await test("revoked exact grant blocks a previously queued Discord publish", async ({ db, env }) => {
     const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
     const grantId = await grant(env);
