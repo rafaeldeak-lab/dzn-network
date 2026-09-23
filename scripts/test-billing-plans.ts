@@ -261,6 +261,9 @@ for (const snippet of ["Starter", "Pro", "PAYMENT_COPY.starterOffer", "PAYMENT_C
   assert.ok(pricingSection.includes(snippet), `Dedicated pricing must contain ${snippet}`);
 }
 assert.equal(pricingSection.includes("<table"), false, "Pricing comparison should use the responsive mobile-first layout, not the old fixed table.");
+assert.equal(pricingSection.includes('"Seasonal participation where events allow"'), false, "Pricing must not present shared seasonal participation as Pro-only.");
+assert.equal(pricingSection.includes('"Subscription billing portal"'), false, "Pricing must not present the shared billing portal as Pro-only.");
+assert.equal(pricingSection.includes("sm:sr-only"), true, "Desktop comparison values must retain accessible Starter and Pro labels.");
 assert.equal(/Premium|Partner Listing|Network plan|Partner plan/.test(pricingSection), false);
 assert.equal(/paid leaderboard rank|leaderboard rank boost|buy better leaderboard/i.test(pricingSection), false);
 assert.ok(landingSource.includes('href="/pricing"'));

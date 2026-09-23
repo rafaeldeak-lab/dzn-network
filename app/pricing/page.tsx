@@ -73,13 +73,13 @@ const proFeatureGroups = [
     icon: Swords,
     title: "Events and Server Wars",
     summary: "Host community competition while keeping every score and result plan-neutral.",
-    features: ["Server Wars challenge-hosting tools", "Event announcements and leaderboard posts", "Server-vs-server progress Discord posts", "Public network-ranking posts", "Seasonal participation where events allow", "No paid score, rank or gameplay advantage"],
+    features: ["Server Wars challenge-hosting tools", "Official event-hosting tools", "Event announcements and leaderboard posts", "Server-vs-server progress Discord posts", "Public network-ranking posts", "No paid score, rank or gameplay advantage"],
   },
   {
     icon: Radar,
     title: "Faster owner operations",
     summary: "Run more servers with shorter eligible refresh windows and one billing portal.",
-    features: ["Up to 3 linked DayZ servers", "5-minute server-status cadence", "10-minute ADM discovery cadence", "Priority refresh capability", "Owner announcements", "Subscription billing portal"],
+    features: ["Up to 3 linked DayZ servers", "5-minute server-status cadence", "10-minute ADM discovery cadence", "Priority refresh capability", "Owner announcements", "Advanced listing analytics"],
   },
 ] as const;
 
@@ -274,7 +274,7 @@ function FeatureComparisonRow({ label, starterValue, proValue }: { label: string
 
 function ComparisonValue({ plan, value, tone }: { plan: string; value: string | null; tone: "cyan" | "amber" }) {
   const Icon = value ? Check : X;
-  return <div className="flex items-start gap-2 text-sm font-semibold leading-5 text-zinc-300"><span className="w-16 shrink-0 text-xs font-black uppercase text-zinc-500 sm:hidden">{plan}</span><Icon aria-hidden="true" className={`mt-0.5 h-4 w-4 shrink-0 ${value ? tone === "amber" ? "text-amber-200" : "text-cyan-200" : "text-zinc-600"}`} /><span>{value ?? "Not included"}</span></div>;
+  return <div className="flex items-start gap-2 text-sm font-semibold leading-5 text-zinc-300"><span className="w-16 shrink-0 text-xs font-black uppercase text-zinc-500 sm:sr-only">{plan}</span><Icon aria-hidden="true" className={`mt-0.5 h-4 w-4 shrink-0 ${value ? tone === "amber" ? "text-amber-200" : "text-cyan-200" : "text-zinc-600"}`} /><span>{value ?? "Not included"}</span></div>;
 }
 
 function slugify(value: string) {
