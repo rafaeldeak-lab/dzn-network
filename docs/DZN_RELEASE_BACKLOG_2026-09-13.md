@@ -40,6 +40,21 @@ dashboard verification defect, not evidence that the installed bot must be
 reinstalled. See `DZN_DISCORD_DISCOVERY_RECOVERY_2026-09-13.md`. Message delivery,
 automatic-post configuration and owner approval notifications remain separate.
 
+The following bounded implementation connects the exact NukeTown showcase grant
+to owner dashboard health, Advanced Showcase and advertising/bump reads. The UI
+separates `Pro Listing (complimentary)` from account billing, loads the read-only
+summary only when visible, and flags a past date on an otherwise active billing
+record for review. It does not rewrite a subscription, renewal date or account
+server allowance. Scheduler, event-host and Discord-publishing consumers remain
+separate work. The exact lifetime event total remains unavailable until a
+dedicated durable aggregate exists; partial durable counters are not presented as
+that total. Other headline metrics use `server_stats` when present and a
+hard-bounded fallback otherwise. Player, build, travel and exploration boards
+are bounded, locked accounts skip raw event reconstruction, and owner analytics
+responses use `no-store`.
+Complimentary bumps revalidate the exact grant inside the write so a concurrent
+revocation cannot consume the old cadence.
+
 ## Remaining Work Groups
 
 | Requests | Remaining work | Important boundary |
@@ -61,7 +76,7 @@ automatic-post configuration and owner approval notifications remain separate.
 - NukeTown service 18765761: durable exact-server Pro-equivalent access without a fake paid subscription, no grants to other servers, and preserve the user's normal bot-aligned restart schedule. Reverify live entitlement/protected-feature payloads before reporting current status.
 - Nitrado: genuine automatic import was proved on September 12 by two persisted kill rows and five joins in one `scheduled_nitrado` job, matched to its exact server, service and stored source lines. This corrects the previous unproved-first-event wording. Sustained recovery remains open: the inspected lifecycle was still degraded, Discord queueing warned, and event timestamp normalization/hash coverage need review. Recheck current health; that point-in-time proof is not continuous-sync certification.
 - Bot host: September 13 read-only inspection found the working `pandora.service` active and the latest hourly reset completed, with the existing Europe/London schedule unchanged. A separate obsolete `pandora-bot.service` repeatedly fails because its virtualenv Python is missing. Root storage had only 202 MB free. Disabling only the obsolete unit was presented for specific approval; no service action or disk deletion accompanied this website change.
-- Dashboard: stale renewal date, undefined bump allowance, advanced showcase state and plan labels. Reverify current payloads and rendering before closing.
+- Dashboard: selected-server plan labels, bump details and Advanced Showcase are implemented for the exact complimentary grant in the current bounded release. Complete rendered and live post-release verification before closing; account billing verification remains separate because the source record still reports an active plan with a past period end.
 - FED & FERAL: real owner setup/recovery, current token association, verification, lifecycle, scheduled import and continuing sync proof.
 - Genuine player account linking: exact server/player provenance, owner approval/decline with reason, server-scoped revocation, player notice and preserved history.
 - Discord and website notifications: show who is requesting what for which server; authorized owner decisions and restricted channels only. Platform-owner console needs searchable audited request/decision/support timelines.

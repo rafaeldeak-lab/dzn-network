@@ -455,7 +455,7 @@ export async function updateServerListing(env: Env, user: SessionUser | null, li
     return { status: 400, payload: { ok: false, error: "VALIDATION_FAILED", message: "Listing media fields contain an invalid or unsafe value." } };
   }
 
-  const writeGuard = showcaseWriteGuard(resolvedLinkedServerId, server.user_id ?? "", showcaseAccess);
+  const writeGuard = await showcaseWriteGuard(env, resolvedLinkedServerId, server.user_id ?? "", showcaseAccess);
   const update = await requireDb(env).prepare(
     `UPDATE linked_servers SET
       public_description = ?,

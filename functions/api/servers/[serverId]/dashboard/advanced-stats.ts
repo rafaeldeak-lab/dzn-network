@@ -1,11 +1,8 @@
 import { getSessionUser } from "../../../../_lib/db";
+import { getServerAdvancedShowcasePayload } from "../../../../_lib/advanced-leaderboards";
 import { json, methodNotAllowed } from "../../../../_lib/http";
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
 import type { PagesFunction } from "../../../../_lib/types";
-
-const PRIVATE_HEADERS = {
-  "cache-control": "private, max-age=20",
-};
 
 export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
   const linkedServerId = sanitizeParam(params.serverId);
@@ -27,18 +24,26 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
   }
 
   try {
-    const payload = await readDurableAdvancedStatsSnapshot(linkedServerId);
+    const payload = await getServerAdvancedShowcasePayload(env, linkedServerId, {
+      ownerScoped: true,
+      overlayLimit: 220,
+    });
     if (!payload) {
-      return json(advancedStatsPending(), { headers: PRIVATE_HEADERS });
+      return json(advancedStatsPending());
     }
-    return json(payload, { headers: PRIVATE_HEADERS });
+    return json({
+      ...payload,
+      available: true,
+      stale: false,
+      reason: null,
+    });
   } catch (error) {
     console.warn("DZN DASHBOARD ADVANCED STATS LOAD FAILED", safeError(error));
     return json({
       ...advancedStatsPending(),
       reason: "advanced_stats_snapshot_unavailable",
       warning: "Advanced showcase data is temporarily unavailable. Core dashboard stats remain live.",
-    }, { headers: PRIVATE_HEADERS });
+    });
   }
 };
 
@@ -50,13 +55,6 @@ function sanitizeParam(value: unknown) {
   const raw = Array.isArray(value) ? value[0] : value;
   if (typeof raw !== "string") return "";
   return raw.trim().slice(0, 96);
-}
-
-async function readDurableAdvancedStatsSnapshot(_linkedServerId: string) {
-  // Durable advanced analytics snapshots are produced outside the dashboard GET
-  // path. Until one exists, the route intentionally degrades instead of
-  // rebuilding travel/exploration analytics from raw ADM event tables.
-  return null;
 }
 
 function advancedStatsPending() {

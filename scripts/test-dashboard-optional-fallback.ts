@@ -7,6 +7,7 @@ function source(path: string) {
 }
 
 const advancedStatsRoute = source("functions/api/servers/[serverId]/dashboard/advanced-stats.ts");
+const advancedStatsBuilder = source("functions/_lib/advanced-leaderboards.ts");
 const warsRoute = source("functions/api/servers/[serverId]/wars/index.ts");
 const recentEventsRoute = source("functions/api/sync/recent-events.ts");
 const postingDestinationsRoute = source("functions/api/servers/[serverId]/posting-destinations.ts");
@@ -16,13 +17,21 @@ const dashboardSource = source("components/onboarding/dashboard.tsx");
 
 assert.equal(
   advancedStatsRoute.includes("getServerAdvancedShowcasePayload"),
-  false,
-  "Advanced Stats GET must not reconstruct heavy showcase analytics on demand.",
+  true,
+  "Advanced Stats GET must load the selected server's bounded aggregate showcase.",
 );
+assert.equal(advancedStatsRoute.includes("ownerScoped: true"), true, "Advanced Stats must resolve the authenticated owner's exact server.");
+assert.equal(advancedStatsBuilder.includes("SERVER_ADVANCED_CACHE_TTL_MS"), true, "Advanced Stats aggregation must remain short-lived cached.");
+assert.equal(advancedStatsBuilder.includes("SERVER_ADVANCED_EVENT_SAMPLE_LIMIT = 6_000"), true, "Advanced Stats event reads must have an explicit hard bound.");
+assert.equal(advancedStatsBuilder.includes("sampled_kill_events"), true, "Advanced Stats player rankings must aggregate a bounded kill sample.");
+assert.equal(advancedStatsBuilder.includes("sampled_build_events"), true, "Advanced Stats build rankings must aggregate a bounded build sample.");
+assert.equal(advancedStatsBuilder.includes("FROM server_stats"), true, "Advanced Stats lifetime headline totals must use the durable aggregate.");
+assert.equal(advancedStatsBuilder.includes("lockedOwnerAnalytics\n    ? [await canonicalPromise, [], [], []]"), true, "Locked owner accounts must skip raw event reconstruction.");
+assert.equal(advancedStatsBuilder.includes("readServerShowcaseAccess"), true, "Advanced Stats must resolve exact-server complimentary access without rewriting billing.");
 assert.equal(
   advancedStatsRoute.includes("advanced_stats_snapshot_pending"),
   true,
-  "Advanced Stats GET must return a controlled pending snapshot state.",
+  "Advanced Stats GET must retain a controlled fallback when aggregation is unavailable.",
 );
 assert.equal(
   advancedStatsRoute.includes("available: false"),

@@ -95,7 +95,7 @@ assert.equal(/ensureMockUser|isMockAuth/.test(bumpRoute), false, "Bump route mus
 const galleryRoute = readFileSync("functions/api/servers/[serverId]/gallery.ts", "utf8");
 for (const snippet of [
   "canUseShowcaseFeature(access, \"gallery_images\")",
-  "showcaseWriteGuard(server.id, server.user_id, access)",
+  "await showcaseWriteGuard(env, server.id, server.user_id, access)",
   "db.batch(statements)",
   "Pro Listing supports up to",
   "galleryAllowedMimeTypes",

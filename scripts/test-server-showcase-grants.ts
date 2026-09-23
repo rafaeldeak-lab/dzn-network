@@ -17,6 +17,11 @@ import { getAvailableShowcaseBadgesForServer, resolvePublicServerVisualLoadout, 
 import { getAvailableFrameVisuals, getAvailableThemeBannerVisuals } from "../lib/badges/visuals";
 import { getPublicServersPayload, onRequest as publicServers, refreshPublicShowcaseSnapshot } from "../functions/api/public/servers";
 import { formatPublicVisibilitySummary, publicListingPlanLabel, publicVisibilityTierLabel } from "../lib/showcase-labels";
+import { getPublicAdvancedLeaderboardsPayload, getServerAdvancedShowcasePayload, queryPositionSamples } from "../functions/_lib/advanced-leaderboards";
+import { onRequestGet as dashboardAdvancedStats } from "../functions/api/servers/[serverId]/dashboard/advanced-stats";
+import { onRequestGet as dashboardHealth } from "../functions/api/servers/[serverId]/dashboard/health";
+import { onRequest as advertisingBump } from "../functions/api/servers/[serverId]/advertising/bump";
+import { dashboardSelectedServerAccess } from "../components/onboarding/dashboard-detail-display";
 
 type Row = Record<string, unknown>;
 type Sqlite = { exec(sql: string): void; close(): void; prepare(sql: string): {
@@ -29,6 +34,8 @@ class LocalD1 {
   sqlite = new DatabaseSync(":memory:");
   beforeWrite: ((sql: string) => void) | null = null;
   beforeBatch: (() => void) | null = null;
+  beforeFirst: ((sql: string) => void | Promise<void>) | null = null;
+  afterFirst: ((sql: string, value: Row | null) => void | Promise<void>) | null = null;
   prepare(sql: string) {
     const statement = (values: unknown[] = []) => ({
       bind: (...args: unknown[]) => statement(args),
@@ -37,7 +44,12 @@ class LocalD1 {
         if (/^\s*SELECT\b/i.test(sql)) return { success: true, results: this.sqlite.prepare(sql).all(...values), meta: { changes: 0 } };
         return { success: true, results: [], meta: this.sqlite.prepare(sql).run(...values) };
       },
-      first: async () => this.sqlite.prepare(sql).get(...values) ?? null,
+      first: async () => {
+        await this.beforeFirst?.(sql);
+        const value = this.sqlite.prepare(sql).get(...values) ?? null;
+        await this.afterFirst?.(sql, value);
+        return value;
+      },
       all: async () => ({ success: true, results: this.sqlite.prepare(sql).all(...values) }),
     });
     return statement();
@@ -102,6 +114,22 @@ async function grant(env: Env) {
   assert.equal(result.status, 200);
   return requestId;
 }
+function grantExpiring(db: LocalD1, seconds = 1) {
+  const id = randomUUID();
+  db.sqlite.prepare(`INSERT INTO server_showcase_grants (
+    id, linked_server_id, owner_user_id, owner_discord_id, guild_id, nitrado_service_id,
+    created_by_user_id, created_at, expires_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 second'),
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?))`)
+    .run(id, scope.linkedServerId, scope.ownerUserId, scope.ownerDiscordId, scope.guildId,
+      scope.nitradoServiceId, actor.id, `+${seconds} seconds`);
+  const expiresAt = String(db.sqlite.prepare("SELECT expires_at FROM server_showcase_grants WHERE id = ?").get(id)?.expires_at);
+  return { id, expiresAt };
+}
+function waitUntilAfter(iso: string) {
+  const waitMs = Math.max(0, Date.parse(iso) - Date.now() + 50);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+}
 function revokeSql(db: LocalD1, id: string) {
   db.sqlite.prepare("UPDATE server_showcase_grants SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), revocation_reason = 'support_correction' WHERE id = ?").run(id);
 }
@@ -143,6 +171,15 @@ async function run() {
     assert.equal((await readServerShowcaseAccess(env, scope.linkedServerId, inactive)).source, "billing");
     assert.equal((await readServerShowcaseAccess(env, scope.linkedServerId, { plan_key: "premium", subscription_status: "active" })).listing.listingPlanKey, "pro");
   }, false);
+  await test("advertising GET stays read-only when owner billing schema is unavailable", async ({ db, env }) => {
+    db.sqlite.exec("DROP TABLE owner_billing_accounts");
+    const response = await invoke(advertisingBump, env, actor, "GET", undefined, "same-guild-other-server");
+    assert.equal(response.status, 200);
+    const body = await response.json() as { advertising: { effective_listing_plan: string; access_source: string } };
+    assert.equal(body.advertising.effective_listing_plan, "free");
+    assert.equal(body.advertising.access_source, "billing");
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'owner_billing_accounts'").get()?.count, 0);
+  });
   await test("exact grant enables Pro listing without a paid subscription or account slots", async ({ db, env }) => {
     await upsertBillingAccount(env, { discordUserId: actor.discord_id, planKey: "free", planStatus: "free" });
     const entitlements = await getOwnerEntitlements(env, actor.discord_id);
@@ -157,6 +194,894 @@ async function run() {
       const isolated = await readServerShowcaseAccess(env, id, inactive);
       assert.equal(isolated.source, "billing", id); assert.equal(canUseShowcaseFeature(isolated, "gallery_images"), false, id);
     }
+  });
+  await test("active paid Pro takes precedence over a matching complimentary grant", async ({ db, env }) => {
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE server_subscriptions SET status = 'active'").run();
+
+    for (const planKey of ["pro", "premium", "network", "partner"]) {
+      const access = await readServerShowcaseAccess(env, scope.linkedServerId, {
+        plan_key: planKey,
+        subscription_status: "active",
+      });
+      assert.equal(access.source, "billing", planKey);
+      assert.equal(access.grantId, null, planKey);
+      assert.equal(access.listing.listingPlanKey, "pro", planKey);
+    }
+
+    const advanced = await (await invoke(dashboardAdvancedStats, env, actor, "GET")).json() as {
+      access: { source: string; subscriptionActive: boolean };
+    };
+    assert.equal(advanced.access.source, "billing");
+    assert.equal(advanced.access.subscriptionActive, true);
+
+    const health = await (await invoke(dashboardHealth, env, actor, "GET")).json() as {
+      server_access: { source: string };
+    };
+    assert.equal(health.server_access.source, "billing");
+
+    const advertising = await (await invoke(advertisingBump, env, actor, "GET")).json() as {
+      advertising: { access_source: string };
+    };
+    assert.equal(advertising.advertising.access_source, "billing");
+
+    let revoked = false;
+    db.beforeWrite = (sql) => {
+      if (revoked || !/INSERT INTO server_listing_events/.test(sql)) return;
+      revoked = true;
+      revokeSql(db, grantId);
+    };
+    const bumpResponse = await invoke(advertisingBump, env, actor, "POST", {});
+    db.beforeWrite = null;
+    assert.equal(revoked, true);
+    assert.equal(bumpResponse.status, 200);
+    assert.equal((await bumpResponse.json() as { server_access: { source: string } }).server_access.source, "billing");
+  });
+  await test("exact grant unlocks bounded owner analytics and weekly bumps without changing billing", async ({ db, env }) => {
+    seedPublicMedia(db);
+    const billingBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    await grant(env);
+
+    const advanced = await getServerAdvancedShowcasePayload(env, scope.linkedServerId, { ownerScoped: true, overlayLimit: 220 });
+    assert.ok(advanced);
+    assert.equal(advanced.access.source, "complimentary_showcase");
+    assert.equal(advanced.access.effectivePlan, "pro");
+    assert.equal(advanced.access.subscriptionActive, false);
+    assert.equal(advanced.access.dashboardAnalytics, true);
+    assert.ok(advanced.boards.every(board => !board.locked));
+
+    const advancedResponse = await invoke(dashboardAdvancedStats, env, actor, "GET");
+    assert.equal(advancedResponse.status, 200);
+    assert.match(advancedResponse.headers.get("cache-control") ?? "", /no-store/);
+    assert.doesNotMatch(advancedResponse.headers.get("cache-control") ?? "", /max-age/);
+    assert.equal(advancedResponse.headers.get("pragma"), "no-cache");
+    const advancedBody = await advancedResponse.json() as { available: boolean; access: { source: string; subscriptionActive: boolean } };
+    assert.equal(advancedBody.available, true);
+    assert.equal(advancedBody.access.source, "complimentary_showcase");
+    assert.equal(advancedBody.access.subscriptionActive, false);
+
+    const healthResponse = await invoke(dashboardHealth, env, actor, "GET");
+    assert.equal(healthResponse.status, 200);
+    const healthBody = await healthResponse.json() as {
+      current_plan: string;
+      configured_plan: string;
+      subscription_status: string;
+      server_access: { source: string; effectiveListingPlan: string };
+      plan_limits: { status_interval_minutes: number; adm_discovery_interval_minutes: number; adm_processing_interval_minutes: number };
+      warnings: string[];
+    };
+    assert.equal(healthBody.current_plan, "free");
+    assert.equal(healthBody.configured_plan, "pro");
+    assert.equal(healthBody.subscription_status, "canceled");
+    assert.equal(healthBody.server_access.source, "complimentary_showcase");
+    assert.equal(healthBody.server_access.effectiveListingPlan, "pro");
+    assert.deepEqual(healthBody.plan_limits, { status_interval_minutes: 60, adm_discovery_interval_minutes: 60, adm_processing_interval_minutes: 1440 });
+    assert.equal(healthBody.warnings.includes("subscription_not_active"), true);
+
+    const advertisingResponse = await invoke(advertisingBump, env, actor, "GET");
+    assert.equal(advertisingResponse.status, 200);
+    const advertisingBody = await advertisingResponse.json() as {
+      advertising: { access_source: string; effective_listing_plan: string; bump_cooldown_days: number; included_bumps_per_month: number };
+      server_access: { source: string };
+    };
+    assert.equal(advertisingBody.advertising.access_source, "complimentary_showcase");
+    assert.equal(advertisingBody.advertising.effective_listing_plan, "pro");
+    assert.equal(advertisingBody.advertising.bump_cooldown_days, 7);
+    assert.equal(advertisingBody.advertising.included_bumps_per_month, 2);
+    assert.equal(advertisingBody.server_access.source, "complimentary_showcase");
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), billingBefore);
+  });
+  await test("owner analytics resolve only the exact server authorized by id", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE linked_servers SET public_slug = ? WHERE id = ?")
+      .run("same-guild-public", "same-guild-other-server");
+    db.sqlite.prepare("UPDATE linked_servers SET user_id = ?, public_slug = ? WHERE id = ?")
+      .run(other.id, "same-guild-other-server", scope.linkedServerId);
+
+    const response = await invoke(dashboardAdvancedStats, env, actor, "GET", undefined, "same-guild-other-server");
+    assert.equal(response.status, 200);
+    const body = await response.json() as { server: { id: string } };
+    assert.equal(body.server.id, "same-guild-other-server");
+  });
+  await test("complimentary bump starts a fresh period when owner billing dates are stale", async ({ db, env }) => {
+    await upsertBillingAccount(env, {
+      discordUserId: actor.discord_id,
+      planKey: "free",
+      planStatus: "free",
+      currentPeriodStart: "2026-06-18T00:00:00.000Z",
+      currentPeriodEnd: "2026-07-18T00:00:00.000Z",
+    });
+    await grant(env);
+    const billingBefore = db.sqlite.prepare("SELECT * FROM owner_billing_accounts WHERE discord_user_id = ?").get(actor.discord_id);
+    db.sqlite.prepare(`INSERT INTO server_advertising_state (
+        linked_server_id, owner_discord_id, last_bumped_at, next_bump_at,
+        bump_count_current_period, bump_period_start, bump_period_end, updated_at
+      ) VALUES (?, ?, '2026-06-01T00:00:00.000Z', '2026-06-08T00:00:00.000Z', 2,
+        '2026-06-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z')`)
+      .run(scope.linkedServerId, actor.discord_id);
+
+    const originalNow = Date.now;
+    let now = originalNow();
+    Date.now = () => now;
+    try {
+      const bumpResponse = await invoke(advertisingBump, env, actor, "POST", {});
+      assert.equal(bumpResponse.status, 200);
+      const bump = await bumpResponse.json() as {
+        advertising: { bump_count_current_period: number; bump_period_start: string; bump_period_end: string };
+      };
+      assert.equal(bump.advertising.bump_count_current_period, 1);
+      assert.ok(Date.parse(bump.advertising.bump_period_start) <= now);
+      assert.ok(Date.parse(bump.advertising.bump_period_end) > now);
+
+      now += 7 * 24 * 60 * 60 * 1000;
+      const samePeriodResponse = await invoke(advertisingBump, env, actor, "POST", {});
+      assert.equal(samePeriodResponse.status, 200);
+      const samePeriod = await samePeriodResponse.json() as typeof bump;
+      assert.equal(samePeriod.advertising.bump_count_current_period, 2);
+      assert.equal(samePeriod.advertising.bump_period_start, bump.advertising.bump_period_start);
+      assert.equal(samePeriod.advertising.bump_period_end, bump.advertising.bump_period_end);
+
+      now = Date.parse(bump.advertising.bump_period_end) + 1000;
+      const rolloverResponse = await invoke(advertisingBump, env, actor, "POST", {});
+      assert.equal(rolloverResponse.status, 200);
+      const rollover = await rolloverResponse.json() as typeof bump;
+      assert.equal(rollover.advertising.bump_count_current_period, 1);
+      assert.ok(Date.parse(rollover.advertising.bump_period_start) > Date.parse(bump.advertising.bump_period_start));
+      assert.ok(Date.parse(rollover.advertising.bump_period_end) > Date.parse(bump.advertising.bump_period_end));
+
+      const readResponse = await invoke(advertisingBump, env, actor, "GET");
+      assert.equal(readResponse.status, 200);
+      const read = await readResponse.json() as typeof bump;
+      const readState = Object.fromEntries(Object.entries(read.advertising).filter(([key]) => !key.endsWith("_observed_at")));
+      const rolloverState = Object.fromEntries(Object.entries(rollover.advertising).filter(([key]) => !key.endsWith("_observed_at")));
+      assert.deepEqual(readState, rolloverState);
+      assert.deepEqual(
+        db.sqlite.prepare("SELECT * FROM owner_billing_accounts WHERE discord_user_id = ?").get(actor.discord_id),
+        billingBefore,
+      );
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+  await test("exact grant highlights only NukeTown without changing global advanced ranks beyond the metadata window", async ({ db, env }) => {
+    seedPublicMedia(db);
+    for (let index = 0; index < 501; index += 1) {
+      db.sqlite.prepare(`INSERT INTO linked_servers (id, user_id, guild_id, discord_guild_id, nitrado_service_id,
+        server_name, server_type, server_category, status, lifecycle_status, public_slug, listing_visibility)
+        VALUES (?, ?, 'extra-guild', 'synthetic-guild', ?, 'Synthetic extra', 'deathmatch', 'deathmatch',
+          'live', 'active_live', ?, 'public')`)
+        .run(`extra-${index}`, actor.id, `extra-service-${index}`, `extra-${index}`);
+    }
+    db.sqlite.prepare("UPDATE linked_servers SET rowid = 10000 WHERE id = ?").run(scope.linkedServerId);
+    assert.ok(Number(db.sqlite.prepare("SELECT count(*) AS count FROM linked_servers").get()?.count) > 500);
+    db.sqlite.exec(`WITH ranked_free_servers AS (
+        SELECT id, nitrado_service_id
+        FROM linked_servers
+        WHERE id LIKE 'extra-%'
+        ORDER BY id
+        LIMIT 1
+      ), event_numbers(event_number) AS (VALUES (1), (2), (3))
+      INSERT INTO build_events (id, linked_server_id, nitrado_service_id, player_name, event_type,
+        source_adm_file, source_line_number, occurred_at, raw_line)
+      SELECT 'higher-free-build-' || ranked_free_servers.id || '-' || event_numbers.event_number,
+        ranked_free_servers.id, ranked_free_servers.nitrado_service_id, 'Synthetic free builder', 'built',
+        'synthetic.ADM', event_numbers.event_number, '2026-09-19T00:00:00Z', 'synthetic'
+      FROM ranked_free_servers CROSS JOIN event_numbers;`);
+    for (const [id, serverId, serviceId] of [
+      ["nuketown-build", scope.linkedServerId, scope.nitradoServiceId],
+      ["neighbor-build", "same-guild-other-server", "10000001"],
+    ]) {
+      db.sqlite.prepare(`INSERT INTO build_events (id, linked_server_id, nitrado_service_id, player_name, event_type,
+        source_adm_file, source_line_number, occurred_at, raw_line)
+        VALUES (?, ?, ?, 'Synthetic builder', 'built', 'synthetic.ADM', 1, '2026-09-19T00:00:00Z', 'synthetic')`)
+        .run(id, serverId, serviceId);
+    }
+    for (const [id, x, y, occurredAt] of [
+      ["nuketown-window-position-1", 1000, 1000, "2026-09-19T00:00:00Z"],
+      ["nuketown-window-position-2", 1100, 1100, "2026-09-19T00:10:00Z"],
+    ] as const) {
+      db.sqlite.prepare(`INSERT INTO player_events
+        (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
+        VALUES (?, ?, 'NukeTown window explorer', 'player_position', ?, ?, ?)`)
+        .run(id, scope.linkedServerId, x, y, occurredAt);
+    }
+    const before = await getPublicAdvancedLeaderboardsPayload(env, { limit: 20 });
+    await grant(env);
+    const payload = await getPublicAdvancedLeaderboardsPayload(env, { limit: 19 });
+    for (const metricKey of ["build_score", "balanced_activity_score"]) {
+      const beforeBoard = before.boards.find((candidate) => candidate.metricKey === metricKey);
+      const board = payload.boards.find((candidate) => candidate.metricKey === metricKey);
+      assert.ok(beforeBoard, `${metricKey} pre-grant board required`);
+      assert.ok(board, `${metricKey} board required`);
+      const competitiveProjection = (rows: typeof board.rows) => rows.map((row) =>
+        Object.fromEntries(Object.entries(row).filter(([key]) => key !== "isPremiumShowcase")));
+      assert.deepEqual(
+        competitiveProjection(board.rows),
+        competitiveProjection(beforeBoard.rows.slice(0, 19)),
+        `${metricKey} ranks and values must not change with presentation access`,
+      );
+      const nuketown = board.rows.find((row) => row.serverId === scope.linkedServerId);
+      assert.ok(nuketown, `NukeTown must appear on ${metricKey}`);
+      assert.equal(nuketown.isPremiumShowcase, true, metricKey);
+      assert.equal(board.rows.find((row) => row.serverId === "same-guild-other-server")?.isPremiumShowcase ?? false, false, `${metricKey} grant must remain exact-server`);
+      if (metricKey === "build_score") {
+        const higherFree = board.rows.find((row) => row.serverId?.startsWith("extra-"));
+        assert.ok(higherFree, "higher-scoring Free server must remain ranked");
+        assert.ok(higherFree.rank < nuketown.rank, "presentation access must not outrank a higher-scoring Free server");
+        assert.equal(higherFree.isPremiumShowcase, false);
+      }
+    }
+    for (const metricKey of ["most_travelled_server", "most_on_foot_distance", "map_exploration_percent"]) {
+      assert.equal(payload.boards.some((board) => board.metricKey === metricKey), false, metricKey);
+    }
+    assert.match(payload.notes.join(" "), /durable plan-neutral aggregates/i);
+  });
+  await test("owner analytics use only durable headline totals and bounded event samples", async ({ db, env }) => {
+    seedPublicMedia(db);
+    await grant(env);
+    db.sqlite.prepare(`INSERT INTO server_stats (
+      id, linked_server_id, total_kills, total_deaths, total_joins, total_disconnects, unique_players, last_event_at
+    ) VALUES ('durable-stats', ?, 1, 1, 2, 1, 1, '2026-09-19T00:00:00Z')`).run(scope.linkedServerId);
+    const eventQueries: string[] = [];
+    const wrappedDb = { prepare(sql: string) {
+      if (/\bFROM\s+(?:kill_events|player_events|build_events)\b/i.test(sql)) eventQueries.push(sql);
+      return db.prepare(sql);
+    } } as unknown as D1Database;
+    const payload = await getServerAdvancedShowcasePayload({ ...env, DB: wrappedDb }, scope.linkedServerId, { ownerScoped: true });
+    assert.ok(payload);
+    assert.ok(eventQueries.length > 0);
+    const lifetimeCountQueries = eventQueries.filter(sql => /AS\s+player_events[\s\S]+AS\s+build_events/i.test(sql));
+    const sampledQueries = eventQueries.filter(sql => !lifetimeCountQueries.includes(sql));
+    assert.equal(lifetimeCountQueries.length, 0, "Request-time analytics must not count full raw event history.");
+    assert.equal(payload.summary.eventsTracked, null, "Partial durable counters must not be presented as a complete event total.");
+    assert.ok(payload.notes.some(note => note.includes("dedicated durable aggregate")));
+    assert.ok(sampledQueries.every(sql => /\bLIMIT\s+\?/i.test(sql)), "Every request-time event row query must be hard bounded");
+    assert.ok(sampledQueries.every(sql => /ORDER BY rowid DESC[\s\S]+LIMIT \?/i.test(sql)), "Every bounded event sample must select newest imported rows first");
+    assert.match(eventQueries.join("\n"), /FROM player_events[\s\S]+WHERE linked_server_id = \?[\s\S]+ORDER BY rowid DESC[\s\S]+LIMIT \?/, "Position sampling must bound selected-server rows before testing coordinate fields.");
+  });
+  await test("sparse position history stays inside the newest fixed row window", async ({ db, env }) => {
+    db.sqlite.prepare(`INSERT INTO player_events
+      (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
+      VALUES ('old-coordinate', ?, 'Old explorer', 'player_position', 1000, 1000, '2026-01-01T00:00:00Z')`).run(scope.linkedServerId);
+    db.sqlite.exec(`WITH RECURSIVE sequence(value) AS (
+        SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 8001
+      )
+      INSERT INTO player_events (id, linked_server_id, player_name, event_type, occurred_at)
+      SELECT 'coordinate-less-' || value, '${scope.linkedServerId}', 'Active player', 'player_connected', '2026-09-19T00:00:00Z'
+      FROM sequence;`);
+    const samples = await queryPositionSamples(env, { linkedServerId: scope.linkedServerId, limit: 6000 });
+    assert.equal(samples.some(sample => sample.playerName === "Old explorer"), false);
+  });
+  await test("unrelated server imports do not evict selected-server positions", async ({ db, env }) => {
+    db.sqlite.prepare(`INSERT INTO player_events
+      (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
+      VALUES ('target-coordinate', ?, 'Target explorer', 'player_position', 1000, 1000, '2026-01-01T00:00:00Z')`).run(scope.linkedServerId);
+    db.sqlite.exec(`WITH RECURSIVE sequence(value) AS (
+        SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 8001
+      )
+      INSERT INTO player_events (id, linked_server_id, player_name, event_type, occurred_at)
+      SELECT 'unrelated-event-' || value, 'same-guild-other-server', 'Other player', 'player_connected', '2026-09-19T00:00:00Z'
+      FROM sequence;`);
+    const samples = await queryPositionSamples(env, { linkedServerId: scope.linkedServerId, limit: 6000 });
+    assert.equal(samples.some(sample => sample.playerName === "Target explorer"), true);
+  });
+  await test("bounded analytics include newest rows without fabricating a lifetime event total", async ({ db, env }) => {
+    db.sqlite.exec("UPDATE server_subscriptions SET status = 'active'");
+    db.sqlite.prepare(`INSERT INTO server_stats (
+      id, linked_server_id, total_kills, total_deaths, total_joins, total_disconnects, unique_players, last_event_at
+    ) VALUES ('large-durable-stats', ?, 6001, 6001, 2001, 1, 2, '2026-09-19T00:00:00Z')`).run(scope.linkedServerId);
+    db.sqlite.exec(`WITH RECURSIVE sequence(value) AS (
+        SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 6000
+      )
+      INSERT INTO kill_events (id, linked_server_id, killer_name, victim_name, distance, occurred_at)
+      SELECT 'old-kill-' || value, '${scope.linkedServerId}', 'Older player', 'Synthetic victim', 45, '2026-01-01T00:00:00Z'
+      FROM sequence;
+      WITH RECURSIVE sequence(value) AS (
+        SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 2000
+      )
+      INSERT INTO player_events (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
+      SELECT 'old-position-' || value, '${scope.linkedServerId}', 'Older explorer', 'player_position', 1000, 1000, '2026-01-01T00:00:00Z'
+      FROM sequence;`);
+    db.sqlite.prepare(`INSERT INTO kill_events (id, linked_server_id, killer_name, victim_name, distance, occurred_at)
+      VALUES ('newest-kill', ?, 'Newest player', 'Synthetic victim', 2000, '2026-09-19T00:00:00Z')`).run(scope.linkedServerId);
+    db.sqlite.prepare(`INSERT INTO player_events (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
+      VALUES ('newest-position', ?, 'Newest explorer', 'player_position', 5000, 5000, '2026-09-19T00:00:00Z')`).run(scope.linkedServerId);
+    db.sqlite.prepare(`INSERT INTO build_events (id, linked_server_id, nitrado_service_id, player_name, event_type,
+      source_adm_file, source_line_number, occurred_at, raw_line)
+      VALUES ('newest-build', ?, ?, 'Newest builder', 'built', 'synthetic.ADM', 1, '2026-09-19T00:00:00Z', 'synthetic')`)
+      .run(scope.linkedServerId, scope.nitradoServiceId);
+
+    const payload = await getServerAdvancedShowcasePayload(env, scope.linkedServerId);
+    assert.ok(payload);
+    const longest = payload.boards.find(board => board.metricKey === "server_longest_kills");
+    assert.equal(longest?.rows[0]?.playerName, "Newest player");
+    assert.equal(payload.summary.eventsTracked, null);
+    assert.ok(payload.notes.some(note => note.includes("dedicated durable aggregate")));
+    const samples = await queryPositionSamples(env, { linkedServerId: scope.linkedServerId, limit: 6000 });
+    assert.equal(samples.some(sample => sample.occurredAt === "2026-09-19T00:00:00Z"), true);
+  });
+  await test("bounded fallback preserves freshness for kill-only data", async ({ db, env }) => {
+    db.sqlite.exec("UPDATE server_subscriptions SET status = 'active'");
+    db.sqlite.prepare(`INSERT INTO kill_events (id, linked_server_id, killer_name, victim_name, distance, occurred_at)
+      VALUES ('freshness-kill', ?, 'Fresh player', 'Synthetic victim', 50, '2026-09-19T12:00:00Z')`).run(scope.linkedServerId);
+    const payload = await getServerAdvancedShowcasePayload(env, scope.linkedServerId);
+    assert.ok(payload);
+    assert.equal(payload.summary.kills, 1);
+    assert.equal(payload.summary.lastUpdatedAt, "2026-09-19T12:00:00Z");
+  });
+  await test("locked owner analytics never reconstruct raw event history", async ({ db, env }) => {
+    const wrappedDb = { prepare(sql: string) {
+      if (/\bFROM\s+(?:kill_events|player_events|build_events)\b/i.test(sql)) {
+        throw new Error("Locked analytics attempted a raw event query");
+      }
+      return db.prepare(sql);
+    } } as unknown as D1Database;
+    const payload = await getServerAdvancedShowcasePayload({ ...env, DB: wrappedDb }, scope.linkedServerId, { ownerScoped: true });
+    assert.ok(payload);
+    assert.equal(payload.access.dashboardAnalytics, false);
+    assert.equal(payload.summary.eventsTracked, null);
+    assert.ok(payload.notes.some(note => note.includes("exact lifetime event total is unavailable")));
+    assert.ok(payload.boards.every(board => board.locked && board.rows.length === 0));
+  });
+  await test("revoked complimentary grant cannot commit a queued weekly bump", async ({ db, env }) => {
+    const grantId = await grant(env);
+    let revoked = false;
+    db.beforeWrite = (sql) => {
+      if (!revoked && /INSERT INTO server_listing_events/.test(sql)) {
+        revoked = true;
+        revokeSql(db, grantId);
+      }
+    };
+    const response = await invoke(advertisingBump, env, actor, "POST", {});
+    db.beforeWrite = null;
+    const body = await response.json() as { code?: string };
+    assert.equal(revoked, true);
+    assert.equal(response.status, 409);
+    assert.equal(body.code, "access_changed");
+    assert.equal(db.sqlite.prepare("SELECT COALESCE(bump_count_current_period, 0) AS count FROM server_advertising_state WHERE linked_server_id = ?").get(scope.linkedServerId)?.count ?? 0, 0);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM server_ad_bump_events WHERE linked_server_id = ?").get(scope.linkedServerId)?.count, 0);
+  });
+  await test("expired complimentary grant uses the database clock at the protected bump write", async ({ db, env }) => {
+    const { expiresAt } = grantExpiring(db);
+    const OriginalDate = globalThis.Date;
+    const skewedNow = OriginalDate.parse(expiresAt) - 500;
+    class SkewedDate extends OriginalDate {
+      constructor(value?: string | number | Date) {
+        super(value === undefined ? skewedNow : value instanceof OriginalDate ? value.getTime() : value);
+      }
+      static now() { return skewedNow; }
+    }
+    let expired = false;
+    db.beforeFirst = (sql) => {
+      if (expired || !/INSERT INTO server_advertising_state/.test(sql)) return;
+      expired = true;
+      waitUntilAfter(expiresAt);
+      globalThis.Date = SkewedDate as DateConstructor;
+    };
+    try {
+      const response = await invoke(advertisingBump, env, actor, "POST", {});
+      const body = await response.json() as { code?: string };
+      assert.equal(response.status, 409, JSON.stringify(body));
+      assert.equal(expired, true);
+      assert.equal(body.code, "access_changed");
+      assert.equal(db.sqlite.prepare("SELECT COALESCE(bump_count_current_period, 0) AS count FROM server_advertising_state WHERE linked_server_id = ?").get(scope.linkedServerId)?.count ?? 0, 0);
+      assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM server_ad_bump_events WHERE linked_server_id = ?").get(scope.linkedServerId)?.count, 0);
+    } finally {
+      db.beforeFirst = null;
+      globalThis.Date = OriginalDate;
+    }
+  });
+  await test("paid downgrade cannot create or commit a queued weekly bump", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'pro', status = 'active'").run();
+    let downgraded = false;
+    db.beforeWrite = (sql) => {
+      if (!downgraded && /INSERT INTO server_listing_events/.test(sql)) {
+        downgraded = true;
+        db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'starter', status = 'canceled'").run();
+      }
+    };
+    const response = await invoke(advertisingBump, env, actor, "POST", {}, "same-guild-other-server");
+    db.beforeWrite = null;
+    const body = await response.json() as { code?: string };
+    assert.equal(downgraded, true);
+    assert.equal(response.status, 409);
+    assert.equal(body.code, "access_changed");
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM server_advertising_state WHERE linked_server_id = ?").get("same-guild-other-server")?.count, 0);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM server_ad_bump_events WHERE linked_server_id = ?").get("same-guild-other-server")?.count, 0);
+  });
+  await test("transferred owner cannot create or commit a queued Free bump", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET owner_discord_id = ?, plan_key = 'pro', status = 'active'").run(other.discord_id);
+    await upsertBillingAccount(env, { discordUserId: actor.discord_id, planKey: "free", planStatus: "free" });
+    let transferred = false;
+    db.beforeWrite = (sql) => {
+      if (!transferred && /INSERT INTO server_listing_events/.test(sql)) {
+        transferred = true;
+        db.sqlite.prepare("UPDATE linked_servers SET user_id = ? WHERE id = ?").run(other.id, "same-guild-other-server");
+      }
+    };
+    const response = await invoke(advertisingBump, env, actor, "POST", {}, "same-guild-other-server");
+    db.beforeWrite = null;
+    const body = await response.json() as { code?: string };
+    assert.equal(transferred, true);
+    assert.equal(response.status, 409);
+    assert.equal(body.code, "access_changed");
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM server_advertising_state WHERE linked_server_id = ?").get("same-guild-other-server")?.count, 0);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM server_ad_bump_events WHERE linked_server_id = ?").get("same-guild-other-server")?.count, 0);
+  });
+  await test("changed lifecycle cannot create or commit a queued Free bump", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET owner_discord_id = ?, plan_key = 'starter', status = 'canceled'").run(actor.discord_id);
+    let lifecycleChanged = false;
+    db.beforeWrite = (sql) => {
+      if (!lifecycleChanged && /INSERT INTO server_listing_events/.test(sql)) {
+        lifecycleChanged = true;
+        db.sqlite.prepare("UPDATE linked_servers SET lifecycle_status = 'archived_hidden' WHERE id = ?").run("same-guild-other-server");
+      }
+    };
+    const response = await invoke(advertisingBump, env, actor, "POST", {}, "same-guild-other-server");
+    db.beforeWrite = null;
+    const body = await response.json() as { code?: string };
+    assert.equal(lifecycleChanged, true);
+    assert.equal(response.status, 409);
+    assert.equal(body.code, "access_changed");
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM server_advertising_state WHERE linked_server_id = ?").get("same-guild-other-server")?.count, 0);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM server_ad_bump_events WHERE linked_server_id = ?").get("same-guild-other-server")?.count, 0);
+  });
+  await test("successful bump response is newer than an overlapping pre-write read", async ({ db, env }) => {
+    await grant(env);
+    type AdvertisingRead = { generated_at: string; advertising: { bump_count_current_period: number } };
+    const observed: { read?: AdvertisingRead } = {};
+    const wrappedDb = { prepare(sql: string) {
+      const statement = db.prepare(sql);
+      if (!/UPDATE server_advertising_state[\s\S]+RETURNING/.test(sql)) return statement;
+      const wrap = (current: ReturnType<LocalD1["prepare"]>): ReturnType<LocalD1["prepare"]> => ({
+        bind: (...values: unknown[]) => wrap(current.bind(...values)),
+        run: () => current.run(),
+        all: () => current.all(),
+        first: async () => {
+          await new Promise(resolve => setTimeout(resolve, 20));
+          const response = await invoke(advertisingBump, env, actor, "GET");
+          observed.read = await response.json() as AdvertisingRead;
+          return current.first();
+        },
+      });
+      return wrap(statement);
+    } } as unknown as D1Database;
+    const response = await invoke(advertisingBump, { ...env, DB: wrappedDb }, actor, "POST", {});
+    const body = await response.json() as { generated_at: string; advertising: { bump_count_current_period: number } };
+    assert.equal(response.status, 200);
+    assert.ok(observed.read);
+    assert.equal(observed.read.advertising.bump_count_current_period, 0);
+    assert.equal(body.advertising.bump_count_current_period, 1);
+    assert.ok(Date.parse(body.generated_at) >= Date.parse(observed.read.generated_at));
+  });
+  await test("a delayed advertising GET cannot outrank a newer access snapshot", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET status = 'active'").run();
+    type AdvertisingRead = {
+      generated_at: string;
+      advertising: { effective_listing_plan: string };
+    };
+    const observed: { fresh?: AdvertisingRead } = {};
+    db.afterFirst = async (sql) => {
+      if (!sql.includes("SELECT * FROM server_advertising_state")) return;
+      db.afterFirst = null;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      db.sqlite.prepare("UPDATE server_subscriptions SET status = 'canceled'").run();
+      observed.fresh = await (await invoke(advertisingBump, env, actor, "GET")).json() as AdvertisingRead;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    };
+
+    const stale = await (await invoke(advertisingBump, env, actor, "GET")).json() as AdvertisingRead;
+    assert.ok(observed.fresh);
+    assert.equal(stale.advertising.effective_listing_plan, "pro");
+    assert.equal(observed.fresh.advertising.effective_listing_plan, "free");
+    assert.ok(Date.parse(stale.generated_at) < Date.parse(observed.fresh.generated_at));
+  });
+  await test("health access observed after advertising wins an overlapping revocation", async ({ db, env }) => {
+    const grantId = await grant(env);
+    type AccessRead = {
+      generated_at: string;
+      server_access: {
+        source: "billing" | "complimentary_showcase";
+        effectiveListingPlan: string;
+        billingObservedAt: string;
+        showcaseGrantObservedAt: string;
+      };
+    };
+    type AdvertisingRead = {
+      generated_at: string;
+      advertising: {
+        access_source: "billing" | "complimentary_showcase";
+        effective_listing_plan: string;
+        billing_observed_at: string;
+        showcase_grant_observed_at: string;
+      };
+    };
+    const observed: { advertising?: AdvertisingRead } = {};
+    db.beforeFirst = async (sql) => {
+      if (!sql.includes("FROM server_showcase_grants AS grant_row")) return;
+      db.beforeFirst = null;
+      observed.advertising = await (await invoke(advertisingBump, env, actor, "GET")).json() as AdvertisingRead;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      revokeSql(db, grantId);
+    };
+
+    const health = await (await invoke(dashboardHealth, env, actor, "GET")).json() as AccessRead;
+    assert.ok(observed.advertising);
+    assert.equal(observed.advertising.advertising.access_source, "complimentary_showcase");
+    assert.equal(health.server_access.source, "billing");
+    assert.ok(Date.parse(health.server_access.showcaseGrantObservedAt) >
+      Date.parse(observed.advertising.advertising.showcase_grant_observed_at));
+    assert.deepEqual(dashboardSelectedServerAccess({
+      healthAccess: health.server_access,
+      healthGeneratedAt: health.generated_at,
+      advertisingAccess: observed.advertising.advertising,
+      advertisingGeneratedAt: observed.advertising.generated_at,
+      serverDisplayPlan: null,
+    }), { source: "billing", effectivePlan: "free" });
+  });
+  await test("advertising access observed after health wins an overlapping revocation", async ({ db, env }) => {
+    const grantId = await grant(env);
+    type AccessRead = {
+      generated_at: string;
+      server_access: {
+        source: "billing" | "complimentary_showcase";
+        effectiveListingPlan: string;
+        billingObservedAt: string;
+        showcaseGrantObservedAt: string;
+      };
+    };
+    type AdvertisingRead = {
+      generated_at: string;
+      advertising: {
+        access_source: "billing" | "complimentary_showcase";
+        effective_listing_plan: string;
+        billing_observed_at: string;
+        showcase_grant_observed_at: string;
+      };
+    };
+    const observed: { health?: AccessRead } = {};
+    db.beforeFirst = async (sql) => {
+      if (!sql.includes("FROM server_showcase_grants AS grant_row")) return;
+      db.beforeFirst = null;
+      observed.health = await (await invoke(dashboardHealth, env, actor, "GET")).json() as AccessRead;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      revokeSql(db, grantId);
+    };
+
+    const advertising = await (await invoke(advertisingBump, env, actor, "GET")).json() as AdvertisingRead;
+    assert.ok(observed.health);
+    assert.equal(observed.health.server_access.source, "complimentary_showcase");
+    assert.equal(advertising.advertising.access_source, "billing");
+    assert.ok(Date.parse(advertising.advertising.showcase_grant_observed_at) >
+      Date.parse(observed.health.server_access.showcaseGrantObservedAt));
+    assert.deepEqual(dashboardSelectedServerAccess({
+      healthAccess: observed.health.server_access,
+      healthGeneratedAt: observed.health.generated_at,
+      advertisingAccess: advertising.advertising,
+      advertisingGeneratedAt: advertising.generated_at,
+      serverDisplayPlan: null,
+    }), { source: "billing", effectivePlan: "free" });
+  });
+  await test("an advertising response cannot revive a grant revoked after its access read", async ({ db, env }) => {
+    const grantId = await grant(env);
+    type AccessRead = {
+      generated_at: string;
+      server_access: {
+        source: "billing" | "complimentary_showcase";
+        effectiveListingPlan: string;
+        billingObservedAt: string;
+        showcaseGrantObservedAt: string;
+      };
+    };
+    type AdvertisingRead = {
+      generated_at: string;
+      advertising: {
+        access_source: "billing" | "complimentary_showcase";
+        effective_listing_plan: string;
+        billing_observed_at: string;
+        showcase_grant_observed_at: string;
+      };
+    };
+    const observed: { health?: AccessRead } = {};
+    db.beforeFirst = async (sql) => {
+      if (!sql.includes("SELECT * FROM server_advertising_state")) return;
+      db.beforeFirst = null;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      revokeSql(db, grantId);
+      observed.health = await (await invoke(dashboardHealth, env, actor, "GET")).json() as AccessRead;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    };
+
+    const advertising = await (await invoke(advertisingBump, env, actor, "GET")).json() as AdvertisingRead;
+    assert.ok(observed.health);
+    assert.equal(advertising.advertising.access_source, "complimentary_showcase");
+    assert.equal(observed.health.server_access.source, "billing");
+    assert.ok(Date.parse(advertising.generated_at) < Date.parse(observed.health.generated_at));
+    assert.ok(Date.parse(observed.health.server_access.showcaseGrantObservedAt) >
+      Date.parse(advertising.advertising.showcase_grant_observed_at));
+    assert.deepEqual(dashboardSelectedServerAccess({
+      healthAccess: observed.health.server_access,
+      healthGeneratedAt: observed.health.generated_at,
+      advertisingAccess: advertising.advertising,
+      advertisingGeneratedAt: advertising.generated_at,
+      serverDisplayPlan: null,
+    }), { source: "billing", effectivePlan: "free" });
+  });
+  await test("a health response cannot revive billing canceled after its server read", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET status = 'active'").run();
+    type AccessRead = {
+      generated_at: string;
+      server_access: {
+        source: "billing";
+        effectiveListingPlan: string;
+        billingObservedAt: string;
+        showcaseGrantObservedAt: string;
+      };
+    };
+    type AdvertisingRead = {
+      generated_at: string;
+      advertising: {
+        access_source: "billing";
+        effective_listing_plan: string;
+        billing_observed_at: string;
+        showcase_grant_observed_at: string;
+      };
+    };
+    const observed: { advertising?: AdvertisingRead } = {};
+    db.beforeFirst = async (sql) => {
+      if (!sql.includes("FROM nitrado_file_read_attempts")) return;
+      db.beforeFirst = null;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      db.sqlite.prepare("UPDATE server_subscriptions SET status = 'canceled'").run();
+      observed.advertising = await (await invoke(advertisingBump, env, actor, "GET")).json() as AdvertisingRead;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    };
+
+    const health = await (await invoke(dashboardHealth, env, actor, "GET")).json() as AccessRead;
+    assert.ok(observed.advertising);
+    assert.equal(health.server_access.effectiveListingPlan, "pro");
+    assert.equal(observed.advertising.advertising.effective_listing_plan, "free");
+    assert.ok(Date.parse(health.generated_at) >= Date.parse(observed.advertising.generated_at));
+    assert.ok(Date.parse(observed.advertising.advertising.billing_observed_at) >
+      Date.parse(health.server_access.billingObservedAt));
+    assert.deepEqual(dashboardSelectedServerAccess({
+      healthAccess: health.server_access,
+      healthGeneratedAt: health.generated_at,
+      advertisingAccess: observed.advertising.advertising,
+      advertisingGeneratedAt: observed.advertising.generated_at,
+      serverDisplayPlan: null,
+    }), { source: "billing", effectivePlan: "free" });
+  });
+  await test("newer complimentary access outranks a delayed stale paid health snapshot", async ({ db, env }) => {
+    await grant(env);
+    db.sqlite.prepare("UPDATE server_subscriptions SET status = 'active'").run();
+    type AccessRead = {
+      generated_at: string;
+      server_access: {
+        source: "billing" | "complimentary_showcase";
+        effectiveListingPlan: string;
+        billingObservedAt: string;
+        showcaseGrantObservedAt: string;
+      };
+    };
+    type AdvertisingRead = {
+      generated_at: string;
+      advertising: {
+        access_source: "billing" | "complimentary_showcase";
+        effective_listing_plan: string;
+        billing_observed_at: string;
+        showcase_grant_observed_at: string;
+      };
+    };
+    const observed: { advertising?: AdvertisingRead } = {};
+    db.afterFirst = async (sql) => {
+      if (!sql.includes("COALESCE(server_subscriptions.plan_key, owner_billing_accounts.plan_key) AS plan_key")) return;
+      db.afterFirst = null;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      db.sqlite.prepare("UPDATE server_subscriptions SET status = 'canceled'").run();
+      observed.advertising = await (await invoke(advertisingBump, env, actor, "GET")).json() as AdvertisingRead;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    };
+
+    const health = await (await invoke(dashboardHealth, env, actor, "GET")).json() as AccessRead;
+    assert.ok(observed.advertising);
+    assert.equal(health.server_access.source, "billing");
+    assert.equal(observed.advertising.advertising.access_source, "complimentary_showcase");
+    assert.ok(Date.parse(observed.advertising.advertising.billing_observed_at) >
+      Date.parse(health.server_access.billingObservedAt));
+    assert.equal(health.server_access.showcaseGrantObservedAt, health.server_access.billingObservedAt);
+    assert.deepEqual(dashboardSelectedServerAccess({
+      healthAccess: health.server_access,
+      healthGeneratedAt: health.generated_at,
+      advertisingAccess: observed.advertising.advertising,
+      advertisingGeneratedAt: observed.advertising.generated_at,
+      serverDisplayPlan: null,
+    }), { source: "complimentary_showcase", effectivePlan: "pro" });
+  });
+  await test("the final billing snapshot sees a higher-priority subscription inserted during fallback reads", async ({ db, env }) => {
+    const subscription = db.sqlite.prepare("SELECT * FROM server_subscriptions").get()!;
+    await upsertBillingAccount(env, {
+      discordUserId: actor.discord_id,
+      planKey: "free",
+      planStatus: "free",
+    });
+    db.sqlite.exec("DELETE FROM server_subscriptions");
+    type AccessRead = {
+      generated_at: string;
+      server_access: {
+        source: "billing";
+        effectiveListingPlan: string;
+        billingObservedAt: string;
+      };
+    };
+    type AdvertisingRead = {
+      generated_at: string;
+      advertising: {
+        access_source: "billing";
+        effective_listing_plan: string;
+        billing_observed_at: string;
+      };
+    };
+    const observed: { health?: AccessRead } = {};
+    db.beforeFirst = async (sql) => {
+      if (!sql.includes("LEFT JOIN owner_billing_accounts ON owner_billing_accounts.discord_user_id = ?")) return;
+      db.beforeFirst = null;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      const columns = Object.keys(subscription);
+      db.sqlite.prepare(`INSERT INTO server_subscriptions (${columns.join(",")}) VALUES (${columns.map(() => "?").join(",")})`)
+        .run(...Object.values({ ...subscription, status: "active" }));
+      observed.health = await (await invoke(dashboardHealth, env, actor, "GET")).json() as AccessRead;
+    };
+
+    const advertising = await (await invoke(advertisingBump, env, actor, "GET")).json() as AdvertisingRead;
+    assert.ok(observed.health);
+    assert.equal(advertising.advertising.effective_listing_plan, "pro");
+    assert.equal(observed.health.server_access.effectiveListingPlan, "pro");
+    assert.ok(Date.parse(advertising.advertising.billing_observed_at) >=
+      Date.parse(observed.health.server_access.billingObservedAt));
+    assert.deepEqual(dashboardSelectedServerAccess({
+      healthAccess: observed.health.server_access,
+      healthGeneratedAt: observed.health.generated_at,
+      advertisingAccess: advertising.advertising,
+      advertisingGeneratedAt: advertising.generated_at,
+      serverDisplayPlan: null,
+    }), { source: "billing", effectivePlan: "pro" });
+  });
+  await test("a delayed health query result keeps its database snapshot observation", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET status = 'active'").run();
+    type AccessRead = {
+      generated_at: string;
+      server_access: {
+        source: "billing";
+        effectiveListingPlan: string;
+        billingObservedAt: string;
+      };
+    };
+    type AdvertisingRead = {
+      generated_at: string;
+      advertising: {
+        access_source: "billing";
+        effective_listing_plan: string;
+        billing_observed_at: string;
+      };
+    };
+    const observed: { advertising?: AdvertisingRead } = {};
+    db.afterFirst = async (sql) => {
+      if (!sql.includes("COALESCE(server_subscriptions.plan_key, owner_billing_accounts.plan_key) AS plan_key")) return;
+      db.afterFirst = null;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      db.sqlite.prepare("UPDATE server_subscriptions SET status = 'canceled'").run();
+      observed.advertising = await (await invoke(advertisingBump, env, actor, "GET")).json() as AdvertisingRead;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    };
+
+    const health = await (await invoke(dashboardHealth, env, actor, "GET")).json() as AccessRead;
+    assert.ok(observed.advertising);
+    assert.equal(health.server_access.effectiveListingPlan, "pro");
+    assert.equal(observed.advertising.advertising.effective_listing_plan, "free");
+    assert.ok(Date.parse(observed.advertising.advertising.billing_observed_at) >
+      Date.parse(health.server_access.billingObservedAt));
+    assert.deepEqual(dashboardSelectedServerAccess({
+      healthAccess: health.server_access,
+      healthGeneratedAt: health.generated_at,
+      advertisingAccess: observed.advertising.advertising,
+      advertisingGeneratedAt: observed.advertising.generated_at,
+      serverDisplayPlan: null,
+    }), { source: "billing", effectivePlan: "free" });
+  });
+  await test("the final billing snapshot sees an owner fallback canceled during the request", async ({ db, env }) => {
+    db.sqlite.exec("DELETE FROM server_subscriptions");
+    await upsertBillingAccount(env, {
+      discordUserId: actor.discord_id,
+      planKey: "pro",
+      planStatus: "active",
+    });
+    db.sqlite.exec("DELETE FROM server_subscriptions");
+    type AccessRead = {
+      generated_at: string;
+      server_access: {
+        source: "billing";
+        effectiveListingPlan: string;
+        billingObservedAt: string;
+      };
+    };
+    type AdvertisingRead = {
+      generated_at: string;
+      advertising: {
+        access_source: "billing";
+        effective_listing_plan: string;
+        billing_observed_at: string;
+      };
+    };
+    const observed: { health?: AccessRead } = {};
+    db.afterFirst = async (sql) => {
+      if (!sql.includes("AS server_subscription_status")) return;
+      db.afterFirst = null;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      observed.health = await (await invoke(dashboardHealth, env, actor, "GET")).json() as AccessRead;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      db.sqlite.prepare("UPDATE owner_billing_accounts SET plan_status = 'canceled', updated_at = ? WHERE discord_user_id = ?")
+        .run(new Date().toISOString(), actor.discord_id);
+    };
+
+    const advertising = await (await invoke(advertisingBump, env, actor, "GET")).json() as AdvertisingRead;
+    assert.ok(observed.health);
+    assert.equal(observed.health.server_access.effectiveListingPlan, "pro");
+    assert.equal(advertising.advertising.effective_listing_plan, "free");
+    assert.ok(Date.parse(advertising.advertising.billing_observed_at) >
+      Date.parse(observed.health.server_access.billingObservedAt));
+    assert.deepEqual(dashboardSelectedServerAccess({
+      healthAccess: observed.health.server_access,
+      healthGeneratedAt: observed.health.generated_at,
+      advertisingAccess: advertising.advertising,
+      advertisingGeneratedAt: advertising.generated_at,
+      serverDisplayPlan: null,
+    }), { source: "billing", effectivePlan: "free" });
+  });
+  await test("a queued grant read evaluates expiry at the database snapshot", async ({ db, env }) => {
+    const createdAt = new Date(Date.now() - 1_000).toISOString();
+    const expiresAt = new Date(Date.now() + 100).toISOString();
+    db.sqlite.prepare(`INSERT INTO server_showcase_grants (
+      id, linked_server_id, owner_user_id, owner_discord_id, guild_id, nitrado_service_id,
+      created_by_user_id, created_at, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(randomUUID(), scope.linkedServerId, scope.ownerUserId, scope.ownerDiscordId, scope.guildId,
+        scope.nitradoServiceId, actor.id, createdAt, expiresAt);
+    db.beforeFirst = async (sql) => {
+      if (!sql.includes("WITH active_grant AS")) return;
+      db.beforeFirst = null;
+      await new Promise(resolve => setTimeout(resolve, 150));
+    };
+
+    const response = await invoke(advertisingBump, env, actor, "GET");
+    const body = await response.json() as {
+      advertising: {
+        access_source: "billing" | "complimentary_showcase";
+        showcase_grant_observed_at: string;
+      };
+    };
+    assert.equal(response.status, 200);
+    assert.equal(body.advertising.access_source, "billing");
+    assert.ok(Date.parse(body.advertising.showcase_grant_observed_at) >= Date.parse(expiresAt));
   });
   await test("concurrent grants create one immutable grant and one audit event", async ({ db, env }) => {
     const results = await Promise.all(Array.from({ length: 8 }, () => changeShowcaseGrant(env, actor, { action: "grant", requestId: randomUUID() })));
@@ -285,6 +1210,38 @@ async function run() {
     assert.equal((await invoke(gallery, env, actor, "PUT", { images: [] })).status, 409);
     assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_gallery_images").get()?.n, 1);
   });
+  await test("gallery rejects an expired grant at transaction start without deleting original images", async ({ db, env }) => {
+    const { expiresAt } = grantExpiring(db);
+    db.sqlite.prepare(`INSERT INTO server_gallery_images (
+      id, server_id, url, width, height, size_bytes, mime_type, sort_order, created_at, updated_at
+    ) VALUES ('previous-image', ?, 'https://local.test/previous.jpg', 1600, 900, 1000, 'image/jpeg', 0, '2026-09-01', '2026-09-01')`)
+      .run(scope.linkedServerId);
+    db.beforeBatch = () => { db.beforeBatch = null; waitUntilAfter(expiresAt); };
+    const response = await invoke(gallery, env, actor, "PUT", { images: [image] });
+    assert.equal(response.status, 409, JSON.stringify(await response.json()));
+    assert.deepEqual(db.sqlite.prepare("SELECT id, url FROM server_gallery_images").all().map(row => row.url), ["https://local.test/previous.jpg"]);
+  });
+  await test("gallery rolls back when its grant expires during atomic replacement", async ({ db, env }) => {
+    const { expiresAt } = grantExpiring(db);
+    db.sqlite.prepare(`INSERT INTO server_gallery_images (
+      id, server_id, url, width, height, size_bytes, mime_type, sort_order, created_at, updated_at
+    ) VALUES ('previous-image', ?, 'https://local.test/previous.jpg', 1600, 900, 1000, 'image/jpeg', 0, '2026-09-01', '2026-09-01')`)
+      .run(scope.linkedServerId);
+    let expiredDuringBatch = false;
+    db.beforeWrite = (sql) => {
+      if (expiredDuringBatch || !/^\s*INSERT INTO server_gallery_images/i.test(sql)) return;
+      expiredDuringBatch = true;
+      waitUntilAfter(expiresAt);
+    };
+    try {
+      const response = await invoke(gallery, env, actor, "PUT", { images: [image] });
+      assert.equal(response.status, 409, JSON.stringify(await response.json()));
+      assert.equal(expiredDuringBatch, true);
+      assert.deepEqual(db.sqlite.prepare("SELECT id, url FROM server_gallery_images").all().map(row => row.url), ["https://local.test/previous.jpg"]);
+    } finally {
+      db.beforeWrite = null;
+    }
+  });
   await test("gallery replacement rolls back if an image insert fails", async ({ db, env }) => {
     await grant(env); await invoke(gallery, env, actor, "PUT", { images: [image] });
     const before = db.sqlite.prepare("SELECT * FROM server_gallery_images").all();
@@ -312,9 +1269,16 @@ async function run() {
   });
   await test("write guard rejects changed billing and transferred owner", async ({ db, env }) => {
     const access = await readServerShowcaseAccess(env, "same-guild-other-server", inactive);
-    const guard = showcaseWriteGuard("same-guild-other-server", actor.id, access);
+    const guard = await showcaseWriteGuard(env, "same-guild-other-server", actor.id, access);
     assert.equal(db.sqlite.prepare(`SELECT 1 AS allowed WHERE ${guard.sql}`).get(...guard.values)?.allowed, 1);
     db.sqlite.exec("UPDATE server_subscriptions SET status = 'active'");
+    assert.equal(db.sqlite.prepare(`SELECT 1 AS allowed WHERE ${guard.sql}`).get(...guard.values), undefined);
+  });
+  await test("write guard evaluates complimentary expiry when the protected statement executes", async ({ db, env }) => {
+    const { expiresAt } = grantExpiring(db);
+    const access = await readServerShowcaseAccess(env, scope.linkedServerId, inactive);
+    const guard = await showcaseWriteGuard(env, scope.linkedServerId, actor.id, access);
+    waitUntilAfter(expiresAt);
     assert.equal(db.sqlite.prepare(`SELECT 1 AS allowed WHERE ${guard.sql}`).get(...guard.values), undefined);
   });
   await test("legacy paid customers preserve the original listing contract", async ({ db, env }) => {
@@ -323,9 +1287,120 @@ async function run() {
       const response = await invoke(gallery, env, actor, "GET", undefined, "same-guild-other-server");
       const body = await response.json() as { canPublishGallery: boolean; serverAccess: Row };
       assert.equal(body.canPublishGallery, true, plan); assert.equal(body.serverAccess.source, "billing");
+      const advertisingResponse = await invoke(advertisingBump, env, actor, "GET", undefined, "same-guild-other-server");
+      const advertisingBody = await advertisingResponse.json() as {
+        generated_at: string;
+        advertising: { access_source: string; effective_listing_plan: string; bump_cooldown_days: number; included_bumps_per_month: number };
+      };
+      assert.match(advertisingBody.generated_at, /^\d{4}-\d{2}-\d{2}T/);
+      assert.equal(advertisingBody.advertising.access_source, "billing", plan);
+      assert.equal(advertisingBody.advertising.effective_listing_plan, "pro", plan);
+      assert.equal(advertisingBody.advertising.bump_cooldown_days, 7, plan);
+      assert.equal(advertisingBody.advertising.included_bumps_per_month, 2, plan);
     }
     assert.equal((await readShowcaseGrantSupport(env, other)).status, 403);
     assert.deepEqual(db.sqlite.prepare("PRAGMA foreign_key_check").all(), []);
+  });
+  await test("foreign-owner guild billing cannot upgrade advertising access", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET owner_discord_id = ?, plan_key = 'pro', status = 'active'").run(other.discord_id);
+    await upsertBillingAccount(env, { discordUserId: actor.discord_id, planKey: "free", planStatus: "free" });
+
+    const readResponse = await invoke(advertisingBump, env, actor, "GET", undefined, "same-guild-other-server");
+    assert.equal(readResponse.status, 200);
+    const readBody = await readResponse.json() as {
+      advertising: { access_source: string; effective_listing_plan: string; bump_cooldown_days: number; included_bumps_per_month: number };
+      entitlements: { plan_key: string };
+    };
+    assert.equal(readBody.entitlements.plan_key, "free");
+    assert.equal(readBody.advertising.access_source, "billing");
+    assert.equal(readBody.advertising.effective_listing_plan, "free");
+    assert.equal(readBody.advertising.bump_cooldown_days, 30);
+    assert.equal(readBody.advertising.included_bumps_per_month, 1);
+
+    const healthResponse = await invoke(dashboardHealth, env, actor, "GET", undefined, "same-guild-other-server");
+    assert.equal(healthResponse.status, 200);
+    const healthBody = await healthResponse.json() as {
+      current_plan: string;
+      server_access: { source: string; effectiveListingPlan: string };
+    };
+    assert.equal(healthBody.current_plan, "free");
+    assert.equal(healthBody.server_access.source, "billing");
+    assert.equal(healthBody.server_access.effectiveListingPlan, "free");
+
+    const advancedResponse = await invoke(dashboardAdvancedStats, env, actor, "GET", undefined, "same-guild-other-server");
+    assert.equal(advancedResponse.status, 200);
+    const advancedBody = await advancedResponse.json() as {
+      access: { source: string; effectivePlan: string; dashboardAnalytics: boolean };
+      boards: Array<{ locked?: boolean; rows: unknown[] }>;
+    };
+    assert.equal(advancedBody.access.source, "billing");
+    assert.equal(advancedBody.access.effectivePlan, "free");
+    assert.equal(advancedBody.access.dashboardAnalytics, false);
+    assert.ok(advancedBody.boards.every((board) => board.locked === true && board.rows.length === 0));
+
+    const bumpResponse = await invoke(advertisingBump, env, actor, "POST", {}, "same-guild-other-server");
+    assert.equal(bumpResponse.status, 200);
+    const bumpBody = await bumpResponse.json() as {
+      advertising: { access_source: string; effective_listing_plan: string; bump_cooldown_days: number; next_bump_at: string };
+    };
+    assert.equal(bumpBody.advertising.access_source, "billing");
+    assert.equal(bumpBody.advertising.effective_listing_plan, "free");
+    assert.equal(bumpBody.advertising.bump_cooldown_days, 30);
+    assert.ok(Date.parse(bumpBody.advertising.next_bump_at) - Date.now() > 29 * 24 * 60 * 60 * 1000);
+    assert.equal(db.sqlite.prepare("SELECT owner_discord_id FROM server_advertising_state WHERE linked_server_id = ?").get("same-guild-other-server")?.owner_discord_id, actor.discord_id);
+  });
+  await test("inactive Starter access is consistently locked across dashboard endpoints", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET owner_discord_id = ?, plan_key = 'starter', status = 'canceled'").run(actor.discord_id);
+
+    const health = await (await invoke(dashboardHealth, env, actor, "GET", undefined, "same-guild-other-server")).json() as {
+      current_plan: string;
+      server_access: { source: string; effectiveListingPlan: string };
+    };
+    const advanced = await (await invoke(dashboardAdvancedStats, env, actor, "GET", undefined, "same-guild-other-server")).json() as {
+      access: { source: string; effectivePlan: string; dashboardAnalytics: boolean };
+    };
+    const advertising = await (await invoke(advertisingBump, env, actor, "GET", undefined, "same-guild-other-server")).json() as {
+      advertising: { access_source: string; effective_listing_plan: string };
+    };
+
+    assert.equal(health.current_plan, "free");
+    assert.equal(health.server_access.source, "billing");
+    assert.equal(health.server_access.effectiveListingPlan, "free");
+    assert.equal(advanced.access.source, "billing");
+    assert.equal(advanced.access.effectivePlan, "free");
+    assert.equal(advanced.access.dashboardAnalytics, false);
+    assert.equal(advertising.advertising.access_source, "billing");
+    assert.equal(advertising.advertising.effective_listing_plan, "free");
+  });
+  await test("owner billing preserves paid access when a shared guild projection belongs to another owner", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET owner_discord_id = ?, plan_key = 'pro', status = 'active'").run(other.discord_id);
+    await upsertBillingAccount(env, { discordUserId: actor.discord_id, planKey: "pro", planStatus: "active" });
+
+    const serverId = "same-guild-other-server";
+    const health = await (await invoke(dashboardHealth, env, actor, "GET", undefined, serverId)).json() as {
+      current_plan: string;
+      server_access: { source: string; effectiveListingPlan: string };
+    };
+    const advanced = await (await invoke(dashboardAdvancedStats, env, actor, "GET", undefined, serverId)).json() as {
+      access: { source: string; effectivePlan: string; dashboardAnalytics: boolean };
+    };
+    const advertising = await (await invoke(advertisingBump, env, actor, "GET", undefined, serverId)).json() as {
+      advertising: { access_source: string; effective_listing_plan: string };
+    };
+
+    assert.equal(health.current_plan, "pro");
+    assert.equal(health.server_access.source, "billing");
+    assert.equal(health.server_access.effectiveListingPlan, "pro");
+    assert.equal(advanced.access.source, "billing");
+    assert.equal(advanced.access.effectivePlan, "pro");
+    assert.equal(advanced.access.dashboardAnalytics, true);
+    assert.equal(advertising.advertising.access_source, "billing");
+    assert.equal(advertising.advertising.effective_listing_plan, "pro");
+    const bump = await invoke(advertisingBump, env, actor, "POST", {}, serverId);
+    assert.equal(bump.status, 200);
+    const bumpBody = await bump.json() as { advertising: { effective_listing_plan: string; bump_cooldown_days: number } };
+    assert.equal(bumpBody.advertising.effective_listing_plan, "pro");
+    assert.equal(bumpBody.advertising.bump_cooldown_days, 7);
   });
   await test("visual access uses exact grant, real sessions and canonical service aliases", async ({ db, env }) => {
     await grant(env);
@@ -429,6 +1504,34 @@ async function run() {
       assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_customisation_audit_log").get()?.n, 1);
     });
   }
+  await test("visual transaction rejects an expired grant before audit or overwrite", async ({ db, env }) => {
+    const { expiresAt } = grantExpiring(db);
+    await saveServerVisualLoadout(env, scope.linkedServerId, actor.id, proVisual);
+    db.beforeBatch = () => { db.beforeBatch = null; waitUntilAfter(expiresAt); };
+    const response = await invoke(visualPut, env, actor, "PUT", { ...proVisual, profileFrameKey: "gold" });
+    assert.equal(response.status, 409);
+    assert.equal(db.sqlite.prepare("SELECT profile_frame_key FROM server_visual_loadouts").get()?.profile_frame_key, "diamond");
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_customisation_audit_log").get()?.n, 1);
+  });
+  await test("visual transaction rolls back when its grant expires during the save", async ({ db, env }) => {
+    const { expiresAt } = grantExpiring(db);
+    await saveServerVisualLoadout(env, scope.linkedServerId, actor.id, proVisual);
+    let expiredDuringBatch = false;
+    db.beforeWrite = (sql) => {
+      if (expiredDuringBatch || !/^\s*INSERT INTO server_visual_loadouts/i.test(sql)) return;
+      expiredDuringBatch = true;
+      waitUntilAfter(expiresAt);
+    };
+    try {
+      const response = await invoke(visualPut, env, actor, "PUT", { ...proVisual, profileFrameKey: "gold" });
+      assert.equal(response.status, 409);
+      assert.equal(expiredDuringBatch, true);
+      assert.equal(db.sqlite.prepare("SELECT profile_frame_key FROM server_visual_loadouts").get()?.profile_frame_key, "diamond");
+      assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_customisation_audit_log").get()?.n, 1);
+    } finally {
+      db.beforeWrite = null;
+    }
+  });
   await test("visual save checks owner snapshot from route authorization", async ({ db, env }) => {
     await grant(env);
     db.sqlite.prepare("UPDATE linked_servers SET user_id = ? WHERE id = ?").run(other.id, scope.linkedServerId);

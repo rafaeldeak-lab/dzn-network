@@ -3,6 +3,7 @@ import "./test-dashboard-plan-display";
 import { readFileSync } from "node:fs";
 
 const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
+const detailDisplaySource = readFileSync("components/onboarding/dashboard-detail-display.ts", "utf8");
 const policySource = readFileSync("docs/PUBLIC_ACCESS_POLICY.md", "utf8");
 
 const packageGuideBlock = sourceBlock(dashboardSource, "function DashboardPackageGuide", "function renderDashboardTabAccessBadge");
@@ -46,6 +47,13 @@ for (const expected of [
 ]) {
   assert.equal(packageHelperBlock.includes(expected), true, `Package helper must keep copy for: ${expected}`);
 }
+assert.equal(packageHelperBlock.includes("complimentary_showcase"), false, "Exact-server showcase access must not unlock account-level Discord or event package indicators.");
+assert.equal(dashboardSource.includes("dashboardSelectedServerAccess("), true, "Exact-server complimentary access must remain visible in the selected-server card.");
+assert.equal(detailDisplaySource.includes("const useAdvertising"), true, "Selected-server access must explicitly reconcile health and advertising responses.");
+assert.equal(detailDisplaySource.includes("!input.healthAccess?.source"), false, "A failed health refresh must not discard the newest accepted access watermark.");
+assert.equal(detailDisplaySource.includes("advertisingTime >= healthTime"), true, "Only a same-age or newer advertising response may override health access.");
+assert.equal(detailDisplaySource.includes("if (input.healthAccess?.source)"), true, "A newer health response must override retained advertising access.");
+assert.equal(dashboardSource.includes(': dashboardAccessLabel(selectedServerEffectivePlan);'), true, "Selected-server access must not fall back to the account billing label.");
 
 for (const legacyPlan of ["premium", "network", "partner"]) {
   assert.equal(packageHelperBlock.includes(`normalized === \"${legacyPlan}\"`), true, `${legacyPlan} must continue to display as effective Pro.`);
@@ -67,9 +75,9 @@ assert.equal(packageGuideBlock.includes("createPortalSession"), false, "The pack
 
 assert.equal(dashboardSource.includes('if (value === "starter") return "Starter Listing";'), true, "Starter dashboard labels must not fall through to Free Listing.");
 assert.equal(
-  advertisingBoostBlock.includes("dashboardPackageTierFromPlanKey(billing?.plan_key ?? null, billing?.plan_status ?? null)"),
+  advertisingBoostBlock.includes("dashboardAdvertisingListing(advertising)"),
   true,
-  "Advertising fallback copy must classify Pro by effective package tier, not by billing status alone.",
+  "Advertising UI must classify the selected server only from server-scoped access.",
 );
 assert.equal(
   advertisingBoostBlock.includes('billing?.plan_status === "active" || billing?.plan_status === "trialing"'),

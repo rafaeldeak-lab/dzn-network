@@ -154,13 +154,13 @@ export async function createPortalSession() {
 }
 
 export async function bumpServer(linkedServerId: string) {
-  return request<{ ok: boolean; advertising: AdvertisingBumpStatus }>(`/api/servers/${encodeURIComponent(linkedServerId)}/advertising/bump`, {
+  return request<{ ok: boolean; generated_at: string; advertising: AdvertisingBumpStatus }>(`/api/servers/${encodeURIComponent(linkedServerId)}/advertising/bump`, {
     method: "POST",
   });
 }
 
 export async function getServerAdvertisingStatus(linkedServerId: string) {
-  return request<{ ok: boolean; advertising: AdvertisingBumpStatus }>(`/api/servers/${encodeURIComponent(linkedServerId)}/advertising/bump`);
+  return request<{ ok: boolean; generated_at: string; advertising: AdvertisingBumpStatus }>(`/api/servers/${encodeURIComponent(linkedServerId)}/advertising/bump`);
 }
 
 export async function getServerBadgeStatus(linkedServerId: string) {

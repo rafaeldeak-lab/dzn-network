@@ -5,6 +5,7 @@ import { effectiveEntitlementPlan, getAdmDiscoveryIntervalMinutes, getAdmPullInt
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
 import { calculateServerScore } from "../../../../_lib/server-ranking";
 import { getCanonicalServerRank, getCanonicalServerStats } from "../../../../_lib/server-stats";
+import { readServerShowcaseAccess, serializeShowcaseAccess } from "../../../../_lib/server-showcase-access";
 import type { PagesFunction } from "../../../../_lib/types";
 import { getServerLifecycleDisplay, normalizeServerLifecycleStatus } from "../../../../../lib/server-lifecycle";
 
@@ -25,6 +26,7 @@ type ServerRow = {
   player_count_status: string | null;
   plan_key: string | null;
   subscription_status: string | null;
+  billing_observed_at: string | null;
   newest_available_adm_filename: string | null;
   newest_readable_adm_filename: string | null;
   last_adm_discovery_check_at: string | null;
@@ -173,7 +175,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     await ensureAdmSyncSchema(env);
     const db = requireDb(env);
     const now = new Date().toISOString();
-    const [server, stats, recentEvents, activeJob, queuedJobs, completedToday, fileState, currentFileState, latestReadIssue, cronRows] = await Promise.all([
+    const [serverObservation, stats, recentEvents, activeJob, queuedJobs, completedToday, fileState, currentFileState, latestReadIssue, cronRows] = await Promise.all([
       db.prepare(
         `SELECT linked_servers.id, linked_servers.guild_id, linked_servers.public_slug,
                 linked_servers.nitrado_service_id, linked_servers.display_name,
@@ -181,7 +183,9 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
                 linked_servers.status AS linked_status,
                 linked_servers.current_players, linked_servers.max_players, linked_servers.player_slots,
                 linked_servers.player_count_last_checked_at, linked_servers.player_count_status,
-                server_subscriptions.plan_key, server_subscriptions.status AS subscription_status,
+                COALESCE(server_subscriptions.plan_key, owner_billing_accounts.plan_key) AS plan_key,
+                COALESCE(server_subscriptions.status, owner_billing_accounts.plan_status) AS subscription_status,
+                strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS billing_observed_at,
                 server_sync_state.newest_available_adm_filename,
                 server_sync_state.newest_readable_adm_filename,
                 server_sync_state.last_adm_discovery_check_at,
@@ -204,7 +208,11 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
                 server_sync_state.next_retry_after,
                 server_sync_state.last_skip_reason
          FROM linked_servers
-         LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+         LEFT JOIN users ON users.id = linked_servers.user_id
+         LEFT JOIN server_subscriptions
+           ON server_subscriptions.guild_id = linked_servers.guild_id
+          AND server_subscriptions.owner_discord_id = users.discord_id
+         LEFT JOIN owner_billing_accounts ON owner_billing_accounts.discord_user_id = users.discord_id
          LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
          LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
          WHERE linked_servers.id = ?
@@ -316,6 +324,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
       ).all<CronRow>().catch(() => ({ results: [] as CronRow[] })),
     ]);
 
+    const server = serverObservation;
     if (!server) return dashboardHealthError(404, "server_not_found", "Server not found.");
     const lifecycleStatus = normalizeServerLifecycleStatus({
       lifecycle_status: server.lifecycle_status,
@@ -351,6 +360,12 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     const latestReadTruth = normalizeLatestReadTruth(latestReadIssue, latestDiagnostic);
 
     const planKey = normalizePlanKey(server.plan_key);
+    const serverAccess = await readServerShowcaseAccess(env, linkedServerId, {
+      plan_key: server.plan_key,
+      subscription_status: server.subscription_status,
+      observed_at: server.billing_observed_at,
+    });
+    const showcaseGrantObservedAt = serverAccess.observedAt;
     const currentPlan = effectiveEntitlementPlan(planKey, server.subscription_status);
     const statsSnapshot = canonicalStats ? statsFromCanonical(canonicalStats, server) : statsFromRow(stats, server);
     const score = canonicalRank?.score ?? calculateServerScore({
@@ -392,10 +407,11 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
       ...(server.subscription_status && !["active", "trialing"].includes(String(server.subscription_status).toLowerCase()) ? ["subscription_not_active"] : []),
     ];
 
+    const generatedAt = new Date().toISOString();
     const payload = {
       ok: true,
       data: null,
-      generated_at: now,
+      generated_at: generatedAt,
       stale: false,
       source: "live",
       server_id: server.id,
@@ -418,6 +434,11 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
       current_plan: currentPlan,
       configured_plan: planKey,
       subscription_status: server.subscription_status,
+      server_access: {
+        ...serializeShowcaseAccess(serverAccess),
+        billingObservedAt: server.billing_observed_at ?? now,
+        showcaseGrantObservedAt,
+      },
       plan_limits: {
         status_interval_minutes: getServerStatusInterval(currentPlan),
         adm_discovery_interval_minutes: getAdmDiscoveryIntervalMinutes(currentPlan),

@@ -55,8 +55,9 @@ includesAll([
   'actionKey: "run-auto-post-dispatcher"',
   '"test-discord-post"',
   'actionKey: "rebuild-public-cache"',
-  'actionKey: "manage-billing"',
   'actionKey: "refresh-plan"',
+  'onBilling={() => setActiveTab("billing")}',
+  'onClick={() => setActiveTab("billing")}',
 ]);
 
 includesAll([

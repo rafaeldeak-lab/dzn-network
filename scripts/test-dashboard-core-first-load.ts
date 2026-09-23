@@ -13,6 +13,10 @@ function sliceBetween(startMarker: string, endMarker: string) {
 
 const refreshBilling = sliceBetween(
   "const refreshBilling = useCallback",
+  "const refreshPlanSummary = useCallback",
+);
+const refreshPlanSummary = sliceBetween(
+  "const refreshPlanSummary = useCallback",
   "const refreshDiscordPostingSetup = useCallback",
 );
 const refreshDiscordPostingSetup = sliceBetween(
@@ -73,6 +77,17 @@ assert.equal(
   false,
   "Billing refresh must not load Sync Health diagnostics.",
 );
+assert.equal(refreshPlanSummary.includes("requestBillingStatus("), true, "Visible plan summary must fetch ordered current account billing details.");
+assert.equal(refreshPlanSummary.includes("requestAdvertisingStatus("), true, "Visible plan summary must fetch exact selected-server bump access.");
+assert.equal(dashboard.includes("response: await getBillingStatus()"), true, "The ordered billing wrapper must delegate to the account-billing API.");
+assert.equal(dashboard.includes("response: await getServerAdvertisingStatus(requestServerId)"), true, "The ordered advertising wrapper must delegate to the selected-server API.");
+assert.equal(refreshPlanSummary.includes("Promise.allSettled"), true, "Selected-server access must survive an independent account-billing failure.");
+assert.equal(refreshPlanSummary.includes('runOptionalDashboardRequest(\n      "billing"'), true, "Account billing must retain bounded retry handling.");
+assert.equal(refreshPlanSummary.includes('runOptionalDashboardRequest(\n      "advertising"'), true, "Selected-server access must retry independently from billing.");
+assert.equal(refreshPlanSummary.includes('const billingRequest = runOptionalDashboardRequest('), true, "Account billing must apply through its own request pipeline.");
+assert.equal(refreshPlanSummary.includes('const advertisingRequest = runOptionalDashboardRequest('), true, "Selected-server access must apply through its own request pipeline.");
+assert.equal(refreshPlanSummary.includes("getBillingPlans("), false, "Overview must not fetch the billing catalogue.");
+assert.equal(refreshPlanSummary.includes("getBillingReadiness("), false, "Overview must not fetch admin billing readiness.");
 
 assert.equal(
   refreshDiscordPostingSetup.includes("getPostingDestinations("),
@@ -141,6 +156,7 @@ assert.equal(
   true,
   "Server Wars must be attached to a visibility gate.",
 );
+assert.equal(dashboard.includes("const planSummaryPanelRef = useRef"), true, "Selected-server plan summary must be visibility gated.");
 assert.equal(
   dashboard.includes("new IntersectionObserver"),
   true,
@@ -156,5 +172,6 @@ assert.equal(
   true,
   "Server Wars must load at most once per selected-server visibility cycle.",
 );
+assert.equal(dashboard.includes("planSummaryRequestedRef.current"), true, "Plan summary must load at most once per selected-server visibility cycle.");
 
 console.log("Dashboard core-first load tests passed.");

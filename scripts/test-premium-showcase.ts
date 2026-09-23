@@ -4,6 +4,8 @@ import { getAdvancedShowcaseAccess } from "../functions/_lib/advanced-showcase-e
 
 assert.equal(getAdvancedShowcaseAccess("free", "active").effectivePlan, "free");
 assert.equal(getAdvancedShowcaseAccess("starter", "active").publicServerTop15, false);
+assert.equal(getAdvancedShowcaseAccess("starter", "canceled").effectivePlan, "free");
+assert.equal(getAdvancedShowcaseAccess("starter", "past_due").effectivePlan, "free");
 
 const activePro = getAdvancedShowcaseAccess("pro", "active");
 assert.equal(activePro.effectivePlan, "pro");
@@ -23,5 +25,13 @@ assert.equal(getAdvancedShowcaseAccess("partner", "active").effectivePlan, "prem
 assert.equal(getAdvancedShowcaseAccess("network", "trialing").effectivePlan, "premium");
 assert.equal(getAdvancedShowcaseAccess("partner", "unpaid").effectivePlan, "free");
 assert.equal(getAdvancedShowcaseAccess(null, null).dashboardAnalytics, false);
+
+const complimentary = getAdvancedShowcaseAccess("free", "free", { source: "complimentary_showcase" });
+assert.equal(complimentary.source, "complimentary_showcase");
+assert.equal(complimentary.configuredPlan, "free");
+assert.equal(complimentary.effectivePlan, "pro");
+assert.equal(complimentary.subscriptionActive, false, "Complimentary server access must never fabricate a paid subscription.");
+assert.equal(complimentary.dashboardAnalytics, true);
+assert.deepEqual(complimentary.lockedModules, []);
 
 console.log("Pro advanced showcase entitlement tests passed.");
