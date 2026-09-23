@@ -186,7 +186,7 @@ export function readDznCommsReadHistoryFlags(env: Env, request?: Request): DznCo
 function isLocalRequest(request: Request) {
   try {
     const host = new URL(request.url).hostname.toLowerCase();
-    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost");
+    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]" || host.endsWith(".localhost");
   } catch {
     return false;
   }

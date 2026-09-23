@@ -83,11 +83,12 @@ export async function handleDznCommsSend(request: Request, env: Env) {
       db.prepare("INSERT INTO dzn_comms_messages (id, channel_id, author_user_id, author_display_name, author_role_label, body, visibility_state, source_label) VALUES (?, ?, ?, ?, 'Member', ?, 'visible', 'authenticated_web_chat')").bind(messageId, channel.id, user.id, safeName(user), moderated.body),
       db.prepare("INSERT INTO dzn_comms_send_receipts (id, actor_user_id, channel_id, client_request_id, body_hash, decision, response_status, reason_code, message_id, expires_at) VALUES (?, ?, ?, ?, ?, 'allow', 201, 'MESSAGE_ALLOWED', ?, ?)").bind(receiptId, user.id, channel.id, requestId, bodyHash, messageId, expires),
     ]);
-  } catch {
+  } catch (cause) {
     const concurrentReplay = await readReceipt(db, user.id, channel.id, requestId);
     if (concurrentReplay?.body_hash === bodyHash) return receiptResponse(concurrentReplay, true);
     if (concurrentReplay) return error(409, "REQUEST_ID_CONFLICT", "This retry ID was already used for different text.");
-    return error(429, "RATE_LIMITED", "Wait five seconds before sending another message.");
+    if (isQuotaConstraintError(cause)) return error(429, "RATE_LIMITED", "Wait five seconds before sending another message.");
+    return error(503, "CHAT_STORAGE_UNAVAILABLE", "Global Chat could not store that message. Retry shortly.");
   }
   return json({ ok: true, code: "MESSAGE_SENT", message_id: messageId, replayed: false }, { status: 201, headers: privateNoStoreHeaders() });
 }
@@ -115,9 +116,10 @@ export async function handleDznCommsReport(request: Request, env: Env) {
       allocateReportSlot(db, user.id, now.toISOString().slice(0, 16)),
       db.prepare("INSERT INTO dzn_comms_reports (id, message_id, reporter_user_id, reason_code) VALUES (?, ?, ?, ?)").bind(crypto.randomUUID(), messageId, user.id, reason),
     ]);
-  } catch {
+  } catch (cause) {
     const replay = await db.prepare("SELECT id FROM dzn_comms_reports WHERE message_id = ? AND reporter_user_id = ? LIMIT 1").bind(messageId, user.id).first<{ id: string }>();
-    if (!replay) return error(429, "REPORT_RATE_LIMITED", "Too many reports were sent. Wait a moment and retry.");
+    if (!replay && isQuotaConstraintError(cause)) return error(429, "REPORT_RATE_LIMITED", "Too many reports were sent. Wait a moment and retry.");
+    if (!replay) return error(503, "REPORT_STORAGE_UNAVAILABLE", "That report could not be stored. Retry shortly.");
   }
   return json({ ok: true, code: "REPORT_RECEIVED" }, { status: 202, headers: privateNoStoreHeaders() });
 }
@@ -186,7 +188,12 @@ function clean(value: unknown, max: number) { return typeof value === "string" ?
 function safeName(user: SessionUser) { return clean(user.username, 60).replace(/[\u0000-\u001f\u007f]/g, "") || "DZN Player"; }
 function exactKeys(value: unknown, keys: string[]) { return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value as object).sort().join("|") === [...keys].sort().join("|")); }
 function sameOrigin(request: Request) { const origin = request.headers.get("origin"); if (!origin) return false; try { return new URL(origin).origin === new URL(request.url).origin; } catch { return false; } }
-function isLocalRequest(request: Request) { try { const host = new URL(request.url).hostname.toLowerCase(); return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost"); } catch { return false; } }
+function isLocalRequest(request: Request) { try { const host = new URL(request.url).hostname.toLowerCase(); return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]" || host.endsWith(".localhost"); } catch { return false; } }
+function isQuotaConstraintError(cause: unknown) {
+  const message = cause instanceof Error ? cause.message : String(cause ?? "");
+  return /(?:constraint failed|constraint_error|not null constraint|unique constraint)/i.test(message)
+    && /dzn_comms_(?:attempt|send|report)_slots/i.test(message);
+}
 function allocateAttemptSlot(db: D1Database, actorId: string, minuteBucket: string) {
   return db.prepare(slotAllocationSql("dzn_comms_attempt_slots", "actor_user_id", ATTEMPTS_PER_MINUTE)).bind(actorId, minuteBucket, actorId, minuteBucket);
 }

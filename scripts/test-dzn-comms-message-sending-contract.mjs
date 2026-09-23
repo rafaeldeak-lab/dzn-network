@@ -80,5 +80,10 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /liveUiEnabled \? "Live" : "History"/, "Production history must not be labelled Local/Test.");
   assert.match(client, /"\/api\/comms\/messages"/);
   assert.match(client, /"\/api\/comms\/reports"/);
+  assert.match(client, /setTimeout\(\(\) => controller\.abort\(\), COMMS_HISTORY_TIMEOUT_MS\)/, "Send and report mutations must have a bounded abort timeout.");
+  assert.match(client, /body: JSON\.stringify\(body\), signal: controller\.signal/, "Every mutation request must carry the timeout signal.");
+  assert.match(runtime, /CHAT_STORAGE_UNAVAILABLE/);
+  assert.match(runtime, /REPORT_STORAGE_UNAVAILABLE/);
+  assert.match(runtime, /host === "\[::1\]"/, "Local activation must accept WHATWG bracketed IPv6 loopback hosts.");
   assert.doesNotMatch(runtime + shell + client, /STRIPE_SECRET|DZN_LIVE_CHECKOUT_ENABLED|NITRADO_TOKEN|DISCORD_BOT_TOKEN|WebSocket|DurableObject|OPENAI_API_KEY/);
 });

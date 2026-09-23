@@ -160,22 +160,29 @@ export async function loadCommsHistory(signal: AbortSignal, options: { fetcher?:
   }
 }
 
-export async function sendCommsMessage(body: string, clientRequestId: string) {
-  const response = await fetch("/api/comms/messages", {
-    method: "POST", credentials: "include", redirect: "error",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ channelSlug: "global-chat", clientRequestId, body }),
-  });
+async function postCommsMutation(path: string, body: unknown, fallbackMessage: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), COMMS_HISTORY_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method: "POST", credentials: "include", redirect: "error",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify(body), signal: controller.signal,
+    });
+  } catch {
+    throw new Error(fallbackMessage);
+  } finally {
+    clearTimeout(timer);
+  }
   const payload = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
-  if (!response.ok || !payload?.ok) throw new Error(payload?.message || "Message could not be sent.");
+  if (!response.ok || !payload?.ok) throw new Error(payload?.message || fallbackMessage);
+}
+
+export async function sendCommsMessage(body: string, clientRequestId: string) {
+  await postCommsMutation("/api/comms/messages", { channelSlug: "global-chat", clientRequestId, body }, "Message could not be sent.");
 }
 
 export async function reportCommsMessage(messageId: string, reason = "other") {
-  const response = await fetch("/api/comms/reports", {
-    method: "POST", credentials: "include", redirect: "error",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ messageId, reason }),
-  });
-  const payload = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
-  if (!response.ok || !payload?.ok) throw new Error(payload?.message || "Report could not be sent.");
+  await postCommsMutation("/api/comms/reports", { messageId, reason }, "Report could not be sent.");
 }

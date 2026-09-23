@@ -90,10 +90,10 @@ async function fixture() {
   };
 }
 
-function request(path: string, token: string | null, body: unknown, origin = "http://127.0.0.1") {
+function request(path: string, token: string | null, body: unknown, origin = "http://127.0.0.1", baseUrl = "http://127.0.0.1") {
   const headers = new Headers({ origin, "content-type": "application/json" });
   if (token) headers.set("cookie", `dzn_session=${token}`);
-  return new Request(`http://127.0.0.1${path}`, { method: "POST", headers, body: JSON.stringify(body) });
+  return new Request(`${baseUrl}${path}`, { method: "POST", headers, body: JSON.stringify(body) });
 }
 
 async function payload(response: Response) {
@@ -105,6 +105,8 @@ async function testSendRuntime() {
   try {
     assert.equal((await handleDznCommsSend(request("/api/comms/messages", null, {}), f.env)).status, 401);
     assert.equal((await handleDznCommsSend(request("/api/comms/messages", "player-token", {}, "https://evil.example"), f.env)).status, 403);
+    const ipv6Request = request("/api/comms/messages", "player-token", {}, "http://[::1]", "http://[::1]");
+    assert.notEqual((await handleDznCommsSend(ipv6Request, f.env)).status, 404, "Bracketed IPv6 loopback must be accepted in local_test scope.");
     const input = { channelSlug: "global-chat", clientRequestId: "request-00000001", body: "Hello DZN" };
     const sent = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), f.env);
     assert.equal(sent.status, 201);
@@ -127,7 +129,8 @@ async function testSendRuntime() {
     const result = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
       channelSlug: "global-chat", clientRequestId: "request-rollback-1", body: "Rollback me",
     }), rollback.env);
-    assert.equal(result.status, 429);
+    assert.equal(result.status, 503);
+    assert.equal((await payload(result)).code, "CHAT_STORAGE_UNAVAILABLE");
     assert.equal(rollback.count("dzn_comms_messages"), 0);
     assert.equal(rollback.count("dzn_comms_send_slots"), 0);
     assert.equal(rollback.count("dzn_comms_attempt_slots"), 0);
@@ -187,6 +190,21 @@ async function testReportAndModerationRuntime() {
     assert.equal(resolveNoOp.status, 409);
     assert.equal(f.count("dzn_comms_moderation_audit"), 2);
   } finally { f.close(); }
+
+  const unavailableReport = await fixture();
+  try {
+    unavailableReport.sqlite.prepare(`INSERT INTO dzn_comms_messages
+      (id,channel_id,author_user_id,author_display_name,body,visibility_state)
+      VALUES ('message-storage','dzn-global-chat','other','Other','Review this','visible')`).run();
+    unavailableReport.failAt(1);
+    const failed = await handleDznCommsReport(request("/api/comms/reports", "player-token", {
+      messageId: "message-storage", reason: "other",
+    }), unavailableReport.env);
+    assert.equal(failed.status, 503);
+    assert.equal((await payload(failed)).code, "REPORT_STORAGE_UNAVAILABLE");
+    assert.equal(unavailableReport.count("dzn_comms_reports"), 0);
+    assert.equal(unavailableReport.count("dzn_comms_report_slots"), 0);
+  } finally { unavailableReport.close(); }
 }
 
 async function main() {
