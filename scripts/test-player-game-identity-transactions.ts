@@ -184,5 +184,34 @@ export async function testPlayerGameIdentityTransactions() {
       else { assert.equal(f.state().claim.length, 1); assert.equal(f.state().audit.length, 1); }
     } finally { f.close(); }
   }
+  const gamertag = identityTransactionFixture();
+  try {
+    gamertag.sqlite.exec("DELETE FROM player_game_identity_claims; UPDATE player_profiles SET player_id='game-id-secret-123456' WHERE id='profile-a'");
+    const result = await createPlayerGameIdentityClaim(
+      gamertag.env,
+      identityTestUser("player-a", "discord-a"),
+      { server_slug: "server-a", player_reference: "survivor" },
+    );
+    assert.equal(result.status, 201, "A unique server-scoped visible gamertag should create a review request.");
+    assert.equal(gamertag.state().claim[0].player_profile_id, "profile-a");
+    assert.equal(gamertag.state().claim[0].player_id, "game-id-secret-123456", "The pending claim must store the hidden exact ID resolved server-side.");
+    assert.equal(result.ok && result.claim.player_id, "game...3456", "The player-facing response must mask the hidden exact ID.");
+    assert.match(String(gamertag.state().audit[0].note), /^request_source=gamertag_lookup;/, "The audit record must preserve gamertag provenance for owner review.");
+  } finally { gamertag.close(); }
+  const ambiguousGamertag = identityTransactionFixture();
+  try {
+    ambiguousGamertag.sqlite.exec(`DELETE FROM player_game_identity_claims;
+      INSERT INTO player_profiles (id,linked_server_id,player_id,player_name)
+      VALUES ('profile-b','server-a','game-b','SURVIVOR')`);
+    const before = ambiguousGamertag.state();
+    const result = await createPlayerGameIdentityClaim(
+      ambiguousGamertag.env,
+      identityTestUser("player-a", "discord-a"),
+      { server_slug: "server-a", player_reference: "Survivor" },
+    );
+    assert.equal(result.status, 409, "Duplicate gamertags inside one server must fail closed.");
+    assert.equal(ambiguousGamertag.state().claim.length, before.claim.length, "Ambiguous names must not create a claim.");
+    assert.equal(ambiguousGamertag.state().links.length, 0, "Ambiguous names must never create a verified link.");
+  } finally { ambiguousGamertag.close(); }
   console.log("Identity claim transactions: rollback, conflicts, fresh ownership and concurrent decisions passed.");
 }

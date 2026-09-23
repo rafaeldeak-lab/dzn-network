@@ -10,7 +10,7 @@ This slice adds the first verified Discord-to-ADM player identity bridge so play
 
 - Players use private `GET/POST /api/player/game-identities`.
 - A claim targets one public-safe server and one exact ADM `player_id`.
-- Player-facing UI should hide the technical "slug" concept behind a simple public server picker/search, then ask only for the game ID or proof code supplied by the owner.
+- Player-facing UI hides the technical "slug" concept behind a simple public server picker/search, then asks for the visible DayZ gamertag used on that server.
 - Claims are stored in `player_game_identity_claims`.
 - Server owners and DZN admins use private owner/admin routes:
   - `GET /api/owner/player-game-identity-claims`
@@ -20,7 +20,7 @@ This slice adds the first verified Discord-to-ADM player identity bridge so play
 - The shared stat bridge now reads active verified links first and keeps the older direct `player_profiles.discord_id` path as compatibility.
 - Public leaderboard profile attribution can resolve handles through active verified links, but ranking/order/score calculations remain unchanged.
 - `/player/profile` now includes a private "Link My Game Stats" panel with link status and claim creation.
-- Normal players should see "choose server", "game ID", and "owner/admin check" language. Internal `server_slug`, `linked_server_id`, and ADM `player_id` wording should remain limited to code, tests, docs, or owner/admin technical surfaces.
+- Normal players should see "choose server", "DayZ gamertag", and "owner/admin check" language. Internal `server_slug`, `linked_server_id`, and ADM `player_id` wording remains limited to code, tests, docs, or owner/admin technical surfaces.
 - `/owner/player-game-identity-claims` is the private troubleshooting queue for matching server owners and DZN admins. It shows the exact submitted game ID, selected server, imported game profile label, approve/reject guidance, and missing-evidence copy.
 - The owner/admin queue can show `submitted_player_id` only because it is private no-store and scoped through the owner/admin review API. Player-facing and public profile payloads continue to mask game IDs.
 
@@ -35,6 +35,8 @@ PR `#144` currently also uses migration number `0064` for the DZN Comms read-his
 The follow-up troubleshooting slice adds no migration. It exposes the existing pending-claim review route through `/owner/player-game-identity-claims` and adds private review context to the owner/admin payload. The page helps owners/admins see the selected server, imported game profile label, exact submitted game ID, player account label, approve/reject rules, and missing-evidence guidance.
 
 Exact submitted game IDs remain blocked from public/player-facing payloads. They are visible only in the private owner/admin queue, which uses private no-store responses and server-side owner/admin claim review gates.
+
+The 2026-09-23 usability repair removes the unimplemented owner-code promise. A unique exact gamertag may resolve one candidate only inside the selected public server. Duplicate names and missing imports fail closed. The pending claim stores the resolved hidden profile row and player ID, and approval revalidates both before creating a link. Name lookup never auto-approves, never changes imported stats, and never affects billing, ranking, scoring, XP, events, or competitive eligibility.
 
 ### PR #148 review fixes (2026-09-06)
 

@@ -36,6 +36,7 @@ type PlayerGameIdentityClaim = {
   user_id: string;
   requester_discord_id?: string;
   account_name: string | null;
+  request_source?: "gamertag_lookup" | "legacy_exact_id";
   linked_server_id: string;
   player_profile_id: string;
   player_id: string;
@@ -287,7 +288,7 @@ export function PlayerGameIdentityClaimsPage() {
               </p>
               <h1 className="mt-3 text-3xl font-black uppercase text-white md:text-4xl">Player Stat Link Checks</h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
-                Review the exact game ID a logged-in player submitted, confirm the evidence with the right server owner or DZN admin, then approve or reject the link. Names are only context.
+                Review the imported profile DZN resolved inside the selected server, verify ownership independently, then approve or reject the link. A gamertag can locate a candidate but is never proof.
               </p>
             </div>
             <div className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-right">
@@ -297,7 +298,7 @@ export function PlayerGameIdentityClaimsPage() {
           </div>
 
           <div className="mt-4 grid gap-2 md:grid-cols-3">
-            <BoundaryPill title="Exact ID only" body="No display-name matching." />
+            <BoundaryPill title="Candidate only" body="Gamertags never auto-link." />
             <BoundaryPill title="Owner scoped" body="Cross-owner reviews stay denied." />
             <BoundaryPill title="Stats display only" body="No billing or score effect." />
           </div>
@@ -379,7 +380,7 @@ function HistoryCard({ item }: { item: PlayerGameIdentityHistory }) {
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <DetailBox label="Game profile" value={item.player_name || "Name not available"} />
-        <DetailBox label="Exact submitted game ID" value={item.player_id || "Not recorded"} emphasis />
+        <DetailBox label="Resolved exact game ID" value={item.player_id || "Not recorded"} emphasis />
         <DetailBox label="Linked Discord account" value={item.requester_discord_id || "Not recorded"} />
         <DetailBox label="Decision by" value={item.actor_name || item.actor_user_id || "System actor unavailable"} />
       </div>
@@ -508,7 +509,8 @@ function ClaimCard({
           <div className="grid gap-3 sm:grid-cols-2">
             <DetailBox label="Server" value={claim.server_name || "DZN Server"} href={serverHref} />
             <DetailBox label="Imported game profile" value={claim.player_name || "Name not available"} />
-            <DetailBox label="Submitted game ID" value={exactId} emphasis />
+            <DetailBox label="Resolved exact game ID" value={exactId} emphasis />
+            <DetailBox label="Request source" value={claim.request_source === "gamertag_lookup" ? "Visible gamertag lookup - not ownership proof" : "Legacy exact-ID request - still requires verification"} />
             <DetailBox label="Public-safe masked ID" value={claim.player_id || "Not available"} />
             <DetailBox label="Request reference" value={claim.id} />
             <DetailBox label="DZN account reference" value={claim.user_id} />
@@ -555,7 +557,7 @@ function ClaimCard({
           value={note}
           maxLength={NOTE_LIMIT}
           onChange={(event) => onNoteChange(event.target.value)}
-          placeholder="Example: Exact owner proof checked, or reject reason for the player."
+          placeholder="Example: Independent owner evidence checked, or the reason this request was rejected."
           className="mt-2 min-h-20 w-full resize-y rounded-lg border border-white/10 bg-black/35 px-3 py-2 text-sm font-semibold text-white outline-none transition placeholder:text-zinc-600 focus:border-cyan-300/45"
         />
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -641,9 +643,9 @@ function fallbackReviewContext(claim: PlayerGameIdentityClaim): ClaimReviewConte
         status: "warning",
       },
     ],
-    approve_when: ["The exact submitted game ID belongs to this logged-in account."],
-    reject_when: ["The submitted game ID, server, or owner evidence cannot be confirmed."],
-    missing_evidence_guidance: "Ask the player to get the exact game ID or proof code from the server owner again.",
+    approve_when: ["Independent owner evidence confirms the resolved exact game profile belongs to this logged-in account."],
+    reject_when: ["The resolved profile, selected server, or independent ownership evidence cannot be confirmed."],
+    missing_evidence_guidance: "Do not approve from the public gamertag or leaderboard position alone. Confirm ownership independently or reject the request.",
     boundary:
       "This review can only connect existing stats display to the right account. It does not change billing, ownership, scoring, rankings, discovery, reviews, progression, events, or competitive eligibility.",
   };

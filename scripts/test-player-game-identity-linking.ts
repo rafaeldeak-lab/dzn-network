@@ -60,18 +60,21 @@ assert.match(ownerConsole, /\/owner\/player-game-identity-claims/, "Owner consol
 assert.match(helper, /parsePlayerGameIdentityClaimInput/, "Helper must parse claim inputs centrally.");
 assert.match(helper, /public_slug/, "Players should be able to reference a public server slug without exposing raw internals.");
 assert.match(helper, /LIMIT 2/, "Exact ADM profile lookups must reject ambiguous matches.");
-assert.match(helper, /AMBIGUOUS_PLAYER_ID/, "Ambiguous identity matches must fail closed.");
-assert.match(helper, /submitted_player_id:\s*row\.player_id/, "Private owner/admin review payloads must expose the exact submitted game ID for troubleshooting.");
+assert.match(helper, /AMBIGUOUS_PLAYER_REFERENCE/, "Ambiguous gamertag or identity matches must fail closed.");
+assert.match(helper, /submitted_player_id:\s*row\.player_id/, "Private owner/admin review payloads must expose the resolved exact game ID for troubleshooting.");
+assert.match(helper, /claim:\s*sanitizeClaimRows\(\[claim\]\)\[0\]/, "Player-facing claim responses must mask the resolved hidden game ID.");
+assert.match(helper, /request_source=\$\{parsed\.requestSource\}/, "Claim audit history must retain whether the request began as a gamertag lookup or legacy exact-ID request.");
 assert.match(helper, /review_context/, "Owner/admin claim rows must include review troubleshooting context.");
 assert.match(helper, /missing_evidence_guidance/, "Owner/admin review context must explain what evidence is missing.");
 assert.match(helper, /Only this server owner or a DZN admin can review that claim/, "Cross-owner claim reviews must stay denied server-side.");
 assert.match(helper, /linked_servers\.id = \? OR linked_servers\.public_slug = \?/, "Claim creation must resolve one public server by exact id or public slug before writing.");
 assert.match(helper, /WHERE player_profiles\.linked_server_id = \?[\s\S]*AND player_profiles\.player_id = \?/, "Claim creation must validate one exact ADM profile after server resolution.");
 assert.match(helper, /player_profiles\.player_id = \?/, "Claim creation must match the exact ADM player ID.");
+assert.match(helper, /lower\(trim\(player_profiles\.player_name\)\) = lower\(trim\(\?\)\)/, "Claim creation may resolve one server-scoped visible gamertag to a review candidate.");
+assert.match(helper, /LIMIT 2/, "Gamertag resolution must detect duplicates and fail closed.");
 assert.match(helper, /requireServerOwnerOrDznAdmin/, "Claim approval must be scoped to the matching owner or DZN admin.");
 assert.doesNotMatch(helper, /UPDATE player_profiles|SET discord_id/, "New approvals must not create an untracked second stats attribution.");
-assert.doesNotMatch(helper, /WHERE[\s\S]{0,500}player_profiles\.player_name\s*=/i, "Identity linking must not attach accounts by player name.");
-assert.doesNotMatch(helper, /lower\(player_profiles\.player_name|lower\(kill_events\.killer_name|lower\(kill_events\.victim_name/i, "Identity linking must not add case-folded name matching.");
+assert.match(helper, /p\.id = player_game_identity_claims\.player_profile_id[\s\S]*p\.player_id = player_game_identity_claims\.player_id/, "Approval must revalidate the exact imported profile row and hidden player ID, never the gamertag alone.");
 assert.doesNotMatch(
   helper,
   /\b(?:STRIPE|checkout_session|checkout\.session|server_subscriptions|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns|nitrado_connections|server_reviews|review_score|badge_awards|user_badges|dzn_season|server_war_events|ctf_tournaments|competitive_events|xp_award|calling_card_awards|dynamic_visibility_score|network_rank|rankServers)\b/i,
@@ -109,10 +112,10 @@ assert.match(identityPanel, /\/api\/public\/servers\?limit=120/, "Identity panel
 assert.match(identityPanel, /Link My Game Stats/, "Identity panel must use simple player-facing wording.");
 assert.match(identityPanel, /Choose server/, "Identity panel must ask players to choose a server instead of understanding slugs.");
 assert.match(identityPanel, /Search for your server/, "Identity panel must support searchable server selection.");
-assert.match(identityPanel, /Game ID or proof code from owner/, "Identity panel must ask for the owner-supplied game ID/proof code.");
+assert.match(identityPanel, /DayZ gamertag on this server/, "Identity panel must ask for the visible server gamertag.");
 assert.match(identityPanel, /Send For Check/, "Identity panel must make the owner/admin check flow explicit.");
 assert.match(identityPanel, /server_slug/, "Identity UI must still submit a safe public server slug reference internally.");
-assert.match(identityPanel, /player_id/, "Identity UI must still submit an exact player ID internally.");
+assert.match(identityPanel, /player_reference/, "Identity UI must submit the visible gamertag as an untrusted lookup reference.");
 assert.doesNotMatch(identityPanel, /Server slug or DZN server ID/, "Player-facing UI must not ask normal players to understand server slugs.");
 assert.doesNotMatch(identityPanel, /Use the public server slug from the server page/, "Player-facing UI must not expose the old slug instructions.");
 assert.doesNotMatch(identityPanel, /Private Proof Flow/, "Player-facing UI should use owner-checked language instead of technical proof-flow copy.");
@@ -120,17 +123,19 @@ assert.doesNotMatch(identityPanel, /\b(?:localStorage|sessionStorage|sendBeacon|
 
 assert.match(ownerClaimPage, /\/api\/owner\/player-game-identity-claims/, "Owner/admin troubleshooting UI must read the private claim queue.");
 assert.match(ownerClaimPage, /Decision History/, "Authenticated owners need a visible approval and revocation history view.");
-assert.match(ownerClaimPage, /Exact submitted game ID/, "Decision history must identify the exact game account that was reviewed.");
+assert.match(ownerClaimPage, /Resolved exact game ID/, "Decision history must identify the exact game account that was reviewed without claiming the player submitted it.");
 assert.match(ownerClaimPage, /Recorded reason/, "Decision history must expose the stored approval, rejection or revocation reason.");
 assert.match(ownerClaimPage, /Load older decisions/, "Decision history must allow owners to inspect records beyond the first page.");
 assert.match(helper, /COALESCE\(claims\.discord_id, links\.discord_id\)/, "Revocation history must fall back to the linked Discord identity.");
 assert.match(helper, /datetime\(audit\.created_at\) < datetime\(\?\)/, "Decision history must use a stable keyset cursor instead of clamped offsets.");
 assert.match(ownerClaimPage, /method: "PATCH"/, "Owner/admin troubleshooting UI must use the existing review PATCH route.");
-assert.match(ownerClaimPage, /Submitted game ID/, "Owner/admin troubleshooting UI must show the exact submitted game ID.");
+assert.match(ownerClaimPage, /Resolved exact game ID/, "Owner/admin troubleshooting UI must show the exact resolved game ID.");
 assert.match(ownerClaimPage, /Public-safe masked ID/, "Owner/admin troubleshooting UI must distinguish masked player-safe IDs from owner-only exact IDs.");
+assert.match(ownerClaimPage, /Gamertags never auto-link/, "Owner review UI must state that a gamertag lookup is only a candidate.");
+assert.match(ownerClaimPage, /verify ownership independently/, "Owner review UI must require evidence independent of the public gamertag.");
 assert.match(ownerClaimPage, /Approve Link/, "Owner/admin troubleshooting UI must make approval clear.");
 assert.match(ownerClaimPage, /Reject Request/, "Owner/admin troubleshooting UI must make rejection clear.");
-assert.match(ownerClaimPage, /Names are only context/, "Owner/admin troubleshooting UI must warn that names are not proof.");
+assert.match(ownerClaimPage, /gamertag can locate a candidate but is never proof/i, "Owner/admin troubleshooting UI must warn that names are not proof.");
 assert.match(ownerClaimPage, /Missing evidence/, "Owner/admin troubleshooting UI must explain missing evidence.");
 assert.match(ownerClaimPage, /credentials: "include"/, "Owner/admin troubleshooting UI must preserve authenticated private requests.");
 assert.doesNotMatch(
@@ -145,7 +150,7 @@ assert.doesNotMatch(
 );
 
 assert.match(platformSpec, /Verified Player Game-Identity Linking\/Reconciliation/i, "Master spec must document the identity-linking slice.");
-assert.match(platformSpec, /Never infer a game identity from `player_name`/, "Master spec must keep the no-name-matching rule explicit.");
+assert.match(platformSpec, /Never approve or attach a game identity from `player_name`/, "Master spec must keep the no-name-approval rule explicit.");
 assert.match(platformSpec, /does not grant server ownership, Nitrado access, owner setup, billing entitlements/i, "Master spec must keep owner/payment boundaries explicit.");
 assert.match(platformSpec, /\/owner\/player-game-identity-claims/, "Master spec must document the private owner/admin troubleshooting queue.");
 assert.match(platformSpec, /Exact submitted game IDs are allowed only in the private owner\/admin review queue/, "Master spec must document the exact-ID exposure boundary.");
@@ -161,7 +166,14 @@ assert.equal(sanitizePlayerGameIdentityPlayerId("<script>"), null);
 assert.deepEqual(parsePlayerGameIdentityClaimInput({ server_slug: "pandora-network", player_id: "player-1" }), {
   ok: true,
   serverRef: "pandora-network",
-  playerId: "player-1",
+  playerReference: "player-1",
+  requestSource: "legacy_exact_id",
+});
+assert.deepEqual(parsePlayerGameIdentityClaimInput({ server_slug: "pandora-network", player_reference: " xAKA-MINI_KickAs " }), {
+  ok: true,
+  serverRef: "pandora-network",
+  playerReference: "xAKA-MINI_KickAs",
+  requestSource: "gamertag_lookup",
 });
 assert.deepEqual(parsePlayerGameIdentityReviewInput({ action: "approve", note: "Exact ADM proof checked." }), {
   ok: true,
