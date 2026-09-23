@@ -3,6 +3,7 @@
 import {
   AlertTriangle,
   Bot,
+  Flag,
   Hash,
   LockKeyhole,
   MessageCircle,
@@ -10,10 +11,10 @@ import {
   ShieldCheck,
   Users,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { CommsMessageTime } from "./comms-message-time";
-import { loadCommsHistory, type CommsHistoryMessage, type CommsHistoryPayload } from "./comms-history-client";
+import { loadCommsHistory, reportCommsMessage, sendCommsMessage, type CommsHistoryMessage, type CommsHistoryPayload } from "./comms-history-client";
 
 type CommsHistoryState =
   | { status: "static"; payload: CommsHistoryPayload; message: string }
@@ -22,6 +23,7 @@ type CommsHistoryState =
   | { status: "fallback"; payload: CommsHistoryPayload; message: string };
 
 const historyUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED === "true";
+const liveUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED === "true";
 
 const staticPayload: CommsHistoryPayload = {
   ok: true,
@@ -92,43 +94,82 @@ const staticPayload: CommsHistoryPayload = {
 };
 
 export function DznCommsShell() {
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [composerMessage, setComposerMessage] = useState("");
+  const sendAttemptRef = useRef<{ draft: string; requestId: string } | null>(null);
   const [history, setHistory] = useState<CommsHistoryState>(() => ({
-    status: historyUiEnabled ? "loading" : "static",
+    status: historyUiEnabled || liveUiEnabled ? "loading" : "static",
     payload: staticPayload,
-    message: historyUiEnabled
-      ? "Checking the local/test message-history read model."
+    message: historyUiEnabled || liveUiEnabled
+      ? "Connecting to DZN Global Chat."
       : "Static fallback is active. Message history is disabled by default.",
   }));
 
   useEffect(() => {
-    if (!historyUiEnabled) return;
+    if (!historyUiEnabled && !liveUiEnabled) return;
 
     const controller = new AbortController();
-    loadCommsHistory(controller.signal)
+    const refresh = () => loadCommsHistory(controller.signal)
       .then((payload) => {
         if (controller.signal.aborted) return;
         setHistory({
           status: "ready",
           payload,
-          message: "Local/test read-history payload loaded. Sending remains disabled.",
+          message: liveUiEnabled && payload.feature_flags.sending_enabled ? "Global Chat is live. Keep it respectful and report abuse." : "Message history is available. Sending is not enabled yet.",
         });
       })
       .catch(() => {
         if (controller.signal.aborted) return;
-        setHistory({
-          status: "fallback",
-          payload: staticPayload,
-          message: "Message history could not be reached, so DZN is showing the static read-only fallback.",
-        });
+        setHistory((current) => current.status === "ready"
+          ? { ...current, message: "Global Chat could not refresh. Showing the last received messages while DZN reconnects." }
+          : {
+              status: "fallback",
+              payload: staticPayload,
+              message: "Message history could not be reached, so DZN is showing the static read-only fallback.",
+            });
       });
+    void refresh();
+    const poller = liveUiEnabled ? window.setInterval(() => void refresh(), 5_000) : undefined;
 
     return () => {
       controller.abort();
+      if (poller !== undefined) window.clearInterval(poller);
     };
   }, []);
 
   const payload = history.payload;
   const statusLabel = useMemo(() => statusCopy(history.status), [history.status]);
+  const sendingEnabled = liveUiEnabled && payload.feature_flags.sending_enabled;
+  const reportActionsEnabled = liveUiEnabled && payload.feature_flags.report_actions_enabled;
+  const canSend = sendingEnabled && draft.trim().length > 0 && !sending;
+
+  async function handleSend(event: FormEvent) {
+    event.preventDefault();
+    if (!canSend) return;
+    const pendingAttempt = sendAttemptRef.current?.draft === draft
+      ? sendAttemptRef.current
+      : { draft, requestId: crypto.randomUUID() };
+    sendAttemptRef.current = pendingAttempt;
+    setSending(true);
+    setComposerMessage("");
+    try {
+      await sendCommsMessage(draft, pendingAttempt.requestId);
+      sendAttemptRef.current = null;
+      setDraft("");
+      setComposerMessage("Message sent to Global Chat.");
+      try {
+        const refreshed = await loadCommsHistory(new AbortController().signal);
+        setHistory({ status: "ready", payload: refreshed, message: "Message sent to Global Chat." });
+      } catch {
+        setHistory((current) => ({ ...current, message: "Message sent. Chat history will refresh shortly." }));
+      }
+    } catch (error) {
+      setComposerMessage(error instanceof Error ? error.message : "Message could not be sent.");
+    } finally {
+      setSending(false);
+    }
+  }
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#03050d] pb-24 pt-28 text-zinc-100 sm:pt-32">
@@ -141,16 +182,16 @@ export function DznCommsShell() {
               </span>
               <div className="min-w-0">
                 <p className="text-xs font-black uppercase tracking-[0.28em] text-cyan-200">DZN Comms</p>
-                <h1 className="mt-1 text-3xl font-black uppercase leading-none text-white sm:text-4xl">Global Read History</h1>
+                <h1 className="mt-1 text-3xl font-black uppercase leading-none text-white sm:text-4xl">Global Chat</h1>
                 <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-zinc-300">
-                  The first Comms layer is read-only and disabled by default. Live sending, reactions, moderation actions, presence,
-                  private chat and AI support stay blocked for their own approval slices.
+                  Discord-authenticated members can talk in one moderated DZN channel. Private chat, reactions, presence and AI
+                  support remain separate future releases.
                 </p>
               </div>
             </div>
             <div className="grid gap-2 sm:grid-cols-2 lg:w-[330px]">
               <StatusPill label="History" value={statusLabel} tone={history.status === "ready" ? "cyan" : "violet"} />
-              <StatusPill label="Runtime" value="No Send" tone="gold" />
+              <StatusPill label="Runtime" value={sendingEnabled ? "Live" : "Read Only"} tone={sendingEnabled ? "cyan" : "gold"} />
             </div>
           </div>
 
@@ -158,15 +199,15 @@ export function DznCommsShell() {
             <aside className="border-b border-white/10 bg-black/18 p-4 lg:border-b-0 lg:border-r">
               <PanelTitle icon={Hash} label="Channels" />
               <div className="mt-4 space-y-2">
-                <ChannelButton active icon={Hash} label="Global Chat" meta="Read-only" />
+                <ChannelButton active icon={Hash} label="Global Chat" meta={sendingEnabled ? "Live" : "Read-only"} />
                 <ChannelButton icon={Hash} label="New Players" meta="Future" />
                 <ChannelButton icon={Hash} label="Server Owners" meta="Future" />
                 <ChannelButton icon={LockKeyhole} label="Private Groups" meta="Blocked" />
               </div>
               <div className="mt-5 rounded-lg border border-amber-300/20 bg-amber-300/8 p-3">
-                <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-200">Disabled Composer</p>
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-200">Community Safety</p>
                 <p className="mt-2 text-xs font-semibold leading-5 text-zinc-300">
-                  Message sending is intentionally unavailable in this foundation.
+                  Do not post invites, secrets, threats or personal information. Report abuse instead of replying to it.
                 </p>
               </div>
             </aside>
@@ -188,11 +229,11 @@ export function DznCommsShell() {
 
               <div className="mt-4 space-y-3">
                 {payload.messages.map((message) => (
-                  <MessageRow key={message.id} message={message} />
+                  <MessageRow key={message.id} message={message} reportEnabled={reportActionsEnabled} />
                 ))}
               </div>
 
-              <form className="mt-5 flex items-center gap-2 rounded-lg border border-white/10 bg-black/28 p-2" aria-label="Disabled DZN Comms composer">
+              <form onSubmit={handleSend} className="mt-5 flex items-center gap-2 rounded-lg border border-white/10 bg-black/28 p-2" aria-label="DZN Comms message composer">
                 <button
                   type="button"
                   disabled
@@ -202,28 +243,29 @@ export function DznCommsShell() {
                   <MessageCircle className="h-5 w-5" aria-hidden="true" />
                 </button>
                 <input
-                  disabled
-                  value=""
-                  readOnly
-                  placeholder="Message sending is blocked until the approved Comms runtime slice."
+                  disabled={!sendingEnabled || sending}
+                  value={draft}
+                  onChange={(event) => setDraft([...event.target.value].slice(0, 2_000).join(""))}
+                  placeholder={sendingEnabled ? "Message Global Chat" : "Message sending is not enabled yet."}
                   className="min-w-0 flex-1 bg-transparent px-2 text-sm font-semibold text-zinc-300 placeholder:text-zinc-500 focus:outline-none"
                 />
                 <button
-                  type="button"
-                  disabled
+                  type="submit"
+                  disabled={!canSend}
                   className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-cyan-300/20 bg-cyan-400/10 text-cyan-500 opacity-60"
-                  aria-label="Send is unavailable"
+                  aria-label={sendingEnabled ? "Send message" : "Send is unavailable"}
                 >
                   <Send className="h-5 w-5" aria-hidden="true" />
                 </button>
               </form>
+              {composerMessage ? <p role="alert" className="mt-2 text-sm font-bold text-amber-200">{composerMessage}</p> : null}
             </section>
 
             <aside className="bg-black/18 p-4">
               <PanelTitle icon={ShieldCheck} label="Safety Contract" />
               <div className="mt-4 space-y-3">
-                <SafetyCard icon={ShieldCheck} label="Read-only first" value="GET history only" />
-                <SafetyCard icon={AlertTriangle} label="Moderation" value="No mutation routes" />
+                <SafetyCard icon={ShieldCheck} label="Authenticated" value="Discord login required to send" />
+                <SafetyCard icon={AlertTriangle} label="Moderation" value="Filters, reports and owner actions" />
                 <SafetyCard icon={Bot} label="DZN Assist" value="AI runtime blocked" />
                 <SafetyCard icon={Users} label="Private groups" value="Membership proof required" />
               </div>
@@ -243,8 +285,20 @@ export function DznCommsShell() {
   );
 }
 
-function MessageRow({ message }: { message: CommsHistoryMessage }) {
+function MessageRow({ message, reportEnabled }: { message: CommsHistoryMessage; reportEnabled: boolean }) {
   const muted = message.visibility_state !== "visible";
+  const [reportState, setReportState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+
+  async function submitReport() {
+    if (reportState === "sending" || reportState === "sent") return;
+    setReportState("sending");
+    try {
+      await reportCommsMessage(message.id);
+      setReportState("sent");
+    } catch {
+      setReportState("error");
+    }
+  }
 
   return (
     <article className={`rounded-lg border p-4 ${muted ? "border-amber-300/18 bg-amber-300/6" : "border-white/10 bg-black/22"}`}>
@@ -261,6 +315,15 @@ function MessageRow({ message }: { message: CommsHistoryMessage }) {
             <CommsMessageTime value={message.created_at} />
           </div>
           <p className={`mt-2 text-sm font-semibold leading-6 [overflow-wrap:anywhere] ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
+          {reportEnabled && !muted ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button type="button" disabled={reportState === "sending" || reportState === "sent"} onClick={() => void submitReport()} className="inline-flex items-center gap-1 text-xs font-bold text-zinc-400 hover:text-amber-200 disabled:cursor-not-allowed disabled:text-zinc-600" title="Report this message to DZN moderation">
+                <Flag className="h-3.5 w-3.5" aria-hidden="true" /> {reportState === "sending" ? "Sending" : reportState === "sent" ? "Reported" : "Report"}
+              </button>
+              {reportState === "sent" ? <span role="status" className="text-xs font-bold text-cyan-200">Report received.</span> : null}
+              {reportState === "error" ? <span role="alert" className="text-xs font-bold text-amber-200">Report failed. Try again.</span> : null}
+            </div>
+          ) : null}
         </div>
       </div>
     </article>
@@ -322,7 +385,7 @@ function StatusPill({ label, value, tone }: { label: string; value: string; tone
 }
 
 function statusCopy(status: CommsHistoryState["status"]) {
-  if (status === "ready") return "Local/Test";
+  if (status === "ready") return liveUiEnabled ? "Live" : "History";
   if (status === "loading") return "Checking";
   if (status === "fallback") return "Fallback";
   return "Static";

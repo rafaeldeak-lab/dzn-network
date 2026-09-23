@@ -60,11 +60,11 @@ assert.deepEqual(
 assert.match(helper, /request\.method !== "GET"/, "DZN Comms message history route must be GET-only.");
 assert.match(helper, /DZN_COMMS_MESSAGE_HISTORY_READ_ENABLED/, "Route must require an explicit server-side flag.");
 assert.match(helper, /DZN_COMMS_MESSAGE_HISTORY_READ_SCOPE/, "Route must require an explicit local/test scope.");
-assert.match(helper, /scope === "local_test"/, "Route must stay local/test scoped in this foundation.");
+assert.match(helper, /liveScope === "production"/, "Released live history must require an explicit production scope.");
 assert.match(helper, /getSessionUser\(env, request\)/, "Private group reads must resolve the current Discord session.");
 assert.match(helper, /membership_state = 'active'/, "Private group reads must require an active membership row.");
 assert.match(helper, /SUPPORT_HISTORY_BLOCKED/, "Private support history must remain blocked in this slice.");
-assert.match(helper, /sending_enabled: false/, "Route payload must report sending disabled.");
+assert.match(helper, /sending_enabled: flags\.writeFeaturesEnabled/, "Route payload must derive sending state from the protected server flag.");
 assert.match(helper, /reactions_enabled: false/, "Route payload must report reactions disabled.");
 assert.match(helper, /ai_assist_runtime_enabled: false/, "Route payload must report AI support runtime disabled.");
 assert.match(helper, /durable_objects_or_websockets_enabled: false/, "Route payload must report WebSocket/Durable Object runtime disabled.");
@@ -76,9 +76,8 @@ assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED/, "The /co
 assert.match(shell, /loadCommsHistory\(controller.signal\)/, "The UI must use the bounded history client.");
 assert.match(historyClient, /"\/api\/comms\/message-history\?channel=global-chat&limit=30"/, "The client should only fetch the read-only history route.");
 assert.match(historyClient, /credentials: "include"/, "The client should preserve current-user cookies for read checks.");
-assert.match(shell, /Sending remains disabled/i, "The UI must clearly keep sending disabled.");
-assert.match(shell, /disabled/i, "The composer controls must remain disabled.");
-assert.doesNotMatch(shell, /\b(?:method:\s*["']POST["']|method:\s*["']DELETE["']|sendBeacon|analytics|localStorage|sessionStorage|WebSocket|EventSource|DurableObject|OPENAI_API_KEY|AI_GATEWAY|stripe|checkout|DZN_LIVE_CHECKOUT_ENABLED)\b/i, "The /community shell must not send, persist, track, call AI, or touch checkout.");
+assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED/, "The live composer must remain behind an explicit public UI flag.");
+assert.doesNotMatch(shell, /\b(?:sendBeacon|analytics|localStorage|sessionStorage|WebSocket|EventSource|DurableObject|OPENAI_API_KEY|AI_GATEWAY|stripe|checkout|DZN_LIVE_CHECKOUT_ENABLED)\b/i, "The /community shell must not track, call AI, or touch checkout.");
 assert.match(platformSpec, /DZN Comms\/support remains the next queued product area/i, "Master spec must keep DZN Comms in the queued product area.");
 assert.match(packageJson, /"test:dzn-comms-read-history": "tsx scripts\/test-dzn-comms-read-history\.ts && npm run test:dzn-comms-history-client"/, "Dedicated Comms read-history and client tests must be registered.");
 
@@ -96,7 +95,7 @@ assert.equal(
   true,
   "Read-history route should enable only when the explicit local/test scope is present.",
 );
-assert.ok(dznCommsReadHistoryBoundary().some((line) => /cannot send chat messages/i.test(line)), "Boundary copy must block sending.");
+assert.ok(dznCommsReadHistoryBoundary().some((line) => /separate same-origin routes/i.test(line)), "Boundary copy must identify the protected write routes.");
 
 async function main() {
   testMessageTimestamps();
@@ -155,6 +154,12 @@ async function testRuntimeContracts() {
   const unicodePayload = await loadCommsHistory(new AbortController().signal, { fetcher: async () => unicodeRead });
   assert.equal(unicodePayload.messages.length, 30, "A real API page of long Unicode messages must not fall back to static content.");
   assert.ok(unicodePayload.messages.every(row => row.body === "\u4e2d".repeat(2_000)));
+  const astralDb = seededDb();
+  astralDb.messages.splice(0, astralDb.messages.length,
+    message({ id: "astral", channelId: "channel-global", body: "😀".repeat(2_000), createdAt: "2026-09-01T10:00:00.000Z" }));
+  const astralRead = await callMessageHistoryRoute(astralDb, "GET", "https://dzn.test/api/comms/message-history?channel=global-chat", enabledEnv(astralDb));
+  const astralPayload = await loadCommsHistory(new AbortController().signal, { fetcher: async () => astralRead });
+  assert.equal([...astralPayload.messages[0].body].length, 2_000, "Accepted astral characters must survive the API and client without truncation or split surrogates.");
   for (const kind of ["public", "private_group", "support"] as const) {
     for (const visibility of ["public", "private_group", "support_private"] as const) {
       if (visibility === (kind === "support" ? "support_private" : kind)) continue;

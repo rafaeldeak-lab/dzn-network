@@ -43,7 +43,7 @@ export type DznCommsReadHistoryFlags = {
   localTestScope: boolean;
   scope: string;
   uiFlagName: "NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED";
-  writeFeaturesEnabled: false;
+  writeFeaturesEnabled: boolean;
   aiRuntimeEnabled: false;
 };
 
@@ -58,7 +58,7 @@ const expiredBody = "Message expired.";
 export async function handleDznCommsMessageHistoryRequest(request: Request, env: Env) {
   if (request.method !== "GET") return methodNotAllowed();
 
-  const flags = readDznCommsReadHistoryFlags(env);
+  const flags = readDznCommsReadHistoryFlags(env, request);
   if (!flags.enabled) {
     return json(
       {
@@ -149,10 +149,10 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
       feature_flags: {
         route_enabled: flags.enabled,
         ui_flag_name: flags.uiFlagName,
-        sending_enabled: false,
+        sending_enabled: flags.writeFeaturesEnabled,
         reactions_enabled: false,
-        report_actions_enabled: false,
-        moderation_mutations_enabled: false,
+        report_actions_enabled: flags.writeFeaturesEnabled,
+        moderation_mutations_enabled: flags.writeFeaturesEnabled,
         ai_assist_runtime_enabled: false,
         durable_objects_or_websockets_enabled: false,
         analytics_or_tracking_enabled: false,
@@ -163,26 +163,39 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
   );
 }
 
-export function readDznCommsReadHistoryFlags(env: Env): DznCommsReadHistoryFlags {
+export function readDznCommsReadHistoryFlags(env: Env, request?: Request): DznCommsReadHistoryFlags {
   const readFlag = parseBooleanFlag(env.DZN_COMMS_MESSAGE_HISTORY_READ_ENABLED);
   const scope = cleanString(env.DZN_COMMS_MESSAGE_HISTORY_READ_SCOPE).toLowerCase();
   const localTestScope = scope === "local_test";
+  const liveScope = cleanString(env.DZN_COMMS_LIVE_SCOPE).toLowerCase();
+  const secretReady = typeof env.SESSION_SECRET === "string" && env.SESSION_SECRET.length >= 32;
+  const localRequest = request ? isLocalRequest(request) : false;
+  const liveEnabled = parseBooleanFlag(env.DZN_COMMS_LIVE_ENABLED) && secretReady && (liveScope === "production" || (liveScope === "local_test" && localRequest));
 
   return {
-    enabled: readFlag && localTestScope,
+    enabled: (readFlag && localTestScope) || liveEnabled,
     readFlag,
     localTestScope,
     scope,
     uiFlagName: "NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED",
-    writeFeaturesEnabled: false,
+    writeFeaturesEnabled: liveEnabled,
     aiRuntimeEnabled: false,
   };
 }
 
+function isLocalRequest(request: Request) {
+  try {
+    const host = new URL(request.url).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]" || host.endsWith(".localhost");
+  } catch {
+    return false;
+  }
+}
+
 export function dznCommsReadHistoryBoundary() {
   return [
-    "DZN Comms read history is disabled by default and local/test-scoped.",
-    "The route is GET-only and cannot send chat messages, add reactions, report messages, moderate messages, or call AI support.",
+    "DZN Comms stays disabled by default and requires explicit server and UI release flags.",
+    "Authenticated sending, reporting and platform-owner moderation use separate same-origin routes; reactions and AI support remain disabled.",
     "Read history does not write analytics, tracking events, billing data, owner entitlements, server ownership, ranking data, discovery formulas, reviews, events, XP, calling-card awards, Server Wars, CTF, retained exports, or competitive eligibility.",
     "Private group history requires current-user membership before any rows are returned.",
   ];
@@ -317,7 +330,7 @@ function cleanText(value: unknown, maxLength: number) {
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  return normalized.slice(0, maxLength);
+  return [...normalized].slice(0, maxLength).join("");
 }
 
 function isExpired(value: string | null) {
