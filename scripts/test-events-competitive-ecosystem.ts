@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 
-import { getEventsListPayload, resolveEventStatusFilter } from "../functions/_lib/events";
+import { getEventsListPayload, hasQualifyingFullEventSubscription, resolveEventStatusFilter } from "../functions/_lib/events";
 import { buildChallengePhaseTemplates, renderEventProgressBar } from "../functions/_lib/event-hub";
 import { assertSameServerCategory, categoryMismatchPayload, normalizeServerCategory } from "../functions/_lib/server-categories";
 import type { Env } from "../functions/_lib/types";
@@ -35,6 +35,14 @@ assert.deepEqual(categoryMismatchPayload(), {
 assert.deepEqual(resolveEventStatusFilter("upcoming"), ["upcoming", "registration_open", "standby"]);
 assert.deepEqual(resolveEventStatusFilter("active"), ["live"]);
 assert.deepEqual(resolveEventStatusFilter("completed"), ["ended"]);
+assert.equal(hasQualifyingFullEventSubscription([
+  { plan_key: "premium", status: "canceled" },
+  { plan_key: "pro", status: "active" },
+]), true, "Any active qualifying owner subscription must unlock full event detail even when an inactive legacy plan also exists.");
+assert.equal(hasQualifyingFullEventSubscription([
+  { plan_key: "premium", status: "canceled" },
+  { plan_key: "starter", status: "active" },
+]), false, "Inactive legacy plans and active Starter subscriptions must not unlock full event detail.");
 
 const migration = source("migrations/0032_events_competitive_ecosystem.sql");
 includesAll(migration, [

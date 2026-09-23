@@ -262,6 +262,8 @@ for (const snippet of ["Starter", "Pro", "PAYMENT_COPY.starterOffer", "PAYMENT_C
 }
 assert.equal(pricingSection.includes('["Network rankings", "Included", "Included"]'), true, "Shared network rankings must not be sold as a Pro-only feature.");
 assert.equal(pricingSection.includes('["Event leaderboard detail", null, "Included"]'), true, "Only the Pro-gated event detail should be presented as the upgrade.");
+assert.equal(pricingSection.includes('["Listing analytics", "Included", "Included"]'), true, "Current listing analytics must be presented as shared until advanced fields are actually plan-gated.");
+assert.equal(pricingSection.includes("Advanced listing analytics"), false, "Pricing must not sell shared listing analytics as an advanced Pro feature.");
 assert.equal(pricingSection.includes("Event leaderboards and network rankings"), false, "Shared rankings must not be bundled into a Pro-only claim.");
 assert.equal(pricingSection.includes("Event and network leaderboards"), false, "The rendered Pro checklist must not bundle shared network rankings into paid value.");
 assert.equal(pricingSection.includes("Homepage feature"), false, "Pricing must not promise an unimplemented Pro homepage placement.");

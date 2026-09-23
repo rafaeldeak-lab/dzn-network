@@ -79,7 +79,7 @@ const proFeatureGroups = [
     icon: Radar,
     title: "Faster owner operations",
     summary: "Run more servers with shorter eligible refresh windows and deeper operational insight.",
-    features: ["Up to 3 linked DayZ servers", "5-minute server-status cadence", "10-minute ADM discovery cadence", "Priority Discord posting", "Owner announcements", "Advanced listing analytics"],
+    features: ["Up to 3 linked DayZ servers", "5-minute server-status cadence", "10-minute ADM discovery cadence", "Priority Discord posting", "Owner announcements", "Public advert publishing every 24 hours"],
   },
 ] as const;
 
@@ -103,7 +103,7 @@ const comparisonGroups = [
       ["Earned badge showcase", "Up to 3", "Up to 8"],
       ["Featured and spotlight rotation", null, "Eligible, not guaranteed"],
       ["Enhanced discovery", null, "Included"],
-      ["Listing analytics", "Limited", "Advanced"],
+      ["Listing analytics", "Included", "Included"],
     ],
   },
   {

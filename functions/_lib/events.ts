@@ -1089,25 +1089,21 @@ async function fetchServerMatches(env: Env, serverId: string) {
 
 async function hasFullEventAccess(env: Env, viewer: SessionUser | null) {
   if (!viewer) return false;
-  const row = await requireDb(env)
+  const rows = await requireDb(env)
     .prepare(
       `SELECT server_subscriptions.plan_key, server_subscriptions.status
        FROM server_subscriptions
        LEFT JOIN discord_guilds ON discord_guilds.guild_id = server_subscriptions.guild_id
        WHERE server_subscriptions.owner_discord_id = ?
-          OR discord_guilds.owner_user_id = ?
-       ORDER BY CASE lower(COALESCE(server_subscriptions.plan_key, 'free'))
-         WHEN 'premium' THEN 0
-         WHEN 'partner' THEN 0
-         WHEN 'network' THEN 1
-         WHEN 'pro' THEN 1
-         ELSE 2
-       END
-       LIMIT 1`,
+          OR discord_guilds.owner_user_id = ?`,
     )
     .bind(viewer.discord_id, viewer.id)
-    .first<{ plan_key: string | null; status: string | null }>();
-  return Boolean(row && isActiveSubscription(row.status) && FULL_EVENT_PLANS.includes(normalizePlanKey(row.plan_key)));
+    .all<{ plan_key: string | null; status: string | null }>();
+  return hasQualifyingFullEventSubscription(rows.results ?? []);
+}
+
+export function hasQualifyingFullEventSubscription(rows: Array<{ plan_key: string | null; status: string | null }>) {
+  return rows.some((row) => isActiveSubscription(row.status) && FULL_EVENT_PLANS.includes(normalizePlanKey(row.plan_key)));
 }
 
 async function validateCompetitiveEventCreationSchema(env: Env, requestId: string): Promise<{ ok: true } | EventCreateFailure> {
