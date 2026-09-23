@@ -17,6 +17,7 @@ test("live Comms implementation remains default-off and migration-gated", () => 
   assert.ok(existsSync(new URL("functions/api/comms/messages.ts", root)));
   assert.ok(existsSync(new URL("functions/api/comms/reports.ts", root)));
   assert.ok(existsSync(new URL("functions/api/owner/comms/moderate.ts", root)));
+  assert.ok(existsSync(new URL("scripts/test-dzn-comms-live-runtime.ts", root)));
   assert.match(migration, /Production application remains a separate release operation/);
 });
 
@@ -76,6 +77,7 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /liveUiEnabled && payload\.feature_flags\.sending_enabled \? "Global Chat is live/, "Read-only history must not claim chat is live before the matching UI release gate.");
   assert.match(shell, /Report received\./);
   assert.match(shell, /Report failed\. Try again\./);
+  assert.match(shell, /liveUiEnabled \? "Live" : "History"/, "Production history must not be labelled Local/Test.");
   assert.match(client, /"\/api\/comms\/messages"/);
   assert.match(client, /"\/api\/comms\/reports"/);
   assert.doesNotMatch(runtime + shell + client, /STRIPE_SECRET|DZN_LIVE_CHECKOUT_ENABLED|NITRADO_TOKEN|DISCORD_BOT_TOKEN|WebSocket|DurableObject|OPENAI_API_KEY/);

@@ -383,7 +383,7 @@ function StatusPill({ label, value, tone }: { label: string; value: string; tone
 }
 
 function statusCopy(status: CommsHistoryState["status"]) {
-  if (status === "ready") return "Local/Test";
+  if (status === "ready") return liveUiEnabled ? "Live" : "History";
   if (status === "loading") return "Checking";
   if (status === "fallback") return "Fallback";
   return "Static";
