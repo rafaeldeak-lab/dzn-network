@@ -346,7 +346,7 @@ async function run() {
       Date.now = originalNow;
     }
   });
-  await test("exact grant includes only NukeTown in Pro global advanced boards beyond the metadata window", async ({ db, env }) => {
+  await test("exact grant highlights only NukeTown without changing global advanced ranks beyond the metadata window", async ({ db, env }) => {
     seedPublicMedia(db);
     for (let index = 0; index < 501; index += 1) {
       db.sqlite.prepare(`INSERT INTO linked_servers (id, user_id, guild_id, discord_guild_id, nitrado_service_id,
@@ -362,8 +362,8 @@ async function run() {
         FROM linked_servers
         WHERE id LIKE 'extra-%'
         ORDER BY id
-        LIMIT 80
-      ), event_numbers(event_number) AS (VALUES (1), (2))
+        LIMIT 1
+      ), event_numbers(event_number) AS (VALUES (1), (2), (3))
       INSERT INTO build_events (id, linked_server_id, nitrado_service_id, player_name, event_type,
         source_adm_file, source_line_number, occurred_at, raw_line)
       SELECT 'higher-free-build-' || ranked_free_servers.id || '-' || event_numbers.event_number,
@@ -388,47 +388,36 @@ async function run() {
         VALUES (?, ?, 'NukeTown window explorer', 'player_position', ?, ?, ?)`)
         .run(id, scope.linkedServerId, x, y, occurredAt);
     }
+    const before = await getPublicAdvancedLeaderboardsPayload(env, { limit: 20 });
     await grant(env);
-
-    const payload = await getPublicAdvancedLeaderboardsPayload(env, { limit: 20 });
-    for (const metricKey of ["build_score", "balanced_activity_score", "most_travelled_server", "most_on_foot_distance", "map_exploration_percent"]) {
-      const board = payload.boards.find((candidate) => candidate.metricKey === metricKey);
-      assert.ok(board, `${metricKey} board required`);
-      const nuketown = board.rows.find((row) => row.serverId === scope.linkedServerId);
-      assert.ok(nuketown, `NukeTown must appear on ${metricKey}`);
-      assert.equal(nuketown.isPremiumShowcase, true, metricKey);
-      assert.equal(board.rows.some((row) => row.serverId === "same-guild-other-server"), false, `${metricKey} grant must remain exact-server`);
-    }
-  });
-  await test("Free movement imports cannot exhaust the Pro movement sample window", async ({ db, env }) => {
-    seedPublicMedia(db);
-    db.sqlite.prepare(`INSERT INTO player_events
-      (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
-      VALUES ('nuketown-position-1', ?, 'NukeTown explorer', 'player_position', 1000, 1000, '2026-01-01T00:00:00Z')`)
-      .run(scope.linkedServerId);
-    db.sqlite.prepare(`INSERT INTO player_events
-      (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
-      VALUES ('nuketown-position-2', ?, 'NukeTown explorer', 'player_position', 1100, 1100, '2026-01-01T00:10:00Z')`)
-      .run(scope.linkedServerId);
-    db.sqlite.exec(`WITH RECURSIVE sequence(value) AS (
-        SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 4001
-      )
-      INSERT INTO player_events
-        (id, linked_server_id, player_name, event_type, position_x, position_y, occurred_at)
-      SELECT 'newer-free-position-' || value, 'same-guild-other-server', 'Neighbour explorer',
-        'player_position', 1200 + (value % 10), 1200 + (value % 10), '2026-09-19T00:10:00Z'
-      FROM sequence;`);
-    await grant(env);
-
     const payload = await getPublicAdvancedLeaderboardsPayload(env, { limit: 19 });
-    for (const metricKey of ["most_travelled_server", "most_on_foot_distance", "map_exploration_percent"]) {
+    for (const metricKey of ["build_score", "balanced_activity_score"]) {
+      const beforeBoard = before.boards.find((candidate) => candidate.metricKey === metricKey);
       const board = payload.boards.find((candidate) => candidate.metricKey === metricKey);
+      assert.ok(beforeBoard, `${metricKey} pre-grant board required`);
       assert.ok(board, `${metricKey} board required`);
+      const competitiveProjection = (rows: typeof board.rows) => rows.map((row) =>
+        Object.fromEntries(Object.entries(row).filter(([key]) => key !== "isPremiumShowcase")));
+      assert.deepEqual(
+        competitiveProjection(board.rows),
+        competitiveProjection(beforeBoard.rows.slice(0, 19)),
+        `${metricKey} ranks and values must not change with presentation access`,
+      );
       const nuketown = board.rows.find((row) => row.serverId === scope.linkedServerId);
       assert.ok(nuketown, `NukeTown must appear on ${metricKey}`);
       assert.equal(nuketown.isPremiumShowcase, true, metricKey);
-      assert.equal(board.rows.some((row) => row.serverId === "same-guild-other-server"), false, `${metricKey} grant must remain exact-server`);
+      assert.equal(board.rows.find((row) => row.serverId === "same-guild-other-server")?.isPremiumShowcase ?? false, false, `${metricKey} grant must remain exact-server`);
+      if (metricKey === "build_score") {
+        const higherFree = board.rows.find((row) => row.serverId?.startsWith("extra-"));
+        assert.ok(higherFree, "higher-scoring Free server must remain ranked");
+        assert.ok(higherFree.rank < nuketown.rank, "presentation access must not outrank a higher-scoring Free server");
+        assert.equal(higherFree.isPremiumShowcase, false);
+      }
     }
+    for (const metricKey of ["most_travelled_server", "most_on_foot_distance", "map_exploration_percent"]) {
+      assert.equal(payload.boards.some((board) => board.metricKey === metricKey), false, metricKey);
+    }
+    assert.match(payload.notes.join(" "), /durable plan-neutral aggregates/i);
   });
   await test("owner analytics use only durable headline totals and bounded event samples", async ({ db, env }) => {
     seedPublicMedia(db);

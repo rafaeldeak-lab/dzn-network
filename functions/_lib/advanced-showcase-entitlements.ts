@@ -66,7 +66,7 @@ export function getAdvancedShowcaseAccess(
     publicTravelShowcase: proPlus,
     publicExplorationSummary: proPlus,
     publicMapOverlay: proPlus,
-    globalAdvancedBoards: proPlus,
+    globalAdvancedBoards: true,
     globalPremiumShowcase: proPlus,
     lockedModules: buildLockedModules(effectivePlan),
   };
@@ -97,12 +97,6 @@ function buildLockedModules(plan: AdvancedShowcasePlan): AdvancedShowcaseAccess[
     });
   }
   if (plan !== "pro" && plan !== "premium") {
-    locks.push({
-      key: "global_showcase",
-      title: "Global Advanced Showcase",
-      requiredPlan: "pro",
-      reason: "Pro unlocks global advanced showcase eligibility, map overlays, travel boards, and full public presentation.",
-    });
     locks.push({
       key: "map_overlay",
       title: "Public Map Overlay",

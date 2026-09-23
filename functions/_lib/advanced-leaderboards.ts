@@ -150,7 +150,6 @@ type CachedAdvancedValue = {
 const PUBLIC_ADVANCED_CACHE_TTL_MS = 15_000;
 const SERVER_ADVANCED_CACHE_TTL_MS = 30_000;
 const MAX_ADVANCED_CACHE_ENTRIES = 80;
-const PUBLIC_ADVANCED_POSITION_SAMPLE_LIMIT = 4_000;
 const SERVER_ADVANCED_EVENT_SAMPLE_LIMIT = 6_000;
 const publicAdvancedPayloadCache = new Map<string, CachedAdvancedValue>();
 const serverAdvancedPayloadCaches = new WeakMap<NonNullable<Env["DB"]>, Map<string, CachedAdvancedValue>>();
@@ -165,29 +164,21 @@ async function buildPublicAdvancedLeaderboardsPayload(env: Env, options: { limit
   await ensureAdvancedReadSchema(env);
   const limit = safeLimit(options.limit, 8, 20);
   const accessByServer = await resolvePublicAdvancedAccess(env);
-  const [serverMeta, pvpBoards, buildBoards, hybridBoards, samples] = await Promise.all([
-    queryPublicServerMeta(env, accessByServer),
+  const [pvpBoards, buildBoards, hybridBoards] = await Promise.all([
     queryPvpServerBoards(env, limit, accessByServer),
     queryBuildServerBoards(env, limit, accessByServer),
     queryHybridServerBoards(env, limit, accessByServer),
-    queryPositionSamples(env, {
-      limit: PUBLIC_ADVANCED_POSITION_SAMPLE_LIMIT,
-      globalAdvancedAccessByServer: accessByServer,
-    }),
   ]);
-  const metaById = new Map(serverMeta.map((server) => [server.id, server]));
-  const travelBoards = buildTravelServerBoards(samples, metaById, accessByServer, limit);
-  const explorationBoards = buildExplorationServerBoards(samples, serverMeta, accessByServer, limit);
 
   return {
     ok: true,
     generated_at: new Date().toISOString(),
-    categories: ["overall", "pvp", "deathmatch", "pve", "hybrid", "builds", "survival", "travel", "exploration", "weapons", "premium_showcase"],
-    boards: [...pvpBoards, ...buildBoards, ...hybridBoards, ...travelBoards, ...explorationBoards],
+    categories: ["overall", "pvp", "deathmatch", "pve", "hybrid", "builds", "survival", "weapons", "premium_showcase"],
+    boards: [...pvpBoards, ...buildBoards, ...hybridBoards],
     notes: [
       "All values are derived from imported ADM kill, player, and build events.",
-      "Travel and exploration are estimated from bounded ADM position samples and exclude suspicious movement.",
-      "Public exploration data is aggregate-only; raw player coordinates and exact routes are not exposed.",
+      "Global travel and exploration ranks remain unavailable until durable plan-neutral aggregates can rank every eligible server fairly.",
+      "Server-specific travel and exploration remain estimated from bounded ADM samples; raw player coordinates and exact routes are not exposed.",
     ],
   };
 }
@@ -371,12 +362,11 @@ export async function queryPositionSamples(
   options: {
     linkedServerId?: string | null;
     limit?: number;
-    globalAdvancedAccessByServer?: Map<string, AdvancedShowcaseAccess>;
   } = {},
 ): Promise<TravelPositionSample[]> {
   const db = requireDb(env);
   const limit = safeLimit(options.limit, 2_000, 20_000);
-  if (options.linkedServerId) {
+  if (!options.linkedServerId) return [];
     const perSourceLimit = Math.max(1, Math.ceil(limit / 3));
     const sourceRowWindow = perSourceLimit * 4;
     const result = await db.prepare(
@@ -448,67 +438,6 @@ export async function queryPositionSamples(
       sourceRowWindow,
     ).all<PositionSampleRow>();
     return positionRowsToSamples(result.results ?? []).sort((a, b) => timestampNumber(b.occurredAt) - timestampNumber(a.occurredAt)).slice(0, limit);
-  }
-  const advancedEligibility = options.globalAdvancedAccessByServer
-    ? globalAdvancedEligibilitySql(options.globalAdvancedAccessByServer)
-    : null;
-  const eligibleServerCte = advancedEligibility
-    ? `WITH eligible_servers AS (
-         SELECT linked_servers.id
-         FROM linked_servers
-         WHERE ${publicServerWhereSql()}
-           AND ${advancedEligibility.sql}
-       )`
-    : "";
-  const eligibleServerFilter = advancedEligibility
-    ? "AND linked_server_id IN (SELECT id FROM eligible_servers)"
-    : "";
-  const statement = db.prepare(
-    `${eligibleServerCte}
-     SELECT linked_server_id, player_key, player_name, occurred_at, x, y, z, source_event_type
-     FROM (
-       SELECT linked_server_id,
-              COALESCE(player_id, lower(player_name)) AS player_key,
-              player_name,
-              COALESCE(occurred_at, created_at) AS occurred_at,
-              position_x AS x,
-              position_y AS y,
-              position_z AS z,
-              event_type AS source_event_type
-       FROM player_events
-       WHERE position_x IS NOT NULL AND position_y IS NOT NULL
-         ${eligibleServerFilter}
-       UNION ALL
-       SELECT linked_server_id,
-              COALESCE(killer_id, lower(killer_name)) AS player_key,
-              killer_name AS player_name,
-              COALESCE(occurred_at, created_at) AS occurred_at,
-              position_x AS x,
-              position_y AS y,
-              position_z AS z,
-              'player_killed' AS source_event_type
-       FROM kill_events
-       WHERE position_x IS NOT NULL AND position_y IS NOT NULL AND killer_name IS NOT NULL
-         ${eligibleServerFilter}
-       UNION ALL
-       SELECT linked_server_id,
-              COALESCE(player_id, lower(player_name)) AS player_key,
-              player_name,
-              COALESCE(occurred_at, created_at) AS occurred_at,
-              pos_x AS x,
-              pos_y AS y,
-              pos_z AS z,
-              event_type AS source_event_type
-       FROM build_events
-       WHERE pos_x IS NOT NULL AND pos_y IS NOT NULL
-         ${eligibleServerFilter}
-     )
-     ORDER BY occurred_at DESC
-     LIMIT ?`,
-  );
-  const result = await statement.bind(...(advancedEligibility?.bindings ?? []), limit).all<PositionSampleRow>();
-
-  return positionRowsToSamples(result.results ?? []);
 }
 
 function emptyAdvancedLeaderboardsPayload() {
@@ -524,30 +453,6 @@ function emptyAdvancedLeaderboardsPayload() {
 async function ensureAdvancedReadSchema(env: Env) {
   await ensureAdmSyncSchema(env);
   await ensureBuildEventSchema(env);
-}
-
-async function queryPublicServerMeta(env: Env, accessByServer: Map<string, AdvancedShowcaseAccess>) {
-  const advancedEligibility = globalAdvancedEligibilitySql(accessByServer);
-  const result = await requireDb(env)
-    .prepare(
-      `SELECT linked_servers.id,
-              linked_servers.public_slug,
-              COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
-              linked_servers.server_mode,
-              linked_servers.server_type,
-              linked_servers.map_name,
-              linked_servers.mission,
-              linked_servers.updated_at,
-              ${subscriptionPlanSql()} AS plan_key,
-              ${subscriptionStatusSql()} AS subscription_status
-       FROM linked_servers
-       WHERE ${publicServerWhereSql()}
-         AND ${advancedEligibility.sql}
-       ORDER BY linked_servers.id`,
-    )
-    .bind(...advancedEligibility.bindings)
-    .all<PublicServerMeta>();
-  return result.results ?? [];
 }
 
 async function resolveAdvancedServer(env: Env, serverRef: string, ownerScoped: boolean) {
@@ -641,7 +546,6 @@ async function queryPvpServerBoards(env: Env, limit: number, accessByServer: Map
 }
 
 async function queryBuildServerBoards(env: Env, limit: number, accessByServer: Map<string, AdvancedShowcaseAccess>): Promise<AdvancedBoard[]> {
-  const advancedEligibility = globalAdvancedEligibilitySql(accessByServer);
   const rows = await requireDb(env)
     .prepare(
       `SELECT linked_servers.id,
@@ -661,29 +565,27 @@ async function queryBuildServerBoards(env: Env, limit: number, accessByServer: M
        FROM linked_servers
        LEFT JOIN build_events ON build_events.linked_server_id = linked_servers.id
        WHERE ${publicServerWhereSql()}
-         AND ${advancedEligibility.sql}
        GROUP BY linked_servers.id
        HAVING value > 0
        ORDER BY value DESC, supporting_a DESC, data_freshness DESC
        LIMIT ?`,
     )
-    .bind(...advancedEligibility.bindings, limit)
+    .bind(limit)
     .all<ServerMetricRow>();
 
-  const repairRows = await queryBuildMetric(env, "SUM(CASE WHEN build_events.event_type = 'repaired' THEN 1 ELSE 0 END)", "repairs", limit, accessByServer);
-  const raidRows = await queryBuildMetric(env, `SUM(CASE WHEN ${raidSql()} THEN 1 ELSE 0 END)`, "raid", limit, accessByServer);
-  const trapsRows = await queryBuildMetric(env, `SUM(CASE WHEN ${trapSql()} THEN 1 ELSE 0 END)`, "traps", limit, accessByServer);
+  const repairRows = await queryBuildMetric(env, "SUM(CASE WHEN build_events.event_type = 'repaired' THEN 1 ELSE 0 END)", "repairs", limit);
+  const raidRows = await queryBuildMetric(env, `SUM(CASE WHEN ${raidSql()} THEN 1 ELSE 0 END)`, "raid", limit);
+  const trapsRows = await queryBuildMetric(env, `SUM(CASE WHEN ${trapSql()} THEN 1 ELSE 0 END)`, "traps", limit);
 
   return [
-    serverBoard("build_score", "Highest Build Score", "Construction score from built, placed, repair, and defence actions. Raid/destruction is separate.", "builds", "pro", rows.results ?? [], "score", limit, accessByServer, true),
-    serverBoard("repairs", "Most Repairs", "Fence/gate repair and maintenance events.", "pve", "pro", repairRows, "count", limit, accessByServer, true),
-    serverBoard("raid_score", "Most Base Raiding / Dismantles", "Dismantle and destruction activity, separate from build score.", "pve", "pro", raidRows, "count", limit, accessByServer, true),
-    serverBoard("traps_explosives", "Most Traps & Explosives Placed", "ADM-derived trap/explosive placement events.", "builds", "pro", trapsRows, "count", limit, accessByServer, true),
+    serverBoard("build_score", "Highest Build Score", "Construction score from built, placed, repair, and defence actions. Raid/destruction is separate.", "builds", "free", rows.results ?? [], "score", limit, accessByServer),
+    serverBoard("repairs", "Most Repairs", "Fence/gate repair and maintenance events.", "pve", "free", repairRows, "count", limit, accessByServer),
+    serverBoard("raid_score", "Most Base Raiding / Dismantles", "Dismantle and destruction activity, separate from build score.", "pve", "free", raidRows, "count", limit, accessByServer),
+    serverBoard("traps_explosives", "Most Traps & Explosives Placed", "ADM-derived trap/explosive placement events.", "builds", "free", trapsRows, "count", limit, accessByServer),
   ];
 }
 
 async function queryHybridServerBoards(env: Env, limit: number, accessByServer: Map<string, AdvancedShowcaseAccess>): Promise<AdvancedBoard[]> {
-  const advancedEligibility = globalAdvancedEligibilitySql(accessByServer);
   const rows = await requireDb(env)
     .prepare(
       `SELECT *
@@ -712,13 +614,12 @@ async function queryHybridServerBoards(env: Env, limit: number, accessByServer: 
                 ) AS data_freshness
          FROM linked_servers
          WHERE ${publicServerWhereSql()}
-           AND ${advancedEligibility.sql}
        )
        WHERE value > 0
        ORDER BY value DESC, data_freshness DESC
        LIMIT ?`,
     )
-    .bind(...advancedEligibility.bindings, limit)
+    .bind(limit)
     .all<ServerMetricRow>();
 
   const eventRows = await requireDb(env)
@@ -753,101 +654,9 @@ async function queryHybridServerBoards(env: Env, limit: number, accessByServer: 
     .all<ServerMetricRow>();
 
   return [
-    serverBoard("balanced_activity_score", "Best Balanced Server Score", "Separate combined score using combat, event, and build activity.", "hybrid", "pro", rows.results ?? [], "score", limit, accessByServer, true),
+    serverBoard("balanced_activity_score", "Best Balanced Server Score", "Separate combined score using combat, event, and build activity.", "hybrid", "free", rows.results ?? [], "score", limit, accessByServer),
     serverBoard("events_tracked", "Most Events Tracked", "Canonical imported ADM event rows: kills + player events + build events.", "hybrid", "free", eventRows.results ?? [], "count", limit, accessByServer),
   ];
-}
-
-function buildTravelServerBoards(
-  samples: TravelPositionSample[],
-  metaById: Map<string, PublicServerMeta>,
-  accessByServer: Map<string, AdvancedShowcaseAccess>,
-  limit: number,
-): AdvancedBoard[] {
-  const travel = computeTravelStats(samples);
-  const rows = travel.servers
-    .filter((server) => {
-      const meta = metaById.get(server.linkedServerId);
-      return Boolean(meta && resolveAdvancedAccess(meta, accessByServer).globalAdvancedBoards);
-    })
-    .map((server) => serverTravelToBoardRow(
-      server,
-      metaById.get(server.linkedServerId),
-      accessByServer.get(server.linkedServerId),
-    ))
-    .filter(Boolean) as AdvancedBoardRow[];
-  const byTotal = [...rows].sort((a, b) => numberOrZero(b.value) - numberOrZero(a.value)).slice(0, limit).map((row, index) => ({ ...row, rank: index + 1 }));
-  const byOnFoot = [...rows].sort((a, b) => numberOrZero(b.supportingStats?.onFootDistanceM) - numberOrZero(a.supportingStats?.onFootDistanceM)).slice(0, limit).map((row, index) => ({
-    ...row,
-    rank: index + 1,
-    value: row.supportingStats?.onFootDistanceM as number,
-    displayValue: formatDistanceMeters(numberOrZero(row.supportingStats?.onFootDistanceM)),
-  }));
-  return [
-    {
-      metricKey: "most_travelled_server",
-      title: "Most Travelled Server",
-      description: "Estimated valid ADM movement distance, excluding suspicious jumps.",
-      category: "travel",
-      packageRequired: "premium",
-      rows: byTotal,
-      estimated: true,
-    },
-    {
-      metricKey: "most_on_foot_distance",
-      title: "Most On-Foot Distance",
-      description: "Conservative on-foot movement estimate.",
-      category: "travel",
-      packageRequired: "premium",
-      rows: byOnFoot,
-      estimated: true,
-    },
-  ];
-}
-
-function buildExplorationServerBoards(
-  samples: TravelPositionSample[],
-  servers: PublicServerMeta[],
-  accessByServer: Map<string, AdvancedShowcaseAccess>,
-  limit: number,
-): AdvancedBoard[] {
-  const samplesByServer = groupSamplesByServer(samples);
-  const rows = servers
-    .filter((server) => resolveAdvancedAccess(server, accessByServer).globalAdvancedBoards)
-    .map((server) => {
-    const exploration = summarizeMapExploration(server.map_name ?? server.mission, samplesByServer.get(server.id) ?? [], { overlayLimit: 0 });
-    if (!exploration.supported || exploration.exploredCellsCount <= 0) return null;
-    return {
-      rank: 0,
-      serverId: server.id,
-      serverSlug: server.public_slug,
-      serverName: server.server_name,
-      serverMode: server.server_mode ?? server.server_type,
-      mapName: exploration.mapDisplayName,
-      value: exploration.explorationPercent,
-      displayValue: `${exploration.explorationPercent.toFixed(2)}%`,
-      topPlayer: exploration.topExplorerName,
-      supportingStats: {
-        exploredCells: exploration.exploredCellsCount,
-        activeExplorers: exploration.activeExplorersCount,
-        boundsConfidence: exploration.boundsConfidence,
-      },
-      dataFreshness: exploration.lastExplorationUpdateAt,
-      estimated: exploration.estimated,
-      isPremiumShowcase: resolveAdvancedAccess(server, accessByServer).globalPremiumShowcase,
-    } satisfies AdvancedBoardRow;
-  }).filter(Boolean) as AdvancedBoardRow[];
-
-  const ranked = rows.sort((a, b) => numberOrZero(b.value) - numberOrZero(a.value)).slice(0, limit).map((row, index) => ({ ...row, rank: index + 1 }));
-  return [{
-    metricKey: "map_exploration_percent",
-    title: "Best Explorer Server",
-    description: "Aggregate map grid coverage from valid ADM position samples. No raw coordinates or routes are exposed.",
-    category: "exploration",
-    packageRequired: "premium",
-    rows: ranked,
-    estimated: true,
-  }];
 }
 
 async function queryBuildMetric(
@@ -855,9 +664,7 @@ async function queryBuildMetric(
   expression: string,
   mode: string,
   limit: number,
-  accessByServer: Map<string, AdvancedShowcaseAccess>,
 ) {
-  const advancedEligibility = globalAdvancedEligibilitySql(accessByServer);
   const rows = await requireDb(env)
     .prepare(
       `SELECT linked_servers.id,
@@ -874,13 +681,12 @@ async function queryBuildMetric(
        FROM linked_servers
        LEFT JOIN build_events ON build_events.linked_server_id = linked_servers.id
        WHERE ${publicServerWhereSql()}
-         AND ${advancedEligibility.sql}
        GROUP BY linked_servers.id
        HAVING value > 0
        ORDER BY value DESC, data_freshness DESC
        LIMIT ?`,
     )
-    .bind(...advancedEligibility.bindings, limit)
+    .bind(limit)
     .all<ServerMetricRow & { mode?: string }>();
   return (rows.results ?? []).map((row) => ({ ...row, mode }));
 }
@@ -1109,10 +915,8 @@ function serverBoard(
   valueType: "count" | "distance" | "score" | "ratio" | "kills",
   limit: number,
   accessByServer: Map<string, AdvancedShowcaseAccess>,
-  requireProPlus = false,
 ): AdvancedBoard {
   const ranked = rows
-    .filter((row) => !requireProPlus || resolveAdvancedAccess(row, accessByServer).globalAdvancedBoards)
     .slice(0, limit)
     .map((row, index) => ({
       rank: index + 1,
@@ -1270,50 +1074,12 @@ function summarizeCell(config: NonNullable<ReturnType<typeof resolveDznMapConfig
   return `${cellX}:${cellY}`;
 }
 
-function serverTravelToBoardRow(
-  stats: TravelServerStats,
-  meta: PublicServerMeta | undefined,
-  access: AdvancedShowcaseAccess | undefined,
-): AdvancedBoardRow | null {
-  if (!meta || stats.totalValidDistanceM <= 0) return null;
-  return {
-    rank: 0,
-    serverId: meta.id,
-    serverSlug: meta.public_slug,
-    serverName: meta.server_name,
-    serverMode: meta.server_mode ?? meta.server_type,
-    mapName: meta.map_name ?? meta.mission,
-    value: stats.totalValidDistanceM,
-    displayValue: formatDistanceMeters(stats.totalValidDistanceM),
-    topPlayer: stats.topExplorerPlayer,
-    supportingStats: {
-      onFootDistanceM: stats.totalOnFootDistanceM,
-      fastTravelEstimatedDistanceM: stats.totalFastTravelEstimatedDistanceM,
-      activeExplorers: stats.activeExplorersCount,
-      suspiciousSegmentsIgnored: stats.suspiciousSegmentsCount,
-    },
-    dataFreshness: stats.lastTravelSampleAt,
-    isPremiumShowcase: (access ?? getAdvancedShowcaseAccess(meta.plan_key, meta.subscription_status)).globalPremiumShowcase,
-    estimated: true,
-  };
-}
-
 function summarizeBuildRows(rows: PlayerMetricRow[]) {
   return rows.reduce((summary, row) => ({
     buildScore: summary.buildScore + numberOrZero(row.build_score),
     structuresBuilt: summary.structuresBuilt + numberOrZero(row.structures_built),
     raidScore: summary.raidScore + numberOrZero(row.raid_score),
   }), { buildScore: 0, structuresBuilt: 0, raidScore: 0 });
-}
-
-function groupSamplesByServer(samples: TravelPositionSample[]) {
-  const byServer = new Map<string, TravelPositionSample[]>();
-  for (const sample of samples) {
-    const rows = byServer.get(sample.linkedServerId) ?? [];
-    rows.push(sample);
-    byServer.set(sample.linkedServerId, rows);
-  }
-  return byServer;
 }
 
 function publicServerWhereSql() {
@@ -1358,21 +1124,6 @@ function subscriptionStatusSql() {
              )
              LIMIT 1)
           )`;
-}
-
-function globalAdvancedEligibilitySql(accessByServer: Map<string, AdvancedShowcaseAccess>) {
-  const complimentaryServerIds = [...accessByServer.entries()]
-    .filter(([, access]) => access.globalAdvancedBoards)
-    .map(([serverId]) => serverId);
-  const paidEligibility = `(lower(COALESCE(${subscriptionPlanSql()}, 'free')) IN ('pro', 'premium', 'network', 'partner')
-    AND lower(COALESCE(${subscriptionStatusSql()}, '')) IN ('active', 'trialing'))`;
-  if (complimentaryServerIds.length === 0) {
-    return { sql: paidEligibility, bindings: [] as string[] };
-  }
-  return {
-    sql: `(${paidEligibility} OR linked_servers.id IN (${complimentaryServerIds.map(() => "?").join(", ")}))`,
-    bindings: complimentaryServerIds,
-  };
 }
 
 function buildScoreCaseSql() {

@@ -11,8 +11,6 @@ const ADVANCED_CATEGORIES = [
   "hybrid",
   "builds",
   "survival",
-  "travel",
-  "exploration",
   "weapons",
   "premium_showcase",
 ];

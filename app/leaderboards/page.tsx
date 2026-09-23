@@ -391,7 +391,7 @@ function AdvancedShowcaseSection({ payload, loading, error }: { payload: Advance
   const boards = (payload?.boards ?? []).filter((board) => board.rows.length > 0 || board.locked).slice(0, 10);
   const categories = payload?.categories?.length
     ? payload.categories
-    : ["overall", "pvp", "builds", "travel", "exploration", "premium_showcase"];
+    : ["overall", "pvp", "builds", "hybrid", "premium_showcase"];
 
   return (
     <section className="dzn-advanced-showcase leaderboard-ref-panel glass-surface animated-border rounded p-4" aria-labelledby="advanced-showcase-title">
@@ -400,7 +400,7 @@ function AdvancedShowcaseSection({ payload, loading, error }: { payload: Advance
           <p className="dzn-advanced-showcase__eyebrow">Advanced Server Stats</p>
           <h2 id="advanced-showcase-title">Server-first ADM intelligence beyond K/D</h2>
           <p>
-            Global server boards for combat, builds, hybrid activity, travel, and exploration. Travel and map coverage are estimated from bounded ADM position samples.
+            Plan-neutral global server rankings for combat, builds, and hybrid activity. Server-specific travel and map coverage remain available where supported.
           </p>
         </div>
         <div className="dzn-advanced-showcase__meta">
