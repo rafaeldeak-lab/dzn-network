@@ -344,6 +344,45 @@ async function run() {
     assert.equal(dispatched.results[0]?.status, "no_message_id");
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
   });
+  await test("revoked grant cannot commit a posting destination save", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const grantId = await grant(env);
+    await getAutomationContextForLinkedServer(env, scope.linkedServerId);
+    db.beforeBatch = () => revokeSql(db, grantId);
+    const response = await invoke(postingDestinations, env, actor, "POST", {
+      post_type: "priority_status_embed",
+      discord_channel_id: "99999999",
+      enabled: true,
+    });
+    db.beforeBatch = null;
+    assert.equal(response.status, 403);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_posting_destinations WHERE guild_id = ?").get(scope.guildId)?.n, 0);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("revoked grant blocks a Discord test immediately before delivery", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const grantId = await grant(env);
+    await getAutomationContextForLinkedServer(env, scope.linkedServerId);
+    let revoked = false;
+    db.beforeFirst = (sql) => {
+      if (revoked || !/SELECT discord_message_id FROM server_posting_state/.test(sql)) return;
+      revoked = true;
+      revokeSql(db, grantId);
+    };
+    const response = await invoke(postingDestinations, env, actor, "POST", {
+      action: "test",
+      channel_id: "99999999",
+      test_post_type: "priority_status_embed",
+      discord_webhook_url: "https://discord.com/api/webhooks/12345678/local-test-token",
+    });
+    db.beforeFirst = null;
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { test_post: { ok: boolean; mode: string } };
+    assert.equal(revoked, true);
+    assert.equal(payload.test_post.ok, false);
+    assert.equal(payload.test_post.mode, "access_revoked");
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
   await test("revoked exact grant blocks a previously queued Discord publish", async ({ db, env }) => {
     const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
     const grantId = await grant(env);

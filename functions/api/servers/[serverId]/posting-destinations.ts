@@ -11,6 +11,12 @@ import { ensureAutomationSchema, getAutomationContextForLinkedServer } from "../
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
 import { AUTO_POST_OPTIONS, AUTO_POST_TYPES, getListingLimits, hasListingAutoPost, normalizeListingPlanKey } from "../../../_lib/plans";
+import {
+  isShowcaseWriteAssertionError,
+  showcaseWriteAssertionSql,
+  showcaseWriteGuard,
+  type ServerShowcaseAccess,
+} from "../../../_lib/server-showcase-access";
 import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
 import type { AutoPostType } from "../../../../lib/billing/plans";
 
@@ -24,6 +30,14 @@ type SavePostingDestinationBody = {
   discord_webhook_url?: string | null;
   enabled?: boolean;
   send_test_post?: boolean;
+};
+
+type PostingContext = {
+  linkedServerId: string;
+  guildId: string;
+  planKey: string;
+  subscriptionStatus: string;
+  showcaseAccess: ServerShowcaseAccess;
 };
 
 export const onRequest: PagesFunction = async ({ request, env, params }) => {
@@ -70,7 +84,8 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   });
   await ensureAutomationSchema(env);
   const now = new Date().toISOString();
-  await requireDb(env)
+  const db = requireDb(env);
+  const insertDestination = db
     .prepare(
       `INSERT INTO server_posting_destinations (
         id, guild_id, post_type, discord_channel_id, discord_webhook_url, enabled,
@@ -96,8 +111,9 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
       user.discord_id,
       now,
       now,
-    )
-    .run();
+    );
+  const writeAllowed = await runProtectedPostingBatch(env, context, user.id, [insertDestination]);
+  if (!writeAllowed) return json({ error: "Discord posting access changed. Refresh and try again." }, { status: 403 });
 
   await upsertPostingPermissionWarning(env, {
     guildId: context.guildId,
@@ -120,33 +136,37 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
         missing_permissions: permissionCheck.missing_permissions,
       };
     } else {
-      try {
-        const delivery = await sendDiscordTestPost(env, {
-          guild_id: context.guildId,
-          post_type: postType,
-          discord_channel_id: channelId,
-          discord_webhook_url: webhookUrl,
-        }, state?.discord_message_id ?? null);
-        await recordDiscordPostingDeliveryState(env, {
-          guild_id: context.guildId,
-          post_type: postType,
-          discord_channel_id: channelId,
-        }, delivery);
-        testResult = { ok: true, mode: delivery.mode };
-      } catch (error) {
-        const classified = classifyDiscordPostingError(error);
-        await upsertPostingPermissionWarning(env, {
-          guildId: context.guildId,
-          postType,
-          channelId,
-          warning: classified.warning,
-        });
-        testResult = {
-          ok: false,
-          mode: classified.mode,
-          error: classified.warning ?? "Discord test post failed.",
-          missing_permissions: classified.missing_permissions,
-        };
+      if (!await isPostingAccessCurrent(env, context, postType)) {
+        testResult = { ok: false, mode: "access_revoked", error: "Discord posting access changed. Refresh and try again." };
+      } else {
+        try {
+          const delivery = await sendDiscordTestPost(env, {
+            guild_id: context.guildId,
+            post_type: postType,
+            discord_channel_id: channelId,
+            discord_webhook_url: webhookUrl,
+          }, state?.discord_message_id ?? null);
+          await recordDiscordPostingDeliveryState(env, {
+            guild_id: context.guildId,
+            post_type: postType,
+            discord_channel_id: channelId,
+          }, delivery);
+          testResult = { ok: true, mode: delivery.mode };
+        } catch (error) {
+          const classified = classifyDiscordPostingError(error);
+          await upsertPostingPermissionWarning(env, {
+            guildId: context.guildId,
+            postType,
+            channelId,
+            warning: classified.warning,
+          });
+          testResult = {
+            ok: false,
+            mode: classified.mode,
+            error: classified.warning ?? "Discord test post failed.",
+            missing_permissions: classified.missing_permissions,
+          };
+        }
       }
     }
   }
@@ -159,7 +179,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
 
 async function handleGroupedPostingAction(
   env: Env,
-  context: { guildId: string; planKey: string; subscriptionStatus: string },
+  context: PostingContext,
   user: SessionUser,
   body: SavePostingDestinationBody,
 ) {
@@ -217,7 +237,7 @@ async function handleGroupedPostingAction(
     const postType = normalizePostType(body.test_post_type ?? body.post_type ?? body.post_types?.[0]);
     if (!postType) return json({ error: "Select a post type to test." }, { status: 400 });
     if (!hasListingAutoPost(context, postType)) return json({ error: "Upgrade required for this Discord auto-post type." }, { status: 403 });
-    const testResult = await runPostingTest(env, context.guildId, channelId, postType, webhookUrl, permissionCheck);
+    const testResult = await runPostingTest(env, context, channelId, postType, webhookUrl, permissionCheck);
     return json({
       ...await getPostingDestinationPayload(env, context),
       permission_check: permissionCheck,
@@ -235,9 +255,9 @@ async function handleGroupedPostingAction(
 
   const now = new Date().toISOString();
   const db = requireDb(env);
+  const writes: D1PreparedStatement[] = [];
   for (const postType of postTypes) {
-    await db
-      .prepare(
+    writes.push(db.prepare(
         `INSERT INTO server_posting_destinations (
           id, guild_id, post_type, discord_channel_id, discord_webhook_url, enabled,
           required_feature, min_plan_key, created_by_discord_id, created_at, updated_at
@@ -262,8 +282,16 @@ async function handleGroupedPostingAction(
         user.discord_id,
         now,
         now,
-      )
-      .run();
+      ));
+  }
+
+  const placeholders = postTypes.map(() => "?").join(", ");
+  writes.push(db
+    .prepare(`UPDATE server_posting_destinations SET enabled = 0, updated_at = ? WHERE guild_id = ? AND discord_channel_id = ? AND post_type NOT IN (${placeholders})`)
+    .bind(now, context.guildId, channelId, ...postTypes));
+  const writeAllowed = await runProtectedPostingBatch(env, context, user.id, writes);
+  if (!writeAllowed) return json({ error: "Discord posting access changed. Refresh and try again." }, { status: 403 });
+  for (const postType of postTypes) {
     await upsertPostingPermissionWarning(env, {
       guildId: context.guildId,
       postType,
@@ -271,12 +299,6 @@ async function handleGroupedPostingAction(
       warning: permissionCheck.warning,
     });
   }
-
-  const placeholders = postTypes.map(() => "?").join(", ");
-  await db
-    .prepare(`UPDATE server_posting_destinations SET enabled = 0, updated_at = ? WHERE guild_id = ? AND discord_channel_id = ? AND post_type NOT IN (${placeholders})`)
-    .bind(now, context.guildId, channelId, ...postTypes)
-    .run();
 
   return json({
     ...await getPostingDestinationPayload(env, context),
@@ -286,12 +308,13 @@ async function handleGroupedPostingAction(
 
 async function runPostingTest(
   env: Env,
-  guildId: string,
+  context: PostingContext,
   channelId: string,
   postType: AutoPostType,
   webhookUrl: string | null,
   permissionCheck: Awaited<ReturnType<typeof checkDiscordPostingPermissions>>,
 ) {
+  const guildId = context.guildId;
   const state = await requireDb(env)
     .prepare("SELECT discord_message_id FROM server_posting_state WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ? LIMIT 1")
     .bind(guildId, postType, channelId)
@@ -303,6 +326,10 @@ async function runPostingTest(
       error: permissionCheck.warning ?? "DZN cannot auto-post in this channel yet.",
       missing_permissions: permissionCheck.missing_permissions,
     };
+  }
+
+  if (!await isPostingAccessCurrent(env, context, postType)) {
+    return { ok: false, mode: "access_revoked", error: "Discord posting access changed. Refresh and try again." };
   }
 
   try {
@@ -516,7 +543,36 @@ async function getPostingDestinationPayload(env: Env, context: { guildId: string
 }
 
 async function getPostingContextForRead(env: Env, linkedServerId: string) {
-  return getAutomationContextForLinkedServer(env, linkedServerId);
+  const context = await getAutomationContextForLinkedServer(env, linkedServerId);
+  return context ? { ...context, linkedServerId } : null;
+}
+
+async function runProtectedPostingBatch(
+  env: Env,
+  context: PostingContext,
+  ownerUserId: string,
+  writes: D1PreparedStatement[],
+) {
+  const db = requireDb(env);
+  const guard = await showcaseWriteGuard(env, context.linkedServerId, ownerUserId, context.showcaseAccess);
+  try {
+    await db.batch([
+      db.prepare(showcaseWriteAssertionSql(guard.sql)).bind(...guard.values),
+      ...writes,
+    ]);
+    return true;
+  } catch (error) {
+    if (isShowcaseWriteAssertionError(error)) return false;
+    throw error;
+  }
+}
+
+async function isPostingAccessCurrent(env: Env, context: PostingContext, postType: AutoPostType) {
+  const current = await getPostingContextForRead(env, context.linkedServerId);
+  if (!current || !hasListingAutoPost(current, postType)) return false;
+  if (context.showcaseAccess.source !== "complimentary_showcase") return true;
+  return current.showcaseAccess.source === "complimentary_showcase"
+    && current.showcaseAccess.grantId === context.showcaseAccess.grantId;
 }
 
 function savedPostingChannel(channelId: string) {

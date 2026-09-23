@@ -673,6 +673,7 @@ export async function getAutomationContextForLinkedServer(env: Env, linkedServer
     planKey: showcaseAccess.source === "complimentary_showcase" ? "pro" : normalizePlanKey(billing.plan_key),
     subscriptionStatus: showcaseAccess.source === "complimentary_showcase" ? "active" : billing.status ?? "inactive",
     accessSource: showcaseAccess.source,
+    showcaseAccess,
   };
 }
 
