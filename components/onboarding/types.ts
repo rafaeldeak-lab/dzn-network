@@ -151,6 +151,7 @@ export type DashboardServerWarsResult = {
     listingVisibility: string | null;
   };
   access?: {
+    accessSource: "billing" | "complimentary_showcase";
     effectivePlan: string;
     canCreateChallenge: boolean;
     canCreateFeatured: boolean;

@@ -253,6 +253,38 @@ async function run() {
     }
     assert.equal(db.sqlite.prepare("SELECT status FROM server_subscriptions").get()?.status, "canceled");
   });
+  await test("mid-batch exact grant expiry rolls back every Server Wars write", async ({ db, env }) => {
+    const { expiresAt } = grantExpiring(db, 1);
+    let waited = false;
+    db.beforeWrite = (sql) => {
+      if (waited || !/INSERT INTO server_war_events/.test(sql)) return;
+      waited = true;
+      waitUntilAfter(expiresAt);
+    };
+    const result = await createServerWarChallenge(env, actor, scope.linkedServerId, {
+      opponentServerId: "foreign-owner-server",
+      rulesetKey: "deathmatch_war",
+      title: "Expiring grant challenge",
+    });
+    db.beforeWrite = null;
+    assert.equal(waited, true);
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 403);
+    assert.equal(result.error, "plan_locked");
+    for (const table of ["server_war_events", "server_war_participants", "server_war_challenges"]) {
+      assert.equal(db.sqlite.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.n, 0, table);
+    }
+    assert.equal(db.sqlite.prepare("SELECT status FROM server_subscriptions").get()?.status, "canceled");
+  });
+  await test("Server Wars dashboard labels complimentary access truthfully", async ({ env }) => {
+    await grant(env);
+    const payload = await getOwnerServerWarsPayload(env, actor, scope.linkedServerId);
+    assert.equal(payload.ok, true);
+    if (!payload.ok) throw new Error("Expected owner Server Wars payload");
+    assert.equal(payload.access.accessSource, "complimentary_showcase");
+    const dashboardSource = readFileSync("components/onboarding/dashboard.tsx", "utf8");
+    assert.match(dashboardSource, /accessSource === "complimentary_showcase"[\s\S]*Pro \(complimentary\)/);
+  });
   await test("active paid Pro takes precedence over a matching complimentary grant", async ({ db, env }) => {
     const grantId = await grant(env);
     db.sqlite.prepare("UPDATE server_subscriptions SET status = 'active'").run();

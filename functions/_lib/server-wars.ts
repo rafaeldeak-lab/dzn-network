@@ -459,6 +459,7 @@ export async function createServerWarChallenge(
       challengerParticipant,
       opponentParticipant,
       challengeStatement,
+      db.prepare(showcaseWriteAssertionSql(guard.sql)).bind(...guard.values),
     ]);
   } catch (error) {
     if (isShowcaseWriteAssertionError(error)) {
