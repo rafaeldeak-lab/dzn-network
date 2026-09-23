@@ -649,6 +649,7 @@ function OverviewPanel({ overview, lifecycleCounts }: { overview: OwnerOverview;
 }
 
 function ServersPanel({ servers }: { servers: OwnerServer[] }) {
+  const [supportSelection, setSupportSelection] = useState<OwnerServer | null>(null);
   const [supportServer, setSupportServer] = useState<OwnerServer | null>(null);
   const [supportStatus, setSupportStatus] = useState<"idle" | "loading" | "error">("idle");
   const supportRequestRef = useRef<AbortController | null>(null);
@@ -659,7 +660,8 @@ function ServersPanel({ servers }: { servers: OwnerServer[] }) {
     supportRequestRef.current?.abort();
     const request = new AbortController();
     supportRequestRef.current = request;
-    setSupportServer(server);
+    setSupportSelection(server);
+    setSupportServer(null);
     setSupportStatus("loading");
     try {
       const response = await fetch(`/api/owner/servers/${encodeURIComponent(server.id)}`, { cache: "no-store", signal: request.signal });
@@ -671,6 +673,7 @@ function ServersPanel({ servers }: { servers: OwnerServer[] }) {
       setSupportStatus("idle");
     } catch (error) {
       if (request.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+      if (supportRequestRef.current !== request) return;
       setSupportStatus("error");
     }
   }
@@ -754,25 +757,28 @@ function ServersPanel({ servers }: { servers: OwnerServer[] }) {
           </table>
         </div>
       </div>
-      {supportServer ? (
+      {supportSelection ? (
         <ServerSupportView
+          selection={{ id: supportSelection.id, serverName: supportSelection.serverName }}
           server={supportServer}
           status={supportStatus}
           onClose={() => {
             supportRequestRef.current?.abort();
             supportRequestRef.current = null;
+            setSupportSelection(null);
             setSupportServer(null);
             setSupportStatus("idle");
           }}
-          onRefresh={() => void openSupportView(supportServer)}
+          onRefresh={() => void openSupportView(supportSelection)}
         />
       ) : null}
     </div>
   );
 }
 
-function ServerSupportView({ server, status, onClose, onRefresh }: {
-  server: OwnerServer;
+function ServerSupportView({ selection, server, status, onClose, onRefresh }: {
+  selection: Pick<OwnerServer, "id" | "serverName">;
+  server: OwnerServer | null;
   status: "idle" | "loading" | "error";
   onClose: () => void;
   onRefresh: () => void;
@@ -792,8 +798,8 @@ function ServerSupportView({ server, status, onClose, onRefresh }: {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-200">Platform-owner support view</p>
-            <h2 id="owner-server-support-title" className="mt-1 text-2xl font-black text-white">{server.serverName}</h2>
-            <p className="mt-1 text-xs text-zinc-500">Exact server ID: {server.id}</p>
+            <h2 id="owner-server-support-title" className="mt-1 text-2xl font-black text-white">{selection.serverName}</h2>
+            <p className="mt-1 text-xs text-zinc-500">Exact server ID: {selection.id}</p>
           </div>
           <div className="flex gap-2">
             <button type="button" title="Refresh support data" aria-label="Refresh support data" onClick={onRefresh} disabled={status === "loading"} className="grid h-10 w-10 place-items-center rounded-lg border border-cyan-300/20 bg-cyan-300/10 text-cyan-100 disabled:opacity-50">
@@ -808,9 +814,10 @@ function ServerSupportView({ server, status, onClose, onRefresh }: {
         <div className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-300/[0.05] p-3 text-xs leading-5 text-emerald-100">
           Read-only support access. Nitrado credentials, Discord private content, payment secrets and raw player locations are excluded. This view does not impersonate the server owner.
         </div>
-        {status === "error" ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] p-3 text-xs font-bold text-amber-100">The live support record could not be refreshed. Showing the last inventory snapshot.</p> : null}
+        {status === "loading" ? <p className="mt-3 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] p-3 text-xs font-bold text-cyan-100">Loading the audited support record...</p> : null}
+        {status === "error" ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] p-3 text-xs font-bold text-amber-100">The audited support record could not be opened. No server details are displayed.</p> : null}
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {server ? <><div className="mt-4 grid gap-3 sm:grid-cols-2">
           <SupportSection title="Identity">
             <SupportValue label="Owner" value={server.owner.username ?? "Unknown owner"} />
             <SupportValue label="Owner Discord" value={server.owner.discordId ?? "Not linked"} />
@@ -863,7 +870,7 @@ function ServerSupportView({ server, status, onClose, onRefresh }: {
         <div className="mt-4 flex flex-wrap gap-2">
           {server.publicProfileUrl ? <Link href={server.publicProfileUrl} className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-300/10 px-3 py-2 text-xs font-black text-cyan-100"><ExternalLink size={14} aria-hidden="true" />Public profile</Link> : null}
           <Link href="/owner/player-game-identity-claims" className="inline-flex items-center gap-2 rounded-lg border border-violet-300/20 bg-violet-300/10 px-3 py-2 text-xs font-black text-violet-100"><LifeBuoy size={14} aria-hidden="true" />Player account requests</Link>
-        </div>
+        </div></> : null}
       </section>
     </div>
   );

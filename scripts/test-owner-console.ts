@@ -26,6 +26,7 @@ import { onRequest as onPublicEventsListRequest } from "../functions/api/events"
 import { onRequest as onPublicEventDetailRequest } from "../functions/api/events/[slug]";
 import { onRequestGet as onOwnerEventsApiGet, onRequestPost as onOwnerEventsApiPost } from "../functions/api/owner/events";
 import { onRequestGet as onOwnerDraftEventGet } from "../functions/api/owner/events/[slug]";
+import { createOwnerServerDetailHandler } from "../functions/api/owner/servers/[serverId]";
 import { onRequestGet as onOwnerEventReviewPageGet } from "../functions/owner/events/review";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
 
@@ -50,6 +51,50 @@ assert.deepEqual(authorizePlatformOwnerUser(ownerEnv, { discord_id: "33333333333
   reason: "forbidden",
 });
 assert.equal(authorizePlatformOwnerUser(ownerEnv, { discord_id: "111111111111111111" }).ok, true);
+
+const supportAuditCalls: Array<{ actor: string | null; serverId: string; requestId: string | null }> = [];
+const supportServer = mapOwnerServerRowForTest({
+  id: "synthetic-support-server",
+  server_name: "Synthetic Support Server",
+  lifecycle_status: "active_live",
+  status: "live",
+});
+const supportHandler = createOwnerServerDetailHandler({
+  authorize: async (_env, request) => {
+    const mode = request.headers.get("x-test-auth");
+    if (mode === "owner") return {
+      ok: true as const,
+      user: { id: "synthetic-owner", discord_id: "111111111111111111", username: "Synthetic Owner", avatar: null },
+    };
+    return {
+      ok: false as const,
+      response: new Response(JSON.stringify({ ok: false }), { status: mode === "forbidden" ? 403 : 401 }),
+    };
+  },
+  loadServer: async (_env, serverId) => serverId === supportServer.id ? supportServer : null,
+  auditAccess: async (_env, user, serverId, requestId) => {
+    supportAuditCalls.push({ actor: user.discord_id ?? null, serverId, requestId });
+  },
+});
+async function invokeSupportRoute(serverId: string, auth?: string) {
+  return supportHandler({
+    request: new Request(`https://dzn.test/api/owner/servers/${serverId}`, { headers: auth ? { "x-test-auth": auth, "cf-ray": "synthetic-ray" } : {} }),
+    env: {} as Env,
+    params: { serverId },
+    data: {},
+    waitUntil() {},
+    next: async () => new Response(null, { status: 404 }),
+  });
+}
+async function assertOwnerSupportRouteAudit() {
+  assert.equal((await invokeSupportRoute(supportServer.id)).status, 401);
+  assert.equal((await invokeSupportRoute(supportServer.id, "forbidden")).status, 403);
+  assert.equal((await invokeSupportRoute("missing-support-server", "owner")).status, 404);
+  assert.equal(supportAuditCalls.length, 0, "Rejected and missing-server reads must not create support-access audit entries.");
+  const supportResponse = await invokeSupportRoute(supportServer.id, "owner");
+  assert.equal(supportResponse.status, 200);
+  assert.deepEqual(supportAuditCalls, [{ actor: "111111111111111111", serverId: supportServer.id, requestId: "synthetic-ray" }]);
+}
 
 const discordPreview = buildOwnerDiscordPreviewEmbed(
   { DZN_DISCORD_NOTIFICATIONS_ENABLED: "false" },
@@ -375,7 +420,7 @@ assert.match(ownerUiSource, /supportRequestRef\.current\?\.abort\(\)/, "Closing 
 assert.match(ownerUiSource, /This view does not impersonate the server owner/, "Support view must state its non-impersonation boundary.");
 assert.match(ownerUiSource, /Nitrado credentials, Discord private content, payment secrets and raw player locations are excluded/, "Support view must explain its sensitive-data boundary.");
 const ownerServerDetailSource = readFileSync("functions/api/owner/servers/[serverId].ts", "utf8");
-assert.match(ownerServerDetailSource, /recordOwnerSupportAccess\(env, auth\.user, server\.id/, "Each support-server read must be audited after authorization and exact-server resolution.");
+assert.match(ownerServerDetailSource, /auditAccess:\s*recordOwnerSupportAccess/, "The production detail route must use the durable support-access audit writer.");
 assert.match(ownerUiSource, /h-dvh overflow-hidden/, "Owner console shell must lock to viewport height.");
 assert.match(ownerUiSource, /lg:grid-cols-\[240px_minmax\(0,1fr\)\]/, "Owner console should keep a compact fixed desktop sidebar.");
 assert.match(ownerUiSource, /h-full min-h-0/, "Owner console panels must use constrained internal height.");
@@ -432,6 +477,7 @@ void assertOwnerPrivateDraftReviewRoutes()
   });
 
 async function assertOwnerPrivateDraftReviewRoutes() {
+  await assertOwnerSupportRouteAudit();
   const publicEventDetailSource = readFileSync("functions/_lib/events.ts", "utf8");
   assert.match(publicEventDetailSource, /WHERE slug = \?/);
   assert.match(publicEventDetailSource, /visibility === "private" \|\| status === "draft"/, "Public event detail API must hide private or draft stored events before demo fallback.");
