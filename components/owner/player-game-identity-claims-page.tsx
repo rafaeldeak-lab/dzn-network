@@ -699,7 +699,7 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 
 function VerificationToggle({ checked, onChange, label }: { checked: boolean; onChange: (checked: boolean) => void; label: string }) {
   return (
-    <label className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition ${checked ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-black/20 hover:border-emerald-300/20"}`}>
+    <label className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition focus-within:border-cyan-300/70 focus-within:ring-2 focus-within:ring-cyan-300/70 focus-within:ring-offset-2 focus-within:ring-offset-[#06110e] ${checked ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-black/20 hover:border-emerald-300/20"}`}>
       <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="sr-only" />
       <span className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border ${checked ? "border-emerald-300 bg-emerald-300 text-[#03100b]" : "border-zinc-600 text-transparent"}`}>
         <CheckCircle2 className="size-4" aria-hidden="true" />

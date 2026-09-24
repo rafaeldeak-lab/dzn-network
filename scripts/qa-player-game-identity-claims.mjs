@@ -87,6 +87,10 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "No horizontal overflow");
     const fullIdVisible = await page.getByText(exactId, { exact: true }).evaluate(el => el.scrollWidth <= el.clientWidth);
     assert.equal(fullIdVisible, true, "The full exact game ID must wrap inside its cell");
+    const firstCheckbox = page.getByRole("checkbox").first();
+    await firstCheckbox.focus();
+    assert.equal(await firstCheckbox.evaluate(input => input === document.activeElement), true, "Verification controls must be keyboard focusable");
+    assert.notEqual(await firstCheckbox.evaluate(input => getComputedStyle(input.closest("label")).boxShadow), "none", "Keyboard focus must render a visible focus ring");
     await page.screenshot({ path: path.join(evidence, `pending-${width}.png`), fullPage: true });
     assert.equal(await page.getByRole("button", { name: "Approve Link" }).isDisabled(), true, "Approval must stay locked until every evidence check is confirmed");
     for (const checkbox of await page.getByRole("checkbox").all()) await checkbox.check({ force: true });
