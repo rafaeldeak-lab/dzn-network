@@ -32,6 +32,13 @@ const claim = {
   submitted_player_id: exactId, player_name: "Sample Survivor", status: "pending",
   requested_at: "2026-09-06T12:00:00Z", server_name: "Sample Server", public_slug: "sample-server",
 };
+const historyItem = {
+  id: "history-approved", claim_id: "local-claim", link_id: "local-link", linked_server_id: "sample-server",
+  server_name: "Sample Server", public_slug: "sample-server", user_id: "sample-player", account_name: "Sample Player",
+  account_avatar_url: `${base}/avatar.png`, requester_discord_id: "831243159785701398", player_id: "7656...1111",
+  player_name: "Sample Survivor", action: "claim_approved", result: "accepted", note: "Owner evidence checked",
+  actor_user_id: "sample-owner", actor_name: "Sample Owner", created_at: "2026-09-24T14:34:00Z",
+};
 const checks = [];
 try {
   for (const width of [1440, 900, 390]) {
@@ -41,6 +48,7 @@ try {
     page.on("pageerror", error => errors.push(error.message));
     let source = "player_game_identity_claims";
     let claims = [claim];
+    let history = [];
     let status = 200;
     let deny = false;
     let patchCount = 0;
@@ -56,6 +64,7 @@ try {
           assert.deepEqual(JSON.parse(request.postData()), { action: "approve", note: "" });
           if (deny) return route.fulfill({ status: 403, json: { ok: false, message: "Only this server owner can review that claim." } });
           claims = [];
+          history = [historyItem];
           return route.fulfill({ json: { ok: true, message: "Link request approved." } });
         }
         assert.equal(request.method(), "GET");
@@ -63,7 +72,7 @@ try {
           delayInitialClaims = false;
           await new Promise(resolve => setTimeout(resolve, 200));
         }
-        return route.fulfill({ status, json: { ok: true, source, private: true, owner_or_admin_only: true, claims } });
+        return route.fulfill({ status, json: { ok: true, source, private: true, owner_or_admin_only: true, claims, history, history_has_more: false, history_next_cursor: null } });
       }
       if (url.pathname === "/api/owner/player-game-identity-links") {
         return route.fulfill({ json: { ok: true, items: [], next: null } });
@@ -103,6 +112,18 @@ try {
     await page.getByRole("button", { name: "Approve Link" }).click();
     await page.getByRole("heading", { name: "No pending player stat checks" }).waitFor();
     assert.equal(await page.getByRole("status").filter({ hasText: "Link request approved." }).count(), 1);
+    await page.getByRole("button", { name: "Decision History" }).click();
+    await page.getByRole("img", { name: "Sample Player Discord profile" }).waitFor();
+    await page.getByPlaceholder("Search player, gamertag, server or reviewer").fill("Sample Survivor");
+    assert.equal(await page.getByText("Sample Survivor", { exact: false }).count() > 0, true, "History search must find the game profile.");
+    await page.getByPlaceholder("Search player, gamertag, server or reviewer").fill("missing player");
+    await page.getByText("No loaded decisions match those filters.").waitFor();
+    await page.getByPlaceholder("Search player, gamertag, server or reviewer").fill("");
+    await page.getByLabel("Filter by decision").selectOption("claim_approved");
+    await page.getByText("Decision details", { exact: true }).click();
+    await page.getByText("Owner evidence checked", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "History must not overflow the viewport");
+    await page.screenshot({ path: path.join(evidence, `history-${width}.png`), fullPage: true });
     source = "unavailable";
     await page.getByRole("button", { name: "Refresh Queue" }).click();
     await page.getByRole("heading", { name: "Review queue unavailable" }).waitFor();
@@ -114,7 +135,7 @@ try {
     await page.getByRole("heading", { name: "Log in to review player stat links" }).waitFor();
     assert.deepEqual(errors, []);
     assert.equal(patchCount, 2);
-    checks.push({ width, passed: true, scenarios: ["pending", "avatar-fallback", "full-id", "denied-review", "approval-confirmation", "empty", "unavailable-with-link-management", "logged-out"], pageErrors: errors });
+    checks.push({ width, passed: true, scenarios: ["pending", "avatar-fallback", "full-id", "denied-review", "approval-confirmation", "history-avatar-search-filter", "empty", "unavailable-with-link-management", "logged-out"], pageErrors: errors });
     await context.close();
   }
   const dashboard = await readFile("out/dashboard.html", "utf8");

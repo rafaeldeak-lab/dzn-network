@@ -135,6 +135,14 @@ assert.equal(provider.includes("dzn:pulse:pending-dismissals:v1"), true, "Pendin
 assert.equal(provider.includes("data-dzn-pulse-bell"), true, "Bell focus restoration needs a stable selector.");
 assert.equal(provider.includes("DznPulseDrawer"), true, "Provider must render the drawer.");
 assert.equal(provider.includes("EventPopupManager"), true, "Provider must support popup manager mounting.");
+assert.equal(provider.includes("AccountDecisionPopupManager"), true, "Provider must mount the player-link decision popup manager.");
+assert.equal(provider.includes("player_link_approved"), true, "Player-link approval notifications must be eligible for a website popup.");
+assert.equal(provider.includes("player_link_rejected"), true, "Player-link rejection notifications must be eligible for a website popup.");
+assert.equal(provider.includes("player_link_revoked"), true, "Player-link revocation notifications must be eligible for a website popup.");
+assert.equal(provider.includes("/api/dzn-pulse/notifications?filter=news&limit=10"), true, "Decision popup polling must use the bounded private notification feed.");
+assert.equal(provider.includes("credentials: \"include\""), true, "Decision popup polling must preserve authenticated private requests.");
+assert.equal(provider.includes("dzn:pulse:account-decisions:v1"), true, "Decision popup session deduplication must use a versioned key.");
+assert.equal(provider.includes("data-dzn-account-decision-popup"), true, "Decision popups need a stable rendered QA selector.");
 assert.equal(provider.includes("const [mounted, setMounted] = useState(false)"), true, "Pulse provider must defer dynamic Pulse UI until after client hydration.");
 assert.equal(provider.includes("enabled: mounted && enabled"), true, "Pulse context must not expose enabled state before hydration completes.");
 assert.equal(provider.includes("mounted && enabled ? <DznPulseDrawer />"), true, "Pulse drawer must be client-mounted to avoid hydration drift.");

@@ -83,6 +83,9 @@ export async function testPlayerGameIdentityTransactions() {
       assert.equal(state.claim[0].status, action === "approve" ? "approved" : "rejected");
       assert.equal(state.audit.length, action === "approve" ? 2 : 1);
       assert.equal(state.links.length, action === "approve" ? 1 : 0);
+      assert.equal(state.notifications.length, 1, "Each committed owner decision must create one player account notification.");
+      assert.equal(state.notifications[0].type, action === "approve" ? "player_link_approved" : "player_link_rejected");
+      assert.equal(state.notifications[0].user_id, "player-a");
       assert.equal(state.profiles[0].discord_id, null, "New links must not overwrite legacy attribution");
       if (result.ok && action === "approve") assert.equal(result.link_id, state.links[0].id);
       const before = f.state();
@@ -92,7 +95,7 @@ export async function testPlayerGameIdentityTransactions() {
     } finally { f.close(); }
   }
   for (const action of ["approve", "reject"] as const) {
-    for (let failure = 0; failure < (action === "approve" ? 5 : 2); failure++) {
+    for (let failure = 0; failure < (action === "approve" ? 6 : 3); failure++) {
       const f = identityTransactionFixture();
       try {
         const before = f.state(); f.failAt(failure);

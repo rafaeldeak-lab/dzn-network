@@ -35,6 +35,7 @@ const NOTIFICATION_POLL_MS = 60_000;
 const POPUP_POLL_MS = 60_000;
 const SESSION_DISMISSALS_KEY = "dzn:pulse:session-dismissals:v1";
 const PENDING_DISMISSALS_KEY = "dzn:pulse:pending-dismissals:v1";
+const ACCOUNT_DECISION_POPUPS_KEY = "dzn:pulse:account-decisions:v1";
 
 type PulseConfig = {
   ok: boolean;
@@ -400,6 +401,7 @@ export function DznPulseProvider({
     <PulseContext.Provider value={value}>
       {children}
       {mounted && enabled ? <DznPulseDrawer /> : null}
+      {mounted && enabled ? <AccountDecisionPopupManager /> : null}
       {mounted && enabled && enablePopups ? <EventPopupManager /> : null}
       {mounted && enabled ? <PulseBellFocusBridge buttonRef={bellButtonRef} /> : null}
     </PulseContext.Provider>
@@ -875,6 +877,114 @@ function NotificationIcon({ type, className }: { type: string; className: string
   if (type.includes("news") || type.includes("announcement")) return <Radio className={className} />;
   if (type.includes("event")) return <Zap className={className} />;
   return <Activity className={className} />;
+}
+
+function AccountDecisionPopupManager() {
+  const [notification, setNotification] = useState<PulseNotification | null>(null);
+  const requestInFlight = useRef(false);
+
+  const refresh = useCallback(async () => {
+    if (requestInFlight.current || document.visibilityState === "hidden") return;
+    requestInFlight.current = true;
+    try {
+      const response = await fetchJsonWithRetry<NotificationsResponse>("/api/dzn-pulse/notifications?filter=news&limit=10", {
+        cache: "no-store",
+        credentials: "include",
+        headers: { accept: "application/json" },
+        retries: 0,
+        timeoutMs: 8000,
+      });
+      const seen = readAccountDecisionPopupIds();
+      const next = response.items.find((item) => !item.read_at && isPlayerLinkDecision(item.type) && !seen.has(item.id)) ?? null;
+      if (!next) return;
+      rememberAccountDecisionPopup(next.id);
+      setNotification(next);
+    } catch {
+      // The notification drawer remains available if a transient popup request fails.
+    } finally {
+      requestInFlight.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    const run = () => void refresh();
+    const timer = window.setTimeout(run, 600);
+    const interval = window.setInterval(run, NOTIFICATION_POLL_MS);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") run();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [refresh]);
+
+  if (!notification) return null;
+  const approved = notification.type === "player_link_approved";
+
+  async function openDecision() {
+    const current = notification;
+    setNotification(null);
+    if (!current) return;
+    await fetchJsonWithRetry(`/api/dzn-pulse/notifications/${encodeURIComponent(current.id)}/read`, {
+      method: "POST",
+      cache: "no-store",
+      credentials: "include",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      retries: 0,
+      timeoutMs: 8000,
+    }).catch(() => undefined);
+    navigateToInternal(current.action_url || "/player/profile#game-account");
+  }
+
+  return (
+    <aside data-dzn-account-decision-popup role="status" className={`fixed bottom-4 right-4 z-[80] w-[calc(100vw-2rem)] max-w-sm overflow-hidden rounded-lg border bg-[#07101c] shadow-[0_20px_70px_rgba(0,0,0,0.55)] ${approved ? "border-emerald-300/35" : "border-amber-300/35"}`}>
+      <div className={`h-1 w-full ${approved ? "bg-emerald-300" : "bg-amber-300"}`} />
+      <div className="p-4">
+        <div className="flex items-start gap-3">
+          <span className={`grid size-10 shrink-0 place-items-center rounded-md border ${approved ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-100" : "border-amber-300/30 bg-amber-300/10 text-amber-100"}`}>
+            {approved ? <Check className="size-5" /> : <CircleAlert className="size-5" />}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-cyan-200">Game account decision</p>
+            <p className="mt-1 text-sm font-black uppercase text-white">{notification.title}</p>
+            <p className="mt-1 text-xs font-semibold leading-5 text-zinc-300">{notification.body}</p>
+          </div>
+          <button type="button" onClick={() => setNotification(null)} aria-label="Dismiss account decision" className="grid size-8 shrink-0 place-items-center rounded-md border border-white/10 text-zinc-400 hover:text-white">
+            <X className="size-4" />
+          </button>
+        </div>
+        <button type="button" onClick={() => void openDecision()} className="mt-4 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-cyan-200/50 bg-cyan-300 px-3 text-xs font-black uppercase text-slate-950 hover:bg-cyan-200">
+          View game account <ChevronRight className="size-4" />
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+function isPlayerLinkDecision(type: string) {
+  return type === "player_link_approved" || type === "player_link_rejected" || type === "player_link_revoked";
+}
+
+function readAccountDecisionPopupIds() {
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(ACCOUNT_DECISION_POPUPS_KEY) ?? "[]") as unknown;
+    return new Set(Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string").slice(-30) : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function rememberAccountDecisionPopup(id: string) {
+  const seen = readAccountDecisionPopupIds();
+  seen.add(id);
+  try {
+    window.sessionStorage.setItem(ACCOUNT_DECISION_POPUPS_KEY, JSON.stringify(Array.from(seen).slice(-30)));
+  } catch {
+    // Session storage is optional; the notification remains visible in DZN Pulse.
+  }
 }
 
 function toneForNotification(category: PulseFilter) {

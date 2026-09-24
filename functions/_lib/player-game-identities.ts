@@ -2,6 +2,7 @@ import { isDznAdminDiscordId } from "./admin";
 import { requireDb } from "./db";
 import { isPlatformOwnerDiscordId } from "./platform-owner";
 import { requireServerOwnerOrDznAdmin } from "./public-cache";
+import type { PlayerGameIdentityDecisionDelivery } from "./player-game-identity-notifications";
 import type { Env, SessionUser } from "./types";
 
 export type PlayerGameIdentityStatus = "pending" | "approved" | "rejected" | "cancelled";
@@ -77,6 +78,8 @@ export type OwnerPlayerGameIdentityHistoryRow = {
   public_slug: string | null;
   user_id: string;
   account_name: string | null;
+  account_avatar?: string | null;
+  account_avatar_url: string | null;
   requester_discord_id: string | null;
   player_id: string;
   player_name: string | null;
@@ -125,6 +128,7 @@ type ReviewableClaimRow = {
   player_id: string;
   player_name: string | null;
   status: PlayerGameIdentityStatus;
+  server_name: string | null;
 };
 
 type CreateClaimInput = {
@@ -148,7 +152,7 @@ export type CreatePlayerGameIdentityClaimResult =
   | { ok: false; status: 400 | 404 | 409 | 429 | 503; error: string; message: string };
 
 export type ReviewPlayerGameIdentityClaimResult =
-  | { ok: true; status: 200; claim_id: string; link_id: string | null; action: "approved" | "rejected"; message: string }
+  | { ok: true; status: 200; claim_id: string; link_id: string | null; action: "approved" | "rejected"; message: string; delivery: PlayerGameIdentityDecisionDelivery }
   | { ok: false; status: 400 | 403 | 404 | 409 | 503; error: string; message: string };
 
 const MAX_PENDING_IDENTITY_CLAIMS_PER_USER = 5;
@@ -536,6 +540,7 @@ export async function readOwnerPlayerGameIdentityClaims(
           linked_servers.public_slug,
           audit.user_id,
           requesters.username AS account_name,
+          requesters.avatar AS account_avatar,
           COALESCE(claims.discord_id, links.discord_id) AS requester_discord_id,
           COALESCE(NULLIF(audit.player_id, ''), claims.player_id, links.player_id, '') AS player_id,
           COALESCE(claims.player_name, links.player_name) AS player_name,
@@ -571,7 +576,10 @@ export async function readOwnerPlayerGameIdentityClaims(
         OWNER_HISTORY_PAGE_SIZE + 1,
       ).all<OwnerPlayerGameIdentityHistoryRow>(),
     ]);
-    const historyRows = historyResult.results ?? [];
+    const historyRows = (historyResult.results ?? []).map(({ account_avatar: avatar, ...row }) => ({
+      ...row,
+      account_avatar_url: discordAvatarUrl(row.requester_discord_id ?? "", avatar ?? null),
+    }));
     const historyHasMore = historyRows.length > OWNER_HISTORY_PAGE_SIZE;
     const historyPage = historyRows.slice(0, OWNER_HISTORY_PAGE_SIZE);
     const lastHistoryRow = historyPage.at(-1);
@@ -621,9 +629,12 @@ export async function reviewPlayerGameIdentityClaim(
     const claim = await db
       .prepare(
         `SELECT
-          id, user_id, discord_id, linked_server_id, player_profile_id, player_id, player_name, status
-         FROM player_game_identity_claims
-         WHERE id = ?
+          claims.id, claims.user_id, claims.discord_id, claims.linked_server_id, claims.player_profile_id,
+          claims.player_id, claims.player_name, claims.status,
+          COALESCE(NULLIF(servers.display_name, ''), NULLIF(servers.hostname, ''), servers.server_name, servers.nitrado_service_name) AS server_name
+         FROM player_game_identity_claims claims
+         INNER JOIN linked_servers servers ON servers.id = claims.linked_server_id
+         WHERE claims.id = ?
          LIMIT 1`,
       )
       .bind(claimId)
@@ -664,9 +675,10 @@ export async function reviewPlayerGameIdentityClaim(
           playerId: claim.player_id,
           note: parsed.note,
         }, { previousWrite: true }),
+        preparePlayerLinkDecisionNotification(db, claim, "rejected", { previousWrite: true }),
       ]);
       if (results[0].meta.changes !== 1) return reviewChangedResult();
-      return { ok: true, status: 200, claim_id: claim.id, link_id: null, action: "rejected", message: "Identity claim rejected." };
+      return { ok: true, status: 200, claim_id: claim.id, link_id: null, action: "rejected", message: "Identity claim rejected.", delivery: decisionDelivery(claim, "rejected") };
     }
 
     const exactProfile = await readExactPlayerProfileById(db, claim);
@@ -763,6 +775,7 @@ export async function reviewPlayerGameIdentityClaim(
           WHERE l.linked_server_id = ? AND l.player_id = ? AND l.status = 'active' AND l.revoked_at IS NULL
             AND ${decisionGate}`,
       ).bind(crypto.randomUUID(), claim.id, actor.id, linkId, parsed.note, claim.linked_server_id, claim.player_id, decisionId),
+      preparePlayerLinkDecisionNotification(db, claim, "approved", { decisionId }),
       db.prepare(
         `SELECT id FROM player_game_identity_links
          WHERE linked_server_id = ? AND player_id = ? AND status = 'active' AND revoked_at IS NULL AND ${decisionGate}`,
@@ -771,7 +784,7 @@ export async function reviewPlayerGameIdentityClaim(
     if (results[0].meta.changes !== 1) return reviewChangedResult();
     const linkedId = (results[results.length - 1]?.results?.[0] as { id?: string } | undefined)?.id;
     if (!linkedId) throw new Error("Committed link result unavailable");
-    return { ok: true, status: 200, claim_id: claim.id, link_id: linkedId, action: "approved", message: "Link request approved and connected by exact game ID." };
+    return { ok: true, status: 200, claim_id: claim.id, link_id: linkedId, action: "approved", message: "Link request approved and connected by exact game ID.", delivery: decisionDelivery(claim, "approved") };
   } catch {
     return {
       ok: false,
@@ -993,6 +1006,50 @@ function prepareGameIdentityAudit(db: D1Database, input: GameIdentityAuditInput,
       input.result,
       sanitizeReviewNote(input.note),
     );
+}
+
+function preparePlayerLinkDecisionNotification(
+  db: D1Database,
+  claim: ReviewableClaimRow,
+  action: "approved" | "rejected",
+  options: { previousWrite?: boolean; decisionId?: string },
+) {
+  const approved = action === "approved";
+  const condition = options.previousWrite
+    ? "changes() = 1"
+    : "EXISTS (SELECT 1 FROM player_game_identity_audit_log WHERE id = ?)";
+  const bindings: unknown[] = [
+    crypto.randomUUID(),
+    claim.user_id,
+    null,
+    approved ? "player_link_approved" : "player_link_rejected",
+    approved ? "Game stats link approved" : "Game stats link not approved",
+    approved
+      ? `Your ${claim.player_name || "game profile"} stats link for ${claim.server_name || "this DZN server"} is now active.`
+      : `Your ${claim.player_name || "game profile"} link request for ${claim.server_name || "this DZN server"} was not approved.`,
+    "/player/profile#game-account",
+    approved ? 700 : 650,
+    `player-link-decision:${claim.id}:${action}`,
+    JSON.stringify({ claim_id: claim.id, decision: action }),
+  ];
+  if (options.decisionId) bindings.push(options.decisionId);
+  return db.prepare(
+    `INSERT OR IGNORE INTO user_notifications (
+      id, user_id, server_id, type, title, body, action_url, priority, dedupe_key, metadata, created_at, expires_at
+    ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, datetime('now', '+90 days')
+      WHERE ${condition}`,
+  ).bind(...bindings);
+}
+
+function decisionDelivery(claim: ReviewableClaimRow, action: "approved" | "rejected"): PlayerGameIdentityDecisionDelivery {
+  return {
+    claimId: claim.id,
+    userId: claim.user_id,
+    discordId: claim.discord_id,
+    action,
+    serverName: claim.server_name || "DZN Server",
+    playerName: claim.player_name || "game profile",
+  };
 }
 
 async function writeGameIdentityAudit(env: Env, input: GameIdentityAuditInput) {

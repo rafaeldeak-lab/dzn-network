@@ -3,6 +3,7 @@ import { json, methodNotAllowed, readBoundedJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
 import { privateNoStoreHeaders } from "../../../_lib/performance";
 import { reviewPlayerGameIdentityClaim } from "../../../_lib/player-game-identities";
+import { dispatchPlayerGameIdentityDecisionDiscord } from "../../../_lib/player-game-identity-notifications";
 import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
 
 type ReviewBody = {
@@ -11,7 +12,7 @@ type ReviewBody = {
   note?: unknown;
 };
 
-export const onRequest: PagesFunction = async ({ request, env, params }) => {
+export const onRequest: PagesFunction = async ({ request, env, params, waitUntil }) => {
   if (request.method !== "PATCH") return methodNotAllowed();
 
   const user = await resolveUser(env, request);
@@ -38,7 +39,10 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
 
   const claimId = Array.isArray(params.claimId) ? params.claimId[0] : params.claimId;
   const result = await reviewPlayerGameIdentityClaim(env, user, claimId ?? "", bodyResult.value);
-  return json(result, { status: result.status, headers: privateNoStoreHeaders() });
+  if (!result.ok) return json(result, { status: result.status, headers: privateNoStoreHeaders() });
+  const { delivery, ...publicResult } = result;
+  waitUntil(dispatchPlayerGameIdentityDecisionDiscord(env, delivery));
+  return json(publicResult, { status: publicResult.status, headers: privateNoStoreHeaders() });
 };
 
 async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {

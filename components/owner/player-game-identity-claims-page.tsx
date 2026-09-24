@@ -14,6 +14,7 @@ import {
   Home,
   ListChecks,
   RefreshCw,
+  Search,
   Server,
   ShieldCheck,
   UserRound,
@@ -86,6 +87,7 @@ type PlayerGameIdentityHistory = {
   public_slug: string | null;
   user_id: string;
   account_name: string | null;
+  account_avatar_url: string | null;
   requester_discord_id: string | null;
   player_id: string;
   player_name: string | null;
@@ -126,6 +128,9 @@ export function PlayerGameIdentityClaimsPage() {
   const [busyClaim, setBusyClaim] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [selectedClaimIndex, setSelectedClaimIndex] = useState(0);
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyAction, setHistoryAction] = useState<"all" | PlayerGameIdentityHistory["action"]>("all");
+  const [historyServer, setHistoryServer] = useState("all");
 
   const fetchClaims = useCallback(async (historyCursor: string | null = null): Promise<ClaimLoadResult> => {
     const endpoint = historyCursor
@@ -233,6 +238,17 @@ export function PlayerGameIdentityClaimsPage() {
   const pendingCount = pendingClaims.length;
   const safeSelectedClaimIndex = Math.min(selectedClaimIndex, Math.max(0, pendingClaims.length - 1));
   const selectedClaim = pendingClaims[safeSelectedClaimIndex] ?? null;
+  const historyServers = useMemo(() => Array.from(new Map(history.map((item) => [item.linked_server_id, item.server_name || "DZN Server"]))).sort((a, b) => a[1].localeCompare(b[1])), [history]);
+  const filteredHistory = useMemo(() => {
+    const query = historySearch.trim().toLowerCase();
+    return history.filter((item) => {
+      if (historyAction !== "all" && item.action !== historyAction) return false;
+      if (historyServer !== "all" && item.linked_server_id !== historyServer) return false;
+      if (!query) return true;
+      return [item.account_name, item.requester_discord_id, item.player_name, item.player_id, item.server_name, item.actor_name, item.note]
+        .some((value) => value?.toLowerCase().includes(query));
+    });
+  }, [history, historyAction, historySearch, historyServer]);
 
   async function submitReview(claim: PlayerGameIdentityClaim, action: ReviewAction) {
     const note = (notes[claim.id] ?? "").trim().slice(0, NOTE_LIMIT);
@@ -363,9 +379,33 @@ export function PlayerGameIdentityClaimsPage() {
         {state === "ready" && view === "history" && history.length === 0 ? <HistoryEmptyState /> : null}
         {state === "ready" && view === "history" && history.length > 0 ? (
           <div className="grid gap-3">
-            <p className="text-xs font-semibold text-zinc-500">Showing {history.length} most recent decisions{historyHasMore ? "; older records are available." : "."}</p>
+            <section className="grid gap-3 rounded-lg border border-white/10 bg-[#07101b] p-3 sm:grid-cols-[minmax(0,1fr)_180px_220px]" aria-label="Decision history filters">
+              <label className="relative block">
+                <span className="sr-only">Search decision history</span>
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500" aria-hidden="true" />
+                <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder="Search player, gamertag, server or reviewer" className="min-h-11 w-full rounded-md border border-white/10 bg-black/35 py-2 pl-9 pr-3 text-sm font-semibold text-white outline-none focus:border-cyan-300/45" />
+              </label>
+              <label>
+                <span className="sr-only">Filter by decision</span>
+                <select value={historyAction} onChange={(event) => setHistoryAction(event.target.value as typeof historyAction)} className="min-h-11 w-full rounded-md border border-white/10 bg-black/35 px-3 text-sm font-bold text-zinc-200 outline-none focus:border-cyan-300/45">
+                  <option value="all">All decisions</option>
+                  <option value="claim_approved">Approved</option>
+                  <option value="claim_rejected">Rejected</option>
+                  <option value="link_revoked">Revoked</option>
+                </select>
+              </label>
+              <label>
+                <span className="sr-only">Filter by server</span>
+                <select value={historyServer} onChange={(event) => setHistoryServer(event.target.value)} className="min-h-11 w-full rounded-md border border-white/10 bg-black/35 px-3 text-sm font-bold text-zinc-200 outline-none focus:border-cyan-300/45">
+                  <option value="all">All servers</option>
+                  {historyServers.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                </select>
+              </label>
+            </section>
+            <p className="text-xs font-semibold text-zinc-500">Showing {filteredHistory.length} of {history.length} loaded decisions{historyHasMore ? "; older records are available." : "."}</p>
             <section className="grid gap-3" aria-label="Approval and revocation history">
-              {history.map((item) => <HistoryCard key={item.id} item={item} />)}
+              {filteredHistory.map((item) => <HistoryCard key={item.id} item={item} />)}
+              {filteredHistory.length === 0 ? <div className="rounded-lg border border-dashed border-white/15 bg-white/[0.025] p-6 text-center text-sm font-semibold text-zinc-400">No loaded decisions match those filters.</div> : null}
             </section>
             {historyHasMore ? (
               <button type="button" onClick={() => void loadOlderHistory()} disabled={historyLoading} className="mx-auto inline-flex min-h-11 items-center gap-2 rounded-md border border-violet-300/30 bg-violet-300/10 px-4 py-2 text-xs font-black uppercase text-violet-50 transition hover:bg-violet-300/15 disabled:cursor-wait disabled:opacity-60">
@@ -386,33 +426,51 @@ export function PlayerGameIdentityClaimsPage() {
 }
 
 function HistoryCard({ item }: { item: PlayerGameIdentityHistory }) {
+  const [failedAvatar, setFailedAvatar] = useState(false);
   const labels = {
     claim_approved: { title: "Link approved", tone: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100" },
     claim_rejected: { title: "Request rejected", tone: "border-rose-300/25 bg-rose-300/10 text-rose-100" },
     link_revoked: { title: "Link revoked", tone: "border-amber-300/25 bg-amber-300/10 text-amber-100" },
   } as const;
   const label = labels[item.action];
+  const initial = (item.account_name || "D").trim().charAt(0).toUpperCase() || "D";
   return (
-    <article className="rounded-lg border border-white/10 bg-black/45 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">Authenticated owner decision</p>
-          <h2 className="mt-1 text-xl font-black text-white">{item.account_name || "DZN Player"} <span className="text-zinc-500">on</span> {item.server_name || "DZN Server"}</h2>
-          <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-zinc-400"><Clock3 className="size-3.5" aria-hidden="true" />{formatDate(item.created_at)}</p>
+    <article className="rounded-lg border border-white/10 bg-black/45 p-3 sm:p-4">
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-md border border-cyan-300/25 bg-cyan-300/10 text-lg font-black text-cyan-100">
+          {item.account_avatar_url && !failedAvatar ? (
+            // Discord avatar URLs are validated and assembled by the private server-side read model.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={item.account_avatar_url} alt={`${item.account_name || "DZN Player"} Discord profile`} onError={() => setFailedAvatar(true)} className="size-full object-cover" />
+          ) : <span aria-label={`${item.account_name || "DZN Player"} Discord profile fallback`}>{initial}</span>}
         </div>
-        <span className={`rounded-md border px-3 py-1.5 text-xs font-black uppercase ${label.tone}`}>{label.title}</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-black text-white">{item.account_name || "DZN Player"}</h2>
+              <p className="mt-0.5 truncate text-sm font-semibold text-zinc-300">{item.player_name || "Game profile"} <span className="text-zinc-600">on</span> {item.server_name || "DZN Server"}</p>
+            </div>
+            <span className={`shrink-0 rounded-md border px-2.5 py-1 text-[10px] font-black uppercase ${label.tone}`}>{label.title}</span>
+          </div>
+          <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-zinc-500">
+            <span className="inline-flex items-center gap-1.5"><Clock3 className="size-3.5" aria-hidden="true" />{formatDate(item.created_at)}</span>
+            <span>Reviewed by {item.actor_name || "DZN admin"}</span>
+          </p>
+        </div>
       </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <DetailBox label="Game profile" value={item.player_name || "Name not available"} />
-        <DetailBox label="Resolved exact game ID" value={item.player_id || "Not recorded"} emphasis />
-        <DetailBox label="Linked Discord account" value={item.requester_discord_id || "Not recorded"} />
-        <DetailBox label="Decision by" value={item.actor_name || item.actor_user_id || "System actor unavailable"} />
-      </div>
-      <div className="mt-3 rounded-md border border-white/10 bg-white/[0.035] p-3">
-        <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Recorded reason</p>
-        <p className="mt-1 text-sm font-semibold leading-6 text-zinc-200">{item.note || "No reason was recorded for this earlier decision."}</p>
-        <p className="mt-2 break-all text-[10px] font-semibold text-zinc-600">Audit reference: {item.id}</p>
-      </div>
+      <details className="group mt-3 rounded-md border border-white/10 bg-white/[0.025]">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 px-3 text-xs font-black uppercase text-zinc-400 hover:text-white">Decision details <ChevronDown className="size-4 transition group-open:rotate-180" aria-hidden="true" /></summary>
+        <div className="grid gap-2 border-t border-white/10 p-3 sm:grid-cols-2 lg:grid-cols-4">
+          <DetailBox label="Exact game ID" value={item.player_id || "Not recorded"} emphasis />
+          <DetailBox label="Discord account" value={item.requester_discord_id || "Not recorded"} />
+          <DetailBox label="Decision by" value={item.actor_name || item.actor_user_id || "System actor unavailable"} />
+          <DetailBox label="Audit reference" value={item.id} />
+          <div className="rounded-md border border-white/10 bg-black/25 p-3 sm:col-span-2 lg:col-span-4">
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Recorded reason</p>
+            <p className="mt-1 text-sm font-semibold leading-6 text-zinc-200">{item.note || "No reason was recorded for this earlier decision."}</p>
+          </div>
+        </div>
+      </details>
     </article>
   );
 }

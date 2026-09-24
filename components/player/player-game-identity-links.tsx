@@ -211,7 +211,7 @@ export function PlayerGameIdentityLinks() {
   }
 
   return (
-    <section aria-busy={identityState.status === "loading" || serverPickerState.status === "loading"} className="rounded-lg border border-cyan-300/25 bg-slate-950/78 p-5 shadow-[0_0_36px_rgba(34,211,238,0.1)] backdrop-blur">
+    <section aria-busy={identityState.status === "loading" || serverPickerState.status === "loading"} className="min-w-0 overflow-hidden rounded-lg border border-cyan-300/25 bg-slate-950/78 p-4 shadow-[0_0_36px_rgba(34,211,238,0.1)] backdrop-blur sm:p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-cyan-300/35 bg-cyan-300/10 text-cyan-100">
@@ -246,8 +246,8 @@ export function PlayerGameIdentityLinks() {
       ) : null}
 
       {data ? (
-        <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.85fr)]">
-          <div className="space-y-3">
+        <div className="mt-5 grid min-w-0 gap-4">
+          <div className="min-w-0 space-y-3">
             {data.revoked_links?.length ? <section aria-label="Revoked game stats links" className="border-l-2 border-rose-400 pl-3">
               <h3 className="text-sm font-bold text-white">Revoked links</h3>
               {data.revoked_links.map(link => <div key={link.id} className="border-b border-white/10 py-3 text-sm [overflow-wrap:anywhere]">
