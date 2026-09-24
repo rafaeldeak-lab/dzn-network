@@ -24,6 +24,12 @@ import { onRequest as advertisingBump } from "../functions/api/servers/[serverId
 import { dashboardSelectedServerAccess } from "../components/onboarding/dashboard-detail-display";
 import { createServerWarChallenge, getOwnerServerWarsPayload, getServerWarOpponentOptions } from "../functions/_lib/server-wars";
 import { processServerMatchmakingOptIn } from "../functions/_lib/ctf-tournaments";
+import { getAutomationContextForLinkedServer, queueDiscordPostUpdatesForGuild } from "../functions/_lib/automation";
+import { dispatchQueuedDiscordPostUpdates } from "../functions/_lib/discord-posting";
+import { onRequest as postingDestinations } from "../functions/api/servers/[serverId]/posting-destinations";
+import { getOwnerDiscordOverview } from "../functions/_lib/owner-discord-control";
+import { onRequest as runAutoPostsNow } from "../functions/api/servers/[serverId]/auto-posts/run-now";
+import { importAdmTextForServer } from "../functions/_lib/adm-sync";
 
 type Row = Record<string, unknown>;
 type Sqlite = { exec(sql: string): void; close(): void; prepare(sql: string): {
@@ -37,6 +43,7 @@ class LocalD1 {
   beforeWrite: ((sql: string) => void) | null = null;
   beforeBatch: (() => void) | null = null;
   beforeFirst: ((sql: string) => void | Promise<void>) | null = null;
+  beforeAll: ((sql: string) => void) | null = null;
   afterFirst: ((sql: string, value: Row | null) => void | Promise<void>) | null = null;
   prepare(sql: string) {
     const statement = (values: unknown[] = []) => ({
@@ -52,7 +59,10 @@ class LocalD1 {
         await this.afterFirst?.(sql, value);
         return value;
       },
-      all: async () => ({ success: true, results: this.sqlite.prepare(sql).all(...values) }),
+      all: async () => {
+        this.beforeAll?.(sql);
+        return { success: true, results: this.sqlite.prepare(sql).all(...values) };
+      },
     });
     return statement();
   }
@@ -255,6 +265,446 @@ async function run() {
     assert.equal(unrelated.ok, false);
     assert.equal(unrelated.status, "plan_locked");
     assert.equal(db.sqlite.prepare("SELECT is_searching_for_match FROM linked_servers WHERE id = ?").get("same-guild-other-server")?.is_searching_for_match, 0);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("inactive paid labels preserve Free Discord posts without unlocking Pro posts", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "pro", ["basic_status_embed"], "ambiguous-free-test", {
+      linkedServerId: scope.linkedServerId,
+    }), 0);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "pro", ["basic_status_embed"], "free-baseline-test", {
+      linkedServerId: scope.linkedServerId,
+    }), 1);
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "pro", ["priority_status_embed"], "inactive-pro-test", {
+      linkedServerId: scope.linkedServerId,
+    }), 0);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM automation_jobs WHERE job_type = 'discord-post-update'").get()?.n, 1);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("exact grant enables only NukeTown Discord queue access without fabricating billing", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const locked = await getAutomationContextForLinkedServer(env, scope.linkedServerId);
+    assert.equal(locked?.planKey, "pro");
+    assert.equal(locked?.subscriptionStatus, "canceled");
+    assert.equal(locked?.accessSource, "billing");
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "pro", ["priority_status_embed"], "canceled-pro-test", {
+      linkedServerId: scope.linkedServerId,
+    }), 0);
+
+    await grant(env);
+    const unlocked = await getAutomationContextForLinkedServer(env, scope.linkedServerId);
+    assert.equal(unlocked?.planKey, "pro");
+    assert.equal(unlocked?.subscriptionStatus, "active");
+    assert.equal(unlocked?.accessSource, "complimentary_showcase");
+    const ambiguousResponse = await invoke(postingDestinations, env, actor, "GET");
+    assert.equal(ambiguousResponse.status, 200);
+    const ambiguousPayload = await ambiguousResponse.json() as { post_type_options: Array<{ key: string; allowed_by_plan: boolean }> };
+    assert.equal(ambiguousPayload.post_type_options.find((option) => option.key === "priority_status_embed")?.allowed_by_plan, false);
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["priority_status_embed"], "ambiguous-grant-test", {
+      linkedServerId: scope.linkedServerId,
+    }), 0);
+    assert.equal((await invoke(runAutoPostsNow, env, actor, "POST", {})).status, 403);
+
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    assert.equal((await invoke(runAutoPostsNow, env, actor, "POST", {})).status, 200);
+    const queued = await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["priority_status_embed"], "exact-grant-test", {
+      linkedServerId: scope.linkedServerId,
+    });
+    assert.equal(queued, 1);
+
+    const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    assert.equal(dispatched.ok, true);
+    assert.equal(dispatched.results[0]?.status, "skipped_disabled");
+    assert.equal(dispatched.results[0]?.reason, "No saved posting destination exists.");
+
+    const unrelated = await getAutomationContextForLinkedServer(env, "same-guild-other-server");
+    assert.equal(unrelated?.accessSource, "billing");
+    assert.equal(unrelated?.subscriptionStatus, "canceled");
+    const unrelatedQueued = await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["priority_status_embed"], "unrelated-test", {
+      linkedServerId: "same-guild-other-server",
+    });
+    assert.equal(unrelatedQueued, 0);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM automation_jobs WHERE job_type = 'discord-post-update'").get()?.n, 1);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("grant-backed manual ADM import reaches scoped Discord queueing", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    const result = await importAdmTextForServer(env, {
+      linkedServerId: scope.linkedServerId,
+      filename: "DayZServer_PS4_x64_2026-09-24_05-20-00.ADM",
+      admText: '05:20:01 | Player "SyntheticVictim" (DEAD) (id=VICTIM_ID pos=<6400, 9000, 10>) killed by Player "SyntheticKiller" (id=KILLER_ID pos=<6401, 9001, 10>) with M4-A1 from 12.5 meters',
+      source: "manual_paste",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.written_kills, 1);
+    assert.equal(result.discord_jobs_queued > 0, true);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM automation_jobs WHERE job_type = 'discord-post-update'").get()?.n, result.discord_jobs_queued);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("exact grant unlocks destination controls and eligible due posts cannot be starved", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+
+    const response = await invoke(postingDestinations, env, actor, "GET");
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { post_type_options: Array<{ key: string; allowed_by_plan: boolean; listing_plan_key: string }> };
+    const priorityStatus = payload.post_type_options.find((option) => option.key === "priority_status_embed");
+    assert.equal(priorityStatus?.allowed_by_plan, true);
+    assert.equal(priorityStatus?.listing_plan_key, "pro");
+
+    for (let index = 0; index < 9; index += 1) {
+      db.sqlite.prepare(`INSERT INTO server_posting_destinations (
+        id, guild_id, post_type, discord_channel_id, enabled, created_by_discord_id, created_at, updated_at
+      ) VALUES (?, ?, 'priority_status_embed', ?, 1, ?, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`)
+        .run(`ineligible-${String(index).padStart(2, "0")}`, `ineligible-guild-${index}`, `9000000${index}`, actor.discord_id);
+    }
+    db.sqlite.prepare(`INSERT INTO server_posting_destinations (
+      id, guild_id, post_type, discord_channel_id, enabled, created_by_discord_id, created_at, updated_at
+    ) VALUES (?, ?, 'priority_status_embed', '99999999', 1, ?, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`)
+      .run("zz-eligible", scope.guildId, actor.discord_id);
+
+    let destinationScanPages = 0;
+    db.beforeAll = (sql) => {
+      if (/FROM server_posting_destinations AS destinations/.test(sql)) destinationScanPages += 1;
+    };
+    const firstTick = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    db.beforeAll = null;
+    assert.equal(firstTick.ok, true);
+    assert.equal(firstTick.processed, 0);
+    assert.equal(destinationScanPages, 2);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_posting_state WHERE guild_id = '__dzn_internal__'").get()?.n, 1);
+    const cursorPayload = db.sqlite.prepare("SELECT last_payload_hash FROM server_posting_state WHERE guild_id = '__dzn_internal__'").get()?.last_payload_hash;
+    assert.deepEqual(JSON.parse(String(cursorPayload)), { destinationId: "ineligible-07" });
+    assert.equal((await getOwnerDiscordOverview(env)).lastPostAttempt, null);
+
+    const resumedTick = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    assert.equal(resumedTick.ok, true);
+    assert.equal(resumedTick.processed, 1);
+    assert.equal(resumedTick.results[0]?.guild_id, scope.guildId);
+    assert.equal(resumedTick.results[0]?.status, "no_message_id");
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("exact grant outranks active Starter only for NukeTown Discord dispatch", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'starter', status = 'active'").run();
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    db.sqlite.prepare(`INSERT INTO server_posting_destinations (
+      id, guild_id, post_type, discord_channel_id, enabled, created_by_discord_id, created_at, updated_at
+    ) VALUES (?, ?, 'priority_status_embed', '99999999', 1, ?, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`)
+      .run(randomUUID(), scope.guildId, actor.discord_id);
+
+    const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    assert.equal(dispatched.processed, 1);
+    assert.equal(dispatched.results[0]?.guild_id, scope.guildId);
+    assert.equal(dispatched.results[0]?.status, "no_message_id");
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("ambiguous grant preserves active Starter Discord access", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'starter', status = 'active'").run();
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    await grant(env);
+
+    const response = await invoke(postingDestinations, env, actor, "GET");
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { post_type_options: Array<{ key: string; allowed_by_plan: boolean; listing_plan_key: string }> };
+    const basic = payload.post_type_options.find((option) => option.key === "basic_status_embed");
+    const priority = payload.post_type_options.find((option) => option.key === "priority_status_embed");
+    assert.equal(basic?.allowed_by_plan, true);
+    assert.equal(basic?.listing_plan_key, "starter");
+    assert.equal(priority?.allowed_by_plan, false);
+    assert.equal((await invoke(runAutoPostsNow, env, actor, "POST", {})).status, 200);
+
+    const saved = await invoke(postingDestinations, env, actor, "POST", {
+      post_type: "basic_status_embed",
+      discord_channel_id: "99999999",
+      enabled: true,
+    });
+    assert.equal(saved.status, 200);
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "pro", ["basic_status_embed"], "starter-fallback", {
+      linkedServerId: scope.linkedServerId,
+    }), 1);
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "pro", ["priority_status_embed"], "grant-still-ambiguous", {
+      linkedServerId: scope.linkedServerId,
+    }), 0);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("revoked grant cannot commit a posting destination save", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    await getAutomationContextForLinkedServer(env, scope.linkedServerId);
+    db.beforeBatch = () => revokeSql(db, grantId);
+    const response = await invoke(postingDestinations, env, actor, "POST", {
+      post_type: "priority_status_embed",
+      discord_channel_id: "99999999",
+      enabled: true,
+    });
+    db.beforeBatch = null;
+    assert.equal(response.status, 403);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_posting_destinations WHERE guild_id = ?").get(scope.guildId)?.n, 0);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("a newly eligible same-guild server blocks the atomic destination save", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    db.beforeBatch = () => db.sqlite.prepare("UPDATE linked_servers SET status = 'live', lifecycle_status = 'active_live' WHERE id = 'same-guild-other-server'").run();
+    const response = await invoke(postingDestinations, env, actor, "POST", {
+      post_type: "priority_status_embed",
+      discord_channel_id: "99999999",
+      enabled: true,
+    });
+    db.beforeBatch = null;
+    assert.equal(response.status, 403);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_posting_destinations WHERE guild_id = ?").get(scope.guildId)?.n, 0);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("inactive billing cannot race an ambiguous Free destination save", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    db.beforeBatch = () => db.sqlite.prepare("UPDATE linked_servers SET status = 'live', lifecycle_status = 'active_live' WHERE id = 'same-guild-other-server'").run();
+    const response = await invoke(postingDestinations, env, actor, "POST", {
+      post_type: "basic_status_embed",
+      discord_channel_id: "99999999",
+      enabled: true,
+    });
+    db.beforeBatch = null;
+    assert.equal(response.status, 403);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_posting_destinations WHERE guild_id = ?").get(scope.guildId)?.n, 0);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("revoked grant blocks a Discord test immediately before delivery", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    await getAutomationContextForLinkedServer(env, scope.linkedServerId);
+    let revoked = false;
+    db.beforeFirst = (sql) => {
+      if (revoked || !/SELECT discord_message_id FROM server_posting_state/.test(sql)) return;
+      revoked = true;
+      revokeSql(db, grantId);
+    };
+    const response = await invoke(postingDestinations, env, actor, "POST", {
+      action: "test",
+      channel_id: "99999999",
+      test_post_type: "priority_status_embed",
+      discord_webhook_url: "https://discord.com/api/webhooks/12345678/local-test-token",
+    });
+    db.beforeFirst = null;
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { test_post: { ok: boolean; mode: string } };
+    assert.equal(revoked, true);
+    assert.equal(payload.test_post.ok, false);
+    assert.equal(payload.test_post.mode, "access_revoked");
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("Starter fallback preserves a grouped basic test after grant revocation", async ({ db, env }) => {
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    let changed = false;
+    db.beforeFirst = (sql) => {
+      if (changed || !/SELECT discord_message_id FROM server_posting_state/.test(sql)) return;
+      changed = true;
+      revokeSql(db, grantId);
+      db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'starter', status = 'active'").run();
+    };
+    const response = await invoke(postingDestinations, env, actor, "POST", {
+      action: "test",
+      channel_id: "99999999",
+      test_post_type: "basic_status_embed",
+      discord_webhook_url: "https://discord.com/api/webhooks/12345678/local-test-token",
+    });
+    db.beforeFirst = null;
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { test_post: { ok: boolean; mode: string } };
+    assert.equal(changed, true);
+    assert.equal(payload.test_post.ok, false);
+    assert.equal(payload.test_post.mode, "not_configured");
+  });
+  await test("Starter fallback preserves a basic save test after grant revocation", async ({ db, env }) => {
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    let changed = false;
+    db.beforeFirst = (sql) => {
+      if (changed || !/SELECT discord_message_id FROM server_posting_state/.test(sql)) return;
+      changed = true;
+      revokeSql(db, grantId);
+      db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'starter', status = 'active'").run();
+    };
+    const response = await invoke(postingDestinations, env, actor, "POST", {
+      post_type: "basic_status_embed",
+      discord_channel_id: "99999999",
+      discord_webhook_url: "https://discord.com/api/webhooks/12345678/local-test-token",
+      enabled: true,
+      send_test_post: true,
+    });
+    db.beforeFirst = null;
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { test_post: { ok: boolean; mode: string } };
+    assert.equal(changed, true);
+    assert.equal(payload.test_post.ok, false);
+    assert.equal(payload.test_post.mode, "not_configured");
+  });
+  await test("revoked exact grant blocks a previously queued Discord publish", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["priority_status_embed"], "revoke-test", {
+      linkedServerId: scope.linkedServerId,
+    }), 1);
+    revokeSql(db, grantId);
+    const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    assert.equal(dispatched.results[0]?.status, "skipped_plan_locked");
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("queued grant delivery revalidates immediately before Discord send", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    db.sqlite.prepare(`INSERT INTO server_posting_destinations (
+      id, guild_id, post_type, discord_channel_id, enabled, created_by_discord_id, created_at, updated_at
+    ) VALUES ('queued-delivery', ?, 'priority_status_embed', '99999999', 1, ?, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`)
+      .run(scope.guildId, actor.discord_id);
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["priority_status_embed"], "queued-race-test", {
+      linkedServerId: scope.linkedServerId,
+    }), 1);
+    let revoked = false;
+    db.beforeFirst = (sql) => {
+      if (revoked || !/SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state/.test(sql)) return;
+      revoked = true;
+      revokeSql(db, grantId);
+    };
+    const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    db.beforeFirst = null;
+    assert.equal(revoked, true);
+    assert.equal(dispatched.results[0]?.status, "skipped_plan_locked");
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("Free-compatible delivery rerenders after grant revocation", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    db.sqlite.prepare(`INSERT INTO server_posting_destinations (
+      id, guild_id, post_type, discord_channel_id, discord_webhook_url, enabled,
+      created_by_discord_id, created_at, updated_at
+    ) VALUES ('queued-free-delivery', ?, 'basic_status_embed', '99999999',
+      'https://discord.com/api/webhooks/12345678/local-test-token', 1, ?,
+      '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`)
+      .run(scope.guildId, actor.discord_id);
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["basic_status_embed"], "queued-free-race-test", {
+      linkedServerId: scope.linkedServerId,
+    }), 1);
+    let revoked = false;
+    db.beforeFirst = (sql) => {
+      if (revoked || !/SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state/.test(sql)) return;
+      revoked = true;
+      revokeSql(db, grantId);
+    };
+    const forbiddenFetch = globalThis.fetch;
+    let sentBody = "";
+    globalThis.fetch = async (_input, init) => {
+      sentBody = String(init?.body ?? "");
+      return new Response(JSON.stringify({ id: "synthetic-message" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    try {
+      const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+      assert.equal(dispatched.results[0]?.status, "sent");
+    } finally {
+      globalThis.fetch = forbiddenFetch;
+      db.beforeFirst = null;
+    }
+    assert.equal(revoked, true);
+    assert.match(sentBody, /Plan: FREE/);
+    assert.doesNotMatch(sentBody, /Plan: PRO/);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("queued Free delivery revalidates single-server scope", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    db.sqlite.prepare(`INSERT INTO server_posting_destinations (
+      id, guild_id, post_type, discord_channel_id, discord_webhook_url, enabled,
+      created_by_discord_id, created_at, updated_at
+    ) VALUES ('queued-free-scope', ?, 'basic_status_embed', '99999999',
+      'https://discord.com/api/webhooks/12345678/local-test-token', 1, ?,
+      '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`)
+      .run(scope.guildId, actor.discord_id);
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["basic_status_embed"], "queued-free-scope-test", {
+      linkedServerId: scope.linkedServerId,
+    }), 1);
+    let scopeChanged = false;
+    db.beforeFirst = (sql) => {
+      if (scopeChanged || !/SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state/.test(sql)) return;
+      scopeChanged = true;
+      db.sqlite.prepare("UPDATE linked_servers SET status = 'active', lifecycle_status = 'active_live' WHERE id = 'same-guild-other-server'").run();
+    };
+    const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    db.beforeFirst = null;
+    assert.equal(scopeChanged, true);
+    assert.equal(dispatched.results[0]?.status, "skipped_plan_locked");
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("scheduled delivery reapplies Free cadence after grant revocation", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    const lastEditedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    db.sqlite.prepare(`INSERT INTO server_posting_destinations (
+      id, guild_id, post_type, discord_channel_id, discord_webhook_url, enabled,
+      created_by_discord_id, created_at, updated_at
+    ) VALUES ('scheduled-cadence', ?, 'basic_status_embed', '99999999',
+      'https://discord.com/api/webhooks/12345678/local-test-token', 1, ?,
+      '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`)
+      .run(scope.guildId, actor.discord_id);
+    db.sqlite.prepare(`INSERT INTO server_posting_state (
+      id, guild_id, post_type, discord_channel_id, discord_message_id, last_edited_at,
+      last_payload_hash, created_at, updated_at
+    ) VALUES ('scheduled-cadence-state', ?, 'basic_status_embed', '99999999',
+      'existing-message', ?, 'old-hash', ?, ?)`)
+      .run(scope.guildId, lastEditedAt, lastEditedAt, lastEditedAt);
+    let revoked = false;
+    db.beforeFirst = (sql) => {
+      if (revoked || !/SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state/.test(sql)) return;
+      revoked = true;
+      revokeSql(db, grantId);
+    };
+    const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    db.beforeFirst = null;
+    assert.equal(revoked, true);
+    assert.equal(dispatched.results[0]?.status, "skipped_not_due");
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("scheduled delivery revalidates a cached grant before every Discord send", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    for (const [id, postType, channelId] of [
+      ["delivery-a", "priority_status_embed", "99999991"],
+      ["delivery-b", "leaderboard_embed", "99999992"],
+    ]) {
+      db.sqlite.prepare(`INSERT INTO server_posting_destinations (
+        id, guild_id, post_type, discord_channel_id, enabled, created_by_discord_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 1, ?, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`)
+        .run(id, scope.guildId, postType, channelId, actor.discord_id);
+    }
+    let stateReads = 0;
+    db.beforeFirst = (sql) => {
+      if (!/SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state/.test(sql)) return;
+      stateReads += 1;
+      if (stateReads === 2) revokeSql(db, grantId);
+    };
+    const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 2 });
+    db.beforeFirst = null;
+    assert.equal(stateReads, 2);
+    assert.equal(dispatched.results[0]?.status, "no_message_id");
+    assert.equal(dispatched.results[1]?.status, "skipped_plan_locked");
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
   });
   await test("revoked exact grant rolls back the CTF matchmaking opt-in", async ({ db, env }) => {

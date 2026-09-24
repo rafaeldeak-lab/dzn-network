@@ -1,6 +1,7 @@
 import { ensureAutomationSchema } from "./automation";
 import { requireDb } from "./db";
 import { getAdmPullInterval, getServerStatusInterval, hasListingAutoPost, normalizeListingPlanKey, normalizePlanKey } from "./plans";
+import { readServerShowcaseAccess } from "./server-showcase-access";
 import type { Env } from "./types";
 import type { AutoPostType } from "../../lib/billing/plans";
 import { serverLifecycleSqlExpression } from "../../lib/server-lifecycle";
@@ -19,6 +20,11 @@ type PostingDestination = {
   discord_channel_id: string;
   discord_webhook_url: string | null;
   enabled: number;
+};
+
+type DuePostingDestination = PostingDestination & {
+  destination_id: string;
+  last_edited_at: string | null;
 };
 
 type PostingState = {
@@ -159,6 +165,13 @@ type DiscordDispatchBudget = {
   deadlineAtMs: number;
 };
 
+const DUE_POSTING_CURSOR = {
+  id: "dzn-discord-due-scan-cursor",
+  guildId: "__dzn_internal__",
+  postType: "__due_posting_scan__",
+  channelId: "__scheduler__",
+} as const;
+
 export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJobs?: number; deadlineMs?: number } = {}) {
   await ensureAutomationSchema(env);
   const maxJobs = Math.max(1, Math.min(Math.trunc(Number(options.maxJobs ?? 2)) || 2, 10));
@@ -246,19 +259,8 @@ export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJ
 
 async function processPostJob(env: Env, job: QueuedPostJob): Promise<DiscordPostDispatchDetail> {
   const db = requireDb(env);
-  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
-  const subscription = await db
-    .prepare(
-      `SELECT server_subscriptions.plan_key, server_subscriptions.status,
-              ${lifecycleStatusSql} AS lifecycle_status
-       FROM server_subscriptions
-       LEFT JOIN linked_servers ON linked_servers.guild_id = server_subscriptions.guild_id
-       WHERE server_subscriptions.guild_id = ?
-       LIMIT 1`,
-    )
-    .bind(job.guild_id)
-    .first<{ plan_key: string | null; status: string | null; lifecycle_status: string | null }>();
-  if (!["active_live", "active_degraded"].includes(String(subscription?.lifecycle_status ?? "active_live"))) {
+  const publishingAccess = await resolveDiscordPublishingAccessForGuild(env, job.guild_id);
+  if (!["active_live", "active_degraded"].includes(publishingAccess.lifecycleStatus)) {
     return {
       guild_id: job.guild_id,
       post_type: job.post_type,
@@ -268,8 +270,7 @@ async function processPostJob(env: Env, job: QueuedPostJob): Promise<DiscordPost
       reason: "Server lifecycle is not eligible for Discord auto-posting.",
     };
   }
-  const planKey = normalizePlanKey(subscription?.plan_key);
-  const listingContext = { plan_key: planKey, subscription_status: subscription?.status ?? "inactive" };
+  const listingContext = { plan_key: publishingAccess.planKey, subscription_status: publishingAccess.subscriptionStatus };
   if (!hasListingAutoPost(listingContext, job.post_type)) {
     return {
       guild_id: job.guild_id,
@@ -296,14 +297,17 @@ async function processPostJob(env: Env, job: QueuedPostJob): Promise<DiscordPost
     };
   }
 
-  return processConfiguredPostingDestination(env, destination, listingContext, { force: true });
+  return processConfiguredPostingDestination(env, destination, listingContext, {
+    force: true,
+    revalidateAccessBeforeDelivery: requiresPublishingAccessRevalidation(publishingAccess),
+  });
 }
 
 async function processConfiguredPostingDestination(
   env: Env,
   destination: PostingDestination,
   listingContext: { plan_key?: unknown; planKey?: unknown; subscription_status?: unknown; subscriptionStatus?: unknown },
-  options: { force?: boolean } = {},
+  options: { force?: boolean; revalidateAccessBeforeDelivery?: boolean } = {},
 ): Promise<DiscordPostDispatchDetail> {
   if (Number(destination.enabled ?? 0) !== 1) {
     await recordPostingDispatchStatus(env, destination, "skipped_disabled", "Posting destination is disabled.");
@@ -334,13 +338,48 @@ async function processConfiguredPostingDestination(
     .prepare("SELECT * FROM server_public_cache WHERE guild_id = ? LIMIT 1")
     .bind(destination.guild_id)
     .first<PublicCache>();
-  const listingPlanKey = normalizeListingPlanKey(listingContext);
-  const payload = renderDiscordPostPayload(destination.post_type, cache, listingPlanKey);
-  const payloadHash = await hashPayload(payload);
   const state = await db
     .prepare("SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ? LIMIT 1")
     .bind(destination.guild_id, destination.post_type, destination.discord_channel_id)
     .first<PostingState>();
+
+  let effectiveListingContext = listingContext;
+  if (options.revalidateAccessBeforeDelivery) {
+    const currentAccess = await resolveDiscordPublishingAccessForGuild(env, destination.guild_id);
+    const currentListingContext = { plan_key: currentAccess.planKey, subscription_status: currentAccess.subscriptionStatus };
+    if (!["active_live", "active_degraded"].includes(currentAccess.lifecycleStatus)
+      || !hasListingAutoPost(currentListingContext, destination.post_type)) {
+      await recordPostingDispatchStatus(env, destination, "skipped_plan_locked", "Current access no longer allows this auto-post type.");
+      return {
+        guild_id: destination.guild_id,
+        post_type: destination.post_type,
+        channel_id: destination.discord_channel_id,
+        status: "skipped_plan_locked",
+        message_id: state?.discord_message_id ?? null,
+        reason: "Current access no longer allows this auto-post type.",
+        last_edited_at: state?.last_edited_at ?? null,
+        message_state_found: Boolean(state),
+      };
+    }
+    effectiveListingContext = currentListingContext;
+    if (!options.force && !isAutoPostDue(destination.post_type, normalizeListingPlanKey(currentListingContext), state?.last_edited_at)) {
+      await recordPostingDispatchStatus(env, destination, "skipped_not_due", null);
+      return {
+        guild_id: destination.guild_id,
+        post_type: destination.post_type,
+        channel_id: destination.discord_channel_id,
+        status: "skipped_not_due",
+        message_id: state?.discord_message_id ?? null,
+        reason: "Current access cadence is not due yet.",
+        last_edited_at: state?.last_edited_at ?? null,
+        message_state_found: Boolean(state),
+      };
+    }
+  }
+
+  const listingPlanKey = normalizeListingPlanKey(effectiveListingContext);
+  const payload = renderDiscordPostPayload(destination.post_type, cache, listingPlanKey);
+  const payloadHash = await hashPayload(payload);
   const oldPayloadHash = state?.last_payload_hash ?? null;
   if (!options.force && state?.last_payload_hash === payloadHash) {
     await recordPostingDispatchStatus(env, destination, "skipped_unchanged", null);
@@ -399,31 +438,6 @@ async function processConfiguredPostingDestination(
 
 async function processDuePostingDestinations(env: Env, options: { maxJobs: number; guildId?: string; force?: boolean; budget?: DiscordDispatchBudget }) {
   const db = requireDb(env);
-  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
-  const rows = await db
-    .prepare(
-      `SELECT destinations.guild_id, destinations.post_type, destinations.discord_channel_id,
-              destinations.discord_webhook_url, destinations.enabled,
-              subscriptions.plan_key, subscriptions.status AS subscription_status,
-              ${lifecycleStatusSql} AS lifecycle_status,
-              state.last_edited_at
-       FROM server_posting_destinations AS destinations
-       JOIN server_subscriptions AS subscriptions ON subscriptions.guild_id = destinations.guild_id
-       LEFT JOIN linked_servers ON linked_servers.guild_id = destinations.guild_id
-       LEFT JOIN server_posting_state AS state
-         ON state.guild_id = destinations.guild_id
-        AND state.post_type = destinations.post_type
-        AND state.discord_channel_id = destinations.discord_channel_id
-       WHERE (? IS NULL OR destinations.guild_id = ?)
-         AND lower(COALESCE(subscriptions.status, 'inactive')) IN ('active', 'trialing')
-         AND COALESCE(destinations.enabled, 0) = 1
-         AND ${lifecycleStatusSql} IN ('active_live', 'active_degraded')
-       ORDER BY COALESCE(state.last_edited_at, '1970-01-01T00:00:00.000Z') ASC
-       LIMIT ?`,
-    )
-    .bind(options.guildId ?? null, options.guildId ?? null, Math.max(1, options.maxJobs * 4))
-    .all<PostingDestination & { plan_key: string | null; subscription_status: string | null; lifecycle_status: string | null; last_edited_at: string | null }>();
-
   let processed = 0;
   let edited = 0;
   let sent = 0;
@@ -431,37 +445,175 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
   let failed = 0;
   let budgetExhausted = false;
   const results: DiscordPostDispatchDetail[] = [];
+  const accessByGuild = new Map<string, Awaited<ReturnType<typeof resolveDiscordPublishingAccessForGuild>>>();
+  const pageSize = Math.max(4, Math.min(options.maxJobs * 4, 100));
+  const maxPages = Math.max(2, Math.min(options.maxJobs * 2, 8));
+  const maxAccessLookups = Math.max(4, Math.min(options.maxJobs * 8, 24));
+  const savedCursor = options.guildId ? null : await readDuePostingCursor(db);
+  let cursorDestinationId = savedCursor?.destinationId ?? "";
+  let reachedEnd = false;
+  let scanLimitReached = false;
+  let scannedPages = 0;
 
-  for (const row of rows.results ?? []) {
+  while (!reachedEnd && !scanLimitReached && scannedPages < maxPages && processed < options.maxJobs) {
     if (options.budget && isDiscordDispatchBudgetLow(options.budget)) {
       budgetExhausted = true;
       break;
     }
-    if (processed >= options.maxJobs) break;
-    const planKey = normalizePlanKey(row.plan_key);
-    const listingContext = { plan_key: planKey, subscription_status: row.subscription_status ?? "inactive" };
-    if (!options.force && !isAutoPostDue(row.post_type, normalizeListingPlanKey(listingContext), row.last_edited_at)) continue;
-    processed += 1;
-    try {
-      const result = await processConfiguredPostingDestination(env, row, listingContext, { force: options.force });
-      results.push(result);
-      if (result.status === "edited") edited += 1;
-      else if (result.status === "sent" || result.status === "success") sent += 1;
-      else skipped += 1;
-    } catch (error) {
-      failed += 1;
-      results.push({
-        guild_id: row.guild_id,
-        post_type: row.post_type,
-        channel_id: row.discord_channel_id,
-        status: "failed",
-        message_id: null,
-        reason: error instanceof Error ? error.message : "Discord post update failed",
-      });
+    const pageResult: D1Result<DuePostingDestination> = await db
+      .prepare(
+        `SELECT destinations.id AS destination_id, destinations.guild_id, destinations.post_type,
+                destinations.discord_channel_id, destinations.discord_webhook_url, destinations.enabled,
+                state.last_edited_at
+         FROM server_posting_destinations AS destinations
+         LEFT JOIN server_posting_state AS state
+           ON state.guild_id = destinations.guild_id
+          AND state.post_type = destinations.post_type
+          AND state.discord_channel_id = destinations.discord_channel_id
+         WHERE (? IS NULL OR destinations.guild_id = ?)
+           AND COALESCE(destinations.enabled, 0) = 1
+           AND (? = '' OR destinations.id > ?)
+         ORDER BY destinations.id ASC
+         LIMIT ?`,
+      )
+      .bind(
+        options.guildId ?? null,
+        options.guildId ?? null,
+        cursorDestinationId,
+        cursorDestinationId,
+        pageSize,
+      )
+      .all<DuePostingDestination>();
+    scannedPages += 1;
+    const page: DuePostingDestination[] = pageResult.results ?? [];
+    if (page.length === 0) {
+      reachedEnd = true;
+      break;
+    }
+
+    for (const row of page) {
+      if (options.budget && isDiscordDispatchBudgetLow(options.budget)) {
+        budgetExhausted = true;
+        break;
+      }
+      if (processed >= options.maxJobs) break;
+      let publishingAccess = accessByGuild.get(row.guild_id);
+      if (!publishingAccess) {
+        if (accessByGuild.size >= maxAccessLookups) {
+          scanLimitReached = true;
+          break;
+        }
+        publishingAccess = await resolveDiscordPublishingAccessForGuild(env, row.guild_id);
+        accessByGuild.set(row.guild_id, publishingAccess);
+      }
+      cursorDestinationId = row.destination_id;
+      if (!["active_live", "active_degraded"].includes(publishingAccess.lifecycleStatus)) continue;
+      const listingContext = { plan_key: publishingAccess.planKey, subscription_status: publishingAccess.subscriptionStatus };
+      if (!hasListingAutoPost(listingContext, row.post_type)) continue;
+      if (!options.force && !isAutoPostDue(row.post_type, normalizeListingPlanKey(listingContext), row.last_edited_at)) continue;
+      processed += 1;
+      try {
+        const result = await processConfiguredPostingDestination(env, row, listingContext, {
+          force: options.force,
+          revalidateAccessBeforeDelivery: requiresPublishingAccessRevalidation(publishingAccess),
+        });
+        results.push(result);
+        if (result.status === "edited") edited += 1;
+        else if (result.status === "sent" || result.status === "success") sent += 1;
+        else skipped += 1;
+      } catch (error) {
+        failed += 1;
+        results.push({
+          guild_id: row.guild_id,
+          post_type: row.post_type,
+          channel_id: row.discord_channel_id,
+          status: "failed",
+          message_id: null,
+          reason: error instanceof Error ? error.message : "Discord post update failed",
+        });
+      }
+    }
+    if (budgetExhausted) break;
+    if (!scanLimitReached && processed < options.maxJobs && page.length < pageSize) reachedEnd = true;
+  }
+
+  if (!options.guildId) {
+    if (reachedEnd) {
+      await clearDuePostingCursor(db);
+    } else if (cursorDestinationId) {
+      await saveDuePostingCursor(db, { destinationId: cursorDestinationId });
     }
   }
 
   return { processed, edited, sent, posted: edited + sent, skipped, failed, budgetExhausted, results };
+}
+
+async function resolveDiscordPublishingAccessForGuild(env: Env, guildId: string) {
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
+  const result = await requireDb(env)
+    .prepare(
+      `SELECT linked_servers.id, server_subscriptions.plan_key, server_subscriptions.status,
+              ${lifecycleStatusSql} AS lifecycle_status
+       FROM linked_servers
+       LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       WHERE linked_servers.guild_id = ?
+         AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')
+         AND COALESCE(linked_servers.merged_into_server_id, '') = ''`,
+    )
+    .bind(guildId)
+    .all<{ id: string; plan_key: string | null; status: string | null; lifecycle_status: string | null }>();
+  const rows = result.results ?? [];
+  const activeBillingRows = rows.filter((row) => ["active", "trialing"].includes(String(row.status ?? "").toLowerCase()));
+  const activeProBilling = activeBillingRows.find((row) => normalizeListingPlanKey(row.plan_key, row.status) === "pro"
+    && ["active_live", "active_degraded"].includes(String(row.lifecycle_status ?? "active_live")))
+    ?? activeBillingRows.find((row) => normalizeListingPlanKey(row.plan_key, row.status) === "pro");
+  if (activeProBilling) {
+    return {
+      planKey: normalizePlanKey(activeProBilling.plan_key),
+      subscriptionStatus: activeProBilling.status ?? "inactive",
+      lifecycleStatus: String(activeProBilling.lifecycle_status ?? "active_live"),
+      accessSource: "billing" as const,
+    };
+  }
+
+  const eligibleServerIds = [...new Set(rows
+    .filter((row) => ["active_live", "active_degraded"].includes(String(row.lifecycle_status ?? "active_live")))
+    .map((row) => row.id))];
+  const baseline = eligibleServerIds.length === 1 ? rows.find((row) => row.id === eligibleServerIds[0]) : undefined;
+  if (baseline) {
+    const access = await readServerShowcaseAccess(env, baseline.id, {
+      plan_key: baseline.plan_key,
+      subscription_status: baseline.status,
+    });
+    if (access.source === "complimentary_showcase") {
+      return { planKey: "pro" as const, subscriptionStatus: "active", lifecycleStatus: "active_live", accessSource: access.source };
+    }
+  }
+
+  const activeBilling = activeBillingRows.find((row) => ["active_live", "active_degraded"].includes(String(row.lifecycle_status ?? "active_live")))
+    ?? activeBillingRows[0];
+  if (activeBilling) {
+    return {
+      planKey: normalizePlanKey(activeBilling.plan_key),
+      subscriptionStatus: activeBilling.status ?? "inactive",
+      lifecycleStatus: String(activeBilling.lifecycle_status ?? "active_live"),
+      accessSource: "billing" as const,
+    };
+  }
+  if (!baseline) {
+    return { planKey: "free" as const, subscriptionStatus: "inactive", lifecycleStatus: "ineligible", accessSource: "billing" as const };
+  }
+  return {
+    planKey: normalizePlanKey(baseline.plan_key),
+    subscriptionStatus: baseline.status ?? "inactive",
+    lifecycleStatus: String(baseline.lifecycle_status ?? "active_live"),
+    accessSource: "billing" as const,
+  };
+}
+
+function requiresPublishingAccessRevalidation(access: Awaited<ReturnType<typeof resolveDiscordPublishingAccessForGuild>>) {
+  return access.accessSource === "complimentary_showcase"
+    || !["active", "trialing"].includes(String(access.subscriptionStatus ?? "").toLowerCase());
 }
 
 export async function dispatchDiscordPostsForGuild(env: Env, guildId: string, options: { maxJobs?: number; force?: boolean } = {}) {
@@ -492,6 +644,56 @@ function createDiscordDispatchBudget(deadlineMs: unknown): DiscordDispatchBudget
 
 function isDiscordDispatchBudgetLow(budget: DiscordDispatchBudget) {
   return Date.now() >= budget.deadlineAtMs - 350;
+}
+
+async function readDuePostingCursor(db: D1Database) {
+  const row = await db
+    .prepare(
+      `SELECT last_payload_hash
+       FROM server_posting_state
+       WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ?
+       LIMIT 1`,
+    )
+    .bind(DUE_POSTING_CURSOR.guildId, DUE_POSTING_CURSOR.postType, DUE_POSTING_CURSOR.channelId)
+    .first<{ last_payload_hash: string | null }>();
+  if (!row?.last_payload_hash) return null;
+  try {
+    const parsed = JSON.parse(row.last_payload_hash) as { destinationId?: unknown };
+    if (typeof parsed.destinationId !== "string") return null;
+    return { destinationId: parsed.destinationId };
+  } catch {
+    return null;
+  }
+}
+
+async function saveDuePostingCursor(db: D1Database, cursor: { destinationId: string }) {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `INSERT INTO server_posting_state (
+         id, guild_id, post_type, discord_channel_id, last_payload_hash, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(guild_id, post_type, discord_channel_id) DO UPDATE SET
+         last_payload_hash = excluded.last_payload_hash,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(
+      DUE_POSTING_CURSOR.id,
+      DUE_POSTING_CURSOR.guildId,
+      DUE_POSTING_CURSOR.postType,
+      DUE_POSTING_CURSOR.channelId,
+      JSON.stringify(cursor),
+      now,
+      now,
+    )
+    .run();
+}
+
+async function clearDuePostingCursor(db: D1Database) {
+  await db
+    .prepare("DELETE FROM server_posting_state WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ?")
+    .bind(DUE_POSTING_CURSOR.guildId, DUE_POSTING_CURSOR.postType, DUE_POSTING_CURSOR.channelId)
+    .run();
 }
 
 export async function sendDiscordTestPost(env: Env, destination: {

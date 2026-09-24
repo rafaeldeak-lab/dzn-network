@@ -147,7 +147,7 @@ for (const [file, snippets] of [
 
 const discordPosting = readFileSync("functions/_lib/discord-posting.ts", "utf8");
 assert.equal(discordPosting.includes("Server lifecycle is not eligible for Discord auto-posting."), true);
-assert.equal(discordPosting.includes("active_live', 'active_degraded"), true);
+assert.match(discordPosting, /active_live["'],\s*["']active_degraded/);
 
 const serverWarsCategories = readFileSync("functions/_lib/server-war-categories.ts", "utf8");
 assert.equal(serverWarsCategories.includes("normalizeServerLifecycleStatus"), true);

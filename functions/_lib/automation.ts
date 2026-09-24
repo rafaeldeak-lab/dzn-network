@@ -2,14 +2,17 @@ import { requireDb } from "./db";
 import {
   getAdmDiscoveryIntervalMinutes,
   getAdmPullInterval,
+  getListingLimits,
   getPlanConfig,
   getPlanPriority,
   getServerStatusInterval,
   hasAutoPost,
+  normalizeListingPlanKey,
   normalizePlanKey,
   type PlanKey,
 } from "./plans";
 import { rankServers } from "./server-ranking";
+import { readServerShowcaseAccess } from "./server-showcase-access";
 import type { Env } from "./types";
 import type { AutoPostType } from "../../lib/billing/plans";
 import {
@@ -645,23 +648,100 @@ export async function getDueStatusAutomationServers(env: Env, maxServers: number
   return (rows.results ?? []).sort((a, b) => getPlanPriority(b.plan_key) - getPlanPriority(a.plan_key));
 }
 
-export async function getAutomationContextForLinkedServer(env: Env, linkedServerId: string) {
-  await ensureAutomationRowsForLinkedServers(env);
-  const row = await requireDb(env)
+export async function getAutomationContextForLinkedServer(
+  env: Env,
+  linkedServerId: string,
+  options: { skipSchemaEnsure?: boolean } = {},
+) {
+  if (!options.skipSchemaEnsure) await ensureAutomationSchema(env);
+  const result = await requireDb(env)
     .prepare(
       `SELECT linked_servers.guild_id, server_subscriptions.plan_key, server_subscriptions.status
        FROM linked_servers
        LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
-       WHERE linked_servers.id = ?
-       LIMIT 1`,
+       WHERE linked_servers.id = ?`,
     )
     .bind(linkedServerId)
-    .first<{ guild_id: string | null; plan_key: string | null; status: string | null }>();
+    .all<{ guild_id: string | null; plan_key: string | null; status: string | null }>();
+  const rows = result.results ?? [];
+  const row = rows[0];
   if (!row?.guild_id) return null;
+  const activeBilling = rows
+    .filter((candidate) => isActiveSubscriptionStatus(candidate.status))
+    .sort((left, right) => getPlanPriority(normalizePlanKey(right.plan_key)) - getPlanPriority(normalizePlanKey(left.plan_key)))[0];
+  const billing = activeBilling ?? row;
+  const showcaseAccess = await readServerShowcaseAccess(env, linkedServerId, {
+    plan_key: billing.plan_key,
+    subscription_status: billing.status,
+  });
   return {
     guildId: row.guild_id,
-    planKey: normalizePlanKey(row.plan_key),
-    subscriptionStatus: row.status ?? "inactive",
+    planKey: showcaseAccess.source === "complimentary_showcase" ? "pro" : normalizePlanKey(billing.plan_key),
+    subscriptionStatus: showcaseAccess.source === "complimentary_showcase" ? "active" : billing.status ?? "inactive",
+    accessSource: showcaseAccess.source,
+    showcaseAccess,
+  };
+}
+
+export async function getDiscordPublishingContextForLinkedServer(
+  env: Env,
+  linkedServerId: string,
+  options: { skipSchemaEnsure?: boolean } = {},
+) {
+  const context = await getAutomationContextForLinkedServer(env, linkedServerId, options);
+  if (!context) return null;
+  if (context.showcaseAccess.source !== "complimentary_showcase" && isActiveSubscriptionStatus(context.subscriptionStatus)) {
+    return { ...context, discordPublishingEligible: true };
+  }
+
+  const singleServerScope = discordPublishingSingleServerScopeGuard(context.guildId, linkedServerId);
+  const result = await requireDb(env)
+    .prepare(`SELECT CASE WHEN (${singleServerScope.sql}) THEN 1 ELSE 0 END AS eligible`)
+    .bind(...singleServerScope.values)
+    .first<{ eligible: number }>();
+  const complimentaryEligible = Number(result?.eligible ?? 0) === 1;
+  if (!complimentaryEligible && isActiveSubscriptionStatus(context.showcaseAccess.billingStatus)) {
+    const billingPlanKey = normalizePlanKey(context.showcaseAccess.billingPlan);
+    const billingSubscriptionStatus = context.showcaseAccess.billingStatus ?? "inactive";
+    return {
+      ...context,
+      planKey: billingPlanKey,
+      subscriptionStatus: billingSubscriptionStatus,
+      accessSource: "billing" as const,
+      showcaseAccess: {
+        ...context.showcaseAccess,
+        source: "billing" as const,
+        grantId: null,
+        expiresAt: null,
+        listing: getListingLimits({
+          plan_key: context.showcaseAccess.billingPlan,
+          subscription_status: billingSubscriptionStatus,
+        }),
+      },
+      discordPublishingEligible: true,
+    };
+  }
+  return {
+    ...context,
+    discordPublishingEligible: complimentaryEligible,
+  };
+}
+
+export function discordPublishingSingleServerScopeGuard(guildId: string, linkedServerId: string) {
+  const selectedLifecycleSql = serverLifecycleSqlExpression("selected_server");
+  const candidateLifecycleSql = serverLifecycleSqlExpression("candidate_server");
+  const eligible = (alias: string, lifecycleSql: string) => `
+    lower(COALESCE(${alias}.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')
+    AND COALESCE(${alias}.merged_into_server_id, '') = ''
+    AND ${lifecycleSql} IN ('active_live', 'active_degraded')`;
+  return {
+    sql: `EXISTS (SELECT 1 FROM linked_servers AS selected_server
+      WHERE selected_server.id = ? AND selected_server.guild_id = ?
+        AND ${eligible("selected_server", selectedLifecycleSql)})
+      AND (SELECT COUNT(DISTINCT candidate_server.id) FROM linked_servers AS candidate_server
+        WHERE candidate_server.guild_id = ?
+          AND ${eligible("candidate_server", candidateLifecycleSql)}) = 1`,
+    values: [linkedServerId, guildId, guildId],
   };
 }
 
@@ -1373,12 +1453,25 @@ function numberOrZero(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export async function queueDiscordPostUpdatesForGuild(env: Env, guildId: string, planKey: PlanKey, postTypes: AutoPostType[], reason: string) {
+export async function queueDiscordPostUpdatesForGuild(
+  env: Env,
+  guildId: string,
+  planKey: PlanKey,
+  postTypes: AutoPostType[],
+  reason: string,
+  options: { linkedServerId?: string } = {},
+) {
   await ensureAutomationSchema(env);
+  let effectivePlanKey = planKey;
+  if (options.linkedServerId) {
+    const context = await getDiscordPublishingContextForLinkedServer(env, options.linkedServerId, { skipSchemaEnsure: true });
+    if (!context || context.guildId !== guildId || !context.discordPublishingEligible) return 0;
+    effectivePlanKey = normalizeListingPlanKey(context);
+  }
   const now = new Date().toISOString();
   let queued = 0;
   for (const postType of postTypes) {
-    if (!hasAutoPost(planKey, postType)) continue;
+    if (!hasAutoPost(effectivePlanKey, postType)) continue;
     const update = await requireDb(env)
       .prepare(
         `UPDATE automation_jobs SET

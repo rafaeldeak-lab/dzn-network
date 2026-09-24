@@ -27,7 +27,6 @@ import {
   ensureAutomationSchema,
   getDueAdmDiscoveryAutomationServers,
   getDueAdmAutomationServers,
-  isActiveSubscriptionStatus,
   markAdmPullStarted,
   queueDiscordPostUpdatesForGuild,
   recordAdmCadenceObservation,
@@ -2303,7 +2302,7 @@ export async function importReadableAdmLinesIntoDatabase(
           "build_feed_embed",
           "admin_alerts_embed",
           "admin_logs_embed",
-        ], "adm-data-change"), "Discord post queue");
+        ], "adm-data-change", { linkedServerId: context.linkedServerId }), "Discord post queue");
         discordQueueStatus = discordQueuesCreated > 0 ? "queued" : "skipped";
       } catch {
         discordQueueStatus = "failed";
@@ -2502,7 +2501,7 @@ export async function importAdmTextForServer(
     planKey: server.plan_key,
     publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
     updatePublicCache: Boolean(server.guild_id),
-    queueDiscordPosts: Boolean(server.guild_id && isActiveSubscriptionStatus(server.subscription_status)),
+    queueDiscordPosts: Boolean(server.guild_id),
     ignoreExistingCursor: true,
   });
   const warnings = [
@@ -4203,7 +4202,7 @@ async function finalizeAdmImportJob(
     });
   }
 
-  if (server.guild_id && isActiveSubscriptionStatus(server.subscription_status) && (Number(row.written_kills ?? 0) > 0 || Number(row.player_events ?? 0) > 0 || (!isScheduledNitradoImport && Number(row.raw_events ?? 0) > 0))) {
+  if (server.guild_id && (Number(row.written_kills ?? 0) > 0 || Number(row.player_events ?? 0) > 0 || (!isScheduledNitradoImport && Number(row.raw_events ?? 0) > 0))) {
     try {
       discordQueuesCreated = await withManualAdmPhaseTimeout(queueDiscordPostUpdatesForGuild(env, server.guild_id, server.plan_key, [
         "leaderboard_embed",
@@ -4218,7 +4217,7 @@ async function finalizeAdmImportJob(
         "build_feed_embed",
         "admin_alerts_embed",
         "admin_logs_embed",
-      ], "manual-adm-import"), "Discord post queue");
+      ], "manual-adm-import", { linkedServerId: server.id }), "Discord post queue");
       discordQueueStatus = discordQueuesCreated > 0 ? "queued" : "skipped";
     } catch (error) {
       discordQueueStatus = "failed";
