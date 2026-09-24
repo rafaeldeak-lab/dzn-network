@@ -50,7 +50,12 @@ export function NavigationProgress() {
   const recoveryTimer = useRef<number | null>(null);
   const pendingNavigation = useRef(false);
   const visibleProgress = useRef(false);
+  const currentHref = useRef<string | null>(null);
   const currentLocation = `${pathname}?${searchParams.toString()}`;
+
+  useEffect(() => {
+    currentHref.current = window.location.href;
+  }, [currentLocation]);
 
   const clearTimers = useCallback(() => {
     if (startTimer.current) window.clearTimeout(startTimer.current);
@@ -103,7 +108,16 @@ export function NavigationProgress() {
       }, 0);
     };
 
-    const onPopState = () => start();
+    const onPopState = () => {
+      const previousHref = currentHref.current;
+      const nextHref = window.location.href;
+      currentHref.current = nextHref;
+      if (previousHref && !shouldStartNavigationProgress({ href: nextHref }, previousHref)) {
+        clearTimers();
+        return;
+      }
+      start();
+    };
     document.addEventListener("click", onClick);
     window.addEventListener("popstate", onPopState);
     window.addEventListener("pageshow", clearTimers);
