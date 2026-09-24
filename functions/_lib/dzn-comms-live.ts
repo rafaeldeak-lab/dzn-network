@@ -166,12 +166,21 @@ export async function handleDznCommsModeration(request: Request, env: Env) {
   statements.push(db.prepare("INSERT INTO dzn_comms_moderation_audit (id, message_id, actor_user_id, action, reason_code) SELECT ?, ?, ?, ?, ? WHERE changes() > 0").bind(crypto.randomUUID(), messageId, auth.user.id, action, reason));
   if (state === "deleted") {
     statements.push(db.prepare("UPDATE dzn_comms_reports SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = ? WHERE message_id = ? AND status = 'open'").bind(auth.user.id, messageId));
-    statements.push(db.prepare(`DELETE FROM dzn_comms_send_slots
-      WHERE EXISTS (
-        SELECT 1 FROM dzn_comms_send_receipts AS receipts
+    statements.push(db.prepare(`WITH target_slot AS (
+        SELECT slots.actor_user_id, slots.minute_bucket, slots.slot
+        FROM dzn_comms_send_slots AS slots
+        JOIN dzn_comms_send_receipts AS receipts ON receipts.actor_user_id = slots.actor_user_id
         WHERE receipts.message_id = ?
-          AND receipts.actor_user_id = dzn_comms_send_slots.actor_user_id
-          AND ABS((julianday(dzn_comms_send_slots.accepted_at) - julianday(receipts.created_at)) * 86400.0) <= 5.0
+        ORDER BY ABS((julianday(slots.accepted_at) - julianday(receipts.created_at)) * 86400.0) ASC,
+          slots.accepted_at DESC, slots.slot DESC
+        LIMIT 1
+      )
+      DELETE FROM dzn_comms_send_slots
+      WHERE EXISTS (
+        SELECT 1 FROM target_slot
+        WHERE target_slot.actor_user_id = dzn_comms_send_slots.actor_user_id
+          AND target_slot.minute_bucket = dzn_comms_send_slots.minute_bucket
+          AND target_slot.slot = dzn_comms_send_slots.slot
       )`).bind(messageId));
     statements.push(db.prepare("UPDATE dzn_comms_send_receipts SET message_id = NULL WHERE message_id = ?").bind(messageId));
   }
