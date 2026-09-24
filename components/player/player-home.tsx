@@ -317,20 +317,48 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
   useEffect(() => {
     if (mode !== "profile" || authState.status !== "logged_in" || hubState.status === "idle" || hubState.status === "loading") return;
     let frame = 0;
+    let pending = true;
+    let alignmentTimer = 0;
+    let expiryTimer = 0;
     const alignProfileSection = () => {
+      if (!pending) return;
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
+        if (!pending) return;
         const id = window.location.hash.slice(1);
         if (id !== "game-account" && id !== "profile-settings" && id !== "profile-summary") return;
+        if ((id === "game-account" || id === "profile-settings") && document.querySelector('#game-account [aria-busy="true"]')) return;
         document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "auto" });
       });
     };
-    const onHashChange = () => alignProfileSection();
-    alignProfileSection();
-    window.addEventListener("hashchange", onHashChange);
-    return () => {
+    const cancelPendingAlignment = () => {
+      pending = false;
       cancelAnimationFrame(frame);
+      window.clearInterval(alignmentTimer);
+      window.clearTimeout(expiryTimer);
+    };
+    const startPendingAlignment = () => {
+      cancelPendingAlignment();
+      pending = true;
+      alignProfileSection();
+      alignmentTimer = window.setInterval(alignProfileSection, 100);
+      expiryTimer = window.setTimeout(cancelPendingAlignment, 10_000);
+    };
+    const onHashChange = () => startPendingAlignment();
+    startPendingAlignment();
+    const gameAccount = document.getElementById("game-account");
+    const observer = new MutationObserver(alignProfileSection);
+    if (gameAccount) observer.observe(gameAccount, { subtree: true, childList: true, attributes: true, attributeFilter: ["aria-busy"] });
+    const resizeObserver = new ResizeObserver(alignProfileSection);
+    if (gameAccount) resizeObserver.observe(gameAccount);
+    window.addEventListener("hashchange", onHashChange);
+    for (const event of ["wheel", "touchstart", "pointerdown", "keydown"] as const) window.addEventListener(event, cancelPendingAlignment, { passive: true });
+    return () => {
+      cancelPendingAlignment();
+      observer.disconnect();
+      resizeObserver.disconnect();
       window.removeEventListener("hashchange", onHashChange);
+      for (const event of ["wheel", "touchstart", "pointerdown", "keydown"] as const) window.removeEventListener(event, cancelPendingAlignment);
     };
   }, [mode, authState.status, hubState.status]);
 

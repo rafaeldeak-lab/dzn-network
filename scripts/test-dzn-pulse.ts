@@ -139,7 +139,9 @@ assert.equal(provider.includes("AccountDecisionPopupManager"), true, "Provider m
 assert.equal(provider.includes("player_link_approved"), true, "Player-link approval notifications must be eligible for a website popup.");
 assert.equal(provider.includes("player_link_rejected"), true, "Player-link rejection notifications must be eligible for a website popup.");
 assert.equal(provider.includes("player_link_revoked"), true, "Player-link revocation notifications must be eligible for a website popup.");
-assert.equal(provider.includes("/api/dzn-pulse/notifications?filter=news&limit=10"), true, "Decision popup polling must use the bounded private notification feed.");
+assert.equal(provider.includes("/api/dzn-pulse/notifications?account_decisions=1&limit=10"), true, "Decision popup polling must use the bounded decision-specific private feed.");
+assert.equal(service.includes("options.accountDecisionsOnly"), true, "The private feed must support decision-specific filtering independent of general news volume.");
+assert.equal(service.includes("'player_link_approved', 'player_link_rejected', 'player_link_revoked'"), true, "Decision-specific filtering must cover every player-link decision type.");
 assert.equal(provider.includes("credentials: \"include\""), true, "Decision popup polling must preserve authenticated private requests.");
 assert.equal(provider.includes("dzn:pulse:account-decisions:v1"), true, "Decision popup session deduplication must use a versioned key.");
 assert.equal(provider.includes("data-dzn-account-decision-popup"), true, "Decision popups need a stable rendered QA selector.");

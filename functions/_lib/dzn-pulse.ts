@@ -288,6 +288,7 @@ export async function listUserNotifications(env: Env, user: SessionUser, options
   filter?: string | null;
   cursor?: string | null;
   limit?: number | string | null;
+  accountDecisionsOnly?: boolean;
 } = {}): Promise<PulseListResult> {
   if (!isDznPulseEnabled(env)) return emptyPulseList();
   const db = requireDb(env);
@@ -309,6 +310,9 @@ export async function listUserNotifications(env: Env, user: SessionUser, options
   if (filter !== "all") {
     conditions.push(`user_notifications.type IN (${notificationTypesForFilter(filter).map(() => "?").join(", ")})`);
     bindings.push(...notificationTypesForFilter(filter));
+  }
+  if (options.accountDecisionsOnly) {
+    conditions.push("user_notifications.type IN ('player_link_approved', 'player_link_rejected', 'player_link_revoked')");
   }
 
   if (cursor) {

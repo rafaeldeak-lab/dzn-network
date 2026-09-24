@@ -887,7 +887,7 @@ function AccountDecisionPopupManager() {
     if (requestInFlight.current || document.visibilityState === "hidden") return;
     requestInFlight.current = true;
     try {
-      const response = await fetchJsonWithRetry<NotificationsResponse>("/api/dzn-pulse/notifications?filter=news&limit=10", {
+      const response = await fetchJsonWithRetry<NotificationsResponse>("/api/dzn-pulse/notifications?account_decisions=1&limit=10", {
         cache: "no-store",
         credentials: "include",
         headers: { accept: "application/json" },
@@ -936,7 +936,7 @@ function AccountDecisionPopupManager() {
       retries: 0,
       timeoutMs: 8000,
     }).catch(() => undefined);
-    navigateToInternal(current.action_url || "/player/profile#game-account");
+    navigateToInternal(isPlayerLinkDecision(current.type) ? "/player/profile#game-account" : current.action_url || "/player/profile#game-account");
   }
 
   return (

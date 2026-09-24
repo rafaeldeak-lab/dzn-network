@@ -23,6 +23,7 @@ const playerHome = readFileSync("components/player/player-home.tsx", "utf8");
 const identityPanel = readFileSync("components/player/player-game-identity-links.tsx", "utf8");
 const ownerClaimPage = readFileSync("components/owner/player-game-identity-claims-page.tsx", "utf8");
 const ownerClaimRoutePage = readFileSync("app/owner/player-game-identity-claims/page.tsx", "utf8");
+const revocationHelper = readFileSync("functions/_lib/player-game-identity-revocation.ts", "utf8");
 const ownerConsole = readFileSync("components/owner/owner-console.tsx", "utf8");
 const platformSpec = readFileSync("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md", "utf8");
 const handoff = readFileSync("docs/DZN_VERIFIED_PLAYER_GAME_IDENTITY_LINKING_HANDOFF.md", "utf8");
@@ -126,6 +127,7 @@ assert.match(identityPanel, /Choose server/, "Identity panel must ask players to
 assert.match(identityPanel, /Search for your server/, "Identity panel must support searchable server selection.");
 assert.match(identityPanel, /DayZ gamertag on this server/, "Identity panel must ask for the visible server gamertag.");
 assert.match(identityPanel, /Send For Check/, "Identity panel must make the owner/admin check flow explicit.");
+assert.match(revocationHelper, /\/player\/profile#game-account/, "Revocation notifications must open the affected Game Account section.");
 assert.match(identityPanel, /server_slug/, "Identity UI must still submit a safe public server slug reference internally.");
 assert.match(identityPanel, /player_reference/, "Identity UI must submit the visible gamertag as an untrusted lookup reference.");
 assert.doesNotMatch(identityPanel, /Server slug or DZN server ID/, "Player-facing UI must not ask normal players to understand server slugs.");

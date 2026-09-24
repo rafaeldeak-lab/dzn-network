@@ -224,6 +224,12 @@ async function checkProfileFollowups(browser) {
           await page.goto(`${origin}/player/profile#profile-settings`, { waitUntil: "domcontentloaded" });
           await page.waitForFunction(() => document.querySelector("#profile-summary")?.textContent.includes("No linked server stats yet."));
           assert.equal(await page.locator('#game-account [aria-busy="true"]').count(), 1);
+          await page.waitForLoadState("networkidle");
+          await assertAnchorInView(page, "profile-settings");
+          await page.goto(`${origin}/player`, { waitUntil: "networkidle" });
+          await page.goto(`${origin}/player/profile#profile-settings`, { waitUntil: "domcontentloaded" });
+          await page.waitForFunction(() => document.querySelector("#profile-summary")?.textContent.includes("No linked server stats yet."));
+          assert.equal(await page.locator('#game-account [aria-busy="true"]').count(), 1);
           await page.keyboard.press("Control+Home");
           await page.waitForLoadState("networkidle");
           assert.equal(await page.evaluate(() => scrollY), 0, "A late panel response must not override the user's scroll");
