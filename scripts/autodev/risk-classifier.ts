@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import {
   fail,
@@ -173,13 +174,43 @@ export function detectDestructiveMigration(content: string, file = "") {
   const normalizedFile = normalizePath(file);
   const isMigrationLike = isMigration(normalizedFile) || /\.sql$/i.test(normalizedFile);
   if (!isMigrationLike && !/CREATE\s+TABLE|DROP\s+TABLE|DELETE\s+FROM|ALTER\s+TABLE|UPDATE\s+player_profiles/i.test(text) && !DESTRUCTIVE_TRUNCATE_PATTERN.test(text)) return findings;
-  if (/DROP\s+TABLE/i.test(text)) findings.push("destructive DROP TABLE detected");
+  if (/DROP\s+TABLE/i.test(text) && !isVerifiedCommsPrivacyCopyAndSwap(content, text, normalizedFile)) findings.push("destructive DROP TABLE detected");
   if (DESTRUCTIVE_TRUNCATE_PATTERN.test(text)) findings.push("destructive TRUNCATE detected");
   if (new RegExp(`DELETE\\s+FROM\\s+(${PROTECTED_DELETE_TABLES.join("|")})\\b`, "i").test(text)) findings.push("destructive DELETE FROM protected table detected");
   if (/ALTER\s+TABLE[\s\S]{0,200}\bDROP\s+COLUMN\b/i.test(text)) findings.push("destructive ALTER TABLE DROP COLUMN detected");
   if (/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?player_stats\b/i.test(text)) findings.push("player_stats table creation detected");
   if (/UPDATE\s+player_profiles[\s\S]{0,260}\b(kills|deaths|joins|disconnects|score|longest_kill_distance|highest_killstreak)\s*=\s*0\b/i.test(text)) findings.push("destructive player_profiles stat reset logic detected");
   return findings;
+}
+
+function isVerifiedCommsPrivacyCopyAndSwap(content: string, text: string, file: string) {
+  if (file !== "migrations/0072_dzn_comms_private_rate_ledgers.sql") return false;
+  const canonicalHash = createHash("sha256").update(content.replace(/\r\n/g, "\n")).digest("hex");
+  if (canonicalHash !== "27b9fccf3cc20eca020857e5565490edde7b59f5e2e0c90bd96b626458d51441") return false;
+  if (DESTRUCTIVE_TRUNCATE_PATTERN.test(text) || /ALTER\s+TABLE[\s\S]{0,200}\bDROP\s+COLUMN\b/i.test(text)) return false;
+
+  const expectedDrops = [
+    "dzn_comms_rate_cutover_guard",
+    "dzn_comms_send_receipts",
+    "dzn_comms_send_slots",
+    "dzn_comms_attempt_slots",
+    "dzn_comms_attempt_actor_map",
+  ];
+  const drops = [...text.matchAll(/\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?([A-Za-z_][\w$]*)\s*;/gi)].map((match) => match[1].toLowerCase());
+  if (drops.length !== expectedDrops.length || expectedDrops.some((table) => !drops.includes(table))) return false;
+
+  for (const table of ["dzn_comms_send_receipts", "dzn_comms_send_slots", "dzn_comms_attempt_slots"]) {
+    const replacement = `${table}_v2`;
+    if (!new RegExp(`CREATE\\s+TABLE\\s+${replacement}\\b`, "i").test(text)) return false;
+    if (!new RegExp(`INSERT\\s+INTO\\s+${replacement}\\b[\\s\\S]{0,2400}FROM\\s+${table}\\b`, "i").test(text)) return false;
+    if (!new RegExp(`ALTER\\s+TABLE\\s+${replacement}\\s+RENAME\\s+TO\\s+${table}\\b`, "i").test(text)) return false;
+  }
+
+  return /CREATE\s+TABLE\s+dzn_comms_rate_cutover_guard\b/i.test(text)
+    && /FROM\s+dzn_comms_send_receipts\s+WHERE\s+julianday\(expires_at\)\s*>\s*julianday\('now'\)/i.test(text)
+    && /FROM\s+dzn_comms_attempt_slots[\s\S]{0,200}minute_bucket\s*=\s*strftime\('%Y-%m-%dT%H:%M',\s*'now'\)/i.test(text)
+    && /FROM\s+dzn_comms_send_slots[\s\S]{0,300}julianday\(accepted_at\)\s*>\s*julianday\('now',\s*'-5 seconds'\)/i.test(text)
+    && /CREATE\s+TABLE\s+dzn_comms_attempt_actor_map\b/i.test(text);
 }
 
 export function classifyRecoverableProductionStatus(status: string | null | undefined) {

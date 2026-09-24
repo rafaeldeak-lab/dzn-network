@@ -86,6 +86,12 @@ assert.deepEqual(detectDestructiveMigration("DROP TABLE player_profiles;", "migr
 assert.deepEqual(detectDestructiveMigration("DELETE FROM player_profiles;", "migrations/9999.sql").length > 0, true);
 assert.deepEqual(detectDestructiveMigration("CREATE TABLE player_stats (id TEXT);", "migrations/9999.sql").length > 0, true);
 assert.deepEqual(detectDestructiveMigration("CREATE TABLE IF NOT EXISTS safe_table (id TEXT);", "migrations/9999.sql"), []);
+const commsPrivacyMigration = read("migrations/0072_dzn_comms_private_rate_ledgers.sql");
+assert.deepEqual(detectDestructiveMigration(commsPrivacyMigration, "migrations/0072_dzn_comms_private_rate_ledgers.sql"), [], "The exact verified Comms copy-and-swap migration must pass the scheduled audit.");
+assert.equal(classifyPath("migrations/0072_dzn_comms_private_rate_ledgers.sql", commsPrivacyMigration).risk, "medium");
+assert.equal(detectDestructiveMigration(commsPrivacyMigration, "migrations/9999_renamed.sql").length > 0, true, "The copy-and-swap exemption must be filename-bound.");
+assert.equal(detectDestructiveMigration(commsPrivacyMigration.replace("FROM dzn_comms_send_receipts;", "FROM dzn_comms_channels;"), "migrations/0072_dzn_comms_private_rate_ledgers.sql").length > 0, true, "The exemption must reject a missing source-table copy.");
+assert.equal(detectDestructiveMigration(`${commsPrivacyMigration}\nDROP TABLE users;`, "migrations/0072_dzn_comms_private_rate_ledgers.sql").length > 0, true, "The exemption must reject any additional dropped table.");
 
 assert.equal(classifyRecoverableProductionStatus("nitrado_upstream_down"), true);
 assert.equal(classifyRecoverableProductionStatus("waiting_for_nitrado"), true);
