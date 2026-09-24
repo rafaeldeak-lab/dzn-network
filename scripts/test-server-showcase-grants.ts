@@ -382,6 +382,34 @@ async function run() {
     assert.equal(dispatched.results[0]?.status, "no_message_id");
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
   });
+  await test("ambiguous grant preserves active Starter Discord access", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'starter', status = 'active'").run();
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    await grant(env);
+
+    const response = await invoke(postingDestinations, env, actor, "GET");
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { post_type_options: Array<{ key: string; allowed_by_plan: boolean; listing_plan_key: string }> };
+    const basic = payload.post_type_options.find((option) => option.key === "basic_status_embed");
+    const priority = payload.post_type_options.find((option) => option.key === "priority_status_embed");
+    assert.equal(basic?.allowed_by_plan, true);
+    assert.equal(basic?.listing_plan_key, "starter");
+    assert.equal(priority?.allowed_by_plan, false);
+
+    const saved = await invoke(postingDestinations, env, actor, "POST", {
+      post_type: "basic_status_embed",
+      discord_channel_id: "99999999",
+      enabled: true,
+    });
+    assert.equal(saved.status, 200);
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "pro", ["basic_status_embed"], "starter-fallback", {
+      linkedServerId: scope.linkedServerId,
+    }), 1);
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "pro", ["priority_status_embed"], "grant-still-ambiguous", {
+      linkedServerId: scope.linkedServerId,
+    }), 0);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
   await test("revoked grant cannot commit a posting destination save", async ({ db, env }) => {
     const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
     const grantId = await grant(env);

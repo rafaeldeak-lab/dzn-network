@@ -2,6 +2,7 @@ import { requireDb } from "./db";
 import {
   getAdmDiscoveryIntervalMinutes,
   getAdmPullInterval,
+  getListingLimits,
   getPlanConfig,
   getPlanPriority,
   getServerStatusInterval,
@@ -698,9 +699,31 @@ export async function getDiscordPublishingContextForLinkedServer(
     .prepare(`SELECT CASE WHEN (${singleServerScope.sql}) THEN 1 ELSE 0 END AS eligible`)
     .bind(...singleServerScope.values)
     .first<{ eligible: number }>();
+  const complimentaryEligible = Number(result?.eligible ?? 0) === 1;
+  if (!complimentaryEligible && isActiveSubscriptionStatus(context.showcaseAccess.billingStatus)) {
+    const billingPlanKey = normalizePlanKey(context.showcaseAccess.billingPlan);
+    const billingSubscriptionStatus = context.showcaseAccess.billingStatus ?? "inactive";
+    return {
+      ...context,
+      planKey: billingPlanKey,
+      subscriptionStatus: billingSubscriptionStatus,
+      accessSource: "billing" as const,
+      showcaseAccess: {
+        ...context.showcaseAccess,
+        source: "billing" as const,
+        grantId: null,
+        expiresAt: null,
+        listing: getListingLimits({
+          plan_key: context.showcaseAccess.billingPlan,
+          subscription_status: billingSubscriptionStatus,
+        }),
+      },
+      discordPublishingEligible: true,
+    };
+  }
   return {
     ...context,
-    discordPublishingEligible: Number(result?.eligible ?? 0) === 1,
+    discordPublishingEligible: complimentaryEligible,
   };
 }
 
