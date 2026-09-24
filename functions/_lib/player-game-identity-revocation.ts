@@ -1,4 +1,6 @@
 import { requireDb } from "./db";
+import { isDiscordNotificationsEnabled } from "./feature-flags";
+import { hasPlayerGameIdentityDeliveryLedger } from "./player-game-identity-notifications";
 import { isPlatformOwnerDiscordId } from "./platform-owner";
 import type { Env, SessionUser } from "./types";
 
@@ -58,6 +60,9 @@ export async function revokePlayerGameIdentityLink(env: Env, actor: SessionUser,
     if (link.legacy_conflict) return { ok: false, status: 409, error: "LEGACY_ASSOCIATION_REVIEW_REQUIRED",
       message: "An older account association also exists. Nothing was changed. DZN support must check its evidence before removing it." };
     const decisionId = crypto.randomUUID();
+    const deliveryId = isDiscordNotificationsEnabled(env) && await hasPlayerGameIdentityDeliveryLedger(env)
+      ? crypto.randomUUID()
+      : null;
     const gate = `EXISTS (SELECT 1 FROM player_game_identity_audit_log WHERE id = ? AND result = 'accepted')`;
     const sameProfile = `c.linked_server_id = ? AND c.player_profile_id = ? AND c.player_id = ?`;
     const results = await db.batch([
@@ -89,9 +94,15 @@ export async function revokePlayerGameIdentityLink(env: Env, actor: SessionUser,
           '/player/profile#game-account', 1, ?, ? WHERE ${gate}`)
         .bind(decisionId, link.user_id, `A server owner or DZN support revoked one of your game stats links. Reason: ${reason}`, `player-link-revoked:${link.id}`,
           JSON.stringify({ link_id: link.id, audit_id: decisionId }), decisionId),
+      ...(deliveryId ? [db.prepare(`INSERT INTO player_game_identity_notification_deliveries (
+          id, audit_id, claim_id, link_id, user_id, discord_id, linked_server_id, event_type,
+          status, attempt_count, next_attempt_at, created_at, updated_at
+        ) SELECT ?, ?, NULL, ?, ?, ?, ?, 'revoked', 'queued', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          WHERE ${gate}`)
+        .bind(deliveryId, decisionId, link.id, link.user_id, link.discord_id, link.linked_server_id, decisionId)] : []),
     ]);
     if (results[0].meta.changes !== 1) return changed();
-    return { ok: true, status: 200, message: "Link revoked. The player has a private notification. Gameplay records and other server links are unchanged." };
+    return { ok: true, status: 200, delivery_id: deliveryId, message: "Link revoked. The player has a private notification. Gameplay records and other server links are unchanged." };
   } catch {
     return { ok: false, status: 503, message: "The link could not be updated. Refresh its current status before trying again." };
   }

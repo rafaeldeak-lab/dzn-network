@@ -97,6 +97,9 @@ type PlayerGameIdentityHistory = {
   actor_user_id: string | null;
   actor_name: string | null;
   created_at: string | null;
+  discord_delivery_status: "queued" | "processing" | "retry" | "delivered" | "failed" | "skipped" | null;
+  discord_delivery_attempts: number | null;
+  discord_delivery_result: string | null;
 };
 
 type LoadState = "loading" | "ready" | "unauthorized" | "error";
@@ -131,6 +134,7 @@ export function PlayerGameIdentityClaimsPage() {
   const [historySearch, setHistorySearch] = useState("");
   const [historyAction, setHistoryAction] = useState<"all" | PlayerGameIdentityHistory["action"]>("all");
   const [historyServer, setHistoryServer] = useState("all");
+  const [historyDelivery, setHistoryDelivery] = useState<"all" | "delivered" | "attention" | "not-tracked">("all");
 
   const fetchClaims = useCallback(async (historyCursor: string | null = null): Promise<ClaimLoadResult> => {
     const endpoint = historyCursor
@@ -244,11 +248,14 @@ export function PlayerGameIdentityClaimsPage() {
     return history.filter((item) => {
       if (historyAction !== "all" && item.action !== historyAction) return false;
       if (historyServer !== "all" && item.linked_server_id !== historyServer) return false;
+      if (historyDelivery === "delivered" && item.discord_delivery_status !== "delivered") return false;
+      if (historyDelivery === "attention" && !["retry", "failed"].includes(item.discord_delivery_status ?? "")) return false;
+      if (historyDelivery === "not-tracked" && item.discord_delivery_status !== null) return false;
       if (!query) return true;
-      return [item.account_name, item.requester_discord_id, item.player_name, item.player_id, item.server_name, item.actor_name, item.note]
+      return [item.account_name, item.requester_discord_id, item.player_name, item.player_id, item.server_name, item.actor_name, item.note, item.discord_delivery_status, item.discord_delivery_result]
         .some((value) => value?.toLowerCase().includes(query));
     });
-  }, [history, historyAction, historySearch, historyServer]);
+  }, [history, historyAction, historyDelivery, historySearch, historyServer]);
 
   async function submitReview(claim: PlayerGameIdentityClaim, action: ReviewAction) {
     const note = (notes[claim.id] ?? "").trim().slice(0, NOTE_LIMIT);
@@ -379,7 +386,7 @@ export function PlayerGameIdentityClaimsPage() {
         {state === "ready" && view === "history" && history.length === 0 ? <HistoryEmptyState /> : null}
         {state === "ready" && view === "history" && history.length > 0 ? (
           <div className="grid gap-3">
-            <section className="grid gap-3 rounded-lg border border-white/10 bg-[#07101b] p-3 sm:grid-cols-[minmax(0,1fr)_180px_220px]" aria-label="Decision history filters">
+            <section className="grid gap-3 rounded-lg border border-white/10 bg-[#07101b] p-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_170px_190px_190px]" aria-label="Decision history filters">
               <label className="relative block">
                 <span className="sr-only">Search decision history</span>
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500" aria-hidden="true" />
@@ -399,6 +406,15 @@ export function PlayerGameIdentityClaimsPage() {
                 <select value={historyServer} onChange={(event) => setHistoryServer(event.target.value)} className="min-h-11 w-full rounded-md border border-white/10 bg-black/35 px-3 text-sm font-bold text-zinc-200 outline-none focus:border-cyan-300/45">
                   <option value="all">All servers</option>
                   {historyServers.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                </select>
+              </label>
+              <label>
+                <span className="sr-only">Filter by Discord delivery</span>
+                <select value={historyDelivery} onChange={(event) => setHistoryDelivery(event.target.value as typeof historyDelivery)} className="min-h-11 w-full rounded-md border border-white/10 bg-black/35 px-3 text-sm font-bold text-zinc-200 outline-none focus:border-cyan-300/45">
+                  <option value="all">All delivery states</option>
+                  <option value="delivered">Discord delivered</option>
+                  <option value="attention">Retry or failed</option>
+                  <option value="not-tracked">Not tracked</option>
                 </select>
               </label>
             </section>
@@ -455,6 +471,7 @@ function HistoryCard({ item }: { item: PlayerGameIdentityHistory }) {
           <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-zinc-500">
             <span className="inline-flex items-center gap-1.5"><Clock3 className="size-3.5" aria-hidden="true" />{formatDate(item.created_at)}</span>
             <span>Reviewed by {item.actor_name || "DZN admin"}</span>
+            <DeliveryStatus status={item.discord_delivery_status} attempts={item.discord_delivery_attempts} />
           </p>
         </div>
       </div>
@@ -473,6 +490,19 @@ function HistoryCard({ item }: { item: PlayerGameIdentityHistory }) {
       </details>
     </article>
   );
+}
+
+function DeliveryStatus({ status, attempts }: { status: PlayerGameIdentityHistory["discord_delivery_status"]; attempts: number | null }) {
+  const labels = {
+    queued: "Discord queued",
+    processing: "Discord sending",
+    retry: "Discord retry scheduled",
+    delivered: "Discord delivered",
+    failed: "Discord delivery failed",
+    skipped: "Discord not requested",
+  } as const;
+  if (!status) return <span>Discord delivery not tracked</span>;
+  return <span>{labels[status]}{attempts && attempts > 1 ? ` (${attempts} attempts)` : ""}</span>;
 }
 
 function HistoryEmptyState() {

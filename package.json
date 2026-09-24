@@ -19,7 +19,7 @@
     "test:player-community-matching": "tsx scripts/test-player-community-matching.ts",
     "test:player-hub-real-data": "tsx scripts/test-player-hub-real-data.ts",
     "test:player-hub-profile-progression": "tsx scripts/test-player-hub-profile-progression.ts",
-    "test:player-game-identity-linking": "tsx scripts/test-player-game-identity-linking.ts",
+    "test:player-game-identity-linking": "tsx scripts/test-player-game-identity-linking.ts && tsx scripts/test-player-game-identity-delivery-ledger.ts",
     "test:player-profile-privacy-preferences": "tsx scripts/test-player-profile-privacy-preferences.ts",
     "test:public-player-profile-viewer": "tsx scripts/test-public-player-profile-viewer.ts",
     "test:public-profile-owner-preview-share-polish": "tsx scripts/test-public-profile-owner-preview-share-polish.ts",

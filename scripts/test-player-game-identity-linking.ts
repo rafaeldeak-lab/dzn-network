@@ -57,7 +57,7 @@ assert.match(ownerReviewRoute, /request\.method !== "PATCH"/, "Owner/admin claim
 assert.match(ownerReviewRoute, /isSameOriginMutation/, "Owner/admin claim reviews must reject cross-origin mutations.");
 assert.match(ownerReviewRoute, /reviewPlayerGameIdentityClaim/, "Owner/admin claim route must use the canonical review helper.");
 assert.match(ownerReviewRoute, /privateNoStoreHeaders\(\)/, "Owner/admin review responses must be private no-store.");
-assert.match(ownerReviewRoute, /waitUntil\(dispatchPlayerGameIdentityDecisionDiscord\(env, delivery\)\)/, "Discord delivery must run after the durable decision without delaying the response.");
+assert.match(ownerReviewRoute, /waitUntil\(delivery\.deliveryId[\s\S]*dispatchQueuedPlayerGameIdentityNotifications[\s\S]*dispatchPlayerGameIdentityDecisionDiscord/, "Durable queued delivery, with the migration-safe fallback, must run after the decision without delaying the response.");
 assert.match(ownerReviewRoute, /const \{ delivery, \.\.\.publicResult \} = result/, "Internal Discord delivery details must be removed from the public response.");
 assert.match(ownerReviewRoute, /return json\(publicResult,/, "Successful review responses must contain only the public decision result.");
 assert.match(ownerClaimRoutePage, /PlayerGameIdentityClaimsPage/, "Owners/admins need a durable review queue route.");
@@ -170,7 +170,7 @@ assert.match(platformSpec, /\/owner\/player-game-identity-claims/, "Master spec 
 assert.match(platformSpec, /Exact submitted game IDs are allowed only in the private owner\/admin review queue/, "Master spec must document the exact-ID exposure boundary.");
 assert.match(handoff, /PR `#144` currently also uses migration number `0064`/, "Handoff must flag the migration-number conflict with the queued Comms PR.");
 assert.match(handoff, /private troubleshooting queue/, "Handoff must document the owner/admin troubleshooting queue.");
-assert.match(packageJson, /"test:player-game-identity-linking": "tsx scripts\/test-player-game-identity-linking\.ts"/, "Dedicated game identity test script must be registered.");
+assert.match(packageJson, /"test:player-game-identity-linking": "tsx scripts\/test-player-game-identity-linking\.ts && tsx scripts\/test-player-game-identity-delivery-ledger\.ts"/, "Identity tests must include the durable delivery ledger contract.");
 
 assert.equal(sanitizePlayerGameIdentityServerRef(" pandora-network "), "pandora-network");
 assert.equal(sanitizePlayerGameIdentityServerRef("server_123"), "server_123");
