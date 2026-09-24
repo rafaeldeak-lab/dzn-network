@@ -341,7 +341,7 @@ export async function listUserNotifications(env: Env, user: SessionUser, options
 
   const rows = result.results ?? [];
   const visibleRows = rows.slice(0, limit);
-  const nextRow = rows.length > limit ? rows[limit] : null;
+  const nextRow = rows.length > limit ? visibleRows[visibleRows.length - 1] : null;
 
   return {
     ok: true,

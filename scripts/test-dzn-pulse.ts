@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 
-import { getPulseSummary, sanitizePulseActionUrl } from "../functions/_lib/dzn-pulse";
+import { getPulseSummary, listUserNotifications, sanitizePulseActionUrl } from "../functions/_lib/dzn-pulse";
+import type { Env, SessionUser } from "../functions/_lib/types";
 
 function read(path: string) {
   return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
@@ -25,6 +27,19 @@ const envExample = read(".env.example");
 const cloudflareEnv = read("cloudflare-env.d.ts");
 const packageJson = read("package.json");
 const gitignore = read(".gitignore");
+
+type SqliteRow = Record<string, unknown>;
+type Sqlite = {
+  exec(sql: string): void;
+  close(): void;
+  prepare(sql: string): {
+    all(...values: unknown[]): SqliteRow[];
+    get(...values: unknown[]): SqliteRow | undefined;
+    run(...values: unknown[]): unknown;
+  };
+};
+
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: new (path: string) => Sqlite };
 
 for (const table of [
   "notification_campaigns",
@@ -194,6 +209,41 @@ assert.equal(packageJson.includes("\"test:dzn-pulse\""), true, "Package scripts 
 assert.equal(gitignore.includes("tmp/dzn-pulse-demo-seed.sql"), true, "Generated Pulse demo seed SQL must be ignored.");
 assert.equal(gitignore.includes("tmp/dzn-pulse-*.patch"), true, "Pulse preflight patches must be ignored.");
 
+async function testNotificationPaginationBoundary() {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT NOT NULL UNIQUE, username TEXT, avatar TEXT);
+      CREATE TABLE linked_servers (id TEXT PRIMARY KEY, display_name TEXT, hostname TEXT, server_name TEXT, nitrado_service_name TEXT);
+      CREATE TABLE competitive_events (id TEXT PRIMARY KEY, name TEXT);
+      INSERT INTO users VALUES ('pulse-user','100','Pulse User',NULL);`);
+    sqlite.exec(migration);
+    const insert = sqlite.prepare(`INSERT INTO user_notifications
+      (id,user_id,type,title,body,dedupe_key,created_at)
+      VALUES (?,'pulse-user','player_link_approved','Approved','Decision',?,?)`);
+    for (let index = 1; index <= 21; index += 1) {
+      const suffix = String(index).padStart(2, "0");
+      const minute = String(60 - index).padStart(2, "0");
+      insert.run(`decision-${suffix}`, `decision-${suffix}`, `2026-09-24T12:${minute}:00.000Z`);
+    }
+    const prepare = (sql: string, bindings: unknown[] = []) => ({
+      bind: (...values: unknown[]) => prepare(sql, values),
+      all: async () => ({ results: sqlite.prepare(sql).all(...bindings) }),
+      first: async <T>() => sqlite.prepare(sql).get(...bindings) as T | undefined ?? null,
+    });
+    const env = { DZN_PULSE_ENABLED: "true", DB: { prepare } } as unknown as Env;
+    const user = { id: "pulse-user", discord_id: "100", username: "Pulse User", avatar: null } satisfies SessionUser;
+    const first = await listUserNotifications(env, user, { accountDecisionsOnly: true, unreadOnly: true, limit: 20 });
+    assert.equal(first.items.length, 20);
+    assert.equal(first.items[19]?.id, "decision-20");
+    assert.ok(first.nextCursor, "A 21-item feed must expose a second page.");
+    const second = await listUserNotifications(env, user, { accountDecisionsOnly: true, unreadOnly: true, limit: 20, cursor: first.nextCursor });
+    assert.deepEqual(second.items.map((item) => item.id), ["decision-21"], "Pagination must not skip the lookahead boundary row.");
+    assert.equal(second.nextCursor, null);
+  } finally {
+    sqlite.close();
+  }
+}
+
 const summaryQueries: string[] = [];
 const emptyStatement = {
   bind: () => emptyStatement,
@@ -207,11 +257,10 @@ const emptyPreviewDb = {
     return emptyStatement;
   },
 };
-getPulseSummary(
+Promise.all([testNotificationPaginationBoundary(), getPulseSummary(
   { DZN_PULSE_ENABLED: "true", DB: emptyPreviewDb } as never,
   { id: "preview-user", email: "preview@example.test", name: "Preview User", role: "owner" } as never,
-)
-  .then((emptyPreviewSummary) => {
+)]).then(([, emptyPreviewSummary]) => {
     assert.equal(emptyPreviewSummary.ok, true, "Authenticated Pulse summary must return a controlled empty-state payload.");
     assert.equal(emptyPreviewSummary.metrics.live_events, 0, "Empty preview summary must not fabricate live events.");
     assert.equal(emptyPreviewSummary.top_server, null, "Empty preview summary must not fabricate a top server.");
