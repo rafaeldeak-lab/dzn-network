@@ -280,14 +280,18 @@ async function testRetentionRuntime() {
     f.sqlite.prepare(`INSERT INTO dzn_comms_send_receipts
       (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,expires_at)
       VALUES ('old-receipt','player','dzn-global-chat','old-request','hash','allow',201,'2026-01-01T00:00:00.000Z')`).run();
+    f.sqlite.prepare(`INSERT INTO dzn_comms_reports (id,message_id,reporter_user_id,reason_code)
+      VALUES ('expired-report','expired-message','player','other')`).run();
     const result = await runDznCommsRetention(f.env.DB, new Date("2026-09-24T12:00:00.000Z"));
     assert.equal(result.messagesErased, 1);
+    assert.equal(result.reportsResolved, 1);
     assert.equal(result.receiptsDeleted, 1);
     const message = f.sqlite.prepare("SELECT body,author_user_id,author_display_name,visibility_state FROM dzn_comms_messages WHERE id = 'expired-message'").get();
     assert.equal(message?.body, "Message expired.");
     assert.equal(message?.author_user_id, null);
     assert.equal(message?.author_display_name, "DZN Safety");
     assert.equal(message?.visibility_state, "expired");
+    assert.equal(f.sqlite.prepare("SELECT status FROM dzn_comms_reports WHERE id = 'expired-report'").get()?.status, "resolved");
   } finally { f.close(); }
 }
 

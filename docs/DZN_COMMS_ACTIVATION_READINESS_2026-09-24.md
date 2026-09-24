@@ -13,7 +13,7 @@ Status: source-ready and default-off. This document is not authorization to modi
 - Hide, restore, resolve, dismiss and destructive erase actions.
 - Immediate body and author-link erasure for deleted messages.
 - Thirty-day expiry on newly accepted messages and tombstone erasure during cleanup.
-- Cleanup for expired receipts, timeouts and old rate-limit slots.
+- Cleanup that closes reports on expired messages, plus expired receipts, timeouts and old rate-limit slots.
 - No AI provider, billing, entitlement, Nitrado, ranking, XP or reward mutation.
 
 ## Flags That Must Remain Off Until Activation

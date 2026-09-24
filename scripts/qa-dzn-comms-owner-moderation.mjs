@@ -13,13 +13,13 @@ const payload = {
     author_display_name: "DZN Player",
     body: "Example reported message for the private moderation workspace.",
     visibility_state: "visible",
-    created_at: "2026-09-24T10:00:00.000Z",
+    created_at: "2026-09-24 10:00:00",
     expires_at: "2026-10-24T10:00:00.000Z",
     report_count: 2,
-    first_reported_at: "2026-09-24T10:05:00.000Z",
+    first_reported_at: "2026-09-24 10:05:00",
     reasons: "harassment,spam",
   }],
-  audit: [{ id: "audit-qa-1", message_id: "older-message", action: "hide", reason_code: "Safety review", created_at: "2026-09-24T09:00:00.000Z", actor_name: "DZN Owner" }],
+  audit: [{ id: "audit-qa-1", message_id: "older-message", action: "hide", reason_code: "Safety review", created_at: "2026-09-24 09:00:00", actor_name: "DZN Owner" }],
   retention: { message_days: 30, deleted_body_erasure: true },
 };
 

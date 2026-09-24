@@ -215,6 +215,11 @@ export async function runDznCommsRetention(db: D1Database, now = new Date()) {
           author_role_label = 'System', visibility_state = 'expired', edited_at = ?
       WHERE expires_at IS NOT NULL AND julianday(expires_at) <= julianday(?)
         AND visibility_state NOT IN ('deleted', 'expired')`).bind(timestamp, timestamp),
+    db.prepare(`UPDATE dzn_comms_reports
+      SET status = 'resolved', resolved_at = ?, resolved_by_user_id = NULL
+      WHERE status = 'open' AND message_id IN (
+        SELECT id FROM dzn_comms_messages WHERE visibility_state = 'expired'
+      )`).bind(timestamp),
     db.prepare("DELETE FROM dzn_comms_send_receipts WHERE julianday(expires_at) <= julianday(?)").bind(timestamp),
     db.prepare("DELETE FROM dzn_comms_timeouts WHERE julianday(expires_at) <= julianday(?)").bind(timestamp),
     db.prepare("DELETE FROM dzn_comms_send_slots WHERE julianday(created_at) <= julianday(?)").bind(slotCutoff),
@@ -224,9 +229,10 @@ export async function runDznCommsRetention(db: D1Database, now = new Date()) {
   const changes = results.map((result) => Number(result.meta?.changes ?? 0));
   return {
     messagesErased: changes[0] ?? 0,
-    receiptsDeleted: changes[1] ?? 0,
-    timeoutsDeleted: changes[2] ?? 0,
-    rateSlotsDeleted: changes.slice(3).reduce((sum, value) => sum + value, 0),
+    reportsResolved: changes[1] ?? 0,
+    receiptsDeleted: changes[2] ?? 0,
+    timeoutsDeleted: changes[3] ?? 0,
+    rateSlotsDeleted: changes.slice(4).reduce((sum, value) => sum + value, 0),
   };
 }
 

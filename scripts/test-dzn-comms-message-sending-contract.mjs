@@ -19,6 +19,7 @@ test("live Comms implementation remains default-off and migration-gated", () => 
   assert.ok(existsSync(new URL("functions/api/comms/messages.ts", root)));
   assert.ok(existsSync(new URL("functions/api/comms/reports.ts", root)));
   assert.ok(existsSync(new URL("functions/api/owner/comms/moderate.ts", root)));
+  assert.ok(existsSync(new URL("functions/owner/comms.ts", root)), "The owner Comms page must have a platform-owner page guard.");
   assert.ok(existsSync(new URL("scripts/test-dzn-comms-live-runtime.ts", root)));
   assert.match(migration, /Production application remains a separate release operation/);
 });
