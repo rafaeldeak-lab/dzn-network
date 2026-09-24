@@ -298,7 +298,10 @@ async function processPostJob(env: Env, job: QueuedPostJob): Promise<DiscordPost
     };
   }
 
-  return processConfiguredPostingDestination(env, destination, listingContext, { force: true });
+  return processConfiguredPostingDestination(env, destination, listingContext, {
+    force: true,
+    revalidateAccessBeforeDelivery: publishingAccess.accessSource === "complimentary_showcase",
+  });
 }
 
 async function processConfiguredPostingDestination(
