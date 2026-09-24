@@ -29,6 +29,7 @@ import { dispatchQueuedDiscordPostUpdates } from "../functions/_lib/discord-post
 import { onRequest as postingDestinations } from "../functions/api/servers/[serverId]/posting-destinations";
 import { getOwnerDiscordOverview } from "../functions/_lib/owner-discord-control";
 import { onRequest as runAutoPostsNow } from "../functions/api/servers/[serverId]/auto-posts/run-now";
+import { importAdmTextForServer } from "../functions/_lib/adm-sync";
 
 type Row = Record<string, unknown>;
 type Sqlite = { exec(sql: string): void; close(): void; prepare(sql: string): {
@@ -325,6 +326,22 @@ async function run() {
     });
     assert.equal(unrelatedQueued, 0);
     assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM automation_jobs WHERE job_type = 'discord-post-update'").get()?.n, 1);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("grant-backed manual ADM import reaches scoped Discord queueing", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    const result = await importAdmTextForServer(env, {
+      linkedServerId: scope.linkedServerId,
+      filename: "DayZServer_PS4_x64_2026-09-24_05-20-00.ADM",
+      admText: '05:20:01 | Player "SyntheticVictim" (DEAD) (id=VICTIM_ID pos=<6400, 9000, 10>) killed by Player "SyntheticKiller" (id=KILLER_ID pos=<6401, 9001, 10>) with M4-A1 from 12.5 meters',
+      source: "manual_paste",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.written_kills, 1);
+    assert.equal(result.discord_jobs_queued > 0, true);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM automation_jobs WHERE job_type = 'discord-post-update'").get()?.n, result.discord_jobs_queued);
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
   });
   await test("exact grant unlocks destination controls and eligible due posts cannot be starved", async ({ db, env }) => {

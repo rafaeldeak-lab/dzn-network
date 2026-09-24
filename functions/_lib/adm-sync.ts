@@ -27,7 +27,6 @@ import {
   ensureAutomationSchema,
   getDueAdmDiscoveryAutomationServers,
   getDueAdmAutomationServers,
-  isActiveSubscriptionStatus,
   markAdmPullStarted,
   queueDiscordPostUpdatesForGuild,
   recordAdmCadenceObservation,
@@ -2502,7 +2501,7 @@ export async function importAdmTextForServer(
     planKey: server.plan_key,
     publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
     updatePublicCache: Boolean(server.guild_id),
-    queueDiscordPosts: Boolean(server.guild_id && isActiveSubscriptionStatus(server.subscription_status)),
+    queueDiscordPosts: Boolean(server.guild_id),
     ignoreExistingCursor: true,
   });
   const warnings = [
