@@ -40,6 +40,7 @@ export type OwnerPlayerGameIdentityClaimRow = PlayerGameIdentityClaimRow & {
   user_id: string;
   requester_discord_id: string;
   account_name: string | null;
+  account_avatar: string | null;
   request_source: "gamertag_lookup" | "legacy_exact_id";
 };
 
@@ -47,6 +48,7 @@ export type OwnerPlayerGameIdentityClaimPayloadRow = PlayerGameIdentityClaimRow 
   user_id: string;
   requester_discord_id: string;
   account_name: string | null;
+  account_avatar_url: string | null;
   request_source: "gamertag_lookup" | "legacy_exact_id";
   submitted_player_id: string;
   review_context: {
@@ -499,6 +501,7 @@ export async function readOwnerPlayerGameIdentityClaims(
           COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
           linked_servers.public_slug,
           claim_users.username AS account_name,
+          claim_users.avatar AS account_avatar,
           reviewers.username AS reviewer_name,
           COALESCE((
             SELECT CASE
@@ -1023,6 +1026,7 @@ function sanitizeOwnerClaimRows(rows: OwnerPlayerGameIdentityClaimRow[]) {
     ...sanitizeClaimRows([row])[0],
     user_id: row.user_id,
     account_name: row.account_name || "DZN Player",
+    account_avatar_url: discordAvatarUrl(row.requester_discord_id, row.account_avatar),
     request_source: row.request_source,
     submitted_player_id: row.player_id,
     review_context: {
@@ -1115,6 +1119,11 @@ function claimFromActiveLink(activeLink: ActiveLinkRow, linkedServerId: string, 
     public_slug: null,
     reviewer_name: null,
   };
+}
+
+function discordAvatarUrl(discordId: string, avatarHash: string | null) {
+  if (!/^\d{5,32}$/.test(discordId) || !avatarHash || !/^[A-Za-z0-9_]{2,128}$/.test(avatarHash)) return null;
+  return `https://cdn.discordapp.com/avatars/${encodeURIComponent(discordId)}/${encodeURIComponent(avatarHash)}.webp?size=128`;
 }
 
 function maskPlayerId(playerId: string | null) {
