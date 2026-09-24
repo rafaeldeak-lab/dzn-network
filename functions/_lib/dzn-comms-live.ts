@@ -166,6 +166,13 @@ export async function handleDznCommsModeration(request: Request, env: Env) {
   statements.push(db.prepare("INSERT INTO dzn_comms_moderation_audit (id, message_id, actor_user_id, action, reason_code) SELECT ?, ?, ?, ?, ? WHERE changes() > 0").bind(crypto.randomUUID(), messageId, auth.user.id, action, reason));
   if (state === "deleted") {
     statements.push(db.prepare("UPDATE dzn_comms_reports SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = ? WHERE message_id = ? AND status = 'open'").bind(auth.user.id, messageId));
+    statements.push(db.prepare(`DELETE FROM dzn_comms_send_slots
+      WHERE EXISTS (
+        SELECT 1 FROM dzn_comms_send_receipts AS receipts
+        WHERE receipts.message_id = ?
+          AND receipts.actor_user_id = dzn_comms_send_slots.actor_user_id
+          AND ABS((julianday(dzn_comms_send_slots.accepted_at) - julianday(receipts.created_at)) * 86400.0) <= 5.0
+      )`).bind(messageId));
     statements.push(db.prepare("UPDATE dzn_comms_send_receipts SET message_id = NULL WHERE message_id = ?").bind(messageId));
   }
   const results = await db.batch(statements);

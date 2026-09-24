@@ -247,6 +247,8 @@ async function testReportAndModerationRuntime() {
     erased.sqlite.prepare(`INSERT INTO dzn_comms_send_receipts
       (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,message_id,expires_at)
       VALUES ('receipt-delete','other','dzn-global-chat','delete-request','hash','allow',201,'message-delete',datetime('now','+1 day'))`).run();
+    erased.sqlite.prepare(`INSERT INTO dzn_comms_send_slots (actor_user_id,minute_bucket,slot,accepted_at)
+      VALUES ('other',strftime('%Y-%m-%dT%H:%M','now'),1,CURRENT_TIMESTAMP)`).run();
     const response = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {
       messageId: "message-delete", action: "delete", reason: "personal information",
     }), erased.env);
@@ -257,6 +259,7 @@ async function testReportAndModerationRuntime() {
     assert.equal(row.visibility_state, "deleted");
     assert.equal(erased.sqlite.prepare("SELECT status FROM dzn_comms_reports WHERE id = 'report-delete'").get()?.status, "resolved");
     assert.equal(erased.sqlite.prepare("SELECT message_id FROM dzn_comms_send_receipts WHERE id = 'receipt-delete'").get()?.message_id, null, "Erasure must unlink the retained idempotency receipt from its author's message.");
+    assert.equal(erased.count("dzn_comms_send_slots"), 0, "Erasure must remove the matching author/timestamp send-slot association.");
   } finally { erased.close(); }
 
   const unavailableReport = await fixture();
