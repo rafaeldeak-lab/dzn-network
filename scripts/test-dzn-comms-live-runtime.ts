@@ -391,7 +391,33 @@ function testPrivateLedgerMigrationRuntime() {
   } finally { sqlite.close(); }
 }
 
+function testPrivateLedgerMigrationRejectsActiveQuotas() {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec(`PRAGMA foreign_keys = ON;
+      CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT NOT NULL UNIQUE, username TEXT, avatar TEXT);
+      INSERT INTO users VALUES ('active-player','100','Active Player',NULL);`);
+    sqlite.exec(readFileSync("migrations/0065_dzn_comms_read_history.sql", "utf8"));
+    sqlite.exec(readFileSync("migrations/0071_dzn_comms_live_moderation.sql", "utf8"));
+    sqlite.exec(`INSERT INTO dzn_comms_attempt_slots (actor_user_id,minute_bucket,slot)
+        VALUES ('active-player',strftime('%Y-%m-%dT%H:%M','now'),1);
+      INSERT INTO dzn_comms_send_slots (actor_user_id,minute_bucket,slot,accepted_at)
+        VALUES ('active-player',strftime('%Y-%m-%dT%H:%M','now'),1,CURRENT_TIMESTAMP);`);
+    assert.throws(
+      () => sqlite.exec(readFileSync("migrations/0072_dzn_comms_private_rate_ledgers.sql", "utf8")),
+      /constraint failed/i,
+      "The privacy migration must fail closed while legacy quotas are still enforceable.",
+    );
+    const attemptColumns = new Set(sqlite.prepare("PRAGMA table_info(dzn_comms_attempt_slots)").all().map((row) => String(row.name)));
+    assert.equal(attemptColumns.has("actor_user_id"), true, "A guarded failure must happen before rebuilding the legacy ledger.");
+    assert.equal(attemptColumns.has("actor_attempt_key"), false);
+  } finally {
+    sqlite.close();
+  }
+}
+
 async function main() {
+  testPrivateLedgerMigrationRejectsActiveQuotas();
   testPrivateLedgerMigrationRuntime();
   await testSendRuntime();
   await testReportAndModerationRuntime();

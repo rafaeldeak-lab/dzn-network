@@ -37,13 +37,15 @@ DZN_COMMS_RETENTION_SCOPE=local_test
 1. Confirm the production account, database name and database ID. Capture a recovery point and a sanitized schema/ledger snapshot.
 2. List the D1 migration ledger and prove the exact state of `0065_dzn_comms_read_history.sql`, `0071_dzn_comms_live_moderation.sql`, and `0072_dzn_comms_private_rate_ledgers.sql` before writing anything.
 3. If approved and pending, apply only migration `0065`; verify its ledger row, tables, indexes and foreign keys.
-4. If approved and pending, apply `0071` and then `0072` as separate controlled writes; after each migration verify its ledger row, tables, indexes, constraints and foreign keys. Verify the seeded `global-chat` channel after `0071`, and verify that the receipt and accepted-send ledgers contain no raw account ID column after `0072`.
-5. Enable the server history, live, owner-moderation and retention flags with scope `production`. Keep both public UI flags off.
-6. Run authenticated API checks with designated test accounts: history, allowed send, blocked send, replay, conflicting replay, rate limit, report, owner-only queue, hide, restore, resolve and erase.
-7. Invoke the retention route with the configured cron secret against controlled expired fixtures. Prove plaintext and author-link erasure plus bounded maintenance counts.
-8. Enable both public UI flags and rebuild the site. Verify signed-out, signed-in and platform-owner behavior on phone, tablet and desktop.
-9. Register the authenticated retention endpoint with the existing scheduler only after the manual cleanup check passes. Do not change the Nitrado or Discord-bot restart schedule.
-10. Observe error rates and reports. If a runtime check fails, turn the Comms flags off. The additive schema may remain while the cause is investigated.
+4. If approved and pending, apply `0071` as its own controlled write. Verify its ledger row, tables, indexes, constraints, foreign keys and the seeded `global-chat` channel. Keep every Comms live/UI flag off before the privacy cutover.
+5. Before `0072`, prove there are zero legacy attempt slots in the current UTC minute, zero send slots in the current UTC minute, and zero send slots accepted within the last five seconds. Wait with sending disabled until all three counts are zero. Migration `0072` deliberately fails before any table rebuild if an enforceable legacy quota remains.
+6. Apply `0072` as a separate controlled write. Verify its ledger row, indexes, constraints and foreign keys, and prove that receipt, accepted-send and attempt ledgers contain no raw account ID column. Do not enable runtime flags if the migration guard fails.
+7. Enable the server history, live, owner-moderation and retention flags with scope `production`. Keep both public UI flags off.
+8. Run authenticated API checks with designated test accounts: history, allowed send, blocked send, replay, conflicting replay, rate limit, report, owner-only queue, hide, restore, resolve and erase.
+9. Invoke the retention route with the configured cron secret against controlled expired fixtures. Prove plaintext and author-link erasure plus bounded maintenance counts.
+10. Enable both public UI flags and rebuild the site. Verify signed-out, signed-in and platform-owner behavior on phone, tablet and desktop.
+11. Register the authenticated retention endpoint with the existing scheduler only after the manual cleanup check passes. Do not change the Nitrado or Discord-bot restart schedule.
+12. Observe error rates and reports. If a runtime check fails, turn the Comms flags off. The additive schema may remain while the cause is investigated.
 
 ## Required Evidence
 
