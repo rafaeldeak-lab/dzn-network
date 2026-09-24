@@ -38,6 +38,7 @@ const historyItem = {
   account_avatar_url: `${base}/avatar.png`, requester_discord_id: "831243159785701398", player_id: "7656...1111",
   player_name: "Sample Survivor", action: "claim_approved", result: "accepted", note: "Owner evidence checked",
   actor_user_id: "sample-owner", actor_name: "Sample Owner", created_at: "2026-09-24T14:34:00Z",
+  discord_delivery_status: "delivered", discord_delivery_attempts: 2, discord_delivery_result: "discord_dm_delivered",
 };
 const checks = [];
 try {
@@ -120,6 +121,8 @@ try {
     await page.getByText("No loaded decisions match those filters.").waitFor();
     await page.getByPlaceholder("Search player, gamertag, server or reviewer").fill("");
     await page.getByLabel("Filter by decision").selectOption("claim_approved");
+    await page.getByLabel("Filter by Discord delivery").selectOption("delivered");
+    await page.getByText("Discord delivered (2 attempts)", { exact: true }).waitFor();
     await page.getByText("Decision details", { exact: true }).click();
     await page.getByText("Owner evidence checked", { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "History must not overflow the viewport");

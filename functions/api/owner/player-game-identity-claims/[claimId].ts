@@ -3,7 +3,10 @@ import { json, methodNotAllowed, readBoundedJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
 import { privateNoStoreHeaders } from "../../../_lib/performance";
 import { reviewPlayerGameIdentityClaim } from "../../../_lib/player-game-identities";
-import { dispatchPlayerGameIdentityDecisionDiscord } from "../../../_lib/player-game-identity-notifications";
+import {
+  dispatchPlayerGameIdentityDecisionDiscord,
+  dispatchQueuedPlayerGameIdentityNotifications,
+} from "../../../_lib/player-game-identity-notifications";
 import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
 
 type ReviewBody = {
@@ -41,7 +44,9 @@ export const onRequest: PagesFunction = async ({ request, env, params, waitUntil
   const result = await reviewPlayerGameIdentityClaim(env, user, claimId ?? "", bodyResult.value);
   if (!result.ok) return json(result, { status: result.status, headers: privateNoStoreHeaders() });
   const { delivery, ...publicResult } = result;
-  waitUntil(dispatchPlayerGameIdentityDecisionDiscord(env, delivery));
+  waitUntil(delivery.deliveryId
+    ? dispatchQueuedPlayerGameIdentityNotifications(env, { deliveryId: delivery.deliveryId, maxJobs: 1 })
+    : dispatchPlayerGameIdentityDecisionDiscord(env, delivery));
   return json(publicResult, { status: publicResult.status, headers: privateNoStoreHeaders() });
 };
 
