@@ -164,7 +164,10 @@ export async function handleDznCommsModeration(request: Request, env: Env) {
   else if (state) statements.push(db.prepare("UPDATE dzn_comms_messages SET visibility_state = ?, edited_at = CURRENT_TIMESTAMP WHERE id = ? AND visibility_state != 'deleted' AND visibility_state != ?").bind(state, messageId, state));
   if (action === "resolve_report" || action === "dismiss_report") statements.push(db.prepare("UPDATE dzn_comms_reports SET status = ?, resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = ? WHERE message_id = ? AND status = 'open'").bind(action === "resolve_report" ? "resolved" : "dismissed", auth.user.id, messageId));
   statements.push(db.prepare("INSERT INTO dzn_comms_moderation_audit (id, message_id, actor_user_id, action, reason_code) SELECT ?, ?, ?, ?, ? WHERE changes() > 0").bind(crypto.randomUUID(), messageId, auth.user.id, action, reason));
-  if (state === "deleted") statements.push(db.prepare("UPDATE dzn_comms_reports SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = ? WHERE message_id = ? AND status = 'open'").bind(auth.user.id, messageId));
+  if (state === "deleted") {
+    statements.push(db.prepare("UPDATE dzn_comms_reports SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = ? WHERE message_id = ? AND status = 'open'").bind(auth.user.id, messageId));
+    statements.push(db.prepare("UPDATE dzn_comms_send_receipts SET message_id = NULL WHERE message_id = ?").bind(messageId));
+  }
   const results = await db.batch(statements);
   if (Number(results[0]?.meta?.changes ?? 0) < 1 || Number(results[1]?.meta?.changes ?? 0) !== 1) {
     return error(409, "MODERATION_NO_CHANGE", "That moderation action no longer changes the current message or report state.");
