@@ -18,6 +18,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     cursor: url.searchParams.get("cursor"),
     limit: url.searchParams.get("limit"),
     accountDecisionsOnly: url.searchParams.get("account_decisions") === "1",
+    unreadOnly: url.searchParams.get("unread") === "1",
   });
   return json(payload, { headers: PULSE_NO_STORE_HEADERS });
 };

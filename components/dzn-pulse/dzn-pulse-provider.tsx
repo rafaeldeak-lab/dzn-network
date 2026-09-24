@@ -887,18 +887,27 @@ function AccountDecisionPopupManager() {
     if (requestInFlight.current || document.visibilityState === "hidden") return;
     requestInFlight.current = true;
     try {
-      const response = await fetchJsonWithRetry<NotificationsResponse>("/api/dzn-pulse/notifications?account_decisions=1&limit=10", {
-        cache: "no-store",
-        credentials: "include",
-        headers: { accept: "application/json" },
-        retries: 0,
-        timeoutMs: 8000,
-      });
       const seen = readAccountDecisionPopupIds();
-      const next = response.items.find((item) => !item.read_at && isPlayerLinkDecision(item.type) && !seen.has(item.id)) ?? null;
-      if (!next) return;
-      rememberAccountDecisionPopup(next.id);
-      setNotification(next);
+      let cursor: string | null = null;
+      for (let page = 0; page < 5; page += 1) {
+        const params = new URLSearchParams({ account_decisions: "1", unread: "1", limit: "20" });
+        if (cursor) params.set("cursor", cursor);
+        const response = await fetchJsonWithRetry<NotificationsResponse>(`/api/dzn-pulse/notifications?${params.toString()}`, {
+          cache: "no-store",
+          credentials: "include",
+          headers: { accept: "application/json" },
+          retries: 0,
+          timeoutMs: 8000,
+        });
+        const next = response.items.find((item) => isPlayerLinkDecision(item.type) && !seen.has(item.id)) ?? null;
+        if (next) {
+          rememberAccountDecisionPopup(next.id);
+          setNotification(next);
+          return;
+        }
+        cursor = response.nextCursor;
+        if (!cursor) return;
+      }
     } catch {
       // The notification drawer remains available if a transient popup request fails.
     } finally {

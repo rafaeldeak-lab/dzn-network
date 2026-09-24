@@ -15,6 +15,12 @@ export async function dispatchPlayerGameIdentityDecisionDiscord(
   delivery: PlayerGameIdentityDecisionDelivery,
 ) {
   if (!isDiscordNotificationsEnabled(env)) return { ok: true, skipped: true, reason: "discord_notifications_disabled" } as const;
+  const preference = await env.DB.prepare(
+    "SELECT discord_enabled FROM notification_preferences WHERE user_id = ?",
+  ).bind(delivery.userId).first<{ discord_enabled: number | null }>().catch(() => null);
+  if (Number(preference?.discord_enabled ?? 0) !== 1) {
+    return { ok: true, skipped: true, reason: "discord_notifications_not_enabled_by_player" } as const;
+  }
   const token = normalizeBotToken(env.DISCORD_BOT_TOKEN);
   if (!token) return { ok: false, skipped: true, reason: "discord_bot_token_missing" } as const;
   if (!/^\d{5,32}$/.test(delivery.discordId)) return { ok: false, skipped: true, reason: "discord_recipient_invalid" } as const;
@@ -57,5 +63,11 @@ function normalizeBotToken(value: unknown) {
 }
 
 function safeDiscordText(value: string) {
-  return value.replace(/[*_`~|>@]/g, "").replace(/\s+/g, " ").trim().slice(0, 100) || "game profile";
+  return value
+    .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "link removed")
+    .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?(?:\/\S*)?/gi, (match) => match.replace(/\./g, " dot "))
+    .replace(/[*_`~|>@[\]()]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 100) || "game profile";
 }
