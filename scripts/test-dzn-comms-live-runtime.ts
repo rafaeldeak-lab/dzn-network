@@ -265,6 +265,25 @@ async function testReportAndModerationRuntime() {
     assert.equal(erased.sqlite.prepare("SELECT slot FROM dzn_comms_send_slots").get()?.slot, 2, "The neighboring accepted-send slot must remain intact.");
   } finally { erased.close(); }
 
+  const erasedAfterSlotExpiry = await fixture();
+  try {
+    erasedAfterSlotExpiry.sqlite.prepare(`INSERT INTO dzn_comms_messages
+      (id,channel_id,author_user_id,author_display_name,body,visibility_state)
+      VALUES ('message-delete-late','dzn-global-chat','other','Other','Old sensitive text','visible')`).run();
+    erasedAfterSlotExpiry.sqlite.prepare(`INSERT INTO dzn_comms_send_receipts
+      (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,message_id,created_at,expires_at)
+      VALUES ('receipt-delete-late','other','dzn-global-chat','delete-late-request','hash','allow',201,'message-delete-late',datetime('now','-3 days'),datetime('now','+4 days'))`).run();
+    erasedAfterSlotExpiry.sqlite.prepare(`INSERT INTO dzn_comms_send_slots (actor_user_id,minute_bucket,slot,accepted_at)
+      VALUES ('other',strftime('%Y-%m-%dT%H:%M','now'),1,CURRENT_TIMESTAMP)`).run();
+    const response = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {
+      messageId: "message-delete-late", action: "delete", reason: "personal information",
+    }), erasedAfterSlotExpiry.env);
+    assert.equal(response.status, 200);
+    assert.equal(erasedAfterSlotExpiry.count("dzn_comms_send_slots"), 1, "Erasure after target-slot retention must not remove a newer unrelated send slot.");
+    assert.equal(erasedAfterSlotExpiry.sqlite.prepare("SELECT message_id FROM dzn_comms_send_receipts WHERE id = 'receipt-delete-late'").get()?.message_id, null, "Late erasure must still unlink the retained receipt.");
+    assert.equal(erasedAfterSlotExpiry.sqlite.prepare("SELECT visibility_state FROM dzn_comms_messages WHERE id = 'message-delete-late'").get()?.visibility_state, "deleted");
+  } finally { erasedAfterSlotExpiry.close(); }
+
   const unavailableReport = await fixture();
   try {
     unavailableReport.sqlite.prepare(`INSERT INTO dzn_comms_messages

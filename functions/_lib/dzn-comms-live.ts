@@ -171,6 +171,7 @@ export async function handleDznCommsModeration(request: Request, env: Env) {
         FROM dzn_comms_send_slots AS slots
         JOIN dzn_comms_send_receipts AS receipts ON receipts.actor_user_id = slots.actor_user_id
         WHERE receipts.message_id = ?
+          AND ABS((julianday(slots.accepted_at) - julianday(receipts.created_at)) * 86400.0) <= 5.0
         ORDER BY ABS((julianday(slots.accepted_at) - julianday(receipts.created_at)) * 86400.0) ASC,
           slots.accepted_at DESC, slots.slot DESC
         LIMIT 1
