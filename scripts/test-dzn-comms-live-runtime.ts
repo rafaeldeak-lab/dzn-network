@@ -367,7 +367,7 @@ function testPrivateLedgerMigrationRuntime() {
     sqlite.exec(readFileSync("migrations/0071_dzn_comms_live_moderation.sql", "utf8"));
     sqlite.exec(`INSERT INTO dzn_comms_send_receipts
         (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,expires_at)
-        VALUES ('legacy-receipt','legacy-player','dzn-global-chat','legacy-request','hash','block',422,datetime('now','+1 day'));
+        VALUES ('legacy-receipt','legacy-player','dzn-global-chat','legacy-request','hash','block',422,datetime('now','-1 day'));
       INSERT INTO dzn_comms_send_slots (actor_user_id,minute_bucket,slot,accepted_at)
         VALUES ('legacy-player','2026-09-24T12:00',1,'2026-09-24T12:00:00.000Z');
       INSERT INTO dzn_comms_attempt_slots (actor_user_id,minute_bucket,slot)
@@ -389,6 +389,31 @@ function testPrivateLedgerMigrationRuntime() {
     assert.equal(attempts[0]?.actor_attempt_key, attempts[1]?.actor_attempt_key, "Migration must preserve one actor's existing attempt quota grouping.");
     assert.equal(sqlite.prepare("PRAGMA foreign_key_check").all().length, 0);
   } finally { sqlite.close(); }
+}
+
+function testPrivateLedgerMigrationRejectsUnexpiredReceipts() {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec(`PRAGMA foreign_keys = ON;
+      CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT NOT NULL UNIQUE, username TEXT, avatar TEXT);
+      INSERT INTO users VALUES ('replay-player','100','Replay Player',NULL);`);
+    sqlite.exec(readFileSync("migrations/0065_dzn_comms_read_history.sql", "utf8"));
+    sqlite.exec(readFileSync("migrations/0071_dzn_comms_live_moderation.sql", "utf8"));
+    sqlite.exec(`INSERT INTO dzn_comms_send_receipts
+        (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,expires_at)
+        VALUES ('active-receipt','replay-player','dzn-global-chat','replay-request','hash','allow',201,datetime('now','+1 day'));`);
+    assert.throws(
+      () => sqlite.exec(readFileSync("migrations/0072_dzn_comms_private_rate_ledgers.sql", "utf8")),
+      /constraint failed/i,
+      "The privacy migration must fail closed while a legacy replay or conflict decision is still valid.",
+    );
+    const receiptColumns = new Set(sqlite.prepare("PRAGMA table_info(dzn_comms_send_receipts)").all().map((row) => String(row.name)));
+    assert.equal(receiptColumns.has("actor_user_id"), true, "The receipt guard must fail before rebuilding the legacy ledger.");
+    assert.equal(receiptColumns.has("actor_receipt_key"), false);
+    assert.equal(sqlite.prepare("SELECT count(*) AS total FROM dzn_comms_send_receipts WHERE id = 'active-receipt'").get()?.total, 1, "A guarded cutover must preserve the reachable legacy receipt.");
+  } finally {
+    sqlite.close();
+  }
 }
 
 function testPrivateLedgerMigrationRejectsActiveQuotas() {
@@ -417,6 +442,7 @@ function testPrivateLedgerMigrationRejectsActiveQuotas() {
 }
 
 async function main() {
+  testPrivateLedgerMigrationRejectsUnexpiredReceipts();
   testPrivateLedgerMigrationRejectsActiveQuotas();
   testPrivateLedgerMigrationRuntime();
   await testSendRuntime();

@@ -1,8 +1,9 @@
 -- Pseudonymize the short-lived Comms receipt and accepted-send ledgers.
 -- Production application remains a separate controlled operation.
 
--- Refuse the cutover while a legacy key still carries an enforceable quota.
--- The activation runbook keeps live sending off and retries after this guard is clear.
+-- Refuse the cutover while a legacy receipt or key still carries an enforceable
+-- replay, conflict or rate-limit decision. The activation runbook keeps live
+-- sending off and retries after this guard is clear.
 CREATE TABLE dzn_comms_rate_cutover_guard (
   ready INTEGER NOT NULL CHECK(ready = 1)
 );
@@ -10,6 +11,9 @@ CREATE TABLE dzn_comms_rate_cutover_guard (
 INSERT INTO dzn_comms_rate_cutover_guard (ready)
 SELECT CASE WHEN
   EXISTS (
+    SELECT 1 FROM dzn_comms_send_receipts
+    WHERE julianday(expires_at) > julianday('now')
+  ) OR EXISTS (
     SELECT 1 FROM dzn_comms_attempt_slots
     WHERE minute_bucket = strftime('%Y-%m-%dT%H:%M', 'now')
   ) OR EXISTS (

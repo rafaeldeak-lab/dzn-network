@@ -36,6 +36,7 @@ test("schema supplies durable idempotency, quotas, reports, timeouts and audit",
   assert.match(migration, /actor_receipt_key TEXT NOT NULL/);
   assert.match(privacyMigration, /actor_attempt_key TEXT NOT NULL/);
   assert.match(privacyMigration, /dzn_comms_rate_cutover_guard/);
+  assert.match(privacyMigration, /FROM dzn_comms_send_receipts\s+WHERE julianday\(expires_at\) > julianday\('now'\)/, "Privacy cutover must preserve every still-valid legacy replay and conflict decision.");
   assert.match(privacyMigration, /minute_bucket = strftime\('%Y-%m-%dT%H:%M', 'now'\)/, "Privacy cutover must reject current-minute legacy quotas.");
   assert.match(privacyMigration, /julianday\(accepted_at\) > julianday\('now', '-5 seconds'\)/, "Privacy cutover must reject a legacy slow-mode slot crossing a minute boundary.");
   assert.doesNotMatch(privacyMigration, /CREATE TABLE dzn_comms_attempt_slots_v2[\s\S]*?actor_user_id TEXT/, "The upgraded attempt ledger must not retain raw account IDs.");
