@@ -11,10 +11,13 @@ const runtime = read("functions/_lib/dzn-comms-live.ts");
 const shell = read("components/comms/dzn-comms-shell.tsx");
 const client = read("components/comms/comms-history-client.ts");
 const env = read(".env.example");
+const cloudflareEnv = read("cloudflare-env.d.ts");
 
 test("live Comms implementation remains default-off and migration-gated", () => {
   assert.match(env, /^DZN_COMMS_LIVE_ENABLED=false$/m);
   assert.match(env, /^DZN_COMMS_LIVE_SCOPE=local_test$/m);
+  assert.match(env, /^DZN_COMMS_LEDGER_SECRET=$/m);
+  assert.match(cloudflareEnv, /DZN_COMMS_LEDGER_SECRET\?: string/);
   assert.match(env, /^NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED=false$/m);
   assert.match(env, /^DZN_COMMS_OWNER_MODERATION_ENABLED=false$/m);
   assert.match(env, /^DZN_COMMS_RETENTION_ENABLED=false$/m);
@@ -63,7 +66,10 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /rateLimitDigest/);
   assert.match(runtime, /attemptLimitDigest/);
   assert.match(runtime, /receiptDigest/);
-  assert.match(runtime, /receiptDigest\(user\.id, requestId, env\.SESSION_SECRET!\)/, "Replay keys must be scoped to one actor and one client request.");
+  assert.match(runtime, /receiptDigest\(user\.id, requestId, env\.DZN_COMMS_LEDGER_SECRET!\)/, "Replay keys must be scoped to one actor and one client request using the stable Comms ledger secret.");
+  assert.match(runtime, /rateLimitDigest\(user\.id, env\.DZN_COMMS_LEDGER_SECRET!\)/);
+  assert.match(runtime, /attemptLimitDigest\(user\.id, env\.DZN_COMMS_LEDGER_SECRET!\)/);
+  assert.doesNotMatch(runtime, /(?:receiptDigest|rateLimitDigest|attemptLimitDigest)\([^\n]+env\.SESSION_SECRET/, "Persistent ledger keys must not rotate with the login session secret.");
   assert.match(runtime, /actorId\.normalize\("NFKC"\).*requestId\.normalize\("NFKC"\)/, "Separate receipts from one actor must not share a stable join key.");
   assert.doesNotMatch(runtime, /dzn_comms_send_receipts \(id, actor_user_id/, "Receipt writes must not retain the raw account ID.");
   assert.match(runtime, /secretReady/);

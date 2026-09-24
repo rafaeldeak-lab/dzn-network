@@ -168,7 +168,9 @@ export function readDznCommsReadHistoryFlags(env: Env, request?: Request): DznCo
   const scope = cleanString(env.DZN_COMMS_MESSAGE_HISTORY_READ_SCOPE).toLowerCase();
   const localTestScope = scope === "local_test";
   const liveScope = cleanString(env.DZN_COMMS_LIVE_SCOPE).toLowerCase();
-  const secretReady = typeof env.SESSION_SECRET === "string" && env.SESSION_SECRET.length >= 32;
+  const sessionSecretReady = typeof env.SESSION_SECRET === "string" && env.SESSION_SECRET.length >= 32;
+  const ledgerSecretReady = typeof env.DZN_COMMS_LEDGER_SECRET === "string" && env.DZN_COMMS_LEDGER_SECRET.length >= 32;
+  const secretReady = sessionSecretReady && ledgerSecretReady;
   const localRequest = request ? isLocalRequest(request) : false;
   const liveEnabled = parseBooleanFlag(env.DZN_COMMS_LIVE_ENABLED) && secretReady && (liveScope === "production" || (liveScope === "local_test" && localRequest));
 

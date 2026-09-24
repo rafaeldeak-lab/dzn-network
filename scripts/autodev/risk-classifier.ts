@@ -59,7 +59,7 @@ const AUTOMATION_POLICY: Record<RiskLevel, AutomationPolicy> = {
 };
 
 const PROTECTED_DELETE_TABLES = ["player_profiles", "kills", "kill_events", "deaths", "player_events", "events", "competitive_events", "sessions", "subscriptions", "server_subscriptions", "servers", "linked_servers"];
-const RUNTIME_SECRETS_IN_GITHUB = ["DISCORD_BOT_TOKEN", "DISCORD_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "DZN_LIVE_CHECKOUT_ENABLED", "SESSION_SECRET", "TOKEN_ENCRYPTION_KEY", "MOCK_AUTH", "MOCK_NITRADO", "NEXT_PUBLIC_"];
+const RUNTIME_SECRETS_IN_GITHUB = ["DISCORD_BOT_TOKEN", "DISCORD_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "DZN_LIVE_CHECKOUT_ENABLED", "SESSION_SECRET", "DZN_COMMS_LEDGER_SECRET", "TOKEN_ENCRYPTION_KEY", "MOCK_AUTH", "MOCK_NITRADO", "NEXT_PUBLIC_"];
 const METERED_AI_CREDENTIALS = [
   "OPENAI_API_KEY",
   "AZURE_OPENAI_API_KEY",
@@ -286,7 +286,7 @@ function detectHardBlockedContent(content: string, file: string) {
   if (!isPolicyDocument(file)) {
     if (/\b(disable|bypass|skip|remove|weaken)\b[\s\S]{0,120}\b(auth|authorization|requireCronSecret|isCronAuthorized|401|403|session)\b/i.test(text)) findings.push("auth or endpoint protection weakening detected");
     if (/\b(disable|bypass|skip|remove|weaken)\b[\s\S]{0,160}\b(same-category|same category|assertSameServerCategory|assertSameCategoryChallenge|matchmaking)\b/i.test(text) || /\bcross-category\b[\s\S]{0,120}\b(allow|allowed|match|matchmaking|compete)\b/i.test(text)) findings.push("same-category matchmaking enforcement removal detected");
-    if (/\b(raw|plain(?:text)?)\b[\s\S]{0,80}\b(token|secret|STRIPE_SECRET_KEY|TOKEN_ENCRYPTION_KEY|SESSION_SECRET)\b/i.test(text) && /\b(log|console\.log|return|expose|artifact|summary)\b/i.test(text)) findings.push("secret or token exposure pattern detected");
+    if (/\b(raw|plain(?:text)?)\b[\s\S]{0,80}\b(token|secret|STRIPE_SECRET_KEY|TOKEN_ENCRYPTION_KEY|SESSION_SECRET|DZN_COMMS_LEDGER_SECRET)\b/i.test(text) && /\b(log|console\.log|return|expose|artifact|summary)\b/i.test(text)) findings.push("secret or token exposure pattern detected");
   }
   return Array.from(new Set(findings));
 }

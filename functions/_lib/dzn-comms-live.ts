@@ -22,7 +22,9 @@ type ModerateInput = { messageId?: unknown; action?: unknown; reason?: unknown }
 export function readDznCommsLiveFlags(env: Env, request?: Request) {
   const enabled = booleanFlag(env.DZN_COMMS_LIVE_ENABLED);
   const scope = clean(env.DZN_COMMS_LIVE_SCOPE, 32).toLowerCase();
-  const secretReady = typeof env.SESSION_SECRET === "string" && env.SESSION_SECRET.length >= 32;
+  const sessionSecretReady = typeof env.SESSION_SECRET === "string" && env.SESSION_SECRET.length >= 32;
+  const ledgerSecretReady = typeof env.DZN_COMMS_LEDGER_SECRET === "string" && env.DZN_COMMS_LEDGER_SECRET.length >= 32;
+  const secretReady = sessionSecretReady && ledgerSecretReady;
   const localRequest = request ? isLocalRequest(request) : false;
   return { enabled: enabled && secretReady && (scope === "production" || (scope === "local_test" && localRequest)), scope, secretReady, localRequest };
 }
@@ -72,10 +74,10 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   const db = requireDb(env);
   const channel = await db.prepare("SELECT id FROM dzn_comms_channels WHERE slug = 'global-chat' AND kind = 'public' AND visibility = 'public' AND is_readable = 1 LIMIT 1").first<{ id: string }>();
   if (!channel?.id) return error(503, "CHAT_NOT_READY", "Global Chat is not ready yet.");
-  const bodyHash = await keyedDigest(typeof parsed.value.body === "string" ? parsed.value.body : "", env.SESSION_SECRET!);
-  const actorReceiptKey = await receiptDigest(user.id, requestId, env.SESSION_SECRET!);
-  const actorRateKey = await rateLimitDigest(user.id, env.SESSION_SECRET!);
-  const actorAttemptKey = await attemptLimitDigest(user.id, env.SESSION_SECRET!);
+  const bodyHash = await keyedDigest(typeof parsed.value.body === "string" ? parsed.value.body : "", env.DZN_COMMS_LEDGER_SECRET!);
+  const actorReceiptKey = await receiptDigest(user.id, requestId, env.DZN_COMMS_LEDGER_SECRET!);
+  const actorRateKey = await rateLimitDigest(user.id, env.DZN_COMMS_LEDGER_SECRET!);
+  const actorAttemptKey = await attemptLimitDigest(user.id, env.DZN_COMMS_LEDGER_SECRET!);
   const now = new Date();
   const minuteBucket = now.toISOString().slice(0, 16);
   try {

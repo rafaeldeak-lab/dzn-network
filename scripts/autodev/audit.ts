@@ -103,7 +103,7 @@ check(/^name:\s*DZN Nitrado ADM Diagnostics/m.test(readText(".github/workflows/d
 check(!/schedule:/.test(readText(".github/workflows/dzn-nitrado-diagnostics.yml")), "diagnostics workflow manual-only", "Nitrado ADM diagnostics workflow is manual-only.", "Nitrado ADM diagnostics workflow must not be scheduled.", "high");
 
 const allWorkflowText = listFiles(".github/workflows", (file) => /\.ya?ml$/i.test(file)).map((file) => readText(file)).join("\n");
-for (const secret of ["DISCORD_BOT_TOKEN", "DISCORD_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "DZN_LIVE_CHECKOUT_ENABLED", "SESSION_SECRET", "TOKEN_ENCRYPTION_KEY", "MOCK_AUTH", "MOCK_NITRADO", "OPENAI_API_KEY"]) {
+for (const secret of ["DISCORD_BOT_TOKEN", "DISCORD_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "DZN_LIVE_CHECKOUT_ENABLED", "SESSION_SECRET", "DZN_COMMS_LEDGER_SECRET", "TOKEN_ENCRYPTION_KEY", "MOCK_AUTH", "MOCK_NITRADO", "OPENAI_API_KEY"]) {
   check(!allWorkflowText.includes(`secrets.${secret}`), `workflow runtime secret ${secret}`, `${secret} is not referenced by workflows.`, `${secret} must not be copied into GitHub workflows.`, "high");
 }
 check(!/openai\/codex-action|OPENAI_API_KEY|sk-proj-|sk-[A-Za-z0-9]/i.test(allWorkflowText), "paid Codex/OpenAI action absent", "No paid OpenAI/Codex GitHub execution is enabled.", "Paid OpenAI/Codex GitHub execution must not be enabled.", "high");

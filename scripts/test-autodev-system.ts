@@ -95,7 +95,7 @@ assert.equal(classifyRecoverableProductionStatus("403"), false);
 
 const workflows = readdirSync(".github/workflows").filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"));
 const workflowText = workflows.map((name) => read(`.github/workflows/${name}`)).join("\n");
-for (const secret of ["DISCORD_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "SESSION_SECRET", "TOKEN_ENCRYPTION_KEY"]) {
+for (const secret of ["DISCORD_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "SESSION_SECRET", "DZN_COMMS_LEDGER_SECRET", "TOKEN_ENCRYPTION_KEY"]) {
   assert.equal(workflowText.includes(`secrets.${secret}`), false, `${secret} must not be referenced by GitHub workflows`);
 }
 assert.equal(read(".github/workflows/dzn-adm-sync.yml").includes("schedule:"), false);

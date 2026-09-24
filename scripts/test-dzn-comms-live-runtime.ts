@@ -19,8 +19,9 @@ type Sqlite = {
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: new (path: string) => Sqlite };
 const secret = "dzn-comms-runtime-test-secret-32-bytes-minimum";
+const ledgerSecret = "dzn-comms-ledger-test-secret-32-bytes-minimum";
 async function receiptKey(actorId: string, requestId: string) {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms-receipt:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms-receipt:${ledgerSecret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${actorId.normalize("NFKC")}\n${requestId.normalize("NFKC")}`)))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
@@ -85,6 +86,7 @@ async function fixture() {
   const env = {
     DB: db,
     SESSION_SECRET: secret,
+    DZN_COMMS_LEDGER_SECRET: ledgerSecret,
     DZN_COMMS_LIVE_ENABLED: "true",
     DZN_COMMS_LIVE_SCOPE: "local_test",
     DZN_COMMS_OWNER_MODERATION_ENABLED: "true",
@@ -120,6 +122,7 @@ async function payload(response: Response) {
 async function testSendRuntime() {
   const f = await fixture();
   try {
+    assert.equal((await handleDznCommsSend(request("/api/comms/messages", "player-token", {}), { ...f.env, DZN_COMMS_LEDGER_SECRET: undefined } as Env)).status, 404, "Live sending must fail closed without the dedicated ledger secret.");
     assert.equal((await handleDznCommsSend(request("/api/comms/messages", null, {}), f.env)).status, 401);
     assert.equal((await handleDznCommsSend(request("/api/comms/messages", "player-token", {}, "https://evil.example"), f.env)).status, 403);
     const ipv6Request = request("/api/comms/messages", "player-token", {}, "http://[::1]", "http://[::1]");
@@ -138,6 +141,13 @@ async function testSendRuntime() {
     const conflict = await handleDznCommsSend(request("/api/comms/messages", "player-token", { ...input, body: "Different" }), f.env);
     assert.equal(conflict.status, 409);
     assert.equal((await payload(conflict)).code, "REQUEST_ID_CONFLICT");
+    const rotatedSessionSecret = "rotated-session-secret-32-bytes-minimum";
+    f.env.SESSION_SECRET = rotatedSessionSecret;
+    f.sqlite.prepare("UPDATE sessions SET session_token_hash = ? WHERE user_id = 'player'").run(await hmacSha256("player-token", rotatedSessionSecret));
+    const replayAfterSessionRotation = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), f.env);
+    assert.equal(replayAfterSessionRotation.status, 200, "Session-secret rotation must not invalidate a still-live Comms receipt.");
+    assert.equal((await payload(replayAfterSessionRotation)).replayed, true);
+    assert.equal(f.count("dzn_comms_messages"), 1, "Session-secret rotation must not duplicate an idempotent message.");
     const tooFast = await handleDznCommsSend(request("/api/comms/messages", "player-token", { ...input, clientRequestId: "request-00000002" }), f.env);
     assert.equal(tooFast.status, 429, "The five-second send guard must reject an immediate second message.");
     f.sqlite.prepare("UPDATE dzn_comms_send_slots SET accepted_at = datetime('now','-10 seconds')").run();
