@@ -305,7 +305,7 @@ async function processConfiguredPostingDestination(
   env: Env,
   destination: PostingDestination,
   listingContext: { plan_key?: unknown; planKey?: unknown; subscription_status?: unknown; subscriptionStatus?: unknown },
-  options: { force?: boolean } = {},
+  options: { force?: boolean; revalidateAccessBeforeDelivery?: boolean } = {},
 ): Promise<DiscordPostDispatchDetail> {
   if (Number(destination.enabled ?? 0) !== 1) {
     await recordPostingDispatchStatus(env, destination, "skipped_disabled", "Posting destination is disabled.");
@@ -358,6 +358,27 @@ async function processConfiguredPostingDestination(
       last_edited_at: state.last_edited_at ?? null,
       message_state_found: true,
     };
+  }
+
+  if (options.revalidateAccessBeforeDelivery) {
+    const currentAccess = await resolveDiscordPublishingAccessForGuild(env, destination.guild_id);
+    const currentListingContext = { plan_key: currentAccess.planKey, subscription_status: currentAccess.subscriptionStatus };
+    if (!["active_live", "active_degraded"].includes(currentAccess.lifecycleStatus)
+      || !hasListingAutoPost(currentListingContext, destination.post_type)) {
+      await recordPostingDispatchStatus(env, destination, "skipped_plan_locked", "Current access no longer allows this auto-post type.");
+      return {
+        guild_id: destination.guild_id,
+        post_type: destination.post_type,
+        channel_id: destination.discord_channel_id,
+        status: "skipped_plan_locked",
+        message_id: state?.discord_message_id ?? null,
+        reason: "Current access no longer allows this auto-post type.",
+        old_payload_hash: oldPayloadHash,
+        new_payload_hash: payloadHash,
+        last_edited_at: state?.last_edited_at ?? null,
+        message_state_found: Boolean(state),
+      };
+    }
   }
 
   try {
@@ -485,7 +506,10 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
       if (!options.force && !isAutoPostDue(row.post_type, normalizeListingPlanKey(listingContext), row.last_edited_at)) continue;
       processed += 1;
       try {
-        const result = await processConfiguredPostingDestination(env, row, listingContext, { force: options.force });
+        const result = await processConfiguredPostingDestination(env, row, listingContext, {
+          force: options.force,
+          revalidateAccessBeforeDelivery: publishingAccess.accessSource === "complimentary_showcase",
+        });
         results.push(result);
         if (result.status === "edited") edited += 1;
         else if (result.status === "sent" || result.status === "success") sent += 1;

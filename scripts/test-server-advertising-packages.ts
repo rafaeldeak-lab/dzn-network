@@ -148,5 +148,7 @@ assert.equal(postingRoute.includes("wouldExceedDiscordChannelLimit"), true, "Dis
 assert.equal(postingRoute.includes("hasListingAutoPost"), true, "Discord posting route should use listing package post gates.");
 assert.equal(postingRoute.includes("getDiscordPublishingContextForLinkedServer"), true, "Discord posting saves should use exact-server effective publishing access.");
 assert.equal(postingRoute.includes("ensureAutomationRowsForLinkedServers"), false, "Discord posting saves must not run broad automation context sync that can overwrite server listing plans.");
+const automationSource = readFileSync("functions/_lib/automation.ts", "utf8");
+assert.equal(automationSource.includes("{ skipSchemaEnsure: true }"), true, "Discord queueing should reuse its completed schema initialization.");
 
 console.log("Server advertising package tests passed.");

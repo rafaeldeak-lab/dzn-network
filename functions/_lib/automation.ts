@@ -647,8 +647,12 @@ export async function getDueStatusAutomationServers(env: Env, maxServers: number
   return (rows.results ?? []).sort((a, b) => getPlanPriority(b.plan_key) - getPlanPriority(a.plan_key));
 }
 
-export async function getAutomationContextForLinkedServer(env: Env, linkedServerId: string) {
-  await ensureAutomationSchema(env);
+export async function getAutomationContextForLinkedServer(
+  env: Env,
+  linkedServerId: string,
+  options: { skipSchemaEnsure?: boolean } = {},
+) {
+  if (!options.skipSchemaEnsure) await ensureAutomationSchema(env);
   const result = await requireDb(env)
     .prepare(
       `SELECT linked_servers.guild_id, server_subscriptions.plan_key, server_subscriptions.status
@@ -678,8 +682,12 @@ export async function getAutomationContextForLinkedServer(env: Env, linkedServer
   };
 }
 
-export async function getDiscordPublishingContextForLinkedServer(env: Env, linkedServerId: string) {
-  const context = await getAutomationContextForLinkedServer(env, linkedServerId);
+export async function getDiscordPublishingContextForLinkedServer(
+  env: Env,
+  linkedServerId: string,
+  options: { skipSchemaEnsure?: boolean } = {},
+) {
+  const context = await getAutomationContextForLinkedServer(env, linkedServerId, options);
   if (!context) return null;
   if (context.showcaseAccess.source !== "complimentary_showcase") {
     return { ...context, discordPublishingEligible: true };
@@ -1433,7 +1441,7 @@ export async function queueDiscordPostUpdatesForGuild(
   await ensureAutomationSchema(env);
   let effectivePlanKey = planKey;
   if (options.linkedServerId) {
-    const context = await getDiscordPublishingContextForLinkedServer(env, options.linkedServerId);
+    const context = await getDiscordPublishingContextForLinkedServer(env, options.linkedServerId, { skipSchemaEnsure: true });
     if (!context || context.guildId !== guildId || !context.discordPublishingEligible) return 0;
     effectivePlanKey = normalizeListingPlanKey(context);
   }

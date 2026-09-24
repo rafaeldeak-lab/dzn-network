@@ -434,6 +434,32 @@ async function run() {
     assert.equal(dispatched.results[0]?.status, "skipped_plan_locked");
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
   });
+  await test("scheduled delivery revalidates a cached grant before every Discord send", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    for (const [id, postType, channelId] of [
+      ["delivery-a", "priority_status_embed", "99999991"],
+      ["delivery-b", "leaderboard_embed", "99999992"],
+    ]) {
+      db.sqlite.prepare(`INSERT INTO server_posting_destinations (
+        id, guild_id, post_type, discord_channel_id, enabled, created_by_discord_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 1, ?, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`)
+        .run(id, scope.guildId, postType, channelId, actor.discord_id);
+    }
+    let stateReads = 0;
+    db.beforeFirst = (sql) => {
+      if (!/SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state/.test(sql)) return;
+      stateReads += 1;
+      if (stateReads === 2) revokeSql(db, grantId);
+    };
+    const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 2 });
+    db.beforeFirst = null;
+    assert.equal(stateReads, 2);
+    assert.equal(dispatched.results[0]?.status, "no_message_id");
+    assert.equal(dispatched.results[1]?.status, "skipped_plan_locked");
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
   await test("revoked exact grant rolls back the CTF matchmaking opt-in", async ({ db, env }) => {
     const grantId = await grant(env);
     db.beforeBatch = () => revokeSql(db, grantId);
