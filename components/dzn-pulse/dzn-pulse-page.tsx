@@ -122,7 +122,7 @@ const CATEGORY_CHIPS = ["Deathmatch", "PvP", "PvE", "PvP/PvE", "Hardcore", "Role
 
 export function DznPulsePage() {
   return (
-    <DznPulseProvider enablePopups>
+    <DznPulseProvider enablePopups enableAccountDecisionPopups>
       <DznPulsePageContent />
     </DznPulseProvider>
   );

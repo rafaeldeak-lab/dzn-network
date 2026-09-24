@@ -151,6 +151,8 @@ assert.equal(provider.includes("data-dzn-pulse-bell"), true, "Bell focus restora
 assert.equal(provider.includes("DznPulseDrawer"), true, "Provider must render the drawer.");
 assert.equal(provider.includes("EventPopupManager"), true, "Provider must support popup manager mounting.");
 assert.equal(provider.includes("AccountDecisionPopupManager"), true, "Provider must mount the player-link decision popup manager.");
+assert.equal(provider.includes("enableAccountDecisionPopups = false"), true, "Nested Pulse providers must suppress account-decision popups by default.");
+assert.equal(provider.includes("mounted && enabled && enableAccountDecisionPopups ? <AccountDecisionPopupManager />"), true, "Only an explicitly designated page-global provider may mount the decision popup manager.");
 assert.equal(provider.includes("player_link_approved"), true, "Player-link approval notifications must be eligible for a website popup.");
 assert.equal(provider.includes("player_link_rejected"), true, "Player-link rejection notifications must be eligible for a website popup.");
 assert.equal(provider.includes("player_link_revoked"), true, "Player-link revocation notifications must be eligible for a website popup.");
@@ -162,6 +164,7 @@ assert.equal(service.includes("options.unreadOnly"), true, "The private feed mus
 assert.equal(service.includes("'player_link_approved', 'player_link_rejected', 'player_link_revoked'"), true, "Decision-specific filtering must cover every player-link decision type.");
 assert.equal(provider.includes("credentials: \"include\""), true, "Decision popup polling must preserve authenticated private requests.");
 assert.equal(provider.includes("dzn:pulse:account-decisions:v1"), true, "Decision popup session deduplication must use a versioned key.");
+assert.equal(provider.includes("Array.from(seen).slice(-100)"), true, "Session dismissal memory must cover the complete five-page decision scan window.");
 assert.equal(provider.includes("data-dzn-account-decision-popup"), true, "Decision popups need a stable rendered QA selector.");
 assert.equal(provider.includes("const [mounted, setMounted] = useState(false)"), true, "Pulse provider must defer dynamic Pulse UI until after client hydration.");
 assert.equal(provider.includes("enabled: mounted && enabled"), true, "Pulse context must not expose enabled state before hydration completes.");
@@ -184,7 +187,8 @@ assert.equal(pulsePage.includes("Same-Category Matching"), true, "DZN Pulse page
 assert.equal(pulsePage.includes("/api/dzn-pulse/summary"), true, "DZN Pulse page must use the summary API.");
 assert.equal(/<Link[^>]+href=["']\/["'][\s\S]{0,120}<DznLogo/.test(pulsePage), false, "DZN Pulse page must not wrap DznLogo in Link because DznLogo already renders an anchor.");
 
-assert.equal(eventsPage.includes("DznPulseProvider enablePopups"), true, "Events shell must mount the Pulse provider with popups.");
+assert.equal(eventsPage.includes("DznPulseProvider enablePopups"), true, "Events shell must mount the Pulse provider with event popups.");
+assert.equal(eventsPage.includes("enableAccountDecisionPopups"), false, "The events provider must defer account-decision popups to the visible global header.");
 assert.equal(eventsPage.includes("PulseEventsSidebarItem"), true, "Events sidebar must include a feature-gated Pulse item.");
 assert.equal(eventsPage.includes("PulseEventSpotlight"), true, "Events page must include a feature-gated visual enhancement.");
 assert.equal(eventsPage.includes("PulseFeaturedMatchup"), true, "Challenges page must include a feature-gated matchup card.");
@@ -200,9 +204,10 @@ assert.equal(eventData.includes("Date.now()"), false, "Event fallback data must 
 assert.equal(eventData.includes("FALLBACK_NOW_MS"), true, "Event fallback data must use a deterministic timestamp.");
 assert.equal(eventFormat.includes("shortTimeUntil"), false, "Event format helpers must not expose Date.now-based render helpers.");
 
-assert.equal(dashboard.includes("DznPulseProvider enablePopups"), true, "Dashboard shell must mount the Pulse provider.");
+assert.equal(dashboard.includes("DznPulseProvider enablePopups enableAccountDecisionPopups"), true, "The hidden-header dashboard must own account-decision popups.");
 assert.equal(dashboard.includes("DznPulseBell"), true, "Dashboard must use the shared Pulse bell.");
 assert.equal(siteHeader.includes("DznPulseProvider"), true, "Shared site header must mount the Pulse provider.");
+assert.equal(siteHeader.includes("DznPulseProvider enableAccountDecisionPopups"), true, "The visible global header must own account-decision popups.");
 assert.equal(siteHeader.includes("DznPulseBell"), true, "Shared site header must expose the Pulse bell for authenticated users.");
 
 assert.equal(packageJson.includes("\"test:dzn-pulse\""), true, "Package scripts must include test:dzn-pulse.");

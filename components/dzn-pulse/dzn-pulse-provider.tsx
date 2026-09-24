@@ -146,9 +146,11 @@ let configPromise: Promise<PulseConfig> | null = null;
 export function DznPulseProvider({
   children,
   enablePopups = false,
+  enableAccountDecisionPopups = false,
 }: {
   children: ReactNode;
   enablePopups?: boolean;
+  enableAccountDecisionPopups?: boolean;
 }) {
   const [mounted, setMounted] = useState(false);
   const [enabled, setEnabled] = useState(false);
@@ -401,7 +403,7 @@ export function DznPulseProvider({
     <PulseContext.Provider value={value}>
       {children}
       {mounted && enabled ? <DznPulseDrawer /> : null}
-      {mounted && enabled ? <AccountDecisionPopupManager /> : null}
+      {mounted && enabled && enableAccountDecisionPopups ? <AccountDecisionPopupManager /> : null}
       {mounted && enabled && enablePopups ? <EventPopupManager /> : null}
       {mounted && enabled ? <PulseBellFocusBridge buttonRef={bellButtonRef} /> : null}
     </PulseContext.Provider>
@@ -980,7 +982,7 @@ function isPlayerLinkDecision(type: string) {
 function readAccountDecisionPopupIds() {
   try {
     const parsed = JSON.parse(window.sessionStorage.getItem(ACCOUNT_DECISION_POPUPS_KEY) ?? "[]") as unknown;
-    return new Set(Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string").slice(-30) : []);
+    return new Set(Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string").slice(-100) : []);
   } catch {
     return new Set<string>();
   }
@@ -990,7 +992,7 @@ function rememberAccountDecisionPopup(id: string) {
   const seen = readAccountDecisionPopupIds();
   seen.add(id);
   try {
-    window.sessionStorage.setItem(ACCOUNT_DECISION_POPUPS_KEY, JSON.stringify(Array.from(seen).slice(-30)));
+    window.sessionStorage.setItem(ACCOUNT_DECISION_POPUPS_KEY, JSON.stringify(Array.from(seen).slice(-100)));
   } catch {
     // Session storage is optional; the notification remains visible in DZN Pulse.
   }

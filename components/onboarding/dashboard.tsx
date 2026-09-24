@@ -425,7 +425,7 @@ export function Dashboard() {
 
 function DashboardFrame({ children }: { children: React.ReactNode }) {
   return (
-    <DznPulseProvider enablePopups>
+    <DznPulseProvider enablePopups enableAccountDecisionPopups>
       <main className="relative min-h-screen overflow-hidden bg-[#02030a] text-white">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_16%_12%,rgba(139,92,246,0.26),transparent_30%),radial-gradient(circle_at_78%_18%,rgba(14,165,233,0.14),transparent_28%),linear-gradient(180deg,#02030a_0%,#07101f_52%,#02030a_100%)]" />
         <div className="scanline absolute inset-0 opacity-20" />
