@@ -176,6 +176,7 @@
     "test:dzn-comms-read-history": "tsx scripts/test-dzn-comms-read-history.ts && npm run test:dzn-comms-history-client",
     "test:dzn-comms-history-client": "tsx --test scripts/test-dzn-comms-history-client.ts",
     "test:dzn-comms-message-sending-contract": "node --test scripts/test-dzn-comms-message-sending-contract.mjs && tsx scripts/test-dzn-comms-live-runtime.ts",
+    "qa:dzn-comms-owner-moderation": "node scripts/qa-dzn-comms-owner-moderation.mjs",
     "test:dzn-release-stack-reconciliation-preflight": "tsx scripts/test-dzn-release-stack-reconciliation-preflight.ts"
   },
   "dependencies": {

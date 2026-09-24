@@ -588,6 +588,9 @@ function OwnerShell({ activeView, setActiveView, children }: {
             <Link href="/owner/player-game-identity-claims" className="block rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-2 text-sm font-bold text-cyan-100 hover:border-cyan-300/40 hover:text-white">
               Review Player Stat Claims
             </Link>
+            <Link href="/owner/comms" className="block rounded-lg border border-violet-300/20 bg-violet-300/[0.06] px-3 py-2 text-sm font-bold text-violet-100 hover:border-violet-300/40 hover:text-white">
+              Moderate Global Chat
+            </Link>
           </div>
         </aside>
 

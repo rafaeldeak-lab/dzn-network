@@ -11,11 +11,15 @@ It does not implement private groups, reactions, attachments, presence, WebSocke
 
 ## Release Gates
 
-All three flags default off:
+All activation flags default off:
 
 - `DZN_COMMS_LIVE_ENABLED=false`
 - `DZN_COMMS_LIVE_SCOPE=local_test`
 - `NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED=false`
+- `DZN_COMMS_OWNER_MODERATION_ENABLED=false`
+- `DZN_COMMS_OWNER_MODERATION_SCOPE=local_test`
+- `DZN_COMMS_RETENTION_ENABLED=false`
+- `DZN_COMMS_RETENTION_SCOPE=local_test`
 
 Production activation requires a separately reviewed application of `0065_dzn_comms_read_history.sql` and `0071_dzn_comms_live_moderation.sql`, verification of their exact production ledger state, then server scope `production` and the matching UI flag. A source merge alone does not apply migrations or activate chat.
 
@@ -37,6 +41,6 @@ Accepted messages, quota slots and decision receipts are written in one D1 batch
 
 ## Retention And Boundaries
 
-Receipts expire after seven days. A later maintenance slice must enforce deletion of expired receipts, old slots and messages before production activation is considered complete. Deleted message-body erasure and a dedicated owner moderation screen also remain follow-ups; the current API records state and audit history but does not claim those later controls are finished.
+Receipts expire after seven days. Newly accepted messages expire after thirty days. The authenticated retention route erases expired message text and author links, then removes expired receipts, timeouts and old quota slots. Deleted messages are erased immediately and open reports for that message are resolved. The dedicated platform-owner screen exposes the open queue and recent decision history. Production scheduling and activation remain separate operations governed by the activation-readiness checklist.
 
 Comms reads and writes never alter billing, owner entitlement, server ownership, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF, XP, calling-card awards, profile visibility, retained exports or competitive eligibility.

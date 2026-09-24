@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 import { hmacSha256 } from "../functions/_lib/crypto";
-import { handleDznCommsModeration, handleDznCommsReport, handleDznCommsSend } from "../functions/_lib/dzn-comms-live";
+import { handleDznCommsModeration, handleDznCommsReport, handleDznCommsSend, runDznCommsRetention } from "../functions/_lib/dzn-comms-live";
 import type { Env } from "../functions/_lib/types";
 
 type Row = Record<string, unknown>;
@@ -32,6 +32,10 @@ async function fixture() {
   `);
   sqlite.exec(readFileSync("migrations/0065_dzn_comms_read_history.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0071_dzn_comms_live_moderation.sql", "utf8"));
+  const requiredTables = ["dzn_comms_channels", "dzn_comms_messages", "dzn_comms_send_receipts", "dzn_comms_reports", "dzn_comms_moderation_audit"];
+  const installedTables = new Set(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => String(row.name)));
+  assert.deepEqual(requiredTables.filter((table) => !installedTables.has(table)), [], "Both Comms migrations must install the required tables.");
+  assert.equal(sqlite.prepare("PRAGMA foreign_key_check").all().length, 0, "Comms migrations must preserve foreign-key integrity.");
   for (const [id, token] of [["player", "player-token"], ["other", "other-token"], ["owner", "owner-token"]]) {
     sqlite.prepare("INSERT INTO sessions (id,user_id,session_token_hash,expires_at) VALUES (?,?,?,datetime('now','+1 day'))")
       .run(`session-${id}`, id, await hmacSha256(token, secret));
@@ -78,6 +82,8 @@ async function fixture() {
     SESSION_SECRET: secret,
     DZN_COMMS_LIVE_ENABLED: "true",
     DZN_COMMS_LIVE_SCOPE: "local_test",
+    DZN_COMMS_OWNER_MODERATION_ENABLED: "true",
+    DZN_COMMS_OWNER_MODERATION_SCOPE: "local_test",
     DZN_PLATFORM_OWNER_DISCORD_IDS: "999",
   } as unknown as Env;
   return {
@@ -96,8 +102,14 @@ function request(path: string, token: string | null, body: unknown, origin = "ht
   return new Request(`${baseUrl}${path}`, { method: "POST", headers, body: JSON.stringify(body) });
 }
 
+function getRequest(path: string, token: string | null) {
+  const headers = new Headers();
+  if (token) headers.set("cookie", `dzn_session=${token}`);
+  return new Request(`http://127.0.0.1${path}`, { headers });
+}
+
 async function payload(response: Response) {
-  return await response.json() as { ok?: boolean; code?: string; replayed?: boolean };
+  return await response.json() as { ok?: boolean; code?: string; replayed?: boolean; message_id?: string };
 }
 
 async function testSendRuntime() {
@@ -111,6 +123,8 @@ async function testSendRuntime() {
     const sent = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), f.env);
     assert.equal(sent.status, 201);
     assert.equal(f.count("dzn_comms_messages"), 1);
+    const storedMessage = f.sqlite.prepare("SELECT expires_at FROM dzn_comms_messages WHERE id = ?").get((await payload(sent)).message_id) as { expires_at?: string } | undefined;
+    assert.ok(storedMessage?.expires_at, "Accepted messages must receive an explicit expiry timestamp.");
     assert.equal(f.count("dzn_comms_send_receipts"), 1);
     const replay = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), f.env);
     assert.equal(replay.status, 200);
@@ -195,6 +209,11 @@ async function testReportAndModerationRuntime() {
     assert.equal((await handleDznCommsModeration(request("/api/owner/comms/moderate", "other-token", {
       messageId: "message-other", action: "hide", reason: "review",
     }), f.env)).status, 403, "A non-platform owner must not moderate chat.");
+    assert.equal((await handleDznCommsModeration(getRequest("/api/owner/comms/moderate", "other-token"), f.env)).status, 403, "A non-platform owner must not read the moderation queue.");
+    const queue = await handleDznCommsModeration(getRequest("/api/owner/comms/moderate", "owner-token"), f.env);
+    assert.equal(queue.status, 200);
+    const queuePayload = await queue.json() as { reports?: Array<{ message_id: string }> };
+    assert.equal(queuePayload.reports?.[0]?.message_id, "message-other", "The owner queue must expose reported messages.");
     const hidden = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {
       messageId: "message-other", action: "hide", reason: "review",
     }), f.env);
@@ -218,6 +237,24 @@ async function testReportAndModerationRuntime() {
     assert.equal(f.count("dzn_comms_moderation_audit"), 2);
   } finally { f.close(); }
 
+  const erased = await fixture();
+  try {
+    erased.sqlite.prepare(`INSERT INTO dzn_comms_messages
+      (id,channel_id,author_user_id,author_display_name,body,visibility_state)
+      VALUES ('message-delete','dzn-global-chat','other','Other','Sensitive text to erase','visible')`).run();
+    erased.sqlite.prepare(`INSERT INTO dzn_comms_reports (id,message_id,reporter_user_id,reason_code)
+      VALUES ('report-delete','message-delete','player','personal_information')`).run();
+    const response = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {
+      messageId: "message-delete", action: "delete", reason: "personal information",
+    }), erased.env);
+    assert.equal(response.status, 200);
+    const row = erased.sqlite.prepare("SELECT body,author_user_id,visibility_state FROM dzn_comms_messages WHERE id = 'message-delete'").get() as Row;
+    assert.equal(row.body, "Message deleted.");
+    assert.equal(row.author_user_id, null);
+    assert.equal(row.visibility_state, "deleted");
+    assert.equal(erased.sqlite.prepare("SELECT status FROM dzn_comms_reports WHERE id = 'report-delete'").get()?.status, "resolved");
+  } finally { erased.close(); }
+
   const unavailableReport = await fixture();
   try {
     unavailableReport.sqlite.prepare(`INSERT INTO dzn_comms_messages
@@ -234,9 +271,30 @@ async function testReportAndModerationRuntime() {
   } finally { unavailableReport.close(); }
 }
 
+async function testRetentionRuntime() {
+  const f = await fixture();
+  try {
+    f.sqlite.prepare(`INSERT INTO dzn_comms_messages
+      (id,channel_id,author_user_id,author_display_name,body,visibility_state,expires_at)
+      VALUES ('expired-message','dzn-global-chat','other','Other','Expired private text','visible','2026-01-01T00:00:00.000Z')`).run();
+    f.sqlite.prepare(`INSERT INTO dzn_comms_send_receipts
+      (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,expires_at)
+      VALUES ('old-receipt','player','dzn-global-chat','old-request','hash','allow',201,'2026-01-01T00:00:00.000Z')`).run();
+    const result = await runDznCommsRetention(f.env.DB, new Date("2026-09-24T12:00:00.000Z"));
+    assert.equal(result.messagesErased, 1);
+    assert.equal(result.receiptsDeleted, 1);
+    const message = f.sqlite.prepare("SELECT body,author_user_id,author_display_name,visibility_state FROM dzn_comms_messages WHERE id = 'expired-message'").get();
+    assert.equal(message?.body, "Message expired.");
+    assert.equal(message?.author_user_id, null);
+    assert.equal(message?.author_display_name, "DZN Safety");
+    assert.equal(message?.visibility_state, "expired");
+  } finally { f.close(); }
+}
+
 async function main() {
   await testSendRuntime();
   await testReportAndModerationRuntime();
+  await testRetentionRuntime();
   console.log("Live Comms handlers: auth, origin, idempotency, conflict, quota, rollback, report and moderation behavior passed.");
 }
 
