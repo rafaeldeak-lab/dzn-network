@@ -584,6 +584,7 @@ async function isPostingAccessCurrent(env: Env, context: PostingContext, postTyp
   const current = await getPostingContextForRead(env, context.linkedServerId);
   if (!current || !hasPostingAccess(current, postType)) return false;
   if (context.showcaseAccess.source !== "complimentary_showcase") return true;
+  if (current.showcaseAccess.source !== "complimentary_showcase") return true;
   return current.showcaseAccess.source === "complimentary_showcase"
     && current.showcaseAccess.grantId === context.showcaseAccess.grantId;
 }

@@ -503,6 +503,53 @@ async function run() {
     assert.equal(payload.test_post.mode, "access_revoked");
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
   });
+  await test("Starter fallback preserves a grouped basic test after grant revocation", async ({ db, env }) => {
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    let changed = false;
+    db.beforeFirst = (sql) => {
+      if (changed || !/SELECT discord_message_id FROM server_posting_state/.test(sql)) return;
+      changed = true;
+      revokeSql(db, grantId);
+      db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'starter', status = 'active'").run();
+    };
+    const response = await invoke(postingDestinations, env, actor, "POST", {
+      action: "test",
+      channel_id: "99999999",
+      test_post_type: "basic_status_embed",
+      discord_webhook_url: "https://discord.com/api/webhooks/12345678/local-test-token",
+    });
+    db.beforeFirst = null;
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { test_post: { ok: boolean; mode: string } };
+    assert.equal(changed, true);
+    assert.equal(payload.test_post.ok, false);
+    assert.equal(payload.test_post.mode, "not_configured");
+  });
+  await test("Starter fallback preserves a basic save test after grant revocation", async ({ db, env }) => {
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    let changed = false;
+    db.beforeFirst = (sql) => {
+      if (changed || !/SELECT discord_message_id FROM server_posting_state/.test(sql)) return;
+      changed = true;
+      revokeSql(db, grantId);
+      db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'starter', status = 'active'").run();
+    };
+    const response = await invoke(postingDestinations, env, actor, "POST", {
+      post_type: "basic_status_embed",
+      discord_channel_id: "99999999",
+      discord_webhook_url: "https://discord.com/api/webhooks/12345678/local-test-token",
+      enabled: true,
+      send_test_post: true,
+    });
+    db.beforeFirst = null;
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { test_post: { ok: boolean; mode: string } };
+    assert.equal(changed, true);
+    assert.equal(payload.test_post.ok, false);
+    assert.equal(payload.test_post.mode, "not_configured");
+  });
   await test("revoked exact grant blocks a previously queued Discord publish", async ({ db, env }) => {
     const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
     const grantId = await grant(env);
