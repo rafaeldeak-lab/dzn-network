@@ -6,6 +6,7 @@ import {
   getPlanPriority,
   getServerStatusInterval,
   hasAutoPost,
+  normalizeListingPlanKey,
   normalizePlanKey,
   type PlanKey,
 } from "./plans";
@@ -681,26 +682,35 @@ export async function getDiscordPublishingContextForLinkedServer(env: Env, linke
   const context = await getAutomationContextForLinkedServer(env, linkedServerId);
   if (!context) return null;
   if (context.showcaseAccess.source !== "complimentary_showcase") {
-    return { ...context, discordPublishingEligible: isActiveSubscriptionStatus(context.subscriptionStatus) };
+    return { ...context, discordPublishingEligible: true };
   }
 
-  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
+  const grantScope = discordPublishingGrantScopeGuard(context.guildId, linkedServerId);
   const result = await requireDb(env)
-    .prepare(
-      `SELECT linked_servers.id, ${lifecycleStatusSql} AS lifecycle_status
-       FROM linked_servers
-       WHERE linked_servers.guild_id = ?
-         AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')
-         AND COALESCE(linked_servers.merged_into_server_id, '') = ''`,
-    )
-    .bind(context.guildId)
-    .all<{ id: string; lifecycle_status: string | null }>();
-  const eligibleServerIds = [...new Set((result.results ?? [])
-    .filter((row) => ["active_live", "active_degraded"].includes(String(row.lifecycle_status ?? "active_live")))
-    .map((row) => row.id))];
+    .prepare(`SELECT CASE WHEN (${grantScope.sql}) THEN 1 ELSE 0 END AS eligible`)
+    .bind(...grantScope.values)
+    .first<{ eligible: number }>();
   return {
     ...context,
-    discordPublishingEligible: eligibleServerIds.length === 1 && eligibleServerIds[0] === linkedServerId,
+    discordPublishingEligible: Number(result?.eligible ?? 0) === 1,
+  };
+}
+
+export function discordPublishingGrantScopeGuard(guildId: string, linkedServerId: string) {
+  const selectedLifecycleSql = serverLifecycleSqlExpression("selected_server");
+  const candidateLifecycleSql = serverLifecycleSqlExpression("candidate_server");
+  const eligible = (alias: string, lifecycleSql: string) => `
+    lower(COALESCE(${alias}.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')
+    AND COALESCE(${alias}.merged_into_server_id, '') = ''
+    AND ${lifecycleSql} IN ('active_live', 'active_degraded')`;
+  return {
+    sql: `EXISTS (SELECT 1 FROM linked_servers AS selected_server
+      WHERE selected_server.id = ? AND selected_server.guild_id = ?
+        AND ${eligible("selected_server", selectedLifecycleSql)})
+      AND (SELECT COUNT(DISTINCT candidate_server.id) FROM linked_servers AS candidate_server
+        WHERE candidate_server.guild_id = ?
+          AND ${eligible("candidate_server", candidateLifecycleSql)}) = 1`,
+    values: [linkedServerId, guildId, guildId],
   };
 }
 
@@ -1425,7 +1435,7 @@ export async function queueDiscordPostUpdatesForGuild(
   if (options.linkedServerId) {
     const context = await getDiscordPublishingContextForLinkedServer(env, options.linkedServerId);
     if (!context || context.guildId !== guildId || !context.discordPublishingEligible) return 0;
-    effectivePlanKey = context.planKey;
+    effectivePlanKey = normalizeListingPlanKey(context);
   }
   const now = new Date().toISOString();
   let queued = 0;

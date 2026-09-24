@@ -7,7 +7,7 @@ import {
   sendDiscordTestPost,
   verifyDiscordPostingChannel,
 } from "../../../_lib/discord-posting";
-import { ensureAutomationSchema, getDiscordPublishingContextForLinkedServer } from "../../../_lib/automation";
+import { discordPublishingGrantScopeGuard, ensureAutomationSchema, getDiscordPublishingContextForLinkedServer } from "../../../_lib/automation";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
 import { AUTO_POST_OPTIONS, AUTO_POST_TYPES, getListingLimits, hasListingAutoPost, normalizeListingPlanKey } from "../../../_lib/plans";
@@ -555,7 +555,13 @@ async function runProtectedPostingBatch(
   writes: D1PreparedStatement[],
 ) {
   const db = requireDb(env);
-  const guard = await showcaseWriteGuard(env, context.linkedServerId, ownerUserId, context.showcaseAccess);
+  const showcaseGuard = await showcaseWriteGuard(env, context.linkedServerId, ownerUserId, context.showcaseAccess);
+  const grantScope = context.showcaseAccess.source === "complimentary_showcase"
+    ? discordPublishingGrantScopeGuard(context.guildId, context.linkedServerId)
+    : null;
+  const guard = grantScope
+    ? { sql: `${showcaseGuard.sql} AND (${grantScope.sql})`, values: [...showcaseGuard.values, ...grantScope.values] }
+    : showcaseGuard;
   try {
     await db.batch([
       db.prepare(showcaseWriteAssertionSql(guard.sql)).bind(...guard.values),
