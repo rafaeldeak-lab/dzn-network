@@ -1,4 +1,4 @@
-import { getAutomationContextForLinkedServer, isActiveSubscriptionStatus } from "../../../../_lib/automation";
+import { getDiscordPublishingContextForLinkedServer, isActiveSubscriptionStatus } from "../../../../_lib/automation";
 import { getSessionUser, requireDb } from "../../../../_lib/db";
 import { dispatchDiscordPostsForGuild } from "../../../../_lib/discord-posting";
 import { json, methodNotAllowed } from "../../../../_lib/http";
@@ -17,9 +17,9 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
 
   if (request.method !== "POST") return methodNotAllowed();
 
-  const context = await getAutomationContextForLinkedServer(env, linkedServerId);
+  const context = await getDiscordPublishingContextForLinkedServer(env, linkedServerId);
   if (!context) return json({ error: "Automation is not ready for this server yet." }, { status: 409 });
-  if (!isActiveSubscriptionStatus(context.subscriptionStatus)) {
+  if (!context.discordPublishingEligible || !isActiveSubscriptionStatus(context.subscriptionStatus)) {
     return json({ error: "Active DZN Pro access is required to run Discord auto-post dispatch." }, { status: 403 });
   }
 

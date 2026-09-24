@@ -28,6 +28,7 @@ import { getAutomationContextForLinkedServer, queueDiscordPostUpdatesForGuild } 
 import { dispatchQueuedDiscordPostUpdates } from "../functions/_lib/discord-posting";
 import { onRequest as postingDestinations } from "../functions/api/servers/[serverId]/posting-destinations";
 import { getOwnerDiscordOverview } from "../functions/_lib/owner-discord-control";
+import { onRequest as runAutoPostsNow } from "../functions/api/servers/[serverId]/auto-posts/run-now";
 
 type Row = Record<string, unknown>;
 type Sqlite = { exec(sql: string): void; close(): void; prepare(sql: string): {
@@ -302,8 +303,10 @@ async function run() {
     assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["priority_status_embed"], "ambiguous-grant-test", {
       linkedServerId: scope.linkedServerId,
     }), 0);
+    assert.equal((await invoke(runAutoPostsNow, env, actor, "POST", {})).status, 403);
 
     db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    assert.equal((await invoke(runAutoPostsNow, env, actor, "POST", {})).status, 200);
     const queued = await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["priority_status_embed"], "exact-grant-test", {
       linkedServerId: scope.linkedServerId,
     });
@@ -395,6 +398,7 @@ async function run() {
     assert.equal(basic?.allowed_by_plan, true);
     assert.equal(basic?.listing_plan_key, "starter");
     assert.equal(priority?.allowed_by_plan, false);
+    assert.equal((await invoke(runAutoPostsNow, env, actor, "POST", {})).status, 200);
 
     const saved = await invoke(postingDestinations, env, actor, "POST", {
       post_type: "basic_status_embed",
