@@ -885,6 +885,9 @@ async function getLastStoredPostAttempt(env: Env): Promise<OwnerDiscordOverview[
     const row = await env.DB.prepare(
       `SELECT guild_id, post_type, discord_channel_id, last_posted_at, last_edited_at, last_error, updated_at
        FROM server_posting_state
+       WHERE NOT (guild_id = '__dzn_internal__'
+         AND post_type = '__due_posting_scan__'
+         AND discord_channel_id = '__scheduler__')
        ORDER BY COALESCE(last_edited_at, last_posted_at, updated_at) DESC
        LIMIT 1`,
     ).first<StoredPostState>();

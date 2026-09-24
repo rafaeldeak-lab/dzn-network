@@ -27,6 +27,7 @@ import { processServerMatchmakingOptIn } from "../functions/_lib/ctf-tournaments
 import { getAutomationContextForLinkedServer, queueDiscordPostUpdatesForGuild } from "../functions/_lib/automation";
 import { dispatchQueuedDiscordPostUpdates } from "../functions/_lib/discord-posting";
 import { onRequest as postingDestinations } from "../functions/api/servers/[serverId]/posting-destinations";
+import { getOwnerDiscordOverview } from "../functions/_lib/owner-discord-control";
 
 type Row = Record<string, unknown>;
 type Sqlite = { exec(sql: string): void; close(): void; prepare(sql: string): {
@@ -346,6 +347,7 @@ async function run() {
     assert.equal(firstTick.ok, true);
     assert.equal(firstTick.processed, 0);
     assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_posting_state WHERE guild_id = '__dzn_internal__'").get()?.n, 1);
+    assert.equal((await getOwnerDiscordOverview(env)).lastPostAttempt, null);
 
     const resumedTick = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
     assert.equal(resumedTick.ok, true);
