@@ -52,6 +52,9 @@ assert.match(playerHome, /Privacy & Sharing/, "The profile workspace must expose
 assert.match(playerHome, /hidden=\{activeProfileSection !== "profile-summary"\}/, "The profile workspace must show only one primary section at a time.");
 assert.match(playerHome, /visitedProfileSections\.has\("game-account"\)/, "The profile workspace must preserve a visited game-link form while it is hidden.");
 assert.match(profileQa, /Switching sections must preserve an in-progress link request/, "Rendered QA must protect game-link drafts across profile navigation.");
+assert.match(playerHome, /activeProfileSection === section && window\.location\.hash === sectionHash/, "Selecting the active profile section must not add duplicate history entries.");
+assert.match(playerHome, /overflow-x-clip/, "The page shell must preserve sticky profile navigation without horizontal overflow.");
+assert.match(profileQa, /page shell must not trap sticky profile navigation/, "Rendered QA must protect the sticky profile navigation contract.");
 assert.match(playerHome, /mode === "home"/, "The full dashboard panels must remain on the Player Hub route.");
 assert.match(playerHome, /section \?\? "profile-summary"/, "Clearing or invalidating the profile hash must restore Overview.");
 assert.match(playerHome, /setProfileReturnTo\(section \? `\/player\/profile#\$\{section\}` : "\/player\/profile"\)/, "Discord login must preserve a recognized profile deep link.");

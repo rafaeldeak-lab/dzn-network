@@ -131,8 +131,12 @@ if (process.argv.includes("--serve")) {
             await page.getByRole("button", { name: /Privacy & Sharing/ }).click();
             await assertAnchorInView(page, "profile-settings");
             assert.equal(await page.locator("#game-account").isHidden(), true, "Unselected profile sections must be hidden");
+            assert.equal(await page.locator("main").evaluate(element => getComputedStyle(element).overflowY), "visible", "The page shell must not trap sticky profile navigation");
             await page.getByRole("button", { name: /Game Stats/ }).click();
             assert.equal(await page.getByPlaceholder("For example: xAKA-MINI_KickAs").inputValue(), draftGamertag, "Switching sections must preserve an in-progress link request");
+            const historyLength = await page.evaluate(() => history.length);
+            await page.getByRole("button", { name: /Game Stats/ }).click();
+            assert.equal(await page.evaluate(() => history.length), historyLength, "Selecting the active section must not add a duplicate history entry");
 
             await page.goto(`${origin}/player/profile`, { waitUntil: "networkidle" });
             await page.getByRole("button", { name: /Game Stats/ }).click();

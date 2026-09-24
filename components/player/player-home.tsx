@@ -411,6 +411,8 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
   }
 
   function openProfileSection(section: ProfileSectionId) {
+    const sectionHash = `#${section}`;
+    if (activeProfileSection === section && window.location.hash === sectionHash) return;
     setActiveProfileSection(section);
     setVisitedProfileSections((current) => {
       if (current.has(section)) return current;
@@ -418,8 +420,8 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
       next.add(section);
       return next;
     });
-    setProfileReturnTo(`/player/profile#${section}`);
-    window.history.pushState(null, "", `#${section}`);
+    setProfileReturnTo(`/player/profile${sectionHash}`);
+    window.history.pushState(null, "", sectionHash);
   }
 
   async function refreshCommunityMatches() {
@@ -490,7 +492,7 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
   const ownerSetupHref = hubData?.owner_setup.href ?? ownerSetupFallbackHref;
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#02030a] text-white">
+    <main className="relative min-h-screen overflow-x-clip bg-[#02030a] text-white">
       <SiteHeaderAuthState
         authenticated={authState.status === "logged_in"}
         checkingAccount={authState.status === "loading"}
