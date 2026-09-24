@@ -44,6 +44,7 @@ try {
     let status = 200;
     let deny = false;
     let patchCount = 0;
+    let delayInitialClaims = true;
     await page.route("**/*", async route => {
       const request = route.request();
       const url = new URL(request.url());
@@ -58,6 +59,10 @@ try {
           return route.fulfill({ json: { ok: true, message: "Link request approved." } });
         }
         assert.equal(request.method(), "GET");
+        if (delayInitialClaims) {
+          delayInitialClaims = false;
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
         return route.fulfill({ status, json: { ok: true, source, private: true, owner_or_admin_only: true, claims } });
       }
       if (url.pathname === "/api/owner/player-game-identity-links") {
@@ -70,6 +75,7 @@ try {
       return route.continue();
     });
     await page.goto(`${base}/owner/player-game-identity-claims`);
+    await page.getByRole("region", { name: "Manage game stats links" }).waitFor();
     await page.getByRole("img", { name: "Sample Player Discord profile" }).waitFor();
     assert.equal(await page.getByRole("img", { name: "Sample Player Discord profile" }).evaluate(image => image.complete && image.naturalWidth > 0), true, "Discord profile image must render");
     claims = [{ ...claim, account_avatar_url: `${base}/missing-avatar.png` }];

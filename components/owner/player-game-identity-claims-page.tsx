@@ -375,7 +375,7 @@ export function PlayerGameIdentityClaimsPage() {
             ) : null}
           </div>
         ) : null}
-        {state === "ready" || state === "error" ? (
+        {state !== "unauthorized" ? (
           <section className="rounded-lg border border-cyan-300/15 bg-[#06101b] px-4 sm:px-5">
             <ManagedGameIdentityLinks />
           </section>
