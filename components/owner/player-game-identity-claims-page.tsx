@@ -375,7 +375,7 @@ export function PlayerGameIdentityClaimsPage() {
             ) : null}
           </div>
         ) : null}
-        {state === "ready" ? (
+        {state === "ready" || state === "error" ? (
           <section className="rounded-lg border border-cyan-300/15 bg-[#06101b] px-4 sm:px-5">
             <ManagedGameIdentityLinks />
           </section>
@@ -514,6 +514,7 @@ function ClaimCard({
   const serverHref = claim.public_slug ? `/servers/${claim.public_slug}` : null;
   const requesterDiscordId = claim.requester_discord_id;
   const [confirmed, setConfirmed] = useState({ ownership: false, match: false, account: false });
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   const approvalReady = confirmed.ownership && confirmed.match && confirmed.account;
   const profileInitial = (claim.account_name || "DZN").trim().charAt(0).toUpperCase();
 
@@ -545,11 +546,13 @@ function ClaimCard({
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <div className="flex min-w-0 items-center gap-3 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] p-3 sm:col-span-2">
               <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-md border border-cyan-300/30 bg-[#111d2b] text-xl font-black text-cyan-100">
-                {claim.account_avatar_url ? (
+                {claim.account_avatar_url && failedAvatarUrl !== claim.account_avatar_url ? (
                   // Discord avatar URLs are validated and assembled by the private server-side read model.
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={claim.account_avatar_url} alt={`${claim.account_name || "DZN Player"} Discord profile`} className="h-full w-full object-cover" />
-                ) : profileInitial}
+                  <img src={claim.account_avatar_url} alt={`${claim.account_name || "DZN Player"} Discord profile`} onError={() => setFailedAvatarUrl(claim.account_avatar_url ?? null)} className="h-full w-full object-cover" />
+                ) : (
+                  <span aria-label={`${claim.account_name || "DZN Player"} Discord profile fallback`}>{profileInitial}</span>
+                )}
               </div>
               <div className="min-w-0">
                 <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Player / claim name</p>

@@ -72,6 +72,10 @@ try {
     await page.goto(`${base}/owner/player-game-identity-claims`);
     await page.getByRole("img", { name: "Sample Player Discord profile" }).waitFor();
     assert.equal(await page.getByRole("img", { name: "Sample Player Discord profile" }).evaluate(image => image.complete && image.naturalWidth > 0), true, "Discord profile image must render");
+    claims = [{ ...claim, account_avatar_url: `${base}/missing-avatar.png` }];
+    await page.getByRole("button", { name: "Refresh Queue" }).click();
+    await page.getByLabel("Sample Player Discord profile fallback").waitFor();
+    assert.equal(await page.getByRole("img", { name: "Sample Player Discord profile" }).count(), 0, "A failed Discord avatar must be replaced by the initials fallback");
     await page.getByText("Technical details", { exact: true }).click();
     await page.getByText(exactId, { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "No horizontal overflow");
@@ -92,6 +96,7 @@ try {
     source = "unavailable";
     await page.getByRole("button", { name: "Refresh Queue" }).click();
     await page.getByRole("heading", { name: "Review queue unavailable" }).waitFor();
+    await page.getByRole("region", { name: "Manage game stats links" }).waitFor();
     assert.equal(await page.getByText("No pending player stat checks", { exact: true }).count(), 0);
     await page.screenshot({ path: path.join(evidence, `unavailable-${width}.png`), fullPage: true });
     status = 401;
@@ -99,7 +104,7 @@ try {
     await page.getByRole("heading", { name: "Log in to review player stat links" }).waitFor();
     assert.deepEqual(errors, []);
     assert.equal(patchCount, 2);
-    checks.push({ width, passed: true, scenarios: ["pending", "full-id", "denied-review", "approval-confirmation", "empty", "unavailable", "logged-out"], pageErrors: errors });
+    checks.push({ width, passed: true, scenarios: ["pending", "avatar-fallback", "full-id", "denied-review", "approval-confirmation", "empty", "unavailable-with-link-management", "logged-out"], pageErrors: errors });
     await context.close();
   }
   const dashboard = await readFile("out/dashboard.html", "utf8");
