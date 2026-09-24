@@ -7,7 +7,12 @@ import {
   sendDiscordTestPost,
   verifyDiscordPostingChannel,
 } from "../../../_lib/discord-posting";
-import { discordPublishingGrantScopeGuard, ensureAutomationSchema, getDiscordPublishingContextForLinkedServer } from "../../../_lib/automation";
+import {
+  discordPublishingSingleServerScopeGuard,
+  ensureAutomationSchema,
+  getDiscordPublishingContextForLinkedServer,
+  isActiveSubscriptionStatus,
+} from "../../../_lib/automation";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
 import { AUTO_POST_OPTIONS, AUTO_POST_TYPES, getListingLimits, hasListingAutoPost, normalizeListingPlanKey } from "../../../_lib/plans";
@@ -556,11 +561,13 @@ async function runProtectedPostingBatch(
 ) {
   const db = requireDb(env);
   const showcaseGuard = await showcaseWriteGuard(env, context.linkedServerId, ownerUserId, context.showcaseAccess);
-  const grantScope = context.showcaseAccess.source === "complimentary_showcase"
-    ? discordPublishingGrantScopeGuard(context.guildId, context.linkedServerId)
+  const requiresSingleServerScope = context.showcaseAccess.source === "complimentary_showcase"
+    || !isActiveSubscriptionStatus(context.subscriptionStatus);
+  const singleServerScope = requiresSingleServerScope
+    ? discordPublishingSingleServerScopeGuard(context.guildId, context.linkedServerId)
     : null;
-  const guard = grantScope
-    ? { sql: `${showcaseGuard.sql} AND (${grantScope.sql})`, values: [...showcaseGuard.values, ...grantScope.values] }
+  const guard = singleServerScope
+    ? { sql: `${showcaseGuard.sql} AND (${singleServerScope.sql})`, values: [...showcaseGuard.values, ...singleServerScope.values] }
     : showcaseGuard;
   try {
     await db.batch([

@@ -262,6 +262,10 @@ async function run() {
   });
   await test("inactive paid labels preserve Free Discord posts without unlocking Pro posts", async ({ db, env }) => {
     const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "pro", ["basic_status_embed"], "ambiguous-free-test", {
+      linkedServerId: scope.linkedServerId,
+    }), 0);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
     assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "pro", ["basic_status_embed"], "free-baseline-test", {
       linkedServerId: scope.linkedServerId,
     }), 1);
@@ -389,6 +393,20 @@ async function run() {
     db.beforeBatch = () => db.sqlite.prepare("UPDATE linked_servers SET status = 'live', lifecycle_status = 'active_live' WHERE id = 'same-guild-other-server'").run();
     const response = await invoke(postingDestinations, env, actor, "POST", {
       post_type: "priority_status_embed",
+      discord_channel_id: "99999999",
+      enabled: true,
+    });
+    db.beforeBatch = null;
+    assert.equal(response.status, 403);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_posting_destinations WHERE guild_id = ?").get(scope.guildId)?.n, 0);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
+  await test("inactive billing cannot race an ambiguous Free destination save", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    db.beforeBatch = () => db.sqlite.prepare("UPDATE linked_servers SET status = 'live', lifecycle_status = 'active_live' WHERE id = 'same-guild-other-server'").run();
+    const response = await invoke(postingDestinations, env, actor, "POST", {
+      post_type: "basic_status_embed",
       discord_channel_id: "99999999",
       enabled: true,
     });

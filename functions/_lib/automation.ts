@@ -689,14 +689,14 @@ export async function getDiscordPublishingContextForLinkedServer(
 ) {
   const context = await getAutomationContextForLinkedServer(env, linkedServerId, options);
   if (!context) return null;
-  if (context.showcaseAccess.source !== "complimentary_showcase") {
+  if (context.showcaseAccess.source !== "complimentary_showcase" && isActiveSubscriptionStatus(context.subscriptionStatus)) {
     return { ...context, discordPublishingEligible: true };
   }
 
-  const grantScope = discordPublishingGrantScopeGuard(context.guildId, linkedServerId);
+  const singleServerScope = discordPublishingSingleServerScopeGuard(context.guildId, linkedServerId);
   const result = await requireDb(env)
-    .prepare(`SELECT CASE WHEN (${grantScope.sql}) THEN 1 ELSE 0 END AS eligible`)
-    .bind(...grantScope.values)
+    .prepare(`SELECT CASE WHEN (${singleServerScope.sql}) THEN 1 ELSE 0 END AS eligible`)
+    .bind(...singleServerScope.values)
     .first<{ eligible: number }>();
   return {
     ...context,
@@ -704,7 +704,7 @@ export async function getDiscordPublishingContextForLinkedServer(
   };
 }
 
-export function discordPublishingGrantScopeGuard(guildId: string, linkedServerId: string) {
+export function discordPublishingSingleServerScopeGuard(guildId: string, linkedServerId: string) {
   const selectedLifecycleSql = serverLifecycleSqlExpression("selected_server");
   const candidateLifecycleSql = serverLifecycleSqlExpression("candidate_server");
   const eligible = (alias: string, lifecycleSql: string) => `
