@@ -516,6 +516,31 @@ async function run() {
     assert.doesNotMatch(sentBody, /Plan: PRO/);
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
   });
+  await test("queued Free delivery revalidates single-server scope", async ({ db, env }) => {
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    db.sqlite.prepare(`INSERT INTO server_posting_destinations (
+      id, guild_id, post_type, discord_channel_id, discord_webhook_url, enabled,
+      created_by_discord_id, created_at, updated_at
+    ) VALUES ('queued-free-scope', ?, 'basic_status_embed', '99999999',
+      'https://discord.com/api/webhooks/12345678/local-test-token', 1, ?,
+      '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`)
+      .run(scope.guildId, actor.discord_id);
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["basic_status_embed"], "queued-free-scope-test", {
+      linkedServerId: scope.linkedServerId,
+    }), 1);
+    let scopeChanged = false;
+    db.beforeFirst = (sql) => {
+      if (scopeChanged || !/SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state/.test(sql)) return;
+      scopeChanged = true;
+      db.sqlite.prepare("UPDATE linked_servers SET status = 'active', lifecycle_status = 'active_live' WHERE id = 'same-guild-other-server'").run();
+    };
+    const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    db.beforeFirst = null;
+    assert.equal(scopeChanged, true);
+    assert.equal(dispatched.results[0]?.status, "skipped_plan_locked");
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+  });
   await test("scheduled delivery revalidates a cached grant before every Discord send", async ({ db, env }) => {
     const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
     const grantId = await grant(env);

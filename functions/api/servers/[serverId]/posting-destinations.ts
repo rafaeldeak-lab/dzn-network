@@ -62,6 +62,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   }
   if (request.method !== "POST") return methodNotAllowed();
 
+  await ensureAutomationSchema(env);
   const context = await getPostingContextForRead(env, linkedServerId);
   if (!context) return json({ error: "Automation is not ready for this server yet." }, { status: 409 });
 
@@ -88,7 +89,6 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
     discord_channel_id: channelId,
     discord_webhook_url: webhookUrl,
   });
-  await ensureAutomationSchema(env);
   const now = new Date().toISOString();
   const db = requireDb(env);
   const insertDestination = db
@@ -189,7 +189,6 @@ async function handleGroupedPostingAction(
   user: SessionUser,
   body: SavePostingDestinationBody,
 ) {
-  await ensureAutomationSchema(env);
   const limits = getListingLimits(context);
   const action = body.action ?? "save";
   const channelId = sanitizeDiscordId(body.channel_id ?? body.discord_channel_id);
@@ -549,7 +548,7 @@ async function getPostingDestinationPayload(env: Env, context: PostingContext) {
 }
 
 async function getPostingContextForRead(env: Env, linkedServerId: string) {
-  const context = await getDiscordPublishingContextForLinkedServer(env, linkedServerId);
+  const context = await getDiscordPublishingContextForLinkedServer(env, linkedServerId, { skipSchemaEnsure: true });
   return context ? { ...context, linkedServerId } : null;
 }
 

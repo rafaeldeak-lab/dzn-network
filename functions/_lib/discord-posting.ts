@@ -300,7 +300,7 @@ async function processPostJob(env: Env, job: QueuedPostJob): Promise<DiscordPost
 
   return processConfiguredPostingDestination(env, destination, listingContext, {
     force: true,
-    revalidateAccessBeforeDelivery: publishingAccess.accessSource === "complimentary_showcase",
+    revalidateAccessBeforeDelivery: requiresPublishingAccessRevalidation(publishingAccess),
   });
 }
 
@@ -512,7 +512,7 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
       try {
         const result = await processConfiguredPostingDestination(env, row, listingContext, {
           force: options.force,
-          revalidateAccessBeforeDelivery: publishingAccess.accessSource === "complimentary_showcase",
+          revalidateAccessBeforeDelivery: requiresPublishingAccessRevalidation(publishingAccess),
         });
         results.push(result);
         if (result.status === "edited") edited += 1;
@@ -606,6 +606,11 @@ async function resolveDiscordPublishingAccessForGuild(env: Env, guildId: string)
     lifecycleStatus: String(baseline.lifecycle_status ?? "active_live"),
     accessSource: "billing" as const,
   };
+}
+
+function requiresPublishingAccessRevalidation(access: Awaited<ReturnType<typeof resolveDiscordPublishingAccessForGuild>>) {
+  return access.accessSource === "complimentary_showcase"
+    || !["active", "trialing"].includes(String(access.subscriptionStatus ?? "").toLowerCase());
 }
 
 export async function dispatchDiscordPostsForGuild(env: Env, guildId: string, options: { maxJobs?: number; force?: boolean } = {}) {
