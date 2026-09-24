@@ -339,13 +339,35 @@ async function processConfiguredPostingDestination(
     .prepare("SELECT * FROM server_public_cache WHERE guild_id = ? LIMIT 1")
     .bind(destination.guild_id)
     .first<PublicCache>();
-  const listingPlanKey = normalizeListingPlanKey(listingContext);
-  const payload = renderDiscordPostPayload(destination.post_type, cache, listingPlanKey);
-  const payloadHash = await hashPayload(payload);
   const state = await db
     .prepare("SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ? LIMIT 1")
     .bind(destination.guild_id, destination.post_type, destination.discord_channel_id)
     .first<PostingState>();
+
+  let effectiveListingContext = listingContext;
+  if (options.revalidateAccessBeforeDelivery) {
+    const currentAccess = await resolveDiscordPublishingAccessForGuild(env, destination.guild_id);
+    const currentListingContext = { plan_key: currentAccess.planKey, subscription_status: currentAccess.subscriptionStatus };
+    if (!["active_live", "active_degraded"].includes(currentAccess.lifecycleStatus)
+      || !hasListingAutoPost(currentListingContext, destination.post_type)) {
+      await recordPostingDispatchStatus(env, destination, "skipped_plan_locked", "Current access no longer allows this auto-post type.");
+      return {
+        guild_id: destination.guild_id,
+        post_type: destination.post_type,
+        channel_id: destination.discord_channel_id,
+        status: "skipped_plan_locked",
+        message_id: state?.discord_message_id ?? null,
+        reason: "Current access no longer allows this auto-post type.",
+        last_edited_at: state?.last_edited_at ?? null,
+        message_state_found: Boolean(state),
+      };
+    }
+    effectiveListingContext = currentListingContext;
+  }
+
+  const listingPlanKey = normalizeListingPlanKey(effectiveListingContext);
+  const payload = renderDiscordPostPayload(destination.post_type, cache, listingPlanKey);
+  const payloadHash = await hashPayload(payload);
   const oldPayloadHash = state?.last_payload_hash ?? null;
   if (!options.force && state?.last_payload_hash === payloadHash) {
     await recordPostingDispatchStatus(env, destination, "skipped_unchanged", null);
@@ -361,27 +383,6 @@ async function processConfiguredPostingDestination(
       last_edited_at: state.last_edited_at ?? null,
       message_state_found: true,
     };
-  }
-
-  if (options.revalidateAccessBeforeDelivery) {
-    const currentAccess = await resolveDiscordPublishingAccessForGuild(env, destination.guild_id);
-    const currentListingContext = { plan_key: currentAccess.planKey, subscription_status: currentAccess.subscriptionStatus };
-    if (!["active_live", "active_degraded"].includes(currentAccess.lifecycleStatus)
-      || !hasListingAutoPost(currentListingContext, destination.post_type)) {
-      await recordPostingDispatchStatus(env, destination, "skipped_plan_locked", "Current access no longer allows this auto-post type.");
-      return {
-        guild_id: destination.guild_id,
-        post_type: destination.post_type,
-        channel_id: destination.discord_channel_id,
-        status: "skipped_plan_locked",
-        message_id: state?.discord_message_id ?? null,
-        reason: "Current access no longer allows this auto-post type.",
-        old_payload_hash: oldPayloadHash,
-        new_payload_hash: payloadHash,
-        last_edited_at: state?.last_edited_at ?? null,
-        message_state_found: Boolean(state),
-      };
-    }
   }
 
   try {
