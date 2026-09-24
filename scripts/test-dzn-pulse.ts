@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 
-import { getPulseSummary, sanitizePulseActionUrl } from "../functions/_lib/dzn-pulse";
+import { getPulseSummary, listUserNotifications, sanitizePulseActionUrl } from "../functions/_lib/dzn-pulse";
+import type { Env, SessionUser } from "../functions/_lib/types";
 
 function read(path: string) {
   return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
@@ -25,6 +27,19 @@ const envExample = read(".env.example");
 const cloudflareEnv = read("cloudflare-env.d.ts");
 const packageJson = read("package.json");
 const gitignore = read(".gitignore");
+
+type SqliteRow = Record<string, unknown>;
+type Sqlite = {
+  exec(sql: string): void;
+  close(): void;
+  prepare(sql: string): {
+    all(...values: unknown[]): SqliteRow[];
+    get(...values: unknown[]): SqliteRow | undefined;
+    run(...values: unknown[]): unknown;
+  };
+};
+
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: new (path: string) => Sqlite };
 
 for (const table of [
   "notification_campaigns",
@@ -135,6 +150,22 @@ assert.equal(provider.includes("dzn:pulse:pending-dismissals:v1"), true, "Pendin
 assert.equal(provider.includes("data-dzn-pulse-bell"), true, "Bell focus restoration needs a stable selector.");
 assert.equal(provider.includes("DznPulseDrawer"), true, "Provider must render the drawer.");
 assert.equal(provider.includes("EventPopupManager"), true, "Provider must support popup manager mounting.");
+assert.equal(provider.includes("AccountDecisionPopupManager"), true, "Provider must mount the player-link decision popup manager.");
+assert.equal(provider.includes("enableAccountDecisionPopups = false"), true, "Nested Pulse providers must suppress account-decision popups by default.");
+assert.equal(provider.includes("mounted && enabled && enableAccountDecisionPopups ? <AccountDecisionPopupManager />"), true, "Only an explicitly designated page-global provider may mount the decision popup manager.");
+assert.equal(provider.includes("player_link_approved"), true, "Player-link approval notifications must be eligible for a website popup.");
+assert.equal(provider.includes("player_link_rejected"), true, "Player-link rejection notifications must be eligible for a website popup.");
+assert.equal(provider.includes("player_link_revoked"), true, "Player-link revocation notifications must be eligible for a website popup.");
+assert.equal(provider.includes('new URLSearchParams({ account_decisions: "1", unread: "1", limit: "20" })'), true, "Decision popup polling must use the unread decision-specific private feed.");
+assert.equal(provider.includes("page < 5"), true, "Decision popup polling must follow a bounded number of result pages.");
+assert.equal(provider.includes("cursor = response.nextCursor"), true, "Decision popup polling must advance past already-seen decisions.");
+assert.equal(service.includes("options.accountDecisionsOnly"), true, "The private feed must support decision-specific filtering independent of general news volume.");
+assert.equal(service.includes("options.unreadOnly"), true, "The private feed must filter read decisions before pagination.");
+assert.equal(service.includes("'player_link_approved', 'player_link_rejected', 'player_link_revoked'"), true, "Decision-specific filtering must cover every player-link decision type.");
+assert.equal(provider.includes("credentials: \"include\""), true, "Decision popup polling must preserve authenticated private requests.");
+assert.equal(provider.includes("dzn:pulse:account-decisions:v1"), true, "Decision popup session deduplication must use a versioned key.");
+assert.equal(provider.includes("Array.from(seen).slice(-100)"), true, "Session dismissal memory must cover the complete five-page decision scan window.");
+assert.equal(provider.includes("data-dzn-account-decision-popup"), true, "Decision popups need a stable rendered QA selector.");
 assert.equal(provider.includes("const [mounted, setMounted] = useState(false)"), true, "Pulse provider must defer dynamic Pulse UI until after client hydration.");
 assert.equal(provider.includes("enabled: mounted && enabled"), true, "Pulse context must not expose enabled state before hydration completes.");
 assert.equal(provider.includes("mounted && enabled ? <DznPulseDrawer />"), true, "Pulse drawer must be client-mounted to avoid hydration drift.");
@@ -156,7 +187,8 @@ assert.equal(pulsePage.includes("Same-Category Matching"), true, "DZN Pulse page
 assert.equal(pulsePage.includes("/api/dzn-pulse/summary"), true, "DZN Pulse page must use the summary API.");
 assert.equal(/<Link[^>]+href=["']\/["'][\s\S]{0,120}<DznLogo/.test(pulsePage), false, "DZN Pulse page must not wrap DznLogo in Link because DznLogo already renders an anchor.");
 
-assert.equal(eventsPage.includes("DznPulseProvider enablePopups"), true, "Events shell must mount the Pulse provider with popups.");
+assert.equal(eventsPage.includes("DznPulseProvider enablePopups"), true, "Events shell must mount the Pulse provider with event popups.");
+assert.equal(eventsPage.includes("enableAccountDecisionPopups"), false, "The events provider must defer account-decision popups to the visible global header.");
 assert.equal(eventsPage.includes("PulseEventsSidebarItem"), true, "Events sidebar must include a feature-gated Pulse item.");
 assert.equal(eventsPage.includes("PulseEventSpotlight"), true, "Events page must include a feature-gated visual enhancement.");
 assert.equal(eventsPage.includes("PulseFeaturedMatchup"), true, "Challenges page must include a feature-gated matchup card.");
@@ -172,14 +204,50 @@ assert.equal(eventData.includes("Date.now()"), false, "Event fallback data must 
 assert.equal(eventData.includes("FALLBACK_NOW_MS"), true, "Event fallback data must use a deterministic timestamp.");
 assert.equal(eventFormat.includes("shortTimeUntil"), false, "Event format helpers must not expose Date.now-based render helpers.");
 
-assert.equal(dashboard.includes("DznPulseProvider enablePopups"), true, "Dashboard shell must mount the Pulse provider.");
+assert.equal(dashboard.includes("DznPulseProvider enablePopups enableAccountDecisionPopups"), true, "The hidden-header dashboard must own account-decision popups.");
 assert.equal(dashboard.includes("DznPulseBell"), true, "Dashboard must use the shared Pulse bell.");
 assert.equal(siteHeader.includes("DznPulseProvider"), true, "Shared site header must mount the Pulse provider.");
+assert.equal(siteHeader.includes("DznPulseProvider enableAccountDecisionPopups"), true, "The visible global header must own account-decision popups.");
 assert.equal(siteHeader.includes("DznPulseBell"), true, "Shared site header must expose the Pulse bell for authenticated users.");
 
 assert.equal(packageJson.includes("\"test:dzn-pulse\""), true, "Package scripts must include test:dzn-pulse.");
 assert.equal(gitignore.includes("tmp/dzn-pulse-demo-seed.sql"), true, "Generated Pulse demo seed SQL must be ignored.");
 assert.equal(gitignore.includes("tmp/dzn-pulse-*.patch"), true, "Pulse preflight patches must be ignored.");
+
+async function testNotificationPaginationBoundary() {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT NOT NULL UNIQUE, username TEXT, avatar TEXT);
+      CREATE TABLE linked_servers (id TEXT PRIMARY KEY, display_name TEXT, hostname TEXT, server_name TEXT, nitrado_service_name TEXT);
+      CREATE TABLE competitive_events (id TEXT PRIMARY KEY, name TEXT);
+      INSERT INTO users VALUES ('pulse-user','100','Pulse User',NULL);`);
+    sqlite.exec(migration);
+    const insert = sqlite.prepare(`INSERT INTO user_notifications
+      (id,user_id,type,title,body,dedupe_key,created_at)
+      VALUES (?,'pulse-user','player_link_approved','Approved','Decision',?,?)`);
+    for (let index = 1; index <= 21; index += 1) {
+      const suffix = String(index).padStart(2, "0");
+      const minute = String(60 - index).padStart(2, "0");
+      insert.run(`decision-${suffix}`, `decision-${suffix}`, `2026-09-24T12:${minute}:00.000Z`);
+    }
+    const prepare = (sql: string, bindings: unknown[] = []) => ({
+      bind: (...values: unknown[]) => prepare(sql, values),
+      all: async () => ({ results: sqlite.prepare(sql).all(...bindings) }),
+      first: async <T>() => sqlite.prepare(sql).get(...bindings) as T | undefined ?? null,
+    });
+    const env = { DZN_PULSE_ENABLED: "true", DB: { prepare } } as unknown as Env;
+    const user = { id: "pulse-user", discord_id: "100", username: "Pulse User", avatar: null } satisfies SessionUser;
+    const first = await listUserNotifications(env, user, { accountDecisionsOnly: true, unreadOnly: true, limit: 20 });
+    assert.equal(first.items.length, 20);
+    assert.equal(first.items[19]?.id, "decision-20");
+    assert.ok(first.nextCursor, "A 21-item feed must expose a second page.");
+    const second = await listUserNotifications(env, user, { accountDecisionsOnly: true, unreadOnly: true, limit: 20, cursor: first.nextCursor });
+    assert.deepEqual(second.items.map((item) => item.id), ["decision-21"], "Pagination must not skip the lookahead boundary row.");
+    assert.equal(second.nextCursor, null);
+  } finally {
+    sqlite.close();
+  }
+}
 
 const summaryQueries: string[] = [];
 const emptyStatement = {
@@ -194,11 +262,10 @@ const emptyPreviewDb = {
     return emptyStatement;
   },
 };
-getPulseSummary(
+Promise.all([testNotificationPaginationBoundary(), getPulseSummary(
   { DZN_PULSE_ENABLED: "true", DB: emptyPreviewDb } as never,
   { id: "preview-user", email: "preview@example.test", name: "Preview User", role: "owner" } as never,
-)
-  .then((emptyPreviewSummary) => {
+)]).then(([, emptyPreviewSummary]) => {
     assert.equal(emptyPreviewSummary.ok, true, "Authenticated Pulse summary must return a controlled empty-state payload.");
     assert.equal(emptyPreviewSummary.metrics.live_events, 0, "Empty preview summary must not fabricate live events.");
     assert.equal(emptyPreviewSummary.top_server, null, "Empty preview summary must not fabricate a top server.");

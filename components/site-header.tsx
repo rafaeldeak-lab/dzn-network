@@ -200,7 +200,7 @@ export function SiteHeader({
   const showAddServer = resolvedAuthenticated && (resolvedNavigation?.can_link_more_servers ?? true);
 
   return (
-    <DznPulseProvider>
+    <DznPulseProvider enableAccountDecisionPopups>
       <header className="dzn-header-shell">
       <nav
         className={`dzn-header-nav ${resolvedAuthenticated ? "dzn-header-nav--authenticated" : "dzn-header-nav--logged-out"}`}

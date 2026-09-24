@@ -9,18 +9,21 @@ import {
 } from "../functions/_lib/player-game-identities";
 import { rankPublicPlayers } from "../functions/_lib/public-leaderboards";
 import { testPlayerGameIdentityReadModels } from "./test-player-game-identity-read-model";
+import { testPlayerGameIdentityNotifications } from "./test-player-game-identity-notifications";
 
 const migration = readFileSync("migrations/0064_player_game_identity_links.sql", "utf8");
 const helper = readFileSync("functions/_lib/player-game-identities.ts", "utf8");
 const playerRoute = readFileSync("functions/api/player/game-identities.ts", "utf8");
 const ownerListRoute = readFileSync("functions/api/owner/player-game-identity-claims.ts", "utf8");
 const ownerReviewRoute = readFileSync("functions/api/owner/player-game-identity-claims/[claimId].ts", "utf8");
+const decisionNotifications = readFileSync("functions/_lib/player-game-identity-notifications.ts", "utf8");
 const statBridge = readFileSync("functions/_lib/player-stat-bridge.ts", "utf8");
 const leaderboards = readFileSync("functions/_lib/public-leaderboards.ts", "utf8");
 const playerHome = readFileSync("components/player/player-home.tsx", "utf8");
 const identityPanel = readFileSync("components/player/player-game-identity-links.tsx", "utf8");
 const ownerClaimPage = readFileSync("components/owner/player-game-identity-claims-page.tsx", "utf8");
 const ownerClaimRoutePage = readFileSync("app/owner/player-game-identity-claims/page.tsx", "utf8");
+const revocationHelper = readFileSync("functions/_lib/player-game-identity-revocation.ts", "utf8");
 const ownerConsole = readFileSync("components/owner/owner-console.tsx", "utf8");
 const platformSpec = readFileSync("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md", "utf8");
 const handoff = readFileSync("docs/DZN_VERIFIED_PLAYER_GAME_IDENTITY_LINKING_HANDOFF.md", "utf8");
@@ -54,6 +57,9 @@ assert.match(ownerReviewRoute, /request\.method !== "PATCH"/, "Owner/admin claim
 assert.match(ownerReviewRoute, /isSameOriginMutation/, "Owner/admin claim reviews must reject cross-origin mutations.");
 assert.match(ownerReviewRoute, /reviewPlayerGameIdentityClaim/, "Owner/admin claim route must use the canonical review helper.");
 assert.match(ownerReviewRoute, /privateNoStoreHeaders\(\)/, "Owner/admin review responses must be private no-store.");
+assert.match(ownerReviewRoute, /waitUntil\(dispatchPlayerGameIdentityDecisionDiscord\(env, delivery\)\)/, "Discord delivery must run after the durable decision without delaying the response.");
+assert.match(ownerReviewRoute, /const \{ delivery, \.\.\.publicResult \} = result/, "Internal Discord delivery details must be removed from the public response.");
+assert.match(ownerReviewRoute, /return json\(publicResult,/, "Successful review responses must contain only the public decision result.");
 assert.match(ownerClaimRoutePage, /PlayerGameIdentityClaimsPage/, "Owners/admins need a durable review queue route.");
 assert.match(ownerConsole, /\/owner\/player-game-identity-claims/, "Owner console must expose the player stat claim review queue.");
 
@@ -73,6 +79,13 @@ assert.match(helper, /player_profiles\.player_id = \?/, "Claim creation must mat
 assert.match(helper, /lower\(trim\(player_profiles\.player_name\)\) = lower\(trim\(\?\)\)/, "Claim creation may resolve one server-scoped visible gamertag to a review candidate.");
 assert.match(helper, /LIMIT 2/, "Gamertag resolution must detect duplicates and fail closed.");
 assert.match(helper, /requireServerOwnerOrDznAdmin/, "Claim approval must be scoped to the matching owner or DZN admin.");
+assert.match(helper, /INSERT OR IGNORE INTO user_notifications/, "Approval and rejection must create one durable private website notification.");
+assert.match(helper, /player-link-decision:\$\{claim\.id\}:\$\{action\}/, "Decision notifications must use a stable dedupe key.");
+assert.match(helper, /\/player\/profile#game-account/, "Decision notifications must link players to their game-account panel.");
+assert.match(decisionNotifications, /isDiscordNotificationsEnabled\(env\)/, "Discord decision delivery must remain explicitly feature-gated through the typed flag helper.");
+assert.match(decisionNotifications, /\/users\/@me\/channels/, "Discord decision delivery must open a private DM channel.");
+assert.match(decisionNotifications, /allowed_mentions:\s*\{ parse: \[\] \}/, "Discord decision messages must disable mentions.");
+assert.doesNotMatch(decisionNotifications, /console\.(?:log|error|warn)/, "Discord decision delivery must not log private payloads or credentials.");
 assert.doesNotMatch(helper, /UPDATE player_profiles|SET discord_id/, "New approvals must not create an untracked second stats attribution.");
 assert.match(helper, /p\.id = player_game_identity_claims\.player_profile_id[\s\S]*p\.player_id = player_game_identity_claims\.player_id/, "Approval must revalidate the exact imported profile row and hidden player ID, never the gamertag alone.");
 assert.doesNotMatch(
@@ -114,6 +127,7 @@ assert.match(identityPanel, /Choose server/, "Identity panel must ask players to
 assert.match(identityPanel, /Search for your server/, "Identity panel must support searchable server selection.");
 assert.match(identityPanel, /DayZ gamertag on this server/, "Identity panel must ask for the visible server gamertag.");
 assert.match(identityPanel, /Send For Check/, "Identity panel must make the owner/admin check flow explicit.");
+assert.match(revocationHelper, /\/player\/profile#game-account/, "Revocation notifications must open the affected Game Account section.");
 assert.match(identityPanel, /server_slug/, "Identity UI must still submit a safe public server slug reference internally.");
 assert.match(identityPanel, /player_reference/, "Identity UI must submit the visible gamertag as an untrusted lookup reference.");
 assert.doesNotMatch(identityPanel, /Server slug or DZN server ID/, "Player-facing UI must not ask normal players to understand server slugs.");
@@ -233,7 +247,7 @@ assert.deepEqual(
 assert.equal(rankedWithLinks[0].public_profile_href, "/players/linked-ace");
 assert.equal(JSON.stringify(rankedWithLinks).includes("verified-discord"), false, "Leaderboard payloads must not expose Discord IDs.");
 
-void testPlayerGameIdentityReadModels().then(() => {
+void testPlayerGameIdentityReadModels().then(testPlayerGameIdentityNotifications).then(() => {
   console.log("Player game identity linking guardrails and database privacy tests passed.");
 }).catch((error) => {
   console.error(error);

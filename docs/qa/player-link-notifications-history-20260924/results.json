@@ -1,0 +1,54 @@
+{
+  "generatedAt": "2026-09-24T15:52:27.576Z",
+  "mockOnly": true,
+  "checks": [
+    {
+      "width": 1440,
+      "passed": true,
+      "scenarios": [
+        "pending",
+        "avatar-fallback",
+        "full-id",
+        "denied-review",
+        "approval-confirmation",
+        "history-avatar-search-filter",
+        "empty",
+        "unavailable-with-link-management",
+        "logged-out"
+      ],
+      "pageErrors": []
+    },
+    {
+      "width": 900,
+      "passed": true,
+      "scenarios": [
+        "pending",
+        "avatar-fallback",
+        "full-id",
+        "denied-review",
+        "approval-confirmation",
+        "history-avatar-search-filter",
+        "empty",
+        "unavailable-with-link-management",
+        "logged-out"
+      ],
+      "pageErrors": []
+    },
+    {
+      "width": 390,
+      "passed": true,
+      "scenarios": [
+        "pending",
+        "avatar-fallback",
+        "full-id",
+        "denied-review",
+        "approval-confirmation",
+        "history-avatar-search-filter",
+        "empty",
+        "unavailable-with-link-management",
+        "logged-out"
+      ],
+      "pageErrors": []
+    }
+  ]
+}

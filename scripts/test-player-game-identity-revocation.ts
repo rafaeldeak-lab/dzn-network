@@ -51,10 +51,11 @@ export async function testPlayerGameIdentityRevocation() {
     const history = await readPlayerRequestSupport(f.env.DB, new URLSearchParams({ request: "claim-a" }));
     assert.ok(history.ok && "history" in history && history.history.some(event => event.action === "link_revoked" && event.note === input.reason));
     const notices = f.state().notifications;
-    assert.equal(notices.length, 1); assert.equal(notices[0].user_id, player.id);
-    assert.equal(notices[0].type, "player_link_revoked");
-    assert.doesNotMatch(String(notices[0].body), /discord-a|game-a/);
-    assert.ok(String(notices[0].body).includes(input.reason), "The notice retains only the same reason already visible to this player.");
+    assert.equal(notices.length, 2, "The original approval notice and later revocation notice must both remain in account history.");
+    const revokedNotice = notices.find(notice => notice.type === "player_link_revoked");
+    assert.equal(revokedNotice?.user_id, player.id);
+    assert.doesNotMatch(String(revokedNotice?.body), /discord-a|game-a/);
+    assert.ok(String(revokedNotice?.body).includes(input.reason), "The notice retains only the same reason already visible to this player.");
     const after = f.state();
     assert.equal((await revokePlayerGameIdentityLink(f.env, owner, f.linkId, input)).status, 409);
     assert.deepEqual(f.state(), after, "Replayed decisions must not duplicate notices or audit events");
@@ -83,7 +84,8 @@ export async function testPlayerGameIdentityRevocation() {
       fixture.setBeforeBatch(() => fixture.sqlite.exec(change));
       assert.equal((await revokePlayerGameIdentityLink(fixture.env, owner, fixture.linkId, input)).status, 409, change);
       assert.equal(fixture.state().audit.filter(row => row.action === "link_revoked").length, 0);
-      assert.equal(fixture.state().notifications.length, 0);
+      assert.equal(fixture.state().notifications.length, 1, "A rejected revocation race must retain only the earlier approval notice.");
+      assert.equal(fixture.state().notifications[0].type, "player_link_approved");
     } finally { fixture.close(); }
   }
   for (const legacyDiscord of ["discord-a", "discord-b", "  discord-a  "]) {
@@ -100,7 +102,7 @@ export async function testPlayerGameIdentityRevocation() {
   try {
     const results = await Promise.all([1, 2].map(() => revokePlayerGameIdentityLink(concurrent.env, owner, concurrent.linkId, input)));
     assert.deepEqual(results.map(result => result.status).sort(), [200, 409]);
-    assert.equal(concurrent.state().notifications.length, 1);
+    assert.equal(concurrent.state().notifications.length, 2, "Concurrent revocation must add one notice beside the earlier approval notice.");
   } finally { concurrent.close(); }
 
   const access = await approvedFixture();
@@ -170,7 +172,7 @@ export async function testPlayerGameIdentityRevocation() {
         assert.deepEqual(fixture.state(), before, "Wrong-owner deletion cannot touch notices or links.");
         assert.equal((await deleteOwnedLinkedServerData(fixture.env, "owner-a", "server-a")).ok, true);
         assert.equal(fixture.sqlite.prepare("SELECT id FROM linked_servers WHERE id='server-a'").get(), undefined);
-        assert.equal(fixture.state().notifications.length, 2, "Server removal preserves private recipient notices.");
+        assert.equal(fixture.state().notifications.length, 3, "Server removal preserves private approval and revocation notices.");
         const notice = fixture.sqlite.prepare("SELECT body FROM user_notifications WHERE user_id='player-a' AND type='player_link_revoked'").get();
         assert.ok(String(notice?.body).includes(input.reason), "The player-visible reason survives server/link/audit deletion.");
         assert.equal(String(notice?.body).includes("Review the reason in your player profile"), false);
