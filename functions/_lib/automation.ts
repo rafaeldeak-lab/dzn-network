@@ -677,6 +677,33 @@ export async function getAutomationContextForLinkedServer(env: Env, linkedServer
   };
 }
 
+export async function getDiscordPublishingContextForLinkedServer(env: Env, linkedServerId: string) {
+  const context = await getAutomationContextForLinkedServer(env, linkedServerId);
+  if (!context) return null;
+  if (context.showcaseAccess.source !== "complimentary_showcase") {
+    return { ...context, discordPublishingEligible: isActiveSubscriptionStatus(context.subscriptionStatus) };
+  }
+
+  const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
+  const result = await requireDb(env)
+    .prepare(
+      `SELECT linked_servers.id, ${lifecycleStatusSql} AS lifecycle_status
+       FROM linked_servers
+       WHERE linked_servers.guild_id = ?
+         AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'suspended')
+         AND COALESCE(linked_servers.merged_into_server_id, '') = ''`,
+    )
+    .bind(context.guildId)
+    .all<{ id: string; lifecycle_status: string | null }>();
+  const eligibleServerIds = [...new Set((result.results ?? [])
+    .filter((row) => ["active_live", "active_degraded"].includes(String(row.lifecycle_status ?? "active_live")))
+    .map((row) => row.id))];
+  return {
+    ...context,
+    discordPublishingEligible: eligibleServerIds.length === 1 && eligibleServerIds[0] === linkedServerId,
+  };
+}
+
 export async function markStatusCheckStarted(env: Env, guildId: string, options: { leaseMs?: number } = {}) {
   const now = new Date().toISOString();
   const leaseMs = Math.max(60_000, Math.min(Math.trunc(Number(options.leaseMs ?? 5 * 60 * 1000)) || 5 * 60 * 1000, 15 * 60 * 1000));
@@ -1395,9 +1422,9 @@ export async function queueDiscordPostUpdatesForGuild(
 ) {
   await ensureAutomationSchema(env);
   let effectivePlanKey = planKey;
-  if (options.linkedServerId && postTypes.some((postType) => !hasAutoPost(planKey, postType))) {
-    const context = await getAutomationContextForLinkedServer(env, options.linkedServerId);
-    if (!context || context.guildId !== guildId || !isActiveSubscriptionStatus(context.subscriptionStatus)) return 0;
+  if (options.linkedServerId) {
+    const context = await getDiscordPublishingContextForLinkedServer(env, options.linkedServerId);
+    if (!context || context.guildId !== guildId || !context.discordPublishingEligible) return 0;
     effectivePlanKey = context.planKey;
   }
   const now = new Date().toISOString();

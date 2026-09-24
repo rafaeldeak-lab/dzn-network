@@ -7,7 +7,7 @@ import {
   sendDiscordTestPost,
   verifyDiscordPostingChannel,
 } from "../../../_lib/discord-posting";
-import { ensureAutomationSchema, getAutomationContextForLinkedServer } from "../../../_lib/automation";
+import { ensureAutomationSchema, getDiscordPublishingContextForLinkedServer } from "../../../_lib/automation";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
 import { AUTO_POST_OPTIONS, AUTO_POST_TYPES, getListingLimits, hasListingAutoPost, normalizeListingPlanKey } from "../../../_lib/plans";
@@ -38,6 +38,7 @@ type PostingContext = {
   planKey: string;
   subscriptionStatus: string;
   showcaseAccess: ServerShowcaseAccess;
+  discordPublishingEligible: boolean;
 };
 
 export const onRequest: PagesFunction = async ({ request, env, params }) => {
@@ -66,7 +67,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
 
   const postType = normalizePostType(body.post_type);
   if (!postType) return json({ error: "Invalid post type" }, { status: 400 });
-  if (!hasListingAutoPost(context, postType)) {
+  if (!hasPostingAccess(context, postType)) {
     return json({ error: "Upgrade required for this Discord auto-post type." }, { status: 403 });
   }
   const channelId = sanitizeDiscordId(body.discord_channel_id);
@@ -236,7 +237,7 @@ async function handleGroupedPostingAction(
   if (action === "test") {
     const postType = normalizePostType(body.test_post_type ?? body.post_type ?? body.post_types?.[0]);
     if (!postType) return json({ error: "Select a post type to test." }, { status: 400 });
-    if (!hasListingAutoPost(context, postType)) return json({ error: "Upgrade required for this Discord auto-post type." }, { status: 403 });
+    if (!hasPostingAccess(context, postType)) return json({ error: "Upgrade required for this Discord auto-post type." }, { status: 403 });
     const testResult = await runPostingTest(env, context, channelId, postType, webhookUrl, permissionCheck);
     return json({
       ...await getPostingDestinationPayload(env, context),
@@ -247,7 +248,7 @@ async function handleGroupedPostingAction(
 
   const postTypes = normalizePostTypes(body.post_types);
   if (!postTypes.length) return json({ error: "Select at least one auto-post type." }, { status: 400 });
-  const locked = postTypes.filter((postType) => !hasListingAutoPost(context, postType));
+  const locked = postTypes.filter((postType) => !hasPostingAccess(context, postType));
   if (locked.length > 0) return json({ error: "One or more selected auto-post types are locked by your DZN plan." }, { status: 403 });
   if (limits.discordChannelLimit !== null && await wouldExceedDiscordChannelLimit(env, context.guildId, channelId, limits.discordChannelLimit)) {
     return json({ error: "Free Listing supports one connected Discord auto-post channel. Upgrade to Pro for multiple post-type channels.", code: "CHANNEL_LIMIT" }, { status: 403 });
@@ -362,7 +363,7 @@ async function runPostingTest(
   }
 }
 
-async function getPostingDestinationPayload(env: Env, context: { guildId: string; planKey: string; subscriptionStatus: string }) {
+async function getPostingDestinationPayload(env: Env, context: PostingContext) {
   const { guildId } = context;
   const listingPlanKey = normalizeListingPlanKey(context);
   const rows = await requireDb(env)
@@ -446,8 +447,8 @@ async function getPostingDestinationPayload(env: Env, context: { guildId: string
       const setup = resolvePostingSetup(deliveryMode, row?.discord_channel_id ?? null, Boolean(row?.discord_webhook_url), setupWarning, permissionMissing);
       return {
         post_type: postType,
-        allowed: hasListingAutoPost(context, postType),
-        locked_message: hasListingAutoPost(context, postType) ? null : lockedMessage(postType),
+        allowed: hasPostingAccess(context, postType),
+        locked_message: hasPostingAccess(context, postType) ? null : lockedMessage(postType),
         discord_channel_id: row?.discord_channel_id ?? null,
         has_webhook_url: Boolean(row?.discord_webhook_url),
         enabled: row ? Number(row.enabled ?? 0) === 1 : false,
@@ -485,7 +486,7 @@ async function getPostingDestinationPayload(env: Env, context: { guildId: string
   return {
     post_type_options: AUTO_POST_OPTIONS.map((option) => ({
       ...option,
-      allowed_by_plan: hasListingAutoPost(context, option.key),
+      allowed_by_plan: hasPostingAccess(context, option.key),
       listing_plan_key: listingPlanKey,
     })),
     post_types: postTypeSummaries,
@@ -543,7 +544,7 @@ async function getPostingDestinationPayload(env: Env, context: { guildId: string
 }
 
 async function getPostingContextForRead(env: Env, linkedServerId: string) {
-  const context = await getAutomationContextForLinkedServer(env, linkedServerId);
+  const context = await getDiscordPublishingContextForLinkedServer(env, linkedServerId);
   return context ? { ...context, linkedServerId } : null;
 }
 
@@ -569,10 +570,14 @@ async function runProtectedPostingBatch(
 
 async function isPostingAccessCurrent(env: Env, context: PostingContext, postType: AutoPostType) {
   const current = await getPostingContextForRead(env, context.linkedServerId);
-  if (!current || !hasListingAutoPost(current, postType)) return false;
+  if (!current || !hasPostingAccess(current, postType)) return false;
   if (context.showcaseAccess.source !== "complimentary_showcase") return true;
   return current.showcaseAccess.source === "complimentary_showcase"
     && current.showcaseAccess.grantId === context.showcaseAccess.grantId;
+}
+
+function hasPostingAccess(context: PostingContext, postType: AutoPostType) {
+  return context.discordPublishingEligible && hasListingAutoPost(context, postType);
 }
 
 function savedPostingChannel(channelId: string) {

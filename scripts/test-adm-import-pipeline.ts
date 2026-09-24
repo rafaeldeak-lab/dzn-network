@@ -2263,6 +2263,22 @@ class MemoryStatement {
   async all<T>(): Promise<{ results: T[] }> {
     const q = normalizeSql(this.query);
     if (q.startsWith("pragma table_info")) return { results: [] };
+    if (q.includes("select linked_servers.guild_id, server_subscriptions.plan_key") && q.includes("where linked_servers.id = ?")) {
+      const row = this.db.linkedServers.get(String(this.values[0]));
+      return { results: row ? [{
+        guild_id: row.guild_id,
+        plan_key: row.plan_key,
+        status: row.subscription_status,
+      } as T] : [] };
+    }
+    if (q.includes("select linked_servers.id") && q.includes("as lifecycle_status") && q.includes("where linked_servers.guild_id = ?")) {
+      const rows = [...this.db.linkedServers.values()]
+        .filter((row) => row.guild_id === this.values[0]
+          && !["deleted", "merged", "suspended"].includes(String(row.status ?? "pending").toLowerCase())
+          && !row.merged_into_server_id)
+        .map((row) => ({ id: row.id, lifecycle_status: row.lifecycle_status ?? "active_live" }));
+      return { results: rows as T[] };
+    }
     if (q.includes("from adm_raw_events") && q.includes("order by coalesce(source_line_number")) {
       const rows = this.db.admRawEvents
         .filter((row) =>

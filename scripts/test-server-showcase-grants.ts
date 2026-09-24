@@ -266,18 +266,29 @@ async function run() {
     assert.equal(locked?.planKey, "pro");
     assert.equal(locked?.subscriptionStatus, "canceled");
     assert.equal(locked?.accessSource, "billing");
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "pro", ["priority_status_embed"], "canceled-pro-test", {
+      linkedServerId: scope.linkedServerId,
+    }), 0);
 
     await grant(env);
     const unlocked = await getAutomationContextForLinkedServer(env, scope.linkedServerId);
     assert.equal(unlocked?.planKey, "pro");
     assert.equal(unlocked?.subscriptionStatus, "active");
     assert.equal(unlocked?.accessSource, "complimentary_showcase");
+    const ambiguousResponse = await invoke(postingDestinations, env, actor, "GET");
+    assert.equal(ambiguousResponse.status, 200);
+    const ambiguousPayload = await ambiguousResponse.json() as { post_type_options: Array<{ key: string; allowed_by_plan: boolean }> };
+    assert.equal(ambiguousPayload.post_type_options.find((option) => option.key === "priority_status_embed")?.allowed_by_plan, false);
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["priority_status_embed"], "ambiguous-grant-test", {
+      linkedServerId: scope.linkedServerId,
+    }), 0);
+
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
     const queued = await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["priority_status_embed"], "exact-grant-test", {
       linkedServerId: scope.linkedServerId,
     });
     assert.equal(queued, 1);
 
-    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
     const dispatched = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
     assert.equal(dispatched.ok, true);
     assert.equal(dispatched.results[0]?.status, "skipped_disabled");
@@ -347,6 +358,7 @@ async function run() {
   await test("revoked grant cannot commit a posting destination save", async ({ db, env }) => {
     const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
     const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
     await getAutomationContextForLinkedServer(env, scope.linkedServerId);
     db.beforeBatch = () => revokeSql(db, grantId);
     const response = await invoke(postingDestinations, env, actor, "POST", {
@@ -362,6 +374,7 @@ async function run() {
   await test("revoked grant blocks a Discord test immediately before delivery", async ({ db, env }) => {
     const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
     const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
     await getAutomationContextForLinkedServer(env, scope.linkedServerId);
     let revoked = false;
     db.beforeFirst = (sql) => {
