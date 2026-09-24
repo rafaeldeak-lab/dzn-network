@@ -8,6 +8,9 @@ const root = path.resolve(process.env.DZN_PROFILE_QA_BUILD_ROOT ?? "out");
 const output = path.resolve(process.env.DZN_PROFILE_QA_OUTPUT ?? "artifacts/player-hub-profile-state-qa");
 const port = Number(process.env.DZN_PROFILE_QA_PORT ?? 3102);
 const origin = `http://127.0.0.1:${port}`;
+const qaWidths = process.env.DZN_PROFILE_QA_WIDTHS
+  ? process.env.DZN_PROFILE_QA_WIDTHS.split(",").map(value => Number(value.trim())).filter(Number.isFinite)
+  : [1440, 900, 390, 320];
 const name = "Profile QA Player";
 const mime = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".txt": "text/x-component", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".webp": "image/webp", ".woff2": "font/woff2", ".webm": "video/webm", ".mp4": "video/mp4", ".ico": "image/x-icon" };
 const messages = {
@@ -79,7 +82,7 @@ if (process.argv.includes("--serve")) {
   const results = [];
   try {
     if (process.argv.includes("--followup-only")) results.push(...await checkProfileFollowups(browser));
-    for (const width of process.argv.includes("--followup-only") ? [] : [1440, 900, 390, 320]) {
+    for (const width of process.argv.includes("--followup-only") ? [] : qaWidths) {
       for (const [publicState, statsState] of [["published", "stats_available"], ["private", "zero"], ["private", "empty"], ["not_published", "empty"], ["unavailable", "stats_available"], ["published", "unavailable"]]) {
         const context = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion: width < 400 ? "reduce" : "no-preference", timezoneId: "America/Los_Angeles" });
         const page = await context.newPage();
@@ -117,26 +120,41 @@ if (process.argv.includes("--serve")) {
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Page overflow at ${width}`);
           assert.deepEqual(mutations, [], "Reading the hub must not mutate anything");
           if (routePath === "/player/profile") {
+            await panel.getByRole("link", { name: "Game account", exact: true }).click();
+            await page.waitForFunction(() => location.hash === "#game-account" && Boolean(document.getElementById("game-account")));
             const revoked = page.getByRole("region", { name: "Revoked game stats links" });
             await revoked.getByText("The proof did not match this game account. Contact support to submit current evidence.").waitFor();
             assert.equal(await revoked.getByRole("link", { name: "Contact support" }).getAttribute("href"), "mailto:dznnetworksupport@gmail.com");
             assert.ok(await revoked.evaluate(el => el.scrollWidth <= el.clientWidth));
-            for (const [label, id] of [["Edit profile", "profile-settings"], ["Game account", "game-account"]]) {
-              await panel.getByRole("link", { name: label, exact: true }).click();
-              await page.waitForFunction(expected => location.hash === `#${expected}` && document.getElementById(expected)?.getBoundingClientRect().top < innerHeight, id);
-            }
+            await page.getByRole("button", { name: /Privacy & Sharing/ }).click();
+            await assertAnchorInView(page, "profile-settings");
+            assert.equal(await page.locator("#game-account").count(), 0, "Only the selected profile section should remain mounted");
+
+            await page.goto(`${origin}/player/profile`, { waitUntil: "networkidle" });
+            await page.getByRole("button", { name: /Game Stats/ }).click();
+            await page.waitForFunction(() => location.hash === "#game-account");
+            await page.goBack();
+            await page.waitForFunction(() => location.pathname === "/player/profile" && location.hash === "" && Boolean(document.querySelector("#profile-summary")));
           }
           if (routePath === "/player") await panel.screenshot({ path: path.join(output, `${publicState}-${statsState}-${width}.png`) });
         }
         if (publicState === "published" && statsState === "stats_available") {
+          await page.getByRole("button", { name: /Privacy & Sharing/ }).click();
+          await page.locator("#profile-settings").waitFor();
           const initialReads = hubReads;
           await page.getByRole("button", { name: "Hide Public profile on public profile surfaces", exact: true }).click();
-          await page.waitForFunction(() => document.querySelector("#profile-summary")?.textContent.includes("Your public profile is switched off."));
+          await page.getByRole("button", { name: "Show Public profile on public profile surfaces", exact: true }).waitFor();
+          for (let attempt = 0; attempt < 40 && hubReads <= initialReads; attempt++) await new Promise(resolve => setTimeout(resolve, 25));
           assert.ok(hubReads > initialReads, "Saving must reread the summary");
+          await page.getByRole("button", { name: /Overview/ }).click();
+          await page.waitForFunction(() => document.querySelector("#profile-summary")?.textContent.includes("Your public profile is switched off."));
           assert.equal(await page.locator("#profile-summary").getByRole("link", { name: "View public profile", exact: true }).count(), 0);
+          await page.getByRole("button", { name: /Privacy & Sharing/ }).click();
+          await page.locator("#profile-settings").waitFor();
           rejectSave = true;
           await page.getByRole("button", { name: "Show Public profile on public profile surfaces", exact: true }).click();
           await page.getByText("Fixture save failure", { exact: true }).first().waitFor();
+          await page.getByRole("button", { name: /Overview/ }).click();
           assert.equal(await page.locator("#profile-summary").getByRole("link", { name: "View public profile", exact: true }).count(), 0, "Failed publication must not invent a link");
           assert.deepEqual(mutations, ["PATCH /api/player/profile/privacy", "PATCH /api/player/profile/privacy"]);
         }
@@ -153,12 +171,13 @@ if (process.argv.includes("--serve")) {
 
 async function checkProfileFollowups(browser) {
   const results = [];
-  for (const width of [1440, 900, 390, 320]) {
+  for (const width of qaWidths) {
     for (const scenario of process.argv.includes("--navigation-only") ? ["empty"] : ["empty", "zero", "populated", "hidden", "unavailable"]) {
       const context = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion: width < 400 ? "reduce" : "no-preference" });
       const page = await context.newPage();
       const errors = [], mutations = [];
       let holdIdentity = false;
+      let signedOut = false;
       page.on("pageerror", error => errors.push(error.message));
       page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
       await page.route("**/*", async route => {
@@ -166,6 +185,10 @@ async function checkProfileFollowups(browser) {
         if (url.origin !== origin) { await route.abort(); return; }
         if (!url.pathname.startsWith("/api/")) { await route.continue(); return; }
         if (request.method() !== "GET") { mutations.push(`${request.method()} ${url.pathname}`); await route.fulfill({ status: 405, json: { ok: false } }); return; }
+        if (url.pathname === "/api/auth/me" && signedOut) {
+          await route.fulfill({ status: 401, json: { authenticated: false, user: null } });
+          return;
+        }
         // Deliberately let native navigation run before authentication and panel data arrive.
         const delay = { "/api/auth/me": 350, "/api/player/hub": 750, "/api/player/game-identities": holdIdentity ? 4000 : 1100, "/api/player/profile/privacy": 500 }[url.pathname] ?? 0;
         if (delay) await new Promise(resolve => setTimeout(resolve, delay));
@@ -222,17 +245,28 @@ async function checkProfileFollowups(browser) {
           await page.goto(`${origin}/player`, { waitUntil: "networkidle" });
           holdIdentity = true;
           await page.goto(`${origin}/player/profile#profile-settings`, { waitUntil: "domcontentloaded" });
-          await page.waitForFunction(() => document.querySelector("#profile-summary")?.textContent.includes("No linked server stats yet."));
-          assert.equal(await page.locator('#game-account [aria-busy="true"]').count(), 1);
+          await page.locator("#profile-settings").waitFor();
+          assert.equal(await page.locator("#profile-summary, #game-account").count(), 0, "Unselected profile sections must not coexist");
           await page.waitForLoadState("networkidle");
           await assertAnchorInView(page, "profile-settings");
           await page.goto(`${origin}/player`, { waitUntil: "networkidle" });
-          await page.goto(`${origin}/player/profile#profile-settings`, { waitUntil: "domcontentloaded" });
-          await page.waitForFunction(() => document.querySelector("#profile-summary")?.textContent.includes("No linked server stats yet."));
-          assert.equal(await page.locator('#game-account [aria-busy="true"]').count(), 1);
+          await page.goto(`${origin}/player/profile#game-account`, { waitUntil: "domcontentloaded" });
+          await page.locator('#game-account [aria-busy="true"]').waitFor();
           await page.keyboard.press("Control+Home");
           await page.waitForLoadState("networkidle");
           assert.equal(await page.evaluate(() => scrollY), 0, "A late panel response must not override the user's scroll");
+
+          signedOut = true;
+          await page.reload({ waitUntil: "networkidle" });
+          assert.equal(
+            await page.getByRole("link", { name: "Login With Discord", exact: true }).getAttribute("href"),
+            "/login?returnTo=%2Fplayer%2Fprofile%23game-account",
+            "Discord login must preserve the requested profile section",
+          );
+          for (let index = errors.length - 1; index >= 0; index--) {
+            if (/401 \(Unauthorized\)/.test(errors[index])) errors.splice(index, 1);
+          }
+          signedOut = false;
         }
         assert.deepEqual(errors, []);
         assert.deepEqual(mutations, []);
@@ -249,6 +283,6 @@ async function checkProfileFollowups(browser) {
 async function assertAnchorInView(page, id) {
   await page.waitForFunction(expected => {
     const top = document.getElementById(expected)?.getBoundingClientRect().top;
-    return location.hash === `#${expected}` && top >= 90 && top < innerHeight / 2;
+    return location.hash === `#${expected}` && top >= 80 && top < innerHeight;
   }, id, { timeout: 5000 });
 }

@@ -295,7 +295,8 @@ async function requestPlayerHub(): Promise<PlayerHubRequestResult> {
 }
 
 export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
-  const returnTo = mode === "profile" ? "/player/profile" : "/player";
+  const [profileReturnTo, setProfileReturnTo] = useState("/player/profile");
+  const returnTo = mode === "profile" ? profileReturnTo : "/player";
   const [authState, setAuthState] = useState<PlayerAuthState>({
     status: "loading",
     user: null,
@@ -321,7 +322,8 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
     if (mode !== "profile") return;
     const syncSectionFromHash = () => {
       const section = profileSectionFromHash(window.location.hash);
-      if (section) setActiveProfileSection(section);
+      setActiveProfileSection(section ?? "profile-summary");
+      setProfileReturnTo(section ? `/player/profile#${section}` : "/player/profile");
     };
     syncSectionFromHash();
     window.addEventListener("hashchange", syncSectionFromHash);
@@ -329,14 +331,14 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
   }, [mode]);
 
   useEffect(() => {
-    if (mode !== "profile" || authState.status !== "logged_in" || hubState.status === "idle" || hubState.status === "loading") return;
+    if (mode !== "profile" || authState.status !== "logged_in") return;
     const requestedSection = profileSectionFromHash(window.location.hash);
     if (!requestedSection || requestedSection !== activeProfileSection) return;
     const frame = requestAnimationFrame(() => {
       document.getElementById(requestedSection)?.scrollIntoView({ block: "start", behavior: "auto" });
     });
     return () => cancelAnimationFrame(frame);
-  }, [mode, authState.status, hubState.status, activeProfileSection]);
+  }, [mode, authState.status, activeProfileSection]);
 
   useEffect(() => {
     let activeRequest = true;
@@ -402,6 +404,7 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
 
   function openProfileSection(section: ProfileSectionId) {
     setActiveProfileSection(section);
+    setProfileReturnTo(`/player/profile#${section}`);
     window.history.pushState(null, "", `#${section}`);
   }
 

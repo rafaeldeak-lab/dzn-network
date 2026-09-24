@@ -50,6 +50,8 @@ assert.match(playerHome, /Game Stats/, "The profile workspace must expose game-s
 assert.match(playerHome, /Privacy & Sharing/, "The profile workspace must expose privacy and sharing controls.");
 assert.match(playerHome, /activeProfileSection === "profile-summary"/, "The profile workspace must render one primary section at a time.");
 assert.match(playerHome, /mode === "home"/, "The full dashboard panels must remain on the Player Hub route.");
+assert.match(playerHome, /section \?\? "profile-summary"/, "Clearing or invalidating the profile hash must restore Overview.");
+assert.match(playerHome, /setProfileReturnTo\(section \? `\/player\/profile#\$\{section\}` : "\/player\/profile"\)/, "Discord login must preserve a recognized profile deep link.");
 assert.doesNotMatch(playerHome, /dedicated profile privacy slices|Current Profile Signals|This profile summary is private and read-only/, "The summary must not expose internal development wording.");
 assert.match(playerHome, /progression\.tracks\.map/, "Player Hub UI must render earned progression track readiness.");
 assert.match(playerHome, /future_earned_runtime/, "Player Hub UI must keep earned progression runtime marked as future.");
