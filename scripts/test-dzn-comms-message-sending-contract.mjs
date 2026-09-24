@@ -4,7 +4,9 @@ import test from "node:test";
 
 const root = new URL("../", import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), "utf8");
-const migration = read("migrations/0071_dzn_comms_live_moderation.sql");
+const baseMigration = read("migrations/0071_dzn_comms_live_moderation.sql");
+const privacyMigration = read("migrations/0072_dzn_comms_private_rate_ledgers.sql");
+const migration = `${baseMigration}\n${privacyMigration}`;
 const runtime = read("functions/_lib/dzn-comms-live.ts");
 const shell = read("components/comms/dzn-comms-shell.tsx");
 const client = read("components/comms/comms-history-client.ts");
@@ -31,6 +33,7 @@ test("schema supplies durable idempotency, quotas, reports, timeouts and audit",
   assert.match(migration, /UNIQUE\(actor_user_id, channel_id, client_request_id\)/);
   assert.match(migration, /accepted_at TEXT NOT NULL/);
   assert.match(migration, /actor_rate_key TEXT NOT NULL/);
+  assert.match(migration, /actor_receipt_key TEXT NOT NULL/);
   assert.match(migration, /send_rate_key TEXT/);
   assert.match(migration, /send_minute_bucket TEXT/);
   assert.match(migration, /send_slot INTEGER/);
@@ -52,6 +55,8 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /channels\.slug = 'global-chat'/);
   assert.match(runtime, /keyedDigest/);
   assert.match(runtime, /rateLimitDigest/);
+  assert.match(runtime, /receiptDigest/);
+  assert.doesNotMatch(runtime, /dzn_comms_send_receipts \(id, actor_user_id/, "Receipt writes must not retain the raw account ID.");
   assert.match(runtime, /secretReady/);
   assert.match(runtime, /scope === "local_test" && localRequest/);
   assert.match(runtime, /WITH RECURSIVE slots\(slot\)/);

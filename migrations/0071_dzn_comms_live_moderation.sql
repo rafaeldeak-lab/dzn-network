@@ -11,9 +11,6 @@ CREATE TABLE IF NOT EXISTS dzn_comms_send_receipts (
   response_status INTEGER NOT NULL,
   reason_code TEXT,
   message_id TEXT,
-  send_rate_key TEXT,
-  send_minute_bucket TEXT,
-  send_slot INTEGER CHECK(send_slot BETWEEN 1 AND 20),
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   expires_at TEXT NOT NULL,
   UNIQUE(actor_user_id, channel_id, client_request_id),
@@ -23,12 +20,13 @@ CREATE TABLE IF NOT EXISTS dzn_comms_send_receipts (
 );
 
 CREATE TABLE IF NOT EXISTS dzn_comms_send_slots (
-  actor_rate_key TEXT NOT NULL,
+  actor_user_id TEXT NOT NULL,
   minute_bucket TEXT NOT NULL,
   slot INTEGER NOT NULL CHECK(slot BETWEEN 1 AND 20),
   accepted_at TEXT NOT NULL,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY(actor_rate_key, minute_bucket, slot)
+  PRIMARY KEY(actor_user_id, minute_bucket, slot),
+  FOREIGN KEY(actor_user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS dzn_comms_attempt_slots (
@@ -89,7 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_dzn_comms_receipts_actor_created
 CREATE INDEX IF NOT EXISTS idx_dzn_comms_slots_created
   ON dzn_comms_send_slots(created_at);
 CREATE INDEX IF NOT EXISTS idx_dzn_comms_slots_actor_accepted
-  ON dzn_comms_send_slots(actor_rate_key, accepted_at DESC);
+  ON dzn_comms_send_slots(actor_user_id, accepted_at DESC);
 CREATE INDEX IF NOT EXISTS idx_dzn_comms_attempt_slots_created
   ON dzn_comms_attempt_slots(created_at);
 CREATE INDEX IF NOT EXISTS idx_dzn_comms_report_slots_created

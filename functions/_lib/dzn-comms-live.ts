@@ -73,6 +73,7 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   const channel = await db.prepare("SELECT id FROM dzn_comms_channels WHERE slug = 'global-chat' AND kind = 'public' AND visibility = 'public' AND is_readable = 1 LIMIT 1").first<{ id: string }>();
   if (!channel?.id) return error(503, "CHAT_NOT_READY", "Global Chat is not ready yet.");
   const bodyHash = await keyedDigest(typeof parsed.value.body === "string" ? parsed.value.body : "", env.SESSION_SECRET!);
+  const actorReceiptKey = await receiptDigest(user.id, env.SESSION_SECRET!);
   const actorRateKey = await rateLimitDigest(user.id, env.SESSION_SECRET!);
   const now = new Date();
   const minuteBucket = now.toISOString().slice(0, 16);
@@ -82,34 +83,34 @@ export async function handleDznCommsSend(request: Request, env: Env) {
     if (isQuotaConstraintError(cause)) return error(429, "RATE_LIMITED", "Too many chat attempts were made. Wait a moment and retry.");
     return error(503, "CHAT_STORAGE_UNAVAILABLE", "Global Chat could not verify this attempt. Retry shortly.");
   }
-  const replay = await readReceipt(db, user.id, channel.id, requestId);
+  const replay = await readReceipt(db, actorReceiptKey, channel.id, requestId);
   if (replay) {
     if (replay.body_hash !== bodyHash) return error(409, "REQUEST_ID_CONFLICT", "This retry ID was already used for different text.");
     return receiptResponse(replay, true);
   }
   const timeout = await db.prepare("SELECT expires_at FROM dzn_comms_timeouts WHERE actor_user_id = ? AND julianday(expires_at) > julianday('now') LIMIT 1").bind(user.id).first<{ expires_at: string }>();
   if (timeout) return error(423, "CHAT_TIMEOUT", "Chat is temporarily unavailable for this account.");
-  if (moderated.decision !== "allow") return storeRejected(db, user, channel.id, requestId, bodyHash, moderated.decision, moderated.code);
+  if (moderated.decision !== "allow") return storeRejected(db, user, actorReceiptKey, channel.id, requestId, bodyHash, moderated.decision, moderated.code);
   const messageId = crypto.randomUUID();
   const receiptId = crypto.randomUUID();
   const expires = new Date(now.getTime() + 7 * 86_400_000).toISOString();
   const messageExpires = new Date(now.getTime() + MESSAGE_RETENTION_DAYS * 86_400_000).toISOString();
   try {
     await db.batch([
-      deleteExpiredReceipt(db, user.id, channel.id, requestId),
+      deleteExpiredReceipt(db, actorReceiptKey, channel.id, requestId),
       allocateSendSlot(db, actorRateKey, minuteBucket, now.toISOString()),
       db.prepare("INSERT INTO dzn_comms_messages (id, channel_id, author_user_id, author_display_name, author_role_label, body, visibility_state, source_label, expires_at) VALUES (?, ?, ?, ?, 'Member', ?, 'visible', 'authenticated_web_chat', ?)").bind(messageId, channel.id, user.id, safeName(user), moderated.body, messageExpires),
       db.prepare(`INSERT INTO dzn_comms_send_receipts
-        (id, actor_user_id, channel_id, client_request_id, body_hash, decision, response_status, reason_code,
+        (id, actor_receipt_key, channel_id, client_request_id, body_hash, decision, response_status, reason_code,
           message_id, send_rate_key, send_minute_bucket, send_slot, expires_at)
         SELECT ?, ?, ?, ?, ?, 'allow', 201, 'MESSAGE_ALLOWED', ?, ?, ?, slots.slot, ?
         FROM dzn_comms_send_slots AS slots
         WHERE slots.actor_rate_key = ? AND slots.minute_bucket = ? AND slots.accepted_at = ?
-        LIMIT 1`).bind(receiptId, user.id, channel.id, requestId, bodyHash, messageId, actorRateKey, minuteBucket, expires,
+        LIMIT 1`).bind(receiptId, actorReceiptKey, channel.id, requestId, bodyHash, messageId, actorRateKey, minuteBucket, expires,
           actorRateKey, minuteBucket, now.toISOString()),
     ]);
   } catch (cause) {
-    const concurrentReplay = await readReceipt(db, user.id, channel.id, requestId);
+    const concurrentReplay = await readReceipt(db, actorReceiptKey, channel.id, requestId);
     if (concurrentReplay?.body_hash === bodyHash) return receiptResponse(concurrentReplay, true);
     if (concurrentReplay) return error(409, "REQUEST_ID_CONFLICT", "This retry ID was already used for different text.");
     if (isQuotaConstraintError(cause)) return error(429, "RATE_LIMITED", "Wait five seconds before sending another message.");
@@ -247,19 +248,19 @@ export async function runDznCommsRetention(db: D1Database, now = new Date()) {
   };
 }
 
-async function storeRejected(db: D1Database, user: SessionUser, channelId: string, requestId: string, bodyHash: string, decision: "block" | "timeout", reason: string) {
+async function storeRejected(db: D1Database, user: SessionUser, actorReceiptKey: string, channelId: string, requestId: string, bodyHash: string, decision: "block" | "timeout", reason: string) {
   const status = decision === "timeout" ? 423 : 422;
   const receiptId = crypto.randomUUID();
   const now = Date.now();
   const statements = [
-    deleteExpiredReceipt(db, user.id, channelId, requestId),
-    db.prepare("INSERT INTO dzn_comms_send_receipts (id, actor_user_id, channel_id, client_request_id, body_hash, decision, response_status, reason_code, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(receiptId, user.id, channelId, requestId, bodyHash, decision, status, reason, new Date(now + 7 * 86_400_000).toISOString()),
+    deleteExpiredReceipt(db, actorReceiptKey, channelId, requestId),
+    db.prepare("INSERT INTO dzn_comms_send_receipts (id, actor_receipt_key, channel_id, client_request_id, body_hash, decision, response_status, reason_code, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(receiptId, actorReceiptKey, channelId, requestId, bodyHash, decision, status, reason, new Date(now + 7 * 86_400_000).toISOString()),
   ];
   if (decision === "timeout") statements.push(db.prepare("INSERT INTO dzn_comms_timeouts (actor_user_id, reason_code, expires_at) VALUES (?, ?, ?) ON CONFLICT(actor_user_id) DO UPDATE SET reason_code = excluded.reason_code, expires_at = excluded.expires_at, updated_at = CURRENT_TIMESTAMP").bind(user.id, reason, new Date(now + 10 * 60_000).toISOString()));
   try {
     await db.batch(statements);
   } catch {
-    const replay = await readReceipt(db, user.id, channelId, requestId);
+    const replay = await readReceipt(db, actorReceiptKey, channelId, requestId);
     if (replay?.body_hash === bodyHash) return receiptResponse(replay, true);
     if (replay) return error(409, "REQUEST_ID_CONFLICT", "This retry ID was already used for different text.");
     return error(503, "CHAT_STORAGE_UNAVAILABLE", "Global Chat could not store that safety decision. Retry shortly.");
@@ -267,12 +268,12 @@ async function storeRejected(db: D1Database, user: SessionUser, channelId: strin
   return error(status, reason, decision === "timeout" ? "This account has a short chat timeout for a safety review." : "That message was blocked by DZN Safety.");
 }
 
-async function readReceipt(db: D1Database, actorId: string, channelId: string, requestId: string) {
-  return db.prepare("SELECT body_hash, decision, response_status, reason_code, message_id FROM dzn_comms_send_receipts WHERE actor_user_id = ? AND channel_id = ? AND client_request_id = ? AND julianday(expires_at) > julianday('now') LIMIT 1").bind(actorId, channelId, requestId).first<{ body_hash: string; decision: string; response_status: number; reason_code: string | null; message_id: string | null }>();
+async function readReceipt(db: D1Database, actorReceiptKey: string, channelId: string, requestId: string) {
+  return db.prepare("SELECT body_hash, decision, response_status, reason_code, message_id FROM dzn_comms_send_receipts WHERE actor_receipt_key = ? AND channel_id = ? AND client_request_id = ? AND julianday(expires_at) > julianday('now') LIMIT 1").bind(actorReceiptKey, channelId, requestId).first<{ body_hash: string; decision: string; response_status: number; reason_code: string | null; message_id: string | null }>();
 }
 
-function deleteExpiredReceipt(db: D1Database, actorId: string, channelId: string, requestId: string) {
-  return db.prepare("DELETE FROM dzn_comms_send_receipts WHERE actor_user_id = ? AND channel_id = ? AND client_request_id = ? AND julianday(expires_at) <= julianday('now')").bind(actorId, channelId, requestId);
+function deleteExpiredReceipt(db: D1Database, actorReceiptKey: string, channelId: string, requestId: string) {
+  return db.prepare("DELETE FROM dzn_comms_send_receipts WHERE actor_receipt_key = ? AND channel_id = ? AND client_request_id = ? AND julianday(expires_at) <= julianday('now')").bind(actorReceiptKey, channelId, requestId);
 }
 
 function receiptResponse(row: { decision: string; response_status: number; reason_code: string | null; message_id: string | null }, replayed: boolean) {
@@ -321,4 +322,5 @@ function slotAllocationSql(table: "dzn_comms_attempt_slots" | "dzn_comms_report_
     ))`;
 }
 async function keyedDigest(value: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value.normalize("NFKC"))))].map(byte => byte.toString(16).padStart(2, "0")).join(""); }
+async function receiptDigest(actorId: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms-receipt:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(actorId)))].map(byte => byte.toString(16).padStart(2, "0")).join(""); }
 async function rateLimitDigest(actorId: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms-rate:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(actorId)))].map(byte => byte.toString(16).padStart(2, "0")).join(""); }

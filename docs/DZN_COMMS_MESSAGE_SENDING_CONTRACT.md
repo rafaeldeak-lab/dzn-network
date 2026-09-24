@@ -21,7 +21,7 @@ All activation flags default off:
 - `DZN_COMMS_RETENTION_ENABLED=false`
 - `DZN_COMMS_RETENTION_SCOPE=local_test`
 
-Production activation requires a separately reviewed application of `0065_dzn_comms_read_history.sql` and `0071_dzn_comms_live_moderation.sql`, verification of their exact production ledger state, then server scope `production` and the matching UI flag. A source merge alone does not apply migrations or activate chat.
+Production activation requires a separately reviewed application of `0065_dzn_comms_read_history.sql`, `0071_dzn_comms_live_moderation.sql`, and `0072_dzn_comms_private_rate_ledgers.sql`, verification of their exact production ledger state, then server scope `production` and the matching UI flag. A source merge alone does not apply migrations or activate chat.
 
 The `local_test` scope is accepted only when the request host is loopback or a `.localhost` hostname. It cannot enable write routes on a preview or production hostname, even if the enable flag is set accidentally.
 
@@ -31,7 +31,7 @@ The `local_test` scope is accepted only when the request host is loopback or a `
 
 The server controls actor identity, author label, channel, timestamp, visibility and source. It blocks token-shaped secrets, external Discord invites, repeated-character spam and severe threat/doxxing language. Rejected text remains request-memory-only and is never written to D1.
 
-Accepted messages, quota slots and decision receipts are written in one D1 batch. The receipt key is `(actor_user_id, channel_id, client_request_id)`. Same-key retries return the original result and a different body returns conflict. Each quota write allocates the first free slot atomically under a secret-derived rate key, so the rate ledger does not store the raw user ID. The receipt records the exact allocated slot while the message is active. Destructive erasure clears that association but retains the pseudonymous slot until normal retention, preserving both cooldown and per-minute limits without retaining a message-to-author link. The accepted timestamp is checked against the previous accepted send to enforce a full five elapsed seconds, while bounded minute slots enforce the hard ceiling during concurrent sends.
+Accepted messages, quota slots and decision receipts are written in one D1 batch. Receipts and accepted-send slots use separate secret-derived actor keys and do not store the raw user ID. The receipt key is `(actor_receipt_key, channel_id, client_request_id)`. Same-key retries return the original result and a different body returns conflict. Each quota write allocates the first free slot atomically, and the receipt records the exact allocated slot while the message is active. Destructive erasure clears the message and slot association but retains the independent pseudonymous quota slot until normal retention, preserving both cooldown and per-minute limits without retaining a message-to-author link. The accepted timestamp is checked against the previous accepted send to enforce a full five elapsed seconds, while bounded minute slots enforce the hard ceiling during concurrent sends.
 
 ## Reporting And Moderation
 

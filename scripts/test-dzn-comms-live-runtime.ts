@@ -19,6 +19,10 @@ type Sqlite = {
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: new (path: string) => Sqlite };
 const secret = "dzn-comms-runtime-test-secret-32-bytes-minimum";
+async function receiptKey(actorId: string) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms-receipt:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(actorId)))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 async function fixture() {
   const sqlite = new DatabaseSync(":memory:");
@@ -32,6 +36,7 @@ async function fixture() {
   `);
   sqlite.exec(readFileSync("migrations/0065_dzn_comms_read_history.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0071_dzn_comms_live_moderation.sql", "utf8"));
+  sqlite.exec(readFileSync("migrations/0072_dzn_comms_private_rate_ledgers.sql", "utf8"));
   const requiredTables = ["dzn_comms_channels", "dzn_comms_messages", "dzn_comms_send_receipts", "dzn_comms_reports", "dzn_comms_moderation_audit"];
   const installedTables = new Set(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => String(row.name)));
   assert.deepEqual(requiredTables.filter((table) => !installedTables.has(table)), [], "Both Comms migrations must install the required tables.");
@@ -153,9 +158,10 @@ async function testSendRuntime() {
 
   const expired = await fixture();
   try {
+    const playerReceiptKey = await receiptKey("player");
     expired.sqlite.prepare(`INSERT INTO dzn_comms_send_receipts
-      (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,reason_code,expires_at)
-      VALUES ('expired','player','dzn-global-chat','request-expired-1','old-hash','block',422,'SPAM_BLOCKED',datetime('now','-1 day'))`).run();
+      (id,actor_receipt_key,channel_id,client_request_id,body_hash,decision,response_status,reason_code,expires_at)
+      VALUES ('expired',?,'dzn-global-chat','request-expired-1','old-hash','block',422,'SPAM_BLOCKED',datetime('now','-1 day'))`).run(playerReceiptKey);
     const replaced = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
       channelSlug: "global-chat", clientRequestId: "request-expired-1", body: "Fresh request after receipt expiry",
     }), expired.env);
@@ -180,9 +186,10 @@ async function testSendRuntime() {
 
   const raced = await fixture();
   try {
+    const playerReceiptKey = await receiptKey("player");
     raced.beforeBatch(() => raced.sqlite.prepare(`INSERT INTO dzn_comms_send_receipts
-      (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,reason_code,expires_at)
-      VALUES ('raced','player','dzn-global-chat','request-race-0001','different-hash','block',422,'SPAM_BLOCKED',datetime('now','+1 day'))`).run());
+      (id,actor_receipt_key,channel_id,client_request_id,body_hash,decision,response_status,reason_code,expires_at)
+      VALUES ('raced',?,'dzn-global-chat','request-race-0001','different-hash','block',422,'SPAM_BLOCKED',datetime('now','+1 day'))`).run(playerReceiptKey));
     const result = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
       channelSlug: "global-chat", clientRequestId: "request-race-0001", body: "Original body",
     }), raced.env);
@@ -246,7 +253,8 @@ async function testReportAndModerationRuntime() {
     const messageId = (await payload(sent)).message_id!;
     erased.sqlite.prepare(`INSERT INTO dzn_comms_reports (id,message_id,reporter_user_id,reason_code)
       VALUES ('report-delete',?,'player','personal_information')`).run(messageId);
-    const receiptBefore = erased.sqlite.prepare("SELECT send_rate_key,send_minute_bucket,send_slot FROM dzn_comms_send_receipts WHERE message_id = ?").get(messageId);
+    const receiptBefore = erased.sqlite.prepare("SELECT actor_receipt_key,send_rate_key,send_minute_bucket,send_slot FROM dzn_comms_send_receipts WHERE message_id = ?").get(messageId);
+    assert.match(String(receiptBefore?.actor_receipt_key), /^[a-f0-9]{64}$/, "Accepted sends must use a pseudonymous receipt key.");
     assert.match(String(receiptBefore?.send_rate_key), /^[a-f0-9]{64}$/, "Accepted sends must use a pseudonymous rate key.");
     assert.ok(receiptBefore?.send_minute_bucket && receiptBefore?.send_slot, "The receipt must persist the exact allocated slot.");
     assert.equal(erased.count("dzn_comms_send_slots"), 1);
@@ -259,7 +267,8 @@ async function testReportAndModerationRuntime() {
     assert.equal(row.author_user_id, null);
     assert.equal(row.visibility_state, "deleted");
     assert.equal(erased.sqlite.prepare("SELECT status FROM dzn_comms_reports WHERE id = 'report-delete'").get()?.status, "resolved");
-    const receiptAfter = erased.sqlite.prepare("SELECT message_id,send_rate_key,send_minute_bucket,send_slot FROM dzn_comms_send_receipts WHERE client_request_id = 'delete-request-0001'").get();
+    const receiptAfter = erased.sqlite.prepare("SELECT actor_receipt_key,message_id,send_rate_key,send_minute_bucket,send_slot FROM dzn_comms_send_receipts WHERE client_request_id = 'delete-request-0001'").get();
+    assert.match(String(receiptAfter?.actor_receipt_key), /^[a-f0-9]{64}$/, "Erasure may retain only the non-reversible receipt key needed for replay protection.");
     assert.equal(receiptAfter?.message_id, null, "Erasure must unlink the retained receipt from the message.");
     assert.equal(receiptAfter?.send_rate_key, null, "Erasure must clear the receipt's pseudonymous rate key.");
     assert.equal(receiptAfter?.send_minute_bucket, null, "Erasure must clear the receipt's exact rate minute.");
@@ -277,7 +286,7 @@ async function testReportAndModerationRuntime() {
       (id,channel_id,author_user_id,author_display_name,body,visibility_state)
       VALUES ('message-delete-late','dzn-global-chat','other','Other','Old sensitive text','visible')`).run();
     erasedAfterSlotExpiry.sqlite.prepare(`INSERT INTO dzn_comms_send_receipts
-      (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,message_id,created_at,expires_at)
+      (id,actor_receipt_key,channel_id,client_request_id,body_hash,decision,response_status,message_id,created_at,expires_at)
       VALUES ('receipt-delete-late','other','dzn-global-chat','delete-late-request','hash','allow',201,'message-delete-late',datetime('now','-3 days'),datetime('now','+4 days'))`).run();
     erasedAfterSlotExpiry.sqlite.prepare(`INSERT INTO dzn_comms_send_slots (actor_rate_key,minute_bucket,slot,accepted_at)
       VALUES ('unrelated-pseudonymous-rate-key',strftime('%Y-%m-%dT%H:%M','now'),1,CURRENT_TIMESTAMP)`).run();
@@ -313,7 +322,7 @@ async function testRetentionRuntime() {
       (id,channel_id,author_user_id,author_display_name,body,visibility_state,expires_at)
       VALUES ('expired-message','dzn-global-chat','other','Other','Expired private text','visible','2026-01-01T00:00:00.000Z')`).run();
     f.sqlite.prepare(`INSERT INTO dzn_comms_send_receipts
-      (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,expires_at)
+      (id,actor_receipt_key,channel_id,client_request_id,body_hash,decision,response_status,expires_at)
       VALUES ('old-receipt','player','dzn-global-chat','old-request','hash','allow',201,'2026-01-01T00:00:00.000Z')`).run();
     f.sqlite.prepare(`INSERT INTO dzn_comms_reports (id,message_id,reporter_user_id,reason_code)
       VALUES ('expired-report','expired-message','player','other')`).run();
@@ -330,7 +339,34 @@ async function testRetentionRuntime() {
   } finally { f.close(); }
 }
 
+function testPrivateLedgerMigrationRuntime() {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec(`PRAGMA foreign_keys = ON;
+      CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT NOT NULL UNIQUE, username TEXT, avatar TEXT);
+      INSERT INTO users VALUES ('legacy-player','100','Legacy Player',NULL);`);
+    sqlite.exec(readFileSync("migrations/0065_dzn_comms_read_history.sql", "utf8"));
+    sqlite.exec(readFileSync("migrations/0071_dzn_comms_live_moderation.sql", "utf8"));
+    sqlite.exec(`INSERT INTO dzn_comms_send_receipts
+        (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,expires_at)
+        VALUES ('legacy-receipt','legacy-player','dzn-global-chat','legacy-request','hash','block',422,datetime('now','+1 day'));
+      INSERT INTO dzn_comms_send_slots (actor_user_id,minute_bucket,slot,accepted_at)
+        VALUES ('legacy-player','2026-09-24T12:00',1,'2026-09-24T12:00:00.000Z');`);
+    sqlite.exec(readFileSync("migrations/0072_dzn_comms_private_rate_ledgers.sql", "utf8"));
+    const receiptColumns = new Set(sqlite.prepare("PRAGMA table_info(dzn_comms_send_receipts)").all().map((row) => String(row.name)));
+    const slotColumns = new Set(sqlite.prepare("PRAGMA table_info(dzn_comms_send_slots)").all().map((row) => String(row.name)));
+    assert.equal(receiptColumns.has("actor_user_id"), false, "The upgraded receipt ledger must drop the raw account ID column.");
+    assert.equal(slotColumns.has("actor_user_id"), false, "The upgraded accepted-send ledger must drop the raw account ID column.");
+    const receipt = sqlite.prepare("SELECT actor_receipt_key FROM dzn_comms_send_receipts WHERE id = 'legacy-receipt'").get();
+    const slot = sqlite.prepare("SELECT actor_rate_key FROM dzn_comms_send_slots").get();
+    assert.match(String(receipt?.actor_receipt_key), /^[a-f0-9]{64}$/);
+    assert.match(String(slot?.actor_rate_key), /^[a-f0-9]{64}$/);
+    assert.equal(sqlite.prepare("PRAGMA foreign_key_check").all().length, 0);
+  } finally { sqlite.close(); }
+}
+
 async function main() {
+  testPrivateLedgerMigrationRuntime();
   await testSendRuntime();
   await testReportAndModerationRuntime();
   await testRetentionRuntime();

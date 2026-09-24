@@ -35,9 +35,9 @@ DZN_COMMS_RETENTION_SCOPE=local_test
 ## Controlled Production Activation
 
 1. Confirm the production account, database name and database ID. Capture a recovery point and a sanitized schema/ledger snapshot.
-2. List the D1 migration ledger and prove the exact state of `0065_dzn_comms_read_history.sql` and `0071_dzn_comms_live_moderation.sql` before writing anything.
+2. List the D1 migration ledger and prove the exact state of `0065_dzn_comms_read_history.sql`, `0071_dzn_comms_live_moderation.sql`, and `0072_dzn_comms_private_rate_ledgers.sql` before writing anything.
 3. If approved and pending, apply only migration `0065`; verify its ledger row, tables, indexes and foreign keys.
-4. If approved and pending, apply only migration `0071`; verify its ledger row, tables, indexes, constraints, seeded `global-chat` channel and foreign keys.
+4. If approved and pending, apply `0071` and then `0072` as separate controlled writes; after each migration verify its ledger row, tables, indexes, constraints and foreign keys. Verify the seeded `global-chat` channel after `0071`, and verify that the receipt and accepted-send ledgers contain no raw account ID column after `0072`.
 5. Enable the server history, live, owner-moderation and retention flags with scope `production`. Keep both public UI flags off.
 6. Run authenticated API checks with designated test accounts: history, allowed send, blocked send, replay, conflicting replay, rate limit, report, owner-only queue, hide, restore, resolve and erase.
 7. Invoke the retention route with the configured cron secret against controlled expired fixtures. Prove plaintext and author-link erasure plus bounded maintenance counts.
