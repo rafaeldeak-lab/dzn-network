@@ -41,6 +41,7 @@ class LocalD1 {
   beforeWrite: ((sql: string) => void) | null = null;
   beforeBatch: (() => void) | null = null;
   beforeFirst: ((sql: string) => void | Promise<void>) | null = null;
+  beforeAll: ((sql: string) => void) | null = null;
   afterFirst: ((sql: string, value: Row | null) => void | Promise<void>) | null = null;
   prepare(sql: string) {
     const statement = (values: unknown[] = []) => ({
@@ -56,7 +57,10 @@ class LocalD1 {
         await this.afterFirst?.(sql, value);
         return value;
       },
-      all: async () => ({ success: true, results: this.sqlite.prepare(sql).all(...values) }),
+      all: async () => {
+        this.beforeAll?.(sql);
+        return { success: true, results: this.sqlite.prepare(sql).all(...values) };
+      },
     });
     return statement();
   }
@@ -343,9 +347,15 @@ async function run() {
     ) VALUES (?, ?, 'priority_status_embed', '99999999', 1, ?, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`)
       .run("zz-eligible", scope.guildId, actor.discord_id);
 
+    let destinationScanPages = 0;
+    db.beforeAll = (sql) => {
+      if (/FROM server_posting_destinations AS destinations/.test(sql)) destinationScanPages += 1;
+    };
     const firstTick = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+    db.beforeAll = null;
     assert.equal(firstTick.ok, true);
     assert.equal(firstTick.processed, 0);
+    assert.equal(destinationScanPages, 2);
     assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_posting_state WHERE guild_id = '__dzn_internal__'").get()?.n, 1);
     assert.equal((await getOwnerDiscordOverview(env)).lastPostAttempt, null);
 

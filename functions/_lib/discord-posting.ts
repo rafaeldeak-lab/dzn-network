@@ -448,14 +448,16 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
   const results: DiscordPostDispatchDetail[] = [];
   const accessByGuild = new Map<string, Awaited<ReturnType<typeof resolveDiscordPublishingAccessForGuild>>>();
   const pageSize = Math.max(4, Math.min(options.maxJobs * 4, 100));
+  const maxPages = Math.max(2, Math.min(options.maxJobs * 2, 8));
   const maxAccessLookups = Math.max(4, Math.min(options.maxJobs * 8, 24));
   const savedCursor = options.guildId ? null : await readDuePostingCursor(db);
   let cursorEditedAt: string | null = savedCursor?.editedAt ?? null;
   let cursorDestinationId = savedCursor?.destinationId ?? "";
   let reachedEnd = false;
   let scanLimitReached = false;
+  let scannedPages = 0;
 
-  while (!reachedEnd && !scanLimitReached && processed < options.maxJobs) {
+  while (!reachedEnd && !scanLimitReached && scannedPages < maxPages && processed < options.maxJobs) {
     if (options.budget && isDiscordDispatchBudgetLow(options.budget)) {
       budgetExhausted = true;
       break;
@@ -494,6 +496,7 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
         pageSize,
       )
       .all<DuePostingDestination>();
+    scannedPages += 1;
     const page: DuePostingDestination[] = pageResult.results ?? [];
     if (page.length === 0) {
       reachedEnd = true;
