@@ -267,8 +267,11 @@ async function testReportAndModerationRuntime() {
       VALUES ('report-delete',?,'player','personal_information')`).run(messageId);
     const receiptBefore = erased.sqlite.prepare("SELECT actor_receipt_key,send_rate_key,send_minute_bucket,send_slot FROM dzn_comms_send_receipts WHERE message_id = ?").get(messageId);
     const retainedReceipt = erased.sqlite.prepare("SELECT actor_receipt_key FROM dzn_comms_send_receipts WHERE message_id = ?").get(retainedMessageId);
+    const attemptKeys = erased.sqlite.prepare("SELECT DISTINCT actor_attempt_key FROM dzn_comms_attempt_slots").all();
     assert.match(String(receiptBefore?.actor_receipt_key), /^[a-f0-9]{64}$/, "Accepted sends must use a pseudonymous receipt key.");
     assert.notEqual(receiptBefore?.actor_receipt_key, retainedReceipt?.actor_receipt_key, "Receipts for one author must use unlinkable per-request keys.");
+    assert.deepEqual(attemptKeys.length, 1, "One author's attempt quota must retain one pseudonymous key.");
+    assert.match(String(attemptKeys[0]?.actor_attempt_key), /^[a-f0-9]{64}$/, "Attempt quotas must not retain the raw account ID.");
     assert.match(String(receiptBefore?.send_rate_key), /^[a-f0-9]{64}$/, "Accepted sends must use a pseudonymous rate key.");
     assert.ok(receiptBefore?.send_minute_bucket && receiptBefore?.send_slot, "The receipt must persist the exact allocated slot.");
     assert.equal(erased.count("dzn_comms_send_slots"), 2);
@@ -366,16 +369,24 @@ function testPrivateLedgerMigrationRuntime() {
         (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,expires_at)
         VALUES ('legacy-receipt','legacy-player','dzn-global-chat','legacy-request','hash','block',422,datetime('now','+1 day'));
       INSERT INTO dzn_comms_send_slots (actor_user_id,minute_bucket,slot,accepted_at)
-        VALUES ('legacy-player','2026-09-24T12:00',1,'2026-09-24T12:00:00.000Z');`);
+        VALUES ('legacy-player','2026-09-24T12:00',1,'2026-09-24T12:00:00.000Z');
+      INSERT INTO dzn_comms_attempt_slots (actor_user_id,minute_bucket,slot)
+        VALUES ('legacy-player','2026-09-24T12:00',1), ('legacy-player','2026-09-24T12:00',2);`);
     sqlite.exec(readFileSync("migrations/0072_dzn_comms_private_rate_ledgers.sql", "utf8"));
     const receiptColumns = new Set(sqlite.prepare("PRAGMA table_info(dzn_comms_send_receipts)").all().map((row) => String(row.name)));
     const slotColumns = new Set(sqlite.prepare("PRAGMA table_info(dzn_comms_send_slots)").all().map((row) => String(row.name)));
+    const attemptColumns = new Set(sqlite.prepare("PRAGMA table_info(dzn_comms_attempt_slots)").all().map((row) => String(row.name)));
     assert.equal(receiptColumns.has("actor_user_id"), false, "The upgraded receipt ledger must drop the raw account ID column.");
     assert.equal(slotColumns.has("actor_user_id"), false, "The upgraded accepted-send ledger must drop the raw account ID column.");
+    assert.equal(attemptColumns.has("actor_user_id"), false, "The upgraded attempt ledger must drop the raw account ID column.");
     const receipt = sqlite.prepare("SELECT actor_receipt_key FROM dzn_comms_send_receipts WHERE id = 'legacy-receipt'").get();
     const slot = sqlite.prepare("SELECT actor_rate_key FROM dzn_comms_send_slots").get();
+    const attempts = sqlite.prepare("SELECT actor_attempt_key FROM dzn_comms_attempt_slots ORDER BY slot").all();
     assert.match(String(receipt?.actor_receipt_key), /^[a-f0-9]{64}$/);
     assert.match(String(slot?.actor_rate_key), /^[a-f0-9]{64}$/);
+    assert.equal(attempts.length, 2);
+    assert.match(String(attempts[0]?.actor_attempt_key), /^[a-f0-9]{64}$/);
+    assert.equal(attempts[0]?.actor_attempt_key, attempts[1]?.actor_attempt_key, "Migration must preserve one actor's existing attempt quota grouping.");
     assert.equal(sqlite.prepare("PRAGMA foreign_key_check").all().length, 0);
   } finally { sqlite.close(); }
 }

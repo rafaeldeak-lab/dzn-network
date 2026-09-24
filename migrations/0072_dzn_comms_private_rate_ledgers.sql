@@ -4,6 +4,7 @@
 DROP INDEX IF EXISTS idx_dzn_comms_receipts_actor_created;
 DROP INDEX IF EXISTS idx_dzn_comms_slots_actor_accepted;
 DROP INDEX IF EXISTS idx_dzn_comms_slots_created;
+DROP INDEX IF EXISTS idx_dzn_comms_attempt_slots_created;
 
 CREATE TABLE dzn_comms_send_receipts_v2 (
   id TEXT PRIMARY KEY,
@@ -52,9 +53,39 @@ FROM dzn_comms_send_slots;
 DROP TABLE dzn_comms_send_slots;
 ALTER TABLE dzn_comms_send_slots_v2 RENAME TO dzn_comms_send_slots;
 
+CREATE TABLE dzn_comms_attempt_actor_map (
+  actor_user_id TEXT PRIMARY KEY,
+  actor_attempt_key TEXT NOT NULL UNIQUE
+);
+
+INSERT INTO dzn_comms_attempt_actor_map (actor_user_id, actor_attempt_key)
+SELECT actor_user_id, lower(hex(randomblob(32)))
+FROM dzn_comms_attempt_slots
+GROUP BY actor_user_id;
+
+CREATE TABLE dzn_comms_attempt_slots_v2 (
+  actor_attempt_key TEXT NOT NULL,
+  minute_bucket TEXT NOT NULL,
+  slot INTEGER NOT NULL CHECK(slot BETWEEN 1 AND 30),
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(actor_attempt_key, minute_bucket, slot)
+);
+
+INSERT INTO dzn_comms_attempt_slots_v2
+  (actor_attempt_key, minute_bucket, slot, created_at)
+SELECT actor_map.actor_attempt_key, attempt.minute_bucket, attempt.slot, attempt.created_at
+FROM dzn_comms_attempt_slots AS attempt
+JOIN dzn_comms_attempt_actor_map AS actor_map ON actor_map.actor_user_id = attempt.actor_user_id;
+
+DROP TABLE dzn_comms_attempt_slots;
+ALTER TABLE dzn_comms_attempt_slots_v2 RENAME TO dzn_comms_attempt_slots;
+DROP TABLE dzn_comms_attempt_actor_map;
+
 CREATE INDEX idx_dzn_comms_receipts_actor_created
   ON dzn_comms_send_receipts(actor_receipt_key, created_at DESC);
 CREATE INDEX idx_dzn_comms_slots_created
   ON dzn_comms_send_slots(created_at);
 CREATE INDEX idx_dzn_comms_slots_actor_accepted
   ON dzn_comms_send_slots(actor_rate_key, accepted_at DESC);
+CREATE INDEX idx_dzn_comms_attempt_slots_created
+  ON dzn_comms_attempt_slots(created_at);

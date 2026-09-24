@@ -75,10 +75,11 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   const bodyHash = await keyedDigest(typeof parsed.value.body === "string" ? parsed.value.body : "", env.SESSION_SECRET!);
   const actorReceiptKey = await receiptDigest(user.id, requestId, env.SESSION_SECRET!);
   const actorRateKey = await rateLimitDigest(user.id, env.SESSION_SECRET!);
+  const actorAttemptKey = await attemptLimitDigest(user.id, env.SESSION_SECRET!);
   const now = new Date();
   const minuteBucket = now.toISOString().slice(0, 16);
   try {
-    await allocateAttemptSlot(db, user.id, minuteBucket).run();
+    await allocateAttemptSlot(db, actorAttemptKey, minuteBucket).run();
   } catch (cause) {
     if (isQuotaConstraintError(cause)) return error(429, "RATE_LIMITED", "Too many chat attempts were made. Wait a moment and retry.");
     return error(503, "CHAT_STORAGE_UNAVAILABLE", "Global Chat could not verify this attempt. Retry shortly.");
@@ -299,8 +300,8 @@ function isQuotaConstraintError(cause: unknown) {
   return /(?:constraint failed|constraint_error|not null constraint|unique constraint)/i.test(message)
     && /dzn_comms_(?:attempt|send|report)_slots/i.test(message);
 }
-function allocateAttemptSlot(db: D1Database, actorId: string, minuteBucket: string) {
-  return db.prepare(slotAllocationSql("dzn_comms_attempt_slots", "actor_user_id", ATTEMPTS_PER_MINUTE)).bind(actorId, minuteBucket, actorId, minuteBucket);
+function allocateAttemptSlot(db: D1Database, actorAttemptKey: string, minuteBucket: string) {
+  return db.prepare(slotAllocationSql("dzn_comms_attempt_slots", "actor_attempt_key", ATTEMPTS_PER_MINUTE)).bind(actorAttemptKey, minuteBucket, actorAttemptKey, minuteBucket);
 }
 function allocateReportSlot(db: D1Database, actorId: string, minuteBucket: string) {
   return db.prepare(slotAllocationSql("dzn_comms_report_slots", "reporter_user_id", REPORTS_PER_MINUTE)).bind(actorId, minuteBucket, actorId, minuteBucket);
@@ -314,7 +315,7 @@ function allocateSendSlot(db: D1Database, actorRateKey: string, minuteBucket: st
       SELECT slot FROM dzn_comms_send_slots WHERE actor_rate_key = ? AND minute_bucket = ?
     )) ELSE NULL END, ?`).bind(actorRateKey, minuteBucket, actorRateKey, acceptedAt, actorRateKey, minuteBucket, acceptedAt);
 }
-function slotAllocationSql(table: "dzn_comms_attempt_slots" | "dzn_comms_report_slots", actorColumn: "actor_user_id" | "reporter_user_id", maximum: number) {
+function slotAllocationSql(table: "dzn_comms_attempt_slots" | "dzn_comms_report_slots", actorColumn: "actor_attempt_key" | "reporter_user_id", maximum: number) {
   return `WITH RECURSIVE slots(slot) AS (SELECT 1 UNION ALL SELECT slot + 1 FROM slots WHERE slot < ${maximum})
     INSERT INTO ${table} (${actorColumn}, minute_bucket, slot)
     SELECT ?, ?, (SELECT MIN(slot) FROM slots WHERE slot NOT IN (
@@ -324,3 +325,4 @@ function slotAllocationSql(table: "dzn_comms_attempt_slots" | "dzn_comms_report_
 async function keyedDigest(value: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value.normalize("NFKC"))))].map(byte => byte.toString(16).padStart(2, "0")).join(""); }
 async function receiptDigest(actorId: string, requestId: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms-receipt:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${actorId.normalize("NFKC")}\n${requestId.normalize("NFKC")}`)))].map(byte => byte.toString(16).padStart(2, "0")).join(""); }
 async function rateLimitDigest(actorId: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms-rate:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(actorId)))].map(byte => byte.toString(16).padStart(2, "0")).join(""); }
+async function attemptLimitDigest(actorId: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms-attempt:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(actorId)))].map(byte => byte.toString(16).padStart(2, "0")).join(""); }

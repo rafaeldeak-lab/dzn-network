@@ -34,6 +34,8 @@ test("schema supplies durable idempotency, quotas, reports, timeouts and audit",
   assert.match(migration, /accepted_at TEXT NOT NULL/);
   assert.match(migration, /actor_rate_key TEXT NOT NULL/);
   assert.match(migration, /actor_receipt_key TEXT NOT NULL/);
+  assert.match(privacyMigration, /actor_attempt_key TEXT NOT NULL/);
+  assert.doesNotMatch(privacyMigration, /CREATE TABLE dzn_comms_attempt_slots_v2[\s\S]*?actor_user_id TEXT/, "The upgraded attempt ledger must not retain raw account IDs.");
   assert.match(migration, /send_rate_key TEXT/);
   assert.match(migration, /send_minute_bucket TEXT/);
   assert.match(migration, /send_slot INTEGER/);
@@ -55,6 +57,7 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /channels\.slug = 'global-chat'/);
   assert.match(runtime, /keyedDigest/);
   assert.match(runtime, /rateLimitDigest/);
+  assert.match(runtime, /attemptLimitDigest/);
   assert.match(runtime, /receiptDigest/);
   assert.match(runtime, /receiptDigest\(user\.id, requestId, env\.SESSION_SECRET!\)/, "Replay keys must be scoped to one actor and one client request.");
   assert.match(runtime, /actorId\.normalize\("NFKC"\).*requestId\.normalize\("NFKC"\)/, "Separate receipts from one actor must not share a stable join key.");
@@ -62,7 +65,7 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /secretReady/);
   assert.match(runtime, /scope === "local_test" && localRequest/);
   assert.match(runtime, /WITH RECURSIVE slots\(slot\)/);
-  assert.match(runtime, /await allocateAttemptSlot\(db, user\.id, minuteBucket\)\.run\(\)[\s\S]*const replay = await readReceipt/, "Attempt quota must be reserved before an idempotency replay can return.");
+  assert.match(runtime, /await allocateAttemptSlot\(db, actorAttemptKey, minuteBucket\)\.run\(\)[\s\S]*const replay = await readReceipt/, "Attempt quota must be reserved before an idempotency replay can return.");
   assert.doesNotMatch(runtime, /boundedSlot/);
   assert.match(runtime, /julianday\(accepted_at\) > julianday\(\?, '-5 seconds'\)/);
   assert.match(runtime, /exactKeys\(parsed\.value, \["messageId", "reason"\]\)/);
