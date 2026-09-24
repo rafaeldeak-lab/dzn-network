@@ -2093,6 +2093,17 @@ class MemoryStatement {
 
   async first<T>(): Promise<T | null> {
     const q = normalizeSql(this.query);
+    if (q.includes("select case when") && q.includes("as eligible") && q.includes("selected_server")) {
+      const selected = this.db.linkedServers.get(String(this.values[0]));
+      const guildId = String(this.values[1]);
+      const isEligible = (row: MemoryRow | undefined) => Boolean(row
+        && !["deleted", "merged", "suspended"].includes(String(row.status ?? "pending").toLowerCase())
+        && !row.merged_into_server_id
+        && ["active_live", "active_degraded"].includes(String(row.lifecycle_status ?? "active_live")));
+      const eligibleCount = [...this.db.linkedServers.values()]
+        .filter((row) => row.guild_id === guildId && isEligible(row)).length;
+      return ({ eligible: selected?.guild_id === guildId && isEligible(selected) && eligibleCount === 1 ? 1 : 0 } as T);
+    }
     if (q.includes("from adm_import_jobs")) {
       if (q.includes("where server_id = ? and filename = ?")) {
         const rows = Array.from(this.db.admImportJobs.values())

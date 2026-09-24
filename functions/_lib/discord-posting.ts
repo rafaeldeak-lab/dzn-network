@@ -363,6 +363,19 @@ async function processConfiguredPostingDestination(
       };
     }
     effectiveListingContext = currentListingContext;
+    if (!options.force && !isAutoPostDue(destination.post_type, normalizeListingPlanKey(currentListingContext), state?.last_edited_at)) {
+      await recordPostingDispatchStatus(env, destination, "skipped_not_due", null);
+      return {
+        guild_id: destination.guild_id,
+        post_type: destination.post_type,
+        channel_id: destination.discord_channel_id,
+        status: "skipped_not_due",
+        message_id: state?.discord_message_id ?? null,
+        reason: "Current access cadence is not due yet.",
+        last_edited_at: state?.last_edited_at ?? null,
+        message_state_found: Boolean(state),
+      };
+    }
   }
 
   const listingPlanKey = normalizeListingPlanKey(effectiveListingContext);
