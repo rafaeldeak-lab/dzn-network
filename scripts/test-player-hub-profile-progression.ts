@@ -55,6 +55,8 @@ assert.match(profileQa, /Switching sections must preserve an in-progress link re
 assert.match(playerHome, /activeProfileSection === section && window\.location\.hash === sectionHash/, "Selecting the active profile section must not add duplicate history entries.");
 assert.match(playerHome, /overflow-x-clip/, "The page shell must preserve sticky profile navigation without horizontal overflow.");
 assert.match(profileQa, /page shell must not trap sticky profile navigation/, "Rendered QA must protect the sticky profile navigation contract.");
+assert.match(profileQa, /selected section must start below the sticky navigation/, "Rendered QA must reject section content hidden under the sticky navigation.");
+assert.match(profileQa, /Hash-only Back navigation must not leave page progress active/, "Rendered QA must reject a stuck page-progress indicator after section history traversal.");
 assert.match(playerHome, /mode === "home"/, "The full dashboard panels must remain on the Player Hub route.");
 assert.match(playerHome, /section \?\? "profile-summary"/, "Clearing or invalidating the profile hash must restore Overview.");
 assert.match(playerHome, /setProfileReturnTo\(section \? `\/player\/profile#\$\{section\}` : "\/player\/profile"\)/, "Discord login must preserve a recognized profile deep link.");

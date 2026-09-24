@@ -652,7 +652,7 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
               <div hidden={activeProfileSection !== "profile-summary"}><ProfileProgressionPanel state={hubState} /></div>
             ) : null}
             {visitedProfileSections.has("game-account") ? (
-              <div id="game-account" hidden={activeProfileSection !== "game-account"} className="scroll-mt-32"><PlayerGameIdentityLinks /></div>
+              <div id="game-account" hidden={activeProfileSection !== "game-account"} className="scroll-mt-72 md:scroll-mt-44"><PlayerGameIdentityLinks /></div>
             ) : null}
             {visitedProfileSections.has("profile-settings") ? (
               <div hidden={activeProfileSection !== "profile-settings"}><PlayerProfilePrivacySettings onSaved={refreshProfileSummary} /></div>
@@ -1035,7 +1035,7 @@ function ProfileProgressionPanel({ state }: { state: PlayerHubState }) {
       : profile?.public_profile_status === "unavailable" ? "Status unavailable" : "Not published";
 
   return (
-    <section id="profile-summary" aria-labelledby="profile-summary-title" className="min-w-0 rounded-lg border border-emerald-300/25 bg-slate-950/78 p-4 backdrop-blur sm:p-5">
+    <section id="profile-summary" aria-labelledby="profile-summary-title" className="min-w-0 scroll-mt-72 rounded-lg border border-emerald-300/25 bg-slate-950/78 p-4 backdrop-blur sm:p-5 md:scroll-mt-44">
       <div className="flex items-center gap-3">
         <span className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-emerald-300/35 bg-emerald-300/10 text-emerald-100">
           <UserRound aria-hidden="true" className="h-5 w-5" />

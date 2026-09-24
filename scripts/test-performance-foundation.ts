@@ -1584,6 +1584,7 @@ function assertLoadingUx() {
   assertIncludes(progress, "RECOVERY_TIMEOUT_MS");
   assertIncludes(progress, "shouldStartNavigationProgress");
   assertIncludes(progress, "popstate");
+  assertIncludes(progress, "!shouldStartNavigationProgress({ href: nextHref }, previousHref)", "hash-only history traversal must not start page progress");
   assertIncludes(progress, "target.hasAttribute(\"download\")");
   assertIncludes(progress, "const currentHref = window.location.href;", "navigation progress must capture the current URL synchronously during the click");
   assertIncludes(progress, "const shouldStart = shouldStartNavigationProgress(navigationTarget, currentHref);", "navigation progress must evaluate intent before deferring");

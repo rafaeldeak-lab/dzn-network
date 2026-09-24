@@ -130,6 +130,13 @@ if (process.argv.includes("--serve")) {
             await page.getByPlaceholder("For example: xAKA-MINI_KickAs").fill(draftGamertag);
             await page.getByRole("button", { name: /Privacy & Sharing/ }).click();
             await assertAnchorInView(page, "profile-settings");
+            const sectionPositions = await page.evaluate(() => {
+              const navigation = document.querySelector('nav[aria-label="Profile sections"]');
+              const section = document.getElementById("profile-settings");
+              if (!navigation || !section) return null;
+              return { navigationBottom: navigation.getBoundingClientRect().bottom, sectionTop: section.getBoundingClientRect().top };
+            });
+            assert.ok(sectionPositions && sectionPositions.sectionTop >= sectionPositions.navigationBottom, "The selected section must start below the sticky navigation");
             assert.equal(await page.locator("#game-account").isHidden(), true, "Unselected profile sections must be hidden");
             assert.equal(await page.locator("main").evaluate(element => getComputedStyle(element).overflowY), "visible", "The page shell must not trap sticky profile navigation");
             await page.getByRole("button", { name: /Game Stats/ }).click();
@@ -143,6 +150,8 @@ if (process.argv.includes("--serve")) {
             await page.waitForFunction(() => location.hash === "#game-account");
             await page.goBack();
             await page.waitForFunction(() => location.pathname === "/player/profile" && location.hash === "" && Boolean(document.querySelector("#profile-summary")));
+            await page.waitForTimeout(250);
+            assert.equal(await page.getByText("Loading page", { exact: true }).count(), 0, "Hash-only Back navigation must not leave page progress active");
           }
           if (routePath === "/player") await panel.screenshot({ path: path.join(output, `${publicState}-${statsState}-${width}.png`) });
         }
