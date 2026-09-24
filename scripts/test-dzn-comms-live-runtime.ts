@@ -216,7 +216,7 @@ async function testReportAndModerationRuntime() {
     assert.equal(queuePayload.reports?.[0]?.message_id, "message-other", "The owner queue must expose reported messages.");
     const hidden = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {
       messageId: "message-other", action: "hide", reason: "review",
-    }), f.env);
+    }), { ...f.env, DZN_COMMS_LIVE_ENABLED: "false" } as Env);
     assert.equal(hidden.status, 200);
     assert.equal(f.count("dzn_comms_moderation_audit"), 1);
     const noOp = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {

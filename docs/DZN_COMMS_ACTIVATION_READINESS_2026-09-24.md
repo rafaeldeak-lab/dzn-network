@@ -10,6 +10,7 @@ Status: source-ready and default-off. This document is not authorization to modi
 - Same-origin enforcement, bounded bodies, server-owned identity and channel selection.
 - Five-second slow mode, per-minute attempt/send/report ceilings and durable idempotency receipts.
 - Platform-owner-only moderation queue, required decision reasons and recent audit history.
+- Moderation remains available behind its dedicated owner flag when live sending is paused.
 - Hide, restore, resolve, dismiss and destructive erase actions.
 - Immediate body and author-link erasure for deleted messages.
 - Thirty-day expiry on newly accepted messages and tombstone erasure during cleanup.

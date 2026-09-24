@@ -144,7 +144,7 @@ export async function handleDznCommsReport(request: Request, env: Env) {
 export async function handleDznCommsModeration(request: Request, env: Env) {
   if (request.method === "GET") return handleDznCommsModerationQueue(request, env);
   if (request.method !== "POST") return methodNotAllowed();
-  if (!readDznCommsLiveFlags(env, request).enabled || !readDznCommsOwnerModerationFlags(env, request).enabled) return unavailable();
+  if (!readDznCommsOwnerModerationFlags(env, request).enabled) return unavailable();
   if (!sameOrigin(request)) return error(403, "CROSS_ORIGIN", "Cross-origin moderation requests are not allowed.");
   const auth = await requirePlatformOwner(env, request);
   if (!auth.ok) return auth.response;
