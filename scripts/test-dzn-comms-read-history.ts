@@ -95,6 +95,25 @@ assert.equal(
   true,
   "Read-history route should enable only when the explicit local/test scope is present.",
 );
+assert.equal(
+  readDznCommsReadHistoryFlags({
+    DZN_COMMS_LIVE_ENABLED: "true",
+    DZN_COMMS_LIVE_SCOPE: "production",
+    SESSION_SECRET: "session-secret-at-least-32-bytes-long",
+  } as unknown as Env).writeFeaturesEnabled,
+  false,
+  "Live write features must fail closed without the dedicated ledger secret.",
+);
+assert.equal(
+  readDznCommsReadHistoryFlags({
+    DZN_COMMS_LIVE_ENABLED: "true",
+    DZN_COMMS_LIVE_SCOPE: "production",
+    SESSION_SECRET: "session-secret-at-least-32-bytes-long",
+    DZN_COMMS_LEDGER_SECRET: "ledger-secret-at-least-32-bytes-long",
+  } as unknown as Env).writeFeaturesEnabled,
+  true,
+  "Live write features require independent session and stable ledger secrets.",
+);
 assert.ok(dznCommsReadHistoryBoundary().some((line) => /separate same-origin routes/i.test(line)), "Boundary copy must identify the protected write routes.");
 
 async function main() {

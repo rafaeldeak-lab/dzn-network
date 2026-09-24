@@ -86,6 +86,12 @@ assert.deepEqual(detectDestructiveMigration("DROP TABLE player_profiles;", "migr
 assert.deepEqual(detectDestructiveMigration("DELETE FROM player_profiles;", "migrations/9999.sql").length > 0, true);
 assert.deepEqual(detectDestructiveMigration("CREATE TABLE player_stats (id TEXT);", "migrations/9999.sql").length > 0, true);
 assert.deepEqual(detectDestructiveMigration("CREATE TABLE IF NOT EXISTS safe_table (id TEXT);", "migrations/9999.sql"), []);
+const commsPrivacyMigration = read("migrations/0072_dzn_comms_private_rate_ledgers.sql");
+assert.deepEqual(detectDestructiveMigration(commsPrivacyMigration, "migrations/0072_dzn_comms_private_rate_ledgers.sql"), [], "The exact verified Comms copy-and-swap migration must pass the scheduled audit.");
+assert.equal(classifyPath("migrations/0072_dzn_comms_private_rate_ledgers.sql", commsPrivacyMigration).risk, "medium");
+assert.equal(detectDestructiveMigration(commsPrivacyMigration, "migrations/9999_renamed.sql").length > 0, true, "The copy-and-swap exemption must be filename-bound.");
+assert.equal(detectDestructiveMigration(commsPrivacyMigration.replace("FROM dzn_comms_send_receipts;", "FROM dzn_comms_channels;"), "migrations/0072_dzn_comms_private_rate_ledgers.sql").length > 0, true, "The exemption must reject a missing source-table copy.");
+assert.equal(detectDestructiveMigration(`${commsPrivacyMigration}\nDROP TABLE users;`, "migrations/0072_dzn_comms_private_rate_ledgers.sql").length > 0, true, "The exemption must reject any additional dropped table.");
 
 assert.equal(classifyRecoverableProductionStatus("nitrado_upstream_down"), true);
 assert.equal(classifyRecoverableProductionStatus("waiting_for_nitrado"), true);
@@ -95,7 +101,7 @@ assert.equal(classifyRecoverableProductionStatus("403"), false);
 
 const workflows = readdirSync(".github/workflows").filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"));
 const workflowText = workflows.map((name) => read(`.github/workflows/${name}`)).join("\n");
-for (const secret of ["DISCORD_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "SESSION_SECRET", "TOKEN_ENCRYPTION_KEY"]) {
+for (const secret of ["DISCORD_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "SESSION_SECRET", "DZN_COMMS_LEDGER_SECRET", "TOKEN_ENCRYPTION_KEY"]) {
   assert.equal(workflowText.includes(`secrets.${secret}`), false, `${secret} must not be referenced by GitHub workflows`);
 }
 assert.equal(read(".github/workflows/dzn-adm-sync.yml").includes("schedule:"), false);

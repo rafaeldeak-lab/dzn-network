@@ -16,7 +16,7 @@ export const HARD_BLOCK_PATTERNS: Array<[RegExp, string]> = [
   [/\bcreate\b[\s\S]{0,40}\bplayer_stats\b/i, "player_stats creation request"],
   [/\b(player_profiles|kills|deaths|events|sessions|subscriptions)\b[\s\S]{0,80}\b(reset|delete|wipe|purge|truncate)\b/i, "protected data reset/delete request"],
   [/\bTOKEN_ENCRYPTION_KEY\b|encrypted_token|token_iv|token_auth_tag/i, "token encryption request"],
-  [/\bsecrets\.(DISCORD_BOT_TOKEN|DISCORD_CLIENT_SECRET|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|DZN_LIVE_CHECKOUT_ENABLED|SESSION_SECRET|TOKEN_ENCRYPTION_KEY|MOCK_AUTH|MOCK_NITRADO|OPENAI_API_KEY)\b/i, "runtime secret workflow request"],
+  [/\bsecrets\.(DISCORD_BOT_TOKEN|DISCORD_CLIENT_SECRET|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|DZN_LIVE_CHECKOUT_ENABLED|SESSION_SECRET|DZN_COMMS_LEDGER_SECRET|TOKEN_ENCRYPTION_KEY|MOCK_AUTH|MOCK_NITRADO|OPENAI_API_KEY)\b/i, "runtime secret workflow request"],
   [/\bstripe\s+(?:products?|prices?|webhook(?:_endpoints)?|customers?|subscriptions?)\s+(?:create|update|delete)\b/i, "live Stripe billing mutation request"],
   [/\b(?:curl|fetch|Invoke-RestMethod|Invoke-WebRequest)\b[\s\S]{0,180}\b(?:api\.stripe\.com\/v1\/(?:products|prices|webhook_endpoints|customers|subscriptions)[\s\S]{0,180}\b(?:POST|PUT|PATCH|DELETE)|(?:POST|PUT|PATCH|DELETE)[\s\S]{0,180}\bapi\.stripe\.com\/v1\/(?:products|prices|webhook_endpoints|customers|subscriptions))\b/i, "direct Stripe API mutation request"],
   [/\b(?:npx\s+)?wrangler\s+pages\s+secret\s+put\s+(?:STRIPE_PRICE_STARTER|STRIPE_PRICE_PRO|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|DZN_LIVE_CHECKOUT_ENABLED)\b/i, "Stripe production secret mutation request"],

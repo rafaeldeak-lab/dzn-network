@@ -94,6 +94,7 @@ async function fixture(migrate = true) {
   const env = { DB: db as unknown as D1Database, SESSION_SECRET: "local-test-only", DZN_PLATFORM_OWNER_DISCORD_IDS: scope.ownerDiscordId } as Env;
   for (const name of migrationFiles) {
     if (!migrate && name === "0069_server_showcase_grants.sql") continue;
+    if (name === "0069_server_showcase_grants.sql") await ensureLinkedServerMetadataColumns(env);
     db.sqlite.exec(readFileSync(`migrations/${name}`, "utf8"));
   }
   await ensureLinkedServerMetadataColumns(env);

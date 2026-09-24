@@ -4,19 +4,27 @@ import test from "node:test";
 
 const root = new URL("../", import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), "utf8");
-const migration = read("migrations/0071_dzn_comms_live_moderation.sql");
+const baseMigration = read("migrations/0071_dzn_comms_live_moderation.sql");
+const privacyMigration = read("migrations/0072_dzn_comms_private_rate_ledgers.sql");
+const migration = `${baseMigration}\n${privacyMigration}`;
 const runtime = read("functions/_lib/dzn-comms-live.ts");
 const shell = read("components/comms/dzn-comms-shell.tsx");
 const client = read("components/comms/comms-history-client.ts");
 const env = read(".env.example");
+const cloudflareEnv = read("cloudflare-env.d.ts");
 
 test("live Comms implementation remains default-off and migration-gated", () => {
   assert.match(env, /^DZN_COMMS_LIVE_ENABLED=false$/m);
   assert.match(env, /^DZN_COMMS_LIVE_SCOPE=local_test$/m);
+  assert.match(env, /^DZN_COMMS_LEDGER_SECRET=$/m);
+  assert.match(cloudflareEnv, /DZN_COMMS_LEDGER_SECRET\?: string/);
   assert.match(env, /^NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED=false$/m);
+  assert.match(env, /^DZN_COMMS_OWNER_MODERATION_ENABLED=false$/m);
+  assert.match(env, /^DZN_COMMS_RETENTION_ENABLED=false$/m);
   assert.ok(existsSync(new URL("functions/api/comms/messages.ts", root)));
   assert.ok(existsSync(new URL("functions/api/comms/reports.ts", root)));
   assert.ok(existsSync(new URL("functions/api/owner/comms/moderate.ts", root)));
+  assert.ok(existsSync(new URL("functions/owner/comms.ts", root)), "The owner Comms page must have a platform-owner page guard.");
   assert.ok(existsSync(new URL("scripts/test-dzn-comms-live-runtime.ts", root)));
   assert.match(migration, /Production application remains a separate release operation/);
 });
@@ -27,6 +35,17 @@ test("schema supplies durable idempotency, quotas, reports, timeouts and audit",
   }
   assert.match(migration, /UNIQUE\(actor_user_id, channel_id, client_request_id\)/);
   assert.match(migration, /accepted_at TEXT NOT NULL/);
+  assert.match(migration, /actor_rate_key TEXT NOT NULL/);
+  assert.match(migration, /actor_receipt_key TEXT NOT NULL/);
+  assert.match(privacyMigration, /actor_attempt_key TEXT NOT NULL/);
+  assert.match(privacyMigration, /dzn_comms_rate_cutover_guard/);
+  assert.match(privacyMigration, /FROM dzn_comms_send_receipts\s+WHERE julianday\(expires_at\) > julianday\('now'\)/, "Privacy cutover must preserve every still-valid legacy replay and conflict decision.");
+  assert.match(privacyMigration, /minute_bucket = strftime\('%Y-%m-%dT%H:%M', 'now'\)/, "Privacy cutover must reject current-minute legacy quotas.");
+  assert.match(privacyMigration, /julianday\(accepted_at\) > julianday\('now', '-5 seconds'\)/, "Privacy cutover must reject a legacy slow-mode slot crossing a minute boundary.");
+  assert.doesNotMatch(privacyMigration, /CREATE TABLE dzn_comms_attempt_slots_v2[\s\S]*?actor_user_id TEXT/, "The upgraded attempt ledger must not retain raw account IDs.");
+  assert.match(migration, /send_rate_key TEXT/);
+  assert.match(migration, /send_minute_bucket TEXT/);
+  assert.match(migration, /send_slot INTEGER/);
   assert.match(migration, /CHECK\(slot BETWEEN 1 AND 20\)/);
   assert.match(migration, /CHECK\(slot BETWEEN 1 AND 30\)/);
   assert.match(migration, /CHECK\(slot BETWEEN 1 AND 10\)/);
@@ -44,10 +63,19 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /db\.batch\(statements\)/);
   assert.match(runtime, /channels\.slug = 'global-chat'/);
   assert.match(runtime, /keyedDigest/);
+  assert.match(runtime, /rateLimitDigest/);
+  assert.match(runtime, /attemptLimitDigest/);
+  assert.match(runtime, /receiptDigest/);
+  assert.match(runtime, /receiptDigest\(user\.id, requestId, env\.DZN_COMMS_LEDGER_SECRET!\)/, "Replay keys must be scoped to one actor and one client request using the stable Comms ledger secret.");
+  assert.match(runtime, /rateLimitDigest\(user\.id, env\.DZN_COMMS_LEDGER_SECRET!\)/);
+  assert.match(runtime, /attemptLimitDigest\(user\.id, env\.DZN_COMMS_LEDGER_SECRET!\)/);
+  assert.doesNotMatch(runtime, /(?:receiptDigest|rateLimitDigest|attemptLimitDigest)\([^\n]+env\.SESSION_SECRET/, "Persistent ledger keys must not rotate with the login session secret.");
+  assert.match(runtime, /actorId\.normalize\("NFKC"\).*requestId\.normalize\("NFKC"\)/, "Separate receipts from one actor must not share a stable join key.");
+  assert.doesNotMatch(runtime, /dzn_comms_send_receipts \(id, actor_user_id/, "Receipt writes must not retain the raw account ID.");
   assert.match(runtime, /secretReady/);
   assert.match(runtime, /scope === "local_test" && localRequest/);
   assert.match(runtime, /WITH RECURSIVE slots\(slot\)/);
-  assert.match(runtime, /await allocateAttemptSlot\(db, user\.id, minuteBucket\)\.run\(\)[\s\S]*const replay = await readReceipt/, "Attempt quota must be reserved before an idempotency replay can return.");
+  assert.match(runtime, /await allocateAttemptSlot\(db, actorAttemptKey, minuteBucket\)\.run\(\)[\s\S]*const replay = await readReceipt/, "Attempt quota must be reserved before an idempotency replay can return.");
   assert.doesNotMatch(runtime, /boundedSlot/);
   assert.match(runtime, /julianday\(accepted_at\) > julianday\(\?, '-5 seconds'\)/);
   assert.match(runtime, /exactKeys\(parsed\.value, \["messageId", "reason"\]\)/);
@@ -55,6 +83,8 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /concurrentReplay\) return error\(409, "REQUEST_ID_CONFLICT"/, "Concurrent different-body retries must preserve 409 conflict semantics.");
   assert.match(runtime, /WHERE changes\(\) > 0/, "Moderation audit rows must depend on a real state transition.");
   assert.match(runtime, /MODERATION_NO_CHANGE/, "No-op moderation must return a conflict instead of a false success.");
+  assert.match(runtime, /SET message_id = NULL, send_rate_key = NULL, send_minute_bucket = NULL, send_slot = NULL/, "Destructive erasure must clear the exact receipt-to-rate-slot association.");
+  assert.doesNotMatch(runtime, /DELETE FROM dzn_comms_send_slots[\s\S]{0,500}message_id/, "Destructive erasure must not refund accepted-send rate limits.");
 });
 
 test("moderation publishes only allow decisions and never stores rejected text", () => {

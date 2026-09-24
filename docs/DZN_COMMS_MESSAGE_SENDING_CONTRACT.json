@@ -1,11 +1,12 @@
 {
-  "version": 2,
+  "version": 3,
   "status": "implemented_default_off",
   "runtimeImplemented": true,
   "productionApproved": false,
   "productionMigrationsRequireSeparateApproval": [
     "0065_dzn_comms_read_history.sql",
-    "0071_dzn_comms_live_moderation.sql"
+    "0071_dzn_comms_live_moderation.sql",
+    "0072_dzn_comms_private_rate_ledgers.sql"
   ],
   "route": { "method": "POST", "path": "/api/comms/messages", "implemented": true },
   "pilot": { "channels": ["global-chat"], "transport": "https_polling", "privateSending": false },
