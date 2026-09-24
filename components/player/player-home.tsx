@@ -14,6 +14,7 @@ import {
   Pencil,
   Radio,
   RefreshCw,
+  Share2,
   ShieldCheck,
   Sparkles,
   Trophy,
@@ -30,6 +31,7 @@ import { SiteHeaderAuthState } from "@/components/site-header";
 import type { AuthResponse } from "@/components/onboarding/types";
 
 type PlayerHomeMode = "home" | "profile";
+type ProfileSectionId = "profile-summary" | "game-account" | "profile-settings";
 type PlayerAuthState =
   | { status: "loading"; user: null; navigation: null; linkedServerCount: 0 }
   | { status: "logged_out"; user: null; navigation: null; linkedServerCount: 0 }
@@ -313,54 +315,28 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
   });
   const hubUserId = authState.status === "logged_in" ? authState.user.id : null;
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
+  const [activeProfileSection, setActiveProfileSection] = useState<ProfileSectionId>("profile-summary");
+
+  useEffect(() => {
+    if (mode !== "profile") return;
+    const syncSectionFromHash = () => {
+      const section = profileSectionFromHash(window.location.hash);
+      if (section) setActiveProfileSection(section);
+    };
+    syncSectionFromHash();
+    window.addEventListener("hashchange", syncSectionFromHash);
+    return () => window.removeEventListener("hashchange", syncSectionFromHash);
+  }, [mode]);
 
   useEffect(() => {
     if (mode !== "profile" || authState.status !== "logged_in" || hubState.status === "idle" || hubState.status === "loading") return;
-    let frame = 0;
-    let pending = true;
-    let alignmentTimer = 0;
-    let expiryTimer = 0;
-    const alignProfileSection = () => {
-      if (!pending) return;
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        if (!pending) return;
-        const id = window.location.hash.slice(1);
-        if (id !== "game-account" && id !== "profile-settings" && id !== "profile-summary") return;
-        if ((id === "game-account" || id === "profile-settings") && document.querySelector('#game-account [aria-busy="true"]')) return;
-        document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "auto" });
-      });
-    };
-    const cancelPendingAlignment = () => {
-      pending = false;
-      cancelAnimationFrame(frame);
-      window.clearInterval(alignmentTimer);
-      window.clearTimeout(expiryTimer);
-    };
-    const startPendingAlignment = () => {
-      cancelPendingAlignment();
-      pending = true;
-      alignProfileSection();
-      alignmentTimer = window.setInterval(alignProfileSection, 100);
-      expiryTimer = window.setTimeout(cancelPendingAlignment, 10_000);
-    };
-    const onHashChange = () => startPendingAlignment();
-    startPendingAlignment();
-    const gameAccount = document.getElementById("game-account");
-    const observer = new MutationObserver(alignProfileSection);
-    if (gameAccount) observer.observe(gameAccount, { subtree: true, childList: true, attributes: true, attributeFilter: ["aria-busy"] });
-    const resizeObserver = new ResizeObserver(alignProfileSection);
-    if (gameAccount) resizeObserver.observe(gameAccount);
-    window.addEventListener("hashchange", onHashChange);
-    for (const event of ["wheel", "touchstart", "pointerdown", "keydown"] as const) window.addEventListener(event, cancelPendingAlignment, { passive: true });
-    return () => {
-      cancelPendingAlignment();
-      observer.disconnect();
-      resizeObserver.disconnect();
-      window.removeEventListener("hashchange", onHashChange);
-      for (const event of ["wheel", "touchstart", "pointerdown", "keydown"] as const) window.removeEventListener(event, cancelPendingAlignment);
-    };
-  }, [mode, authState.status, hubState.status]);
+    const requestedSection = profileSectionFromHash(window.location.hash);
+    if (!requestedSection || requestedSection !== activeProfileSection) return;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(requestedSection)?.scrollIntoView({ block: "start", behavior: "auto" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [mode, authState.status, hubState.status, activeProfileSection]);
 
   useEffect(() => {
     let activeRequest = true;
@@ -422,6 +398,11 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
   function refreshProfileSummary() {
     setHubState({ status: "loading", data: null, message: null });
     setProfileRefreshKey((value) => value + 1);
+  }
+
+  function openProfileSection(section: ProfileSectionId) {
+    setActiveProfileSection(section);
+    window.history.pushState(null, "", `#${section}`);
   }
 
   async function refreshCommunityMatches() {
@@ -508,7 +489,10 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_16%,rgba(34,211,238,0.22),transparent_24%),radial-gradient(circle_at_78%_18%,rgba(168,85,247,0.2),transparent_26%),linear-gradient(rgba(125,211,252,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(168,85,247,0.05)_1px,transparent_1px)] bg-[size:auto,auto,120px_120px,120px_120px]" aria-hidden="true" />
 
       <section className="relative mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pb-28 pt-8 sm:px-6 lg:px-8">
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+        {mode === "profile" && authState.status === "logged_in" ? (
+          <ProfilePageIntro displayName={profileHandlePreview} />
+        ) : (
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
           <div className="rounded-lg border border-cyan-300/25 bg-slate-950/78 p-5 shadow-[0_0_42px_rgba(34,211,238,0.12)] backdrop-blur">
             <div className="flex flex-wrap items-center gap-3">
               <span className="inline-flex items-center gap-2 rounded-md border border-cyan-300/35 bg-cyan-300/10 px-3 py-1 text-xs font-black uppercase text-cyan-100">
@@ -603,40 +587,136 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
             ) : null}
           </aside>
         </div>
+        )}
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {playerActionCards.map((card) => (
-            <Link
-              key={card.href}
-              href={card.href}
-              className={`group rounded-lg border bg-slate-950/78 p-4 backdrop-blur transition hover:-translate-y-0.5 hover:bg-slate-900/88 ${toneClasses(card.tone)}`}
-            >
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/15 bg-white/8 text-white">
-                {card.icon}
-              </span>
-              <span className="mt-4 flex items-center justify-between gap-3">
-                <span className="text-base font-black uppercase text-white">{card.title}</span>
-                <ChevronRight aria-hidden="true" className="h-4 w-4 text-slate-400 transition group-hover:text-cyan-100" />
-              </span>
-              <span className="mt-2 block text-sm font-semibold leading-6 text-slate-300">{card.description}</span>
-            </Link>
-          ))}
-        </div>
+        {mode === "home" ? (
+          <>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {playerActionCards.map((card) => (
+                <Link
+                  key={card.href}
+                  href={card.href}
+                  className={`group rounded-lg border bg-slate-950/78 p-4 backdrop-blur transition hover:-translate-y-0.5 hover:bg-slate-900/88 ${toneClasses(card.tone)}`}
+                >
+                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/15 bg-white/8 text-white">
+                    {card.icon}
+                  </span>
+                  <span className="mt-4 flex items-center justify-between gap-3">
+                    <span className="text-base font-black uppercase text-white">{card.title}</span>
+                    <ChevronRight aria-hidden="true" className="h-4 w-4 text-slate-400 transition group-hover:text-cyan-100" />
+                  </span>
+                  <span className="mt-2 block text-sm font-semibold leading-6 text-slate-300">{card.description}</span>
+                </Link>
+              ))}
+            </div>
 
-        {authState.status === "logged_in" ? (
-          <PlayerHubDataPanels state={hubState} refreshState={communityRefresh} onRefreshCommunityMatches={refreshCommunityMatches} />
+            {authState.status === "logged_in" ? (
+              <PlayerHubDataPanels state={hubState} refreshState={communityRefresh} onRefreshCommunityMatches={refreshCommunityMatches} />
+            ) : (
+              <LoggedOutHubPreview />
+            )}
+
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+              <ProfileProgressionPanel state={hubState} />
+              <OwnerSetupBoundary ownerSetupHref={ownerSetupHref} />
+            </div>
+          </>
+        ) : authState.status === "logged_in" ? (
+          <ProfileWorkspaceNavigation activeSection={activeProfileSection} onSelect={openProfileSection} />
         ) : (
           <LoggedOutHubPreview />
         )}
 
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-          <div className="space-y-4">
-            <ProfileProgressionPanel state={hubState} />
-            {mode === "profile" && authState.status === "logged_in" ? <div id="game-account" className="scroll-mt-32"><PlayerGameIdentityLinks /></div> : null}
-            {mode === "profile" && authState.status === "logged_in" ? <PlayerProfilePrivacySettings onSaved={refreshProfileSummary} /> : null}
+        {mode === "profile" && authState.status === "logged_in" ? (
+          <div className="min-w-0">
+            {activeProfileSection === "profile-summary" ? <ProfileProgressionPanel state={hubState} /> : null}
+            {activeProfileSection === "game-account" ? <div id="game-account" className="scroll-mt-32"><PlayerGameIdentityLinks /></div> : null}
+            {activeProfileSection === "profile-settings" ? <PlayerProfilePrivacySettings onSaved={refreshProfileSummary} /> : null}
           </div>
+        ) : null}
+      </section>
+    </main>
+  );
+}
 
-          <section className="rounded-lg border border-amber-300/25 bg-slate-950/78 p-5 backdrop-blur">
+function ProfileWorkspaceNavigation({
+  activeSection,
+  onSelect,
+}: {
+  activeSection: ProfileSectionId;
+  onSelect: (section: ProfileSectionId) => void;
+}) {
+  const sections: Array<{ id: ProfileSectionId; label: string; description: string; icon: ReactNode }> = [
+    { id: "profile-summary", label: "Overview", description: "Stats and profile status", icon: <UserRound aria-hidden="true" className="h-4 w-4" /> },
+    { id: "game-account", label: "Game Stats", description: "Linked accounts and requests", icon: <Gamepad2 aria-hidden="true" className="h-4 w-4" /> },
+    { id: "profile-settings", label: "Privacy & Sharing", description: "Public profile controls", icon: <Share2 aria-hidden="true" className="h-4 w-4" /> },
+  ];
+
+  return (
+    <nav aria-label="Profile sections" className="sticky top-20 z-20 grid gap-2 rounded-lg border border-cyan-300/25 bg-slate-950/95 p-2 shadow-[0_16px_38px_rgba(2,6,23,0.55)] backdrop-blur md:grid-cols-3">
+      {sections.map((section) => {
+        const selected = activeSection === section.id;
+        return (
+          <button
+            key={section.id}
+            type="button"
+            onClick={() => onSelect(section.id)}
+            aria-current={selected ? "page" : undefined}
+            className={`flex min-h-14 items-center gap-3 rounded-md border px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 ${
+              selected
+                ? "border-cyan-200/60 bg-cyan-300/14 text-white shadow-[inset_3px_0_0_rgba(34,211,238,0.9)]"
+                : "border-transparent bg-white/[0.03] text-slate-300 hover:border-white/15 hover:bg-white/[0.07]"
+            }`}
+          >
+            <span className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border ${selected ? "border-cyan-200/45 bg-cyan-300/12 text-cyan-100" : "border-white/10 bg-slate-950/70 text-slate-400"}`}>
+              {section.icon}
+            </span>
+            <span className="min-w-0">
+              <span className="block text-sm font-black uppercase">{section.label}</span>
+              <span className="mt-0.5 block text-xs font-semibold text-slate-400">{section.description}</span>
+            </span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function ProfilePageIntro({ displayName }: { displayName: string }) {
+  return (
+    <section className="flex flex-col gap-4 rounded-lg border border-cyan-300/25 bg-slate-950/88 p-4 shadow-[0_0_42px_rgba(34,211,238,0.12)] backdrop-blur sm:p-5 lg:flex-row lg:items-center lg:justify-between">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-md border border-cyan-300/35 bg-cyan-300/10 px-2.5 py-1 text-[0.68rem] font-black uppercase text-cyan-100">
+            <ShieldCheck aria-hidden="true" className="h-3.5 w-3.5" />
+            Private Player Profile
+          </span>
+          <span className="max-w-full truncate rounded-md border border-emerald-300/25 bg-emerald-300/10 px-2.5 py-1 text-[0.68rem] font-black uppercase text-emerald-100">
+            {displayName} - Discord verified
+          </span>
+        </div>
+        <h1 className="mt-3 text-2xl font-black uppercase leading-tight text-white sm:text-3xl">Manage My Player Profile</h1>
+        <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-300">
+          Switch between your stats, linked game account, and public profile controls without searching through the full Player Hub.
+        </p>
+      </div>
+      <div className="flex shrink-0 flex-wrap gap-2">
+        <Link href="/player" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-cyan-200/55 bg-cyan-300 px-3 text-xs font-black uppercase text-slate-950">
+          Player Hub
+          <ChevronRight aria-hidden="true" className="h-4 w-4" />
+        </Link>
+        <Link href="/servers" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/15 bg-white/8 px-3 text-xs font-black uppercase text-white">
+          Servers
+          <ExternalLink aria-hidden="true" className="h-4 w-4" />
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+function OwnerSetupBoundary({ ownerSetupHref }: { ownerSetupHref: string }) {
+  return (
+    <section className="rounded-lg border border-amber-300/25 bg-slate-950/78 p-5 backdrop-blur">
             <div className="flex items-center gap-3">
               <span className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-amber-300/35 bg-amber-300/10 text-amber-100">
                 <LockKeyhole aria-hidden="true" className="h-5 w-5" />
@@ -657,11 +737,13 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
               Owner Pricing
               <Crown aria-hidden="true" className="h-4 w-4" />
             </Link>
-          </section>
-        </div>
-      </section>
-    </main>
+    </section>
   );
+}
+
+function profileSectionFromHash(hash: string): ProfileSectionId | null {
+  const id = hash.replace(/^#/, "");
+  return id === "profile-summary" || id === "game-account" || id === "profile-settings" ? id : null;
 }
 
 function PlayerHubDataPanels({
