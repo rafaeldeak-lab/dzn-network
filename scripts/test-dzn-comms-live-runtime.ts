@@ -19,9 +19,9 @@ type Sqlite = {
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: new (path: string) => Sqlite };
 const secret = "dzn-comms-runtime-test-secret-32-bytes-minimum";
-async function receiptKey(actorId: string) {
+async function receiptKey(actorId: string, requestId: string) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms-receipt:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(actorId)))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${actorId.normalize("NFKC")}\n${requestId.normalize("NFKC")}`)))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function fixture() {
@@ -140,6 +140,12 @@ async function testSendRuntime() {
     assert.equal((await payload(conflict)).code, "REQUEST_ID_CONFLICT");
     const tooFast = await handleDznCommsSend(request("/api/comms/messages", "player-token", { ...input, clientRequestId: "request-00000002" }), f.env);
     assert.equal(tooFast.status, 429, "The five-second send guard must reject an immediate second message.");
+    f.sqlite.prepare("UPDATE dzn_comms_send_slots SET accepted_at = datetime('now','-10 seconds')").run();
+    const second = await handleDznCommsSend(request("/api/comms/messages", "player-token", { ...input, clientRequestId: "request-00000003" }), f.env);
+    assert.equal(second.status, 201);
+    const receiptKeys = f.sqlite.prepare("SELECT actor_receipt_key FROM dzn_comms_send_receipts ORDER BY created_at, id").all();
+    assert.equal(receiptKeys.length, 2);
+    assert.notEqual(receiptKeys[0]?.actor_receipt_key, receiptKeys[1]?.actor_receipt_key, "Separate requests from one account must not share a correlatable receipt key.");
   } finally { f.close(); }
 
   const replayQuota = await fixture();
@@ -158,7 +164,7 @@ async function testSendRuntime() {
 
   const expired = await fixture();
   try {
-    const playerReceiptKey = await receiptKey("player");
+    const playerReceiptKey = await receiptKey("player", "request-expired-1");
     expired.sqlite.prepare(`INSERT INTO dzn_comms_send_receipts
       (id,actor_receipt_key,channel_id,client_request_id,body_hash,decision,response_status,reason_code,expires_at)
       VALUES ('expired',?,'dzn-global-chat','request-expired-1','old-hash','block',422,'SPAM_BLOCKED',datetime('now','-1 day'))`).run(playerReceiptKey);
@@ -186,7 +192,7 @@ async function testSendRuntime() {
 
   const raced = await fixture();
   try {
-    const playerReceiptKey = await receiptKey("player");
+    const playerReceiptKey = await receiptKey("player", "request-race-0001");
     raced.beforeBatch(() => raced.sqlite.prepare(`INSERT INTO dzn_comms_send_receipts
       (id,actor_receipt_key,channel_id,client_request_id,body_hash,decision,response_status,reason_code,expires_at)
       VALUES ('raced',?,'dzn-global-chat','request-race-0001','different-hash','block',422,'SPAM_BLOCKED',datetime('now','+1 day'))`).run(playerReceiptKey));
@@ -251,13 +257,21 @@ async function testReportAndModerationRuntime() {
     }), erased.env);
     assert.equal(sent.status, 201);
     const messageId = (await payload(sent)).message_id!;
+    erased.sqlite.prepare("UPDATE dzn_comms_send_slots SET accepted_at = datetime('now','-10 seconds')").run();
+    const retained = await handleDznCommsSend(request("/api/comms/messages", "other-token", {
+      channelSlug: "global-chat", clientRequestId: "retain-request-0001", body: "Retained message",
+    }), erased.env);
+    assert.equal(retained.status, 201);
+    const retainedMessageId = (await payload(retained)).message_id!;
     erased.sqlite.prepare(`INSERT INTO dzn_comms_reports (id,message_id,reporter_user_id,reason_code)
       VALUES ('report-delete',?,'player','personal_information')`).run(messageId);
     const receiptBefore = erased.sqlite.prepare("SELECT actor_receipt_key,send_rate_key,send_minute_bucket,send_slot FROM dzn_comms_send_receipts WHERE message_id = ?").get(messageId);
+    const retainedReceipt = erased.sqlite.prepare("SELECT actor_receipt_key FROM dzn_comms_send_receipts WHERE message_id = ?").get(retainedMessageId);
     assert.match(String(receiptBefore?.actor_receipt_key), /^[a-f0-9]{64}$/, "Accepted sends must use a pseudonymous receipt key.");
+    assert.notEqual(receiptBefore?.actor_receipt_key, retainedReceipt?.actor_receipt_key, "Receipts for one author must use unlinkable per-request keys.");
     assert.match(String(receiptBefore?.send_rate_key), /^[a-f0-9]{64}$/, "Accepted sends must use a pseudonymous rate key.");
     assert.ok(receiptBefore?.send_minute_bucket && receiptBefore?.send_slot, "The receipt must persist the exact allocated slot.");
-    assert.equal(erased.count("dzn_comms_send_slots"), 1);
+    assert.equal(erased.count("dzn_comms_send_slots"), 2);
     const response = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {
       messageId, action: "delete", reason: "personal information",
     }), erased.env);
@@ -268,12 +282,13 @@ async function testReportAndModerationRuntime() {
     assert.equal(row.visibility_state, "deleted");
     assert.equal(erased.sqlite.prepare("SELECT status FROM dzn_comms_reports WHERE id = 'report-delete'").get()?.status, "resolved");
     const receiptAfter = erased.sqlite.prepare("SELECT actor_receipt_key,message_id,send_rate_key,send_minute_bucket,send_slot FROM dzn_comms_send_receipts WHERE client_request_id = 'delete-request-0001'").get();
-    assert.match(String(receiptAfter?.actor_receipt_key), /^[a-f0-9]{64}$/, "Erasure may retain only the non-reversible receipt key needed for replay protection.");
+    assert.match(String(receiptAfter?.actor_receipt_key), /^[a-f0-9]{64}$/, "Erasure may retain only the per-request replay key.");
+    assert.notEqual(receiptAfter?.actor_receipt_key, retainedReceipt?.actor_receipt_key, "An erased receipt must not join to the author's retained receipts.");
     assert.equal(receiptAfter?.message_id, null, "Erasure must unlink the retained receipt from the message.");
     assert.equal(receiptAfter?.send_rate_key, null, "Erasure must clear the receipt's pseudonymous rate key.");
     assert.equal(receiptAfter?.send_minute_bucket, null, "Erasure must clear the receipt's exact rate minute.");
     assert.equal(receiptAfter?.send_slot, null, "Erasure must clear the receipt's exact rate slot.");
-    assert.equal(erased.count("dzn_comms_send_slots"), 1, "Erasure must retain the pseudonymous accepted-send slot until normal retention.");
+    assert.equal(erased.count("dzn_comms_send_slots"), 2, "Erasure must retain every pseudonymous accepted-send slot until normal retention.");
     const postErasureSend = await handleDznCommsSend(request("/api/comms/messages", "other-token", {
       channelSlug: "global-chat", clientRequestId: "after-delete-0001", body: "Immediate follow-up",
     }), erased.env);

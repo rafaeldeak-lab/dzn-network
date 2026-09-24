@@ -73,7 +73,7 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   const channel = await db.prepare("SELECT id FROM dzn_comms_channels WHERE slug = 'global-chat' AND kind = 'public' AND visibility = 'public' AND is_readable = 1 LIMIT 1").first<{ id: string }>();
   if (!channel?.id) return error(503, "CHAT_NOT_READY", "Global Chat is not ready yet.");
   const bodyHash = await keyedDigest(typeof parsed.value.body === "string" ? parsed.value.body : "", env.SESSION_SECRET!);
-  const actorReceiptKey = await receiptDigest(user.id, env.SESSION_SECRET!);
+  const actorReceiptKey = await receiptDigest(user.id, requestId, env.SESSION_SECRET!);
   const actorRateKey = await rateLimitDigest(user.id, env.SESSION_SECRET!);
   const now = new Date();
   const minuteBucket = now.toISOString().slice(0, 16);
@@ -322,5 +322,5 @@ function slotAllocationSql(table: "dzn_comms_attempt_slots" | "dzn_comms_report_
     ))`;
 }
 async function keyedDigest(value: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value.normalize("NFKC"))))].map(byte => byte.toString(16).padStart(2, "0")).join(""); }
-async function receiptDigest(actorId: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms-receipt:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(actorId)))].map(byte => byte.toString(16).padStart(2, "0")).join(""); }
+async function receiptDigest(actorId: string, requestId: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms-receipt:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${actorId.normalize("NFKC")}\n${requestId.normalize("NFKC")}`)))].map(byte => byte.toString(16).padStart(2, "0")).join(""); }
 async function rateLimitDigest(actorId: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms-rate:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(actorId)))].map(byte => byte.toString(16).padStart(2, "0")).join(""); }

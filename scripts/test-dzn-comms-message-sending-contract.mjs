@@ -56,6 +56,8 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /keyedDigest/);
   assert.match(runtime, /rateLimitDigest/);
   assert.match(runtime, /receiptDigest/);
+  assert.match(runtime, /receiptDigest\(user\.id, requestId, env\.SESSION_SECRET!\)/, "Replay keys must be scoped to one actor and one client request.");
+  assert.match(runtime, /actorId\.normalize\("NFKC"\).*requestId\.normalize\("NFKC"\)/, "Separate receipts from one actor must not share a stable join key.");
   assert.doesNotMatch(runtime, /dzn_comms_send_receipts \(id, actor_user_id/, "Receipt writes must not retain the raw account ID.");
   assert.match(runtime, /secretReady/);
   assert.match(runtime, /scope === "local_test" && localRequest/);
