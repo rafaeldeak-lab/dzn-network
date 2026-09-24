@@ -360,6 +360,8 @@ async function run() {
     assert.equal(firstTick.processed, 0);
     assert.equal(destinationScanPages, 2);
     assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_posting_state WHERE guild_id = '__dzn_internal__'").get()?.n, 1);
+    const cursorPayload = db.sqlite.prepare("SELECT last_payload_hash FROM server_posting_state WHERE guild_id = '__dzn_internal__'").get()?.last_payload_hash;
+    assert.deepEqual(JSON.parse(String(cursorPayload)), { destinationId: "ineligible-07" });
     assert.equal((await getOwnerDiscordOverview(env)).lastPostAttempt, null);
 
     const resumedTick = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });

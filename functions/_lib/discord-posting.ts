@@ -25,7 +25,6 @@ type PostingDestination = {
 type DuePostingDestination = PostingDestination & {
   destination_id: string;
   last_edited_at: string | null;
-  cursor_edited_at: string;
 };
 
 type PostingState = {
@@ -451,7 +450,6 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
   const maxPages = Math.max(2, Math.min(options.maxJobs * 2, 8));
   const maxAccessLookups = Math.max(4, Math.min(options.maxJobs * 8, 24));
   const savedCursor = options.guildId ? null : await readDuePostingCursor(db);
-  let cursorEditedAt: string | null = savedCursor?.editedAt ?? null;
   let cursorDestinationId = savedCursor?.destinationId ?? "";
   let reachedEnd = false;
   let scanLimitReached = false;
@@ -466,8 +464,7 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
       .prepare(
         `SELECT destinations.id AS destination_id, destinations.guild_id, destinations.post_type,
                 destinations.discord_channel_id, destinations.discord_webhook_url, destinations.enabled,
-                state.last_edited_at,
-                COALESCE(state.last_edited_at, '1970-01-01T00:00:00.000Z') AS cursor_edited_at
+                state.last_edited_at
          FROM server_posting_destinations AS destinations
          LEFT JOIN server_posting_state AS state
            ON state.guild_id = destinations.guild_id
@@ -475,23 +472,14 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
           AND state.discord_channel_id = destinations.discord_channel_id
          WHERE (? IS NULL OR destinations.guild_id = ?)
            AND COALESCE(destinations.enabled, 0) = 1
-           AND (
-             ? IS NULL
-             OR COALESCE(state.last_edited_at, '1970-01-01T00:00:00.000Z') > ?
-             OR (
-               COALESCE(state.last_edited_at, '1970-01-01T00:00:00.000Z') = ?
-               AND destinations.id > ?
-             )
-           )
-         ORDER BY cursor_edited_at ASC, destinations.id ASC
+           AND (? = '' OR destinations.id > ?)
+         ORDER BY destinations.id ASC
          LIMIT ?`,
       )
       .bind(
         options.guildId ?? null,
         options.guildId ?? null,
-        cursorEditedAt,
-        cursorEditedAt,
-        cursorEditedAt,
+        cursorDestinationId,
         cursorDestinationId,
         pageSize,
       )
@@ -518,7 +506,6 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
         publishingAccess = await resolveDiscordPublishingAccessForGuild(env, row.guild_id);
         accessByGuild.set(row.guild_id, publishingAccess);
       }
-      cursorEditedAt = row.cursor_edited_at;
       cursorDestinationId = row.destination_id;
       if (!["active_live", "active_degraded"].includes(publishingAccess.lifecycleStatus)) continue;
       const listingContext = { plan_key: publishingAccess.planKey, subscription_status: publishingAccess.subscriptionStatus };
@@ -553,8 +540,8 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
   if (!options.guildId) {
     if (reachedEnd) {
       await clearDuePostingCursor(db);
-    } else if (cursorEditedAt && cursorDestinationId) {
-      await saveDuePostingCursor(db, { editedAt: cursorEditedAt, destinationId: cursorDestinationId });
+    } else if (cursorDestinationId) {
+      await saveDuePostingCursor(db, { destinationId: cursorDestinationId });
     }
   }
 
@@ -671,15 +658,15 @@ async function readDuePostingCursor(db: D1Database) {
     .first<{ last_payload_hash: string | null }>();
   if (!row?.last_payload_hash) return null;
   try {
-    const parsed = JSON.parse(row.last_payload_hash) as { editedAt?: unknown; destinationId?: unknown };
-    if (typeof parsed.editedAt !== "string" || typeof parsed.destinationId !== "string") return null;
-    return { editedAt: parsed.editedAt, destinationId: parsed.destinationId };
+    const parsed = JSON.parse(row.last_payload_hash) as { destinationId?: unknown };
+    if (typeof parsed.destinationId !== "string") return null;
+    return { destinationId: parsed.destinationId };
   } catch {
     return null;
   }
 }
 
-async function saveDuePostingCursor(db: D1Database, cursor: { editedAt: string; destinationId: string }) {
+async function saveDuePostingCursor(db: D1Database, cursor: { destinationId: string }) {
   const now = new Date().toISOString();
   await db
     .prepare(
