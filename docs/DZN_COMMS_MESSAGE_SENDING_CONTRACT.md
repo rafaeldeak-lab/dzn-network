@@ -31,7 +31,7 @@ The `local_test` scope is accepted only when the request host is loopback or a `
 
 The server controls actor identity, author label, channel, timestamp, visibility and source. It blocks token-shaped secrets, external Discord invites, repeated-character spam and severe threat/doxxing language. Rejected text remains request-memory-only and is never written to D1.
 
-Accepted messages, quota slots and decision receipts are written in one D1 batch. The receipt key is `(actor_user_id, channel_id, client_request_id)`. Same-key retries return the original result and a different body returns conflict. Each quota write allocates the first free slot atomically, so unrelated request IDs cannot collide. The accepted timestamp is checked against the previous accepted send to enforce a full five elapsed seconds, while bounded minute slots enforce the hard ceiling during concurrent sends.
+Accepted messages, quota slots and decision receipts are written in one D1 batch. The receipt key is `(actor_user_id, channel_id, client_request_id)`. Same-key retries return the original result and a different body returns conflict. Each quota write allocates the first free slot atomically under a secret-derived rate key, so the rate ledger does not store the raw user ID. The receipt records the exact allocated slot while the message is active. Destructive erasure clears that association but retains the pseudonymous slot until normal retention, preserving both cooldown and per-minute limits without retaining a message-to-author link. The accepted timestamp is checked against the previous accepted send to enforce a full five elapsed seconds, while bounded minute slots enforce the hard ceiling during concurrent sends.
 
 ## Reporting And Moderation
 

@@ -73,6 +73,7 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   const channel = await db.prepare("SELECT id FROM dzn_comms_channels WHERE slug = 'global-chat' AND kind = 'public' AND visibility = 'public' AND is_readable = 1 LIMIT 1").first<{ id: string }>();
   if (!channel?.id) return error(503, "CHAT_NOT_READY", "Global Chat is not ready yet.");
   const bodyHash = await keyedDigest(typeof parsed.value.body === "string" ? parsed.value.body : "", env.SESSION_SECRET!);
+  const actorRateKey = await rateLimitDigest(user.id, env.SESSION_SECRET!);
   const now = new Date();
   const minuteBucket = now.toISOString().slice(0, 16);
   try {
@@ -96,9 +97,16 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   try {
     await db.batch([
       deleteExpiredReceipt(db, user.id, channel.id, requestId),
-      allocateSendSlot(db, user.id, minuteBucket, now.toISOString()),
+      allocateSendSlot(db, actorRateKey, minuteBucket, now.toISOString()),
       db.prepare("INSERT INTO dzn_comms_messages (id, channel_id, author_user_id, author_display_name, author_role_label, body, visibility_state, source_label, expires_at) VALUES (?, ?, ?, ?, 'Member', ?, 'visible', 'authenticated_web_chat', ?)").bind(messageId, channel.id, user.id, safeName(user), moderated.body, messageExpires),
-      db.prepare("INSERT INTO dzn_comms_send_receipts (id, actor_user_id, channel_id, client_request_id, body_hash, decision, response_status, reason_code, message_id, expires_at) VALUES (?, ?, ?, ?, ?, 'allow', 201, 'MESSAGE_ALLOWED', ?, ?)").bind(receiptId, user.id, channel.id, requestId, bodyHash, messageId, expires),
+      db.prepare(`INSERT INTO dzn_comms_send_receipts
+        (id, actor_user_id, channel_id, client_request_id, body_hash, decision, response_status, reason_code,
+          message_id, send_rate_key, send_minute_bucket, send_slot, expires_at)
+        SELECT ?, ?, ?, ?, ?, 'allow', 201, 'MESSAGE_ALLOWED', ?, ?, ?, slots.slot, ?
+        FROM dzn_comms_send_slots AS slots
+        WHERE slots.actor_rate_key = ? AND slots.minute_bucket = ? AND slots.accepted_at = ?
+        LIMIT 1`).bind(receiptId, user.id, channel.id, requestId, bodyHash, messageId, actorRateKey, minuteBucket, expires,
+          actorRateKey, minuteBucket, now.toISOString()),
     ]);
   } catch (cause) {
     const concurrentReplay = await readReceipt(db, user.id, channel.id, requestId);
@@ -166,24 +174,7 @@ export async function handleDznCommsModeration(request: Request, env: Env) {
   statements.push(db.prepare("INSERT INTO dzn_comms_moderation_audit (id, message_id, actor_user_id, action, reason_code) SELECT ?, ?, ?, ?, ? WHERE changes() > 0").bind(crypto.randomUUID(), messageId, auth.user.id, action, reason));
   if (state === "deleted") {
     statements.push(db.prepare("UPDATE dzn_comms_reports SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = ? WHERE message_id = ? AND status = 'open'").bind(auth.user.id, messageId));
-    statements.push(db.prepare(`WITH target_slot AS (
-        SELECT slots.actor_user_id, slots.minute_bucket, slots.slot
-        FROM dzn_comms_send_slots AS slots
-        JOIN dzn_comms_send_receipts AS receipts ON receipts.actor_user_id = slots.actor_user_id
-        WHERE receipts.message_id = ?
-          AND ABS((julianday(slots.accepted_at) - julianday(receipts.created_at)) * 86400.0) <= 5.0
-        ORDER BY ABS((julianday(slots.accepted_at) - julianday(receipts.created_at)) * 86400.0) ASC,
-          slots.accepted_at DESC, slots.slot DESC
-        LIMIT 1
-      )
-      DELETE FROM dzn_comms_send_slots
-      WHERE EXISTS (
-        SELECT 1 FROM target_slot
-        WHERE target_slot.actor_user_id = dzn_comms_send_slots.actor_user_id
-          AND target_slot.minute_bucket = dzn_comms_send_slots.minute_bucket
-          AND target_slot.slot = dzn_comms_send_slots.slot
-      )`).bind(messageId));
-    statements.push(db.prepare("UPDATE dzn_comms_send_receipts SET message_id = NULL WHERE message_id = ?").bind(messageId));
+    statements.push(db.prepare("UPDATE dzn_comms_send_receipts SET message_id = NULL, send_rate_key = NULL, send_minute_bucket = NULL, send_slot = NULL WHERE message_id = ?").bind(messageId));
   }
   const results = await db.batch(statements);
   if (Number(results[0]?.meta?.changes ?? 0) < 1 || Number(results[1]?.meta?.changes ?? 0) !== 1) {
@@ -313,14 +304,14 @@ function allocateAttemptSlot(db: D1Database, actorId: string, minuteBucket: stri
 function allocateReportSlot(db: D1Database, actorId: string, minuteBucket: string) {
   return db.prepare(slotAllocationSql("dzn_comms_report_slots", "reporter_user_id", REPORTS_PER_MINUTE)).bind(actorId, minuteBucket, actorId, minuteBucket);
 }
-function allocateSendSlot(db: D1Database, actorId: string, minuteBucket: string, acceptedAt: string) {
+function allocateSendSlot(db: D1Database, actorRateKey: string, minuteBucket: string, acceptedAt: string) {
   return db.prepare(`WITH RECURSIVE slots(slot) AS (SELECT 1 UNION ALL SELECT slot + 1 FROM slots WHERE slot < ${SENDS_PER_MINUTE})
-    INSERT INTO dzn_comms_send_slots (actor_user_id, minute_bucket, slot, accepted_at)
+    INSERT INTO dzn_comms_send_slots (actor_rate_key, minute_bucket, slot, accepted_at)
     SELECT ?, ?, CASE WHEN NOT EXISTS (
-      SELECT 1 FROM dzn_comms_send_slots WHERE actor_user_id = ? AND julianday(accepted_at) > julianday(?, '-5 seconds')
+      SELECT 1 FROM dzn_comms_send_slots WHERE actor_rate_key = ? AND julianday(accepted_at) > julianday(?, '-5 seconds')
     ) THEN (SELECT MIN(slot) FROM slots WHERE slot NOT IN (
-      SELECT slot FROM dzn_comms_send_slots WHERE actor_user_id = ? AND minute_bucket = ?
-    )) ELSE NULL END, ?`).bind(actorId, minuteBucket, actorId, acceptedAt, actorId, minuteBucket, acceptedAt);
+      SELECT slot FROM dzn_comms_send_slots WHERE actor_rate_key = ? AND minute_bucket = ?
+    )) ELSE NULL END, ?`).bind(actorRateKey, minuteBucket, actorRateKey, acceptedAt, actorRateKey, minuteBucket, acceptedAt);
 }
 function slotAllocationSql(table: "dzn_comms_attempt_slots" | "dzn_comms_report_slots", actorColumn: "actor_user_id" | "reporter_user_id", maximum: number) {
   return `WITH RECURSIVE slots(slot) AS (SELECT 1 UNION ALL SELECT slot + 1 FROM slots WHERE slot < ${maximum})
@@ -330,3 +321,4 @@ function slotAllocationSql(table: "dzn_comms_attempt_slots" | "dzn_comms_report_
     ))`;
 }
 async function keyedDigest(value: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value.normalize("NFKC"))))].map(byte => byte.toString(16).padStart(2, "0")).join(""); }
+async function rateLimitDigest(actorId: string, secret: string) { const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`dzn-comms-rate:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]); return [...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(actorId)))].map(byte => byte.toString(16).padStart(2, "0")).join(""); }

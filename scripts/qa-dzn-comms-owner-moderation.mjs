@@ -32,8 +32,8 @@ for (const [name, width, height] of [["desktop", 1440, 1000], ["tablet", 900, 10
     if (route.request().method() === "POST") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, code: "MODERATION_RECORDED" }) });
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payload) });
   });
-  await page.goto(`${baseUrl}/owner/comms`, { waitUntil: "networkidle", timeout: 30_000 });
-  await page.getByRole("heading", { name: "Global Chat moderation" }).waitFor();
+  await page.goto(`${baseUrl}/owner/comms`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.getByRole("heading", { name: "Global Chat moderation" }).waitFor({ timeout: 30_000 });
   const result = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, title: document.title }));
   if (result.overflow !== 0 || errors.length) throw new Error(`${name} moderation QA failed: ${JSON.stringify({ result, errors })}`);
   await page.screenshot({ path: `${output}/screenshots/${name}.png`, fullPage: true });

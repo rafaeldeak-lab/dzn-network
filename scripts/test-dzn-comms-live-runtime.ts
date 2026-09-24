@@ -239,30 +239,36 @@ async function testReportAndModerationRuntime() {
 
   const erased = await fixture();
   try {
-    erased.sqlite.prepare(`INSERT INTO dzn_comms_messages
-      (id,channel_id,author_user_id,author_display_name,body,visibility_state)
-      VALUES ('message-delete','dzn-global-chat','other','Other','Sensitive text to erase','visible')`).run();
+    const sent = await handleDznCommsSend(request("/api/comms/messages", "other-token", {
+      channelSlug: "global-chat", clientRequestId: "delete-request-0001", body: "Sensitive text to erase",
+    }), erased.env);
+    assert.equal(sent.status, 201);
+    const messageId = (await payload(sent)).message_id!;
     erased.sqlite.prepare(`INSERT INTO dzn_comms_reports (id,message_id,reporter_user_id,reason_code)
-      VALUES ('report-delete','message-delete','player','personal_information')`).run();
-    erased.sqlite.prepare(`INSERT INTO dzn_comms_send_receipts
-      (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,message_id,expires_at)
-      VALUES ('receipt-delete','other','dzn-global-chat','delete-request','hash','allow',201,'message-delete',datetime('now','+1 day'))`).run();
-    erased.sqlite.prepare(`INSERT INTO dzn_comms_send_slots (actor_user_id,minute_bucket,slot,accepted_at)
-      VALUES ('other',strftime('%Y-%m-%dT%H:%M','now'),1,CURRENT_TIMESTAMP)`).run();
-    erased.sqlite.prepare(`INSERT INTO dzn_comms_send_slots (actor_user_id,minute_bucket,slot,accepted_at)
-      VALUES ('other',strftime('%Y-%m-%dT%H:%M','now'),2,datetime('now','-5.001 seconds'))`).run();
+      VALUES ('report-delete',?,'player','personal_information')`).run(messageId);
+    const receiptBefore = erased.sqlite.prepare("SELECT send_rate_key,send_minute_bucket,send_slot FROM dzn_comms_send_receipts WHERE message_id = ?").get(messageId);
+    assert.match(String(receiptBefore?.send_rate_key), /^[a-f0-9]{64}$/, "Accepted sends must use a pseudonymous rate key.");
+    assert.ok(receiptBefore?.send_minute_bucket && receiptBefore?.send_slot, "The receipt must persist the exact allocated slot.");
+    assert.equal(erased.count("dzn_comms_send_slots"), 1);
     const response = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {
-      messageId: "message-delete", action: "delete", reason: "personal information",
+      messageId, action: "delete", reason: "personal information",
     }), erased.env);
     assert.equal(response.status, 200);
-    const row = erased.sqlite.prepare("SELECT body,author_user_id,visibility_state FROM dzn_comms_messages WHERE id = 'message-delete'").get() as Row;
+    const row = erased.sqlite.prepare("SELECT body,author_user_id,visibility_state FROM dzn_comms_messages WHERE id = ?").get(messageId) as Row;
     assert.equal(row.body, "Message deleted.");
     assert.equal(row.author_user_id, null);
     assert.equal(row.visibility_state, "deleted");
     assert.equal(erased.sqlite.prepare("SELECT status FROM dzn_comms_reports WHERE id = 'report-delete'").get()?.status, "resolved");
-    assert.equal(erased.sqlite.prepare("SELECT message_id FROM dzn_comms_send_receipts WHERE id = 'receipt-delete'").get()?.message_id, null, "Erasure must unlink the retained idempotency receipt from its author's message.");
-    assert.equal(erased.count("dzn_comms_send_slots"), 1, "Erasure must remove exactly the nearest author/timestamp send-slot association.");
-    assert.equal(erased.sqlite.prepare("SELECT slot FROM dzn_comms_send_slots").get()?.slot, 2, "The neighboring accepted-send slot must remain intact.");
+    const receiptAfter = erased.sqlite.prepare("SELECT message_id,send_rate_key,send_minute_bucket,send_slot FROM dzn_comms_send_receipts WHERE client_request_id = 'delete-request-0001'").get();
+    assert.equal(receiptAfter?.message_id, null, "Erasure must unlink the retained receipt from the message.");
+    assert.equal(receiptAfter?.send_rate_key, null, "Erasure must clear the receipt's pseudonymous rate key.");
+    assert.equal(receiptAfter?.send_minute_bucket, null, "Erasure must clear the receipt's exact rate minute.");
+    assert.equal(receiptAfter?.send_slot, null, "Erasure must clear the receipt's exact rate slot.");
+    assert.equal(erased.count("dzn_comms_send_slots"), 1, "Erasure must retain the pseudonymous accepted-send slot until normal retention.");
+    const postErasureSend = await handleDznCommsSend(request("/api/comms/messages", "other-token", {
+      channelSlug: "global-chat", clientRequestId: "after-delete-0001", body: "Immediate follow-up",
+    }), erased.env);
+    assert.equal(postErasureSend.status, 429, "Moderation erasure must not refund the five-second or per-minute send quota.");
   } finally { erased.close(); }
 
   const erasedAfterSlotExpiry = await fixture();
@@ -273,13 +279,13 @@ async function testReportAndModerationRuntime() {
     erasedAfterSlotExpiry.sqlite.prepare(`INSERT INTO dzn_comms_send_receipts
       (id,actor_user_id,channel_id,client_request_id,body_hash,decision,response_status,message_id,created_at,expires_at)
       VALUES ('receipt-delete-late','other','dzn-global-chat','delete-late-request','hash','allow',201,'message-delete-late',datetime('now','-3 days'),datetime('now','+4 days'))`).run();
-    erasedAfterSlotExpiry.sqlite.prepare(`INSERT INTO dzn_comms_send_slots (actor_user_id,minute_bucket,slot,accepted_at)
-      VALUES ('other',strftime('%Y-%m-%dT%H:%M','now'),1,CURRENT_TIMESTAMP)`).run();
+    erasedAfterSlotExpiry.sqlite.prepare(`INSERT INTO dzn_comms_send_slots (actor_rate_key,minute_bucket,slot,accepted_at)
+      VALUES ('unrelated-pseudonymous-rate-key',strftime('%Y-%m-%dT%H:%M','now'),1,CURRENT_TIMESTAMP)`).run();
     const response = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {
       messageId: "message-delete-late", action: "delete", reason: "personal information",
     }), erasedAfterSlotExpiry.env);
     assert.equal(response.status, 200);
-    assert.equal(erasedAfterSlotExpiry.count("dzn_comms_send_slots"), 1, "Erasure after target-slot retention must not remove a newer unrelated send slot.");
+    assert.equal(erasedAfterSlotExpiry.count("dzn_comms_send_slots"), 1, "Erasure must not search for or remove an unrelated pseudonymous rate slot.");
     assert.equal(erasedAfterSlotExpiry.sqlite.prepare("SELECT message_id FROM dzn_comms_send_receipts WHERE id = 'receipt-delete-late'").get()?.message_id, null, "Late erasure must still unlink the retained receipt.");
     assert.equal(erasedAfterSlotExpiry.sqlite.prepare("SELECT visibility_state FROM dzn_comms_messages WHERE id = 'message-delete-late'").get()?.visibility_state, "deleted");
   } finally { erasedAfterSlotExpiry.close(); }

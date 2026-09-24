@@ -30,6 +30,10 @@ test("schema supplies durable idempotency, quotas, reports, timeouts and audit",
   }
   assert.match(migration, /UNIQUE\(actor_user_id, channel_id, client_request_id\)/);
   assert.match(migration, /accepted_at TEXT NOT NULL/);
+  assert.match(migration, /actor_rate_key TEXT NOT NULL/);
+  assert.match(migration, /send_rate_key TEXT/);
+  assert.match(migration, /send_minute_bucket TEXT/);
+  assert.match(migration, /send_slot INTEGER/);
   assert.match(migration, /CHECK\(slot BETWEEN 1 AND 20\)/);
   assert.match(migration, /CHECK\(slot BETWEEN 1 AND 30\)/);
   assert.match(migration, /CHECK\(slot BETWEEN 1 AND 10\)/);
@@ -47,6 +51,7 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /db\.batch\(statements\)/);
   assert.match(runtime, /channels\.slug = 'global-chat'/);
   assert.match(runtime, /keyedDigest/);
+  assert.match(runtime, /rateLimitDigest/);
   assert.match(runtime, /secretReady/);
   assert.match(runtime, /scope === "local_test" && localRequest/);
   assert.match(runtime, /WITH RECURSIVE slots\(slot\)/);
@@ -58,6 +63,8 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /concurrentReplay\) return error\(409, "REQUEST_ID_CONFLICT"/, "Concurrent different-body retries must preserve 409 conflict semantics.");
   assert.match(runtime, /WHERE changes\(\) > 0/, "Moderation audit rows must depend on a real state transition.");
   assert.match(runtime, /MODERATION_NO_CHANGE/, "No-op moderation must return a conflict instead of a false success.");
+  assert.match(runtime, /SET message_id = NULL, send_rate_key = NULL, send_minute_bucket = NULL, send_slot = NULL/, "Destructive erasure must clear the exact receipt-to-rate-slot association.");
+  assert.doesNotMatch(runtime, /DELETE FROM dzn_comms_send_slots[\s\S]{0,500}message_id/, "Destructive erasure must not refund accepted-send rate limits.");
 });
 
 test("moderation publishes only allow decisions and never stores rejected text", () => {
