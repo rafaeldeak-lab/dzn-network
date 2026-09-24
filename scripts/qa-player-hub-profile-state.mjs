@@ -126,9 +126,13 @@ if (process.argv.includes("--serve")) {
             await revoked.getByText("The proof did not match this game account. Contact support to submit current evidence.").waitFor();
             assert.equal(await revoked.getByRole("link", { name: "Contact support" }).getAttribute("href"), "mailto:dznnetworksupport@gmail.com");
             assert.ok(await revoked.evaluate(el => el.scrollWidth <= el.clientWidth));
+            const draftGamertag = `Draft-${width}`;
+            await page.getByPlaceholder("For example: xAKA-MINI_KickAs").fill(draftGamertag);
             await page.getByRole("button", { name: /Privacy & Sharing/ }).click();
             await assertAnchorInView(page, "profile-settings");
-            assert.equal(await page.locator("#game-account").count(), 0, "Only the selected profile section should remain mounted");
+            assert.equal(await page.locator("#game-account").isHidden(), true, "Unselected profile sections must be hidden");
+            await page.getByRole("button", { name: /Game Stats/ }).click();
+            assert.equal(await page.getByPlaceholder("For example: xAKA-MINI_KickAs").inputValue(), draftGamertag, "Switching sections must preserve an in-progress link request");
 
             await page.goto(`${origin}/player/profile`, { waitUntil: "networkidle" });
             await page.getByRole("button", { name: /Game Stats/ }).click();
@@ -246,7 +250,7 @@ async function checkProfileFollowups(browser) {
           holdIdentity = true;
           await page.goto(`${origin}/player/profile#profile-settings`, { waitUntil: "domcontentloaded" });
           await page.locator("#profile-settings").waitFor();
-          assert.equal(await page.locator("#profile-summary, #game-account").count(), 0, "Unselected profile sections must not coexist");
+          assert.equal(await page.locator("#profile-summary:visible, #game-account:visible").count(), 0, "Unselected profile sections must not be visible");
           await page.waitForLoadState("networkidle");
           await assertAnchorInView(page, "profile-settings");
           await page.goto(`${origin}/player`, { waitUntil: "networkidle" });

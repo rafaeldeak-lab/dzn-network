@@ -5,6 +5,7 @@ import { testPlayerHubProfileState } from "./test-player-hub-profile-state";
 const route = readFileSync("functions/api/player/hub.ts", "utf8");
 const statBridge = readFileSync("functions/_lib/player-stat-bridge.ts", "utf8");
 const playerHome = readFileSync("components/player/player-home.tsx", "utf8");
+const profileQa = readFileSync("scripts/qa-player-hub-profile-state.mjs", "utf8");
 const platformSpec = readFileSync("docs/DZN_PLAYER_OWNER_PLATFORM_SPEC.md", "utf8");
 const packageJson = readFileSync("package.json", "utf8");
 
@@ -48,7 +49,9 @@ assert.match(playerHome, /ProfileWorkspaceNavigation/, "The profile route must u
 assert.match(playerHome, /Overview/, "The profile workspace must expose an overview section.");
 assert.match(playerHome, /Game Stats/, "The profile workspace must expose game-stat linking without a long-page hunt.");
 assert.match(playerHome, /Privacy & Sharing/, "The profile workspace must expose privacy and sharing controls.");
-assert.match(playerHome, /activeProfileSection === "profile-summary"/, "The profile workspace must render one primary section at a time.");
+assert.match(playerHome, /hidden=\{activeProfileSection !== "profile-summary"\}/, "The profile workspace must show only one primary section at a time.");
+assert.match(playerHome, /visitedProfileSections\.has\("game-account"\)/, "The profile workspace must preserve a visited game-link form while it is hidden.");
+assert.match(profileQa, /Switching sections must preserve an in-progress link request/, "Rendered QA must protect game-link drafts across profile navigation.");
 assert.match(playerHome, /mode === "home"/, "The full dashboard panels must remain on the Player Hub route.");
 assert.match(playerHome, /section \?\? "profile-summary"/, "Clearing or invalidating the profile hash must restore Overview.");
 assert.match(playerHome, /setProfileReturnTo\(section \? `\/player\/profile#\$\{section\}` : "\/player\/profile"\)/, "Discord login must preserve a recognized profile deep link.");

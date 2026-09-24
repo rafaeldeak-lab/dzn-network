@@ -317,12 +317,20 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
   const hubUserId = authState.status === "logged_in" ? authState.user.id : null;
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const [activeProfileSection, setActiveProfileSection] = useState<ProfileSectionId>("profile-summary");
+  const [visitedProfileSections, setVisitedProfileSections] = useState<Set<ProfileSectionId>>(() => new Set(["profile-summary"]));
 
   useEffect(() => {
     if (mode !== "profile") return;
     const syncSectionFromHash = () => {
       const section = profileSectionFromHash(window.location.hash);
-      setActiveProfileSection(section ?? "profile-summary");
+      const nextSection = section ?? "profile-summary";
+      setActiveProfileSection(nextSection);
+      setVisitedProfileSections((current) => {
+        if (current.has(nextSection)) return current;
+        const next = new Set(current);
+        next.add(nextSection);
+        return next;
+      });
       setProfileReturnTo(section ? `/player/profile#${section}` : "/player/profile");
     };
     syncSectionFromHash();
@@ -404,6 +412,12 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
 
   function openProfileSection(section: ProfileSectionId) {
     setActiveProfileSection(section);
+    setVisitedProfileSections((current) => {
+      if (current.has(section)) return current;
+      const next = new Set(current);
+      next.add(section);
+      return next;
+    });
     setProfileReturnTo(`/player/profile#${section}`);
     window.history.pushState(null, "", `#${section}`);
   }
@@ -632,9 +646,15 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
 
         {mode === "profile" && authState.status === "logged_in" ? (
           <div className="min-w-0">
-            {activeProfileSection === "profile-summary" ? <ProfileProgressionPanel state={hubState} /> : null}
-            {activeProfileSection === "game-account" ? <div id="game-account" className="scroll-mt-32"><PlayerGameIdentityLinks /></div> : null}
-            {activeProfileSection === "profile-settings" ? <PlayerProfilePrivacySettings onSaved={refreshProfileSummary} /> : null}
+            {visitedProfileSections.has("profile-summary") ? (
+              <div hidden={activeProfileSection !== "profile-summary"}><ProfileProgressionPanel state={hubState} /></div>
+            ) : null}
+            {visitedProfileSections.has("game-account") ? (
+              <div id="game-account" hidden={activeProfileSection !== "game-account"} className="scroll-mt-32"><PlayerGameIdentityLinks /></div>
+            ) : null}
+            {visitedProfileSections.has("profile-settings") ? (
+              <div hidden={activeProfileSection !== "profile-settings"}><PlayerProfilePrivacySettings onSaved={refreshProfileSummary} /></div>
+            ) : null}
           </div>
         ) : null}
       </section>
