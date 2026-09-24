@@ -30,13 +30,17 @@ export async function testPlayerGameIdentityReadModels() {
   try {
     sqlite.exec(`
       PRAGMA foreign_keys = ON;
-      CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT);
+      CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT, avatar TEXT);
       CREATE TABLE linked_servers (
         id TEXT PRIMARY KEY, user_id TEXT, guild_id TEXT, status TEXT, merged_into_server_id TEXT,
         display_name TEXT, hostname TEXT, server_name TEXT, nitrado_service_name TEXT, public_slug TEXT
       );
       CREATE TABLE player_profiles (id TEXT PRIMARY KEY);
-      INSERT INTO users VALUES ('player-a', 'Player A'), ('player-b', 'Player B'), ('owner-a', 'Owner A'), ('owner-b', 'Owner B');
+      INSERT INTO users VALUES
+        ('player-a', 'Player A', 'avatar_hash_a'),
+        ('player-b', 'Player B', NULL),
+        ('owner-a', 'Owner A', NULL),
+        ('owner-b', 'Owner B', NULL);
       INSERT INTO linked_servers (id, user_id, status, server_name, public_slug) VALUES
         ('server-a', 'owner-a', 'active', 'Server A', 'server-a'), ('server-b', 'owner-b', 'active', 'Server B', 'server-b');
       INSERT INTO player_profiles VALUES ('profile-a'), ('profile-b');
@@ -44,10 +48,10 @@ export async function testPlayerGameIdentityReadModels() {
     sqlite.exec(readFileSync("migrations/0064_player_game_identity_links.sql", "utf8"));
     sqlite.exec(`
       INSERT INTO player_game_identity_claims (id, user_id, discord_id, linked_server_id, player_profile_id, player_id) VALUES
-        ('claim-a', 'player-a', 'discord-a', 'server-a', 'profile-a', '76561198000000001'),
+        ('claim-a', 'player-a', '831243159785701398', 'server-a', 'profile-a', '76561198000000001'),
         ('claim-b', 'player-b', 'discord-b', 'server-b', 'profile-b', '76561198000000002');
       INSERT INTO player_game_identity_links (id, user_id, discord_id, linked_server_id, player_profile_id, player_id, verified_source, verified_by_user_id) VALUES
-        ('link-a', 'player-a', 'discord-a', 'server-a', 'profile-a', '76561198000000001', 'owner_approved', 'owner-a'),
+        ('link-a', 'player-a', '831243159785701398', 'server-a', 'profile-a', '76561198000000001', 'owner_approved', 'owner-a'),
         ('link-b', 'player-b', 'discord-b', 'server-b', 'profile-b', '76561198000000002', 'owner_approved', 'owner-b');
       INSERT INTO player_game_identity_audit_log
         (id, claim_id, link_id, user_id, actor_user_id, linked_server_id, player_profile_id, player_id, action, result, note) VALUES
@@ -78,6 +82,7 @@ export async function testPlayerGameIdentityReadModels() {
     assert.equal(ownerA.source, "player_game_identity_claims");
     assert.deepEqual(ownerA.claims.map(row => row.id), ["claim-a"]);
     assert.equal((ownerA.claims[0] as { submitted_player_id?: string }).submitted_player_id, "76561198000000001");
+    assert.equal((ownerA.claims[0] as { account_avatar_url?: string }).account_avatar_url, "https://cdn.discordapp.com/avatars/831243159785701398/avatar_hash_a.webp?size=128");
     assert.notEqual(ownerA.claims[0].player_id, "76561198000000001");
     assert.deepEqual(ownerA.history.map(row => row.id), ["audit-a"]);
     assert.equal(ownerA.history[0].player_id, "76561198000000001");
@@ -114,7 +119,7 @@ export async function testPlayerGameIdentityReadModels() {
     assert.equal(secondHistoryPage.history_next_cursor, null);
     assert.equal(new Set([...firstHistoryPage.history, ...secondHistoryPage.history].map(row => row.id)).size, 52);
 
-    const player = await readPlayerGameIdentityReadModel(env, user("player-a", "discord-a"));
+    const player = await readPlayerGameIdentityReadModel(env, user("player-a", "831243159785701398"));
     assert.equal(player.source, "player_game_identity_links");
     assert.deepEqual(player.claims.map(row => row.id), ["claim-a"]);
     assert.deepEqual(player.active_links.map(row => row.id), ["link-a"]);

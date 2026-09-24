@@ -2,15 +2,25 @@
 
 import {
   AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
   CheckCircle2,
+  ChevronDown,
   Clock3,
+  Copy,
   ExternalLink,
+  FileCheck2,
+  Gamepad2,
+  Home,
+  ListChecks,
   RefreshCw,
+  Server,
   ShieldCheck,
+  UserRound,
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ManagedGameIdentityLinks } from "./managed-game-identity-links";
 
 type ReviewCheck = {
@@ -36,6 +46,7 @@ type PlayerGameIdentityClaim = {
   user_id: string;
   requester_discord_id?: string;
   account_name: string | null;
+  account_avatar_url?: string | null;
   request_source?: "gamertag_lookup" | "legacy_exact_id";
   linked_server_id: string;
   player_profile_id: string;
@@ -114,6 +125,7 @@ export function PlayerGameIdentityClaimsPage() {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [busyClaim, setBusyClaim] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [selectedClaimIndex, setSelectedClaimIndex] = useState(0);
 
   const fetchClaims = useCallback(async (historyCursor: string | null = null): Promise<ClaimLoadResult> => {
     const endpoint = historyCursor
@@ -217,7 +229,10 @@ export function PlayerGameIdentityClaimsPage() {
     };
   }, [applyLoadResult, fetchClaims]);
 
-  const pendingCount = useMemo(() => claims.filter((claim) => claim.status === "pending").length, [claims]);
+  const pendingClaims = useMemo(() => claims.filter((claim) => claim.status === "pending"), [claims]);
+  const pendingCount = pendingClaims.length;
+  const safeSelectedClaimIndex = Math.min(selectedClaimIndex, Math.max(0, pendingClaims.length - 1));
+  const selectedClaim = pendingClaims[safeSelectedClaimIndex] ?? null;
 
   async function submitReview(claim: PlayerGameIdentityClaim, action: ReviewAction) {
     const note = (notes[claim.id] ?? "").trim().slice(0, NOTE_LIMIT);
@@ -257,50 +272,55 @@ export function PlayerGameIdentityClaimsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#02030a] px-4 py-6 text-zinc-100">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_16%_10%,rgba(34,211,238,0.12),transparent_30%),radial-gradient(circle_at_80%_0%,rgba(168,85,247,0.16),transparent_34%)]" />
-      <div className="relative mx-auto flex max-w-6xl flex-col gap-4">
+    <main className="min-h-screen bg-[#02050a] px-3 py-4 text-zinc-100 sm:px-5 sm:py-6">
+      <div className="relative mx-auto flex max-w-[1480px] flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap gap-2">
-            <Link href="/owner" className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black uppercase text-zinc-300 hover:border-cyan-300/30 hover:text-white">
+            <Link href="/" className="inline-flex min-h-10 items-center gap-2 rounded-md border border-white/10 bg-black/45 px-3 py-2 text-xs font-black uppercase text-zinc-300 hover:border-cyan-300/30 hover:text-white">
+              <Home className="size-4" aria-hidden="true" />
+              Home
+            </Link>
+            <Link href="/owner" className="inline-flex min-h-10 items-center rounded-md border border-white/10 bg-black/45 px-3 py-2 text-xs font-black uppercase text-zinc-300 hover:border-cyan-300/30 hover:text-white">
               Owner Console
             </Link>
-            <Link href="/dashboard" className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-black uppercase text-zinc-300 hover:border-cyan-300/30 hover:text-white">
+            <Link href="/dashboard" className="inline-flex min-h-10 items-center rounded-md border border-white/10 bg-black/45 px-3 py-2 text-xs font-black uppercase text-zinc-300 hover:border-cyan-300/30 hover:text-white">
               Server Dashboard
             </Link>
           </div>
           <button
             type="button"
             onClick={() => void loadClaims()}
-            className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 hover:bg-cyan-300/20"
+            className="inline-flex min-h-10 items-center gap-2 rounded-md border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-xs font-black uppercase text-cyan-50 hover:bg-cyan-300/20"
           >
             <RefreshCw className="size-4" aria-hidden="true" />
             Refresh Queue
           </button>
         </div>
 
-        <section className="rounded-lg border border-cyan-300/20 bg-black/45 p-5 shadow-[0_0_48px_rgba(34,211,238,0.08)]">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
+        <section
+          className="relative overflow-hidden rounded-lg border border-cyan-300/20 bg-black/70 shadow-[0_0_48px_rgba(34,211,238,0.08)]"
+          style={{ backgroundImage: "url('/media/dzn-cinematic-survivor.png')", backgroundPosition: "center 48%", backgroundSize: "cover" }}
+        >
+          <div className="absolute inset-0 bg-[#020817]/80" aria-hidden="true" />
+          <div className="relative flex flex-wrap items-center justify-between gap-5 p-5 sm:p-6">
+            <div className="max-w-4xl">
               <p className="inline-flex items-center gap-2 rounded-md border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-100">
                 <ShieldCheck className="size-3.5" aria-hidden="true" />
                 Private owner/admin review
               </p>
-              <h1 className="mt-3 text-3xl font-black uppercase text-white md:text-4xl">Player Stat Link Checks</h1>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
-                Review the imported profile DZN resolved inside the selected server, verify ownership independently, then approve or reject the link. A gamertag can locate a candidate but is never proof.
+              <h1 className="mt-3 text-3xl font-black text-white sm:text-4xl">Player Stat Link Checks</h1>
+              <p className="mt-2 max-w-3xl text-sm font-medium leading-6 text-zinc-300">
+                Match one DZN account to one imported game profile and verify ownership independently before making a decision. Gamertags never auto-link. A gamertag can locate a candidate but is never proof.
               </p>
             </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-right">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">Pending</p>
-              <p className="mt-1 text-3xl font-black text-white">{pendingCount}</p>
+            <div className="min-w-40 rounded-lg border border-cyan-300/20 bg-[#061326]/90 px-5 py-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-200">Pending reviews</p>
+              <div className="mt-1 flex items-end justify-between gap-4">
+                <p className="text-4xl font-black text-white">{pendingCount}</p>
+                <ListChecks className="mb-1 size-6 text-cyan-300" aria-hidden="true" />
+              </div>
+              <p className="mt-1 text-xs font-semibold text-zinc-400">awaiting your decision</p>
             </div>
-          </div>
-
-          <div className="mt-4 grid gap-2 md:grid-cols-3">
-            <BoundaryPill title="Candidate only" body="Gamertags never auto-link." />
-            <BoundaryPill title="Owner scoped" body="Cross-owner reviews stay denied." />
-            <BoundaryPill title="Stats display only" body="No billing or score effect." />
           </div>
         </section>
 
@@ -312,12 +332,12 @@ export function PlayerGameIdentityClaimsPage() {
         ) : null}
 
         {state === "ready" ? (
-          <div className="grid grid-cols-2 gap-2 rounded-lg border border-white/10 bg-black/35 p-1.5" aria-label="Player link review views">
-            <button type="button" onClick={() => setView("pending")} aria-pressed={view === "pending"} className={`rounded-md px-3 py-2 text-xs font-black uppercase ${view === "pending" ? "bg-cyan-300/15 text-cyan-50" : "text-zinc-400 hover:text-white"}`}>
-              Pending ({pendingCount})
+          <div className="grid grid-cols-2 gap-1 rounded-lg border border-white/10 bg-black/45 p-1.5" aria-label="Player link review views">
+            <button type="button" onClick={() => setView("pending")} aria-pressed={view === "pending"} className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-3 py-2 text-xs font-black uppercase ${view === "pending" ? "border border-cyan-300/35 bg-cyan-300/15 text-cyan-50" : "border border-transparent text-zinc-400 hover:text-white"}`}>
+              <Clock3 className="size-4" aria-hidden="true" /> Pending ({pendingCount})
             </button>
-            <button type="button" onClick={() => setView("history")} aria-pressed={view === "history"} className={`rounded-md px-3 py-2 text-xs font-black uppercase ${view === "history" ? "bg-violet-300/15 text-violet-50" : "text-zinc-400 hover:text-white"}`}>
-              Decision History
+            <button type="button" onClick={() => setView("history")} aria-pressed={view === "history"} className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-3 py-2 text-xs font-black uppercase ${view === "history" ? "border border-violet-300/35 bg-violet-300/15 text-violet-50" : "border border-transparent text-zinc-400 hover:text-white"}`}>
+              <FileCheck2 className="size-4" aria-hidden="true" /> Decision History
             </button>
           </div>
         ) : null}
@@ -325,20 +345,20 @@ export function PlayerGameIdentityClaimsPage() {
         {state === "loading" ? <LoadingState /> : null}
         {state === "unauthorized" ? <UnauthorizedState /> : null}
         {state === "error" ? <ErrorState message={error ?? "Player stat link checks could not be loaded."} /> : null}
-        {state === "ready" && view === "pending" && claims.length === 0 ? <EmptyState boundary={payloadBoundary} /> : null}
-        {state === "ready" && view === "pending" && claims.length > 0 ? (
-          <section className="grid gap-4">
-            {claims.map((claim) => (
-              <ClaimCard
-                key={claim.id}
-                claim={claim}
-                note={notes[claim.id] ?? ""}
-                busy={busyClaim === claim.id}
-                onNoteChange={(value) => setNotes((current) => ({ ...current, [claim.id]: value.slice(0, NOTE_LIMIT) }))}
-                onReview={(action) => void submitReview(claim, action)}
-              />
-            ))}
-          </section>
+        {state === "ready" && view === "pending" && pendingClaims.length === 0 ? <EmptyState boundary={payloadBoundary} /> : null}
+        {state === "ready" && view === "pending" && selectedClaim ? (
+          <ClaimCard
+            key={selectedClaim.id}
+            claim={selectedClaim}
+            note={notes[selectedClaim.id] ?? ""}
+            busy={busyClaim === selectedClaim.id}
+            position={safeSelectedClaimIndex + 1}
+            total={pendingClaims.length}
+            onPrevious={() => setSelectedClaimIndex(Math.max(0, safeSelectedClaimIndex - 1))}
+            onNext={() => setSelectedClaimIndex(Math.min(pendingClaims.length - 1, safeSelectedClaimIndex + 1))}
+            onNoteChange={(value) => setNotes((current) => ({ ...current, [selectedClaim.id]: value.slice(0, NOTE_LIMIT) }))}
+            onReview={(action) => void submitReview(selectedClaim, action)}
+          />
         ) : null}
         {state === "ready" && view === "history" && history.length === 0 ? <HistoryEmptyState /> : null}
         {state === "ready" && view === "history" && history.length > 0 ? (
@@ -355,8 +375,12 @@ export function PlayerGameIdentityClaimsPage() {
             ) : null}
           </div>
         ) : null}
+        {state === "ready" ? (
+          <section className="rounded-lg border border-cyan-300/15 bg-[#06101b] px-4 sm:px-5">
+            <ManagedGameIdentityLinks />
+          </section>
+        ) : null}
       </div>
-      <div className="mx-auto w-full max-w-6xl"><ManagedGameIdentityLinks /></div>
     </main>
   );
 }
@@ -399,15 +423,6 @@ function HistoryEmptyState() {
       <h2 className="text-xl font-black text-white">No recorded decisions yet</h2>
       <p className="mt-2 text-sm leading-6 text-zinc-400">Approvals, rejections and revocations for servers you are authorized to manage will appear here.</p>
     </section>
-  );
-}
-
-function BoundaryPill({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.035] px-3 py-2">
-      <p className="text-xs font-black uppercase text-white">{title}</p>
-      <p className="mt-1 text-xs font-semibold text-zinc-400">{body}</p>
-    </div>
   );
 }
 
@@ -477,12 +492,20 @@ function ClaimCard({
   claim,
   note,
   busy,
+  position,
+  total,
+  onPrevious,
+  onNext,
   onNoteChange,
   onReview,
 }: {
   claim: PlayerGameIdentityClaim;
   note: string;
   busy: boolean;
+  position: number;
+  total: number;
+  onPrevious: () => void;
+  onNext: () => void;
   onNoteChange: (value: string) => void;
   onReview: (action: ReviewAction) => void;
 }) {
@@ -490,105 +513,144 @@ function ClaimCard({
   const exactId = claim.submitted_player_id ?? "Not available";
   const serverHref = claim.public_slug ? `/servers/${claim.public_slug}` : null;
   const requesterDiscordId = claim.requester_discord_id;
+  const [confirmed, setConfirmed] = useState({ ownership: false, match: false, account: false });
+  const approvalReady = confirmed.ownership && confirmed.match && confirmed.account;
+  const profileInitial = (claim.account_name || "DZN").trim().charAt(0).toUpperCase();
 
   return (
-    <article className="rounded-lg border border-white/10 bg-black/45 p-4 shadow-[0_0_36px_rgba(0,0,0,0.28)]">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-200">Pending player link</p>
-          <h2 className="mt-1 text-2xl font-black text-white">{claim.account_name || "DZN Player"}</h2>
-          <p className="mt-1 text-sm font-semibold text-zinc-400">Requested {formatDate(claim.requested_at)}</p>
-        </div>
-        <span className="rounded-md border border-amber-300/25 bg-amber-300/10 px-3 py-1.5 text-xs font-black uppercase text-amber-100">
-          Needs owner check
-        </span>
+    <article className="overflow-hidden rounded-lg border border-white/10 bg-[#050a12] shadow-[0_0_36px_rgba(0,0,0,0.28)]">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/10 bg-[#07111d] px-3 py-3 sm:px-4">
+        <button type="button" aria-label="Previous request" onClick={onPrevious} disabled={position <= 1 || busy} className="inline-flex min-h-9 items-center gap-2 rounded-md border border-white/10 px-2.5 text-xs font-black text-zinc-300 hover:border-cyan-300/30 hover:text-white disabled:opacity-35 sm:px-3">
+          <ArrowLeft className="size-4" aria-hidden="true" /> <span className="hidden sm:inline">Previous</span>
+        </button>
+        <p className="truncate text-center text-[10px] font-black uppercase tracking-[0.12em] text-zinc-400 sm:text-xs sm:tracking-[0.16em]">Reviewing {position} of {total}</p>
+        <button type="button" aria-label="Next request" onClick={onNext} disabled={position >= total || busy} className="inline-flex min-h-9 items-center gap-2 rounded-md border border-white/10 px-2.5 text-xs font-black text-zinc-300 hover:border-cyan-300/30 hover:text-white disabled:opacity-35 sm:px-3">
+          <span className="hidden sm:inline">Next</span> <ArrowRight className="size-4" aria-hidden="true" />
+        </button>
       </div>
 
-      <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-        <div className="grid min-w-0 gap-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <DetailBox label="Server" value={claim.server_name || "DZN Server"} href={serverHref} />
-            <DetailBox label="Imported game profile" value={claim.player_name || "Name not available"} />
-            <DetailBox label="Resolved exact game ID" value={exactId} emphasis />
-            <DetailBox label="Request source" value={claim.request_source === "gamertag_lookup" ? "Visible gamertag lookup - not ownership proof" : "Legacy exact-ID request - still requires verification"} />
-            <DetailBox label="Public-safe masked ID" value={claim.player_id || "Not available"} />
-            <DetailBox label="Request reference" value={claim.id} />
-            <DetailBox label="DZN account reference" value={claim.user_id} />
-            <DetailBox label="Requesting Discord account" value={requesterDiscordId || "Not recorded"} />
-            <DetailBox label="Requested action" value="Link this game account's statistics to this DZN account" />
-          </div>
-
-          <section className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.06] p-3">
-            <h3 className="text-sm font-black uppercase text-cyan-50">What to check</h3>
-            <div className="mt-3 grid gap-2">
-              {context.checks.map((check) => (
-                <div key={`${claim.id}-${check.label}`} className="flex gap-3 rounded-md border border-white/10 bg-black/25 p-3">
-                  {check.status === "ready" ? (
-                    <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-200" aria-hidden="true" />
-                  ) : (
-                    <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-200" aria-hidden="true" />
-                  )}
-                  <div>
-                    <p className="text-xs font-black uppercase text-white">{check.label}</p>
-                    <p className="mt-1 text-xs font-semibold leading-5 text-zinc-400">{check.detail}</p>
-                  </div>
-                </div>
-              ))}
+      <div className="grid min-w-0 gap-4 p-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(520px,1.1fr)]">
+        <section className="min-w-0 rounded-lg border border-white/10 bg-[#08101b] p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200">Player claim details</p>
+              <h2 className="mt-1 text-xl font-black text-white">One account, one server, one game profile</h2>
             </div>
-          </section>
-        </div>
-
-        <div className="grid gap-3">
-          <GuidanceList title="Approve only when" items={context.approve_when} tone="approve" />
-          <GuidanceList title="Reject when" items={context.reject_when} tone="reject" />
-          <section className="rounded-lg border border-amber-300/20 bg-amber-300/10 p-3">
-            <h3 className="text-sm font-black uppercase text-amber-50">Missing evidence</h3>
-            <p className="mt-2 text-xs font-semibold leading-5 text-amber-100/85">{context.missing_evidence_guidance}</p>
-          </section>
-        </div>
-      </div>
-
-      <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-3">
-        <label className="text-xs font-black uppercase text-zinc-200" htmlFor={`review-note-${claim.id}`}>
-          Optional review note
-        </label>
-        <textarea
-          id={`review-note-${claim.id}`}
-          value={note}
-          maxLength={NOTE_LIMIT}
-          onChange={(event) => onNoteChange(event.target.value)}
-          placeholder="Example: Independent owner evidence checked, or the reason this request was rejected."
-          className="mt-2 min-h-20 w-full resize-y rounded-lg border border-white/10 bg-black/35 px-3 py-2 text-sm font-semibold text-white outline-none transition placeholder:text-zinc-600 focus:border-cyan-300/45"
-        />
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-          <p className="max-w-2xl text-xs font-semibold leading-5 text-zinc-500">{context.boundary}</p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => onReview("reject")}
-              className="inline-flex items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-300/10 px-4 py-3 text-xs font-black uppercase text-rose-100 hover:bg-rose-300/20 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <XCircle className="size-4" aria-hidden="true" />
-              Reject Request
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => onReview("approve")}
-              className="inline-flex items-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-300/10 px-4 py-3 text-xs font-black uppercase text-emerald-100 hover:bg-emerald-300/20 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <CheckCircle2 className="size-4" aria-hidden="true" />
-              Approve Link
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-md border border-amber-300/30 bg-amber-300/10 px-2.5 py-1 text-[10px] font-black uppercase text-amber-100">Pending</span>
+              <span className="rounded-md border border-violet-300/30 bg-violet-300/10 px-2.5 py-1 text-[10px] font-black uppercase text-violet-100">Display-only link</span>
+            </div>
           </div>
-        </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="flex min-w-0 items-center gap-3 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] p-3 sm:col-span-2">
+              <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-md border border-cyan-300/30 bg-[#111d2b] text-xl font-black text-cyan-100">
+                {claim.account_avatar_url ? (
+                  // Discord avatar URLs are validated and assembled by the private server-side read model.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={claim.account_avatar_url} alt={`${claim.account_name || "DZN Player"} Discord profile`} className="h-full w-full object-cover" />
+                ) : profileInitial}
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-500">Player / claim name</p>
+                <p className="mt-1 truncate text-lg font-black text-white">{claim.account_name || "DZN Player"}</p>
+                <p className="mt-1 text-xs font-semibold text-zinc-400">Requested {formatDate(claim.requested_at)}</p>
+              </div>
+            </div>
+            <DetailBox icon={<Server className="size-4" />} label="Server" value={claim.server_name || "DZN Server"} href={serverHref} />
+            <DetailBox icon={<Gamepad2 className="size-4" />} label="Imported game profile" value={claim.player_name || "Name not available"} />
+            <DetailBox icon={<UserRound className="size-4" />} label="Requesting Discord account" value={requesterDiscordId || "Not recorded"} />
+            <DetailBox icon={<FileCheck2 className="size-4" />} label="Request source" value={claim.request_source === "gamertag_lookup" ? "Gamertag candidate" : "Legacy exact-ID request"} />
+          </div>
+
+          <details className="group mt-3 rounded-lg border border-white/10 bg-black/25">
+            <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-black uppercase text-zinc-300">
+              Technical details
+              <ChevronDown className="size-4 transition group-open:rotate-180" aria-hidden="true" />
+            </summary>
+            <div className="grid gap-3 border-t border-white/10 p-3 sm:grid-cols-2">
+              <DetailBox label="Resolved exact game ID" value={exactId} emphasis copyable />
+              <DetailBox label="Public-safe masked ID" value={claim.player_id || "Not available"} copyable />
+              <DetailBox label="DZN account reference" value={claim.user_id} copyable />
+              <DetailBox label="Request reference" value={claim.id} copyable />
+            </div>
+          </details>
+
+          <div className="mt-3 rounded-lg border border-violet-300/15 bg-violet-300/[0.05] p-3">
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-200">Game stats links</p>
+            <p className="mt-2 text-sm font-semibold text-zinc-300">No active verified links are shown for this request. An approved link appears in the managed links section below.</p>
+          </div>
+        </section>
+
+        <section className="min-w-0 rounded-lg border border-cyan-300/20 bg-[#071421] p-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200"><ShieldCheck className="size-4" aria-hidden="true" /> Decision workspace</p>
+              <h2 className="mt-1 text-xl font-black text-white">Confirm the evidence, then decide</h2>
+            </div>
+            <div className="min-w-44 rounded-lg border border-amber-300/20 bg-amber-300/[0.07] p-3">
+              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-amber-200">Evidence strength</p>
+              <div className="mt-2 flex gap-1" aria-hidden="true">
+                {[0, 1, 2, 3, 4].map((bar) => <span key={bar} className={`h-2 flex-1 rounded-sm ${bar < 2 ? "bg-amber-300" : "bg-white/10"}`} />)}
+              </div>
+              <p className="mt-2 text-sm font-black text-amber-100">Owner verification required</p>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-300/[0.06] p-3">
+            <h3 className="text-sm font-black text-white">What you must confirm</h3>
+            <div className="mt-3 grid gap-2">
+              <VerificationToggle checked={confirmed.ownership} onChange={(checked) => setConfirmed((current) => ({ ...current, ownership: checked }))} label="Independent ownership evidence confirms this imported game profile belongs to the requesting account." />
+              <VerificationToggle checked={confirmed.match} onChange={(checked) => setConfirmed((current) => ({ ...current, match: checked }))} label="The selected server and imported game profile match the evidence, not just the public gamertag." />
+              <VerificationToggle checked={confirmed.account} onChange={(checked) => setConfirmed((current) => ({ ...current, account: checked }))} label="This is not a shared account, alternate user, or uncertain identity match." />
+            </div>
+          </div>
+
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <GuidanceList title="Approve when" items={context.approve_when} tone="approve" />
+            <GuidanceList title="Reject when" items={context.reject_when} tone="reject" />
+          </div>
+
+          <details className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.06]">
+            <summary className="cursor-pointer list-none px-3 py-2 text-xs font-black uppercase text-amber-100">Missing evidence and guidance</summary>
+            <div className="grid gap-2 border-t border-amber-300/15 p-3">
+              {context.checks.map((check) => <div key={`${claim.id}-${check.label}`} className="flex gap-2 text-xs font-semibold leading-5 text-zinc-300">{check.status === "ready" ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-300" /> : <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-300" />}<span><strong className="text-white">{check.label}:</strong> {check.detail}</span></div>)}
+              <p className="mt-1 text-xs font-semibold leading-5 text-amber-100/85">{context.missing_evidence_guidance}</p>
+            </div>
+          </details>
+
+          <div className="mt-3 rounded-lg border border-white/10 bg-black/25 p-3">
+            <label className="text-xs font-black uppercase text-zinc-200" htmlFor={`review-note-${claim.id}`}>Review note (optional)</label>
+            <textarea id={`review-note-${claim.id}`} value={note} maxLength={NOTE_LIMIT} onChange={(event) => onNoteChange(event.target.value)} placeholder="Add evidence checked or the reason for rejection..." className="mt-2 min-h-20 w-full resize-y rounded-md border border-white/10 bg-black/35 px-3 py-2 text-sm font-semibold text-white outline-none placeholder:text-zinc-600 focus:border-cyan-300/45" />
+            <p className="mt-1 text-right text-[10px] font-semibold text-zinc-600">{note.length}/{NOTE_LIMIT}</p>
+          </div>
+
+          <p className="mt-3 text-xs font-semibold leading-5 text-zinc-500">{context.boundary}</p>
+          <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" disabled={busy} onClick={() => onReview("reject")} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-rose-300/35 bg-rose-300/10 px-4 text-xs font-black uppercase text-rose-100 hover:bg-rose-300/20 disabled:cursor-not-allowed disabled:opacity-50"><XCircle className="size-4" aria-hidden="true" /> Reject Request</button>
+            <button type="button" disabled={busy || !approvalReady} onClick={() => onReview("approve")} title={approvalReady ? "Approve this verified link" : "Complete all three verification checks before approval"} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-emerald-300/35 bg-emerald-300/15 px-4 text-xs font-black uppercase text-emerald-100 hover:bg-emerald-300/25 disabled:cursor-not-allowed disabled:opacity-40"><CheckCircle2 className="size-4" aria-hidden="true" /> {busy ? "Saving decision" : "Approve Link"}</button>
+          </div>
+        </section>
       </div>
     </article>
   );
 }
 
-function DetailBox({ label, value, href, emphasis = false }: { label: string; value: string; href?: string | null; emphasis?: boolean }) {
+function DetailBox({
+  label,
+  value,
+  href,
+  emphasis = false,
+  icon,
+  copyable = false,
+}: {
+  label: string;
+  value: string;
+  href?: string | null;
+  emphasis?: boolean;
+  icon?: ReactNode;
+  copyable?: boolean;
+}) {
   const content = href ? (
     <Link href={href} className="inline-flex min-w-0 items-center gap-2 text-cyan-100 hover:text-cyan-50">
       <span className="truncate">{value}</span>
@@ -600,9 +662,47 @@ function DetailBox({ label, value, href, emphasis = false }: { label: string; va
 
   return (
     <div className={`min-w-0 rounded-lg border p-3 ${emphasis ? "border-cyan-300/25 bg-cyan-300/10" : "border-white/10 bg-white/[0.035]"}`}>
-      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-500">{label}</p>
-      <p className={`mt-2 min-w-0 text-sm font-black ${emphasis ? "text-cyan-50" : "text-white"}`}>{content}</p>
+      <div className="flex items-center gap-2 text-zinc-500">
+        {icon ? <span className="text-cyan-300" aria-hidden="true">{icon}</span> : null}
+        <p className="text-[10px] font-black uppercase tracking-[0.14em]">{label}</p>
+      </div>
+      <div className="mt-2 flex min-w-0 items-start gap-2">
+        <p className={`min-w-0 flex-1 text-sm font-black ${emphasis ? "text-cyan-50" : "text-white"}`}>{content}</p>
+        {copyable ? <CopyButton value={value} label={label} /> : null}
+      </div>
     </div>
+  );
+}
+
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={`Copy ${label}`}
+      title={copied ? "Copied" : `Copy ${label}`}
+      onClick={() => {
+        void navigator.clipboard.writeText(value).then(() => {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      className="inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-white/10 text-zinc-400 hover:border-cyan-300/30 hover:text-cyan-100"
+    >
+      {copied ? <CheckCircle2 className="size-4" aria-hidden="true" /> : <Copy className="size-4" aria-hidden="true" />}
+    </button>
+  );
+}
+
+function VerificationToggle({ checked, onChange, label }: { checked: boolean; onChange: (checked: boolean) => void; label: string }) {
+  return (
+    <label className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition ${checked ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-black/20 hover:border-emerald-300/20"}`}>
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="sr-only" />
+      <span className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border ${checked ? "border-emerald-300 bg-emerald-300 text-[#03100b]" : "border-zinc-600 text-transparent"}`}>
+        <CheckCircle2 className="size-4" aria-hidden="true" />
+      </span>
+      <span className="text-xs font-semibold leading-5 text-zinc-200">{label}</span>
+    </label>
   );
 }
 

@@ -24,8 +24,10 @@ await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ channel: "msedge", headless: true });
 const exactId = "76561198" + "1".repeat(152);
+const avatar = await readFile("public/media/dzn-cinematic-survivor.png");
 const claim = {
   id: "local-claim", user_id: "sample-player", account_name: "Sample Player",
+  account_avatar_url: `${base}/avatar.png`, requester_discord_id: "831243159785701398",
   linked_server_id: "sample-server", player_profile_id: "sample-profile", player_id: "7656...1111",
   submitted_player_id: exactId, player_name: "Sample Survivor", status: "pending",
   requested_at: "2026-09-06T12:00:00Z", server_name: "Sample Server", public_slug: "sample-server",
@@ -46,6 +48,7 @@ try {
       const request = route.request();
       const url = new URL(request.url());
       if (url.origin !== base) return route.abort();
+      if (url.pathname === "/avatar.png") return route.fulfill({ contentType: "image/png", body: avatar });
       if (url.pathname.startsWith("/api/owner/player-game-identity-claims")) {
         if (request.method() === "PATCH") {
           patchCount++;
@@ -57,6 +60,9 @@ try {
         assert.equal(request.method(), "GET");
         return route.fulfill({ status, json: { ok: true, source, private: true, owner_or_admin_only: true, claims } });
       }
+      if (url.pathname === "/api/owner/player-game-identity-links") {
+        return route.fulfill({ json: { ok: true, items: [], next: null } });
+      }
       if (url.pathname.startsWith("/api/")) {
         assert.equal(request.method(), "GET", "No other API writes are allowed");
         return route.fulfill({ json: { authenticated: false, user: null, notifications: [] } });
@@ -64,11 +70,17 @@ try {
       return route.continue();
     });
     await page.goto(`${base}/owner/player-game-identity-claims`);
+    await page.getByRole("img", { name: "Sample Player Discord profile" }).waitFor();
+    assert.equal(await page.getByRole("img", { name: "Sample Player Discord profile" }).evaluate(image => image.complete && image.naturalWidth > 0), true, "Discord profile image must render");
+    await page.getByText("Technical details", { exact: true }).click();
     await page.getByText(exactId, { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "No horizontal overflow");
     const fullIdVisible = await page.getByText(exactId, { exact: true }).evaluate(el => el.scrollWidth <= el.clientWidth);
     assert.equal(fullIdVisible, true, "The full exact game ID must wrap inside its cell");
     await page.screenshot({ path: path.join(evidence, `pending-${width}.png`), fullPage: true });
+    assert.equal(await page.getByRole("button", { name: "Approve Link" }).isDisabled(), true, "Approval must stay locked until every evidence check is confirmed");
+    for (const checkbox of await page.getByRole("checkbox").all()) await checkbox.check({ force: true });
+    assert.equal(await page.getByRole("button", { name: "Approve Link" }).isEnabled(), true);
     deny = true;
     await page.getByRole("button", { name: "Approve Link" }).click();
     await page.getByRole("alert").filter({ hasText: "Only this server owner" }).waitFor();
