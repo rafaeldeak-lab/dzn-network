@@ -2,6 +2,12 @@ import { isDznAdminDiscordId } from "./admin";
 import { requireDb } from "./db";
 import { isDiscordNotificationsEnabled } from "./feature-flags";
 import { isPlatformOwnerDiscordId } from "./platform-owner";
+import {
+  hasOwnerRequestNotificationLedger,
+  prepareOwnerRequestDiscordDelivery,
+  prepareOwnerRequestWebsiteNotification,
+  resolveOwnerRequestNotificationRecipients,
+} from "./player-game-identity-owner-notifications";
 import { requireServerOwnerOrDznAdmin } from "./public-cache";
 import {
   hasPlayerGameIdentityDeliveryLedger,
@@ -110,6 +116,7 @@ type PlayerProfileCandidateRow = {
 
 type PublicIdentityServerRow = {
   linked_server_id: string;
+  owner_user_id: string;
   server_name: string | null;
   public_slug: string | null;
 };
@@ -155,7 +162,7 @@ type ReviewClaimInput = {
 };
 
 export type CreatePlayerGameIdentityClaimResult =
-  | { ok: true; status: 200 | 201; claim: PlayerGameIdentityClaimRow; already_linked?: true; message: string }
+  | { ok: true; status: 200 | 201; claim: PlayerGameIdentityClaimRow; already_linked?: true; message: string; owner_delivery_ids?: string[] }
   | { ok: false; status: 400 | 404 | 409 | 429 | 503; error: string; message: string };
 
 export type ReviewPlayerGameIdentityClaimResult =
@@ -452,6 +459,12 @@ export async function createPlayerGameIdentityClaim(
     }
 
     const claimId = crypto.randomUUID();
+    const auditId = crypto.randomUUID();
+    const recipients = await resolveOwnerRequestNotificationRecipients(env, server.owner_user_id);
+    const hasOwnerDeliveryLedger = await hasOwnerRequestNotificationLedger(env);
+    const ownerDeliveries = hasOwnerDeliveryLedger
+      ? recipients.map((recipient) => ({ id: crypto.randomUUID(), recipient }))
+      : [];
     await db.batch([
       db.prepare(
         `INSERT INTO player_game_identity_claims (
@@ -469,12 +482,32 @@ export async function createPlayerGameIdentityClaim(
         playerProfileId: profile.id,
         playerId: profile.player_id,
         note: `request_source=${parsed.requestSource}; Pending server-scoped reference resolved to one exact imported profile for owner/admin review.`,
-      }),
+      }, { id: auditId }),
+      ...recipients.map((recipient) => prepareOwnerRequestWebsiteNotification(db, {
+        claimId,
+        linkedServerId: profile.linked_server_id,
+        recipient,
+        serverName: server.server_name || "DZN Server",
+        playerName: profile.player_name || "game profile",
+        requesterName: user.username || "A player",
+      })),
+      ...ownerDeliveries.map(({ id, recipient }) => prepareOwnerRequestDiscordDelivery(db, {
+        id,
+        claimId,
+        linkedServerId: profile.linked_server_id,
+        recipient,
+      })),
     ]);
 
     const claim = await readPlayerGameIdentityClaimById(db, claimId, user.id, user.discord_id);
     if (!claim) throw new Error("Claim was not readable after creation.");
-    return { ok: true, status: 201, claim: sanitizeClaimRows([claim])[0], message: "Link request sent. A server owner or DZN admin must approve it before stats link to your account." };
+    return {
+      ok: true,
+      status: 201,
+      claim: sanitizeClaimRows([claim])[0],
+      owner_delivery_ids: ownerDeliveries.map((delivery) => delivery.id),
+      message: "Link request sent. A server owner or DZN admin must approve it before stats link to your account.",
+    };
   } catch {
     return {
       ok: false,
@@ -832,6 +865,7 @@ async function readPublicIdentityServer(db: D1Database, serverRef: string) {
     .prepare(
       `SELECT
         linked_servers.id AS linked_server_id,
+        linked_servers.user_id AS owner_user_id,
         COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
         linked_servers.public_slug
        FROM linked_servers
