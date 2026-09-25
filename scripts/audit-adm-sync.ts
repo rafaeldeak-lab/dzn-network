@@ -192,7 +192,7 @@ function auditDiscordQueues() {
   checkIncludes("functions/_lib/adm-sync.ts", "queueDiscordPostUpdatesForGuild", "ADM processing queues Discord updates");
   checkIncludes("functions/_lib/adm-sync.ts", "\"killfeed_embed\"", "Killfeed post can be queued from ADM data");
   checkIncludes("functions/_lib/adm-sync.ts", "\"leaderboard_embed\"", "Leaderboard post can be queued from ADM data");
-  checkIncludes("functions/_lib/automation.ts", "hasAutoPost(planKey, postType)", "Discord queue respects plan-gated post types");
+  checkIncludes("functions/_lib/automation.ts", "hasAutoPost(effectivePlanKey, postType)", "Discord queue respects effective plan and complimentary-access post types");
 }
 
 function auditDashboardWording() {

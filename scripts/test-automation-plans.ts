@@ -258,6 +258,8 @@ assert.equal(systemAuditSource.includes("auditAdmSyncWiring"), true);
 assert.equal(systemAuditSource.includes("0018_adm_reset_state_tracking.sql"), true);
 assert.equal(systemAuditSource.includes("0019_adm_discovery_and_nitrado_settings.sql"), true);
 assert.equal(systemAuditSource.includes("0020_adm_observed_cadence.sql"), true);
+assert.equal(systemAuditSource.includes('"manageBilling"'), true);
+assert.equal(systemAuditSource.includes('"openBillingPortal"'), false);
 assert.equal(systemAuditSource.includes("Total checks"), true);
 
 const admAuditSource = readFileSync("scripts/audit-adm-sync.ts", "utf8");
@@ -268,6 +270,8 @@ assert.equal(admAuditSource.includes("waiting_after_restart"), true);
 assert.equal(admAuditSource.includes("latest_adm_unreadable"), true);
 assert.equal(admAuditSource.includes("delayed_after_restart"), true);
 assert.equal(admAuditSource.includes("queueDiscordPostUpdatesForGuild"), true);
+assert.equal(admAuditSource.includes("hasAutoPost(effectivePlanKey, postType)"), true);
+assert.equal(admAuditSource.includes("hasAutoPost(planKey, postType)"), false);
 assert.equal(readFileSync("migrations/0018_adm_reset_state_tracking.sql", "utf8").includes("last_restart_detected_source"), true);
 assert.equal(readFileSync("migrations/0019_adm_discovery_and_nitrado_settings.sql", "utf8").includes("nitrado_log_playerlist_confirmed"), true);
 assert.equal(readFileSync("migrations/0020_adm_observed_cadence.sql", "utf8").includes("observed_adm_cadence_minutes"), true);
