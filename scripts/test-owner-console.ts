@@ -188,6 +188,82 @@ const maskedOwner = mapOwnerServerRowForTest({
 assert.equal(maskedOwner.owner.discordId, "1111...1111");
 assert.notEqual(maskedOwner.owner.discordId, "111111111111111111");
 
+const fedFeralDiagnosis = mapOwnerServerRowForTest({
+  id: "server-fed-feral",
+  server_name: "FED & FERAL [PVE]",
+  public_slug: "fed-feral-pve",
+  status: "pending",
+  listing_visibility: "public",
+  lifecycle_status: "active_live",
+  verified_server: 0,
+  subscription_plan_key: "free",
+  subscription_status: "inactive",
+  owner_billing_account_present: 0,
+  token_record_present: 1,
+  onboarding_last_tested_at: null,
+  current_player_count: null,
+  last_successful_status_check_at: null,
+  last_sync_at: null,
+  latest_adm_file: null,
+});
+assert.equal(fedFeralDiagnosis.billing.paid, false);
+assert.equal(fedFeralDiagnosis.billing.accountPresent, true, "A server subscription row is still a billing record even when inactive.");
+assert.deepEqual(fedFeralDiagnosis.supportBlockers.map((blocker) => blocker.key), ["billing", "verification", "service_check", "status_sync", "adm_sync"]);
+assert.equal(fedFeralDiagnosis.onboarding.tokenRecordPresent, true);
+
+const paidHealthyServer = mapOwnerServerRowForTest({
+  id: "server-paid",
+  server_name: "Paid healthy server",
+  status: "live",
+  lifecycle_status: "active_live",
+  verified_server: 1,
+  subscription_plan_key: "pro",
+  subscription_status: "active",
+  server_customer_reference_present: 1,
+  server_subscription_reference_present: 1,
+  token_record_present: 1,
+  onboarding_token_valid: 1,
+  onboarding_service_access: 1,
+  onboarding_adm_logs_found: 1,
+  onboarding_dayz_service_detected: 1,
+  onboarding_last_tested_at: "2026-09-25T10:00:00.000Z",
+  last_successful_status_check_at: "2026-09-25T10:01:00.000Z",
+  current_player_count: 4,
+  last_sync_at: "2026-09-25T10:02:00.000Z",
+  latest_adm_file: "server.ADM",
+});
+assert.equal(paidHealthyServer.billing.paid, true);
+assert.equal(paidHealthyServer.billing.customerReferencePresent, true);
+assert.equal(paidHealthyServer.billing.subscriptionReferencePresent, true);
+assert.deepEqual(paidHealthyServer.supportBlockers, []);
+
+const paidOwnerFallback = mapOwnerServerRowForTest({
+  id: "server-owner-paid",
+  server_name: "Owner-paid server",
+  status: "live",
+  lifecycle_status: "active_live",
+  verified_server: 1,
+  subscription_plan_key: "free",
+  subscription_status: "inactive",
+  owner_billing_account_present: 1,
+  owner_plan_key: "pro",
+  owner_plan_status: "trialing",
+  owner_customer_reference_present: 1,
+  owner_subscription_reference_present: 1,
+  token_record_present: 1,
+  onboarding_token_valid: 1,
+  onboarding_service_access: 1,
+  onboarding_adm_logs_found: 1,
+  onboarding_dayz_service_detected: 1,
+  onboarding_last_tested_at: "2026-09-25T10:00:00.000Z",
+  last_successful_status_check_at: "2026-09-25T10:01:00.000Z",
+  current_player_count: 4,
+  last_sync_at: "2026-09-25T10:02:00.000Z",
+  latest_adm_file: "server.ADM",
+});
+assert.equal(paidOwnerFallback.billing.paid, true);
+assert.equal(paidOwnerFallback.billing.source, "owner");
+
 const warlords = mapOwnerServerRowForTest({
   id: "server-warlords",
   server_name: "Warlords PvP",
@@ -199,6 +275,7 @@ const warlords = mapOwnerServerRowForTest({
 assert.equal(warlords.knownRole, "warlords");
 assert.equal(warlords.lifecycleStatus, "archived_hidden");
 assert.equal(warlords.resource.excludedFromActiveSync, true);
+assert.deepEqual(warlords.supportBlockers, [], "Archived servers must not be presented as active setup failures.");
 
 const pandora = mapOwnerServerRowForTest({
   id: "server-pandora",
@@ -314,8 +391,10 @@ assert.match(testEmbedApiSource, /productionSendingDisabled:\s*true/);
 assert.match(testEmbedApiSource, /autoPostingEnabled:\s*false/);
 
 const ownerDataSource = readFileSync("functions/_lib/owner-console.ts", "utf8");
-assert.doesNotMatch(ownerDataSource, /\bnitrado_connections\b/i);
 assert.doesNotMatch(ownerDataSource, /\bencrypted_token\b|\btoken_iv\b|\btoken_auth_tag\b|\bDISCORD_BOT_TOKEN\b|\bSESSION_SECRET\b/i);
+assert.match(ownerDataSource, /EXISTS \(\s*SELECT 1 FROM nitrado_connections/, "Owner support may disclose only whether a Nitrado credential record exists.");
+assert.match(ownerDataSource, /owner_billing_accounts\.stripe_customer_id IS NOT NULL/, "Owner support must expose presence instead of raw billing identifiers.");
+assert.doesNotMatch(ownerDataSource, /owner_billing_accounts\.stripe_customer_id\s+AS|owner_billing_accounts\.stripe_subscription_id\s+AS/i, "Raw billing identifiers must not enter the support payload.");
 assert.doesNotMatch(ownerDataSource, /\bfetch\s*\(/i);
 assert.match(ownerDataSource, /server_sync_state/);
 assert.match(ownerDataSource, /adm_sync_state/);
@@ -418,6 +497,8 @@ assert.match(ownerUiSource, /\/api\/owner\/servers\/\$\{encodeURIComponent\(serv
 assert.match(ownerUiSource, /json\.server\.id !== server\.id/, "Support view must reject a response for a different server.");
 assert.match(ownerUiSource, /supportRequestRef\.current\?\.abort\(\)/, "Closing or switching support views must cancel the previous request.");
 assert.match(ownerUiSource, /This view does not impersonate the server owner/, "Support view must state its non-impersonation boundary.");
+assert.match(ownerUiSource, /What is holding this server back/, "Support view must show a concise blocker checklist.");
+assert.match(ownerUiSource, /Not paid - no active paid plan/, "Support view must make unpaid state explicit.");
 assert.match(ownerUiSource, /Nitrado credentials, Discord private content, payment secrets and raw player locations are excluded/, "Support view must explain its sensitive-data boundary.");
 const ownerServerDetailSource = readFileSync("functions/api/owner/servers/[serverId].ts", "utf8");
 assert.match(ownerServerDetailSource, /auditAccess:\s*recordOwnerSupportAccess/, "The production detail route must use the durable support-access audit writer.");
