@@ -6,6 +6,7 @@ import {
   createPlayerGameIdentityClaim,
   readPlayerGameIdentityReadModel,
 } from "../../_lib/player-game-identities";
+import { dispatchQueuedOwnerRequestNotifications } from "../../_lib/player-game-identity-owner-notifications";
 import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 
 type ClaimBody = {
@@ -18,9 +19,9 @@ type ClaimBody = {
   player_name?: unknown;
 };
 
-export const onRequest: PagesFunction = async ({ request, env }) => {
+export const onRequest: PagesFunction = async ({ request, env, waitUntil }) => {
   if (request.method === "GET") return handleGet(request, env);
-  if (request.method === "POST") return handlePost(request, env);
+  if (request.method === "POST") return handlePost(request, env, waitUntil);
   return methodNotAllowed();
 };
 
@@ -36,7 +37,7 @@ async function handleGet(request: Request, env: Env) {
   return json(await readPlayerGameIdentityReadModel(env, user), { headers: privateNoStoreHeaders() });
 }
 
-async function handlePost(request: Request, env: Env) {
+async function handlePost(request: Request, env: Env, waitUntil: (promise: Promise<unknown>) => void) {
   const user = await resolveUser(env, request);
   if (!user) {
     return json(
@@ -60,6 +61,14 @@ async function handlePost(request: Request, env: Env) {
   }
 
   const result = await createPlayerGameIdentityClaim(env, user, bodyResult.value);
+  if (result.ok && result.status === 201 && result.owner_delivery_ids?.length) {
+    waitUntil(dispatchQueuedOwnerRequestNotifications(env, { deliveryIds: result.owner_delivery_ids, maxJobs: result.owner_delivery_ids.length }));
+  }
+  if (result.ok && "owner_delivery_ids" in result) {
+    const publicResult = { ...result };
+    delete publicResult.owner_delivery_ids;
+    return json(publicResult, { status: result.status, headers: privateNoStoreHeaders() });
+  }
   return json(result, { status: result.status, headers: privateNoStoreHeaders() });
 }
 

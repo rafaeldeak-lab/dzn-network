@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { createPlayerGameIdentityClaim, reviewPlayerGameIdentityClaim } from "../functions/_lib/player-game-identities";
+import { dispatchQueuedOwnerRequestNotifications } from "../functions/_lib/player-game-identity-owner-notifications";
 import type { Env, SessionUser } from "../functions/_lib/types";
 
 type Row = Record<string, unknown>;
@@ -186,6 +187,55 @@ export async function testPlayerGameIdentityTransactions() {
       if (shouldFail) assert.deepEqual(f.state(), before);
       else { assert.equal(f.state().claim.length, 1); assert.equal(f.state().audit.length, 1); }
     } finally { f.close(); }
+  }
+  const ownerNotifications = identityTransactionFixture();
+  const originalFetch = globalThis.fetch;
+  try {
+    ownerNotifications.sqlite.exec(`DELETE FROM player_game_identity_claims;
+      UPDATE users SET discord_id='888888888888888888' WHERE id='owner-a';
+      INSERT INTO users VALUES ('platform-owner','999999999999999999','Platform Owner',NULL);`);
+    ownerNotifications.sqlite.exec(readFileSync("migrations/0075_player_link_owner_request_notifications.sql", "utf8"));
+    Object.assign(ownerNotifications.env, {
+      DZN_DISCORD_NOTIFICATIONS_ENABLED: "true",
+      DZN_PLATFORM_OWNER_DISCORD_IDS: "999999999999999999",
+      DISCORD_BOT_TOKEN: "test-token-with-enough-length",
+    });
+    const discordBodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/users/@me/channels")) return Response.json({ id: "998877665544332211" });
+      discordBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return Response.json({ id: "message-a" });
+    }) as typeof fetch;
+    const result = await createPlayerGameIdentityClaim(
+      ownerNotifications.env,
+      identityTestUser("player-a", "discord-a"),
+      { server_slug: "server-a", player_id: "game-a" },
+    );
+    assert.equal(result.status, 201);
+    const notices = ownerNotifications.sqlite.prepare("SELECT user_id,type,dedupe_key,metadata FROM user_notifications ORDER BY user_id").all();
+    assert.deepEqual(notices.map((row) => row.user_id), ["owner-a", "platform-owner"], "Only the server owner and configured platform owner receive website review alerts.");
+    assert.ok(notices.every((row) => row.type === "player_link_review_requested"));
+    assert.equal(JSON.stringify(notices).includes("game-a"), false, "Owner alerts must not expose the hidden exact game ID.");
+    const deliveries = ownerNotifications.sqlite.prepare("SELECT recipient_user_id,status FROM player_game_identity_owner_notification_deliveries ORDER BY recipient_user_id").all();
+    assert.deepEqual(deliveries.map((row) => row.recipient_user_id), ["owner-a", "platform-owner"]);
+    const deliveryResult = await dispatchQueuedOwnerRequestNotifications(ownerNotifications.env, {
+      deliveryIds: result.ok ? result.owner_delivery_ids : [],
+      maxJobs: 2,
+    });
+    assert.equal(deliveryResult.delivered, 2);
+    assert.equal(discordBodies.length, 2);
+    assert.ok(discordBodies.every((body) => String(body.content).includes("not proof they played or own the profile")));
+    assert.ok(discordBodies.every((body) => !String(body.content).includes("game-a")));
+    const repeated = await createPlayerGameIdentityClaim(
+      ownerNotifications.env,
+      identityTestUser("player-a", "discord-a"),
+      { server_slug: "server-a", player_id: "game-a" },
+    );
+    assert.equal(repeated.status, 200);
+    assert.equal(ownerNotifications.sqlite.prepare("SELECT COUNT(*) AS count FROM user_notifications").get()?.count, 2, "A repeated pending request must not duplicate owner alerts.");
+  } finally {
+    globalThis.fetch = originalFetch;
+    ownerNotifications.close();
   }
   const gamertag = identityTransactionFixture();
   try {
