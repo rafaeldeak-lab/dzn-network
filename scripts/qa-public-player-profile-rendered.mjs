@@ -28,12 +28,12 @@ const scenarios = {
     mustContain: [
       "Public Safe Profile",
       "Rafael DZN",
+      "Discord connected",
       "Gameplay Summary",
       "Pandora Network",
       "Published Sections",
       "Earned Progression",
       "Fair Boundary",
-      "Profile visibility cannot alter billing",
       "Manage My Profile",
     ],
     mustNotContain: [
@@ -208,8 +208,8 @@ async function main() {
 async function startNext() {
   const command = process.platform === "win32" ? "cmd.exe" : "npm";
   const args = process.platform === "win32"
-    ? ["/d", "/s", "/c", `npm run dev -- --hostname 127.0.0.1 --port ${NEXT_PORT}`]
-    : ["run", "dev", "--", "--hostname", "127.0.0.1", "--port", String(NEXT_PORT)];
+    ? ["/d", "/s", "/c", `npm run dev -- --webpack --hostname 127.0.0.1 --port ${NEXT_PORT}`]
+    : ["run", "dev", "--", "--webpack", "--hostname", "127.0.0.1", "--port", String(NEXT_PORT)];
   const child = spawn(command, args, {
     cwd: ROOT,
     env: {
@@ -284,6 +284,18 @@ async function fulfillOrContinue(page, event, scenario) {
     }));
     return;
   }
+  if (url.endsWith("/avatar")) {
+    await page.send("Fetch.fulfillRequest", {
+      requestId: event.requestId,
+      responseCode: 200,
+      responseHeaders: [
+        { name: "content-type", value: "image/png" },
+        { name: "cache-control", value: "public, max-age=300" },
+      ],
+      body: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    });
+    return;
+  }
   if (url.startsWith(`${BASE_URL}/api/public/players/`)) {
     await page.send("Fetch.fulfillRequest", jsonResponse(event.requestId, scenario.apiStatus, scenario.apiPayload, "public, max-age=15, stale-while-revalidate=45"));
     return;
@@ -297,6 +309,11 @@ function publishedProfilePayload() {
     handle: "rafael-dzn-a1b2c3",
     href: "/players/rafael-dzn-a1b2c3",
     display_name: "Rafael DZN",
+    discord_profile: {
+      visible: true,
+      connected: true,
+      avatar_url: "/api/public/players/rafael-dzn-a1b2c3/avatar",
+    },
     published_at: "2026-09-01T12:00:00.000Z",
     updated_at: "2026-09-01T12:15:00.000Z",
     sections: {

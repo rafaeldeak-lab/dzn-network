@@ -6,6 +6,7 @@ import { onRequest as publicProfileRoute } from "../functions/api/public/players
 import {
   ensureCurrentPublicProfileHandle,
   normalizePublicProfileHandle,
+  readPublicDiscordAvatarSource,
   readPublicPlayerProfileByHandle,
 } from "../functions/_lib/player-public-profiles";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
@@ -14,6 +15,7 @@ const migration = readFileSync("migrations/0063_player_public_profiles.sql", "ut
 const helper = readFileSync("functions/_lib/player-public-profiles.ts", "utf8");
 const statBridgeHelper = readFileSync("functions/_lib/player-stat-bridge.ts", "utf8");
 const publicApi = readFileSync("functions/api/public/players/[handle].ts", "utf8");
+const publicAvatarApi = readFileSync("functions/api/public/players/[handle]/avatar.ts", "utf8");
 const shellRoute = readFileSync("functions/players/[handle].ts", "utf8");
 const page = readFileSync("app/players/[handle]/page.tsx", "utf8");
 const component = readFileSync("components/player/public-player-profile.tsx", "utf8");
@@ -65,6 +67,10 @@ assert.match(publicApi, /PROFILE_NOT_FOUND/, "Hidden and missing profiles must s
 assert.match(publicApi, /noStoreForErrorHeaders\(\{ vary: "Cookie" \}\)/, "Published public profile responses must be no-store so privacy changes are not served stale.");
 assert.doesNotMatch(publicApi, /publicCacheHeaders/, "Public profile payloads must not use stale public cache headers.");
 assert.doesNotMatch(publicApi, /\b(?:getSessionUser|ensureMockUser|INSERT INTO|UPDATE\s+[a-z_]+|DELETE FROM)\b/i, "Public profile API must not require sessions or write data.");
+assert.match(publicAvatarApi, /readPublicDiscordAvatarSource\(env, params\.handle\)/, "Public avatar delivery must re-check the canonical public identity boundary.");
+assert.match(publicAvatarApi, /discordResponse\.body/, "Public avatars must proxy bytes rather than redirecting visitors to an identifier-bearing Discord URL.");
+assert.doesNotMatch(publicAvatarApi, /status:\s*30[1278]|location:/i, "Public avatar delivery must not expose Discord identifiers through redirects.");
+assert.match(helper, /show_display_name = 1/, "Public avatar reads must require the saved display-identity preference.");
 assert.match(shellRoute, /env\.ASSETS\.fetch/, "Dynamic public profile pages must serve the static players shell through Pages assets.");
 assert.match(shellRoute, /\/players"/, "Dynamic public profile shell must serve the exported players page.");
 assert.doesNotMatch(shellRoute, /\/players\.html/, "Dynamic public profile shell must avoid the redirected .html asset path on Pages.");
@@ -89,12 +95,12 @@ async function testPublicProfileRuntimeContract() {
   const env = { DB: db } as unknown as Env;
   const currentUser: SessionUser = {
     id: "user-1",
-    discord_id: "discord-1",
+    discord_id: "831243159785701398",
     username: "Rafael DZN",
     avatar: null,
   };
-  db.users.set("user-1", { discord_id: "discord-1", username: "Rafael DZN" });
-  db.users.set("other-user", { discord_id: "discord-2", username: "Hidden Player" });
+  db.users.set("user-1", { discord_id: "831243159785701398", username: "Rafael DZN", avatar: "profile_avatar_hash" });
+  db.users.set("other-user", { discord_id: "discord-2", username: "Hidden Player", avatar: null });
 
   assert.equal(normalizePublicProfileHandle("  Rafael DZN!!  "), "rafael-dzn", "Display names must normalize into safe handle bases.");
   assert.equal(normalizePublicProfileHandle("!!"), "dzn-player", "Empty display names must fall back to a generic safe handle base.");
@@ -124,6 +130,8 @@ async function testPublicProfileRuntimeContract() {
   assert.equal(minimalPublicProfile.sections.display_name.value, null, "Hidden display name sections must omit the chosen name.");
   assert.equal(minimalPublicProfile.sections.gameplay_summary.totals, null, "Hidden gameplay summaries must omit gameplay totals.");
   assert.equal(minimalPublicProfile.sections.featured_server.server, null, "Hidden featured servers must omit server details.");
+  assert.equal(minimalPublicProfile.discord_profile.avatar_url, null, "Discord avatars must remain hidden with the display identity.");
+  assert.equal(await readPublicDiscordAvatarSource(env, generated.handle), null, "The avatar proxy source must remain unavailable while display identity is hidden.");
   assert.equal(minimalPublicProfile.sections.xp_progress.visible, true, "Visible future XP sections may show public-safe status copy.");
   assert.equal(minimalPublicProfile.sections.challenge_progress.visible, false, "Hidden future challenge sections must stay hidden.");
   assertNoPrivatePublicProfileLeak(minimalPublicProfile);
@@ -138,7 +146,7 @@ async function testPublicProfileRuntimeContract() {
     show_calling_cards: 1,
     show_award_dates: 1,
   }));
-  db.aggregates.set("discord-1", {
+  db.aggregates.set("831243159785701398", {
     linked_game_profiles: 2,
     linked_public_servers: 2,
     total_kills: 44,
@@ -147,7 +155,7 @@ async function testPublicProfileRuntimeContract() {
     longest_kill_distance: 760,
     last_seen_at: "2026-08-31T21:00:00.000Z",
   });
-  db.featuredServers.set("discord-1", {
+  db.featuredServers.set("831243159785701398", {
     public_slug: "pandora-network",
     server_name: "Pandora Network",
     server_type: "PVP",
@@ -162,6 +170,11 @@ async function testPublicProfileRuntimeContract() {
   const published = await readPublicPlayerProfileByHandle(env, generated.handle);
   assert.ok(published, "Published public profiles should resolve by handle.");
   assert.equal(published.display_name, "Rafael DZN", "Display names may appear only when saved preferences allow them.");
+  assert.equal(published.discord_profile.avatar_url, `/api/public/players/${generated.handle}/avatar`, "Opted-in display identities may expose only the DZN avatar proxy URL.");
+  assert.deepEqual(await readPublicDiscordAvatarSource(env, generated.handle), {
+    discord_id: "831243159785701398",
+    avatar_hash: "profile_avatar_hash",
+  }, "The avatar proxy may resolve validated source identifiers internally after public identity opt-in.");
   assert.equal(published.sections.gameplay_summary.totals?.kills, 44, "Gameplay summaries may show public-safe aggregate totals.");
   assert.equal(published.sections.featured_server.server?.href, "/servers/profile?slug=pandora-network", "Featured servers must link through public-safe server profile paths.");
   assert.deepEqual(published.privacy.visible_sections, [
@@ -231,6 +244,7 @@ async function callPublicProfileRoute(
 type FakeUserRow = {
   discord_id: string;
   username: string | null;
+  avatar: string | null;
 };
 
 type FakePublicProfileRow = {
@@ -332,6 +346,7 @@ class FakeD1PreparedStatement {
       const user = this.db.users.get(row.user_id);
       const preferences = this.db.preferences.get(row.user_id);
       if (!user || !preferences || preferences.public_profile_enabled !== 1) return null as T | null;
+      if (query.includes("show_display_name = 1") && preferences.show_display_name !== 1) return null as T | null;
       return {
         user_id: row.user_id,
         handle: row.handle,
@@ -340,19 +355,20 @@ class FakeD1PreparedStatement {
         updated_at: row.updated_at,
         discord_id: user.discord_id,
         username: user.username,
+        avatar: user.avatar,
         ...preferences,
       } as T;
     }
 
     if (query.includes("from trusted_public_player_profile_resolved_stats") && query.includes("count(trusted_public_player_profile_resolved_stats.id)")) {
-      assert.equal(String(this.bindings[0]), "discord-1", "Public gameplay aggregate reads must bind the owning Discord ID.");
+      assert.equal(String(this.bindings[0]), "831243159785701398", "Public gameplay aggregate reads must bind the owning Discord ID.");
       assert.match(query, /kill_events\.killer_id = trusted_public_player_profiles\.player_id/, "Public gameplay aggregate reads must use the trusted player ID bridge.");
       assert.doesNotMatch(query, /lower\([^)]*(?:player_name|killer_name|victim_name)|(?:player_profiles\.player_name|kill_events\.killer_name|kill_events\.victim_name)\s*=/i, "Public gameplay aggregate reads must not match by player name.");
       return (this.db.aggregates.get(String(this.bindings[0])) ?? null) as T | null;
     }
 
     if (query.includes("from trusted_public_player_profile_resolved_stats") && query.includes("linked_servers.public_slug")) {
-      assert.equal(String(this.bindings[0]), "discord-1", "Public featured-server reads must bind the owning Discord ID.");
+      assert.equal(String(this.bindings[0]), "831243159785701398", "Public featured-server reads must bind the owning Discord ID.");
       assert.match(query, /kill_events\.killer_id = trusted_public_player_profiles\.player_id/, "Public featured-server reads must use the trusted player ID bridge.");
       assert.doesNotMatch(query, /lower\([^)]*(?:player_name|killer_name|victim_name)|(?:player_profiles\.player_name|kill_events\.killer_name|kill_events\.victim_name)\s*=/i, "Public featured-server reads must not match by player name.");
       return (this.db.featuredServers.get(String(this.bindings[0])) ?? null) as T | null;
@@ -411,7 +427,7 @@ function preferenceRow(overrides: Partial<Record<keyof FakePreferenceRow, number
 
 function assertNoPrivatePublicProfileLeak(payload: unknown) {
   const serialized = JSON.stringify(payload);
-  assert.doesNotMatch(serialized, /discord-1|discord-2|user-1|other-user|"discord_id"|"user_id"|"player_id"|"player_name"|"raw_evidence"|account_entitlements|supporter_cards/i, "Public profile payloads must not expose private ids, raw evidence fields, or payment table data.");
+  assert.doesNotMatch(serialized, /831243159785701398|profile_avatar_hash|discord-1|discord-2|user-1|other-user|"discord_id"|"user_id"|"player_id"|"player_name"|"raw_evidence"|account_entitlements|supporter_cards/i, "Public profile payloads must not expose private ids, avatar hashes, raw evidence fields, or payment table data.");
   assert.match(serialized, /"private_identifiers_exposed":false/, "Public profile payloads must explicitly mark private identifiers as hidden.");
   assert.match(serialized, /"raw_award_evidence_exposed":false/, "Public profile payloads must explicitly mark raw award evidence as hidden.");
 }

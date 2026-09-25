@@ -26,11 +26,21 @@ export type PublicProfileLink = {
   href: string;
 };
 
+export type PublicDiscordAvatarSource = {
+  discord_id: string;
+  avatar_hash: string;
+};
+
 export type PublicPlayerProfilePayload = {
   ok: true;
   handle: string;
   href: string;
   display_name: string;
+  discord_profile: {
+    visible: boolean;
+    connected: boolean;
+    avatar_url: string | null;
+  };
   published_at: string | null;
   updated_at: string | null;
   sections: {
@@ -110,6 +120,7 @@ type PublicPlayerProfileOwnerRow = ExistingPublicProfileRow & {
   user_id: string;
   discord_id: string;
   username: string | null;
+  avatar: string | null;
   public_profile_enabled: number | null;
   show_display_name: number | null;
   show_gameplay_summary: number | null;
@@ -294,6 +305,7 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
         player_public_profiles.updated_at,
         users.discord_id,
         users.username,
+        users.avatar,
         player_profile_privacy_preferences.public_profile_enabled,
         player_profile_privacy_preferences.show_display_name,
         player_profile_privacy_preferences.show_gameplay_summary,
@@ -325,12 +337,20 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
 
   const visibleSections = visiblePublicProfileSections(preferences);
   const displayName = preferences.show_display_name ? safeDisplayName(row.username) : "DZN Player";
+  const discordAvatarUrl = preferences.show_display_name && validDiscordAvatar(row.discord_id, row.avatar)
+    ? `/api/public/players/${encodeURIComponent(row.handle)}/avatar`
+    : null;
 
   return {
     ok: true,
     handle: row.handle,
     href: publicProfileHref(row.handle),
     display_name: displayName,
+    discord_profile: {
+      visible: preferences.show_display_name,
+      connected: preferences.show_display_name,
+      avatar_url: discordAvatarUrl,
+    },
     published_at: row.created_at,
     updated_at: latestDateString(row.updated_at, row.preferences_updated_at),
     sections: {
@@ -387,6 +407,34 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
       "Profile visibility cannot alter billing, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF, XP awards, calling-card awards, or competitive eligibility.",
     ],
   };
+}
+
+export async function readPublicDiscordAvatarSource(env: Env, rawHandle: unknown): Promise<PublicDiscordAvatarSource | null> {
+  const handle = normalizeLookupHandle(rawHandle);
+  if (!handle) return null;
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT users.discord_id, users.avatar
+       FROM player_public_profiles
+       INNER JOIN users ON users.id = player_public_profiles.user_id
+       INNER JOIN player_profile_privacy_preferences
+         ON player_profile_privacy_preferences.user_id = player_public_profiles.user_id
+       WHERE player_public_profiles.handle = ?
+         AND player_public_profiles.status = 'active'
+         AND player_profile_privacy_preferences.public_profile_enabled = 1
+         AND player_profile_privacy_preferences.show_display_name = 1
+       LIMIT 1`,
+    )
+    .bind(handle)
+    .first<{ discord_id: string | null; avatar: string | null }>();
+  if (!row?.discord_id || !validDiscordAvatar(row.discord_id, row.avatar)) return null;
+  return { discord_id: row.discord_id, avatar_hash: row.avatar! };
+}
+
+function validDiscordAvatar(discordId: string, avatarHash: string | null) {
+  return /^\d{16,22}$/.test(discordId)
+    && typeof avatarHash === "string"
+    && /^[a-zA-Z0-9_]{8,128}$/.test(avatarHash);
 }
 
 function normalizeLookupHandle(value: unknown) {
