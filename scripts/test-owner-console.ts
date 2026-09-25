@@ -264,6 +264,27 @@ const paidOwnerFallback = mapOwnerServerRowForTest({
 assert.equal(paidOwnerFallback.billing.paid, true);
 assert.equal(paidOwnerFallback.billing.source, "owner");
 
+const admEvidenceOverridesOldCheck = mapOwnerServerRowForTest({
+  id: "server-adm-evidence",
+  server_name: "ADM evidence server",
+  status: "live",
+  lifecycle_status: "active_live",
+  verified_server: 1,
+  subscription_plan_key: "pro",
+  subscription_status: "active",
+  token_record_present: 1,
+  onboarding_token_valid: 1,
+  onboarding_service_access: 1,
+  onboarding_adm_logs_found: null,
+  onboarding_dayz_service_detected: 1,
+  onboarding_last_tested_at: "2026-09-24T10:00:00.000Z",
+  last_successful_status_check_at: "2026-09-25T10:01:00.000Z",
+  current_player_count: 0,
+  last_sync_at: "2026-09-25T10:02:00.000Z",
+  latest_adm_file: "server.ADM",
+});
+assert.equal(admEvidenceOverridesOldCheck.supportBlockers.some((blocker) => blocker.key === "adm_sync"), false, "Stored ADM import evidence must override an older incomplete onboarding check.");
+
 const warlords = mapOwnerServerRowForTest({
   id: "server-warlords",
   server_name: "Warlords PvP",
@@ -393,6 +414,8 @@ assert.match(testEmbedApiSource, /autoPostingEnabled:\s*false/);
 const ownerDataSource = readFileSync("functions/_lib/owner-console.ts", "utf8");
 assert.doesNotMatch(ownerDataSource, /\bencrypted_token\b|\btoken_iv\b|\btoken_auth_tag\b|\bDISCORD_BOT_TOKEN\b|\bSESSION_SECRET\b/i);
 assert.match(ownerDataSource, /EXISTS \(\s*SELECT 1 FROM nitrado_connections/, "Owner support may disclose only whether a Nitrado credential record exists.");
+assert.match(ownerDataSource, /nitrado_connections\.user_id = linked_servers\.user_id/, "Token presence must be scoped to the server's current owner.");
+assert.match(ownerDataSource, /server_subscriptions\.owner_discord_id = users\.discord_id/, "Server billing must be scoped to the server's current owner.");
 assert.match(ownerDataSource, /owner_billing_accounts\.stripe_customer_id IS NOT NULL/, "Owner support must expose presence instead of raw billing identifiers.");
 assert.doesNotMatch(ownerDataSource, /owner_billing_accounts\.stripe_customer_id\s+AS|owner_billing_accounts\.stripe_subscription_id\s+AS/i, "Raw billing identifiers must not enter the support payload.");
 assert.doesNotMatch(ownerDataSource, /\bfetch\s*\(/i);
@@ -499,6 +522,7 @@ assert.match(ownerUiSource, /supportRequestRef\.current\?\.abort\(\)/, "Closing 
 assert.match(ownerUiSource, /This view does not impersonate the server owner/, "Support view must state its non-impersonation boundary.");
 assert.match(ownerUiSource, /What is holding this server back/, "Support view must show a concise blocker checklist.");
 assert.match(ownerUiSource, /Not paid - no active paid plan/, "Support view must make unpaid state explicit.");
+assert.doesNotMatch(ownerUiSource, /blocker\.actionUrl \? <Link/, "Platform support guidance must not open customer-scoped setup or billing routes as the operator.");
 assert.match(ownerUiSource, /Nitrado credentials, Discord private content, payment secrets and raw player locations are excluded/, "Support view must explain its sensitive-data boundary.");
 const ownerServerDetailSource = readFileSync("functions/api/owner/servers/[serverId].ts", "utf8");
 assert.match(ownerServerDetailSource, /auditAccess:\s*recordOwnerSupportAccess/, "The production detail route must use the durable support-access audit writer.");

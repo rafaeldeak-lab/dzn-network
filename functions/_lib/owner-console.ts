@@ -147,7 +147,6 @@ export type OwnerSupportBlocker = {
   severity: "blocking" | "attention";
   title: string;
   recommendation: string;
-  actionUrl: string | null;
 };
 
 export type OwnerOverview = {
@@ -313,6 +312,7 @@ export async function getOwnerServers(env: Env): Promise<OwnerServerRow[]> {
        EXISTS (
          SELECT 1 FROM nitrado_connections
          WHERE nitrado_connections.linked_server_id = linked_servers.id
+           AND nitrado_connections.user_id = linked_servers.user_id
        ) AS token_record_present,
        onboarding_checks.token_valid AS onboarding_token_valid,
        onboarding_checks.service_access AS onboarding_service_access,
@@ -362,6 +362,7 @@ export async function getOwnerServers(env: Env): Promise<OwnerServerRow[]> {
      LEFT JOIN users ON users.id = linked_servers.user_id
      LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
      LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       AND server_subscriptions.owner_discord_id = users.discord_id
      LEFT JOIN owner_billing_accounts ON owner_billing_accounts.discord_user_id = users.discord_id
      LEFT JOIN onboarding_checks ON onboarding_checks.id = (
        SELECT latest_check.id
@@ -627,8 +628,7 @@ export function buildOwnerSupportBlockers(input: {
       key: "billing",
       severity: "blocking",
       title: "No active paid plan",
-      recommendation: "Choose a server-owner plan to enable scheduled imports and paid server features. No charge is created from this support view.",
-      actionUrl: "/pricing?intent=owner_setup&returnTo=%2Fsetup",
+      recommendation: "Ask the server owner to choose a server-owner plan from their own account. No charge can be created from this support view.",
     });
   }
   if (normalizedText(input.status) === "pending" || !input.onboarding.verifiedServer) {
@@ -636,8 +636,7 @@ export function buildOwnerSupportBlockers(input: {
       key: "verification",
       severity: "blocking",
       title: "Server setup is not verified",
-      recommendation: "Open Server Setup and complete the remaining verification steps for this exact server.",
-      actionUrl: "/setup",
+      recommendation: "Ask the server owner to open Server Setup in their own account and complete verification for this exact server.",
     });
   }
   if (!input.onboarding.tokenRecordPresent || input.onboarding.lastTestedAt === null || input.onboarding.tokenValid !== true || input.onboarding.serviceAccess !== true || input.onboarding.dayzServiceDetected !== true) {
@@ -645,8 +644,7 @@ export function buildOwnerSupportBlockers(input: {
       key: "service_check",
       severity: "blocking",
       title: "Nitrado service checks are incomplete",
-      recommendation: "Re-open Server Setup, confirm the correct Nitrado service, and run the connection checks. Re-save the token only if the check asks for it.",
-      actionUrl: "/setup",
+      recommendation: "Ask the server owner to confirm the correct Nitrado service and run the connection checks in their own account. They should re-save the token only if the check asks for it.",
     });
   }
   if (!input.lastSuccessfulStatusCheckAt || input.currentPlayerCount === null) {
@@ -655,16 +653,14 @@ export function buildOwnerSupportBlockers(input: {
       severity: "attention",
       title: "Live status and player count are unproven",
       recommendation: "Complete verification first. DZN must then record a successful live status check before the dashboard can show a current player count.",
-      actionUrl: null,
     });
   }
-  if (input.onboarding.admLogsFound !== true || (!input.lastSuccessfulImportAt && !input.latestAdmFile)) {
+  if (input.onboarding.admLogsFound !== true && !input.lastSuccessfulImportAt && !input.latestAdmFile) {
     blockers.push({
       key: "adm_sync",
       severity: "attention",
       title: "ADM import has not been proven",
       recommendation: "After verification and plan setup, allow the scheduled importer to discover and process a genuine ADM log. Do not change the existing restart schedule.",
-      actionUrl: null,
     });
   }
   return blockers;

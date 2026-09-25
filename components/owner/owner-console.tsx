@@ -81,7 +81,6 @@ type OwnerServer = {
     severity: "blocking" | "attention";
     title: string;
     recommendation: string;
-    actionUrl: string | null;
   }>;
   stats: {
     totalKills: number;
@@ -906,7 +905,6 @@ function ServerSupportView({ selection, server, status, onClose, onRefresh }: {
                 <span className={`text-[10px] font-black uppercase ${blocker.severity === "blocking" ? "text-rose-200" : "text-amber-200"}`}>{blocker.severity}</span>
               </div>
               <p className="mt-1 text-xs leading-5 text-zinc-300">{blocker.recommendation}</p>
-              {blocker.actionUrl ? <Link href={blocker.actionUrl} className="mt-2 inline-flex items-center gap-1 text-xs font-black text-cyan-200 hover:text-cyan-100">Open recommended step <ExternalLink size={12} aria-hidden="true" /></Link> : null}
             </div>
           ))}
         </SupportSection>
