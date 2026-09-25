@@ -630,6 +630,7 @@ export function buildOwnerSupportBlockers(input: {
 }): OwnerSupportBlocker[] {
   if (["archived_hidden", "legacy_offline", "final_sync_complete"].includes(input.lifecycleStatus)) return [];
   const blockers: OwnerSupportBlocker[] = [];
+  const tokenNeedsResave = input.lifecycleStatus === "token_needs_resave";
   if (!input.billing.paid) {
     blockers.push({
       key: "billing",
@@ -646,12 +647,14 @@ export function buildOwnerSupportBlockers(input: {
       recommendation: "Ask the server owner to open Server Setup in their own account and complete verification for this exact server.",
     });
   }
-  if (!input.onboarding.tokenRecordPresent || input.onboarding.lastTestedAt === null || input.onboarding.tokenValid !== true || input.onboarding.serviceAccess !== true || input.onboarding.dayzServiceDetected !== true) {
+  if (tokenNeedsResave || !input.onboarding.tokenRecordPresent || input.onboarding.lastTestedAt === null || input.onboarding.tokenValid !== true || input.onboarding.serviceAccess !== true || input.onboarding.dayzServiceDetected !== true) {
     blockers.push({
       key: "service_check",
       severity: "blocking",
-      title: "Nitrado service checks are incomplete",
-      recommendation: "Ask the server owner to confirm the correct Nitrado service and run the connection checks in their own account. They should re-save the token only if the check asks for it.",
+      title: tokenNeedsResave ? "Nitrado token needs to be re-saved" : "Nitrado service checks are incomplete",
+      recommendation: tokenNeedsResave
+        ? "Ask the server owner to re-save their Nitrado token in Server Setup, then rerun the connection checks for this exact server."
+        : "Ask the server owner to confirm the correct Nitrado service and run the connection checks in their own account. They should re-save the token only if the check asks for it.",
     });
   }
   if (!input.lastSuccessfulStatusCheckAt || input.currentPlayerCount === null) {

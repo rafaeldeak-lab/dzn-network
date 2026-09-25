@@ -6,6 +6,7 @@ import { encryptToken } from "../functions/_lib/crypto";
 import { onRequest as goLive } from "../functions/api/onboarding/go-live";
 import { onRequest as testSetup } from "../functions/api/onboarding/test";
 import { verifyNitradoSetupService, getOnboardingServiceProof, saveOnboardingServiceChecks } from "../functions/_lib/onboarding-service-proof";
+import { storePendingNitradoToken } from "../functions/_lib/onboarding";
 import type { Env, PagesFunction } from "../functions/_lib/types";
 
 type Sqlite = {
@@ -103,6 +104,18 @@ async function main() {
   const originalFetch = globalThis.fetch;
   let scenarios = 0;
   try {
+    {
+      const { db, env } = await fixture();
+      assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM onboarding_checks").get()?.n, 1);
+      await storePendingNitradoToken(env, "owner", "server", "replacement-token");
+      assert.equal(
+        db.sqlite.prepare("SELECT COUNT(*) AS n FROM onboarding_checks").get()?.n,
+        0,
+        "Replacing a token must invalidate setup checks even when both writes share a timestamp second.",
+      );
+      scenarios += 1;
+    }
+
     const failures: Array<{ label: string; response: () => Response; code: string; access?: boolean }> = [
       ...[401, 403, 404, 429, 500, 503].map((status) => ({
         label: `HTTP ${status}`, response: () => new Response("provider-private-error", { status }),

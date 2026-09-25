@@ -238,6 +238,29 @@ assert.equal(paidHealthyServer.billing.customerReferencePresent, true);
 assert.equal(paidHealthyServer.billing.subscriptionReferencePresent, true);
 assert.deepEqual(paidHealthyServer.supportBlockers, []);
 
+const tokenNeedsResaveDespiteHistoricalSuccess = mapOwnerServerRowForTest({
+  id: "server-token-resave",
+  server_name: "Token re-save server",
+  status: "live",
+  lifecycle_status: "token_needs_resave",
+  verified_server: 1,
+  subscription_plan_key: "pro",
+  subscription_status: "active",
+  token_record_present: 1,
+  onboarding_token_valid: 1,
+  onboarding_service_access: 1,
+  onboarding_adm_logs_found: 1,
+  onboarding_dayz_service_detected: 1,
+  onboarding_last_tested_at: "2026-09-25T10:00:00.000Z",
+  last_successful_status_check_at: "2026-09-25T10:01:00.000Z",
+  current_player_count: 4,
+  last_sync_at: "2026-09-25T10:02:00.000Z",
+  latest_adm_file: "server.ADM",
+  last_processed_file: "server.ADM",
+});
+assert.deepEqual(tokenNeedsResaveDespiteHistoricalSuccess.supportBlockers.map((blocker) => blocker.key), ["service_check"]);
+assert.equal(tokenNeedsResaveDespiteHistoricalSuccess.supportBlockers[0]?.title, "Nitrado token needs to be re-saved");
+
 const paidOwnerFallback = mapOwnerServerRowForTest({
   id: "server-owner-paid",
   server_name: "Owner-paid server",
