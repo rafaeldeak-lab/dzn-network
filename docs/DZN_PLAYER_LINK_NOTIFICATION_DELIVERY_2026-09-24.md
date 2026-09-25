@@ -32,4 +32,6 @@ The source remains compatible before migration `0073` is applied. The decision r
 
 The manual one-message proof uses `.github/workflows/dzn-player-link-notification-delivery.yml`. It can run only through `workflow_dispatch`, requires the exact `APPROVE_ONE_PLAYER_LINK_NOTIFICATION_TEST` confirmation, proves the route returns `401` without authentication, masks the existing cron secret, and succeeds only when exactly one queued notification is delivered with no retry, failure or skip. It does not query or mutate Nitrado, billing, subscriptions, payments or restart schedules.
 
+After that proof succeeds, the existing `dzn-auto-update-worker` may call the protected player-link delivery route on its unchanged every-minute schedule. The task is bounded to 20 due rows, records its own `player-link-notifications` automation result, and does not call ADM or Nitrado routes. Server Wars and ordinary Discord publishing retain their existing five-minute cadence.
+
 No production migration, feature-flag change, Discord message, secret operation, payment action, customer charge, Nitrado operation or restart occurred as part of this source slice.
