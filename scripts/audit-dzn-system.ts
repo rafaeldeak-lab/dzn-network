@@ -277,7 +277,7 @@ function auditDashboardStructure() {
     "rerunLogCheck",
     "clearTestData",
     "confirmDangerAction",
-    "openBillingPortal",
+    "manageBilling",
     "runDispatcherNow",
     "runSetupAction",
     "saveSetup",
