@@ -305,15 +305,14 @@ export function DznPulseProvider({
   }, []);
 
   const markRead = useCallback(async (notification: PulseNotification) => {
-    if (notification.read_at) {
-      if (notification.action_url) navigateToInternal(notification.action_url);
-      return;
-    }
+    const wasUnread = !notification.read_at;
     const previousNotifications = notifications;
     const previousUnread = unreadCount;
     const readAt = new Date().toISOString();
-    setNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, read_at: readAt } : item));
-    setUnreadCount((count) => Math.max(0, count - 1));
+    if (wasUnread) {
+      setNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, read_at: readAt } : item));
+      setUnreadCount((count) => Math.max(0, count - 1));
+    }
     try {
       await fetchJsonWithRetry(`/api/dzn-pulse/notifications/${encodeURIComponent(notification.id)}/read`, {
         method: "POST",
@@ -324,8 +323,10 @@ export function DznPulseProvider({
       });
       if (notification.action_url) navigateToInternal(notification.action_url);
     } catch {
-      setNotifications(previousNotifications);
-      setUnreadCount(previousUnread);
+      if (wasUnread) {
+        setNotifications(previousNotifications);
+        setUnreadCount(previousUnread);
+      }
     }
   }, [notifications, unreadCount]);
 

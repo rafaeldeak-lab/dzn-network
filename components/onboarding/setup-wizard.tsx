@@ -184,14 +184,21 @@ export function SetupWizard() {
       try {
         const auth = await getMe();
         setAuthenticated(true);
-        const [guildResult, draftResult] = await Promise.all([
+        const [guildResult, draftLoad] = await Promise.all([
           loadDiscordGuilds(true),
-          getOnboardingDraft().catch(() => ({ ok: false, available: false, draft: null })),
+          getOnboardingDraft()
+            .then((result) => ({ result, failed: false }))
+            .catch(() => ({ result: { ok: false, available: true, draft: null }, failed: true })),
         ]);
+        const draftResult = draftLoad.result;
+        const draftLoadFailed = draftLoad.failed;
         setGuilds(guildResult.guilds);
         const linkedServer = auth.linkedServer;
         const draft = draftResult.draft;
-        if (draft?.discordGuildId && guildResult.guilds.some((guild) => guild.guild_id === draft.discordGuildId)) {
+        const reviewRequested = window.location.hash === "#review-test";
+        if (reviewRequested && linkedServer?.guild_id) {
+          setSelectedGuild(linkedServer.guild_id);
+        } else if (draft?.discordGuildId && guildResult.guilds.some((guild) => guild.guild_id === draft.discordGuildId)) {
           setSelectedGuild(draft.discordGuildId);
         } else if (linkedServer?.guild_id) {
           setSelectedGuild(linkedServer.guild_id);
@@ -199,29 +206,7 @@ export function SetupWizard() {
           setSelectedGuild(guildResult.guilds[0].guild_id);
         }
 
-        if (draftResult.available && draft) {
-          setServerType(draft.serverType || "PVP");
-          setServerCategory(draft.serverCategory ?? "");
-          setSelectedTags(draft.tags);
-          setPublicListing(draft.publicListing);
-          setValidatedLinkedServerId(draft.linkedServerId);
-          setSelectedService(draft.nitradoServiceId ?? "");
-          setDirectServiceValidated(draft.directServiceValidated);
-          setTokenValid(Boolean(draft.linkedServerId));
-          const existing = auth.linkedServers?.find((server) => server.id === draft.linkedServerId) ?? linkedServer;
-          if (existing && draft.nitradoServiceId && existing.nitrado_service_id === draft.nitradoServiceId) {
-            const existingService = nitradoServiceFromLinkedServer(existing);
-            setServices([existingService]);
-            setValidatedService(existingService);
-          } else if (draft.linkedServerId && draft.nitradoServiceId) {
-            const serviceResult = await getNitradoServices(draft.linkedServerId).catch(() => ({ services: [] }));
-            setServices(serviceResult.services);
-            setValidatedService(serviceResult.services.find((service) => service.id === draft.nitradoServiceId) ?? null);
-          }
-          setStep(draft.currentStep);
-          setDraftUpdatedAt(draft.updatedAt);
-          setDraftStatus("saved");
-        } else if (window.location.hash === "#review-test" && linkedServer) {
+        if (reviewRequested && linkedServer) {
           const existingService: NitradoService = {
             id: linkedServer.nitrado_service_id,
             name: linkedServer.nitrado_service_name || linkedServer.server_name,
@@ -243,9 +228,33 @@ export function SetupWizard() {
           setTokenValid(true);
           setDirectServiceValidated(true);
           setStep(5);
+        } else if (draftResult.available && draft) {
+          setServerType(draft.serverType || "PVP");
+          setServerCategory(draft.serverCategory ?? "");
+          setSelectedTags(draft.tags);
+          setPublicListing(draft.publicListing);
+          setValidatedLinkedServerId(draft.linkedServerId);
+          setSelectedService(draft.nitradoServiceId ?? "");
+          setDirectServiceValidated(draft.directServiceValidated);
+          setTokenValid(Boolean(draft.linkedServerId));
+          const existing = auth.linkedServers?.find((server) => server.id === draft.linkedServerId) ?? linkedServer;
+          if (existing && draft.nitradoServiceId && existing.nitrado_service_id === draft.nitradoServiceId) {
+            const existingService = nitradoServiceFromLinkedServer(existing);
+            setServices([existingService]);
+            setValidatedService(existingService);
+          } else if (draft.linkedServerId && draft.nitradoServiceId) {
+            const serviceResult = await getNitradoServices(draft.linkedServerId).catch(() => ({ services: [] }));
+            setServices(serviceResult.services);
+            setValidatedService(serviceResult.services.find((service) => service.id === draft.nitradoServiceId) ?? null);
+          }
+          setStep(draft.currentStep);
+          setDraftUpdatedAt(draft.updatedAt);
+          setDraftStatus("saved");
         }
         setDraftAvailable(draftResult.available);
-        if (!draftResult.available) setDraftStatus("unavailable");
+        if (draftLoadFailed) setDraftStatus("failed");
+        else if (!draftResult.available) setDraftStatus("unavailable");
+        else if (draft) setDraftStatus("saved");
         else if (!draft) setDraftStatus("idle");
         setDraftHydrated(true);
       } catch {

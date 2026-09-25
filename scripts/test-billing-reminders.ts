@@ -11,6 +11,7 @@ import type { Env, PagesFunction, SessionUser } from "../functions/_lib/types";
 
 const user: SessionUser = { id: "owner", discord_id: "discord-owner", username: "Owner", avatar: null };
 const other: SessionUser = { id: "other", discord_id: "discord-other", username: "Other", avatar: null };
+const pulseProviderSource = readFileSync("components/dzn-pulse/dzn-pulse-provider.tsx", "utf8");
 
 async function fixture() {
   const { db, env } = createCheckoutFixture();
@@ -180,6 +181,10 @@ async function main() {
       assert.equal(await countUnreadNotifications(env, user), 0);
       const bulkReadMetadata = db.sqlite.prepare("SELECT metadata FROM user_notifications WHERE id = 'news'").get()?.metadata;
       assert.equal(JSON.parse(String(bulkReadMetadata ?? "{}")).opened_at, undefined, "Bulk read does not claim the notice was opened");
+      assert.equal(pulseProviderSource.includes("if (notification.read_at) {"), false, "Clicking an already-read notification must still record its first open.");
+      await markNotificationRead(env, user, "news");
+      const openedAfterBulkRead = db.sqlite.prepare("SELECT metadata FROM user_notifications WHERE id = 'news'").get()?.metadata;
+      assert.equal(typeof JSON.parse(String(openedAfterBulkRead ?? "{}")).opened_at, "string", "Opening after mark-all-read records the first-open timestamp");
       assert.equal((await clearReadNotifications(env, user)).cleared, 2);
       assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM user_notifications").get()?.n, 1);
       assertNarrowWrites(db.statements); db.sqlite.close(); cases++;

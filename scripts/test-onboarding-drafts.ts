@@ -16,6 +16,7 @@ type Sqlite = {
   };
 };
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: new (path: string) => Sqlite };
+const setupWizardSource = readFileSync("components/onboarding/setup-wizard.tsx", "utf8");
 
 function d1(sqlite: Sqlite) {
   const prepare = (sql: string, bindings: unknown[] = []) => ({
@@ -46,6 +47,11 @@ async function invoke(env: Env, cookie: string | null, method: string, body?: Re
 }
 
 async function main() {
+  const reviewBranch = setupWizardSource.indexOf("if (reviewRequested && linkedServer) {");
+  const draftBranch = setupWizardSource.indexOf("else if (draftResult.available && draft) {");
+  assert.ok(reviewBranch >= 0 && draftBranch > reviewBranch, "Setup-guide links must take precedence over saved drafts.");
+  assert.equal(setupWizardSource.includes("result: { ok: false, available: true, draft: null }, failed: true"), true, "Transient draft reads must leave later autosave attempts enabled.");
+
   const unavailableSqlite = new DatabaseSync(":memory:");
   unavailableSqlite.exec(readFileSync("migrations/0001_initial_schema.sql", "utf8"));
   unavailableSqlite.exec("INSERT INTO users (id,discord_id,username) VALUES ('user-a','111111111111111111','Owner A')");
