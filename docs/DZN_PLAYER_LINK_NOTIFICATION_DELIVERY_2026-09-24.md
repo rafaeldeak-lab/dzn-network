@@ -30,4 +30,6 @@ The source remains compatible before migration `0073` is applied. The decision r
 8. Verify one simulated retry without sending duplicate messages, then verify a permanent failure is visible in owner history.
 9. Register the protected run endpoint with the existing scheduler only after the manual delivery test succeeds. Do not alter the Nitrado or Discord-bot restart schedule.
 
+The manual one-message proof uses `.github/workflows/dzn-player-link-notification-delivery.yml`. It can run only through `workflow_dispatch`, requires the exact `APPROVE_ONE_PLAYER_LINK_NOTIFICATION_TEST` confirmation, proves the route returns `401` without authentication, masks the existing cron secret, and succeeds only when exactly one queued notification is delivered with no retry, failure or skip. It does not query or mutate Nitrado, billing, subscriptions, payments or restart schedules.
+
 No production migration, feature-flag change, Discord message, secret operation, payment action, customer charge, Nitrado operation or restart occurred as part of this source slice.

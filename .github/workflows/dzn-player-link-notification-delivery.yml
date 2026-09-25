@@ -1,0 +1,101 @@
+name: DZN Player Link Notification Delivery
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Must equal APPROVE_ONE_PLAYER_LINK_NOTIFICATION_TEST
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dzn-player-link-notification-delivery
+  cancel-in-progress: false
+
+jobs:
+  deliver-one:
+    runs-on: ubuntu-latest
+    env:
+      PRODUCTION_APP_URL: https://dzn-network.pages.dev
+      CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - name: Validate one-message production guard
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            echo "::error::Player-link delivery is allowed only from a manual workflow dispatch."
+            exit 1
+          fi
+          if [ "${CONFIRMATION}" != "APPROVE_ONE_PLAYER_LINK_NOTIFICATION_TEST" ]; then
+            echo "::error::confirmation must equal APPROVE_ONE_PLAYER_LINK_NOTIFICATION_TEST."
+            exit 1
+          fi
+          if [ "${PRODUCTION_APP_URL}" != "https://dzn-network.pages.dev" ]; then
+            echo "::error::Production URL must be the canonical stable Pages origin."
+            exit 1
+          fi
+
+      - name: Prove endpoint authentication and deliver exactly one queued notification
+        env:
+          DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}
+          SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "::error::Missing DZN_CRON_SECRET or SYNC_CRON_SECRET."
+            exit 1
+          fi
+          echo "::add-mask::${CRON_SECRET}"
+
+          endpoint="${PRODUCTION_APP_URL}/api/sync/player-link-notifications/run"
+          unauthenticated_status="$(curl --silent --show-error --output unauthenticated.json --write-out '%{http_code}' --request POST "${endpoint}")"
+          if [ "${unauthenticated_status}" != "401" ]; then
+            echo "::error::Protected delivery endpoint must return HTTP 401 without the cron secret; received ${unauthenticated_status}."
+            exit 1
+          fi
+
+          authenticated_status="$(curl --silent --show-error --output delivery-result.json --write-out '%{http_code}' \
+            --request POST \
+            --header "x-dzn-cron-secret: ${CRON_SECRET}" \
+            --header 'content-type: application/json' \
+            --data '{}' \
+            "${endpoint}")"
+          if [ "${authenticated_status}" != "200" ]; then
+            echo "::error::Protected delivery endpoint returned HTTP ${authenticated_status}."
+            exit 1
+          fi
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const result = JSON.parse(fs.readFileSync("delivery-result.json", "utf8"));
+          const expected = {
+            ok: true,
+            unavailable: false,
+            processed: 1,
+            delivered: 1,
+            retried: 0,
+            failed: 0,
+            skipped: 0,
+          };
+          for (const [key, value] of Object.entries(expected)) {
+            if (result[key] !== value) {
+              throw new Error(`Expected ${key}=${JSON.stringify(value)}, received ${JSON.stringify(result[key])}.`);
+            }
+          }
+          NODE
+
+          {
+            echo "## Player Link Notification Delivery"
+            echo ""
+            echo "- Manual production confirmation: passed"
+            echo "- Unauthenticated endpoint protection: HTTP 401"
+            echo "- Queued jobs processed: 1"
+            echo "- Discord deliveries confirmed: 1"
+            echo "- Retries, failures and skips: 0"
+          } >> "${GITHUB_STEP_SUMMARY}"
