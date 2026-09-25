@@ -321,7 +321,6 @@ export function DznPulseProvider({
         headers: { "content-type": "application/json", accept: "application/json" },
         retries: 0,
       });
-      if (notification.action_url) navigateToInternal(notification.action_url);
     } catch {
       if (wasUnread) {
         setNotifications(previousNotifications);

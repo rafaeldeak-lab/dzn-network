@@ -59,6 +59,7 @@ function assertNarrowWrites(statements: string[]) {
 async function main() {
   const markReadBlock = pulseProviderSource.slice(pulseProviderSource.indexOf("const markRead"), pulseProviderSource.indexOf("const markAllRead"));
   assert.ok(markReadBlock.lastIndexOf("navigateToInternal(notification.action_url)") > markReadBlock.lastIndexOf("} catch {"), "Notification destinations must still open when read tracking fails.");
+  assert.equal(markReadBlock.match(/navigateToInternal\(notification\.action_url\)/g)?.length, 1, "A successful read receipt must navigate exactly once.");
   const originalFetch = globalThis.fetch;
   let providerCalls = 0;
   globalThis.fetch = async () => { providerCalls++; throw new Error("No provider, analytics, email or Discord calls allowed"); };
