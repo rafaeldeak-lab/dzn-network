@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+const baseUrl = process.env.DZN_QA_BASE_URL ?? "http://localhost:3102";
 const server = {
   id: "synthetic-support-server", serverName: "Synthetic Support Server", slug: "synthetic-support-server",
   owner: { username: "example-owner", discordId: "1111...1111" },
@@ -13,6 +14,13 @@ const server = {
   adm: { latestFile: null, latestProcessedFile: null, lastProcessedOffset: null, latestImportedEventAt: null, lastSuccessfulImportAt: null, lastAttemptedReadAt: null, status: "unknown" },
   tokenStatus: "unknown", publicProfileUrl: "/servers/synthetic-support-server", dashboardUrl: "/dashboard?server=synthetic-support-server",
   plan: { key: "free", status: "inactive" },
+  billing: { paid: false, accountPresent: false, planKey: null, status: null, source: "none" },
+  onboarding: { tokenRecordPresent: true, tokenSaveStatus: "saved", accountVerified: false, tokenAccessible: null, dayzServiceDetected: null, lastTestedAt: null },
+  setupNotification: { websiteStatus: "opened", sentAt: "2026-09-25T01:07:04.000Z", readAt: "2026-09-25T01:20:00.000Z", openedAt: "2026-09-25T01:21:00.000Z", discordStatus: "disabled_by_owner", discordNotificationsEnabled: false },
+  supportBlockers: [
+    { key: "billing", severity: "attention", title: "No paid plan", detail: "No paid billing state is recorded." },
+    { key: "verification", severity: "blocking", title: "Account verification pending", detail: "The owner must complete account verification." },
+  ],
   stats: { totalKills: 0, totalDeaths: 0, totalJoins: 0, totalDisconnects: 0, uniquePlayers: 0, buildScore: 0, lastEventAt: null, lastBuildAt: null },
   resource: { admSyncEnabled: true, metadataRefreshEnabled: true, playerCountPollingEnabled: true, discordPostingEnabled: true, serverWarsEligible: false, consumingScheduledResources: true, excludedFromActiveSync: false, skippedReason: null },
   nextRetryAfter: null, lastSkipReason: null, badges: ["ACTIVE"], knownRole: null,
@@ -41,15 +49,19 @@ for (const [name, width, height] of [["desktop", 1440, 900], ["mobile", 390, 844
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.route("**/api/owner/**", async (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(responseFor(new URL(route.request().url()).pathname)) }));
-  await page.goto("http://localhost:3102/owner", { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.goto(`${baseUrl}/owner`, { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.getByText("DZN Network control state", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Servers", exact: true }).click();
   await page.getByText("All linked servers", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Support view" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.waitFor({ state: "visible" });
-  const result = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, title: document.querySelector("#owner-server-support-title")?.textContent, secretText: /encrypted_token|token_iv|payment secret value/i.test(document.body.innerText) }));
-  if (result.overflow !== 0 || result.title !== server.serverName || result.secretText || pageErrors.length) throw new Error(`${name} owner support QA failed: ${JSON.stringify({ result, pageErrors })}`);
+  await dialog.getByText("Owner notification", { exact: true }).waitFor();
+  const result = await page.evaluate(() => {
+    const dialogText = document.querySelector('[role="dialog"]')?.textContent ?? "";
+    return { overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, title: document.querySelector("#owner-server-support-title")?.textContent, secretText: /encrypted_token|token_iv|payment secret value/i.test(document.body.innerText), notificationStatusVisible: dialogText.includes("Opened by owner") };
+  });
+  if (result.overflow !== 0 || result.title !== server.serverName || result.secretText || !result.notificationStatusVisible || pageErrors.length) throw new Error(`${name} owner support QA failed: ${JSON.stringify({ result, pageErrors })}`);
   await page.screenshot({ path: join(tmpdir(), `dzn-owner-support-${name}.png`) });
   if (name === "desktop") {
     await page.keyboard.press("Escape");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   BarChart3,
@@ -32,13 +32,16 @@ import Link from "next/link";
 
 import {
   clearClientAuthState,
+  clearOnboardingDraft,
   getDiscordBotStatus,
   getGuilds,
   getMe,
+  getOnboardingDraft,
   getNitradoServices,
   goLive,
   logoutAndRedirect,
   saveOnboarding,
+  saveOnboardingDraft,
   testAdmPath,
   testOnboarding,
   validateNitradoToken,
@@ -46,6 +49,7 @@ import {
 import type { AdmApiDebug, DiscordBotStatusResponse, DiscordGuild, LinkedServer, NitradoService, OnboardingChecks } from "./types";
 import { DznLogo } from "@/components/dzn/dzn-logo";
 import { getServerCategoryOption, SERVER_CATEGORY_OPTIONS } from "./server-category-options";
+import { DZN_BOT_INSTALL_PERMISSIONS } from "@/lib/discord-bot-permissions";
 
 const steps = [
   "Connect Discord Server",
@@ -121,6 +125,8 @@ const INITIAL_VERIFICATION_PROGRESS: VerificationProgress = {
   lastCheckedAt: null,
 };
 
+type DraftSaveStatus = "loading" | "unavailable" | "idle" | "saving" | "saved" | "failed";
+
 export function SetupWizard() {
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
@@ -152,6 +158,14 @@ export function SetupWizard() {
   const [botChecking, setBotChecking] = useState(false);
   const [botStatusMessage, setBotStatusMessage] = useState("");
   const [verificationProgress, setVerificationProgress] = useState<VerificationProgress>(INITIAL_VERIFICATION_PROGRESS);
+  const [draftStatus, setDraftStatus] = useState<DraftSaveStatus>("loading");
+  const [draftAvailable, setDraftAvailable] = useState(false);
+  const [draftUpdatedAt, setDraftUpdatedAt] = useState<string | null>(null);
+  const [draftHydrated, setDraftHydrated] = useState(false);
+  const [restartArmed, setRestartArmed] = useState(false);
+  const [restartBusy, setRestartBusy] = useState(false);
+  const draftSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const draftAutosaveTimerRef = useRef<number | null>(null);
 
   const loadDiscordGuilds = useCallback(async (fresh: boolean) => {
     try {
@@ -170,16 +184,44 @@ export function SetupWizard() {
       try {
         const auth = await getMe();
         setAuthenticated(true);
-        const guildResult = await loadDiscordGuilds(true);
+        const [guildResult, draftResult] = await Promise.all([
+          loadDiscordGuilds(true),
+          getOnboardingDraft().catch(() => ({ ok: false, available: false, draft: null })),
+        ]);
         setGuilds(guildResult.guilds);
         const linkedServer = auth.linkedServer;
-        if (linkedServer?.guild_id) {
+        const draft = draftResult.draft;
+        if (draft?.discordGuildId && guildResult.guilds.some((guild) => guild.guild_id === draft.discordGuildId)) {
+          setSelectedGuild(draft.discordGuildId);
+        } else if (linkedServer?.guild_id) {
           setSelectedGuild(linkedServer.guild_id);
         } else if (guildResult.guilds[0]) {
           setSelectedGuild(guildResult.guilds[0].guild_id);
         }
 
-        if (window.location.hash === "#review-test" && linkedServer) {
+        if (draftResult.available && draft) {
+          setServerType(draft.serverType || "PVP");
+          setServerCategory(draft.serverCategory ?? "");
+          setSelectedTags(draft.tags);
+          setPublicListing(draft.publicListing);
+          setValidatedLinkedServerId(draft.linkedServerId);
+          setSelectedService(draft.nitradoServiceId ?? "");
+          setDirectServiceValidated(draft.directServiceValidated);
+          setTokenValid(Boolean(draft.linkedServerId));
+          const existing = auth.linkedServers?.find((server) => server.id === draft.linkedServerId) ?? linkedServer;
+          if (existing && draft.nitradoServiceId && existing.nitrado_service_id === draft.nitradoServiceId) {
+            const existingService = nitradoServiceFromLinkedServer(existing);
+            setServices([existingService]);
+            setValidatedService(existingService);
+          } else if (draft.linkedServerId && draft.nitradoServiceId) {
+            const serviceResult = await getNitradoServices(draft.linkedServerId).catch(() => ({ services: [] }));
+            setServices(serviceResult.services);
+            setValidatedService(serviceResult.services.find((service) => service.id === draft.nitradoServiceId) ?? null);
+          }
+          setStep(draft.currentStep);
+          setDraftUpdatedAt(draft.updatedAt);
+          setDraftStatus("saved");
+        } else if (window.location.hash === "#review-test" && linkedServer) {
           const existingService: NitradoService = {
             id: linkedServer.nitrado_service_id,
             name: linkedServer.nitrado_service_name || linkedServer.server_name,
@@ -202,6 +244,10 @@ export function SetupWizard() {
           setDirectServiceValidated(true);
           setStep(5);
         }
+        setDraftAvailable(draftResult.available);
+        if (!draftResult.available) setDraftStatus("unavailable");
+        else if (!draft) setDraftStatus("idle");
+        setDraftHydrated(true);
       } catch {
         setAuthenticated(false);
       } finally {
@@ -210,6 +256,53 @@ export function SetupWizard() {
     }
     load();
   }, [loadDiscordGuilds]);
+
+  useEffect(() => {
+    if (!authenticated || !draftHydrated || !draftAvailable || (step === 6 && publishedServer)) return;
+    draftAutosaveTimerRef.current = window.setTimeout(() => {
+      draftAutosaveTimerRef.current = null;
+      const payload = {
+        currentStep: step,
+        discordGuildId: selectedGuild || null,
+        serverType,
+        server_category: serverCategory || null,
+        tags: selectedTags,
+        publicListing,
+        linkedServerId: validatedLinkedServerId,
+        nitradoServiceId: selectedService || null,
+        directServiceValidated,
+      };
+      setDraftStatus("saving");
+      draftSaveChainRef.current = draftSaveChainRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          const result = await saveOnboardingDraft(payload);
+          setDraftUpdatedAt(result.draft?.updatedAt ?? new Date().toISOString());
+          setDraftStatus("saved");
+        })
+        .catch(() => setDraftStatus("failed"));
+    }, 800);
+    return () => {
+      if (draftAutosaveTimerRef.current !== null) {
+        window.clearTimeout(draftAutosaveTimerRef.current);
+        draftAutosaveTimerRef.current = null;
+      }
+    };
+  }, [
+    authenticated,
+    directServiceValidated,
+    draftAvailable,
+    draftHydrated,
+    publicListing,
+    publishedServer,
+    selectedGuild,
+    selectedService,
+    selectedTags,
+    serverCategory,
+    serverType,
+    step,
+    validatedLinkedServerId,
+  ]);
 
   useEffect(() => {
     if (!loading && !authenticated) {
@@ -453,12 +546,63 @@ export function SetupWizard() {
       await goLive();
       const refreshed = await getMe().catch(() => null);
       setPublishedServer(refreshed?.linkedServer ?? null);
+      if (draftAutosaveTimerRef.current !== null) {
+        window.clearTimeout(draftAutosaveTimerRef.current);
+        draftAutosaveTimerRef.current = null;
+      }
+      await draftSaveChainRef.current.catch(() => undefined);
+      if (draftAvailable) await clearOnboardingDraft().catch(() => null);
+      setDraftUpdatedAt(null);
+      setDraftStatus("idle");
       setStep(6);
     } catch (error) {
       setPublishError(error instanceof Error ? error.message : "Go-live failed");
       setStep(6);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function restartSetup() {
+    if (!restartArmed) {
+      setRestartArmed(true);
+      return;
+    }
+    setRestartBusy(true);
+    try {
+      if (draftAutosaveTimerRef.current !== null) {
+        window.clearTimeout(draftAutosaveTimerRef.current);
+        draftAutosaveTimerRef.current = null;
+      }
+      await draftSaveChainRef.current.catch(() => undefined);
+      if (draftAvailable) await clearOnboardingDraft();
+      setStep(0);
+      setSelectedGuild(guilds[0]?.guild_id ?? "");
+      setServerType("PVP");
+      setServerCategory("");
+      setSelectedTags([]);
+      setPublicListing(emptyPublicListing());
+      setTokenInput("");
+      setTokenValid(false);
+      setServiceIdInput("");
+      setWebInterfaceUrl("");
+      setDetectedServiceId("");
+      setValidatedService(null);
+      setDirectServiceValidated(false);
+      setSelectedService("");
+      setValidatedLinkedServerId(null);
+      setChecks(null);
+      setPublishedServer(null);
+      setPublishError("");
+      setMessage("");
+      setVerificationProgress(INITIAL_VERIFICATION_PROGRESS);
+      setDraftUpdatedAt(null);
+      setDraftStatus("idle");
+      setRestartArmed(false);
+    } catch {
+      setDraftStatus("failed");
+    } finally {
+      setRestartBusy(false);
     }
   }
 
@@ -505,6 +649,15 @@ export function SetupWizard() {
 
   return (
     <SetupFrame onLogout={signOut}>
+      <SetupProgressBand
+        percent={setupCompletionPercent(step, Boolean(publishedServer))}
+        saveStatus={draftStatus}
+        savedAt={draftUpdatedAt}
+        restartArmed={restartArmed}
+        restartBusy={restartBusy}
+        onRestart={() => void restartSetup()}
+        onCancelRestart={() => setRestartArmed(false)}
+      />
       <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
         <aside className="glass-surface animated-border rounded-lg p-5">
           <div className="relative z-10">
@@ -637,6 +790,73 @@ export function SetupWizard() {
         </section>
       </div>
     </SetupFrame>
+  );
+}
+
+function SetupProgressBand({
+  percent,
+  saveStatus,
+  savedAt,
+  restartArmed,
+  restartBusy,
+  onRestart,
+  onCancelRestart,
+}: {
+  percent: number;
+  saveStatus: DraftSaveStatus;
+  savedAt: string | null;
+  restartArmed: boolean;
+  restartBusy: boolean;
+  onRestart: () => void;
+  onCancelRestart: () => void;
+}) {
+  const remaining = Math.max(0, 100 - percent);
+  const saveLabel = saveStatus === "saving"
+    ? "Saving your progress..."
+    : saveStatus === "saved"
+      ? `Progress saved${savedAt ? ` ${formatDraftSavedAt(savedAt)}` : ""}`
+      : saveStatus === "failed"
+        ? "Progress could not be saved. Your completed server data is unchanged."
+        : saveStatus === "unavailable"
+          ? "Automatic draft saving is awaiting activation."
+          : "Your answers save automatically.";
+
+  return (
+    <section className="mb-5 border-y border-cyan-300/15 bg-cyan-300/[0.04] px-4 py-4 sm:px-5" aria-label="Setup progress">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="min-w-[220px] flex-1">
+          <div className="flex items-center justify-between gap-4 text-xs font-black uppercase text-cyan-100">
+            <span>Setup {percent}% complete</span>
+            <span className="text-zinc-400">{remaining}% remaining</span>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-sm bg-white/10">
+            <div className="h-full bg-gradient-to-r from-cyan-300 via-emerald-300 to-violet-300 transition-[width] duration-300" style={{ width: `${percent}%` }} />
+          </div>
+          <p className={`mt-2 text-xs ${saveStatus === "failed" ? "text-amber-200" : "text-zinc-400"}`} aria-live="polite">{saveLabel}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {restartArmed ? (
+            <button type="button" onClick={onCancelRestart} disabled={restartBusy} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black uppercase text-zinc-300">
+              Keep progress
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onRestart}
+            disabled={restartBusy}
+            className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-black uppercase ${restartArmed ? "border-rose-300/35 bg-rose-300/10 text-rose-100" : "border-white/10 bg-white/[0.03] text-zinc-300"}`}
+          >
+            <RefreshCw className={`h-4 w-4 ${restartBusy ? "animate-spin" : ""}`} aria-hidden="true" />
+            {restartArmed ? "Confirm restart" : "Restart setup"}
+          </button>
+        </div>
+      </div>
+      {restartArmed ? (
+        <p className="mt-3 text-xs leading-5 text-rose-100">
+          This clears only your saved wizard answers. It does not delete a linked server, saved token, subscription, or imported data.
+        </p>
+      ) : null}
+    </section>
   );
 }
 
@@ -778,7 +998,7 @@ function BotInstallStep({
 }) {
   const botInstalled = Boolean(status?.bot_connected && status.channels_available);
   const postableCount = status?.postable_channels_count ?? 0;
-  const inviteUrl = status?.invite_url ?? "https://discord.com/oauth2/authorize?permissions=8&scope=bot%20applications.commands";
+  const inviteUrl = status?.invite_url ?? `https://discord.com/oauth2/authorize?permissions=${DZN_BOT_INSTALL_PERMISSIONS}&scope=bot%20applications.commands`;
 
   return (
     <Step
@@ -2271,6 +2491,17 @@ function formatCheckedAt(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
+function formatDraftSavedAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return `at ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function setupCompletionPercent(step: number, published: boolean) {
+  if (published) return 100;
+  return step === 6 ? 86 : Math.max(0, Math.min(86, Math.round((step / 7) * 100)));
+}
+
 function getVerificationPercent(progress: VerificationProgress) {
   if (!progress.running) {
     return progress.completedCount >= VERIFICATION_STAGES.length ? 100 : 0;
@@ -2337,5 +2568,18 @@ function publicListingFromLinkedServer(server: LinkedServer): PublicListingForm 
     public_rules: server.public_rules ?? "",
     public_language: server.public_language ?? "",
     public_region_label: server.public_region_label ?? "",
+  };
+}
+
+function nitradoServiceFromLinkedServer(server: LinkedServer): NitradoService {
+  return {
+    id: server.nitrado_service_id,
+    name: server.nitrado_service_name || server.server_name,
+    game: server.game ?? "DayZ",
+    region: server.region ?? undefined,
+    platform: server.platform ?? undefined,
+    ipAddress: server.ip_address ?? undefined,
+    playerSlots: server.player_slots ?? undefined,
+    status: server.status,
   };
 }

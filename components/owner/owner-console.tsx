@@ -76,6 +76,14 @@ type OwnerServer = {
     dayzServiceDetected: boolean | null;
     lastTestedAt: string | null;
   };
+  setupNotification: {
+    websiteStatus: "not_sent" | "sent_unread" | "read" | "opened";
+    sentAt: string | null;
+    readAt: string | null;
+    openedAt: string | null;
+    discordStatus: "not_sent" | "disabled_by_owner" | "delivered" | "failed" | "unknown";
+    discordNotificationsEnabled: boolean;
+  };
   supportBlockers: Array<{
     key: "billing" | "verification" | "service_check" | "status_sync" | "adm_sync";
     severity: "blocking" | "attention";
@@ -754,6 +762,7 @@ function ServersPanel({ servers }: { servers: OwnerServer[] }) {
                     <div className="mt-1 text-xs text-zinc-500">Listing: {server.listingVisibility ?? "default"}</div>
                     <div className={`mt-2 text-xs font-black uppercase ${server.billing.paid ? "text-emerald-200" : "text-amber-200"}`}>{server.billing.paid ? "Paid" : "Not paid"}</div>
                     <div className="mt-1 text-xs text-zinc-500">Plan: {server.billing.planKey ?? server.plan.key ?? "none"} / {server.billing.status ?? server.plan.status ?? "unknown"}</div>
+                    <div className="mt-2 text-xs font-bold text-cyan-200">Setup notice: {setupNoticeLabel(server.setupNotification.websiteStatus)}</div>
                   </td>
                   <td className="px-4 py-4 text-zinc-300">
                     <div className="font-bold text-white">{server.playerCount.current ?? "unknown"} / {server.playerCount.max ?? "unknown"}</div>
@@ -879,6 +888,14 @@ function ServerSupportView({ selection, server, status, onClose, onRefresh }: {
             <SupportValue label="ADM logs found" value={supportCheckLabel(server.onboarding.admLogsFound)} />
             <SupportValue label="Last tested" value={formatDate(server.onboarding.lastTestedAt)} />
           </SupportSection>
+          <SupportSection title="Owner notification">
+            <SupportValue label="Website notification" value={setupNoticeLabel(server.setupNotification.websiteStatus)} />
+            <SupportValue label="Sent" value={formatDate(server.setupNotification.sentAt)} />
+            <SupportValue label="Read / acknowledged" value={formatDate(server.setupNotification.readAt)} />
+            <SupportValue label="Opened" value={formatDate(server.setupNotification.openedAt)} />
+            <SupportValue label="Discord notification" value={setupDiscordNoticeLabel(server.setupNotification.discordStatus)} />
+            <SupportValue label="Owner Discord preference" value={server.setupNotification.discordNotificationsEnabled ? "Enabled" : "Disabled"} />
+          </SupportSection>
           <SupportSection title="ADM and player count">
             <SupportValue label="Latest ADM" value={server.adm.latestFile ?? "None discovered"} />
             <SupportValue label="Processed ADM" value={server.adm.latestProcessedFile ?? "None processed"} />
@@ -958,6 +975,21 @@ function SupportValue({ label, value }: { label: string; value: string }) {
 function supportCheckLabel(value: boolean | null) {
   if (value === null) return "Not checked";
   return value ? "Passed" : "Not passed";
+}
+
+function setupNoticeLabel(status: OwnerServer["setupNotification"]["websiteStatus"]) {
+  if (status === "opened") return "Opened by owner";
+  if (status === "read") return "Marked read - not opened directly";
+  if (status === "sent_unread") return "Sent - not opened yet";
+  return "Not sent";
+}
+
+function setupDiscordNoticeLabel(status: OwnerServer["setupNotification"]["discordStatus"]) {
+  if (status === "delivered") return "Delivered";
+  if (status === "failed") return "Delivery failed";
+  if (status === "disabled_by_owner") return "Not sent - owner preference is off";
+  if (status === "unknown") return "Delivery state unavailable";
+  return "Not sent";
 }
 
 function LifecyclePanel({ lifecycleCounts }: { lifecycleCounts: Array<typeof LIFECYCLE_COPY[number] & { count: number }> }) {

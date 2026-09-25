@@ -104,6 +104,63 @@ export async function saveOnboarding(data: {
   });
 }
 
+export type OnboardingDraft = {
+  currentStep: number;
+  completionPercent: number;
+  discordGuildId: string | null;
+  serverType: string | null;
+  serverCategory: string | null;
+  tags: string[];
+  publicListing: {
+    public_short_description: string;
+    public_description: string;
+    public_discord_invite: string;
+    public_website_url: string;
+    public_rules: string;
+    public_language: string;
+    public_region_label: string;
+  };
+  linkedServerId: string | null;
+  nitradoServiceId: string | null;
+  directServiceValidated: boolean;
+  updatedAt: string;
+};
+
+export async function getOnboardingDraft() {
+  return request<{ ok: boolean; available: boolean; draft: OnboardingDraft | null }>("/api/onboarding/draft", { cache: "no-store" });
+}
+
+export async function saveOnboardingDraft(data: {
+  currentStep: number;
+  discordGuildId: string | null;
+  serverType: string;
+  server_category: string | null;
+  tags: string[];
+  publicListing: OnboardingDraft["publicListing"];
+  linkedServerId: string | null;
+  nitradoServiceId: string | null;
+  directServiceValidated: boolean;
+}) {
+  return request<{ ok: boolean; available: boolean; draft: OnboardingDraft | null }>("/api/onboarding/draft", {
+    method: "PUT",
+    body: JSON.stringify({
+      currentStep: data.currentStep,
+      discordGuildId: data.discordGuildId,
+      serverType: data.serverType,
+      server_category: data.server_category,
+      tags: data.tags,
+      ...data.publicListing,
+      linkedServerId: data.linkedServerId,
+      nitradoServiceId: data.nitradoServiceId,
+      directServiceValidated: data.directServiceValidated,
+    }),
+  });
+}
+
+export async function clearOnboardingDraft() {
+  return request<{ ok: boolean; cleared: boolean }>("/api/onboarding/draft", { method: "DELETE" });
+}
+
 export async function updateServerPublicListing(linkedServerId: string, data: {
   public_short_description?: string | null;
   public_description?: string | null;

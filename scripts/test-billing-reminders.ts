@@ -100,7 +100,14 @@ async function main() {
       assert.equal(await countUnreadNotifications(env, other), 0);
       assert.equal((await markNotificationRead(env, other, items.items[0].id)).status, 404);
       assert.equal(await countUnreadNotifications(env, user), 1);
-      assert.equal((await markNotificationRead(env, user, items.items[0].id)).status, 200);
+      const opened = await markNotificationRead(env, user, items.items[0].id);
+      assert.equal(opened.status, 200);
+      const openedMetadata = JSON.parse(String(db.sqlite.prepare("SELECT metadata FROM user_notifications WHERE id = ?").get(items.items[0].id)?.metadata ?? "{}"));
+      assert.equal(typeof openedMetadata.opened_at, "string", "Opening one notification records a first-open timestamp");
+      const firstOpenedAt = openedMetadata.opened_at;
+      await markNotificationRead(env, user, items.items[0].id);
+      const reopenedMetadata = JSON.parse(String(db.sqlite.prepare("SELECT metadata FROM user_notifications WHERE id = ?").get(items.items[0].id)?.metadata ?? "{}"));
+      assert.equal(reopenedMetadata.opened_at, firstOpenedAt, "Reopening preserves the first-open timestamp");
       assert.equal(await countUnreadNotifications(env, user), 0);
       assert.equal((await clearReadNotifications(env, other)).cleared, 0);
       assert.equal((await clearReadNotifications(env, user)).cleared, 1);
@@ -171,6 +178,8 @@ async function main() {
       assert.equal((await listUserNotifications(env, user, { filter: "billing" })).items.length, 1);
       await markAllNotificationsRead(env, user);
       assert.equal(await countUnreadNotifications(env, user), 0);
+      const bulkReadMetadata = db.sqlite.prepare("SELECT metadata FROM user_notifications WHERE id = 'news'").get()?.metadata;
+      assert.equal(JSON.parse(String(bulkReadMetadata ?? "{}")).opened_at, undefined, "Bulk read does not claim the notice was opened");
       assert.equal((await clearReadNotifications(env, user)).cleared, 2);
       assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM user_notifications").get()?.n, 1);
       assertNarrowWrites(db.statements); db.sqlite.close(); cases++;

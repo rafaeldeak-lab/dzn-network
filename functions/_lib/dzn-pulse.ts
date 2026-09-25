@@ -387,14 +387,22 @@ export async function markNotificationRead(env: Env, user: SessionUser, notifica
   if (!id) return { ok: false, status: 400, error: "invalid_notification_id", message: "Invalid notification id." };
   const now = new Date().toISOString();
   const result = await requireDb(env)
-    .prepare("UPDATE user_notifications SET read_at = COALESCE(read_at, ?) WHERE id = ? AND user_id = ?")
-    .bind(now, id, user.id)
+    .prepare(
+      `UPDATE user_notifications
+       SET read_at = COALESCE(read_at, ?),
+           metadata = CASE
+             WHEN json_valid(COALESCE(metadata, '')) AND json_extract(metadata, '$.opened_at') IS NOT NULL THEN metadata
+             ELSE json_set(CASE WHEN json_valid(COALESCE(metadata, '')) THEN metadata ELSE '{}' END, '$.opened_at', ?)
+           END
+       WHERE id = ? AND user_id = ?`,
+    )
+    .bind(now, now, id, user.id)
     .run();
   const changes = Number(result.meta?.changes ?? 0) || 0;
   if (changes <= 0) {
     return { ok: false, status: 404, error: "notification_not_found", message: "Notification was not found." };
   }
-  return { ok: true, status: 200, id, read_at: now, unreadCount: await countUnreadNotifications(env, user) };
+  return { ok: true, status: 200, id, read_at: now, opened_at: now, unreadCount: await countUnreadNotifications(env, user) };
 }
 
 export async function markAllNotificationsRead(env: Env, user: SessionUser) {
