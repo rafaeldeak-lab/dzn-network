@@ -231,6 +231,7 @@ const paidHealthyServer = mapOwnerServerRowForTest({
   current_player_count: 4,
   last_sync_at: "2026-09-25T10:02:00.000Z",
   latest_adm_file: "server.ADM",
+  last_processed_file: "server.ADM",
 });
 assert.equal(paidHealthyServer.billing.paid, true);
 assert.equal(paidHealthyServer.billing.customerReferencePresent, true);
@@ -260,6 +261,7 @@ const paidOwnerFallback = mapOwnerServerRowForTest({
   current_player_count: 4,
   last_sync_at: "2026-09-25T10:02:00.000Z",
   latest_adm_file: "server.ADM",
+  last_processed_file: "server.ADM",
 });
 assert.equal(paidOwnerFallback.billing.paid, true);
 assert.equal(paidOwnerFallback.billing.source, "owner");
@@ -281,9 +283,34 @@ const admEvidenceOverridesOldCheck = mapOwnerServerRowForTest({
   last_successful_status_check_at: "2026-09-25T10:01:00.000Z",
   current_player_count: 0,
   last_sync_at: "2026-09-25T10:02:00.000Z",
-  latest_adm_file: "server.ADM",
+  last_processed_file: "server.ADM",
 });
 assert.equal(admEvidenceOverridesOldCheck.supportBlockers.some((blocker) => blocker.key === "adm_sync"), false, "Stored ADM import evidence must override an older incomplete onboarding check.");
+
+const failedAdmAttemptIsNotProof = mapOwnerServerRowForTest({
+  id: "server-adm-failed",
+  server_name: "Failed ADM server",
+  status: "live",
+  lifecycle_status: "active_live",
+  verified_server: 1,
+  subscription_plan_key: "pro",
+  subscription_status: "active",
+  token_record_present: 1,
+  onboarding_token_valid: 1,
+  onboarding_service_access: 1,
+  onboarding_adm_logs_found: null,
+  onboarding_dayz_service_detected: 1,
+  onboarding_last_tested_at: "2026-09-25T10:00:00.000Z",
+  last_successful_status_check_at: "2026-09-25T10:01:00.000Z",
+  current_player_count: 0,
+  last_sync_status: "adm_file_unreadable",
+  last_sync_at: "2026-09-25T10:02:00.000Z",
+  latest_adm_file: null,
+  last_processed_file: null,
+  last_successful_adm_pull_at: null,
+});
+assert.equal(failedAdmAttemptIsNotProof.adm.lastSuccessfulImportAt, null);
+assert.equal(failedAdmAttemptIsNotProof.supportBlockers.some((blocker) => blocker.key === "adm_sync"), true, "A failed ADM attempt timestamp must not clear the import-proof blocker.");
 
 const warlords = mapOwnerServerRowForTest({
   id: "server-warlords",
@@ -416,6 +443,8 @@ assert.doesNotMatch(ownerDataSource, /\bencrypted_token\b|\btoken_iv\b|\btoken_a
 assert.match(ownerDataSource, /EXISTS \(\s*SELECT 1 FROM nitrado_connections/, "Owner support may disclose only whether a Nitrado credential record exists.");
 assert.match(ownerDataSource, /nitrado_connections\.user_id = linked_servers\.user_id/, "Token presence must be scoped to the server's current owner.");
 assert.match(ownerDataSource, /server_subscriptions\.owner_discord_id = users\.discord_id/, "Server billing must be scoped to the server's current owner.");
+assert.match(ownerDataSource, /datetime\(latest_check\.last_tested_at\) >= datetime/, "Onboarding proof must postdate the current owner's latest token.");
+assert.match(ownerDataSource, /current_connection\.user_id = linked_servers\.user_id/, "Onboarding proof freshness must use the current owner's token timestamp.");
 assert.match(ownerDataSource, /owner_billing_accounts\.stripe_customer_id IS NOT NULL/, "Owner support must expose presence instead of raw billing identifiers.");
 assert.doesNotMatch(ownerDataSource, /owner_billing_accounts\.stripe_customer_id\s+AS|owner_billing_accounts\.stripe_subscription_id\s+AS/i, "Raw billing identifiers must not enter the support payload.");
 assert.doesNotMatch(ownerDataSource, /\bfetch\s*\(/i);

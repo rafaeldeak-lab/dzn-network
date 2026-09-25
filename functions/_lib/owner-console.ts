@@ -368,6 +368,13 @@ export async function getOwnerServers(env: Env): Promise<OwnerServerRow[]> {
        SELECT latest_check.id
        FROM onboarding_checks AS latest_check
        WHERE latest_check.linked_server_id = linked_servers.id
+         AND latest_check.last_tested_at IS NOT NULL
+         AND datetime(latest_check.last_tested_at) >= datetime((
+           SELECT MAX(COALESCE(current_connection.updated_at, current_connection.created_at))
+           FROM nitrado_connections AS current_connection
+           WHERE current_connection.linked_server_id = linked_servers.id
+             AND current_connection.user_id = linked_servers.user_id
+         ))
        ORDER BY latest_check.last_tested_at DESC, latest_check.id DESC
        LIMIT 1
      )
@@ -476,7 +483,7 @@ function mapOwnerServerRow(row: OwnerServerRecord): OwnerServerRow {
     stringOrNull(row.last_event_at) ??
     stringOrNull(row.last_build_at) ??
     stringOrNull(row.last_sync_at);
-  const lastSuccessfulImportAt = stringOrNull(row.last_sync_at) ?? stringOrNull(row.last_successful_adm_pull_at);
+  const lastSuccessfulImportAt = stringOrNull(row.latest_imported_event_at) ?? stringOrNull(row.last_successful_adm_pull_at);
   const tokenStatus = inferSafeTokenStatus(row, lifecycleStatus);
   const slug = stringOrNull(row.public_slug);
   const knownRole = inferKnownServerRole(row);
@@ -553,7 +560,7 @@ function mapOwnerServerRow(row: OwnerServerRecord): OwnerServerRow {
       lastSuccessfulStatusCheckAt: stringOrNull(row.last_successful_status_check_at),
       currentPlayerCount: numberOrNull(row.current_player_count ?? row.public_current_player_count),
       lastSuccessfulImportAt,
-      latestAdmFile,
+      latestProcessedFile,
     }),
     stats: {
       totalKills: numberOrZero(row.total_kills),
@@ -619,7 +626,7 @@ export function buildOwnerSupportBlockers(input: {
   lastSuccessfulStatusCheckAt: string | null;
   currentPlayerCount: number | null;
   lastSuccessfulImportAt: string | null;
-  latestAdmFile: string | null;
+  latestProcessedFile: string | null;
 }): OwnerSupportBlocker[] {
   if (["archived_hidden", "legacy_offline", "final_sync_complete"].includes(input.lifecycleStatus)) return [];
   const blockers: OwnerSupportBlocker[] = [];
@@ -655,7 +662,7 @@ export function buildOwnerSupportBlockers(input: {
       recommendation: "Complete verification first. DZN must then record a successful live status check before the dashboard can show a current player count.",
     });
   }
-  if (input.onboarding.admLogsFound !== true && !input.lastSuccessfulImportAt && !input.latestAdmFile) {
+  if (input.onboarding.admLogsFound !== true && !input.lastSuccessfulImportAt && !input.latestProcessedFile) {
     blockers.push({
       key: "adm_sync",
       severity: "attention",

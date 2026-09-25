@@ -882,7 +882,7 @@ function ServerSupportView({ selection, server, status, onClose, onRefresh }: {
           <SupportSection title="ADM and player count">
             <SupportValue label="Latest ADM" value={server.adm.latestFile ?? "None discovered"} />
             <SupportValue label="Processed ADM" value={server.adm.latestProcessedFile ?? "None processed"} />
-            <SupportValue label="Last import" value={formatDate(server.adm.lastSuccessfulImportAt)} />
+            <SupportValue label="Last successful pull / import" value={formatDate(server.adm.lastSuccessfulImportAt)} />
             <SupportValue label="Latest event" value={formatDate(server.adm.latestImportedEventAt)} />
             <SupportValue label="Players" value={`${server.playerCount.current ?? "unknown"} / ${server.playerCount.max ?? "unknown"}`} />
           </SupportSection>
