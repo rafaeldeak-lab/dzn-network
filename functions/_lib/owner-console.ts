@@ -120,6 +120,14 @@ export type OwnerServerRow = {
     dayzServiceDetected: boolean | null;
     lastTestedAt: string | null;
   };
+  setupNotification: {
+    websiteStatus: "not_sent" | "sent_unread" | "read" | "opened";
+    sentAt: string | null;
+    readAt: string | null;
+    openedAt: string | null;
+    discordStatus: "not_sent" | "disabled_by_owner" | "delivered" | "failed" | "unknown";
+    discordNotificationsEnabled: boolean;
+  };
   supportBlockers: OwnerSupportBlocker[];
   stats: {
     totalKills: number;
@@ -319,6 +327,19 @@ export async function getOwnerServers(env: Env): Promise<OwnerServerRow[]> {
        onboarding_checks.adm_logs_found AS onboarding_adm_logs_found,
        onboarding_checks.dayz_service_detected AS onboarding_dayz_service_detected,
        onboarding_checks.last_tested_at AS onboarding_last_tested_at,
+       setup_notification.created_at AS setup_notification_sent_at,
+       setup_notification.read_at AS setup_notification_read_at,
+       CASE
+         WHEN json_valid(COALESCE(setup_notification.metadata, ''))
+           THEN json_extract(setup_notification.metadata, '$.opened_at')
+         ELSE NULL
+       END AS setup_notification_opened_at,
+       CASE
+         WHEN json_valid(COALESCE(setup_notification.metadata, ''))
+           THEN json_extract(setup_notification.metadata, '$.discord_delivery_status')
+         ELSE NULL
+       END AS setup_notification_discord_status,
+       COALESCE(notification_preferences.discord_enabled, 0) AS owner_discord_notifications_enabled,
        server_sync_state.current_player_count,
        server_sync_state.max_player_count,
        server_sync_state.server_online,
@@ -378,6 +399,19 @@ export async function getOwnerServers(env: Env): Promise<OwnerServerRow[]> {
        ORDER BY latest_check.last_tested_at DESC, latest_check.id DESC
        LIMIT 1
      )
+     LEFT JOIN user_notifications AS setup_notification ON setup_notification.id = (
+       SELECT latest_notification.id
+       FROM user_notifications AS latest_notification
+       WHERE latest_notification.user_id = linked_servers.user_id
+         AND latest_notification.server_id = linked_servers.id
+         AND (
+           latest_notification.action_url = '/setup#review-test'
+           OR latest_notification.dedupe_key LIKE '%-setup-recommendation-%'
+         )
+       ORDER BY datetime(latest_notification.created_at) DESC, latest_notification.id DESC
+       LIMIT 1
+     )
+     LEFT JOIN notification_preferences ON notification_preferences.user_id = linked_servers.user_id
      LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
      LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
      LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
@@ -552,6 +586,7 @@ function mapOwnerServerRow(row: OwnerServerRecord): OwnerServerRow {
     },
     billing,
     onboarding,
+    setupNotification: buildSetupNotificationState(row),
     supportBlockers: buildOwnerSupportBlockers({
       lifecycleStatus,
       status: stringOrNull(row.status),
@@ -585,6 +620,31 @@ function mapOwnerServerRow(row: OwnerServerRecord): OwnerServerRow {
 }
 
 export const mapOwnerServerRowForTest = mapOwnerServerRow;
+
+function buildSetupNotificationState(row: OwnerServerRecord): OwnerServerRow["setupNotification"] {
+  const sentAt = stringOrNull(row.setup_notification_sent_at);
+  const readAt = stringOrNull(row.setup_notification_read_at);
+  const openedAt = stringOrNull(row.setup_notification_opened_at);
+  const discordNotificationsEnabled = truthy(row.owner_discord_notifications_enabled);
+  const storedDiscordStatus = normalizedText(row.setup_notification_discord_status);
+  const discordStatus = storedDiscordStatus === "delivered"
+    ? "delivered"
+    : storedDiscordStatus === "failed"
+      ? "failed"
+      : !discordNotificationsEnabled
+        ? "disabled_by_owner"
+        : storedDiscordStatus
+          ? "unknown"
+          : "not_sent";
+  return {
+    websiteStatus: openedAt ? "opened" : readAt ? "read" : sentAt ? "sent_unread" : "not_sent",
+    sentAt,
+    readAt,
+    openedAt,
+    discordStatus,
+    discordNotificationsEnabled,
+  };
+}
 
 function buildOwnerBillingState(row: OwnerServerRecord): OwnerServerRow["billing"] {
   const serverPlan = stringOrNull(row.subscription_plan_key);

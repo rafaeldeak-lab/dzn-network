@@ -4,6 +4,7 @@ import { DiscordChannelFetchError, fetchDiscordPostingChannels } from "../../_li
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isMockAuth, mockGuilds } from "../../_lib/mock";
 import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
+import { DZN_BOT_INSTALL_PERMISSIONS } from "../../../lib/discord-bot-permissions";
 
 type ManagedGuild = {
   guild_id: string;
@@ -190,10 +191,10 @@ function classifyBotStatusError(error: unknown) {
 
 function buildBotInviteUrl(env: Env, guildId: string | null) {
   const clientId = typeof env.DISCORD_CLIENT_ID === "string" ? env.DISCORD_CLIENT_ID.trim() : "";
-  if (!clientId) return "https://discord.com/oauth2/authorize?permissions=8&scope=bot%20applications.commands";
+  if (!clientId) return `https://discord.com/oauth2/authorize?permissions=${DZN_BOT_INSTALL_PERMISSIONS}&scope=bot%20applications.commands`;
   const url = new URL("https://discord.com/oauth2/authorize");
   url.searchParams.set("client_id", clientId);
-  url.searchParams.set("permissions", "8");
+  url.searchParams.set("permissions", DZN_BOT_INSTALL_PERMISSIONS);
   url.searchParams.set("scope", "bot applications.commands");
   if (guildId) {
     url.searchParams.set("guild_id", guildId);
