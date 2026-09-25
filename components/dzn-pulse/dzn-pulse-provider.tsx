@@ -328,6 +328,7 @@ export function DznPulseProvider({
         setUnreadCount(previousUnread);
       }
     }
+    if (notification.action_url) navigateToInternal(notification.action_url);
   }, [notifications, unreadCount]);
 
   const markAllRead = useCallback(async () => {

@@ -50,7 +50,12 @@ async function main() {
   const reviewBranch = setupWizardSource.indexOf("if (reviewRequested && linkedServer) {");
   const draftBranch = setupWizardSource.indexOf("else if (draftResult.available && draft) {");
   assert.ok(reviewBranch >= 0 && draftBranch > reviewBranch, "Setup-guide links must take precedence over saved drafts.");
-  assert.equal(setupWizardSource.includes("result: { ok: false, available: true, draft: null }, failed: true"), true, "Transient draft reads must leave later autosave attempts enabled.");
+  assert.equal(setupWizardSource.includes("loadOnboardingDraftWithRetry()"), true, "Transient draft reads must be retried before setup continues.");
+  assert.equal(setupWizardSource.includes("result: { ok: false, available: false, draft: null }, failed: true"), true, "A failed draft read must keep autosave disabled so unseen progress cannot be overwritten.");
+  assert.equal(setupWizardSource.includes("setDraftAvailable(!draftLoadFailed && draftResult.available)"), true, "Autosave availability must require a successful hydration read.");
+  const draftRouteSource = readFileSync("functions/api/onboarding/draft.ts", "utf8");
+  const schemaProbe = draftRouteSource.slice(draftRouteSource.indexOf("async function hasDraftSchema"), draftRouteSource.indexOf("function serializeDraft"));
+  assert.equal(schemaProbe.includes("catch"), false, "Transient D1 errors must not be reported as a missing migration.");
 
   const unavailableSqlite = new DatabaseSync(":memory:");
   unavailableSqlite.exec(readFileSync("migrations/0001_initial_schema.sql", "utf8"));

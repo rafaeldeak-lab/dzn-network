@@ -150,14 +150,10 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 };
 
 async function hasDraftSchema(env: Env) {
-  try {
-    const row = await requireDb(env).prepare(
-      "SELECT 1 AS ready FROM sqlite_master WHERE type = 'table' AND name = 'onboarding_drafts' LIMIT 1",
-    ).first<{ ready: number }>();
-    return row?.ready === 1;
-  } catch {
-    return false;
-  }
+  const row = await requireDb(env).prepare(
+    "SELECT 1 AS ready FROM sqlite_master WHERE type = 'table' AND name = 'onboarding_drafts' LIMIT 1",
+  ).first<{ ready: number }>();
+  return row?.ready === 1;
 }
 
 function serializeDraft(row: DraftRow) {

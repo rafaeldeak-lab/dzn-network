@@ -127,6 +127,19 @@ const INITIAL_VERIFICATION_PROGRESS: VerificationProgress = {
 
 type DraftSaveStatus = "loading" | "unavailable" | "idle" | "saving" | "saved" | "failed";
 
+async function loadOnboardingDraftWithRetry() {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await getOnboardingDraft();
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
 export function SetupWizard() {
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
@@ -186,9 +199,9 @@ export function SetupWizard() {
         setAuthenticated(true);
         const [guildResult, draftLoad] = await Promise.all([
           loadDiscordGuilds(true),
-          getOnboardingDraft()
+          loadOnboardingDraftWithRetry()
             .then((result) => ({ result, failed: false }))
-            .catch(() => ({ result: { ok: false, available: true, draft: null }, failed: true })),
+            .catch(() => ({ result: { ok: false, available: false, draft: null }, failed: true })),
         ]);
         const draftResult = draftLoad.result;
         const draftLoadFailed = draftLoad.failed;
@@ -251,7 +264,7 @@ export function SetupWizard() {
           setDraftUpdatedAt(draft.updatedAt);
           setDraftStatus("saved");
         }
-        setDraftAvailable(draftResult.available);
+        setDraftAvailable(!draftLoadFailed && draftResult.available);
         if (draftLoadFailed) setDraftStatus("failed");
         else if (!draftResult.available) setDraftStatus("unavailable");
         else if (draft) setDraftStatus("saved");
