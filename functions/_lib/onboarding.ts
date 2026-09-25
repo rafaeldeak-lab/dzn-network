@@ -300,8 +300,11 @@ export async function storePendingNitradoToken(env: Env, userId: string, linkedS
   try {
     const existingConnection = await getLatestNitradoConnectionForLinkedServer(env, userId, linkedServerId);
     if (existingConnection) {
-      await db
-        .prepare(
+      // D1 timestamps have second-level precision, so a timestamp comparison cannot
+      // reliably distinguish a pre-save check from a token saved in the same second.
+      // Invalidate those checks in the same transaction as the credential change.
+      await db.batch([
+        db.prepare(
           `UPDATE nitrado_connections
            SET encrypted_token = ?,
                token_iv = ?,
@@ -311,20 +314,44 @@ export async function storePendingNitradoToken(env: Env, userId: string, linkedS
              AND user_id = ?
              AND linked_server_id = ?`,
         )
-        .bind(encrypted.encryptedToken, encrypted.iv, encrypted.authTag, existingConnection.id, userId, linkedServerId)
-        .run();
+          .bind(encrypted.encryptedToken, encrypted.iv, encrypted.authTag, existingConnection.id, userId, linkedServerId),
+        db.prepare(
+          `DELETE FROM onboarding_checks
+           WHERE linked_server_id = ?
+             AND EXISTS (
+               SELECT 1
+               FROM nitrado_connections
+               WHERE id = ?
+                 AND user_id = ?
+                 AND linked_server_id = ?
+                 AND encrypted_token = ?
+             )`,
+        ).bind(linkedServerId, existingConnection.id, userId, linkedServerId, encrypted.encryptedToken),
+      ]);
       return existingConnection.id;
     }
 
     const connectionId = crypto.randomUUID();
-    await db
-      .prepare(
+    await db.batch([
+      db.prepare(
         `INSERT INTO nitrado_connections (
           id, user_id, linked_server_id, encrypted_token, token_iv, token_auth_tag, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       )
-      .bind(connectionId, userId, linkedServerId, encrypted.encryptedToken, encrypted.iv, encrypted.authTag)
-      .run();
+        .bind(connectionId, userId, linkedServerId, encrypted.encryptedToken, encrypted.iv, encrypted.authTag),
+      db.prepare(
+        `DELETE FROM onboarding_checks
+         WHERE linked_server_id = ?
+           AND EXISTS (
+             SELECT 1
+             FROM nitrado_connections
+             WHERE id = ?
+               AND user_id = ?
+               AND linked_server_id = ?
+               AND encrypted_token = ?
+           )`,
+      ).bind(linkedServerId, connectionId, userId, linkedServerId, encrypted.encryptedToken),
+    ]);
     return connectionId;
   } catch (error) {
     await releaseLinkedServerAllowanceReservation(env, {

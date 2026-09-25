@@ -6,6 +6,7 @@ import { encryptToken } from "../functions/_lib/crypto";
 import { onRequest as goLive } from "../functions/api/onboarding/go-live";
 import { onRequest as testSetup } from "../functions/api/onboarding/test";
 import { verifyNitradoSetupService, getOnboardingServiceProof, saveOnboardingServiceChecks } from "../functions/_lib/onboarding-service-proof";
+import { storePendingNitradoToken } from "../functions/_lib/onboarding";
 import type { Env, PagesFunction } from "../functions/_lib/types";
 
 type Sqlite = {
@@ -51,6 +52,11 @@ async function fixture() {
   db.sqlite.exec(readFileSync("migrations/0001_initial_schema.sql", "utf8"));
   db.sqlite.exec(`
     ALTER TABLE linked_servers ADD COLUMN merged_into_server_id TEXT;
+    ALTER TABLE linked_servers ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'active_live';
+    ALTER TABLE linked_servers ADD COLUMN lifecycle_reason TEXT;
+    ALTER TABLE linked_servers ADD COLUMN lifecycle_updated_at TEXT;
+    ALTER TABLE linked_servers ADD COLUMN owner_action_required INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE linked_servers ADD COLUMN owner_action_reason TEXT;
     CREATE TABLE kill_events (linked_server_id TEXT, victim_name TEXT, distance REAL);
     CREATE TABLE server_stats (linked_server_id TEXT, unique_players INTEGER);
     INSERT INTO users (id, discord_id, username) VALUES ('owner', 'discord-owner', 'Owner'), ('other', 'discord-other', 'Other');
@@ -94,7 +100,7 @@ function checkedFetch(response: () => Response | Promise<Response>, calls: strin
 function assertNoUnrelatedWrites(db: LocalD1) {
   for (const sql of db.writes) {
     if (/^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(sql)) {
-      assert.match(sql, /^\s*(UPDATE linked_servers SET status = 'live'|UPDATE onboarding_checks|INSERT INTO onboarding_checks)/i);
+      assert.match(sql, /^\s*(UPDATE linked_servers\s+SET (status = 'live'|lifecycle_status = 'active_live')|UPDATE onboarding_checks|INSERT INTO onboarding_checks)/i);
     }
   }
 }
@@ -103,6 +109,43 @@ async function main() {
   const originalFetch = globalThis.fetch;
   let scenarios = 0;
   try {
+    {
+      const { db, env } = await fixture();
+      assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM onboarding_checks").get()?.n, 1);
+      await storePendingNitradoToken(env, "owner", "server", "replacement-token");
+      assert.equal(
+        db.sqlite.prepare("SELECT COUNT(*) AS n FROM onboarding_checks").get()?.n,
+        0,
+        "Replacing a token must invalidate setup checks even when both writes share a timestamp second.",
+      );
+      scenarios += 1;
+    }
+
+    {
+      const { db, env } = await fixture();
+      db.sqlite.exec("UPDATE linked_servers SET lifecycle_status = 'token_needs_resave', lifecycle_reason = 'decrypt_failed', owner_action_required = 1, owner_action_reason = 'Re-save token' WHERE id = 'server'");
+      checkedFetch(() => provider());
+      const proof = await getOnboardingServiceProof(env, "owner", "server", "12345");
+      assert.equal(await saveOnboardingServiceChecks(env, proof, false), true);
+      const recovered = db.sqlite.prepare("SELECT lifecycle_status, lifecycle_reason, owner_action_required, owner_action_reason FROM linked_servers WHERE id = 'server'").get();
+      assert.deepEqual({ ...recovered }, { lifecycle_status: "active_live", lifecycle_reason: null, owner_action_required: 0, owner_action_reason: null }, "A successful current-token proof must restore scheduled lifecycle work");
+      assertNoUnrelatedWrites(db);
+      db.sqlite.close();
+      scenarios += 1;
+    }
+
+    {
+      const { db, env } = await fixture();
+      db.sqlite.exec("UPDATE linked_servers SET lifecycle_status = 'token_needs_resave', lifecycle_reason = 'decrypt_failed', owner_action_required = 1 WHERE id = 'server'");
+      checkedFetch(() => new Response("denied", { status: 401 }));
+      const proof = await getOnboardingServiceProof(env, "owner", "server", "12345");
+      assert.equal(await saveOnboardingServiceChecks(env, proof, false), true);
+      assert.equal(db.sqlite.prepare("SELECT lifecycle_status FROM linked_servers WHERE id = 'server'").get()?.lifecycle_status, "token_needs_resave", "A failed token proof must not restore scheduled lifecycle work");
+      assertNoUnrelatedWrites(db);
+      db.sqlite.close();
+      scenarios += 1;
+    }
+
     const failures: Array<{ label: string; response: () => Response; code: string; access?: boolean }> = [
       ...[401, 403, 404, 429, 500, 503].map((status) => ({
         label: `HTTP ${status}`, response: () => new Response("provider-private-error", { status }),

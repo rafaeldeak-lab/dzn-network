@@ -56,6 +56,32 @@ type OwnerServer = {
   publicProfileUrl: string | null;
   dashboardUrl: string;
   plan: { key: string | null; status: string | null };
+  billing: {
+    paid: boolean;
+    accountPresent: boolean;
+    planKey: string | null;
+    status: string | null;
+    source: "server" | "owner" | "none";
+    customerReferencePresent: boolean;
+    subscriptionReferencePresent: boolean;
+    currentPeriodEnd: string | null;
+    cancelAtPeriodEnd: boolean;
+  };
+  onboarding: {
+    verifiedServer: boolean;
+    tokenRecordPresent: boolean;
+    tokenValid: boolean | null;
+    serviceAccess: boolean | null;
+    admLogsFound: boolean | null;
+    dayzServiceDetected: boolean | null;
+    lastTestedAt: string | null;
+  };
+  supportBlockers: Array<{
+    key: "billing" | "verification" | "service_check" | "status_sync" | "adm_sync";
+    severity: "blocking" | "attention";
+    title: string;
+    recommendation: string;
+  }>;
   stats: {
     totalKills: number;
     totalDeaths: number;
@@ -693,7 +719,7 @@ function ServersPanel({ servers }: { servers: OwnerServer[] }) {
                 <th className="px-4 py-3">Owner / Discord Server</th>
                 <th className="px-4 py-3">Nitrado</th>
                 <th className="px-4 py-3">Lifecycle</th>
-                <th className="px-4 py-3">Visibility</th>
+                <th className="px-4 py-3">Status / Billing</th>
                 <th className="px-4 py-3">Player Count</th>
                 <th className="px-4 py-3">ADM</th>
                 <th className="px-4 py-3">Token</th>
@@ -726,7 +752,8 @@ function ServersPanel({ servers }: { servers: OwnerServer[] }) {
                   <td className="px-4 py-4 text-zinc-300">
                     <div>Status: {server.status ?? "unknown"}</div>
                     <div className="mt-1 text-xs text-zinc-500">Listing: {server.listingVisibility ?? "default"}</div>
-                    <div className="mt-1 text-xs text-zinc-500">Plan: {server.plan.key ?? "none"} / {server.plan.status ?? "unknown"}</div>
+                    <div className={`mt-2 text-xs font-black uppercase ${server.billing.paid ? "text-emerald-200" : "text-amber-200"}`}>{server.billing.paid ? "Paid" : "Not paid"}</div>
+                    <div className="mt-1 text-xs text-zinc-500">Plan: {server.billing.planKey ?? server.plan.key ?? "none"} / {server.billing.status ?? server.plan.status ?? "unknown"}</div>
                   </td>
                   <td className="px-4 py-4 text-zinc-300">
                     <div className="font-bold text-white">{server.playerCount.current ?? "unknown"} / {server.playerCount.max ?? "unknown"}</div>
@@ -835,10 +862,27 @@ function ServerSupportView({ selection, server, status, onClose, onRefresh }: {
             <SupportValue label="Plan" value={`${server.plan.key ?? "none"} / ${server.plan.status ?? "unknown"}`} />
             <SupportValue label="Token health" value={server.tokenStatus} />
           </SupportSection>
+          <SupportSection title="Billing status">
+            <SupportValue label="Payment state" value={server.billing.paid ? "Paid - active access" : "Not paid - no active paid plan"} />
+            <SupportValue label="Billing record" value={server.billing.accountPresent ? `Present (${server.billing.source})` : "No billing account found"} />
+            <SupportValue label="Plan / status" value={`${server.billing.planKey ?? "none"} / ${server.billing.status ?? "unknown"}`} />
+            <SupportValue label="Customer reference" value={server.billing.customerReferencePresent ? "Present" : "Not present"} />
+            <SupportValue label="Subscription reference" value={server.billing.subscriptionReferencePresent ? "Present" : "Not present"} />
+            <SupportValue label="Current period ends" value={formatDate(server.billing.currentPeriodEnd)} />
+          </SupportSection>
+          <SupportSection title="Setup checks">
+            <SupportValue label="DZN verified" value={supportCheckLabel(server.onboarding.verifiedServer)} />
+            <SupportValue label="Token saved" value={supportCheckLabel(server.onboarding.tokenRecordPresent)} />
+            <SupportValue label="Token valid" value={supportCheckLabel(server.onboarding.tokenValid)} />
+            <SupportValue label="Service access" value={supportCheckLabel(server.onboarding.serviceAccess)} />
+            <SupportValue label="DayZ detected" value={supportCheckLabel(server.onboarding.dayzServiceDetected)} />
+            <SupportValue label="ADM logs found" value={supportCheckLabel(server.onboarding.admLogsFound)} />
+            <SupportValue label="Last tested" value={formatDate(server.onboarding.lastTestedAt)} />
+          </SupportSection>
           <SupportSection title="ADM and player count">
             <SupportValue label="Latest ADM" value={server.adm.latestFile ?? "None discovered"} />
             <SupportValue label="Processed ADM" value={server.adm.latestProcessedFile ?? "None processed"} />
-            <SupportValue label="Last import" value={formatDate(server.adm.lastSuccessfulImportAt)} />
+            <SupportValue label="Last successful pull / import" value={formatDate(server.adm.lastSuccessfulImportAt)} />
             <SupportValue label="Latest event" value={formatDate(server.adm.latestImportedEventAt)} />
             <SupportValue label="Players" value={`${server.playerCount.current ?? "unknown"} / ${server.playerCount.max ?? "unknown"}`} />
           </SupportSection>
@@ -850,6 +894,20 @@ function ServerSupportView({ selection, server, status, onClose, onRefresh }: {
             <SupportValue label="Last event" value={formatDate(server.stats.lastEventAt)} />
           </SupportSection>
         </div>
+
+        <SupportSection title={`What is holding this server back (${server.supportBlockers.length})`} className="mt-3">
+          {server.supportBlockers.length === 0 ? (
+            <p className="text-xs font-bold text-emerald-200">No billing, verification, status-sync, or ADM-sync blockers are visible in the stored record.</p>
+          ) : server.supportBlockers.map((blocker) => (
+            <div key={blocker.key} className={`border-l-2 py-1 pl-3 ${blocker.severity === "blocking" ? "border-rose-300/50" : "border-amber-300/50"}`}>
+              <div className="flex items-start justify-between gap-3">
+                <h4 className="text-xs font-black text-white">{blocker.title}</h4>
+                <span className={`text-[10px] font-black uppercase ${blocker.severity === "blocking" ? "text-rose-200" : "text-amber-200"}`}>{blocker.severity}</span>
+              </div>
+              <p className="mt-1 text-xs leading-5 text-zinc-300">{blocker.recommendation}</p>
+            </div>
+          ))}
+        </SupportSection>
 
         <SupportSection title="Scheduled resource eligibility" className="mt-3">
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -895,6 +953,11 @@ function SupportValue({ label, value }: { label: string; value: string }) {
       <span className="max-w-[65%] break-words text-right font-bold text-zinc-200">{value}</span>
     </div>
   );
+}
+
+function supportCheckLabel(value: boolean | null) {
+  if (value === null) return "Not checked";
+  return value ? "Passed" : "Not passed";
 }
 
 function LifecyclePanel({ lifecycleCounts }: { lifecycleCounts: Array<typeof LIFECYCLE_COPY[number] & { count: number }> }) {

@@ -113,6 +113,7 @@ export async function onboardingProofStillCurrent(env: Env, proof: OnboardingSer
 export async function saveOnboardingServiceChecks(env: Env, proof: OnboardingServiceProof, admLogsFound: boolean) {
   const db = requireDb(env);
   const values = [Number(proof.checks.tokenValid), Number(proof.checks.serviceAccess), Number(admLogsFound), Number(proof.checks.dayzServiceDetected)];
+  const serviceVerified = proof.checks.tokenValid && proof.checks.serviceAccess && proof.checks.dayzServiceDetected;
   const results = await db.batch([
     db.prepare(`UPDATE onboarding_checks SET token_valid = ?, service_access = ?, adm_logs_found = ?, dayz_service_detected = ?, last_tested_at = CURRENT_TIMESTAMP
       WHERE linked_server_id = ? AND ${proof.guard.sql}`).bind(...values, proof.linkedServerId, ...proof.guard.bindings),
@@ -120,6 +121,12 @@ export async function saveOnboardingServiceChecks(env: Env, proof: OnboardingSer
       SELECT ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP WHERE ${proof.guard.sql}
         AND NOT EXISTS (SELECT 1 FROM onboarding_checks WHERE linked_server_id = ?)`)
       .bind(crypto.randomUUID(), proof.linkedServerId, ...values, ...proof.guard.bindings, proof.linkedServerId),
+    db.prepare(`UPDATE linked_servers
+      SET lifecycle_status = 'active_live', lifecycle_reason = NULL, lifecycle_updated_at = CURRENT_TIMESTAMP,
+          owner_action_required = 0, owner_action_reason = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND lower(COALESCE(lifecycle_status, 'active_live')) = 'token_needs_resave'
+        AND ? = 1 AND ${proof.guard.sql}`)
+      .bind(proof.linkedServerId, Number(serviceVerified), ...proof.guard.bindings),
   ]);
   return results.some((result) => Number(result.meta.changes) > 0);
 }

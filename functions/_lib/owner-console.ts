@@ -100,6 +100,27 @@ export type OwnerServerRow = {
     key: string | null;
     status: string | null;
   };
+  billing: {
+    paid: boolean;
+    accountPresent: boolean;
+    planKey: string | null;
+    status: string | null;
+    source: "server" | "owner" | "none";
+    customerReferencePresent: boolean;
+    subscriptionReferencePresent: boolean;
+    currentPeriodEnd: string | null;
+    cancelAtPeriodEnd: boolean;
+  };
+  onboarding: {
+    verifiedServer: boolean;
+    tokenRecordPresent: boolean;
+    tokenValid: boolean | null;
+    serviceAccess: boolean | null;
+    admLogsFound: boolean | null;
+    dayzServiceDetected: boolean | null;
+    lastTestedAt: string | null;
+  };
+  supportBlockers: OwnerSupportBlocker[];
   stats: {
     totalKills: number;
     totalDeaths: number;
@@ -119,6 +140,13 @@ export type OwnerServerRow = {
   lastSkipReason: string | null;
   badges: string[];
   knownRole: "nuketown" | "pandora" | "warlords" | null;
+};
+
+export type OwnerSupportBlocker = {
+  key: "billing" | "verification" | "service_check" | "status_sync" | "adm_sync";
+  severity: "blocking" | "attention";
+  title: string;
+  recommendation: string;
 };
 
 export type OwnerOverview = {
@@ -250,6 +278,7 @@ export async function getOwnerServers(env: Env): Promise<OwnerServerRow[]> {
        linked_servers.status,
        linked_servers.public_slug,
        linked_servers.listing_visibility,
+       linked_servers.verified_server,
        linked_servers.lifecycle_status,
        linked_servers.lifecycle_reason,
        linked_servers.lifecycle_updated_at,
@@ -269,6 +298,27 @@ export async function getOwnerServers(env: Env): Promise<OwnerServerRow[]> {
        discord_guilds.name AS discord_guild_name,
        server_subscriptions.plan_key AS subscription_plan_key,
        server_subscriptions.status AS subscription_status,
+       server_subscriptions.stripe_customer_id IS NOT NULL AS server_customer_reference_present,
+       server_subscriptions.stripe_subscription_id IS NOT NULL AS server_subscription_reference_present,
+       server_subscriptions.current_period_end AS server_current_period_end,
+       server_subscriptions.cancel_at_period_end AS server_cancel_at_period_end,
+       owner_billing_accounts.id IS NOT NULL AS owner_billing_account_present,
+       owner_billing_accounts.plan_key AS owner_plan_key,
+       owner_billing_accounts.plan_status AS owner_plan_status,
+       owner_billing_accounts.stripe_customer_id IS NOT NULL AS owner_customer_reference_present,
+       owner_billing_accounts.stripe_subscription_id IS NOT NULL AS owner_subscription_reference_present,
+       owner_billing_accounts.current_period_end AS owner_current_period_end,
+       owner_billing_accounts.cancel_at_period_end AS owner_cancel_at_period_end,
+       EXISTS (
+         SELECT 1 FROM nitrado_connections
+         WHERE nitrado_connections.linked_server_id = linked_servers.id
+           AND nitrado_connections.user_id = linked_servers.user_id
+       ) AS token_record_present,
+       onboarding_checks.token_valid AS onboarding_token_valid,
+       onboarding_checks.service_access AS onboarding_service_access,
+       onboarding_checks.adm_logs_found AS onboarding_adm_logs_found,
+       onboarding_checks.dayz_service_detected AS onboarding_dayz_service_detected,
+       onboarding_checks.last_tested_at AS onboarding_last_tested_at,
        server_sync_state.current_player_count,
        server_sync_state.max_player_count,
        server_sync_state.server_online,
@@ -312,6 +362,22 @@ export async function getOwnerServers(env: Env): Promise<OwnerServerRow[]> {
      LEFT JOIN users ON users.id = linked_servers.user_id
      LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
      LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       AND server_subscriptions.owner_discord_id = users.discord_id
+     LEFT JOIN owner_billing_accounts ON owner_billing_accounts.discord_user_id = users.discord_id
+     LEFT JOIN onboarding_checks ON onboarding_checks.id = (
+       SELECT latest_check.id
+       FROM onboarding_checks AS latest_check
+       WHERE latest_check.linked_server_id = linked_servers.id
+         AND latest_check.last_tested_at IS NOT NULL
+         AND datetime(latest_check.last_tested_at) >= datetime((
+           SELECT MAX(COALESCE(current_connection.updated_at, current_connection.created_at))
+           FROM nitrado_connections AS current_connection
+           WHERE current_connection.linked_server_id = linked_servers.id
+             AND current_connection.user_id = linked_servers.user_id
+         ))
+       ORDER BY latest_check.last_tested_at DESC, latest_check.id DESC
+       LIMIT 1
+     )
      LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
      LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
      LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
@@ -417,10 +483,20 @@ function mapOwnerServerRow(row: OwnerServerRecord): OwnerServerRow {
     stringOrNull(row.last_event_at) ??
     stringOrNull(row.last_build_at) ??
     stringOrNull(row.last_sync_at);
-  const lastSuccessfulImportAt = stringOrNull(row.last_sync_at) ?? stringOrNull(row.last_successful_adm_pull_at);
+  const lastSuccessfulImportAt = stringOrNull(row.latest_imported_event_at) ?? stringOrNull(row.last_successful_adm_pull_at);
   const tokenStatus = inferSafeTokenStatus(row, lifecycleStatus);
   const slug = stringOrNull(row.public_slug);
   const knownRole = inferKnownServerRole(row);
+  const billing = buildOwnerBillingState(row);
+  const onboarding = {
+    verifiedServer: truthy(row.verified_server),
+    tokenRecordPresent: truthy(row.token_record_present),
+    tokenValid: nullableBoolean(row.onboarding_token_valid),
+    serviceAccess: nullableBoolean(row.onboarding_service_access),
+    admLogsFound: nullableBoolean(row.onboarding_adm_logs_found),
+    dayzServiceDetected: nullableBoolean(row.onboarding_dayz_service_detected),
+    lastTestedAt: stringOrNull(row.onboarding_last_tested_at),
+  };
 
   return {
     id: String(row.id ?? ""),
@@ -474,6 +550,18 @@ function mapOwnerServerRow(row: OwnerServerRecord): OwnerServerRow {
       key: stringOrNull(row.subscription_plan_key),
       status: stringOrNull(row.subscription_status),
     },
+    billing,
+    onboarding,
+    supportBlockers: buildOwnerSupportBlockers({
+      lifecycleStatus,
+      status: stringOrNull(row.status),
+      billing,
+      onboarding,
+      lastSuccessfulStatusCheckAt: stringOrNull(row.last_successful_status_check_at),
+      currentPlayerCount: numberOrNull(row.current_player_count ?? row.public_current_player_count),
+      lastSuccessfulImportAt,
+      latestProcessedFile,
+    }),
     stats: {
       totalKills: numberOrZero(row.total_kills),
       totalDeaths: numberOrZero(row.total_deaths),
@@ -497,6 +585,96 @@ function mapOwnerServerRow(row: OwnerServerRecord): OwnerServerRow {
 }
 
 export const mapOwnerServerRowForTest = mapOwnerServerRow;
+
+function buildOwnerBillingState(row: OwnerServerRecord): OwnerServerRow["billing"] {
+  const serverPlan = stringOrNull(row.subscription_plan_key);
+  const serverStatus = stringOrNull(row.subscription_status);
+  const ownerPlan = stringOrNull(row.owner_plan_key);
+  const ownerStatus = stringOrNull(row.owner_plan_status);
+  const serverRecordPresent = Boolean(serverPlan || serverStatus || truthy(row.server_customer_reference_present) || truthy(row.server_subscription_reference_present));
+  const ownerRecordPresent = truthy(row.owner_billing_account_present);
+  const serverPaid = isPaidBillingState(serverPlan, serverStatus);
+  const ownerPaid = isPaidBillingState(ownerPlan, ownerStatus);
+  const source = serverPaid ? "server" : ownerPaid ? "owner" : serverRecordPresent ? "server" : ownerRecordPresent ? "owner" : "none";
+  const planKey = source === "server" ? serverPlan : source === "owner" ? ownerPlan : null;
+  const status = source === "server" ? serverStatus : source === "owner" ? ownerStatus : null;
+  const paid = source === "server" ? serverPaid : source === "owner" ? ownerPaid : false;
+
+  return {
+    paid,
+    accountPresent: source !== "none",
+    planKey,
+    status,
+    source,
+    customerReferencePresent: truthy(source === "server" ? row.server_customer_reference_present : row.owner_customer_reference_present),
+    subscriptionReferencePresent: truthy(source === "server" ? row.server_subscription_reference_present : row.owner_subscription_reference_present),
+    currentPeriodEnd: stringOrNull(source === "server" ? row.server_current_period_end : row.owner_current_period_end),
+    cancelAtPeriodEnd: truthy(source === "server" ? row.server_cancel_at_period_end : row.owner_cancel_at_period_end),
+  };
+}
+
+function isPaidBillingState(planKey: unknown, status: unknown) {
+  const plan = normalizedText(planKey);
+  return Boolean(plan && plan !== "free" && ["active", "trialing"].includes(normalizedText(status)));
+}
+
+export function buildOwnerSupportBlockers(input: {
+  lifecycleStatus: ServerLifecycleStatus;
+  status: string | null;
+  billing: OwnerServerRow["billing"];
+  onboarding: OwnerServerRow["onboarding"];
+  lastSuccessfulStatusCheckAt: string | null;
+  currentPlayerCount: number | null;
+  lastSuccessfulImportAt: string | null;
+  latestProcessedFile: string | null;
+}): OwnerSupportBlocker[] {
+  if (["archived_hidden", "legacy_offline", "final_sync_complete"].includes(input.lifecycleStatus)) return [];
+  const blockers: OwnerSupportBlocker[] = [];
+  const tokenNeedsResave = input.lifecycleStatus === "token_needs_resave";
+  if (!input.billing.paid) {
+    blockers.push({
+      key: "billing",
+      severity: "blocking",
+      title: "No active paid plan",
+      recommendation: "Ask the server owner to choose a server-owner plan from their own account. No charge can be created from this support view.",
+    });
+  }
+  if (normalizedText(input.status) === "pending" || !input.onboarding.verifiedServer) {
+    blockers.push({
+      key: "verification",
+      severity: "blocking",
+      title: "Server setup is not verified",
+      recommendation: "Ask the server owner to open Server Setup in their own account and complete verification for this exact server.",
+    });
+  }
+  if (tokenNeedsResave || !input.onboarding.tokenRecordPresent || input.onboarding.lastTestedAt === null || input.onboarding.tokenValid !== true || input.onboarding.serviceAccess !== true || input.onboarding.dayzServiceDetected !== true) {
+    blockers.push({
+      key: "service_check",
+      severity: "blocking",
+      title: tokenNeedsResave ? "Nitrado token needs to be re-saved" : "Nitrado service checks are incomplete",
+      recommendation: tokenNeedsResave
+        ? "Ask the server owner to re-save their Nitrado token in Server Setup, then rerun the connection checks for this exact server."
+        : "Ask the server owner to confirm the correct Nitrado service and run the connection checks in their own account. They should re-save the token only if the check asks for it.",
+    });
+  }
+  if (!input.lastSuccessfulStatusCheckAt || input.currentPlayerCount === null) {
+    blockers.push({
+      key: "status_sync",
+      severity: "attention",
+      title: "Live status and player count are unproven",
+      recommendation: "Complete verification first. DZN must then record a successful live status check before the dashboard can show a current player count.",
+    });
+  }
+  if (input.onboarding.admLogsFound !== true && !input.lastSuccessfulImportAt && !input.latestProcessedFile) {
+    blockers.push({
+      key: "adm_sync",
+      severity: "attention",
+      title: "ADM import has not been proven",
+      recommendation: "After verification and plan setup, allow the scheduled importer to discover and process a genuine ADM log. Do not change the existing restart schedule.",
+    });
+  }
+  return blockers;
+}
 
 function createLifecycleCounts() {
   return Object.fromEntries(SERVER_LIFECYCLE_STATUSES.map((status) => [status, 0])) as Record<ServerLifecycleStatus, number>;
@@ -598,6 +776,11 @@ function truthy(value: unknown) {
   if (typeof value === "number") return value !== 0;
   const normalized = normalizedText(value);
   return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+function nullableBoolean(value: unknown): boolean | null {
+  if (value === null || value === undefined || value === "") return null;
+  return truthy(value);
 }
 
 function stringOrNull(value: unknown) {
