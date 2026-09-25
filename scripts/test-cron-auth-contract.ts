@@ -41,6 +41,7 @@ for (const file of [
   "functions/api/sync/adm/run.ts",
   "functions/api/sync/public-snapshots/run.ts",
   "functions/api/sync/discord-posts/run.ts",
+  "functions/api/sync/player-link-notifications/run.ts",
   "functions/api/sync/ctf-scorecards/run.ts",
   "functions/api/debug/nitrado-admin-logs.ts",
   "functions/api/debug/nitrado-file-read.ts",
@@ -101,6 +102,25 @@ assert.equal(diagnosticsWorkflowSource.includes("x-cron-secret: ${CRON_SECRET}")
 assert.equal(diagnosticsWorkflowSource.includes("Authorization: Bearer ${CRON_SECRET}"), true);
 assert.equal(diagnosticsWorkflowSource.includes("?cron_secret="), false);
 assert.equal(diagnosticsWorkflowSource.includes("echo \"$CRON_SECRET\""), false);
+
+const playerLinkDeliveryWorkflow = readFileSync(".github/workflows/dzn-player-link-notification-delivery.yml", "utf8");
+assert.equal(playerLinkDeliveryWorkflow.includes("workflow_dispatch:"), true);
+assert.equal(playerLinkDeliveryWorkflow.includes("APPROVE_ONE_PLAYER_LINK_NOTIFICATION_TEST"), true);
+assert.equal(playerLinkDeliveryWorkflow.includes("DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}"), true);
+assert.equal(playerLinkDeliveryWorkflow.includes("SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}"), true);
+assert.equal(playerLinkDeliveryWorkflow.includes('CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"'), true);
+assert.equal(playerLinkDeliveryWorkflow.includes("::add-mask::${CRON_SECRET}"), true);
+assert.equal(playerLinkDeliveryWorkflow.includes("/api/sync/player-link-notifications/run"), true);
+assert.equal(playerLinkDeliveryWorkflow.includes('unauthenticated_status}" != "401"'), true);
+assert.equal(playerLinkDeliveryWorkflow.includes("processed: 1"), true);
+assert.equal(playerLinkDeliveryWorkflow.includes("delivered: 1"), true);
+assert.equal(playerLinkDeliveryWorkflow.includes("retried: 0"), true);
+assert.equal(playerLinkDeliveryWorkflow.includes("failed: 0"), true);
+assert.equal(playerLinkDeliveryWorkflow.includes("skipped: 0"), true);
+assert.equal(playerLinkDeliveryWorkflow.includes("echo \"$CRON_SECRET\""), false);
+assert.equal(playerLinkDeliveryWorkflow.includes("echo \"${CRON_SECRET}\""), false);
+assert.equal(playerLinkDeliveryWorkflow.includes("wrangler d1"), false);
+assert.equal(playerLinkDeliveryWorkflow.includes("Nitrado"), false);
 
 runProtectedEndpointShortCircuitTests()
   .then(() => {
