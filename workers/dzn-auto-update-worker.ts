@@ -48,6 +48,17 @@ const TASKS: SchedulerTask[] = [
     },
   },
   {
+    label: "player-link-notifications",
+    path: "/api/sync/player-link-notifications/run",
+    cadence: "every-minute",
+    timeoutMs: 10_000,
+    body: {
+      source: "cloudflare-scheduled",
+      cron: "dzn-auto-update-worker",
+      max_jobs: 20,
+    },
+  },
+  {
     label: "server-wars",
     path: "/api/cron/server-wars/refresh",
     cadence: "every-five-minutes",

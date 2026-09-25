@@ -31,7 +31,7 @@ export const AUTOMATION_MIGRATION_WARNING =
   "Automation is running, but D1 migration history needs attention. Rerun npm run db:migrate:remote once Cloudflare account permissions are fixed.";
 
 export type AutomationCronSource = typeof AUTOMATION_CRON_SOURCES[number];
-export type AutomationCronJobType = "metadata" | "adm" | "discord-posts" | "server-wars";
+export type AutomationCronJobType = "metadata" | "adm" | "discord-posts" | "server-wars" | "player-link-notifications";
 export type AutomationCronStatus = "started" | "success" | "failed" | "partial" | "warning" | "no_op" | "timed_out" | "accepted";
 
 type AutomationCronRunRow = {
