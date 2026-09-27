@@ -23,6 +23,15 @@ type OwnerDeliveryRow = {
   requester_name: string | null;
 };
 
+type PendingOwnerReconciliationRow = {
+  claim_id: string;
+  linked_server_id: string;
+  server_owner_user_id: string;
+  server_name: string | null;
+  player_name: string | null;
+  requester_name: string | null;
+};
+
 const MAX_ATTEMPTS = 5;
 const RETRY_MINUTES = [1, 5, 30, 120, 360] as const;
 
@@ -104,6 +113,7 @@ export async function dispatchQueuedOwnerRequestNotifications(
   }
   const db = requireDb(env);
   const maxJobs = Math.max(1, Math.min(20, Math.trunc(options.maxJobs ?? 10)));
+  await reconcilePendingOwnerRequestRecipients(env, maxJobs);
   await db.prepare(
     `UPDATE player_game_identity_owner_notification_deliveries
      SET status = 'retry', lease_id = NULL, lease_expires_at = NULL, next_attempt_at = CURRENT_TIMESTAMP,
@@ -209,6 +219,76 @@ export async function dispatchQueuedOwnerRequestNotifications(
     else failed++;
   }
   return { ok: failed === 0, unavailable: false, processed: delivered + retried + failed + skipped, delivered, retried, failed, skipped };
+}
+
+async function reconcilePendingOwnerRequestRecipients(env: Env, maxClaims: number) {
+  const db = requireDb(env);
+  const claims = await db.prepare(
+    `SELECT c.id AS claim_id, c.linked_server_id, s.user_id AS server_owner_user_id,
+            COALESCE(NULLIF(s.display_name,''), NULLIF(s.hostname,''), s.server_name, s.nitrado_service_name) AS server_name,
+            c.player_name, requester.username AS requester_name
+     FROM player_game_identity_claims c
+     JOIN linked_servers s ON s.id=c.linked_server_id
+     JOIN users owner_user ON owner_user.id=s.user_id AND owner_user.discord_id IS NOT NULL
+     JOIN users requester ON requester.id=c.user_id
+     WHERE c.status='pending'
+       AND EXISTS (SELECT 1 FROM player_game_identity_owner_notification_deliveries existing WHERE existing.claim_id=c.id)
+       AND (
+         NOT EXISTS (
+           SELECT 1 FROM player_game_identity_owner_notification_deliveries current_delivery
+           WHERE current_delivery.claim_id=c.id AND current_delivery.recipient_user_id=s.user_id
+             AND NOT (current_delivery.status='skipped' AND current_delivery.result_code='recipient_no_longer_authorized')
+         )
+         OR NOT EXISTS (
+           SELECT 1 FROM user_notifications current_alert
+           WHERE current_alert.user_id=s.user_id
+             AND current_alert.dedupe_key=('player-link-review:' || c.id || ':' || s.user_id)
+             AND datetime(current_alert.expires_at) > datetime('now')
+         )
+       )
+     ORDER BY datetime(c.created_at), c.id
+     LIMIT ?`,
+  ).bind(maxClaims).all<PendingOwnerReconciliationRow>();
+
+  for (const claim of claims.results ?? []) {
+    const recipients = await resolveOwnerRequestNotificationRecipients(env, claim.server_owner_user_id);
+    if (!recipients.length) continue;
+    const recipientIds = recipients.map((recipient) => recipient.userId);
+    const placeholders = recipientIds.map(() => "?").join(", ");
+    const statements = recipients.flatMap((recipient) => [
+      prepareOwnerRequestWebsiteNotification(db, {
+        claimId: claim.claim_id,
+        linkedServerId: claim.linked_server_id,
+        recipient,
+        serverName: claim.server_name || "DZN Server",
+        playerName: claim.player_name || "game profile",
+        requesterName: claim.requester_name || "A player",
+      }),
+      prepareOwnerRequestDiscordDelivery(db, {
+        id: crypto.randomUUID(),
+        claimId: claim.claim_id,
+        linkedServerId: claim.linked_server_id,
+        recipient,
+      }),
+    ]);
+    statements.push(
+      db.prepare(
+        `UPDATE user_notifications
+         SET read_at=COALESCE(read_at, CURRENT_TIMESTAMP), expires_at=CURRENT_TIMESTAMP,
+             metadata=json_set(COALESCE(metadata, '{}'), '$.review_status', 'recipient_no_longer_authorized', '$.terminalized_at', CURRENT_TIMESTAMP)
+         WHERE type='player_link_review_requested'
+           AND json_extract(metadata, '$.claim_id')=?
+           AND user_id NOT IN (${placeholders})`,
+      ).bind(claim.claim_id, ...recipientIds),
+      db.prepare(
+        `UPDATE player_game_identity_owner_notification_deliveries
+         SET status='skipped', result_code='recipient_no_longer_authorized', lease_id=NULL, lease_expires_at=NULL,
+             updated_at=CURRENT_TIMESTAMP
+         WHERE claim_id=? AND recipient_user_id NOT IN (${placeholders})`,
+      ).bind(claim.claim_id, ...recipientIds),
+    );
+    await db.batch(statements);
+  }
 }
 
 async function sendOwnerRequestDiscord(env: Env, row: OwnerDeliveryRow) {

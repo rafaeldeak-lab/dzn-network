@@ -193,11 +193,12 @@ export async function testPlayerGameIdentityTransactions() {
   try {
     ownerNotifications.sqlite.exec(`DELETE FROM player_game_identity_claims;
       UPDATE users SET discord_id='888888888888888888' WHERE id='owner-a';
+      UPDATE users SET discord_id='666666666666666666' WHERE id='owner-b';
       INSERT INTO users VALUES ('platform-owner','999999999999999999','Platform Owner',NULL);
       INSERT INTO users VALUES ('platform-observer','777777777777777777','Platform Observer',NULL);`);
     ownerNotifications.sqlite.exec(readFileSync("migrations/0075_player_link_owner_request_notifications.sql", "utf8"));
     ownerNotifications.sqlite.exec(`INSERT OR REPLACE INTO notification_preferences (user_id,discord_enabled)
-      VALUES ('owner-a',1),('platform-owner',1);`);
+      VALUES ('owner-a',1),('owner-b',1),('platform-owner',1);`);
     Object.assign(ownerNotifications.env, {
       DZN_DISCORD_NOTIFICATIONS_ENABLED: "true",
       DZN_PLATFORM_OWNER_DISCORD_IDS: "999999999999999999,777777777777777777",
@@ -231,6 +232,17 @@ export async function testPlayerGameIdentityTransactions() {
     assert.equal(discordBodies.length, 2);
     assert.ok(discordBodies.every((body) => String(body.content).includes("not proof they played or own the profile")));
     assert.ok(discordBodies.every((body) => !String(body.content).includes("game-a")));
+    ownerNotifications.sqlite.exec("UPDATE linked_servers SET user_id='owner-b' WHERE id='server-a'");
+    const deliveredOwnershipChanged = await dispatchQueuedOwnerRequestNotifications(ownerNotifications.env, { maxJobs: 1 });
+    assert.equal(deliveredOwnershipChanged.delivered, 1, "A delivered pending claim must be reconciled and sent to a new current owner.");
+    assert.equal(ownerNotifications.sqlite.prepare("SELECT status FROM player_game_identity_owner_notification_deliveries WHERE recipient_user_id='owner-b'").get()?.status, "delivered");
+    const deliveredFormerAlert = ownerNotifications.sqlite.prepare("SELECT read_at,expires_at FROM user_notifications WHERE user_id='owner-a' AND type='player_link_review_requested'").get();
+    assert.ok(deliveredFormerAlert?.read_at && deliveredFormerAlert.expires_at, "Ownership reconciliation must expire the former owner's website alert even after delivery completed.");
+    ownerNotifications.sqlite.exec("UPDATE linked_servers SET user_id='owner-a' WHERE id='server-a'");
+    const deliveredOwnershipReturned = await dispatchQueuedOwnerRequestNotifications(ownerNotifications.env, { maxJobs: 1 });
+    assert.equal(deliveredOwnershipReturned.delivered, 1, "A returning current owner must be reactivated after a delivered A-to-B-to-A transfer.");
+    const deliveredRestoredAlert = ownerNotifications.sqlite.prepare("SELECT read_at,expires_at FROM user_notifications WHERE user_id='owner-a' AND type='player_link_review_requested'").get();
+    assert.equal(deliveredRestoredAlert?.read_at, null, "A returning current owner's website alert must become actionable again.");
     ownerNotifications.sqlite.exec(`UPDATE notification_preferences SET discord_enabled=0 WHERE user_id='owner-a';
       UPDATE player_game_identity_owner_notification_deliveries
       SET status='queued', attempt_count=0, next_attempt_at=CURRENT_TIMESTAMP, delivered_at=NULL, result_code=NULL
@@ -256,10 +268,10 @@ export async function testPlayerGameIdentityTransactions() {
       WHERE recipient_user_id='owner-a';`);
     const fetchesBeforeOwnershipChange = discordBodies.length;
     const ownershipChanged = await dispatchQueuedOwnerRequestNotifications(ownerNotifications.env, { maxJobs: 1 });
-    assert.equal(ownershipChanged.skipped, 1, "A former server owner must not receive a delayed review notification.");
-    assert.equal(discordBodies.length, fetchesBeforeOwnershipChange, "Authorization must be rechecked before any Discord request.");
+    assert.equal(ownershipChanged.delivered, 1, "A pending review must be delivered to the replacement owner in the same bounded run.");
+    assert.equal(discordBodies.length, fetchesBeforeOwnershipChange + 1, "Only the newly authorized owner may receive the replacement Discord request.");
     assert.equal(ownerNotifications.sqlite.prepare("SELECT result_code FROM player_game_identity_owner_notification_deliveries WHERE recipient_user_id='owner-a'").get()?.result_code, "recipient_no_longer_authorized");
-    assert.equal(ownerNotifications.sqlite.prepare("SELECT status FROM player_game_identity_owner_notification_deliveries WHERE recipient_user_id='owner-b'").get()?.status, "queued", "The current server owner must receive a replacement queued delivery.");
+    assert.equal(ownerNotifications.sqlite.prepare("SELECT status FROM player_game_identity_owner_notification_deliveries WHERE recipient_user_id='owner-b'").get()?.status, "delivered", "The current server owner must receive the replacement delivery.");
     assert.equal(ownerNotifications.sqlite.prepare("SELECT COUNT(*) AS count FROM user_notifications WHERE user_id='owner-b'").get()?.count, 1, "The current server owner must receive a replacement website alert.");
     const staleOwnerAlert = ownerNotifications.sqlite.prepare("SELECT read_at,expires_at FROM user_notifications WHERE user_id='owner-a' AND type='player_link_review_requested'").get();
     assert.ok(staleOwnerAlert?.read_at && staleOwnerAlert.expires_at, "The former owner's website alert must be expired when review access is revoked.");
@@ -272,8 +284,8 @@ export async function testPlayerGameIdentityTransactions() {
     assert.equal(ownerNotifications.sqlite.prepare("SELECT COUNT(*) AS count FROM user_notifications").get()?.count, 3, "A repeated pending request must not duplicate the reconciled owner alerts.");
     ownerNotifications.sqlite.exec("UPDATE linked_servers SET user_id='owner-a' WHERE id='server-a'");
     const ownershipReturned = await dispatchQueuedOwnerRequestNotifications(ownerNotifications.env, { maxJobs: 1 });
-    assert.equal(ownershipReturned.skipped, 1, "The replacement owner delivery must reroute again when ownership returns.");
-    assert.equal(ownerNotifications.sqlite.prepare("SELECT status FROM player_game_identity_owner_notification_deliveries WHERE recipient_user_id='owner-a'").get()?.status, "queued", "A current owner must be requeued after a prior authorization skip.");
+    assert.equal(ownershipReturned.delivered, 1, "The replacement owner delivery must reroute again when ownership returns.");
+    assert.equal(ownerNotifications.sqlite.prepare("SELECT status FROM player_game_identity_owner_notification_deliveries WHERE recipient_user_id='owner-a'").get()?.status, "delivered", "A returning current owner must receive a new delivery after a prior authorization skip.");
     const restoredOwnerAlert = ownerNotifications.sqlite.prepare("SELECT read_at,expires_at FROM user_notifications WHERE user_id='owner-a' AND type='player_link_review_requested'").get();
     assert.equal(restoredOwnerAlert?.read_at, null, "A returning owner's website alert must become actionable again.");
     assert.ok(new Date(String(restoredOwnerAlert?.expires_at)).getTime() > Date.now(), "A returning owner's website alert must receive a fresh expiry.");
