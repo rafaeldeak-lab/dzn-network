@@ -231,6 +231,9 @@ includesAll(leaderboards, [
   "Longest Kills",
   "filteredServers.map",
   "payload.top_players.map",
+  "activeMode !== \"all\"",
+  "setServerModeError(`${formatModeFilter(activeMode)} rankings could not be loaded right now.`)",
+  "serverModeError ? (",
 ]);
 
 const authMeRoute = source("functions/api/auth/me.ts");

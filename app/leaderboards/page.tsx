@@ -173,6 +173,7 @@ export default function LeaderboardsPage() {
   const [advancedError, setAdvancedError] = useState("");
   const [activeBoard, setActiveBoard] = useState<LeaderboardBoard>("servers");
   const [activeMode, setActiveMode] = useState<LeaderboardMode>("all");
+  const [serverModeError, setServerModeError] = useState("");
 
   useEffect(() => {
     console.log("DZN LIVE LEADERBOARDS LOADED");
@@ -198,6 +199,7 @@ export default function LeaderboardsPage() {
       latestRequestId.current = requestId;
       const cached = activeMode === "all" ? loadLastGoodLeaderboard() : null;
       const hasVisibleData = Boolean(cached) || visiblePayloadRef.current;
+      setServerModeError("");
       // The server and first browser render must agree before restoring local data.
       if (cached && !visiblePayloadRef.current) setPayload(cached);
       setLoading(!hasVisibleData);
@@ -215,10 +217,15 @@ export default function LeaderboardsPage() {
         if (activeMode === "all" && hasMeaningfulLeaderboard(normalized)) saveLastGoodLeaderboard(normalized);
         setLoadState(hasMeaningfulLeaderboard(normalized) ? "loaded" : "empty_real_data");
         setError("");
+        setServerModeError("");
       } catch (loadError) {
         if (active) {
           const cached = activeMode === "all" ? loadLastGoodLeaderboard() : null;
-          if (cached) {
+          if (activeMode !== "all") {
+            setServerModeError(`${formatModeFilter(activeMode)} rankings could not be loaded right now.`);
+            setError("");
+            setLoadState("refresh_failed");
+          } else if (cached) {
             setPayload(cached);
             setError("");
             setLoadState("loaded");
@@ -357,25 +364,29 @@ export default function LeaderboardsPage() {
             {activeBoard === "servers" ? (
               <div id="leaderboard-servers-panel" role="tabpanel" className="leaderboard-ref-board-view" data-board-view="servers">
                 <LeaderboardModeSwitcher activeMode={activeMode} onChange={setActiveMode} />
-                <LeaderboardTable
-                  title="Top Servers"
-                  icon={RadioTower}
-                  empty={activeMode === "all" ? "No ranked servers yet." : `No ranked ${formatModeFilter(activeMode)} servers yet.`}
-                  actionLabel="View all servers"
-                  actionHref="/servers"
-                  headers={["Rank", "Server", "Mode", "Players", "Kills", "Deaths", "K/D", "Score"]}
-                  rankValues={filteredServers.map((server) => server.rank)}
-                  rows={filteredServers.map((server) => [
-                    `#${server.rank}`,
-                    <ServerLink key="server" slug={server.slug} label={server.server_name} />,
-                    <ModeBadge key="mode" mode={server.mode} />,
-                    formatNumber(server.unique_players ?? 0),
-                    formatNumber(server.kills),
-                    formatNumber(server.deaths),
-                    formatKd(server),
-                    <span key="score" className="leaderboard-ref-score" title={scoreBreakdownTitle(server.score_breakdown)}>{server.score_label === "Pending" ? "Pending" : formatNumber(server.score)}</span>,
-                  ])}
-                />
+                {serverModeError ? (
+                  <MessagePanel message={serverModeError} onRetry={() => setReloadNonce((value) => value + 1)} />
+                ) : (
+                  <LeaderboardTable
+                    title="Top Servers"
+                    icon={RadioTower}
+                    empty={activeMode === "all" ? "No ranked servers yet." : `No ranked ${formatModeFilter(activeMode)} servers yet.`}
+                    actionLabel="View all servers"
+                    actionHref="/servers"
+                    headers={["Rank", "Server", "Mode", "Players", "Kills", "Deaths", "K/D", "Score"]}
+                    rankValues={filteredServers.map((server) => server.rank)}
+                    rows={filteredServers.map((server) => [
+                      `#${server.rank}`,
+                      <ServerLink key="server" slug={server.slug} label={server.server_name} />,
+                      <ModeBadge key="mode" mode={server.mode} />,
+                      formatNumber(server.unique_players ?? 0),
+                      formatNumber(server.kills),
+                      formatNumber(server.deaths),
+                      formatKd(server),
+                      <span key="score" className="leaderboard-ref-score" title={scoreBreakdownTitle(server.score_breakdown)}>{server.score_label === "Pending" ? "Pending" : formatNumber(server.score)}</span>,
+                    ])}
+                  />
+                )}
               </div>
             ) : null}
 
