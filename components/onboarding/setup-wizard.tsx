@@ -165,6 +165,7 @@ export function SetupWizard() {
   const [checks, setChecks] = useState<OnboardingChecks | null>(null);
   const [publishedServer, setPublishedServer] = useState<LinkedServer | null>(null);
   const [publicationComplete, setPublicationComplete] = useState(false);
+  const [reviewMode, setReviewMode] = useState(false);
   const [publishError, setPublishError] = useState("");
   const [guildRefreshing, setGuildRefreshing] = useState(false);
   const [guildRefreshMessage, setGuildRefreshMessage] = useState("");
@@ -213,6 +214,7 @@ export function SetupWizard() {
         const linkedServer = auth.linkedServer;
         const draft = draftResult.draft;
         const reviewRequested = window.location.hash === "#review-test";
+        setReviewMode(reviewRequested);
         if (reviewRequested && linkedServer?.guild_id) {
           setSelectedGuild(linkedServer.guild_id);
         } else if (draft?.discordGuildId && guildResult.guilds.some((guild) => guild.guild_id === draft.discordGuildId)) {
@@ -284,7 +286,7 @@ export function SetupWizard() {
   }, [loadDiscordGuilds]);
 
   useEffect(() => {
-    if (!authenticated || !draftHydrated || !draftAvailable || publicationComplete || (step === 6 && publishedServer)) return;
+    if (!authenticated || !draftHydrated || !draftAvailable || reviewMode || publicationComplete || (step === 6 && publishedServer)) return;
     const revision = ++draftSaveRevisionRef.current;
     let saveQueued = false;
     const payload = {
@@ -344,6 +346,7 @@ export function SetupWizard() {
     publicListing,
     publicationComplete,
     publishedServer,
+    reviewMode,
     selectedGuild,
     selectedService,
     selectedTags,
@@ -730,7 +733,7 @@ export function SetupWizard() {
   return (
     <SetupFrame onLogout={signOut}>
       <SetupProgressBand
-        percent={setupCompletionPercent(step, Boolean(publishedServer))}
+        percent={setupCompletionPercent(step, publicationComplete)}
         saveStatus={draftStatus}
         savedAt={draftUpdatedAt}
         restartArmed={restartArmed}
@@ -841,6 +844,7 @@ export function SetupWizard() {
                 {step === 6 ? (
                   <LiveStep
                     server={publishedServer}
+                    publicationComplete={publicationComplete}
                     service={selectedServiceData}
                     checks={checks}
                     finalError={publishError}
@@ -2233,11 +2237,11 @@ function AdvancedDiagnostics({
   );
 }
 
-function LiveStep({ server, service, checks, finalError, onRetryTest, onBack }: { server: LinkedServer | null; service?: NitradoService; checks: OnboardingChecks | null; finalError: string; onRetryTest: () => void | Promise<void>; onBack: () => void }) {
+function LiveStep({ server, publicationComplete, service, checks, finalError, onRetryTest, onBack }: { server: LinkedServer | null; publicationComplete: boolean; service?: NitradoService; checks: OnboardingChecks | null; finalError: string; onRetryTest: () => void | Promise<void>; onBack: () => void }) {
   const reduceMotion = useReducedMotion();
   const serverName = server?.display_name ?? server?.hostname ?? server?.server_name ?? service?.name ?? "Your DayZ server";
   const publicHref = server?.public_slug ? `/servers/profile?slug=${encodeURIComponent(server.public_slug)}` : "/servers";
-  const isFailure = Boolean(finalError || !server);
+  const isFailure = Boolean(finalError || !publicationComplete);
   const admPending = Boolean(checks?.admLog?.admFileExists && !checks.admLog.sampleReadSucceeded);
 
   useEffect(() => {
