@@ -30,6 +30,7 @@ export const PULSE_NOTIFICATION_TYPES = [
   "player_link_revoked",
   "player_link_approved",
   "player_link_rejected",
+  "player_link_review_requested",
 ] as const;
 
 export type PulseNotificationType = typeof PULSE_NOTIFICATION_TYPES[number];
@@ -1125,7 +1126,7 @@ function notificationTypesForFilter(filter: PulseNotificationFilter): PulseNotif
   if (filter === "events") return ["upcoming_event", "event_starting", "event_started", "event_countdown", "event_entry_confirmed", "event_result", "prize_unlocked"];
   if (filter === "scores") return ["event_score_update", "event_rank_update", "monthly_global_rank"];
   if (filter === "achievements") return ["achievement_unlocked"];
-  if (filter === "news") return ["dzn_news", "dzn_announcement", "server_setup_recommendation", "player_link_approved", "player_link_rejected", "player_link_revoked"];
+  if (filter === "news") return ["dzn_news", "dzn_announcement", "server_setup_recommendation", "player_link_approved", "player_link_rejected", "player_link_revoked", "player_link_review_requested"];
   return [...PULSE_NOTIFICATION_TYPES];
 }
 

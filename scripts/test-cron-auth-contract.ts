@@ -42,6 +42,7 @@ for (const file of [
   "functions/api/sync/public-snapshots/run.ts",
   "functions/api/sync/discord-posts/run.ts",
   "functions/api/sync/player-link-notifications/run.ts",
+  "functions/api/sync/player-link-owner-notifications/run.ts",
   "functions/api/sync/ctf-scorecards/run.ts",
   "functions/api/debug/nitrado-admin-logs.ts",
   "functions/api/debug/nitrado-file-read.ts",
