@@ -140,10 +140,28 @@ export async function testPlayerGameIdentityDeliveryLedger() {
           delivered_at=NULL, result_code=NULL
       WHERE id='delivery-a'`);
     const exhaustedLease = await dispatchQueuedPlayerGameIdentityNotifications(env, { deliveryId: "delivery-a" });
-    assert.equal(exhaustedLease.processed, 0, "An expired fifth attempt must not be claimed a sixth time.");
+    assert.equal(exhaustedLease.processed, 1, "An expired fifth attempt must be counted as a terminal failure, not claimed a sixth time.");
+    assert.equal(exhaustedLease.failed, 1);
+    assert.equal(exhaustedLease.ok, false);
     row = sqlite.prepare("SELECT status,attempt_count,result_code FROM player_game_identity_notification_deliveries WHERE id='delivery-a'").get();
     assert.equal(row?.status, "failed");
     assert.equal(row?.result_code, "delivery_attempts_exhausted");
+
+    sqlite.exec(`UPDATE player_game_identity_notification_deliveries
+      SET status='processing', attempt_count=5, lease_id='expired-runner-lease',
+          lease_expires_at=datetime('now', '-1 minute'), result_code=NULL
+      WHERE id='delivery-a'`);
+    const failedRun = await runDeliveryQueue({
+      request: new Request("https://dzn.test/api/sync/player-link-notifications/run", {
+        method: "POST", headers: { "x-dzn-cron-secret": "unit-test-secret" },
+      }),
+      env: { ...env, DZN_CRON_SECRET: "unit-test-secret" }, params: {}, data: {}, waitUntil() {}, next: async () => new Response(null),
+    });
+    assert.equal(failedRun.status, 503, "The guarded runner must surface an exhausted lease as a failed task.");
+    const failedRunBody = await failedRun.json() as { task_status?: string; processed?: number; failed?: number };
+    assert.equal(failedRunBody.task_status, "failed");
+    assert.equal(failedRunBody.processed, 1);
+    assert.equal(failedRunBody.failed, 1);
 
     sqlite.exec(`UPDATE player_game_identity_notification_deliveries
       SET status='queued', attempt_count=0, next_attempt_at=CURRENT_TIMESTAMP, delivered_at=NULL, result_code=NULL
