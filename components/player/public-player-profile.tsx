@@ -84,7 +84,7 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
         <div className="dzn-public-profile__hero-scan" aria-hidden="true" />
         <div className="relative z-10 flex h-full flex-col justify-end gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="flex min-w-0 flex-col gap-5 sm:flex-row sm:items-end">
-            <div className="relative shrink-0">
+            <div className="relative self-start shrink-0">
               <div className="dzn-public-profile__avatar-ring h-28 w-28 rounded-full p-[3px] sm:h-36 sm:w-36">
                 <DiscordAvatar displayName={data.display_name} initial={initial} url={data.discord_profile.avatar_url} discordVisible={data.discord_profile.visible} />
               </div>

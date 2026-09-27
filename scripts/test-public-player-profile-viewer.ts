@@ -85,6 +85,7 @@ assert.match(component, /Manage My Profile/, "Public profile UI must send owners
 assert.match(component, /onError=\{\(\) => setFailed\(true\)\}/, "A failed public Discord avatar request must reveal the player's initial fallback.");
 assert.match(component, /<span aria-hidden="true">\{initial\}<\/span>/, "The public avatar must retain an initial beneath the image layer.");
 assert.match(component, /discordVisible \? `\$\{displayName\} Discord avatar` : `\$\{displayName\} profile image`/, "A hidden Discord identity must use a neutral accessible profile-image label.");
+assert.match(component, /className="relative self-start shrink-0"/, "The mobile Discord status dot must stay anchored to the avatar instead of a full-width wrapper.");
 assert.match(component, /totals\?\.kills \? "Flawless" : "--"/, "A positive-kill, zero-death public record must be presented as Flawless rather than as a false decimal ratio.");
 assert.match(component, /data\.discord_profile\.visible && data\.discord_profile\.connected \? \([\s\S]*Account connected[\s\S]*\) : <HiddenCopy \/>/, "Discord connection details must be replaced with privacy-safe hidden copy when identity visibility is off.");
 assert.doesNotMatch(component, /\b(?:sendBeacon|analytics|localStorage|sessionStorage)\b/i, "Public profile UI must not store share history or track analytics.");
