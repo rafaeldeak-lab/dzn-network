@@ -166,6 +166,7 @@ export function SetupWizard() {
   const [publicationComplete, setPublicationComplete] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
   const [publishError, setPublishError] = useState("");
+  const [draftCleanupWarning, setDraftCleanupWarning] = useState("");
   const [guildRefreshing, setGuildRefreshing] = useState(false);
   const [guildRefreshMessage, setGuildRefreshMessage] = useState("");
   const [botStatus, setBotStatus] = useState<DiscordBotStatusResponse | null>(null);
@@ -609,6 +610,7 @@ export function SetupWizard() {
     setBusy(true);
     setMessage("");
     setPublishError("");
+    setDraftCleanupWarning("");
     try {
       await goLive();
       draftFlushSuppressedRef.current = true;
@@ -638,7 +640,7 @@ export function SetupWizard() {
         }
       } else {
         setDraftStatus("failed");
-        setPublishError("Your server is live, but saved setup progress could not be cleared. DZN will not overwrite it; retry setup cleanup before starting another setup.");
+        setDraftCleanupWarning("Your server is live, but saved setup progress could not be cleared. DZN will not overwrite it; retry setup cleanup before starting another setup.");
       }
       setStep(6);
     } catch (error) {
@@ -691,6 +693,7 @@ export function SetupWizard() {
       setChecks(null);
       setPublishedServer(null);
       setPublishError("");
+      setDraftCleanupWarning("");
       setMessage("");
       setVerificationProgress(INITIAL_VERIFICATION_PROGRESS);
       setDraftUpdatedAt(null);
@@ -866,6 +869,7 @@ export function SetupWizard() {
                     service={selectedServiceData}
                     checks={checks}
                     finalError={publishError}
+                    cleanupWarning={draftCleanupWarning}
                     onRetryTest={async () => {
                       await runTest();
                       setStep(5);
@@ -2255,7 +2259,7 @@ function AdvancedDiagnostics({
   );
 }
 
-function LiveStep({ server, publicationComplete, service, checks, finalError, onRetryTest, onBack }: { server: LinkedServer | null; publicationComplete: boolean; service?: NitradoService; checks: OnboardingChecks | null; finalError: string; onRetryTest: () => void | Promise<void>; onBack: () => void }) {
+function LiveStep({ server, publicationComplete, service, checks, finalError, cleanupWarning, onRetryTest, onBack }: { server: LinkedServer | null; publicationComplete: boolean; service?: NitradoService; checks: OnboardingChecks | null; finalError: string; cleanupWarning: string; onRetryTest: () => void | Promise<void>; onBack: () => void }) {
   const reduceMotion = useReducedMotion();
   const serverName = server?.display_name ?? server?.hostname ?? server?.server_name ?? service?.name ?? "Your DayZ server";
   const publicHref = server?.public_slug ? `/servers/profile?slug=${encodeURIComponent(server.public_slug)}` : "/servers";
@@ -2301,6 +2305,11 @@ function LiveStep({ server, publicationComplete, service, checks, finalError, on
           <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-zinc-300">
             Your server is now listed on DZN Network.
           </p>
+          {cleanupWarning ? (
+            <p className="mx-auto mt-4 max-w-2xl rounded-lg border border-amber-300/25 bg-amber-400/10 px-4 py-3 text-sm font-bold leading-6 text-amber-50" role="status">
+              {cleanupWarning}
+            </p>
+          ) : null}
           <p className={`mx-auto mt-4 max-w-2xl rounded-lg border px-4 py-3 text-sm font-bold leading-6 ${admPending ? "border-orange-300/20 bg-orange-400/10 text-orange-50" : "border-emerald-300/20 bg-emerald-400/10 text-emerald-50"}`}>
             PvP stats will begin syncing automatically as ADM activity becomes available.
           </p>
