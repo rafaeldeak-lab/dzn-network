@@ -60,9 +60,11 @@ async function main() {
   assert.match(setupWizardSource, /setDraftStatus\("failed"\)[\s\S]*saved setup progress could not be cleared/, "Exhausted publication cleanup must remain visible instead of silently leaving a stale draft.");
   assert.match(setupWizardSource, /revision === draftSaveRevisionRef\.current\) setDraftStatus\("saving"\)[\s\S]*draftFlushPendingRef\.current = \(\) =>[\s\S]*queueSave\(true\)/, "Pending edits must be visible immediately and prepared for a keepalive flush when setup is left before the debounce finishes.");
   assert.match(setupWizardSource, /addEventListener\("beforeunload", flushPendingDraft\)[\s\S]*addEventListener\("pagehide", flushPendingDraft\)/, "Pending draft edits must flush only when the setup page is actually being left.");
+  assert.match(setupWizardSource, /return \(\) => \{\s*flushPendingDraft\(\);\s*window\.removeEventListener\("beforeunload"/, "Client-side route changes must flush a pending draft when the setup wizard unmounts.");
   assert.doesNotMatch(setupWizardSource, /return \(\) => \{[\s\S]{0,250}queueSave\(true\)/, "Ordinary form-state changes must restart the debounce without issuing an immediate keepalive write.");
   assert.match(setupWizardSource, /draftFlushSuppressedRef\.current = true;[\s\S]*setPublicationComplete\(true\)/, "Publishing must suppress cleanup flushes before draft deletion starts.");
   assert.match(setupWizardSource, /draftSchemaUnavailable = draftHydrated && !draftAvailable && draftStatus === "unavailable";[\s\S]*let draftCleared = draftSchemaUnavailable/, "Publishing may skip draft deletion only after a confirmed schema-unavailable response.");
+  assert.match(setupWizardSource, /await clearOnboardingDraft\(\);\s*setDraftAvailable\(true\);[\s\S]*setReviewMode\(false\);[\s\S]*window\.history\.replaceState/, "A confirmed restart must restore draft saving and leave setup review mode.");
   assert.equal(setupWizardSource.includes("the invite requests Administrator permission"), false, "Bot setup copy must not claim the least-privilege invite requests Administrator.");
   assert.equal(setupWizardSource.includes("View Channels, Send Messages, Embed Links, and Read Message History"), true, "Bot setup copy must name the least-privilege invite permissions.");
   const draftRouteSource = readFileSync("functions/api/onboarding/draft.ts", "utf8");

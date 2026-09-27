@@ -361,6 +361,7 @@ export function SetupWizard() {
     window.addEventListener("beforeunload", flushPendingDraft);
     window.addEventListener("pagehide", flushPendingDraft);
     return () => {
+      flushPendingDraft();
       window.removeEventListener("beforeunload", flushPendingDraft);
       window.removeEventListener("pagehide", flushPendingDraft);
     };
@@ -654,7 +655,14 @@ export function SetupWizard() {
         draftAutosaveTimerRef.current = null;
       }
       await draftSaveChainRef.current.catch(() => undefined);
-      if (draftStatus !== "unavailable") await clearOnboardingDraft();
+      if (draftStatus !== "unavailable") {
+        await clearOnboardingDraft();
+        setDraftAvailable(true);
+      }
+      setReviewMode(false);
+      if (window.location.hash === "#review-test") {
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+      }
       setPublicationComplete(false);
       setStep(0);
       setSelectedGuild(guilds[0]?.guild_id ?? "");
