@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Gamepad2, Loader2, Search, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Gamepad2, KeyRound, Loader2, Search, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { DZN_SUPPORT_EMAIL_HREF } from "@/lib/support";
 import { FormEvent, useEffect, useMemo, useState } from "react";
@@ -32,6 +32,8 @@ type IdentityClaimRow = {
   server_name: string | null;
   public_slug: string | null;
   reviewer_name: string | null;
+  proof_status?: "none" | "issued" | "verified";
+  proof_expires_at?: string | null;
 };
 
 type IdentityPayload = {
@@ -271,15 +273,17 @@ export function PlayerGameIdentityLinks() {
                   />
                 ))}
                 {claims.map((claim) => (
-                  <IdentityRow
-                    key={claim.id}
-                    title={claim.server_name ?? "DZN Server"}
-                    subtitle={`${claim.player_name ?? "Game profile"} - ${claim.player_id}`}
-                    statusLabel={friendlyStatusLabel(claim.status)}
-                    statusTone={claim.status === "approved" ? "emerald" : claim.status === "rejected" ? "red" : "violet"}
-                    href={claim.public_slug ? `/servers/profile?slug=${encodeURIComponent(claim.public_slug)}` : null}
-                    meta={claim.reviewed_at ? `Checked ${formatDate(claim.reviewed_at)}` : claim.requested_at ? `Sent ${formatDate(claim.requested_at)}` : "Request recorded"}
-                  />
+                  <div key={claim.id} className="space-y-2">
+                    <IdentityRow
+                      title={claim.server_name ?? "DZN Server"}
+                      subtitle={`${claim.player_name ?? "Game profile"} - ${claim.player_id}`}
+                      statusLabel={friendlyStatusLabel(claim.status)}
+                      statusTone={claim.status === "approved" ? "emerald" : claim.status === "rejected" ? "red" : "violet"}
+                      href={claim.public_slug ? `/servers/profile?slug=${encodeURIComponent(claim.public_slug)}` : null}
+                      meta={claim.reviewed_at ? `Checked ${formatDate(claim.reviewed_at)}` : claim.requested_at ? `Sent ${formatDate(claim.requested_at)}` : "Request recorded"}
+                    />
+                    {claim.status === "pending" ? <ProofCodeRedeemer claimId={claim.id} verified={claim.proof_status === "verified"} /> : null}
+                  </div>
                 ))}
               </>
             ) : (
@@ -472,6 +476,48 @@ function toServerChoices(rows: PublicServerOption[]) {
     });
   }
   return Array.from(choices.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function ProofCodeRedeemer({ claimId, verified }: { claimId: string; verified: boolean }) {
+  const [code, setCode] = useState("");
+  const [state, setState] = useState<{ status: "idle" | "loading" | "success" | "error"; message: string | null }>({ status: "idle", message: null });
+  const normalized = code.trim().toUpperCase();
+
+  if (verified) {
+    return <div className="border-l-2 border-emerald-300 bg-emerald-300/[0.06] p-3 text-sm font-semibold text-emerald-100"><span className="inline-flex items-center gap-2 font-black uppercase"><CheckCircle2 className="size-4" aria-hidden="true" /> Owner proof verified</span><p className="mt-1 text-xs font-semibold">This one-time check is recorded and waiting for the owner&apos;s final decision.</p></div>;
+  }
+
+  async function redeem() {
+    if (!normalized || state.status === "loading") return;
+    setState({ status: "loading", message: "Checking the one-time code..." });
+    try {
+      const response = await fetch("/api/player/game-identities/proof-code", {
+        method: "POST", credentials: "include", cache: "no-store",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ claim_id: claimId, proof_code: normalized }),
+      });
+      const result = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
+      if (!response.ok || !result?.ok) {
+        setState({ status: "error", message: result?.message ?? "That proof code could not be accepted." });
+        return;
+      }
+      setCode("");
+      setState({ status: "success", message: result.message ?? "Proof code accepted." });
+    } catch {
+      setState({ status: "error", message: "The proof code could not be checked. Check your connection and try again." });
+    }
+  }
+
+  return (
+    <div className="border-l-2 border-cyan-300/40 bg-cyan-300/[0.05] p-3">
+      <label htmlFor={`proof-code-${claimId}`} className="inline-flex items-center gap-2 text-xs font-black uppercase text-cyan-100"><KeyRound className="size-4" aria-hidden="true" /> Owner proof code</label>
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+        <input id={`proof-code-${claimId}`} value={code} onChange={(event) => setCode(event.target.value)} disabled={state.status === "success"} autoComplete="one-time-code" placeholder="DZN-XXXX-XXXX" className="min-h-10 min-w-0 flex-1 rounded-md border border-white/12 bg-slate-950/80 px-3 text-sm font-black uppercase text-white outline-none focus:border-cyan-200 disabled:opacity-60" />
+        <button type="button" onClick={() => void redeem()} disabled={!normalized || state.status === "loading" || state.status === "success"} className="inline-flex min-h-10 items-center justify-center rounded-md border border-cyan-300/30 bg-cyan-300/10 px-4 text-xs font-black uppercase text-cyan-100 disabled:opacity-50">{state.status === "loading" ? "Checking" : state.status === "success" ? "Verified" : "Use code"}</button>
+      </div>
+      <p className={`mt-2 text-xs font-semibold ${state.status === "error" ? "text-rose-200" : state.status === "success" ? "text-emerald-200" : "text-slate-400"}`}>{state.message ?? "Use the short-lived code issued by this server owner. It works once and does not auto-approve the link."}</p>
+    </div>
+  );
 }
 
 function IdentityRow({

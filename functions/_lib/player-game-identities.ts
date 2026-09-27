@@ -9,6 +9,7 @@ import {
   resolveOwnerRequestNotificationRecipients,
 } from "./player-game-identity-owner-notifications";
 import { requireServerOwnerOrDznAdmin } from "./public-cache";
+import { hasPlayerGameIdentityProofCodes } from "./player-game-identity-proof-codes";
 import {
   hasPlayerGameIdentityDeliveryLedger,
   type PlayerGameIdentityDecisionDelivery,
@@ -31,6 +32,8 @@ export type PlayerGameIdentityClaimRow = {
   server_name: string | null;
   public_slug: string | null;
   reviewer_name: string | null;
+  proof_status?: "none" | "issued" | "verified";
+  proof_expires_at?: string | null;
 };
 
 export type PlayerGameIdentityLinkRow = {
@@ -61,6 +64,9 @@ export type OwnerPlayerGameIdentityClaimPayloadRow = PlayerGameIdentityClaimRow 
   account_name: string | null;
   account_avatar_url: string | null;
   request_source: "gamertag_lookup" | "legacy_exact_id";
+  proof_verified: boolean;
+  proof_status: "none" | "issued" | "verified";
+  proof_expires_at: string | null;
   submitted_player_id: string;
   review_context: {
     evidence_status: "ready_for_owner_review";
@@ -225,6 +231,15 @@ export function parsePlayerGameIdentityReviewInput(input: ReviewClaimInput) {
 export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUser) {
   try {
     const db = requireDb(env);
+    const hasProofCodes = await hasPlayerGameIdentityProofCodes(db);
+    const playerProofProjection = hasProofCodes
+      ? `CASE
+          WHEN EXISTS (SELECT 1 FROM player_game_identity_proof_codes proof WHERE proof.claim_id = player_game_identity_claims.id AND proof.status = 'consumed') THEN 'verified'
+          WHEN EXISTS (SELECT 1 FROM player_game_identity_proof_codes proof WHERE proof.claim_id = player_game_identity_claims.id AND proof.status = 'active' AND datetime(proof.expires_at) > CURRENT_TIMESTAMP) THEN 'issued'
+          ELSE 'none'
+        END AS proof_status,
+        (SELECT proof.expires_at FROM player_game_identity_proof_codes proof WHERE proof.claim_id = player_game_identity_claims.id AND proof.status = 'active' AND datetime(proof.expires_at) > CURRENT_TIMESTAMP ORDER BY datetime(proof.created_at) DESC LIMIT 1) AS proof_expires_at`
+      : `'none' AS proof_status, NULL AS proof_expires_at`;
     const [linksResult, claimsResult, revokedResult] = await Promise.all([
       db
         .prepare(
@@ -265,7 +280,8 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
             player_game_identity_claims.review_note,
             COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
             linked_servers.public_slug,
-            reviewers.username AS reviewer_name
+            reviewers.username AS reviewer_name,
+            ${playerProofProjection}
            FROM player_game_identity_claims
            INNER JOIN linked_servers ON linked_servers.id = player_game_identity_claims.linked_server_id
            LEFT JOIN users reviewers ON reviewers.id = player_game_identity_claims.reviewed_by_user_id
@@ -528,6 +544,7 @@ export async function readOwnerPlayerGameIdentityClaims(
     const isAdmin = isDznAdminDiscordId(env, user.discord_id);
     const hasGlobalHistoryAccess = isPlatformOwnerDiscordId(env, user.discord_id);
     const hasDeliveryLedger = await hasPlayerGameIdentityDeliveryLedger(env);
+    const hasProofCodes = await hasPlayerGameIdentityProofCodes(db);
     const historyCursor = options.historyCursor ?? null;
     const deliveryProjection = hasDeliveryLedger
       ? `(
@@ -543,6 +560,14 @@ export async function readOwnerPlayerGameIdentityClaims(
           WHERE delivery.audit_id = audit.id LIMIT 1
         ) AS discord_delivery_result`
       : `NULL AS discord_delivery_status, NULL AS discord_delivery_attempts, NULL AS discord_delivery_result`;
+    const proofProjection = hasProofCodes
+      ? `CASE
+          WHEN EXISTS (SELECT 1 FROM player_game_identity_proof_codes proof WHERE proof.claim_id = player_game_identity_claims.id AND proof.status = 'consumed') THEN 'verified'
+          WHEN EXISTS (SELECT 1 FROM player_game_identity_proof_codes proof WHERE proof.claim_id = player_game_identity_claims.id AND proof.status = 'active' AND datetime(proof.expires_at) > CURRENT_TIMESTAMP) THEN 'issued'
+          ELSE 'none'
+        END AS proof_status,
+        (SELECT proof.expires_at FROM player_game_identity_proof_codes proof WHERE proof.claim_id = player_game_identity_claims.id AND proof.status = 'active' AND datetime(proof.expires_at) > CURRENT_TIMESTAMP ORDER BY datetime(proof.created_at) DESC LIMIT 1) AS proof_expires_at`
+      : `'none' AS proof_status, NULL AS proof_expires_at`;
     const [result, historyResult] = await Promise.all([db
       .prepare(
         `SELECT
@@ -562,6 +587,7 @@ export async function readOwnerPlayerGameIdentityClaims(
           claim_users.username AS account_name,
           claim_users.avatar AS account_avatar,
           reviewers.username AS reviewer_name,
+          ${proofProjection},
           COALESCE((
             SELECT CASE
               WHEN request_audit.note LIKE 'request_source=gamertag_lookup;%' THEN 'gamertag_lookup'
@@ -1208,6 +1234,9 @@ function sanitizeOwnerClaimRows(rows: OwnerPlayerGameIdentityClaimRow[]) {
     account_name: row.account_name || "DZN Player",
     account_avatar_url: discordAvatarUrl(row.requester_discord_id, row.account_avatar),
     request_source: row.request_source,
+    proof_verified: row.proof_status === "verified",
+    proof_status: row.proof_status ?? "none",
+    proof_expires_at: row.proof_expires_at ?? null,
     submitted_player_id: row.player_id,
     review_context: {
       evidence_status: "ready_for_owner_review" as const,
@@ -1215,6 +1244,13 @@ function sanitizeOwnerClaimRows(rows: OwnerPlayerGameIdentityClaimRow[]) {
       server_label: row.server_name || "DZN Server",
       game_profile_label: row.player_name || "Imported ADM profile",
       checks: [
+        {
+          label: "One-time owner proof",
+          detail: row.proof_status === "verified"
+            ? "The requesting player redeemed the short-lived code issued for this exact request."
+            : "No one-time owner proof code has been redeemed for this request yet.",
+          status: row.proof_status === "verified" ? "ready" as const : "warning" as const,
+        },
         {
           label: "Owner scoped",
           detail: "This queue only returns pending claims for servers owned by the current user, or for DZN admins.",
