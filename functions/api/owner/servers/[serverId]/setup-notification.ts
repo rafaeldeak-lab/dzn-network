@@ -1,5 +1,6 @@
 import { json, methodNotAllowed, readJson } from "../../../../_lib/http";
 import { sendOwnerSetupRecommendation } from "../../../../_lib/owner-setup-notifications";
+import { recordOwnerSetupReminderAudit } from "../../../../_lib/owner-discord-control";
 import { requirePlatformOwner } from "../../../../_lib/platform-owner";
 import type { PagesFunction } from "../../../../_lib/types";
 
@@ -12,7 +13,17 @@ export const onRequestPost: PagesFunction = async ({ env, request, params }) => 
     return json({ ok: false, error: "confirmation_required", message: "Confirm the setup reminder before sending." }, { status: 400 });
   }
   const serverId = String(params.serverId ?? "").trim();
-  const result = await sendOwnerSetupRecommendation(env, serverId);
+  let result: Awaited<ReturnType<typeof sendOwnerSetupRecommendation>>;
+  try {
+    result = await sendOwnerSetupRecommendation(env, serverId);
+  } catch (error) {
+    await recordOwnerSetupReminderAudit(env, auth.user, serverId, {
+      ok: false,
+      error: error instanceof Error ? error.message : "setup_reminder_failed",
+    }, request.headers.get("cf-ray"));
+    throw error;
+  }
+  await recordOwnerSetupReminderAudit(env, auth.user, serverId, result, request.headers.get("cf-ray"));
   if (!result.ok) return json({ ok: false, error: result.error, message: result.error === "no_setup_blockers"
     ? "This server has no current setup blockers."
     : result.error === "dzn_pulse_disabled"

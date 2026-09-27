@@ -656,6 +656,7 @@ export function SetupWizard() {
     }
     setRestartBusy(true);
     draftFlushSuppressedRef.current = true;
+    let resetDraftStatus: typeof draftStatus = draftAvailable ? "idle" : "unavailable";
     try {
       if (draftAutosaveTimerRef.current !== null) {
         window.clearTimeout(draftAutosaveTimerRef.current);
@@ -665,6 +666,7 @@ export function SetupWizard() {
       if (draftStatus !== "unavailable") {
         await clearOnboardingDraft();
         setDraftAvailable(true);
+        resetDraftStatus = "idle";
       }
       setReviewMode(false);
       if (window.location.hash === "#review-test") {
@@ -692,7 +694,7 @@ export function SetupWizard() {
       setMessage("");
       setVerificationProgress(INITIAL_VERIFICATION_PROGRESS);
       setDraftUpdatedAt(null);
-      setDraftStatus("idle");
+      setDraftStatus(resetDraftStatus);
       setRestartArmed(false);
     } catch {
       setDraftStatus("failed");

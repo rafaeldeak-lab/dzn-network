@@ -24,6 +24,7 @@ export const PULSE_NOTIFICATION_TYPES = [
   "prize_unlocked",
   "dzn_news",
   "dzn_announcement",
+  "server_setup_recommendation",
   "billing_payment_setup",
   "billing_trial_ending",
   "player_link_revoked",
@@ -1124,7 +1125,7 @@ function notificationTypesForFilter(filter: PulseNotificationFilter): PulseNotif
   if (filter === "events") return ["upcoming_event", "event_starting", "event_started", "event_countdown", "event_entry_confirmed", "event_result", "prize_unlocked"];
   if (filter === "scores") return ["event_score_update", "event_rank_update", "monthly_global_rank"];
   if (filter === "achievements") return ["achievement_unlocked"];
-  if (filter === "news") return ["dzn_news", "dzn_announcement", "player_link_approved", "player_link_rejected", "player_link_revoked"];
+  if (filter === "news") return ["dzn_news", "dzn_announcement", "server_setup_recommendation", "player_link_approved", "player_link_rejected", "player_link_revoked"];
   return [...PULSE_NOTIFICATION_TYPES];
 }
 
