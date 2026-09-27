@@ -16,6 +16,7 @@ type LeaderboardServer = {
   server_name: string;
   slug: string | null;
   mode: string;
+  category: string;
   kills: number;
   deaths: number;
   kd: number | null;
@@ -304,7 +305,7 @@ export default function LeaderboardsPage() {
   const initialError = loadState === "error_initial";
   const modeTransitionLoading = displayedMode !== activeMode && !serverModeError;
   const filteredServers = useMemo(
-    () => payload.top_servers.filter((server) => matchesLeaderboardMode(server.mode, activeMode)),
+    () => payload.top_servers.filter((server) => matchesLeaderboardMode(server.category, activeMode)),
     [activeMode, payload.top_servers],
   );
 
@@ -1062,6 +1063,7 @@ function normalizeServer(server: LeaderboardServer): LeaderboardServer {
     server_name: server.server_name || "Unnamed DZN Server",
     slug: server.slug ?? null,
     mode: server.mode || "UNKNOWN",
+    category: server.category || server.mode || "UNKNOWN",
     kills: numberOrZero(server.kills),
     deaths: numberOrZero(server.deaths),
     kd: typeof server.kd === "number" && Number.isFinite(server.kd) ? server.kd : null,

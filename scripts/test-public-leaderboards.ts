@@ -146,6 +146,7 @@ const globallyRankedServers: PublicLeaderboardServer[] = Array.from({ length: 12
   server_name: `Server ${index + 1}`,
   slug: `server-${index + 1}`,
   mode: index === 10 ? "DEATHMATCH" : "SURVIVAL",
+  category: index === 10 ? "deathmatch" : "survival",
   kills: 120 - index,
   deaths: 40,
   kd: 3,
@@ -162,6 +163,13 @@ const deathmatchOutsideTopTen = filterRankedPublicServersByMode(globallyRankedSe
 assert.equal(deathmatchOutsideTopTen.length, 1, "Mode filtering must use the complete bounded ranked-server set.");
 assert.equal(deathmatchOutsideTopTen[0].rank, 11, "Mode filtering must preserve the server's global rank.");
 assert.equal(filterRankedPublicServersByMode(globallyRankedServers, "all", 10).length, 10);
+const canonicalCategoryDiffersFromDisplayMode: PublicLeaderboardServer = {
+  ...globallyRankedServers[0],
+  mode: "HARDCORE",
+  category: "pvp",
+};
+assert.equal(filterRankedPublicServersByMode([canonicalCategoryDiffersFromDisplayMode], "pvp", 10).length, 1, "Mode filters must use the canonical server category.");
+assert.equal(filterRankedPublicServersByMode([canonicalCategoryDiffersFromDisplayMode], "survival", 10).length, 0, "Display mode must not override the canonical category.");
 assert.equal(normalizePublicLeaderboardMode("PvP"), "pvp");
 assert.equal(normalizePublicLeaderboardMode("unsupported"), "all");
 

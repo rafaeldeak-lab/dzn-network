@@ -12,8 +12,8 @@ const name = "Very_Long_Player_Name_With_No_Spaces_123456789";
 const serverName = "A very long DayZ community server name that must remain readable";
 const avatarUrl = "/api/public/players/qa-player/avatar";
 const kill = { rank: 1, player_name: name, victim_name: "Another_Player_With_A_Long_Name", server_name: serverName, server_slug: "qa-server", weapon: "Mosin 91/30", distance: 106.7, occurred_at: "2026-09-09T06:00:00Z", player_public_profile_href: "/players/qa-player", player_public_profile_avatar_url: avatarUrl };
-const serverRow = { rank: 1, server_id: "qa-server", server_name: serverName, slug: "qa-server", mode: "PVP / PVE", kills: 500, deaths: 200, kd: 2.5, kd_label: "2.50", longest_kill: 106.7, unique_players: 142, score: 1000, score_label: "1000", score_breakdown: null };
-const deathmatchRow = { ...serverRow, rank: 11, server_id: "qa-deathmatch", server_name: "QA Deathmatch", slug: "qa-deathmatch", mode: "DEATHMATCH", score: 700, score_label: "700" };
+const serverRow = { rank: 1, server_id: "qa-server", server_name: serverName, slug: "qa-server", mode: "HARDCORE", category: "pvp", kills: 500, deaths: 200, kd: 2.5, kd_label: "2.50", longest_kill: 106.7, unique_players: 142, score: 1000, score_label: "1000", score_breakdown: null };
+const deathmatchRow = { ...serverRow, rank: 11, server_id: "qa-deathmatch", server_name: "QA Deathmatch", slug: "qa-deathmatch", mode: "DEATHMATCH", category: "deathmatch", score: 700, score_label: "700" };
 const boards = { ok: true, top_servers: [serverRow], top_players: [{ ...kill, player_id: null, kills: 65, deaths: 20, kd: 3.25, kd_label: "3.25", longest_kill: 106.7, public_profile_href: "/players/qa-player", public_profile_avatar_url: avatarUrl }], personal_best_kills: [kill], longest_kills: [kill], best_overall_kill: kill, latest_kill: kill, updated_at: "2026-09-09T06:00:00Z", access_level: "full", is_locked: false };
 function api(url) {
   if (url.pathname === "/api/public/leaderboards") return { ...boards, top_servers: url.searchParams.get("mode") === "deathmatch" ? [deathmatchRow] : boards.top_servers };

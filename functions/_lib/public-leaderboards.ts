@@ -2,6 +2,7 @@ import { getRankedBuildServers, type PublicBuildLeaderboardRow } from "./build-e
 import { requireDb } from "./db";
 import { readPublicProfileLinksByDiscordIds, type PublicProfileLink } from "./player-public-profiles";
 import { calculateServerScore, calculateServerScoreBreakdown, rankServers, type ServerScoreBreakdown } from "./server-ranking";
+import { normalizeServerCategoryFromRecord } from "./server-categories";
 import type { Env } from "./types";
 import {
   SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
@@ -44,6 +45,7 @@ export type PublicLeaderboardServer = {
   server_name: string;
   slug: string | null;
   mode: string;
+  category: string;
   kills: number;
   deaths: number;
   kd: number | null;
@@ -91,6 +93,7 @@ type PublicServerStatRow = {
   server_name: string | null;
   slug: string | null;
   mode: string | null;
+  category: string | null;
   kills: number | null;
   deaths: number | null;
   unique_players: number | null;
@@ -250,7 +253,8 @@ export async function getRankedPublicServers(env: Env, limit: number, mode: Publ
         linked_servers.id AS server_id,
         COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
         linked_servers.public_slug AS slug,
-        COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type, 'UNKNOWN') AS mode,
+        COALESCE(NULLIF(linked_servers.server_mode, ''), NULLIF(linked_servers.server_type, ''), linked_servers.server_category, 'UNKNOWN') AS mode,
+        COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_type, ''), linked_servers.server_mode, 'UNKNOWN') AS category,
         (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id) AS kills,
         (
           (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id AND kill_events.victim_name IS NOT NULL)
@@ -308,6 +312,7 @@ export async function getRankedPublicServers(env: Env, limit: number, mode: Publ
       server_name: row.server_name ?? "Unnamed DZN Server",
       slug: row.slug,
       mode: normalizeMode(row.mode),
+      category: normalizeServerCategoryFromRecord({ server_category: row.category }) ?? normalizeMode(row.category),
       kills,
       deaths,
       kd: kd.value,
@@ -330,6 +335,7 @@ export async function getRankedPublicServers(env: Env, limit: number, mode: Publ
       server_name: server.server_name,
       slug: server.slug,
       mode: server.mode,
+      category: server.category,
       kills: server.kills,
       deaths: server.deaths,
       kd: server.kd,
@@ -350,7 +356,7 @@ export type PublicLeaderboardMode = "all" | "deathmatch" | "pvp" | "pve" | "surv
 
 export function filterRankedPublicServersByMode(servers: PublicLeaderboardServer[], mode: PublicLeaderboardMode, limit: number) {
   const queryLimit = Math.max(1, Math.min(Math.trunc(limit) || 10, 500));
-  return servers.filter((server) => matchesPublicLeaderboardMode(server.mode, mode)).slice(0, queryLimit);
+  return servers.filter((server) => matchesPublicLeaderboardMode(server.category, mode)).slice(0, queryLimit);
 }
 
 async function getTopPlayers(env: Env, limit: number, linkedServerId?: string, offset = 0, includeVerifiedLinks = true): Promise<PublicLeaderboardPlayer[]> {
