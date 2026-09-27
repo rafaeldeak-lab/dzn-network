@@ -30,7 +30,10 @@ export async function testPlayerGameIdentityRevocation() {
       CREATE TABLE kill_events (id TEXT, linked_server_id TEXT, killer_id TEXT, victim_id TEXT, distance REAL, occurred_at TEXT, created_at TEXT);
       INSERT INTO player_profiles (id,linked_server_id,player_id,player_name,discord_id) VALUES ('legacy-independent','server-a','other-game','Other','discord-b');
       INSERT INTO player_game_identity_claims (id,user_id,discord_id,linked_server_id,player_profile_id,player_id)
-        VALUES ('claim-stale','player-a','discord-a','server-a','profile-a','game-a');`);
+        VALUES ('claim-stale','player-a','discord-a','server-a','profile-a','game-a');
+      INSERT INTO user_notifications (id,user_id,type,title,body,dedupe_key,metadata)
+        VALUES ('claim-stale-alert','owner-a','player_link_review_requested','Review needed','Pending review',
+          'player-link-review:claim-stale:owner-a','{"claim_id":"claim-stale"}');`);
     const before = f.state();
     assert.equal((await readTrustedPlayerGameplayAggregate(f.env.DB, player.discord_id))?.total_kills, 7);
     const ownerList = await readManagedGameIdentityLinks(f.env, owner, new URLSearchParams());
@@ -41,6 +44,9 @@ export async function testPlayerGameIdentityRevocation() {
     assert.deepEqual(f.state().profiles, before.profiles, "Revocation must never change gameplay or independent attribution");
     assert.equal(f.state().claim.find(row => row.id === "claim-a")?.status, "approved", "Historical approval must remain recorded");
     assert.equal(f.state().claim.find(row => row.id === "claim-stale")?.status, "cancelled");
+    const closedAlert = f.sqlite.prepare("SELECT read_at, expires_at, json_extract(metadata, '$.review_status') AS review_status FROM user_notifications WHERE id = 'claim-stale-alert'").get();
+    assert.ok(closedAlert?.read_at && closedAlert?.expires_at, "Revocation must close the cancelled claim's owner review alert.");
+    assert.equal(closedAlert.review_status, "cancelled", "The closed owner alert must explain that its claim was cancelled.");
     assert.equal((await reviewPlayerGameIdentityClaim(f.env, owner, "claim-stale", { action: "approve" })).status, 409);
     assert.equal((await readTrustedPlayerGameplayAggregate(f.env.DB, player.discord_id))?.linked_game_profiles, 0);
     assert.equal((await readTrustedPlayerGameplayAggregate(f.env.DB, "discord-b"))?.total_kills, 7);
@@ -51,7 +57,7 @@ export async function testPlayerGameIdentityRevocation() {
     const history = await readPlayerRequestSupport(f.env.DB, new URLSearchParams({ request: "claim-a" }));
     assert.ok(history.ok && "history" in history && history.history.some(event => event.action === "link_revoked" && event.note === input.reason));
     const notices = f.state().notifications;
-    assert.equal(notices.length, 2, "The original approval notice and later revocation notice must both remain in account history.");
+    assert.equal(notices.length, 3, "The closed owner review alert, original approval notice and later revocation notice must remain in account history.");
     const revokedNotice = notices.find(notice => notice.type === "player_link_revoked");
     assert.equal(revokedNotice?.user_id, player.id);
     assert.doesNotMatch(String(revokedNotice?.body), /discord-a|game-a/);
@@ -61,7 +67,7 @@ export async function testPlayerGameIdentityRevocation() {
     assert.deepEqual(f.state(), after, "Replayed decisions must not duplicate notices or audit events");
   } finally { f.close(); }
 
-  for (let index = 0; index < 5; index++) {
+  for (let index = 0; index < 6; index++) {
     const fixture = await approvedFixture();
     try {
       const before = fixture.state(); fixture.failAt(index);
