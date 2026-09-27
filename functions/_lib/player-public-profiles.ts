@@ -25,6 +25,14 @@ export type PlayerPublicProfileHandle = {
 export type PublicProfileLink = {
   handle: string;
   href: string;
+  avatar_url?: string | null;
+};
+
+type PublicProfileLinkRow = {
+  discord_id: string | null;
+  handle: string | null;
+  avatar: string | null;
+  discord_identity_enabled: number | null;
 };
 
 export type PublicDiscordAvatarSource = {
@@ -161,11 +169,36 @@ export async function readPublicProfileLinksByDiscordIds(
   for (let index = 0; index < ids.length; index += publicProfileLinkLookupChunkSize) {
     const chunk = ids.slice(index, index + publicProfileLinkLookupChunkSize);
     const placeholders = chunk.map(() => "?").join(", ");
-    const rows = await db
+    const consentAwareRows = await db
       .prepare(
         `SELECT
           users.discord_id,
-          player_public_profiles.handle
+          users.avatar,
+          player_public_profiles.handle,
+          player_public_discord_identity_preferences.enabled AS discord_identity_enabled
+         FROM users
+         INNER JOIN player_public_profiles ON player_public_profiles.user_id = users.id
+         INNER JOIN player_profile_privacy_preferences
+           ON player_profile_privacy_preferences.user_id = users.id
+         LEFT JOIN player_public_discord_identity_preferences
+           ON player_public_discord_identity_preferences.user_id = users.id
+         WHERE users.discord_id IN (${placeholders})
+           AND player_public_profiles.status = 'active'
+           AND player_profile_privacy_preferences.public_profile_enabled = 1`,
+      )
+      .bind(...chunk)
+      .all<PublicProfileLinkRow>()
+      .catch(() => null);
+
+    // Public handles existed before the independent Discord identity consent table.
+    // Keep those links working while failing closed for avatar disclosure.
+    const rows = consentAwareRows ?? await db
+      .prepare(
+        `SELECT
+          users.discord_id,
+          NULL AS avatar,
+          player_public_profiles.handle,
+          0 AS discord_identity_enabled
          FROM users
          INNER JOIN player_public_profiles ON player_public_profiles.user_id = users.id
          INNER JOIN player_profile_privacy_preferences
@@ -175,7 +208,7 @@ export async function readPublicProfileLinksByDiscordIds(
            AND player_profile_privacy_preferences.public_profile_enabled = 1`,
       )
       .bind(...chunk)
-      .all<{ discord_id: string | null; handle: string | null }>()
+      .all<PublicProfileLinkRow>()
       .catch(() => null);
 
     if (!rows) return links;
@@ -185,6 +218,9 @@ export async function readPublicProfileLinksByDiscordIds(
       links.set(row.discord_id, {
         handle: row.handle,
         href: publicProfileHref(row.handle),
+        avatar_url: row.discord_identity_enabled === 1 && validDiscordAvatar(row.discord_id, row.avatar)
+          ? `/api/public/players/${encodeURIComponent(row.handle)}/avatar`
+          : null,
       });
     }
   }

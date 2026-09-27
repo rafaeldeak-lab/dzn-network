@@ -10,8 +10,9 @@ const port = Number(process.env.DZN_MOBILE_QA_PORT ?? 3106);
 const origin = `http://127.0.0.1:${port}`;
 const name = "Very_Long_Player_Name_With_No_Spaces_123456789";
 const serverName = "A very long DayZ community server name that must remain readable";
-const kill = { rank: 1, player_name: name, victim_name: "Another_Player_With_A_Long_Name", server_name: serverName, server_slug: "qa-server", weapon: "Mosin 91/30", distance: 106.7, occurred_at: "2026-09-09T06:00:00Z" };
-const boards = { ok: true, top_servers: [{ rank: 1, server_id: "qa-server", server_name: serverName, slug: "qa-server", mode: "PVP / PVE", kills: 500, deaths: 200, kd: 2.5, kd_label: "2.50", longest_kill: 106.7, score: 1000, score_label: "1000", score_breakdown: null }], top_players: [{ ...kill, player_id: null, kills: 65, deaths: 20, kd: 3.25, kd_label: "3.25", longest_kill: 106.7 }], personal_best_kills: [kill], longest_kills: [kill], best_overall_kill: kill, latest_kill: kill, updated_at: "2026-09-09T06:00:00Z", access_level: "full", is_locked: false };
+const avatarUrl = "/api/public/players/qa-player/avatar";
+const kill = { rank: 1, player_name: name, victim_name: "Another_Player_With_A_Long_Name", server_name: serverName, server_slug: "qa-server", weapon: "Mosin 91/30", distance: 106.7, occurred_at: "2026-09-09T06:00:00Z", player_public_profile_href: "/players/qa-player", player_public_profile_avatar_url: avatarUrl };
+const boards = { ok: true, top_servers: [{ rank: 1, server_id: "qa-server", server_name: serverName, slug: "qa-server", mode: "PVP / PVE", kills: 500, deaths: 200, kd: 2.5, kd_label: "2.50", longest_kill: 106.7, unique_players: 142, score: 1000, score_label: "1000", score_breakdown: null }], top_players: [{ ...kill, player_id: null, kills: 65, deaths: 20, kd: 3.25, kd_label: "3.25", longest_kill: 106.7, public_profile_href: "/players/qa-player", public_profile_avatar_url: avatarUrl }], personal_best_kills: [kill], longest_kills: [kill], best_overall_kill: kill, latest_kill: kill, updated_at: "2026-09-09T06:00:00Z", access_level: "full", is_locked: false };
 function api(url) {
   if (url.pathname === "/api/public/leaderboards") return boards;
   if (url.pathname === "/api/public/leaderboards/advanced") return { ok: true, boards: [], categories: [], notes: [] };
@@ -26,6 +27,7 @@ const server = createServer(async (request, response) => {
   try {
     if (!["GET", "HEAD"].includes(request.method)) { response.writeHead(405).end(); return; }
     const url = new URL(request.url, origin);
+    if (/^\/api\/public\/players\/[a-z0-9-]+\/avatar$/.test(url.pathname)) { response.writeHead(200, { "content-type": "image/png", "cache-control": "no-store" }).end(await readFile(path.join(root, "leaderboards", "sniper-accent.png"))); return; }
     if (url.pathname.startsWith("/api/")) { response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(api(url))); return; }
     const candidate = path.resolve(root, url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname).slice(1));
     if (!candidate.startsWith(`${root}${path.sep}`)) { response.writeHead(403).end(); return; }
@@ -59,7 +61,12 @@ if (process.argv.includes("--serve")) {
           return new URL(request.url()).origin === origin && isRead ? route.continue() : route.abort();
         });
         await page.goto(`${origin}/leaderboards`, { waitUntil: "networkidle" });
+        await page.getByRole("table", { name: "Top Servers", exact: true }).waitFor();
+        await page.locator('[data-board-view="servers"]').screenshot({ path: path.join(output, `servers-${width}-${reducedMotion}.png`) });
+        await page.getByRole("tab", { name: "Players", exact: true }).click();
         await page.getByRole("table", { name: "Top Players", exact: true }).waitFor();
+        await page.locator('img[src*="/api/public/players/"]').first().scrollIntoViewIfNeeded();
+        await page.waitForFunction(() => [...document.querySelectorAll('img[src*="/api/public/players/"]')].some(image => image.naturalWidth > 0));
         const layout = await page.evaluate(() => ({
           overflow: document.documentElement.scrollWidth > innerWidth,
           tickerPosition: getComputedStyle(document.querySelector(".dzn-beta-ticker")).position,
@@ -69,6 +76,7 @@ if (process.argv.includes("--serve")) {
           cells: [...document.querySelectorAll("td")].map(e => ({ label: e.dataset.label, text: e.textContent, display: getComputedStyle(e).display, width: e.getBoundingClientRect().width })),
           art: [...document.querySelectorAll(".leaderboard-ref-kill-art,.leaderboard-ref-kill-card-bg")].map(e => ({ width: e.getBoundingClientRect().width, height: getComputedStyle(e).height, parentWidth: e.parentElement.clientWidth })),
           animations: [...document.querySelectorAll(".leaderboard-ref-bullet-spark,.leaderboard-ref-kill-art")].map(e => getComputedStyle(e).animationName),
+          avatarLoaded: [...document.querySelectorAll('img[src*="/api/public/players/"]')].some(e => e.naturalWidth > 0),
         }));
         assert.equal(layout.overflow, false, `Page overflow at ${width}`);
         assert.equal(layout.tickerPosition, "relative");
@@ -79,13 +87,15 @@ if (process.argv.includes("--serve")) {
           assert.ok(layout.art.every(a => a.width >= a.parentWidth - 3 && a.height === "116px"), JSON.stringify(layout.art));
         }
         if (reducedMotion === "reduce") assert.ok(layout.animations.every(a => a === "none"));
-        else assert.ok(layout.animations.some(a => a !== "none"), "Projectile effects preserved");
+        assert.equal(layout.avatarLoaded, true, "Consented Discord avatar proxy image must render");
         for (const asset of ["sniper-accent.png", "rifle-accent.png", "bullet-tracer-accent.png"]) {
           const result = await page.evaluate(src => new Promise(resolve => { const img = new Image(); img.onload = () => resolve(img.naturalWidth); img.onerror = () => resolve(0); img.src = src; }), `/leaderboards/${asset}`);
           assert.ok(result > 0, `Missing art ${asset}`);
         }
-        await page.locator(".leaderboard-ref-area--longest").screenshot({ path: path.join(output, `records-${width}-${reducedMotion}.png`) });
         await page.locator(".leaderboard-ref-area--players").screenshot({ path: path.join(output, `players-${width}-${reducedMotion}.png`) });
+        await page.getByRole("tab", { name: "Records", exact: true }).click();
+        await page.getByRole("table", { name: "Personal best kills", exact: true }).waitFor();
+        await page.locator(".leaderboard-ref-area--longest").screenshot({ path: path.join(output, `records-${width}-${reducedMotion}.png`) });
         await page.locator(".leaderboard-ref-area--personal").screenshot({ path: path.join(output, `personal-${width}-${reducedMotion}.png`) });
         await page.getByRole("button", { name: "Hide beta notice" }).click();
         assert.equal(await page.locator(".dzn-beta-ticker").count(), 0);

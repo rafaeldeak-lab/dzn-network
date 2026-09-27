@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Activity, ArrowRight, Compass, Crosshair, Hammer, Lock, Map, RadioTower, Route, Shield, Skull, Trophy, Users } from "lucide-react";
+import { Activity, ArrowRight, Compass, Crosshair, Gamepad2, Hammer, LayoutGrid, Lock, Map, RadioTower, Route, Shield, Skull, Swords, Trees, Trophy, UserRound, Users } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 
 import { AnimatedBullet, KillProjectileAccent } from "@/components/leaderboards/animated-bullet";
@@ -52,6 +53,7 @@ type LeaderboardPlayer = {
   last_seen: string | null;
   public_profile_handle?: string | null;
   public_profile_href?: string | null;
+  public_profile_avatar_url?: string | null;
 };
 
 type LongestKill = {
@@ -65,6 +67,7 @@ type LongestKill = {
   occurred_at: string | null;
   player_public_profile_handle?: string | null;
   player_public_profile_href?: string | null;
+  player_public_profile_avatar_url?: string | null;
 };
 
 type LeaderboardsPayload = {
@@ -142,6 +145,8 @@ const emptyPayload = {
 const LEADERBOARD_LAST_GOOD_KEY = "dzn:lastGoodLeaderboard";
 const LEADERBOARD_LAST_GOOD_MAX_AGE_MS = 10 * 60 * 1000;
 type LeaderboardLoadState = "loading_initial" | "loaded" | "refreshing" | "refresh_failed" | "empty_real_data" | "error_initial";
+type LeaderboardBoard = "servers" | "players" | "records";
+type LeaderboardMode = "all" | "deathmatch" | "pvp" | "pve" | "survival";
 
 export default function LeaderboardsPage() {
   const [payload, setPayload] = useState<{
@@ -166,6 +171,8 @@ export default function LeaderboardsPage() {
   const [advancedPayload, setAdvancedPayload] = useState<AdvancedLeaderboardsPayload | null>(null);
   const [advancedLoading, setAdvancedLoading] = useState(true);
   const [advancedError, setAdvancedError] = useState("");
+  const [activeBoard, setActiveBoard] = useState<LeaderboardBoard>("servers");
+  const [activeMode, setActiveMode] = useState<LeaderboardMode>("all");
 
   useEffect(() => {
     console.log("DZN LIVE LEADERBOARDS LOADED");
@@ -268,6 +275,10 @@ export default function LeaderboardsPage() {
   const totalPlayers = payload.top_players.length;
   const longestKill = payload.best_overall_kill?.distance ?? payload.personal_best_kills[0]?.distance ?? 0;
   const initialError = loadState === "error_initial";
+  const filteredServers = useMemo(
+    () => payload.top_servers.filter((server) => matchesLeaderboardMode(server.mode, activeMode)),
+    [activeMode, payload.top_servers],
+  );
 
   const playerContent = payload.is_locked ? (
     <LockedLeaderboardPanel title="Top Players" icon={Users} text="Log in with Discord to unlock ranked players, kills, deaths, K/D, and personal records." />
@@ -279,9 +290,10 @@ export default function LeaderboardsPage() {
       actionLabel="View all players"
       actionHref="/login?returnTo=/leaderboards"
       headers={["Rank", "Player", "Server", "Kills", "Deaths", "K/D", "Longest"]}
+      rankValues={payload.top_players.map((player) => player.rank)}
       rows={payload.top_players.map((player, index) => [
         `#${player.rank}`,
-        <PlayerName key="player" name={player.player_name} index={index} href={player.public_profile_href} />,
+        <PlayerName key="player" name={player.player_name} index={index} href={player.public_profile_href} avatarUrl={player.public_profile_avatar_url} />,
         <ServerLink key="server" slug={player.server_slug} label={player.server_name} />,
         formatNumber(player.kills),
         formatNumber(player.deaths),
@@ -337,43 +349,54 @@ export default function LeaderboardsPage() {
         {loading ? <LoadingGrid /> : null}
 
         {!loading && !initialError ? (
-          <div className="leaderboard-ref-grid leaderboard-reference-grid dzn-leaderboard-layout pb-4">
-            <div className="leaderboard-ref-main leaderboard-ref-area--servers leaderboard-reference-area leaderboard-reference-area--servers">
-              <LeaderboardTable
-                title="Top Servers"
-                icon={RadioTower}
-                empty="No ranked servers yet."
-                actionLabel="View all servers"
-                actionHref="/servers"
-                headers={["Rank", "Server", "Mode", "Kills", "Deaths", "K/D", "Longest", "Score"]}
-                rows={payload.top_servers.map((server) => [
-                  `#${server.rank}`,
-                  <ServerLink key="server" slug={server.slug} label={server.server_name} />,
-                  server.mode,
-                  formatNumber(server.kills),
-                  formatNumber(server.deaths),
-                  formatKd(server),
-                  formatDistance(server.longest_kill),
-                  <span key="score" title={scoreBreakdownTitle(server.score_breakdown)}>{server.score_label === "Pending" ? "Pending" : formatNumber(server.score)}</span>,
-                ])}
-              />
-            </div>
+          <div className="leaderboard-ref-board-shell pb-4">
+            <LeaderboardBoardSwitcher activeBoard={activeBoard} onChange={setActiveBoard} />
 
-            <div className="leaderboard-ref-side leaderboard-ref-area--longest leaderboard-reference-area leaderboard-reference-area--longest">
-              <LongestKillsSection
-                bestOverall={payload.is_locked ? null : payload.best_overall_kill}
-                latestKill={payload.is_locked ? null : payload.latest_kill}
-                oneShotKill={payload.is_locked ? null : payload.personal_best_kills[0] ?? payload.longest_kills[0] ?? null}
-              />
-            </div>
+            {activeBoard === "servers" ? (
+              <div id="leaderboard-servers-panel" role="tabpanel" className="leaderboard-ref-board-view" data-board-view="servers">
+                <LeaderboardModeSwitcher activeMode={activeMode} onChange={setActiveMode} />
+                <LeaderboardTable
+                  title="Top Servers"
+                  icon={RadioTower}
+                  empty={activeMode === "all" ? "No ranked servers yet." : `No ranked ${formatModeFilter(activeMode)} servers yet.`}
+                  actionLabel="View all servers"
+                  actionHref="/servers"
+                  headers={["Rank", "Server", "Mode", "Players", "Kills", "Deaths", "K/D", "Score"]}
+                  rankValues={filteredServers.map((server) => server.rank)}
+                  rows={filteredServers.map((server) => [
+                    `#${server.rank}`,
+                    <ServerLink key="server" slug={server.slug} label={server.server_name} />,
+                    <ModeBadge key="mode" mode={server.mode} />,
+                    formatNumber(server.unique_players ?? 0),
+                    formatNumber(server.kills),
+                    formatNumber(server.deaths),
+                    formatKd(server),
+                    <span key="score" className="leaderboard-ref-score" title={scoreBreakdownTitle(server.score_breakdown)}>{server.score_label === "Pending" ? "Pending" : formatNumber(server.score)}</span>,
+                  ])}
+                />
+              </div>
+            ) : null}
 
-            <div className="leaderboard-ref-main leaderboard-ref-area--players leaderboard-reference-area leaderboard-reference-area--players">
-              {playerContent}
-            </div>
+            {activeBoard === "players" ? (
+              <div id="leaderboard-players-panel" role="tabpanel" className="leaderboard-ref-board-view leaderboard-ref-area--players" data-board-view="players">
+                {playerContent}
+              </div>
+            ) : null}
 
-            <div className="leaderboard-ref-main leaderboard-ref-area--personal leaderboard-reference-area leaderboard-reference-area--personal">
-              {personalBestContent}
-            </div>
+            {activeBoard === "records" ? (
+              <div id="leaderboard-records-panel" role="tabpanel" className="leaderboard-ref-records-grid" data-board-view="records">
+                <div className="leaderboard-ref-area--longest">
+                  <LongestKillsSection
+                    bestOverall={payload.is_locked ? null : payload.best_overall_kill}
+                    latestKill={payload.is_locked ? null : payload.latest_kill}
+                    oneShotKill={payload.is_locked ? null : payload.personal_best_kills[0] ?? payload.longest_kills[0] ?? null}
+                  />
+                </div>
+                <div className="leaderboard-ref-area--personal">
+                  {personalBestContent}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -384,6 +407,72 @@ export default function LeaderboardsPage() {
         ) : null}
       </div>
     </main>
+  );
+}
+
+function LeaderboardBoardSwitcher({
+  activeBoard,
+  onChange,
+}: {
+  activeBoard: LeaderboardBoard;
+  onChange: (board: LeaderboardBoard) => void;
+}) {
+  const boards: Array<{ id: LeaderboardBoard; label: string; icon: typeof Activity }> = [
+    { id: "servers", label: "Servers", icon: RadioTower },
+    { id: "players", label: "Players", icon: UserRound },
+    { id: "records", label: "Records", icon: Trophy },
+  ];
+
+  return (
+    <div className="leaderboard-ref-board-tabs" role="tablist" aria-label="Leaderboard boards">
+      {boards.map(({ id, label, icon: Icon }) => (
+        <button
+          key={id}
+          type="button"
+          role="tab"
+          aria-selected={activeBoard === id}
+          aria-controls={`leaderboard-${id}-panel`}
+          className="leaderboard-ref-board-tab"
+          onClick={() => onChange(id)}
+        >
+          <Icon aria-hidden="true" />
+          <span>{label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function LeaderboardModeSwitcher({
+  activeMode,
+  onChange,
+}: {
+  activeMode: LeaderboardMode;
+  onChange: (mode: LeaderboardMode) => void;
+}) {
+  const modes: Array<{ id: LeaderboardMode; label: string; icon: typeof Activity }> = [
+    { id: "all", label: "All Modes", icon: LayoutGrid },
+    { id: "deathmatch", label: "Deathmatch", icon: Skull },
+    { id: "pvp", label: "PvP", icon: Swords },
+    { id: "pve", label: "PvE", icon: Users },
+    { id: "survival", label: "Survival", icon: Trees },
+  ];
+
+  return (
+    <div className="leaderboard-ref-mode-tabs" role="group" aria-label="Filter servers by game mode">
+      {modes.map(({ id, label, icon: Icon }) => (
+        <button
+          key={id}
+          type="button"
+          aria-pressed={activeMode === id}
+          className="leaderboard-ref-mode-tab"
+          onClick={() => onChange(id)}
+        >
+          <Icon aria-hidden="true" />
+          <span>{label}</span>
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -558,7 +647,7 @@ function PersonalBestTable({ personalBests }: { personalBests: LongestKill[] }) 
                       <span className={`leaderboard-ref-rank dzn-rank-badge dzn-rank-badge--${rankTone(index)}`}>#{kill.rank}</span>
                     </td>
                     <td data-label="Player" className="border-y border-white/10 px-3 py-2 text-sm font-black text-white">
-                      <PlayerName name={kill.player_name} index={index} href={kill.player_public_profile_href} />
+                      <PlayerName name={kill.player_name} index={index} href={kill.player_public_profile_href} avatarUrl={kill.player_public_profile_avatar_url} />
                     </td>
                     <td data-label="Victim" className="border-y border-white/10 px-3 py-2 text-sm font-bold text-zinc-200">{kill.victim_name}</td>
                     <td data-label="Server" className="border-y border-white/10 px-3 py-2 text-sm font-bold text-zinc-200">
@@ -611,7 +700,7 @@ function KillHighlightCard({
           <>
             <p className="mt-1 text-2xl font-black text-white">{formatDistance(kill.distance)}</p>
             <p className="mt-1 max-w-[58%] text-[11px] font-bold leading-4 text-zinc-100">
-              <InlinePlayerProfileLink name={kill.player_name} href={kill.player_public_profile_href} /> eliminated {kill.victim_name} with {kill.weapon}
+              <InlinePlayerProfileLink name={kill.player_name} href={kill.player_public_profile_href} avatarUrl={kill.player_public_profile_avatar_url} /> eliminated {kill.victim_name} with {kill.weapon}
             </p>
             <div className="mt-2 flex max-w-[64%] flex-wrap items-center gap-2 text-[10px] font-bold text-zinc-300">
               <ServerLink slug={kill.server_slug} label={kill.server_name} />
@@ -662,6 +751,7 @@ function LeaderboardTable({
   empty,
   actionLabel,
   actionHref,
+  rankValues,
 }: {
   title: string;
   icon: typeof Activity;
@@ -670,6 +760,7 @@ function LeaderboardTable({
   empty: string;
   actionLabel?: string;
   actionHref?: string;
+  rankValues?: number[];
 }) {
   return (
     <section className="leaderboard-ref-panel leaderboard-reference-panel dzn-leaderboard-card glass-surface animated-border rounded p-4">
@@ -699,17 +790,21 @@ function LeaderboardTable({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, rowIndex) => (
-                  <tr key={rowIndex} className="dzn-leaderboard-row rounded-lg bg-black/24">
+                {rows.map((row, rowIndex) => {
+                  const rowRank = rankValues?.[rowIndex] ?? rowIndex + 1;
+                  const rowTone = rankTone(rowRank - 1);
+                  return (
+                  <tr key={rowIndex} className={`dzn-leaderboard-row dzn-leaderboard-row--${rowTone} rounded-lg bg-black/24`}>
                     {row.map((cell, cellIndex) => (
                       <td key={cellIndex} data-label={headers[cellIndex]} className="border-y border-white/10 px-3 py-2 first:rounded-l last:rounded-r">
-                        <span className={cellIndex === 0 ? `leaderboard-ref-rank dzn-rank-badge dzn-rank-badge--${rankTone(rowIndex)}` : "text-sm font-bold text-zinc-100"}>
+                        <span className={cellIndex === 0 ? `leaderboard-ref-rank dzn-rank-badge dzn-rank-badge--${rowTone}` : "text-sm font-bold text-zinc-100"}>
                           {cell}
                         </span>
                       </td>
                     ))}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -734,14 +829,15 @@ function StatCard({ icon: Icon, label, value, tone }: { icon: typeof Activity; l
   );
 }
 
-function PlayerName({ name, index, href }: { name: string; index: number; href?: string | null }) {
+function PlayerName({ name, index, href, avatarUrl }: { name: string; index: number; href?: string | null; avatarUrl?: string | null }) {
   const safeHref = safePublicProfileHref(href);
   const nameContent = (
     <>
-      <span className={`leaderboard-reference-avatar leaderboard-reference-avatar--${rankTone(index)}`} aria-hidden="true">
-        {name.slice(0, 1).toUpperCase()}
+      <PlayerAvatar name={name} index={index} avatarUrl={avatarUrl} />
+      <span className="leaderboard-ref-player-copy">
+        <strong>{name}</strong>
+        {safeHref ? <small>DZN public profile</small> : <small>Leaderboard player</small>}
       </span>
-      <span>{name}</span>
     </>
   );
 
@@ -756,6 +852,7 @@ function PlayerName({ name, index, href }: { name: string; index: number; href?:
   return (
     <Link
       href={safeHref}
+      prefetch={false}
       aria-label={`View public profile for ${name}`}
       className="leaderboard-ref-player leaderboard-reference-player inline-flex items-center gap-2 text-white transition hover:text-cyan-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200"
     >
@@ -764,13 +861,38 @@ function PlayerName({ name, index, href }: { name: string; index: number; href?:
   );
 }
 
-function InlinePlayerProfileLink({ name, href }: { name: string; href?: string | null }) {
+function PlayerAvatar({ name, index, avatarUrl, compact = false }: { name: string; index: number; avatarUrl?: string | null; compact?: boolean }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const safeAvatarUrl = safePublicProfileAvatarUrl(avatarUrl);
+  const className = `leaderboard-reference-avatar leaderboard-reference-avatar--${rankTone(index)}${compact ? " leaderboard-reference-avatar--compact" : ""}`;
+
+  return (
+    <span className={className} aria-hidden="true">
+      {safeAvatarUrl && !imageFailed ? (
+        <Image src={safeAvatarUrl} alt="" width={48} height={48} unoptimized onError={() => setImageFailed(true)} />
+      ) : name.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+function InlinePlayerProfileLink({ name, href, avatarUrl }: { name: string; href?: string | null; avatarUrl?: string | null }) {
   const safeHref = safePublicProfileHref(href);
   if (!safeHref) return <>{name}</>;
   return (
-    <Link href={safeHref} className="text-cyan-100 transition hover:text-white" aria-label={`View public profile for ${name}`}>
+    <Link href={safeHref} prefetch={false} className="leaderboard-ref-inline-player text-cyan-100 transition hover:text-white" aria-label={`View public profile for ${name}`}>
+      <PlayerAvatar name={name} index={3} avatarUrl={avatarUrl} compact />
       {name}
     </Link>
+  );
+}
+
+function ModeBadge({ mode }: { mode: string }) {
+  const normalized = mode.trim() || "Unknown";
+  return (
+    <span className={`leaderboard-ref-mode-badge leaderboard-ref-mode-badge--${modeTone(normalized)}`}>
+      <Gamepad2 aria-hidden="true" />
+      {normalized}
+    </span>
   );
 }
 
@@ -870,8 +992,10 @@ function stripVolatileLeaderboardProfileLinks(value: unknown): unknown {
 function isVolatilePublicProfileLinkKey(key: string) {
   return key === "public_profile_handle"
     || key === "public_profile_href"
+    || key === "public_profile_avatar_url"
     || key === "player_public_profile_handle"
-    || key === "player_public_profile_href";
+    || key === "player_public_profile_href"
+    || key === "player_public_profile_avatar_url";
 }
 
 function hasMeaningfulLeaderboard(payload: {
@@ -923,6 +1047,7 @@ function normalizePlayer(player: LeaderboardPlayer): LeaderboardPlayer {
     last_seen: player.last_seen ?? null,
     public_profile_handle: typeof player.public_profile_handle === "string" ? player.public_profile_handle : null,
     public_profile_href: safePublicProfileHref(player.public_profile_href),
+    public_profile_avatar_url: safePublicProfileAvatarUrl(player.public_profile_avatar_url),
   };
 }
 
@@ -938,6 +1063,7 @@ function normalizeLongestKill(kill: LongestKill): LongestKill {
     occurred_at: kill.occurred_at ?? null,
     player_public_profile_handle: typeof kill.player_public_profile_handle === "string" ? kill.player_public_profile_handle : null,
     player_public_profile_href: safePublicProfileHref(kill.player_public_profile_href),
+    player_public_profile_avatar_url: safePublicProfileAvatarUrl(kill.player_public_profile_avatar_url),
   };
 }
 
@@ -952,11 +1078,40 @@ function normalizeKillHighlight(kill: Omit<LongestKill, "rank">): Omit<LongestKi
     occurred_at: kill.occurred_at ?? null,
     player_public_profile_handle: typeof kill.player_public_profile_handle === "string" ? kill.player_public_profile_handle : null,
     player_public_profile_href: safePublicProfileHref(kill.player_public_profile_href),
+    player_public_profile_avatar_url: safePublicProfileAvatarUrl(kill.player_public_profile_avatar_url),
   };
 }
 
 function safePublicProfileHref(value: string | null | undefined) {
   return typeof value === "string" && /^\/players\/[a-z0-9-]{3,48}$/.test(value) ? value : null;
+}
+
+function safePublicProfileAvatarUrl(value: string | null | undefined) {
+  return typeof value === "string" && /^\/api\/public\/players\/[a-z0-9-]{3,48}\/avatar$/.test(value) ? value : null;
+}
+
+function matchesLeaderboardMode(mode: string, filter: LeaderboardMode) {
+  if (filter === "all") return true;
+  const normalized = mode.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  const tokens = normalized.trim().split(/\s+/);
+  if (filter === "deathmatch") return normalized.includes("deathmatch") || tokens.includes("dm");
+  if (filter === "survival") return normalized.includes("survival");
+  return tokens.includes(filter);
+}
+
+function formatModeFilter(mode: LeaderboardMode) {
+  if (mode === "pvp") return "PvP";
+  if (mode === "pve") return "PvE";
+  return mode.replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function modeTone(mode: string) {
+  const normalized = mode.toLowerCase();
+  if (normalized.includes("deathmatch")) return "deathmatch";
+  if (normalized.includes("pvp")) return "pvp";
+  if (normalized.includes("pve")) return "pve";
+  if (normalized.includes("survival")) return "survival";
+  return "standard";
 }
 
 function formatKd(item: { kd: number | null; kd_label: string }) {

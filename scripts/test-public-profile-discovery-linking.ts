@@ -25,6 +25,8 @@ const linkHelperSource = profileHelperSource.slice(
 );
 assert.match(linkHelperSource, /player_public_profiles\.status = 'active'/, "Profile attribution links must require an active public handle.");
 assert.match(linkHelperSource, /player_profile_privacy_preferences\.public_profile_enabled = 1/, "Profile attribution links must require saved public-profile opt-in.");
+assert.match(linkHelperSource, /player_public_discord_identity_preferences\.enabled AS discord_identity_enabled/, "Discord avatars must require the independent identity consent source.");
+assert.match(linkHelperSource, /\/api\/public\/players\/\$\{encodeURIComponent\(row\.handle\)\}\/avatar/, "Leaderboard avatars must use the public same-origin proxy.");
 assert.match(linkHelperSource, /maxPublicProfileLinkLookupIds/, "Profile attribution link lookups must stay bounded.");
 assert.doesNotMatch(
   linkHelperSource,
@@ -55,8 +57,9 @@ assert.match(leaderboardsPageSource, /function InlinePlayerProfileLink/, "Leader
 assert.match(packageJson, /"test:public-profile-discovery-linking": "tsx scripts\/test-public-profile-discovery-linking\.ts"/, "Dedicated public profile discovery-linking test script must be registered.");
 
 async function testOptInProfileLinkLookup() {
+  const visibleDiscordId = "831243159785701398";
   const db = new FakeProfileLinkD1();
-  db.users.set("visible-user", { discord_id: "visible-discord" });
+  db.users.set("visible-user", { discord_id: visibleDiscordId });
   db.users.set("private-user", { discord_id: "private-discord" });
   db.users.set("disabled-user", { discord_id: "disabled-discord" });
   db.users.set("other-user", { discord_id: "other-discord" });
@@ -66,10 +69,12 @@ async function testOptInProfileLinkLookup() {
   db.preferences.set("visible-user", { public_profile_enabled: 1 });
   db.preferences.set("private-user", { public_profile_enabled: 0 });
   db.preferences.set("disabled-user", { public_profile_enabled: 1 });
+  db.avatars.set("visible-user", "visible_avatar_hash");
+  db.discordIdentityPreferences.set("visible-user", 1);
 
   const links = await readPublicProfileLinksByDiscordIds({ DB: db } as unknown as Env, [
-    "visible-discord",
-    "visible-discord",
+    visibleDiscordId,
+    visibleDiscordId,
     " private-discord ",
     "disabled-discord",
     "missing-discord",
@@ -78,20 +83,30 @@ async function testOptInProfileLinkLookup() {
     undefined,
   ]);
 
-  assert.deepEqual(links.get("visible-discord"), {
+  assert.deepEqual(links.get(visibleDiscordId), {
     handle: "visible-player",
     href: publicProfileHref("visible-player"),
+    avatar_url: "/api/public/players/visible-player/avatar",
   });
   assert.equal(links.has("private-discord"), false, "Private profiles must not receive attribution links.");
   assert.equal(links.has("disabled-discord"), false, "Disabled handles must not receive attribution links.");
   assert.equal(links.has("missing-discord"), false, "Missing users must not receive attribution links.");
   assert.equal(db.lastBindings.length, 4, "Lookup must de-duplicate and trim requested Discord IDs.");
   assert.equal(JSON.stringify([...links]).includes("other-discord"), false, "Other-user Discord IDs must not be exposed.");
+
+  const preConsentMigrationDb = new FakeProfileLinkD1({ consentTableAvailable: false });
+  preConsentMigrationDb.users.set("visible-user", { discord_id: visibleDiscordId });
+  preConsentMigrationDb.publicProfiles.set("visible-user", { handle: "visible-player", status: "active" });
+  preConsentMigrationDb.preferences.set("visible-user", { public_profile_enabled: 1 });
+  preConsentMigrationDb.avatars.set("visible-user", "visible_avatar_hash");
+  const preMigrationLinks = await readPublicProfileLinksByDiscordIds({ DB: preConsentMigrationDb } as unknown as Env, [visibleDiscordId]);
+  assert.equal(preMigrationLinks.get(visibleDiscordId)?.href, "/players/visible-player", "Public profile links must survive before the consent migration is active.");
+  assert.equal(preMigrationLinks.get(visibleDiscordId)?.avatar_url, null, "Discord avatars must fail closed before independent consent is available.");
 }
 
 function testReviewAttributionIsPresentationOnly() {
   const links = new Map<string, PublicProfileLink>([
-    ["visible-discord", { handle: "visible-player", href: "/players/visible-player" }],
+    ["visible-discord", { handle: "visible-player", href: "/players/visible-player", avatar_url: "/api/public/players/visible-player/avatar" }],
   ]);
   const rows: ServerReviewRow[] = [
     reviewRow({ id: "visible-review", reviewerDiscordId: "visible-discord", rating: 5, status: "approved" }),
@@ -113,7 +128,7 @@ function testReviewAttributionIsPresentationOnly() {
 
 function testLeaderboardAttributionIsPresentationOnly() {
   const links = new Map<string, PublicProfileLink>([
-    ["visible-discord", { handle: "visible-player", href: "/players/visible-player" }],
+    ["visible-discord", { handle: "visible-player", href: "/players/visible-player", avatar_url: "/api/public/players/visible-player/avatar" }],
   ]);
   const input = [
     {
@@ -146,6 +161,7 @@ function testLeaderboardAttributionIsPresentationOnly() {
     "Public profile attribution must not change player ranks or metrics.",
   );
   assert.equal(withLinks[0].public_profile_href, "/players/visible-player");
+  assert.equal(withLinks[0].public_profile_avatar_url, "/api/public/players/visible-player/avatar");
   assert.equal(withLinks[1].public_profile_href, null);
   assert.equal(JSON.stringify(withLinks).includes("visible-discord"), false, "Leaderboard payloads must not expose Discord IDs.");
   assert.equal(JSON.stringify(withLinks).includes("private-discord"), false, "Leaderboard payloads must not expose private Discord IDs.");
@@ -177,6 +193,7 @@ function testLeaderboardAttributionIsPresentationOnly() {
 
   assert.equal(longestKills[0].rank, 1);
   assert.equal(longestKills[0].player_public_profile_href, "/players/visible-player");
+  assert.equal(longestKills[0].player_public_profile_avatar_url, "/api/public/players/visible-player/avatar");
   assert.equal(longestKills[1].player_public_profile_href, null);
   assert.equal(JSON.stringify(longestKills).includes("visible-discord"), false, "Longest-kill payloads must not expose Discord IDs.");
 }
@@ -187,6 +204,7 @@ function testSnapshotPrivacyStrip() {
       player_name: "Visible Ace",
       public_profile_handle: "visible-player",
       public_profile_href: "/players/visible-player",
+      public_profile_avatar_url: "/api/public/players/visible-player/avatar",
     }],
     reviews: [{
       reviewer_name: "Visible Ace",
@@ -197,6 +215,7 @@ function testSnapshotPrivacyStrip() {
       player_name: "Visible Ace",
       player_public_profile_handle: "visible-player",
       player_public_profile_href: "/players/visible-player",
+      player_public_profile_avatar_url: "/api/public/players/visible-player/avatar",
     },
   };
 
@@ -206,6 +225,7 @@ function testSnapshotPrivacyStrip() {
   assert.equal(serialized.includes("public_profile_href"), false, "Snapshot fallbacks must not retain public profile hrefs.");
   assert.equal(serialized.includes("public_profile_handle"), false, "Snapshot fallbacks must not retain public profile handles.");
   assert.equal(serialized.includes("player_public_profile_href"), false, "Snapshot fallbacks must not retain kill-highlight public profile hrefs.");
+  assert.equal(serialized.includes("profile_avatar_url"), false, "Snapshot fallbacks must not retain consent-sensitive avatar proxy URLs.");
   assert.equal((stripped as typeof snapshot).top_players[0].player_name, "Visible Ace", "Snapshot stripping must preserve non-profile public data.");
 }
 
@@ -226,8 +246,12 @@ class FakeProfileLinkD1 {
   readonly users = new Map<string, FakeUser>();
   readonly publicProfiles = new Map<string, FakePublicProfile>();
   readonly preferences = new Map<string, FakePreference>();
+  readonly avatars = new Map<string, string>();
+  readonly discordIdentityPreferences = new Map<string, number>();
   readonly queries: string[] = [];
   lastBindings: unknown[] = [];
+
+  constructor(readonly options: { consentTableAvailable?: boolean } = {}) {}
 
   prepare(query: string) {
     this.queries.push(normalizedSql(query));
@@ -251,18 +275,27 @@ class FakeProfileLinkStatement {
 
   async all<T>() {
     const query = normalizedSql(this.query);
+    if (query.includes("left join player_public_discord_identity_preferences") && this.db.options.consentTableAvailable === false) {
+      throw new Error("no such table: player_public_discord_identity_preferences");
+    }
     assert.match(query, /from users inner join player_public_profiles/, "Profile link lookups must bridge from users to active public profile handles.");
     assert.match(query, /inner join player_profile_privacy_preferences/, "Profile link lookups must require saved privacy preferences.");
 
     const requestedDiscordIds = new Set(this.bindings.map(String));
-    const rows: Array<{ discord_id: string; handle: string }> = [];
+    const rows: Array<{ discord_id: string; handle: string; avatar: string | null; discord_identity_enabled: number }> = [];
     for (const [userId, user] of this.db.users) {
       const profile = this.db.publicProfiles.get(userId);
       const preference = this.db.preferences.get(userId);
       if (!requestedDiscordIds.has(user.discord_id)) continue;
       if (!profile || profile.status !== "active") continue;
       if (preference?.public_profile_enabled !== 1) continue;
-      rows.push({ discord_id: user.discord_id, handle: profile.handle });
+      const consentAware = query.includes("left join player_public_discord_identity_preferences");
+      rows.push({
+        discord_id: user.discord_id,
+        handle: profile.handle,
+        avatar: consentAware ? this.db.avatars.get(userId) ?? null : null,
+        discord_identity_enabled: consentAware ? this.db.discordIdentityPreferences.get(userId) ?? 0 : 0,
+      });
     }
     return { results: rows, success: true, meta: {} } as T;
   }

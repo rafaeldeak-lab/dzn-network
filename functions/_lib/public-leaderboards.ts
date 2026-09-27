@@ -28,6 +28,7 @@ export type PublicLeaderboardPlayer = {
   last_seen: string | null;
   public_profile_handle?: string | null;
   public_profile_href?: string | null;
+  public_profile_avatar_url?: string | null;
   highest_killstreak?: number;
   total_time_alive_seconds?: number;
   headshots?: number;
@@ -67,6 +68,7 @@ export type PublicLongestKill = {
   occurred_at: string | null;
   player_public_profile_handle?: string | null;
   player_public_profile_href?: string | null;
+  player_public_profile_avatar_url?: string | null;
 };
 
 export type PublicKillHighlight = Omit<PublicLongestKill, "rank">;
@@ -572,6 +574,7 @@ export function rankPublicPlayers(
         last_seen: player.lastSeen ?? null,
         public_profile_handle: publicProfile?.handle ?? null,
         public_profile_href: publicProfile?.href ?? null,
+        public_profile_avatar_url: publicProfile?.avatar_url ?? null,
       } satisfies PublicLeaderboardPlayer;
     });
 }
@@ -611,6 +614,7 @@ export function rankLongestKills(
       occurred_at: row.occurred_at ?? null,
       player_public_profile_handle: row.discord_id ? publicProfileLinksByDiscordId.get(row.discord_id)?.handle ?? null : null,
       player_public_profile_href: row.discord_id ? publicProfileLinksByDiscordId.get(row.discord_id)?.href ?? null : null,
+      player_public_profile_avatar_url: row.discord_id ? publicProfileLinksByDiscordId.get(row.discord_id)?.avatar_url ?? null : null,
     } satisfies PublicLongestKill));
 }
 
@@ -829,6 +833,7 @@ async function getTelemetryLeaderboard(env: Env, metric: PublicLeaderboardMetric
       spawn_kills_count: numberOrZero(row.spawn_kills_count),
       public_profile_handle: publicProfile?.handle ?? null,
       public_profile_href: publicProfile?.href ?? null,
+      public_profile_avatar_url: publicProfile?.avatar_url ?? null,
       metric,
       metric_value: metricValue,
       metric_label: formatMetricLabel(metric, metricValue),
@@ -878,6 +883,7 @@ function toKillHighlight(
     occurred_at: row.occurred_at ?? row.created_at ?? null,
     player_public_profile_handle: publicProfile?.handle ?? null,
     player_public_profile_href: publicProfile?.href ?? null,
+    player_public_profile_avatar_url: publicProfile?.avatar_url ?? null,
   };
 }
 
