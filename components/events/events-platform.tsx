@@ -34,6 +34,7 @@ import {
   fallbackServerEvents,
   fallbackServers,
   type CompetitiveEvent,
+  type EventActivity,
   type EventDetailPayload,
   type EventMatch,
   type EventsPayload,
@@ -345,6 +346,7 @@ export function EventCreatePage() {
 export function EventsHubPage() {
   const fallback = useMemo(() => fallbackEventsPayload(), []);
   const { data, loadState } = useEventsPayload("/api/events?limit=24", fallback);
+  const liveActivity = useLiveEventActivity();
   const active = data.events.filter((event) => event.status === "live");
   const upcoming = data.events.filter((event) => ["upcoming", "registration_open", "standby"].includes(event.status));
   const featured = (active[0] ?? upcoming[0] ?? data.events[0]) ?? null;
@@ -361,7 +363,7 @@ export function EventsHubPage() {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.15fr)_320px]">
         <UpcomingEventsPanel events={upcoming.slice(0, 3)} />
         <BracketPreviewPanel event={featured} matches={usingDisplayFallback ? fallbackMatches : []} />
-        <LiveActivityFeed activity={usingDisplayFallback ? fallbackActivity : []} />
+        <LiveActivityFeed activity={usingDisplayFallback ? fallbackActivity : liveActivity} />
       </div>
       <NetworkEventStats summary={data.summary} />
       <ServerWarsTeaser />
@@ -377,6 +379,9 @@ export function EventsHubPage() {
 function FeaturedEventStage({ event }: { event: CompetitiveEvent | null }) {
   if (!event) return <div className="min-h-[330px] border border-dashed border-white/10 bg-white/[0.02]" />;
   const live = event.status === "live";
+  const ended = event.status === "ended";
+  const timingLabel = ended ? "Ended" : live ? "Ends" : "Starts";
+  const timingValue = ended || live ? event.ends_at : event.starts_at;
   return (
     <section data-featured-event className="relative min-h-[330px] overflow-hidden border border-cyan-300/24 bg-cover bg-center" style={eventImageStyle(event.banner_url)}>
       <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(2,6,23,0.96),rgba(2,6,23,0.7)_58%,rgba(2,6,23,0.32))]" />
@@ -397,8 +402,8 @@ function FeaturedEventStage({ event }: { event: CompetitiveEvent | null }) {
             <span className="inline-flex items-center gap-2"><Server className="h-4 w-4 text-emerald-300" />{formatNumber(event.registered_servers)} servers</span>
           </div>
           <div className="mt-6 flex flex-wrap items-center gap-3">
-            <Link href={`/events/${event.slug}`} className="inline-flex items-center gap-2 rounded-md border border-cyan-200/55 bg-cyan-400/22 px-5 py-3 text-xs font-black uppercase text-white transition hover:bg-cyan-400/32">{live ? "Open live event" : "View event"}<ArrowRight className="h-4 w-4" /></Link>
-            <div className="rounded-md border border-white/12 bg-black/38 px-4 py-3 text-[10px] font-black uppercase text-zinc-300">{live ? "Ends" : "Starts"} <span className="ml-1 text-white"><ClientTimeUntil value={live ? event.ends_at : event.starts_at} /></span></div>
+            <Link href={`/events/${event.slug}`} className="inline-flex items-center gap-2 rounded-md border border-cyan-200/55 bg-cyan-400/22 px-5 py-3 text-xs font-black uppercase text-white transition hover:bg-cyan-400/32">{live ? "Open live event" : ended ? "View results" : "View event"}<ArrowRight className="h-4 w-4" /></Link>
+            <div className="rounded-md border border-white/12 bg-black/38 px-4 py-3 text-[10px] font-black uppercase text-zinc-300">{timingLabel} <span className="ml-1 text-white"><ClientTimeUntil value={timingValue} /></span></div>
           </div>
         </div>
       </div>
@@ -833,6 +838,29 @@ function useEventsPayload(endpoint: string, fallback: EventsPayload) {
       });
   }, [endpoint, fallback]);
   return { data, loadState };
+}
+
+function useLiveEventActivity() {
+  const [activity, setActivity] = useState<EventActivity[]>([]);
+  useEffect(() => {
+    let active = true;
+    fetchJsonWithRetry<{ ok: boolean; source: string; activity?: EventActivity[] }>("/api/events/live-feed?limit=6", {
+      credentials: "include",
+      headers: { accept: "application/json" },
+      timeoutMs: 12_000,
+    })
+      .then((payload) => {
+        if (!active) return;
+        setActivity(payload.ok && payload.source === "live" && Array.isArray(payload.activity) ? payload.activity : []);
+      })
+      .catch(() => {
+        if (active) setActivity([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  return activity;
 }
 
 function useEventDetail(slug: string) {
