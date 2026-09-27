@@ -424,14 +424,17 @@ export async function markAllNotificationsRead(env: Env, user: SessionUser) {
 export async function clearReadNotifications(env: Env, user: SessionUser) {
   if (!isDznPulseEnabled(env)) return { status: 404, ...pulseFeatureDisabledPayload() };
   const db = requireDb(env);
-  // Preserve the single delivery receipt so clearing a payment notice cannot recreate it on every visit.
+  // Expire durable receipts from the inbox while retaining their delivery/open state for support views.
   const results = await db.batch([
     db.prepare(`UPDATE user_notifications SET expires_at = CURRENT_TIMESTAMP
-      WHERE user_id = ? AND type IN (?, ?) AND read_at IS NOT NULL
+      WHERE user_id = ? AND read_at IS NOT NULL
+        AND (type IN (?, ?) OR COALESCE(action_url, '') = ? OR dedupe_key LIKE '%-setup-recommendation-%')
         AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`)
-      .bind(user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE),
-    db.prepare("DELETE FROM user_notifications WHERE user_id = ? AND read_at IS NOT NULL AND type NOT IN (?, ?)")
-      .bind(user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE),
+      .bind(user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE, "/setup#review-test"),
+    db.prepare(`DELETE FROM user_notifications
+      WHERE user_id = ? AND read_at IS NOT NULL
+        AND NOT (type IN (?, ?) OR COALESCE(action_url, '') = ? OR dedupe_key LIKE '%-setup-recommendation-%')`)
+      .bind(user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE, "/setup#review-test"),
   ]);
   return { ok: true, status: 200, cleared: results.reduce((sum, result) => sum + (Number(result.meta?.changes) || 0), 0), unreadCount: await countUnreadNotifications(env, user) };
 }

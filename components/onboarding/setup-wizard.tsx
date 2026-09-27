@@ -616,8 +616,9 @@ export function SetupWizard() {
       await draftSaveChainRef.current.catch(() => undefined);
       const refreshed = await getMe().catch(() => null);
       setPublishedServer(refreshed?.linkedServer ?? null);
+      const preserveUnrelatedDraft = reviewMode;
       const draftSchemaUnavailable = draftHydrated && !draftAvailable && draftStatus === "unavailable";
-      let draftCleared = draftSchemaUnavailable;
+      let draftCleared = preserveUnrelatedDraft || draftSchemaUnavailable;
       for (let attempt = 0; !draftCleared && attempt < 3; attempt++) {
         try {
           await clearOnboardingDraft();
@@ -627,8 +628,10 @@ export function SetupWizard() {
         }
       }
       if (draftCleared) {
-        setDraftUpdatedAt(null);
-        setDraftStatus("idle");
+        if (!preserveUnrelatedDraft) {
+          setDraftUpdatedAt(null);
+          setDraftStatus("idle");
+        }
       } else {
         setDraftStatus("failed");
         setPublishError("Your server is live, but saved setup progress could not be cleared. DZN will not overwrite it; retry setup cleanup before starting another setup.");

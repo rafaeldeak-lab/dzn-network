@@ -63,13 +63,16 @@ async function main() {
   assert.match(setupWizardSource, /return \(\) => \{\s*flushPendingDraft\(\);\s*window\.removeEventListener\("beforeunload"/, "Client-side route changes must flush a pending draft when the setup wizard unmounts.");
   assert.doesNotMatch(setupWizardSource, /return \(\) => \{[\s\S]{0,250}queueSave\(true\)/, "Ordinary form-state changes must restart the debounce without issuing an immediate keepalive write.");
   assert.match(setupWizardSource, /draftFlushSuppressedRef\.current = true;[\s\S]*setPublicationComplete\(true\)/, "Publishing must suppress cleanup flushes before draft deletion starts.");
-  assert.match(setupWizardSource, /draftSchemaUnavailable = draftHydrated && !draftAvailable && draftStatus === "unavailable";[\s\S]*let draftCleared = draftSchemaUnavailable/, "Publishing may skip draft deletion only after a confirmed schema-unavailable response.");
+  assert.match(setupWizardSource, /draftSchemaUnavailable = draftHydrated && !draftAvailable && draftStatus === "unavailable";[\s\S]*let draftCleared = preserveUnrelatedDraft \|\| draftSchemaUnavailable/, "Publishing may skip draft deletion only for review mode or after a confirmed schema-unavailable response.");
+  assert.match(setupWizardSource, /preserveUnrelatedDraft = reviewMode;[\s\S]*let draftCleared = preserveUnrelatedDraft \|\| draftSchemaUnavailable;[\s\S]*if \(!preserveUnrelatedDraft\)/, "Publishing from linked-server review mode must preserve an unrelated user onboarding draft.");
   assert.match(setupWizardSource, /await clearOnboardingDraft\(\);\s*setDraftAvailable\(true\);[\s\S]*setReviewMode\(false\);[\s\S]*window\.history\.replaceState/, "A confirmed restart must restore draft saving and leave setup review mode.");
   assert.equal(setupWizardSource.includes("the invite requests Administrator permission"), false, "Bot setup copy must not claim the least-privilege invite requests Administrator.");
   assert.equal(setupWizardSource.includes("View Channels, Send Messages, Embed Links, and Read Message History"), true, "Bot setup copy must name the least-privilege invite permissions.");
   const draftRouteSource = readFileSync("functions/api/onboarding/draft.ts", "utf8");
   const schemaProbe = draftRouteSource.slice(draftRouteSource.indexOf("async function hasDraftSchema"), draftRouteSource.indexOf("function serializeDraft"));
   assert.equal(schemaProbe.includes("catch"), false, "Transient D1 errors must not be reported as a missing migration.");
+  const pulseSource = readFileSync("functions/_lib/dzn-pulse.ts", "utf8");
+  assert.match(pulseSource, /COALESCE\(action_url, ''\) = \? OR dedupe_key LIKE '%-setup-recommendation-%'[\s\S]*DELETE FROM user_notifications[\s\S]*NOT \(type IN \(\?, \?\) OR COALESCE\(action_url, ''\) = \? OR dedupe_key LIKE '%-setup-recommendation-%'\)/, "Clearing read notifications must retain setup delivery receipts for owner support status.");
 
   const unavailableSqlite = new DatabaseSync(":memory:");
   unavailableSqlite.exec(readFileSync("migrations/0001_initial_schema.sql", "utf8"));
