@@ -307,17 +307,22 @@ export function SetupWizard() {
     const queueSave = (keepalive = false) => {
       if (saveQueued) return;
       saveQueued = true;
-      draftSaveChainRef.current = draftSaveChainRef.current
-        .catch(() => undefined)
-        .then(async () => {
+      const performSave = async () => {
+        try {
           const result = await saveOnboardingDraft(payload, { keepalive });
           if (revision !== draftSaveRevisionRef.current) return;
           setDraftUpdatedAt(result.draft?.updatedAt ?? new Date().toISOString());
           setDraftStatus("saved");
-        })
-        .catch(() => {
+        } catch {
           if (revision === draftSaveRevisionRef.current) setDraftStatus("failed");
-        });
+        }
+      };
+      if (keepalive) {
+        const immediateSave = performSave();
+        draftSaveChainRef.current = Promise.allSettled([draftSaveChainRef.current, immediateSave]).then(() => undefined);
+        return;
+      }
+      draftSaveChainRef.current = draftSaveChainRef.current.catch(() => undefined).then(performSave);
     };
 
     draftAutosaveTimerRef.current = window.setTimeout(() => {

@@ -313,15 +313,22 @@ export function DznPulseProvider({
       setNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, read_at: readAt } : item));
       setUnreadCount((count) => Math.max(0, count - 1));
     }
-    if (notification.action_url) navigateToInternal(notification.action_url);
-    try {
-      await fetchJsonWithRetry(`/api/dzn-pulse/notifications/${encodeURIComponent(notification.id)}/read`, {
+    const receipt = fetchJsonWithRetry(`/api/dzn-pulse/notifications/${encodeURIComponent(notification.id)}/read`, {
         method: "POST",
         cache: "no-store",
         credentials: "include",
         headers: { "content-type": "application/json", accept: "application/json" },
+        keepalive: Boolean(notification.action_url),
         retries: 0,
+        timeoutMs: notification.action_url ? 0 : 15_000,
       });
+    if (notification.action_url) {
+      void receipt.catch(() => undefined);
+      navigateToInternal(notification.action_url);
+      return;
+    }
+    try {
+      await receipt;
     } catch {
       if (wasUnread) {
         setNotifications(previousNotifications);

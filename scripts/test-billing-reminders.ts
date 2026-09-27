@@ -58,7 +58,8 @@ function assertNarrowWrites(statements: string[]) {
 
 async function main() {
   const markReadBlock = pulseProviderSource.slice(pulseProviderSource.indexOf("const markRead"), pulseProviderSource.indexOf("const markAllRead"));
-  assert.ok(markReadBlock.indexOf("navigateToInternal(notification.action_url)") < markReadBlock.indexOf("fetchJsonWithRetry"), "Notification destinations must open immediately before best-effort read tracking can delay them.");
+  assert.ok(markReadBlock.indexOf("fetchJsonWithRetry") < markReadBlock.indexOf("navigateToInternal(notification.action_url)"), "The unload-safe read receipt must start before notification navigation.");
+  assert.match(markReadBlock, /keepalive: Boolean\(notification\.action_url\)[\s\S]*void receipt\.catch\(\(\) => undefined\);[\s\S]*navigateToInternal\(notification\.action_url\)/, "Action notifications must keep the receipt alive without delaying navigation.");
   assert.equal(markReadBlock.match(/navigateToInternal\(notification\.action_url\)/g)?.length, 1, "A successful read receipt must navigate exactly once.");
   assert.ok(markReadBlock.indexOf("fetchJsonWithRetry") > markReadBlock.indexOf("const wasUnread"), "Opening an already-read notification must still call the individual read endpoint so opened_at is recorded.");
   const originalFetch = globalThis.fetch;
