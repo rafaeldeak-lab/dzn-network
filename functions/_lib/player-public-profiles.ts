@@ -259,7 +259,7 @@ export async function ensureCurrentPublicProfileHandle(env: Env, user: SessionUs
     if (existingHandle && existingHandle.user_id !== user.id) continue;
 
     try {
-      await db
+      const activated = await db
         .prepare(
           `INSERT INTO player_public_profiles (
             id,
@@ -271,23 +271,23 @@ export async function ensureCurrentPublicProfileHandle(env: Env, user: SessionUs
           ) VALUES (?, ?, ?, 'active', ?, ?)
           ON CONFLICT(user_id) DO UPDATE SET
             status = 'active',
-            updated_at = excluded.updated_at`,
+            updated_at = excluded.updated_at
+          RETURNING handle, status, created_at, updated_at`,
         )
         .bind(crypto.randomUUID(), user.id, candidate, now, now)
-        .run();
+        .first<ExistingPublicProfileRow>();
+      if (!activated?.handle) throw new Error("public_profile_handle_unavailable");
+      return {
+        handle: activated.handle,
+        href: publicProfileHref(activated.handle),
+        status: activated.status === "disabled" ? "disabled" : "active",
+        created_at: activated.created_at,
+        updated_at: activated.updated_at,
+      };
     } catch (error) {
       if (attempt < 9 && isHandleCollision(error)) continue;
       throw error;
     }
-
-    const handle = existing?.handle ?? candidate;
-    return {
-      handle,
-      href: publicProfileHref(handle),
-      status: "active",
-      created_at: existing?.created_at ?? now,
-      updated_at: now,
-    };
   }
 
   throw new Error("public_profile_handle_unavailable");

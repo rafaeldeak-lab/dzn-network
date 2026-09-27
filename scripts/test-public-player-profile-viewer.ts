@@ -404,6 +404,25 @@ class FakeD1PreparedStatement {
       return (row ? { user_id: row.user_id } : null) as T | null;
     }
 
+    if (query.includes("insert into player_public_profiles") && query.includes("returning handle")) {
+      recordProtectedWrite(this.db, query);
+      this.db.writeTargets.push("player_public_profiles");
+      const userId = String(this.bindings[1]);
+      const candidate = String(this.bindings[2]);
+      const now = String(this.bindings[4]);
+      const existing = this.db.publicProfilesByUser.get(userId);
+      const row = {
+        user_id: userId,
+        handle: existing?.handle ?? candidate,
+        status: "active" as const,
+        created_at: existing?.created_at ?? now,
+        updated_at: now,
+      };
+      this.db.publicProfilesByUser.set(userId, row);
+      this.db.publicProfilesByHandle.set(row.handle, row);
+      return row as T;
+    }
+
     if (query.includes("select enabled from player_public_discord_identity_preferences where user_id = ?")) {
       const enabled = this.db.discordIdentityConsent.get(String(this.bindings[0]));
       return (enabled === undefined ? null : { enabled }) as T | null;

@@ -179,6 +179,26 @@ async function testPrivacyRouteRuntimeContract() {
     "A successful handle activation must return the handle written by the UPSERT.",
   );
 
+  const concurrentActivationDb = new FakeD1Database();
+  concurrentActivationDb.concurrentPublicProfileHandle = "concurrent-player-a1b2c3";
+  const concurrentActivation = await callPrivacyRoute(
+    concurrentActivationDb,
+    { DB: concurrentActivationDb, MOCK_AUTH: "true" } as unknown as Env,
+    "PATCH",
+    { settings: { public_profile_enabled: true } },
+  );
+  assert.equal(concurrentActivation.status, 200, "Concurrent first-time profile activation must succeed.");
+  assert.equal(
+    (await concurrentActivation.json() as PrivacyPayload).public_profile_handle,
+    "concurrent-player-a1b2c3",
+    "Concurrent activation must return the handle retained by the UPSERT.",
+  );
+  assert.equal(
+    concurrentActivationDb.publicProfilesByUser.get("mock-user")?.handle,
+    "concurrent-player-a1b2c3",
+    "Concurrent activation must preserve the first stored handle.",
+  );
+
   const saved = await callPrivacyRoute(db, { DB: db, MOCK_AUTH: "true" } as unknown as Env, "PATCH", {
     settings: {
       public_profile_enabled: true,
@@ -290,6 +310,7 @@ class FakeD1Database {
   failPreferenceReads = false;
   failDiscordConsentWrites = false;
   failPublicProfileReadsAfterWrite = false;
+  concurrentPublicProfileHandle: string | null = null;
 
   prepare(query: string) {
     return new FakeD1PreparedStatement(this, query);
@@ -353,6 +374,34 @@ class FakeD1PreparedStatement {
     if (query.includes("from player_public_profiles") && query.includes("where handle = ?")) {
       const userId = this.db.publicProfileOwnersByHandle.get(String(this.bindings[0]));
       return (userId ? { user_id: userId } : null) as T | null;
+    }
+    if (query.includes("insert into player_public_profiles") && query.includes("returning handle")) {
+      recordProtectedWrite(this.db, query);
+      this.db.writeTargets.add("player_public_profiles");
+      const userId = String(this.bindings[1]);
+      const candidate = String(this.bindings[2]);
+      const now = String(this.bindings[4]);
+      if (!this.db.publicProfilesByUser.has(userId) && this.db.concurrentPublicProfileHandle) {
+        const concurrentHandle = this.db.concurrentPublicProfileHandle;
+        this.db.publicProfilesByUser.set(userId, {
+          handle: concurrentHandle,
+          status: "active",
+          created_at: now,
+          updated_at: now,
+        });
+        this.db.publicProfileOwnersByHandle.set(concurrentHandle, userId);
+      }
+      const existing = this.db.publicProfilesByUser.get(userId);
+      const handle = existing?.handle ?? candidate;
+      const activated = {
+        handle,
+        status: "active" as const,
+        created_at: existing?.created_at ?? now,
+        updated_at: now,
+      };
+      this.db.publicProfilesByUser.set(userId, activated);
+      this.db.publicProfileOwnersByHandle.set(handle, userId);
+      return activated as T;
     }
     return null as T | null;
   }
