@@ -663,6 +663,7 @@ async function getSavedDiscordEventChannelSummaryForSettings(env: Env, linkedSer
   selected: SettingsEventChannelSelection;
   liveScoreboardReady: boolean;
   defaultReady: boolean;
+  playerLinkApprovalChannel: SettingsEventChannelSummary | null;
 }> {
   const empty = emptyDiscordEventChannelSummary();
   try {
@@ -686,7 +687,24 @@ async function getSavedDiscordEventChannelSummaryForSettings(env: Env, linkedSer
       }>();
 
     const selected = { ...empty.selected };
+    let playerLinkApprovalChannel: SettingsEventChannelSummary | null = null;
     for (const row of rows.results ?? []) {
+      if (row.channel_type === "player_link_approvals") {
+        const missingPermissions = [
+          row.bot_can_view ? null : "View Channel",
+          row.bot_can_send ? null : "Send Messages",
+          row.bot_can_embed ? null : "Embed Links",
+          row.bot_can_read_history ? null : "Read Message History",
+        ].filter(Boolean) as string[];
+        playerLinkApprovalChannel = {
+          channelId: row.channel_id,
+          channelName: row.channel_name,
+          channelType: row.channel_kind ?? "text",
+          valid: missingPermissions.length === 0,
+          missingPermissions,
+        };
+        continue;
+      }
       if (!isSettingsEventChannelType(row.channel_type)) continue;
       const missingPermissions = [
         row.bot_can_view ? null : "View Channel",
@@ -706,6 +724,7 @@ async function getSavedDiscordEventChannelSummaryForSettings(env: Env, linkedSer
       selected,
       liveScoreboardReady: Boolean(selected.event_live_scoreboard?.valid),
       defaultReady: Boolean(selected.default_event?.valid),
+      playerLinkApprovalChannel,
     };
   } catch (error) {
     console.warn("DZN server settings Discord channel summary skipped", error instanceof Error ? error.message : "unknown error");
@@ -717,6 +736,7 @@ function emptyDiscordEventChannelSummary(): {
   selected: SettingsEventChannelSelection;
   liveScoreboardReady: boolean;
   defaultReady: boolean;
+  playerLinkApprovalChannel: SettingsEventChannelSummary | null;
 } {
   return {
     selected: {
@@ -727,6 +747,7 @@ function emptyDiscordEventChannelSummary(): {
     },
     liveScoreboardReady: false,
     defaultReady: false,
+    playerLinkApprovalChannel: null,
   };
 }
 

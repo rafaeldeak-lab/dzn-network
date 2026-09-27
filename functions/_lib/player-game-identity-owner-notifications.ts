@@ -1,4 +1,5 @@
 import { requireDb } from "./db";
+import { DiscordChannelFetchError, verifyDiscordPostingChannel } from "./discord-posting";
 import { isDznAdminDiscordId } from "./admin";
 import { isDiscordNotificationsEnabled } from "./feature-flags";
 import { parsePlatformOwnerDiscordIds } from "./platform-owner";
@@ -14,6 +15,7 @@ type OwnerDeliveryRow = {
   claim_id: string;
   linked_server_id: string;
   server_owner_user_id: string;
+  guild_id: string | null;
   recipient_user_id: string;
   recipient_discord_id: string;
   attempt_count: number;
@@ -34,6 +36,7 @@ type PendingOwnerReconciliationRow = {
 
 const MAX_ATTEMPTS = 5;
 const RETRY_MINUTES = [1, 5, 30, 120, 360] as const;
+export const OWNER_REQUEST_NOTIFICATION_MAX_JOBS = 5;
 
 export async function hasOwnerRequestNotificationLedger(env: Env) {
   const row = await requireDb(env).prepare(
@@ -125,7 +128,7 @@ export async function dispatchQueuedOwnerRequestNotifications(
     return { ok: true, unavailable: true, processed: 0, delivered: 0, retried: 0, failed: 0, skipped: 0 };
   }
   const db = requireDb(env);
-  const maxJobs = Math.max(1, Math.min(20, Math.trunc(options.maxJobs ?? 10)));
+  const maxJobs = Math.max(1, Math.min(OWNER_REQUEST_NOTIFICATION_MAX_JOBS, Math.trunc(options.maxJobs ?? OWNER_REQUEST_NOTIFICATION_MAX_JOBS)));
   await reconcilePendingOwnerRequestRecipients(env, maxJobs);
   await db.prepare(
     `UPDATE player_game_identity_owner_notification_deliveries
@@ -156,7 +159,7 @@ export async function dispatchQueuedOwnerRequestNotifications(
     ).bind(leaseId, candidate.id).run();
     if (Number(claimed.meta.changes ?? 0) !== 1) continue;
     const row = await db.prepare(
-      `SELECT d.id, d.claim_id, d.linked_server_id, s.user_id AS server_owner_user_id,
+      `SELECT d.id, d.claim_id, d.linked_server_id, s.user_id AS server_owner_user_id, s.guild_id,
               d.recipient_user_id, d.recipient_discord_id, d.attempt_count,
               c.status AS claim_status,
               COALESCE(NULLIF(s.display_name,''), NULLIF(s.hostname,''), s.server_name, s.nitrado_service_name) AS server_name,
@@ -363,30 +366,71 @@ async function sendOwnerRequestDiscord(env: Env, row: OwnerDeliveryRow) {
   const token = normalizeBotToken(env.DISCORD_BOT_TOKEN);
   if (!token) return { ok: false, skipped: true, reason: "discord_bot_token_missing" } as const;
   if (!/^\d{5,32}$/.test(row.recipient_discord_id)) return { ok: false, skipped: true, reason: "discord_recipient_invalid" } as const;
+  const content = `New DZN player-stat link review: **${safeText(row.requester_name || "A player")}** asked to link **${safeText(row.player_name || "a game profile")}** on **${safeText(row.server_name || "your server")}**. This is not proof they played or own the profile. Verify the evidence in Owner Console before approving.`;
+  let retryableChannelFailure: string | null = null;
   try {
+    if (row.recipient_user_id === row.server_owner_user_id && row.guild_id) {
+      let selected: { channel_id: string } | null = null;
+      try {
+        selected = await requireDb(env).prepare(
+          `SELECT channel_id FROM server_discord_channel_settings
+           WHERE linked_server_id=? AND guild_id=? AND channel_type='player_link_approvals'
+             AND bot_can_view=1 AND bot_can_send=1 AND bot_can_read_history=1
+           LIMIT 1`,
+        ).bind(row.linked_server_id, row.guild_id).first<{ channel_id: string }>();
+      } catch {
+        retryableChannelFailure = "discord_restricted_channel_lookup_failed";
+      }
+      if (selected?.channel_id) {
+        let channel = null;
+        try {
+          channel = await verifyDiscordPostingChannel(env, row.guild_id, selected.channel_id, { allowedMemberIds: [row.recipient_discord_id] });
+        } catch (error) {
+          const status = error instanceof DiscordChannelFetchError ? Number(error.status ?? 0) : 0;
+          retryableChannelFailure = status === 429 || status >= 500
+            ? `discord_restricted_channel_verify_${status}`
+            : "discord_restricted_channel_verify_request_failed";
+        }
+        if (channel?.can_post && channel.restricted_from_everyone) {
+          try {
+            const channelDelivery = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(selected.channel_id)}/messages`, {
+              method: "POST",
+              headers: { authorization: `Bot ${token}`, "content-type": "application/json" },
+              body: JSON.stringify({ content, allowed_mentions: { parse: [] }, components: [] }),
+            });
+            if (channelDelivery.ok) return { ok: true, skipped: false, reason: "discord_restricted_channel_delivered" } as const;
+            if (channelDelivery.status === 429 || channelDelivery.status >= 500) {
+              retryableChannelFailure = `discord_restricted_channel_message_${channelDelivery.status}`;
+            }
+          } catch {
+            retryableChannelFailure = "discord_restricted_channel_request_failed";
+          }
+        }
+      }
+    }
     const channelResponse = await fetch("https://discord.com/api/v10/users/@me/channels", {
       method: "POST",
       headers: { authorization: `Bot ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ recipient_id: row.recipient_discord_id }),
     });
-    if (!channelResponse.ok) return { ok: false, skipped: false, reason: `discord_dm_channel_${channelResponse.status}` } as const;
+    if (!channelResponse.ok) return { ok: false, skipped: false, reason: retryableChannelFailure ?? `discord_dm_channel_${channelResponse.status}` } as const;
     const channel = await channelResponse.json().catch(() => null) as { id?: unknown } | null;
     const channelId = typeof channel?.id === "string" && /^\d{5,32}$/.test(channel.id) ? channel.id : null;
-    if (!channelId) return { ok: false, skipped: false, reason: "discord_dm_channel_invalid" } as const;
+    if (!channelId) return { ok: false, skipped: false, reason: retryableChannelFailure ?? "discord_dm_channel_invalid" } as const;
     const response = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages`, {
       method: "POST",
       headers: { authorization: `Bot ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
-        content: `New DZN player-stat link review: **${safeText(row.requester_name || "A player")}** asked to link **${safeText(row.player_name || "a game profile")}** on **${safeText(row.server_name || "your server")}**. This is not proof they played or own the profile. Verify the evidence in Owner Console before approving.`,
+        content,
         allowed_mentions: { parse: [] },
         components: [],
       }),
     });
     return response.ok
       ? { ok: true, skipped: false, reason: "discord_dm_delivered" } as const
-      : { ok: false, skipped: false, reason: `discord_dm_message_${response.status}` } as const;
+      : { ok: false, skipped: false, reason: retryableChannelFailure ?? `discord_dm_message_${response.status}` } as const;
   } catch {
-    return { ok: false, skipped: false, reason: "discord_dm_request_failed" } as const;
+    return { ok: false, skipped: false, reason: retryableChannelFailure ?? "discord_dm_request_failed" } as const;
   }
 }
 
@@ -394,7 +438,12 @@ function classifyResult(result: Awaited<ReturnType<typeof sendOwnerRequestDiscor
   if (result.ok && !result.skipped) return { status: "delivered", delay: "+0 minutes" } as const;
   if (result.ok && result.skipped) return { status: "skipped", delay: "+0 minutes" } as const;
   const statusCode = Number(result.reason.match(/_(\d{3})$/)?.[1] ?? 0);
-  const retryable = result.reason === "discord_dm_request_failed" || statusCode === 429 || statusCode >= 500;
+  const retryable = result.reason === "discord_dm_request_failed"
+    || result.reason === "discord_restricted_channel_request_failed"
+    || result.reason === "discord_restricted_channel_verify_request_failed"
+    || result.reason === "discord_restricted_channel_lookup_failed"
+    || statusCode === 429
+    || statusCode >= 500;
   if (retryable && attemptCount < MAX_ATTEMPTS) {
     const minutes = RETRY_MINUTES[Math.min(attemptCount - 1, RETRY_MINUTES.length - 1)];
     return { status: "retry", delay: `+${minutes} minutes` } as const;

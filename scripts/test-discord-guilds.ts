@@ -78,9 +78,22 @@ const categoryDenyResult = evaluateDiscordChannelPermissionsForTest({
     { id: botRoleId, type: 0, allow: "0", deny: sendMessages.toString() },
   ],
 });
-assert.equal(categoryDenyResult.can_post, false);
-assert.deepEqual(categoryDenyResult.missing_permissions, ["Send Messages"]);
-assert.equal(categoryDenyResult.permission_source, "category_overwrite");
+assert.equal(categoryDenyResult.can_post, true, "An unsynced child must ignore a parent deny when checking the bot's effective permissions.");
+assert.deepEqual(categoryDenyResult.missing_permissions, []);
+assert.equal(categoryDenyResult.permission_source, "guild_roles");
+assert.equal(categoryDenyResult.restricted_from_everyone, false, "An unsynced child must not inherit its category's private classification.");
+
+const categoryAllowResult = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  basePermissions: viewChannel | embedLinks | readHistory,
+  categoryPermissionOverwrites: [
+    { id: botRoleId, type: 0, allow: sendMessages.toString(), deny: "0" },
+  ],
+});
+assert.equal(categoryAllowResult.can_post, false, "An unsynced child must ignore a parent allow when checking the bot's effective permissions.");
+assert.deepEqual(categoryAllowResult.missing_permissions, ["Send Messages"]);
 
 const missingSendOnlyResult = evaluateDiscordChannelPermissionsForTest({
   guildId,
@@ -90,6 +103,125 @@ const missingSendOnlyResult = evaluateDiscordChannelPermissionsForTest({
 });
 assert.equal(missingSendOnlyResult.can_post, false);
 assert.deepEqual(missingSendOnlyResult.missing_permissions, ["Send Messages"]);
+
+const restrictedReviewChannel = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: requiredPostingPermissions,
+  channelPermissionOverwrites: [
+    { id: guildId, type: 0, allow: "0", deny: viewChannel.toString() },
+    { id: botRoleId, type: 0, allow: viewChannel.toString(), deny: "0" },
+  ],
+});
+assert.equal(restrictedReviewChannel.can_post, true, "The DZN bot role may post in the private review channel.");
+assert.equal(restrictedReviewChannel.restricted_from_everyone, true, "The review channel must deny View Channel to @everyone.");
+
+const unsyncedPublicChild = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: requiredPostingPermissions,
+  categoryPermissionOverwrites: [
+    { id: guildId, type: 0, allow: "0", deny: viewChannel.toString() },
+  ],
+});
+assert.equal(unsyncedPublicChild.restricted_from_everyone, false, "A private parent must not make an unsynced public child eligible for review details.");
+
+const broadMemberRole = "ordinary-members";
+const broadRoleReviewChannel = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  botManagedRoleIds: [botRoleId],
+  rolePermissions: { [broadMemberRole]: viewChannel },
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: requiredPostingPermissions,
+  channelPermissionOverwrites: [
+    { id: guildId, type: 0, allow: "0", deny: viewChannel.toString() },
+    { id: botRoleId, type: 0, allow: viewChannel.toString(), deny: "0" },
+    { id: broadMemberRole, type: 0, allow: viewChannel.toString(), deny: "0" },
+  ],
+});
+assert.equal(broadRoleReviewChannel.restricted_from_everyone, false, "A general member-role allow must keep review details out of the channel.");
+
+const guildLevelBroadRole = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  botManagedRoleIds: [botRoleId],
+  rolePermissions: { [broadMemberRole]: viewChannel },
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: "0",
+});
+assert.equal(guildLevelBroadRole.restricted_from_everyone, false, "A guild-level member role with View Channel must keep an otherwise unoverridden channel ineligible.");
+
+const guildRoleRemovedByRoleDeny = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  botManagedRoleIds: [botRoleId],
+  rolePermissions: { [broadMemberRole]: viewChannel },
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: "0",
+  channelPermissionOverwrites: [
+    { id: broadMemberRole, type: 0, allow: "0", deny: viewChannel.toString() },
+    { id: botRoleId, type: 0, allow: viewChannel.toString(), deny: "0" },
+  ],
+});
+assert.equal(guildRoleRemovedByRoleDeny.restricted_from_everyone, true, "A channel role deny must remove that role's guild-level visibility.");
+
+const guildRoleRemovedByChannelDeny = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  botManagedRoleIds: [botRoleId],
+  rolePermissions: { [broadMemberRole]: viewChannel },
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: "0",
+  channelPermissionOverwrites: [
+    { id: guildId, type: 0, allow: "0", deny: viewChannel.toString() },
+    { id: botRoleId, type: 0, allow: viewChannel.toString(), deny: "0" },
+  ],
+});
+assert.equal(guildRoleRemovedByChannelDeny.restricted_from_everyone, true, "An explicit channel deny may remove guild-level member visibility while retaining DZN Bot access.");
+
+const ownerMemberReviewChannel = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  botManagedRoleIds: [botRoleId],
+  allowedMemberIds: ["owner-discord-id"],
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: requiredPostingPermissions,
+  channelPermissionOverwrites: [
+    { id: guildId, type: 0, allow: "0", deny: viewChannel.toString() },
+    { id: botRoleId, type: 0, allow: viewChannel.toString(), deny: "0" },
+    { id: "owner-discord-id", type: 1, allow: viewChannel.toString(), deny: "0" },
+  ],
+});
+assert.equal(ownerMemberReviewChannel.restricted_from_everyone, true, "The selected owner and DZN Bot may retain access to the private review channel.");
+
+const publicReviewChannel = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: requiredPostingPermissions,
+});
+assert.equal(publicReviewChannel.restricted_from_everyone, false, "A public channel must never pass the private review-channel check.");
+
+const ownerNotificationSource = readFileSync("functions/_lib/player-game-identity-owner-notifications.ts", "utf8");
+assert.match(ownerNotificationSource, /channel_type='player_link_approvals'/);
+assert.match(ownerNotificationSource, /channel\?\.can_post && channel\.restricted_from_everyone/);
+assert.match(ownerNotificationSource, /discord_restricted_channel_delivered/);
+assert.match(ownerNotificationSource, /users\/@me\/channels/, "Private owner messages must remain as the fallback.");
+
+const serverSettingsSource = readFileSync("components/onboarding/server-settings-page.tsx", "utf8");
+assert.match(serverSettingsSource, /Private Player-Link Review Channel/);
+assert.match(serverSettingsSource, /channel\.canSelect && channel\.restrictedFromEveryone/);
 
 const botStatusSource = readFileSync("functions/api/discord/bot-status.ts", "utf8");
 assert.equal(botStatusSource.includes("DISCORD_BOT_TOKEN"), true);

@@ -1,6 +1,9 @@
 import { requireCronSecret } from "../../../_lib/cron-auth";
 import { json, methodNotAllowed } from "../../../_lib/http";
-import { dispatchQueuedOwnerRequestNotifications } from "../../../_lib/player-game-identity-owner-notifications";
+import {
+  dispatchQueuedOwnerRequestNotifications,
+  OWNER_REQUEST_NOTIFICATION_MAX_JOBS,
+} from "../../../_lib/player-game-identity-owner-notifications";
 import type { PagesFunction } from "../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -8,7 +11,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const unauthorized = requireCronSecret(request, env);
   if (unauthorized) return unauthorized;
 
-  const result = await dispatchQueuedOwnerRequestNotifications(env, { maxJobs: 20 });
+  const result = await dispatchQueuedOwnerRequestNotifications(env, { maxJobs: OWNER_REQUEST_NOTIFICATION_MAX_JOBS });
   const taskStatus = result.unavailable || result.processed === 0 ? "no_op" : result.ok ? "success" : "failed";
   return json({
     ...result,

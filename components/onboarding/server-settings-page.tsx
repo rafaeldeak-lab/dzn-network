@@ -134,6 +134,7 @@ type SettingsResponse = {
     selected: Record<EventChannelType, EventChannelSummary | null> | null;
     liveScoreboardReady: boolean;
     defaultReady: boolean;
+    playerLinkApprovalChannel: EventChannelSummary | null;
   };
   setupPageUrl: string;
   publicPageUrl: string;
@@ -167,11 +168,13 @@ type DiscordEventChannelOption = {
   id: string;
   name: string;
   type: string;
+  categoryName?: string | null;
   canSelect: boolean;
   botCanView: boolean;
   botCanSend: boolean;
   botCanEmbed: boolean;
   botCanReadHistory: boolean;
+  restrictedFromEveryone: boolean;
   missingPermissions: string[];
 };
 
@@ -183,6 +186,7 @@ type DiscordEventChannelsResponse = {
   guildName?: string | null;
   channels: DiscordEventChannelOption[];
   selected?: Record<EventChannelType, EventChannelSummary | null>;
+  playerLinkApprovalChannel?: EventChannelSummary | null;
   error?: string;
   errorCode?: string;
   message?: string;
@@ -411,6 +415,7 @@ export function ServerSettingsPage() {
   const [seasonStatusError, setSeasonStatusError] = useState<string | null>(null);
   const [seasonJoinAction, setSeasonJoinAction] = useState<SeasonJoinActionState>({ seasonId: null, busy: false, message: null, error: null });
   const [advancedRoutingOpen, setAdvancedRoutingOpen] = useState(false);
+  const [playerLinkApprovalChannelId, setPlayerLinkApprovalChannelId] = useState("");
   const [eventChannelIds, setEventChannelIds] = useState<Record<EventChannelType, string>>({
     default_event: "",
     event_announcements: "",
@@ -424,6 +429,7 @@ export function ServerSettingsPage() {
   const visibilityProgress = useSaveProgress();
   const discordSaveProgress = useSaveProgress();
   const discordTestProgress = useSaveProgress();
+  const playerLinkChannelProgress = useSaveProgress();
 
   useEffect(() => {
     let active = true;
@@ -475,6 +481,7 @@ export function ServerSettingsPage() {
         setDiscordEmbedAccentColor(data.server.discordEmbedAccentColor ?? "");
         setVisibility(data.server.visibility);
         setEventChannelIds(channelIdsFromSettings(data));
+        setPlayerLinkApprovalChannelId(data.discordEventChannels?.playerLinkApprovalChannel?.channelId ?? "");
         setSaveState({ area: null, message: null, error: null });
       })
       .catch((error) => {
@@ -559,6 +566,7 @@ export function ServerSettingsPage() {
   const visibilityChanged = Boolean(settings && visibility !== settings.server.visibility);
   const tagsChanged = Boolean(settings && JSON.stringify(selectedTags) !== JSON.stringify(settings.currentTags));
   const discordChanged = Boolean(settings && JSON.stringify(eventChannelIds) !== JSON.stringify(channelIdsFromSettings(settings)));
+  const playerLinkChannelChanged = Boolean(settings && playerLinkApprovalChannelId !== (settings.discordEventChannels?.playerLinkApprovalChannel?.channelId ?? ""));
   const proAdvertChanged = Boolean(settings && (
     advertBannerUrl !== (settings.server.advertBannerUrl ?? "") ||
     advertBannerAlt !== (settings.server.advertBannerAlt ?? "") ||
@@ -851,6 +859,27 @@ export function ServerSettingsPage() {
       const message = safeErrorMessage(error, "Unable to save Discord event channel.");
       setSaveState({ area: null, message: null, error: message });
       discordSaveProgress.fail(message);
+    }
+  }
+
+  async function savePlayerLinkApprovalChannel() {
+    if (!settings) return;
+    playerLinkChannelProgress.start("Checking private channel access...", 15);
+    setSaveState({ area: null, message: null, error: null });
+    try {
+      playerLinkChannelProgress.setStage("saving", "Saving review channel...", 40);
+      const result = await postJson(`/api/servers/${encodeURIComponent(settings.server.id)}/settings/discord-channels`, {
+        playerLinkApprovalChannelId,
+      });
+      playerLinkChannelProgress.setStage("refreshing", "Refreshing channel status...", 75);
+      await reloadSettings(settings.server.id);
+      await refreshDiscordEventChannels(settings.server.id, false);
+      setSaveState({ area: null, message: result.message ?? "Player-link review delivery updated.", error: null });
+      playerLinkChannelProgress.complete("Saved");
+    } catch (error) {
+      const message = safeErrorMessage(error, "Unable to save the private player-link review channel.");
+      setSaveState({ area: null, message: null, error: message });
+      playerLinkChannelProgress.fail(message);
     }
   }
 
@@ -1328,6 +1357,58 @@ export function ServerSettingsPage() {
             <span className="text-xs font-bold text-zinc-400">
               Required bot permissions: View Channel, Send Messages, Embed Links, Read Message History.
             </span>
+          </div>
+
+          <div className="mt-6 border-t border-white/10 pt-5">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)] lg:items-end">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-black text-white">
+                  <LockKeyhole className="h-4 w-4 text-emerald-200" />
+                  Private Player-Link Review Channel
+                </div>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
+                  Send new player stat-link requests to a channel hidden from @everyone. DZN rechecks privacy and bot access before every post, and uses a private owner message if the channel is unavailable.
+                </p>
+              </div>
+              <label className="block">
+                <span className="mb-2 block text-xs font-black uppercase text-zinc-300">Restricted Discord Channel</span>
+                <select
+                  value={playerLinkApprovalChannelId}
+                  onChange={(event) => setPlayerLinkApprovalChannelId(event.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-[#080b16] px-3 py-3 text-sm font-bold text-white outline-none focus:border-emerald-300/50"
+                >
+                  <option value="">Use private owner messages</option>
+                  {playerLinkApprovalChannelId && !(discordChannels?.channels ?? []).some((channel) => channel.id === playerLinkApprovalChannelId && channel.canSelect && channel.restrictedFromEveryone) ? (
+                    <option value={playerLinkApprovalChannelId} disabled>Saved channel needs a fresh private access check</option>
+                  ) : null}
+                  {(discordChannels?.channels ?? [])
+                    .filter((channel) => channel.canSelect && channel.restrictedFromEveryone)
+                    .map((channel) => (
+                      <option key={channel.id} value={channel.id}>
+                        {channel.categoryName ? `${channel.categoryName} / ` : ""}#{channel.name}
+                      </option>
+                    ))}
+                </select>
+                {playerLinkApprovalChannelId && !(discordChannels?.channels ?? []).some((channel) => channel.id === playerLinkApprovalChannelId && channel.canSelect && channel.restrictedFromEveryone) ? (
+                  <span className="mt-2 block text-xs font-bold leading-5 text-amber-200">DZN will use a private owner message until this channel is confirmed hidden from @everyone with the required bot access.</span>
+                ) : null}
+              </label>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <SaveProgressButton
+                idleLabel="Save Review Delivery"
+                savingLabel="Saving..."
+                refreshingLabel="Refreshing..."
+                successLabel="Saved"
+                errorLabel="Retry Save"
+                state={playerLinkChannelProgress.state}
+                disabled={!playerLinkChannelChanged}
+                onClick={savePlayerLinkApprovalChannel}
+                icon={<Save className="h-4 w-4" />}
+                buttonClassName="inline-flex items-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-400/10 px-4 py-3 text-xs font-black uppercase text-emerald-50 disabled:cursor-not-allowed disabled:opacity-55"
+              />
+              <span className="text-xs font-bold text-zinc-400">Only channels Discord confirms are hidden from @everyone are listed.</span>
+            </div>
           </div>
         </div>
       </section>

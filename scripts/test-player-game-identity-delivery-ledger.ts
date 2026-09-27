@@ -5,6 +5,7 @@ import {
   dispatchQueuedPlayerGameIdentityNotifications,
   hasPlayerGameIdentityDeliveryLedger,
 } from "../functions/_lib/player-game-identity-notifications";
+import { OWNER_REQUEST_NOTIFICATION_MAX_JOBS } from "../functions/_lib/player-game-identity-owner-notifications";
 import { reviewPlayerGameIdentityClaim } from "../functions/_lib/player-game-identities";
 import { onRequest as runDeliveryQueue } from "../functions/api/sync/player-link-notifications/run";
 import type { Env } from "../functions/_lib/types";
@@ -35,6 +36,8 @@ export async function testPlayerGameIdentityDeliveryLedger() {
   const ownerRunnerSource = readFileSync("functions/api/sync/player-link-owner-notifications/run.ts", "utf8");
   assert.doesNotMatch(decisionRunnerSource, /dispatchQueuedOwnerRequestNotifications/, "The guarded one-decision runner must never drain owner-request deliveries.");
   assert.match(ownerRunnerSource, /requireCronSecret[\s\S]*dispatchQueuedOwnerRequestNotifications/, "Owner-request retries must use a separate protected runner and delivery budget.");
+  assert.equal(OWNER_REQUEST_NOTIFICATION_MAX_JOBS, 5, "Restricted-channel verification must leave headroom under the Worker subrequest limit.");
+  assert.match(ownerRunnerSource, /maxJobs:\s*OWNER_REQUEST_NOTIFICATION_MAX_JOBS/, "The scheduled owner runner must use the bounded restricted-channel batch size.");
   const unavailableEnv = {
     DB: { prepare: () => ({ first: async () => null }) },
     DZN_CRON_SECRET: "unit-test-secret",
