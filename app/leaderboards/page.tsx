@@ -235,9 +235,11 @@ export default function LeaderboardsPage() {
         if (active) {
           const cached = activeMode === "all" ? loadLastGoodLeaderboard() : null;
           if (activeMode !== "all") {
-            setServerModeError(`${formatModeFilter(activeMode)} rankings could not be loaded right now.`);
             setError("");
             setLoadState("refresh_failed");
+            if (payloadMode.current !== activeMode || !visiblePayloadRef.current) {
+              setServerModeError(`${formatModeFilter(activeMode)} rankings could not be loaded right now.`);
+            }
           } else if (cached) {
             setPayload(cached);
             setError("");
@@ -372,9 +374,9 @@ export default function LeaderboardsPage() {
         </section>
 
         {error ? <MessagePanel message={error} onRetry={() => setReloadNonce((value) => value + 1)} /> : null}
-        {loading || modeTransitionLoading ? <LoadingGrid /> : null}
+        {loading ? <LoadingGrid /> : null}
 
-        {!loading && !modeTransitionLoading && !initialError ? (
+        {!loading && !initialError ? (
           <div className="leaderboard-ref-board-shell pb-4">
             <LeaderboardBoardSwitcher activeBoard={activeBoard} onChange={setActiveBoard} />
 
@@ -387,7 +389,9 @@ export default function LeaderboardsPage() {
                     setActiveMode(mode);
                   }}
                 />
-                {serverModeError ? (
+                {modeTransitionLoading ? (
+                  <LoadingGrid />
+                ) : serverModeError ? (
                   <MessagePanel message={serverModeError} onRetry={() => setReloadNonce((value) => value + 1)} />
                 ) : (
                   <LeaderboardTable

@@ -70,6 +70,8 @@ if (process.argv.includes("--serve")) {
         await page.getByRole("button", { name: "PvP", exact: true }).click();
         assert.equal(await page.getByRole("table", { name: "Top Servers", exact: true }).count(), 0, "A selected mode must not render the previous mode's table while loading");
         assert.ok(await page.locator(".dzn-leaderboard-card .animate-pulse").count() > 0, "A delayed successful mode request must show a loading state");
+        assert.equal(await page.getByRole("button", { name: "All Modes", exact: true }).count(), 1, "Mode controls must remain mounted while results load");
+        assert.equal(await page.getByRole("tab", { name: "Players", exact: true }).count(), 1, "Board controls must remain mounted while results load");
         await page.getByRole("table", { name: "Top Servers", exact: true }).waitFor();
         await page.getByText(serverName, { exact: true }).waitFor();
         await page.getByRole("button", { name: "Deathmatch", exact: true }).click();

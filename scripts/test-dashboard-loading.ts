@@ -203,6 +203,7 @@ includesAll(leaderboards, [
   "useRef<LeaderboardMode | null>(null)",
   "payloadMode.current === activeMode",
   "displayedMode !== activeMode && !serverModeError",
+  "payloadMode.current !== activeMode || !visiblePayloadRef.current",
   "inFlight.current === controller",
   "inFlight.current?.abort()",
   "fetchJsonWithRetry<LeaderboardsPayload>",
