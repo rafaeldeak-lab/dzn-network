@@ -220,8 +220,8 @@ export default function LeaderboardsPage() {
         });
         if (!active || latestRequestId.current !== requestId) return;
         const responsePayload = data.data && !data.top_servers ? data.data : data;
-        if (activeMode !== "all" && responsePayload.source === "empty_no_cache") {
-          throw new Error("Mode leaderboard is temporarily unavailable.");
+        if (responsePayload.source === "empty_no_cache") {
+          throw new Error("Leaderboard data is temporarily unavailable.");
         }
         const normalized = normalizePayload(responsePayload);
         payloadMode.current = activeMode;

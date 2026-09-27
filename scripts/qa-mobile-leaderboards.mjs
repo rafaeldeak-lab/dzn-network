@@ -144,9 +144,9 @@ if (process.argv.includes("--serve")) {
       await reversePage.getByRole("button", { name: "PvP", exact: true }).click();
       await reversePage.getByRole("table", { name: "Top Servers", exact: true }).waitFor();
       await reversePage.evaluate(key => localStorage.removeItem(key), "dzn:lastGoodLeaderboard");
-      await reversePage.route("**/api/public/leaderboards", route => route.fulfill({ status: 400, json: { error: "Synthetic all-mode outage" } }));
+      await reversePage.route("**/api/public/leaderboards", route => route.fulfill({ json: { ...boards, top_servers: [], source: "empty_no_cache", stale: true, fallback_reason: "live_query_failed_no_snapshot" } }));
       await reversePage.getByRole("button", { name: "All Modes", exact: true }).click();
-      await reversePage.getByText("Synthetic all-mode outage", { exact: true }).waitFor();
+      await reversePage.getByText("Leaderboard data is temporarily unavailable.", { exact: true }).waitFor();
       assert.equal(await reversePage.getByRole("table", { name: "Top Servers", exact: true }).count(), 0, "A failed all-mode request must not reuse a filtered payload");
       assert.equal(await reversePage.locator(".dzn-leaderboard-card .animate-pulse").count(), 0, "A failed reverse transition must leave the loading state");
       await reverseContext.close();
