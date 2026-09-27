@@ -202,7 +202,8 @@ export default function LeaderboardsPage() {
       const requestId = latestRequestId.current + 1;
       latestRequestId.current = requestId;
       const cached = activeMode === "all" ? loadLastGoodLeaderboard() : null;
-      const hasAnyVisibleData = Boolean(cached) || visiblePayloadRef.current;
+      const hasCurrentPayload = payloadMode.current === activeMode;
+      const hasAnyVisibleData = Boolean(cached) || hasCurrentPayload;
       // The server and first browser render must agree before restoring local data.
       if (cached && payloadMode.current !== "all") {
         payloadMode.current = "all";
@@ -237,17 +238,19 @@ export default function LeaderboardsPage() {
           const cached = activeMode === "all" ? loadLastGoodLeaderboard() : null;
           if (activeMode !== "all") {
             setError("");
-            setLoadState("refresh_failed");
-            if (payloadMode.current !== activeMode || !visiblePayloadRef.current) {
+            if (payloadMode.current !== activeMode) {
+              setLoadState("refresh_failed");
               setServerModeError(`${formatModeFilter(activeMode)} rankings could not be loaded right now.`);
+            } else {
+              setLoadState(visiblePayloadRef.current ? "loaded" : "empty_real_data");
             }
           } else if (cached) {
             setPayload(cached);
             setError("");
             setLoadState("loaded");
-          } else if (payloadMode.current === activeMode && visiblePayloadRef.current) {
+          } else if (payloadMode.current === activeMode) {
             setError("");
-            setLoadState("loaded");
+            setLoadState(visiblePayloadRef.current ? "loaded" : "empty_real_data");
           } else {
             setError(loadError instanceof Error ? loadError.message : "Leaderboard data could not be loaded right now.");
             setLoadState("error_initial");

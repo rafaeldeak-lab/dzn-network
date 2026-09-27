@@ -15,8 +15,12 @@ const kill = { rank: 1, player_name: name, victim_name: "Another_Player_With_A_L
 const serverRow = { rank: 1, server_id: "qa-server", server_name: serverName, slug: "qa-server", mode: "HARDCORE", category: "pvp", kills: 500, deaths: 200, kd: 2.5, kd_label: "2.50", longest_kill: 106.7, unique_players: 142, score: 1000, score_label: "1000", score_breakdown: null };
 const deathmatchRow = { ...serverRow, rank: 11, server_id: "qa-deathmatch", server_name: "QA Deathmatch", slug: "qa-deathmatch", mode: "DEATHMATCH", category: "deathmatch", score: 700, score_label: "700" };
 const boards = { ok: true, top_servers: [serverRow], top_players: [{ ...kill, player_id: null, kills: 65, deaths: 20, kd: 3.25, kd_label: "3.25", longest_kill: 106.7, public_profile_href: "/players/qa-player", public_profile_avatar_url: avatarUrl }], personal_best_kills: [kill], longest_kills: [kill], best_overall_kill: kill, latest_kill: kill, updated_at: "2026-09-09T06:00:00Z", access_level: "full", is_locked: false };
+const emptyPreviewBoards = { ...boards, top_servers: [], top_players: [], personal_best_kills: [], longest_kills: [], best_overall_kill: null, latest_kill: null, access_level: "preview", is_locked: true };
 function api(url) {
-  if (url.pathname === "/api/public/leaderboards") return { ...boards, top_servers: url.searchParams.get("mode") === "deathmatch" ? [deathmatchRow] : boards.top_servers };
+  if (url.pathname === "/api/public/leaderboards") {
+    if (url.searchParams.get("mode") === "pve") return emptyPreviewBoards;
+    return { ...boards, top_servers: url.searchParams.get("mode") === "deathmatch" ? [deathmatchRow] : boards.top_servers };
+  }
   if (url.pathname === "/api/public/leaderboards/advanced") return { ok: true, boards: [], categories: [], notes: [] };
   if (url.pathname === "/api/public/server-wars") return { ok: true, events: [], rulesets: [], leaderboards: [], summary: {} };
   if (url.pathname === "/api/auth/me") return { authenticated: true, user: { id: "qa", username: "QA player" }, linkedServers: [], linkedServer: null };
@@ -25,6 +29,7 @@ function api(url) {
   return { ok: true, items: [], servers: [] };
 }
 const mime = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".txt": "text/x-component", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".webp": "image/webp", ".woff2": "font/woff2", ".webm": "video/webm", ".mp4": "video/mp4", ".ico": "image/x-icon" };
+let pveRequestCount = 0;
 const server = createServer(async (request, response) => {
   try {
     if (!["GET", "HEAD"].includes(request.method)) { response.writeHead(405).end(); return; }
@@ -32,6 +37,7 @@ const server = createServer(async (request, response) => {
     if (/^\/api\/public\/players\/[a-z0-9-]+\/avatar$/.test(url.pathname)) { response.writeHead(200, { "content-type": "image/png", "cache-control": "no-store" }).end(await readFile(path.join(root, "leaderboards", "sniper-accent.png"))); return; }
     if (url.pathname === "/api/public/leaderboards" && url.searchParams.get("mode") === "survival") { response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ...boards, top_servers: [], source: "empty_no_cache", stale: true, fallback_reason: "live_query_failed_no_snapshot" })); return; }
     if (url.pathname === "/api/public/leaderboards" && url.searchParams.get("mode") === "pvp") await new Promise(resolve => setTimeout(resolve, 600));
+    if (url.pathname === "/api/public/leaderboards" && url.searchParams.get("mode") === "pve" && ++pveRequestCount > 1) await new Promise(resolve => setTimeout(resolve, 600));
     if (url.pathname.startsWith("/api/")) { response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(api(url))); return; }
     const candidate = path.resolve(root, url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname).slice(1));
     if (!candidate.startsWith(`${root}${path.sep}`)) { response.writeHead(403).end(); return; }
@@ -154,6 +160,19 @@ if (process.argv.includes("--serve")) {
       assert.equal(await reversePage.locator(".dzn-leaderboard-card .animate-pulse").count(), 0, "A failed reverse transition must leave the loading state");
       await reverseContext.close();
       results.push({ route: "leaderboards-all-mode-failure", width: 390, surfaced: true });
+
+      const emptyContext = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce" });
+      const emptyPage = await emptyContext.newPage();
+      await emptyPage.clock.install();
+      await emptyPage.goto(`${origin}/leaderboards`, { waitUntil: "networkidle" });
+      await emptyPage.getByRole("button", { name: "PvE", exact: true }).click();
+      await emptyPage.getByText("No ranked PvE servers yet.", { exact: true }).waitFor();
+      await emptyPage.clock.runFor(30_000);
+      assert.equal(await emptyPage.getByRole("button", { name: "All Modes", exact: true }).count(), 1, "Mode controls must remain mounted while an empty mode refreshes");
+      assert.equal(await emptyPage.getByRole("tab", { name: "Players", exact: true }).count(), 1, "Board controls must remain mounted while an empty mode refreshes");
+      assert.equal(await emptyPage.getByText("No ranked PvE servers yet.", { exact: true }).count(), 1, "A legitimate empty result must remain visible while it refreshes");
+      await emptyContext.close();
+      results.push({ route: "leaderboards-empty-mode-refresh", width: 390, controlsMounted: true });
     }
     for (const width of [320, 390]) {
       for (const routeName of ["login", "signup"]) {
