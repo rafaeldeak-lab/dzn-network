@@ -31,7 +31,6 @@ import {
 import Link from "next/link";
 
 import {
-  clearClientAuthState,
   clearOnboardingDraft,
   getDiscordBotStatus,
   getGuilds,
@@ -706,7 +705,8 @@ export function SetupWizard() {
   }
 
   async function signOut() {
-    clearClientAuthState();
+    draftFlushPendingRef.current();
+    await draftSaveChainRef.current.catch(() => undefined);
     await logoutAndRedirect();
   }
 

@@ -631,6 +631,8 @@ function buildSetupNotificationState(row: OwnerServerRecord): OwnerServerRow["se
     ? "delivered"
     : storedDiscordStatus === "failed"
       ? "failed"
+      : storedDiscordStatus === "not_sent"
+        ? "not_sent"
       : !discordNotificationsEnabled
         ? "disabled_by_owner"
         : storedDiscordStatus

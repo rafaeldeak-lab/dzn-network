@@ -822,6 +822,29 @@ function ServerSupportView({ selection, server, status, onClose, onRefresh }: {
   onClose: () => void;
   onRefresh: () => void;
 }) {
+  const [reminder, setReminder] = useState<{ serverId: string; state: "sending" | "sent" | "error"; message: string } | null>(null);
+  const reminderState = reminder?.serverId === selection.id ? reminder.state : "idle";
+  const reminderMessage = reminder?.serverId === selection.id ? reminder.message : "";
+
+  async function sendSetupReminder() {
+    setReminder({ serverId: selection.id, state: "sending", message: "" });
+    try {
+      const response = await fetch(`/api/owner/servers/${encodeURIComponent(selection.id)}/setup-notification`, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ confirmation: "SEND_SETUP_REMINDER" }),
+      });
+      const payload = await response.json().catch(() => null) as { message?: string } | null;
+      if (!response.ok) throw new Error(payload?.message || "Setup reminder could not be sent.");
+      setReminder({ serverId: selection.id, state: "sent", message: payload?.message || "Setup reminder recorded." });
+      onRefresh();
+    } catch (error) {
+      setReminder({ serverId: selection.id, state: "error", message: error instanceof Error ? error.message : "Setup reminder could not be sent." });
+    }
+  }
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -895,6 +918,15 @@ function ServerSupportView({ selection, server, status, onClose, onRefresh }: {
             <SupportValue label="Opened" value={formatDate(server.setupNotification.openedAt)} />
             <SupportValue label="Discord notification" value={setupDiscordNoticeLabel(server.setupNotification.discordStatus)} />
             <SupportValue label="Owner Discord preference" value={server.setupNotification.discordNotificationsEnabled ? "Enabled" : "Disabled"} />
+            <button
+              type="button"
+              disabled={reminderState === "sending" || server.supportBlockers.length === 0}
+              onClick={() => void sendSetupReminder()}
+              className="mt-2 w-full rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-xs font-black text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {reminderState === "sending" ? "Sending..." : "Send setup reminder"}
+            </button>
+            {reminderMessage ? <p className={`mt-2 text-xs ${reminderState === "error" ? "text-rose-200" : "text-emerald-200"}`}>{reminderMessage}</p> : null}
           </SupportSection>
           <SupportSection title="ADM and player count">
             <SupportValue label="Latest ADM" value={server.adm.latestFile ?? "None discovered"} />

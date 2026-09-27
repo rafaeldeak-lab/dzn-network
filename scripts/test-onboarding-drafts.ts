@@ -60,6 +60,7 @@ async function main() {
   assert.match(setupWizardSource, /setDraftStatus\("failed"\)[\s\S]*saved setup progress could not be cleared/, "Exhausted publication cleanup must remain visible instead of silently leaving a stale draft.");
   assert.match(setupWizardSource, /revision === draftSaveRevisionRef\.current\) setDraftStatus\("saving"\)[\s\S]*draftFlushPendingRef\.current = \(\) =>[\s\S]*queueSave\(true\)/, "Pending edits must be visible immediately and prepared for a keepalive flush when setup is left before the debounce finishes.");
   assert.match(setupWizardSource, /if \(keepalive\) \{\s*const immediateSave = performSave\(\);[\s\S]*Promise\.allSettled\(\[draftSaveChainRef\.current, immediateSave\]\)/, "The final keepalive save must start immediately instead of waiting behind an older autosave.");
+  assert.match(setupWizardSource, /async function signOut\(\) \{\s*draftFlushPendingRef\.current\(\);\s*await draftSaveChainRef\.current\.catch\(\(\) => undefined\);\s*await logoutAndRedirect\(\);/, "Logout must finish the latest draft save before invalidating the owner session.");
   assert.match(setupWizardSource, /addEventListener\("beforeunload", flushPendingDraft\)[\s\S]*addEventListener\("pagehide", flushPendingDraft\)/, "Pending draft edits must flush only when the setup page is actually being left.");
   assert.match(setupWizardSource, /return \(\) => \{\s*flushPendingDraft\(\);\s*window\.removeEventListener\("beforeunload"/, "Client-side route changes must flush a pending draft when the setup wizard unmounts.");
   assert.doesNotMatch(setupWizardSource, /return \(\) => \{[\s\S]{0,250}queueSave\(true\)/, "Ordinary form-state changes must restart the debounce without issuing an immediate keepalive write.");
@@ -77,6 +78,11 @@ async function main() {
   assert.equal(schemaProbe.includes("catch"), false, "Transient D1 errors must not be reported as a missing migration.");
   const pulseSource = readFileSync("functions/_lib/dzn-pulse.ts", "utf8");
   assert.match(pulseSource, /COALESCE\(action_url, ''\) = \? OR dedupe_key LIKE '%-setup-recommendation-%'[\s\S]*DELETE FROM user_notifications[\s\S]*NOT \(type IN \(\?, \?\) OR COALESCE\(action_url, ''\) = \? OR dedupe_key LIKE '%-setup-recommendation-%'\)/, "Clearing read notifications must retain setup delivery receipts for owner support status.");
+  const setupNotificationRoute = readFileSync("functions/api/owner/servers/[serverId]/setup-notification.ts", "utf8");
+  assert.match(setupNotificationRoute, /requirePlatformOwner[\s\S]*sameOrigin[\s\S]*SEND_SETUP_REMINDER[\s\S]*sendOwnerSetupRecommendation/, "Setup reminders must have an explicit same-origin, platform-owner-confirmed creation path.");
+  const setupNotificationService = readFileSync("functions/_lib/owner-setup-notifications.ts", "utf8");
+  assert.match(setupNotificationService, /INSERT INTO user_notifications[\s\S]*\/setup#review-test/, "Setup reminder creation must persist a private website notification.");
+  assert.match(setupNotificationService, /discord_delivery_status[\s\S]*discord_delivery_result[\s\S]*discord_attempted_at/, "Setup reminder creation must persist the Discord delivery outcome.");
 
   const unavailableSqlite = new DatabaseSync(":memory:");
   unavailableSqlite.exec(readFileSync("migrations/0001_initial_schema.sql", "utf8"));
