@@ -12,6 +12,8 @@ export type OwnerRequestNotificationRecipient = {
 type OwnerDeliveryRow = {
   id: string;
   claim_id: string;
+  linked_server_id: string;
+  server_owner_user_id: string;
   recipient_user_id: string;
   recipient_discord_id: string;
   attempt_count: number;
@@ -121,7 +123,8 @@ export async function dispatchQueuedOwnerRequestNotifications(
     ).bind(leaseId, candidate.id).run();
     if (Number(claimed.meta.changes ?? 0) !== 1) continue;
     const row = await db.prepare(
-      `SELECT d.id, d.claim_id, d.recipient_user_id, d.recipient_discord_id, d.attempt_count,
+      `SELECT d.id, d.claim_id, d.linked_server_id, s.user_id AS server_owner_user_id,
+              d.recipient_user_id, d.recipient_discord_id, d.attempt_count,
               c.status AS claim_status,
               COALESCE(NULLIF(s.display_name,''), NULLIF(s.hostname,''), s.server_name, s.nitrado_service_name) AS server_name,
               c.player_name, u.username AS requester_name
@@ -136,6 +139,37 @@ export async function dispatchQueuedOwnerRequestNotifications(
       await db.prepare(
         `UPDATE player_game_identity_owner_notification_deliveries
          SET status='skipped', result_code='claim_not_pending', lease_id=NULL, lease_expires_at=NULL,
+             updated_at=CURRENT_TIMESTAMP
+         WHERE id=? AND lease_id=? AND status='processing'`,
+      ).bind(row.id, leaseId).run();
+      skipped++;
+      continue;
+    }
+    const currentRecipients = await resolveOwnerRequestNotificationRecipients(env, row.server_owner_user_id);
+    const stillAuthorized = currentRecipients.some((recipient) => (
+      recipient.userId === row.recipient_user_id && recipient.discordId === row.recipient_discord_id
+    ));
+    if (!stillAuthorized) {
+      const statements = currentRecipients.flatMap((recipient) => [
+        prepareOwnerRequestWebsiteNotification(db, {
+          claimId: row.claim_id,
+          linkedServerId: row.linked_server_id,
+          recipient,
+          serverName: row.server_name || "DZN Server",
+          playerName: row.player_name || "game profile",
+          requesterName: row.requester_name || "A player",
+        }),
+        prepareOwnerRequestDiscordDelivery(db, {
+          id: crypto.randomUUID(),
+          claimId: row.claim_id,
+          linkedServerId: row.linked_server_id,
+          recipient,
+        }),
+      ]);
+      if (statements.length) await db.batch(statements);
+      await db.prepare(
+        `UPDATE player_game_identity_owner_notification_deliveries
+         SET status='skipped', result_code='recipient_no_longer_authorized', lease_id=NULL, lease_expires_at=NULL,
              updated_at=CURRENT_TIMESTAMP
          WHERE id=? AND lease_id=? AND status='processing'`,
       ).bind(row.id, leaseId).run();

@@ -250,13 +250,25 @@ export async function testPlayerGameIdentityTransactions() {
     assert.equal(discordBodies.length, fetchesBeforeResolved, "A resolved claim must not trigger a stale owner DM.");
     assert.equal(ownerNotifications.sqlite.prepare("SELECT result_code FROM player_game_identity_owner_notification_deliveries WHERE recipient_user_id='owner-a'").get()?.result_code, "claim_not_pending");
     ownerNotifications.sqlite.exec(`UPDATE player_game_identity_claims SET status='pending' WHERE id='${result.ok ? result.claim.id : "missing"}';`);
+    ownerNotifications.sqlite.exec(`UPDATE linked_servers SET user_id='owner-b' WHERE id='server-a';
+      UPDATE player_game_identity_owner_notification_deliveries
+      SET status='queued', attempt_count=0, next_attempt_at=CURRENT_TIMESTAMP, delivered_at=NULL, result_code=NULL
+      WHERE recipient_user_id='owner-a';`);
+    const fetchesBeforeOwnershipChange = discordBodies.length;
+    const ownershipChanged = await dispatchQueuedOwnerRequestNotifications(ownerNotifications.env, { maxJobs: 1 });
+    assert.equal(ownershipChanged.skipped, 1, "A former server owner must not receive a delayed review notification.");
+    assert.equal(discordBodies.length, fetchesBeforeOwnershipChange, "Authorization must be rechecked before any Discord request.");
+    assert.equal(ownerNotifications.sqlite.prepare("SELECT result_code FROM player_game_identity_owner_notification_deliveries WHERE recipient_user_id='owner-a'").get()?.result_code, "recipient_no_longer_authorized");
+    assert.equal(ownerNotifications.sqlite.prepare("SELECT status FROM player_game_identity_owner_notification_deliveries WHERE recipient_user_id='owner-b'").get()?.status, "queued", "The current server owner must receive a replacement queued delivery.");
+    assert.equal(ownerNotifications.sqlite.prepare("SELECT COUNT(*) AS count FROM user_notifications WHERE user_id='owner-b'").get()?.count, 1, "The current server owner must receive a replacement website alert.");
     const repeated = await createPlayerGameIdentityClaim(
       ownerNotifications.env,
       identityTestUser("player-a", "discord-a"),
       { server_slug: "server-a", player_id: "game-a" },
     );
     assert.equal(repeated.status, 200);
-    assert.equal(ownerNotifications.sqlite.prepare("SELECT COUNT(*) AS count FROM user_notifications").get()?.count, 2, "A repeated pending request must not duplicate owner alerts.");
+    assert.equal(ownerNotifications.sqlite.prepare("SELECT COUNT(*) AS count FROM user_notifications").get()?.count, 3, "A repeated pending request must not duplicate the reconciled owner alerts.");
+    ownerNotifications.sqlite.exec("UPDATE linked_servers SET user_id='owner-a' WHERE id='server-a'");
     const rejected = await reviewPlayerGameIdentityClaim(ownerNotifications.env, owner, result.ok ? result.claim.id : "missing", { action: "reject" });
     assert.equal(rejected.status, 200);
     const resolvedNotices = ownerNotifications.sqlite.prepare(
