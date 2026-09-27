@@ -81,6 +81,7 @@ const categoryDenyResult = evaluateDiscordChannelPermissionsForTest({
 assert.equal(categoryDenyResult.can_post, false);
 assert.deepEqual(categoryDenyResult.missing_permissions, ["Send Messages"]);
 assert.equal(categoryDenyResult.permission_source, "category_overwrite");
+assert.equal(categoryDenyResult.restricted_from_everyone, false, "An unsynced child must not inherit its category's private classification.");
 
 const missingSendOnlyResult = evaluateDiscordChannelPermissionsForTest({
   guildId,
@@ -104,6 +105,18 @@ const restrictedReviewChannel = evaluateDiscordChannelPermissionsForTest({
 });
 assert.equal(restrictedReviewChannel.can_post, true, "The DZN bot role may post in the private review channel.");
 assert.equal(restrictedReviewChannel.restricted_from_everyone, true, "The review channel must deny View Channel to @everyone.");
+
+const unsyncedPublicChild = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: requiredPostingPermissions,
+  categoryPermissionOverwrites: [
+    { id: guildId, type: 0, allow: "0", deny: viewChannel.toString() },
+  ],
+});
+assert.equal(unsyncedPublicChild.restricted_from_everyone, false, "A private parent must not make an unsynced public child eligible for review details.");
 
 const publicReviewChannel = evaluateDiscordChannelPermissionsForTest({
   guildId,

@@ -858,7 +858,7 @@ export async function fetchDiscordPostingChannels(env: Env, guildId: string): Pr
         can_read_history: permissions === null ? true : !missing.includes("Read Message History"),
         can_manage_messages: evaluation.botHasAdministrator || canManageMessages,
         restricted_from_everyone: permissionContext
-          ? isRestrictedFromEveryone(permissionContext, channel, category?.channel ?? null)
+          ? isRestrictedFromEveryone(permissionContext, channel)
           : false,
         can_post: evaluation.botHasAdministrator || permissions === null ? true : missing.length === 0,
         missing_permissions: missing,
@@ -906,7 +906,7 @@ export async function verifyDiscordPostingChannel(env: Env, guildId: string, cha
     can_read_history: permissions === null ? true : !missing.includes("Read Message History"),
     can_manage_messages: evaluation.botHasAdministrator || canManageMessages,
     restricted_from_everyone: permissionContext
-      ? isRestrictedFromEveryone(permissionContext, channel, category)
+      ? isRestrictedFromEveryone(permissionContext, channel)
       : false,
     can_post: evaluation.botHasAdministrator || permissions === null ? true : missing.length === 0,
     missing_permissions: missing,
@@ -1254,14 +1254,14 @@ async function getBotGuildPermissionContext(botToken: string, guildId: string): 
   return { botUserId, guildId, roleIds, roleNames, everyonePermissions, basePermissions };
 }
 
-function isRestrictedFromEveryone(context: BotPermissionContext, channel: DiscordChannel, category: DiscordChannel | null) {
+function isRestrictedFromEveryone(context: BotPermissionContext, channel: DiscordChannel) {
   if (hasPermission(context.everyonePermissions, DISCORD_ADMINISTRATOR_PERMISSION)) return false;
   let permissions = context.everyonePermissions;
   const applyEveryoneOverwrite = (overwrites: PermissionOverwrite[]) => {
     const overwrite = overwrites.find((item) => String(item.id) === context.guildId && String(item.type) === "0");
     permissions = applyPermissionOverwrite(permissions, overwrite);
   };
-  applyEveryoneOverwrite(Array.isArray(category?.permission_overwrites) ? category.permission_overwrites : []);
+  // Synced child channels repeat their category overwrites. Unsynced children do not inherit them.
   applyEveryoneOverwrite(Array.isArray(channel.permission_overwrites) ? channel.permission_overwrites : []);
   return !hasPermission(permissions, DISCORD_PERMISSION_ONE << BigInt(10));
 }
@@ -1435,7 +1435,7 @@ export function evaluateDiscordChannelPermissionsForTest(input: {
   const missing = getMissingRequiredBotPermissions(evaluation);
   return {
     can_post: evaluation.botHasAdministrator || evaluation.permissions === null ? true : missing.length === 0,
-    restricted_from_everyone: isRestrictedFromEveryone(context, channel, category),
+    restricted_from_everyone: isRestrictedFromEveryone(context, channel),
     missing_permissions: missing,
     permission_source: evaluation.source,
     diagnostics: buildChannelPermissionDiagnostics(channel.id ?? "channel", channel.name ?? "channel", context, evaluation, missing),

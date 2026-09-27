@@ -319,6 +319,72 @@ export async function testPlayerGameIdentityTransactions() {
     globalThis.fetch = originalFetch;
     ownerNotifications.close();
   }
+  const channelRetry = identityTransactionFixture();
+  const retryFetch = globalThis.fetch;
+  try {
+    channelRetry.sqlite.exec(`DELETE FROM player_game_identity_claims;
+      UPDATE users SET discord_id='888888888888888888' WHERE id='owner-a';`);
+    channelRetry.sqlite.exec(readFileSync("migrations/0075_player_link_owner_request_notifications.sql", "utf8"));
+    channelRetry.sqlite.exec(`CREATE TABLE server_discord_channel_settings (
+      id TEXT PRIMARY KEY, linked_server_id TEXT NOT NULL, guild_id TEXT NOT NULL,
+      channel_type TEXT NOT NULL, channel_id TEXT NOT NULL,
+      bot_can_view INTEGER, bot_can_send INTEGER, bot_can_embed INTEGER, bot_can_read_history INTEGER
+    );
+    INSERT INTO server_discord_channel_settings VALUES (
+      'review-channel-setting','server-a','guild-a','player_link_approvals','123456789012345678',1,1,1,1
+    );
+    INSERT OR REPLACE INTO notification_preferences (user_id,discord_enabled) VALUES ('owner-a',1);`);
+    Object.assign(channelRetry.env, {
+      DZN_DISCORD_NOTIFICATIONS_ENABLED: "true",
+      DZN_PLATFORM_OWNER_DISCORD_IDS: "",
+      DZN_ADMIN_DISCORD_IDS: "",
+      DISCORD_BOT_TOKEN: "test-token-with-enough-length",
+    });
+    const requiredBits = ((BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(11)) | (BigInt(1) << BigInt(14)) | (BigInt(1) << BigInt(16))).toString();
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/channels/123456789012345678")) {
+        return Response.json({
+          id: "123456789012345678",
+          guild_id: "guild-a",
+          type: 0,
+          name: "private-reviews",
+          permission_overwrites: [
+            { id: "guild-a", type: 0, allow: "0", deny: (BigInt(1) << BigInt(10)).toString() },
+            { id: "bot-role", type: 0, allow: (BigInt(1) << BigInt(10)).toString(), deny: "0" },
+          ],
+        });
+      }
+      if (url.endsWith("/users/@me")) return Response.json({ id: "bot-user" });
+      if (url.endsWith("/guilds/guild-a/members/bot-user")) return Response.json({ roles: ["bot-role"] });
+      if (url.endsWith("/guilds/guild-a/roles")) {
+        return Response.json([
+          { id: "guild-a", name: "@everyone", permissions: requiredBits },
+          { id: "bot-role", name: "DZN Bot", permissions: requiredBits },
+        ]);
+      }
+      if (url.endsWith("/channels/123456789012345678/messages")) return new Response("", { status: 429 });
+      if (url.endsWith("/users/@me/channels")) return new Response("", { status: 403 });
+      throw new Error(`Unexpected Discord request: ${url}`);
+    }) as typeof fetch;
+    const claim = await createPlayerGameIdentityClaim(
+      channelRetry.env,
+      identityTestUser("player-a", "discord-a"),
+      { server_slug: "server-a", player_id: "game-a" },
+    );
+    assert.equal(claim.status, 201);
+    const retryResult = await dispatchQueuedOwnerRequestNotifications(channelRetry.env, {
+      deliveryIds: claim.ok ? claim.owner_delivery_ids : [],
+      maxJobs: 1,
+    });
+    assert.equal(retryResult.retried, 1, "A rate-limited private channel must remain retryable when the owner DM fallback is closed.");
+    const retryRow = channelRetry.sqlite.prepare("SELECT status,result_code FROM player_game_identity_owner_notification_deliveries").get();
+    assert.equal(retryRow?.status, "retry");
+    assert.equal(retryRow?.result_code, "discord_restricted_channel_message_429");
+  } finally {
+    globalThis.fetch = retryFetch;
+    channelRetry.close();
+  }
   const gamertag = identityTransactionFixture();
   try {
     gamertag.sqlite.exec("DELETE FROM player_game_identity_claims; UPDATE player_profiles SET player_id='game-id-secret-123456' WHERE id='profile-a'");
