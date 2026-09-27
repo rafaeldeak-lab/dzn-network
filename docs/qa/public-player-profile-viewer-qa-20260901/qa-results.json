@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-27T10:27:12.141Z",
+  "generated_at": "2026-09-27T10:43:15.670Z",
   "results": [
     {
       "scenario": "published",
@@ -14,6 +14,14 @@
       "viewport": "mobile",
       "screenshot": "screenshots/published-mobile.png",
       "assertions": 16,
+      "consoleMessages": [],
+      "failedRequests": []
+    },
+    {
+      "scenario": "identityHidden",
+      "viewport": "desktop",
+      "screenshot": "screenshots/identityHidden-desktop.png",
+      "assertions": 11,
       "consoleMessages": [],
       "failedRequests": []
     },

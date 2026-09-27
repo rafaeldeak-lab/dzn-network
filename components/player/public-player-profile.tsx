@@ -146,7 +146,9 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
         </div>
         <aside className="space-y-4">
           <ProfileBand icon={<ShieldCheck aria-hidden="true" className="h-5 w-5" />} title="Connected Discord" visible={data.discord_profile.visible && data.discord_profile.connected}>
-            <div className="flex items-center gap-3"><div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-indigo-300/35 bg-indigo-400/15 text-lg font-black text-indigo-100">{initial}</div><div className="min-w-0"><p className="truncate font-black text-white">{data.display_name}</p><p className="mt-1 inline-flex items-center gap-2 text-xs font-bold text-emerald-200"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Account connected</p></div></div>
+            {data.discord_profile.visible && data.discord_profile.connected ? (
+              <div className="flex items-center gap-3"><div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-indigo-300/35 bg-indigo-400/15 text-lg font-black text-indigo-100">{initial}</div><div className="min-w-0"><p className="truncate font-black text-white">{data.display_name}</p><p className="mt-1 inline-flex items-center gap-2 text-xs font-bold text-emerald-200"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Account connected</p></div></div>
+            ) : <HiddenCopy />}
           </ProfileBand>
           <ProfileBand icon={<EyeOff aria-hidden="true" className="h-5 w-5" />} title="Published Sections" visible>
             <div className="flex flex-wrap gap-2">{data.privacy.visible_sections.length ? data.privacy.visible_sections.map((section) => <span key={section} className="rounded-md border border-emerald-300/25 bg-emerald-300/10 px-2 py-1 text-[10px] font-black uppercase text-emerald-100">{section.replace(/_/g, " ")}</span>) : <span className="text-sm font-semibold text-slate-300">No optional sections are visible.</span>}</div>

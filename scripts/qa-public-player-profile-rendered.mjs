@@ -45,6 +45,25 @@ const scenarios = {
       "DZN-SUP",
     ],
   },
+  identityHidden: {
+    apiStatus: 200,
+    apiPayload: hiddenIdentityProfilePayload(),
+    readyText: "DZN Player",
+    mustContain: [
+      "Public Safe Profile",
+      "DZN Player",
+      "Connected Discord",
+      "Hidden",
+      "This section is hidden by the player's saved profile preferences",
+    ],
+    mustNotContain: [
+      "Rafael DZN",
+      "Discord connected",
+      "Account connected",
+      "discord-1",
+      "user-1",
+    ],
+  },
   hidden: {
     apiStatus: 404,
     apiPayload: {
@@ -106,6 +125,7 @@ const scenarios = {
 const captures = [
   { scenario: "published", viewport: "desktop", width: 1440, height: 1100, path: "/players/preview" },
   { scenario: "published", viewport: "mobile", width: 390, height: 1280, mobile: true, path: "/players/preview" },
+  { scenario: "identityHidden", viewport: "desktop", width: 1440, height: 1100, path: "/players/preview" },
   { scenario: "hidden", viewport: "desktop", width: 1440, height: 900, path: "/players/preview" },
   { scenario: "unavailable", viewport: "desktop", width: 1440, height: 900, path: "/players/preview" },
   { scenario: "invalidHandle", viewport: "desktop", width: 1440, height: 900, path: "/players" },
@@ -392,6 +412,23 @@ function publishedProfilePayload() {
       "No Discord IDs, DZN user IDs, raw player IDs, raw award evidence, payment state, or owner state is returned.",
       "Profile visibility cannot alter billing, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF, XP awards, calling-card awards, or competitive eligibility.",
     ],
+  };
+}
+
+function hiddenIdentityProfilePayload() {
+  const payload = publishedProfilePayload();
+  return {
+    ...payload,
+    display_name: "DZN Player",
+    discord_profile: { visible: false, connected: false, avatar_url: null },
+    sections: {
+      ...payload.sections,
+      display_name: { visible: false, value: null },
+    },
+    privacy: {
+      ...payload.privacy,
+      visible_sections: payload.privacy.visible_sections.filter((section) => section !== "display_name"),
+    },
   };
 }
 

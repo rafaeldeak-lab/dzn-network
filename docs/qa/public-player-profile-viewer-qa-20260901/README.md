@@ -10,6 +10,7 @@ No production D1, Stripe, Cloudflare secret/config, Nitrado, Discord runtime, St
 | --- | --- | --- | --- |
 | published | desktop | [screenshots/published-desktop.png](screenshots/published-desktop.png) | 16 text/boundary/overlap checks |
 | published | mobile | [screenshots/published-mobile.png](screenshots/published-mobile.png) | 16 text/boundary/overlap checks |
+| identityHidden | desktop | [screenshots/identityHidden-desktop.png](screenshots/identityHidden-desktop.png) | 11 text/boundary/overlap checks |
 | hidden | desktop | [screenshots/hidden-desktop.png](screenshots/hidden-desktop.png) | 9 text/boundary/overlap checks |
 | unavailable | desktop | [screenshots/unavailable-desktop.png](screenshots/unavailable-desktop.png) | 7 text/boundary/overlap checks |
 | invalidHandle | desktop | [screenshots/invalidHandle-desktop.png](screenshots/invalidHandle-desktop.png) | 8 text/boundary/overlap checks |
@@ -32,6 +33,12 @@ Console warnings/errors: none captured.
 Network failures: none captured.
 
 ### published / mobile
+
+Console warnings/errors: none captured.
+
+Network failures: none captured.
+
+### identityHidden / desktop
 
 Console warnings/errors: none captured.
 
