@@ -740,10 +740,11 @@ export function normalizePublicLeaderboardMode(value: unknown): PublicLeaderboar
 
 function matchesPublicLeaderboardMode(mode: string, filter: PublicLeaderboardMode) {
   if (filter === "all") return true;
+  const category = normalizeServerCategoryFromRecord({ server_category: mode });
   const normalized = mode.toLowerCase().replace(/[^a-z0-9]+/g, " ");
   const tokens = normalized.trim().split(/\s+/);
   if (filter === "deathmatch") return normalized.includes("deathmatch") || tokens.includes("dm");
-  if (filter === "survival") return normalized.includes("survival");
+  if (filter === "survival") return category === "pve" || category === "pvp_pve";
   return tokens.includes(filter);
 }
 

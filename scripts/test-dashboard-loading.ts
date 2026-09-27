@@ -202,7 +202,7 @@ includesAll(leaderboards, [
   "useRef<AbortController | null>(null)",
   "useRef<LeaderboardMode | null>(null)",
   "const hasCurrentPayload = payloadMode.current === activeMode",
-  "const hasAnyVisibleData = Boolean(cached) || hasCurrentPayload",
+  "const hasAnyVisibleData = Boolean(cached) || visiblePayloadRef.current || hasCurrentPayload",
   "payloadMode.current === activeMode",
   "displayedMode !== activeMode && !serverModeError",
   "if (payloadMode.current !== activeMode)",

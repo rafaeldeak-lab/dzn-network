@@ -203,7 +203,7 @@ export default function LeaderboardsPage() {
       latestRequestId.current = requestId;
       const cached = activeMode === "all" ? loadLastGoodLeaderboard() : null;
       const hasCurrentPayload = payloadMode.current === activeMode;
-      const hasAnyVisibleData = Boolean(cached) || hasCurrentPayload;
+      const hasAnyVisibleData = Boolean(cached) || visiblePayloadRef.current || hasCurrentPayload;
       // The server and first browser render must agree before restoring local data.
       if (cached && payloadMode.current !== "all") {
         payloadMode.current = "all";
@@ -1141,10 +1141,11 @@ function safePublicProfileAvatarUrl(value: string | null | undefined) {
 
 function matchesLeaderboardMode(mode: string, filter: LeaderboardMode) {
   if (filter === "all") return true;
+  const category = mode.trim().toLowerCase();
   const normalized = mode.toLowerCase().replace(/[^a-z0-9]+/g, " ");
   const tokens = normalized.trim().split(/\s+/);
   if (filter === "deathmatch") return normalized.includes("deathmatch") || tokens.includes("dm");
-  if (filter === "survival") return normalized.includes("survival");
+  if (filter === "survival") return category === "pve" || category === "pvp_pve";
   return tokens.includes(filter);
 }
 

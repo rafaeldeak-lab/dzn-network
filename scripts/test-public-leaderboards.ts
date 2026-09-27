@@ -170,6 +170,9 @@ const canonicalCategoryDiffersFromDisplayMode: PublicLeaderboardServer = {
 };
 assert.equal(filterRankedPublicServersByMode([canonicalCategoryDiffersFromDisplayMode], "pvp", 10).length, 1, "Mode filters must use the canonical server category.");
 assert.equal(filterRankedPublicServersByMode([canonicalCategoryDiffersFromDisplayMode], "survival", 10).length, 0, "Display mode must not override the canonical category.");
+assert.equal(filterRankedPublicServersByMode([{ ...canonicalCategoryDiffersFromDisplayMode, category: "pve" }], "survival", 10).length, 1, "PvE is the canonical survival-focused category.");
+assert.equal(filterRankedPublicServersByMode([{ ...canonicalCategoryDiffersFromDisplayMode, category: "pvp_pve" }], "survival", 10).length, 1, "Hybrid PvP/PvE servers are eligible for survival rankings.");
+assert.equal(filterRankedPublicServersByMode([{ ...canonicalCategoryDiffersFromDisplayMode, category: "pvp" }], "survival", 10).length, 0, "PvP-only servers must not enter survival rankings.");
 assert.equal(normalizePublicLeaderboardMode("PvP"), "pvp");
 assert.equal(normalizePublicLeaderboardMode("unsupported"), "all");
 
