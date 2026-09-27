@@ -9717,3 +9717,113 @@ button.dzn-header-action {
     animation: none !important;
   }
 }
+
+.dzn-public-profile {
+  isolation: isolate;
+}
+
+.dzn-public-profile__backdrop,
+.dzn-public-profile__grid {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.dzn-public-profile__backdrop {
+  z-index: 0;
+  background:
+    linear-gradient(180deg, rgba(2, 3, 10, 0.34), rgba(2, 3, 10, 0.92) 42%, #02030a 88%),
+    url("/media/dzn-cinematic-survivor.png") center top / cover no-repeat;
+  opacity: 0.42;
+  transform: scale(1.035);
+  animation: dznPublicProfileBackdrop 22s ease-in-out infinite alternate;
+}
+
+.dzn-public-profile__grid {
+  z-index: 1;
+  opacity: 0.32;
+  background:
+    linear-gradient(rgba(34, 211, 238, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(139, 92, 246, 0.045) 1px, transparent 1px);
+  background-size: 96px 96px;
+  mask-image: linear-gradient(to bottom, black, transparent 78%);
+  animation: dznPublicProfileGrid 28s linear infinite;
+}
+
+.dzn-public-profile__hero {
+  isolation: isolate;
+  background: #050b14;
+  border-radius: 8px;
+}
+
+.dzn-public-profile__hero-media,
+.dzn-public-profile__hero-scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.dzn-public-profile__hero-media {
+  z-index: 0;
+  background:
+    linear-gradient(90deg, rgba(2, 6, 23, 0.9) 0%, rgba(2, 6, 23, 0.55) 52%, rgba(2, 6, 23, 0.72) 100%),
+    linear-gradient(180deg, rgba(2, 6, 23, 0.08), rgba(2, 6, 23, 0.84)),
+    url("/leaderboards/cta-survivor-scene.png") center 42% / cover no-repeat;
+  transform: scale(1.025);
+  animation: dznPublicProfileHero 16s ease-in-out infinite alternate;
+}
+
+.dzn-public-profile__hero-scan {
+  z-index: 1;
+  opacity: 0.42;
+  background: linear-gradient(105deg, transparent 34%, rgba(34, 211, 238, 0.2) 48%, rgba(168, 85, 247, 0.2) 52%, transparent 66%);
+  transform: translateX(-70%);
+  animation: dznPublicProfileScan 9s ease-in-out infinite;
+}
+
+.dzn-public-profile__avatar-ring {
+  background: conic-gradient(from 40deg, #22d3ee, #2563eb, #a855f7, #22d3ee);
+  box-shadow: 0 0 24px rgba(34, 211, 238, 0.36), 0 0 56px rgba(139, 92, 246, 0.2);
+  animation: dznPublicProfileAvatar 5s ease-in-out infinite;
+}
+
+@keyframes dznPublicProfileBackdrop {
+  from { transform: scale(1.035) translate3d(-0.35%, 0, 0); }
+  to { transform: scale(1.075) translate3d(0.45%, -0.6%, 0); }
+}
+
+@keyframes dznPublicProfileGrid {
+  to { background-position: 96px 96px, -96px 0; }
+}
+
+@keyframes dznPublicProfileHero {
+  from { transform: scale(1.025) translate3d(-0.3%, 0, 0); }
+  to { transform: scale(1.075) translate3d(0.45%, -0.45%, 0); }
+}
+
+@keyframes dznPublicProfileScan {
+  0%, 18% { opacity: 0; transform: translateX(-74%); }
+  32% { opacity: 0.42; }
+  62%, 100% { opacity: 0; transform: translateX(74%); }
+}
+
+@keyframes dznPublicProfileAvatar {
+  0%, 100% { filter: brightness(1); box-shadow: 0 0 24px rgba(34, 211, 238, 0.36), 0 0 56px rgba(139, 92, 246, 0.2); }
+  50% { filter: brightness(1.14); box-shadow: 0 0 32px rgba(34, 211, 238, 0.56), 0 0 72px rgba(139, 92, 246, 0.3); }
+}
+
+@media (max-width: 640px) {
+  .dzn-public-profile__hero-media {
+    background-position: 62% center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dzn-public-profile__backdrop,
+  .dzn-public-profile__grid,
+  .dzn-public-profile__hero-media,
+  .dzn-public-profile__hero-scan,
+  .dzn-public-profile__avatar-ring {
+    animation: none !important;
+  }
+}

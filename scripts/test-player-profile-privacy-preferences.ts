@@ -5,6 +5,7 @@ import { onRequest as privacyRoute } from "../functions/api/player/profile/priva
 import type { Env, PagesContext } from "../functions/_lib/types";
 
 const migration = readFileSync("migrations/0062_player_profile_privacy_preferences.sql", "utf8");
+const discordConsentMigration = readFileSync("migrations/0076_public_profile_discord_identity_consent.sql", "utf8");
 const route = readFileSync("functions/api/player/profile/privacy.ts", "utf8");
 const component = readFileSync("components/player/profile-privacy-settings.tsx", "utf8");
 const playerHome = readFileSync("components/player/player-home.tsx", "utf8");
@@ -14,6 +15,7 @@ const packageJson = readFileSync("package.json", "utf8");
 assert.match(migration, /CREATE TABLE IF NOT EXISTS player_profile_privacy_preferences/, "Migration must create the player-owned privacy preference table.");
 assert.match(migration, /user_id TEXT NOT NULL UNIQUE/, "Privacy preferences must be one row per current user.");
 assert.match(migration, /FOREIGN KEY\(user_id\) REFERENCES users\(id\) ON DELETE CASCADE/, "Privacy preferences must stay attached to the owning account.");
+assert.match(discordConsentMigration, /enabled INTEGER NOT NULL DEFAULT 0 CHECK \(enabled IN \(0, 1\)\)/, "Discord identity publication must use a separate default-off consent.");
 for (const column of [
   "public_profile_enabled",
   "show_display_name",
@@ -98,9 +100,68 @@ async function testPrivacyRouteRuntimeContract() {
   assert.equal(defaultPayload.source, "defaults", "Missing preference rows should return default preferences without writing preference rows.");
   assert.equal(defaultPayload.settings.public_profile_enabled, false, "Public profile should default private.");
   assert.equal(defaultPayload.settings.show_award_dates, false, "Award dates should default hidden.");
+  assert.equal(defaultPayload.settings.show_discord_identity, false, "Discord identity should default hidden even when display names default visible.");
   assert.equal(defaultPayload.public_profile_href, null, "Privacy preferences must not create a public profile URL.");
   assert.equal(defaultPayload.public_profile_handle, null, "Private default preferences must not expose a public profile handle.");
   assert.equal(db.preferences.has("mock-user"), false, "GET must not persist defaults implicitly.");
+
+  const missingConsentTableDb = new FakeD1Database();
+  missingConsentTableDb.discordConsentTableMissing = true;
+  const missingConsentTableRead = await callPrivacyRoute(
+    missingConsentTableDb,
+    { DB: missingConsentTableDb, MOCK_AUTH: "true" } as unknown as Env,
+    "GET",
+  );
+  assert.equal(missingConsentTableRead.status, 200, "Pre-migration deployments must keep Discord identity safely default-off.");
+  assert.equal(
+    (await missingConsentTableRead.json() as PrivacyPayload).settings.show_discord_identity,
+    false,
+    "A missing consent table must never imply Discord identity consent.",
+  );
+
+  const consentReadFailureDb = new FakeD1Database();
+  consentReadFailureDb.preferences.set("mock-user", {
+    public_profile_enabled: 1,
+    show_display_name: 1,
+    show_gameplay_summary: 1,
+    show_featured_server: 1,
+    show_xp_progress: 0,
+    show_challenge_progress: 0,
+    show_calling_cards: 0,
+    show_award_dates: 0,
+    updated_at: "2026-09-27T00:00:00.000Z",
+  });
+  consentReadFailureDb.discordIdentityConsent.set("mock-user", 1);
+  consentReadFailureDb.failDiscordConsentReads = true;
+  const failedConsentRead = await callPrivacyRoute(
+    consentReadFailureDb,
+    { DB: consentReadFailureDb, MOCK_AUTH: "true" } as unknown as Env,
+    "GET",
+  );
+  assert.equal(failedConsentRead.status, 503, "Operational Discord consent read failures must not be reported as opt-out.");
+  assert.equal(
+    (await failedConsentRead.json() as { error: string }).error,
+    "SETTINGS_UNAVAILABLE",
+    "Operational Discord consent read failures must use the settings unavailable contract.",
+  );
+  const preferencesBeforeFailedPatch = { ...consentReadFailureDb.preferences.get("mock-user")! };
+  const failedUnrelatedPatch = await callPrivacyRoute(
+    consentReadFailureDb,
+    { DB: consentReadFailureDb, MOCK_AUTH: "true" } as unknown as Env,
+    "PATCH",
+    { settings: { show_gameplay_summary: false } },
+  );
+  assert.equal(failedUnrelatedPatch.status, 503, "Unrelated updates must stop when Discord consent cannot be read.");
+  assert.deepEqual(
+    consentReadFailureDb.preferences.get("mock-user"),
+    preferencesBeforeFailedPatch,
+    "A failed Discord consent read must not overwrite saved preferences.",
+  );
+  assert.equal(
+    consentReadFailureDb.writeTargets.has("player_profile_privacy_preferences"),
+    false,
+    "A failed Discord consent read must not write the preference table.",
+  );
 
   const crossOrigin = await callPrivacyRoute(db, { DB: db, MOCK_AUTH: "true" } as unknown as Env, "PATCH", {
     settings: { public_profile_enabled: true },
@@ -125,6 +186,114 @@ async function testPrivacyRouteRuntimeContract() {
   assert.equal(unavailablePatch.status, 503, "Preference writes must stop when current preferences cannot be read.");
   assert.equal(unavailableDb.preferences.has("mock-user"), false, "Unavailable preference reads must not be followed by preference writes.");
   assert.equal([...unavailableDb.writeTargets].includes("player_profile_privacy_preferences"), false, "Unavailable preference reads must not write the preference table.");
+
+  const atomicDb = new FakeD1Database();
+  atomicDb.failDiscordConsentWrites = true;
+  const atomicFailure = await callPrivacyRoute(atomicDb, { DB: atomicDb, MOCK_AUTH: "true" } as unknown as Env, "PATCH", {
+    settings: { public_profile_enabled: true, show_discord_identity: true },
+  });
+  assert.equal(atomicFailure.status, 503, "A failed Discord consent write must fail the combined preference update.");
+  assert.equal(atomicDb.preferences.has("mock-user"), false, "A failed Discord consent write must roll back ordinary privacy settings.");
+  assert.equal(atomicDb.discordIdentityConsent.has("mock-user"), false, "A failed Discord consent write must not persist consent.");
+
+  const handleAtomicDb = new FakeD1Database();
+  handleAtomicDb.preferences.set("mock-user", {
+    public_profile_enabled: 1,
+    show_display_name: 1,
+    show_gameplay_summary: 1,
+    show_featured_server: 1,
+    show_xp_progress: 0,
+    show_challenge_progress: 0,
+    show_calling_cards: 0,
+    show_award_dates: 0,
+    updated_at: "2026-09-27T00:00:00.000Z",
+  });
+  handleAtomicDb.failDiscordConsentWrites = true;
+  const handleAtomicFailure = await callPrivacyRoute(
+    handleAtomicDb,
+    { DB: handleAtomicDb, MOCK_AUTH: "true" } as unknown as Env,
+    "PATCH",
+    { settings: { show_discord_identity: true } },
+  );
+  assert.equal(handleAtomicFailure.status, 503, "A failed consent write must fail for an enabled profile without a handle.");
+  assert.equal(
+    handleAtomicDb.publicProfilesByUser.has("mock-user"),
+    false,
+    "A failed consent write must not activate a public profile handle.",
+  );
+
+  const existingHandleReadFailureDb = new FakeD1Database();
+  existingHandleReadFailureDb.preferences.set("mock-user", {
+    public_profile_enabled: 1,
+    show_display_name: 1,
+    show_gameplay_summary: 1,
+    show_featured_server: 1,
+    show_xp_progress: 0,
+    show_challenge_progress: 0,
+    show_calling_cards: 0,
+    show_award_dates: 0,
+    updated_at: "2026-09-27T00:00:00.000Z",
+  });
+  existingHandleReadFailureDb.discordIdentityConsent.set("mock-user", 0);
+  existingHandleReadFailureDb.publicProfilesByUser.set("mock-user", {
+    handle: "mock-user-a1b2c3",
+    status: "active",
+    created_at: "2026-09-27T00:00:00.000Z",
+    updated_at: "2026-09-27T00:00:00.000Z",
+  });
+  existingHandleReadFailureDb.failPublicProfileReads = true;
+  const existingHandleReadFailure = await callPrivacyRoute(
+    existingHandleReadFailureDb,
+    { DB: existingHandleReadFailureDb, MOCK_AUTH: "true" } as unknown as Env,
+    "PATCH",
+    { settings: { show_discord_identity: true } },
+  );
+  assert.equal(existingHandleReadFailure.status, 503, "A failed existing-handle read must stop before consent changes.");
+  assert.equal(
+    existingHandleReadFailureDb.discordIdentityConsent.get("mock-user"),
+    0,
+    "A failed existing-handle read must preserve the prior Discord consent state.",
+  );
+  assert.equal(
+    existingHandleReadFailureDb.writeTargets.has("player_profile_privacy_preferences"),
+    false,
+    "A failed existing-handle read must not write ordinary profile preferences.",
+  );
+
+  const postWriteReadDb = new FakeD1Database();
+  postWriteReadDb.failPublicProfileReadsAfterWrite = true;
+  const postWriteReadResult = await callPrivacyRoute(
+    postWriteReadDb,
+    { DB: postWriteReadDb, MOCK_AUTH: "true" } as unknown as Env,
+    "PATCH",
+    { settings: { public_profile_enabled: true } },
+  );
+  assert.equal(postWriteReadResult.status, 200, "A successful handle activation must not depend on a fallible post-write read.");
+  assert.match(
+    (await postWriteReadResult.json() as PrivacyPayload).public_profile_handle ?? "",
+    /^[a-z0-9][a-z0-9-]*-[a-z0-9]{6,8}$/,
+    "A successful handle activation must return the handle written by the UPSERT.",
+  );
+
+  const concurrentActivationDb = new FakeD1Database();
+  concurrentActivationDb.concurrentPublicProfileHandle = "concurrent-player-a1b2c3";
+  const concurrentActivation = await callPrivacyRoute(
+    concurrentActivationDb,
+    { DB: concurrentActivationDb, MOCK_AUTH: "true" } as unknown as Env,
+    "PATCH",
+    { settings: { public_profile_enabled: true } },
+  );
+  assert.equal(concurrentActivation.status, 200, "Concurrent first-time profile activation must succeed.");
+  assert.equal(
+    (await concurrentActivation.json() as PrivacyPayload).public_profile_handle,
+    "concurrent-player-a1b2c3",
+    "Concurrent activation must return the handle retained by the UPSERT.",
+  );
+  assert.equal(
+    concurrentActivationDb.publicProfilesByUser.get("mock-user")?.handle,
+    "concurrent-player-a1b2c3",
+    "Concurrent activation must preserve the first stored handle.",
+  );
 
   const saved = await callPrivacyRoute(db, { DB: db, MOCK_AUTH: "true" } as unknown as Env, "PATCH", {
     settings: {
@@ -158,6 +327,13 @@ async function testPrivacyRouteRuntimeContract() {
   assert.equal(db.preferences.size, 2, "Idempotent current-user updates must not create duplicate rows.");
   assert.equal(db.preferences.get("other-user")?.public_profile_enabled, 1, "Other users' preference rows must not be changed.");
 
+  const discordConsent = await callPrivacyRoute(db, { DB: db, MOCK_AUTH: "true" } as unknown as Env, "PATCH", {
+    settings: { show_discord_identity: true },
+  });
+  assert.equal(discordConsent.status, 200, "A player must be able to explicitly publish their Discord photo and connection status.");
+  assert.equal((await discordConsent.json() as PrivacyPayload).settings.show_discord_identity, true);
+  assert.equal(db.discordIdentityConsent.get("mock-user"), 1, "Discord identity consent must persist separately from display-name visibility.");
+
   const reread = await callPrivacyRoute(db, { DB: db, MOCK_AUTH: "true" } as unknown as Env, "GET");
   const rereadPayload = await reread.json() as PrivacyPayload;
   assert.equal(rereadPayload.settings.show_display_name, false, "GET must return the current user's saved settings.");
@@ -166,7 +342,7 @@ async function testPrivacyRouteRuntimeContract() {
   assert.equal(rereadPayload.presentation_only, true, "Preference payload must be marked presentation-only.");
   assert.ok(rereadPayload.fairness_boundary.some((line) => /do not bypass saved visibility controls/i.test(line)), "Preference payload must state the visibility control boundary.");
 
-  assert.deepEqual([...db.writeTargets].sort(), ["discord_guilds", "player_profile_privacy_preferences", "player_public_profiles", "users"], "Privacy route writes must be limited to mock auth bootstrap, preference rows, and generated profile handles.");
+  assert.deepEqual([...db.writeTargets].sort(), ["discord_guilds", "player_profile_privacy_preferences", "player_public_discord_identity_preferences", "player_public_profiles", "users"], "Privacy route writes must be limited to mock auth bootstrap, preference rows, explicit Discord consent, and generated profile handles.");
   assert.deepEqual(db.protectedWrites, [], "Privacy route must not write protected billing, owner, progression, review, event, scoring, or competitive tables.");
 }
 
@@ -222,18 +398,40 @@ type FakePublicProfileRow = {
 
 class FakeD1Database {
   readonly preferences = new Map<string, FakePreferenceRow>();
+  readonly discordIdentityConsent = new Map<string, number>();
   readonly publicProfilesByUser = new Map<string, FakePublicProfileRow>();
   readonly publicProfileOwnersByHandle = new Map<string, string>();
   readonly writeTargets = new Set<string>();
   readonly protectedWrites: string[] = [];
   failPreferenceReads = false;
+  failDiscordConsentReads = false;
+  discordConsentTableMissing = false;
+  failDiscordConsentWrites = false;
+  failPublicProfileReads = false;
+  failPublicProfileReadsAfterWrite = false;
+  concurrentPublicProfileHandle: string | null = null;
 
   prepare(query: string) {
     return new FakeD1PreparedStatement(this, query);
   }
 
-  batch() {
-    throw new Error("Fake D1 batch is not implemented for privacy preference tests.");
+  async batch(statements: FakeD1PreparedStatement[]) {
+    const preferences = new Map(this.preferences);
+    const consent = new Map(this.discordIdentityConsent);
+    const writes = new Set(this.writeTargets);
+    try {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      return results;
+    } catch (error) {
+      this.preferences.clear();
+      for (const [key, value] of preferences) this.preferences.set(key, value);
+      this.discordIdentityConsent.clear();
+      for (const [key, value] of consent) this.discordIdentityConsent.set(key, value);
+      this.writeTargets.clear();
+      for (const value of writes) this.writeTargets.add(value);
+      throw error;
+    }
   }
 
   exec() {
@@ -261,13 +459,53 @@ class FakeD1PreparedStatement {
       const row = this.db.preferences.get(String(this.bindings[0]));
       return (row ?? null) as T | null;
     }
+    if (query.includes("from player_public_discord_identity_preferences")) {
+      if (this.db.discordConsentTableMissing) {
+        throw new Error("D1_ERROR: no such table: player_public_discord_identity_preferences");
+      }
+      if (this.db.failDiscordConsentReads) throw new Error("discord consent reads unavailable");
+      const enabled = this.db.discordIdentityConsent.get(String(this.bindings[0]));
+      return (enabled === undefined ? null : { enabled }) as T | null;
+    }
     if (query.includes("from player_public_profiles") && query.includes("where user_id = ?")) {
+      if (this.db.failPublicProfileReads) throw new Error("public profile reads unavailable");
+      if (this.db.failPublicProfileReadsAfterWrite && this.db.writeTargets.has("player_public_profiles")) {
+        throw new Error("public profile reads unavailable after write");
+      }
       const row = this.db.publicProfilesByUser.get(String(this.bindings[0]));
       return (row ?? null) as T | null;
     }
     if (query.includes("from player_public_profiles") && query.includes("where handle = ?")) {
       const userId = this.db.publicProfileOwnersByHandle.get(String(this.bindings[0]));
       return (userId ? { user_id: userId } : null) as T | null;
+    }
+    if (query.includes("insert into player_public_profiles") && query.includes("returning handle")) {
+      recordProtectedWrite(this.db, query);
+      this.db.writeTargets.add("player_public_profiles");
+      const userId = String(this.bindings[1]);
+      const candidate = String(this.bindings[2]);
+      const now = String(this.bindings[4]);
+      if (!this.db.publicProfilesByUser.has(userId) && this.db.concurrentPublicProfileHandle) {
+        const concurrentHandle = this.db.concurrentPublicProfileHandle;
+        this.db.publicProfilesByUser.set(userId, {
+          handle: concurrentHandle,
+          status: "active",
+          created_at: now,
+          updated_at: now,
+        });
+        this.db.publicProfileOwnersByHandle.set(concurrentHandle, userId);
+      }
+      const existing = this.db.publicProfilesByUser.get(userId);
+      const handle = existing?.handle ?? candidate;
+      const activated = {
+        handle,
+        status: "active" as const,
+        created_at: existing?.created_at ?? now,
+        updated_at: now,
+      };
+      this.db.publicProfilesByUser.set(userId, activated);
+      this.db.publicProfileOwnersByHandle.set(handle, userId);
+      return activated as T;
     }
     return null as T | null;
   }
@@ -301,6 +539,13 @@ class FakeD1PreparedStatement {
         updated_at: String(this.bindings[11]),
       };
       this.db.preferences.set(userId, next);
+      return d1Ok();
+    }
+
+    if (query.includes("insert into player_public_discord_identity_preferences")) {
+      if (this.db.failDiscordConsentWrites) throw new Error("discord consent writes unavailable");
+      this.db.writeTargets.add("player_public_discord_identity_preferences");
+      this.db.discordIdentityConsent.set(String(this.bindings[0]), Number(this.bindings[1]));
       return d1Ok();
     }
 

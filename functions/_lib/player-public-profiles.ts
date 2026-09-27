@@ -4,6 +4,7 @@ import type { Env, SessionUser } from "./types";
 
 export type PlayerPublicProfilePreferences = {
   public_profile_enabled: boolean;
+  show_discord_identity: boolean;
   show_display_name: boolean;
   show_gameplay_summary: boolean;
   show_featured_server: boolean;
@@ -26,11 +27,21 @@ export type PublicProfileLink = {
   href: string;
 };
 
+export type PublicDiscordAvatarSource = {
+  discord_id: string;
+  avatar_hash: string;
+};
+
 export type PublicPlayerProfilePayload = {
   ok: true;
   handle: string;
   href: string;
   display_name: string;
+  discord_profile: {
+    visible: boolean;
+    connected: boolean;
+    avatar_url: string | null;
+  };
   published_at: string | null;
   updated_at: string | null;
   sections: {
@@ -110,6 +121,7 @@ type PublicPlayerProfileOwnerRow = ExistingPublicProfileRow & {
   user_id: string;
   discord_id: string;
   username: string | null;
+  avatar: string | null;
   public_profile_enabled: number | null;
   show_display_name: number | null;
   show_gameplay_summary: number | null;
@@ -229,8 +241,14 @@ export async function readCurrentPublicProfileHandle(env: Env, userId: string): 
   };
 }
 
-export async function ensureCurrentPublicProfileHandle(env: Env, user: SessionUser): Promise<PlayerPublicProfileHandle> {
-  const existing = await readCurrentPublicProfileHandle(env, user.id);
+export async function ensureCurrentPublicProfileHandle(
+  env: Env,
+  user: SessionUser,
+  knownProfile?: PlayerPublicProfileHandle | null,
+): Promise<PlayerPublicProfileHandle> {
+  const existing = knownProfile === undefined
+    ? await readCurrentPublicProfileHandle(env, user.id)
+    : knownProfile;
   if (existing?.status === "active") return existing;
 
   const db = requireDb(env);
@@ -247,7 +265,7 @@ export async function ensureCurrentPublicProfileHandle(env: Env, user: SessionUs
     if (existingHandle && existingHandle.user_id !== user.id) continue;
 
     try {
-      await db
+      const activated = await db
         .prepare(
           `INSERT INTO player_public_profiles (
             id,
@@ -259,17 +277,23 @@ export async function ensureCurrentPublicProfileHandle(env: Env, user: SessionUs
           ) VALUES (?, ?, ?, 'active', ?, ?)
           ON CONFLICT(user_id) DO UPDATE SET
             status = 'active',
-            updated_at = excluded.updated_at`,
+            updated_at = excluded.updated_at
+          RETURNING handle, status, created_at, updated_at`,
         )
         .bind(crypto.randomUUID(), user.id, candidate, now, now)
-        .run();
+        .first<ExistingPublicProfileRow>();
+      if (!activated?.handle) throw new Error("public_profile_handle_unavailable");
+      return {
+        handle: activated.handle,
+        href: publicProfileHref(activated.handle),
+        status: activated.status === "disabled" ? "disabled" : "active",
+        created_at: activated.created_at,
+        updated_at: activated.updated_at,
+      };
     } catch (error) {
       if (attempt < 9 && isHandleCollision(error)) continue;
       throw error;
     }
-
-    const handle = await readCurrentPublicProfileHandle(env, user.id);
-    if (handle) return handle;
   }
 
   throw new Error("public_profile_handle_unavailable");
@@ -294,6 +318,7 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
         player_public_profiles.updated_at,
         users.discord_id,
         users.username,
+        users.avatar,
         player_profile_privacy_preferences.public_profile_enabled,
         player_profile_privacy_preferences.show_display_name,
         player_profile_privacy_preferences.show_gameplay_summary,
@@ -318,6 +343,7 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
   if (!row?.discord_id || row.public_profile_enabled !== 1) return null;
 
   const preferences = rowToPreferences(row);
+  preferences.show_discord_identity = await readDiscordIdentityConsent(db, row.user_id);
   const [aggregate, featuredServer] = await Promise.all([
     preferences.show_gameplay_summary ? readPublicPlayerAggregate(db, row.discord_id) : Promise.resolve(null),
     preferences.show_featured_server ? readPublicPlayerFeaturedServer(db, row.discord_id) : Promise.resolve(null),
@@ -325,12 +351,20 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
 
   const visibleSections = visiblePublicProfileSections(preferences);
   const displayName = preferences.show_display_name ? safeDisplayName(row.username) : "DZN Player";
+  const discordAvatarUrl = preferences.show_discord_identity && validDiscordAvatar(row.discord_id, row.avatar)
+    ? `/api/public/players/${encodeURIComponent(row.handle)}/avatar`
+    : null;
 
   return {
     ok: true,
     handle: row.handle,
     href: publicProfileHref(row.handle),
     display_name: displayName,
+    discord_profile: {
+      visible: preferences.show_discord_identity,
+      connected: preferences.show_discord_identity,
+      avatar_url: discordAvatarUrl,
+    },
     published_at: row.created_at,
     updated_at: latestDateString(row.updated_at, row.preferences_updated_at),
     sections: {
@@ -389,6 +423,37 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
   };
 }
 
+export async function readPublicDiscordAvatarSource(env: Env, rawHandle: unknown): Promise<PublicDiscordAvatarSource | null> {
+  const handle = normalizeLookupHandle(rawHandle);
+  if (!handle) return null;
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT users.discord_id, users.avatar
+       FROM player_public_profiles
+       INNER JOIN users ON users.id = player_public_profiles.user_id
+       INNER JOIN player_profile_privacy_preferences
+         ON player_profile_privacy_preferences.user_id = player_public_profiles.user_id
+       INNER JOIN player_public_discord_identity_preferences
+         ON player_public_discord_identity_preferences.user_id = player_public_profiles.user_id
+       WHERE player_public_profiles.handle = ?
+         AND player_public_profiles.status = 'active'
+         AND player_profile_privacy_preferences.public_profile_enabled = 1
+         AND player_public_discord_identity_preferences.enabled = 1
+       LIMIT 1`,
+    )
+    .bind(handle)
+    .first<{ discord_id: string | null; avatar: string | null }>()
+    .catch(() => null);
+  if (!row?.discord_id || !validDiscordAvatar(row.discord_id, row.avatar)) return null;
+  return { discord_id: row.discord_id, avatar_hash: row.avatar! };
+}
+
+function validDiscordAvatar(discordId: string, avatarHash: string | null) {
+  return /^\d{16,22}$/.test(discordId)
+    && typeof avatarHash === "string"
+    && /^[a-zA-Z0-9_]{8,128}$/.test(avatarHash);
+}
+
 function normalizeLookupHandle(value: unknown) {
   if (typeof value !== "string") return null;
   const handle = value.trim().toLowerCase();
@@ -401,6 +466,7 @@ function normalizeLookupHandle(value: unknown) {
 function rowToPreferences(row: PublicPlayerProfileOwnerRow): PlayerPublicProfilePreferences {
   return {
     public_profile_enabled: row.public_profile_enabled === 1,
+    show_discord_identity: false,
     show_display_name: row.show_display_name !== 0,
     show_gameplay_summary: row.show_gameplay_summary !== 0,
     show_featured_server: row.show_featured_server !== 0,
@@ -409,6 +475,13 @@ function rowToPreferences(row: PublicPlayerProfileOwnerRow): PlayerPublicProfile
     show_calling_cards: row.show_calling_cards !== 0,
     show_award_dates: row.show_award_dates === 1,
   };
+}
+
+async function readDiscordIdentityConsent(db: D1Database, userId: string) {
+  const row = await db.prepare(
+    "SELECT enabled FROM player_public_discord_identity_preferences WHERE user_id = ? LIMIT 1",
+  ).bind(userId).first<{ enabled: number | null }>().catch(() => null);
+  return row?.enabled === 1;
 }
 
 async function readPublicPlayerAggregate(db: D1Database, discordId: string) {
@@ -439,6 +512,7 @@ function futureEarnedSection(visible: boolean, visibleMessage: string) {
 function visiblePublicProfileSections(preferences: PlayerPublicProfilePreferences) {
   const sections: string[] = [];
   if (preferences.show_display_name) sections.push("display_name");
+  if (preferences.show_discord_identity) sections.push("discord_identity");
   if (preferences.show_gameplay_summary) sections.push("gameplay_summary");
   if (preferences.show_featured_server) sections.push("featured_server");
   if (preferences.show_xp_progress) sections.push("xp_progress");

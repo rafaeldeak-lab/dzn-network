@@ -698,6 +698,11 @@ function publishedPublicProfilePayload() {
     display_name: "Rafael DZN",
     published_at: "2026-09-01T12:00:00.000Z",
     updated_at: "2026-09-01T12:15:00.000Z",
+    discord_profile: {
+      visible: true,
+      connected: true,
+      avatar_url: null,
+    },
     sections: {
       display_name: {
         visible: true,

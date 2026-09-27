@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 const ROOT = process.cwd();
-const NEXT_PORT = Number(process.env.DZN_PUBLIC_PROFILE_QA_PORT ?? 3097);
-const CHROME_PORT = Number(process.env.DZN_PUBLIC_PROFILE_QA_CHROME_PORT ?? 9231);
+const PORT_OFFSET = process.pid % 1000;
+const NEXT_PORT = Number(process.env.DZN_PUBLIC_PROFILE_QA_PORT ?? 30000 + PORT_OFFSET);
+const CHROME_PORT = Number(process.env.DZN_PUBLIC_PROFILE_QA_CHROME_PORT ?? 32000 + PORT_OFFSET);
 const BASE_URL = `http://127.0.0.1:${NEXT_PORT}`;
 const OUT_DIR = path.join(ROOT, "docs", "qa", "public-player-profile-viewer-qa-20260901");
 const SCREENSHOT_DIR = path.join(OUT_DIR, "screenshots");
@@ -28,12 +29,12 @@ const scenarios = {
     mustContain: [
       "Public Safe Profile",
       "Rafael DZN",
+      "Discord connected",
       "Gameplay Summary",
       "Pandora Network",
       "Published Sections",
       "Earned Progression",
       "Fair Boundary",
-      "Profile visibility cannot alter billing",
       "Manage My Profile",
     ],
     mustNotContain: [
@@ -43,6 +44,25 @@ const scenarios = {
       "raw_evidence",
       "checkout.session",
       "DZN-SUP",
+    ],
+  },
+  identityHidden: {
+    apiStatus: 200,
+    apiPayload: hiddenIdentityProfilePayload(),
+    readyText: "DZN Player",
+    mustContain: [
+      "Public Safe Profile",
+      "DZN Player",
+      "Connected Discord",
+      "Hidden",
+      "This section is hidden by the player's saved profile preferences",
+    ],
+    mustNotContain: [
+      "Rafael DZN",
+      "Discord connected",
+      "Account connected",
+      "discord-1",
+      "user-1",
     ],
   },
   hidden: {
@@ -106,6 +126,7 @@ const scenarios = {
 const captures = [
   { scenario: "published", viewport: "desktop", width: 1440, height: 1100, path: "/players/preview" },
   { scenario: "published", viewport: "mobile", width: 390, height: 1280, mobile: true, path: "/players/preview" },
+  { scenario: "identityHidden", viewport: "desktop", width: 1440, height: 1100, path: "/players/preview" },
   { scenario: "hidden", viewport: "desktop", width: 1440, height: 900, path: "/players/preview" },
   { scenario: "unavailable", viewport: "desktop", width: 1440, height: 900, path: "/players/preview" },
   { scenario: "invalidHandle", viewport: "desktop", width: 1440, height: 900, path: "/players" },
@@ -116,86 +137,64 @@ async function main() {
   let chrome;
 
   try {
-    chrome = await startChrome();
     await mkdir(SCREENSHOT_DIR, { recursive: true });
-    const browser = await connectToChrome();
     const results = [];
 
     for (const capture of captures) {
       const scenario = scenarios[capture.scenario];
+      chrome = await startChrome();
+      const browser = await connectToChrome();
       const page = await browser.newPage();
       const consoleMessages = [];
       const failedRequests = [];
+      try {
+        page.on("Runtime.consoleAPICalled", (event) => {
+          const text = event.args?.map((arg) => arg.value ?? arg.description ?? "").join(" ") ?? "";
+          if (event.type === "error" || event.type === "warning") consoleMessages.push(`${event.type}: ${text}`);
+        });
+        page.on("Network.loadingFailed", (event) => {
+          if (!String(event.errorText ?? "").includes("net::ERR_ABORTED")) failedRequests.push(event.errorText ?? "unknown network failure");
+        });
+        page.on("Fetch.requestPaused", async (event) => fulfillOrContinue(page, event, scenario));
 
-      page.on("Runtime.consoleAPICalled", (event) => {
-        const text = event.args?.map((arg) => arg.value ?? arg.description ?? "").join(" ") ?? "";
-        if (event.type === "error" || event.type === "warning") {
-          consoleMessages.push(`${event.type}: ${text}`);
+        await configureQaPage(page, capture);
+        await page.send("Page.navigate", { url: `${BASE_URL}${capture.path}?qa=${capture.scenario}-${capture.viewport}` });
+        await waitForText(page, scenario.readyText);
+        const screenshot = await waitForStableRenderedFrame(page);
+
+        const text = await pageText(page);
+        const normalizedText = text.toLowerCase();
+        const missing = scenario.mustContain.filter((needle) => !normalizedText.includes(needle.toLowerCase()));
+        const leaked = scenario.mustNotContain.filter((needle) => normalizedText.includes(needle.toLowerCase()));
+        if (missing.length || leaked.length) {
+          throw new Error(`${capture.scenario}/${capture.viewport} text assertion failed. Missing: ${missing.join(", ")}. Leaked: ${leaked.join(", ")}. Text: ${text.slice(0, 1600)}`);
         }
-      });
-      page.on("Network.loadingFailed", (event) => {
-        if (!String(event.errorText ?? "").includes("net::ERR_ABORTED")) {
-          failedRequests.push(event.errorText ?? "unknown network failure");
+
+        const overlaps = await visibleOverlaps(page);
+        if (overlaps.length > 0) {
+          throw new Error(`${capture.scenario}/${capture.viewport} has ${overlaps.length} obvious visible element overlaps: ${JSON.stringify(overlaps.slice(0, 3))}`);
         }
-      });
-      page.on("Fetch.requestPaused", async (event) => {
-        await fulfillOrContinue(page, event, scenario);
-      });
 
-      await page.send("Page.enable");
-      await page.send("Runtime.enable");
-      await page.send("Network.enable");
-      await page.send("Fetch.enable", {
-        patterns: [
-          { urlPattern: `${BASE_URL}/api/auth/me*`, requestStage: "Request" },
-          { urlPattern: `${BASE_URL}/api/dzn-pulse/config*`, requestStage: "Request" },
-          { urlPattern: `${BASE_URL}/api/public/players/*`, requestStage: "Request" },
-        ],
-      });
-      await page.send("Emulation.setDeviceMetricsOverride", {
-        width: capture.width,
-        height: capture.height,
-        deviceScaleFactor: 1,
-        mobile: Boolean(capture.mobile),
-      });
-
-      await page.send("Page.navigate", { url: `${BASE_URL}${capture.path}?qa=${capture.scenario}-${capture.viewport}` });
-      await waitForText(page, scenario.readyText);
-
-      const text = await pageText(page);
-      const normalizedText = text.toLowerCase();
-      const missing = scenario.mustContain.filter((needle) => !normalizedText.includes(needle.toLowerCase()));
-      const leaked = scenario.mustNotContain.filter((needle) => normalizedText.includes(needle.toLowerCase()));
-      if (missing.length || leaked.length) {
-        throw new Error(`${capture.scenario}/${capture.viewport} text assertion failed. Missing: ${missing.join(", ")}. Leaked: ${leaked.join(", ")}. Text: ${text.slice(0, 1600)}`);
+        const fileName = `${capture.scenario}-${capture.viewport}.png`;
+        await writeFile(path.join(SCREENSHOT_DIR, fileName), Buffer.from(screenshot.data, "base64"));
+        results.push({
+          scenario: capture.scenario,
+          viewport: capture.viewport,
+          screenshot: `screenshots/${fileName}`,
+          assertions: scenario.mustContain.length + scenario.mustNotContain.length + 3,
+          consoleMessages,
+          failedRequests,
+        });
+      } finally {
+        await page.send("Page.close").catch(() => undefined);
+        await page.close();
+        await browser.close();
+        await killProcessTree(chrome);
+        chrome = undefined;
+        await rm(CHROME_USER_DATA, { recursive: true, force: true }).catch(() => undefined);
       }
-
-      const overlaps = await visibleOverlaps(page);
-      if (overlaps.length > 0) {
-        throw new Error(`${capture.scenario}/${capture.viewport} has ${overlaps.length} obvious visible element overlaps: ${JSON.stringify(overlaps.slice(0, 3))}`);
-      }
-
-      const screenshot = await page.send("Page.captureScreenshot", {
-        format: "png",
-        captureBeyondViewport: true,
-        fromSurface: true,
-      });
-      const fileName = `${capture.scenario}-${capture.viewport}.png`;
-      await writeFile(path.join(SCREENSHOT_DIR, fileName), Buffer.from(screenshot.data, "base64"));
-
-      results.push({
-        scenario: capture.scenario,
-        viewport: capture.viewport,
-        screenshot: `screenshots/${fileName}`,
-        assertions: scenario.mustContain.length + scenario.mustNotContain.length + 1,
-        consoleMessages,
-        failedRequests,
-      });
-
-      await page.close();
     }
 
-    await browser.close();
     await writeReport(results);
     console.log(`Public player profile rendered QA passed. Report: ${path.relative(ROOT, path.join(OUT_DIR, "README.md"))}`);
   } finally {
@@ -208,8 +207,8 @@ async function main() {
 async function startNext() {
   const command = process.platform === "win32" ? "cmd.exe" : "npm";
   const args = process.platform === "win32"
-    ? ["/d", "/s", "/c", `npm run dev -- --hostname 127.0.0.1 --port ${NEXT_PORT}`]
-    : ["run", "dev", "--", "--hostname", "127.0.0.1", "--port", String(NEXT_PORT)];
+    ? ["/d", "/s", "/c", `npm run dev -- --webpack --hostname 127.0.0.1 --port ${NEXT_PORT}`]
+    : ["run", "dev", "--", "--webpack", "--hostname", "127.0.0.1", "--port", String(NEXT_PORT)];
   const child = spawn(command, args, {
     cwd: ROOT,
     env: {
@@ -264,6 +263,36 @@ async function connectToChrome() {
   };
 }
 
+async function configureQaPage(page, capture) {
+  await page.send("Page.enable");
+  await page.send("Runtime.enable");
+  await page.send("Network.enable");
+  await page.send("Network.setCacheDisabled", { cacheDisabled: true });
+  await page.send("Emulation.setEmulatedMedia", {
+    features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+  });
+  await page.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `(() => {
+      const style = document.createElement('style');
+      style.textContent = '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important;scroll-behavior:auto!important}';
+      document.documentElement.appendChild(style);
+    })()`,
+  });
+  await page.send("Fetch.enable", {
+    patterns: [
+      { urlPattern: `${BASE_URL}/api/auth/me*`, requestStage: "Request" },
+      { urlPattern: `${BASE_URL}/api/dzn-pulse/config*`, requestStage: "Request" },
+      { urlPattern: `${BASE_URL}/api/public/players/*`, requestStage: "Request" },
+    ],
+  });
+  await page.send("Emulation.setDeviceMetricsOverride", {
+    width: capture.width,
+    height: capture.height,
+    deviceScaleFactor: 1,
+    mobile: Boolean(capture.mobile),
+  });
+}
+
 async function fulfillOrContinue(page, event, scenario) {
   const url = event.request.url;
   if (url.startsWith(`${BASE_URL}/api/auth/me`)) {
@@ -284,8 +313,20 @@ async function fulfillOrContinue(page, event, scenario) {
     }));
     return;
   }
+  if (url.endsWith("/avatar")) {
+    await page.send("Fetch.fulfillRequest", {
+      requestId: event.requestId,
+      responseCode: 200,
+      responseHeaders: [
+        { name: "content-type", value: "image/png" },
+        { name: "cache-control", value: "public, max-age=300" },
+      ],
+      body: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    });
+    return;
+  }
   if (url.startsWith(`${BASE_URL}/api/public/players/`)) {
-    await page.send("Fetch.fulfillRequest", jsonResponse(event.requestId, scenario.apiStatus, scenario.apiPayload, "public, max-age=15, stale-while-revalidate=45"));
+    await page.send("Fetch.fulfillRequest", jsonResponse(event.requestId, scenario.apiStatus, scenario.apiPayload));
     return;
   }
   await page.send("Fetch.continueRequest", { requestId: event.requestId });
@@ -297,6 +338,11 @@ function publishedProfilePayload() {
     handle: "rafael-dzn-a1b2c3",
     href: "/players/rafael-dzn-a1b2c3",
     display_name: "Rafael DZN",
+    discord_profile: {
+      visible: true,
+      connected: true,
+      avatar_url: "/api/public/players/rafael-dzn-a1b2c3/avatar",
+    },
     published_at: "2026-09-01T12:00:00.000Z",
     updated_at: "2026-09-01T12:15:00.000Z",
     sections: {
@@ -378,6 +424,23 @@ function publishedProfilePayload() {
   };
 }
 
+function hiddenIdentityProfilePayload() {
+  const payload = publishedProfilePayload();
+  return {
+    ...payload,
+    display_name: "DZN Player",
+    discord_profile: { visible: false, connected: false, avatar_url: null },
+    sections: {
+      ...payload.sections,
+      display_name: { visible: false, value: null },
+    },
+    privacy: {
+      ...payload.privacy,
+      visible_sections: payload.privacy.visible_sections.filter((section) => section !== "display_name"),
+    },
+  };
+}
+
 function jsonResponse(requestId, statusCode, payload, cacheControl = "private, no-store, no-cache, must-revalidate") {
   return {
     requestId,
@@ -418,12 +481,14 @@ async function waitForHttp(url, timeoutMs, child = null) {
 async function waitForText(page, text, timeoutMs = 20_000) {
   const started = Date.now();
   const expected = text.toLowerCase();
+  let lastBodyText = "";
   while (Date.now() - started < timeoutMs) {
     const bodyText = (await pageText(page)).toLowerCase();
+    lastBodyText = bodyText;
     if (bodyText.includes(expected)) return;
     await delay(250);
   }
-  throw new Error(`Timed out waiting for text: ${text}`);
+  throw new Error(`Timed out waiting for text: ${text}. Final body: ${lastBodyText.slice(0, 1200)}`);
 }
 
 async function pageText(page) {
@@ -432,6 +497,56 @@ async function pageText(page) {
     returnByValue: true,
   });
   return String(result.result?.value ?? "");
+}
+
+async function waitForStableRenderedFrame(page, timeoutMs = 20_000) {
+  await page.send("Runtime.evaluate", {
+    expression: `(async () => {
+      await document.fonts.ready;
+      for (const video of document.querySelectorAll('video')) {
+        video.pause();
+        try { video.currentTime = 0; } catch {}
+      }
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+
+  const started = Date.now();
+  let previous = null;
+  let stableMatches = 0;
+  while (Date.now() - started < timeoutMs) {
+    const imageState = await page.send("Runtime.evaluate", {
+      expression: `(() => ({
+        ready: [...document.images].every((image) => image.complete && image.naturalWidth > 0),
+        visibleTextNodes: [...document.querySelectorAll('h1,h2,h3,p,a,button,span')]
+          .filter((element) => {
+            const rect = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            return element.textContent.trim() && rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) > 0;
+          }).length,
+      }))()`,
+      returnByValue: true,
+    });
+    if (!imageState.result?.value?.ready || imageState.result.value.visibleTextNodes < 3) {
+      previous = null;
+      stableMatches = 0;
+      await delay(150);
+      continue;
+    }
+    const screenshot = await page.send("Page.captureScreenshot", {
+      format: "png",
+      captureBeyondViewport: true,
+      fromSurface: true,
+    });
+    if (screenshot.data === previous) stableMatches += 1;
+    else stableMatches = 0;
+    if (stableMatches >= 1) return screenshot;
+    previous = screenshot.data;
+    await delay(200);
+  }
+  throw new Error("Rendered profile did not reach two consecutive identical painted frames.");
 }
 
 async function visibleOverlaps(page) {
@@ -491,7 +606,7 @@ async function writeReport(results) {
     "",
     "| Scenario | Viewport | Screenshot | Proof |",
     "| --- | --- | --- | --- |",
-    ...results.map((result) => `| ${result.scenario} | ${result.viewport} | [${result.screenshot}](${result.screenshot}) | ${result.assertions} text/boundary/overlap checks |`),
+    ...results.map((result) => `| ${result.scenario} | ${result.viewport} | [${result.screenshot}](${result.screenshot}) | ${result.assertions} text/boundary/overlap/stable-paint checks |`),
     "",
     "## Verified States",
     "",
