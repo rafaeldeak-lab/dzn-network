@@ -1,6 +1,7 @@
 "use client";
 
 import { Activity, AlertTriangle, CalendarDays, Crosshair, EyeOff, Gamepad2, Loader2, Radio, Server, ShieldCheck, Sparkles, Trophy, UserRound } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
@@ -85,9 +86,7 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
           <div className="flex min-w-0 flex-col gap-5 sm:flex-row sm:items-end">
             <div className="relative shrink-0">
               <div className="dzn-public-profile__avatar-ring h-28 w-28 rounded-full p-[3px] sm:h-36 sm:w-36">
-                <div role="img" aria-label={`${data.display_name} Discord avatar`} className="flex h-full w-full items-center justify-center rounded-full border-4 border-[#071120] bg-[#071120] bg-cover bg-center text-4xl font-black text-cyan-100 sm:text-5xl" style={data.discord_profile.avatar_url ? { backgroundImage: `url(${data.discord_profile.avatar_url})` } : undefined}>
-                  {data.discord_profile.avatar_url ? <span className="sr-only">{data.display_name}</span> : initial}
-                </div>
+                <DiscordAvatar displayName={data.display_name} initial={initial} url={data.discord_profile.avatar_url} />
               </div>
               {data.discord_profile.connected ? <span className="absolute bottom-2 right-2 h-5 w-5 rounded-full border-4 border-[#071120] bg-emerald-400" aria-label="Discord connected" /> : null}
             </div>
@@ -156,6 +155,26 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
         </aside>
       </section>
       <footer className="flex flex-col items-center justify-between gap-2 border-t border-cyan-300/15 py-4 text-[10px] font-black uppercase text-slate-500 sm:flex-row"><span>DZN Network / Player Hub</span><span>Play / Explore / Belong</span></footer>
+    </div>
+  );
+}
+
+function DiscordAvatar({ displayName, initial, url }: { displayName: string; initial: string; url: string | null }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div role="img" aria-label={`${displayName} Discord avatar`} className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-full border-4 border-[#071120] bg-[#071120] text-4xl font-black text-cyan-100 sm:text-5xl">
+      <span aria-hidden="true">{initial}</span>
+      {url && !failed ? (
+        <Image
+          src={url}
+          alt=""
+          fill
+          unoptimized
+          sizes="(min-width: 640px) 136px, 104px"
+          className="object-cover"
+          onError={() => setFailed(true)}
+        />
+      ) : null}
     </div>
   );
 }

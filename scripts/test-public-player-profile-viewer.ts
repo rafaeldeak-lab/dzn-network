@@ -80,6 +80,8 @@ assert.match(component, /fetch\(`\/api\/public\/players\/\$\{encodeURIComponent\
 assert.match(component, /credentials: "omit"/, "Public profile UI must not send player cookies to the public profile API.");
 assert.doesNotMatch(component, /SiteHeaderAuthState authenticated=\{false\}/, "Public profile pages must let the shared header resolve the real logged-in state.");
 assert.match(component, /Manage My Profile/, "Public profile UI must send owners to the private profile settings surface.");
+assert.match(component, /onError=\{\(\) => setFailed\(true\)\}/, "A failed public Discord avatar request must reveal the player's initial fallback.");
+assert.match(component, /<span aria-hidden="true">\{initial\}<\/span>/, "The public avatar must retain an initial beneath the image layer.");
 assert.doesNotMatch(component, /\b(?:sendBeacon|analytics|localStorage|sessionStorage)\b/i, "Public profile UI must not store share history or track analytics.");
 assert.doesNotMatch(component, /fetch\([^)]*(?:checkout|STRIPE|nitrado_connections|account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns|server_reviews|competitive_events|leaderboards)/i, "Public profile UI must not call Store/payment/owner/review/event/competitive routes.");
 assert.match(privatePrivacyRoute, /ensureCurrentPublicProfileHandle/, "Private profile settings must create a handle only from the authenticated current-user route.");
