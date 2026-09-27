@@ -57,6 +57,9 @@ function assertOwnerPreviewPanelContract() {
     "shareLockCopy",
     "safePublicProfileHref",
     "safePublicProfileHandle",
+    "discord_profile",
+    "Discord Identity",
+    "PreviewDiscordAvatar",
   ]) {
     assert.equal(panel.includes(snippet), true, `Owner preview panel must include ${snippet}.`);
   }
@@ -73,6 +76,8 @@ function assertOwnerPreviewPanelContract() {
     "Owner preview must invalidate the visitor-safe fetch when saved section visibility changes.",
   );
   assert.match(panel, /aria-live="polite"/, "Copy/share feedback must be announced accessibly.");
+  assert.match(panel, /avatarUrl = data\.discord_profile\.visible && data\.discord_profile\.connected[\s\S]+<Image src=\{avatarUrl\}/, "Owner preview must mirror the public visitor's consent-controlled Discord avatar.");
+  assert.match(panel, /key: "discord_identity"[\s\S]+visible: data\.discord_profile\.visible && data\.discord_profile\.connected/, "Owner preview section rows must include the visitor-visible Discord identity state.");
   assert.doesNotMatch(
     panel,
     /xl:grid-cols|href=\{validatedHref \?\? "\/player\/profile"\}|aria-disabled=\{!readyToShare\}/,

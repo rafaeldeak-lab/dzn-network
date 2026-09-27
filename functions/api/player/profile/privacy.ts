@@ -221,7 +221,7 @@ async function readPreferences(env: Env, userId: string) {
 async function writePreferences(env: Env, userId: string, preferences: PrivacyPreferences, writeDiscordConsent: boolean) {
   const db = requireDb(env);
   const now = new Date().toISOString();
-  await db
+  const preferenceWrite = db
     .prepare(
       `INSERT INTO player_profile_privacy_preferences (
         id,
@@ -261,15 +261,16 @@ async function writePreferences(env: Env, userId: string, preferences: PrivacyPr
       boolToInt(preferences.show_award_dates),
       now,
       now,
-    )
-    .run();
+    );
+  const statements = [preferenceWrite];
   if (writeDiscordConsent) {
-    await db.prepare(
+    statements.push(db.prepare(
       `INSERT INTO player_public_discord_identity_preferences (user_id, enabled, created_at, updated_at)
        VALUES (?, ?, ?, ?)
        ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled, updated_at=excluded.updated_at`,
-    ).bind(userId, boolToInt(preferences.show_discord_identity), now, now).run();
+    ).bind(userId, boolToInt(preferences.show_discord_identity), now, now));
   }
+  await db.batch(statements);
 }
 
 function preferencePayload(

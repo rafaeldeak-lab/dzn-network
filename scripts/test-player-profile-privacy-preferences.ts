@@ -129,6 +129,15 @@ async function testPrivacyRouteRuntimeContract() {
   assert.equal(unavailableDb.preferences.has("mock-user"), false, "Unavailable preference reads must not be followed by preference writes.");
   assert.equal([...unavailableDb.writeTargets].includes("player_profile_privacy_preferences"), false, "Unavailable preference reads must not write the preference table.");
 
+  const atomicDb = new FakeD1Database();
+  atomicDb.failDiscordConsentWrites = true;
+  const atomicFailure = await callPrivacyRoute(atomicDb, { DB: atomicDb, MOCK_AUTH: "true" } as unknown as Env, "PATCH", {
+    settings: { public_profile_enabled: true, show_discord_identity: true },
+  });
+  assert.equal(atomicFailure.status, 503, "A failed Discord consent write must fail the combined preference update.");
+  assert.equal(atomicDb.preferences.has("mock-user"), false, "A failed Discord consent write must roll back ordinary privacy settings.");
+  assert.equal(atomicDb.discordIdentityConsent.has("mock-user"), false, "A failed Discord consent write must not persist consent.");
+
   const saved = await callPrivacyRoute(db, { DB: db, MOCK_AUTH: "true" } as unknown as Env, "PATCH", {
     settings: {
       public_profile_enabled: true,
@@ -238,13 +247,29 @@ class FakeD1Database {
   readonly writeTargets = new Set<string>();
   readonly protectedWrites: string[] = [];
   failPreferenceReads = false;
+  failDiscordConsentWrites = false;
 
   prepare(query: string) {
     return new FakeD1PreparedStatement(this, query);
   }
 
-  batch() {
-    throw new Error("Fake D1 batch is not implemented for privacy preference tests.");
+  async batch(statements: FakeD1PreparedStatement[]) {
+    const preferences = new Map(this.preferences);
+    const consent = new Map(this.discordIdentityConsent);
+    const writes = new Set(this.writeTargets);
+    try {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      return results;
+    } catch (error) {
+      this.preferences.clear();
+      for (const [key, value] of preferences) this.preferences.set(key, value);
+      this.discordIdentityConsent.clear();
+      for (const [key, value] of consent) this.discordIdentityConsent.set(key, value);
+      this.writeTargets.clear();
+      for (const value of writes) this.writeTargets.add(value);
+      throw error;
+    }
   }
 
   exec() {
@@ -320,6 +345,7 @@ class FakeD1PreparedStatement {
     }
 
     if (query.includes("insert into player_public_discord_identity_preferences")) {
+      if (this.db.failDiscordConsentWrites) throw new Error("discord consent writes unavailable");
       this.db.writeTargets.add("player_public_discord_identity_preferences");
       this.db.discordIdentityConsent.set(String(this.bindings[0]), Number(this.bindings[1]));
       return d1Ok();

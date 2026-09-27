@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Trophy,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { publicGameplayPresentation } from "@/lib/public-profile-gameplay";
@@ -28,6 +29,7 @@ type PublicPlayerProfilePayload = {
   handle: string;
   href: string;
   display_name: string;
+  discord_profile: { visible: boolean; connected: boolean; avatar_url: string | null };
   published_at: string | null;
   updated_at: string | null;
   sections: {
@@ -480,9 +482,7 @@ function PreviewHero({ state, handle, href }: { state: PreviewState; handle: str
   if (state.status === "ready") {
     return (
       <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
-        <span className="inline-flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-cyan-300/30 bg-cyan-300/12 text-2xl font-black text-cyan-50">
-          {initialsFromName(state.data.display_name)}
-        </span>
+        <PreviewDiscordAvatar data={state.data} />
         <div className="min-w-0">
           <p className="text-[10px] font-black uppercase tracking-[0.14em] text-cyan-100">Visitor View Mirror</p>
           <p className="mt-1 break-words text-2xl font-black uppercase leading-tight text-white [overflow-wrap:anywhere]">{state.data.display_name}</p>
@@ -509,6 +509,26 @@ function PreviewHero({ state, handle, href }: { state: PreviewState; handle: str
         <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">{state.message}</p>
       </div>
     </div>
+  );
+}
+
+function PreviewDiscordAvatar({ data }: { data: PublicPlayerProfilePayload }) {
+  const [failed, setFailed] = useState(false);
+  const avatarUrl = data.discord_profile.visible && data.discord_profile.connected ? data.discord_profile.avatar_url : null;
+  return (
+    <span
+      role="img"
+      aria-label={`${data.display_name} visitor profile image`}
+      className="relative inline-flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-cyan-300/30 bg-cyan-300/12 text-2xl font-black text-cyan-50"
+    >
+      <span aria-hidden="true">{initialsFromName(data.display_name)}</span>
+      {avatarUrl && !failed ? (
+        <Image src={avatarUrl} alt="" fill unoptimized sizes="64px" className="object-cover" onError={() => setFailed(true)} />
+      ) : null}
+      {data.discord_profile.visible && data.discord_profile.connected ? (
+        <span className="absolute bottom-1 right-1 h-3 w-3 rounded-full border-2 border-slate-950 bg-emerald-400" aria-label="Discord connected" />
+      ) : null}
+    </span>
   );
 }
 
@@ -564,6 +584,14 @@ function shareLockCopy(state: PreviewState) {
 
 function publicProfileSectionRows(data: PublicPlayerProfilePayload): PreviewSectionRowModel[] {
   return [
+    {
+      key: "discord_identity",
+      label: "Discord Identity",
+      visible: data.discord_profile.visible && data.discord_profile.connected,
+      detail: data.discord_profile.visible && data.discord_profile.connected
+        ? "Visitors can see the consented Discord profile image and connection state."
+        : "Discord profile image and connection state are hidden.",
+    },
     {
       key: "display_name",
       label: "Display Name",
