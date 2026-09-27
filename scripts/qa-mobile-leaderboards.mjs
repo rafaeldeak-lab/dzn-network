@@ -31,6 +31,7 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url, origin);
     if (/^\/api\/public\/players\/[a-z0-9-]+\/avatar$/.test(url.pathname)) { response.writeHead(200, { "content-type": "image/png", "cache-control": "no-store" }).end(await readFile(path.join(root, "leaderboards", "sniper-accent.png"))); return; }
     if (url.pathname === "/api/public/leaderboards" && url.searchParams.get("mode") === "survival") { response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ...boards, top_servers: [], source: "empty_no_cache", stale: true, fallback_reason: "live_query_failed_no_snapshot" })); return; }
+    if (url.pathname === "/api/public/leaderboards" && url.searchParams.get("mode") === "pvp") await new Promise(resolve => setTimeout(resolve, 600));
     if (url.pathname.startsWith("/api/")) { response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(api(url))); return; }
     const candidate = path.resolve(root, url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname).slice(1));
     if (!candidate.startsWith(`${root}${path.sep}`)) { response.writeHead(403).end(); return; }
@@ -66,6 +67,11 @@ if (process.argv.includes("--serve")) {
         await page.goto(`${origin}/leaderboards`, { waitUntil: "networkidle" });
         await page.getByRole("table", { name: "Top Servers", exact: true }).waitFor();
         await page.locator('[data-board-view="servers"]').screenshot({ path: path.join(output, `servers-${width}-${reducedMotion}.png`) });
+        await page.getByRole("button", { name: "PvP", exact: true }).click();
+        assert.equal(await page.getByRole("table", { name: "Top Servers", exact: true }).count(), 0, "A selected mode must not render the previous mode's table while loading");
+        assert.ok(await page.locator(".dzn-leaderboard-card .animate-pulse").count() > 0, "A delayed successful mode request must show a loading state");
+        await page.getByRole("table", { name: "Top Servers", exact: true }).waitFor();
+        await page.getByText(serverName, { exact: true }).waitFor();
         await page.getByRole("button", { name: "Deathmatch", exact: true }).click();
         await page.getByText("QA Deathmatch", { exact: true }).waitFor();
         assert.equal(await page.locator('td[data-label="Rank"]').innerText(), "#11", "Mode views must preserve global ranks outside the overall top ten");

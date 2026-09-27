@@ -165,6 +165,8 @@ export default function LeaderboardsPage() {
   const [loadState, setLoadState] = useState<LeaderboardLoadState>("loading_initial");
   const [error, setError] = useState("");
   const inFlight = useRef<AbortController | null>(null);
+  const payloadMode = useRef<LeaderboardMode | null>(null);
+  const [displayedMode, setDisplayedMode] = useState<LeaderboardMode | null>(null);
   const latestRequestId = useRef(0);
   const visiblePayloadRef = useRef(hasMeaningfulLeaderboard(payload));
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -199,10 +201,13 @@ export default function LeaderboardsPage() {
       const requestId = latestRequestId.current + 1;
       latestRequestId.current = requestId;
       const cached = activeMode === "all" ? loadLastGoodLeaderboard() : null;
-      const hasVisibleData = Boolean(cached) || visiblePayloadRef.current;
-      setServerModeError("");
+      const hasVisibleData = Boolean(cached) || (payloadMode.current === activeMode && visiblePayloadRef.current);
       // The server and first browser render must agree before restoring local data.
-      if (cached && !visiblePayloadRef.current) setPayload(cached);
+      if (cached && payloadMode.current !== "all") {
+        payloadMode.current = "all";
+        setDisplayedMode("all");
+        setPayload(cached);
+      }
       setLoading(!hasVisibleData);
       setLoadState(!hasVisibleData ? "loading_initial" : "refreshing");
       try {
@@ -219,6 +224,8 @@ export default function LeaderboardsPage() {
           throw new Error("Mode leaderboard is temporarily unavailable.");
         }
         const normalized = normalizePayload(responsePayload);
+        payloadMode.current = activeMode;
+        setDisplayedMode(activeMode);
         setPayload(normalized);
         if (activeMode === "all" && hasMeaningfulLeaderboard(normalized)) saveLastGoodLeaderboard(normalized);
         setLoadState(hasMeaningfulLeaderboard(normalized) ? "loaded" : "empty_real_data");
@@ -293,6 +300,7 @@ export default function LeaderboardsPage() {
   const totalPlayers = payload.top_players.length;
   const longestKill = payload.best_overall_kill?.distance ?? payload.personal_best_kills[0]?.distance ?? 0;
   const initialError = loadState === "error_initial";
+  const modeTransitionLoading = displayedMode !== activeMode && !serverModeError;
   const filteredServers = useMemo(
     () => payload.top_servers.filter((server) => matchesLeaderboardMode(server.mode, activeMode)),
     [activeMode, payload.top_servers],
@@ -364,15 +372,21 @@ export default function LeaderboardsPage() {
         </section>
 
         {error ? <MessagePanel message={error} onRetry={() => setReloadNonce((value) => value + 1)} /> : null}
-        {loading ? <LoadingGrid /> : null}
+        {loading || modeTransitionLoading ? <LoadingGrid /> : null}
 
-        {!loading && !initialError ? (
+        {!loading && !modeTransitionLoading && !initialError ? (
           <div className="leaderboard-ref-board-shell pb-4">
             <LeaderboardBoardSwitcher activeBoard={activeBoard} onChange={setActiveBoard} />
 
             {activeBoard === "servers" ? (
               <div id="leaderboard-servers-panel" role="tabpanel" className="leaderboard-ref-board-view" data-board-view="servers">
-                <LeaderboardModeSwitcher activeMode={activeMode} onChange={setActiveMode} />
+                <LeaderboardModeSwitcher
+                  activeMode={activeMode}
+                  onChange={(mode) => {
+                    setServerModeError("");
+                    setActiveMode(mode);
+                  }}
+                />
                 {serverModeError ? (
                   <MessagePanel message={serverModeError} onRetry={() => setReloadNonce((value) => value + 1)} />
                 ) : (

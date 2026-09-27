@@ -200,6 +200,9 @@ includesAll(leaderboards, [
   "hasMeaningfulLeaderboard",
   "latestRequestId",
   "useRef<AbortController | null>(null)",
+  "useRef<LeaderboardMode | null>(null)",
+  "payloadMode.current === activeMode",
+  "displayedMode !== activeMode && !serverModeError",
   "inFlight.current === controller",
   "inFlight.current?.abort()",
   "fetchJsonWithRetry<LeaderboardsPayload>",
@@ -624,6 +627,6 @@ const mobileLeaderboards = source("app/leaderboards/page.tsx");
 assert.ok(mobileLeaderboards.includes("data-label={headers[cellIndex]}"), "Responsive rows need visible metric labels.");
 assert.ok(mobileLeaderboards.includes('aria-label="Personal best kills"'), "Records retain an accessible table name.");
 assert.equal(mobileLeaderboards.includes("useState(() => !loadLastGoodLeaderboard())"), false, "Cached results must wait until after hydration.");
-assert.ok(mobileLeaderboards.includes("if (cached && !visiblePayloadRef.current) setPayload(cached)"), "Last-good fallback is still restored after mount.");
+assert.ok(mobileLeaderboards.includes('if (cached && payloadMode.current !== "all")'), "The all-mode last-good fallback is still restored after mount.");
 
 console.log("Dashboard/public loading last-good and mobile presentation regression checks passed.");
