@@ -24,6 +24,7 @@ export const PULSE_NOTIFICATION_TYPES = [
   "prize_unlocked",
   "dzn_news",
   "dzn_announcement",
+  "server_setup_recommendation",
   "billing_payment_setup",
   "billing_trial_ending",
   "player_link_revoked",
@@ -387,14 +388,22 @@ export async function markNotificationRead(env: Env, user: SessionUser, notifica
   if (!id) return { ok: false, status: 400, error: "invalid_notification_id", message: "Invalid notification id." };
   const now = new Date().toISOString();
   const result = await requireDb(env)
-    .prepare("UPDATE user_notifications SET read_at = COALESCE(read_at, ?) WHERE id = ? AND user_id = ?")
-    .bind(now, id, user.id)
+    .prepare(
+      `UPDATE user_notifications
+       SET read_at = COALESCE(read_at, ?),
+           metadata = CASE
+             WHEN json_valid(COALESCE(metadata, '')) AND json_extract(metadata, '$.opened_at') IS NOT NULL THEN metadata
+             ELSE json_set(CASE WHEN json_valid(COALESCE(metadata, '')) THEN metadata ELSE '{}' END, '$.opened_at', ?)
+           END
+       WHERE id = ? AND user_id = ?`,
+    )
+    .bind(now, now, id, user.id)
     .run();
   const changes = Number(result.meta?.changes ?? 0) || 0;
   if (changes <= 0) {
     return { ok: false, status: 404, error: "notification_not_found", message: "Notification was not found." };
   }
-  return { ok: true, status: 200, id, read_at: now, unreadCount: await countUnreadNotifications(env, user) };
+  return { ok: true, status: 200, id, read_at: now, opened_at: now, unreadCount: await countUnreadNotifications(env, user) };
 }
 
 export async function markAllNotificationsRead(env: Env, user: SessionUser) {
@@ -416,14 +425,17 @@ export async function markAllNotificationsRead(env: Env, user: SessionUser) {
 export async function clearReadNotifications(env: Env, user: SessionUser) {
   if (!isDznPulseEnabled(env)) return { status: 404, ...pulseFeatureDisabledPayload() };
   const db = requireDb(env);
-  // Preserve the single delivery receipt so clearing a payment notice cannot recreate it on every visit.
+  // Expire durable receipts from the inbox while retaining their delivery/open state for support views.
   const results = await db.batch([
     db.prepare(`UPDATE user_notifications SET expires_at = CURRENT_TIMESTAMP
-      WHERE user_id = ? AND type IN (?, ?) AND read_at IS NOT NULL
+      WHERE user_id = ? AND read_at IS NOT NULL
+        AND (type IN (?, ?) OR COALESCE(action_url, '') = ? OR dedupe_key LIKE '%-setup-recommendation-%')
         AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`)
-      .bind(user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE),
-    db.prepare("DELETE FROM user_notifications WHERE user_id = ? AND read_at IS NOT NULL AND type NOT IN (?, ?)")
-      .bind(user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE),
+      .bind(user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE, "/setup#review-test"),
+    db.prepare(`DELETE FROM user_notifications
+      WHERE user_id = ? AND read_at IS NOT NULL
+        AND NOT (type IN (?, ?) OR COALESCE(action_url, '') = ? OR dedupe_key LIKE '%-setup-recommendation-%')`)
+      .bind(user.id, PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE, "/setup#review-test"),
   ]);
   return { ok: true, status: 200, cleared: results.reduce((sum, result) => sum + (Number(result.meta?.changes) || 0), 0), unreadCount: await countUnreadNotifications(env, user) };
 }
@@ -1113,7 +1125,7 @@ function notificationTypesForFilter(filter: PulseNotificationFilter): PulseNotif
   if (filter === "events") return ["upcoming_event", "event_starting", "event_started", "event_countdown", "event_entry_confirmed", "event_result", "prize_unlocked"];
   if (filter === "scores") return ["event_score_update", "event_rank_update", "monthly_global_rank"];
   if (filter === "achievements") return ["achievement_unlocked"];
-  if (filter === "news") return ["dzn_news", "dzn_announcement", "player_link_approved", "player_link_rejected", "player_link_revoked"];
+  if (filter === "news") return ["dzn_news", "dzn_announcement", "server_setup_recommendation", "player_link_approved", "player_link_rejected", "player_link_revoked"];
   return [...PULSE_NOTIFICATION_TYPES];
 }
 

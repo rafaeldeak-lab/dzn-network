@@ -7,6 +7,7 @@ import {
 import { json, methodNotAllowed } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
 import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
+import { DZN_BOT_INSTALL_PERMISSIONS } from "../../../../lib/discord-bot-permissions";
 
 type ChannelFetchDiagnostics = {
   selected_server_id: string | null;
@@ -405,7 +406,7 @@ function buildBotInviteUrl(env: Env, guildId: string | null) {
   const url = new URL("https://discord.com/oauth2/authorize");
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("scope", "bot applications.commands");
-  url.searchParams.set("permissions", "274878294016");
+  url.searchParams.set("permissions", DZN_BOT_INSTALL_PERMISSIONS);
   url.searchParams.set("guild_id", guildId);
   url.searchParams.set("disable_guild_select", "true");
   return url.toString();

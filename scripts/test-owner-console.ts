@@ -211,6 +211,34 @@ assert.equal(fedFeralDiagnosis.billing.accountPresent, true, "A server subscript
 assert.deepEqual(fedFeralDiagnosis.supportBlockers.map((blocker) => blocker.key), ["billing", "verification", "service_check", "status_sync", "adm_sync"]);
 assert.equal(fedFeralDiagnosis.onboarding.tokenRecordPresent, true);
 
+const sentUnreadRecommendation = mapOwnerServerRowForTest({
+  id: "server-notified",
+  server_name: "Notified server",
+  setup_notification_sent_at: "2026-09-25T01:07:04.000Z",
+  setup_notification_read_at: null,
+  owner_discord_notifications_enabled: 0,
+});
+assert.equal(sentUnreadRecommendation.setupNotification.websiteStatus, "sent_unread");
+assert.equal(sentUnreadRecommendation.setupNotification.discordStatus, "disabled_by_owner");
+const openedRecommendation = mapOwnerServerRowForTest({
+  id: "server-opened-notice",
+  server_name: "Opened notice server",
+  setup_notification_sent_at: "2026-09-25T01:07:04.000Z",
+  setup_notification_read_at: "2026-09-25T02:00:00.000Z",
+  setup_notification_opened_at: "2026-09-25T02:00:00.000Z",
+  owner_discord_notifications_enabled: 1,
+  setup_notification_discord_status: "delivered",
+});
+assert.equal(openedRecommendation.setupNotification.websiteStatus, "opened");
+assert.equal(openedRecommendation.setupNotification.discordStatus, "delivered");
+const readWithoutOpening = mapOwnerServerRowForTest({
+  id: "server-read-notice",
+  server_name: "Read notice server",
+  setup_notification_sent_at: "2026-09-25T01:07:04.000Z",
+  setup_notification_read_at: "2026-09-25T02:00:00.000Z",
+});
+assert.equal(readWithoutOpening.setupNotification.websiteStatus, "read");
+
 const paidHealthyServer = mapOwnerServerRowForTest({
   id: "server-paid",
   server_name: "Paid healthy server",

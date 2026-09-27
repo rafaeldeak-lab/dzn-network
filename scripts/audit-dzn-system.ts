@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { DZN_BOT_INSTALL_PERMISSIONS } from "../lib/discord-bot-permissions";
 
 import {
   AUTO_POST_TYPES,
@@ -165,7 +166,7 @@ function auditBillingPlans() {
 function auditDiscordConfig() {
   const clientId = process.env.DISCORD_CLIENT_ID?.trim();
   if (clientId) {
-    const inviteUrl = `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(clientId)}&permissions=8&scope=bot%20applications.commands`;
+    const inviteUrl = `https://discord.com/oauth2/authorize?client_id=${encodeURIComponent(clientId)}&permissions=${DZN_BOT_INSTALL_PERMISSIONS}&scope=bot%20applications.commands`;
     pass("Discord bot invite URL", `Can be generated: ${inviteUrl.replace(clientId, "[client_id]")}`);
   } else {
     warn("Discord bot invite URL", "DISCORD_CLIENT_ID missing locally, so invite URL cannot be generated here.");
