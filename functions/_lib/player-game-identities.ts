@@ -245,17 +245,30 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
         (SELECT proof.expires_at FROM player_game_identity_proof_codes proof WHERE proof.claim_id = player_game_identity_claims.id AND proof.status = 'active' AND datetime(proof.expires_at) > CURRENT_TIMESTAMP ORDER BY datetime(proof.created_at) DESC LIMIT 1) AS proof_expires_at`
       : `'none' AS proof_status, NULL AS proof_expires_at`;
     const playerDeliveryProjection = hasDeliveryLedger
-      ? `(SELECT delivery.status
+      ? `(SELECT CASE
+            WHEN delivery.status = 'processing'
+              AND delivery.lease_expires_at IS NOT NULL
+              AND datetime(delivery.lease_expires_at) <= CURRENT_TIMESTAMP THEN 'retry'
+            ELSE delivery.status
+          END
           FROM player_game_identity_notification_deliveries delivery
           WHERE delivery.claim_id = player_game_identity_claims.id
+            AND delivery.user_id = player_game_identity_claims.user_id
             AND delivery.event_type IN ('approved', 'rejected')
           ORDER BY datetime(delivery.created_at) DESC, delivery.id DESC
           LIMIT 1) AS discord_delivery_status`
       : `NULL AS discord_delivery_status`;
     const revokedDeliveryProjection = hasDeliveryLedger
-      ? `(SELECT delivery.status
+      ? `(SELECT CASE
+            WHEN delivery.status = 'processing'
+              AND delivery.lease_expires_at IS NOT NULL
+              AND datetime(delivery.lease_expires_at) <= CURRENT_TIMESTAMP THEN 'retry'
+            ELSE delivery.status
+          END
           FROM player_game_identity_notification_deliveries delivery
-          WHERE delivery.link_id = l.id AND delivery.event_type = 'revoked'
+          WHERE delivery.link_id = l.id
+            AND delivery.user_id = l.user_id
+            AND delivery.event_type = 'revoked'
           ORDER BY datetime(delivery.created_at) DESC, delivery.id DESC
           LIMIT 1) AS discord_delivery_status`
       : `NULL AS discord_delivery_status`;

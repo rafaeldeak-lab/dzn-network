@@ -60,9 +60,9 @@ export async function testPlayerGameIdentityReadModels() {
         ('audit-a', 'claim-a', 'link-a', 'player-a', 'owner-a', 'server-a', 'profile-a', '76561198000000001', 'claim_approved', 'accepted', 'Server A proof checked.'),
         ('audit-b', 'claim-b', 'link-b', 'player-b', 'owner-b', 'server-b', 'profile-b', '76561198000000002', 'link_revoked', 'accepted', 'Server B revocation reason.');
       INSERT INTO player_game_identity_notification_deliveries
-        (id, audit_id, claim_id, link_id, user_id, discord_id, linked_server_id, event_type, status, attempt_count) VALUES
-        ('delivery-a', 'audit-a', 'claim-a', 'link-a', 'player-a', '831243159785701398', 'server-a', 'approved', 'delivered', 1),
-        ('delivery-b', 'audit-b', NULL, 'link-b', 'player-b', 'discord-b', 'server-b', 'revoked', 'retry', 2);
+        (id, audit_id, claim_id, link_id, user_id, discord_id, linked_server_id, event_type, status, attempt_count, lease_expires_at) VALUES
+        ('delivery-a', 'audit-a', 'claim-a', 'link-a', 'player-a', '831243159785701398', 'server-a', 'approved', 'delivered', 1, NULL),
+        ('delivery-b', 'audit-b', NULL, 'link-b', 'player-b', 'discord-b', 'server-b', 'revoked', 'processing', 2, datetime('now', '-1 minute'));
     `);
     let attemptedWrites = 0;
     const env = {
@@ -135,7 +135,7 @@ export async function testPlayerGameIdentityReadModels() {
     assert.deepEqual(mismatchedDiscord.claims, []);
     assert.deepEqual(mismatchedDiscord.active_links, []);
     const revokedPlayer = await readPlayerGameIdentityReadModel(env, user("player-b", "discord-b"));
-    assert.equal(revokedPlayer.revoked_links[0]?.discord_delivery_status, "retry", "Players must see that a revocation DM is still retrying.");
+    assert.equal(revokedPlayer.revoked_links[0]?.discord_delivery_status, "retry", "An expired processing lease must be shown as awaiting retry, not actively sending.");
     const denial = await reviewPlayerGameIdentityClaim(env, user("owner-b"), "claim-a", { action: "approve" });
     assert.equal(denial.status, 403);
     assert.equal(attemptedWrites, 0, "Reads and cross-owner denial must perform no writes");
