@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-27T10:59:01.391Z",
+  "generated_at": "2026-09-27T11:37:00.219Z",
   "results": [
     {
       "scenario": "published",
       "viewport": "desktop",
       "screenshot": "screenshots/published-desktop.png",
-      "assertions": 16,
+      "assertions": 18,
       "consoleMessages": [],
       "failedRequests": []
     },
@@ -13,7 +13,7 @@
       "scenario": "published",
       "viewport": "mobile",
       "screenshot": "screenshots/published-mobile.png",
-      "assertions": 16,
+      "assertions": 18,
       "consoleMessages": [],
       "failedRequests": []
     },
@@ -21,7 +21,7 @@
       "scenario": "identityHidden",
       "viewport": "desktop",
       "screenshot": "screenshots/identityHidden-desktop.png",
-      "assertions": 11,
+      "assertions": 13,
       "consoleMessages": [],
       "failedRequests": []
     },
@@ -29,7 +29,7 @@
       "scenario": "hidden",
       "viewport": "desktop",
       "screenshot": "screenshots/hidden-desktop.png",
-      "assertions": 9,
+      "assertions": 11,
       "consoleMessages": [],
       "failedRequests": []
     },
@@ -37,7 +37,7 @@
       "scenario": "unavailable",
       "viewport": "desktop",
       "screenshot": "screenshots/unavailable-desktop.png",
-      "assertions": 7,
+      "assertions": 9,
       "consoleMessages": [],
       "failedRequests": []
     },
@@ -45,7 +45,7 @@
       "scenario": "invalidHandle",
       "viewport": "desktop",
       "screenshot": "screenshots/invalidHandle-desktop.png",
-      "assertions": 8,
+      "assertions": 10,
       "consoleMessages": [],
       "failedRequests": []
     }

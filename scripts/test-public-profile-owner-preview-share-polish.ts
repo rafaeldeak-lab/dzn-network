@@ -77,6 +77,7 @@ function assertOwnerPreviewPanelContract() {
   );
   assert.match(panel, /aria-live="polite"/, "Copy/share feedback must be announced accessibly.");
   assert.match(panel, /avatarUrl = data\.discord_profile\.visible && data\.discord_profile\.connected[\s\S]+<Image src=\{avatarUrl\}/, "Owner preview must mirror the public visitor's consent-controlled Discord avatar.");
+  assert.match(panel, /<PreviewDiscordAvatarImage key=\{avatarUrl \?\? "hidden"\}[\s\S]+function PreviewDiscordAvatarImage/, "Owner preview must remount and retry the Discord avatar after its effective source or visibility changes.");
   assert.match(panel, /key: "discord_identity"[\s\S]+visible: data\.discord_profile\.visible && data\.discord_profile\.connected/, "Owner preview section rows must include the visitor-visible Discord identity state.");
   assert.doesNotMatch(
     panel,

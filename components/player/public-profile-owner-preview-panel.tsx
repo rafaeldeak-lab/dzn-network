@@ -513,8 +513,12 @@ function PreviewHero({ state, handle, href }: { state: PreviewState; handle: str
 }
 
 function PreviewDiscordAvatar({ data }: { data: PublicPlayerProfilePayload }) {
-  const [failed, setFailed] = useState(false);
   const avatarUrl = data.discord_profile.visible && data.discord_profile.connected ? data.discord_profile.avatar_url : null;
+  return <PreviewDiscordAvatarImage key={avatarUrl ?? "hidden"} data={data} avatarUrl={avatarUrl} />;
+}
+
+function PreviewDiscordAvatarImage({ data, avatarUrl }: { data: PublicPlayerProfilePayload; avatarUrl: string | null }) {
+  const [failed, setFailed] = useState(false);
   return (
     <span
       role="img"
