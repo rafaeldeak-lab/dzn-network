@@ -739,6 +739,7 @@ export async function reviewPlayerGameIdentityClaim(
         ...(discordDeliveryId
           ? [preparePlayerLinkDiscordDelivery(db, claim, "rejected", decisionId, discordDeliveryId, null)]
           : []),
+        preparePlayerLinkReviewRequestNotificationResolution(db, claim.id, decisionId, "rejected"),
       ]);
       if (results[0].meta.changes !== 1) return reviewChangedResult();
       return { ok: true, status: 200, claim_id: claim.id, link_id: null, action: "rejected", message: "Identity claim rejected.", delivery: decisionDelivery(claim, "rejected", discordDeliveryId) };
@@ -841,6 +842,7 @@ export async function reviewPlayerGameIdentityClaim(
       ...(discordDeliveryId
         ? [preparePlayerLinkDiscordDelivery(db, claim, "approved", decisionId, discordDeliveryId, linkId)]
         : []),
+      preparePlayerLinkReviewRequestNotificationResolution(db, claim.id, decisionId, "approved"),
       db.prepare(
         `SELECT id FROM player_game_identity_links
          WHERE linked_server_id = ? AND player_id = ? AND status = 'active' AND revoked_at IS NULL AND ${decisionGate}`,
@@ -1132,6 +1134,29 @@ function preparePlayerLinkDiscordDelivery(
     action,
     auditId,
   );
+}
+
+function preparePlayerLinkReviewRequestNotificationResolution(
+  db: D1Database,
+  claimId: string,
+  decisionId: string,
+  resolution: "approved" | "rejected",
+) {
+  return db.prepare(
+    `UPDATE user_notifications
+     SET read_at = COALESCE(read_at, CURRENT_TIMESTAMP),
+         expires_at = CURRENT_TIMESTAMP,
+         metadata = json_set(
+           CASE WHEN json_valid(COALESCE(metadata, '')) THEN metadata ELSE '{}' END,
+           '$.review_status', ?
+         )
+     WHERE type = 'player_link_review_requested'
+       AND dedupe_key LIKE ?
+       AND EXISTS (
+         SELECT 1 FROM player_game_identity_audit_log
+         WHERE id = ? AND result = 'accepted'
+       )`,
+  ).bind(resolution, `player-link-review:${claimId}:%`, decisionId);
 }
 
 function decisionDelivery(

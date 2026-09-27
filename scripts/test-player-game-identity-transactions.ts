@@ -193,13 +193,15 @@ export async function testPlayerGameIdentityTransactions() {
   try {
     ownerNotifications.sqlite.exec(`DELETE FROM player_game_identity_claims;
       UPDATE users SET discord_id='888888888888888888' WHERE id='owner-a';
-      INSERT INTO users VALUES ('platform-owner','999999999999999999','Platform Owner',NULL);`);
+      INSERT INTO users VALUES ('platform-owner','999999999999999999','Platform Owner',NULL);
+      INSERT INTO users VALUES ('platform-observer','777777777777777777','Platform Observer',NULL);`);
     ownerNotifications.sqlite.exec(readFileSync("migrations/0075_player_link_owner_request_notifications.sql", "utf8"));
     ownerNotifications.sqlite.exec(`INSERT OR REPLACE INTO notification_preferences (user_id,discord_enabled)
       VALUES ('owner-a',1),('platform-owner',1);`);
     Object.assign(ownerNotifications.env, {
       DZN_DISCORD_NOTIFICATIONS_ENABLED: "true",
-      DZN_PLATFORM_OWNER_DISCORD_IDS: "999999999999999999",
+      DZN_PLATFORM_OWNER_DISCORD_IDS: "999999999999999999,777777777777777777",
+      DZN_ADMIN_DISCORD_IDS: "999999999999999999",
       DISCORD_BOT_TOKEN: "test-token-with-enough-length",
     });
     const discordBodies: Array<Record<string, unknown>> = [];
@@ -215,7 +217,7 @@ export async function testPlayerGameIdentityTransactions() {
     );
     assert.equal(result.status, 201);
     const notices = ownerNotifications.sqlite.prepare("SELECT user_id,server_id,type,dedupe_key,metadata FROM user_notifications ORDER BY user_id").all();
-    assert.deepEqual(notices.map((row) => row.user_id), ["owner-a", "platform-owner"], "Only the server owner and configured platform owner receive website review alerts.");
+    assert.deepEqual(notices.map((row) => row.user_id), ["owner-a", "platform-owner"], "Only the server owner and an authorized platform admin receive website review alerts.");
     assert.ok(notices.every((row) => row.type === "player_link_review_requested"));
     assert.ok(notices.every((row) => row.server_id === null), "Review alerts must not prevent the referenced server from being deleted.");
     assert.equal(JSON.stringify(notices).includes("game-a"), false, "Owner alerts must not expose the hidden exact game ID.");
@@ -255,6 +257,13 @@ export async function testPlayerGameIdentityTransactions() {
     );
     assert.equal(repeated.status, 200);
     assert.equal(ownerNotifications.sqlite.prepare("SELECT COUNT(*) AS count FROM user_notifications").get()?.count, 2, "A repeated pending request must not duplicate owner alerts.");
+    const rejected = await reviewPlayerGameIdentityClaim(ownerNotifications.env, owner, result.ok ? result.claim.id : "missing", { action: "reject" });
+    assert.equal(rejected.status, 200);
+    const resolvedNotices = ownerNotifications.sqlite.prepare(
+      "SELECT read_at, expires_at, json_extract(metadata, '$.review_status') AS review_status FROM user_notifications WHERE type='player_link_review_requested'",
+    ).all();
+    assert.ok(resolvedNotices.every((row) => row.read_at && row.expires_at), "Deciding a claim must terminalize every matching website review alert.");
+    assert.ok(resolvedNotices.every((row) => row.review_status === "rejected"), "Resolved owner alerts must record the final review status.");
   } finally {
     globalThis.fetch = originalFetch;
     ownerNotifications.close();

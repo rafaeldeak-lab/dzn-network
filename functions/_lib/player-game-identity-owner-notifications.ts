@@ -1,4 +1,5 @@
 import { requireDb } from "./db";
+import { isDznAdminDiscordId } from "./admin";
 import { isDiscordNotificationsEnabled } from "./feature-flags";
 import { parsePlatformOwnerDiscordIds } from "./platform-owner";
 import type { Env } from "./types";
@@ -44,7 +45,9 @@ export async function resolveOwnerRequestNotificationRecipients(env: Env, server
       `SELECT id, discord_id FROM users WHERE discord_id IN (${platformDiscordIds.map(() => "?").join(", ")})`,
     ).bind(...platformDiscordIds).all<{ id: string; discord_id: string }>();
     for (const row of rows.results ?? []) {
-      if (row.discord_id) recipients.set(row.id, { userId: row.id, discordId: row.discord_id });
+      if (row.discord_id && isDznAdminDiscordId(env, row.discord_id)) {
+        recipients.set(row.id, { userId: row.id, discordId: row.discord_id });
+      }
     }
   }
   return [...recipients.values()];
