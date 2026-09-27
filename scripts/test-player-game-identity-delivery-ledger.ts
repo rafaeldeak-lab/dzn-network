@@ -135,6 +135,17 @@ export async function testPlayerGameIdentityDeliveryLedger() {
     assert.equal(row?.result_code, "discord_dm_delivered");
 
     sqlite.exec(`UPDATE player_game_identity_notification_deliveries
+      SET status='processing', attempt_count=5, lease_id='expired-lease',
+          lease_expires_at=datetime('now', '-1 minute'), next_attempt_at=CURRENT_TIMESTAMP,
+          delivered_at=NULL, result_code=NULL
+      WHERE id='delivery-a'`);
+    const exhaustedLease = await dispatchQueuedPlayerGameIdentityNotifications(env, { deliveryId: "delivery-a" });
+    assert.equal(exhaustedLease.processed, 0, "An expired fifth attempt must not be claimed a sixth time.");
+    row = sqlite.prepare("SELECT status,attempt_count,result_code FROM player_game_identity_notification_deliveries WHERE id='delivery-a'").get();
+    assert.equal(row?.status, "failed");
+    assert.equal(row?.result_code, "delivery_attempts_exhausted");
+
+    sqlite.exec(`UPDATE player_game_identity_notification_deliveries
       SET status='queued', attempt_count=0, next_attempt_at=CURRENT_TIMESTAMP, delivered_at=NULL, result_code=NULL
       WHERE id='delivery-a'`);
     const messagesBeforeRace = messagePosts;

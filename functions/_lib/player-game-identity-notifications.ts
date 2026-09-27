@@ -95,10 +95,12 @@ export async function dispatchQueuedPlayerGameIdentityNotifications(
   const maxJobs = Math.max(1, Math.min(20, Math.trunc(options.maxJobs ?? 10)));
   await env.DB.prepare(
     `UPDATE player_game_identity_notification_deliveries
-     SET status = 'retry', lease_id = NULL, lease_expires_at = NULL, next_attempt_at = CURRENT_TIMESTAMP,
-         result_code = 'delivery_lease_expired', updated_at = CURRENT_TIMESTAMP
+     SET status = CASE WHEN attempt_count >= ? THEN 'failed' ELSE 'retry' END,
+         lease_id = NULL, lease_expires_at = NULL, next_attempt_at = CURRENT_TIMESTAMP,
+         result_code = CASE WHEN attempt_count >= ? THEN 'delivery_attempts_exhausted' ELSE 'delivery_lease_expired' END,
+         updated_at = CURRENT_TIMESTAMP
      WHERE status = 'processing' AND lease_expires_at IS NOT NULL AND datetime(lease_expires_at) <= datetime('now')`,
-  ).run();
+  ).bind(MAX_ATTEMPTS, MAX_ATTEMPTS).run();
   const due = await env.DB.prepare(
     `SELECT id FROM player_game_identity_notification_deliveries
      WHERE status IN ('queued', 'retry')

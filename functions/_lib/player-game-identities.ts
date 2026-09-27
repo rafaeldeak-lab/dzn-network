@@ -248,7 +248,8 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
       ? `(SELECT CASE
             WHEN delivery.status = 'processing'
               AND delivery.lease_expires_at IS NOT NULL
-              AND datetime(delivery.lease_expires_at) <= CURRENT_TIMESTAMP THEN 'retry'
+              AND datetime(delivery.lease_expires_at) <= CURRENT_TIMESTAMP
+              THEN CASE WHEN delivery.attempt_count >= 5 THEN 'failed' ELSE 'retry' END
             ELSE delivery.status
           END
           FROM player_game_identity_notification_deliveries delivery
@@ -262,7 +263,8 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
       ? `(SELECT CASE
             WHEN delivery.status = 'processing'
               AND delivery.lease_expires_at IS NOT NULL
-              AND datetime(delivery.lease_expires_at) <= CURRENT_TIMESTAMP THEN 'retry'
+              AND datetime(delivery.lease_expires_at) <= CURRENT_TIMESTAMP
+              THEN CASE WHEN delivery.attempt_count >= 5 THEN 'failed' ELSE 'retry' END
             ELSE delivery.status
           END
           FROM player_game_identity_notification_deliveries delivery
