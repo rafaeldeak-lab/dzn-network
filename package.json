@@ -135,6 +135,7 @@
     "qa:player-hub-rendered": "node scripts/qa-player-hub-rendered.mjs",
     "qa:public-player-profile-rendered": "node scripts/qa-public-player-profile-rendered.mjs",
     "qa:public-profile-owner-preview-share": "node scripts/qa-public-profile-owner-preview-share.mjs",
+    "qa:events-hub-rendered": "node scripts/qa-events-hub-redesign.mjs",
     "player-counts:audit": "tsx scripts/audit-player-counts.ts",
     "adm:backfill-missing": "tsx scripts/adm-backfill-missing.ts",
     "adm:backfill": "tsx scripts/backfill-adm-files.ts",

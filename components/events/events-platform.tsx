@@ -5,10 +5,11 @@ import { useParams, usePathname, useRouter, useSearchParams } from "next/navigat
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   Activity,
+  ArrowRight,
   BarChart3,
+  Bell,
   CalendarDays,
   CheckCircle2,
-  Crown,
   Filter,
   Flag,
   Home,
@@ -20,6 +21,8 @@ import {
   ShieldCheck,
   Swords,
   Trophy,
+  Users,
+  Zap,
 } from "lucide-react";
 
 import { fetchJsonWithRetry } from "@/lib/client-fetch";
@@ -31,26 +34,26 @@ import {
   fallbackServerEvents,
   fallbackServers,
   type CompetitiveEvent,
+  type EventActivity,
   type EventDetailPayload,
   type EventMatch,
   type EventsPayload,
   type ServerEventsPayload,
 } from "./event-data";
-import { cn, formatNumber } from "./event-format";
+import { cn, eventImageStyle, formatDate, formatNumber } from "./event-format";
 import { BracketView } from "./BracketView";
 import { ChallengeBattleCard } from "./ChallengeBattleCard";
 import { ClientTimeUntil } from "./ClientTimeUntil";
 import { EventFilterPanel } from "./EventFilterPanel";
 import { EventHero } from "./EventHero";
+import { EventStatusBadge } from "./EventStatusBadge";
 import { EventTabs } from "./EventTabs";
 import { LeaderboardTeaser } from "./LeaderboardTeaser";
 import { LiveActivityFeed } from "./LiveActivityFeed";
-import { LiveBattleCard } from "./LiveBattleCard";
 import { PremiumLockedCard } from "./PremiumLockedCard";
 import { SeasonBanner } from "./SeasonBanner";
 import { ServerCategoryBadge } from "./ServerCategoryBadge";
 import { ServerEventProfile } from "./ServerEventProfile";
-import { TournamentCard } from "./TournamentCard";
 import { TournamentTable } from "./TournamentTable";
 import { ServerWarsTeaser } from "@/components/server-wars/server-wars-platform";
 import {
@@ -343,42 +346,160 @@ export function EventCreatePage() {
 export function EventsHubPage() {
   const fallback = useMemo(() => fallbackEventsPayload(), []);
   const { data, loadState } = useEventsPayload("/api/events?limit=24", fallback);
+  const liveActivity = useLiveEventActivity();
   const active = data.events.filter((event) => event.status === "live");
   const upcoming = data.events.filter((event) => ["upcoming", "registration_open", "standby"].includes(event.status));
-  const top = fallbackServers[0];
+  const featured = (active[0] ?? upcoming[0] ?? data.events[0]) ?? null;
+  const usingDisplayFallback = data.source === "display_fallback";
   return (
     <EventsShell>
       <EventHero />
       <EventTabs active="CTF Tournaments" />
       <StaleNotice state={loadState} source={data.source} />
-      <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
-        <main className="space-y-5">
-          <PulseEventSpotlight event={(active[0] ?? upcoming[0] ?? data.events[0]) ?? null} />
-          <ServerWarsTeaser />
-          <CommunitySuggestionsPanel />
-          <SectionHeader title="Active Tournaments" href="/events/tournaments?status=active" />
-          <div className="grid gap-4 lg:grid-cols-3">
-            {(active.length ? active : data.events.slice(0, 3)).slice(0, 3).map((event) => <TournamentCard key={event.id} event={event} />)}
-          </div>
-          <SectionHeader title="Upcoming Tournaments" href="/events/tournaments?status=upcoming" />
-          <div className="grid gap-4 md:grid-cols-3">
-            {(upcoming.length ? upcoming : data.events.slice(3, 6)).slice(0, 3).map((event) => <TournamentCard key={event.id} event={event} compact />)}
-          </div>
-          <SeasonBanner />
-          <SectionHeader title="Category-Safe Battle Cards" href="/events/challenges" />
-          <div className="grid gap-4 lg:grid-cols-2">
-            {fallbackMatches.slice(0, 2).map((match) => <LiveBattleCard key={match.id} match={match} />)}
-          </div>
-          <LeaderboardTeaser rows={fallbackServers} locked={data.teaserMode} />
-        </main>
-        <aside className="space-y-5">
-          <OverviewCard summary={data.summary} />
-          <TopServerCard server={top} />
-          <LiveActivityFeed activity={fallbackActivity} />
-          <PremiumLockedCard title="SAME CATEGORY ONLY" message="Deathmatch can only fight Deathmatch, PvP can only fight PvP, and every join/match API enforces the same rule." />
-        </aside>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <FeaturedEventStage event={featured} />
+        <LiveEventsRail events={active.slice(0, 3)} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.15fr)_320px]">
+        <UpcomingEventsPanel events={upcoming.slice(0, 3)} />
+        <BracketPreviewPanel event={featured} matches={usingDisplayFallback ? fallbackMatches : []} />
+        <LiveActivityFeed activity={usingDisplayFallback ? fallbackActivity : liveActivity} />
+      </div>
+      <NetworkEventStats summary={data.summary} />
+      <ServerWarsTeaser />
+      <CommunitySuggestionsPanel />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <SeasonBanner />
+        <PremiumLockedCard title="SAME CATEGORY ONLY" message="Deathmatch can only fight Deathmatch, PvP can only fight PvP, and every join and match API enforces the same rule." />
       </div>
     </EventsShell>
+  );
+}
+
+function FeaturedEventStage({ event }: { event: CompetitiveEvent | null }) {
+  if (!event) return <div className="min-h-[330px] border border-dashed border-white/10 bg-white/[0.02]" />;
+  const live = event.status === "live";
+  const ended = event.status === "ended";
+  const timingLabel = ended ? "Ended" : live ? "Ends" : "Starts";
+  const timingValue = ended || live ? event.ends_at : event.starts_at;
+  return (
+    <section data-featured-event className="relative min-h-[330px] overflow-hidden border border-cyan-300/24 bg-cover bg-center" style={eventImageStyle(event.banner_url)}>
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(2,6,23,0.96),rgba(2,6,23,0.7)_58%,rgba(2,6,23,0.32))]" />
+      <div className="relative flex min-h-[330px] max-w-4xl flex-col justify-between p-5 sm:p-7">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-md border border-violet-300/40 bg-violet-500/22 px-3 py-1.5 text-[10px] font-black uppercase text-white"><Trophy className="h-3.5 w-3.5" />Featured event</span>
+          <PulseEventSpotlight event={event} />
+          <EventStatusBadge status={event.status} />
+          <ServerCategoryBadge category={event.category} label={event.category_label} compact />
+        </div>
+        <div>
+          <p className="text-[10px] font-black uppercase text-cyan-200">{event.event_type_label}</p>
+          <h2 className="mt-2 max-w-3xl text-3xl font-black uppercase text-white sm:text-5xl">{event.name}</h2>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-200">{event.description}</p>
+          <div className="mt-5 flex flex-wrap gap-4 text-[11px] font-black uppercase text-zinc-300">
+            <span className="inline-flex items-center gap-2"><CalendarDays className="h-4 w-4 text-cyan-300" />{formatDate(event.starts_at)}</span>
+            <span className="inline-flex items-center gap-2"><Users className="h-4 w-4 text-violet-300" />{formatNumber(event.total_participants)} participants</span>
+            <span className="inline-flex items-center gap-2"><Server className="h-4 w-4 text-emerald-300" />{formatNumber(event.registered_servers)} servers</span>
+          </div>
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <Link href={`/events/${event.slug}`} className="inline-flex items-center gap-2 rounded-md border border-cyan-200/55 bg-cyan-400/22 px-5 py-3 text-xs font-black uppercase text-white transition hover:bg-cyan-400/32">{live ? "Open live event" : ended ? "View results" : "View event"}<ArrowRight className="h-4 w-4" /></Link>
+            <div className="rounded-md border border-white/12 bg-black/38 px-4 py-3 text-[10px] font-black uppercase text-zinc-300">{timingLabel} <span className="ml-1 text-white"><ClientTimeUntil value={timingValue} /></span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PulseEventSpotlight({ event }: { event: CompetitiveEvent | null }) {
+  const pulse = usePulseContextOptional();
+  if (!pulse?.enabled || !event) return null;
+  return <span className="inline-flex items-center gap-2 rounded-md border border-cyan-300/35 bg-cyan-400/12 px-3 py-1.5 text-[10px] font-black uppercase text-cyan-100"><Activity className="h-3.5 w-3.5" />Pulse tracked</span>;
+}
+
+function LiveEventsRail({ events }: { events: CompetitiveEvent[] }) {
+  return (
+    <section data-live-events className="border border-white/10 bg-[#050915]/94 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="inline-flex items-center gap-2 text-sm font-black uppercase text-white"><span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.85)]" />Live now</h2>
+        <Link href="/events/tournaments?status=active" className="text-[10px] font-black uppercase text-cyan-200">View all</Link>
+      </div>
+      <div className="mt-4 space-y-3">
+        {events.length ? events.map((event) => (
+          <Link key={event.id} href={`/events/${event.slug}`} className="group grid grid-cols-[72px_1fr_auto] items-center gap-3 border border-white/10 bg-white/[0.035] p-2 transition hover:border-cyan-300/35 hover:bg-cyan-400/[0.06]">
+            <span className="h-14 bg-cover bg-center" style={eventImageStyle(event.banner_url)} />
+            <span className="min-w-0"><span className="block truncate text-xs font-black uppercase text-white">{event.name}</span><span className="mt-1 block text-[10px] uppercase text-zinc-500">{formatNumber(event.total_participants)} participants</span></span>
+            <ArrowRight className="h-4 w-4 text-zinc-600 transition group-hover:text-cyan-200" />
+          </Link>
+        )) : <div className="border border-dashed border-white/12 p-4 text-sm leading-6 text-zinc-400">No events are live right now. Browse the schedule for the next competition.</div>}
+      </div>
+      <Link href="/events/tournaments" className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md border border-white/12 bg-white/[0.035] px-3 py-2.5 text-[10px] font-black uppercase text-zinc-200"><Bell className="h-4 w-4 text-violet-300" />Browse all events</Link>
+    </section>
+  );
+}
+
+function UpcomingEventsPanel({ events }: { events: CompetitiveEvent[] }) {
+  return (
+    <section data-upcoming-events className="border border-white/10 bg-[#050915]/94 p-4">
+      <SectionHeader title="Upcoming events" href="/events/tournaments?status=upcoming" />
+      <div className="mt-3 space-y-3">
+        {events.length ? events.map((event) => (
+          <article key={event.id} className="grid grid-cols-[62px_1fr] gap-3 border border-white/10 bg-black/24 p-3">
+            <div className="border border-violet-300/24 bg-violet-500/10 px-2 py-2 text-center"><span className="block text-[10px] font-black uppercase text-violet-200">{event.starts_at ? new Date(event.starts_at).toLocaleString("en-GB", { month: "short", timeZone: "UTC" }) : "TBD"}</span><span className="block text-xl font-black text-white">{event.starts_at ? new Date(event.starts_at).getUTCDate() : "-"}</span></div>
+            <div className="min-w-0"><h3 className="truncate text-sm font-black uppercase text-white">{event.name}</h3><p className="mt-1 line-clamp-1 text-xs text-zinc-500">{event.event_type_label} · {event.category_label}</p><Link href={`/events/${event.slug}`} className="mt-2 inline-flex items-center gap-1 text-[10px] font-black uppercase text-cyan-200">View details<ArrowRight className="h-3.5 w-3.5" /></Link></div>
+          </article>
+        )) : <div className="border border-dashed border-white/12 p-4 text-sm leading-6 text-zinc-400">No upcoming events are published yet. Check back for the next registration window.</div>}
+      </div>
+    </section>
+  );
+}
+
+function BracketPreviewPanel({ event, matches }: { event: CompetitiveEvent | null; matches: EventMatch[] }) {
+  const preview = matches.filter((match) => match.round_number >= 2).slice(0, 3);
+  const bracketHref = event ? `/events/${event.slug}/bracket` : "/events/tournaments";
+  return (
+    <section data-tournament-bracket className="border border-white/10 bg-[#050915]/94 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><p className="text-[10px] font-black uppercase text-violet-200">In progress</p><h2 className="mt-1 text-lg font-black uppercase text-white">Tournament bracket</h2></div>
+        <Link href={bracketHref} className="inline-flex items-center gap-2 text-[10px] font-black uppercase text-cyan-200">Full bracket<ArrowRight className="h-3.5 w-3.5" /></Link>
+      </div>
+      {preview.length ? <>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          {preview.map((match) => (
+          <div key={match.id} className="border border-white/10 bg-black/26 p-3">
+            <div className="flex items-center justify-between text-[9px] font-black uppercase text-zinc-500"><span>{match.round_number === 2 ? "Semi final" : "Grand final"}</span><span>{match.match_status}</span></div>
+            <BracketPreviewTeam name={match.left_server.server_name} score={match.left_score} winner={match.winner_server_id === match.left_server.server_id} />
+            <BracketPreviewTeam name={match.right_server.server_name} score={match.right_score} winner={match.winner_server_id === match.right_server.server_id} />
+          </div>
+          ))}
+        </div>
+        <div className="mt-4 flex items-center justify-between border border-amber-300/24 bg-amber-400/[0.07] p-3"><span className="inline-flex items-center gap-2 text-[10px] font-black uppercase text-amber-100"><Trophy className="h-4 w-4" />Champion projection</span><span className="text-sm font-black uppercase text-white">{preview.at(-1)?.winner_name ?? preview[0]?.winner_name ?? "TBD"}</span></div>
+      </> : (
+        <div className="mt-4 border border-dashed border-white/12 bg-black/20 p-5 text-center">
+          <Trophy className="mx-auto h-6 w-6 text-violet-300" />
+          <p className="mt-3 text-sm font-black uppercase text-white">Bracket updates are not live yet</p>
+          <p className="mt-2 text-xs leading-5 text-zinc-400">Open the featured event for its current registration and match status.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function BracketPreviewTeam({ name, score, winner }: { name: string; score: number; winner: boolean }) {
+  return <div className="mt-2 flex items-center justify-between gap-3 border-t border-white/8 pt-2"><span className={cn("truncate text-xs font-bold", winner ? "text-white" : "text-zinc-400")}>{name}</span><span className={cn("font-mono text-sm font-black", winner ? "text-emerald-200" : "text-zinc-500")}>{score}</span></div>;
+}
+
+function NetworkEventStats({ summary }: { summary: EventsPayload["summary"] }) {
+  const stats = [
+    [Users, `${formatNumber(summary.registered_servers)}+`, "competing servers"],
+    [Zap, formatNumber(summary.active_events), "live events"],
+    [Trophy, formatNumber(summary.completed_events), "completed events"],
+    [Activity, formatNumber(summary.total_participants), "participants"],
+  ] as const;
+  return (
+    <section data-event-stats className="grid border-y border-cyan-300/18 bg-cyan-400/[0.035] sm:grid-cols-2 xl:grid-cols-4">
+      {stats.map(([Icon, value, label]) => <div key={label} className="flex items-center gap-3 border-white/8 px-5 py-4 sm:border-r last:border-r-0"><Icon className="h-6 w-6 text-cyan-300" /><div><div className="text-xl font-black text-white">{value}</div><div className="text-[10px] font-black uppercase text-zinc-500">{label}</div></div></div>)}
+    </section>
   );
 }
 
@@ -719,6 +840,29 @@ function useEventsPayload(endpoint: string, fallback: EventsPayload) {
   return { data, loadState };
 }
 
+function useLiveEventActivity() {
+  const [activity, setActivity] = useState<EventActivity[]>([]);
+  useEffect(() => {
+    let active = true;
+    fetchJsonWithRetry<{ ok: boolean; source: string; activity?: EventActivity[] }>("/api/events/live-feed?limit=6", {
+      credentials: "include",
+      headers: { accept: "application/json" },
+      timeoutMs: 12_000,
+    })
+      .then((payload) => {
+        if (!active) return;
+        setActivity(payload.ok && payload.source === "live" && Array.isArray(payload.activity) ? payload.activity : []);
+      })
+      .catch(() => {
+        if (active) setActivity([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  return activity;
+}
+
 function useEventDetail(slug: string) {
   const fallback = useMemo(() => fallbackEventDetail(slug), [slug]);
   const [data, setData] = useState<EventDetailPayload>(fallback);
@@ -780,45 +924,6 @@ function HeaderLine({ title, subtitle, action }: { title: string; subtitle: stri
   );
 }
 
-function PulseEventSpotlight({ event }: { event: CompetitiveEvent | null }) {
-  const pulse = usePulseContextOptional();
-  if (!pulse?.enabled || !event) return null;
-  const artwork = event.banner_url;
-  return (
-    <article className="relative overflow-hidden rounded-xl border border-violet-300/24 bg-[#050812] shadow-[0_28px_110px_rgba(0,0,0,0.34)]">
-      {artwork ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={artwork} alt="" loading="lazy" decoding="async" width={1280} height={720} className="absolute inset-0 h-full w-full object-cover opacity-38" />
-      ) : null}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(34,211,238,0.24),transparent_34%),radial-gradient(circle_at_88%_20%,rgba(249,115,22,0.22),transparent_34%),linear-gradient(90deg,rgba(5,8,18,0.96),rgba(5,8,18,0.72),rgba(5,8,18,0.96))]" />
-      <div className="relative z-10 grid gap-5 p-5 lg:grid-cols-[1fr_auto] lg:items-end">
-        <div>
-          <div className="flex flex-wrap gap-2">
-            <span className="rounded-md border border-amber-300/32 bg-amber-400/12 px-2.5 py-1 text-[10px] font-black uppercase text-amber-100">Featured Event</span>
-            <span className="rounded-md border border-violet-300/30 bg-violet-500/12 px-2.5 py-1 text-[10px] font-black uppercase text-violet-100">{event.category_label}</span>
-          </div>
-          <p className="mt-5 text-xs font-black uppercase tracking-[0.26em] text-cyan-100">Server VS Server</p>
-          <h2 className="mt-2 max-w-xl text-4xl font-black uppercase leading-none text-white sm:text-5xl">{event.name}</h2>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">{event.description}</p>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[390px]">
-          <PulseSpotlightStat label="Servers" value={formatNumber(event.registered_servers)} />
-          <PulseSpotlightStat label="Players" value={formatNumber(event.total_participants)} />
-          <PulseSpotlightStat label="Starts In" value={<ClientTimeUntil value={event.starts_at} />} />
-        </div>
-        <div className="lg:col-span-2 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
-          <div className="h-2 overflow-hidden rounded-full border border-white/10 bg-white/[0.06]">
-            <span className="block h-full rounded-full bg-[linear-gradient(90deg,#22d3ee,#8b5cf6,#f97316)]" style={{ width: `${Math.max(0, Math.min(100, event.progress_percent))}%` }} />
-          </div>
-          <Link href={`/events/${event.slug}`} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-violet-300/32 bg-violet-500/18 px-5 text-xs font-black uppercase text-white transition hover:bg-violet-500/28">
-            View Details
-          </Link>
-        </div>
-      </div>
-    </article>
-  );
-}
-
 function PulseFeaturedMatchup({ match }: { match: EventMatch | null }) {
   const pulse = usePulseContextOptional();
   if (!pulse?.enabled || !match) return null;
@@ -873,42 +978,6 @@ function EventActionLink({ href, children }: { href: string; children: ReactNode
     <Link href={href} className="inline-flex items-center justify-center rounded-lg border border-violet-300/35 bg-violet-500/18 px-4 py-3 text-xs font-black uppercase text-violet-50 transition hover:bg-violet-500/28">
       {children}
     </Link>
-  );
-}
-
-function OverviewCard({ summary }: { summary: EventsPayload["summary"] }) {
-  return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-      <h2 className="text-sm font-black uppercase text-white">Event Overview</h2>
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <OverviewStat label="Active Events" value={summary.active_events} />
-        <OverviewStat label="Upcoming" value={summary.upcoming_events} />
-        <OverviewStat label="Registered" value={summary.registered_servers} />
-        <OverviewStat label="Participants" value={summary.total_participants} />
-      </div>
-    </section>
-  );
-}
-
-function OverviewStat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg border border-white/8 bg-black/24 p-3">
-      <div className="font-mono text-xl font-black text-white">{formatNumber(value)}</div>
-      <div className="mt-1 text-[10px] font-black uppercase text-zinc-500">{label}</div>
-    </div>
-  );
-}
-
-function TopServerCard({ server }: { server: typeof fallbackServers[number] }) {
-  return (
-    <section className="rounded-lg border border-amber-300/22 bg-[linear-gradient(135deg,rgba(245,158,11,0.12),rgba(124,58,237,0.08)),rgba(3,7,18,0.86)] p-4">
-      <h2 className="flex items-center gap-2 text-sm font-black uppercase text-white"><Crown className="h-4 w-4 text-amber-200" />Top Performing Server</h2>
-      <div className="mt-4 rounded-lg border border-white/10 bg-black/24 p-4">
-        <div className="text-lg font-black uppercase text-white">{server.server_name}</div>
-        <div className="mt-2"><ServerCategoryBadge category={server.category} label={server.category_label} compact /></div>
-        <div className="mt-4 font-mono text-2xl font-black text-amber-100">{formatNumber(server.score)} pts</div>
-      </div>
-    </section>
   );
 }
 

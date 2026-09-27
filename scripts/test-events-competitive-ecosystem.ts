@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
+import { Miniflare } from "miniflare";
 
 import { getEventsListPayload, hasQualifyingFullEventSubscription, resolveEventStatusFilter } from "../functions/_lib/events";
 import { buildChallengePhaseTemplates, renderEventProgressBar } from "../functions/_lib/event-hub";
@@ -284,5 +285,75 @@ async function main() {
   assert.equal(buildChallengePhaseTemplates("pve", "survival_challenge").some((phase) => phase.metricType === "build_score"), true, "PvE templates must include build/base scoring.");
   assert.equal(renderEventProgressBar(75, 25).includes("🏳️"), true, "Discord progress bar should include flag marker.");
 
+  await assertD1BackedEventSummaries();
+
   console.log("Events competitive ecosystem tests passed.");
+}
+
+async function assertD1BackedEventSummaries() {
+  const mf = new Miniflare({
+    modules: true,
+    script: "export default { fetch() { return new Response('local'); } }",
+    compatibilityDate: "2026-05-08",
+    d1Databases: ["DB"],
+    d1Persist: false,
+  });
+  try {
+    const db = await mf.getD1Database("DB");
+    const schema = [
+      `CREATE TABLE competitive_events (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL, description TEXT, category TEXT NOT NULL,
+        event_type TEXT NOT NULL, status TEXT NOT NULL, visibility TEXT, premium_tier TEXT, server_limit INTEGER,
+        team_limit INTEGER, starts_at TEXT, ends_at TEXT, created_by TEXT, banner_url TEXT, rules TEXT, rewards TEXT,
+        created_at TEXT, updated_at TEXT
+      )`,
+      `CREATE TABLE competitive_event_servers (
+        id TEXT PRIMARY KEY, event_id TEXT NOT NULL, server_id TEXT NOT NULL, category TEXT, approved INTEGER,
+        score INTEGER DEFAULT 0, wins INTEGER DEFAULT 0, losses INTEGER DEFAULT 0, draws INTEGER DEFAULT 0,
+        seed INTEGER, registered_at TEXT
+      )`,
+      "CREATE TABLE competitive_event_matches (id TEXT PRIMARY KEY, event_id TEXT NOT NULL, match_status TEXT)",
+      `CREATE TABLE competitive_event_activity (
+        id TEXT PRIMARY KEY, event_id TEXT, server_id TEXT, activity_type TEXT, message TEXT, metadata TEXT, created_at TEXT
+      )`,
+      "CREATE TABLE linked_servers (id TEXT PRIMARY KEY, public_slug TEXT, server_category TEXT, status TEXT)",
+    ];
+    for (const statement of schema) await db.prepare(statement).run();
+    const eventInsert = db.prepare(`INSERT INTO competitive_events (
+      id, name, slug, description, category, event_type, status, visibility, premium_tier, server_limit,
+      team_limit, starts_at, ends_at, created_by, banner_url, rules, rewards, created_at, updated_at
+    ) VALUES (?, ?, ?, '', 'deathmatch', 'community_cup', ?, 'public', 'free', 16, 16, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`);
+    const timestamp = "2026-09-27T12:00:00.000Z";
+    await eventInsert.bind("event-live", "Live Cup", "live-cup", "live", timestamp, timestamp, timestamp, timestamp).run();
+    for (let index = 1; index <= 11; index += 1) {
+      await eventInsert.bind(`event-ended-${index}`, `Ended Cup ${index}`, `ended-cup-${index}`, "ended", timestamp, timestamp, timestamp, timestamp).run();
+    }
+    await db.prepare("INSERT INTO competitive_event_servers (id, event_id, server_id, category, approved, registered_at) VALUES (?, ?, ?, 'deathmatch', 1, ?)")
+      .bind("registration-live-a", "event-live", "server-a", timestamp).run();
+    await db.prepare("INSERT INTO competitive_event_servers (id, event_id, server_id, category, approved, registered_at) VALUES (?, ?, ?, 'deathmatch', 1, ?)")
+      .bind("registration-ended-a", "event-ended-1", "server-a", timestamp).run();
+    await db.prepare("INSERT INTO competitive_event_servers (id, event_id, server_id, category, approved, registered_at) VALUES (?, ?, ?, 'deathmatch', 1, ?)")
+      .bind("registration-ended-b", "event-ended-2", "server-b", timestamp).run();
+
+    const env = { DB: db as unknown as D1Database } as Env;
+    const all = await getEventsListPayload(env, null, { limit: 24 });
+    assert.equal(all.source, "live");
+    assert.equal(all.events.length, 10, "Public event rows remain page-limited.");
+    assert.equal(all.summary.active_events, 1);
+    assert.equal(all.summary.completed_events, 11, "Summary counts include events beyond the page limit.");
+    assert.equal(all.summary.registered_servers, 2, "A server registered in multiple events is counted once.");
+
+    const completed = await getEventsListPayload(env, null, { status: "completed", limit: 24 });
+    assert.equal(completed.events.length, 10);
+    assert.equal(completed.summary.active_events, 0);
+    assert.equal(completed.summary.completed_events, 11, "Status-filtered totals remain independent of pagination.");
+    assert.equal(completed.summary.registered_servers, 2);
+
+    const live = await getEventsListPayload(env, null, { status: "active", limit: 24 });
+    assert.equal(live.summary.active_events, 1);
+    assert.equal(live.summary.completed_events, 0);
+    assert.equal(live.summary.registered_servers, 1, "Filtered totals include only matching event registrations.");
+  } finally {
+    await mf.dispose();
+  }
 }
