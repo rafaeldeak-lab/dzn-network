@@ -83,6 +83,21 @@ export async function revokePlayerGameIdentityLink(env: Env, actor: SessionUser,
           'claim_cancelled', 'accepted', 'Pending request closed after link revocation. Submit a new request with current evidence.'
         FROM player_game_identity_claims c WHERE c.status = 'pending' AND ${sameProfile} AND ${gate}`)
         .bind(decisionId, link.id, actor.id, link.linked_server_id, link.player_profile_id, link.player_id, decisionId),
+      db.prepare(`UPDATE user_notifications
+        SET read_at = COALESCE(read_at, CURRENT_TIMESTAMP),
+            expires_at = CURRENT_TIMESTAMP,
+            metadata = json_set(
+              CASE WHEN json_valid(COALESCE(metadata, '')) THEN metadata ELSE '{}' END,
+              '$.review_status', 'cancelled'
+            )
+        WHERE type = 'player_link_review_requested'
+          AND EXISTS (
+            SELECT 1 FROM player_game_identity_claims c
+            WHERE c.status = 'pending' AND ${sameProfile}
+              AND user_notifications.dedupe_key LIKE 'player-link-review:' || c.id || ':%'
+          )
+          AND ${gate}`)
+        .bind(link.linked_server_id, link.player_profile_id, link.player_id, decisionId),
       db.prepare(`UPDATE player_game_identity_claims AS c SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP,
           review_note = 'Link revoked. Submit a new request with current evidence.'
         WHERE c.status = 'pending' AND ${sameProfile} AND ${gate}`)

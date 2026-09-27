@@ -30,7 +30,10 @@ export async function testPlayerGameIdentityRevocation() {
       CREATE TABLE kill_events (id TEXT, linked_server_id TEXT, killer_id TEXT, victim_id TEXT, distance REAL, occurred_at TEXT, created_at TEXT);
       INSERT INTO player_profiles (id,linked_server_id,player_id,player_name,discord_id) VALUES ('legacy-independent','server-a','other-game','Other','discord-b');
       INSERT INTO player_game_identity_claims (id,user_id,discord_id,linked_server_id,player_profile_id,player_id)
-        VALUES ('claim-stale','player-a','discord-a','server-a','profile-a','game-a');`);
+        VALUES ('claim-stale','player-a','discord-a','server-a','profile-a','game-a');
+      INSERT INTO user_notifications (id,user_id,type,title,body,dedupe_key,metadata)
+        VALUES ('claim-stale-alert','owner-a','player_link_review_requested','Review needed','Pending review',
+          'player-link-review:claim-stale:owner-a','{"claim_id":"claim-stale"}');`);
     const before = f.state();
     assert.equal((await readTrustedPlayerGameplayAggregate(f.env.DB, player.discord_id))?.total_kills, 7);
     const ownerList = await readManagedGameIdentityLinks(f.env, owner, new URLSearchParams());
@@ -41,6 +44,9 @@ export async function testPlayerGameIdentityRevocation() {
     assert.deepEqual(f.state().profiles, before.profiles, "Revocation must never change gameplay or independent attribution");
     assert.equal(f.state().claim.find(row => row.id === "claim-a")?.status, "approved", "Historical approval must remain recorded");
     assert.equal(f.state().claim.find(row => row.id === "claim-stale")?.status, "cancelled");
+    const closedAlert = f.sqlite.prepare("SELECT read_at, expires_at, json_extract(metadata, '$.review_status') AS review_status FROM user_notifications WHERE id = 'claim-stale-alert'").get();
+    assert.ok(closedAlert?.read_at && closedAlert?.expires_at, "Revocation must close the cancelled claim's owner review alert.");
+    assert.equal(closedAlert.review_status, "cancelled", "The closed owner alert must explain that its claim was cancelled.");
     assert.equal((await reviewPlayerGameIdentityClaim(f.env, owner, "claim-stale", { action: "approve" })).status, 409);
     assert.equal((await readTrustedPlayerGameplayAggregate(f.env.DB, player.discord_id))?.linked_game_profiles, 0);
     assert.equal((await readTrustedPlayerGameplayAggregate(f.env.DB, "discord-b"))?.total_kills, 7);
@@ -51,7 +57,7 @@ export async function testPlayerGameIdentityRevocation() {
     const history = await readPlayerRequestSupport(f.env.DB, new URLSearchParams({ request: "claim-a" }));
     assert.ok(history.ok && "history" in history && history.history.some(event => event.action === "link_revoked" && event.note === input.reason));
     const notices = f.state().notifications;
-    assert.equal(notices.length, 2, "The original approval notice and later revocation notice must both remain in account history.");
+    assert.equal(notices.length, 3, "The closed owner review alert, original approval notice and later revocation notice must remain in account history.");
     const revokedNotice = notices.find(notice => notice.type === "player_link_revoked");
     assert.equal(revokedNotice?.user_id, player.id);
     assert.doesNotMatch(String(revokedNotice?.body), /discord-a|game-a/);
@@ -61,7 +67,7 @@ export async function testPlayerGameIdentityRevocation() {
     assert.deepEqual(f.state(), after, "Replayed decisions must not duplicate notices or audit events");
   } finally { f.close(); }
 
-  for (let index = 0; index < 5; index++) {
+  for (let index = 0; index < 6; index++) {
     const fixture = await approvedFixture();
     try {
       const before = fixture.state(); fixture.failAt(index);
@@ -159,13 +165,23 @@ export async function testPlayerGameIdentityRevocation() {
         CREATE TABLE sessions (user_id TEXT);
         CREATE TABLE discord_guilds (id TEXT, owner_user_id TEXT);
         ALTER TABLE linked_servers ADD COLUMN discord_guild_id TEXT;
+        INSERT INTO player_profiles (id,linked_server_id,player_id,player_name)
+        VALUES ('profile-account-delete','server-a','game-account-delete','Account Survivor');
         INSERT INTO user_notifications (id,user_id,type,title,body,dedupe_key)
-        VALUES ('unrelated-notice','player-b','news','Other notice','Other private notice','unrelated');`);
+        VALUES ('unrelated-notice','player-b','news','Other notice','Other private notice','unrelated');
+        INSERT INTO player_game_identity_claims
+          (id,user_id,discord_id,linked_server_id,player_profile_id,player_id,player_name,status)
+        VALUES ('pending-delete-claim','player-b','discord-b','server-a','profile-a','game-a','Survivor','pending'),
+          ('pending-account-delete-claim','player-a','discord-a','server-a','profile-account-delete','game-account-delete','Account Survivor','pending');
+        INSERT INTO user_notifications (id,user_id,type,title,body,dedupe_key,metadata)
+        VALUES ('pending-review-alert','owner-a','player_link_review_requested','Review needed','Pending review','player-link-review:pending-delete-claim:owner-a','{"claim_id":"pending-delete-claim"}'),
+          ('pending-account-review-alert','owner-a','player_link_review_requested','Review needed','Pending account review','player-link-review:pending-account-delete-claim:owner-a','{"claim_id":"pending-account-delete-claim"}');`);
       if (remove === "player") {
         assert.equal((await deleteOwnedAccountData(fixture.env, "player-a")).ok, true);
         assert.equal(fixture.sqlite.prepare("SELECT id FROM users WHERE id='player-a'").get(), undefined);
         assert.equal(fixture.sqlite.prepare("SELECT id FROM linked_servers WHERE id='server-a'").get()?.id, "server-a");
-        assert.equal(fixture.state().notifications.length, 1);
+        assert.equal(fixture.state().notifications.length, 2, "Deleting a player account must preserve unrelated and still-actionable owner review alerts.");
+        assert.equal(fixture.sqlite.prepare("SELECT id FROM user_notifications WHERE id='pending-account-review-alert'").get(), undefined, "Deleting a requester account must erase its stale owner review alert.");
       } else {
         const before = fixture.state();
         assert.equal((await deleteOwnedLinkedServerData(fixture.env, "owner-b", "server-a")).status, 403);
@@ -173,6 +189,7 @@ export async function testPlayerGameIdentityRevocation() {
         assert.equal((await deleteOwnedLinkedServerData(fixture.env, "owner-a", "server-a")).ok, true);
         assert.equal(fixture.sqlite.prepare("SELECT id FROM linked_servers WHERE id='server-a'").get(), undefined);
         assert.equal(fixture.state().notifications.length, 3, "Server removal preserves private approval and revocation notices.");
+        assert.equal(fixture.sqlite.prepare("SELECT id FROM user_notifications WHERE id='pending-review-alert'").get(), undefined, "Server removal must erase stale pending-review alerts after their claim is cascade-deleted.");
         const notice = fixture.sqlite.prepare("SELECT body FROM user_notifications WHERE user_id='player-a' AND type='player_link_revoked'").get();
         assert.ok(String(notice?.body).includes(input.reason), "The player-visible reason survives server/link/audit deletion.");
         assert.equal(String(notice?.body).includes("Review the reason in your player profile"), false);
