@@ -210,12 +210,10 @@ includesAll(leaderboards, [
   "leaderboard-ref-page",
   "leaderboard-ref-hero-art",
   "leaderboard-ref-stats",
-  "leaderboard-ref-grid",
   "leaderboard-ref-kill-card",
   "leaderboard-ref-kill-card-bg",
   "leaderboard-ref-kill-card-content",
   "leaderboard-reference-page",
-  "leaderboard-reference-grid",
   "leaderboard-reference-stat-grid",
   "leaderboard-reference-longest-card",
   "dzn-leaderboard-hero",
@@ -231,7 +229,7 @@ includesAll(leaderboards, [
   "Top Players",
   "Personal Bests",
   "Longest Kills",
-  "payload.top_servers.map",
+  "filteredServers.map",
   "payload.top_players.map",
 ]);
 
