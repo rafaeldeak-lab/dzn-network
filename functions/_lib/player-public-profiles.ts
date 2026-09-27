@@ -4,6 +4,7 @@ import type { Env, SessionUser } from "./types";
 
 export type PlayerPublicProfilePreferences = {
   public_profile_enabled: boolean;
+  show_discord_identity: boolean;
   show_display_name: boolean;
   show_gameplay_summary: boolean;
   show_featured_server: boolean;
@@ -330,6 +331,7 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
   if (!row?.discord_id || row.public_profile_enabled !== 1) return null;
 
   const preferences = rowToPreferences(row);
+  preferences.show_discord_identity = await readDiscordIdentityConsent(db, row.user_id);
   const [aggregate, featuredServer] = await Promise.all([
     preferences.show_gameplay_summary ? readPublicPlayerAggregate(db, row.discord_id) : Promise.resolve(null),
     preferences.show_featured_server ? readPublicPlayerFeaturedServer(db, row.discord_id) : Promise.resolve(null),
@@ -337,7 +339,7 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
 
   const visibleSections = visiblePublicProfileSections(preferences);
   const displayName = preferences.show_display_name ? safeDisplayName(row.username) : "DZN Player";
-  const discordAvatarUrl = preferences.show_display_name && validDiscordAvatar(row.discord_id, row.avatar)
+  const discordAvatarUrl = preferences.show_discord_identity && validDiscordAvatar(row.discord_id, row.avatar)
     ? `/api/public/players/${encodeURIComponent(row.handle)}/avatar`
     : null;
 
@@ -347,8 +349,8 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
     href: publicProfileHref(row.handle),
     display_name: displayName,
     discord_profile: {
-      visible: preferences.show_display_name,
-      connected: preferences.show_display_name,
+      visible: preferences.show_discord_identity,
+      connected: preferences.show_discord_identity,
       avatar_url: discordAvatarUrl,
     },
     published_at: row.created_at,
@@ -419,14 +421,17 @@ export async function readPublicDiscordAvatarSource(env: Env, rawHandle: unknown
        INNER JOIN users ON users.id = player_public_profiles.user_id
        INNER JOIN player_profile_privacy_preferences
          ON player_profile_privacy_preferences.user_id = player_public_profiles.user_id
+       INNER JOIN player_public_discord_identity_preferences
+         ON player_public_discord_identity_preferences.user_id = player_public_profiles.user_id
        WHERE player_public_profiles.handle = ?
          AND player_public_profiles.status = 'active'
          AND player_profile_privacy_preferences.public_profile_enabled = 1
-         AND player_profile_privacy_preferences.show_display_name = 1
+         AND player_public_discord_identity_preferences.enabled = 1
        LIMIT 1`,
     )
     .bind(handle)
-    .first<{ discord_id: string | null; avatar: string | null }>();
+    .first<{ discord_id: string | null; avatar: string | null }>()
+    .catch(() => null);
   if (!row?.discord_id || !validDiscordAvatar(row.discord_id, row.avatar)) return null;
   return { discord_id: row.discord_id, avatar_hash: row.avatar! };
 }
@@ -449,6 +454,7 @@ function normalizeLookupHandle(value: unknown) {
 function rowToPreferences(row: PublicPlayerProfileOwnerRow): PlayerPublicProfilePreferences {
   return {
     public_profile_enabled: row.public_profile_enabled === 1,
+    show_discord_identity: false,
     show_display_name: row.show_display_name !== 0,
     show_gameplay_summary: row.show_gameplay_summary !== 0,
     show_featured_server: row.show_featured_server !== 0,
@@ -457,6 +463,13 @@ function rowToPreferences(row: PublicPlayerProfileOwnerRow): PlayerPublicProfile
     show_calling_cards: row.show_calling_cards !== 0,
     show_award_dates: row.show_award_dates === 1,
   };
+}
+
+async function readDiscordIdentityConsent(db: D1Database, userId: string) {
+  const row = await db.prepare(
+    "SELECT enabled FROM player_public_discord_identity_preferences WHERE user_id = ? LIMIT 1",
+  ).bind(userId).first<{ enabled: number | null }>().catch(() => null);
+  return row?.enabled === 1;
 }
 
 async function readPublicPlayerAggregate(db: D1Database, discordId: string) {
@@ -487,6 +500,7 @@ function futureEarnedSection(visible: boolean, visibleMessage: string) {
 function visiblePublicProfileSections(preferences: PlayerPublicProfilePreferences) {
   const sections: string[] = [];
   if (preferences.show_display_name) sections.push("display_name");
+  if (preferences.show_discord_identity) sections.push("discord_identity");
   if (preferences.show_gameplay_summary) sections.push("gameplay_summary");
   if (preferences.show_featured_server) sections.push("featured_server");
   if (preferences.show_xp_progress) sections.push("xp_progress");

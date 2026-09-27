@@ -9,6 +9,7 @@ import { PublicProfileOwnerPreviewPanel } from "@/components/player/public-profi
 type PrivacyPreferenceKey =
   | "public_profile_enabled"
   | "show_display_name"
+  | "show_discord_identity"
   | "show_gameplay_summary"
   | "show_featured_server"
   | "show_xp_progress"

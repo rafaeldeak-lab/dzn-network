@@ -5,6 +5,7 @@ import { onRequest as privacyRoute } from "../functions/api/player/profile/priva
 import type { Env, PagesContext } from "../functions/_lib/types";
 
 const migration = readFileSync("migrations/0062_player_profile_privacy_preferences.sql", "utf8");
+const discordConsentMigration = readFileSync("migrations/0076_public_profile_discord_identity_consent.sql", "utf8");
 const route = readFileSync("functions/api/player/profile/privacy.ts", "utf8");
 const component = readFileSync("components/player/profile-privacy-settings.tsx", "utf8");
 const playerHome = readFileSync("components/player/player-home.tsx", "utf8");
@@ -14,6 +15,7 @@ const packageJson = readFileSync("package.json", "utf8");
 assert.match(migration, /CREATE TABLE IF NOT EXISTS player_profile_privacy_preferences/, "Migration must create the player-owned privacy preference table.");
 assert.match(migration, /user_id TEXT NOT NULL UNIQUE/, "Privacy preferences must be one row per current user.");
 assert.match(migration, /FOREIGN KEY\(user_id\) REFERENCES users\(id\) ON DELETE CASCADE/, "Privacy preferences must stay attached to the owning account.");
+assert.match(discordConsentMigration, /enabled INTEGER NOT NULL DEFAULT 0 CHECK \(enabled IN \(0, 1\)\)/, "Discord identity publication must use a separate default-off consent.");
 for (const column of [
   "public_profile_enabled",
   "show_display_name",
@@ -98,6 +100,7 @@ async function testPrivacyRouteRuntimeContract() {
   assert.equal(defaultPayload.source, "defaults", "Missing preference rows should return default preferences without writing preference rows.");
   assert.equal(defaultPayload.settings.public_profile_enabled, false, "Public profile should default private.");
   assert.equal(defaultPayload.settings.show_award_dates, false, "Award dates should default hidden.");
+  assert.equal(defaultPayload.settings.show_discord_identity, false, "Discord identity should default hidden even when display names default visible.");
   assert.equal(defaultPayload.public_profile_href, null, "Privacy preferences must not create a public profile URL.");
   assert.equal(defaultPayload.public_profile_handle, null, "Private default preferences must not expose a public profile handle.");
   assert.equal(db.preferences.has("mock-user"), false, "GET must not persist defaults implicitly.");
@@ -158,6 +161,13 @@ async function testPrivacyRouteRuntimeContract() {
   assert.equal(db.preferences.size, 2, "Idempotent current-user updates must not create duplicate rows.");
   assert.equal(db.preferences.get("other-user")?.public_profile_enabled, 1, "Other users' preference rows must not be changed.");
 
+  const discordConsent = await callPrivacyRoute(db, { DB: db, MOCK_AUTH: "true" } as unknown as Env, "PATCH", {
+    settings: { show_discord_identity: true },
+  });
+  assert.equal(discordConsent.status, 200, "A player must be able to explicitly publish their Discord photo and connection status.");
+  assert.equal((await discordConsent.json() as PrivacyPayload).settings.show_discord_identity, true);
+  assert.equal(db.discordIdentityConsent.get("mock-user"), 1, "Discord identity consent must persist separately from display-name visibility.");
+
   const reread = await callPrivacyRoute(db, { DB: db, MOCK_AUTH: "true" } as unknown as Env, "GET");
   const rereadPayload = await reread.json() as PrivacyPayload;
   assert.equal(rereadPayload.settings.show_display_name, false, "GET must return the current user's saved settings.");
@@ -166,7 +176,7 @@ async function testPrivacyRouteRuntimeContract() {
   assert.equal(rereadPayload.presentation_only, true, "Preference payload must be marked presentation-only.");
   assert.ok(rereadPayload.fairness_boundary.some((line) => /do not bypass saved visibility controls/i.test(line)), "Preference payload must state the visibility control boundary.");
 
-  assert.deepEqual([...db.writeTargets].sort(), ["discord_guilds", "player_profile_privacy_preferences", "player_public_profiles", "users"], "Privacy route writes must be limited to mock auth bootstrap, preference rows, and generated profile handles.");
+  assert.deepEqual([...db.writeTargets].sort(), ["discord_guilds", "player_profile_privacy_preferences", "player_public_discord_identity_preferences", "player_public_profiles", "users"], "Privacy route writes must be limited to mock auth bootstrap, preference rows, explicit Discord consent, and generated profile handles.");
   assert.deepEqual(db.protectedWrites, [], "Privacy route must not write protected billing, owner, progression, review, event, scoring, or competitive tables.");
 }
 
@@ -222,6 +232,7 @@ type FakePublicProfileRow = {
 
 class FakeD1Database {
   readonly preferences = new Map<string, FakePreferenceRow>();
+  readonly discordIdentityConsent = new Map<string, number>();
   readonly publicProfilesByUser = new Map<string, FakePublicProfileRow>();
   readonly publicProfileOwnersByHandle = new Map<string, string>();
   readonly writeTargets = new Set<string>();
@@ -260,6 +271,10 @@ class FakeD1PreparedStatement {
       if (this.db.failPreferenceReads) throw new Error("preference reads unavailable");
       const row = this.db.preferences.get(String(this.bindings[0]));
       return (row ?? null) as T | null;
+    }
+    if (query.includes("from player_public_discord_identity_preferences")) {
+      const enabled = this.db.discordIdentityConsent.get(String(this.bindings[0]));
+      return (enabled === undefined ? null : { enabled }) as T | null;
     }
     if (query.includes("from player_public_profiles") && query.includes("where user_id = ?")) {
       const row = this.db.publicProfilesByUser.get(String(this.bindings[0]));
@@ -301,6 +316,12 @@ class FakeD1PreparedStatement {
         updated_at: String(this.bindings[11]),
       };
       this.db.preferences.set(userId, next);
+      return d1Ok();
+    }
+
+    if (query.includes("insert into player_public_discord_identity_preferences")) {
+      this.db.writeTargets.add("player_public_discord_identity_preferences");
+      this.db.discordIdentityConsent.set(String(this.bindings[0]), Number(this.bindings[1]));
       return d1Ok();
     }
 

@@ -23,6 +23,12 @@ const preferenceFields = [
     defaultValue: true,
   },
   {
+    key: "show_discord_identity",
+    label: "Discord photo and connection",
+    description: "Show your Discord profile photo and connected status on your public DZN profile.",
+    defaultValue: false,
+  },
+  {
     key: "show_gameplay_summary",
     label: "Gameplay summary",
     description: "Show safe aggregate gameplay totals, never raw identifiers or raw evidence.",
@@ -138,7 +144,7 @@ async function handlePatch(request: Request, env: Env) {
     const publicProfile = next.public_profile_enabled
       ? await ensureCurrentPublicProfileHandle(env, user)
       : await readPublicProfileHandleForPayload(env, user.id);
-    await writePreferences(env, user.id, next);
+    await writePreferences(env, user.id, next, Object.hasOwn(parsed.settings, "show_discord_identity"));
     return json(preferencePayload(next, "player_profile_privacy_preferences", new Date().toISOString(), publicProfile), {
       headers: privateNoStoreHeaders(),
     });
@@ -193,8 +199,13 @@ async function readPreferences(env: Env, userId: string) {
       .bind(userId)
       .first<PreferenceRow>();
 
+    const preferences = rowToPreferences(row);
+    const discordConsent = await db.prepare(
+      "SELECT enabled FROM player_public_discord_identity_preferences WHERE user_id = ? LIMIT 1",
+    ).bind(userId).first<{ enabled: number | null }>().catch(() => null);
+    preferences.show_discord_identity = discordConsent?.enabled === 1;
     return {
-      preferences: rowToPreferences(row),
+      preferences,
       source: row ? "player_profile_privacy_preferences" as const : "defaults" as const,
       updatedAt: row?.updated_at ?? null,
     };
@@ -207,7 +218,7 @@ async function readPreferences(env: Env, userId: string) {
   }
 }
 
-async function writePreferences(env: Env, userId: string, preferences: PrivacyPreferences) {
+async function writePreferences(env: Env, userId: string, preferences: PrivacyPreferences, writeDiscordConsent: boolean) {
   const db = requireDb(env);
   const now = new Date().toISOString();
   await db
@@ -252,6 +263,13 @@ async function writePreferences(env: Env, userId: string, preferences: PrivacyPr
       now,
     )
     .run();
+  if (writeDiscordConsent) {
+    await db.prepare(
+      `INSERT INTO player_public_discord_identity_preferences (user_id, enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET enabled=excluded.enabled, updated_at=excluded.updated_at`,
+    ).bind(userId, boolToInt(preferences.show_discord_identity), now, now).run();
+  }
 }
 
 function preferencePayload(

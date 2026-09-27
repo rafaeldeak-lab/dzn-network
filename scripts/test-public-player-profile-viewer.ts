@@ -13,6 +13,7 @@ import {
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
 
 const migration = readFileSync("migrations/0063_player_public_profiles.sql", "utf8");
+const discordConsentMigration = readFileSync("migrations/0076_public_profile_discord_identity_consent.sql", "utf8");
 const helper = readFileSync("functions/_lib/player-public-profiles.ts", "utf8");
 const statBridgeHelper = readFileSync("functions/_lib/player-stat-bridge.ts", "utf8");
 const publicApi = readFileSync("functions/api/public/players/[handle].ts", "utf8");
@@ -71,7 +72,8 @@ assert.doesNotMatch(publicApi, /\b(?:getSessionUser|ensureMockUser|INSERT INTO|U
 assert.match(publicAvatarApi, /readPublicDiscordAvatarSource\(env, params\.handle\)/, "Public avatar delivery must re-check the canonical public identity boundary.");
 assert.match(publicAvatarApi, /discordResponse\.body/, "Public avatars must proxy bytes rather than redirecting visitors to an identifier-bearing Discord URL.");
 assert.doesNotMatch(publicAvatarApi, /status:\s*30[1278]|location:/i, "Public avatar delivery must not expose Discord identifiers through redirects.");
-assert.match(helper, /show_display_name = 1/, "Public avatar reads must require the saved display-identity preference.");
+assert.match(discordConsentMigration, /enabled INTEGER NOT NULL DEFAULT 0/, "Discord identity consent must default off for every existing and future profile.");
+assert.match(helper, /player_public_discord_identity_preferences\.enabled = 1/, "Public avatar reads must require separate saved Discord identity consent.");
 assert.match(shellRoute, /env\.ASSETS\.fetch/, "Dynamic public profile pages must serve the static players shell through Pages assets.");
 assert.match(shellRoute, /\/players"/, "Dynamic public profile shell must serve the exported players page.");
 assert.doesNotMatch(shellRoute, /\/players\.html/, "Dynamic public profile shell must avoid the redirected .html asset path on Pages.");
@@ -174,15 +176,20 @@ async function testPublicProfileRuntimeContract() {
   const published = await readPublicPlayerProfileByHandle(env, generated.handle);
   assert.ok(published, "Published public profiles should resolve by handle.");
   assert.equal(published.display_name, "Rafael DZN", "Display names may appear only when saved preferences allow them.");
-  assert.equal(published.discord_profile.avatar_url, `/api/public/players/${generated.handle}/avatar`, "Opted-in display identities may expose only the DZN avatar proxy URL.");
+  assert.equal(published.discord_profile.avatar_url, null, "A display-name opt-in must not imply consent to publish Discord identity details.");
+  assert.equal(await readPublicDiscordAvatarSource(env, generated.handle), null, "Existing public profiles must keep Discord avatars private until separate consent is saved.");
+  db.discordIdentityConsent.set("user-1", 1);
+  const discordPublished = await readPublicPlayerProfileByHandle(env, generated.handle);
+  assert.equal(discordPublished?.discord_profile.avatar_url, `/api/public/players/${generated.handle}/avatar`, "Explicit Discord identity consent may expose only the DZN avatar proxy URL.");
   assert.deepEqual(await readPublicDiscordAvatarSource(env, generated.handle), {
     discord_id: "831243159785701398",
     avatar_hash: "profile_avatar_hash",
   }, "The avatar proxy may resolve validated source identifiers internally after public identity opt-in.");
   assert.equal(published.sections.gameplay_summary.totals?.kills, 44, "Gameplay summaries may show public-safe aggregate totals.");
   assert.equal(published.sections.featured_server.server?.href, "/servers/profile?slug=pandora-network", "Featured servers must link through public-safe server profile paths.");
-  assert.deepEqual(published.privacy.visible_sections, [
+  assert.deepEqual(discordPublished?.privacy.visible_sections, [
     "display_name",
+    "discord_identity",
     "gameplay_summary",
     "featured_server",
     "xp_progress",
@@ -229,6 +236,7 @@ async function testPublicProfileRuntimeContract() {
   assert.equal(avatarPost.status, 405, "Public avatar routes must reject mutations before reading profile data.");
 
   db.preferences.set("user-1", preferenceRow({ public_profile_enabled: 1, show_display_name: 0 }));
+  db.discordIdentityConsent.set("user-1", 0);
   let avatarFetches = 0;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => {
@@ -241,6 +249,7 @@ async function testPublicProfileRuntimeContract() {
     assert.equal(avatarFetches, 0, "A hidden avatar must not trigger an upstream Discord request.");
 
     db.preferences.set("user-1", preferenceRow({ public_profile_enabled: 1, show_display_name: 1 }));
+    db.discordIdentityConsent.set("user-1", 1);
     const publicAvatar = await callPublicAvatarRoute(db, generated.handle);
     assert.equal(publicAvatar.status, 200, "An opted-in Discord avatar must stream through the DZN proxy.");
     assert.equal(publicAvatar.headers.get("content-type"), "image/webp");
@@ -346,6 +355,7 @@ class FakePublicProfileD1 {
   readonly publicProfilesByUser = new Map<string, FakePublicProfileRow>();
   readonly publicProfilesByHandle = new Map<string, FakePublicProfileRow>();
   readonly preferences = new Map<string, FakePreferenceRow>();
+  readonly discordIdentityConsent = new Map<string, number>();
   readonly aggregates = new Map<string, FakeAggregateRow>();
   readonly featuredServers = new Map<string, FakeFeaturedServerRow>();
   readonly writeTargets: string[] = [];
@@ -392,13 +402,18 @@ class FakeD1PreparedStatement {
       return (row ? { user_id: row.user_id } : null) as T | null;
     }
 
+    if (query.includes("select enabled from player_public_discord_identity_preferences where user_id = ?")) {
+      const enabled = this.db.discordIdentityConsent.get(String(this.bindings[0]));
+      return (enabled === undefined ? null : { enabled }) as T | null;
+    }
+
     if (query.includes("from player_public_profiles") && query.includes("inner join users") && query.includes("player_profile_privacy_preferences")) {
       const row = this.db.publicProfilesByHandle.get(String(this.bindings[0]));
       if (!row || row.status !== "active") return null as T | null;
       const user = this.db.users.get(row.user_id);
       const preferences = this.db.preferences.get(row.user_id);
       if (!user || !preferences || preferences.public_profile_enabled !== 1) return null as T | null;
-      if (query.includes("show_display_name = 1") && preferences.show_display_name !== 1) return null as T | null;
+      if (query.includes("player_public_discord_identity_preferences.enabled = 1") && this.db.discordIdentityConsent.get(row.user_id) !== 1) return null as T | null;
       return {
         user_id: row.user_id,
         handle: row.handle,
