@@ -1,9 +1,10 @@
 import { requireDb } from "./db";
-import { isDiscordNotificationsEnabled } from "./feature-flags";
+import { isDiscordNotificationsEnabled, isDznPulseEnabled } from "./feature-flags";
 import { getOwnerServer } from "./owner-console";
 import type { Env } from "./types";
 
 export async function sendOwnerSetupRecommendation(env: Env, serverId: string) {
+  if (!isDznPulseEnabled(env)) return { ok: false as const, status: 409, error: "dzn_pulse_disabled" };
   const db = requireDb(env);
   const owner = await db.prepare(
     `SELECT linked_servers.user_id, linked_servers.server_name, users.discord_id

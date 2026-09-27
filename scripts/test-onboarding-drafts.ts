@@ -81,6 +81,7 @@ async function main() {
   const setupNotificationRoute = readFileSync("functions/api/owner/servers/[serverId]/setup-notification.ts", "utf8");
   assert.match(setupNotificationRoute, /requirePlatformOwner[\s\S]*sameOrigin[\s\S]*SEND_SETUP_REMINDER[\s\S]*sendOwnerSetupRecommendation/, "Setup reminders must have an explicit same-origin, platform-owner-confirmed creation path.");
   const setupNotificationService = readFileSync("functions/_lib/owner-setup-notifications.ts", "utf8");
+  assert.match(setupNotificationService, /if \(!isDznPulseEnabled\(env\)\) return \{ ok: false as const, status: 409, error: "dzn_pulse_disabled" \}/, "A disabled website-notification channel must reject the reminder before writing a false delivery receipt.");
   assert.match(setupNotificationService, /INSERT INTO user_notifications[\s\S]*\/setup#review-test/, "Setup reminder creation must persist a private website notification.");
   assert.match(setupNotificationService, /discord_delivery_status[\s\S]*discord_delivery_result[\s\S]*discord_attempted_at/, "Setup reminder creation must persist the Discord delivery outcome.");
 

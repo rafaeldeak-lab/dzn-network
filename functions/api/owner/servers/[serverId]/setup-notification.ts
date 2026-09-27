@@ -13,7 +13,11 @@ export const onRequestPost: PagesFunction = async ({ env, request, params }) => 
   }
   const serverId = String(params.serverId ?? "").trim();
   const result = await sendOwnerSetupRecommendation(env, serverId);
-  if (!result.ok) return json({ ok: false, error: result.error, message: result.error === "no_setup_blockers" ? "This server has no current setup blockers." : "The setup reminder could not be created." }, { status: result.status });
+  if (!result.ok) return json({ ok: false, error: result.error, message: result.error === "no_setup_blockers"
+    ? "This server has no current setup blockers."
+    : result.error === "dzn_pulse_disabled"
+      ? "DZN Pulse website notifications are disabled, so no reminder was recorded or sent."
+      : "The setup reminder could not be created." }, { status: result.status });
   return json({ ok: true, website: result.website, discord: result.discord, message: result.discord === "delivered" ? "Website and Discord setup reminders sent." : "Website setup reminder sent; Discord was not delivered." });
 };
 

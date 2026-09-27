@@ -822,7 +822,7 @@ function ServerSupportView({ selection, server, status, onClose, onRefresh }: {
   onClose: () => void;
   onRefresh: () => void;
 }) {
-  const [reminder, setReminder] = useState<{ serverId: string; state: "sending" | "sent" | "error"; message: string } | null>(null);
+  const [reminder, setReminder] = useState<{ serverId: string; state: "confirming" | "sending" | "sent" | "error"; message: string } | null>(null);
   const reminderState = reminder?.serverId === selection.id ? reminder.state : "idle";
   const reminderMessage = reminder?.serverId === selection.id ? reminder.message : "";
 
@@ -874,7 +874,7 @@ function ServerSupportView({ selection, server, status, onClose, onRefresh }: {
         </div>
 
         <div className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-300/[0.05] p-3 text-xs leading-5 text-emerald-100">
-          Read-only support access. Nitrado credentials, Discord private content, payment secrets and raw player locations are excluded. This view does not impersonate the server owner.
+          Server data is read-only. The separate setup-reminder control below performs one clearly confirmed communication action. Nitrado credentials, Discord private content, payment secrets and raw player locations are excluded. This view does not impersonate the server owner.
         </div>
         {status === "loading" ? <p className="mt-3 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] p-3 text-xs font-bold text-cyan-100">Loading the audited support record...</p> : null}
         {status === "error" ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] p-3 text-xs font-bold text-amber-100">The audited support record could not be opened. No server details are displayed.</p> : null}
@@ -921,10 +921,12 @@ function ServerSupportView({ selection, server, status, onClose, onRefresh }: {
             <button
               type="button"
               disabled={reminderState === "sending" || server.supportBlockers.length === 0}
-              onClick={() => void sendSetupReminder()}
+              onClick={() => reminderState === "confirming"
+                ? void sendSetupReminder()
+                : setReminder({ serverId: selection.id, state: "confirming", message: "Confirm to create a private website notification and, when enabled by DZN and the owner, send one Discord DM." })}
               className="mt-2 w-full rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-xs font-black text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {reminderState === "sending" ? "Sending..." : "Send setup reminder"}
+              {reminderState === "sending" ? "Sending..." : reminderState === "confirming" ? "Confirm reminder send" : "Send setup reminder"}
             </button>
             {reminderMessage ? <p className={`mt-2 text-xs ${reminderState === "error" ? "text-rose-200" : "text-emerald-200"}`}>{reminderMessage}</p> : null}
           </SupportSection>
