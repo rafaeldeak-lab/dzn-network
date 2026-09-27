@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "pretest": "npm run test:games-hub && npm run test:discord-discovery-recovery",
+    "pretest": "npm run test:games-hub && npm run test:discord-discovery-recovery && npm run test:onboarding-drafts",
     "test:discord-discovery-recovery": "tsx scripts/test-discord-discovery-recovery.ts",
     "dev:games-hub": "tsx scripts/dev-games-hub.ts",
     "test:games-hub": "tsx scripts/test-games-hub.ts",
@@ -117,6 +117,8 @@
     "test:stripe-live-activation-checklist": "tsx scripts/test-stripe-live-activation-checklist.ts",
     "test:billing-integrity": "tsx scripts/test-billing-integrity.ts",
     "test:onboarding-service-proof": "tsx scripts/test-onboarding-service-proof.ts",
+    "test:onboarding-drafts": "tsx scripts/test-onboarding-drafts.ts",
+    "qa:onboarding-resume": "node scripts/qa-onboarding-resume.mjs",
     "test:reputation-platform": "tsx scripts/test-reputation-platform.ts",
     "test:badge-visual-system": "tsx scripts/test-badge-visual-system.ts",
     "test:badge-awards": "tsx scripts/test-badge-awards.ts",

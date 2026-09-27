@@ -76,6 +76,14 @@ type OwnerServer = {
     dayzServiceDetected: boolean | null;
     lastTestedAt: string | null;
   };
+  setupNotification: {
+    websiteStatus: "not_sent" | "sent_unread" | "read" | "opened";
+    sentAt: string | null;
+    readAt: string | null;
+    openedAt: string | null;
+    discordStatus: "not_sent" | "disabled_by_owner" | "delivered" | "failed" | "unknown";
+    discordNotificationsEnabled: boolean;
+  };
   supportBlockers: Array<{
     key: "billing" | "verification" | "service_check" | "status_sync" | "adm_sync";
     severity: "blocking" | "attention";
@@ -754,6 +762,7 @@ function ServersPanel({ servers }: { servers: OwnerServer[] }) {
                     <div className="mt-1 text-xs text-zinc-500">Listing: {server.listingVisibility ?? "default"}</div>
                     <div className={`mt-2 text-xs font-black uppercase ${server.billing.paid ? "text-emerald-200" : "text-amber-200"}`}>{server.billing.paid ? "Paid" : "Not paid"}</div>
                     <div className="mt-1 text-xs text-zinc-500">Plan: {server.billing.planKey ?? server.plan.key ?? "none"} / {server.billing.status ?? server.plan.status ?? "unknown"}</div>
+                    <div className="mt-2 text-xs font-bold text-cyan-200">Setup notice: {setupNoticeLabel(server.setupNotification.websiteStatus)}</div>
                   </td>
                   <td className="px-4 py-4 text-zinc-300">
                     <div className="font-bold text-white">{server.playerCount.current ?? "unknown"} / {server.playerCount.max ?? "unknown"}</div>
@@ -813,6 +822,29 @@ function ServerSupportView({ selection, server, status, onClose, onRefresh }: {
   onClose: () => void;
   onRefresh: () => void;
 }) {
+  const [reminder, setReminder] = useState<{ serverId: string; state: "confirming" | "sending" | "sent" | "error"; message: string } | null>(null);
+  const reminderState = reminder?.serverId === selection.id ? reminder.state : "idle";
+  const reminderMessage = reminder?.serverId === selection.id ? reminder.message : "";
+
+  async function sendSetupReminder() {
+    setReminder({ serverId: selection.id, state: "sending", message: "" });
+    try {
+      const response = await fetch(`/api/owner/servers/${encodeURIComponent(selection.id)}/setup-notification`, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ confirmation: "SEND_SETUP_REMINDER" }),
+      });
+      const payload = await response.json().catch(() => null) as { message?: string } | null;
+      if (!response.ok) throw new Error(payload?.message || "Setup reminder could not be sent.");
+      setReminder({ serverId: selection.id, state: "sent", message: payload?.message || "Setup reminder recorded." });
+      onRefresh();
+    } catch (error) {
+      setReminder({ serverId: selection.id, state: "error", message: error instanceof Error ? error.message : "Setup reminder could not be sent." });
+    }
+  }
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -842,7 +874,7 @@ function ServerSupportView({ selection, server, status, onClose, onRefresh }: {
         </div>
 
         <div className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-300/[0.05] p-3 text-xs leading-5 text-emerald-100">
-          Read-only support access. Nitrado credentials, Discord private content, payment secrets and raw player locations are excluded. This view does not impersonate the server owner.
+          Server data is read-only. The separate setup-reminder control below performs one clearly confirmed communication action. Nitrado credentials, Discord private content, payment secrets and raw player locations are excluded. This view does not impersonate the server owner.
         </div>
         {status === "loading" ? <p className="mt-3 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] p-3 text-xs font-bold text-cyan-100">Loading the audited support record...</p> : null}
         {status === "error" ? <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] p-3 text-xs font-bold text-amber-100">The audited support record could not be opened. No server details are displayed.</p> : null}
@@ -878,6 +910,25 @@ function ServerSupportView({ selection, server, status, onClose, onRefresh }: {
             <SupportValue label="DayZ detected" value={supportCheckLabel(server.onboarding.dayzServiceDetected)} />
             <SupportValue label="ADM logs found" value={supportCheckLabel(server.onboarding.admLogsFound)} />
             <SupportValue label="Last tested" value={formatDate(server.onboarding.lastTestedAt)} />
+          </SupportSection>
+          <SupportSection title="Owner notification">
+            <SupportValue label="Website notification" value={setupNoticeLabel(server.setupNotification.websiteStatus)} />
+            <SupportValue label="Sent" value={formatDate(server.setupNotification.sentAt)} />
+            <SupportValue label="Read / acknowledged" value={formatDate(server.setupNotification.readAt)} />
+            <SupportValue label="Opened" value={formatDate(server.setupNotification.openedAt)} />
+            <SupportValue label="Discord notification" value={setupDiscordNoticeLabel(server.setupNotification.discordStatus)} />
+            <SupportValue label="Owner Discord preference" value={server.setupNotification.discordNotificationsEnabled ? "Enabled" : "Disabled"} />
+            <button
+              type="button"
+              disabled={reminderState === "sending" || server.supportBlockers.length === 0}
+              onClick={() => reminderState === "confirming"
+                ? void sendSetupReminder()
+                : setReminder({ serverId: selection.id, state: "confirming", message: "Confirm to create a private website notification and, when enabled by DZN and the owner, send one Discord DM." })}
+              className="mt-2 w-full rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-xs font-black text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {reminderState === "sending" ? "Sending..." : reminderState === "confirming" ? "Confirm reminder send" : "Send setup reminder"}
+            </button>
+            {reminderMessage ? <p className={`mt-2 text-xs ${reminderState === "error" ? "text-rose-200" : "text-emerald-200"}`}>{reminderMessage}</p> : null}
           </SupportSection>
           <SupportSection title="ADM and player count">
             <SupportValue label="Latest ADM" value={server.adm.latestFile ?? "None discovered"} />
@@ -958,6 +1009,21 @@ function SupportValue({ label, value }: { label: string; value: string }) {
 function supportCheckLabel(value: boolean | null) {
   if (value === null) return "Not checked";
   return value ? "Passed" : "Not passed";
+}
+
+function setupNoticeLabel(status: OwnerServer["setupNotification"]["websiteStatus"]) {
+  if (status === "opened") return "Opened by owner";
+  if (status === "read") return "Marked read - not opened directly";
+  if (status === "sent_unread") return "Sent - not opened yet";
+  return "Not sent";
+}
+
+function setupDiscordNoticeLabel(status: OwnerServer["setupNotification"]["discordStatus"]) {
+  if (status === "delivered") return "Delivered";
+  if (status === "failed") return "Delivery failed";
+  if (status === "disabled_by_owner") return "Not sent - owner preference is off";
+  if (status === "unknown") return "Delivery state unavailable";
+  return "Not sent";
 }
 
 function LifecyclePanel({ lifecycleCounts }: { lifecycleCounts: Array<typeof LIFECYCLE_COPY[number] & { count: number }> }) {

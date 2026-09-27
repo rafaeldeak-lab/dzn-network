@@ -1049,6 +1049,31 @@ export async function recordOwnerSupportAccess(env: Env, user: SessionUser, serv
   });
 }
 
+export async function recordOwnerSetupReminderAudit(
+  env: Env,
+  user: SessionUser,
+  serverId: string,
+  outcome: { ok: boolean; website?: string; discord?: string; error?: string },
+  requestId: string | null,
+) {
+  await insertOwnerDiscordAuditLog(env, user, {
+    action: "support_setup_reminder_sent",
+    targetType: "linked_server",
+    targetSlot: serverId,
+    guildId: null,
+    channelId: null,
+    before: null,
+    after: {
+      serverId,
+      website: outcome.website ?? null,
+      discord: outcome.discord ?? null,
+    },
+    result: outcome.ok ? "success" : "failed",
+    reason: outcome.ok ? "Platform owner confirmed the server setup reminder." : outcome.error ?? "setup_reminder_failed",
+    requestId,
+  });
+}
+
 async function tableExists(env: Env, tableName: string): Promise<boolean> {
   const row = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1").bind(tableName).first<{ name?: string }>();
   return row?.name === tableName;
