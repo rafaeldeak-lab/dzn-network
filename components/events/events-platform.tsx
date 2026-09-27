@@ -382,6 +382,7 @@ function FeaturedEventStage({ event }: { event: CompetitiveEvent | null }) {
       <div className="relative flex min-h-[330px] max-w-4xl flex-col justify-between p-5 sm:p-7">
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-2 rounded-md border border-violet-300/40 bg-violet-500/22 px-3 py-1.5 text-[10px] font-black uppercase text-white"><Trophy className="h-3.5 w-3.5" />Featured event</span>
+          <PulseEventSpotlight event={event} />
           <EventStatusBadge status={event.status} />
           <ServerCategoryBadge category={event.category} label={event.category_label} compact />
         </div>
@@ -402,6 +403,12 @@ function FeaturedEventStage({ event }: { event: CompetitiveEvent | null }) {
       </div>
     </section>
   );
+}
+
+function PulseEventSpotlight({ event }: { event: CompetitiveEvent | null }) {
+  const pulse = usePulseContextOptional();
+  if (!pulse?.enabled || !event) return null;
+  return <span className="inline-flex items-center gap-2 rounded-md border border-cyan-300/35 bg-cyan-400/12 px-3 py-1.5 text-[10px] font-black uppercase text-cyan-100"><Activity className="h-3.5 w-3.5" />Pulse tracked</span>;
 }
 
 function LiveEventsRail({ events }: { events: CompetitiveEvent[] }) {
