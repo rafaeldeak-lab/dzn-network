@@ -95,7 +95,13 @@ async function handleGet(request: Request, env: Env) {
   }
 
   const result = await readPreferences(env, user.id);
-  const publicProfile = result.source === "unavailable" ? null : await readPublicProfileHandleForPayload(env, user.id);
+  if (result.source === "unavailable") {
+    return json(
+      { ok: false, error: "SETTINGS_UNAVAILABLE", message: "Profile privacy settings are unavailable in this environment." },
+      { status: 503, headers: privateNoStoreHeaders() },
+    );
+  }
+  const publicProfile = await readPublicProfileHandleForPayload(env, user.id);
   return json(preferencePayload(result.preferences, result.source, result.updatedAt, publicProfile), {
     headers: privateNoStoreHeaders(),
   });
@@ -200,9 +206,7 @@ async function readPreferences(env: Env, userId: string) {
       .first<PreferenceRow>();
 
     const preferences = rowToPreferences(row);
-    const discordConsent = await db.prepare(
-      "SELECT enabled FROM player_public_discord_identity_preferences WHERE user_id = ? LIMIT 1",
-    ).bind(userId).first<{ enabled: number | null }>().catch(() => null);
+    const discordConsent = await readDiscordIdentityConsent(db, userId);
     preferences.show_discord_identity = discordConsent?.enabled === 1;
     return {
       preferences,
@@ -216,6 +220,22 @@ async function readPreferences(env: Env, userId: string) {
       updatedAt: null,
     };
   }
+}
+
+async function readDiscordIdentityConsent(db: D1Database, userId: string) {
+  try {
+    return await db.prepare(
+      "SELECT enabled FROM player_public_discord_identity_preferences WHERE user_id = ? LIMIT 1",
+    ).bind(userId).first<{ enabled: number | null }>();
+  } catch (error) {
+    if (isMissingDiscordIdentityConsentTable(error)) return null;
+    throw error;
+  }
+}
+
+function isMissingDiscordIdentityConsentTable(error: unknown) {
+  return error instanceof Error
+    && /no such table:\s*player_public_discord_identity_preferences/i.test(error.message);
 }
 
 async function writePreferences(env: Env, userId: string, preferences: PrivacyPreferences, writeDiscordConsent: boolean) {

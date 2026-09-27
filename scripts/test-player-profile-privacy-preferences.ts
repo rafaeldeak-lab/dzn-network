@@ -105,6 +105,64 @@ async function testPrivacyRouteRuntimeContract() {
   assert.equal(defaultPayload.public_profile_handle, null, "Private default preferences must not expose a public profile handle.");
   assert.equal(db.preferences.has("mock-user"), false, "GET must not persist defaults implicitly.");
 
+  const missingConsentTableDb = new FakeD1Database();
+  missingConsentTableDb.discordConsentTableMissing = true;
+  const missingConsentTableRead = await callPrivacyRoute(
+    missingConsentTableDb,
+    { DB: missingConsentTableDb, MOCK_AUTH: "true" } as unknown as Env,
+    "GET",
+  );
+  assert.equal(missingConsentTableRead.status, 200, "Pre-migration deployments must keep Discord identity safely default-off.");
+  assert.equal(
+    (await missingConsentTableRead.json() as PrivacyPayload).settings.show_discord_identity,
+    false,
+    "A missing consent table must never imply Discord identity consent.",
+  );
+
+  const consentReadFailureDb = new FakeD1Database();
+  consentReadFailureDb.preferences.set("mock-user", {
+    public_profile_enabled: 1,
+    show_display_name: 1,
+    show_gameplay_summary: 1,
+    show_featured_server: 1,
+    show_xp_progress: 0,
+    show_challenge_progress: 0,
+    show_calling_cards: 0,
+    show_award_dates: 0,
+    updated_at: "2026-09-27T00:00:00.000Z",
+  });
+  consentReadFailureDb.discordIdentityConsent.set("mock-user", 1);
+  consentReadFailureDb.failDiscordConsentReads = true;
+  const failedConsentRead = await callPrivacyRoute(
+    consentReadFailureDb,
+    { DB: consentReadFailureDb, MOCK_AUTH: "true" } as unknown as Env,
+    "GET",
+  );
+  assert.equal(failedConsentRead.status, 503, "Operational Discord consent read failures must not be reported as opt-out.");
+  assert.equal(
+    (await failedConsentRead.json() as { error: string }).error,
+    "SETTINGS_UNAVAILABLE",
+    "Operational Discord consent read failures must use the settings unavailable contract.",
+  );
+  const preferencesBeforeFailedPatch = { ...consentReadFailureDb.preferences.get("mock-user")! };
+  const failedUnrelatedPatch = await callPrivacyRoute(
+    consentReadFailureDb,
+    { DB: consentReadFailureDb, MOCK_AUTH: "true" } as unknown as Env,
+    "PATCH",
+    { settings: { show_gameplay_summary: false } },
+  );
+  assert.equal(failedUnrelatedPatch.status, 503, "Unrelated updates must stop when Discord consent cannot be read.");
+  assert.deepEqual(
+    consentReadFailureDb.preferences.get("mock-user"),
+    preferencesBeforeFailedPatch,
+    "A failed Discord consent read must not overwrite saved preferences.",
+  );
+  assert.equal(
+    consentReadFailureDb.writeTargets.has("player_profile_privacy_preferences"),
+    false,
+    "A failed Discord consent read must not write the preference table.",
+  );
+
   const crossOrigin = await callPrivacyRoute(db, { DB: db, MOCK_AUTH: "true" } as unknown as Env, "PATCH", {
     settings: { public_profile_enabled: true },
   }, "https://evil.test");
@@ -308,6 +366,8 @@ class FakeD1Database {
   readonly writeTargets = new Set<string>();
   readonly protectedWrites: string[] = [];
   failPreferenceReads = false;
+  failDiscordConsentReads = false;
+  discordConsentTableMissing = false;
   failDiscordConsentWrites = false;
   failPublicProfileReadsAfterWrite = false;
   concurrentPublicProfileHandle: string | null = null;
@@ -361,6 +421,10 @@ class FakeD1PreparedStatement {
       return (row ?? null) as T | null;
     }
     if (query.includes("from player_public_discord_identity_preferences")) {
+      if (this.db.discordConsentTableMissing) {
+        throw new Error("D1_ERROR: no such table: player_public_discord_identity_preferences");
+      }
+      if (this.db.failDiscordConsentReads) throw new Error("discord consent reads unavailable");
       const enabled = this.db.discordIdentityConsent.get(String(this.bindings[0]));
       return (enabled === undefined ? null : { enabled }) as T | null;
     }
