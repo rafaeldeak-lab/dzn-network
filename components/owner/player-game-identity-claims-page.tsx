@@ -612,16 +612,20 @@ function ClaimCard({
 
   async function issueProofCode() {
     setProofState("loading");
-    const response = await fetch(`/api/owner/player-game-identity-claims/${encodeURIComponent(claim.id)}/proof-code`, {
-      method: "POST", credentials: "include", headers: { accept: "application/json" },
-    });
-    const result = await response.json().catch(() => null) as { ok?: boolean; code?: string } | null;
-    if (!response.ok || !result?.ok || !result.code) {
+    try {
+      const response = await fetch(`/api/owner/player-game-identity-claims/${encodeURIComponent(claim.id)}/proof-code`, {
+        method: "POST", credentials: "include", headers: { accept: "application/json" },
+      });
+      const result = await response.json().catch(() => null) as { ok?: boolean; code?: string } | null;
+      if (!response.ok || !result?.ok || !result.code) {
+        setProofState("error");
+        return;
+      }
+      setProofCode(result.code);
+      setProofState("idle");
+    } catch {
       setProofState("error");
-      return;
     }
-    setProofCode(result.code);
-    setProofState("idle");
   }
 
   return (

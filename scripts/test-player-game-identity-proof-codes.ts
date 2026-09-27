@@ -29,6 +29,11 @@ async function main() {
   const replacement = await issuePlayerGameIdentityProofCode(fixture.env, identityTestUser("owner-a"), "claim-a");
   assert.equal(replacement.ok, true);
   assert.equal(fixture.sqlite.prepare("SELECT COUNT(*) AS count FROM player_game_identity_proof_codes WHERE claim_id='claim-a' AND status='active'").get()?.count, 1);
+  const activeBeforeRace = fixture.sqlite.prepare("SELECT id FROM player_game_identity_proof_codes WHERE claim_id='claim-a' AND status='active'").get()?.id;
+  fixture.setBeforeBatch(() => fixture.sqlite.exec("UPDATE linked_servers SET user_id='owner-b' WHERE id='server-a'"));
+  const ownershipRace = await issuePlayerGameIdentityProofCode(fixture.env, identityTestUser("owner-a"), "claim-a");
+  assert.equal(ownershipRace.ok, false, "Issuance must recheck current ownership inside the write transaction.");
+  assert.equal(fixture.sqlite.prepare("SELECT id FROM player_game_identity_proof_codes WHERE claim_id='claim-a' AND status='active'").get()?.id, activeBeforeRace, "A stale owner must not revoke the current proof code.");
   console.log("Player link proof codes: owner scope, hashing, account binding, expiry fence and replay protection passed.");
   } finally {
     fixture.close();

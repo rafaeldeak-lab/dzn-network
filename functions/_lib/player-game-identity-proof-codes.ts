@@ -1,4 +1,5 @@
 import { requireDb } from "./db";
+import { isDznAdminDiscordId } from "./admin";
 import { requireServerOwnerOrDznAdmin } from "./public-cache";
 import type { Env, SessionUser } from "./types";
 
@@ -20,13 +21,21 @@ export async function issuePlayerGameIdentityProofCode(env: Env, actor: SessionU
     const code = generateProofCode();
     const hash = await hashProofCode(code);
     const id = crypto.randomUUID();
+    const hasGlobalAccess = isDznAdminDiscordId(env, actor.discord_id) || env.MOCK_AUTH === "1" || env.MOCK_AUTH === "true";
+    const currentAccess = `EXISTS (
+      SELECT 1 FROM linked_servers server
+      WHERE server.id = ? AND (? = 1 OR server.user_id = ?)
+        AND lower(COALESCE(server.status, 'pending')) NOT IN ('deleted', 'merged')
+        AND (server.merged_into_server_id IS NULL OR server.merged_into_server_id = '')
+    )`;
     const results = await db.batch([
-      db.prepare(`UPDATE player_game_identity_proof_codes SET status = 'revoked', updated_at = CURRENT_TIMESTAMP WHERE claim_id = ? AND status = 'active'`).bind(claim.id),
+      db.prepare(`UPDATE player_game_identity_proof_codes SET status = 'revoked', updated_at = CURRENT_TIMESTAMP WHERE claim_id = ? AND status = 'active' AND ${currentAccess}`)
+        .bind(claim.id, claim.linked_server_id, hasGlobalAccess ? 1 : 0, actor.id),
       db.prepare(
         `INSERT INTO player_game_identity_proof_codes (id, claim_id, linked_server_id, issued_by_user_id, code_hash, status, expires_at)
          SELECT ?, ?, ?, ?, ?, 'active', datetime('now', '+${CODE_TTL_MINUTES} minutes')
-         WHERE EXISTS (SELECT 1 FROM player_game_identity_claims WHERE id = ? AND status = 'pending')`,
-      ).bind(id, claim.id, claim.linked_server_id, actor.id, hash, claim.id),
+         WHERE EXISTS (SELECT 1 FROM player_game_identity_claims WHERE id = ? AND status = 'pending') AND ${currentAccess}`,
+      ).bind(id, claim.id, claim.linked_server_id, actor.id, hash, claim.id, claim.linked_server_id, hasGlobalAccess ? 1 : 0, actor.id),
     ]);
     if (results[1].meta.changes !== 1) return failure(409, "CLAIM_CHANGED", "This link request changed. Refresh and try again.");
     return { ok: true as const, status: 201 as const, code, expires_in_minutes: CODE_TTL_MINUTES, message: "One-time proof code created. Share it only with this requesting player." };

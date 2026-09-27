@@ -484,18 +484,22 @@ function ProofCodeRedeemer({ claimId }: { claimId: string }) {
   async function redeem() {
     if (!normalized || state.status === "loading") return;
     setState({ status: "loading", message: "Checking the one-time code..." });
-    const response = await fetch("/api/player/game-identities/proof-code", {
-      method: "POST", credentials: "include", cache: "no-store",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({ claim_id: claimId, proof_code: normalized }),
-    });
-    const result = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
-    if (!response.ok || !result?.ok) {
-      setState({ status: "error", message: result?.message ?? "That proof code could not be accepted." });
-      return;
+    try {
+      const response = await fetch("/api/player/game-identities/proof-code", {
+        method: "POST", credentials: "include", cache: "no-store",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ claim_id: claimId, proof_code: normalized }),
+      });
+      const result = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
+      if (!response.ok || !result?.ok) {
+        setState({ status: "error", message: result?.message ?? "That proof code could not be accepted." });
+        return;
+      }
+      setCode("");
+      setState({ status: "success", message: result.message ?? "Proof code accepted." });
+    } catch {
+      setState({ status: "error", message: "The proof code could not be checked. Check your connection and try again." });
     }
-    setCode("");
-    setState({ status: "success", message: result.message ?? "Proof code accepted." });
   }
 
   return (
