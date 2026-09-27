@@ -130,12 +130,11 @@ assert.equal(ownerLinkDeliveryWorkflow.includes("DZN_CRON_SECRET: ${{ secrets.DZ
 assert.equal(ownerLinkDeliveryWorkflow.includes("SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}"), true);
 assert.equal(ownerLinkDeliveryWorkflow.includes('CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"'), true);
 assert.equal(ownerLinkDeliveryWorkflow.includes("::add-mask::${CRON_SECRET}"), true);
-assert.equal(ownerLinkDeliveryWorkflow.includes("/api/sync/player-link-owner-notifications/run"), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes("/api/sync/player-link-owner-notifications/prove-one-v1"), true);
 assert.equal(ownerLinkDeliveryWorkflow.includes('unauthenticated_status}" != "401"'), true);
-assert.equal(ownerLinkDeliveryWorkflow.includes("deployed-capability.json"), true);
 assert.equal(ownerLinkDeliveryWorkflow.includes("owner_notification_single_delivery_v1"), true);
-assert.equal(ownerLinkDeliveryWorkflow.indexOf("deployed-capability.json") < ownerLinkDeliveryWorkflow.indexOf("delivery-result.json"), true);
-assert.equal(ownerLinkDeliveryWorkflow.includes('{"max_jobs": 1}'), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes("/api/sync/player-link-owner-notifications/run"), false);
+assert.equal(ownerLinkDeliveryWorkflow.includes("max_jobs"), false);
 assert.equal(ownerLinkDeliveryWorkflow.includes("processed: 1"), true);
 assert.equal(ownerLinkDeliveryWorkflow.includes("delivered: 1"), true);
 assert.equal(ownerLinkDeliveryWorkflow.includes("retried: 0"), true);
