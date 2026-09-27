@@ -167,6 +167,13 @@ if (process.argv.includes("--serve")) {
       await emptyPage.goto(`${origin}/leaderboards`, { waitUntil: "networkidle" });
       await emptyPage.getByRole("button", { name: "PvE", exact: true }).click();
       await emptyPage.getByText("No ranked PvE servers yet.", { exact: true }).waitFor();
+      await emptyPage.getByRole("button", { name: "PvP", exact: true }).click();
+      assert.equal(await emptyPage.getByRole("button", { name: "All Modes", exact: true }).count(), 1, "Mode controls must remain mounted when leaving an empty mode");
+      assert.equal(await emptyPage.getByRole("tab", { name: "Players", exact: true }).count(), 1, "Board controls must remain mounted when leaving an empty mode");
+      assert.ok(await emptyPage.locator(".dzn-leaderboard-card .animate-pulse").count() > 0, "Leaving an empty mode must scope loading to the server results");
+      await emptyPage.getByRole("table", { name: "Top Servers", exact: true }).waitFor();
+      await emptyPage.getByRole("button", { name: "PvE", exact: true }).click();
+      await emptyPage.getByText("No ranked PvE servers yet.", { exact: true }).waitFor();
       await emptyPage.clock.runFor(30_000);
       assert.equal(await emptyPage.getByRole("button", { name: "All Modes", exact: true }).count(), 1, "Mode controls must remain mounted while an empty mode refreshes");
       assert.equal(await emptyPage.getByRole("tab", { name: "Players", exact: true }).count(), 1, "Board controls must remain mounted while an empty mode refreshes");

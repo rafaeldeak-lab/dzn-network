@@ -202,8 +202,8 @@ export default function LeaderboardsPage() {
       const requestId = latestRequestId.current + 1;
       latestRequestId.current = requestId;
       const cached = activeMode === "all" ? loadLastGoodLeaderboard() : null;
-      const hasCurrentPayload = payloadMode.current === activeMode;
-      const hasAnyVisibleData = Boolean(cached) || visiblePayloadRef.current || hasCurrentPayload;
+      const hasDisplayedPayload = payloadMode.current !== null;
+      const hasAnyVisibleData = Boolean(cached) || hasDisplayedPayload;
       // The server and first browser render must agree before restoring local data.
       if (cached && payloadMode.current !== "all") {
         payloadMode.current = "all";
