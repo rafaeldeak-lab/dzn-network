@@ -133,6 +133,9 @@ if (process.argv.includes("--serve")) {
       await page.getByRole("button", { name: "Survival", exact: true }).click();
       await page.getByText("Survival rankings could not be loaded right now.", { exact: true }).waitFor();
       assert.equal(await page.getByRole("table", { name: "Top Servers", exact: true }).count(), 0, "An empty_no_cache mode response must not reuse another mode's server table");
+      await page.getByRole("button", { name: "Survival", exact: true }).click();
+      await page.getByText("Survival rankings could not be loaded right now.", { exact: true }).waitFor();
+      assert.equal(await page.locator(".dzn-leaderboard-card .animate-pulse").count(), 0, "Reselecting a failed active mode must not hide its recovery state");
       await page.getByRole("tab", { name: "Players", exact: true }).click();
       await page.getByRole("table", { name: "Top Players", exact: true }).waitFor();
       await context.close();

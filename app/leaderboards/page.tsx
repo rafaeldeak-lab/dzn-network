@@ -385,6 +385,10 @@ export default function LeaderboardsPage() {
                 <LeaderboardModeSwitcher
                   activeMode={activeMode}
                   onChange={(mode) => {
+                    if (mode === activeMode) {
+                      if (serverModeError) setReloadNonce((value) => value + 1);
+                      return;
+                    }
                     setServerModeError("");
                     setActiveMode(mode);
                   }}
@@ -873,7 +877,7 @@ function PlayerName({ name, index, href, avatarUrl }: { name: string; index: num
   const safeHref = safePublicProfileHref(href);
   const nameContent = (
     <>
-      <PlayerAvatar name={name} index={index} avatarUrl={avatarUrl} />
+      <PlayerAvatar key={`${name}:${avatarUrl ?? ""}`} name={name} index={index} avatarUrl={avatarUrl} />
       <span className="leaderboard-ref-player-copy">
         <strong>{name}</strong>
         {safeHref ? <small>DZN public profile</small> : <small>Leaderboard player</small>}
@@ -920,7 +924,7 @@ function InlinePlayerProfileLink({ name, href, avatarUrl }: { name: string; href
   if (!safeHref) return <>{name}</>;
   return (
     <Link href={safeHref} prefetch={false} className="leaderboard-ref-inline-player text-cyan-100 transition hover:text-white" aria-label={`View public profile for ${name}`}>
-      <PlayerAvatar name={name} index={3} avatarUrl={avatarUrl} compact />
+      <PlayerAvatar key={`${name}:${avatarUrl ?? ""}`} name={name} index={3} avatarUrl={avatarUrl} compact />
       {name}
     </Link>
   );
