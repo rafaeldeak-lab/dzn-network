@@ -19,6 +19,7 @@ export const EVENT_CHANNEL_TYPES = [
 ] as const;
 
 export type EventChannelType = typeof EVENT_CHANNEL_TYPES[number];
+const PLAYER_LINK_APPROVAL_CHANNEL_TYPE = "player_link_approvals";
 
 const REQUIRED_PERMISSION_LABELS = ["View Channel", "Send Messages", "Embed Links", "Read Message History"];
 const EVENT_OFFICIAL_TYPES = new Set(["capture_the_flag", "server_vs_server", "bot_tournament", "faction_wars", "seasonal_wars"]);
@@ -354,6 +355,7 @@ export async function listOwnerDiscordEventChannels(env: Env, user: SessionUser 
           guildId,
           guildName: server.guild_name,
           selected: serializeSavedChannels(saved),
+          playerLinkApprovalChannel: serializeSavedChannel(saved.find((row) => row.channel_type === PLAYER_LINK_APPROVAL_CHANNEL_TYPE)),
           channels: cachedChannels,
         },
       };
@@ -369,6 +371,7 @@ export async function listOwnerDiscordEventChannels(env: Env, user: SessionUser 
         guildName: server.guild_name,
         channels: [],
         selected: serializeSavedChannels(saved),
+        playerLinkApprovalChannel: serializeSavedChannel(saved.find((row) => row.channel_type === PLAYER_LINK_APPROVAL_CHANNEL_TYPE)),
       },
     };
   }
@@ -389,7 +392,11 @@ export async function saveOwnerDiscordEventChannels(env: Env, user: SessionUser 
     ["event_results", normalizeDiscordId(input.eventResultsChannelId)],
   ];
   const provided = requested.filter(([, channelId]) => Boolean(channelId)) as Array<[EventChannelType, string]>;
-  if (provided.length === 0) return { status: 400, payload: { ok: false, error: "CHANNEL_NOT_FOUND", message: "Choose at least one valid event channel." } };
+  const approvalChannelIncluded = Object.prototype.hasOwnProperty.call(input, "playerLinkApprovalChannelId");
+  const approvalChannelId = normalizeDiscordId(input.playerLinkApprovalChannelId);
+  if (provided.length === 0 && !approvalChannelIncluded) {
+    return { status: 400, payload: { ok: false, error: "CHANNEL_NOT_FOUND", message: "Choose at least one valid event channel." } };
+  }
 
   const saved: SavedChannelRow[] = [];
   for (const [channelType, channelId] of provided) {
@@ -425,12 +432,42 @@ export async function saveOwnerDiscordEventChannels(env: Env, user: SessionUser 
     saved.push(await upsertEventChannelSetting(env, server.id, guildId, channelType, channel, user.id));
   }
 
+  if (approvalChannelIncluded) {
+    if (!approvalChannelId) {
+      await requireDb(env)
+        .prepare("DELETE FROM server_discord_channel_settings WHERE linked_server_id = ? AND channel_type = ?")
+        .bind(server.id, PLAYER_LINK_APPROVAL_CHANNEL_TYPE)
+        .run();
+    } else {
+      let channel: DiscordPostingChannel | null = null;
+      try {
+        channel = isMockAuthEnabled(env)
+          ? mockEventChannels().find((item) => item.channel_id === approvalChannelId) ?? null
+          : await verifyDiscordPostingChannel(env, guildId, approvalChannelId);
+      } catch (error) {
+        const mapped = mapDiscordChannelFetchError(error);
+        return { status: mapped.httpStatus, payload: { ok: false, error: mapped.error, errorCode: mapped.error, message: mapped.message } };
+      }
+      if (!channel) {
+        return { status: 404, payload: { ok: false, error: "CHANNEL_NOT_IN_CONNECTED_GUILD", message: "Channel was not found in the connected Discord server." } };
+      }
+      if (!channel.can_post || channel.missing_permissions.length > 0) {
+        return { status: 409, payload: { ok: false, error: "BOT_MISSING_PERMISSIONS", message: "DZN bot needs View Channel, Send Messages, Embed Links, and Read Message History before this channel can be used.", missingPermissions: channel.missing_permissions.length ? channel.missing_permissions : REQUIRED_PERMISSION_LABELS } };
+      }
+      if (!channel.restricted_from_everyone) {
+        return { status: 409, payload: { ok: false, error: "PRIVATE_CHANNEL_REQUIRED", message: "Player-link reviews can only use a Discord channel hidden from @everyone. Restrict the channel to trusted owner or admin roles, then refresh and try again." } };
+      }
+      saved.push(await upsertEventChannelSetting(env, server.id, guildId, PLAYER_LINK_APPROVAL_CHANNEL_TYPE, channel, user.id));
+    }
+  }
+
   return {
     status: 200,
     payload: {
       ok: true,
-      message: "Discord event channels saved.",
+      message: provided.length > 0 ? "Discord channel settings saved." : approvalChannelId ? "Private player-link review channel saved." : "Player-link reviews will use private owner messages.",
       selected: serializeSavedChannels(await getSavedEventChannels(env, server.id)),
+      playerLinkApprovalChannel: serializeSavedChannel((await getSavedEventChannels(env, server.id)).find((row) => row.channel_type === PLAYER_LINK_APPROVAL_CHANNEL_TYPE)),
       saved: serializeSavedChannels(saved),
     },
   };
@@ -735,6 +772,7 @@ function channelListPayload(server: OwnerServerRow, guildId: string, saved: Save
     guildId,
     guildName: server.guild_name,
     selected: serializeSavedChannels(saved),
+    playerLinkApprovalChannel: serializeSavedChannel(saved.find((row) => row.channel_type === PLAYER_LINK_APPROVAL_CHANNEL_TYPE)),
     channels: channels.map((channel) => ({
       id: channel.channel_id,
       name: channel.channel_name,
@@ -745,6 +783,7 @@ function channelListPayload(server: OwnerServerRow, guildId: string, saved: Save
       botCanSend: channel.can_send,
       botCanEmbed: channel.can_embed,
       botCanReadHistory: channel.can_read_history,
+      restrictedFromEveryone: channel.restricted_from_everyone,
       missingPermissions: channel.missing_permissions,
     })),
   };
@@ -916,7 +955,7 @@ export async function getSavedDiscordEventChannelSummary(env: Env, linkedServerI
   };
 }
 
-async function upsertEventChannelSetting(env: Env, linkedServerId: string, guildId: string, channelType: EventChannelType, channel: DiscordPostingChannel, userId: string) {
+async function upsertEventChannelSetting(env: Env, linkedServerId: string, guildId: string, channelType: EventChannelType | typeof PLAYER_LINK_APPROVAL_CHANNEL_TYPE, channel: DiscordPostingChannel, userId: string) {
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   await requireDb(env)
@@ -1510,6 +1549,7 @@ async function cacheDiscordChannels(env: Env, guildId: string, channels: Discord
           canSend: channel.can_send,
           canEmbed: channel.can_embed,
           canReadHistory: channel.can_read_history,
+          restrictedFromEveryone: channel.restricted_from_everyone,
           missingPermissions: channel.missing_permissions,
         }),
         now,
@@ -1545,6 +1585,7 @@ async function getCachedDiscordChannelOptions(env: Env, guildId: string) {
       botCanSend: permissions.canSend,
       botCanEmbed: permissions.canEmbed,
       botCanReadHistory: permissions.canReadHistory,
+      restrictedFromEveryone: permissions.restrictedFromEveryone,
       missingPermissions: permissions.missingPermissions,
     };
   });
@@ -1557,6 +1598,7 @@ function parseChannelPermissionJson(value: string | null) {
       canSend: boolean;
       canEmbed: boolean;
       canReadHistory: boolean;
+      restrictedFromEveryone: boolean;
       missingPermissions: string[];
     }>;
     return {
@@ -1564,6 +1606,7 @@ function parseChannelPermissionJson(value: string | null) {
       canSend: Boolean(parsed.canSend),
       canEmbed: Boolean(parsed.canEmbed),
       canReadHistory: Boolean(parsed.canReadHistory),
+      restrictedFromEveryone: Boolean(parsed.restrictedFromEveryone),
       missingPermissions: Array.isArray(parsed.missingPermissions) ? parsed.missingPermissions.map(String) : [],
     };
   } catch {
@@ -1572,6 +1615,7 @@ function parseChannelPermissionJson(value: string | null) {
       canSend: false,
       canEmbed: false,
       canReadHistory: false,
+      restrictedFromEveryone: false,
       missingPermissions: REQUIRED_PERMISSION_LABELS,
     };
   }
@@ -1770,6 +1814,7 @@ function mockChannel(channelId: string, name: string, categoryName: string): Dis
     can_embed: true,
     can_read_history: true,
     can_manage_messages: false,
+    restricted_from_everyone: true,
     can_post: true,
     missing_permissions: [],
     permission_source: "administrator",

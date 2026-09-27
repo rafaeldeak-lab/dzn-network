@@ -91,6 +91,39 @@ const missingSendOnlyResult = evaluateDiscordChannelPermissionsForTest({
 assert.equal(missingSendOnlyResult.can_post, false);
 assert.deepEqual(missingSendOnlyResult.missing_permissions, ["Send Messages"]);
 
+const restrictedReviewChannel = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: requiredPostingPermissions,
+  channelPermissionOverwrites: [
+    { id: guildId, type: 0, allow: "0", deny: viewChannel.toString() },
+    { id: botRoleId, type: 0, allow: viewChannel.toString(), deny: "0" },
+  ],
+});
+assert.equal(restrictedReviewChannel.can_post, true, "The DZN bot role may post in the private review channel.");
+assert.equal(restrictedReviewChannel.restricted_from_everyone, true, "The review channel must deny View Channel to @everyone.");
+
+const publicReviewChannel = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: requiredPostingPermissions,
+});
+assert.equal(publicReviewChannel.restricted_from_everyone, false, "A public channel must never pass the private review-channel check.");
+
+const ownerNotificationSource = readFileSync("functions/_lib/player-game-identity-owner-notifications.ts", "utf8");
+assert.match(ownerNotificationSource, /channel_type='player_link_approvals'/);
+assert.match(ownerNotificationSource, /channel\?\.can_post && channel\.restricted_from_everyone/);
+assert.match(ownerNotificationSource, /discord_restricted_channel_delivered/);
+assert.match(ownerNotificationSource, /users\/@me\/channels/, "Private owner messages must remain as the fallback.");
+
+const serverSettingsSource = readFileSync("components/onboarding/server-settings-page.tsx", "utf8");
+assert.match(serverSettingsSource, /Private Player-Link Review Channel/);
+assert.match(serverSettingsSource, /channel\.canSelect && channel\.restrictedFromEveryone/);
+
 const botStatusSource = readFileSync("functions/api/discord/bot-status.ts", "utf8");
 assert.equal(botStatusSource.includes("DISCORD_BOT_TOKEN"), true);
 assert.equal(botStatusSource.includes("fetchDiscordPostingChannels"), true);

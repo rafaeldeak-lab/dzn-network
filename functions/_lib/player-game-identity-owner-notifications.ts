@@ -1,4 +1,5 @@
 import { requireDb } from "./db";
+import { verifyDiscordPostingChannel } from "./discord-posting";
 import { isDznAdminDiscordId } from "./admin";
 import { isDiscordNotificationsEnabled } from "./feature-flags";
 import { parsePlatformOwnerDiscordIds } from "./platform-owner";
@@ -14,6 +15,7 @@ type OwnerDeliveryRow = {
   claim_id: string;
   linked_server_id: string;
   server_owner_user_id: string;
+  guild_id: string | null;
   recipient_user_id: string;
   recipient_discord_id: string;
   attempt_count: number;
@@ -156,7 +158,7 @@ export async function dispatchQueuedOwnerRequestNotifications(
     ).bind(leaseId, candidate.id).run();
     if (Number(claimed.meta.changes ?? 0) !== 1) continue;
     const row = await db.prepare(
-      `SELECT d.id, d.claim_id, d.linked_server_id, s.user_id AS server_owner_user_id,
+      `SELECT d.id, d.claim_id, d.linked_server_id, s.user_id AS server_owner_user_id, s.guild_id,
               d.recipient_user_id, d.recipient_discord_id, d.attempt_count,
               c.status AS claim_status,
               COALESCE(NULLIF(s.display_name,''), NULLIF(s.hostname,''), s.server_name, s.nitrado_service_name) AS server_name,
@@ -363,7 +365,27 @@ async function sendOwnerRequestDiscord(env: Env, row: OwnerDeliveryRow) {
   const token = normalizeBotToken(env.DISCORD_BOT_TOKEN);
   if (!token) return { ok: false, skipped: true, reason: "discord_bot_token_missing" } as const;
   if (!/^\d{5,32}$/.test(row.recipient_discord_id)) return { ok: false, skipped: true, reason: "discord_recipient_invalid" } as const;
+  const content = `New DZN player-stat link review: **${safeText(row.requester_name || "A player")}** asked to link **${safeText(row.player_name || "a game profile")}** on **${safeText(row.server_name || "your server")}**. This is not proof they played or own the profile. Verify the evidence in Owner Console before approving.`;
   try {
+    if (row.recipient_user_id === row.server_owner_user_id && row.guild_id) {
+      const selected = await requireDb(env).prepare(
+        `SELECT channel_id FROM server_discord_channel_settings
+         WHERE linked_server_id=? AND guild_id=? AND channel_type='player_link_approvals'
+           AND bot_can_view=1 AND bot_can_send=1 AND bot_can_read_history=1
+         LIMIT 1`,
+      ).bind(row.linked_server_id, row.guild_id).first<{ channel_id: string }>().catch(() => null);
+      if (selected?.channel_id) {
+        const channel = await verifyDiscordPostingChannel(env, row.guild_id, selected.channel_id).catch(() => null);
+        if (channel?.can_post && channel.restricted_from_everyone) {
+          const channelDelivery = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(selected.channel_id)}/messages`, {
+            method: "POST",
+            headers: { authorization: `Bot ${token}`, "content-type": "application/json" },
+            body: JSON.stringify({ content, allowed_mentions: { parse: [] }, components: [] }),
+          });
+          if (channelDelivery.ok) return { ok: true, skipped: false, reason: "discord_restricted_channel_delivered" } as const;
+        }
+      }
+    }
     const channelResponse = await fetch("https://discord.com/api/v10/users/@me/channels", {
       method: "POST",
       headers: { authorization: `Bot ${token}`, "content-type": "application/json" },
@@ -377,7 +399,7 @@ async function sendOwnerRequestDiscord(env: Env, row: OwnerDeliveryRow) {
       method: "POST",
       headers: { authorization: `Bot ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
-        content: `New DZN player-stat link review: **${safeText(row.requester_name || "A player")}** asked to link **${safeText(row.player_name || "a game profile")}** on **${safeText(row.server_name || "your server")}**. This is not proof they played or own the profile. Verify the evidence in Owner Console before approving.`,
+        content,
         allowed_mentions: { parse: [] },
         components: [],
       }),

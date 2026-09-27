@@ -95,6 +95,7 @@ export type DiscordPostingChannel = {
   can_embed: boolean;
   can_read_history: boolean;
   can_manage_messages: boolean;
+  restricted_from_everyone: boolean;
   can_post: boolean;
   missing_permissions: string[];
   permission_source: DiscordPermissionSource;
@@ -856,6 +857,9 @@ export async function fetchDiscordPostingChannels(env: Env, guildId: string): Pr
         can_embed: permissions === null ? true : !missing.includes("Embed Links"),
         can_read_history: permissions === null ? true : !missing.includes("Read Message History"),
         can_manage_messages: evaluation.botHasAdministrator || canManageMessages,
+        restricted_from_everyone: permissionContext
+          ? isRestrictedFromEveryone(permissionContext, channel, category?.channel ?? null)
+          : false,
         can_post: evaluation.botHasAdministrator || permissions === null ? true : missing.length === 0,
         missing_permissions: missing,
         permission_source: evaluation.source,
@@ -901,6 +905,9 @@ export async function verifyDiscordPostingChannel(env: Env, guildId: string, cha
     can_embed: permissions === null ? true : !missing.includes("Embed Links"),
     can_read_history: permissions === null ? true : !missing.includes("Read Message History"),
     can_manage_messages: evaluation.botHasAdministrator || canManageMessages,
+    restricted_from_everyone: permissionContext
+      ? isRestrictedFromEveryone(permissionContext, channel, category)
+      : false,
     can_post: evaluation.botHasAdministrator || permissions === null ? true : missing.length === 0,
     missing_permissions: missing,
     permission_source: evaluation.source,
@@ -1182,6 +1189,7 @@ type BotPermissionContext = {
   guildId: string;
   roleIds: Set<string>;
   roleNames: string[];
+  everyonePermissions: bigint;
   basePermissions: bigint;
 };
 
@@ -1231,9 +1239,11 @@ async function getBotGuildPermissionContext(botToken: string, guildId: string): 
 
   const roleIds = new Set(Array.isArray(member?.roles) ? member.roles.map(String) : []);
   let basePermissions = BigInt(0);
+  let everyonePermissions = BigInt(0);
   const roleNames: string[] = [];
   for (const role of roles) {
     const roleId = typeof role.id === "string" || typeof role.id === "number" ? String(role.id) : null;
+    if (roleId === guildId) everyonePermissions = parsePermissionBits(role.permissions) ?? BigInt(0);
     if (roleId === guildId || (roleId && roleIds.has(roleId))) {
       basePermissions |= parsePermissionBits(role.permissions) ?? BigInt(0);
       if (roleId !== guildId && typeof role.name === "string" && role.name.trim()) {
@@ -1241,7 +1251,19 @@ async function getBotGuildPermissionContext(botToken: string, guildId: string): 
       }
     }
   }
-  return { botUserId, guildId, roleIds, roleNames, basePermissions };
+  return { botUserId, guildId, roleIds, roleNames, everyonePermissions, basePermissions };
+}
+
+function isRestrictedFromEveryone(context: BotPermissionContext, channel: DiscordChannel, category: DiscordChannel | null) {
+  if (hasPermission(context.everyonePermissions, DISCORD_ADMINISTRATOR_PERMISSION)) return false;
+  let permissions = context.everyonePermissions;
+  const applyEveryoneOverwrite = (overwrites: PermissionOverwrite[]) => {
+    const overwrite = overwrites.find((item) => String(item.id) === context.guildId && String(item.type) === "0");
+    permissions = applyPermissionOverwrite(permissions, overwrite);
+  };
+  applyEveryoneOverwrite(Array.isArray(category?.permission_overwrites) ? category.permission_overwrites : []);
+  applyEveryoneOverwrite(Array.isArray(channel.permission_overwrites) ? channel.permission_overwrites : []);
+  return !hasPermission(permissions, DISCORD_PERMISSION_ONE << BigInt(10));
 }
 
 function getChannelPermissionEvaluationFromContext(context: BotPermissionContext, channel: DiscordChannel | null, category: DiscordChannel | null = null): PermissionEvaluation {
@@ -1386,6 +1408,7 @@ export function evaluateDiscordChannelPermissionsForTest(input: {
   botRoleIds: string[];
   botRoleNames?: string[];
   basePermissions: string | number | bigint;
+  everyonePermissions?: string | number | bigint;
   channelId?: string;
   channelName?: string;
   channelPermissionOverwrites?: PermissionOverwrite[];
@@ -1396,6 +1419,7 @@ export function evaluateDiscordChannelPermissionsForTest(input: {
     botUserId: input.botUserId,
     roleIds: new Set(input.botRoleIds),
     roleNames: input.botRoleNames ?? [],
+    everyonePermissions: parsePermissionBits(input.everyonePermissions ?? input.basePermissions) ?? BigInt(0),
     basePermissions: parsePermissionBits(input.basePermissions) ?? BigInt(0),
   };
   const channel: DiscordChannel = {
@@ -1411,6 +1435,7 @@ export function evaluateDiscordChannelPermissionsForTest(input: {
   const missing = getMissingRequiredBotPermissions(evaluation);
   return {
     can_post: evaluation.botHasAdministrator || evaluation.permissions === null ? true : missing.length === 0,
+    restricted_from_everyone: isRestrictedFromEveryone(context, channel, category),
     missing_permissions: missing,
     permission_source: evaluation.source,
     diagnostics: buildChannelPermissionDiagnostics(channel.id ?? "channel", channel.name ?? "channel", context, evaluation, missing),
