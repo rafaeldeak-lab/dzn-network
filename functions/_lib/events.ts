@@ -401,13 +401,19 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
     .bind(...bindings, limit)
     .all<EventRow>(),
     db.prepare(
-      `SELECT
+      `WITH filtered_events AS (
+         SELECT id, status
+         FROM competitive_events
+         WHERE ${conditions.join(" AND ")}
+       )
+       SELECT
          SUM(CASE WHEN lower(COALESCE(status, 'draft')) = 'live' THEN 1 ELSE 0 END) AS active_events,
          SUM(CASE WHEN lower(COALESCE(status, 'draft')) IN ('upcoming', 'registration_open', 'standby') THEN 1 ELSE 0 END) AS upcoming_events,
          SUM(CASE WHEN lower(COALESCE(status, 'draft')) = 'ended' THEN 1 ELSE 0 END) AS completed_events,
-         COALESCE(SUM((SELECT COUNT(*) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id)), 0) AS registered_servers
-       FROM competitive_events
-       WHERE ${conditions.join(" AND ")}`,
+         (SELECT COUNT(DISTINCT event_servers.server_id)
+          FROM competitive_event_servers AS event_servers
+          JOIN filtered_events AS registered_events ON registered_events.id = event_servers.event_id) AS registered_servers
+       FROM filtered_events`,
     )
     .bind(...bindings)
     .first<EventSummaryRow>(),
