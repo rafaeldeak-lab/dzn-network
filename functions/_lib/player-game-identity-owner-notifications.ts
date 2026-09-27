@@ -11,6 +11,7 @@ export type OwnerRequestNotificationRecipient = {
 type OwnerDeliveryRow = {
   id: string;
   claim_id: string;
+  recipient_user_id: string;
   recipient_discord_id: string;
   attempt_count: number;
   server_name: string | null;
@@ -117,7 +118,7 @@ export async function dispatchQueuedOwnerRequestNotifications(
     ).bind(leaseId, candidate.id).run();
     if (Number(claimed.meta.changes ?? 0) !== 1) continue;
     const row = await db.prepare(
-      `SELECT d.id, d.claim_id, d.recipient_discord_id, d.attempt_count,
+      `SELECT d.id, d.claim_id, d.recipient_user_id, d.recipient_discord_id, d.attempt_count,
               COALESCE(NULLIF(s.display_name,''), NULLIF(s.hostname,''), s.server_name, s.nitrado_service_name) AS server_name,
               c.player_name, u.username AS requester_name
        FROM player_game_identity_owner_notification_deliveries d
@@ -146,6 +147,12 @@ export async function dispatchQueuedOwnerRequestNotifications(
 
 async function sendOwnerRequestDiscord(env: Env, row: OwnerDeliveryRow) {
   if (!isDiscordNotificationsEnabled(env)) return { ok: true, skipped: true, reason: "discord_notifications_disabled" } as const;
+  const preference = await requireDb(env).prepare(
+    "SELECT discord_enabled FROM notification_preferences WHERE user_id = ?",
+  ).bind(row.recipient_user_id).first<{ discord_enabled: number | null }>().catch(() => null);
+  if (Number(preference?.discord_enabled ?? 0) !== 1) {
+    return { ok: true, skipped: true, reason: "discord_notifications_not_enabled_by_owner" } as const;
+  }
   const token = normalizeBotToken(env.DISCORD_BOT_TOKEN);
   if (!token) return { ok: false, skipped: true, reason: "discord_bot_token_missing" } as const;
   if (!/^\d{5,32}$/.test(row.recipient_discord_id)) return { ok: false, skipped: true, reason: "discord_recipient_invalid" } as const;
@@ -178,7 +185,7 @@ async function sendOwnerRequestDiscord(env: Env, row: OwnerDeliveryRow) {
 
 function classifyResult(result: Awaited<ReturnType<typeof sendOwnerRequestDiscord>>, attemptCount: number) {
   if (result.ok && !result.skipped) return { status: "delivered", delay: "+0 minutes" } as const;
-  if (result.skipped && result.reason === "discord_notifications_disabled") return { status: "skipped", delay: "+0 minutes" } as const;
+  if (result.ok && result.skipped) return { status: "skipped", delay: "+0 minutes" } as const;
   const statusCode = Number(result.reason.match(/_(\d{3})$/)?.[1] ?? 0);
   const retryable = result.reason === "discord_dm_request_failed" || statusCode === 429 || statusCode >= 500;
   if (retryable && attemptCount < MAX_ATTEMPTS) {

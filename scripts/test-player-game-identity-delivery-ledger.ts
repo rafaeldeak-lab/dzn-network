@@ -31,6 +31,10 @@ function d1(sqlite: Sqlite) {
 }
 
 export async function testPlayerGameIdentityDeliveryLedger() {
+  const decisionRunnerSource = readFileSync("functions/api/sync/player-link-notifications/run.ts", "utf8");
+  const ownerRunnerSource = readFileSync("functions/api/sync/player-link-owner-notifications/run.ts", "utf8");
+  assert.doesNotMatch(decisionRunnerSource, /dispatchQueuedOwnerRequestNotifications/, "The guarded one-decision runner must never drain owner-request deliveries.");
+  assert.match(ownerRunnerSource, /requireCronSecret[\s\S]*dispatchQueuedOwnerRequestNotifications/, "Owner-request retries must use a separate protected runner and delivery budget.");
   const unavailableEnv = {
     DB: { prepare: () => ({ first: async () => null }) },
     DZN_CRON_SECRET: "unit-test-secret",

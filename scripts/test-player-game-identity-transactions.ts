@@ -195,6 +195,8 @@ export async function testPlayerGameIdentityTransactions() {
       UPDATE users SET discord_id='888888888888888888' WHERE id='owner-a';
       INSERT INTO users VALUES ('platform-owner','999999999999999999','Platform Owner',NULL);`);
     ownerNotifications.sqlite.exec(readFileSync("migrations/0075_player_link_owner_request_notifications.sql", "utf8"));
+    ownerNotifications.sqlite.exec(`INSERT OR REPLACE INTO notification_preferences (user_id,discord_enabled)
+      VALUES ('owner-a',1),('platform-owner',1);`);
     Object.assign(ownerNotifications.env, {
       DZN_DISCORD_NOTIFICATIONS_ENABLED: "true",
       DZN_PLATFORM_OWNER_DISCORD_IDS: "999999999999999999",
@@ -226,6 +228,14 @@ export async function testPlayerGameIdentityTransactions() {
     assert.equal(discordBodies.length, 2);
     assert.ok(discordBodies.every((body) => String(body.content).includes("not proof they played or own the profile")));
     assert.ok(discordBodies.every((body) => !String(body.content).includes("game-a")));
+    ownerNotifications.sqlite.exec(`UPDATE notification_preferences SET discord_enabled=0 WHERE user_id='owner-a';
+      UPDATE player_game_identity_owner_notification_deliveries
+      SET status='queued', attempt_count=0, next_attempt_at=CURRENT_TIMESTAMP, delivered_at=NULL, result_code=NULL
+      WHERE recipient_user_id='owner-a';`);
+    const fetchesBeforeOptOut = discordBodies.length;
+    const optedOut = await dispatchQueuedOwnerRequestNotifications(ownerNotifications.env, { maxJobs: 1 });
+    assert.equal(optedOut.skipped, 1, "Owner Discord delivery must respect the recipient's saved opt-out.");
+    assert.equal(discordBodies.length, fetchesBeforeOptOut, "An opted-out owner must not trigger a Discord request.");
     const repeated = await createPlayerGameIdentityClaim(
       ownerNotifications.env,
       identityTestUser("player-a", "discord-a"),
