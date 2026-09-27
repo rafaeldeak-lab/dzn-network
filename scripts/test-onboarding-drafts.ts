@@ -84,6 +84,8 @@ async function main() {
   assert.match(setupNotificationService, /if \(!isDznPulseEnabled\(env\)\) return \{ ok: false as const, status: 409, error: "dzn_pulse_disabled" \}/, "A disabled website-notification channel must reject the reminder before writing a false delivery receipt.");
   assert.match(setupNotificationService, /INSERT INTO user_notifications[\s\S]*\/setup#review-test/, "Setup reminder creation must persist a private website notification.");
   assert.match(setupNotificationService, /discord_delivery_status[\s\S]*discord_delivery_result[\s\S]*discord_attempted_at/, "Setup reminder creation must persist the Discord delivery outcome.");
+  assert.match(setupNotificationService, /discord_delivery_status'\), 'not_sent'\) NOT IN \('sending', 'delivered'\)[\s\S]*deliveryClaim\.meta\?\.changes/, "Discord setup reminders must claim a durable send state before delivery so retries cannot duplicate a DM.");
+  assert.match(setupNotificationRoute, /recordOwnerSetupReminderAudit\(env, auth\.user[\s\S]*request\.headers\.get\("cf-ray"\)/, "Confirmed setup reminder attempts must audit the authenticated platform owner.");
 
   const unavailableSqlite = new DatabaseSync(":memory:");
   unavailableSqlite.exec(readFileSync("migrations/0001_initial_schema.sql", "utf8"));

@@ -29,7 +29,11 @@ export const onRequestPost: PagesFunction = async ({ env, request, params }) => 
     : result.error === "dzn_pulse_disabled"
       ? "DZN Pulse website notifications are disabled, so no reminder was recorded or sent."
       : "The setup reminder could not be created." }, { status: result.status });
-  return json({ ok: true, website: result.website, discord: result.discord, message: result.discord === "delivered" ? "Website and Discord setup reminders sent." : "Website setup reminder sent; Discord was not delivered." });
+  return json({ ok: true, website: result.website, discord: result.discord, message: result.discord === "delivered"
+    ? "Website and Discord setup reminders sent."
+    : result.discord === "unconfirmed"
+      ? "Website reminder sent. A previous Discord attempt is complete or awaiting confirmation, so DZN did not send a duplicate."
+      : "Website setup reminder sent; Discord was not delivered." });
 };
 
 function sameOrigin(request: Request) {

@@ -25,13 +25,41 @@ export async function sendOwnerSetupRecommendation(env: Env, serverId: string) {
       (id,user_id,server_id,type,title,body,action_url,priority,dedupe_key,metadata,created_at,expires_at)
      VALUES (?, ?, ?, 'server_setup_recommendation', 'Finish your DZN server setup', ?, '/setup#review-test', 800, ?, ?, CURRENT_TIMESTAMP, datetime('now', '+90 days'))
      ON CONFLICT(user_id,dedupe_key) DO UPDATE SET title=excluded.title,body=excluded.body,action_url=excluded.action_url,
-       priority=excluded.priority,metadata=excluded.metadata,read_at=NULL,created_at=CURRENT_TIMESTAMP,expires_at=datetime('now', '+90 days')`,
+       priority=excluded.priority,
+       metadata=CASE
+         WHEN json_extract(user_notifications.metadata, '$.discord_delivery_status') IN ('sending', 'delivered')
+         THEN json_set(excluded.metadata,
+           '$.discord_delivery_status', json_extract(user_notifications.metadata, '$.discord_delivery_status'),
+           '$.discord_delivery_result', json_extract(user_notifications.metadata, '$.discord_delivery_result'),
+           '$.discord_attempted_at', json_extract(user_notifications.metadata, '$.discord_attempted_at'))
+         ELSE excluded.metadata
+       END,
+       read_at=NULL,created_at=CURRENT_TIMESTAMP,expires_at=datetime('now', '+90 days')`,
   ).bind(notificationId, owner.user_id, serverId, body, dedupeKey, JSON.stringify({
     server_id: serverId,
     request_kind: "setup_recommendation",
     blocker_keys: support.supportBlockers.map((item) => item.key),
     discord_delivery_status: "not_sent",
   })).run();
+
+  const deliveryClaim = await db.prepare(
+    `UPDATE user_notifications SET metadata=json_set(COALESCE(metadata,'{}'),
+       '$.discord_delivery_status', 'sending', '$.discord_delivery_result', 'delivery_claimed',
+       '$.discord_attempted_at', CURRENT_TIMESTAMP)
+     WHERE user_id=? AND dedupe_key=?
+       AND COALESCE(json_extract(metadata, '$.discord_delivery_status'), 'not_sent') NOT IN ('sending', 'delivered')`,
+  ).bind(owner.user_id, dedupeKey).run();
+  if (Number(deliveryClaim.meta?.changes ?? 0) !== 1) {
+    const existing = await db.prepare(
+      `SELECT json_extract(metadata, '$.discord_delivery_status') AS status
+       FROM user_notifications WHERE user_id=? AND dedupe_key=? LIMIT 1`,
+    ).bind(owner.user_id, dedupeKey).first<{ status: string | null }>();
+    return {
+      ok: true as const,
+      website: "sent" as const,
+      discord: existing?.status === "delivered" ? "delivered" as const : "unconfirmed" as const,
+    };
+  }
 
   const discord = await deliverSetupDiscord(env, owner, body);
   await db.prepare(
