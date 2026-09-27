@@ -34,10 +34,13 @@ function d1(sqlite: Sqlite) {
 export async function testPlayerGameIdentityDeliveryLedger() {
   const decisionRunnerSource = readFileSync("functions/api/sync/player-link-notifications/run.ts", "utf8");
   const ownerRunnerSource = readFileSync("functions/api/sync/player-link-owner-notifications/run.ts", "utf8");
+  const ownerProofSource = readFileSync("functions/api/sync/player-link-owner-notifications/prove-one-v1.ts", "utf8");
   assert.doesNotMatch(decisionRunnerSource, /dispatchQueuedOwnerRequestNotifications/, "The guarded one-decision runner must never drain owner-request deliveries.");
   assert.match(ownerRunnerSource, /requireCronSecret[\s\S]*dispatchQueuedOwnerRequestNotifications/, "Owner-request retries must use a separate protected runner and delivery budget.");
   assert.equal(OWNER_REQUEST_NOTIFICATION_MAX_JOBS, 5, "Restricted-channel verification must leave headroom under the Worker subrequest limit.");
-  assert.match(ownerRunnerSource, /maxJobs:\s*OWNER_REQUEST_NOTIFICATION_MAX_JOBS/, "The scheduled owner runner must use the bounded restricted-channel batch size.");
+  assert.match(ownerRunnerSource, /maxJobs: OWNER_REQUEST_NOTIFICATION_MAX_JOBS/, "The scheduled owner runner must retain the restricted-channel subrequest ceiling.");
+  assert.match(ownerProofSource, /requireCronSecret[\s\S]*maxJobs: 1/, "The versioned manual proof endpoint must authenticate and hard-code exactly one owner delivery.");
+  assert.match(ownerProofSource, /owner_notification_single_delivery_v1/, "The delivery response must identify the versioned one-message contract.");
   const unavailableEnv = {
     DB: { prepare: () => ({ first: async () => null }) },
     DZN_CRON_SECRET: "unit-test-secret",
