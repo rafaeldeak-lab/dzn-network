@@ -60,10 +60,14 @@ export function prepareOwnerRequestWebsiteNotification(
   input: { claimId: string; linkedServerId: string; recipient: OwnerRequestNotificationRecipient; serverName: string; playerName: string; requesterName: string },
 ) {
   return db.prepare(
-    `INSERT OR IGNORE INTO user_notifications (
+    `INSERT INTO user_notifications (
       id, user_id, server_id, type, title, body, action_url, priority, dedupe_key, metadata, created_at, expires_at
     ) VALUES (?, ?, NULL, 'player_link_review_requested', 'Player stat link needs review', ?,
-      '/owner/player-game-identity-claims', 750, ?, ?, CURRENT_TIMESTAMP, datetime('now', '+90 days'))`,
+      '/owner/player-game-identity-claims', 750, ?, ?, CURRENT_TIMESTAMP, datetime('now', '+90 days'))
+    ON CONFLICT(user_id, dedupe_key) DO UPDATE SET
+      title=excluded.title, body=excluded.body, action_url=excluded.action_url, priority=excluded.priority,
+      metadata=excluded.metadata, read_at=NULL, created_at=CURRENT_TIMESTAMP, expires_at=datetime('now', '+90 days')
+    WHERE datetime(user_notifications.expires_at) <= datetime('now')`,
   ).bind(
     crypto.randomUUID(),
     input.recipient.userId,
@@ -78,10 +82,16 @@ export function prepareOwnerRequestDiscordDelivery(
   input: { id: string; claimId: string; linkedServerId: string; recipient: OwnerRequestNotificationRecipient },
 ) {
   return db.prepare(
-    `INSERT OR IGNORE INTO player_game_identity_owner_notification_deliveries (
+    `INSERT INTO player_game_identity_owner_notification_deliveries (
       id, claim_id, recipient_user_id, recipient_discord_id, linked_server_id, status,
       attempt_count, next_attempt_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, 'queued', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    ) VALUES (?, ?, ?, ?, ?, 'queued', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(claim_id, recipient_user_id) DO UPDATE SET
+      recipient_discord_id=excluded.recipient_discord_id, linked_server_id=excluded.linked_server_id,
+      status='queued', attempt_count=0, next_attempt_at=CURRENT_TIMESTAMP, last_attempt_at=NULL,
+      delivered_at=NULL, result_code=NULL, lease_id=NULL, lease_expires_at=NULL, updated_at=CURRENT_TIMESTAMP
+    WHERE player_game_identity_owner_notification_deliveries.status='skipped'
+      AND player_game_identity_owner_notification_deliveries.result_code='recipient_no_longer_authorized'`,
   ).bind(input.id, input.claimId, input.recipient.userId, input.recipient.discordId, input.linkedServerId);
 }
 
@@ -166,13 +176,21 @@ export async function dispatchQueuedOwnerRequestNotifications(
           recipient,
         }),
       ]);
-      if (statements.length) await db.batch(statements);
-      await db.prepare(
-        `UPDATE player_game_identity_owner_notification_deliveries
-         SET status='skipped', result_code='recipient_no_longer_authorized', lease_id=NULL, lease_expires_at=NULL,
-             updated_at=CURRENT_TIMESTAMP
-         WHERE id=? AND lease_id=? AND status='processing'`,
-      ).bind(row.id, leaseId).run();
+      statements.push(
+        db.prepare(
+          `UPDATE user_notifications
+           SET read_at=COALESCE(read_at, CURRENT_TIMESTAMP), expires_at=CURRENT_TIMESTAMP,
+               metadata=json_set(COALESCE(metadata, '{}'), '$.review_status', 'recipient_no_longer_authorized', '$.terminalized_at', CURRENT_TIMESTAMP)
+           WHERE user_id=? AND dedupe_key=?`,
+        ).bind(row.recipient_user_id, `player-link-review:${row.claim_id}:${row.recipient_user_id}`),
+        db.prepare(
+          `UPDATE player_game_identity_owner_notification_deliveries
+           SET status='skipped', result_code='recipient_no_longer_authorized', lease_id=NULL, lease_expires_at=NULL,
+              updated_at=CURRENT_TIMESTAMP
+           WHERE id=? AND lease_id=? AND status='processing'`,
+        ).bind(row.id, leaseId),
+      );
+      await db.batch(statements);
       skipped++;
       continue;
     }
