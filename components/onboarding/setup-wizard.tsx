@@ -182,6 +182,7 @@ export function SetupWizard() {
   const draftAutosaveTimerRef = useRef<number | null>(null);
   const draftSaveRevisionRef = useRef(0);
   const draftFlushSuppressedRef = useRef(false);
+  const draftFlushPendingRef = useRef<() => void>(() => undefined);
 
   const loadDiscordGuilds = useCallback(async (fresh: boolean) => {
     try {
@@ -285,6 +286,7 @@ export function SetupWizard() {
   useEffect(() => {
     if (!authenticated || !draftHydrated || !draftAvailable || publicationComplete || (step === 6 && publishedServer)) return;
     const revision = ++draftSaveRevisionRef.current;
+    let saveQueued = false;
     const payload = {
       currentStep: step,
       discordGuildId: selectedGuild || null,
@@ -301,6 +303,8 @@ export function SetupWizard() {
     }, 0);
 
     const queueSave = (keepalive = false) => {
+      if (saveQueued) return;
+      saveQueued = true;
       draftSaveChainRef.current = draftSaveChainRef.current
         .catch(() => undefined)
         .then(async () => {
@@ -318,11 +322,18 @@ export function SetupWizard() {
       draftAutosaveTimerRef.current = null;
       queueSave();
     }, 800);
+    draftFlushPendingRef.current = () => {
+      if (draftFlushSuppressedRef.current || saveQueued) return;
+      if (draftAutosaveTimerRef.current !== null) {
+        window.clearTimeout(draftAutosaveTimerRef.current);
+        draftAutosaveTimerRef.current = null;
+      }
+      queueSave(true);
+    };
     return () => {
       if (draftAutosaveTimerRef.current !== null) {
         window.clearTimeout(draftAutosaveTimerRef.current);
         draftAutosaveTimerRef.current = null;
-        if (!draftFlushSuppressedRef.current) queueSave(true);
       }
     };
   }, [
@@ -341,6 +352,16 @@ export function SetupWizard() {
     step,
     validatedLinkedServerId,
   ]);
+
+  useEffect(() => {
+    const flushPendingDraft = () => draftFlushPendingRef.current();
+    window.addEventListener("beforeunload", flushPendingDraft);
+    window.addEventListener("pagehide", flushPendingDraft);
+    return () => {
+      window.removeEventListener("beforeunload", flushPendingDraft);
+      window.removeEventListener("pagehide", flushPendingDraft);
+    };
+  }, []);
 
   useEffect(() => {
     if (!loading && !authenticated) {
@@ -591,7 +612,8 @@ export function SetupWizard() {
       await draftSaveChainRef.current.catch(() => undefined);
       const refreshed = await getMe().catch(() => null);
       setPublishedServer(refreshed?.linkedServer ?? null);
-      let draftCleared = !draftAvailable;
+      const draftSchemaUnavailable = draftHydrated && !draftAvailable && draftStatus === "unavailable";
+      let draftCleared = draftSchemaUnavailable;
       for (let attempt = 0; !draftCleared && attempt < 3; attempt++) {
         try {
           await clearOnboardingDraft();
@@ -629,7 +651,7 @@ export function SetupWizard() {
         draftAutosaveTimerRef.current = null;
       }
       await draftSaveChainRef.current.catch(() => undefined);
-      if (draftAvailable) await clearOnboardingDraft();
+      if (draftStatus !== "unavailable") await clearOnboardingDraft();
       setPublicationComplete(false);
       setStep(0);
       setSelectedGuild(guilds[0]?.guild_id ?? "");
