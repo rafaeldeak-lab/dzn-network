@@ -65,6 +65,9 @@ async function main() {
   assert.match(setupWizardSource, /draftFlushSuppressedRef\.current = true;[\s\S]*setPublicationComplete\(true\)/, "Publishing must suppress cleanup flushes before draft deletion starts.");
   assert.match(setupWizardSource, /draftSchemaUnavailable = draftHydrated && !draftAvailable && draftStatus === "unavailable";[\s\S]*let draftCleared = preserveUnrelatedDraft \|\| draftSchemaUnavailable/, "Publishing may skip draft deletion only for review mode or after a confirmed schema-unavailable response.");
   assert.match(setupWizardSource, /preserveUnrelatedDraft = reviewMode;[\s\S]*let draftCleared = preserveUnrelatedDraft \|\| draftSchemaUnavailable;[\s\S]*if \(!preserveUnrelatedDraft\)/, "Publishing from linked-server review mode must preserve an unrelated user onboarding draft.");
+  const onboardingApiSource = readFileSync("components/onboarding/api.ts", "utf8");
+  const draftApiBlock = onboardingApiSource.slice(onboardingApiSource.indexOf("export async function getOnboardingDraft"), onboardingApiSource.indexOf("export async function updateServerPublicListing"));
+  assert.equal(draftApiBlock.match(/AbortSignal\.timeout\(10_000\)/g)?.length, 3, "Draft reads, writes and deletes must all have a hard timeout so publication and restart cannot wait indefinitely.");
   assert.match(setupWizardSource, /await clearOnboardingDraft\(\);\s*setDraftAvailable\(true\);[\s\S]*setReviewMode\(false\);[\s\S]*window\.history\.replaceState/, "A confirmed restart must restore draft saving and leave setup review mode.");
   assert.equal(setupWizardSource.includes("the invite requests Administrator permission"), false, "Bot setup copy must not claim the least-privilege invite requests Administrator.");
   assert.equal(setupWizardSource.includes("View Channels, Send Messages, Embed Links, and Read Message History"), true, "Bot setup copy must name the least-privilege invite permissions.");

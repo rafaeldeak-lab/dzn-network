@@ -127,7 +127,10 @@ export type OnboardingDraft = {
 };
 
 export async function getOnboardingDraft() {
-  return request<{ ok: boolean; available: boolean; draft: OnboardingDraft | null }>("/api/onboarding/draft", { cache: "no-store" });
+  return request<{ ok: boolean; available: boolean; draft: OnboardingDraft | null }>("/api/onboarding/draft", {
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  });
 }
 
 export async function saveOnboardingDraft(data: {
@@ -144,6 +147,7 @@ export async function saveOnboardingDraft(data: {
   return request<{ ok: boolean; available: boolean; draft: OnboardingDraft | null }>("/api/onboarding/draft", {
     method: "PUT",
     keepalive: options.keepalive,
+    signal: AbortSignal.timeout(10_000),
     body: JSON.stringify({
       currentStep: data.currentStep,
       discordGuildId: data.discordGuildId,
@@ -159,7 +163,10 @@ export async function saveOnboardingDraft(data: {
 }
 
 export async function clearOnboardingDraft() {
-  return request<{ ok: boolean; cleared: boolean }>("/api/onboarding/draft", { method: "DELETE" });
+  return request<{ ok: boolean; cleared: boolean }>("/api/onboarding/draft", {
+    method: "DELETE",
+    signal: AbortSignal.timeout(10_000),
+  });
 }
 
 export async function updateServerPublicListing(linkedServerId: string, data: {
