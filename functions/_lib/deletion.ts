@@ -154,6 +154,16 @@ export async function deleteOwnedAccountData(env: Env, userId: string) {
     [userId],
   );
   if (await tableExists(db, "user_notifications")) {
+    if (await tableExists(db, "player_game_identity_claims")) {
+      await deleteRows(db,
+        `DELETE FROM user_notifications
+         WHERE type = 'player_link_review_requested'
+           AND json_extract(metadata, '$.claim_id') IN (
+             SELECT id FROM player_game_identity_claims WHERE user_id = ?
+           )`,
+        [userId],
+      );
+    }
     await deleteRows(db, "DELETE FROM user_notifications WHERE user_id = ?", [userId]);
   }
   deleted.users += await deleteRows(db, "DELETE FROM users WHERE id = ?", [userId]);

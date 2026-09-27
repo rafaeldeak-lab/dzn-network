@@ -159,18 +159,23 @@ export async function testPlayerGameIdentityRevocation() {
         CREATE TABLE sessions (user_id TEXT);
         CREATE TABLE discord_guilds (id TEXT, owner_user_id TEXT);
         ALTER TABLE linked_servers ADD COLUMN discord_guild_id TEXT;
+        INSERT INTO player_profiles (id,linked_server_id,player_id,player_name)
+        VALUES ('profile-account-delete','server-a','game-account-delete','Account Survivor');
         INSERT INTO user_notifications (id,user_id,type,title,body,dedupe_key)
         VALUES ('unrelated-notice','player-b','news','Other notice','Other private notice','unrelated');
         INSERT INTO player_game_identity_claims
           (id,user_id,discord_id,linked_server_id,player_profile_id,player_id,player_name,status)
-        VALUES ('pending-delete-claim','player-b','discord-b','server-a','profile-a','game-a','Survivor','pending');
+        VALUES ('pending-delete-claim','player-b','discord-b','server-a','profile-a','game-a','Survivor','pending'),
+          ('pending-account-delete-claim','player-a','discord-a','server-a','profile-account-delete','game-account-delete','Account Survivor','pending');
         INSERT INTO user_notifications (id,user_id,type,title,body,dedupe_key,metadata)
-        VALUES ('pending-review-alert','owner-a','player_link_review_requested','Review needed','Pending review','player-link-review:pending-delete-claim:owner-a','{"claim_id":"pending-delete-claim"}');`);
+        VALUES ('pending-review-alert','owner-a','player_link_review_requested','Review needed','Pending review','player-link-review:pending-delete-claim:owner-a','{"claim_id":"pending-delete-claim"}'),
+          ('pending-account-review-alert','owner-a','player_link_review_requested','Review needed','Pending account review','player-link-review:pending-account-delete-claim:owner-a','{"claim_id":"pending-account-delete-claim"}');`);
       if (remove === "player") {
         assert.equal((await deleteOwnedAccountData(fixture.env, "player-a")).ok, true);
         assert.equal(fixture.sqlite.prepare("SELECT id FROM users WHERE id='player-a'").get(), undefined);
         assert.equal(fixture.sqlite.prepare("SELECT id FROM linked_servers WHERE id='server-a'").get()?.id, "server-a");
         assert.equal(fixture.state().notifications.length, 2, "Deleting a player account must preserve unrelated and still-actionable owner review alerts.");
+        assert.equal(fixture.sqlite.prepare("SELECT id FROM user_notifications WHERE id='pending-account-review-alert'").get(), undefined, "Deleting a requester account must erase its stale owner review alert.");
       } else {
         const before = fixture.state();
         assert.equal((await deleteOwnedLinkedServerData(fixture.env, "owner-b", "server-a")).status, 403);
