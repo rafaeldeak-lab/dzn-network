@@ -280,8 +280,14 @@ export async function ensureCurrentPublicProfileHandle(env: Env, user: SessionUs
       throw error;
     }
 
-    const handle = await readCurrentPublicProfileHandle(env, user.id);
-    if (handle) return handle;
+    const handle = existing?.handle ?? candidate;
+    return {
+      handle,
+      href: publicProfileHref(handle),
+      status: "active",
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
   }
 
   throw new Error("public_profile_handle_unavailable");

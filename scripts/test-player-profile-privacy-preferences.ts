@@ -164,6 +164,21 @@ async function testPrivacyRouteRuntimeContract() {
     "A failed consent write must not activate a public profile handle.",
   );
 
+  const postWriteReadDb = new FakeD1Database();
+  postWriteReadDb.failPublicProfileReadsAfterWrite = true;
+  const postWriteReadResult = await callPrivacyRoute(
+    postWriteReadDb,
+    { DB: postWriteReadDb, MOCK_AUTH: "true" } as unknown as Env,
+    "PATCH",
+    { settings: { public_profile_enabled: true } },
+  );
+  assert.equal(postWriteReadResult.status, 200, "A successful handle activation must not depend on a fallible post-write read.");
+  assert.match(
+    (await postWriteReadResult.json() as PrivacyPayload).public_profile_handle ?? "",
+    /^[a-z0-9][a-z0-9-]*-[a-z0-9]{6,8}$/,
+    "A successful handle activation must return the handle written by the UPSERT.",
+  );
+
   const saved = await callPrivacyRoute(db, { DB: db, MOCK_AUTH: "true" } as unknown as Env, "PATCH", {
     settings: {
       public_profile_enabled: true,
@@ -274,6 +289,7 @@ class FakeD1Database {
   readonly protectedWrites: string[] = [];
   failPreferenceReads = false;
   failDiscordConsentWrites = false;
+  failPublicProfileReadsAfterWrite = false;
 
   prepare(query: string) {
     return new FakeD1PreparedStatement(this, query);
@@ -328,6 +344,9 @@ class FakeD1PreparedStatement {
       return (enabled === undefined ? null : { enabled }) as T | null;
     }
     if (query.includes("from player_public_profiles") && query.includes("where user_id = ?")) {
+      if (this.db.failPublicProfileReadsAfterWrite && this.db.writeTargets.has("player_public_profiles")) {
+        throw new Error("public profile reads unavailable after write");
+      }
       const row = this.db.publicProfilesByUser.get(String(this.bindings[0]));
       return (row ?? null) as T | null;
     }
