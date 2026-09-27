@@ -9,6 +9,7 @@ import {
   resolveOwnerRequestNotificationRecipients,
 } from "./player-game-identity-owner-notifications";
 import { requireServerOwnerOrDznAdmin } from "./public-cache";
+import { hasPlayerGameIdentityProofCodes } from "./player-game-identity-proof-codes";
 import {
   hasPlayerGameIdentityDeliveryLedger,
   type PlayerGameIdentityDecisionDelivery,
@@ -53,6 +54,7 @@ export type OwnerPlayerGameIdentityClaimRow = PlayerGameIdentityClaimRow & {
   account_name: string | null;
   account_avatar: string | null;
   request_source: "gamertag_lookup" | "legacy_exact_id";
+  proof_verified: number;
 };
 
 export type OwnerPlayerGameIdentityClaimPayloadRow = PlayerGameIdentityClaimRow & {
@@ -61,6 +63,7 @@ export type OwnerPlayerGameIdentityClaimPayloadRow = PlayerGameIdentityClaimRow 
   account_name: string | null;
   account_avatar_url: string | null;
   request_source: "gamertag_lookup" | "legacy_exact_id";
+  proof_verified: boolean;
   submitted_player_id: string;
   review_context: {
     evidence_status: "ready_for_owner_review";
@@ -528,6 +531,7 @@ export async function readOwnerPlayerGameIdentityClaims(
     const isAdmin = isDznAdminDiscordId(env, user.discord_id);
     const hasGlobalHistoryAccess = isPlatformOwnerDiscordId(env, user.discord_id);
     const hasDeliveryLedger = await hasPlayerGameIdentityDeliveryLedger(env);
+    const hasProofCodes = await hasPlayerGameIdentityProofCodes(db);
     const historyCursor = options.historyCursor ?? null;
     const deliveryProjection = hasDeliveryLedger
       ? `(
@@ -543,6 +547,12 @@ export async function readOwnerPlayerGameIdentityClaims(
           WHERE delivery.audit_id = audit.id LIMIT 1
         ) AS discord_delivery_result`
       : `NULL AS discord_delivery_status, NULL AS discord_delivery_attempts, NULL AS discord_delivery_result`;
+    const proofProjection = hasProofCodes
+      ? `EXISTS (
+          SELECT 1 FROM player_game_identity_proof_codes proof
+          WHERE proof.claim_id = player_game_identity_claims.id AND proof.status = 'consumed'
+        ) AS proof_verified`
+      : `0 AS proof_verified`;
     const [result, historyResult] = await Promise.all([db
       .prepare(
         `SELECT
@@ -562,6 +572,7 @@ export async function readOwnerPlayerGameIdentityClaims(
           claim_users.username AS account_name,
           claim_users.avatar AS account_avatar,
           reviewers.username AS reviewer_name,
+          ${proofProjection},
           COALESCE((
             SELECT CASE
               WHEN request_audit.note LIKE 'request_source=gamertag_lookup;%' THEN 'gamertag_lookup'
@@ -1208,6 +1219,7 @@ function sanitizeOwnerClaimRows(rows: OwnerPlayerGameIdentityClaimRow[]) {
     account_name: row.account_name || "DZN Player",
     account_avatar_url: discordAvatarUrl(row.requester_discord_id, row.account_avatar),
     request_source: row.request_source,
+    proof_verified: row.proof_verified === 1,
     submitted_player_id: row.player_id,
     review_context: {
       evidence_status: "ready_for_owner_review" as const,
@@ -1215,6 +1227,13 @@ function sanitizeOwnerClaimRows(rows: OwnerPlayerGameIdentityClaimRow[]) {
       server_label: row.server_name || "DZN Server",
       game_profile_label: row.player_name || "Imported ADM profile",
       checks: [
+        {
+          label: "One-time owner proof",
+          detail: row.proof_verified
+            ? "The requesting player redeemed the short-lived code issued for this exact request."
+            : "No one-time owner proof code has been redeemed for this request yet.",
+          status: row.proof_verified ? "ready" as const : "warning" as const,
+        },
         {
           label: "Owner scoped",
           detail: "This queue only returns pending claims for servers owned by the current user, or for DZN admins.",

@@ -12,6 +12,7 @@ import {
   FileCheck2,
   Gamepad2,
   Home,
+  KeyRound,
   ListChecks,
   RefreshCw,
   Search,
@@ -49,6 +50,7 @@ type PlayerGameIdentityClaim = {
   account_name: string | null;
   account_avatar_url?: string | null;
   request_source?: "gamertag_lookup" | "legacy_exact_id";
+  proof_verified?: boolean;
   linked_server_id: string;
   player_profile_id: string;
   player_id: string;
@@ -603,8 +605,24 @@ function ClaimCard({
   const requesterDiscordId = claim.requester_discord_id;
   const [confirmed, setConfirmed] = useState({ ownership: false, match: false, account: false });
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
+  const [proofCode, setProofCode] = useState<string | null>(null);
+  const [proofState, setProofState] = useState<"idle" | "loading" | "error">("idle");
   const approvalReady = confirmed.ownership && confirmed.match && confirmed.account;
   const profileInitial = (claim.account_name || "DZN").trim().charAt(0).toUpperCase();
+
+  async function issueProofCode() {
+    setProofState("loading");
+    const response = await fetch(`/api/owner/player-game-identity-claims/${encodeURIComponent(claim.id)}/proof-code`, {
+      method: "POST", credentials: "include", headers: { accept: "application/json" },
+    });
+    const result = await response.json().catch(() => null) as { ok?: boolean; code?: string } | null;
+    if (!response.ok || !result?.ok || !result.code) {
+      setProofState("error");
+      return;
+    }
+    setProofCode(result.code);
+    setProofState("idle");
+  }
 
   return (
     <article className="overflow-hidden rounded-lg border border-white/10 bg-[#050a12] shadow-[0_0_36px_rgba(0,0,0,0.28)]">
@@ -666,6 +684,25 @@ function ClaimCard({
               <DetailBox label="Request reference" value={claim.id} copyable />
             </div>
           </details>
+
+          <div className={`mt-3 border-l-2 p-3 ${claim.proof_verified ? "border-emerald-300 bg-emerald-300/[0.06]" : "border-amber-300 bg-amber-300/[0.05]"}`}>
+            <p className="inline-flex items-center gap-2 text-xs font-black uppercase text-white"><KeyRound className="size-4 text-cyan-200" aria-hidden="true" /> One-time owner proof</p>
+            {claim.proof_verified ? (
+              <p className="mt-2 text-sm font-semibold text-emerald-100">Redeemed by this requesting account for this exact link request.</p>
+            ) : proofCode ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <code className="rounded-md border border-cyan-300/25 bg-black/35 px-3 py-2 text-base font-black text-cyan-100">{proofCode}</code>
+                <button type="button" onClick={() => void navigator.clipboard.writeText(proofCode)} className="inline-flex min-h-10 items-center gap-2 rounded-md border border-white/15 px-3 text-xs font-black uppercase text-white"><Copy className="size-4" aria-hidden="true" /> Copy</button>
+                <p className="w-full text-xs font-semibold text-amber-100">Expires in 30 minutes and can be used once. Share it only with this player.</p>
+              </div>
+            ) : (
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <p className="min-w-0 flex-1 text-xs font-semibold leading-5 text-zinc-300">Issue a request-bound code when the player needs stronger evidence than a visible gamertag.</p>
+                <button type="button" disabled={proofState === "loading" || busy} onClick={() => void issueProofCode()} className="inline-flex min-h-10 items-center gap-2 rounded-md border border-cyan-300/30 bg-cyan-300/10 px-3 text-xs font-black uppercase text-cyan-100 disabled:opacity-50"><KeyRound className="size-4" aria-hidden="true" /> {proofState === "loading" ? "Creating" : "Create code"}</button>
+                {proofState === "error" ? <p className="w-full text-xs font-semibold text-rose-200">The code could not be created. Refresh and try again.</p> : null}
+              </div>
+            )}
+          </div>
 
           <div className="mt-3 rounded-lg border border-violet-300/15 bg-violet-300/[0.05] p-3">
             <p className="text-[10px] font-black uppercase tracking-[0.16em] text-violet-200">Game stats links</p>

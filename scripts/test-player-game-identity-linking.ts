@@ -170,7 +170,7 @@ assert.match(platformSpec, /\/owner\/player-game-identity-claims/, "Master spec 
 assert.match(platformSpec, /Exact submitted game IDs are allowed only in the private owner\/admin review queue/, "Master spec must document the exact-ID exposure boundary.");
 assert.match(handoff, /PR `#144` currently also uses migration number `0064`/, "Handoff must flag the migration-number conflict with the queued Comms PR.");
 assert.match(handoff, /private troubleshooting queue/, "Handoff must document the owner/admin troubleshooting queue.");
-assert.match(packageJson, /"test:player-game-identity-linking": "tsx scripts\/test-player-game-identity-linking\.ts && tsx scripts\/test-player-game-identity-delivery-ledger\.ts"/, "Identity tests must include the durable delivery ledger contract.");
+assert.match(packageJson, /"test:player-game-identity-linking": "tsx scripts\/test-player-game-identity-linking\.ts && tsx scripts\/test-player-game-identity-delivery-ledger\.ts && tsx scripts\/test-player-game-identity-proof-codes\.ts"/, "Identity tests must include the durable delivery and one-time proof-code contracts.");
 
 assert.equal(sanitizePlayerGameIdentityServerRef(" pandora-network "), "pandora-network");
 assert.equal(sanitizePlayerGameIdentityServerRef("server_123"), "server_123");
