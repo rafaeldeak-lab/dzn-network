@@ -30,7 +30,7 @@ const server = createServer(async (request, response) => {
     if (!["GET", "HEAD"].includes(request.method)) { response.writeHead(405).end(); return; }
     const url = new URL(request.url, origin);
     if (/^\/api\/public\/players\/[a-z0-9-]+\/avatar$/.test(url.pathname)) { response.writeHead(200, { "content-type": "image/png", "cache-control": "no-store" }).end(await readFile(path.join(root, "leaderboards", "sniper-accent.png"))); return; }
-    if (url.pathname === "/api/public/leaderboards" && url.searchParams.get("mode") === "survival") { response.writeHead(503, { "content-type": "application/json" }).end(JSON.stringify({ error: "Synthetic mode outage" })); return; }
+    if (url.pathname === "/api/public/leaderboards" && url.searchParams.get("mode") === "survival") { response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ...boards, top_servers: [], source: "empty_no_cache", stale: true, fallback_reason: "live_query_failed_no_snapshot" })); return; }
     if (url.pathname.startsWith("/api/")) { response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(api(url))); return; }
     const candidate = path.resolve(root, url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname).slice(1));
     if (!candidate.startsWith(`${root}${path.sep}`)) { response.writeHead(403).end(); return; }
@@ -119,7 +119,7 @@ if (process.argv.includes("--serve")) {
       await page.getByRole("table", { name: "Top Servers", exact: true }).waitFor();
       await page.getByRole("button", { name: "Survival", exact: true }).click();
       await page.getByText("Survival rankings could not be loaded right now.", { exact: true }).waitFor();
-      assert.equal(await page.getByRole("table", { name: "Top Servers", exact: true }).count(), 0, "A failed mode request must not reuse another mode's server table");
+      assert.equal(await page.getByRole("table", { name: "Top Servers", exact: true }).count(), 0, "An empty_no_cache mode response must not reuse another mode's server table");
       await page.getByRole("tab", { name: "Players", exact: true }).click();
       await page.getByRole("table", { name: "Top Players", exact: true }).waitFor();
       await context.close();

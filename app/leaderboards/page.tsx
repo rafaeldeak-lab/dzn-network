@@ -212,7 +212,11 @@ export default function LeaderboardsPage() {
           headers: { accept: "application/json" },
         });
         if (!active || latestRequestId.current !== requestId) return;
-        const normalized = normalizePayload(data.data && !data.top_servers ? data.data : data);
+        const responsePayload = data.data && !data.top_servers ? data.data : data;
+        if (activeMode !== "all" && responsePayload.source === "empty_no_cache") {
+          throw new Error("Mode leaderboard is temporarily unavailable.");
+        }
+        const normalized = normalizePayload(responsePayload);
         setPayload(normalized);
         if (activeMode === "all" && hasMeaningfulLeaderboard(normalized)) saveLastGoodLeaderboard(normalized);
         setLoadState(hasMeaningfulLeaderboard(normalized) ? "loaded" : "empty_real_data");

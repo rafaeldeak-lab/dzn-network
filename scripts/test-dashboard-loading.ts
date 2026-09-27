@@ -232,6 +232,7 @@ includesAll(leaderboards, [
   "filteredServers.map",
   "payload.top_players.map",
   "activeMode !== \"all\"",
+  "responsePayload.source === \"empty_no_cache\"",
   "setServerModeError(`${formatModeFilter(activeMode)} rankings could not be loaded right now.`)",
   "serverModeError ? (",
 ]);
