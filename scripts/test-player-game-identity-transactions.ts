@@ -214,9 +214,10 @@ export async function testPlayerGameIdentityTransactions() {
       { server_slug: "server-a", player_id: "game-a" },
     );
     assert.equal(result.status, 201);
-    const notices = ownerNotifications.sqlite.prepare("SELECT user_id,type,dedupe_key,metadata FROM user_notifications ORDER BY user_id").all();
+    const notices = ownerNotifications.sqlite.prepare("SELECT user_id,server_id,type,dedupe_key,metadata FROM user_notifications ORDER BY user_id").all();
     assert.deepEqual(notices.map((row) => row.user_id), ["owner-a", "platform-owner"], "Only the server owner and configured platform owner receive website review alerts.");
     assert.ok(notices.every((row) => row.type === "player_link_review_requested"));
+    assert.ok(notices.every((row) => row.server_id === null), "Review alerts must not prevent the referenced server from being deleted.");
     assert.equal(JSON.stringify(notices).includes("game-a"), false, "Owner alerts must not expose the hidden exact game ID.");
     const deliveries = ownerNotifications.sqlite.prepare("SELECT recipient_user_id,status FROM player_game_identity_owner_notification_deliveries ORDER BY recipient_user_id").all();
     assert.deepEqual(deliveries.map((row) => row.recipient_user_id), ["owner-a", "platform-owner"]);
@@ -236,6 +237,17 @@ export async function testPlayerGameIdentityTransactions() {
     const optedOut = await dispatchQueuedOwnerRequestNotifications(ownerNotifications.env, { maxJobs: 1 });
     assert.equal(optedOut.skipped, 1, "Owner Discord delivery must respect the recipient's saved opt-out.");
     assert.equal(discordBodies.length, fetchesBeforeOptOut, "An opted-out owner must not trigger a Discord request.");
+    ownerNotifications.sqlite.exec(`UPDATE notification_preferences SET discord_enabled=1 WHERE user_id='owner-a';
+      UPDATE player_game_identity_owner_notification_deliveries
+      SET status='queued', attempt_count=0, next_attempt_at=CURRENT_TIMESTAMP, delivered_at=NULL, result_code=NULL
+      WHERE recipient_user_id='owner-a';
+      UPDATE player_game_identity_claims SET status='approved' WHERE id='${result.ok ? result.claim.id : "missing"}';`);
+    const fetchesBeforeResolved = discordBodies.length;
+    const resolved = await dispatchQueuedOwnerRequestNotifications(ownerNotifications.env, { maxJobs: 1 });
+    assert.equal(resolved.skipped, 1, "A resolved claim must terminalize its outstanding owner delivery.");
+    assert.equal(discordBodies.length, fetchesBeforeResolved, "A resolved claim must not trigger a stale owner DM.");
+    assert.equal(ownerNotifications.sqlite.prepare("SELECT result_code FROM player_game_identity_owner_notification_deliveries WHERE recipient_user_id='owner-a'").get()?.result_code, "claim_not_pending");
+    ownerNotifications.sqlite.exec(`UPDATE player_game_identity_claims SET status='pending' WHERE id='${result.ok ? result.claim.id : "missing"}';`);
     const repeated = await createPlayerGameIdentityClaim(
       ownerNotifications.env,
       identityTestUser("player-a", "discord-a"),

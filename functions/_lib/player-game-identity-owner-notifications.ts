@@ -14,6 +14,7 @@ type OwnerDeliveryRow = {
   recipient_user_id: string;
   recipient_discord_id: string;
   attempt_count: number;
+  claim_status: string;
   server_name: string | null;
   player_name: string | null;
   requester_name: string | null;
@@ -56,12 +57,11 @@ export function prepareOwnerRequestWebsiteNotification(
   return db.prepare(
     `INSERT OR IGNORE INTO user_notifications (
       id, user_id, server_id, type, title, body, action_url, priority, dedupe_key, metadata, created_at, expires_at
-    ) VALUES (?, ?, ?, 'player_link_review_requested', 'Player stat link needs review', ?,
+    ) VALUES (?, ?, NULL, 'player_link_review_requested', 'Player stat link needs review', ?,
       '/owner/player-game-identity-claims', 750, ?, ?, CURRENT_TIMESTAMP, datetime('now', '+90 days'))`,
   ).bind(
     crypto.randomUUID(),
     input.recipient.userId,
-    input.linkedServerId,
     `${safeText(input.requesterName)} asked to link the ${safeText(input.playerName)} profile on ${safeText(input.serverName)}. The gamertag is only a candidate; verify ownership before deciding.`,
     `player-link-review:${input.claimId}:${input.recipient.userId}`,
     JSON.stringify({ claim_id: input.claimId, request_kind: "stat_link_review" }),
@@ -119,6 +119,7 @@ export async function dispatchQueuedOwnerRequestNotifications(
     if (Number(claimed.meta.changes ?? 0) !== 1) continue;
     const row = await db.prepare(
       `SELECT d.id, d.claim_id, d.recipient_user_id, d.recipient_discord_id, d.attempt_count,
+              c.status AS claim_status,
               COALESCE(NULLIF(s.display_name,''), NULLIF(s.hostname,''), s.server_name, s.nitrado_service_name) AS server_name,
               c.player_name, u.username AS requester_name
        FROM player_game_identity_owner_notification_deliveries d
@@ -128,6 +129,16 @@ export async function dispatchQueuedOwnerRequestNotifications(
        WHERE d.id=? AND d.lease_id=? AND d.status='processing' LIMIT 1`,
     ).bind(candidate.id, leaseId).first<OwnerDeliveryRow>();
     if (!row) continue;
+    if (row.claim_status !== "pending") {
+      await db.prepare(
+        `UPDATE player_game_identity_owner_notification_deliveries
+         SET status='skipped', result_code='claim_not_pending', lease_id=NULL, lease_expires_at=NULL,
+             updated_at=CURRENT_TIMESTAMP
+         WHERE id=? AND lease_id=? AND status='processing'`,
+      ).bind(row.id, leaseId).run();
+      skipped++;
+      continue;
+    }
     const result = await sendOwnerRequestDiscord(env, row);
     const outcome = classifyResult(result, row.attempt_count);
     await db.prepare(
