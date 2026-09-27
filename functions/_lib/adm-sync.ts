@@ -8029,6 +8029,9 @@ async function ensureAdmSyncDetailColumns(env: Env) {
     ["source_line_number", "INTEGER"],
     ["source_sync_run_id", "TEXT"],
   ]);
+  for (const statement of ADM_SYNC_EVENT_HASH_INDEX_STATEMENTS) {
+    await db.prepare(statement).run();
+  }
   await ensureMissingColumns(db, "player_profiles", [
     ["source_service_id", "TEXT"],
     ["highest_killstreak", "INTEGER DEFAULT 0"],
@@ -11161,16 +11164,19 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
   "CREATE INDEX IF NOT EXISTS idx_player_events_linked_server_id ON player_events(linked_server_id)",
   "CREATE INDEX IF NOT EXISTS idx_player_events_event_type ON player_events(event_type)",
   "CREATE INDEX IF NOT EXISTS idx_player_events_occurred_at ON player_events(occurred_at)",
-  "CREATE UNIQUE INDEX IF NOT EXISTS idx_player_events_event_hash ON player_events(event_hash)",
   "CREATE INDEX IF NOT EXISTS idx_kill_events_linked_server_id ON kill_events(linked_server_id)",
   "CREATE INDEX IF NOT EXISTS idx_kill_events_killer_name ON kill_events(killer_name)",
   "CREATE INDEX IF NOT EXISTS idx_kill_events_victim_name ON kill_events(victim_name)",
   "CREATE INDEX IF NOT EXISTS idx_kill_events_occurred_at ON kill_events(occurred_at)",
-  "CREATE UNIQUE INDEX IF NOT EXISTS idx_kill_events_event_hash ON kill_events(event_hash)",
   "CREATE INDEX IF NOT EXISTS idx_server_stats_linked_server_id ON server_stats(linked_server_id)",
   "CREATE INDEX IF NOT EXISTS idx_sync_runs_linked_server_id ON sync_runs(linked_server_id)",
   "CREATE INDEX IF NOT EXISTS idx_sync_runs_created_at ON sync_runs(created_at)",
   "CREATE INDEX IF NOT EXISTS idx_sync_runs_status ON sync_runs(status)",
+];
+
+const ADM_SYNC_EVENT_HASH_INDEX_STATEMENTS = [
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_player_events_event_hash ON player_events(event_hash)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_kill_events_event_hash ON kill_events(event_hash)",
 ];
 
 const ADM_SYNC_SCOPE_INDEX_STATEMENTS = [

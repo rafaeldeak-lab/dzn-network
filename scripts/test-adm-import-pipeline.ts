@@ -316,6 +316,12 @@ async function main() {
   });
 
   assert.equal(successResult.status, "completed");
+  const playerHashColumn = successDb.schemaQueries.indexOf("alter table player_events add column event_hash text");
+  const playerHashIndex = successDb.schemaQueries.indexOf("create unique index if not exists idx_player_events_event_hash on player_events(event_hash)");
+  const killHashColumn = successDb.schemaQueries.indexOf("alter table kill_events add column event_hash text");
+  const killHashIndex = successDb.schemaQueries.indexOf("create unique index if not exists idx_kill_events_event_hash on kill_events(event_hash)");
+  assert.equal(playerHashColumn >= 0 && playerHashIndex > playerHashColumn, true);
+  assert.equal(killHashColumn >= 0 && killHashIndex > killHashColumn, true);
   assert.equal(successDb.killEvents.length, 10);
   assert.equal(successDb.playerEvents.every((event) => event.event_hash === event.id), true);
   assert.equal(successDb.killEvents.every((event) => event.event_hash === event.id), true);
@@ -1543,6 +1549,7 @@ class MemoryD1 {
   failKillInsertAfter: number | null;
   failAutomationJobInsert: boolean;
   killInsertAttempts = 0;
+  schemaQueries: string[] = [];
 
   constructor(options: { failKillInsertAfter?: number | null; failAutomationJobInsert?: boolean } = {}) {
     this.failKillInsertAfter = options.failKillInsertAfter ?? null;
@@ -1566,7 +1573,10 @@ class MemoryStatement {
 
   async run(): Promise<RunResult> {
     const q = normalizeSql(this.query);
-    if (isSchemaQuery(q)) return changed(0);
+    if (isSchemaQuery(q)) {
+      this.db.schemaQueries.push(q);
+      return changed(0);
+    }
     if (q.startsWith("update adm_raw_events") || q.startsWith("update player_events") || q.startsWith("update kill_events") || q.startsWith("update player_profiles") || q.startsWith("update server_stats") || q.startsWith("update adm_sync_state") || q.startsWith("update sync_runs")) return changed(0);
     if (q.includes("insert into adm_build_reparse_state")) {
       const row = {
