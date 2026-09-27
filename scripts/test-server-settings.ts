@@ -96,6 +96,7 @@ includesAll(settingsLib, [
 ]);
 assert.equal(settingsLib.includes("from \"./event-hub\""), false, "Base server settings must not import Event Hub or live Discord channel lookup.");
 assert.equal(settingsLib.includes("TOKEN_ENCRYPTION_KEY"), false, "Server settings must not touch token encryption.");
+assert.equal(settingsLib.includes("SELECT linked_servers.*"), false, "Server settings must select only its contract fields so wide production schemas cannot exceed D1 result-column limits.");
 
 const settingsRoute = source("functions/api/servers/[serverId]/settings.ts");
 includesAll(settingsRoute, ["onRequestGet", "onRequestPatch", "NOT_AUTHENTICATED", "import(\"../../../_lib/server-settings\")", "SETTINGS_UNAVAILABLE", "requestId"]);
