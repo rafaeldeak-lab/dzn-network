@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Brackets, Lightbulb, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Brackets, Lightbulb, ShieldCheck, Sparkles, Trophy, Users } from "lucide-react";
 
 import type { CompetitiveEvent } from "./event-data";
 import { eventImageStyle, formatNumber } from "./event-format";
@@ -10,19 +10,24 @@ import { ServerCategoryBadge } from "./ServerCategoryBadge";
 export function EventHero({ event, detail = false }: { event?: CompetitiveEvent | null; detail?: boolean }) {
   if (!detail) {
     return (
-      <section className="relative overflow-hidden rounded-xl border border-white/10 bg-[radial-gradient(circle_at_24%_0%,rgba(124,58,237,0.26),transparent_36%),radial-gradient(circle_at_82%_8%,rgba(34,211,238,0.18),transparent_34%),rgba(3,7,18,0.86)] p-6 shadow-[0_30px_110px_rgba(0,0,0,0.42)]">
-        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(180deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:42px_42px] opacity-20" />
-        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-4xl font-black uppercase tracking-normal text-white sm:text-6xl">EVENTS</h1>
-            <p className="mt-2 text-sm font-semibold text-zinc-300">Compete. Conquer. Be remembered.</p>
-            <div className="mt-5 flex flex-wrap gap-2 text-[10px] font-black uppercase text-zinc-400">
-              <span className="rounded-md border border-violet-300/25 bg-violet-500/10 px-3 py-2">SAME CATEGORY ONLY</span>
-              <span className="rounded-md border border-cyan-300/25 bg-cyan-400/10 px-3 py-2">PRO MATCHING</span>
-              <span className="rounded-md border border-rose-300/25 bg-rose-400/10 px-3 py-2">TOP 10 TEASER</span>
+      <section data-events-hero className="relative min-h-[250px] overflow-hidden border-y border-cyan-300/18 bg-[url('/media/server-wars-showdown/server-wars-banner-concept.webp')] bg-cover bg-center shadow-[0_24px_80px_rgba(0,0,0,0.38)] sm:min-h-[290px]">
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(1,5,15,0.97)_0%,rgba(1,5,15,0.76)_48%,rgba(1,5,15,0.3)_74%,rgba(1,5,15,0.72)_100%)]" />
+        <div className="absolute inset-x-0 bottom-0 h-24 bg-[linear-gradient(180deg,transparent,#02030a)]" />
+        <div className="relative flex min-h-[250px] flex-col justify-end px-5 py-7 sm:min-h-[290px] sm:px-8">
+          <div className="max-w-3xl">
+            <div className="flex items-center gap-2 text-[10px] font-black uppercase text-cyan-200">
+              <Sparkles className="h-4 w-4" />
+              Survive · Compete · Belong
+            </div>
+            <h1 className="mt-2 text-4xl font-black uppercase text-white sm:text-6xl">Events &amp; Tournaments</h1>
+            <p className="mt-3 max-w-2xl text-sm font-semibold leading-6 text-zinc-200 sm:text-base">Join verified DayZ competitions, follow live brackets, and build a history your community can prove.</p>
+            <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-[10px] font-black uppercase text-zinc-200">
+              <span className="inline-flex items-center gap-2"><Users className="h-4 w-4 text-cyan-300" />Real communities</span>
+              <span className="inline-flex items-center gap-2"><Trophy className="h-4 w-4 text-amber-300" />Verified results</span>
+              <span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-emerald-300" />Category-safe play</span>
             </div>
           </div>
-          <Link href="/events/suggest" className="inline-flex items-center justify-center gap-2 rounded-lg border border-violet-300/40 bg-violet-500/22 px-5 py-3 text-xs font-black uppercase text-white shadow-[0_0_24px_rgba(124,58,237,0.26)] transition hover:bg-violet-500/32">
+          <Link href="/events/suggest" className="mt-6 inline-flex w-fit items-center justify-center gap-2 rounded-md border border-cyan-300/45 bg-cyan-400/16 px-4 py-2.5 text-xs font-black uppercase text-white transition hover:bg-cyan-400/26">
             <Lightbulb className="h-4 w-4" />
             Suggest Competition
           </Link>
