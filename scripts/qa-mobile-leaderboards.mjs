@@ -12,9 +12,11 @@ const name = "Very_Long_Player_Name_With_No_Spaces_123456789";
 const serverName = "A very long DayZ community server name that must remain readable";
 const avatarUrl = "/api/public/players/qa-player/avatar";
 const kill = { rank: 1, player_name: name, victim_name: "Another_Player_With_A_Long_Name", server_name: serverName, server_slug: "qa-server", weapon: "Mosin 91/30", distance: 106.7, occurred_at: "2026-09-09T06:00:00Z", player_public_profile_href: "/players/qa-player", player_public_profile_avatar_url: avatarUrl };
-const boards = { ok: true, top_servers: [{ rank: 1, server_id: "qa-server", server_name: serverName, slug: "qa-server", mode: "PVP / PVE", kills: 500, deaths: 200, kd: 2.5, kd_label: "2.50", longest_kill: 106.7, unique_players: 142, score: 1000, score_label: "1000", score_breakdown: null }], top_players: [{ ...kill, player_id: null, kills: 65, deaths: 20, kd: 3.25, kd_label: "3.25", longest_kill: 106.7, public_profile_href: "/players/qa-player", public_profile_avatar_url: avatarUrl }], personal_best_kills: [kill], longest_kills: [kill], best_overall_kill: kill, latest_kill: kill, updated_at: "2026-09-09T06:00:00Z", access_level: "full", is_locked: false };
+const serverRow = { rank: 1, server_id: "qa-server", server_name: serverName, slug: "qa-server", mode: "PVP / PVE", kills: 500, deaths: 200, kd: 2.5, kd_label: "2.50", longest_kill: 106.7, unique_players: 142, score: 1000, score_label: "1000", score_breakdown: null };
+const deathmatchRow = { ...serverRow, rank: 11, server_id: "qa-deathmatch", server_name: "QA Deathmatch", slug: "qa-deathmatch", mode: "DEATHMATCH", score: 700, score_label: "700" };
+const boards = { ok: true, top_servers: [serverRow], top_players: [{ ...kill, player_id: null, kills: 65, deaths: 20, kd: 3.25, kd_label: "3.25", longest_kill: 106.7, public_profile_href: "/players/qa-player", public_profile_avatar_url: avatarUrl }], personal_best_kills: [kill], longest_kills: [kill], best_overall_kill: kill, latest_kill: kill, updated_at: "2026-09-09T06:00:00Z", access_level: "full", is_locked: false };
 function api(url) {
-  if (url.pathname === "/api/public/leaderboards") return boards;
+  if (url.pathname === "/api/public/leaderboards") return { ...boards, top_servers: url.searchParams.get("mode") === "deathmatch" ? [deathmatchRow] : boards.top_servers };
   if (url.pathname === "/api/public/leaderboards/advanced") return { ok: true, boards: [], categories: [], notes: [] };
   if (url.pathname === "/api/public/server-wars") return { ok: true, events: [], rulesets: [], leaderboards: [], summary: {} };
   if (url.pathname === "/api/auth/me") return { authenticated: true, user: { id: "qa", username: "QA player" }, linkedServers: [], linkedServer: null };
@@ -63,6 +65,9 @@ if (process.argv.includes("--serve")) {
         await page.goto(`${origin}/leaderboards`, { waitUntil: "networkidle" });
         await page.getByRole("table", { name: "Top Servers", exact: true }).waitFor();
         await page.locator('[data-board-view="servers"]').screenshot({ path: path.join(output, `servers-${width}-${reducedMotion}.png`) });
+        await page.getByRole("button", { name: "Deathmatch", exact: true }).click();
+        await page.getByText("QA Deathmatch", { exact: true }).waitFor();
+        assert.equal(await page.locator('td[data-label="Rank"]').innerText(), "#11", "Mode views must preserve global ranks outside the overall top ten");
         await page.getByRole("tab", { name: "Players", exact: true }).click();
         await page.getByRole("table", { name: "Top Players", exact: true }).waitFor();
         await page.locator('img[src*="/api/public/players/"]').first().scrollIntoViewIfNeeded();

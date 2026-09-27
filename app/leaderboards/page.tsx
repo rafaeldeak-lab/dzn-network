@@ -196,14 +196,15 @@ export default function LeaderboardsPage() {
       inFlight.current = true;
       const requestId = latestRequestId.current + 1;
       latestRequestId.current = requestId;
-      const cached = loadLastGoodLeaderboard();
+      const cached = activeMode === "all" ? loadLastGoodLeaderboard() : null;
       const hasVisibleData = Boolean(cached) || visiblePayloadRef.current;
       // The server and first browser render must agree before restoring local data.
       if (cached && !visiblePayloadRef.current) setPayload(cached);
       setLoading(!hasVisibleData);
       setLoadState(!hasVisibleData ? "loading_initial" : "refreshing");
       try {
-        const data = await fetchJsonWithRetry<LeaderboardsPayload>("/api/public/leaderboards", {
+        const query = activeMode === "all" ? "" : `?mode=${encodeURIComponent(activeMode)}`;
+        const data = await fetchJsonWithRetry<LeaderboardsPayload>(`/api/public/leaderboards${query}`, {
           cache: "no-store",
           credentials: "include",
           headers: { accept: "application/json" },
@@ -211,12 +212,12 @@ export default function LeaderboardsPage() {
         if (!active || latestRequestId.current !== requestId) return;
         const normalized = normalizePayload(data.data && !data.top_servers ? data.data : data);
         setPayload(normalized);
-        if (hasMeaningfulLeaderboard(normalized)) saveLastGoodLeaderboard(normalized);
+        if (activeMode === "all" && hasMeaningfulLeaderboard(normalized)) saveLastGoodLeaderboard(normalized);
         setLoadState(hasMeaningfulLeaderboard(normalized) ? "loaded" : "empty_real_data");
         setError("");
       } catch (loadError) {
         if (active) {
-          const cached = loadLastGoodLeaderboard();
+          const cached = activeMode === "all" ? loadLastGoodLeaderboard() : null;
           if (cached) {
             setPayload(cached);
             setError("");
@@ -239,9 +240,10 @@ export default function LeaderboardsPage() {
     const interval = window.setInterval(load, 30_000);
     return () => {
       active = false;
+      inFlight.current = false;
       window.clearInterval(interval);
     };
-  }, [reloadNonce]);
+  }, [activeMode, reloadNonce]);
 
   useEffect(() => {
     let active = true;

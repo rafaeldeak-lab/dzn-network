@@ -146,6 +146,7 @@ export type PublicTelemetryLeaderboardRow = PublicLeaderboardPlayer & {
 export type PublicLeaderboardsOptions = {
   full?: boolean;
   metric?: string | null;
+  mode?: string | null;
   page?: number;
   pageSize?: number;
 };
@@ -181,7 +182,7 @@ export async function getPublicLeaderboardsPayload(env: Env, viewerLoggedIn = tr
   const selectedMetric = normalizeLeaderboardMetric(requestOptions.metric);
 
   const [topServers, topPlayers, killSummary, buildLeaderboard, playerLeaderboards, selectedMetricLeaderboard] = await Promise.all([
-    getRankedPublicServers(env, limit),
+    getRankedPublicServers(env, limit, requestOptions.mode),
     getTopPlayers(env, limit, undefined, offset),
     getLongestKillSummary(env, limit),
     getRankedBuildServers(env, limit),
@@ -241,7 +242,7 @@ async function ensurePublicLeaderboardSchema(env: Env) {
   void env;
 }
 
-export async function getRankedPublicServers(env: Env, limit: number) {
+export async function getRankedPublicServers(env: Env, limit: number, mode: PublicLeaderboardMode = "all") {
   const db = requireDb(env);
   const result = await db
     .prepare(
@@ -322,7 +323,7 @@ export async function getRankedPublicServers(env: Env, limit: number) {
     };
   });
 
-  return rankServers(candidates, limit).map((server) => {
+  const rankedServers = rankServers(candidates, 500).map((server) => {
     return {
       rank: server.rank,
       server_id: server.server_id,
@@ -342,6 +343,14 @@ export async function getRankedPublicServers(env: Env, limit: number) {
       score_breakdown: server.score_breakdown,
     } satisfies PublicLeaderboardServer;
   });
+  return filterRankedPublicServersByMode(rankedServers, mode, limit);
+}
+
+export type PublicLeaderboardMode = "all" | "deathmatch" | "pvp" | "pve" | "survival";
+
+export function filterRankedPublicServersByMode(servers: PublicLeaderboardServer[], mode: PublicLeaderboardMode, limit: number) {
+  const queryLimit = Math.max(1, Math.min(Math.trunc(limit) || 10, 500));
+  return servers.filter((server) => matchesPublicLeaderboardMode(server.mode, mode)).slice(0, queryLimit);
 }
 
 async function getTopPlayers(env: Env, limit: number, linkedServerId?: string, offset = 0, includeVerifiedLinks = true): Promise<PublicLeaderboardPlayer[]> {
@@ -710,9 +719,26 @@ export function normalizePublicLeaderboardOptions(options: PublicLeaderboardsOpt
   return {
     full,
     metric: normalizeLeaderboardMetric(options.metric),
+    mode: normalizePublicLeaderboardMode(options.mode),
     page,
     pageSize,
   };
+}
+
+export function normalizePublicLeaderboardMode(value: unknown): PublicLeaderboardMode {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "deathmatch" || normalized === "pvp" || normalized === "pve" || normalized === "survival"
+    ? normalized
+    : "all";
+}
+
+function matchesPublicLeaderboardMode(mode: string, filter: PublicLeaderboardMode) {
+  if (filter === "all") return true;
+  const normalized = mode.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  const tokens = normalized.trim().split(/\s+/);
+  if (filter === "deathmatch") return normalized.includes("deathmatch") || tokens.includes("dm");
+  if (filter === "survival") return normalized.includes("survival");
+  return tokens.includes(filter);
 }
 
 async function getAllTelemetryLeaderboards(env: Env, limit: number, offset = 0) {
