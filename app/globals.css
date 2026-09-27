@@ -85,7 +85,6 @@ body {
   }
 
   .dzn-skeleton::after,
-  .dzn-beta-ticker__track,
   .dzn-live-server-rail__track {
     animation: none;
   }
@@ -154,27 +153,14 @@ body.dzn-pricing-modal-open .dzn-beta-ticker {
   letter-spacing: 0.14em;
 }
 
-.dzn-beta-ticker__marquee {
-  overflow: hidden;
+.dzn-beta-ticker__copy {
   min-width: 0;
+  margin: 0;
+  padding: 0 16px;
   color: rgba(244, 244, 245, 0.82);
   font-size: 12px;
   font-weight: 700;
-  white-space: nowrap;
-}
-
-.dzn-beta-ticker__track {
-  display: inline-flex;
-  min-width: max-content;
-  gap: 42px;
-  padding-left: 24px;
-  animation: dznBetaTicker 32s linear infinite;
-}
-
-.dzn-beta-ticker__marquee:hover .dzn-beta-ticker__track,
-.dzn-beta-ticker__marquee:focus .dzn-beta-ticker__track,
-.dzn-beta-ticker__marquee:focus-within .dzn-beta-ticker__track {
-  animation-play-state: paused;
+  line-height: 1.35;
 }
 
 .dzn-beta-ticker__actions {
@@ -213,15 +199,6 @@ body.dzn-pricing-modal-open .dzn-beta-ticker {
 .dzn-live-server-rail__viewport:focus-visible {
   outline: 2px solid rgba(34, 211, 238, 0.9);
   outline-offset: 2px;
-}
-
-@keyframes dznBetaTicker {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(-50%);
-  }
 }
 
 .dzn-live-server-rail {
@@ -323,6 +300,11 @@ body.dzn-pricing-modal-open .dzn-beta-ticker {
     padding: 6px 8px;
   }
 
+  .dzn-beta-ticker__copy {
+    padding: 0 10px;
+    font-size: 11px;
+  }
+
   .dzn-live-server-rail__header {
     align-items: flex-start;
     flex-direction: column;
@@ -334,7 +316,6 @@ body.dzn-pricing-modal-open .dzn-beta-ticker {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dzn-beta-ticker__track,
   .dzn-live-server-rail__track {
     animation: none;
     transform: none;
@@ -2037,6 +2018,14 @@ body.dzn-pricing-modal-open .dzn-beta-ticker {
   display: grid;
   min-width: 0;
   gap: 0.72rem;
+}
+
+.leaderboard-ref-board-shell > .leaderboard-ref-area--players,
+.leaderboard-ref-records-grid > .leaderboard-ref-area--longest,
+.leaderboard-ref-records-grid > .leaderboard-ref-area--personal {
+  grid-area: auto;
+  min-width: 0;
+  width: 100%;
 }
 
 .leaderboard-ref-board-tabs,

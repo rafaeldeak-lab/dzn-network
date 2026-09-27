@@ -130,11 +130,8 @@ function assertPublicVisitorContract() {
   const publicApi = read(PUBLIC_PROFILE_API);
   const helper = read(PUBLIC_PROFILE_HELPER);
 
-  assert.doesNotMatch(
-    viewer,
-    /PublicProfileOwnerPreviewPanel|How My Public Profile Looks|Owner Share Controls|Copy Handle|copyProfileHandle|navigator\.clipboard|navigator\.share/i,
-    "Public visitor profile page must not include private owner preview/share controls.",
-  );
+  assert.doesNotMatch(viewer, /PublicProfileOwnerPreviewPanel|How My Public Profile Looks|Owner Share Controls|Copy Handle|copyProfileHandle/i, "Public visitor profile page must not include private owner preview controls.");
+  assert.match(viewer, /Share Profile/, "Public visitors must receive a simple share action without the private owner workspace.");
   assert.match(
     viewer,
     /fetch\(`\/api\/public\/players\/\$\{encodeURIComponent\(handle\)\}`,[\s\S]+credentials: "omit"/,

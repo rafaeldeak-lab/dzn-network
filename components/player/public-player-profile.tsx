@@ -1,11 +1,12 @@
 "use client";
 
-import { Activity, AlertTriangle, CalendarDays, Crosshair, EyeOff, Gamepad2, Loader2, Radio, Server, ShieldCheck, Sparkles, Trophy, UserRound } from "lucide-react";
+import { Activity, AlertTriangle, CalendarDays, Check, Crosshair, EyeOff, Gamepad2, Loader2, Radio, Server, Share2, ShieldCheck, Sparkles, Trophy, UserRound } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { publicGameplayPresentation } from "@/lib/public-profile-gameplay";
+import { publicMapLabel } from "@/lib/showcase-labels";
 
 type FutureSection = { visible: boolean; status: "not_available_yet" | "hidden"; message: string };
 type PublicPlayerProfilePayload = {
@@ -101,7 +102,8 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
               </div>
             </div>
           </div>
-          <div className="flex w-full sm:w-auto">
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
+            <PublicShareAction displayName={data.display_name} />
             <Link href="/player/profile" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-violet-300/45 bg-violet-400/15 px-4 text-xs font-black uppercase text-violet-50 transition hover:bg-violet-400/25"><UserRound aria-hidden="true" className="h-4 w-4" /> Manage My Profile</Link>
           </div>
         </div>
@@ -130,7 +132,7 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
           <ProfileBand icon={<Server aria-hidden="true" className="h-5 w-5" />} title="Featured Server" visible={data.sections.featured_server.visible}>
             {data.sections.featured_server.server ? (
               <Link href={data.sections.featured_server.server.href} className="group grid gap-4 border-l-2 border-cyan-300 bg-[#06111f]/80 p-4 transition hover:bg-[#081a2c] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-                <div><p className="text-lg font-black uppercase text-white group-hover:text-cyan-100">{data.sections.featured_server.server.server_name}</p><p className="mt-1 text-xs font-bold uppercase text-cyan-200">{data.sections.featured_server.server.server_type} / {data.sections.featured_server.server.platform ?? "Platform TBA"} / {data.sections.featured_server.server.map_name ?? "Map TBA"}</p><p className="mt-3 text-sm font-semibold text-slate-300">{data.sections.featured_server.server.kills} kills / {data.sections.featured_server.server.deaths} deaths / {formatDistance(data.sections.featured_server.server.longest_kill_distance)} longest</p></div>
+                <div><p className="text-lg font-black uppercase text-white group-hover:text-cyan-100">{data.sections.featured_server.server.server_name}</p><p className="mt-1 text-xs font-bold uppercase text-cyan-200">{data.sections.featured_server.server.server_type} / {data.sections.featured_server.server.platform ?? "Platform TBA"} / {publicMapLabel(data.sections.featured_server.server.map_name)}</p><p className="mt-3 text-sm font-semibold text-slate-300">{data.sections.featured_server.server.kills} kills / {data.sections.featured_server.server.deaths} deaths / {formatDistance(data.sections.featured_server.server.longest_kill_distance)} longest</p></div>
                 <span className="inline-flex min-h-10 items-center justify-center rounded-md border border-cyan-300/40 px-3 text-xs font-black uppercase text-cyan-100">View Server</span>
               </Link>
             ) : <HiddenCopy />}
@@ -158,6 +160,37 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
       </section>
       <footer className="flex flex-col items-center justify-between gap-2 border-t border-cyan-300/15 py-4 text-[10px] font-black uppercase text-slate-500 sm:flex-row"><span>DZN Network / Player Hub</span><span>Play / Explore / Belong</span></footer>
     </div>
+  );
+}
+
+function PublicShareAction({ displayName }: { displayName: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function shareProfile() {
+    const url = window.location.href;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: `${displayName} on DZN Network`, text: `View ${displayName}'s public DZN Player Hub profile.`, url });
+        return;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2200);
+    } catch {
+      window.prompt("Copy this public profile link", url);
+    }
+  }
+
+  return (
+    <button type="button" onClick={() => void shareProfile()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-cyan-300/55 bg-cyan-300/15 px-4 text-xs font-black uppercase text-cyan-50 transition hover:bg-cyan-300/25" aria-label="Share public profile">
+      {copied ? <Check aria-hidden="true" className="h-4 w-4" /> : <Share2 aria-hidden="true" className="h-4 w-4" />}
+      {copied ? "Link Copied" : "Share Profile"}
+      <span className="sr-only" aria-live="polite">{copied ? "Public profile link copied" : ""}</span>
+    </button>
   );
 }
 

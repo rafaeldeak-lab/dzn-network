@@ -82,6 +82,10 @@ assert.match(component, /fetch\(`\/api\/public\/players\/\$\{encodeURIComponent\
 assert.match(component, /credentials: "omit"/, "Public profile UI must not send player cookies to the public profile API.");
 assert.doesNotMatch(component, /SiteHeaderAuthState authenticated=\{false\}/, "Public profile pages must let the shared header resolve the real logged-in state.");
 assert.match(component, /Manage My Profile/, "Public profile UI must send owners to the private profile settings surface.");
+assert.match(component, /Share Profile/, "Public profile visitors must have a clear native-share or copy-link action.");
+assert.match(component, /navigator\.share/, "Public profile sharing must use the browser share sheet when available.");
+assert.match(component, /navigator\.clipboard\.writeText\(url\)/, "Public profile sharing must copy the same public URL when native sharing is unavailable.");
+assert.match(component, /publicMapLabel\(data\.sections\.featured_server\.server\.map_name\)/, "Featured servers must use friendly public map labels instead of raw DayZ mission identifiers.");
 assert.match(component, /onError=\{\(\) => setFailed\(true\)\}/, "A failed public Discord avatar request must reveal the player's initial fallback.");
 assert.match(component, /<span aria-hidden="true">\{initial\}<\/span>/, "The public avatar must retain an initial beneath the image layer.");
 assert.match(component, /discordVisible \? `\$\{displayName\} Discord avatar` : `\$\{displayName\} profile image`/, "A hidden Discord identity must use a neutral accessible profile-image label.");
