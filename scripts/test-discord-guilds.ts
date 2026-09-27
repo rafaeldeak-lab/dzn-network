@@ -135,6 +135,32 @@ const broadRoleReviewChannel = evaluateDiscordChannelPermissionsForTest({
 });
 assert.equal(broadRoleReviewChannel.restricted_from_everyone, false, "A general member-role allow must keep review details out of the channel.");
 
+const guildLevelBroadRole = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  botManagedRoleIds: [botRoleId],
+  rolePermissions: { [broadMemberRole]: viewChannel },
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: "0",
+});
+assert.equal(guildLevelBroadRole.restricted_from_everyone, false, "A guild-level member role with View Channel must keep an otherwise unoverridden channel ineligible.");
+
+const guildRoleRemovedByChannelDeny = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  botManagedRoleIds: [botRoleId],
+  rolePermissions: { [broadMemberRole]: viewChannel },
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: "0",
+  channelPermissionOverwrites: [
+    { id: guildId, type: 0, allow: "0", deny: viewChannel.toString() },
+    { id: botRoleId, type: 0, allow: viewChannel.toString(), deny: "0" },
+  ],
+});
+assert.equal(guildRoleRemovedByChannelDeny.restricted_from_everyone, true, "An explicit channel deny may remove guild-level member visibility while retaining DZN Bot access.");
+
 const ownerMemberReviewChannel = evaluateDiscordChannelPermissionsForTest({
   guildId,
   botUserId,

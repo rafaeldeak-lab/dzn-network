@@ -342,6 +342,7 @@ export async function testPlayerGameIdentityTransactions() {
     });
     const requiredBits = ((BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(11)) | (BigInt(1) << BigInt(14)) | (BigInt(1) << BigInt(16))).toString();
     let verificationUnavailable = true;
+    let contextUnavailable = false;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/channels/123456789012345678")) {
@@ -360,6 +361,7 @@ export async function testPlayerGameIdentityTransactions() {
       if (url.endsWith("/users/@me")) return Response.json({ id: "bot-user" });
       if (url.endsWith("/guilds/guild-a/members/bot-user")) return Response.json({ roles: ["bot-role"] });
       if (url.endsWith("/guilds/guild-a/roles")) {
+        if (contextUnavailable) return new Response("", { status: 503 });
         return Response.json([
           { id: "guild-a", name: "@everyone", permissions: requiredBits },
           { id: "bot-role", name: "DZN Bot", permissions: requiredBits, tags: { bot_id: "bot-user" } },
@@ -384,6 +386,17 @@ export async function testPlayerGameIdentityTransactions() {
     assert.equal(retryRow?.status, "retry");
     assert.equal(retryRow?.result_code, "discord_restricted_channel_verify_503");
     verificationUnavailable = false;
+    contextUnavailable = true;
+    channelRetry.sqlite.exec("UPDATE player_game_identity_owner_notification_deliveries SET next_attempt_at=CURRENT_TIMESTAMP");
+    const contextRetry = await dispatchQueuedOwnerRequestNotifications(channelRetry.env, {
+      deliveryIds: claim.ok ? claim.owner_delivery_ids : [],
+      maxJobs: 1,
+    });
+    assert.equal(contextRetry.retried, 1, "A temporary Discord roles lookup failure must remain retryable when the owner DM fallback is closed.");
+    retryRow = channelRetry.sqlite.prepare("SELECT status,result_code FROM player_game_identity_owner_notification_deliveries").get();
+    assert.equal(retryRow?.status, "retry");
+    assert.equal(retryRow?.result_code, "discord_restricted_channel_verify_503");
+    contextUnavailable = false;
     channelRetry.sqlite.exec("UPDATE player_game_identity_owner_notification_deliveries SET next_attempt_at=CURRENT_TIMESTAMP");
     const channelPostRetry = await dispatchQueuedOwnerRequestNotifications(channelRetry.env, {
       deliveryIds: claim.ok ? claim.owner_delivery_ids : [],

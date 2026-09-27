@@ -1232,7 +1232,10 @@ async function getBotChannelPermissionBits(botToken: string, channel: DiscordCha
 
 async function getBotGuildPermissionContext(botToken: string, guildId: string): Promise<BotPermissionContext | null> {
   const meResponse = await fetchDiscordApi(botToken, "/users/@me");
-  if (!meResponse.ok) return null;
+  if (!meResponse.ok) {
+    throwForRetryableDiscordResponse(meResponse, "bot identity");
+    return null;
+  }
   const me = await meResponse.json().catch(() => null) as { id?: string } | null;
   const botUserId = typeof me?.id === "string" ? me.id : null;
   if (!botUserId) return null;
@@ -1241,7 +1244,14 @@ async function getBotGuildPermissionContext(botToken: string, guildId: string): 
     fetchDiscordApi(botToken, `/guilds/${encodeURIComponent(guildId)}/members/${encodeURIComponent(botUserId)}`),
     fetchDiscordApi(botToken, `/guilds/${encodeURIComponent(guildId)}/roles`),
   ]);
-  if (!memberResponse.ok || !rolesResponse.ok) return null;
+  if (!memberResponse.ok) {
+    throwForRetryableDiscordResponse(memberResponse, "bot guild membership");
+    return null;
+  }
+  if (!rolesResponse.ok) {
+    throwForRetryableDiscordResponse(rolesResponse, "guild roles");
+    return null;
+  }
   const member = await memberResponse.json().catch(() => null) as { roles?: Array<string | number> } | null;
   const roles = await rolesResponse.json().catch(() => null) as Array<{ id?: string | number; name?: string | null; permissions?: string | number | null; tags?: { bot_id?: string | number | null } | null }> | null;
   if (!Array.isArray(roles)) return null;
@@ -1267,6 +1277,12 @@ async function getBotGuildPermissionContext(botToken: string, guildId: string): 
   return { botUserId, guildId, roleIds, botManagedRoleIds, roleNames, rolePermissions, everyonePermissions, basePermissions };
 }
 
+function throwForRetryableDiscordResponse(response: Response, operation: string) {
+  if (response.status === 429 || response.status >= 500) {
+    throw new DiscordChannelFetchError("discord_api_error", `Discord ${operation} lookup failed with ${response.status}.`, response.status);
+  }
+}
+
 function isRestrictedReviewChannel(context: BotPermissionContext, channel: DiscordChannel, allowedMemberIds: string[]) {
   if (hasPermission(context.everyonePermissions, DISCORD_ADMINISTRATOR_PERMISSION)) return false;
   let permissions = context.everyonePermissions;
@@ -1279,8 +1295,18 @@ function isRestrictedReviewChannel(context: BotPermissionContext, channel: Disco
   const viewChannel = DISCORD_PERMISSION_ONE << BigInt(10);
   if (hasPermission(permissions, viewChannel)) return false;
 
+  const overwrites = channel.permission_overwrites ?? [];
+  const everyoneOverwrite = overwrites.find((overwrite) => String(overwrite.id) === context.guildId && String(overwrite.type) === "0");
+  const everyoneExplicitlyDenied = hasPermission(parsePermissionBits(everyoneOverwrite?.deny) ?? BigInt(0), viewChannel);
+  if (!everyoneExplicitlyDenied) {
+    for (const [roleId, rolePermissions] of context.rolePermissions) {
+      if (roleId === context.guildId || context.botManagedRoleIds.has(roleId)) continue;
+      if (hasPermission(rolePermissions, viewChannel) && !isPrivilegedDiscordRole(rolePermissions)) return false;
+    }
+  }
+
   const allowedMembers = new Set([context.botUserId, ...allowedMemberIds]);
-  for (const overwrite of channel.permission_overwrites ?? []) {
+  for (const overwrite of overwrites) {
     if (!hasPermission(parsePermissionBits(overwrite.allow) ?? BigInt(0), viewChannel)) continue;
     const id = String(overwrite.id);
     if (String(overwrite.type) === "1") {
@@ -1289,12 +1315,15 @@ function isRestrictedReviewChannel(context: BotPermissionContext, channel: Disco
     }
     if (String(overwrite.type) !== "0" || context.botManagedRoleIds.has(id)) continue;
     const rolePermissions = context.rolePermissions.get(id) ?? BigInt(0);
-    const privileged = hasPermission(rolePermissions, DISCORD_ADMINISTRATOR_PERMISSION)
-      || hasPermission(rolePermissions, DISCORD_MANAGE_CHANNELS_PERMISSION)
-      || hasPermission(rolePermissions, DISCORD_MANAGE_GUILD_PERMISSION);
-    if (!privileged) return false;
+    if (!isPrivilegedDiscordRole(rolePermissions)) return false;
   }
   return true;
+}
+
+function isPrivilegedDiscordRole(permissions: bigint) {
+  return hasPermission(permissions, DISCORD_ADMINISTRATOR_PERMISSION)
+    || hasPermission(permissions, DISCORD_MANAGE_CHANNELS_PERMISSION)
+    || hasPermission(permissions, DISCORD_MANAGE_GUILD_PERMISSION);
 }
 
 function getChannelPermissionEvaluationFromContext(context: BotPermissionContext, channel: DiscordChannel | null, category: DiscordChannel | null = null): PermissionEvaluation {
