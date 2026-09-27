@@ -180,6 +180,8 @@ export function SetupWizard() {
   const [restartBusy, setRestartBusy] = useState(false);
   const draftSaveChainRef = useRef<Promise<void>>(Promise.resolve());
   const draftAutosaveTimerRef = useRef<number | null>(null);
+  const draftSaveRevisionRef = useRef(0);
+  const draftFlushSuppressedRef = useRef(false);
 
   const loadDiscordGuilds = useCallback(async (fresh: boolean) => {
     try {
@@ -282,33 +284,45 @@ export function SetupWizard() {
 
   useEffect(() => {
     if (!authenticated || !draftHydrated || !draftAvailable || publicationComplete || (step === 6 && publishedServer)) return;
-    draftAutosaveTimerRef.current = window.setTimeout(() => {
-      draftAutosaveTimerRef.current = null;
-      const payload = {
-        currentStep: step,
-        discordGuildId: selectedGuild || null,
-        serverType,
-        server_category: serverCategory || null,
-        tags: selectedTags,
-        publicListing,
-        linkedServerId: validatedLinkedServerId,
-        nitradoServiceId: selectedService || null,
-        directServiceValidated,
-      };
-      setDraftStatus("saving");
+    const revision = ++draftSaveRevisionRef.current;
+    const payload = {
+      currentStep: step,
+      discordGuildId: selectedGuild || null,
+      serverType,
+      server_category: serverCategory || null,
+      tags: selectedTags,
+      publicListing,
+      linkedServerId: validatedLinkedServerId,
+      nitradoServiceId: selectedService || null,
+      directServiceValidated,
+    };
+    window.setTimeout(() => {
+      if (revision === draftSaveRevisionRef.current) setDraftStatus("saving");
+    }, 0);
+
+    const queueSave = (keepalive = false) => {
       draftSaveChainRef.current = draftSaveChainRef.current
         .catch(() => undefined)
         .then(async () => {
-          const result = await saveOnboardingDraft(payload);
+          const result = await saveOnboardingDraft(payload, { keepalive });
+          if (revision !== draftSaveRevisionRef.current) return;
           setDraftUpdatedAt(result.draft?.updatedAt ?? new Date().toISOString());
           setDraftStatus("saved");
         })
-        .catch(() => setDraftStatus("failed"));
+        .catch(() => {
+          if (revision === draftSaveRevisionRef.current) setDraftStatus("failed");
+        });
+    };
+
+    draftAutosaveTimerRef.current = window.setTimeout(() => {
+      draftAutosaveTimerRef.current = null;
+      queueSave();
     }, 800);
     return () => {
       if (draftAutosaveTimerRef.current !== null) {
         window.clearTimeout(draftAutosaveTimerRef.current);
         draftAutosaveTimerRef.current = null;
+        if (!draftFlushSuppressedRef.current) queueSave(true);
       }
     };
   }, [
@@ -568,6 +582,7 @@ export function SetupWizard() {
     setPublishError("");
     try {
       await goLive();
+      draftFlushSuppressedRef.current = true;
       setPublicationComplete(true);
       if (draftAutosaveTimerRef.current !== null) {
         window.clearTimeout(draftAutosaveTimerRef.current);
@@ -607,6 +622,7 @@ export function SetupWizard() {
       return;
     }
     setRestartBusy(true);
+    draftFlushSuppressedRef.current = true;
     try {
       if (draftAutosaveTimerRef.current !== null) {
         window.clearTimeout(draftAutosaveTimerRef.current);
@@ -642,6 +658,9 @@ export function SetupWizard() {
       setDraftStatus("failed");
     } finally {
       setRestartBusy(false);
+      window.setTimeout(() => {
+        draftFlushSuppressedRef.current = false;
+      }, 0);
     }
   }
 
@@ -1109,7 +1128,7 @@ function BotInstallStep({
 
       {!botInstalled ? (
         <p className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-sm font-bold leading-6 text-amber-50">
-          Add the bot, return to this page, then click Verify Bot Connection. For testing, the invite requests Administrator permission.
+          Add the bot, return to this page, then click Verify Bot Connection. The invite requests only View Channels, Send Messages, Embed Links, and Read Message History.
         </p>
       ) : null}
 

@@ -56,6 +56,10 @@ async function main() {
   assert.match(setupWizardSource, /publicationComplete[\s\S]*setPublicationComplete\(true\)[\s\S]*clearOnboardingDraft/, "Successful go-live must suppress autosave before draft cleanup begins, even if the account refresh fails.");
   assert.match(setupWizardSource, /for \(let attempt = 0; !draftCleared && attempt < 3; attempt\+\+\)/, "Published draft cleanup must retry transient failures.");
   assert.match(setupWizardSource, /setDraftStatus\("failed"\)[\s\S]*saved setup progress could not be cleared/, "Exhausted publication cleanup must remain visible instead of silently leaving a stale draft.");
+  assert.match(setupWizardSource, /revision === draftSaveRevisionRef\.current\) setDraftStatus\("saving"\)[\s\S]*queueSave\(true\)/, "Pending edits must be visible immediately and flushed with keepalive when setup is left before the debounce finishes.");
+  assert.match(setupWizardSource, /draftFlushSuppressedRef\.current = true;[\s\S]*setPublicationComplete\(true\)/, "Publishing must suppress cleanup flushes before draft deletion starts.");
+  assert.equal(setupWizardSource.includes("the invite requests Administrator permission"), false, "Bot setup copy must not claim the least-privilege invite requests Administrator.");
+  assert.equal(setupWizardSource.includes("View Channels, Send Messages, Embed Links, and Read Message History"), true, "Bot setup copy must name the least-privilege invite permissions.");
   const draftRouteSource = readFileSync("functions/api/onboarding/draft.ts", "utf8");
   const schemaProbe = draftRouteSource.slice(draftRouteSource.indexOf("async function hasDraftSchema"), draftRouteSource.indexOf("function serializeDraft"));
   assert.equal(schemaProbe.includes("catch"), false, "Transient D1 errors must not be reported as a missing migration.");

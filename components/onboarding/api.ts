@@ -140,9 +140,10 @@ export async function saveOnboardingDraft(data: {
   linkedServerId: string | null;
   nitradoServiceId: string | null;
   directServiceValidated: boolean;
-}) {
+}, options: { keepalive?: boolean } = {}) {
   return request<{ ok: boolean; available: boolean; draft: OnboardingDraft | null }>("/api/onboarding/draft", {
     method: "PUT",
+    keepalive: options.keepalive,
     body: JSON.stringify({
       currentStep: data.currentStep,
       discordGuildId: data.discordGuildId,
