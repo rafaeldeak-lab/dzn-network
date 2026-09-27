@@ -138,6 +138,32 @@ async function testPrivacyRouteRuntimeContract() {
   assert.equal(atomicDb.preferences.has("mock-user"), false, "A failed Discord consent write must roll back ordinary privacy settings.");
   assert.equal(atomicDb.discordIdentityConsent.has("mock-user"), false, "A failed Discord consent write must not persist consent.");
 
+  const handleAtomicDb = new FakeD1Database();
+  handleAtomicDb.preferences.set("mock-user", {
+    public_profile_enabled: 1,
+    show_display_name: 1,
+    show_gameplay_summary: 1,
+    show_featured_server: 1,
+    show_xp_progress: 0,
+    show_challenge_progress: 0,
+    show_calling_cards: 0,
+    show_award_dates: 0,
+    updated_at: "2026-09-27T00:00:00.000Z",
+  });
+  handleAtomicDb.failDiscordConsentWrites = true;
+  const handleAtomicFailure = await callPrivacyRoute(
+    handleAtomicDb,
+    { DB: handleAtomicDb, MOCK_AUTH: "true" } as unknown as Env,
+    "PATCH",
+    { settings: { show_discord_identity: true } },
+  );
+  assert.equal(handleAtomicFailure.status, 503, "A failed consent write must fail for an enabled profile without a handle.");
+  assert.equal(
+    handleAtomicDb.publicProfilesByUser.has("mock-user"),
+    false,
+    "A failed consent write must not activate a public profile handle.",
+  );
+
   const saved = await callPrivacyRoute(db, { DB: db, MOCK_AUTH: "true" } as unknown as Env, "PATCH", {
     settings: {
       public_profile_enabled: true,
