@@ -1301,7 +1301,9 @@ function isRestrictedReviewChannel(context: BotPermissionContext, channel: Disco
   if (!everyoneExplicitlyDenied) {
     for (const [roleId, rolePermissions] of context.rolePermissions) {
       if (roleId === context.guildId || context.botManagedRoleIds.has(roleId)) continue;
-      if (hasPermission(rolePermissions, viewChannel) && !isPrivilegedDiscordRole(rolePermissions)) return false;
+      const roleOverwrite = overwrites.find((overwrite) => String(overwrite.id) === roleId && String(overwrite.type) === "0");
+      const channelRolePermissions = applyPermissionOverwrite(rolePermissions, roleOverwrite);
+      if (hasPermission(channelRolePermissions, viewChannel) && !isPrivilegedDiscordRole(rolePermissions)) return false;
     }
   }
 

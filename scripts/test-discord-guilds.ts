@@ -146,6 +146,21 @@ const guildLevelBroadRole = evaluateDiscordChannelPermissionsForTest({
 });
 assert.equal(guildLevelBroadRole.restricted_from_everyone, false, "A guild-level member role with View Channel must keep an otherwise unoverridden channel ineligible.");
 
+const guildRoleRemovedByRoleDeny = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  botManagedRoleIds: [botRoleId],
+  rolePermissions: { [broadMemberRole]: viewChannel },
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: "0",
+  channelPermissionOverwrites: [
+    { id: broadMemberRole, type: 0, allow: "0", deny: viewChannel.toString() },
+    { id: botRoleId, type: 0, allow: viewChannel.toString(), deny: "0" },
+  ],
+});
+assert.equal(guildRoleRemovedByRoleDeny.restricted_from_everyone, true, "A channel role deny must remove that role's guild-level visibility.");
+
 const guildRoleRemovedByChannelDeny = evaluateDiscordChannelPermissionsForTest({
   guildId,
   botUserId,
