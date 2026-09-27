@@ -123,6 +123,26 @@ assert.equal(playerLinkDeliveryWorkflow.includes("echo \"${CRON_SECRET}\""), fal
 assert.equal(playerLinkDeliveryWorkflow.includes("wrangler d1"), false);
 assert.equal(playerLinkDeliveryWorkflow.includes("Nitrado"), false);
 
+const ownerLinkDeliveryWorkflow = readFileSync(".github/workflows/dzn-player-link-owner-notification-delivery.yml", "utf8");
+assert.equal(ownerLinkDeliveryWorkflow.includes("workflow_dispatch:"), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes("APPROVE_ONE_OWNER_PLAYER_LINK_NOTIFICATION_TEST"), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes("DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}"), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes("SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}"), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes('CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"'), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes("::add-mask::${CRON_SECRET}"), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes("/api/sync/player-link-owner-notifications/run"), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes('unauthenticated_status}" != "401"'), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes('{"max_jobs": 1}'), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes("processed: 1"), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes("delivered: 1"), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes("retried: 0"), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes("failed: 0"), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes("skipped: 0"), true);
+assert.equal(ownerLinkDeliveryWorkflow.includes("echo \"$CRON_SECRET\""), false);
+assert.equal(ownerLinkDeliveryWorkflow.includes("echo \"${CRON_SECRET}\""), false);
+assert.equal(ownerLinkDeliveryWorkflow.includes("wrangler d1"), false);
+assert.equal(ownerLinkDeliveryWorkflow.includes("Nitrado"), false);
+
 runProtectedEndpointShortCircuitTests()
   .then(() => {
     console.log("Cron auth contract tests passed.");

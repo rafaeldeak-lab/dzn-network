@@ -37,7 +37,9 @@ export async function testPlayerGameIdentityDeliveryLedger() {
   assert.doesNotMatch(decisionRunnerSource, /dispatchQueuedOwnerRequestNotifications/, "The guarded one-decision runner must never drain owner-request deliveries.");
   assert.match(ownerRunnerSource, /requireCronSecret[\s\S]*dispatchQueuedOwnerRequestNotifications/, "Owner-request retries must use a separate protected runner and delivery budget.");
   assert.equal(OWNER_REQUEST_NOTIFICATION_MAX_JOBS, 5, "Restricted-channel verification must leave headroom under the Worker subrequest limit.");
-  assert.match(ownerRunnerSource, /maxJobs:\s*OWNER_REQUEST_NOTIFICATION_MAX_JOBS/, "The scheduled owner runner must use the bounded restricted-channel batch size.");
+  assert.match(ownerRunnerSource, /readBoundedJson<Record<string, unknown>>\(request, 1024\)/, "The protected owner runner must bound its control body.");
+  assert.match(ownerRunnerSource, /body\.value\.max_jobs/, "The manual proof must be able to request exactly one owner delivery.");
+  assert.match(ownerRunnerSource, /Math\.min\(Math\.trunc\(requestedJobs\), OWNER_REQUEST_NOTIFICATION_MAX_JOBS\)/, "Every requested owner batch must retain the restricted-channel subrequest ceiling.");
   const unavailableEnv = {
     DB: { prepare: () => ({ first: async () => null }) },
     DZN_CRON_SECRET: "unit-test-secret",

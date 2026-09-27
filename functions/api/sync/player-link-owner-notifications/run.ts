@@ -1,5 +1,5 @@
 import { requireCronSecret } from "../../../_lib/cron-auth";
-import { json, methodNotAllowed } from "../../../_lib/http";
+import { json, methodNotAllowed, readBoundedJson } from "../../../_lib/http";
 import {
   dispatchQueuedOwnerRequestNotifications,
   OWNER_REQUEST_NOTIFICATION_MAX_JOBS,
@@ -11,7 +11,13 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const unauthorized = requireCronSecret(request, env);
   if (unauthorized) return unauthorized;
 
-  const result = await dispatchQueuedOwnerRequestNotifications(env, { maxJobs: OWNER_REQUEST_NOTIFICATION_MAX_JOBS });
+  const body = await readBoundedJson<Record<string, unknown>>(request, 1024);
+  if (!body.ok) return json(body, { status: body.status });
+  const requestedJobs = Number(body.value.max_jobs);
+  const maxJobs = Number.isFinite(requestedJobs) && requestedJobs > 0
+    ? Math.min(Math.trunc(requestedJobs), OWNER_REQUEST_NOTIFICATION_MAX_JOBS)
+    : OWNER_REQUEST_NOTIFICATION_MAX_JOBS;
+  const result = await dispatchQueuedOwnerRequestNotifications(env, { maxJobs });
   const taskStatus = result.unavailable || result.processed === 0 ? "no_op" : result.ok ? "success" : "failed";
   return json({
     ...result,
