@@ -75,7 +75,7 @@ export function PublicPlayerProfile({ handle: initialHandle = null }: { handle?:
 function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
   const gameplay = publicGameplayPresentation(data.sections.gameplay_summary);
   const totals = data.sections.gameplay_summary.totals;
-  const kd = totals && totals.deaths > 0 ? (totals.kills / totals.deaths).toFixed(2) : totals?.kills ? totals.kills.toFixed(2) : "--";
+  const kd = totals && totals.deaths > 0 ? (totals.kills / totals.deaths).toFixed(2) : totals?.kills ? "Flawless" : "--";
   const initial = data.display_name.trim().slice(0, 1).toUpperCase() || "D";
   return (
     <div className="space-y-4">
@@ -86,7 +86,7 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
           <div className="flex min-w-0 flex-col gap-5 sm:flex-row sm:items-end">
             <div className="relative shrink-0">
               <div className="dzn-public-profile__avatar-ring h-28 w-28 rounded-full p-[3px] sm:h-36 sm:w-36">
-                <DiscordAvatar displayName={data.display_name} initial={initial} url={data.discord_profile.avatar_url} />
+                <DiscordAvatar displayName={data.display_name} initial={initial} url={data.discord_profile.avatar_url} discordVisible={data.discord_profile.visible} />
               </div>
               {data.discord_profile.connected ? <span className="absolute bottom-2 right-2 h-5 w-5 rounded-full border-4 border-[#071120] bg-emerald-400" aria-label="Discord connected" /> : null}
             </div>
@@ -161,10 +161,10 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
   );
 }
 
-function DiscordAvatar({ displayName, initial, url }: { displayName: string; initial: string; url: string | null }) {
+function DiscordAvatar({ displayName, initial, url, discordVisible }: { displayName: string; initial: string; url: string | null; discordVisible: boolean }) {
   const [failed, setFailed] = useState(false);
   return (
-    <div role="img" aria-label={`${displayName} Discord avatar`} className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-full border-4 border-[#071120] bg-[#071120] text-4xl font-black text-cyan-100 sm:text-5xl">
+    <div role="img" aria-label={discordVisible ? `${displayName} Discord avatar` : `${displayName} profile image`} className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-full border-4 border-[#071120] bg-[#071120] text-4xl font-black text-cyan-100 sm:text-5xl">
       <span aria-hidden="true">{initial}</span>
       {url && !failed ? (
         <Image
