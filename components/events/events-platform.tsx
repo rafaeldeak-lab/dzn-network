@@ -348,6 +348,7 @@ export function EventsHubPage() {
   const active = data.events.filter((event) => event.status === "live");
   const upcoming = data.events.filter((event) => ["upcoming", "registration_open", "standby"].includes(event.status));
   const featured = (active[0] ?? upcoming[0] ?? data.events[0]) ?? null;
+  const usingDisplayFallback = data.source === "display_fallback";
   return (
     <EventsShell>
       <EventHero />
@@ -359,8 +360,8 @@ export function EventsHubPage() {
       </div>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.15fr)_320px]">
         <UpcomingEventsPanel events={(upcoming.length ? upcoming : data.events).slice(0, 3)} />
-        <BracketPreviewPanel matches={fallbackMatches} />
-        <LiveActivityFeed activity={fallbackActivity} />
+        <BracketPreviewPanel event={featured} matches={usingDisplayFallback ? fallbackMatches : []} />
+        <LiveActivityFeed activity={usingDisplayFallback ? fallbackActivity : []} />
       </div>
       <NetworkEventStats summary={data.summary} />
       <ServerWarsTeaser />
@@ -448,24 +449,33 @@ function UpcomingEventsPanel({ events }: { events: CompetitiveEvent[] }) {
   );
 }
 
-function BracketPreviewPanel({ matches }: { matches: EventMatch[] }) {
+function BracketPreviewPanel({ event, matches }: { event: CompetitiveEvent | null; matches: EventMatch[] }) {
   const preview = matches.filter((match) => match.round_number >= 2).slice(0, 3);
+  const bracketHref = event ? `/events/${event.slug}/bracket` : "/events/tournaments";
   return (
     <section data-tournament-bracket className="border border-white/10 bg-[#050915]/94 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><p className="text-[10px] font-black uppercase text-violet-200">In progress</p><h2 className="mt-1 text-lg font-black uppercase text-white">Tournament bracket</h2></div>
-        <Link href="/events/dzn-season-1/bracket" className="inline-flex items-center gap-2 text-[10px] font-black uppercase text-cyan-200">Full bracket<ArrowRight className="h-3.5 w-3.5" /></Link>
+        <Link href={bracketHref} className="inline-flex items-center gap-2 text-[10px] font-black uppercase text-cyan-200">Full bracket<ArrowRight className="h-3.5 w-3.5" /></Link>
       </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        {preview.map((match) => (
+      {preview.length ? <>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          {preview.map((match) => (
           <div key={match.id} className="border border-white/10 bg-black/26 p-3">
             <div className="flex items-center justify-between text-[9px] font-black uppercase text-zinc-500"><span>{match.round_number === 2 ? "Semi final" : "Grand final"}</span><span>{match.match_status}</span></div>
             <BracketPreviewTeam name={match.left_server.server_name} score={match.left_score} winner={match.winner_server_id === match.left_server.server_id} />
             <BracketPreviewTeam name={match.right_server.server_name} score={match.right_score} winner={match.winner_server_id === match.right_server.server_id} />
           </div>
-        ))}
-      </div>
-      <div className="mt-4 flex items-center justify-between border border-amber-300/24 bg-amber-400/[0.07] p-3"><span className="inline-flex items-center gap-2 text-[10px] font-black uppercase text-amber-100"><Trophy className="h-4 w-4" />Champion projection</span><span className="text-sm font-black uppercase text-white">{preview.at(-1)?.winner_name ?? preview[0]?.winner_name ?? "TBD"}</span></div>
+          ))}
+        </div>
+        <div className="mt-4 flex items-center justify-between border border-amber-300/24 bg-amber-400/[0.07] p-3"><span className="inline-flex items-center gap-2 text-[10px] font-black uppercase text-amber-100"><Trophy className="h-4 w-4" />Champion projection</span><span className="text-sm font-black uppercase text-white">{preview.at(-1)?.winner_name ?? preview[0]?.winner_name ?? "TBD"}</span></div>
+      </> : (
+        <div className="mt-4 border border-dashed border-white/12 bg-black/20 p-5 text-center">
+          <Trophy className="mx-auto h-6 w-6 text-violet-300" />
+          <p className="mt-3 text-sm font-black uppercase text-white">Bracket updates are not live yet</p>
+          <p className="mt-2 text-xs leading-5 text-zinc-400">Open the featured event for its current registration and match status.</p>
+        </div>
+      )}
     </section>
   );
 }
