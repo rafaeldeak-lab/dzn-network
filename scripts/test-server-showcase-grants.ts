@@ -30,6 +30,8 @@ import { onRequest as postingDestinations } from "../functions/api/servers/[serv
 import { getOwnerDiscordOverview } from "../functions/_lib/owner-discord-control";
 import { onRequest as runAutoPostsNow } from "../functions/api/servers/[serverId]/auto-posts/run-now";
 import { importAdmTextForServer } from "../functions/_lib/adm-sync";
+import { createCompetitiveEvent } from "../functions/_lib/events";
+import { eventCreateHostTransactionGuard, listAuthorizedEventCreationHosts, resolveAuthorizedEventCreationHost } from "../functions/_lib/event-hosts";
 
 type Row = Record<string, unknown>;
 type Sqlite = { exec(sql: string): void; close(): void; prepare(sql: string): {
@@ -183,6 +185,7 @@ async function run() {
   await test("unapplied migration fails closed without changing billing", async ({ env }) => {
     assert.equal((await readServerShowcaseAccess(env, scope.linkedServerId, inactive)).source, "billing");
     assert.equal((await readServerShowcaseAccess(env, scope.linkedServerId, { plan_key: "premium", subscription_status: "active" })).listing.listingPlanKey, "pro");
+    assert.equal((await resolveAuthorizedEventCreationHost(env, actor, scope.linkedServerId)).ok, false);
   }, false);
   await test("advertising GET stays read-only when owner billing schema is unavailable", async ({ db, env }) => {
     db.sqlite.exec("DROP TABLE owner_billing_accounts");
@@ -247,6 +250,62 @@ async function run() {
     if (!unrelated.ok) throw new Error("Expected unrelated owner Server Wars payload");
     assert.equal(unrelated.access.accessSource, "billing");
     assert.equal(unrelated.access.canCreateChallenge, false);
+  });
+  await test("exact grant enables only NukeTown official event hosting without fabricating billing", async ({ db, env }) => {
+    const creatorEnv = { ...env, DZN_PLATFORM_CREATOR_DISCORD_ID: scope.ownerDiscordId } as Env;
+    const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const locked = await resolveAuthorizedEventCreationHost(creatorEnv, actor, scope.linkedServerId);
+    assert.equal(locked.ok, false);
+
+    await grant(creatorEnv);
+    const hosts = await listAuthorizedEventCreationHosts(creatorEnv, actor);
+    assert.equal(hosts.ok, true);
+    if (!hosts.ok) throw new Error("Expected event host inventory");
+    assert.deepEqual(hosts.hosts.map((host) => [host.id, host.event_access_source]), [[scope.linkedServerId, "complimentary_showcase"]]);
+    const resolved = await resolveAuthorizedEventCreationHost(creatorEnv, actor, scope.linkedServerId);
+    assert.equal(resolved.ok, true);
+    if (!resolved.ok) throw new Error("Expected exact event host resolution");
+    const guard = await eventCreateHostTransactionGuard(creatorEnv, actor, resolved.server);
+    const allowed = await creatorEnv.DB.prepare(`SELECT CASE WHEN EXISTS (SELECT 1 FROM linked_servers WHERE ${guard.sql}) THEN 1 ELSE 0 END AS allowed`).bind(...guard.values).first<{ allowed: number }>();
+    assert.equal(allowed?.allowed, 1, JSON.stringify({ values: guard.values }));
+
+    const created = await createCompetitiveEvent(creatorEnv, actor, {
+      hosting_server_id: scope.linkedServerId,
+      name: "NukeTown Complimentary Cup",
+      event_type: "community_cup",
+      status: "registration_open",
+      visibility: "public",
+    });
+    assert.equal(created.ok, true, JSON.stringify({
+      created,
+      events: db.sqlite.prepare("SELECT count(*) AS n FROM competitive_events").get()?.n,
+      registrations: db.sqlite.prepare("SELECT count(*) AS n FROM competitive_event_servers").get()?.n,
+      activity: db.sqlite.prepare("SELECT count(*) AS n FROM competitive_event_activity").get()?.n,
+    }));
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM competitive_events").get()?.n, 1);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM competitive_event_servers").get()?.n, 1);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
+
+    const unrelated = await resolveAuthorizedEventCreationHost(creatorEnv, actor, "same-guild-other-server");
+    assert.equal(unrelated.ok, false);
+  });
+  await test("revoked exact grant rolls back official event creation", async ({ db, env }) => {
+    const creatorEnv = { ...env, DZN_PLATFORM_CREATOR_DISCORD_ID: scope.ownerDiscordId } as Env;
+    const grantId = await grant(creatorEnv);
+    db.beforeBatch = () => revokeSql(db, grantId);
+    const created = await createCompetitiveEvent(creatorEnv, actor, {
+      hosting_server_id: scope.linkedServerId,
+      name: "Revoked NukeTown Cup",
+      event_type: "community_cup",
+      status: "registration_open",
+      visibility: "public",
+    });
+    db.beforeBatch = null;
+    assert.equal(created.ok, false);
+    assert.equal(created.error, "HOST_AUTHORIZATION_CHANGED");
+    for (const table of ["competitive_events", "competitive_event_servers", "competitive_event_activity"]) {
+      assert.equal(db.sqlite.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.n, 0, table);
+    }
   });
   await test("exact grant enables only NukeTown CTF matchmaking without fabricating billing", async ({ db, env }) => {
     const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();

@@ -817,8 +817,10 @@ function assertSourceGovernance() {
   assertIncludes(eventHostsLib, "eventHostSchemaReadiness.get(key) === promise", "Failed event-host readiness probes must use identity-safe eviction.");
   assertIncludes(eventHostsLib, "linked_servers.user_id = ?", "Official host lookup and mutation must bind the host to the authenticated creator.");
   assertIncludes(eventHostsLib, "SELECT COUNT(*)", "Official host authorization must classify duplicate subscription rows deterministically.");
-  assertIncludes(eventsLib, "EVENT_CREATE_HOST_TRANSACTION_PREDICATE", "Official event creation must repeat host ownership inside the transaction.");
+  assertIncludes(createCompetitiveEventBody, "eventCreateHostTransactionGuard(env, viewer, server)", "Official event creation must build a transaction-time host guard.");
   assertIncludes(eventHostsLib, "EVENT_CREATE_HOST_TRANSACTION_PREDICATE", "Shared host module must own the transaction-time predicate.");
+  assertIncludes(eventHostsLib, "linked_servers.id = ? AND linked_servers.user_id = ?", "Every transaction-time host guard must repeat exact host ownership.");
+  assertIncludes(eventHostsLib, "showcaseWriteGuard", "Complimentary event hosting must recheck the exact grant inside the transaction.");
   assertIncludes(eventHostsLib, ") = 1", "Transaction-time host guard must require exactly one subscription row.");
   assertIncludes(eventHostsLib, "server_subscriptions.plan_key", "Transaction-time host guard must include the eligible subscription predicate.");
   assert.doesNotMatch(createCompetitiveEventBody, /compensateFailedEventCreate|compensation_cleanup|DELETE\s+FROM\s+competitive_events|DELETE\s+FROM\s+competitive_event_/i, "Official event creation must not use destructive compensation cleanup.");

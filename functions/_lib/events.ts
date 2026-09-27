@@ -1,5 +1,5 @@
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
-import { EVENT_CREATE_HOST_TRANSACTION_PREDICATE, resolveAuthorizedEventCreationHost } from "./event-hosts";
+import { eventCreateHostTransactionGuard, resolveAuthorizedEventCreationHost } from "./event-hosts";
 import { ensureBillingSchema, normalizePlanKey, type PlanKey } from "./plans";
 import {
   SERVER_CATEGORIES,
@@ -565,6 +565,12 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
     strict_same_category: true,
     tournament_channel_configured: Boolean(sanitizeDiscordSnowflake(input.tournament_channel_id)),
   });
+  let hostWriteGuard: Awaited<ReturnType<typeof eventCreateHostTransactionGuard>>;
+  try {
+    hostWriteGuard = await eventCreateHostTransactionGuard(env, viewer, server);
+  } catch (error) {
+    return eventCreateFailed("entitlement_lookup", requestId, error);
+  }
 
   try {
     await db.batch([
@@ -576,7 +582,7 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
           )
           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
           FROM linked_servers
-          WHERE ${EVENT_CREATE_HOST_TRANSACTION_PREDICATE}
+          WHERE ${hostWriteGuard.sql}
           LIMIT 1`,
         )
         .bind(
@@ -596,8 +602,7 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
           viewer.id,
           rules || "Same-category only. DZN dedupe and server-scope rules apply.",
           rewards || null,
-          server.id,
-          viewer.id,
+          ...hostWriteGuard.values,
         ),
       db
         .prepare(
@@ -615,9 +620,9 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
                server_category = COALESCE(server_category, ?),
                last_event_at = CURRENT_TIMESTAMP,
                updated_at = CURRENT_TIMESTAMP
-           WHERE ${EVENT_CREATE_HOST_TRANSACTION_PREDICATE}`,
+           WHERE ${hostWriteGuard.sql}`,
         )
-        .bind(category, server.id, viewer.id),
+        .bind(category, ...hostWriteGuard.values),
       db
         .prepare(
           `INSERT INTO competitive_event_activity (id, event_id, server_id, activity_type, message, metadata, created_at)
@@ -1163,8 +1168,9 @@ async function validateCompetitiveEventCreationSchema(env: Env, requestId: strin
   }
 }
 
-function serverHasEventEntitlement(server: { plan_key: string | null; subscription_status: string | null }) {
-  return isActiveSubscription(server.subscription_status) && FULL_EVENT_PLANS.includes(normalizePlanKey(server.plan_key));
+function serverHasEventEntitlement(server: { plan_key: string | null; subscription_status: string | null; event_access_source?: string }) {
+  return server.event_access_source === "complimentary_showcase"
+    || (isActiveSubscription(server.subscription_status) && FULL_EVENT_PLANS.includes(normalizePlanKey(server.plan_key)));
 }
 
 export async function insertEventActivity(env: Env, eventId: string | null, serverId: string | null, activityType: string, message: string, metadata: Record<string, unknown>) {

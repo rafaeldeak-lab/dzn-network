@@ -1,5 +1,10 @@
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
 import { normalizePlanKey, type PlanKey } from "./plans";
+import {
+  NUKETOWN_SHOWCASE_SCOPE,
+  readServerShowcaseAccess,
+  showcaseWriteGuard,
+} from "./server-showcase-access";
 import type { Env, SessionUser } from "./types";
 
 const EVENT_HOST_PLANS: PlanKey[] = ["pro", "premium", "network", "partner"];
@@ -135,6 +140,7 @@ export type AuthorizedEventCreationHost = {
   eligible_subscription_count: number | null;
   plan_key: string | null;
   subscription_status: string | null;
+  event_access_source: "billing" | "complimentary_showcase";
 };
 
 export type EventCreationHostResolution =
@@ -268,7 +274,16 @@ export async function listAuthorizedEventCreationHosts(env: Env, viewer: Session
     )
     .bind(viewer.id)
     .all<AuthorizedEventCreationHost>();
-  return { ok: true, hosts: result.results ?? [] };
+  const hosts: AuthorizedEventCreationHost[] = (result.results ?? []).map((server) => ({
+    ...server,
+    event_access_source: "billing",
+  }));
+  if (viewer.id === NUKETOWN_SHOWCASE_SCOPE.ownerUserId && !hosts.some((server) => server.id === NUKETOWN_SHOWCASE_SCOPE.linkedServerId)) {
+    const complimentary = await resolveAuthorizedEventCreationHost(env, viewer, NUKETOWN_SHOWCASE_SCOPE.linkedServerId);
+    if (complimentary.ok && complimentary.server.event_access_source === "complimentary_showcase") hosts.push(complimentary.server);
+  }
+  hosts.sort((left, right) => serverSortName(left).localeCompare(serverSortName(right)));
+  return { ok: true, hosts };
 }
 
 export async function resolveAuthorizedEventCreationHost(
@@ -306,11 +321,46 @@ export async function resolveAuthorizedEventCreationHost(
   const subscriptionRows = Number(server.subscription_row_count ?? 0);
   const eligibleSubscriptions = Number(server.eligible_subscription_count ?? 0);
   if (subscriptionRows > 1) return invalidHostStatePayload();
-  if (subscriptionRows !== 1 || eligibleSubscriptions !== 1 || !hasEventHostEntitlement(server)) {
-    return planLockedPayload();
+  if (subscriptionRows === 1 && eligibleSubscriptions === 1 && hasEventHostEntitlement(server)) {
+    return { ok: true, server: { ...server, event_access_source: "billing" } };
   }
 
-  return { ok: true, server };
+  const showcaseAccess = await readServerShowcaseAccess(env, server.id, {
+    plan_key: server.plan_key,
+    subscription_status: server.subscription_status,
+  });
+  if (showcaseAccess.source === "complimentary_showcase") {
+    return { ok: true, server: { ...server, event_access_source: "complimentary_showcase" } };
+  }
+  return planLockedPayload();
+}
+
+export async function eventCreateHostTransactionGuard(env: Env, viewer: SessionUser, server: AuthorizedEventCreationHost) {
+  if (server.event_access_source !== "complimentary_showcase") {
+    return { sql: EVENT_CREATE_HOST_TRANSACTION_PREDICATE, values: [server.id, viewer.id] };
+  }
+
+  const access = await readServerShowcaseAccess(env, server.id, {
+    plan_key: server.plan_key,
+    subscription_status: server.subscription_status,
+  });
+  if (access.source !== "complimentary_showcase") return { sql: "0 = 1", values: [] as string[] };
+  const grantGuard = await showcaseWriteGuard(env, server.id, viewer.id, access);
+  return {
+    sql: `linked_servers.id = ? AND linked_servers.user_id = ?
+      AND (${grantGuard.sql}) AND EXISTS (
+      SELECT 1 FROM linked_servers AS event_host_state
+      WHERE event_host_state.id = ? AND event_host_state.user_id = ?
+        AND lower(COALESCE(event_host_state.status, 'pending')) NOT IN ('deleted', 'merged', 'archived')
+        AND COALESCE(event_host_state.merged_into_server_id, '') = ''
+        AND lower(COALESCE(event_host_state.listing_visibility, 'public')) != 'hidden'
+    )`,
+    values: [server.id, viewer.id, ...grantGuard.values, server.id, viewer.id],
+  };
+}
+
+function serverSortName(server: AuthorizedEventCreationHost) {
+  return String(server.display_name ?? server.server_name ?? server.hostname ?? server.id).trim().toLowerCase();
 }
 
 function cleanEventHostId(value: unknown) {
