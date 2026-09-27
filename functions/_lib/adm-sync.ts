@@ -8016,17 +8016,22 @@ async function ensureAdmSyncDetailColumns(env: Env) {
     ["source_sync_run_id", "TEXT"],
   ]);
   await ensureMissingColumns(db, "player_events", [
+    ["event_hash", "TEXT"],
     ["source_service_id", "TEXT"],
     ["source_adm_file", "TEXT"],
     ["source_line_number", "INTEGER"],
     ["source_sync_run_id", "TEXT"],
   ]);
   await ensureMissingColumns(db, "kill_events", [
+    ["event_hash", "TEXT"],
     ["source_service_id", "TEXT"],
     ["source_adm_file", "TEXT"],
     ["source_line_number", "INTEGER"],
     ["source_sync_run_id", "TEXT"],
   ]);
+  for (const statement of ADM_SYNC_EVENT_HASH_INDEX_STATEMENTS) {
+    await db.prepare(statement).run();
+  }
   await ensureMissingColumns(db, "player_profiles", [
     ["source_service_id", "TEXT"],
     ["highest_killstreak", "INTEGER DEFAULT 0"],
@@ -8712,12 +8717,13 @@ async function insertPlayerEvent(
   const result = await db
     .prepare(
       `INSERT OR IGNORE INTO player_events (
-        id, linked_server_id, source_service_id, source_sync_run_id, player_profile_id,
+        id, event_hash, linked_server_id, source_service_id, source_sync_run_id, player_profile_id,
         player_name, player_id, event_type, position_x, position_y, position_z,
         adm_file, source_adm_file, line_number, source_line_number, occurred_at, raw_line, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     )
     .bind(
+      id,
       id,
       context.linkedServerId,
       context.nitradoServiceId,
@@ -9219,13 +9225,14 @@ async function insertKillEvent(
   const result = await db
     .prepare(
       `INSERT OR IGNORE INTO kill_events (
-        id, linked_server_id, source_service_id, source_sync_run_id, killer_profile_id,
+        id, event_hash, linked_server_id, source_service_id, source_sync_run_id, killer_profile_id,
         victim_profile_id, killer_name, victim_name, killer_id, victim_id, weapon,
         distance, position_x, position_y, position_z, adm_file, source_adm_file,
         line_number, source_line_number, occurred_at, raw_line, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
     )
     .bind(
+      id,
       id,
       context.linkedServerId,
       context.nitradoServiceId,
@@ -11073,6 +11080,7 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
   )`,
   `CREATE TABLE IF NOT EXISTS player_events (
     id TEXT PRIMARY KEY,
+    event_hash TEXT,
     linked_server_id TEXT NOT NULL,
     player_profile_id TEXT,
     player_name TEXT,
@@ -11089,6 +11097,7 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
   )`,
   `CREATE TABLE IF NOT EXISTS kill_events (
     id TEXT PRIMARY KEY,
+    event_hash TEXT,
     linked_server_id TEXT NOT NULL,
     killer_profile_id TEXT,
     victim_profile_id TEXT,
@@ -11163,6 +11172,11 @@ const ADM_SYNC_SCHEMA_STATEMENTS = [
   "CREATE INDEX IF NOT EXISTS idx_sync_runs_linked_server_id ON sync_runs(linked_server_id)",
   "CREATE INDEX IF NOT EXISTS idx_sync_runs_created_at ON sync_runs(created_at)",
   "CREATE INDEX IF NOT EXISTS idx_sync_runs_status ON sync_runs(status)",
+];
+
+const ADM_SYNC_EVENT_HASH_INDEX_STATEMENTS = [
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_player_events_event_hash ON player_events(event_hash)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_kill_events_event_hash ON kill_events(event_hash)",
 ];
 
 const ADM_SYNC_SCOPE_INDEX_STATEMENTS = [

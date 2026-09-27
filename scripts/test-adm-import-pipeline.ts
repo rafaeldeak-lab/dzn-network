@@ -316,7 +316,17 @@ async function main() {
   });
 
   assert.equal(successResult.status, "completed");
+  const playerHashColumn = successDb.schemaQueries.indexOf("alter table player_events add column event_hash text");
+  const playerHashIndex = successDb.schemaQueries.indexOf("create unique index if not exists idx_player_events_event_hash on player_events(event_hash)");
+  const killHashColumn = successDb.schemaQueries.indexOf("alter table kill_events add column event_hash text");
+  const killHashIndex = successDb.schemaQueries.indexOf("create unique index if not exists idx_kill_events_event_hash on kill_events(event_hash)");
+  assert.equal(playerHashColumn >= 0 && playerHashIndex > playerHashColumn, true);
+  assert.equal(killHashColumn >= 0 && killHashIndex > killHashColumn, true);
   assert.equal(successDb.killEvents.length, 10);
+  assert.equal(successDb.playerEvents.every((event) => event.event_hash === event.id), true);
+  assert.equal(successDb.killEvents.every((event) => event.event_hash === event.id), true);
+  assert.equal(new Set(successDb.playerEvents.map((event) => event.event_hash)).size, successDb.playerEvents.length);
+  assert.equal(new Set(successDb.killEvents.map((event) => event.event_hash)).size, successDb.killEvents.length);
   assert.equal(successDb.playerEvents.filter((event) => event.event_type === "player_suicide").length, 2);
   assert.equal(successDb.playerEvents.filter((event) => event.event_type === "player_died_stats").length, 1);
   assert.equal(successDb.playerEvents.filter((event) => event.event_type === "player_hit").length, 3);
@@ -1539,6 +1549,7 @@ class MemoryD1 {
   failKillInsertAfter: number | null;
   failAutomationJobInsert: boolean;
   killInsertAttempts = 0;
+  schemaQueries: string[] = [];
 
   constructor(options: { failKillInsertAfter?: number | null; failAutomationJobInsert?: boolean } = {}) {
     this.failKillInsertAfter = options.failKillInsertAfter ?? null;
@@ -1562,7 +1573,10 @@ class MemoryStatement {
 
   async run(): Promise<RunResult> {
     const q = normalizeSql(this.query);
-    if (isSchemaQuery(q)) return changed(0);
+    if (isSchemaQuery(q)) {
+      this.db.schemaQueries.push(q);
+      return changed(0);
+    }
     if (q.startsWith("update adm_raw_events") || q.startsWith("update player_events") || q.startsWith("update kill_events") || q.startsWith("update player_profiles") || q.startsWith("update server_stats") || q.startsWith("update adm_sync_state") || q.startsWith("update sync_runs")) return changed(0);
     if (q.includes("insert into adm_build_reparse_state")) {
       const row = {
@@ -1660,18 +1674,19 @@ class MemoryStatement {
     }
     if (q.includes("insert or ignore into player_events")) return this.insertIgnore(this.db.playerEvents, {
       id: this.values[0],
-      linked_server_id: this.values[1],
-      source_service_id: this.values[2],
-      player_profile_id: this.values[4],
-      player_name: this.values[5],
-      player_id: this.values[6],
-      event_type: this.values[7],
-      adm_file: this.values[11],
-      source_adm_file: this.values[12],
-      line_number: this.values[13],
-      source_line_number: this.values[14],
-      occurred_at: this.values[15],
-      raw_line: this.values[16],
+      event_hash: this.values[1],
+      linked_server_id: this.values[2],
+      source_service_id: this.values[3],
+      player_profile_id: this.values[5],
+      player_name: this.values[6],
+      player_id: this.values[7],
+      event_type: this.values[8],
+      adm_file: this.values[12],
+      source_adm_file: this.values[13],
+      line_number: this.values[14],
+      source_line_number: this.values[15],
+      occurred_at: this.values[16],
+      raw_line: this.values[17],
     });
     if (q.includes("insert or ignore into build_events")) return this.insertIgnore(this.db.buildEvents, {
       id: this.values[0],
@@ -1697,22 +1712,23 @@ class MemoryStatement {
       }
       return this.insertIgnore(this.db.killEvents, {
         id: this.values[0],
-        linked_server_id: this.values[1],
-        source_service_id: this.values[2],
-        killer_profile_id: this.values[4],
-        victim_profile_id: this.values[5],
-        killer_name: this.values[6],
-        victim_name: this.values[7],
-        killer_id: this.values[8],
-        victim_id: this.values[9],
-        weapon: this.values[10],
-        distance: Number(this.values[11]),
-        adm_file: this.values[15],
-        source_adm_file: this.values[16],
-        line_number: this.values[17],
-        source_line_number: this.values[18],
-        occurred_at: this.values[19],
-        raw_line: this.values[20],
+        event_hash: this.values[1],
+        linked_server_id: this.values[2],
+        source_service_id: this.values[3],
+        killer_profile_id: this.values[5],
+        victim_profile_id: this.values[6],
+        killer_name: this.values[7],
+        victim_name: this.values[8],
+        killer_id: this.values[9],
+        victim_id: this.values[10],
+        weapon: this.values[11],
+        distance: Number(this.values[12]),
+        adm_file: this.values[16],
+        source_adm_file: this.values[17],
+        line_number: this.values[18],
+        source_line_number: this.values[19],
+        occurred_at: this.values[20],
+        raw_line: this.values[21],
       });
     }
     if (q.includes("insert into server_stats")) {
