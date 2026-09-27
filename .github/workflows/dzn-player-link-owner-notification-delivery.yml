@@ -60,6 +60,28 @@ jobs:
             exit 1
           fi
 
+          capability_status="$(curl --silent --show-error --output deployed-capability.json --write-out '%{http_code}' \
+            --request GET \
+            --header "x-dzn-cron-secret: ${CRON_SECRET}" \
+            "${endpoint}")"
+          if [ "${capability_status}" != "200" ]; then
+            echo "::error::The deployed endpoint does not expose the required one-message proof contract; received HTTP ${capability_status}."
+            exit 1
+          fi
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const capability = JSON.parse(fs.readFileSync("deployed-capability.json", "utf8"));
+          if (
+            capability.ok !== true ||
+            capability.proof_contract !== "owner_notification_single_delivery_v1" ||
+            capability.max_jobs_parameter !== true ||
+            capability.max_supported_jobs !== 5
+          ) {
+            throw new Error("The deployed endpoint has not confirmed the one-message proof contract.");
+          }
+          NODE
+
           authenticated_status="$(curl --silent --show-error --output delivery-result.json --write-out '%{http_code}' \
             --request POST \
             --header "x-dzn-cron-secret: ${CRON_SECRET}" \
@@ -95,6 +117,7 @@ jobs:
             echo ""
             echo "- Manual production confirmation: passed"
             echo "- Unauthenticated endpoint protection: HTTP 401"
+            echo "- Deployed one-message contract: confirmed before delivery"
             echo "- Queued owner notifications processed: 1"
             echo "- Discord deliveries confirmed: 1"
             echo "- Retries, failures and skips: 0"

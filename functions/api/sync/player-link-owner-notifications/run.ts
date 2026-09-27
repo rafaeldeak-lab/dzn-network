@@ -7,9 +7,23 @@ import {
 import type { PagesFunction } from "../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
-  if (request.method !== "POST") return methodNotAllowed();
+  if (request.method !== "POST" && request.method !== "GET") return methodNotAllowed();
   const unauthorized = requireCronSecret(request, env);
   if (unauthorized) return unauthorized;
+
+  if (request.method === "GET") {
+    return json({
+      ok: true,
+      proof_contract: "owner_notification_single_delivery_v1",
+      max_jobs_parameter: true,
+      max_supported_jobs: OWNER_REQUEST_NOTIFICATION_MAX_JOBS,
+    }, {
+      headers: {
+        "cache-control": "no-store, private",
+        "x-content-type-options": "nosniff",
+      },
+    });
+  }
 
   const body = await readBoundedJson<Record<string, unknown>>(request, 1024);
   if (!body.ok) return json(body, { status: body.status });

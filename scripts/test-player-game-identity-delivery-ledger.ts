@@ -8,6 +8,7 @@ import {
 import { OWNER_REQUEST_NOTIFICATION_MAX_JOBS } from "../functions/_lib/player-game-identity-owner-notifications";
 import { reviewPlayerGameIdentityClaim } from "../functions/_lib/player-game-identities";
 import { onRequest as runDeliveryQueue } from "../functions/api/sync/player-link-notifications/run";
+import { onRequest as runOwnerDeliveryQueue } from "../functions/api/sync/player-link-owner-notifications/run";
 import type { Env } from "../functions/_lib/types";
 import { identityTestUser, identityTransactionFixture } from "./test-player-game-identity-transactions";
 
@@ -38,12 +39,27 @@ export async function testPlayerGameIdentityDeliveryLedger() {
   assert.match(ownerRunnerSource, /requireCronSecret[\s\S]*dispatchQueuedOwnerRequestNotifications/, "Owner-request retries must use a separate protected runner and delivery budget.");
   assert.equal(OWNER_REQUEST_NOTIFICATION_MAX_JOBS, 5, "Restricted-channel verification must leave headroom under the Worker subrequest limit.");
   assert.match(ownerRunnerSource, /readBoundedJson<Record<string, unknown>>\(request, 1024\)/, "The protected owner runner must bound its control body.");
+  assert.match(ownerRunnerSource, /request\.method === "GET"[\s\S]*owner_notification_single_delivery_v1/, "The workflow must be able to prove the deployed one-message contract before causing delivery side effects.");
   assert.match(ownerRunnerSource, /body\.value\.max_jobs/, "The manual proof must be able to request exactly one owner delivery.");
   assert.match(ownerRunnerSource, /Math\.min\(Math\.trunc\(requestedJobs\), OWNER_REQUEST_NOTIFICATION_MAX_JOBS\)/, "Every requested owner batch must retain the restricted-channel subrequest ceiling.");
   const unavailableEnv = {
     DB: { prepare: () => ({ first: async () => null }) },
     DZN_CRON_SECRET: "unit-test-secret",
   } as unknown as Env;
+  const ownerCapability = await runOwnerDeliveryQueue({
+    request: new Request("https://dzn.test/api/sync/player-link-owner-notifications/run", {
+      method: "GET",
+      headers: { "x-dzn-cron-secret": "unit-test-secret" },
+    }),
+    env: unavailableEnv, params: {}, data: {}, waitUntil() {}, next: async () => new Response(null),
+  });
+  assert.equal(ownerCapability.status, 200);
+  assert.deepEqual(await ownerCapability.json(), {
+    ok: true,
+    proof_contract: "owner_notification_single_delivery_v1",
+    max_jobs_parameter: true,
+    max_supported_jobs: 5,
+  });
   const unauthorized = await runDeliveryQueue({
     request: new Request("https://dzn.test/api/sync/player-link-notifications/run", { method: "POST" }),
     env: unavailableEnv, params: {}, data: {}, waitUntil() {}, next: async () => new Response(null),
