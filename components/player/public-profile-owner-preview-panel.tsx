@@ -16,6 +16,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { publicGameplayPresentation } from "@/lib/public-profile-gameplay";
+import { publicMapLabel } from "@/lib/showcase-labels";
 
 type OwnerPreviewSection = {
   key: string;
@@ -283,7 +284,7 @@ export function PublicProfileOwnerPreviewPanel({
                 {previewState.data.sections.featured_server.server.server_name}
               </span>
               <span className="mt-2 block text-sm font-semibold leading-6 text-slate-300">
-                {previewState.data.sections.featured_server.server.server_type} - {previewState.data.sections.featured_server.server.platform ?? "Platform TBA"} - {previewState.data.sections.featured_server.server.map_name ?? "Map TBA"}
+                {previewState.data.sections.featured_server.server.server_type} - {previewState.data.sections.featured_server.server.platform ?? "Platform TBA"} - {publicMapLabel(previewState.data.sections.featured_server.server.map_name)}
               </span>
             </Link>
           ) : null}

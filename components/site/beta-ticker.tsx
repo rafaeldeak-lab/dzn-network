@@ -6,7 +6,7 @@ import { X } from "lucide-react";
 
 const STORAGE_KEY = "dzn:beta-ticker:hidden:v1";
 const TICKER_COPY =
-  "DZN Network is live and actively being improved - Player access is free; server-owner plans are listed on the Pricing page - Some features may change as the platform grows - Found a bug or have an idea? Send feedback";
+  "DZN Network is live and improving. Player access stays free.";
 
 export function BetaTicker() {
   const pathname = usePathname() ?? "";
@@ -44,12 +44,7 @@ export function BetaTicker() {
   return (
     <aside className="dzn-beta-ticker" aria-label="DZN Network beta notice">
       <div className="dzn-beta-ticker__badge">BETA</div>
-      <div className="dzn-beta-ticker__marquee" tabIndex={0}>
-        <div className="dzn-beta-ticker__track">
-          <span>{TICKER_COPY}</span>
-          <span aria-hidden="true">{TICKER_COPY}</span>
-        </div>
-      </div>
+      <p className="dzn-beta-ticker__copy">{TICKER_COPY}</p>
       <div className="dzn-beta-ticker__actions">
         <a href="mailto:feedback@dzn-network.com" className="dzn-beta-ticker__feedback">
           Send feedback

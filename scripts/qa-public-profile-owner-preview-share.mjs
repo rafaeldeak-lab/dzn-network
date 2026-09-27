@@ -28,7 +28,7 @@ const scenarios = {
     readyText: "Visitor Preview Ready",
     interactions: true,
     mustContain: [
-      "Personal Player Profile",
+      "Manage My Player Profile",
       "Profile Privacy Preferences",
       "How My Public Profile Looks",
       "Visitor Preview Ready",
@@ -63,7 +63,7 @@ const scenarios = {
     publicProfile: hiddenPublicProfilePayload(),
     readyText: "Hidden From Visitors",
     mustContain: [
-      "Personal Player Profile",
+      "Manage My Player Profile",
       "How My Public Profile Looks",
       "Hidden From Visitors",
       "Public Profile Hidden",
@@ -85,7 +85,7 @@ const scenarios = {
     publicProfile: hiddenPublicProfilePayload(),
     readyText: "Hidden From Visitors",
     mustContain: [
-      "Personal Player Profile",
+      "Manage My Player Profile",
       "How My Public Profile Looks",
       "Hidden From Visitors",
       "The public profile is currently hidden or unavailable to visitors.",
@@ -110,7 +110,7 @@ const scenarios = {
     },
     readyText: "Preview Unavailable",
     mustContain: [
-      "Personal Player Profile",
+      "Manage My Player Profile",
       "How My Public Profile Looks",
       "Preview Unavailable",
       "Public player profiles are unavailable right now.",
@@ -193,7 +193,7 @@ async function main() {
         mobile: Boolean(capture.mobile),
       });
 
-      await page.send("Page.navigate", { url: `${BASE_URL}/player/profile?qa=${capture.scenario}-${capture.viewport}` });
+      await page.send("Page.navigate", { url: `${BASE_URL}/player/profile?qa=${capture.scenario}-${capture.viewport}#profile-settings` });
       await waitForText(page, scenario.readyText);
 
       let interactionProof = null;
@@ -831,12 +831,14 @@ async function waitForHttp(url, timeoutMs, child = null) {
 async function waitForText(page, text, timeoutMs = 20_000) {
   const started = Date.now();
   const expected = text.toLowerCase();
+  let lastBodyText = "";
   while (Date.now() - started < timeoutMs) {
     const bodyText = (await pageText(page)).toLowerCase();
+    lastBodyText = bodyText;
     if (bodyText.includes(expected)) return;
     await delay(250);
   }
-  throw new Error(`Timed out waiting for text: ${text}`);
+  throw new Error(`Timed out waiting for text: ${text}. Page text: ${lastBodyText.slice(0, 1200)}`);
 }
 
 async function waitForAnyText(page, options, timeoutMs = 20_000) {

@@ -89,6 +89,7 @@ if (process.argv.includes("--serve")) {
         await page.waitForFunction(() => [...document.querySelectorAll('img[src*="/api/public/players/"]')].some(image => image.naturalWidth > 0));
         const layout = await page.evaluate(() => ({
           overflow: document.documentElement.scrollWidth > innerWidth,
+          playerPanelWidth: document.querySelector('.leaderboard-ref-area--players').getBoundingClientRect().width,
           tickerPosition: getComputedStyle(document.querySelector(".dzn-beta-ticker")).position,
           tickerBottom: document.querySelector(".dzn-beta-ticker").getBoundingClientRect().bottom,
           mainTop: document.querySelector("main").getBoundingClientRect().top,
@@ -97,6 +98,7 @@ if (process.argv.includes("--serve")) {
           avatarLoaded: [...document.querySelectorAll('img[src*="/api/public/players/"]')].some(e => e.naturalWidth > 0),
         }));
         assert.equal(layout.overflow, false, `Page overflow at ${width}`);
+        assert.ok(layout.playerPanelWidth >= width - 40, `Player panel must fill the narrow viewport at ${width}px; rendered ${layout.playerPanelWidth}px`);
         assert.equal(layout.tickerPosition, "relative");
         assert.ok(layout.tickerBottom <= layout.mainTop + 1, "Notice must precede content, never overlay it");
         assert.ok(layout.cells.every(c => c.label && c.display !== "none" && c.width > 0), "All original metrics remain visible and labelled");

@@ -35,6 +35,7 @@ const scenarios = {
       "Published Sections",
       "Earned Progression",
       "Fair Boundary",
+      "Share Profile",
       "Manage My Profile",
     ],
     mustNotContain: [
@@ -126,6 +127,7 @@ const scenarios = {
 const captures = [
   { scenario: "published", viewport: "desktop", width: 1440, height: 1100, path: "/players/preview" },
   { scenario: "published", viewport: "mobile", width: 390, height: 1280, mobile: true, path: "/players/preview" },
+  { scenario: "published", viewport: "narrow", width: 320, height: 1280, mobile: true, path: "/players/preview" },
   { scenario: "identityHidden", viewport: "desktop", width: 1440, height: 1100, path: "/players/preview" },
   { scenario: "hidden", viewport: "desktop", width: 1440, height: 900, path: "/players/preview" },
   { scenario: "unavailable", viewport: "desktop", width: 1440, height: 900, path: "/players/preview" },
