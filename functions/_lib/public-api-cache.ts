@@ -196,6 +196,8 @@ function accessLevelFromCacheKey(cacheKey: string): "preview" | "full" {
 function isVolatilePublicProfileLinkKey(key: string) {
   return key === "public_profile_handle"
     || key === "public_profile_href"
+    || key === "public_profile_avatar_url"
     || key === "player_public_profile_handle"
-    || key === "player_public_profile_href";
+    || key === "player_public_profile_href"
+    || key === "player_public_profile_avatar_url";
 }

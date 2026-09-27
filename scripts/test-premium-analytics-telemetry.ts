@@ -89,12 +89,14 @@ for (const snippet of [
 assert.deepEqual(normalizePublicLeaderboardOptions({}), {
   full: false,
   metric: "total_kills",
+  mode: "all",
   page: 1,
   pageSize: 10,
 });
 assert.deepEqual(normalizePublicLeaderboardOptions({ full: true, metric: "kd", page: 3, pageSize: 250 }), {
   full: true,
   metric: "kd_ratio",
+  mode: "all",
   page: 3,
   pageSize: 250,
 });

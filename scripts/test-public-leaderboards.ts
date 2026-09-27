@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { calculateKd, calculateServerScore, calculateServerScoreBreakdown, rankLongestKills, rankPublicPlayers, selectLatestKill } from "../functions/_lib/public-leaderboards";
+import { calculateKd, calculateServerScore, calculateServerScoreBreakdown, filterRankedPublicServersByMode, normalizePublicLeaderboardMode, rankLongestKills, rankPublicPlayers, selectLatestKill, type PublicLeaderboardServer } from "../functions/_lib/public-leaderboards";
 import { rankServers } from "../functions/_lib/server-ranking";
 
 const players = rankPublicPlayers([
@@ -139,6 +139,42 @@ const noDataServer = rankServers([
   { id: "pending", kills: 0, deaths: 0, uniquePlayers: 0, joins: 0, longestKill: 0, statsSyncActive: false, lastActivityAt: null },
 ])[0];
 assert.equal(noDataServer.score_label, "Pending");
+
+const globallyRankedServers: PublicLeaderboardServer[] = Array.from({ length: 12 }, (_, index) => ({
+  rank: index + 1,
+  server_id: `server-${index + 1}`,
+  server_name: `Server ${index + 1}`,
+  slug: `server-${index + 1}`,
+  mode: index === 10 ? "DEATHMATCH" : "SURVIVAL",
+  category: index === 10 ? "deathmatch" : "survival",
+  kills: 120 - index,
+  deaths: 40,
+  kd: 3,
+  kd_label: "3.00",
+  longest_kill: 100,
+  unique_players: 20,
+  joins: 50,
+  stats_sync_active: true,
+  score: 1000 - index,
+  score_label: String(1000 - index),
+  score_breakdown: null,
+}));
+const deathmatchOutsideTopTen = filterRankedPublicServersByMode(globallyRankedServers, "deathmatch", 10);
+assert.equal(deathmatchOutsideTopTen.length, 1, "Mode filtering must use the complete bounded ranked-server set.");
+assert.equal(deathmatchOutsideTopTen[0].rank, 11, "Mode filtering must preserve the server's global rank.");
+assert.equal(filterRankedPublicServersByMode(globallyRankedServers, "all", 10).length, 10);
+const canonicalCategoryDiffersFromDisplayMode: PublicLeaderboardServer = {
+  ...globallyRankedServers[0],
+  mode: "HARDCORE",
+  category: "pvp",
+};
+assert.equal(filterRankedPublicServersByMode([canonicalCategoryDiffersFromDisplayMode], "pvp", 10).length, 1, "Mode filters must use the canonical server category.");
+assert.equal(filterRankedPublicServersByMode([canonicalCategoryDiffersFromDisplayMode], "survival", 10).length, 0, "Display mode must not override the canonical category.");
+assert.equal(filterRankedPublicServersByMode([{ ...canonicalCategoryDiffersFromDisplayMode, category: "pve" }], "survival", 10).length, 1, "PvE is the canonical survival-focused category.");
+assert.equal(filterRankedPublicServersByMode([{ ...canonicalCategoryDiffersFromDisplayMode, category: "pvp_pve" }], "survival", 10).length, 1, "Hybrid PvP/PvE servers are eligible for survival rankings.");
+assert.equal(filterRankedPublicServersByMode([{ ...canonicalCategoryDiffersFromDisplayMode, category: "pvp" }], "survival", 10).length, 0, "PvP-only servers must not enter survival rankings.");
+assert.equal(normalizePublicLeaderboardMode("PvP"), "pvp");
+assert.equal(normalizePublicLeaderboardMode("unsupported"), "all");
 
 assert.equal(rankPublicPlayers([]).length, 0);
 

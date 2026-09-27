@@ -199,6 +199,19 @@ includesAll(leaderboards, [
   "saveLastGoodLeaderboard",
   "hasMeaningfulLeaderboard",
   "latestRequestId",
+  "useRef<AbortController | null>(null)",
+  "useRef<LeaderboardMode | null>(null)",
+  "const hasDisplayedPayload = payloadMode.current !== null",
+  "const hasAnyVisibleData = Boolean(cached) || hasDisplayedPayload",
+  "payloadMode.current === activeMode",
+  "displayedMode !== activeMode && !serverModeError",
+  "if (payloadMode.current !== activeMode)",
+  "setLoadState(visiblePayloadRef.current ? \"loaded\" : \"empty_real_data\")",
+  "if (mode === activeMode)",
+  "if (serverModeError) setReloadNonce((value) => value + 1)",
+  "key={`${name}:${avatarUrl ?? \"\"}`}",
+  "inFlight.current === controller",
+  "inFlight.current?.abort()",
   "fetchJsonWithRetry<LeaderboardsPayload>",
   "/api/public/leaderboards",
   "LEADERBOARD_LAST_GOOD_MAX_AGE_MS",
@@ -210,12 +223,10 @@ includesAll(leaderboards, [
   "leaderboard-ref-page",
   "leaderboard-ref-hero-art",
   "leaderboard-ref-stats",
-  "leaderboard-ref-grid",
   "leaderboard-ref-kill-card",
   "leaderboard-ref-kill-card-bg",
   "leaderboard-ref-kill-card-content",
   "leaderboard-reference-page",
-  "leaderboard-reference-grid",
   "leaderboard-reference-stat-grid",
   "leaderboard-reference-longest-card",
   "dzn-leaderboard-hero",
@@ -231,8 +242,12 @@ includesAll(leaderboards, [
   "Top Players",
   "Personal Bests",
   "Longest Kills",
-  "payload.top_servers.map",
+  "filteredServers.map",
   "payload.top_players.map",
+  "activeMode !== \"all\"",
+  "responsePayload.source === \"empty_no_cache\"",
+  "setServerModeError(`${formatModeFilter(activeMode)} rankings could not be loaded right now.`)",
+  "serverModeError ? (",
 ]);
 
 const authMeRoute = source("functions/api/auth/me.ts");
@@ -619,6 +634,6 @@ const mobileLeaderboards = source("app/leaderboards/page.tsx");
 assert.ok(mobileLeaderboards.includes("data-label={headers[cellIndex]}"), "Responsive rows need visible metric labels.");
 assert.ok(mobileLeaderboards.includes('aria-label="Personal best kills"'), "Records retain an accessible table name.");
 assert.equal(mobileLeaderboards.includes("useState(() => !loadLastGoodLeaderboard())"), false, "Cached results must wait until after hydration.");
-assert.ok(mobileLeaderboards.includes("if (cached && !visiblePayloadRef.current) setPayload(cached)"), "Last-good fallback is still restored after mount.");
+assert.ok(mobileLeaderboards.includes('if (cached && payloadMode.current !== "all")'), "The all-mode last-good fallback is still restored after mount.");
 
 console.log("Dashboard/public loading last-good and mobile presentation regression checks passed.");

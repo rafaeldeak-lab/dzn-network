@@ -2,6 +2,7 @@ import { getRankedBuildServers, type PublicBuildLeaderboardRow } from "./build-e
 import { requireDb } from "./db";
 import { readPublicProfileLinksByDiscordIds, type PublicProfileLink } from "./player-public-profiles";
 import { calculateServerScore, calculateServerScoreBreakdown, rankServers, type ServerScoreBreakdown } from "./server-ranking";
+import { normalizeServerCategoryFromRecord } from "./server-categories";
 import type { Env } from "./types";
 import {
   SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES,
@@ -28,6 +29,7 @@ export type PublicLeaderboardPlayer = {
   last_seen: string | null;
   public_profile_handle?: string | null;
   public_profile_href?: string | null;
+  public_profile_avatar_url?: string | null;
   highest_killstreak?: number;
   total_time_alive_seconds?: number;
   headshots?: number;
@@ -43,6 +45,7 @@ export type PublicLeaderboardServer = {
   server_name: string;
   slug: string | null;
   mode: string;
+  category: string;
   kills: number;
   deaths: number;
   kd: number | null;
@@ -67,6 +70,7 @@ export type PublicLongestKill = {
   occurred_at: string | null;
   player_public_profile_handle?: string | null;
   player_public_profile_href?: string | null;
+  player_public_profile_avatar_url?: string | null;
 };
 
 export type PublicKillHighlight = Omit<PublicLongestKill, "rank">;
@@ -89,6 +93,7 @@ type PublicServerStatRow = {
   server_name: string | null;
   slug: string | null;
   mode: string | null;
+  category: string | null;
   kills: number | null;
   deaths: number | null;
   unique_players: number | null;
@@ -144,6 +149,7 @@ export type PublicTelemetryLeaderboardRow = PublicLeaderboardPlayer & {
 export type PublicLeaderboardsOptions = {
   full?: boolean;
   metric?: string | null;
+  mode?: string | null;
   page?: number;
   pageSize?: number;
 };
@@ -179,7 +185,7 @@ export async function getPublicLeaderboardsPayload(env: Env, viewerLoggedIn = tr
   const selectedMetric = normalizeLeaderboardMetric(requestOptions.metric);
 
   const [topServers, topPlayers, killSummary, buildLeaderboard, playerLeaderboards, selectedMetricLeaderboard] = await Promise.all([
-    getRankedPublicServers(env, limit),
+    getRankedPublicServers(env, limit, requestOptions.mode),
     getTopPlayers(env, limit, undefined, offset),
     getLongestKillSummary(env, limit),
     getRankedBuildServers(env, limit),
@@ -239,7 +245,7 @@ async function ensurePublicLeaderboardSchema(env: Env) {
   void env;
 }
 
-export async function getRankedPublicServers(env: Env, limit: number) {
+export async function getRankedPublicServers(env: Env, limit: number, mode: PublicLeaderboardMode = "all") {
   const db = requireDb(env);
   const result = await db
     .prepare(
@@ -247,7 +253,8 @@ export async function getRankedPublicServers(env: Env, limit: number) {
         linked_servers.id AS server_id,
         COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
         linked_servers.public_slug AS slug,
-        COALESCE(NULLIF(linked_servers.server_mode, ''), linked_servers.server_type, 'UNKNOWN') AS mode,
+        COALESCE(NULLIF(linked_servers.server_mode, ''), NULLIF(linked_servers.server_type, ''), linked_servers.server_category, 'UNKNOWN') AS mode,
+        COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_type, ''), linked_servers.server_mode, 'UNKNOWN') AS category,
         (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id) AS kills,
         (
           (SELECT COUNT(*) FROM kill_events WHERE kill_events.linked_server_id = linked_servers.id AND kill_events.victim_name IS NOT NULL)
@@ -305,6 +312,7 @@ export async function getRankedPublicServers(env: Env, limit: number) {
       server_name: row.server_name ?? "Unnamed DZN Server",
       slug: row.slug,
       mode: normalizeMode(row.mode),
+      category: normalizeServerCategoryFromRecord({ server_category: row.category }) ?? normalizeMode(row.category),
       kills,
       deaths,
       kd: kd.value,
@@ -320,13 +328,14 @@ export async function getRankedPublicServers(env: Env, limit: number) {
     };
   });
 
-  return rankServers(candidates, limit).map((server) => {
+  const rankedServers = rankServers(candidates, 500).map((server) => {
     return {
       rank: server.rank,
       server_id: server.server_id,
       server_name: server.server_name,
       slug: server.slug,
       mode: server.mode,
+      category: server.category,
       kills: server.kills,
       deaths: server.deaths,
       kd: server.kd,
@@ -340,6 +349,14 @@ export async function getRankedPublicServers(env: Env, limit: number) {
       score_breakdown: server.score_breakdown,
     } satisfies PublicLeaderboardServer;
   });
+  return filterRankedPublicServersByMode(rankedServers, mode, limit);
+}
+
+export type PublicLeaderboardMode = "all" | "deathmatch" | "pvp" | "pve" | "survival";
+
+export function filterRankedPublicServersByMode(servers: PublicLeaderboardServer[], mode: PublicLeaderboardMode, limit: number) {
+  const queryLimit = Math.max(1, Math.min(Math.trunc(limit) || 10, 500));
+  return servers.filter((server) => matchesPublicLeaderboardMode(server.category, mode)).slice(0, queryLimit);
 }
 
 async function getTopPlayers(env: Env, limit: number, linkedServerId?: string, offset = 0, includeVerifiedLinks = true): Promise<PublicLeaderboardPlayer[]> {
@@ -572,6 +589,7 @@ export function rankPublicPlayers(
         last_seen: player.lastSeen ?? null,
         public_profile_handle: publicProfile?.handle ?? null,
         public_profile_href: publicProfile?.href ?? null,
+        public_profile_avatar_url: publicProfile?.avatar_url ?? null,
       } satisfies PublicLeaderboardPlayer;
     });
 }
@@ -611,6 +629,7 @@ export function rankLongestKills(
       occurred_at: row.occurred_at ?? null,
       player_public_profile_handle: row.discord_id ? publicProfileLinksByDiscordId.get(row.discord_id)?.handle ?? null : null,
       player_public_profile_href: row.discord_id ? publicProfileLinksByDiscordId.get(row.discord_id)?.href ?? null : null,
+      player_public_profile_avatar_url: row.discord_id ? publicProfileLinksByDiscordId.get(row.discord_id)?.avatar_url ?? null : null,
     } satisfies PublicLongestKill));
 }
 
@@ -706,9 +725,27 @@ export function normalizePublicLeaderboardOptions(options: PublicLeaderboardsOpt
   return {
     full,
     metric: normalizeLeaderboardMetric(options.metric),
+    mode: normalizePublicLeaderboardMode(options.mode),
     page,
     pageSize,
   };
+}
+
+export function normalizePublicLeaderboardMode(value: unknown): PublicLeaderboardMode {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "deathmatch" || normalized === "pvp" || normalized === "pve" || normalized === "survival"
+    ? normalized
+    : "all";
+}
+
+function matchesPublicLeaderboardMode(mode: string, filter: PublicLeaderboardMode) {
+  if (filter === "all") return true;
+  const category = normalizeServerCategoryFromRecord({ server_category: mode });
+  const normalized = mode.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  const tokens = normalized.trim().split(/\s+/);
+  if (filter === "deathmatch") return normalized.includes("deathmatch") || tokens.includes("dm");
+  if (filter === "survival") return category === "pve" || category === "pvp_pve";
+  return tokens.includes(filter);
 }
 
 async function getAllTelemetryLeaderboards(env: Env, limit: number, offset = 0) {
@@ -829,6 +866,7 @@ async function getTelemetryLeaderboard(env: Env, metric: PublicLeaderboardMetric
       spawn_kills_count: numberOrZero(row.spawn_kills_count),
       public_profile_handle: publicProfile?.handle ?? null,
       public_profile_href: publicProfile?.href ?? null,
+      public_profile_avatar_url: publicProfile?.avatar_url ?? null,
       metric,
       metric_value: metricValue,
       metric_label: formatMetricLabel(metric, metricValue),
@@ -878,6 +916,7 @@ function toKillHighlight(
     occurred_at: row.occurred_at ?? row.created_at ?? null,
     player_public_profile_handle: publicProfile?.handle ?? null,
     player_public_profile_href: publicProfile?.href ?? null,
+    player_public_profile_avatar_url: publicProfile?.avatar_url ?? null,
   };
 }
 

@@ -404,6 +404,7 @@ const leaderboardPreview = applyLeaderboardsAccess({
     server_name: `Server ${index + 1}`,
     slug: `server-${index + 1}`,
     mode: "PVP",
+    category: "pvp",
     kills: 10,
     deaths: 2,
     kd: 5,

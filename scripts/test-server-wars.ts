@@ -115,8 +115,8 @@ assert.match(cronRefresh, /runServerWarAutomationTick/);
 
 const leaderboardPage = readFileSync("app/leaderboards/page.tsx", "utf8");
 assert.match(leaderboardPage, /ServerWarsTeaser/);
-assert.match(leaderboardPage, /leaderboard-ref-grid/);
-assert.equal(leaderboardPage.lastIndexOf("leaderboard-ref-grid") < leaderboardPage.lastIndexOf("<ServerWarsTeaser"), true, "Core leaderboards should render before optional Server Wars.");
+assert.match(leaderboardPage, /leaderboard-ref-board-shell/);
+assert.equal(leaderboardPage.lastIndexOf("leaderboard-ref-board-shell") < leaderboardPage.lastIndexOf("<ServerWarsTeaser"), true, "Core leaderboards should render before optional Server Wars.");
 
 const serverWarsUi = readFileSync("components/server-wars/server-wars-platform.tsx", "utf8");
 assert.match(serverWarsUi, /Servers are the competitors/);
