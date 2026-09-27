@@ -11,6 +11,7 @@ import type { Env, PagesFunction, SessionUser } from "../functions/_lib/types";
 
 const user: SessionUser = { id: "owner", discord_id: "discord-owner", username: "Owner", avatar: null };
 const other: SessionUser = { id: "other", discord_id: "discord-other", username: "Other", avatar: null };
+const pulseProviderSource = readFileSync("components/dzn-pulse/dzn-pulse-provider.tsx", "utf8");
 
 async function fixture() {
   const { db, env } = createCheckoutFixture();
@@ -56,6 +57,11 @@ function assertNarrowWrites(statements: string[]) {
 }
 
 async function main() {
+  const markReadBlock = pulseProviderSource.slice(pulseProviderSource.indexOf("const markRead"), pulseProviderSource.indexOf("const markAllRead"));
+  assert.ok(markReadBlock.indexOf("fetchJsonWithRetry") < markReadBlock.indexOf("navigateToInternal(notification.action_url)"), "The unload-safe read receipt must start before notification navigation.");
+  assert.match(markReadBlock, /keepalive: Boolean\(notification\.action_url\)[\s\S]*void receipt\.catch\(\(\) => undefined\);[\s\S]*navigateToInternal\(notification\.action_url\)/, "Action notifications must keep the receipt alive without delaying navigation.");
+  assert.equal(markReadBlock.match(/navigateToInternal\(notification\.action_url\)/g)?.length, 1, "A successful read receipt must navigate exactly once.");
+  assert.ok(markReadBlock.indexOf("fetchJsonWithRetry") > markReadBlock.indexOf("const wasUnread"), "Opening an already-read notification must still call the individual read endpoint so opened_at is recorded.");
   const originalFetch = globalThis.fetch;
   let providerCalls = 0;
   globalThis.fetch = async () => { providerCalls++; throw new Error("No provider, analytics, email or Discord calls allowed"); };
@@ -100,7 +106,14 @@ async function main() {
       assert.equal(await countUnreadNotifications(env, other), 0);
       assert.equal((await markNotificationRead(env, other, items.items[0].id)).status, 404);
       assert.equal(await countUnreadNotifications(env, user), 1);
-      assert.equal((await markNotificationRead(env, user, items.items[0].id)).status, 200);
+      const opened = await markNotificationRead(env, user, items.items[0].id);
+      assert.equal(opened.status, 200);
+      const openedMetadata = JSON.parse(String(db.sqlite.prepare("SELECT metadata FROM user_notifications WHERE id = ?").get(items.items[0].id)?.metadata ?? "{}"));
+      assert.equal(typeof openedMetadata.opened_at, "string", "Opening one notification records a first-open timestamp");
+      const firstOpenedAt = openedMetadata.opened_at;
+      await markNotificationRead(env, user, items.items[0].id);
+      const reopenedMetadata = JSON.parse(String(db.sqlite.prepare("SELECT metadata FROM user_notifications WHERE id = ?").get(items.items[0].id)?.metadata ?? "{}"));
+      assert.equal(reopenedMetadata.opened_at, firstOpenedAt, "Reopening preserves the first-open timestamp");
       assert.equal(await countUnreadNotifications(env, user), 0);
       assert.equal((await clearReadNotifications(env, other)).cleared, 0);
       assert.equal((await clearReadNotifications(env, user)).cleared, 1);
@@ -171,6 +184,12 @@ async function main() {
       assert.equal((await listUserNotifications(env, user, { filter: "billing" })).items.length, 1);
       await markAllNotificationsRead(env, user);
       assert.equal(await countUnreadNotifications(env, user), 0);
+      const bulkReadMetadata = db.sqlite.prepare("SELECT metadata FROM user_notifications WHERE id = 'news'").get()?.metadata;
+      assert.equal(JSON.parse(String(bulkReadMetadata ?? "{}")).opened_at, undefined, "Bulk read does not claim the notice was opened");
+      assert.equal(pulseProviderSource.includes("if (notification.read_at) {"), false, "Clicking an already-read notification must still record its first open.");
+      await markNotificationRead(env, user, "news");
+      const openedAfterBulkRead = db.sqlite.prepare("SELECT metadata FROM user_notifications WHERE id = 'news'").get()?.metadata;
+      assert.equal(typeof JSON.parse(String(openedAfterBulkRead ?? "{}")).opened_at, "string", "Opening after mark-all-read records the first-open timestamp");
       assert.equal((await clearReadNotifications(env, user)).cleared, 2);
       assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM user_notifications").get()?.n, 1);
       assertNarrowWrites(db.statements); db.sqlite.close(); cases++;

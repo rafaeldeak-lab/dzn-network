@@ -95,7 +95,8 @@ const botStatusSource = readFileSync("functions/api/discord/bot-status.ts", "utf
 assert.equal(botStatusSource.includes("DISCORD_BOT_TOKEN"), true);
 assert.equal(botStatusSource.includes("fetchDiscordPostingChannels"), true);
 assert.equal(botStatusSource.includes("bot_not_in_guild"), true);
-assert.equal(botStatusSource.includes("permissions\", \"8\""), true);
+assert.equal(botStatusSource.includes("DZN_BOT_INSTALL_PERMISSIONS"), true);
+assert.equal(botStatusSource.includes('permissions", "8"'), false, "Bot installs must not request Administrator.");
 assert.equal(botStatusSource.includes("channels_fetched_count"), true);
 assert.equal(botStatusSource.includes("postable_channels_count"), true);
 assert.equal(botStatusSource.includes("canManageDiscordGuild"), true);
