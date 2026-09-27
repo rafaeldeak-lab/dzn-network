@@ -50,6 +50,15 @@ export async function resolveOwnerRequestNotificationRecipients(env: Env, server
   ).bind(serverOwnerUserId).first<{ id: string; discord_id: string | null }>();
   if (owner?.discord_id) recipients.set(owner.id, { userId: owner.id, discordId: owner.discord_id });
 
+  for (const recipient of await resolvePlatformAdminNotificationRecipients(env)) {
+    recipients.set(recipient.userId, recipient);
+  }
+  return [...recipients.values()];
+}
+
+async function resolvePlatformAdminNotificationRecipients(env: Env) {
+  const db = requireDb(env);
+  const recipients: OwnerRequestNotificationRecipient[] = [];
   const platformDiscordIds = parsePlatformOwnerDiscordIds(env.DZN_PLATFORM_OWNER_DISCORD_IDS);
   if (platformDiscordIds.length) {
     const rows = await db.prepare(
@@ -57,11 +66,11 @@ export async function resolveOwnerRequestNotificationRecipients(env: Env, server
     ).bind(...platformDiscordIds).all<{ id: string; discord_id: string }>();
     for (const row of rows.results ?? []) {
       if (row.discord_id && isDznAdminDiscordId(env, row.discord_id)) {
-        recipients.set(row.id, { userId: row.id, discordId: row.discord_id });
+        recipients.push({ userId: row.id, discordId: row.discord_id });
       }
     }
   }
-  return [...recipients.values()];
+  return recipients;
 }
 
 export function prepareOwnerRequestWebsiteNotification(
@@ -71,8 +80,9 @@ export function prepareOwnerRequestWebsiteNotification(
   return db.prepare(
     `INSERT INTO user_notifications (
       id, user_id, server_id, type, title, body, action_url, priority, dedupe_key, metadata, created_at, expires_at
-    ) VALUES (?, ?, NULL, 'player_link_review_requested', 'Player stat link needs review', ?,
-      '/owner/player-game-identity-claims', 750, ?, ?, CURRENT_TIMESTAMP, datetime('now', '+90 days'))
+    ) SELECT ?, ?, NULL, 'player_link_review_requested', 'Player stat link needs review', ?,
+      '/owner/player-game-identity-claims', 750, ?, ?, CURRENT_TIMESTAMP, datetime('now', '+90 days')
+    WHERE EXISTS (SELECT 1 FROM player_game_identity_claims WHERE id=? AND status='pending')
     ON CONFLICT(user_id, dedupe_key) DO UPDATE SET
       title=excluded.title, body=excluded.body, action_url=excluded.action_url, priority=excluded.priority,
       metadata=excluded.metadata, read_at=NULL, created_at=CURRENT_TIMESTAMP, expires_at=datetime('now', '+90 days')
@@ -83,6 +93,7 @@ export function prepareOwnerRequestWebsiteNotification(
     `${safeText(input.requesterName)} asked to link the ${safeText(input.playerName)} profile on ${safeText(input.serverName)}. The gamertag is only a candidate; verify ownership before deciding.`,
     `player-link-review:${input.claimId}:${input.recipient.userId}`,
     JSON.stringify({ claim_id: input.claimId, request_kind: "stat_link_review" }),
+    input.claimId,
   );
 }
 
@@ -94,14 +105,16 @@ export function prepareOwnerRequestDiscordDelivery(
     `INSERT INTO player_game_identity_owner_notification_deliveries (
       id, claim_id, recipient_user_id, recipient_discord_id, linked_server_id, status,
       attempt_count, next_attempt_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, 'queued', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ) SELECT ?, ?, ?, ?, ?, 'queued', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+    WHERE EXISTS (SELECT 1 FROM player_game_identity_claims WHERE id=? AND status='pending')
     ON CONFLICT(claim_id, recipient_user_id) DO UPDATE SET
       recipient_discord_id=excluded.recipient_discord_id, linked_server_id=excluded.linked_server_id,
       status='queued', attempt_count=0, next_attempt_at=CURRENT_TIMESTAMP, last_attempt_at=NULL,
       delivered_at=NULL, result_code=NULL, lease_id=NULL, lease_expires_at=NULL, updated_at=CURRENT_TIMESTAMP
-    WHERE player_game_identity_owner_notification_deliveries.status='skipped'
-      AND player_game_identity_owner_notification_deliveries.result_code='recipient_no_longer_authorized'`,
-  ).bind(input.id, input.claimId, input.recipient.userId, input.recipient.discordId, input.linkedServerId);
+    WHERE (player_game_identity_owner_notification_deliveries.status='skipped'
+      AND player_game_identity_owner_notification_deliveries.result_code='recipient_no_longer_authorized')
+      OR player_game_identity_owner_notification_deliveries.recipient_discord_id<>excluded.recipient_discord_id`,
+  ).bind(input.id, input.claimId, input.recipient.userId, input.recipient.discordId, input.linkedServerId, input.claimId);
 }
 
 export async function dispatchQueuedOwnerRequestNotifications(
@@ -191,14 +204,16 @@ export async function dispatchQueuedOwnerRequestNotifications(
           `UPDATE user_notifications
            SET read_at=COALESCE(read_at, CURRENT_TIMESTAMP), expires_at=CURRENT_TIMESTAMP,
                metadata=json_set(COALESCE(metadata, '{}'), '$.review_status', 'recipient_no_longer_authorized', '$.terminalized_at', CURRENT_TIMESTAMP)
-           WHERE user_id=? AND dedupe_key=?`,
-        ).bind(row.recipient_user_id, `player-link-review:${row.claim_id}:${row.recipient_user_id}`),
+           WHERE user_id=? AND dedupe_key=?
+             AND EXISTS (SELECT 1 FROM player_game_identity_claims WHERE id=? AND status='pending')`,
+        ).bind(row.recipient_user_id, `player-link-review:${row.claim_id}:${row.recipient_user_id}`, row.claim_id),
         db.prepare(
           `UPDATE player_game_identity_owner_notification_deliveries
            SET status='skipped', result_code='recipient_no_longer_authorized', lease_id=NULL, lease_expires_at=NULL,
               updated_at=CURRENT_TIMESTAMP
-           WHERE id=? AND lease_id=? AND status='processing'`,
-        ).bind(row.id, leaseId),
+           WHERE id=? AND lease_id=? AND status='processing'
+             AND EXISTS (SELECT 1 FROM player_game_identity_claims WHERE id=? AND status='pending')`,
+        ).bind(row.id, leaseId, row.claim_id),
       );
       await db.batch(statements);
       skipped++;
@@ -223,6 +238,34 @@ export async function dispatchQueuedOwnerRequestNotifications(
 
 async function reconcilePendingOwnerRequestRecipients(env: Env, maxClaims: number) {
   const db = requireDb(env);
+  const platformRecipients = await resolvePlatformAdminNotificationRecipients(env);
+  const platformIds = platformRecipients.map((recipient) => recipient.userId);
+  const platformPlaceholders = platformIds.map(() => "?").join(", ");
+  const formerDeliveryScope = platformIds.length
+    ? `AND current_delivery.recipient_user_id NOT IN (${platformPlaceholders})`
+    : "";
+  const formerAlertScope = platformIds.length
+    ? `AND current_alert.user_id NOT IN (${platformPlaceholders})`
+    : "";
+  const missingPlatformConditions = platformRecipients.map(() => `
+         OR NOT EXISTS (
+           SELECT 1 FROM player_game_identity_owner_notification_deliveries platform_delivery
+           WHERE platform_delivery.claim_id=c.id AND platform_delivery.recipient_user_id=?
+             AND platform_delivery.recipient_discord_id=?
+             AND NOT (platform_delivery.status='skipped' AND platform_delivery.result_code='recipient_no_longer_authorized')
+         )
+         OR NOT EXISTS (
+           SELECT 1 FROM user_notifications platform_alert
+           WHERE platform_alert.user_id=?
+             AND platform_alert.dedupe_key=('player-link-review:' || c.id || ':' || ?)
+             AND datetime(platform_alert.expires_at) > datetime('now')
+         )`).join("");
+  const bindings: unknown[] = [
+    ...platformIds,
+    ...platformIds,
+    ...platformRecipients.flatMap((recipient) => [recipient.userId, recipient.discordId, recipient.userId, recipient.userId]),
+    maxClaims,
+  ];
   const claims = await db.prepare(
     `SELECT c.id AS claim_id, c.linked_server_id, s.user_id AS server_owner_user_id,
             COALESCE(NULLIF(s.display_name,''), NULLIF(s.hostname,''), s.server_name, s.nitrado_service_name) AS server_name,
@@ -237,6 +280,7 @@ async function reconcilePendingOwnerRequestRecipients(env: Env, maxClaims: numbe
          NOT EXISTS (
            SELECT 1 FROM player_game_identity_owner_notification_deliveries current_delivery
            WHERE current_delivery.claim_id=c.id AND current_delivery.recipient_user_id=s.user_id
+             AND current_delivery.recipient_discord_id=owner_user.discord_id
              AND NOT (current_delivery.status='skipped' AND current_delivery.result_code='recipient_no_longer_authorized')
          )
          OR NOT EXISTS (
@@ -245,10 +289,25 @@ async function reconcilePendingOwnerRequestRecipients(env: Env, maxClaims: numbe
              AND current_alert.dedupe_key=('player-link-review:' || c.id || ':' || s.user_id)
              AND datetime(current_alert.expires_at) > datetime('now')
          )
+         OR EXISTS (
+           SELECT 1 FROM player_game_identity_owner_notification_deliveries current_delivery
+           WHERE current_delivery.claim_id=c.id AND current_delivery.recipient_user_id<>s.user_id
+             ${formerDeliveryScope}
+             AND NOT (current_delivery.status='skipped' AND current_delivery.result_code='recipient_no_longer_authorized')
+         )
+         OR EXISTS (
+           SELECT 1 FROM user_notifications current_alert
+           WHERE current_alert.type='player_link_review_requested'
+             AND json_extract(current_alert.metadata, '$.claim_id')=c.id
+             AND current_alert.user_id<>s.user_id
+             ${formerAlertScope}
+             AND datetime(current_alert.expires_at) > datetime('now')
+         )
+         ${missingPlatformConditions}
        )
      ORDER BY datetime(c.created_at), c.id
      LIMIT ?`,
-  ).bind(maxClaims).all<PendingOwnerReconciliationRow>();
+  ).bind(...bindings).all<PendingOwnerReconciliationRow>();
 
   for (const claim of claims.results ?? []) {
     const recipients = await resolveOwnerRequestNotificationRecipients(env, claim.server_owner_user_id);
@@ -278,14 +337,16 @@ async function reconcilePendingOwnerRequestRecipients(env: Env, maxClaims: numbe
              metadata=json_set(COALESCE(metadata, '{}'), '$.review_status', 'recipient_no_longer_authorized', '$.terminalized_at', CURRENT_TIMESTAMP)
          WHERE type='player_link_review_requested'
            AND json_extract(metadata, '$.claim_id')=?
-           AND user_id NOT IN (${placeholders})`,
-      ).bind(claim.claim_id, ...recipientIds),
+           AND user_id NOT IN (${placeholders})
+           AND EXISTS (SELECT 1 FROM player_game_identity_claims WHERE id=? AND status='pending')`,
+      ).bind(claim.claim_id, ...recipientIds, claim.claim_id),
       db.prepare(
         `UPDATE player_game_identity_owner_notification_deliveries
          SET status='skipped', result_code='recipient_no_longer_authorized', lease_id=NULL, lease_expires_at=NULL,
              updated_at=CURRENT_TIMESTAMP
-         WHERE claim_id=? AND recipient_user_id NOT IN (${placeholders})`,
-      ).bind(claim.claim_id, ...recipientIds),
+         WHERE claim_id=? AND recipient_user_id NOT IN (${placeholders})
+           AND EXISTS (SELECT 1 FROM player_game_identity_claims WHERE id=? AND status='pending')`,
+      ).bind(claim.claim_id, ...recipientIds, claim.claim_id),
     );
     await db.batch(statements);
   }

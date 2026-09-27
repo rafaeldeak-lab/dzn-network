@@ -232,6 +232,16 @@ export async function testPlayerGameIdentityTransactions() {
     assert.equal(discordBodies.length, 2);
     assert.ok(discordBodies.every((body) => String(body.content).includes("not proof they played or own the profile")));
     assert.ok(discordBodies.every((body) => !String(body.content).includes("game-a")));
+    ownerNotifications.env.DZN_ADMIN_DISCORD_IDS = "removed-admin";
+    const removedPlatformAdmin = await dispatchQueuedOwnerRequestNotifications(ownerNotifications.env, { maxJobs: 1 });
+    assert.equal(removedPlatformAdmin.processed, 0, "Removing platform review access must not send another notification.");
+    const removedPlatformAlert = ownerNotifications.sqlite.prepare("SELECT read_at,expires_at FROM user_notifications WHERE user_id='platform-owner'").get();
+    assert.ok(removedPlatformAlert?.read_at && removedPlatformAlert.expires_at, "A removed platform admin must lose the actionable website alert.");
+    assert.equal(ownerNotifications.sqlite.prepare("SELECT result_code FROM player_game_identity_owner_notification_deliveries WHERE recipient_user_id='platform-owner'").get()?.result_code, "recipient_no_longer_authorized");
+    ownerNotifications.env.DZN_ADMIN_DISCORD_IDS = "999999999999999999";
+    const restoredPlatformAdmin = await dispatchQueuedOwnerRequestNotifications(ownerNotifications.env, { maxJobs: 1 });
+    assert.equal(restoredPlatformAdmin.delivered, 1, "A newly restored platform admin must receive the pending review request.");
+    assert.equal(ownerNotifications.sqlite.prepare("SELECT read_at FROM user_notifications WHERE user_id='platform-owner'").get()?.read_at, null);
     ownerNotifications.sqlite.exec("UPDATE linked_servers SET user_id='owner-b' WHERE id='server-a'");
     const deliveredOwnershipChanged = await dispatchQueuedOwnerRequestNotifications(ownerNotifications.env, { maxJobs: 1 });
     assert.equal(deliveredOwnershipChanged.delivered, 1, "A delivered pending claim must be reconciled and sent to a new current owner.");
@@ -291,6 +301,13 @@ export async function testPlayerGameIdentityTransactions() {
     assert.ok(new Date(String(restoredOwnerAlert?.expires_at)).getTime() > Date.now(), "A returning owner's website alert must receive a fresh expiry.");
     const supersededOwnerAlert = ownerNotifications.sqlite.prepare("SELECT read_at,expires_at FROM user_notifications WHERE user_id='owner-b' AND type='player_link_review_requested'").get();
     assert.ok(supersededOwnerAlert?.read_at && supersededOwnerAlert.expires_at, "The superseded owner's website alert must be expired.");
+    ownerNotifications.sqlite.exec("UPDATE user_notifications SET read_at=CURRENT_TIMESTAMP, expires_at=CURRENT_TIMESTAMP WHERE user_id='owner-a' AND type='player_link_review_requested'");
+    ownerNotifications.setBeforeBatch(() => ownerNotifications.sqlite.exec(`UPDATE player_game_identity_claims SET status='rejected' WHERE id='${result.ok ? result.claim.id : "missing"}'`));
+    const resolvedDuringReconciliation = await dispatchQueuedOwnerRequestNotifications(ownerNotifications.env, { maxJobs: 1 });
+    assert.equal(resolvedDuringReconciliation.processed, 0, "A claim resolved between reconciliation selection and writes must not reopen delivery.");
+    const guardedAlert = ownerNotifications.sqlite.prepare("SELECT read_at,expires_at FROM user_notifications WHERE user_id='owner-a' AND type='player_link_review_requested'").get();
+    assert.ok(guardedAlert?.read_at && new Date(String(guardedAlert.expires_at)).getTime() <= Date.now(), "Reconciliation must not reopen a resolved claim alert.");
+    ownerNotifications.sqlite.exec(`UPDATE player_game_identity_claims SET status='pending' WHERE id='${result.ok ? result.claim.id : "missing"}'`);
     const rejected = await reviewPlayerGameIdentityClaim(ownerNotifications.env, owner, result.ok ? result.claim.id : "missing", { action: "reject" });
     assert.equal(rejected.status, 200);
     const resolvedNotices = ownerNotifications.sqlite.prepare(
