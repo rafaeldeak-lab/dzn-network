@@ -3,6 +3,7 @@ import "./test-public-profile-gameplay-presentation";
 import { readFileSync } from "node:fs";
 
 import { onRequest as publicProfileRoute } from "../functions/api/public/players/[handle]";
+import { onRequest as publicAvatarRoute } from "../functions/api/public/players/[handle]/avatar";
 import {
   ensureCurrentPublicProfileHandle,
   normalizePublicProfileHandle,
@@ -221,6 +222,39 @@ async function testPublicProfileRuntimeContract() {
   const blockedPost = await callPublicProfileRoute(db, generated.handle, "POST");
   assert.equal(blockedPost.status, 405, "Public profile routes must reject mutations.");
 
+  const avatarPost = await callPublicAvatarRoute(db, generated.handle, "POST");
+  assert.equal(avatarPost.status, 405, "Public avatar routes must reject mutations before reading profile data.");
+
+  db.preferences.set("user-1", preferenceRow({ public_profile_enabled: 1, show_display_name: 0 }));
+  let avatarFetches = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    avatarFetches++;
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/webp" } });
+  }) as typeof fetch;
+  try {
+    const privateAvatar = await callPublicAvatarRoute(db, generated.handle);
+    assert.equal(privateAvatar.status, 404, "Hidden Discord identity must use the same public-safe 404 as a missing avatar.");
+    assert.equal(avatarFetches, 0, "A hidden avatar must not trigger an upstream Discord request.");
+
+    db.preferences.set("user-1", preferenceRow({ public_profile_enabled: 1, show_display_name: 1 }));
+    const publicAvatar = await callPublicAvatarRoute(db, generated.handle);
+    assert.equal(publicAvatar.status, 200, "An opted-in Discord avatar must stream through the DZN proxy.");
+    assert.equal(publicAvatar.headers.get("content-type"), "image/webp");
+    assert.match(publicAvatar.headers.get("cache-control") ?? "", /no-store/);
+    assert.equal(publicAvatar.headers.get("x-content-type-options"), "nosniff");
+    assert.deepEqual([...new Uint8Array(await publicAvatar.arrayBuffer())], [1, 2, 3]);
+
+    globalThis.fetch = (async () => new Response("not an image", { headers: { "content-type": "text/plain" } })) as typeof fetch;
+    assert.equal((await callPublicAvatarRoute(db, generated.handle)).status, 404, "Non-image upstream responses must not be proxied.");
+    globalThis.fetch = (async () => new Response(null, { status: 502 })) as typeof fetch;
+    assert.equal((await callPublicAvatarRoute(db, generated.handle)).status, 404, "Failed upstream avatar responses must not expose Discord details.");
+    globalThis.fetch = (async () => { throw new Error("upstream unavailable"); }) as typeof fetch;
+    assert.equal((await callPublicAvatarRoute(db, generated.handle)).status, 503, "Unexpected upstream failures must use a private transient error.");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
   assert.deepEqual([...db.writeTargets], ["player_public_profiles"], "Runtime writes must be limited to generated public profile handles.");
   assert.deepEqual(db.protectedWrites, [], "Public profile runtime must not write billing, owner, review, event, scoring, award, or competitive tables.");
   assertProtectedTablesWereNotQueried(db);
@@ -233,6 +267,21 @@ async function callPublicProfileRoute(
 ) {
   return publicProfileRoute({
     request: new Request(`https://dzn.test/api/public/players/${handle}`, { method }),
+    env: { DB: db } as unknown as Env,
+    params: { handle },
+    data: {},
+    waitUntil: () => undefined,
+    next: async () => new Response(null, { status: 404 }),
+  } satisfies PagesContext) as Promise<Response>;
+}
+
+async function callPublicAvatarRoute(
+  db: FakePublicProfileD1,
+  handle: string,
+  method: "GET" | "POST" = "GET",
+) {
+  return publicAvatarRoute({
+    request: new Request(`https://dzn.test/api/public/players/${handle}/avatar`, { method }),
     env: { DB: db } as unknown as Env,
     params: { handle },
     data: {},

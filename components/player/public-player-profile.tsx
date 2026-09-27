@@ -97,8 +97,8 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
               <p className="mt-1 text-sm font-bold text-cyan-100">@{data.handle}</p>
               <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-bold uppercase text-slate-200">
                 <span className="inline-flex items-center gap-2"><Gamepad2 aria-hidden="true" className="h-4 w-4 text-cyan-300" /> DZN Player</span>
-                <span className="inline-flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Discord connected</span>
-                <span className="inline-flex items-center gap-2"><CalendarDays aria-hidden="true" className="h-4 w-4 text-violet-300" /> Joined {formatMonthYear(data.published_at)}</span>
+                {data.discord_profile.connected ? <span className="inline-flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Discord connected</span> : null}
+                <span className="inline-flex items-center gap-2"><CalendarDays aria-hidden="true" className="h-4 w-4 text-violet-300" /> Profile published {formatMonthYear(data.published_at)}</span>
               </div>
             </div>
           </div>
@@ -146,7 +146,7 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
           </ProfileBand>
         </div>
         <aside className="space-y-4">
-          <ProfileBand icon={<ShieldCheck aria-hidden="true" className="h-5 w-5" />} title="Connected Discord" visible={data.discord_profile.visible}>
+          <ProfileBand icon={<ShieldCheck aria-hidden="true" className="h-5 w-5" />} title="Connected Discord" visible={data.discord_profile.visible && data.discord_profile.connected}>
             <div className="flex items-center gap-3"><div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-indigo-300/35 bg-indigo-400/15 text-lg font-black text-indigo-100">{initial}</div><div className="min-w-0"><p className="truncate font-black text-white">{data.display_name}</p><p className="mt-1 inline-flex items-center gap-2 text-xs font-bold text-emerald-200"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Account connected</p></div></div>
           </ProfileBand>
           <ProfileBand icon={<EyeOff aria-hidden="true" className="h-5 w-5" />} title="Published Sections" visible>
