@@ -66,6 +66,13 @@ type EventRow = {
   match_count: number | null;
 };
 
+type EventSummaryRow = {
+  active_events: number | null;
+  upcoming_events: number | null;
+  completed_events: number | null;
+  registered_servers: number | null;
+};
+
 type EventServerRow = {
   id: string;
   server_id: string;
@@ -373,8 +380,8 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
     conditions.push("event_type = ?");
     bindings.push(type);
   }
-  const result = await db
-    .prepare(
+  const [result, summaryRow] = await Promise.all([
+    db.prepare(
       `SELECT ${EVENT_PUBLIC_SELECT_COLUMNS},
               (SELECT COUNT(*) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS registered_servers,
               (SELECT COALESCE(SUM(score), 0) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id) AS total_score,
@@ -392,9 +399,28 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
        LIMIT ?`,
     )
     .bind(...bindings, limit)
-    .all<EventRow>();
+    .all<EventRow>(),
+    db.prepare(
+      `SELECT
+         SUM(CASE WHEN lower(COALESCE(status, 'draft')) = 'live' THEN 1 ELSE 0 END) AS active_events,
+         SUM(CASE WHEN lower(COALESCE(status, 'draft')) IN ('upcoming', 'registration_open', 'standby') THEN 1 ELSE 0 END) AS upcoming_events,
+         SUM(CASE WHEN lower(COALESCE(status, 'draft')) = 'ended' THEN 1 ELSE 0 END) AS completed_events,
+         COALESCE(SUM((SELECT COUNT(*) FROM competitive_event_servers WHERE competitive_event_servers.event_id = competitive_events.id)), 0) AS registered_servers
+       FROM competitive_events
+       WHERE ${conditions.join(" AND ")}`,
+    )
+    .bind(...bindings)
+    .first<EventSummaryRow>(),
+  ]);
   const events = (result.results ?? []).map(toEventSummary);
   const visibleEvents = events.length ? events : filterDemoEvents(options, limit);
+  const liveSummary = summaryRow ? {
+    active_events: Number(summaryRow.active_events ?? 0),
+    upcoming_events: Number(summaryRow.upcoming_events ?? 0),
+    completed_events: Number(summaryRow.completed_events ?? 0),
+    registered_servers: Number(summaryRow.registered_servers ?? 0),
+    total_participants: Number(summaryRow.registered_servers ?? 0),
+  } : null;
   return {
     ok: true,
     generated_at: new Date().toISOString(),
@@ -404,7 +430,7 @@ export async function getEventsListPayload(env: Env, viewer: SessionUser | null,
     categoryFilters: SERVER_CATEGORIES.map((value) => ({ value, label: getServerCategoryLabel(value) })),
     statusFilters: PUBLIC_EVENT_STATUSES.map((value) => ({ value, label: eventStatusLabel(value) })),
     typeFilters: EVENT_TYPES.map((value) => ({ value, label: eventTypeLabel(value) })),
-    summary: summarizeEvents(visibleEvents),
+    summary: events.length && liveSummary ? liveSummary : summarizeEvents(visibleEvents),
     events: visibleEvents,
   };
 }

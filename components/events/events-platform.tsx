@@ -356,10 +356,10 @@ export function EventsHubPage() {
       <StaleNotice state={loadState} source={data.source} />
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
         <FeaturedEventStage event={featured} />
-        <LiveEventsRail events={(active.length ? active : data.events).slice(0, 3)} />
+        <LiveEventsRail events={active.slice(0, 3)} />
       </div>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.15fr)_320px]">
-        <UpcomingEventsPanel events={(upcoming.length ? upcoming : data.events).slice(0, 3)} />
+        <UpcomingEventsPanel events={upcoming.slice(0, 3)} />
         <BracketPreviewPanel event={featured} matches={usingDisplayFallback ? fallbackMatches : []} />
         <LiveActivityFeed activity={usingDisplayFallback ? fallbackActivity : []} />
       </div>
@@ -420,13 +420,13 @@ function LiveEventsRail({ events }: { events: CompetitiveEvent[] }) {
         <Link href="/events/tournaments?status=active" className="text-[10px] font-black uppercase text-cyan-200">View all</Link>
       </div>
       <div className="mt-4 space-y-3">
-        {events.map((event) => (
+        {events.length ? events.map((event) => (
           <Link key={event.id} href={`/events/${event.slug}`} className="group grid grid-cols-[72px_1fr_auto] items-center gap-3 border border-white/10 bg-white/[0.035] p-2 transition hover:border-cyan-300/35 hover:bg-cyan-400/[0.06]">
             <span className="h-14 bg-cover bg-center" style={eventImageStyle(event.banner_url)} />
             <span className="min-w-0"><span className="block truncate text-xs font-black uppercase text-white">{event.name}</span><span className="mt-1 block text-[10px] uppercase text-zinc-500">{formatNumber(event.total_participants)} participants</span></span>
             <ArrowRight className="h-4 w-4 text-zinc-600 transition group-hover:text-cyan-200" />
           </Link>
-        ))}
+        )) : <div className="border border-dashed border-white/12 p-4 text-sm leading-6 text-zinc-400">No events are live right now. Browse the schedule for the next competition.</div>}
       </div>
       <Link href="/events/tournaments" className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md border border-white/12 bg-white/[0.035] px-3 py-2.5 text-[10px] font-black uppercase text-zinc-200"><Bell className="h-4 w-4 text-violet-300" />Browse all events</Link>
     </section>
@@ -438,12 +438,12 @@ function UpcomingEventsPanel({ events }: { events: CompetitiveEvent[] }) {
     <section data-upcoming-events className="border border-white/10 bg-[#050915]/94 p-4">
       <SectionHeader title="Upcoming events" href="/events/tournaments?status=upcoming" />
       <div className="mt-3 space-y-3">
-        {events.map((event) => (
+        {events.length ? events.map((event) => (
           <article key={event.id} className="grid grid-cols-[62px_1fr] gap-3 border border-white/10 bg-black/24 p-3">
             <div className="border border-violet-300/24 bg-violet-500/10 px-2 py-2 text-center"><span className="block text-[10px] font-black uppercase text-violet-200">{event.starts_at ? new Date(event.starts_at).toLocaleString("en-GB", { month: "short", timeZone: "UTC" }) : "TBD"}</span><span className="block text-xl font-black text-white">{event.starts_at ? new Date(event.starts_at).getUTCDate() : "-"}</span></div>
             <div className="min-w-0"><h3 className="truncate text-sm font-black uppercase text-white">{event.name}</h3><p className="mt-1 line-clamp-1 text-xs text-zinc-500">{event.event_type_label} · {event.category_label}</p><Link href={`/events/${event.slug}`} className="mt-2 inline-flex items-center gap-1 text-[10px] font-black uppercase text-cyan-200">View details<ArrowRight className="h-3.5 w-3.5" /></Link></div>
           </article>
-        ))}
+        )) : <div className="border border-dashed border-white/12 p-4 text-sm leading-6 text-zinc-400">No upcoming events are published yet. Check back for the next registration window.</div>}
       </div>
     </section>
   );
