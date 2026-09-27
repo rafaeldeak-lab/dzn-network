@@ -134,6 +134,40 @@ export async function testPlayerGameIdentityDeliveryLedger() {
     assert.equal(row?.attempt_count, 2);
     assert.equal(row?.result_code, "discord_dm_delivered");
 
+    sqlite.exec(`INSERT INTO player_game_identity_audit_log
+        (id,claim_id,user_id,linked_server_id,player_profile_id,player_id,action,result)
+      VALUES ('audit-b','claim-a','player-a','server-a','profile-a','game-a','claim_approved','accepted');
+      INSERT INTO player_game_identity_notification_deliveries
+        (id,audit_id,claim_id,user_id,discord_id,linked_server_id,event_type,status,attempt_count,lease_id,lease_expires_at)
+      VALUES ('delivery-b','audit-b','claim-a','player-a','831243159785701398','server-a','approved','processing',5,'unrelated-expired-lease',datetime('now', '-1 minute'));`);
+
+    sqlite.exec(`UPDATE player_game_identity_notification_deliveries
+      SET status='processing', attempt_count=5, lease_id='expired-lease',
+          lease_expires_at=datetime('now', '-1 minute'), next_attempt_at=CURRENT_TIMESTAMP,
+          delivered_at=NULL, result_code=NULL
+      WHERE id='delivery-a'`);
+    const exhaustedLease = await dispatchQueuedPlayerGameIdentityNotifications(env, { deliveryId: "delivery-a" });
+    assert.equal(exhaustedLease.processed, 1, "An expired fifth attempt must be counted as a terminal failure, not claimed a sixth time.");
+    assert.equal(exhaustedLease.failed, 1);
+    assert.equal(exhaustedLease.ok, false);
+    row = sqlite.prepare("SELECT status,attempt_count,result_code FROM player_game_identity_notification_deliveries WHERE id='delivery-a'").get();
+    assert.equal(row?.status, "failed");
+    assert.equal(row?.result_code, "delivery_attempts_exhausted");
+    assert.equal(sqlite.prepare("SELECT status FROM player_game_identity_notification_deliveries WHERE id='delivery-b'").get()?.status, "processing", "A targeted dispatch must not consume unrelated exhausted leases before monitoring sees them.");
+
+    const failedRun = await runDeliveryQueue({
+      request: new Request("https://dzn.test/api/sync/player-link-notifications/run", {
+        method: "POST", headers: { "x-dzn-cron-secret": "unit-test-secret" },
+      }),
+      env: { ...env, DZN_CRON_SECRET: "unit-test-secret" }, params: {}, data: {}, waitUntil() {}, next: async () => new Response(null),
+    });
+    assert.equal(failedRun.status, 503, "The guarded runner must surface an exhausted lease as a failed task.");
+    const failedRunBody = await failedRun.json() as { task_status?: string; processed?: number; failed?: number };
+    assert.equal(failedRunBody.task_status, "failed");
+    assert.equal(failedRunBody.processed, 1);
+    assert.equal(failedRunBody.failed, 1);
+    assert.equal(sqlite.prepare("SELECT status FROM player_game_identity_notification_deliveries WHERE id='delivery-b'").get()?.status, "failed");
+
     sqlite.exec(`UPDATE player_game_identity_notification_deliveries
       SET status='queued', attempt_count=0, next_attempt_at=CURRENT_TIMESTAMP, delivered_at=NULL, result_code=NULL
       WHERE id='delivery-a'`);

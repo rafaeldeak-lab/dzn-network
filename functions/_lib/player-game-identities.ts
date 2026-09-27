@@ -34,7 +34,10 @@ export type PlayerGameIdentityClaimRow = {
   reviewer_name: string | null;
   proof_status?: "none" | "issued" | "verified";
   proof_expires_at?: string | null;
+  discord_delivery_status?: PlayerGameIdentityDeliveryStatus | null;
 };
+
+export type PlayerGameIdentityDeliveryStatus = "queued" | "processing" | "retry" | "delivered" | "failed" | "skipped";
 
 export type PlayerGameIdentityLinkRow = {
   id: string;
@@ -232,6 +235,7 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
   try {
     const db = requireDb(env);
     const hasProofCodes = await hasPlayerGameIdentityProofCodes(db);
+    const hasDeliveryLedger = await hasPlayerGameIdentityDeliveryLedger(env);
     const playerProofProjection = hasProofCodes
       ? `CASE
           WHEN EXISTS (SELECT 1 FROM player_game_identity_proof_codes proof WHERE proof.claim_id = player_game_identity_claims.id AND proof.status = 'consumed') THEN 'verified'
@@ -240,6 +244,36 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
         END AS proof_status,
         (SELECT proof.expires_at FROM player_game_identity_proof_codes proof WHERE proof.claim_id = player_game_identity_claims.id AND proof.status = 'active' AND datetime(proof.expires_at) > CURRENT_TIMESTAMP ORDER BY datetime(proof.created_at) DESC LIMIT 1) AS proof_expires_at`
       : `'none' AS proof_status, NULL AS proof_expires_at`;
+    const playerDeliveryProjection = hasDeliveryLedger
+      ? `(SELECT CASE
+            WHEN delivery.status = 'processing'
+              AND delivery.lease_expires_at IS NOT NULL
+              AND datetime(delivery.lease_expires_at) <= CURRENT_TIMESTAMP
+              THEN CASE WHEN delivery.attempt_count >= 5 THEN 'failed' ELSE 'retry' END
+            ELSE delivery.status
+          END
+          FROM player_game_identity_notification_deliveries delivery
+          WHERE delivery.claim_id = player_game_identity_claims.id
+            AND delivery.user_id = player_game_identity_claims.user_id
+            AND delivery.event_type IN ('approved', 'rejected')
+          ORDER BY datetime(delivery.created_at) DESC, delivery.id DESC
+          LIMIT 1) AS discord_delivery_status`
+      : `NULL AS discord_delivery_status`;
+    const revokedDeliveryProjection = hasDeliveryLedger
+      ? `(SELECT CASE
+            WHEN delivery.status = 'processing'
+              AND delivery.lease_expires_at IS NOT NULL
+              AND datetime(delivery.lease_expires_at) <= CURRENT_TIMESTAMP
+              THEN CASE WHEN delivery.attempt_count >= 5 THEN 'failed' ELSE 'retry' END
+            ELSE delivery.status
+          END
+          FROM player_game_identity_notification_deliveries delivery
+          WHERE delivery.link_id = l.id
+            AND delivery.user_id = l.user_id
+            AND delivery.event_type = 'revoked'
+          ORDER BY datetime(delivery.created_at) DESC, delivery.id DESC
+          LIMIT 1) AS discord_delivery_status`
+      : `NULL AS discord_delivery_status`;
     const [linksResult, claimsResult, revokedResult] = await Promise.all([
       db
         .prepare(
@@ -281,7 +315,8 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
             COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
             linked_servers.public_slug,
             reviewers.username AS reviewer_name,
-            ${playerProofProjection}
+            ${playerProofProjection},
+            ${playerDeliveryProjection}
            FROM player_game_identity_claims
            INNER JOIN linked_servers ON linked_servers.id = player_game_identity_claims.linked_server_id
            LEFT JOIN users reviewers ON reviewers.id = player_game_identity_claims.reviewed_by_user_id
@@ -295,11 +330,12 @@ export async function readPlayerGameIdentityReadModel(env: Env, user: SessionUse
       db.prepare(`SELECT l.id, l.player_name, l.revoked_at,
           COALESCE(NULLIF(s.display_name,''), NULLIF(s.hostname,''), s.server_name, s.nitrado_service_name) AS server_name,
           (SELECT a.note FROM player_game_identity_audit_log a WHERE a.link_id = l.id
-            AND a.action = 'link_revoked' AND a.result = 'accepted' ORDER BY a.created_at DESC, a.id DESC LIMIT 1) AS reason
+            AND a.action = 'link_revoked' AND a.result = 'accepted' ORDER BY a.created_at DESC, a.id DESC LIMIT 1) AS reason,
+          ${revokedDeliveryProjection}
         FROM player_game_identity_links l JOIN linked_servers s ON s.id = l.linked_server_id
         WHERE l.user_id = ? AND l.discord_id = ? AND l.status = 'revoked' AND l.revoked_at IS NOT NULL
         ORDER BY l.revoked_at DESC, l.id DESC LIMIT 20`).bind(user.id, user.discord_id)
-        .all<{ id: string; player_name: string | null; server_name: string | null; revoked_at: string; reason: string | null }>(),
+        .all<{ id: string; player_name: string | null; server_name: string | null; revoked_at: string; reason: string | null; discord_delivery_status: PlayerGameIdentityDeliveryStatus | null }>(),
     ]);
 
     return {
