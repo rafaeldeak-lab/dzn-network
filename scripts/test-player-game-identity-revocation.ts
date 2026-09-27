@@ -160,12 +160,17 @@ export async function testPlayerGameIdentityRevocation() {
         CREATE TABLE discord_guilds (id TEXT, owner_user_id TEXT);
         ALTER TABLE linked_servers ADD COLUMN discord_guild_id TEXT;
         INSERT INTO user_notifications (id,user_id,type,title,body,dedupe_key)
-        VALUES ('unrelated-notice','player-b','news','Other notice','Other private notice','unrelated');`);
+        VALUES ('unrelated-notice','player-b','news','Other notice','Other private notice','unrelated');
+        INSERT INTO player_game_identity_claims
+          (id,user_id,discord_id,linked_server_id,player_profile_id,player_id,player_name,status)
+        VALUES ('pending-delete-claim','player-b','discord-b','server-a','profile-a','game-a','Survivor','pending');
+        INSERT INTO user_notifications (id,user_id,type,title,body,dedupe_key,metadata)
+        VALUES ('pending-review-alert','owner-a','player_link_review_requested','Review needed','Pending review','player-link-review:pending-delete-claim:owner-a','{"claim_id":"pending-delete-claim"}');`);
       if (remove === "player") {
         assert.equal((await deleteOwnedAccountData(fixture.env, "player-a")).ok, true);
         assert.equal(fixture.sqlite.prepare("SELECT id FROM users WHERE id='player-a'").get(), undefined);
         assert.equal(fixture.sqlite.prepare("SELECT id FROM linked_servers WHERE id='server-a'").get()?.id, "server-a");
-        assert.equal(fixture.state().notifications.length, 1);
+        assert.equal(fixture.state().notifications.length, 2, "Deleting a player account must preserve unrelated and still-actionable owner review alerts.");
       } else {
         const before = fixture.state();
         assert.equal((await deleteOwnedLinkedServerData(fixture.env, "owner-b", "server-a")).status, 403);
@@ -173,6 +178,7 @@ export async function testPlayerGameIdentityRevocation() {
         assert.equal((await deleteOwnedLinkedServerData(fixture.env, "owner-a", "server-a")).ok, true);
         assert.equal(fixture.sqlite.prepare("SELECT id FROM linked_servers WHERE id='server-a'").get(), undefined);
         assert.equal(fixture.state().notifications.length, 3, "Server removal preserves private approval and revocation notices.");
+        assert.equal(fixture.sqlite.prepare("SELECT id FROM user_notifications WHERE id='pending-review-alert'").get(), undefined, "Server removal must erase stale pending-review alerts after their claim is cascade-deleted.");
         const notice = fixture.sqlite.prepare("SELECT body FROM user_notifications WHERE user_id='player-a' AND type='player_link_revoked'").get();
         assert.ok(String(notice?.body).includes(input.reason), "The player-visible reason survives server/link/audit deletion.");
         assert.equal(String(notice?.body).includes("Review the reason in your player profile"), false);

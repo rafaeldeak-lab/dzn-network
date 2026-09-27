@@ -92,6 +92,16 @@ export async function deleteOwnedLinkedServerData(env: Env, userId: string, link
   deleted.admRawEvents += await deleteLinkedServerRows(db, "adm_raw_events", linkedServerId);
   deleted.playerEvents += await deleteLinkedServerRows(db, "player_events", linkedServerId);
   deleted.killEvents += await deleteLinkedServerRows(db, "kill_events", linkedServerId);
+  if (await tableExists(db, "user_notifications") && await tableExists(db, "player_game_identity_claims")) {
+    await deleteRows(db,
+      `DELETE FROM user_notifications
+       WHERE type = 'player_link_review_requested'
+         AND json_extract(metadata, '$.claim_id') IN (
+           SELECT id FROM player_game_identity_claims WHERE linked_server_id = ?
+         )`,
+      [linkedServerId],
+    );
+  }
   deleted.playerProfiles += await deleteLinkedServerRows(db, "player_profiles", linkedServerId);
   deleted.serverStats += await deleteLinkedServerRows(db, "server_stats", linkedServerId);
   deleted.admRawEvents += await deleteOptionalLinkedServerRows(db, "adm_raw_lines", linkedServerId);
