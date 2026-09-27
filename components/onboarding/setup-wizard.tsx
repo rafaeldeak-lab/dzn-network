@@ -164,6 +164,7 @@ export function SetupWizard() {
   const [busy, setBusy] = useState(false);
   const [checks, setChecks] = useState<OnboardingChecks | null>(null);
   const [publishedServer, setPublishedServer] = useState<LinkedServer | null>(null);
+  const [publicationComplete, setPublicationComplete] = useState(false);
   const [publishError, setPublishError] = useState("");
   const [guildRefreshing, setGuildRefreshing] = useState(false);
   const [guildRefreshMessage, setGuildRefreshMessage] = useState("");
@@ -280,7 +281,7 @@ export function SetupWizard() {
   }, [loadDiscordGuilds]);
 
   useEffect(() => {
-    if (!authenticated || !draftHydrated || !draftAvailable || (step === 6 && publishedServer)) return;
+    if (!authenticated || !draftHydrated || !draftAvailable || publicationComplete || (step === 6 && publishedServer)) return;
     draftAutosaveTimerRef.current = window.setTimeout(() => {
       draftAutosaveTimerRef.current = null;
       const payload = {
@@ -316,6 +317,7 @@ export function SetupWizard() {
     draftAvailable,
     draftHydrated,
     publicListing,
+    publicationComplete,
     publishedServer,
     selectedGuild,
     selectedService,
@@ -566,16 +568,30 @@ export function SetupWizard() {
     setPublishError("");
     try {
       await goLive();
-      const refreshed = await getMe().catch(() => null);
-      setPublishedServer(refreshed?.linkedServer ?? null);
+      setPublicationComplete(true);
       if (draftAutosaveTimerRef.current !== null) {
         window.clearTimeout(draftAutosaveTimerRef.current);
         draftAutosaveTimerRef.current = null;
       }
       await draftSaveChainRef.current.catch(() => undefined);
-      if (draftAvailable) await clearOnboardingDraft().catch(() => null);
-      setDraftUpdatedAt(null);
-      setDraftStatus("idle");
+      const refreshed = await getMe().catch(() => null);
+      setPublishedServer(refreshed?.linkedServer ?? null);
+      let draftCleared = !draftAvailable;
+      for (let attempt = 0; !draftCleared && attempt < 3; attempt++) {
+        try {
+          await clearOnboardingDraft();
+          draftCleared = true;
+        } catch {
+          if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)));
+        }
+      }
+      if (draftCleared) {
+        setDraftUpdatedAt(null);
+        setDraftStatus("idle");
+      } else {
+        setDraftStatus("failed");
+        setPublishError("Your server is live, but saved setup progress could not be cleared. DZN will not overwrite it; retry setup cleanup before starting another setup.");
+      }
       setStep(6);
     } catch (error) {
       setPublishError(error instanceof Error ? error.message : "Go-live failed");
@@ -598,6 +614,7 @@ export function SetupWizard() {
       }
       await draftSaveChainRef.current.catch(() => undefined);
       if (draftAvailable) await clearOnboardingDraft();
+      setPublicationComplete(false);
       setStep(0);
       setSelectedGuild(guilds[0]?.guild_id ?? "");
       setServerType("PVP");
