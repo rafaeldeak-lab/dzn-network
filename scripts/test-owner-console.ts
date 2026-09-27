@@ -210,6 +210,14 @@ assert.equal(fedFeralDiagnosis.billing.paid, false);
 assert.equal(fedFeralDiagnosis.billing.accountPresent, true, "A server subscription row is still a billing record even when inactive.");
 assert.deepEqual(fedFeralDiagnosis.supportBlockers.map((blocker) => blocker.key), ["billing", "verification", "service_check", "status_sync", "adm_sync"]);
 assert.equal(fedFeralDiagnosis.onboarding.tokenRecordPresent, true);
+assert.equal(fedFeralDiagnosis.lifecycleLabel, "Setup incomplete - verification required");
+assert.match(fedFeralDiagnosis.lifecycleMessage, /before treating this server as live/);
+assert.equal(fedFeralDiagnosis.ownerActionRequired, true);
+assert.match(fedFeralDiagnosis.ownerActionReason ?? "", /Billing is shown separately/);
+assert.equal(fedFeralDiagnosis.syncResourceStatus, "stopped");
+assert.equal(fedFeralDiagnosis.resource.consumingScheduledResources, false);
+assert.equal(fedFeralDiagnosis.resource.skippedReason, "skipped_setup_incomplete");
+assert.deepEqual(fedFeralDiagnosis.badges, ["Setup incomplete"]);
 
 const sentUnreadRecommendation = mapOwnerServerRowForTest({
   id: "server-notified",

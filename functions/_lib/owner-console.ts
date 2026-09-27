@@ -531,6 +531,22 @@ function mapOwnerServerRow(row: OwnerServerRecord): OwnerServerRow {
     dayzServiceDetected: nullableBoolean(row.onboarding_dayz_service_detected),
     lastTestedAt: stringOrNull(row.onboarding_last_tested_at),
   };
+  const setupIncomplete = normalizedText(row.status) === "pending" && (
+    !onboarding.verifiedServer ||
+    onboarding.tokenValid !== true ||
+    onboarding.serviceAccess !== true ||
+    onboarding.dayzServiceDetected !== true ||
+    onboarding.admLogsFound !== true
+  );
+  const presentedResource = setupIncomplete ? buildSetupIncompleteResourceState(resource) : resource;
+  const presentedLifecycleLabel = setupIncomplete ? "Setup incomplete - verification required" : lifecycleLabel;
+  const presentedLifecycleMessage = setupIncomplete
+    ? "Resume setup and run the Nitrado token, DayZ service, and ADM checks before treating this server as live."
+    : display.message;
+  const ownerActionRequired = truthy(row.owner_action_required) || setupIncomplete;
+  const ownerActionReason = safeStatusText(row.owner_action_reason) ?? (setupIncomplete
+    ? "Resume setup and complete verification. Billing is shown separately and does not block Free setup."
+    : null);
 
   return {
     id: String(row.id ?? ""),
@@ -552,12 +568,12 @@ function mapOwnerServerRow(row: OwnerServerRecord): OwnerServerRow {
     status: stringOrNull(row.status),
     listingVisibility: stringOrNull(row.listing_visibility),
     lifecycleStatus,
-    lifecycleLabel,
-    lifecycleMessage: display.message,
+    lifecycleLabel: presentedLifecycleLabel,
+    lifecycleMessage: presentedLifecycleMessage,
     lifecycleReason: safeStatusText(row.lifecycle_reason),
-    ownerActionRequired: truthy(row.owner_action_required),
-    ownerActionReason: safeStatusText(row.owner_action_reason),
-    syncResourceStatus: resource.consumingScheduledResources ? (lifecycleStatus === "active_live" ? "active" : "reduced") : "stopped",
+    ownerActionRequired,
+    ownerActionReason,
+    syncResourceStatus: presentedResource.consumingScheduledResources ? (lifecycleStatus === "active_live" ? "active" : "reduced") : "stopped",
     playerCount: {
       current: numberOrNull(row.current_player_count ?? row.public_current_player_count),
       max: numberOrNull(row.max_player_count ?? row.public_max_player_count),
@@ -607,15 +623,30 @@ function mapOwnerServerRow(row: OwnerServerRecord): OwnerServerRow {
       lastEventAt: stringOrNull(row.last_event_at),
       lastBuildAt: stringOrNull(row.last_build_at),
     },
-    resource,
+    resource: presentedResource,
     nextRetryAfter: stringOrNull(row.next_retry_after),
     nextMetadataCheckAt: stringOrNull(row.next_metadata_check_at),
     nextPlayerCountCheckAt: stringOrNull(row.next_player_count_check_at),
     nextAdmDiscoveryAt: stringOrNull(row.next_adm_discovery_at),
     nextAdmProcessingAt: stringOrNull(row.next_adm_processing_at),
     lastSkipReason: stringOrNull(row.last_skip_reason),
-    badges: buildLifecycleBadges(lifecycleStatus),
+    badges: setupIncomplete ? ["Setup incomplete"] : buildLifecycleBadges(lifecycleStatus),
     knownRole,
+  };
+}
+
+function buildSetupIncompleteResourceState(resource: OwnerServerResourceState): OwnerServerResourceState {
+  return {
+    admSyncEnabled: false,
+    metadataRefreshEnabled: false,
+    playerCountPollingEnabled: false,
+    discordPostingEnabled: false,
+    serverWarsEligible: false,
+    publicLiveEligible: false,
+    consumingScheduledResources: false,
+    excludedFromActiveSync: true,
+    skippedReason: "skipped_setup_incomplete",
+    tasks: resource.tasks.map((entry) => ({ ...entry, enabled: false, skipReason: "skipped_setup_incomplete" })),
   };
 }
 
