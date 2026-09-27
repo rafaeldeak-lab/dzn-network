@@ -27,7 +27,7 @@ export async function sendOwnerSetupRecommendation(env: Env, serverId: string) {
      ON CONFLICT(user_id,dedupe_key) DO UPDATE SET title=excluded.title,body=excluded.body,action_url=excluded.action_url,
        priority=excluded.priority,
        metadata=CASE
-         WHEN json_extract(user_notifications.metadata, '$.discord_delivery_status') IN ('sending', 'delivered')
+         WHEN json_extract(user_notifications.metadata, '$.discord_delivery_status') IN ('sending', 'delivered', 'unconfirmed')
          THEN json_set(excluded.metadata,
            '$.discord_delivery_status', json_extract(user_notifications.metadata, '$.discord_delivery_status'),
            '$.discord_delivery_result', json_extract(user_notifications.metadata, '$.discord_delivery_result'),
@@ -47,7 +47,7 @@ export async function sendOwnerSetupRecommendation(env: Env, serverId: string) {
        '$.discord_delivery_status', 'sending', '$.discord_delivery_result', 'delivery_claimed',
        '$.discord_attempted_at', CURRENT_TIMESTAMP)
      WHERE user_id=? AND dedupe_key=?
-       AND COALESCE(json_extract(metadata, '$.discord_delivery_status'), 'not_sent') NOT IN ('sending', 'delivered')`,
+       AND COALESCE(json_extract(metadata, '$.discord_delivery_status'), 'not_sent') NOT IN ('sending', 'delivered', 'unconfirmed')`,
   ).bind(owner.user_id, dedupeKey).run();
   if (Number(deliveryClaim.meta?.changes ?? 0) !== 1) {
     const existing = await db.prepare(
@@ -70,10 +70,11 @@ export async function sendOwnerSetupRecommendation(env: Env, serverId: string) {
   return { ok: true as const, website: "sent" as const, discord: discord.status };
 }
 
-async function deliverSetupDiscord(
+export async function deliverSetupDiscord(
   env: Env,
   owner: { user_id: string; discord_id: string | null },
   body: string,
+  fetchImpl: typeof fetch = fetch,
 ) {
   if (!isDiscordNotificationsEnabled(env)) return { status: "not_sent", result: "discord_notifications_disabled" };
   const preference = await requireDb(env).prepare("SELECT discord_enabled FROM notification_preferences WHERE user_id=?")
@@ -82,16 +83,21 @@ async function deliverSetupDiscord(
   const discordId = String(owner.discord_id ?? "").trim();
   const token = normalizeBotToken(env.DISCORD_BOT_TOKEN);
   if (!token || !/^\d{5,32}$/.test(discordId)) return { status: "failed", result: token ? "invalid_recipient" : "bot_token_missing" };
+  let channelResponse: Response;
   try {
-    const channelResponse = await fetch("https://discord.com/api/v10/users/@me/channels", {
+    channelResponse = await fetchImpl("https://discord.com/api/v10/users/@me/channels", {
       method: "POST",
       headers: { authorization: `Bot ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ recipient_id: discordId }),
     });
-    const channel = await channelResponse.json().catch(() => null) as { id?: unknown } | null;
-    const channelId = channelResponse.ok && typeof channel?.id === "string" && /^\d{5,32}$/.test(channel.id) ? channel.id : null;
-    if (!channelId) return { status: "failed", result: `discord_dm_channel_${channelResponse.status}` };
-    const messageResponse = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages`, {
+  } catch {
+    return { status: "failed", result: "discord_dm_channel_request_failed" };
+  }
+  const channel = await channelResponse.json().catch(() => null) as { id?: unknown } | null;
+  const channelId = channelResponse.ok && typeof channel?.id === "string" && /^\d{5,32}$/.test(channel.id) ? channel.id : null;
+  if (!channelId) return { status: "failed", result: `discord_dm_channel_${channelResponse.status}` };
+  try {
+    const messageResponse = await fetchImpl(`https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages`, {
       method: "POST",
       headers: { authorization: `Bot ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ content: body, allowed_mentions: { parse: [] }, components: [] }),
@@ -100,7 +106,7 @@ async function deliverSetupDiscord(
       ? { status: "delivered", result: "discord_dm_delivered" }
       : { status: "failed", result: `discord_dm_message_${messageResponse.status}` };
   } catch {
-    return { status: "failed", result: "discord_dm_request_failed" };
+    return { status: "unconfirmed", result: "discord_dm_outcome_unknown" };
   }
 }
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { createSession } from "../functions/_lib/db";
+import { deliverSetupDiscord } from "../functions/_lib/owner-setup-notifications";
 import { onRequest as draftRoute } from "../functions/api/onboarding/draft";
 import type { Env, PagesFunction } from "../functions/_lib/types";
 
@@ -84,8 +85,25 @@ async function main() {
   assert.match(setupNotificationService, /if \(!isDznPulseEnabled\(env\)\) return \{ ok: false as const, status: 409, error: "dzn_pulse_disabled" \}/, "A disabled website-notification channel must reject the reminder before writing a false delivery receipt.");
   assert.match(setupNotificationService, /INSERT INTO user_notifications[\s\S]*\/setup#review-test/, "Setup reminder creation must persist a private website notification.");
   assert.match(setupNotificationService, /discord_delivery_status[\s\S]*discord_delivery_result[\s\S]*discord_attempted_at/, "Setup reminder creation must persist the Discord delivery outcome.");
-  assert.match(setupNotificationService, /discord_delivery_status'\), 'not_sent'\) NOT IN \('sending', 'delivered'\)[\s\S]*deliveryClaim\.meta\?\.changes/, "Discord setup reminders must claim a durable send state before delivery so retries cannot duplicate a DM.");
+  assert.match(setupNotificationService, /discord_delivery_status'\), 'not_sent'\) NOT IN \('sending', 'delivered', 'unconfirmed'\)[\s\S]*deliveryClaim\.meta\?\.changes/, "Discord setup reminders must claim a durable send state before delivery so retries cannot duplicate a DM.");
   assert.match(setupNotificationRoute, /recordOwnerSetupReminderAudit\(env, auth\.user[\s\S]*request\.headers\.get\("cf-ray"\)/, "Confirmed setup reminder attempts must audit the authenticated platform owner.");
+
+  const discordSqlite = new DatabaseSync(":memory:");
+  discordSqlite.exec("CREATE TABLE notification_preferences (user_id TEXT PRIMARY KEY, discord_enabled INTEGER NOT NULL DEFAULT 0)");
+  discordSqlite.exec("INSERT INTO notification_preferences (user_id,discord_enabled) VALUES ('owner-a',1)");
+  let discordCalls = 0;
+  const ambiguousDelivery = await deliverSetupDiscord({
+    DB: d1(discordSqlite),
+    DISCORD_BOT_TOKEN: "test-token-with-at-least-20-characters",
+    DZN_DISCORD_NOTIFICATIONS_ENABLED: "true",
+  } as Env, { user_id: "owner-a", discord_id: "111111111111111111" }, "Finish setup", async () => {
+    discordCalls += 1;
+    if (discordCalls === 1) return new Response(JSON.stringify({ id: "222222222222222222" }), { status: 200 });
+    throw new Error("response lost after submit");
+  });
+  assert.deepEqual(ambiguousDelivery, { status: "unconfirmed", result: "discord_dm_outcome_unknown" }, "A lost response after message submission must remain non-retryable and unconfirmed.");
+  assert.equal(discordCalls, 2);
+  discordSqlite.close();
 
   const unavailableSqlite = new DatabaseSync(":memory:");
   unavailableSqlite.exec(readFileSync("migrations/0001_initial_schema.sql", "utf8"));
