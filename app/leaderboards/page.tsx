@@ -201,15 +201,15 @@ export default function LeaderboardsPage() {
       const requestId = latestRequestId.current + 1;
       latestRequestId.current = requestId;
       const cached = activeMode === "all" ? loadLastGoodLeaderboard() : null;
-      const hasVisibleData = Boolean(cached) || (payloadMode.current === activeMode && visiblePayloadRef.current);
+      const hasAnyVisibleData = Boolean(cached) || visiblePayloadRef.current;
       // The server and first browser render must agree before restoring local data.
       if (cached && payloadMode.current !== "all") {
         payloadMode.current = "all";
         setDisplayedMode("all");
         setPayload(cached);
       }
-      setLoading(!hasVisibleData);
-      setLoadState(!hasVisibleData ? "loading_initial" : "refreshing");
+      setLoading(!hasAnyVisibleData);
+      setLoadState(!hasAnyVisibleData ? "loading_initial" : "refreshing");
       try {
         const query = activeMode === "all" ? "" : `?mode=${encodeURIComponent(activeMode)}`;
         const data = await fetchJsonWithRetry<LeaderboardsPayload>(`/api/public/leaderboards${query}`, {
@@ -244,7 +244,7 @@ export default function LeaderboardsPage() {
             setPayload(cached);
             setError("");
             setLoadState("loaded");
-          } else if (visiblePayloadRef.current) {
+          } else if (payloadMode.current === activeMode && visiblePayloadRef.current) {
             setError("");
             setLoadState("loaded");
           } else {
