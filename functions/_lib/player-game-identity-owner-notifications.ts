@@ -1,5 +1,5 @@
 import { requireDb } from "./db";
-import { verifyDiscordPostingChannel } from "./discord-posting";
+import { DiscordChannelFetchError, verifyDiscordPostingChannel } from "./discord-posting";
 import { isDznAdminDiscordId } from "./admin";
 import { isDiscordNotificationsEnabled } from "./feature-flags";
 import { parsePlatformOwnerDiscordIds } from "./platform-owner";
@@ -376,7 +376,15 @@ async function sendOwnerRequestDiscord(env: Env, row: OwnerDeliveryRow) {
          LIMIT 1`,
       ).bind(row.linked_server_id, row.guild_id).first<{ channel_id: string }>().catch(() => null);
       if (selected?.channel_id) {
-        const channel = await verifyDiscordPostingChannel(env, row.guild_id, selected.channel_id).catch(() => null);
+        let channel = null;
+        try {
+          channel = await verifyDiscordPostingChannel(env, row.guild_id, selected.channel_id, { allowedMemberIds: [row.recipient_discord_id] });
+        } catch (error) {
+          const status = error instanceof DiscordChannelFetchError ? Number(error.status ?? 0) : 0;
+          retryableChannelFailure = status === 429 || status >= 500
+            ? `discord_restricted_channel_verify_${status}`
+            : "discord_restricted_channel_verify_request_failed";
+        }
         if (channel?.can_post && channel.restricted_from_everyone) {
           try {
             const channelDelivery = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(selected.channel_id)}/messages`, {
@@ -426,6 +434,7 @@ function classifyResult(result: Awaited<ReturnType<typeof sendOwnerRequestDiscor
   const statusCode = Number(result.reason.match(/_(\d{3})$/)?.[1] ?? 0);
   const retryable = result.reason === "discord_dm_request_failed"
     || result.reason === "discord_restricted_channel_request_failed"
+    || result.reason === "discord_restricted_channel_verify_request_failed"
     || statusCode === 429
     || statusCode >= 500;
   if (retryable && attemptCount < MAX_ATTEMPTS) {

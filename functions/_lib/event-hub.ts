@@ -29,6 +29,7 @@ const BUILD_METRICS = new Set(["build_score", "structures_built", "walls_built",
 type OwnerServerRow = {
   id: string;
   user_id: string | null;
+  owner_discord_id: string | null;
   guild_id: string | null;
   discord_guild_id: string | null;
   guild_name: string | null;
@@ -338,7 +339,7 @@ export async function listOwnerDiscordEventChannels(env: Env, user: SessionUser 
   }
 
   try {
-    const channels = await fetchDiscordPostingChannels(env, guildId);
+    const channels = await fetchDiscordPostingChannels(env, guildId, { allowedMemberIds: server.owner_discord_id ? [server.owner_discord_id] : [] });
     await cacheDiscordChannels(env, guildId, channels);
     return { status: 200, payload: channelListPayload(server, guildId, saved, channels) };
   } catch (error) {
@@ -443,7 +444,7 @@ export async function saveOwnerDiscordEventChannels(env: Env, user: SessionUser 
       try {
         channel = isMockAuthEnabled(env)
           ? mockEventChannels().find((item) => item.channel_id === approvalChannelId) ?? null
-          : await verifyDiscordPostingChannel(env, guildId, approvalChannelId);
+          : await verifyDiscordPostingChannel(env, guildId, approvalChannelId, { allowedMemberIds: server.owner_discord_id ? [server.owner_discord_id] : [] });
       } catch (error) {
         const mapped = mapDiscordChannelFetchError(error);
         return { status: mapped.httpStatus, payload: { ok: false, error: mapped.error, errorCode: mapped.error, message: mapped.message } };
@@ -793,10 +794,12 @@ async function fetchOwnerServer(env: Env, user: SessionUser, serverId: string) {
   const row = await requireDb(env)
     .prepare(
       `SELECT linked_servers.*,
+              owner_user.discord_id AS owner_discord_id,
               discord_guilds.name AS guild_name,
               server_subscriptions.plan_key,
               server_subscriptions.status AS subscription_status
        FROM linked_servers
+       LEFT JOIN users AS owner_user ON owner_user.id = linked_servers.user_id
        LEFT JOIN discord_guilds
          ON discord_guilds.guild_id = linked_servers.guild_id
          OR discord_guilds.id = linked_servers.discord_guild_id

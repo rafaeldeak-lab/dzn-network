@@ -118,6 +118,39 @@ const unsyncedPublicChild = evaluateDiscordChannelPermissionsForTest({
 });
 assert.equal(unsyncedPublicChild.restricted_from_everyone, false, "A private parent must not make an unsynced public child eligible for review details.");
 
+const broadMemberRole = "ordinary-members";
+const broadRoleReviewChannel = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  botManagedRoleIds: [botRoleId],
+  rolePermissions: { [broadMemberRole]: viewChannel },
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: requiredPostingPermissions,
+  channelPermissionOverwrites: [
+    { id: guildId, type: 0, allow: "0", deny: viewChannel.toString() },
+    { id: botRoleId, type: 0, allow: viewChannel.toString(), deny: "0" },
+    { id: broadMemberRole, type: 0, allow: viewChannel.toString(), deny: "0" },
+  ],
+});
+assert.equal(broadRoleReviewChannel.restricted_from_everyone, false, "A general member-role allow must keep review details out of the channel.");
+
+const ownerMemberReviewChannel = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  botManagedRoleIds: [botRoleId],
+  allowedMemberIds: ["owner-discord-id"],
+  basePermissions: requiredPostingPermissions,
+  everyonePermissions: requiredPostingPermissions,
+  channelPermissionOverwrites: [
+    { id: guildId, type: 0, allow: "0", deny: viewChannel.toString() },
+    { id: botRoleId, type: 0, allow: viewChannel.toString(), deny: "0" },
+    { id: "owner-discord-id", type: 1, allow: viewChannel.toString(), deny: "0" },
+  ],
+});
+assert.equal(ownerMemberReviewChannel.restricted_from_everyone, true, "The selected owner and DZN Bot may retain access to the private review channel.");
+
 const publicReviewChannel = evaluateDiscordChannelPermissionsForTest({
   guildId,
   botUserId,

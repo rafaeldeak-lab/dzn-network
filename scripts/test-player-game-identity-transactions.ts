@@ -341,9 +341,11 @@ export async function testPlayerGameIdentityTransactions() {
       DISCORD_BOT_TOKEN: "test-token-with-enough-length",
     });
     const requiredBits = ((BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(11)) | (BigInt(1) << BigInt(14)) | (BigInt(1) << BigInt(16))).toString();
+    let verificationUnavailable = true;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/channels/123456789012345678")) {
+        if (verificationUnavailable) return new Response("", { status: 503 });
         return Response.json({
           id: "123456789012345678",
           guild_id: "guild-a",
@@ -360,7 +362,7 @@ export async function testPlayerGameIdentityTransactions() {
       if (url.endsWith("/guilds/guild-a/roles")) {
         return Response.json([
           { id: "guild-a", name: "@everyone", permissions: requiredBits },
-          { id: "bot-role", name: "DZN Bot", permissions: requiredBits },
+          { id: "bot-role", name: "DZN Bot", permissions: requiredBits, tags: { bot_id: "bot-user" } },
         ]);
       }
       if (url.endsWith("/channels/123456789012345678/messages")) return new Response("", { status: 429 });
@@ -377,8 +379,18 @@ export async function testPlayerGameIdentityTransactions() {
       deliveryIds: claim.ok ? claim.owner_delivery_ids : [],
       maxJobs: 1,
     });
-    assert.equal(retryResult.retried, 1, "A rate-limited private channel must remain retryable when the owner DM fallback is closed.");
-    const retryRow = channelRetry.sqlite.prepare("SELECT status,result_code FROM player_game_identity_owner_notification_deliveries").get();
+    assert.equal(retryResult.retried, 1, "A temporary private-channel verification failure must remain retryable when the owner DM fallback is closed.");
+    let retryRow = channelRetry.sqlite.prepare("SELECT status,result_code FROM player_game_identity_owner_notification_deliveries").get();
+    assert.equal(retryRow?.status, "retry");
+    assert.equal(retryRow?.result_code, "discord_restricted_channel_verify_503");
+    verificationUnavailable = false;
+    channelRetry.sqlite.exec("UPDATE player_game_identity_owner_notification_deliveries SET next_attempt_at=CURRENT_TIMESTAMP");
+    const channelPostRetry = await dispatchQueuedOwnerRequestNotifications(channelRetry.env, {
+      deliveryIds: claim.ok ? claim.owner_delivery_ids : [],
+      maxJobs: 1,
+    });
+    assert.equal(channelPostRetry.retried, 1, "A rate-limited private channel must remain retryable when the owner DM fallback is closed.");
+    retryRow = channelRetry.sqlite.prepare("SELECT status,result_code FROM player_game_identity_owner_notification_deliveries").get();
     assert.equal(retryRow?.status, "retry");
     assert.equal(retryRow?.result_code, "discord_restricted_channel_message_429");
   } finally {
