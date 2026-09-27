@@ -164,7 +164,7 @@ export default function LeaderboardsPage() {
   const [loading, setLoading] = useState(true);
   const [loadState, setLoadState] = useState<LeaderboardLoadState>("loading_initial");
   const [error, setError] = useState("");
-  const inFlight = useRef(false);
+  const inFlight = useRef<AbortController | null>(null);
   const latestRequestId = useRef(0);
   const visiblePayloadRef = useRef(hasMeaningfulLeaderboard(payload));
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -194,7 +194,8 @@ export default function LeaderboardsPage() {
 
     async function load() {
       if (inFlight.current) return;
-      inFlight.current = true;
+      const controller = new AbortController();
+      inFlight.current = controller;
       const requestId = latestRequestId.current + 1;
       latestRequestId.current = requestId;
       const cached = activeMode === "all" ? loadLastGoodLeaderboard() : null;
@@ -210,6 +211,7 @@ export default function LeaderboardsPage() {
           cache: "no-store",
           credentials: "include",
           headers: { accept: "application/json" },
+          signal: controller.signal,
         });
         if (!active || latestRequestId.current !== requestId) return;
         const responsePayload = data.data && !data.top_servers ? data.data : data;
@@ -242,8 +244,10 @@ export default function LeaderboardsPage() {
           }
         }
       } finally {
-        if (active) setLoading(false);
-        inFlight.current = false;
+        if (inFlight.current === controller) {
+          inFlight.current = null;
+          if (active) setLoading(false);
+        }
       }
     }
 
@@ -251,7 +255,8 @@ export default function LeaderboardsPage() {
     const interval = window.setInterval(load, 30_000);
     return () => {
       active = false;
-      inFlight.current = false;
+      inFlight.current?.abort();
+      inFlight.current = null;
       window.clearInterval(interval);
     };
   }, [activeMode, reloadNonce]);

@@ -80,8 +80,6 @@ if (process.argv.includes("--serve")) {
           mainTop: document.querySelector("main").getBoundingClientRect().top,
           tableOverflow: [...document.querySelectorAll(".dzn-leaderboard-table-wrap")].some(e => e.scrollWidth > e.clientWidth + 1),
           cells: [...document.querySelectorAll("td")].map(e => ({ label: e.dataset.label, text: e.textContent, display: getComputedStyle(e).display, width: e.getBoundingClientRect().width })),
-          art: [...document.querySelectorAll(".leaderboard-ref-kill-art,.leaderboard-ref-kill-card-bg")].map(e => ({ width: e.getBoundingClientRect().width, height: getComputedStyle(e).height, parentWidth: e.parentElement.clientWidth })),
-          animations: [...document.querySelectorAll(".leaderboard-ref-bullet-spark,.leaderboard-ref-kill-art")].map(e => getComputedStyle(e).animationName),
           avatarLoaded: [...document.querySelectorAll('img[src*="/api/public/players/"]')].some(e => e.naturalWidth > 0),
         }));
         assert.equal(layout.overflow, false, `Page overflow at ${width}`);
@@ -90,9 +88,7 @@ if (process.argv.includes("--serve")) {
         assert.ok(layout.cells.every(c => c.label && c.display !== "none" && c.width > 0), "All original metrics remain visible and labelled");
         if (width <= 760) {
           assert.equal(layout.tableOverflow, false, "No sideways mobile table scroll");
-          assert.ok(layout.art.every(a => a.width >= a.parentWidth - 3 && a.height === "116px"), JSON.stringify(layout.art));
         }
-        if (reducedMotion === "reduce") assert.ok(layout.animations.every(a => a === "none"));
         assert.equal(layout.avatarLoaded, true, "Consented Discord avatar proxy image must render");
         for (const asset of ["sniper-accent.png", "rifle-accent.png", "bullet-tracer-accent.png"]) {
           const result = await page.evaluate(src => new Promise(resolve => { const img = new Image(); img.onload = () => resolve(img.naturalWidth); img.onerror = () => resolve(0); img.src = src; }), `/leaderboards/${asset}`);
@@ -101,6 +97,15 @@ if (process.argv.includes("--serve")) {
         await page.locator(".leaderboard-ref-area--players").screenshot({ path: path.join(output, `players-${width}-${reducedMotion}.png`) });
         await page.getByRole("tab", { name: "Records", exact: true }).click();
         await page.getByRole("table", { name: "Personal best kills", exact: true }).waitFor();
+        const recordsLayout = await page.evaluate(() => ({
+          art: [...document.querySelectorAll(".leaderboard-ref-kill-art,.leaderboard-ref-kill-card-bg")].map(e => ({ width: e.getBoundingClientRect().width, height: getComputedStyle(e).height, parentWidth: e.parentElement.clientWidth })),
+          animations: [...document.querySelectorAll(".leaderboard-ref-bullet-spark,.leaderboard-ref-kill-art")].map(e => getComputedStyle(e).animationName),
+        }));
+        assert.ok(recordsLayout.art.length > 0, "Records artwork must be mounted before visual assertions");
+        assert.ok(recordsLayout.animations.length > 0, "Records effects must be mounted before motion assertions");
+        if (width <= 760) assert.ok(recordsLayout.art.every(a => a.width >= a.parentWidth - 3 && a.height === "116px"), JSON.stringify(recordsLayout.art));
+        if (reducedMotion === "reduce") assert.ok(recordsLayout.animations.every(a => a === "none"));
+        else assert.ok(recordsLayout.animations.some(a => a !== "none"), "Normal-motion records must keep at least one active effect");
         await page.locator(".leaderboard-ref-area--longest").screenshot({ path: path.join(output, `records-${width}-${reducedMotion}.png`) });
         await page.locator(".leaderboard-ref-area--personal").screenshot({ path: path.join(output, `personal-${width}-${reducedMotion}.png`) });
         await page.getByRole("button", { name: "Hide beta notice" }).click();
@@ -108,7 +113,7 @@ if (process.argv.includes("--serve")) {
         await page.reload({ waitUntil: "networkidle" });
         assert.equal(await page.locator(".dzn-beta-ticker").count(), 0, "Dismissal survives reload");
         assert.deepEqual(errors, []); assert.deepEqual(failed, []); assert.deepEqual(writes, []);
-        results.push({ width, reducedMotion, ...layout, errors, failed, writes });
+        results.push({ width, reducedMotion, ...layout, ...recordsLayout, errors, failed, writes });
         await context.close();
       }
     }
