@@ -36,6 +36,7 @@ type PendingOwnerReconciliationRow = {
 
 const MAX_ATTEMPTS = 5;
 const RETRY_MINUTES = [1, 5, 30, 120, 360] as const;
+export const OWNER_REQUEST_NOTIFICATION_MAX_JOBS = 5;
 
 export async function hasOwnerRequestNotificationLedger(env: Env) {
   const row = await requireDb(env).prepare(
@@ -127,7 +128,7 @@ export async function dispatchQueuedOwnerRequestNotifications(
     return { ok: true, unavailable: true, processed: 0, delivered: 0, retried: 0, failed: 0, skipped: 0 };
   }
   const db = requireDb(env);
-  const maxJobs = Math.max(1, Math.min(20, Math.trunc(options.maxJobs ?? 10)));
+  const maxJobs = Math.max(1, Math.min(OWNER_REQUEST_NOTIFICATION_MAX_JOBS, Math.trunc(options.maxJobs ?? OWNER_REQUEST_NOTIFICATION_MAX_JOBS)));
   await reconcilePendingOwnerRequestRecipients(env, maxJobs);
   await db.prepare(
     `UPDATE player_game_identity_owner_notification_deliveries
