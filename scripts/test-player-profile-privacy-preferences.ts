@@ -222,6 +222,44 @@ async function testPrivacyRouteRuntimeContract() {
     "A failed consent write must not activate a public profile handle.",
   );
 
+  const existingHandleReadFailureDb = new FakeD1Database();
+  existingHandleReadFailureDb.preferences.set("mock-user", {
+    public_profile_enabled: 1,
+    show_display_name: 1,
+    show_gameplay_summary: 1,
+    show_featured_server: 1,
+    show_xp_progress: 0,
+    show_challenge_progress: 0,
+    show_calling_cards: 0,
+    show_award_dates: 0,
+    updated_at: "2026-09-27T00:00:00.000Z",
+  });
+  existingHandleReadFailureDb.discordIdentityConsent.set("mock-user", 0);
+  existingHandleReadFailureDb.publicProfilesByUser.set("mock-user", {
+    handle: "mock-user-a1b2c3",
+    status: "active",
+    created_at: "2026-09-27T00:00:00.000Z",
+    updated_at: "2026-09-27T00:00:00.000Z",
+  });
+  existingHandleReadFailureDb.failPublicProfileReads = true;
+  const existingHandleReadFailure = await callPrivacyRoute(
+    existingHandleReadFailureDb,
+    { DB: existingHandleReadFailureDb, MOCK_AUTH: "true" } as unknown as Env,
+    "PATCH",
+    { settings: { show_discord_identity: true } },
+  );
+  assert.equal(existingHandleReadFailure.status, 503, "A failed existing-handle read must stop before consent changes.");
+  assert.equal(
+    existingHandleReadFailureDb.discordIdentityConsent.get("mock-user"),
+    0,
+    "A failed existing-handle read must preserve the prior Discord consent state.",
+  );
+  assert.equal(
+    existingHandleReadFailureDb.writeTargets.has("player_profile_privacy_preferences"),
+    false,
+    "A failed existing-handle read must not write ordinary profile preferences.",
+  );
+
   const postWriteReadDb = new FakeD1Database();
   postWriteReadDb.failPublicProfileReadsAfterWrite = true;
   const postWriteReadResult = await callPrivacyRoute(
@@ -369,6 +407,7 @@ class FakeD1Database {
   failDiscordConsentReads = false;
   discordConsentTableMissing = false;
   failDiscordConsentWrites = false;
+  failPublicProfileReads = false;
   failPublicProfileReadsAfterWrite = false;
   concurrentPublicProfileHandle: string | null = null;
 
@@ -429,6 +468,7 @@ class FakeD1PreparedStatement {
       return (enabled === undefined ? null : { enabled }) as T | null;
     }
     if (query.includes("from player_public_profiles") && query.includes("where user_id = ?")) {
+      if (this.db.failPublicProfileReads) throw new Error("public profile reads unavailable");
       if (this.db.failPublicProfileReadsAfterWrite && this.db.writeTargets.has("player_public_profiles")) {
         throw new Error("public profile reads unavailable after write");
       }

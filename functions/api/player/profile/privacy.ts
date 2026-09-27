@@ -147,9 +147,12 @@ async function handlePatch(request: Request, env: Env) {
       );
     }
     const next = { ...current.preferences, ...parsed.settings };
+    const existingPublicProfile = next.public_profile_enabled
+      ? await readCurrentPublicProfileHandle(env, user.id)
+      : null;
     await writePreferences(env, user.id, next, Object.hasOwn(parsed.settings, "show_discord_identity"));
     const publicProfile = next.public_profile_enabled
-      ? await ensureCurrentPublicProfileHandle(env, user)
+      ? await ensureCurrentPublicProfileHandle(env, user, existingPublicProfile)
       : await readPublicProfileHandleForPayload(env, user.id);
     return json(preferencePayload(next, "player_profile_privacy_preferences", new Date().toISOString(), publicProfile), {
       headers: privateNoStoreHeaders(),

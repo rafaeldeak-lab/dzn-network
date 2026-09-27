@@ -241,8 +241,14 @@ export async function readCurrentPublicProfileHandle(env: Env, userId: string): 
   };
 }
 
-export async function ensureCurrentPublicProfileHandle(env: Env, user: SessionUser): Promise<PlayerPublicProfileHandle> {
-  const existing = await readCurrentPublicProfileHandle(env, user.id);
+export async function ensureCurrentPublicProfileHandle(
+  env: Env,
+  user: SessionUser,
+  knownProfile?: PlayerPublicProfileHandle | null,
+): Promise<PlayerPublicProfileHandle> {
+  const existing = knownProfile === undefined
+    ? await readCurrentPublicProfileHandle(env, user.id)
+    : knownProfile;
   if (existing?.status === "active") return existing;
 
   const db = requireDb(env);
