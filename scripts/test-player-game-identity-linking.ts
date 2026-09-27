@@ -127,6 +127,9 @@ assert.match(identityPanel, /Choose server/, "Identity panel must ask players to
 assert.match(identityPanel, /Search for your server/, "Identity panel must support searchable server selection.");
 assert.match(identityPanel, /DayZ gamertag on this server/, "Identity panel must ask for the visible server gamertag.");
 assert.match(identityPanel, /Send For Check/, "Identity panel must make the owner/admin check flow explicit.");
+assert.match(identityPanel, /Discord message delivered/, "Players must be able to see successful Discord decision delivery.");
+assert.match(identityPanel, /Discord retry scheduled/, "Players must be able to see that automatic Discord delivery will retry.");
+assert.match(helper, /player_game_identity_notification_deliveries/, "The private player read model must expose delivery state from the durable ledger.");
 assert.match(revocationHelper, /\/player\/profile#game-account/, "Revocation notifications must open the affected Game Account section.");
 assert.match(identityPanel, /server_slug/, "Identity UI must still submit a safe public server slug reference internally.");
 assert.match(identityPanel, /player_reference/, "Identity UI must submit the visible gamertag as an untrusted lookup reference.");

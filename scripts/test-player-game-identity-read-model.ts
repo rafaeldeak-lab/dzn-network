@@ -46,6 +46,7 @@ export async function testPlayerGameIdentityReadModels() {
       INSERT INTO player_profiles VALUES ('profile-a'), ('profile-b');
     `);
     sqlite.exec(readFileSync("migrations/0064_player_game_identity_links.sql", "utf8"));
+    sqlite.exec(readFileSync("migrations/0073_player_link_notification_delivery.sql", "utf8"));
     sqlite.exec(`
       INSERT INTO player_game_identity_claims (id, user_id, discord_id, linked_server_id, player_profile_id, player_id) VALUES
         ('claim-a', 'player-a', '831243159785701398', 'server-a', 'profile-a', '76561198000000001'),
@@ -53,10 +54,15 @@ export async function testPlayerGameIdentityReadModels() {
       INSERT INTO player_game_identity_links (id, user_id, discord_id, linked_server_id, player_profile_id, player_id, verified_source, verified_by_user_id) VALUES
         ('link-a', 'player-a', '831243159785701398', 'server-a', 'profile-a', '76561198000000001', 'owner_approved', 'owner-a'),
         ('link-b', 'player-b', 'discord-b', 'server-b', 'profile-b', '76561198000000002', 'owner_approved', 'owner-b');
+      UPDATE player_game_identity_links SET status = 'revoked', revoked_at = CURRENT_TIMESTAMP WHERE id = 'link-b';
       INSERT INTO player_game_identity_audit_log
         (id, claim_id, link_id, user_id, actor_user_id, linked_server_id, player_profile_id, player_id, action, result, note) VALUES
         ('audit-a', 'claim-a', 'link-a', 'player-a', 'owner-a', 'server-a', 'profile-a', '76561198000000001', 'claim_approved', 'accepted', 'Server A proof checked.'),
         ('audit-b', 'claim-b', 'link-b', 'player-b', 'owner-b', 'server-b', 'profile-b', '76561198000000002', 'link_revoked', 'accepted', 'Server B revocation reason.');
+      INSERT INTO player_game_identity_notification_deliveries
+        (id, audit_id, claim_id, link_id, user_id, discord_id, linked_server_id, event_type, status, attempt_count) VALUES
+        ('delivery-a', 'audit-a', 'claim-a', 'link-a', 'player-a', '831243159785701398', 'server-a', 'approved', 'delivered', 1),
+        ('delivery-b', 'audit-b', NULL, 'link-b', 'player-b', 'discord-b', 'server-b', 'revoked', 'retry', 2);
     `);
     let attemptedWrites = 0;
     const env = {
@@ -122,11 +128,14 @@ export async function testPlayerGameIdentityReadModels() {
     const player = await readPlayerGameIdentityReadModel(env, user("player-a", "831243159785701398"));
     assert.equal(player.source, "player_game_identity_links");
     assert.deepEqual(player.claims.map(row => row.id), ["claim-a"]);
+    assert.equal(player.claims[0].discord_delivery_status, "delivered", "Players must see their private Discord decision delivery receipt.");
     assert.deepEqual(player.active_links.map(row => row.id), ["link-a"]);
     assert.doesNotMatch(JSON.stringify(player), /7656119800000000[12]|submitted_player_id|review_context|claim-b|link-b/);
     const mismatchedDiscord = await readPlayerGameIdentityReadModel(env, user("player-a", "discord-b"));
     assert.deepEqual(mismatchedDiscord.claims, []);
     assert.deepEqual(mismatchedDiscord.active_links, []);
+    const revokedPlayer = await readPlayerGameIdentityReadModel(env, user("player-b", "discord-b"));
+    assert.equal(revokedPlayer.revoked_links[0]?.discord_delivery_status, "retry", "Players must see that a revocation DM is still retrying.");
     const denial = await reviewPlayerGameIdentityClaim(env, user("owner-b"), "claim-a", { action: "approve" });
     assert.equal(denial.status, 403);
     assert.equal(attemptedWrites, 0, "Reads and cross-owner denial must perform no writes");

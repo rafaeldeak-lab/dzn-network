@@ -34,7 +34,10 @@ type IdentityClaimRow = {
   reviewer_name: string | null;
   proof_status?: "none" | "issued" | "verified";
   proof_expires_at?: string | null;
+  discord_delivery_status?: DiscordDeliveryStatus | null;
 };
+
+type DiscordDeliveryStatus = "queued" | "processing" | "retry" | "delivered" | "failed" | "skipped";
 
 type IdentityPayload = {
   ok: true;
@@ -42,7 +45,7 @@ type IdentityPayload = {
   private: true;
   presentation_only: true;
   active_links: IdentityLinkRow[];
-  revoked_links?: Array<{ id: string; player_name: string | null; server_name: string | null; revoked_at: string; reason: string | null }>;
+  revoked_links?: Array<{ id: string; player_name: string | null; server_name: string | null; revoked_at: string; reason: string | null; discord_delivery_status?: DiscordDeliveryStatus | null }>;
   claims: IdentityClaimRow[];
   proof_flow: {
     player_step: string;
@@ -256,6 +259,7 @@ export function PlayerGameIdentityLinks() {
                 <p className="font-bold text-rose-100">{link.server_name ?? "DZN server"} - {link.player_name ?? "Game account"}</p>
                 <p className="mt-1 text-zinc-300">{link.reason ?? "Contact DZN support for the recorded reason."}</p>
                 <p className="mt-1 text-xs text-zinc-400">Revoked {formatDate(link.revoked_at)}</p>
+                <PlayerDiscordDeliveryStatus status={link.discord_delivery_status} />
                 <a href={DZN_SUPPORT_EMAIL_HREF} className="mt-2 inline-block font-bold text-cyan-200 underline">Contact support</a>
               </div>)}
             </section> : null}
@@ -283,6 +287,7 @@ export function PlayerGameIdentityLinks() {
                       meta={claim.reviewed_at ? `Checked ${formatDate(claim.reviewed_at)}` : claim.requested_at ? `Sent ${formatDate(claim.requested_at)}` : "Request recorded"}
                     />
                     {claim.status === "pending" ? <ProofCodeRedeemer claimId={claim.id} verified={claim.proof_status === "verified"} /> : null}
+                    {claim.status === "approved" || claim.status === "rejected" ? <PlayerDiscordDeliveryStatus status={claim.discord_delivery_status} /> : null}
                   </div>
                 ))}
               </>
@@ -518,6 +523,20 @@ function ProofCodeRedeemer({ claimId, verified }: { claimId: string; verified: b
       <p className={`mt-2 text-xs font-semibold ${state.status === "error" ? "text-rose-200" : state.status === "success" ? "text-emerald-200" : "text-slate-400"}`}>{state.message ?? "Use the short-lived code issued by this server owner. It works once and does not auto-approve the link."}</p>
     </div>
   );
+}
+
+function PlayerDiscordDeliveryStatus({ status }: { status?: DiscordDeliveryStatus | null }) {
+  const copy: Record<DiscordDeliveryStatus, { label: string; detail: string; tone: string }> = {
+    queued: { label: "Discord message queued", detail: "DZN is preparing your private Discord decision message.", tone: "border-cyan-300/30 bg-cyan-300/[0.06] text-cyan-100" },
+    processing: { label: "Discord message sending", detail: "DZN is sending your private Discord decision message now.", tone: "border-cyan-300/30 bg-cyan-300/[0.06] text-cyan-100" },
+    retry: { label: "Discord retry scheduled", detail: "Discord did not accept the last attempt. DZN will try again automatically.", tone: "border-amber-300/30 bg-amber-300/[0.06] text-amber-100" },
+    delivered: { label: "Discord message delivered", detail: "The private Discord decision message was accepted for delivery.", tone: "border-emerald-300/30 bg-emerald-300/[0.06] text-emerald-100" },
+    failed: { label: "Discord message not delivered", detail: "Automatic delivery could not complete. Your decision remains available here on DZN.", tone: "border-rose-300/30 bg-rose-300/[0.06] text-rose-100" },
+    skipped: { label: "Discord message not requested", detail: "Discord notifications were unavailable or disabled. Your decision remains available here on DZN.", tone: "border-white/15 bg-white/[0.04] text-zinc-200" },
+  };
+  if (!status) return null;
+  const item = copy[status];
+  return <div className={`border-l-2 p-3 text-xs font-semibold leading-5 ${item.tone}`}><p className="font-black uppercase">{item.label}</p><p className="mt-1">{item.detail}</p></div>;
 }
 
 function IdentityRow({
