@@ -78,10 +78,22 @@ const categoryDenyResult = evaluateDiscordChannelPermissionsForTest({
     { id: botRoleId, type: 0, allow: "0", deny: sendMessages.toString() },
   ],
 });
-assert.equal(categoryDenyResult.can_post, false);
-assert.deepEqual(categoryDenyResult.missing_permissions, ["Send Messages"]);
-assert.equal(categoryDenyResult.permission_source, "category_overwrite");
+assert.equal(categoryDenyResult.can_post, true, "An unsynced child must ignore a parent deny when checking the bot's effective permissions.");
+assert.deepEqual(categoryDenyResult.missing_permissions, []);
+assert.equal(categoryDenyResult.permission_source, "guild_roles");
 assert.equal(categoryDenyResult.restricted_from_everyone, false, "An unsynced child must not inherit its category's private classification.");
+
+const categoryAllowResult = evaluateDiscordChannelPermissionsForTest({
+  guildId,
+  botUserId,
+  botRoleIds: [botRoleId],
+  basePermissions: viewChannel | embedLinks | readHistory,
+  categoryPermissionOverwrites: [
+    { id: botRoleId, type: 0, allow: sendMessages.toString(), deny: "0" },
+  ],
+});
+assert.equal(categoryAllowResult.can_post, false, "An unsynced child must ignore a parent allow when checking the bot's effective permissions.");
+assert.deepEqual(categoryAllowResult.missing_permissions, ["Send Messages"]);
 
 const missingSendOnlyResult = evaluateDiscordChannelPermissionsForTest({
   guildId,
