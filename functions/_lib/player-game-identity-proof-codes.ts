@@ -17,6 +17,8 @@ export async function issuePlayerGameIdentityProofCode(env: Env, actor: SessionU
     const access = await requireServerOwnerOrDznAdmin(env, actor, claim.linked_server_id);
     if (!access.allowed) return failure(403, "FORBIDDEN", "Only this server owner or a DZN admin can issue a proof code.");
     if (claim.status !== "pending") return failure(409, "CLAIM_NOT_PENDING", "This link request is no longer pending.");
+    const verified = await db.prepare(`SELECT 1 AS verified FROM player_game_identity_proof_codes WHERE claim_id = ? AND status = 'consumed' LIMIT 1`).bind(claim.id).first<{ verified: number }>();
+    if (verified?.verified === 1) return failure(409, "PROOF_ALREADY_VERIFIED", "This request has already completed its one-time proof check.");
 
     const code = generateProofCode();
     const hash = await hashProofCode(code);

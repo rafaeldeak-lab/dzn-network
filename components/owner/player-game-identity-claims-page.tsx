@@ -51,6 +51,8 @@ type PlayerGameIdentityClaim = {
   account_avatar_url?: string | null;
   request_source?: "gamertag_lookup" | "legacy_exact_id";
   proof_verified?: boolean;
+  proof_status?: "none" | "issued" | "verified";
+  proof_expires_at?: string | null;
   linked_server_id: string;
   player_profile_id: string;
   player_id: string;
@@ -607,6 +609,7 @@ function ClaimCard({
   const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   const [proofCode, setProofCode] = useState<string | null>(null);
   const [proofState, setProofState] = useState<"idle" | "loading" | "error">("idle");
+  const [confirmProofReplacement, setConfirmProofReplacement] = useState(false);
   const approvalReady = confirmed.ownership && confirmed.match && confirmed.account;
   const profileInitial = (claim.account_name || "DZN").trim().charAt(0).toUpperCase();
 
@@ -622,6 +625,7 @@ function ClaimCard({
         return;
       }
       setProofCode(result.code);
+      setConfirmProofReplacement(false);
       setProofState("idle");
     } catch {
       setProofState("error");
@@ -698,6 +702,14 @@ function ClaimCard({
                 <code className="rounded-md border border-cyan-300/25 bg-black/35 px-3 py-2 text-base font-black text-cyan-100">{proofCode}</code>
                 <button type="button" onClick={() => void navigator.clipboard.writeText(proofCode)} className="inline-flex min-h-10 items-center gap-2 rounded-md border border-white/15 px-3 text-xs font-black uppercase text-white"><Copy className="size-4" aria-hidden="true" /> Copy</button>
                 <p className="w-full text-xs font-semibold text-amber-100">Expires in 30 minutes and can be used once. Share it only with this player.</p>
+              </div>
+            ) : claim.proof_status === "issued" ? (
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <p className="w-full text-sm font-semibold text-amber-100">A code is already active{claim.proof_expires_at ? ` until ${formatDate(claim.proof_expires_at)}` : ""}. The original value is hidden after it is shown once.</p>
+                {confirmProofReplacement ? <p className="w-full text-xs font-semibold text-rose-100">Replacing it will immediately invalidate the code already shared with the player. Select Replace now to confirm.</p> : null}
+                <button type="button" disabled={proofState === "loading" || busy} onClick={() => confirmProofReplacement ? void issueProofCode() : setConfirmProofReplacement(true)} className="inline-flex min-h-10 items-center gap-2 rounded-md border border-amber-300/30 bg-amber-300/10 px-3 text-xs font-black uppercase text-amber-100 disabled:opacity-50"><KeyRound className="size-4" aria-hidden="true" /> {proofState === "loading" ? "Replacing" : confirmProofReplacement ? "Replace now" : "Replace issued code"}</button>
+                {confirmProofReplacement ? <button type="button" onClick={() => setConfirmProofReplacement(false)} className="min-h-10 rounded-md border border-white/15 px-3 text-xs font-black uppercase text-zinc-200">Cancel</button> : null}
+                {proofState === "error" ? <p className="w-full text-xs font-semibold text-rose-200">The code could not be replaced. Refresh and try again.</p> : null}
               </div>
             ) : (
               <div className="mt-2 flex flex-wrap items-center gap-3">

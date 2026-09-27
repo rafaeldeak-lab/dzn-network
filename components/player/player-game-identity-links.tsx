@@ -32,6 +32,8 @@ type IdentityClaimRow = {
   server_name: string | null;
   public_slug: string | null;
   reviewer_name: string | null;
+  proof_status?: "none" | "issued" | "verified";
+  proof_expires_at?: string | null;
 };
 
 type IdentityPayload = {
@@ -280,7 +282,7 @@ export function PlayerGameIdentityLinks() {
                       href={claim.public_slug ? `/servers/profile?slug=${encodeURIComponent(claim.public_slug)}` : null}
                       meta={claim.reviewed_at ? `Checked ${formatDate(claim.reviewed_at)}` : claim.requested_at ? `Sent ${formatDate(claim.requested_at)}` : "Request recorded"}
                     />
-                    {claim.status === "pending" ? <ProofCodeRedeemer claimId={claim.id} /> : null}
+                    {claim.status === "pending" ? <ProofCodeRedeemer claimId={claim.id} verified={claim.proof_status === "verified"} /> : null}
                   </div>
                 ))}
               </>
@@ -476,10 +478,14 @@ function toServerChoices(rows: PublicServerOption[]) {
   return Array.from(choices.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function ProofCodeRedeemer({ claimId }: { claimId: string }) {
+function ProofCodeRedeemer({ claimId, verified }: { claimId: string; verified: boolean }) {
   const [code, setCode] = useState("");
   const [state, setState] = useState<{ status: "idle" | "loading" | "success" | "error"; message: string | null }>({ status: "idle", message: null });
   const normalized = code.trim().toUpperCase();
+
+  if (verified) {
+    return <div className="border-l-2 border-emerald-300 bg-emerald-300/[0.06] p-3 text-sm font-semibold text-emerald-100"><span className="inline-flex items-center gap-2 font-black uppercase"><CheckCircle2 className="size-4" aria-hidden="true" /> Owner proof verified</span><p className="mt-1 text-xs font-semibold">This one-time check is recorded and waiting for the owner&apos;s final decision.</p></div>;
+  }
 
   async function redeem() {
     if (!normalized || state.status === "loading") return;
