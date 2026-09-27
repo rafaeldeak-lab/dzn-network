@@ -9,6 +9,7 @@ import {
   normalizePublicTags,
   sanitizePublicDescription,
 } from "../functions/_lib/server-settings";
+import { parsePlayerLinkApprovalChannelInput } from "../functions/_lib/event-hub";
 
 function source(path: string) {
   return readFileSync(path, "utf8");
@@ -42,6 +43,11 @@ assert.equal(normalizePublicTags(["Not A Real Tag"]).ok, false);
 
 assert.equal(sanitizePublicDescription("<script>alert(1)</script> A clean public description for a DZN server listing that is long enough."), "A clean public description for a DZN server listing that is long enough.");
 assert.equal(sanitizePublicDescription("javascript:alert(1) A clean public description for a DZN server listing that is long enough."), false);
+
+assert.deepEqual(parsePlayerLinkApprovalChannelInput({}), { included: false, clearRequested: false, channelId: null, valid: true });
+assert.deepEqual(parsePlayerLinkApprovalChannelInput({ playerLinkApprovalChannelId: "" }), { included: true, clearRequested: true, channelId: null, valid: true });
+assert.deepEqual(parsePlayerLinkApprovalChannelInput({ playerLinkApprovalChannelId: "not-a-discord-id" }), { included: true, clearRequested: false, channelId: null, valid: false });
+assert.deepEqual(parsePlayerLinkApprovalChannelInput({ playerLinkApprovalChannelId: "123456789012345678" }), { included: true, clearRequested: false, channelId: "123456789012345678", valid: true });
 
 for (const path of [
   "app/dashboard/server-settings/page.tsx",

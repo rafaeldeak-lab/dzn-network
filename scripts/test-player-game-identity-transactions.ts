@@ -377,12 +377,23 @@ export async function testPlayerGameIdentityTransactions() {
       { server_slug: "server-a", player_id: "game-a" },
     );
     assert.equal(claim.status, 201);
+    channelRetry.sqlite.exec("ALTER TABLE server_discord_channel_settings RENAME TO unavailable_server_discord_channel_settings");
+    const lookupRetry = await dispatchQueuedOwnerRequestNotifications(channelRetry.env, {
+      deliveryIds: claim.ok ? claim.owner_delivery_ids : [],
+      maxJobs: 1,
+    });
+    assert.equal(lookupRetry.retried, 1, "A temporary review-channel lookup failure must remain retryable when the owner DM fallback is closed.");
+    let retryRow = channelRetry.sqlite.prepare("SELECT status,result_code FROM player_game_identity_owner_notification_deliveries").get();
+    assert.equal(retryRow?.status, "retry");
+    assert.equal(retryRow?.result_code, "discord_restricted_channel_lookup_failed");
+    channelRetry.sqlite.exec("ALTER TABLE unavailable_server_discord_channel_settings RENAME TO server_discord_channel_settings");
+    channelRetry.sqlite.exec("UPDATE player_game_identity_owner_notification_deliveries SET next_attempt_at=CURRENT_TIMESTAMP");
     const retryResult = await dispatchQueuedOwnerRequestNotifications(channelRetry.env, {
       deliveryIds: claim.ok ? claim.owner_delivery_ids : [],
       maxJobs: 1,
     });
     assert.equal(retryResult.retried, 1, "A temporary private-channel verification failure must remain retryable when the owner DM fallback is closed.");
-    let retryRow = channelRetry.sqlite.prepare("SELECT status,result_code FROM player_game_identity_owner_notification_deliveries").get();
+    retryRow = channelRetry.sqlite.prepare("SELECT status,result_code FROM player_game_identity_owner_notification_deliveries").get();
     assert.equal(retryRow?.status, "retry");
     assert.equal(retryRow?.result_code, "discord_restricted_channel_verify_503");
     verificationUnavailable = false;

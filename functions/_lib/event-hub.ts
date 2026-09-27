@@ -21,6 +21,14 @@ export const EVENT_CHANNEL_TYPES = [
 export type EventChannelType = typeof EVENT_CHANNEL_TYPES[number];
 const PLAYER_LINK_APPROVAL_CHANNEL_TYPE = "player_link_approvals";
 
+export function parsePlayerLinkApprovalChannelInput(input: Record<string, unknown>) {
+  const included = Object.prototype.hasOwnProperty.call(input, "playerLinkApprovalChannelId");
+  const raw = input.playerLinkApprovalChannelId;
+  const clearRequested = typeof raw === "string" && raw.trim() === "";
+  const channelId = normalizeDiscordId(raw);
+  return { included, clearRequested, channelId, valid: !included || clearRequested || Boolean(channelId) };
+}
+
 const REQUIRED_PERMISSION_LABELS = ["View Channel", "Send Messages", "Embed Links", "Read Message History"];
 const EVENT_OFFICIAL_TYPES = new Set(["capture_the_flag", "server_vs_server", "bot_tournament", "faction_wars", "seasonal_wars"]);
 const PVP_METRICS = new Set(["pvp_kill_count", "pvp_headshot_count", "pvp_weapon_kill_count", "pvp_distance_qualified_kills", "pvp_longest_kill", "pvp_kd_ratio"]);
@@ -393,8 +401,13 @@ export async function saveOwnerDiscordEventChannels(env: Env, user: SessionUser 
     ["event_results", normalizeDiscordId(input.eventResultsChannelId)],
   ];
   const provided = requested.filter(([, channelId]) => Boolean(channelId)) as Array<[EventChannelType, string]>;
-  const approvalChannelIncluded = Object.prototype.hasOwnProperty.call(input, "playerLinkApprovalChannelId");
-  const approvalChannelId = normalizeDiscordId(input.playerLinkApprovalChannelId);
+  const approvalInput = parsePlayerLinkApprovalChannelInput(input);
+  const approvalChannelIncluded = approvalInput.included;
+  const approvalChannelClearRequested = approvalInput.clearRequested;
+  const approvalChannelId = approvalInput.channelId;
+  if (!approvalInput.valid) {
+    return { status: 400, payload: { ok: false, error: "INVALID_CHANNEL_ID", message: "Choose a valid private Discord channel or explicitly select private owner messages." } };
+  }
   if (provided.length === 0 && !approvalChannelIncluded) {
     return { status: 400, payload: { ok: false, error: "CHANNEL_NOT_FOUND", message: "Choose at least one valid event channel." } };
   }
@@ -434,12 +447,12 @@ export async function saveOwnerDiscordEventChannels(env: Env, user: SessionUser 
   }
 
   if (approvalChannelIncluded) {
-    if (!approvalChannelId) {
+    if (approvalChannelClearRequested) {
       await requireDb(env)
         .prepare("DELETE FROM server_discord_channel_settings WHERE linked_server_id = ? AND channel_type = ?")
         .bind(server.id, PLAYER_LINK_APPROVAL_CHANNEL_TYPE)
         .run();
-    } else {
+    } else if (approvalChannelId) {
       let channel: DiscordPostingChannel | null = null;
       try {
         channel = isMockAuthEnabled(env)

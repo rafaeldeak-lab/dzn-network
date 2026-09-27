@@ -369,12 +369,17 @@ async function sendOwnerRequestDiscord(env: Env, row: OwnerDeliveryRow) {
   let retryableChannelFailure: string | null = null;
   try {
     if (row.recipient_user_id === row.server_owner_user_id && row.guild_id) {
-      const selected = await requireDb(env).prepare(
-        `SELECT channel_id FROM server_discord_channel_settings
-         WHERE linked_server_id=? AND guild_id=? AND channel_type='player_link_approvals'
-           AND bot_can_view=1 AND bot_can_send=1 AND bot_can_read_history=1
-         LIMIT 1`,
-      ).bind(row.linked_server_id, row.guild_id).first<{ channel_id: string }>().catch(() => null);
+      let selected: { channel_id: string } | null = null;
+      try {
+        selected = await requireDb(env).prepare(
+          `SELECT channel_id FROM server_discord_channel_settings
+           WHERE linked_server_id=? AND guild_id=? AND channel_type='player_link_approvals'
+             AND bot_can_view=1 AND bot_can_send=1 AND bot_can_read_history=1
+           LIMIT 1`,
+        ).bind(row.linked_server_id, row.guild_id).first<{ channel_id: string }>();
+      } catch {
+        retryableChannelFailure = "discord_restricted_channel_lookup_failed";
+      }
       if (selected?.channel_id) {
         let channel = null;
         try {
@@ -435,6 +440,7 @@ function classifyResult(result: Awaited<ReturnType<typeof sendOwnerRequestDiscor
   const retryable = result.reason === "discord_dm_request_failed"
     || result.reason === "discord_restricted_channel_request_failed"
     || result.reason === "discord_restricted_channel_verify_request_failed"
+    || result.reason === "discord_restricted_channel_lookup_failed"
     || statusCode === 429
     || statusCode >= 500;
   if (retryable && attemptCount < MAX_ATTEMPTS) {
