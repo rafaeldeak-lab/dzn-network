@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { createPlayerGameIdentityClaim, reviewPlayerGameIdentityClaim } from "../functions/_lib/player-game-identities";
 import { dispatchQueuedOwnerRequestNotifications } from "../functions/_lib/player-game-identity-owner-notifications";
+import { revokePlayerGameIdentityLink } from "../functions/_lib/player-game-identity-revocation";
 import type { Env, SessionUser } from "../functions/_lib/types";
 
 type Row = Record<string, unknown>;
@@ -95,6 +96,37 @@ export async function testPlayerGameIdentityTransactions() {
       assert.deepEqual(f.state(), before);
     } finally { f.close(); }
   }
+  const restoredLink = identityTransactionFixture();
+  try {
+    restoredLink.sqlite.exec(readFileSync("migrations/0073_player_link_notification_delivery.sql", "utf8"));
+    restoredLink.sqlite.exec("INSERT INTO notification_preferences (user_id,discord_enabled) VALUES ('player-a',1)");
+    restoredLink.env.DZN_DISCORD_NOTIFICATIONS_ENABLED = "true";
+    const firstApproval = await reviewPlayerGameIdentityClaim(restoredLink.env, owner, "claim-a", {
+      action: "approve",
+      note: "Initial verified link.",
+    });
+    assert.ok(firstApproval.ok && firstApproval.link_id);
+    const revoked = await revokePlayerGameIdentityLink(restoredLink.env, owner, firstApproval.link_id, {
+      confirm: true,
+      reason: "Controlled account-link delivery test.",
+    });
+    assert.equal(revoked.status, 200);
+    const replacement = await createPlayerGameIdentityClaim(restoredLink.env, identityTestUser("player-a", "discord-a"), {
+      server_slug: "server-a",
+      player_id: "game-a",
+    });
+    assert.equal(replacement.status, 201);
+    assert.ok(replacement.ok && replacement.claim.id !== "claim-a");
+    const restored = await reviewPlayerGameIdentityClaim(restoredLink.env, owner, replacement.ok ? replacement.claim.id : "", {
+      action: "approve",
+      note: "Restore the same verified account after notification proof.",
+    });
+    assert.equal(restored.status, 200, "A revoked player must be able to restore the same verified game account.");
+    assert.equal(restored.ok && restored.link_id, firstApproval.link_id, "Restoration must reactivate the exact audited link instead of creating a duplicate history row.");
+    assert.equal(restoredLink.sqlite.prepare("SELECT COUNT(*) AS count FROM player_game_identity_links WHERE status='active'").get()?.count, 1);
+    assert.equal(restoredLink.sqlite.prepare("SELECT COUNT(*) AS count FROM player_game_identity_links").get()?.count, 1);
+    assert.deepEqual(restoredLink.sqlite.prepare("PRAGMA foreign_key_check").all(), []);
+  } finally { restoredLink.close(); }
   for (const action of ["approve", "reject"] as const) {
     for (let failure = 0; failure < (action === "approve" ? 6 : 3); failure++) {
       const f = identityTransactionFixture();
