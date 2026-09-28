@@ -6,6 +6,7 @@ import {
   onRequestGet,
   onRequestOptions,
 } from "../functions/api/sync/discord-posts/run";
+import { fetchDiscordRequestForTest } from "../functions/_lib/discord-posting";
 import type { Env, PagesContext } from "../functions/_lib/types";
 
 const env = {
@@ -122,6 +123,19 @@ async function run() {
   }), env));
   assert.equal(optionsResponse.status, 204);
   assert.equal(optionsResponse.headers.get("allow"), "POST, OPTIONS");
+
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted", "AbortError")), { once: true });
+    });
+    await assert.rejects(
+      () => fetchDiscordRequestForTest("https://discord.test/messages", {}, 20),
+      /discord_request_timeout/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 }
 
 function makeContext(request: Request, testEnv: Env, waitUntil: PagesContext["waitUntil"] = () => undefined): PagesContext {

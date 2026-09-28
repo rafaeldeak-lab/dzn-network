@@ -153,6 +153,7 @@ const REQUIRED_BOT_CHANNEL_PERMISSIONS = [
 const OPTIONAL_BOT_CHANNEL_PERMISSIONS = [
   ["Manage Messages", DISCORD_PERMISSION_ONE << BigInt(13)],
 ] as const;
+const DISCORD_REQUEST_TIMEOUT_MS = 1800;
 export const REQUIRED_BOT_PERMISSION_LABELS = REQUIRED_BOT_CHANNEL_PERMISSIONS.map(([label]) => label);
 export const OPTIONAL_BOT_PERMISSION_LABELS = OPTIONAL_BOT_CHANNEL_PERMISSIONS.map(([label]) => label);
 
@@ -1063,7 +1064,7 @@ async function sendOrEditWithBot(
   };
   let messageId = existingMessageId;
   if (messageId) {
-    const editResponse = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`, {
+    const editResponse = await fetchDiscordRequest(`https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`, {
       method: "PATCH",
       headers,
       body: JSON.stringify(stripWebhookOnlyFields(payload)),
@@ -1075,7 +1076,7 @@ async function sendOrEditWithBot(
     messageId = null;
   }
 
-  const sendResponse = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages`, {
+  const sendResponse = await fetchDiscordRequest(`https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
     headers,
     body: JSON.stringify(stripWebhookOnlyFields(payload)),
@@ -1090,7 +1091,7 @@ async function sendOrEditWithBot(
 async function sendOrEditWithWebhook(webhookUrl: string, payload: DiscordPayload, existingMessageId: string | null) {
   let messageId = existingMessageId;
   if (messageId) {
-    const editResponse = await fetch(`${webhookUrl}/messages/${encodeURIComponent(messageId)}`, {
+    const editResponse = await fetchDiscordRequest(`${webhookUrl}/messages/${encodeURIComponent(messageId)}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
@@ -1101,7 +1102,7 @@ async function sendOrEditWithWebhook(webhookUrl: string, payload: DiscordPayload
     }
     messageId = null;
   }
-  const sendResponse = await fetch(`${webhookUrl}?wait=true`, {
+  const sendResponse = await fetchDiscordRequest(`${webhookUrl}?wait=true`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -1211,9 +1212,27 @@ type PermissionEvaluation = {
 };
 
 async function fetchDiscordApi(botToken: string, path: string) {
-  return fetch(`https://discord.com/api/v10${path}`, {
+  return fetchDiscordRequest(`https://discord.com/api/v10${path}`, {
     headers: { authorization: `Bot ${botToken}` },
-  });
+  }, 5000);
+}
+
+async function fetchDiscordRequest(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = DISCORD_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const boundedTimeoutMs = Math.max(100, Math.min(Math.trunc(timeoutMs) || DISCORD_REQUEST_TIMEOUT_MS, 5000));
+  const timeout = setTimeout(() => controller.abort("DZN_DISCORD_REQUEST_TIMEOUT"), boundedTimeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error("discord_request_timeout");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export function fetchDiscordRequestForTest(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = DISCORD_REQUEST_TIMEOUT_MS) {
+  return fetchDiscordRequest(input, init, timeoutMs);
 }
 
 async function getBotChannelPermissionBits(botToken: string, channel: DiscordChannel | null): Promise<bigint | null> {
