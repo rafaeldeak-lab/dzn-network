@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 import { Miniflare } from "miniflare";
 import { createSession, ensureLinkedServerMetadataColumns } from "../functions/_lib/db";
-import { getOwnerEntitlements, upsertBillingAccount } from "../functions/_lib/plans";
+import { encryptToken } from "../functions/_lib/crypto";
+import { getAdmDiscoveryIntervalMinutes, getOwnerEntitlements, upsertBillingAccount } from "../functions/_lib/plans";
 import { canUseShowcaseFeature, NUKETOWN_SHOWCASE_SCOPE as scope, readServerShowcaseAccess, showcaseWriteGuard } from "../functions/_lib/server-showcase-access";
 import { changeShowcaseGrant, readShowcaseGrantSupport } from "../functions/_lib/server-showcase-grants";
 import { categoryPolicyForPlan, readOwnerServerSettings, updateServerListing } from "../functions/_lib/server-settings";
@@ -21,6 +22,7 @@ import { getPublicAdvancedLeaderboardsPayload, getServerAdvancedShowcasePayload,
 import { onRequestGet as dashboardAdvancedStats } from "../functions/api/servers/[serverId]/dashboard/advanced-stats";
 import { onRequestGet as dashboardHealth } from "../functions/api/servers/[serverId]/dashboard/health";
 import { onRequestGet as admAutomationStatus } from "../functions/api/servers/[serverId]/adm/automation-status";
+import { onRequestGet as admDiscoveryDebug } from "../functions/api/servers/[serverId]/adm-file-discovery/debug";
 import { onRequest as advertisingBump } from "../functions/api/servers/[serverId]/advertising/bump";
 import { dashboardSelectedServerAccess } from "../components/onboarding/dashboard-detail-display";
 import { createServerWarChallenge, getOwnerServerWarsPayload, getServerWarOpponentOptions } from "../functions/_lib/server-wars";
@@ -187,6 +189,47 @@ async function invoke(handler: PagesFunction, env: Env, user: SessionUser | null
     next: async () => new Response(), data: {} } as Parameters<PagesFunction>[0]);
 }
 
+async function seedNitradoConnection(db: LocalD1, env: Env, linkedServerId: string, id: string) {
+  const encrypted = await encryptToken("synthetic-private-token", env.TOKEN_ENCRYPTION_KEY!);
+  db.sqlite.prepare(`INSERT INTO nitrado_connections
+    (id, user_id, linked_server_id, encrypted_token, token_iv, token_auth_tag)
+    VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(id, scope.ownerUserId, linkedServerId, encrypted.encryptedToken, encrypted.iv, encrypted.authTag);
+}
+
+function mockAdmDiscoveryFetch(): typeof fetch {
+  const newestAdm = "DayZServer_PS4_x64_2026-09-28_01-03-18.ADM";
+  const admText = [
+    "AdminLog started on 2026-09-28 at 01:03:18",
+    '01:04:02 | Player "Synthetic" is connected',
+  ].join("\n");
+  const response = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+  return (async (input: RequestInfo | URL) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
+    if (url.hostname === "api.nitrado.net" && url.pathname.endsWith("/gameservers")) {
+      return response({ data: { gameserver: {
+        username: "gameserver-unit",
+        game: "dayzps",
+        name: "Synthetic DayZ",
+        game_specific: { log_files: [`dayzps/config/${newestAdm}`] },
+      } } });
+    }
+    if (url.hostname === "api.nitrado.net" && url.pathname.includes("/file_server/list")) {
+      return response({ data: { entries: [] } });
+    }
+    if (url.hostname === "api.nitrado.net" && url.pathname.includes("/file_server/seek")) {
+      throw new Error("synthetic seek unavailable");
+    }
+    if (url.hostname === "api.nitrado.net" && url.pathname.includes("/file_server/download")) {
+      return new Response(admText, { status: 200, headers: { "content-type": "text/plain" } });
+    }
+    return response({ error: "unexpected synthetic Nitrado request" }, 404);
+  }) as typeof fetch;
+}
+
 function seedPublicMedia(db: LocalD1) {
   db.sqlite.exec(`UPDATE linked_servers SET advert_banner_url = 'https://local.test/synthetic.jpg',
     owner_announcement = 'Synthetic owner announcement', fresh_wipe_promo = 'Synthetic wipe notice',
@@ -281,6 +324,64 @@ async function run() {
     assert.equal(unrelated.plan.access_source, "billing");
     assert.ok(unrelated.problem_flags.includes("automation_access_inactive"));
     assert.match(unrelated.next_action, /paid plan/i);
+  });
+  await test("owner ADM discovery diagnostics preserve exact-server access and guild billing cadence", async ({ db, env }) => {
+    const diagnosticEnv = { ...env, TOKEN_ENCRYPTION_KEY: "synthetic-only-test-key" } as Env;
+    await seedNitradoConnection(db, diagnosticEnv, scope.linkedServerId, "nitrado-nuketown");
+    await seedNitradoConnection(db, diagnosticEnv, "same-guild-other-server", "nitrado-unrelated");
+    await getDueStatusAutomationServers(diagnosticEnv, 10);
+    await grant(diagnosticEnv);
+    const beforeSubscriptions = db.sqlite.prepare("SELECT * FROM server_subscriptions ORDER BY id").all();
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = mockAdmDiscoveryFetch();
+    try {
+      const grantedResponse = await invoke(admDiscoveryDebug, diagnosticEnv, actor, "GET");
+      assert.equal(grantedResponse.status, 200);
+      const granted = await grantedResponse.json() as {
+        selected_newest_available: { name: string } | null;
+        problem_flags: string[];
+        automation_access: {
+          source: string;
+          effective_plan_key: string;
+          billing_status: string;
+          discovery_persistence_plan_key: string;
+        };
+        current_saved_state: { last_adm_discovery_check_at: string; next_adm_discovery_due_at: string };
+      };
+      assert.deepEqual(granted.automation_access, {
+        source: "complimentary_showcase",
+        effective_plan_key: "pro",
+        billing_plan_key: "free",
+        billing_status: "inactive",
+        discovery_persistence_plan_key: "free",
+      });
+      assert.ok(granted.selected_newest_available?.name,
+        `expected ADM discovery candidate: ${JSON.stringify(granted.problem_flags)}`);
+      const grantedCadence = (Date.parse(granted.current_saved_state.next_adm_discovery_due_at)
+        - Date.parse(granted.current_saved_state.last_adm_discovery_check_at)) / 60_000;
+      assert.ok(Math.abs(grantedCadence - getAdmDiscoveryIntervalMinutes("free")) < 0.1,
+        `granted cadence ${grantedCadence}: ${JSON.stringify(granted.current_saved_state)}`);
+
+      const unrelatedResponse = await invoke(admDiscoveryDebug, diagnosticEnv, actor, "GET", undefined, "same-guild-other-server");
+      assert.equal(unrelatedResponse.status, 200);
+      const unrelated = await unrelatedResponse.json() as {
+        automation_access: { source: string; effective_plan_key: string; discovery_persistence_plan_key: string };
+        current_saved_state: { last_adm_discovery_check_at: string; next_adm_discovery_due_at: string };
+      };
+      assert.deepEqual(unrelated.automation_access, {
+        source: "billing",
+        effective_plan_key: "free",
+        billing_plan_key: "free",
+        billing_status: "inactive",
+        discovery_persistence_plan_key: "free",
+      });
+      const unrelatedCadence = (Date.parse(unrelated.current_saved_state.next_adm_discovery_due_at)
+        - Date.parse(unrelated.current_saved_state.last_adm_discovery_check_at)) / 60_000;
+      assert.ok(Math.abs(unrelatedCadence - getAdmDiscoveryIntervalMinutes("free")) < 0.1, `unrelated cadence ${unrelatedCadence}`);
+      assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions ORDER BY id").all(), beforeSubscriptions);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
   });
   await test("exact grant enables NukeTown Server Wars hosting without fabricating billing", async ({ db, env }) => {
     const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
