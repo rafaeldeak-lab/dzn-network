@@ -1,9 +1,23 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { runOwnerConsolePreviewWorkflowBoundaryAssertions } from "./test-github-workflow-boundary/owner-console-preview";
 
 function read(path: string) {
   return readFileSync(path, "utf8");
+}
+
+const githubWorkflowDirectory = ".github/workflows";
+const githubWorkflowMaximumBytes = 500 * 1024;
+
+for (const workflowName of readdirSync(githubWorkflowDirectory)) {
+  if (!/\.ya?ml$/i.test(workflowName)) continue;
+  const workflowPath = join(githubWorkflowDirectory, workflowName);
+  const workflowBytes = statSync(workflowPath).size;
+  assert.ok(
+    workflowBytes <= githubWorkflowMaximumBytes,
+    `${workflowPath} is ${workflowBytes} bytes; GitHub rejects workflow files larger than 500 KB.`,
+  );
 }
 
 function countOccurrences(source: string, needle: string) {
