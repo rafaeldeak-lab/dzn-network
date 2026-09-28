@@ -35,7 +35,7 @@ import { dispatchQueuedDiscordPostUpdates } from "../functions/_lib/discord-post
 import { onRequest as postingDestinations } from "../functions/api/servers/[serverId]/posting-destinations";
 import { getOwnerDiscordOverview } from "../functions/_lib/owner-discord-control";
 import { onRequest as runAutoPostsNow } from "../functions/api/servers/[serverId]/auto-posts/run-now";
-import { importAdmTextForServer, runAdmWorkerSyncTick, selectAdmWorkerServer } from "../functions/_lib/adm-sync";
+import { importAdmTextForServer, runAdmWorkerSyncTick, runScheduledAdmSync, selectAdmWorkerServer } from "../functions/_lib/adm-sync";
 import { getDueMetadataRefreshServersFast, refreshLivePlayerCountsForActiveServers } from "../functions/_lib/server-metadata";
 import { createCompetitiveEvent } from "../functions/_lib/events";
 import { eventCreateHostTransactionGuard, listAuthorizedEventCreationHosts, resolveAuthorizedEventCreationHost } from "../functions/_lib/event-hosts";
@@ -340,6 +340,26 @@ async function run() {
     assert.equal(worker?.access_source, "complimentary_showcase");
     assert.equal(worker?.plan_key, "pro");
     assert.deepEqual(materialSubscriptions(), subscriptionBefore);
+  });
+  await test("complimentary ADM worker records Pro discovery and pull cadence", async ({ db, env }) => {
+    await getDueStatusAutomationServers(env, 10);
+    await runScheduledAdmSync({ ...env, MOCK_NITRADO: "true" }, { maxServers: 1, refreshMetadata: false });
+    await grant(env);
+    const result = await runAdmWorkerSyncTick({ ...env, MOCK_NITRADO: "true" }, {
+      linkedServerId: scope.linkedServerId,
+      force: true,
+      skipMetadataRefresh: true,
+      maxRuntimeMs: 5_000,
+    });
+    assert.equal(result.selected_linked_server_id, scope.linkedServerId);
+    const state = db.sqlite.prepare(`SELECT last_adm_discovery_check_at, next_adm_discovery_due_at,
+      last_adm_pull_at, next_adm_pull_due_at FROM server_sync_state WHERE guild_id = ?`).get(scope.guildId);
+    assert.ok(state?.last_adm_discovery_check_at && state.next_adm_discovery_due_at);
+    assert.ok(state?.last_adm_pull_at && state.next_adm_pull_due_at);
+    const discoveryMinutes = (Date.parse(String(state.next_adm_discovery_due_at)) - Date.parse(String(state.last_adm_discovery_check_at))) / 60_000;
+    const pullMinutes = (Date.parse(String(state.next_adm_pull_due_at)) - Date.parse(String(state.last_adm_pull_at))) / 60_000;
+    assert.ok(discoveryMinutes >= 9.9 && discoveryMinutes <= 10.1, `discovery cadence ${discoveryMinutes}`);
+    assert.ok(pullMinutes >= 29.9 && pullMinutes <= 30.1, `pull cadence ${pullMinutes}`);
   });
   await test("revoked grant removes NukeTown from every scheduler selector", async ({ env }) => {
     const grantId = await grant(env);

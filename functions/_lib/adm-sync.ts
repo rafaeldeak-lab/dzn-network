@@ -3281,6 +3281,7 @@ export async function planAdmBackfillJobsForServer(
     scheduledBudgeted?: boolean;
     skipMetadataRefresh?: boolean;
     automationAccessSource?: "billing" | "complimentary_showcase";
+    automationPlanKey?: PlanKey;
   } = {},
 ): Promise<AdmBackfillPlanResult> {
   await ensureAdmSyncSchema(env);
@@ -3290,6 +3291,9 @@ export async function planAdmBackfillJobsForServer(
   if (!linkedServer || linkedServer.user_id !== userId) throw new Error("No linked server found");
   const scope = verifyAdmServerScope(linkedServer, crypto.randomUUID());
   const scheduledBudgeted = options.scheduledBudgeted === true;
+  const effectivePlanKey = options.automationAccessSource === "complimentary_showcase" && options.automationPlanKey
+    ? normalizePlanKey(options.automationPlanKey)
+    : linkedServer.plan_key;
   const admBudget = getAdmInvocationBudget(env);
   if (!options.skipMetadataRefresh) {
     await refreshNitradoServerMetadata(env, {
@@ -3310,7 +3314,7 @@ export async function planAdmBackfillJobsForServer(
     readMode: scheduledBudgeted ? "sample" : "full",
     preferredAdmPath,
     previousLatestAdmFileName: null,
-    maxFiles: scheduledBudgeted ? scheduledDiscoveryFileLimit : Math.min(getAdmBackfillReadLimit(linkedServer.plan_key), admBudget.maxFilesPerInvocation),
+    maxFiles: scheduledBudgeted ? scheduledDiscoveryFileLimit : Math.min(getAdmBackfillReadLimit(effectivePlanKey), admBudget.maxFilesPerInvocation),
     lookbackFiles: scheduledBudgeted ? scheduledDiscoveryFileLimit : 12,
     directPreferredFirst: scheduledBudgeted ? false : true,
     adminLogsFirst: scheduledBudgeted ? false : undefined,
@@ -3373,14 +3377,14 @@ export async function planAdmBackfillJobsForServer(
       readError: readErrorByName.get(key) ?? findReadErrorForAdmFile(batch.readErrors, file.name) ?? batch.readError,
     };
   });
-  const maxJobsToCreate = options.maxJobsToCreate ?? getAdmBackfillQueueLimit(linkedServer.plan_key);
+  const maxJobsToCreate = options.maxJobsToCreate ?? getAdmBackfillQueueLimit(effectivePlanKey);
 
   if (scheduledBudgeted && !isMock) {
     const preliminaryPlan = buildAdmBackfillPlan({
       files: plannerFiles,
       handledFilenames,
       existingJobs: existingJobs.map((job) => ({ filename: job.filename, status: job.status, source: job.source })),
-      planKey: linkedServer.plan_key,
+      planKey: effectivePlanKey,
       maxJobsToCreate,
     });
     const exactReadLimit = scheduledBudgeted ? 1 : Math.max(1, Math.min(3, Math.trunc(Number(maxJobsToCreate))));
@@ -3427,7 +3431,7 @@ export async function planAdmBackfillJobsForServer(
     files: plannerFiles,
     handledFilenames,
     existingJobs: latestExistingJobs.map((job) => ({ filename: job.filename, status: job.status, source: job.source })),
-    planKey: linkedServer.plan_key,
+    planKey: effectivePlanKey,
     maxJobsToCreate,
   });
 
@@ -3565,7 +3569,7 @@ export async function planAdmBackfillJobsForServer(
       : message;
     await recordAdmDiscoveryResult(env, {
       guildId: linkedServer.guild_id,
-      planKey: linkedServer.plan_key,
+      planKey: effectivePlanKey,
       ok,
       status,
       error: automationError,
@@ -3576,7 +3580,7 @@ export async function planAdmBackfillJobsForServer(
     }).catch(() => null);
     await recordAdmPullResult(env, {
       guildId: linkedServer.guild_id,
-      planKey: linkedServer.plan_key,
+      planKey: effectivePlanKey,
       ok,
       status,
       error: automationError,
@@ -3597,7 +3601,7 @@ export async function planAdmBackfillJobsForServer(
     ok,
     status,
     message,
-    plan_key: linkedServer.plan_key,
+    plan_key: effectivePlanKey,
     files_found: batch.filesFound,
     window_files: plan.windowFiles,
     missing_files: plan.missingFiles,
@@ -6797,6 +6801,7 @@ export async function runAdmWorkerSyncTick(
           scheduledBudgeted: true,
           skipMetadataRefresh: true,
           automationAccessSource: selected.access_source,
+          automationPlanKey: normalizePlanKey(selected.plan_key),
         });
       } catch (error) {
         if (isAutomationExecutionClaimError(error)) {
@@ -7826,6 +7831,7 @@ export async function runScheduledAdmSync(
         scheduledBudgeted: true,
         skipMetadataRefresh: true,
         automationAccessSource: server.access_source,
+        automationPlanKey: normalizePlanKey(server.plan_key),
       });
       const ok = !isAdmSyncErrorStatus(result.status);
       if (!ok) failed += 1;
