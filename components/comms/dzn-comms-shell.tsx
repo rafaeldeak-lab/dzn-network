@@ -206,13 +206,16 @@ export function DznCommsShell() {
 
   async function handleReaction(messageId: string, reactionKey: CommsReactionKey, remove: boolean) {
     if (!reactionWritesEnabled) throw new Error("Reactions are not enabled yet.");
-    const attemptKey = `${messageId}:${reactionKey}:${remove ? "remove" : "add"}`;
+    const addAttemptKey = `${messageId}:${reactionKey}:add`;
+    const removeAttemptKey = `${messageId}:${reactionKey}:remove`;
+    const attemptKey = remove ? removeAttemptKey : addAttemptKey;
     const mutationId = reactionAttemptRef.current.get(attemptKey) ?? crypto.randomUUID();
     reactionAttemptRef.current.set(attemptKey, mutationId);
     try {
       if (remove) await removeCommsReaction(messageId, reactionKey, mutationId);
       else await addCommsReaction(messageId, reactionKey, mutationId);
-      reactionAttemptRef.current.delete(attemptKey);
+      reactionAttemptRef.current.delete(addAttemptKey);
+      reactionAttemptRef.current.delete(removeAttemptKey);
     } catch (error) {
       throw error;
     }

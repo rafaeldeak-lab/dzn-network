@@ -79,6 +79,7 @@ assert.match(shell, /fetch\("\/api\/auth\/me", \{ cache: "no-store", credentials
 assert.match(shell, /reactionUiEnabled = liveUiEnabled && payload\.feature_flags\.reactions_enabled/, "Reaction rows must remain behind the public live UI switch.");
 assert.match(shell, /reactionWritesAvailable && authStatus === "authenticated"/, "Reaction mutations must remain disabled until authentication is confirmed.");
 assert.match(shell, /Log in to react/, "Signed-out users must receive a direct login action instead of enabled mutation controls.");
+assert.match(shell, /reactionAttemptRef\.current\.delete\(addAttemptKey\)[\s\S]*reactionAttemptRef\.current\.delete\(removeAttemptKey\)/, "A successful reaction mutation must clear stale retry IDs for both action directions.");
 assert.match(historyClient, /"\/api\/comms\/message-history\?channel=global-chat&limit=30"/, "The client should only fetch the read-only history route.");
 assert.match(historyClient, /credentials: "include"/, "The client should preserve current-user cookies for read checks.");
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED/, "The live composer must remain behind an explicit public UI flag.");
