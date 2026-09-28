@@ -27,6 +27,7 @@ import {
   ensureAutomationSchema,
   getDueAdmDiscoveryAutomationServers,
   getDueAdmAutomationServers,
+  isAutomationServerAccessCurrent,
   markAdmPullStarted,
   queueDiscordPostUpdatesForGuild,
   recordAdmCadenceObservation,
@@ -41,6 +42,11 @@ import {
 } from "./server-metadata";
 import { getActiveNitradoRateLimit } from "./nitrado-diagnostics";
 import { normalizePlanKey, type PlanKey } from "./plans";
+import {
+  isMissingShowcaseSchema,
+  showcaseAutomationEntitlementBindings,
+  showcaseAutomationEntitlementCteSql,
+} from "./server-showcase-access";
 import {
   getCanonicalServerStats,
   patchHomeStatsAdmStatsFromCanonicalEvents,
@@ -6467,6 +6473,7 @@ type AdmWorkerSelectedServer = SyncLinkedServer & {
   guild_id: string;
   plan_key: string | null;
   subscription_status: string | null;
+  access_source?: "billing" | "complimentary_showcase";
   current_players: number | null;
   max_players: number | null;
   player_count_status: string | null;
@@ -6514,6 +6521,7 @@ type AdmWorkerMetadataRefreshServer = Pick<
   | "player_count_status"
   | "player_count_last_checked_at"
   | "metadata_last_checked_at"
+  | "access_source"
 >;
 
 export type AdmWorkerSyncTickResult = ScheduledAdmSyncResult & {
@@ -6572,6 +6580,13 @@ export async function runAdmWorkerSyncTick(
         message: metadata.processed > 0
           ? "Refreshed stale server metadata; no due ADM server or pending scheduled ADM import job found for this Worker tick."
           : "No due ADM server or pending scheduled ADM import job found for this Worker tick.",
+      });
+    }
+    if (!await isAutomationServerAccessCurrent(env, selected)) {
+      return admWorkerResult({
+        metadata,
+        skippedNotDue: 1,
+        message: "Server automation access changed before the ADM Worker started external work.",
       });
     }
 
@@ -7166,15 +7181,16 @@ export async function runAdmWorkerSyncTick(
   }
 }
 
-async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { linkedServerId?: string | null; force?: boolean } = {}): Promise<AdmWorkerSelectedServer | null> {
+export async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { linkedServerId?: string | null; force?: boolean } = {}): Promise<AdmWorkerSelectedServer | null> {
   const now = new Date().toISOString();
   const metadataStaleBefore = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const linkedServerId = options.linkedServerId ?? null;
   const force = options.force === true ? 1 : 0;
   const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
-  const row = await requireDb(env)
+  const db = requireDb(env);
+  const selectRow = (includeShowcase: boolean) => db
     .prepare(
-      `WITH cursor AS (
+      `${includeShowcase ? `${showcaseAutomationEntitlementCteSql()},` : "WITH"} cursor AS (
          SELECT value FROM adm_worker_state WHERE key = ? LIMIT 1
        ),
        eligible AS (
@@ -7193,8 +7209,9 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
            linked_servers.player_count_last_checked_at,
            linked_servers.metadata_last_checked_at,
            server_log_config.adm_path,
-           server_subscriptions.plan_key,
-           server_subscriptions.status AS subscription_status,
+           automation_entitlements.plan_key,
+           automation_entitlements.status AS subscription_status,
+           ${includeShowcase ? "automation_entitlements.access_source" : "'billing'"} AS access_source,
            worker_selection.last_worker_selected_at,
            worker_selection.next_worker_due_at,
            worker_selection.selected_count,
@@ -7302,7 +7319,8 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
            nitrado_connections.token_iv,
            nitrado_connections.token_auth_tag
          FROM linked_servers
-         JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+         JOIN ${includeShowcase ? "automation_entitlements" : "server_subscriptions AS automation_entitlements"}
+           ON ${includeShowcase ? "automation_entitlements.linked_server_id = linked_servers.id" : "automation_entitlements.guild_id = linked_servers.guild_id"}
          JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
          LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
          LEFT JOIN server_log_config ON server_log_config.linked_server_id = linked_servers.id
@@ -7318,7 +7336,7 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
          WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
            AND linked_servers.nitrado_service_id IS NOT NULL
            AND linked_servers.nitrado_service_id != ''
-           AND lower(server_subscriptions.status) IN ('active', 'trialing')
+           ${includeShowcase ? "" : "AND lower(automation_entitlements.status) IN ('active', 'trialing')"}
            AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
            AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
            AND (
@@ -7380,6 +7398,7 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
        LIMIT 1`,
     )
     .bind(
+      ...(includeShowcase ? showcaseAutomationEntitlementBindings() : []),
       cursorKey,
       metadataStaleBefore,
       metadataStaleBefore,
@@ -7397,6 +7416,13 @@ async function selectAdmWorkerServer(env: Env, cursorKey: string, options: { lin
       OWNER_SUPPLIED_ADM_RECOVERY_SOURCE,
     )
     .first<AdmWorkerSelectedServer>();
+  let row;
+  try {
+    row = await selectRow(true);
+  } catch (error) {
+    if (!isMissingShowcaseSchema(error)) throw error;
+    row = await selectRow(false);
+  }
   return row ?? null;
 }
 
@@ -7407,6 +7433,7 @@ function isAdmWorkerMetadataStale(selected: AdmWorkerSelectedServer) {
 }
 
 async function refreshSelectedAdmWorkerMetadata(env: Env, selected: AdmWorkerMetadataRefreshServer): Promise<ScheduledMetadataSyncResult> {
+  if (!await isAutomationServerAccessCurrent(env, selected)) return emptyScheduledMetadataSyncResult();
   const beforeCurrent = Number.isFinite(Number(selected.current_players)) ? Number(selected.current_players) : null;
   const beforeMax = Number.isFinite(Number(selected.max_players)) ? Number(selected.max_players) : null;
   const result = await refreshNitradoServerMetadata(env, {
@@ -7442,9 +7469,10 @@ async function refreshSelectedAdmWorkerMetadata(env: Env, selected: AdmWorkerMet
 
 async function refreshOldestStaleAdmWorkerMetadata(env: Env): Promise<ScheduledMetadataSyncResult> {
   const metadataStaleBefore = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-  const row = await requireDb(env)
+  const db = requireDb(env);
+  const selectRow = (includeShowcase: boolean) => db
     .prepare(
-      `SELECT
+      `${includeShowcase ? `${showcaseAutomationEntitlementCteSql()}\n` : ""}SELECT
          linked_servers.id,
          linked_servers.user_id,
          linked_servers.nitrado_service_id,
@@ -7456,13 +7484,15 @@ async function refreshOldestStaleAdmWorkerMetadata(env: Env): Promise<ScheduledM
          linked_servers.max_players,
          linked_servers.player_count_status,
          linked_servers.player_count_last_checked_at,
-         linked_servers.metadata_last_checked_at
+         linked_servers.metadata_last_checked_at,
+         ${includeShowcase ? "automation_entitlements.access_source" : "'billing'"} AS access_source
        FROM linked_servers
-       JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       JOIN ${includeShowcase ? "automation_entitlements" : "server_subscriptions AS automation_entitlements"}
+         ON ${includeShowcase ? "automation_entitlements.linked_server_id = linked_servers.id" : "automation_entitlements.guild_id = linked_servers.guild_id"}
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
-         AND lower(server_subscriptions.status) IN ('active', 'trialing')
+         ${includeShowcase ? "" : "AND lower(automation_entitlements.status) IN ('active', 'trialing')"}
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND (
            linked_servers.metadata_last_checked_at IS NULL
@@ -7475,8 +7505,15 @@ async function refreshOldestStaleAdmWorkerMetadata(env: Env): Promise<ScheduledM
          linked_servers.id ASC
        LIMIT 1`,
     )
-    .bind(metadataStaleBefore, metadataStaleBefore)
+    .bind(...(includeShowcase ? showcaseAutomationEntitlementBindings() : []), metadataStaleBefore, metadataStaleBefore)
     .first<AdmWorkerMetadataRefreshServer>();
+  let row;
+  try {
+    row = await selectRow(true);
+  } catch (error) {
+    if (!isMissingShowcaseSchema(error)) throw error;
+    row = await selectRow(false);
+  }
   return row ? refreshSelectedAdmWorkerMetadata(env, row) : emptyScheduledMetadataSyncResult();
 }
 
@@ -7658,6 +7695,7 @@ export async function runScheduledAdmSync(
 
   for (const server of discoveryServers) {
     try {
+      if (!await isAutomationServerAccessCurrent(env, server)) continue;
       const discovery = await runAdmDiscoveryForLinkedServer(env, server.user_id, server.id);
       discoveryResults.set(server.guild_id, discovery);
       discoveryProcessed += 1;
@@ -7695,6 +7733,7 @@ export async function runScheduledAdmSync(
 
   for (const server of eligibleServers) {
     try {
+      if (!await isAutomationServerAccessCurrent(env, server)) continue;
       await markAdmPullStarted(env, server.guild_id);
       processingProcessed += 1;
       const result = await planAdmBackfillJobsForServer(env, server.user_id, server.id, {

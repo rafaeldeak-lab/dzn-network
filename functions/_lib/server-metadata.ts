@@ -4,6 +4,7 @@ import {
   clearStatusCheckLock,
   getAutomationContextForLinkedServer,
   getDueStatusAutomationServers,
+  isAutomationServerAccessCurrent,
   markStatusCheckStarted,
   queueDiscordPostUpdatesForGuild,
   recordStatusCheckResult,
@@ -14,6 +15,11 @@ import { geolocateServerIp, shouldRefreshServerGeo } from "./geoip";
 import { isMockNitrado } from "./mock";
 import { parseAdmLine } from "./adm-parser";
 import { patchHomeStatsPlayerCountsFromFreshMetadata } from "./player-counts";
+import {
+  isMissingShowcaseSchema,
+  showcaseAutomationEntitlementBindings,
+  showcaseAutomationEntitlementCteSql,
+} from "./server-showcase-access";
 import type { Env } from "./types";
 import {
   SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES,
@@ -894,6 +900,26 @@ export async function refreshLivePlayerCountsForActiveServers(
       continue;
     }
 
+    if (!await isAutomationServerAccessCurrent(env, row)) {
+      skipped += 1;
+      results.push({
+        linked_server_id: row.id,
+        service_id: row.nitrado_service_id,
+        server_name: serverName,
+        status: "skipped",
+        changed: false,
+        current_players: cleanNumber(row.current_players),
+        max_players: cleanNumber(row.max_players),
+        player_count_status: normalizePlayerCountStatus(row.player_count_status),
+        player_count_source: row.player_count_source ?? null,
+        player_count_last_checked_at: row.player_count_last_checked_at,
+        metadata_last_checked_at: row.metadata_last_checked_at,
+        message: "Server automation access changed before metadata refresh",
+        phase: "access_recheck",
+      });
+      continue;
+    }
+
     const lock = await markStatusCheckStarted(env, row.guild_id, {
       leaseMs: Math.max(3 * 60 * 1000, Math.min(livePlayerCountStaleMs, 5 * 60 * 1000)),
     });
@@ -1041,7 +1067,7 @@ export async function refreshLivePlayerCountsForActiveServers(
   };
 }
 
-async function getDueMetadataRefreshServersFast(
+export async function getDueMetadataRefreshServersFast(
   env: Env,
   maxServers: number,
   livePlayerCountStaleMs = METADATA_STALE_MS,
@@ -1053,14 +1079,15 @@ async function getDueMetadataRefreshServersFast(
   const unavailableRetryCutoff = new Date(Date.now() - Math.max(2 * 60 * 1000, Math.min(livePlayerCountStaleMs * 3, 5 * 60 * 1000))).toISOString();
   const db = requireDb(env);
   const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
-  const selectDueServersSql =
-      `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
+  const selectDueServersSql = (includeShowcase: boolean) =>
+      `${includeShowcase ? `${showcaseAutomationEntitlementCteSql()}\n` : ""}SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
               linked_servers.nitrado_service_id, linked_servers.display_name, linked_servers.hostname,
               linked_servers.server_name, linked_servers.nitrado_service_name,
               linked_servers.current_players, linked_servers.max_players,
               linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
-              linked_servers.player_count_source, linked_servers.player_count_status, server_subscriptions.plan_key,
-              server_subscriptions.status AS subscription_status,
+              linked_servers.player_count_source, linked_servers.player_count_status, automation_entitlements.plan_key,
+              automation_entitlements.status AS subscription_status,
+              ${includeShowcase ? "automation_entitlements.access_source" : "'billing'"} AS access_source,
               server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
               server_sync_state.next_adm_pull_due_at, server_sync_state.next_retry_after,
               ${lifecycleStatusSql} AS lifecycle_status,
@@ -1068,12 +1095,13 @@ async function getDueMetadataRefreshServersFast(
               linked_servers.owner_action_required,
               linked_servers.owner_action_reason
        FROM linked_servers
-       JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       JOIN ${includeShowcase ? "automation_entitlements" : "server_subscriptions AS automation_entitlements"}
+         ON ${includeShowcase ? "automation_entitlements.linked_server_id = linked_servers.id" : "automation_entitlements.guild_id = linked_servers.guild_id"}
        LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
-         AND lower(COALESCE(server_subscriptions.status, 'inactive')) IN ('active', 'trialing')
+         ${includeShowcase ? "" : "AND lower(COALESCE(automation_entitlements.status, 'inactive')) IN ('active', 'trialing')"}
          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES)})
          AND (
            ${lifecycleStatusSql} = 'active_live'
@@ -1104,7 +1132,7 @@ async function getDueMetadataRefreshServersFast(
            WHEN 'unavailable' THEN 1
            ELSE 0
          END ASC,
-         CASE lower(COALESCE(server_subscriptions.plan_key, 'free'))
+         CASE lower(COALESCE(automation_entitlements.plan_key, 'free'))
            WHEN 'premium' THEN 4
            WHEN 'network' THEN 4
            WHEN 'partner' THEN 4
@@ -1115,23 +1143,31 @@ async function getDueMetadataRefreshServersFast(
          COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') ASC,
          linked_servers.updated_at DESC
        LIMIT ?`;
-  const rows = await db
-    .prepare(selectDueServersSql)
-    .bind(now, now, livePlayerCountCutoff, staleStatusLockCutoff, unavailableRetryCutoff, staleStatusLockCutoff, maxServers)
+  const selectRows = (includeShowcase: boolean) => db
+    .prepare(selectDueServersSql(includeShowcase))
+    .bind(...(includeShowcase ? showcaseAutomationEntitlementBindings() : []), now, now, livePlayerCountCutoff, staleStatusLockCutoff, unavailableRetryCutoff, staleStatusLockCutoff, maxServers)
     .all<AutomationSyncServer>();
+  let rows;
+  try {
+    rows = await selectRows(true);
+  } catch (error) {
+    if (!isMissingShowcaseSchema(error)) throw error;
+    rows = await selectRows(false);
+  }
   const dueRows = rows.results ?? [];
   const sanitizedDebugServiceId = cleanServiceId(debugServiceId);
   if (!sanitizedDebugServiceId) return dueRows;
   if (dueRows.some((row) => row.nitrado_service_id === sanitizedDebugServiceId)) return dueRows;
-  const debugRow = await db
+  const selectDebugRow = (includeShowcase: boolean) => db
     .prepare(
-      `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
+      `${includeShowcase ? `${showcaseAutomationEntitlementCteSql()}\n` : ""}SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
               linked_servers.nitrado_service_id, linked_servers.display_name, linked_servers.hostname,
               linked_servers.server_name, linked_servers.nitrado_service_name,
               linked_servers.current_players, linked_servers.max_players,
               linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
-              linked_servers.player_count_source, linked_servers.player_count_status, server_subscriptions.plan_key,
-              server_subscriptions.status AS subscription_status,
+              linked_servers.player_count_source, linked_servers.player_count_status, automation_entitlements.plan_key,
+              automation_entitlements.status AS subscription_status,
+              ${includeShowcase ? "automation_entitlements.access_source" : "'billing'"} AS access_source,
               server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
               server_sync_state.next_adm_pull_due_at, server_sync_state.next_retry_after,
               ${lifecycleStatusSql} AS lifecycle_status,
@@ -1139,17 +1175,25 @@ async function getDueMetadataRefreshServersFast(
               linked_servers.owner_action_required,
               linked_servers.owner_action_reason
        FROM linked_servers
-       JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       JOIN ${includeShowcase ? "automation_entitlements" : "server_subscriptions AS automation_entitlements"}
+         ON ${includeShowcase ? "automation_entitlements.linked_server_id = linked_servers.id" : "automation_entitlements.guild_id = linked_servers.guild_id"}
        LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id = ?
-         AND lower(COALESCE(server_subscriptions.status, 'inactive')) IN ('active', 'trialing')
+         ${includeShowcase ? "" : "AND lower(COALESCE(automation_entitlements.status, 'inactive')) IN ('active', 'trialing')"}
          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES)})
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        LIMIT 1`,
     )
-    .bind(sanitizedDebugServiceId)
+    .bind(...(includeShowcase ? showcaseAutomationEntitlementBindings() : []), sanitizedDebugServiceId)
     .first<AutomationSyncServer>();
+  let debugRow;
+  try {
+    debugRow = await selectDebugRow(true);
+  } catch (error) {
+    if (!isMissingShowcaseSchema(error)) throw error;
+    debugRow = await selectDebugRow(false);
+  }
   return debugRow ? [debugRow, ...dueRows].slice(0, maxServers) : dueRows;
 }
 
