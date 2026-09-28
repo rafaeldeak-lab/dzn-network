@@ -117,6 +117,7 @@ assert.equal(eventCreateHandler.indexOf("requirePlatformCreatorEventAdmin") < ev
 const eventHubLib = source("functions/_lib/event-hub.ts");
 includesAll(eventHubLib, [
   "ensureEventHubSchema",
+  "validateOwnerEventHubReadSchema",
   "server_discord_channel_settings",
   "getOwnerEventHub",
   "enterOwnerEvent",
@@ -150,6 +151,9 @@ includesAll(eventHubLib, [
   "last_payload_hash",
   "Scored automatically from DZN ADM Sync. Updates every 5 minutes.",
 ]);
+const ownerEventHubReadBlock = eventHubLib.slice(eventHubLib.indexOf("export async function getOwnerEventHub"), eventHubLib.indexOf("export async function enterOwnerEvent"));
+assert.equal(ownerEventHubReadBlock.includes("validateOwnerEventHubReadSchema"), true, "Owner Event Hub reads must validate schema without mutating it.");
+assert.equal(ownerEventHubReadBlock.includes("ensureEventHubSchema"), false, "Owner Event Hub GET must not run schema DDL.");
 assert.equal(eventHubLib.includes("fetchNitrado"), false, "Event scoring must not read Nitrado directly.");
 assert.equal(eventHubLib.includes("TOKEN_ENCRYPTION_KEY"), false, "Event Hub must not touch Nitrado token encryption.");
 

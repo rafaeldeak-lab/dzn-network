@@ -166,9 +166,75 @@ export async function ensureEventHubSchema(env: Env) {
   }
 }
 
+const OWNER_EVENT_HUB_READ_COLUMNS: Record<string, readonly string[]> = {
+  linked_servers: ["id", "user_id", "guild_id", "discord_guild_id", "status", "public_slug", "server_category", "listing_visibility", "nitrado_service_id", "display_name", "hostname", "server_name", "current_players", "max_players"],
+  users: ["id", "discord_id"],
+  discord_guilds: ["id", "guild_id", "name"],
+  server_subscriptions: ["guild_id", "plan_key", "status", "created_at", "updated_at"],
+  competitive_events: ["id", "name", "slug", "description", "visibility", "status", "event_type", "category", "premium_tier", "server_limit", "team_limit", "starts_at", "ends_at", "rules", "rewards", "requires_discord_posting", "entry_deadline_at", "matchup_duration_hours", "phase_duration_hours", "phase_count", "created_at"],
+  competitive_event_servers: ["event_id", "server_id"],
+  server_event_entries: ["id", "event_id", "linked_server_id", "status", "entered_at", "completed_at", "created_at"],
+  event_matchups: ["id", "event_id", "round_number", "server_a_id", "server_b_id", "status", "starts_at", "ends_at", "scoring_grace_until", "server_a_score", "server_b_score", "created_at"],
+  server_discord_channel_settings: ["linked_server_id", "guild_id", "channel_type", "channel_id", "channel_name", "channel_kind", "bot_can_view", "bot_can_send", "bot_can_embed", "bot_can_read_history", "last_verified_at", "updated_at"],
+  event_cooldowns: ["linked_server_id", "event_type", "plan_key", "cooldown_until", "source_event_id", "reason"],
+  adm_sync_state: ["linked_server_id", "latest_adm_file", "last_processed_file", "last_successful_import_at", "last_sync_status"],
+  adm_import_jobs: ["linked_server_id", "source", "status", "completed_at", "created_at", "updated_at"],
+};
+
+type OwnerEventHubReadiness =
+  | { ok: true }
+  | { ok: false; missingCount: number };
+
+const ownerEventHubReadiness = new WeakMap<object, Promise<OwnerEventHubReadiness>>();
+
+export async function validateOwnerEventHubReadSchema(env: Env): Promise<OwnerEventHubReadiness> {
+  if (!env.DB) return { ok: false, missingCount: 1 };
+  const key = env.DB as unknown as object;
+  const existing = ownerEventHubReadiness.get(key);
+  if (existing) return existing;
+  const pending = validateOwnerEventHubReadSchemaNow(env).then((result) => {
+    if (!result.ok && ownerEventHubReadiness.get(key) === pending) ownerEventHubReadiness.delete(key);
+    return result;
+  }).catch((error) => {
+    if (ownerEventHubReadiness.get(key) === pending) ownerEventHubReadiness.delete(key);
+    throw error;
+  });
+  ownerEventHubReadiness.set(key, pending);
+  return pending;
+}
+
+async function validateOwnerEventHubReadSchemaNow(env: Env): Promise<OwnerEventHubReadiness> {
+  const db = requireDb(env);
+  let missingCount = 0;
+  for (const [table, columns] of Object.entries(OWNER_EVENT_HUB_READ_COLUMNS)) {
+    const info = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+    const names = new Set((info.results ?? []).map((column) => column.name));
+    if (names.size === 0) {
+      missingCount += 1;
+      continue;
+    }
+    for (const column of columns) {
+      if (!names.has(column)) missingCount += 1;
+    }
+  }
+  return missingCount === 0 ? { ok: true } : { ok: false, missingCount };
+}
+
 export async function getOwnerEventHub(env: Env, user: SessionUser | null, serverId: string) {
   if (!user) return { status: 401, payload: { ok: false, error: "NOT_AUTHENTICATED", message: "Log in to view events." } };
-  await ensureEventHubSchema(env);
+  const schema = await validateOwnerEventHubReadSchema(env);
+  if (!schema.ok) {
+    return {
+      status: 503,
+      payload: {
+        ok: false,
+        error: "EVENT_SCHEMA_NOT_READY",
+        errorCode: "EVENT_SCHEMA_NOT_READY",
+        message: "Event Hub storage is not ready.",
+        missingCount: schema.missingCount,
+      },
+    };
+  }
   const server = await fetchOwnerServer(env, user, serverId);
   if (!server) return { status: 403, payload: { ok: false, error: "NOT_AUTHORIZED", message: "Server not found or you do not have access." } };
 
