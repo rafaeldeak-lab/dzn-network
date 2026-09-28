@@ -268,7 +268,7 @@ type SafePublicServer = {
   network_status?: {
     adm_status: "Connected" | "Discovered" | "Needs Review";
     stats_sync: "Active" | "Pending" | "Not Started";
-    public_listing: "Active" | "Historical";
+    public_listing: "Active" | "Setup pending" | "Historical";
     last_sync_at: string | null;
   };
   lifecycle?: {
@@ -1250,7 +1250,7 @@ async function toSafePublicServer(
     network_status: {
       adm_status: admStatus,
       stats_sync: statsSync,
-      public_listing: historicalLifecycle ? "Historical" : "Active",
+      public_listing: publicListingStatus(row.status, historicalLifecycle),
       last_sync_at: lastSyncAt,
     },
     recent_events: await getPublicRecentEvents(env, row.id).catch(() => []),
@@ -1514,7 +1514,7 @@ async function toSafePublicServerPreview(
     network_status: {
       adm_status: admStatus,
       stats_sync: statsSync,
-      public_listing: historicalLifecycle ? "Historical" : "Active",
+      public_listing: publicListingStatus(row.status, historicalLifecycle),
       last_sync_at: lastSyncAt,
     },
     recent_events: [],
@@ -1787,13 +1787,18 @@ export function applyPublicServerAccess(server: SafePublicServer, viewerLoggedIn
     network_status: {
       adm_status: server.adm_status,
       stats_sync: server.stats_sync,
-      public_listing: historicalLifecycle ? "Historical" : "Active",
+      public_listing: publicListingStatus(server.status, historicalLifecycle),
       last_sync_at: null,
     },
     access_level: "preview",
     is_locked: true,
     locked_reason: "Log in with Discord to view full server stats.",
   };
+}
+
+export function publicListingStatus(status: unknown, historicalLifecycle: boolean): "Active" | "Setup pending" | "Historical" {
+  if (historicalLifecycle) return "Historical";
+  return String(status ?? "").trim().toLowerCase() === "live" ? "Active" : "Setup pending";
 }
 
 function findPublicServerBySlug(servers: SafePublicServer[], slug: string) {
