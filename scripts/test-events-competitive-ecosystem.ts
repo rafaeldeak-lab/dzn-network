@@ -222,6 +222,13 @@ assert.equal(eventHubLib.includes("FROM adm_import_jobs\n       WHERE server_id 
 assert.equal(eventHubLib.includes("AND status IN ('completed', 'completed_with_warnings')"), true, "Event Hub should only accept completed scheduled ADM jobs as readiness evidence.");
 assert.equal(eventHubLib.includes("fetchNitrado"), false, "Event scoring must not read Nitrado directly.");
 assert.equal(eventHubLib.includes("TOKEN_ENCRYPTION_KEY"), false, "Event Hub must not touch Nitrado token encryption.");
+assert.equal(eventHubLib.includes("SELECT linked_servers.*"), false, "Event Hub owner reads must not exceed D1 result limits by selecting the wide linked_servers row.");
+includesAll(eventHubLib, [
+  "SELECT linked_servers.id,",
+  "linked_servers.nitrado_service_id,",
+  "linked_servers.current_players,",
+  "linked_servers.max_players,",
+]);
 
 const ownerEventsRoute = source("functions/api/servers/[serverId]/events.ts");
 includesAll(ownerEventsRoute, ["getOwnerEventHub", "NOT_AUTHENTICATED", "status: 401"]);

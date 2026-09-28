@@ -874,7 +874,20 @@ function channelListPayload(server: OwnerServerRow, guildId: string, saved: Save
 async function fetchOwnerServer(env: Env, user: SessionUser, serverId: string) {
   const row = await requireDb(env)
     .prepare(
-      `SELECT linked_servers.*,
+      `SELECT linked_servers.id,
+              linked_servers.user_id,
+              linked_servers.guild_id,
+              linked_servers.discord_guild_id,
+              linked_servers.status,
+              linked_servers.public_slug,
+              linked_servers.server_category,
+              linked_servers.listing_visibility,
+              linked_servers.nitrado_service_id,
+              linked_servers.display_name,
+              linked_servers.hostname,
+              linked_servers.server_name,
+              linked_servers.current_players,
+              linked_servers.max_players,
               owner_user.discord_id AS owner_discord_id,
               discord_guilds.name AS guild_name,
               server_subscriptions.plan_key,
