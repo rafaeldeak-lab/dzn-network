@@ -211,7 +211,11 @@ assert.equal(cronProductionCheckSource.includes("/api/sync/metadata/run"), true)
 const dueStateCheckSource = readFileSync("scripts/check-server-due-state.ts", "utf8");
 assert.equal(dueStateCheckSource.includes("getServerStatusInterval(plan)"), true);
 assert.equal(dueStateCheckSource.includes("ADM discovery"), true);
-assert.equal(dueStateCheckSource.includes("SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES"), true);
+assert.equal(dueStateCheckSource.includes("canRunServerLifecycleTask"), true);
+assert.equal(dueStateCheckSource.includes("serverLifecycleSqlExpression"), true);
+assert.equal(dueStateCheckSource.includes('skippedReason(row, "adm_discovery")'), true);
+assert.equal(dueStateCheckSource.includes('skippedReason(row, "adm_processing")'), true);
+assert.equal(dueStateCheckSource.includes("final_sync_attempted_at"), true);
 assert.equal(dueStateCheckSource.includes("next_retry_after"), true);
 
 console.log("Automation health hardening tests passed.");

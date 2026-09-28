@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { getAdmDiscoveryIntervalMinutes, getAdmPullInterval, getServerStatusInterval, normalizePlanKey } from "../functions/_lib/plans";
 import { isAutomationBillingEligible } from "../functions/_lib/server-showcase-access";
-import { SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES } from "../lib/server-lifecycle";
+import { canRunServerLifecycleTask, serverLifecycleSqlExpression, type ServerLifecycleTask } from "../lib/server-lifecycle";
 
 type ServerDueRow = {
   id: string;
@@ -14,6 +14,7 @@ type ServerDueRow = {
   linked_status: string | null;
   lifecycle_status: string | null;
   merged_into_server_id: string | null;
+  final_sync_attempted_at: string | null;
   plan_key: string | null;
   subscription_status: string | null;
   next_status_check_due_at: string | null;
@@ -62,29 +63,36 @@ function isDue(value: string | null | undefined) {
   return !Number.isFinite(ms) || ms <= Date.now();
 }
 
-function skippedReason(row: ServerDueRow) {
+function skippedReason(row: ServerDueRow, task: Extract<ServerLifecycleTask, "metadata" | "adm_discovery" | "adm_processing">) {
   if (!row.guild_id) return "missing_guild_id";
   if (!row.nitrado_service_id) return "missing_nitrado_service_id";
   if ((row.linked_status ?? "pending").toLowerCase() !== "live") return "not_live";
   if (row.merged_into_server_id) return "merged";
   if (!isAutomationBillingEligible(row.plan_key, row.subscription_status)) return "no_automation_entitlement";
-  if (Number(row.currently_checking_status ?? 0) === 1) return "currently_checking_status";
-  if (Number(row.currently_syncing_adm ?? 0) === 1) return "currently_syncing_adm";
-  const lifecycleStatus = (row.lifecycle_status ?? "active_live").toLowerCase();
-  if (!SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES.includes(lifecycleStatus as typeof SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES[number])) {
-    return "lifecycle_not_metadata_eligible";
-  }
-  if (lifecycleStatus !== "active_live" && !isDue(row.next_retry_after)) return "retry_not_due";
-  if (isDue(row.next_status_check_due_at) || isDue(row.next_adm_discovery_due_at) || isDue(row.next_adm_pull_due_at)) return "due";
-  return "not_due";
+  if (task === "metadata" && Number(row.currently_checking_status ?? 0) === 1) return "currently_checking_status";
+  if (task !== "metadata" && Number(row.currently_syncing_adm ?? 0) === 1) return "currently_syncing_adm";
+  const lifecycle = canRunServerLifecycleTask({
+    lifecycle_status: row.lifecycle_status,
+    status: row.linked_status,
+    next_retry_after: row.next_retry_after,
+    final_sync_attempted_at: row.final_sync_attempted_at,
+  }, task);
+  if (!lifecycle.allowed) return lifecycle.skipReason ?? "lifecycle_not_eligible";
+  const dueAt = task === "metadata"
+    ? row.next_status_check_due_at
+    : task === "adm_discovery"
+      ? row.next_adm_discovery_due_at
+      : row.next_adm_pull_due_at;
+  return isDue(dueAt) ? "due" : "not_due";
 }
 
 const rows = runWranglerQuery<ServerDueRow>(
   `SELECT linked_servers.id, linked_servers.guild_id, linked_servers.public_slug,
           linked_servers.nitrado_service_id, linked_servers.display_name,
           linked_servers.hostname, linked_servers.server_name,
-          linked_servers.status AS linked_status, linked_servers.lifecycle_status,
-          linked_servers.merged_into_server_id,
+          linked_servers.status AS linked_status,
+          ${serverLifecycleSqlExpression("linked_servers")} AS lifecycle_status,
+          linked_servers.merged_into_server_id, linked_servers.final_sync_attempted_at,
           server_subscriptions.plan_key, server_subscriptions.status AS subscription_status,
           server_sync_state.next_status_check_due_at,
           server_sync_state.next_adm_discovery_due_at,
@@ -133,6 +141,8 @@ if (!rows.length) {
     console.log(`status lock age: ${Number(row.currently_checking_status ?? 0) === 1 ? `${lockAge(row, "status") ?? "unknown"} minutes` : "not locked"}`);
     console.log(`ADM lock age: ${Number(row.currently_syncing_adm ?? 0) === 1 ? `${lockAge(row, "adm") ?? "unknown"} minutes` : "not locked"}`);
     console.log(`row update age: ${ageMinutes(row.updated_at) ?? "unknown"} minutes`);
-    console.log(`planner reason: ${skippedReason(row)}`);
+    console.log(`metadata planner reason: ${skippedReason(row, "metadata")}`);
+    console.log(`ADM discovery planner reason: ${skippedReason(row, "adm_discovery")}`);
+    console.log(`ADM processing planner reason: ${skippedReason(row, "adm_processing")}`);
   }
 }
