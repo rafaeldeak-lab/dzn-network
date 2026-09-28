@@ -1,4 +1,5 @@
 import { getSessionUser, requireDb } from "../../../../_lib/db";
+import { getAutomationContextForLinkedServer } from "../../../../_lib/automation";
 import { json, methodNotAllowed } from "../../../../_lib/http";
 import { effectiveEntitlementPlan, getAdmDiscoveryIntervalMinutes, getAdmPullInterval, getServerStatusInterval, normalizePlanKey } from "../../../../_lib/plans";
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
@@ -234,8 +235,16 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
 
     if (!server) return automationStatusError(404, "server_not_found", "Server not found.");
 
-    const planKey = normalizePlanKey(server.plan_key);
-    const effectivePlanKey = effectiveEntitlementPlan(planKey, server.subscription_status);
+    const automationContext = await getAutomationContextForLinkedServer(env, linkedServerId, { skipSchemaEnsure: true });
+    const billingPlanKey = automationContext?.showcaseAccess.billingPlan ?? server.plan_key;
+    const billingStatus = automationContext?.showcaseAccess.billingStatus ?? server.subscription_status;
+    const planKey = normalizePlanKey(billingPlanKey);
+    const effectivePlanKey = automationContext
+      ? effectiveEntitlementPlan(automationContext.planKey, automationContext.subscriptionStatus)
+      : effectiveEntitlementPlan(planKey, billingStatus);
+    const accessSource = automationContext?.accessSource ?? "billing";
+    const automationEligible = accessSource === "complimentary_showcase"
+      || ["active", "trialing"].includes((billingStatus ?? "").toLowerCase());
     const statsSnapshot = canonicalStats ? buildStatsSnapshotFromCanonical(canonicalStats) : buildStatsSnapshot(stats);
     const completedJobs = completedJobsResult.results ?? [];
     const completedFiles = new Set(completedJobs.map((job) => job.filename));
@@ -252,7 +261,9 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
       activeJob: activeJobSnapshot,
       missingFilesCount: missingFiles.length,
       unreadableFilesCount: unreadableFiles.length,
-      subscriptionStatus: server.subscription_status,
+      billingStatus,
+      accessSource,
+      automationEligible,
       effectivePlanKey,
       admDiscoveryStatus: server.adm_discovery_status,
       newestAvailable: server.newest_available_adm_filename,
@@ -274,7 +285,9 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
       plan: {
         plan_key: effectivePlanKey,
         configured_plan_key: planKey,
-        subscription_status: server.subscription_status,
+        subscription_status: billingStatus,
+        access_source: accessSource,
+        complimentary_expires_at: automationContext?.showcaseAccess.expiresAt ?? null,
         status_interval_minutes: getServerStatusInterval(effectivePlanKey),
         adm_discovery_interval_minutes: getAdmDiscoveryIntervalMinutes(effectivePlanKey),
         adm_processing_interval_minutes: getAdmPullInterval(effectivePlanKey),
@@ -339,7 +352,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         missingFiles,
         unreadableFilesCount: unreadableFiles.length,
         effectivePlanKey,
-        subscriptionStatus: server.subscription_status,
+        automationEligible,
         cronHealthy: cron.cron_healthy,
       }),
     });
@@ -435,7 +448,9 @@ function buildProblemFlags(input: {
   activeJob: ReturnType<typeof normalizeJobSnapshot> | null;
   missingFilesCount: number;
   unreadableFilesCount: number;
-  subscriptionStatus: string | null;
+  billingStatus: string | null;
+  accessSource: "billing" | "complimentary_showcase";
+  automationEligible: boolean;
   effectivePlanKey: string;
   admDiscoveryStatus: string | null;
   newestAvailable: string | null;
@@ -448,7 +463,9 @@ function buildProblemFlags(input: {
   if (input.activeJob?.updated_at && ageMinutes(input.activeJob.updated_at, new Date().toISOString()) !== null && ageMinutes(input.activeJob.updated_at, new Date().toISOString())! > 5) flags.push("adm_job_stale");
   if (input.missingFilesCount > 0) flags.push("adm_backfill_missing");
   if (input.unreadableFilesCount > 0 || input.admDiscoveryStatus === "latest_adm_unreadable" || (input.newestAvailable && input.newestAvailable !== input.newestReadable)) flags.push("nitrado_read_waiting");
-  if (!["active", "trialing"].includes((input.subscriptionStatus ?? "").toLowerCase())) flags.push("subscription_not_active");
+  if (!["active", "trialing"].includes((input.billingStatus ?? "").toLowerCase())) flags.push("subscription_not_active");
+  if (input.accessSource === "complimentary_showcase") flags.push("complimentary_showcase_access");
+  if (!input.automationEligible) flags.push("automation_access_inactive");
   if (input.effectivePlanKey === "free") flags.push("adm_processing_limited_by_plan");
   return flags;
 }
@@ -458,10 +475,10 @@ function getNextAction(input: {
   missingFiles: string[];
   unreadableFilesCount: number;
   effectivePlanKey: string;
-  subscriptionStatus: string | null;
+  automationEligible: boolean;
   cronHealthy: boolean;
 }) {
-  if (!["active", "trialing"].includes((input.subscriptionStatus ?? "").toLowerCase()) || input.effectivePlanKey === "free") {
+  if (!input.automationEligible || input.effectivePlanKey === "free") {
     return "Restore an active paid plan before heavy ADM automation runs.";
   }
   if (input.activeJob) return `Continue ${input.activeJob.filename} chunk ${input.activeJob.current_chunk}/${input.activeJob.total_chunks}.`;

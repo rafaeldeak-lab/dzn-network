@@ -2,8 +2,8 @@ import { decryptToken } from "../../../../_lib/crypto";
 import { getSessionUser, requireDb } from "../../../../_lib/db";
 import { json, methodNotAllowed } from "../../../../_lib/http";
 import { debugNitradoAdmFileDiscovery } from "../../../../_lib/nitrado";
-import { recordAdmDiscoveryResult } from "../../../../_lib/automation";
-import { normalizePlanKey } from "../../../../_lib/plans";
+import { getAutomationContextForLinkedServer, recordAdmDiscoveryResult } from "../../../../_lib/automation";
+import { effectiveEntitlementPlan, normalizePlanKey } from "../../../../_lib/plans";
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
 import type { Env, PagesFunction } from "../../../../_lib/types";
 
@@ -17,7 +17,6 @@ type LinkedServerDebugRow = {
   server_name: string | null;
   nitrado_service_name: string | null;
   adm_path: string | null;
-  plan_key: string | null;
 };
 
 type SavedAdmDiscoveryState = {
@@ -50,13 +49,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     .prepare(
       `SELECT id, user_id, guild_id, nitrado_service_id, display_name, hostname,
               server_name, nitrado_service_name,
-              (SELECT adm_path FROM server_log_config WHERE linked_server_id = linked_servers.id LIMIT 1) AS adm_path,
-              (SELECT plan_key
-                 FROM server_subscriptions
-                WHERE server_subscriptions.guild_id = linked_servers.guild_id
-                  AND lower(server_subscriptions.status) IN ('active', 'trialing')
-                ORDER BY updated_at DESC, created_at DESC
-                LIMIT 1) AS plan_key
+              (SELECT adm_path FROM server_log_config WHERE linked_server_id = linked_servers.id LIMIT 1) AS adm_path
        FROM linked_servers
        WHERE id = ?
        LIMIT 1`,
@@ -81,10 +74,21 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     knownLatestFileName: knownLatestFile,
     sampleLimit: 12,
   });
+  const automationContext = await getAutomationContextForLinkedServer(env, server.id, { skipSchemaEnsure: true });
+  const automationPlanKey = automationContext
+    ? effectiveEntitlementPlan(automationContext.planKey, automationContext.subscriptionStatus)
+    : "free";
+  const discoveryPersistencePlanKey = automationContext
+    ? effectiveEntitlementPlan(
+      normalizePlanKey(automationContext.showcaseAccess.billingPlan),
+      automationContext.showcaseAccess.billingStatus,
+    )
+    : "free";
   if (server.guild_id && debug.selected_newest_available?.name) {
     await recordAdmDiscoveryResult(env, {
       guildId: server.guild_id,
-      planKey: normalizePlanKey(server.plan_key),
+      // This state is guild-scoped, so an exact-server grant must not change its cadence.
+      planKey: discoveryPersistencePlanKey,
       ok: true,
       status: debug.selected_newest_readable?.name ? "new_adm_readable" : "latest_adm_unreadable",
       error: null,
@@ -100,6 +104,13 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     ...debug,
     linked_server_id: server.id,
     server_name: debug.server_name ?? server.display_name ?? server.hostname ?? server.server_name ?? server.nitrado_service_name,
+    automation_access: {
+      source: automationContext?.accessSource ?? "billing",
+      effective_plan_key: automationPlanKey,
+      billing_plan_key: automationContext?.showcaseAccess.billingPlan ?? null,
+      billing_status: automationContext?.showcaseAccess.billingStatus ?? null,
+      discovery_persistence_plan_key: discoveryPersistencePlanKey,
+    },
     current_saved_state: refreshedState,
   }, {
     headers: {
