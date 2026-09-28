@@ -2,6 +2,7 @@ import { isDznAdminDiscordId } from "./admin";
 import { requireDb } from "./db";
 import { getAdmDiscoveryIntervalMinutes, getAdmPullInterval, getServerStatusInterval, normalizePlanKey, type PlanKey } from "./plans";
 import { upsertServerPublicCache } from "./automation";
+import { isAutomationBillingEligible } from "./server-showcase-access";
 import type { Env, SessionUser } from "./types";
 
 type AccessCheckResult = {
@@ -346,7 +347,7 @@ function buildPlanDueState(
   const statusDue = isDue(nextStatus, now);
   const admDiscoveryDue = isDue(nextDiscovery, now);
   const admProcessingDue = isDue(nextAdm, now);
-  const active = ["active", "trialing"].includes((subscriptionStatus ?? "").toLowerCase());
+  const active = isAutomationBillingEligible(planKey, subscriptionStatus);
   let skippedReason: string | null = null;
   if (!active) skippedReason = "no_active_subscription";
   else if (!stringValue(linked.nitrado_service_id)) skippedReason = "missing_nitrado_service";
@@ -383,7 +384,7 @@ function buildPublicCacheProblemFlags(input: {
   planKey: PlanKey;
 }) {
   const flags: string[] = [];
-  const active = ["active", "trialing"].includes((stringValue(input.subscription?.status) ?? "").toLowerCase());
+  const active = isAutomationBillingEligible(input.planKey, stringValue(input.subscription?.status));
   if (!input.cache) flags.push("public_cache_missing");
   if (!active) flags.push("subscription_not_active");
   if (isOlderThan(latestTimestamp([input.cacheStatusAt, input.cacheAdmAt, input.cacheUpdatedAt]), input.now, 30)) flags.push("public_cache_stale");

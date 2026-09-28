@@ -29,11 +29,13 @@ import { createServerWarChallenge, getOwnerServerWarsPayload, getServerWarOppone
 import { processServerMatchmakingOptIn } from "../functions/_lib/ctf-tournaments";
 import {
   getAutomationContextForLinkedServer,
+  getAutomationHealth,
   getDueAdmAutomationServers,
   getDueAdmDiscoveryAutomationServers,
   getDueStatusAutomationServers,
   queueDiscordPostUpdatesForGuild,
 } from "../functions/_lib/automation";
+import { getPublicCacheDebugForServer } from "../functions/_lib/public-cache";
 import { dispatchQueuedDiscordPostUpdates } from "../functions/_lib/discord-posting";
 import { onRequest as postingDestinations } from "../functions/api/servers/[serverId]/posting-destinations";
 import { getOwnerDiscordOverview } from "../functions/_lib/owner-discord-control";
@@ -523,6 +525,30 @@ async function run() {
       assert.ok(matching.every((row) => row.subscription_status === "inactive"), kind);
       assert.ok(matching.every((row) => row.access_source === "billing"), kind);
     }
+    const health = await getAutomationHealth(env);
+    assert.ok(health.due_metadata_jobs >= 2);
+    assert.ok(health.due_adm_discovery_jobs >= 2);
+    assert.ok(health.due_adm_jobs >= 2);
+    assert.ok(health.due_server_diagnostics
+      .filter((row) => row.guild_id === scope.guildId)
+      .every((row) => row.skipped_reason !== "no_active_subscription"));
+    const cacheDebug = await getPublicCacheDebugForServer(env, scope.linkedServerId);
+    assert.equal(cacheDebug.plan_due_state.skipped_reason, null);
+    assert.ok(!cacheDebug.problem_flags.includes("subscription_not_active"));
+  });
+  await test("Free metadata refresh honors the configured status cadence", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'free', status = 'inactive' WHERE guild_id = ?").run(scope.guildId);
+    await getDueStatusAutomationServers(env, 10);
+    db.sqlite.prepare(`UPDATE server_sync_state SET next_status_check_due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+30 minutes'),
+      status_sync_started_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE guild_id = ?`).run(scope.guildId);
+    db.sqlite.prepare(`UPDATE linked_servers SET player_count_last_checked_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-5 minutes'),
+      player_count_status = 'fresh' WHERE guild_id = ?`).run(scope.guildId);
+    const early = await getDueMetadataRefreshServersFast(env, 10, 60_000);
+    assert.equal(early.some((row) => row.guild_id === scope.guildId), false);
+    db.sqlite.prepare("UPDATE server_sync_state SET next_status_check_due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE guild_id = ?").run(scope.guildId);
+    const due = await getDueMetadataRefreshServersFast(env, 10, 60_000);
+    assert.deepEqual(due.filter((row) => row.guild_id === scope.guildId).map((row) => row.id).sort(),
+      [scope.linkedServerId, "same-guild-other-server"].sort());
   });
   await test("complimentary ADM worker records Pro discovery and pull cadence", async ({ db, env }) => {
     await getDueStatusAutomationServers(env, 10);

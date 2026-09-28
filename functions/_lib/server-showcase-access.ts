@@ -48,7 +48,7 @@ export function isAutomationBillingEligible(planKey: unknown, status: unknown) {
     || (normalizedPlan === "free" && (normalizedStatus === "free" || normalizedStatus === "inactive"));
 }
 
-export function automationBillingEligibilitySql(alias: "paid" | "automation_entitlements") {
+export function automationBillingEligibilitySql(alias: "paid" | "automation_entitlements" | "server_subscriptions") {
   return `(lower(COALESCE(${alias}.status, 'inactive')) IN ('active', 'trialing')
     OR (lower(COALESCE(${alias}.plan_key, 'free')) = 'free'
       AND lower(COALESCE(${alias}.status, 'inactive')) IN ('free', 'inactive')))`;

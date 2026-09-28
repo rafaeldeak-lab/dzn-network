@@ -2014,7 +2014,7 @@ export async function getAutomationHealth(env: Env) {
        FROM server_subscriptions
        JOIN server_sync_state ON server_sync_state.guild_id = server_subscriptions.guild_id
        JOIN linked_servers ON linked_servers.guild_id = server_subscriptions.guild_id
-       WHERE lower(server_subscriptions.status) IN ('active', 'trialing')
+       WHERE ${automationBillingEligibilitySql("server_subscriptions")}
          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES)})
          AND COALESCE(server_sync_state.currently_checking_status, 0) = 0
          AND (${lifecycleStatusSql} = 'active_live' OR COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') <= ?)
@@ -2025,7 +2025,7 @@ export async function getAutomationHealth(env: Env) {
        FROM server_subscriptions
        JOIN server_sync_state ON server_sync_state.guild_id = server_subscriptions.guild_id
        JOIN linked_servers ON linked_servers.guild_id = server_subscriptions.guild_id
-       WHERE lower(server_subscriptions.status) IN ('active', 'trialing')
+       WHERE ${automationBillingEligibilitySql("server_subscriptions")}
          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
          AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
          AND (${lifecycleStatusSql} NOT IN ('active_degraded', 'nitrado_upstream_down', 'stale_monitoring') OR COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') <= ?)
@@ -2037,7 +2037,7 @@ export async function getAutomationHealth(env: Env) {
        FROM server_subscriptions
        JOIN server_sync_state ON server_sync_state.guild_id = server_subscriptions.guild_id
        JOIN linked_servers ON linked_servers.guild_id = server_subscriptions.guild_id
-       WHERE lower(server_subscriptions.status) IN ('active', 'trialing')
+       WHERE ${automationBillingEligibilitySql("server_subscriptions")}
          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
          AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
          AND (${lifecycleStatusSql} NOT IN ('active_degraded', 'nitrado_upstream_down', 'stale_monitoring') OR COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') <= ?)
@@ -2092,7 +2092,7 @@ export async function getAutomationHealth(env: Env) {
             WHEN ${lifecycleStatusSql} = 'token_needs_resave' THEN 'skipped_token_needs_resave'
             WHEN lower(COALESCE(linked_servers.status, 'pending')) != 'live' THEN 'not_live'
             WHEN linked_servers.nitrado_service_id IS NULL OR linked_servers.nitrado_service_id = '' THEN 'missing_nitrado_token'
-            WHEN lower(COALESCE(server_subscriptions.status, '')) NOT IN ('active', 'trialing') THEN 'no_active_subscription'
+            WHEN NOT ${automationBillingEligibilitySql("server_subscriptions")} THEN 'no_active_subscription'
             WHEN COALESCE(server_sync_state.currently_checking_status, 0) = 1 THEN 'currently_checking_status'
             WHEN COALESCE(server_sync_state.currently_syncing_adm, 0) = 1 THEN 'currently_syncing_adm'
             WHEN ${lifecycleStatusSql} IN ('active_degraded', 'nitrado_upstream_down', 'stale_monitoring')
@@ -2207,7 +2207,8 @@ export async function getAutomationHealth(env: Env) {
     admImportJobsTableExists ? db
       .prepare(
         `SELECT
-          MAX(CASE WHEN source = 'scheduled_nitrado' AND chunks_processed > 0 THEN updated_at ELSE NULL END) AS last_chunk_processed_at,
+          MAX(CASE WHEN adm_import_jobs.source = 'scheduled_nitrado' AND adm_import_jobs.chunks_processed > 0
+            THEN adm_import_jobs.updated_at ELSE NULL END) AS last_chunk_processed_at,
           (SELECT filename FROM adm_import_jobs
            WHERE source = 'scheduled_nitrado'
              AND status IN ('completed', 'completed_with_warnings')

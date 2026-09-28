@@ -1166,9 +1166,14 @@ export async function getDueMetadataRefreshServersFast(
          )
          AND (
            COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
-           OR linked_servers.player_count_last_checked_at IS NULL
-           OR linked_servers.player_count_last_checked_at <= ?
-           OR COALESCE(server_sync_state.status_sync_started_at, server_sync_state.updated_at, '1970-01-01T00:00:00.000Z') <= ?
+           OR (
+             lower(COALESCE(automation_entitlements.plan_key, 'free')) != 'free'
+             AND (
+               linked_servers.player_count_last_checked_at IS NULL
+               OR linked_servers.player_count_last_checked_at <= ?
+               OR COALESCE(server_sync_state.status_sync_started_at, server_sync_state.updated_at, '1970-01-01T00:00:00.000Z') <= ?
+             )
+           )
          )
          AND (
            lower(COALESCE(linked_servers.player_count_status, 'unknown')) != 'unavailable'
