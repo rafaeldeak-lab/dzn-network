@@ -24,12 +24,19 @@ import { onRequest as advertisingBump } from "../functions/api/servers/[serverId
 import { dashboardSelectedServerAccess } from "../components/onboarding/dashboard-detail-display";
 import { createServerWarChallenge, getOwnerServerWarsPayload, getServerWarOpponentOptions } from "../functions/_lib/server-wars";
 import { processServerMatchmakingOptIn } from "../functions/_lib/ctf-tournaments";
-import { getAutomationContextForLinkedServer, queueDiscordPostUpdatesForGuild } from "../functions/_lib/automation";
+import {
+  getAutomationContextForLinkedServer,
+  getDueAdmAutomationServers,
+  getDueAdmDiscoveryAutomationServers,
+  getDueStatusAutomationServers,
+  queueDiscordPostUpdatesForGuild,
+} from "../functions/_lib/automation";
 import { dispatchQueuedDiscordPostUpdates } from "../functions/_lib/discord-posting";
 import { onRequest as postingDestinations } from "../functions/api/servers/[serverId]/posting-destinations";
 import { getOwnerDiscordOverview } from "../functions/_lib/owner-discord-control";
 import { onRequest as runAutoPostsNow } from "../functions/api/servers/[serverId]/auto-posts/run-now";
-import { importAdmTextForServer } from "../functions/_lib/adm-sync";
+import { importAdmTextForServer, runAdmWorkerSyncTick, runScheduledAdmSync, selectAdmWorkerServer } from "../functions/_lib/adm-sync";
+import { getDueMetadataRefreshServersFast, refreshLivePlayerCountsForActiveServers } from "../functions/_lib/server-metadata";
 import { createCompetitiveEvent } from "../functions/_lib/events";
 import { eventCreateHostTransactionGuard, listAuthorizedEventCreationHosts, resolveAuthorizedEventCreationHost } from "../functions/_lib/event-hosts";
 
@@ -311,6 +318,154 @@ async function run() {
     const unrelated = await resolveAuthorizedEventCreationHost(creatorEnv, actor, "same-guild-other-server");
     assert.equal(unrelated.ok, false);
   });
+  await test("exact grant schedules only NukeTown status and ADM work without fabricating billing", async ({ db, env }) => {
+    assert.equal((await getDueStatusAutomationServers(env, 10)).some((row) => row.id === scope.linkedServerId), false);
+    const materialSubscriptions = () => db.sqlite.prepare(`SELECT id, guild_id, owner_discord_id, stripe_customer_id,
+      stripe_subscription_id, stripe_price_id, plan_key, status, current_period_start, current_period_end,
+      cancel_at_period_end, created_at FROM server_subscriptions ORDER BY id`).all();
+    const subscriptionBefore = materialSubscriptions();
+    await grant(env);
+    const status = await getDueStatusAutomationServers(env, 10);
+    const fastStatus = await getDueMetadataRefreshServersFast(env, 10);
+    const discovery = await getDueAdmDiscoveryAutomationServers(env, 10);
+    const adm = await getDueAdmAutomationServers(env, 10, 10 * 60 * 1000);
+    for (const [kind, rows] of [["status", status], ["fast status", fastStatus], ["discovery", discovery], ["adm", adm]] as const) {
+      assert.deepEqual(rows.map((row) => row.id), [scope.linkedServerId], kind);
+      assert.equal(rows[0]?.plan_key, "pro", kind);
+      assert.equal(rows[0]?.subscription_status, "active", kind);
+      assert.equal(rows[0]?.access_source, "complimentary_showcase", kind);
+    }
+    const worker = await selectAdmWorkerServer(env, "showcase-scheduler-test");
+    assert.equal(worker?.id, scope.linkedServerId);
+    assert.equal(worker?.access_source, "complimentary_showcase");
+    assert.equal(worker?.plan_key, "pro");
+    assert.deepEqual(materialSubscriptions(), subscriptionBefore);
+  });
+  await test("complimentary ADM worker records Pro discovery and pull cadence", async ({ db, env }) => {
+    await getDueStatusAutomationServers(env, 10);
+    await runScheduledAdmSync({ ...env, MOCK_NITRADO: "true" }, { maxServers: 1, refreshMetadata: false });
+    await grant(env);
+    const result = await runAdmWorkerSyncTick({ ...env, MOCK_NITRADO: "true" }, {
+      linkedServerId: scope.linkedServerId,
+      force: true,
+      skipMetadataRefresh: true,
+      maxRuntimeMs: 5_000,
+    });
+    assert.equal(result.selected_linked_server_id, scope.linkedServerId);
+    const state = db.sqlite.prepare(`SELECT last_adm_discovery_check_at, next_adm_discovery_due_at,
+      last_adm_pull_at, next_adm_pull_due_at FROM server_sync_state WHERE guild_id = ?`).get(scope.guildId);
+    assert.ok(state?.last_adm_discovery_check_at && state.next_adm_discovery_due_at);
+    assert.ok(state?.last_adm_pull_at && state.next_adm_pull_due_at);
+    const discoveryMinutes = (Date.parse(String(state.next_adm_discovery_due_at)) - Date.parse(String(state.last_adm_discovery_check_at))) / 60_000;
+    const pullMinutes = (Date.parse(String(state.next_adm_pull_due_at)) - Date.parse(String(state.last_adm_pull_at))) / 60_000;
+    assert.ok(discoveryMinutes >= 9.9 && discoveryMinutes <= 10.1, `discovery cadence ${discoveryMinutes}`);
+    assert.ok(pullMinutes >= 29.9 && pullMinutes <= 30.1, `pull cadence ${pullMinutes}`);
+  });
+  await test("revoked grant removes NukeTown from every scheduler selector", async ({ env }) => {
+    const grantId = await grant(env);
+    await changeShowcaseGrant(env, actor, { action: "revoke", grantId, reason: "support_correction" });
+    assert.equal((await getDueStatusAutomationServers(env, 10)).some((row) => row.id === scope.linkedServerId), false);
+    assert.equal((await getDueMetadataRefreshServersFast(env, 10)).some((row) => row.id === scope.linkedServerId), false);
+    assert.equal((await getDueAdmDiscoveryAutomationServers(env, 10)).some((row) => row.id === scope.linkedServerId), false);
+    assert.equal((await getDueAdmAutomationServers(env, 10, 10 * 60 * 1000)).some((row) => row.id === scope.linkedServerId), false);
+    assert.notEqual((await selectAdmWorkerServer(env, "revoked-showcase-scheduler-test"))?.id, scope.linkedServerId);
+  });
+  await test("metadata scheduler rechecks a selected grant before Nitrado work", async ({ db, env }) => {
+    await getDueStatusAutomationServers(env, 10);
+    const grantId = await grant(env);
+    let revoked = false;
+    db.beforeFirst = (sql) => {
+      if (revoked || !sql.includes("WITH active_grant AS")) return;
+      revoked = true;
+      db.beforeFirst = null;
+      revokeSql(db, grantId);
+    };
+    const result = await refreshLivePlayerCountsForActiveServers({ ...env, MOCK_NITRADO: "true" }, {
+      maxServers: 1,
+      queueDiscordUpdates: false,
+      patchHomeStats: false,
+    });
+    assert.equal(revoked, true);
+    assert.equal(result.succeeded, 0);
+    assert.equal(result.failed, 0);
+    assert.equal(result.skipped, 1);
+    assert.equal(result.results[0]?.phase, "access_recheck");
+  });
+  await test("metadata scheduler claims access at the final Nitrado boundary", async ({ db, env }) => {
+    const grantId = await grant(env);
+    const before = db.sqlite.prepare(`SELECT current_players, max_players, player_count_last_checked_at,
+      metadata_last_checked_at FROM linked_servers WHERE id = ?`).get(scope.linkedServerId);
+    let accessReads = 0;
+    db.beforeFirst = (sql) => {
+      if (!sql.includes("WITH active_grant AS")) return;
+      accessReads += 1;
+      if (accessReads !== 2) return;
+      db.beforeFirst = null;
+      revokeSql(db, grantId);
+    };
+    const result = await refreshLivePlayerCountsForActiveServers({ ...env, MOCK_NITRADO: "true" }, {
+      maxServers: 1,
+      queueDiscordUpdates: false,
+      patchHomeStats: false,
+    });
+    assert.equal(accessReads, 2);
+    assert.equal(result.succeeded, 0);
+    assert.equal(result.failed, 0);
+    assert.equal(result.skipped, 1);
+    assert.equal(result.results[0]?.phase, "execution_claim");
+    assert.deepEqual(db.sqlite.prepare(`SELECT current_players, max_players, player_count_last_checked_at,
+      metadata_last_checked_at FROM linked_servers WHERE id = ?`).get(scope.linkedServerId), before);
+  });
+  await test("ADM worker rechecks a selected grant before Nitrado work", async ({ db, env }) => {
+    await getDueStatusAutomationServers(env, 10);
+    const grantId = await grant(env);
+    let revoked = false;
+    db.afterFirst = (sql) => {
+      if (revoked || !sql.includes("eligible AS")) return;
+      revoked = true;
+      db.afterFirst = null;
+      revokeSql(db, grantId);
+    };
+    const result = await runAdmWorkerSyncTick({ ...env, MOCK_NITRADO: "true" }, {
+      linkedServerId: scope.linkedServerId,
+      force: true,
+      maxRuntimeMs: 5_000,
+    });
+    assert.equal(revoked, true);
+    assert.equal(result.selected_linked_server_id, null);
+    assert.equal(result.skipped_not_due, 1);
+    assert.match(result.message, /access changed/i);
+  });
+  await test("ADM worker claims access at the final Nitrado boundary", async ({ db, env }) => {
+    await getDueStatusAutomationServers(env, 10);
+    const grantId = await grant(env);
+    let accessReads = 0;
+    db.beforeFirst = (sql) => {
+      if (!sql.includes("WITH active_grant AS")) return;
+      accessReads += 1;
+      if (accessReads !== 2) return;
+      db.beforeFirst = null;
+      revokeSql(db, grantId);
+    };
+    const result = await runAdmWorkerSyncTick({ ...env, MOCK_NITRADO: "true" }, {
+      linkedServerId: scope.linkedServerId,
+      force: true,
+      skipMetadataRefresh: true,
+      maxRuntimeMs: 5_000,
+    });
+    assert.equal(accessReads, 2);
+    assert.equal(result.selected_linked_server_id, scope.linkedServerId);
+    assert.equal(result.failed, 0);
+    assert.equal(result.skipped_not_due, 1);
+    assert.match(result.message, /access changed/i);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM adm_import_jobs WHERE server_id = ?").get(scope.linkedServerId)?.n, 0);
+  });
+  await test("paid scheduler selection remains available before migration 0069", async ({ env }) => {
+    await upsertBillingAccount(env, { discordUserId: actor.discord_id, planKey: "pro", planStatus: "active" });
+    const status = await getDueStatusAutomationServers(env, 10);
+    assert.ok(status.some((row) => row.id === scope.linkedServerId));
+    assert.ok(status.every((row) => row.access_source === "billing"));
+  }, false);
   await test("revoked exact grant rolls back official event creation", async ({ db, env }) => {
     const creatorEnv = { ...env, DZN_PLATFORM_CREATOR_DISCORD_ID: scope.ownerDiscordId } as Env;
     const grantId = await grant(creatorEnv);

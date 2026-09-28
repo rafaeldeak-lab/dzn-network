@@ -41,6 +41,41 @@ const ACTIVE_SHOWCASE_GRANT_FROM_SQL_AT_DB_TIME = activeShowcaseGrantFromSql("'n
 export const ACTIVE_SHOWCASE_GRANT_AT_DB_TIME_SQL = `SELECT grant_row.id, grant_row.expires_at ${ACTIVE_SHOWCASE_GRANT_FROM_SQL_AT_DB_TIME} LIMIT 1`;
 const SHOWCASE_WRITE_ASSERTION_FAILURE = /integer overflow/i;
 
+export function showcaseAutomationEntitlementCteSql() {
+  return `WITH complimentary_automation_entitlements AS (
+    SELECT entitlement_server.id AS linked_server_id, entitlement_server.guild_id,
+           'pro' AS plan_key, 'active' AS status,
+           'complimentary_showcase' AS access_source
+    FROM linked_servers AS entitlement_server
+    WHERE entitlement_server.id = ?
+      AND EXISTS (${ACTIVE_SHOWCASE_GRANT_AT_DB_TIME_SQL})
+      AND NOT EXISTS (
+        SELECT 1 FROM server_subscriptions AS paid_pro
+        WHERE paid_pro.guild_id = entitlement_server.guild_id
+          AND lower(COALESCE(paid_pro.status, '')) IN ('active', 'trialing')
+          AND lower(COALESCE(paid_pro.plan_key, '')) IN ('pro', 'premium', 'network', 'partner')
+      )
+  ),
+  automation_entitlements AS (
+    SELECT paid_server.id AS linked_server_id, paid.guild_id, paid.plan_key, paid.status,
+           'billing' AS access_source
+    FROM server_subscriptions AS paid
+    JOIN linked_servers AS paid_server ON paid_server.guild_id = paid.guild_id
+    WHERE lower(COALESCE(paid.status, '')) IN ('active', 'trialing')
+      AND NOT EXISTS (
+        SELECT 1 FROM complimentary_automation_entitlements AS complimentary
+        WHERE complimentary.linked_server_id = paid_server.id
+      )
+    UNION ALL
+    SELECT linked_server_id, guild_id, plan_key, status, access_source
+    FROM complimentary_automation_entitlements
+  )`;
+}
+
+export function showcaseAutomationEntitlementBindings() {
+  return [NUKETOWN_SHOWCASE_SCOPE.linkedServerId, ...showcaseScopeBindings()];
+}
+
 type BillingInput = { plan_key: string | null; subscription_status: string | null; observed_at?: string | null };
 export type ServerShowcaseAccess = {
   source: "complimentary_showcase" | "billing";

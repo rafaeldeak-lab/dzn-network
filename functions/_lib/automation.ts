@@ -12,7 +12,12 @@ import {
   type PlanKey,
 } from "./plans";
 import { rankServers } from "./server-ranking";
-import { readServerShowcaseAccess } from "./server-showcase-access";
+import {
+  isMissingShowcaseSchema,
+  readServerShowcaseAccess,
+  showcaseAutomationEntitlementBindings,
+  showcaseAutomationEntitlementCteSql,
+} from "./server-showcase-access";
 import type { Env } from "./types";
 import type { AutoPostType } from "../../lib/billing/plans";
 import {
@@ -65,6 +70,7 @@ export type AutomationSyncServer = {
   player_count_status: string | null;
   plan_key: PlanKey;
   subscription_status: string;
+  access_source?: "billing" | "complimentary_showcase";
   next_status_check_due_at: string | null;
   next_adm_discovery_due_at: string | null;
   next_adm_pull_due_at: string | null;
@@ -610,15 +616,17 @@ export async function getDueStatusAutomationServers(env: Env, maxServers: number
   await recoverStuckAutomationLocks(env);
   const now = new Date().toISOString();
   const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
-  const rows = await requireDb(env)
+  const db = requireDb(env);
+  const selectRows = (includeShowcase: boolean) => db
     .prepare(
-      `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
+      `${includeShowcase ? `${showcaseAutomationEntitlementCteSql()}\n` : ""}SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
               linked_servers.nitrado_service_id, linked_servers.display_name, linked_servers.hostname,
               linked_servers.server_name, linked_servers.nitrado_service_name,
               linked_servers.current_players, linked_servers.max_players,
               linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
-               linked_servers.player_count_source, linked_servers.player_count_status, server_subscriptions.plan_key,
-               server_subscriptions.status AS subscription_status,
+               linked_servers.player_count_source, linked_servers.player_count_status, automation_entitlements.plan_key,
+               automation_entitlements.status AS subscription_status,
+               ${includeShowcase ? "automation_entitlements.access_source" : "'billing'"} AS access_source,
                server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
                server_sync_state.next_adm_pull_due_at, server_sync_state.next_retry_after,
                ${lifecycleStatusSql} AS lifecycle_status,
@@ -626,12 +634,13 @@ export async function getDueStatusAutomationServers(env: Env, maxServers: number
                linked_servers.owner_action_required,
                linked_servers.owner_action_reason
        FROM linked_servers
-       JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       JOIN ${includeShowcase ? "automation_entitlements" : "server_subscriptions AS automation_entitlements"}
+         ON ${includeShowcase ? "automation_entitlements.linked_server_id = linked_servers.id" : "automation_entitlements.guild_id = linked_servers.guild_id"}
        JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
-          AND lower(server_subscriptions.status) IN ('active', 'trialing')
+          ${includeShowcase ? "" : "AND lower(automation_entitlements.status) IN ('active', 'trialing')"}
           AND COALESCE(server_sync_state.currently_checking_status, 0) = 0
           AND COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
           AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES)})
@@ -643,8 +652,15 @@ export async function getDueStatusAutomationServers(env: Env, maxServers: number
         ORDER BY server_sync_state.next_status_check_due_at ASC, linked_servers.updated_at DESC
         LIMIT ?`,
     )
-    .bind(now, now, maxServers)
+    .bind(...(includeShowcase ? showcaseAutomationEntitlementBindings() : []), now, now, maxServers)
     .all<AutomationSyncServer>();
+  let rows;
+  try {
+    rows = await selectRows(true);
+  } catch (error) {
+    if (!isMissingShowcaseSchema(error)) throw error;
+    rows = await selectRows(false);
+  }
   return (rows.results ?? []).sort((a, b) => getPlanPriority(b.plan_key) - getPlanPriority(a.plan_key));
 }
 
@@ -680,6 +696,47 @@ export async function getAutomationContextForLinkedServer(
     subscriptionStatus: showcaseAccess.source === "complimentary_showcase" ? "active" : billing.status ?? "inactive",
     accessSource: showcaseAccess.source,
     showcaseAccess,
+  };
+}
+
+export async function isAutomationServerAccessCurrent(env: Env, server: Pick<AutomationSyncServer, "id" | "access_source">) {
+  return (await claimAutomationServerExecution(env, server)).ok;
+}
+
+export type AutomationExecutionClaim =
+  | {
+      ok: true;
+      linkedServerId: string;
+      accessSource: "billing" | "complimentary_showcase";
+      grantId: string | null;
+    }
+  | {
+      ok: false;
+      linkedServerId: string;
+      accessSource: "complimentary_showcase";
+      grantId: null;
+    };
+
+/**
+ * Revalidates complimentary access at the operation boundary. A successful
+ * claim authorizes one immediately following external operation only.
+ */
+export async function claimAutomationServerExecution(
+  env: Env,
+  server: Pick<AutomationSyncServer, "id" | "access_source">,
+): Promise<AutomationExecutionClaim> {
+  if (server.access_source !== "complimentary_showcase") {
+    return { ok: true, linkedServerId: server.id, accessSource: "billing", grantId: null };
+  }
+  const context = await getAutomationContextForLinkedServer(env, server.id, { skipSchemaEnsure: true });
+  if (context?.accessSource !== "complimentary_showcase" || !context.showcaseAccess.grantId) {
+    return { ok: false, linkedServerId: server.id, accessSource: "complimentary_showcase", grantId: null };
+  }
+  return {
+    ok: true,
+    linkedServerId: server.id,
+    accessSource: "complimentary_showcase",
+    grantId: context.showcaseAccess.grantId,
   };
 }
 
@@ -901,15 +958,17 @@ export async function getDueAdmAutomationServers(env: Env, maxServers: number, m
   await recoverStuckAutomationLocks(env);
   const now = new Date().toISOString();
   const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
-  const rows = await requireDb(env)
+  const db = requireDb(env);
+  const selectRows = (includeShowcase: boolean) => db
     .prepare(
-      `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
+      `${includeShowcase ? `${showcaseAutomationEntitlementCteSql()}\n` : ""}SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
               linked_servers.nitrado_service_id, linked_servers.display_name, linked_servers.hostname,
               linked_servers.server_name, linked_servers.nitrado_service_name,
               linked_servers.current_players, linked_servers.max_players,
               linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
-              linked_servers.player_count_status, server_subscriptions.plan_key,
-              server_subscriptions.status AS subscription_status,
+              linked_servers.player_count_status, automation_entitlements.plan_key,
+              automation_entitlements.status AS subscription_status,
+              ${includeShowcase ? "automation_entitlements.access_source" : "'billing'"} AS access_source,
                server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
                server_sync_state.next_adm_pull_due_at,
                server_sync_state.next_retry_after,
@@ -921,14 +980,15 @@ export async function getDueAdmAutomationServers(env: Env, maxServers: number, m
                server_sync_state.newest_available_adm_filename, server_sync_state.newest_available_adm_timestamp,
                server_sync_state.newest_readable_adm_filename, server_sync_state.newest_readable_adm_timestamp
        FROM linked_servers
-       JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       JOIN ${includeShowcase ? "automation_entitlements" : "server_subscriptions AS automation_entitlements"}
+         ON ${includeShowcase ? "automation_entitlements.linked_server_id = linked_servers.id" : "automation_entitlements.guild_id = linked_servers.guild_id"}
        JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
        LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
          AND (? IS NULL OR linked_servers.id = ?)
-          AND lower(server_subscriptions.status) IN ('active', 'trialing')
+          ${includeShowcase ? "" : "AND lower(automation_entitlements.status) IN ('active', 'trialing')"}
           AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
           AND COALESCE(server_sync_state.next_adm_pull_due_at, '1970-01-01T00:00:00.000Z') <= ?
           AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
@@ -949,8 +1009,15 @@ export async function getDueAdmAutomationServers(env: Env, maxServers: number, m
         ORDER BY server_sync_state.next_adm_pull_due_at ASC, linked_servers.updated_at DESC
         LIMIT ?`,
     )
-    .bind(linkedServerId ?? null, linkedServerId ?? null, now, now, linkedServerId ?? null, minSyncIntervalMs, maxServers)
+    .bind(...(includeShowcase ? showcaseAutomationEntitlementBindings() : []), linkedServerId ?? null, linkedServerId ?? null, now, now, linkedServerId ?? null, minSyncIntervalMs, maxServers)
     .all<AutomationSyncServer>();
+  let rows;
+  try {
+    rows = await selectRows(true);
+  } catch (error) {
+    if (!isMissingShowcaseSchema(error)) throw error;
+    rows = await selectRows(false);
+  }
   return (rows.results ?? []).sort((a, b) => getPlanPriority(b.plan_key) - getPlanPriority(a.plan_key));
 }
 
@@ -959,15 +1026,17 @@ export async function getDueAdmDiscoveryAutomationServers(env: Env, maxServers: 
   await recoverStuckAutomationLocks(env);
   const now = new Date().toISOString();
   const lifecycleStatusSql = serverLifecycleSqlExpression("linked_servers");
-  const rows = await requireDb(env)
+  const db = requireDb(env);
+  const selectRows = (includeShowcase: boolean) => db
     .prepare(
-      `SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
+      `${includeShowcase ? `${showcaseAutomationEntitlementCteSql()}\n` : ""}SELECT linked_servers.id, linked_servers.user_id, linked_servers.guild_id,
               linked_servers.nitrado_service_id, linked_servers.display_name, linked_servers.hostname,
               linked_servers.server_name, linked_servers.nitrado_service_name,
               linked_servers.current_players, linked_servers.max_players,
               linked_servers.player_count_last_checked_at, linked_servers.metadata_last_checked_at,
-              linked_servers.player_count_status, server_subscriptions.plan_key,
-              server_subscriptions.status AS subscription_status,
+              linked_servers.player_count_status, automation_entitlements.plan_key,
+              automation_entitlements.status AS subscription_status,
+              ${includeShowcase ? "automation_entitlements.access_source" : "'billing'"} AS access_source,
                server_sync_state.next_status_check_due_at, server_sync_state.next_adm_discovery_due_at,
                server_sync_state.next_adm_pull_due_at,
                server_sync_state.next_retry_after,
@@ -979,13 +1048,14 @@ export async function getDueAdmDiscoveryAutomationServers(env: Env, maxServers: 
                server_sync_state.newest_available_adm_filename, server_sync_state.newest_available_adm_timestamp,
                server_sync_state.newest_readable_adm_filename, server_sync_state.newest_readable_adm_timestamp
        FROM linked_servers
-       JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
+       JOIN ${includeShowcase ? "automation_entitlements" : "server_subscriptions AS automation_entitlements"}
+         ON ${includeShowcase ? "automation_entitlements.linked_server_id = linked_servers.id" : "automation_entitlements.guild_id = linked_servers.guild_id"}
        JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
          AND (? IS NULL OR linked_servers.id = ?)
-          AND lower(server_subscriptions.status) IN ('active', 'trialing')
+          ${includeShowcase ? "" : "AND lower(automation_entitlements.status) IN ('active', 'trialing')"}
           AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
           AND COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?
           AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
@@ -1002,8 +1072,15 @@ export async function getDueAdmDiscoveryAutomationServers(env: Env, maxServers: 
         ORDER BY server_sync_state.next_adm_discovery_due_at ASC, linked_servers.updated_at DESC
         LIMIT ?`,
     )
-    .bind(linkedServerId ?? null, linkedServerId ?? null, now, now, linkedServerId ?? null, maxServers)
+    .bind(...(includeShowcase ? showcaseAutomationEntitlementBindings() : []), linkedServerId ?? null, linkedServerId ?? null, now, now, linkedServerId ?? null, maxServers)
     .all<AutomationSyncServer>();
+  let rows;
+  try {
+    rows = await selectRows(true);
+  } catch (error) {
+    if (!isMissingShowcaseSchema(error)) throw error;
+    rows = await selectRows(false);
+  }
   return (rows.results ?? []).sort((a, b) => getPlanPriority(b.plan_key) - getPlanPriority(a.plan_key));
 }
 
@@ -1012,6 +1089,13 @@ export async function markAdmPullStarted(env: Env, guildId: string) {
   await requireDb(env)
     .prepare("UPDATE server_sync_state SET currently_syncing_adm = 1, adm_sync_started_at = ?, updated_at = ? WHERE guild_id = ?")
     .bind(now, now, guildId)
+    .run();
+}
+
+export async function clearAdmPullLock(env: Env, guildId: string) {
+  await requireDb(env)
+    .prepare("UPDATE server_sync_state SET currently_syncing_adm = 0, adm_sync_started_at = NULL, updated_at = ? WHERE guild_id = ?")
+    .bind(new Date().toISOString(), guildId)
     .run();
 }
 
