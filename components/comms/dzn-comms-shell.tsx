@@ -33,6 +33,7 @@ type CommsHistoryState =
 
 const historyUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED === "true";
 const liveUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED === "true";
+const reactionUiFlagEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED === "true";
 
 const staticPayload: CommsHistoryPayload = {
   ok: true,
@@ -154,7 +155,7 @@ export function DznCommsShell() {
   const statusLabel = useMemo(() => statusCopy(history.status), [history.status]);
   const sendingEnabled = liveUiEnabled && payload.feature_flags.sending_enabled;
   const reportActionsEnabled = liveUiEnabled && payload.feature_flags.report_actions_enabled;
-  const reactionUiEnabled = liveUiEnabled && payload.feature_flags.reactions_enabled;
+  const reactionUiEnabled = liveUiEnabled && reactionUiFlagEnabled && payload.feature_flags.reactions_enabled;
   const reactionWritesAvailable = reactionUiEnabled && payload.feature_flags.reactions_write_enabled;
 
   useEffect(() => {

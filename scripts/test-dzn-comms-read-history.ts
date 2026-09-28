@@ -46,8 +46,10 @@ assert.doesNotMatch(
 assert.match(envExample, /DZN_COMMS_MESSAGE_HISTORY_READ_ENABLED=false/, "Comms route flag must default off.");
 assert.match(envExample, /DZN_COMMS_MESSAGE_HISTORY_READ_SCOPE=local_test/, "Comms route scope must be local/test by default.");
 assert.match(envExample, /NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED=false/, "Comms UI flag must default off.");
+assert.match(envExample, /NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED=false/, "Comms reaction UI flag must default off.");
 assert.match(cloudflareEnv, /DZN_COMMS_MESSAGE_HISTORY_READ_ENABLED\?: string/, "Cloudflare Env type must include the route flag.");
 assert.match(cloudflareEnv, /DZN_COMMS_MESSAGE_HISTORY_READ_SCOPE\?: string/, "Cloudflare Env type must include the local/test scope.");
+assert.match(cloudflareEnv, /NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED\?: string/, "Cloudflare Env type must include the reaction UI flag.");
 
 const helperWriteTargets = [...helper.matchAll(/\b(?:INSERT\s+INTO|UPDATE\s+[a-z_]+|DELETE\s+FROM|UPSERT|REPLACE\s+INTO)\s+([a-z_]+)/gi)];
 assert.deepEqual(helperWriteTargets, [], "DZN Comms read-history helper must contain no SQL write statements.");
@@ -76,7 +78,8 @@ assert.match(communityPage, /DznCommsShell/, "The /community route must render t
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED/, "The /community shell must fetch only behind the public UI flag.");
 assert.match(shell, /loadCommsHistory\(controller.signal\)/, "The UI must use the bounded history client.");
 assert.match(shell, /fetch\("\/api\/auth\/me", \{ cache: "no-store", credentials: "include"/, "Reaction writes must use the current authenticated-session probe.");
-assert.match(shell, /reactionUiEnabled = liveUiEnabled && payload\.feature_flags\.reactions_enabled/, "Reaction rows must remain behind the public live UI switch.");
+assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED/, "Reaction controls must have a dedicated public activation switch.");
+assert.match(shell, /reactionUiEnabled = liveUiEnabled && reactionUiFlagEnabled && payload\.feature_flags\.reactions_enabled/, "Reaction rows must require the live UI, dedicated reaction UI and server read switches.");
 assert.match(shell, /reactionWritesAvailable && authStatus === "authenticated"/, "Reaction mutations must remain disabled until authentication is confirmed.");
 assert.match(shell, /Log in to react/, "Signed-out users must receive a direct login action instead of enabled mutation controls.");
 assert.match(shell, /if \(!reactionWritesAvailable\) return;/, "The auth probe must remain dormant until reaction writes are available.");
