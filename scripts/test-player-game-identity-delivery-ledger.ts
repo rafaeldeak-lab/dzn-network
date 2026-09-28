@@ -8,6 +8,7 @@ import {
 import { OWNER_REQUEST_NOTIFICATION_MAX_JOBS } from "../functions/_lib/player-game-identity-owner-notifications";
 import { reviewPlayerGameIdentityClaim } from "../functions/_lib/player-game-identities";
 import { onRequest as runDeliveryQueue } from "../functions/api/sync/player-link-notifications/run";
+import { onRequest as proveOneDecisionDelivery } from "../functions/api/sync/player-link-notifications/prove-one-v1";
 import type { Env } from "../functions/_lib/types";
 import { identityTestUser, identityTransactionFixture } from "./test-player-game-identity-transactions";
 
@@ -33,9 +34,12 @@ function d1(sqlite: Sqlite) {
 
 export async function testPlayerGameIdentityDeliveryLedger() {
   const decisionRunnerSource = readFileSync("functions/api/sync/player-link-notifications/run.ts", "utf8");
+  const decisionProofSource = readFileSync("functions/api/sync/player-link-notifications/prove-one-v1.ts", "utf8");
   const ownerRunnerSource = readFileSync("functions/api/sync/player-link-owner-notifications/run.ts", "utf8");
   const ownerProofSource = readFileSync("functions/api/sync/player-link-owner-notifications/prove-one-v1.ts", "utf8");
   assert.doesNotMatch(decisionRunnerSource, /dispatchQueuedOwnerRequestNotifications/, "The guarded one-decision runner must never drain owner-request deliveries.");
+  assert.match(decisionProofSource, /requireCronSecret[\s\S]*deliveryId[\s\S]*maxJobs: 1/, "The versioned decision proof endpoint must authenticate and target exactly one explicit delivery.");
+  assert.match(decisionProofSource, /player_notification_targeted_single_delivery_v1/, "The decision proof response must identify the versioned targeted contract.");
   assert.match(ownerRunnerSource, /requireCronSecret[\s\S]*dispatchQueuedOwnerRequestNotifications/, "Owner-request retries must use a separate protected runner and delivery budget.");
   assert.equal(OWNER_REQUEST_NOTIFICATION_MAX_JOBS, 5, "Restricted-channel verification must leave headroom under the Worker subrequest limit.");
   assert.match(ownerRunnerSource, /maxJobs: OWNER_REQUEST_NOTIFICATION_MAX_JOBS/, "The scheduled owner runner must retain the restricted-channel subrequest ceiling.");
@@ -58,6 +62,14 @@ export async function testPlayerGameIdentityDeliveryLedger() {
   });
   assert.equal(unavailable.status, 200, "The protected runner must stay safe before migration activation.");
   assert.equal((await unavailable.json() as { unavailable?: boolean }).unavailable, true);
+  const invalidProof = await proveOneDecisionDelivery({
+    request: new Request("https://dzn.test/api/sync/player-link-notifications/prove-one-v1", {
+      method: "POST", headers: { "x-dzn-cron-secret": "unit-test-secret", "content-type": "application/json" },
+      body: JSON.stringify({ confirmation: "APPROVE_ONE_PLAYER_LINK_NOTIFICATION_TEST" }),
+    }),
+    env: unavailableEnv, params: {}, data: {}, waitUntil() {}, next: async () => new Response(null),
+  });
+  assert.equal(invalidProof.status, 400, "A manual proof must not select an arbitrary queued delivery.");
 
   const transaction = identityTransactionFixture();
   try {

@@ -7,6 +7,10 @@ on:
         description: Must equal APPROVE_ONE_PLAYER_LINK_NOTIFICATION_TEST
         required: true
         type: string
+      delivery_id:
+        description: Exact queued player-link notification delivery reference
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -21,6 +25,7 @@ jobs:
     env:
       PRODUCTION_APP_URL: https://dzn-network.pages.dev
       CONFIRMATION: ${{ inputs.confirmation }}
+      DELIVERY_ID: ${{ inputs.delivery_id }}
     steps:
       - name: Validate one-message production guard
         run: |
@@ -32,6 +37,10 @@ jobs:
           fi
           if [ "${CONFIRMATION}" != "APPROVE_ONE_PLAYER_LINK_NOTIFICATION_TEST" ]; then
             echo "::error::confirmation must equal APPROVE_ONE_PLAYER_LINK_NOTIFICATION_TEST."
+            exit 1
+          fi
+          if [[ ! "${DELIVERY_ID}" =~ ^[A-Za-z0-9-]{8,80}$ ]]; then
+            echo "::error::delivery_id must be an explicit queued delivery reference."
             exit 1
           fi
           if [ "${PRODUCTION_APP_URL}" != "https://dzn-network.pages.dev" ]; then
@@ -53,18 +62,19 @@ jobs:
           fi
           echo "::add-mask::${CRON_SECRET}"
 
-          endpoint="${PRODUCTION_APP_URL}/api/sync/player-link-notifications/run"
+          endpoint="${PRODUCTION_APP_URL}/api/sync/player-link-notifications/prove-one-v1"
           unauthenticated_status="$(curl --silent --show-error --output unauthenticated.json --write-out '%{http_code}' --request POST "${endpoint}")"
           if [ "${unauthenticated_status}" != "401" ]; then
             echo "::error::Protected delivery endpoint must return HTTP 401 without the cron secret; received ${unauthenticated_status}."
             exit 1
           fi
 
+          node -e 'process.stdout.write(JSON.stringify({confirmation: process.env.CONFIRMATION, delivery_id: process.env.DELIVERY_ID}))' > proof-request.json
           authenticated_status="$(curl --silent --show-error --output delivery-result.json --write-out '%{http_code}' \
             --request POST \
             --header "x-dzn-cron-secret: ${CRON_SECRET}" \
             --header 'content-type: application/json' \
-            --data '{}' \
+            --data-binary @proof-request.json \
             "${endpoint}")"
           if [ "${authenticated_status}" != "200" ]; then
             echo "::error::Protected delivery endpoint returned HTTP ${authenticated_status}."
@@ -76,6 +86,8 @@ jobs:
           const result = JSON.parse(fs.readFileSync("delivery-result.json", "utf8"));
           const expected = {
             ok: true,
+            proof_contract: "player_notification_targeted_single_delivery_v1",
+            delivery_id: process.env.DELIVERY_ID,
             unavailable: false,
             processed: 1,
             delivered: 1,
@@ -94,7 +106,9 @@ jobs:
             echo "## Player Link Notification Delivery"
             echo ""
             echo "- Manual production confirmation: passed"
+            echo "- Explicit delivery reference: validated"
             echo "- Unauthenticated endpoint protection: HTTP 401"
+            echo "- Versioned targeted one-message contract: confirmed by the delivery response"
             echo "- Queued jobs processed: 1"
             echo "- Discord deliveries confirmed: 1"
             echo "- Retries, failures and skips: 0"
