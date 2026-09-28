@@ -210,14 +210,14 @@ export async function loadCommsHistory(signal: AbortSignal, options: { fetcher?:
   }
 }
 
-async function postCommsMutation(path: string, body: unknown, fallbackMessage: string) {
+async function requestCommsMutation(method: "POST" | "DELETE", path: string, body: unknown, fallbackMessage: string) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), COMMS_HISTORY_TIMEOUT_MS);
   let response: Response;
   let payload: { ok?: boolean; message?: string } | null;
   try {
     response = await fetch(path, {
-      method: "POST", credentials: "include", redirect: "error",
+      method, credentials: "include", redirect: "error",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify(body), signal: controller.signal,
     });
@@ -230,10 +230,24 @@ async function postCommsMutation(path: string, body: unknown, fallbackMessage: s
   if (!response.ok || !payload?.ok) throw new Error(payload?.message || fallbackMessage);
 }
 
+async function postCommsMutation(path: string, body: unknown, fallbackMessage: string) {
+  return requestCommsMutation("POST", path, body, fallbackMessage);
+}
+
 export async function sendCommsMessage(body: string, clientRequestId: string) {
   await postCommsMutation("/api/comms/messages", { channelSlug: "global-chat", clientRequestId, body }, "Message could not be sent.");
 }
 
 export async function reportCommsMessage(messageId: string, reason = "other") {
   await postCommsMutation("/api/comms/reports", { messageId, reason }, "Report could not be sent.");
+}
+
+export async function addCommsReaction(messageId: string, reactionKey: CommsReactionKey, clientMutationId: string) {
+  await requestCommsMutation("POST", `/api/comms/messages/${encodeURIComponent(messageId)}/reactions`,
+    { reactionKey, clientMutationId }, "Reaction could not be saved.");
+}
+
+export async function removeCommsReaction(messageId: string, reactionKey: CommsReactionKey, clientMutationId: string) {
+  await requestCommsMutation("DELETE", `/api/comms/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(reactionKey)}`,
+    { clientMutationId }, "Reaction could not be removed.");
 }
