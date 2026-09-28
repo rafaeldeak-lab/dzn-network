@@ -14,7 +14,16 @@ import {
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { CommsMessageTime } from "./comms-message-time";
-import { loadCommsHistory, reportCommsMessage, sendCommsMessage, type CommsHistoryMessage, type CommsHistoryPayload } from "./comms-history-client";
+import {
+  addCommsReaction,
+  loadCommsHistory,
+  removeCommsReaction,
+  reportCommsMessage,
+  sendCommsMessage,
+  type CommsHistoryMessage,
+  type CommsHistoryPayload,
+  type CommsReactionKey,
+} from "./comms-history-client";
 
 type CommsHistoryState =
   | { status: "static"; payload: CommsHistoryPayload; message: string }
@@ -99,6 +108,7 @@ export function DznCommsShell() {
   const [sending, setSending] = useState(false);
   const [composerMessage, setComposerMessage] = useState("");
   const sendAttemptRef = useRef<{ draft: string; requestId: string } | null>(null);
+  const reactionAttemptRef = useRef(new Map<string, string>());
   const [history, setHistory] = useState<CommsHistoryState>(() => ({
     status: historyUiEnabled || liveUiEnabled ? "loading" : "static",
     payload: staticPayload,
@@ -143,6 +153,7 @@ export function DznCommsShell() {
   const statusLabel = useMemo(() => statusCopy(history.status), [history.status]);
   const sendingEnabled = liveUiEnabled && payload.feature_flags.sending_enabled;
   const reportActionsEnabled = liveUiEnabled && payload.feature_flags.report_actions_enabled;
+  const reactionWritesEnabled = liveUiEnabled && payload.feature_flags.reactions_write_enabled;
   const canSend = sendingEnabled && draft.trim().length > 0 && !sending;
 
   async function handleSend(event: FormEvent) {
@@ -172,6 +183,26 @@ export function DznCommsShell() {
     }
   }
 
+  async function handleReaction(messageId: string, reactionKey: CommsReactionKey, remove: boolean) {
+    if (!reactionWritesEnabled) throw new Error("Reactions are not enabled yet.");
+    const attemptKey = `${messageId}:${reactionKey}:${remove ? "remove" : "add"}`;
+    const mutationId = reactionAttemptRef.current.get(attemptKey) ?? crypto.randomUUID();
+    reactionAttemptRef.current.set(attemptKey, mutationId);
+    try {
+      if (remove) await removeCommsReaction(messageId, reactionKey, mutationId);
+      else await addCommsReaction(messageId, reactionKey, mutationId);
+      reactionAttemptRef.current.delete(attemptKey);
+    } catch (error) {
+      throw error;
+    }
+    try {
+      const refreshed = await loadCommsHistory(new AbortController().signal);
+      setHistory({ status: "ready", payload: refreshed, message: "Reaction saved." });
+    } catch {
+      setHistory((current) => ({ ...current, message: "Reaction saved. Counts will refresh shortly." }));
+    }
+  }
+
   return (
     <main className="min-h-screen overflow-hidden bg-[#03050d] pb-24 pt-28 text-zinc-100 sm:pt-32">
       <section className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 sm:px-6 lg:px-8">
@@ -185,8 +216,8 @@ export function DznCommsShell() {
                 <p className="text-xs font-black uppercase tracking-[0.28em] text-cyan-200">DZN Comms</p>
                 <h1 className="mt-1 text-3xl font-black uppercase leading-none text-white sm:text-4xl">Global Chat</h1>
                 <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-zinc-300">
-                  Discord-authenticated members can talk in one moderated DZN channel. Private chat, reactions, presence and AI
-                  support remain separate future releases.
+                  Discord-authenticated members can talk in one moderated DZN channel. Private chat, presence and AI support
+                  remain separate future releases.
                 </p>
               </div>
             </div>
@@ -230,7 +261,13 @@ export function DznCommsShell() {
 
               <div className="mt-4 space-y-3">
                 {payload.messages.map((message) => (
-                  <MessageRow key={message.id} message={message} reportEnabled={reportActionsEnabled} />
+                  <MessageRow
+                    key={message.id}
+                    message={message}
+                    reportEnabled={reportActionsEnabled}
+                    reactionWriteEnabled={reactionWritesEnabled}
+                    onReactionChange={handleReaction}
+                  />
                 ))}
               </div>
 
@@ -247,7 +284,7 @@ export function DznCommsShell() {
                   disabled={!sendingEnabled || sending}
                   value={draft}
                   onChange={(event) => setDraft([...event.target.value].slice(0, 2_000).join(""))}
-                  placeholder={sendingEnabled ? "Message Global Chat" : "Message sending is not enabled yet."}
+                  placeholder={sendingEnabled ? "Message Global Chat" : "Sending unavailable"}
                   className="min-w-0 flex-1 bg-transparent px-2 text-sm font-semibold text-zinc-300 placeholder:text-zinc-500 focus:outline-none"
                 />
                 <button
@@ -286,9 +323,15 @@ export function DznCommsShell() {
   );
 }
 
-function MessageRow({ message, reportEnabled }: { message: CommsHistoryMessage; reportEnabled: boolean }) {
+function MessageRow({ message, reportEnabled, reactionWriteEnabled, onReactionChange }: {
+  message: CommsHistoryMessage;
+  reportEnabled: boolean;
+  reactionWriteEnabled: boolean;
+  onReactionChange: (messageId: string, reactionKey: CommsReactionKey, remove: boolean) => Promise<void>;
+}) {
   const muted = message.visibility_state !== "visible";
   const [reportState, setReportState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [reactionState, setReactionState] = useState<{ key: CommsReactionKey | null; status: "idle" | "sending" | "saved" | "error" }>({ key: null, status: "idle" });
 
   async function submitReport() {
     if (reportState === "sending" || reportState === "sent") return;
@@ -298,6 +341,17 @@ function MessageRow({ message, reportEnabled }: { message: CommsHistoryMessage; 
       setReportState("sent");
     } catch {
       setReportState("error");
+    }
+  }
+
+  async function toggleReaction(key: CommsReactionKey, reacted: boolean) {
+    if (!reactionWriteEnabled || reactionState.status === "sending") return;
+    setReactionState({ key, status: "sending" });
+    try {
+      await onReactionChange(message.id, key, reacted);
+      setReactionState({ key, status: "saved" });
+    } catch {
+      setReactionState({ key, status: "error" });
     }
   }
 
@@ -316,6 +370,34 @@ function MessageRow({ message, reportEnabled }: { message: CommsHistoryMessage; 
             <CommsMessageTime value={message.created_at} />
           </div>
           <p className={`mt-2 text-sm font-semibold leading-6 [overflow-wrap:anywhere] ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
+          {message.reactions && !muted ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2" aria-label="Message reactions">
+              {message.reactions.available_reactions.map((reaction) => {
+                const count = message.reactions?.counts.find((item) => item.key === reaction.key);
+                const reacted = count?.current_user_reacted === true;
+                if (!reactionWriteEnabled && !count) return null;
+                const pending = reactionState.status === "sending" && reactionState.key === reaction.key;
+                return (
+                  <button
+                    key={reaction.key}
+                    type="button"
+                    disabled={!reactionWriteEnabled || reactionState.status === "sending"}
+                    aria-label={`${reacted ? "Remove" : "Add"} ${reaction.label} reaction`}
+                    aria-pressed={reacted}
+                    title={reactionWriteEnabled ? reaction.label : `${reaction.label} reactions`}
+                    onClick={() => void toggleReaction(reaction.key, reacted)}
+                    className={`inline-flex h-8 min-w-10 items-center justify-center gap-1 rounded-md border px-2 text-xs font-black transition-colors ${
+                      reacted ? "border-violet-300/55 bg-violet-400/18 text-violet-100" : "border-white/10 bg-white/5 text-zinc-300"
+                    } disabled:cursor-default disabled:opacity-75`}
+                  >
+                    <span aria-hidden="true">{reaction.emoji}</span>
+                    <span>{pending ? "..." : count?.count ?? 0}</span>
+                  </button>
+                );
+              })}
+              {reactionState.status === "error" ? <span role="alert" className="text-xs font-bold text-amber-200">Reaction failed. Try again.</span> : null}
+            </div>
+          ) : null}
           {reportEnabled && !muted ? (
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <button type="button" disabled={reportState === "sending" || reportState === "sent"} onClick={() => void submitReport()} className="inline-flex items-center gap-1 text-xs font-bold text-zinc-400 hover:text-amber-200 disabled:cursor-not-allowed disabled:text-zinc-600" title="Report this message to DZN moderation">

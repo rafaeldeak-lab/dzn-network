@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { COMMS_HISTORY_MAX_BYTES, loadCommsHistory, parseCommsHistory } from "../components/comms/comms-history-client";
+import { addCommsReaction, COMMS_HISTORY_MAX_BYTES, loadCommsHistory, parseCommsHistory, removeCommsReaction } from "../components/comms/comms-history-client";
 import { commsHistoryFixture } from "./fixtures/comms-history";
 
 const encoder = new TextEncoder();
@@ -69,6 +69,26 @@ test("rejects malformed or misplaced reaction projections", () => {
   assert.throws(() => parseCommsHistory(malformed));
   const disabled = commsHistoryFixture(); Object.assign(disabled.messages[0], { reactions: {} });
   assert.throws(() => parseCommsHistory(disabled));
+});
+
+test("sends bounded own-reaction add and remove requests", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: { url: string; method: string; body: unknown }[] = [];
+  globalThis.fetch = (async (url, options) => {
+    requests.push({ url: String(url), method: String(options?.method), body: JSON.parse(String(options?.body)) });
+    assert.equal(options?.credentials, "include"); assert.equal(options?.redirect, "error");
+    return jsonResponse({ ok: true });
+  }) as typeof fetch;
+  try {
+    await addCommsReaction("message/one", "heart", "reaction-client-0001");
+    await removeCommsReaction("message/one", "heart", "reaction-client-0002");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(requests, [
+    { url: "/api/comms/messages/message%2Fone/reactions", method: "POST", body: { reactionKey: "heart", clientMutationId: "reaction-client-0001" } },
+    { url: "/api/comms/messages/message%2Fone/reactions/heart", method: "DELETE", body: { clientMutationId: "reaction-client-0002" } },
+  ]);
 });
 
 test("rejects malformed nested collections and primitives without reaching the UI", () => {

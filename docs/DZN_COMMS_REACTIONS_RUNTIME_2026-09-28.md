@@ -10,6 +10,7 @@ The source adds a disabled-by-default reaction runtime for messages that the req
 - `POST /api/comms/messages/:messageId/reactions` adds the signed-in requester's own reaction.
 - `DELETE /api/comms/messages/:messageId/reactions/:reactionKey` removes only the signed-in requester's own reaction.
 - Message history embeds the same aggregate projection when reaction reads are enabled.
+- The Comms message rows show bounded aggregate controls only when the existing live UI is active; mutation controls remain disabled unless the server reports reaction writes enabled.
 
 Visitors can read aggregates for visible public messages only. Private-group aggregates and mutations require current active membership. Support-private, hidden, quarantined, deleted and expired messages remain unavailable. Free, Starter and Pro accounts use the same personal reaction rules; reactions do not alter ranking, discovery, XP, badges, events, Server Wars, CTF, billing or entitlement state.
 
@@ -31,6 +32,6 @@ Required order:
 2. Apply only `0078_dzn_comms_reactions.sql` and verify its ledger row, three tables, indexes, triggers, constraints and foreign keys.
 3. Keep `DZN_COMMS_REACTIONS_READ_ENABLED`, `DZN_COMMS_REACTIONS_WRITE_ENABLED` and the public reaction UI disabled.
 4. Run authenticated public/private read, add, replay, conflict, removal, rate-limit, moderation-removal and retention tests.
-5. Enable server-side reads, then server-side writes, and enable any future UI flag last.
+5. Enable server-side reads, then server-side writes, and enable the existing public live UI switch last.
 
 No production D1 write, feature-switch change, secret creation, Discord message, payment action, customer charge, Nitrado action or restart-schedule change is part of this source release.
