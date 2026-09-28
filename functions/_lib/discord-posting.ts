@@ -183,8 +183,11 @@ const DUE_POSTING_CURSOR = {
   channelId: "__scheduler__",
 } as const;
 
-export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJobs?: number; deadlineMs?: number } = {}) {
-  await ensureAutomationSchema(env);
+export async function dispatchQueuedDiscordPostUpdates(
+  env: Env,
+  options: { maxJobs?: number; deadlineMs?: number; ensureSchema?: boolean } = {},
+) {
+  if (options.ensureSchema !== false) await ensureAutomationSchema(env);
   const maxJobs = Math.max(1, Math.min(Math.trunc(Number(options.maxJobs ?? 2)) || 2, 10));
   const budget = createDiscordDispatchBudget(options.deadlineMs);
   const db = requireDb(env);
