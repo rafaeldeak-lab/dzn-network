@@ -755,7 +755,7 @@ export function buildOwnerSupportBlockers(input: {
       key: "adm_sync",
       severity: "attention",
       title: "ADM import has not been proven",
-      recommendation: "After verification, allow the scheduled importer to discover and process a genuine ADM log at the server's current plan cadence. Do not change the existing restart schedule.",
+      recommendation: "After verification, check the server's separate automation access status. If scheduled ADM automation is active, wait for a genuine import; otherwise show the owner that automation is inactive and leave any upgrade choice to them. Do not change the existing restart schedule.",
     });
   }
   return blockers;
