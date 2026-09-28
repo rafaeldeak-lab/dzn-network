@@ -222,6 +222,8 @@ assert.equal(dueStateCheckSource.includes("final_sync_attempted_at"), true);
 assert.equal(dueStateCheckSource.includes("ADM_MIN_SYNC_INTERVAL_MS = 10 * 60 * 1000"), true);
 assert.equal(dueStateCheckSource.includes("adm_sync_state.last_sync_at AS last_adm_sync_at"), true);
 assert.equal(dueStateCheckSource.includes('return "adm_minimum_interval"'), true);
+assert.equal(dueStateCheckSource.includes("hasActiveLock"), true);
+assert.equal(dueStateCheckSource.includes("staleAfterMinutes * 60 * 1000"), true);
 assert.equal(dueStateCheckSource.includes("next_retry_after"), true);
 
 console.log("Automation health hardening tests passed.");

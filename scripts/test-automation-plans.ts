@@ -301,6 +301,8 @@ assert.equal(serverDueStateSource.includes("complimentary_automation_access"), t
 assert.equal(serverDueStateSource.includes("julianday(grant_row.created_at) <= julianday('now')"), true);
 assert.equal(serverDueStateSource.includes("server_subscriptions AS paid_pro"), true);
 assert.equal(serverDueStateSource.includes("'pro', 'premium', 'network', 'partner'"), true);
+assert.equal(serverDueStateSource.includes("COALESCE(linked_servers.lifecycle_status, '')"), true);
+assert.equal(serverDueStateSource.includes('normalizePlanKey(complimentaryAutomation ? "pro" : row.plan_key)'), true);
 assert.equal(serverDueStateSource.includes('return "not_live"'), true);
 assert.equal(serverDueStateSource.includes('return "no_automation_entitlement"'), true);
 assert.equal(serverDueStateSource.includes('return "missing_nitrado_service_id"'), true);

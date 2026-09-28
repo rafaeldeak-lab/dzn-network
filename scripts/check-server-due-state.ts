@@ -71,6 +71,13 @@ function isDue(value: string | null | undefined) {
   return !Number.isFinite(ms) || ms <= Date.now();
 }
 
+function hasActiveLock(flag: number | null | undefined, startedAt: string | null | undefined, fallbackAt: string | null | undefined, staleAfterMinutes: number) {
+  if (Number(flag ?? 0) !== 1) return false;
+  const timestamp = Date.parse(startedAt ?? fallbackAt ?? "");
+  if (!Number.isFinite(timestamp)) return true;
+  return Date.now() - timestamp < staleAfterMinutes * 60 * 1000;
+}
+
 function skippedReason(row: ServerDueRow, task: Extract<ServerLifecycleTask, "metadata" | "adm_discovery" | "adm_processing">) {
   if (!row.guild_id) return "missing_guild_id";
   if (!row.nitrado_service_id) return "missing_nitrado_service_id";
@@ -78,8 +85,12 @@ function skippedReason(row: ServerDueRow, task: Extract<ServerLifecycleTask, "me
   if (row.merged_into_server_id) return "merged";
   if (Number(row.complimentary_automation_access ?? 0) !== 1
     && !isAutomationBillingEligible(row.plan_key, row.subscription_status)) return "no_automation_entitlement";
-  if (task === "metadata" && Number(row.currently_checking_status ?? 0) === 1) return "currently_checking_status";
-  if (task !== "metadata" && Number(row.currently_syncing_adm ?? 0) === 1) return "currently_syncing_adm";
+  if (task === "metadata" && hasActiveLock(row.currently_checking_status, row.status_sync_started_at, row.updated_at, 10)) {
+    return "currently_checking_status";
+  }
+  if (task !== "metadata" && hasActiveLock(row.currently_syncing_adm, row.adm_sync_started_at, row.last_adm_pull_at ?? row.updated_at, 30)) {
+    return "currently_syncing_adm";
+  }
   const lifecycleStatus = String(row.lifecycle_status ?? "active_live").toLowerCase();
   if (!SERVER_LIFECYCLE_STATUSES.includes(lifecycleStatus as typeof SERVER_LIFECYCLE_STATUSES[number])) {
     return "invalid_lifecycle_status";
@@ -122,6 +133,7 @@ const rows = runWranglerQuery<ServerDueRow>(
               AND grant_owner.discord_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.ownerDiscordId)}
               AND linked_servers.guild_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.guildId)}
               AND linked_servers.nitrado_service_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.nitradoServiceId)}
+              AND lower(COALESCE(linked_servers.lifecycle_status, '')) = 'active_live'
               AND grant_row.owner_user_id = linked_servers.user_id
               AND grant_row.owner_discord_id = grant_owner.discord_id
               AND grant_row.guild_id = linked_servers.guild_id
@@ -168,7 +180,8 @@ if (!rows.length) {
   process.exitCode = 1;
 } else {
   for (const row of rows) {
-    const plan = normalizePlanKey(row.plan_key);
+    const complimentaryAutomation = Number(row.complimentary_automation_access ?? 0) === 1;
+    const plan = normalizePlanKey(complimentaryAutomation ? "pro" : row.plan_key);
     const serverName = row.display_name || row.hostname || row.server_name || row.public_slug || row.id;
     console.log(`\nServer: ${serverName}`);
     console.log(`server id: ${row.id}`);
@@ -176,7 +189,7 @@ if (!rows.length) {
     console.log(`public slug: ${row.public_slug ?? "missing"}`);
     console.log(`nitrado service id: ${row.nitrado_service_id ?? "missing"}`);
     console.log(`subscription: ${plan} / ${row.subscription_status ?? "unknown"}`);
-    console.log(`automation entitlement: ${Number(row.complimentary_automation_access ?? 0) === 1 ? "complimentary Pro" : `${plan} billing`}`);
+    console.log(`automation entitlement: ${complimentaryAutomation ? "complimentary Pro" : `${plan} billing`}`);
     console.log(`server setup status: ${row.linked_status ?? "unknown"}`);
     console.log(`lifecycle: ${row.lifecycle_status ?? "active_live"}`);
     console.log(`intervals: status ${getServerStatusInterval(plan)}m, ADM discovery ${getAdmDiscoveryIntervalMinutes(plan)}m, ADM processing ${getAdmPullInterval(plan)}m`);
@@ -185,8 +198,8 @@ if (!rows.length) {
     console.log(`next ADM processing due: ${row.next_adm_pull_due_at ?? "now"} (${isDue(row.next_adm_pull_due_at) ? "due" : "not due"})`);
     console.log(`currently checking status: ${Number(row.currently_checking_status ?? 0) === 1}`);
     console.log(`currently syncing ADM: ${Number(row.currently_syncing_adm ?? 0) === 1}`);
-    console.log(`status lock age: ${Number(row.currently_checking_status ?? 0) === 1 ? `${lockAge(row, "status") ?? "unknown"} minutes` : "not locked"}`);
-    console.log(`ADM lock age: ${Number(row.currently_syncing_adm ?? 0) === 1 ? `${lockAge(row, "adm") ?? "unknown"} minutes` : "not locked"}`);
+    console.log(`status lock age: ${hasActiveLock(row.currently_checking_status, row.status_sync_started_at, row.updated_at, 10) ? `${lockAge(row, "status") ?? "unknown"} minutes` : "not locked"}`);
+    console.log(`ADM lock age: ${hasActiveLock(row.currently_syncing_adm, row.adm_sync_started_at, row.last_adm_pull_at ?? row.updated_at, 30) ? `${lockAge(row, "adm") ?? "unknown"} minutes` : "not locked"}`);
     console.log(`row update age: ${ageMinutes(row.updated_at) ?? "unknown"} minutes`);
     console.log(`metadata planner reason: ${skippedReason(row, "metadata")}`);
     console.log(`ADM discovery planner reason: ${skippedReason(row, "adm_discovery")}`);
