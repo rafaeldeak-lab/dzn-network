@@ -33,6 +33,7 @@ const REQUIRED_PERMISSION_LABELS = ["View Channel", "Send Messages", "Embed Link
 const EVENT_OFFICIAL_TYPES = new Set(["capture_the_flag", "server_vs_server", "bot_tournament", "faction_wars", "seasonal_wars"]);
 const PVP_METRICS = new Set(["pvp_kill_count", "pvp_headshot_count", "pvp_weapon_kill_count", "pvp_distance_qualified_kills", "pvp_longest_kill", "pvp_kd_ratio"]);
 const BUILD_METRICS = new Set(["build_score", "structures_built", "walls_built", "gates_built", "watchtower_parts_built", "storage_items_placed", "flags_raised"]);
+const SUCCESSFUL_ADM_SYNC_STATUSES = new Set(["completed", "completed_with_warnings", "new_data_found", "no_new_lines", "no_new_log_available", "no_supported_events"]);
 
 type OwnerServerRow = {
   id: string;
@@ -177,8 +178,9 @@ const OWNER_EVENT_HUB_READ_COLUMNS: Record<string, readonly string[]> = {
   event_matchups: ["id", "event_id", "round_number", "server_a_id", "server_b_id", "status", "starts_at", "ends_at", "scoring_grace_until", "server_a_score", "server_b_score", "created_at"],
   server_discord_channel_settings: ["linked_server_id", "guild_id", "channel_type", "channel_id", "channel_name", "channel_kind", "bot_can_view", "bot_can_send", "bot_can_embed", "bot_can_read_history", "last_verified_at", "updated_at"],
   event_cooldowns: ["linked_server_id", "event_type", "plan_key", "cooldown_until", "source_event_id", "reason"],
-  adm_sync_state: ["linked_server_id", "latest_adm_file", "last_processed_file", "last_successful_import_at", "last_sync_status"],
-  adm_import_jobs: ["linked_server_id", "source", "status", "completed_at", "created_at", "updated_at"],
+  adm_sync_state: ["linked_server_id", "latest_adm_file", "last_processed_file", "last_sync_at", "last_sync_status"],
+  adm_sync_file_state: ["linked_server_id", "processed_at", "completed_at"],
+  adm_import_jobs: ["server_id", "source", "status", "completed_at", "created_at", "updated_at"],
 };
 
 type OwnerEventHubReadiness =
@@ -1114,7 +1116,7 @@ async function getActiveEventCooldown(env: Env, linkedServerId: string) {
 async function getAdmEligibility(env: Env, linkedServerId: string) {
   const row = await requireDb(env)
     .prepare(
-      `SELECT latest_adm_file, last_processed_file, last_successful_import_at, last_sync_status
+      `SELECT latest_adm_file, last_processed_file, last_sync_at AS last_successful_import_at, last_sync_status
        FROM adm_sync_state
        WHERE linked_server_id = ?
        LIMIT 1`,
@@ -1122,25 +1124,53 @@ async function getAdmEligibility(env: Env, linkedServerId: string) {
     .bind(linkedServerId)
     .first<{ latest_adm_file: string | null; last_processed_file: string | null; last_successful_import_at: string | null; last_sync_status: string | null }>()
     .catch(() => null);
+  const completedFile = await requireDb(env)
+    .prepare(
+      `SELECT MAX(COALESCE(completed_at, processed_at)) AS completed_at
+       FROM adm_sync_file_state
+       WHERE linked_server_id = ?
+         AND (completed_at IS NOT NULL OR processed_at IS NOT NULL)`,
+    )
+    .bind(linkedServerId)
+    .first<{ completed_at: string | null }>()
+    .catch(() => null);
   const job = await requireDb(env)
     .prepare(
       `SELECT status, completed_at, updated_at
        FROM adm_import_jobs
-       WHERE linked_server_id = ?
+       WHERE server_id = ?
          AND source = 'scheduled_nitrado'
+         AND status IN ('completed', 'completed_with_warnings')
+         AND completed_at IS NOT NULL
        ORDER BY datetime(COALESCE(completed_at, updated_at, created_at)) DESC
        LIMIT 1`,
     )
     .bind(linkedServerId)
     .first<{ status: string | null; completed_at: string | null; updated_at: string | null }>()
     .catch(() => null);
-  const recentImportAt = row?.last_successful_import_at ?? job?.completed_at ?? job?.updated_at ?? null;
+  return resolveAdmEligibilityEvidence(row, job, completedFile);
+}
+
+export function resolveAdmEligibilityEvidence(
+  row: { latest_adm_file: string | null; last_processed_file: string | null; last_successful_import_at: string | null; last_sync_status: string | null } | null,
+  job: { status: string | null; completed_at: string | null; updated_at: string | null } | null,
+  completedFile: { completed_at: string | null } | null = null,
+) {
+  const syncStatus = String(row?.last_sync_status ?? "").trim().toLowerCase();
+  const successfulSyncAt = row?.last_successful_import_at && SUCCESSFUL_ADM_SYNC_STATUSES.has(syncStatus)
+    ? row.last_successful_import_at
+    : null;
+  const completedJobAt = job?.completed_at && ["completed", "completed_with_warnings"].includes(String(job.status ?? "").trim().toLowerCase())
+    ? job.completed_at
+    : null;
+  const completedFileAt = completedFile?.completed_at ?? null;
+  const recentImportAt = successfulSyncAt ?? completedFileAt ?? completedJobAt;
   return {
-    ready: Boolean(recentImportAt || row?.latest_adm_file || job),
+    ready: Boolean(recentImportAt),
     latestAdmFile: row?.latest_adm_file ?? null,
     lastProcessedFile: row?.last_processed_file ?? null,
     lastSuccessfulImportAt: recentImportAt,
-    status: row?.last_sync_status ?? job?.status ?? "waiting",
+    status: successfulSyncAt || completedFileAt ? row?.last_sync_status ?? "completed" : completedJobAt ? job?.status ?? "completed" : row?.last_sync_status ?? job?.status ?? "waiting",
   };
 }
 
