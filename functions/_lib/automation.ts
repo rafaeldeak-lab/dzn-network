@@ -177,9 +177,10 @@ export async function ensureAutomationRowsForLinkedServers(env: Env) {
     const hasOwnerBilling = Boolean(row.owner_billing_account_id);
     const status = (hasOwnerBilling ? row.plan_status : row.existing_status) ?? "inactive";
     const planKey = normalizePlanKey(hasOwnerBilling ? row.plan_key : row.existing_plan_key);
+    const ownerDiscordId = row.owner_discord_id ?? row.existing_owner_discord_id ?? "";
     await upsertServerSubscription(env, {
       guildId: row.guild_id,
-      ownerDiscordId: row.owner_discord_id ?? row.existing_owner_discord_id ?? "",
+      ownerDiscordId,
       stripeCustomerId: hasOwnerBilling ? row.stripe_customer_id : row.existing_stripe_customer_id,
       stripeSubscriptionId: hasOwnerBilling ? row.stripe_subscription_id : row.existing_stripe_subscription_id,
       stripePriceId: null,
@@ -188,7 +189,11 @@ export async function ensureAutomationRowsForLinkedServers(env: Env) {
       currentPeriodStart: hasOwnerBilling ? row.current_period_start : row.existing_current_period_start,
       currentPeriodEnd: hasOwnerBilling ? row.current_period_end : row.existing_current_period_end,
       cancelAtPeriodEnd: Number(hasOwnerBilling ? row.cancel_at_period_end : row.existing_cancel_at_period_end) === 1,
-      clearBillingIdentity: Boolean(row.guild_subscription_owner_discord_id && !row.existing_owner_discord_id && !hasOwnerBilling),
+      replaceBillingIdentity: Boolean(
+        row.guild_subscription_owner_discord_id
+        && ownerDiscordId
+        && row.guild_subscription_owner_discord_id !== ownerDiscordId,
+      ),
       forceDue: isActiveSubscriptionStatus(status),
     });
     await upsertServerPublicCache(env, {
@@ -516,7 +521,7 @@ export async function upsertServerSubscription(env: Env, input: {
   currentPeriodStart?: string | null;
   currentPeriodEnd?: string | null;
   cancelAtPeriodEnd?: boolean;
-  clearBillingIdentity?: boolean;
+  replaceBillingIdentity?: boolean;
   forceDue?: boolean;
 }) {
   await ensureAutomationSchema(env);
@@ -534,13 +539,13 @@ export function serverSubscriptionStatements(env: Env, input: Parameters<typeof 
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(guild_id) DO UPDATE SET
         owner_discord_id = excluded.owner_discord_id,
-        stripe_customer_id = CASE WHEN ? THEN NULL ELSE COALESCE(excluded.stripe_customer_id, server_subscriptions.stripe_customer_id) END,
-        stripe_subscription_id = CASE WHEN ? THEN NULL ELSE COALESCE(excluded.stripe_subscription_id, server_subscriptions.stripe_subscription_id) END,
-        stripe_price_id = CASE WHEN ? THEN NULL ELSE COALESCE(excluded.stripe_price_id, server_subscriptions.stripe_price_id) END,
+        stripe_customer_id = CASE WHEN ? THEN excluded.stripe_customer_id ELSE COALESCE(excluded.stripe_customer_id, server_subscriptions.stripe_customer_id) END,
+        stripe_subscription_id = CASE WHEN ? THEN excluded.stripe_subscription_id ELSE COALESCE(excluded.stripe_subscription_id, server_subscriptions.stripe_subscription_id) END,
+        stripe_price_id = CASE WHEN ? THEN excluded.stripe_price_id ELSE COALESCE(excluded.stripe_price_id, server_subscriptions.stripe_price_id) END,
         plan_key = excluded.plan_key,
         status = excluded.status,
-        current_period_start = CASE WHEN ? THEN NULL ELSE COALESCE(excluded.current_period_start, server_subscriptions.current_period_start) END,
-        current_period_end = CASE WHEN ? THEN NULL ELSE COALESCE(excluded.current_period_end, server_subscriptions.current_period_end) END,
+        current_period_start = CASE WHEN ? THEN excluded.current_period_start ELSE COALESCE(excluded.current_period_start, server_subscriptions.current_period_start) END,
+        current_period_end = CASE WHEN ? THEN excluded.current_period_end ELSE COALESCE(excluded.current_period_end, server_subscriptions.current_period_end) END,
         cancel_at_period_end = excluded.cancel_at_period_end,
         updated_at = excluded.updated_at`,
     )
@@ -558,11 +563,11 @@ export function serverSubscriptionStatements(env: Env, input: Parameters<typeof 
       input.cancelAtPeriodEnd ? 1 : 0,
       now,
       now,
-      input.clearBillingIdentity ? 1 : 0,
-      input.clearBillingIdentity ? 1 : 0,
-      input.clearBillingIdentity ? 1 : 0,
-      input.clearBillingIdentity ? 1 : 0,
-      input.clearBillingIdentity ? 1 : 0,
+      input.replaceBillingIdentity ? 1 : 0,
+      input.replaceBillingIdentity ? 1 : 0,
+      input.replaceBillingIdentity ? 1 : 0,
+      input.replaceBillingIdentity ? 1 : 0,
+      input.replaceBillingIdentity ? 1 : 0,
     );
 
   const sync = db
