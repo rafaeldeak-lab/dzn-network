@@ -724,14 +724,6 @@ export function buildOwnerSupportBlockers(input: {
   if (["archived_hidden", "legacy_offline", "final_sync_complete"].includes(input.lifecycleStatus)) return [];
   const blockers: OwnerSupportBlocker[] = [];
   const tokenNeedsResave = input.lifecycleStatus === "token_needs_resave";
-  if (!input.billing.paid) {
-    blockers.push({
-      key: "billing",
-      severity: "blocking",
-      title: "No active paid plan",
-      recommendation: "Ask the server owner to choose a server-owner plan from their own account. No charge can be created from this support view.",
-    });
-  }
   if (normalizedText(input.status) === "pending" || !input.onboarding.verifiedServer) {
     blockers.push({
       key: "verification",
@@ -763,7 +755,7 @@ export function buildOwnerSupportBlockers(input: {
       key: "adm_sync",
       severity: "attention",
       title: "ADM import has not been proven",
-      recommendation: "After verification and plan setup, allow the scheduled importer to discover and process a genuine ADM log. Do not change the existing restart schedule.",
+      recommendation: "After verification, allow the scheduled importer to discover and process a genuine ADM log at the server's current plan cadence. Do not change the existing restart schedule.",
     });
   }
   return blockers;

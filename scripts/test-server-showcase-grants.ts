@@ -323,7 +323,10 @@ async function run() {
     assert.equal(unrelated.plan.subscription_status, "canceled");
     assert.equal(unrelated.plan.access_source, "billing");
     assert.ok(unrelated.problem_flags.includes("automation_access_inactive"));
-    assert.match(unrelated.next_action, /paid plan/i);
+    assert.ok(unrelated.problem_flags.includes("adm_processing_limited_by_plan"));
+    assert.ok(!unrelated.problem_flags.includes("subscription_not_active"));
+    assert.doesNotMatch(unrelated.next_action, /paid plan/i);
+    assert.match(unrelated.next_action, /owner's decision/i);
   });
   await test("owner ADM discovery diagnostics preserve exact-server access and guild billing cadence", async ({ db, env }) => {
     const diagnosticEnv = { ...env, TOKEN_ENCRYPTION_KEY: "synthetic-only-test-key" } as Env;
