@@ -81,6 +81,7 @@ const staticPayload: CommsHistoryPayload = {
     route_enabled: false,
     sending_enabled: false,
     reactions_enabled: false,
+    reactions_write_enabled: false,
     report_actions_enabled: false,
     moderation_mutations_enabled: false,
     ai_assist_runtime_enabled: false,

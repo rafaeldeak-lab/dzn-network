@@ -224,7 +224,10 @@ export async function handleDznCommsModerationQueue(request: Request, env: Env) 
 export async function runDznCommsRetention(db: D1Database, now = new Date()) {
   const timestamp = now.toISOString();
   const slotCutoff = new Date(now.getTime() - RATE_SLOT_RETENTION_DAYS * 86_400_000).toISOString();
-  const results = await db.batch([
+  const installedReactionTables = await db.prepare(`SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name IN ('dzn_comms_reaction_mutations', 'dzn_comms_reaction_rate_slots')`).all<{ name: string }>();
+  const reactionTables = new Set((installedReactionTables.results ?? []).map((row) => row.name));
+  const statements = [
     db.prepare(`UPDATE dzn_comms_messages
       SET body = 'Message expired.', author_user_id = NULL, author_display_name = 'DZN Safety',
           author_role_label = 'System', visibility_state = 'expired', edited_at = ?
@@ -240,14 +243,25 @@ export async function runDznCommsRetention(db: D1Database, now = new Date()) {
     db.prepare("DELETE FROM dzn_comms_send_slots WHERE julianday(created_at) <= julianday(?)").bind(slotCutoff),
     db.prepare("DELETE FROM dzn_comms_attempt_slots WHERE julianday(created_at) <= julianday(?)").bind(slotCutoff),
     db.prepare("DELETE FROM dzn_comms_report_slots WHERE julianday(created_at) <= julianday(?)").bind(slotCutoff),
-  ]);
+  ];
+  if (reactionTables.has("dzn_comms_reaction_mutations")) {
+    statements.push(db.prepare("DELETE FROM dzn_comms_reaction_mutations WHERE julianday(expires_at) <= julianday(?)").bind(timestamp));
+  }
+  if (reactionTables.has("dzn_comms_reaction_rate_slots")) {
+    statements.push(db.prepare("DELETE FROM dzn_comms_reaction_rate_slots WHERE julianday(created_at) <= julianday(?)").bind(slotCutoff));
+  }
+  const results = await db.batch(statements);
   const changes = results.map((result) => Number(result.meta?.changes ?? 0));
   return {
     messagesErased: changes[0] ?? 0,
     reportsResolved: changes[1] ?? 0,
     receiptsDeleted: changes[2] ?? 0,
     timeoutsDeleted: changes[3] ?? 0,
-    rateSlotsDeleted: changes.slice(4).reduce((sum, value) => sum + value, 0),
+    rateSlotsDeleted: changes.slice(4, 7).reduce((sum, value) => sum + value, 0),
+    reactionMutationReceiptsDeleted: reactionTables.has("dzn_comms_reaction_mutations") ? changes[7] ?? 0 : 0,
+    reactionRateSlotsDeleted: reactionTables.has("dzn_comms_reaction_rate_slots")
+      ? changes[reactionTables.has("dzn_comms_reaction_mutations") ? 8 : 7] ?? 0
+      : 0,
   };
 }
 

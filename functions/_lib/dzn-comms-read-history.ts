@@ -1,6 +1,7 @@
 import { getSessionUser, requireDb } from "./db";
 import { json, methodNotAllowed } from "./http";
 import { noStoreForErrorHeaders, privateNoStoreHeaders } from "./performance";
+import { readDznCommsReactionFlags, readDznCommsReactionSummaries } from "./dzn-comms-reactions";
 import type { Env, SessionUser } from "./types";
 
 type DznCommsChannelRow = {
@@ -35,6 +36,12 @@ type DznCommsReadableChannel = {
   name: string;
   description: string | null;
   visibility: "public" | "private_group" | "support_private";
+};
+
+type DznCommsReactionSummary = {
+  revision: string;
+  available_reactions: readonly { key: string; emoji: string; label: string }[];
+  counts: { key: string; emoji: string; label: string; count: number; current_user_reacted: boolean }[];
 };
 
 export type DznCommsReadHistoryFlags = {
@@ -98,7 +105,7 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
     );
   }
 
-  const user = channel.visibility === "public" ? null : await getSessionUser(env, request);
+  const user = await getSessionUser(env, request);
   if (channel.visibility !== "public" && !user) {
     return json(
       { ok: false, code: "UNAUTHORIZED", message: "Log in with Discord to read this DZN Comms group." },
@@ -122,9 +129,13 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
   }
 
   const rows = await readMessages(db, channel.id, limit, before);
+  const reactionFlags = readDznCommsReactionFlags(env, request);
+  const reactionSummaries = reactionFlags.readEnabled
+    ? await readDznCommsReactionSummaries(db, rows.map((row) => row.id), user?.id ?? null)
+    : new Map<string, DznCommsReactionSummary>();
   const messages = rows
     .filter((row) => !isExpired(row.expires_at) && normalizeVisibilityState(row.visibility_state) !== "expired")
-    .map((row) => publicSafeMessage(row))
+    .map((row) => publicSafeMessage(row, reactionSummaries.get(row.id)))
     .reverse();
 
   return json(
@@ -150,7 +161,8 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
         route_enabled: flags.enabled,
         ui_flag_name: flags.uiFlagName,
         sending_enabled: flags.writeFeaturesEnabled,
-        reactions_enabled: false,
+        reactions_enabled: reactionFlags.readEnabled,
+        reactions_write_enabled: reactionFlags.writeEnabled,
         report_actions_enabled: flags.writeFeaturesEnabled,
         moderation_mutations_enabled: flags.writeFeaturesEnabled,
         ai_assist_runtime_enabled: false,
@@ -197,7 +209,7 @@ function isLocalRequest(request: Request) {
 export function dznCommsReadHistoryBoundary() {
   return [
     "DZN Comms stays disabled by default and requires explicit server and UI release flags.",
-    "Authenticated sending, reporting and platform-owner moderation use separate same-origin routes; reactions and AI support remain disabled.",
+    "Authenticated sending, reporting, reactions and platform-owner moderation use separate same-origin routes and separate flags; AI support remains disabled.",
     "Read history does not write analytics, tracking events, billing data, owner entitlements, server ownership, ranking data, discovery formulas, reviews, events, XP, calling-card awards, Server Wars, CTF, retained exports, or competitive eligibility.",
     "Private group history requires current-user membership before any rows are returned.",
   ];
@@ -261,7 +273,7 @@ async function readMessages(db: D1Database, channelId: string, limit: number, be
   return result.results ?? [];
 }
 
-function publicSafeMessage(row: DznCommsMessageRow) {
+function publicSafeMessage(row: DznCommsMessageRow, reactions?: DznCommsReactionSummary) {
   const visibilityState = normalizeVisibilityState(row.visibility_state);
   const visible = visibilityState === "visible";
 
@@ -275,6 +287,7 @@ function publicSafeMessage(row: DznCommsMessageRow) {
     edited_at: cleanNullableText(row.edited_at, 40),
     public_safe: true,
     read_only: true,
+    ...(visible && reactions ? { reactions } : {}),
   };
 }
 

@@ -1,3 +1,11 @@
+export type CommsReactionKey = "heart" | "boost" | "laugh" | "salute" | "fire" | "skull";
+
+export type CommsReactionSummary = {
+  revision: string;
+  available_reactions: { key: CommsReactionKey; emoji: string; label: string }[];
+  counts: { key: CommsReactionKey; emoji: string; label: string; count: number; current_user_reacted: boolean }[];
+};
+
 export type CommsHistoryMessage = {
   id: string;
   author_display_name: string;
@@ -8,6 +16,7 @@ export type CommsHistoryMessage = {
   edited_at: string | null;
   public_safe: true;
   read_only: true;
+  reactions?: CommsReactionSummary;
 };
 
 export type CommsHistoryPayload = {
@@ -21,14 +30,25 @@ export type CommsHistoryPayload = {
   feature_flags: {
     route_enabled: boolean;
     sending_enabled: boolean;
+    reactions_enabled: boolean;
+    reactions_write_enabled: boolean;
     report_actions_enabled: boolean;
     moderation_mutations_enabled: boolean;
   } & Record<(typeof disabledFeatures)[number], false>;
   fairness_boundary: string[];
 };
 
-const disabledFeatures = ["reactions_enabled", "ai_assist_runtime_enabled", "durable_objects_or_websockets_enabled",
+const disabledFeatures = ["ai_assist_runtime_enabled", "durable_objects_or_websockets_enabled",
   "analytics_or_tracking_enabled"] as const;
+const reactionCatalog = [
+  { key: "heart", emoji: "\u{1F49C}", label: "Heart" },
+  { key: "boost", emoji: "\u{1F680}", label: "Boost" },
+  { key: "laugh", emoji: "\u{1F602}", label: "Laugh" },
+  { key: "salute", emoji: "\u{1FAE1}", label: "Salute" },
+  { key: "fire", emoji: "\u{1F525}", label: "Fire" },
+  { key: "skull", emoji: "\u{1F480}", label: "Skull" },
+] as const;
+const reactionByKey = new Map(reactionCatalog.map((reaction) => [reaction.key, reaction]));
 // Thirty 2,000-code-unit bodies plus bounded metadata must fit even with six-byte JSON escapes.
 export const COMMS_HISTORY_MAX_BYTES = 512 * 1_024;
 export const COMMS_HISTORY_TIMEOUT_MS = 5_000;
@@ -55,6 +75,28 @@ function timestamp(value: unknown): string | null {
   return result;
 }
 
+function reactionSummary(value: unknown): CommsReactionSummary {
+  const input = record(value);
+  const revision = text(input.revision, 40);
+  if (!Array.isArray(input.available_reactions) || input.available_reactions.length !== reactionCatalog.length
+    || !Array.isArray(input.counts) || input.counts.length > reactionCatalog.length) throw unavailable();
+  const available = input.available_reactions.map((value) => {
+    const row = record(value), key = text(row.key, 24) as CommsReactionKey, expected = reactionByKey.get(key);
+    if (!expected || row.emoji !== expected.emoji || row.label !== expected.label) throw unavailable();
+    return { ...expected };
+  });
+  if (new Set(available.map((reaction) => reaction.key)).size !== reactionCatalog.length) throw unavailable();
+  const keys = new Set<CommsReactionKey>();
+  const counts = input.counts.map((value) => {
+    const row = record(value), key = text(row.key, 24) as CommsReactionKey, expected = reactionByKey.get(key);
+    if (!expected || keys.has(key) || row.emoji !== expected.emoji || row.label !== expected.label
+      || !Number.isSafeInteger(row.count) || Number(row.count) < 1 || row.current_user_reacted !== Boolean(row.current_user_reacted)) throw unavailable();
+    keys.add(key);
+    return { ...expected, count: Number(row.count), current_user_reacted: row.current_user_reacted as boolean };
+  });
+  return { revision, available_reactions: available, counts };
+}
+
 // Project only the current public channel contract. Never pass an arbitrary response through to JSX.
 export function parseCommsHistory(value: unknown): CommsHistoryPayload {
   const input = record(value), channel = record(input.channel), access = record(input.access), flags = record(input.feature_flags);
@@ -63,7 +105,9 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
     || access.public_channel !== true || access.private_group_membership_required !== false
     || access.current_user_member_role !== null || flags.route_enabled !== true
     || typeof flags.sending_enabled !== "boolean" || typeof flags.report_actions_enabled !== "boolean"
+    || typeof flags.reactions_enabled !== "boolean" || typeof flags.reactions_write_enabled !== "boolean"
     || typeof flags.moderation_mutations_enabled !== "boolean"
+    || (flags.reactions_write_enabled === true && flags.reactions_enabled !== true)
     || flags.report_actions_enabled !== flags.sending_enabled
     || flags.moderation_mutations_enabled !== flags.sending_enabled
     || disabledFeatures.some(key => flags[key] !== false)) throw unavailable();
@@ -80,12 +124,17 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
     const name = text(row.author_display_name, 60), role = text(row.author_role_label, 24), body = text(row.body, 2_000, true);
     const placeholder = state === "deleted" ? "Message deleted." : state === "quarantined"
       ? "Message unavailable while DZN Safety reviews it." : "Message hidden by DZN Safety.";
+    const reactions = flags.reactions_enabled === true && state === "visible"
+      ? reactionSummary(row.reactions)
+      : undefined;
+    if (reactions === undefined && row.reactions !== undefined) throw unavailable();
     return {
       id, visibility_state: state, public_safe: true as const, read_only: true as const,
       author_display_name: state === "visible" ? name : "DZN Safety",
       author_role_label: state === "visible" ? role : "System",
       body: state === "visible" ? body : placeholder,
       created_at: timestamp(row.created_at), edited_at: timestamp(row.edited_at),
+      ...(reactions ? { reactions } : {}),
     };
   });
   const boundary = input.fairness_boundary.map(value => text(value, 1_000));
@@ -96,7 +145,8 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
     access: { public_channel: true, private_group_membership_required: false, current_user_member_role: null },
     messages,
     feature_flags: {
-      route_enabled: true, sending_enabled: flags.sending_enabled, reactions_enabled: false,
+      route_enabled: true, sending_enabled: flags.sending_enabled,
+      reactions_enabled: flags.reactions_enabled, reactions_write_enabled: flags.reactions_write_enabled,
       report_actions_enabled: flags.report_actions_enabled, moderation_mutations_enabled: flags.moderation_mutations_enabled,
       ai_assist_runtime_enabled: false, durable_objects_or_websockets_enabled: false, analytics_or_tracking_enabled: false,
     },
