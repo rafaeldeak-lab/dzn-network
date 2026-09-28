@@ -264,6 +264,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
       billingStatus,
       accessSource,
       automationEligible,
+      configuredPlanKey: planKey,
       effectivePlanKey,
       admDiscoveryStatus: server.adm_discovery_status,
       newestAvailable: server.newest_available_adm_filename,
@@ -352,8 +353,10 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
         missingFiles,
         unreadableFilesCount: unreadableFiles.length,
         effectivePlanKey,
+        configuredPlanKey: planKey,
         automationEligible,
         cronHealthy: cron.cron_healthy,
+        linkedStatus: server.linked_status,
       }),
     });
   } catch (error) {
@@ -451,6 +454,7 @@ function buildProblemFlags(input: {
   billingStatus: string | null;
   accessSource: "billing" | "complimentary_showcase";
   automationEligible: boolean;
+  configuredPlanKey: string;
   effectivePlanKey: string;
   admDiscoveryStatus: string | null;
   newestAvailable: string | null;
@@ -463,7 +467,7 @@ function buildProblemFlags(input: {
   if (input.activeJob?.updated_at && ageMinutes(input.activeJob.updated_at, new Date().toISOString()) !== null && ageMinutes(input.activeJob.updated_at, new Date().toISOString())! > 5) flags.push("adm_job_stale");
   if (input.missingFilesCount > 0) flags.push("adm_backfill_missing");
   if (input.unreadableFilesCount > 0 || input.admDiscoveryStatus === "latest_adm_unreadable" || (input.newestAvailable && input.newestAvailable !== input.newestReadable)) flags.push("nitrado_read_waiting");
-  if (!["active", "trialing"].includes((input.billingStatus ?? "").toLowerCase())) flags.push("subscription_not_active");
+  if (input.configuredPlanKey !== "free" && !["active", "trialing"].includes((input.billingStatus ?? "").toLowerCase())) flags.push("subscription_not_active");
   if (input.accessSource === "complimentary_showcase") flags.push("complimentary_showcase_access");
   if (!input.automationEligible) flags.push("automation_access_inactive");
   if (input.effectivePlanKey === "free") flags.push("adm_processing_limited_by_plan");
@@ -475,11 +479,19 @@ function getNextAction(input: {
   missingFiles: string[];
   unreadableFilesCount: number;
   effectivePlanKey: string;
+  configuredPlanKey: string;
   automationEligible: boolean;
   cronHealthy: boolean;
+  linkedStatus: string | null;
 }) {
-  if (!input.automationEligible || input.effectivePlanKey === "free") {
-    return "Restore an active paid plan before heavy ADM automation runs.";
+  if ((input.linkedStatus ?? "").toLowerCase() === "pending") {
+    return "Resume the existing saved setup and complete the Nitrado, DayZ, and ADM checks. Billing is separate and does not block Free setup.";
+  }
+  if (!input.automationEligible && input.configuredPlanKey === "free") {
+    return "Free setup can be completed without payment. Scheduled ADM automation is inactive at the current account state; upgrading automation is optional and remains the owner's decision.";
+  }
+  if (!input.automationEligible) {
+    return "Resolve server access or lifecycle eligibility before scheduled ADM automation can run.";
   }
   if (input.activeJob) return `Continue ${input.activeJob.filename} chunk ${input.activeJob.current_chunk}/${input.activeJob.total_chunks}.`;
   if (input.missingFiles.length) return `Queue/import oldest missing ADM file ${input.missingFiles[0]}.`;

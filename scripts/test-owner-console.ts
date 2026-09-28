@@ -208,7 +208,10 @@ const fedFeralDiagnosis = mapOwnerServerRowForTest({
 });
 assert.equal(fedFeralDiagnosis.billing.paid, false);
 assert.equal(fedFeralDiagnosis.billing.accountPresent, true, "A server subscription row is still a billing record even when inactive.");
-assert.deepEqual(fedFeralDiagnosis.supportBlockers.map((blocker) => blocker.key), ["billing", "verification", "service_check", "status_sync", "adm_sync"]);
+assert.deepEqual(fedFeralDiagnosis.supportBlockers.map((blocker) => blocker.key), ["verification", "service_check", "status_sync", "adm_sync"]);
+assert.equal(fedFeralDiagnosis.supportBlockers.some((blocker) => blocker.key === "billing"), false, "Billing is reported separately and must not block valid Free setup.");
+assert.match(fedFeralDiagnosis.supportBlockers.find((blocker) => blocker.key === "adm_sync")?.recommendation ?? "", /separate automation access status/);
+assert.match(fedFeralDiagnosis.supportBlockers.find((blocker) => blocker.key === "adm_sync")?.recommendation ?? "", /upgrade choice to them/);
 assert.equal(fedFeralDiagnosis.onboarding.tokenRecordPresent, true);
 assert.equal(fedFeralDiagnosis.lifecycleLabel, "Setup incomplete - verification required");
 assert.match(fedFeralDiagnosis.lifecycleMessage, /before treating this server as live/);
