@@ -315,18 +315,32 @@ async function run() {
     const unrelatedResponse = await invoke(admAutomationStatus, env, actor, "GET", undefined, "same-guild-other-server");
     assert.equal(unrelatedResponse.status, 200);
     const unrelated = await unrelatedResponse.json() as {
-      plan: { plan_key: string; subscription_status: string; access_source: string };
+      plan: { plan_key: string; configured_plan_key: string; subscription_status: string; access_source: string };
       problem_flags: string[];
       next_action: string;
     };
     assert.equal(unrelated.plan.plan_key, "free");
+    assert.equal(unrelated.plan.configured_plan_key, "pro");
     assert.equal(unrelated.plan.subscription_status, "canceled");
     assert.equal(unrelated.plan.access_source, "billing");
     assert.ok(unrelated.problem_flags.includes("automation_access_inactive"));
     assert.ok(unrelated.problem_flags.includes("adm_processing_limited_by_plan"));
-    assert.ok(!unrelated.problem_flags.includes("subscription_not_active"));
-    assert.doesNotMatch(unrelated.next_action, /paid plan/i);
-    assert.match(unrelated.next_action, /owner's decision/i);
+    assert.ok(unrelated.problem_flags.includes("subscription_not_active"));
+    assert.match(unrelated.next_action, /access or lifecycle eligibility/i);
+
+    db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'free', status = 'inactive' WHERE guild_id = ?").run(scope.guildId);
+    const genuineFreeResponse = await invoke(admAutomationStatus, env, actor, "GET", undefined, "same-guild-other-server");
+    assert.equal(genuineFreeResponse.status, 200);
+    const genuineFree = await genuineFreeResponse.json() as {
+      plan: { plan_key: string; configured_plan_key: string; subscription_status: string; access_source: string };
+      problem_flags: string[];
+      next_action: string;
+    };
+    assert.equal(genuineFree.plan.plan_key, "free");
+    assert.equal(genuineFree.plan.configured_plan_key, "free");
+    assert.ok(!genuineFree.problem_flags.includes("subscription_not_active"));
+    assert.doesNotMatch(genuineFree.next_action, /paid plan/i);
+    assert.match(genuineFree.next_action, /owner's decision/i);
   });
   await test("owner ADM discovery diagnostics preserve exact-server access and guild billing cadence", async ({ db, env }) => {
     const diagnosticEnv = { ...env, TOKEN_ENCRYPTION_KEY: "synthetic-only-test-key" } as Env;
