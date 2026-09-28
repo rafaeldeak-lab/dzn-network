@@ -26,9 +26,11 @@ type ServerDueRow = {
   status_sync_started_at: string | null;
   adm_sync_started_at: string | null;
   last_adm_pull_at: string | null;
+  last_adm_sync_at: string | null;
   updated_at: string | null;
 };
 
+const ADM_MIN_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const target = process.argv[2] ?? process.env.DZN_SERVER_SLUG ?? "pandora-dayz";
 
 function runWranglerQuery<T>(sql: string): T[] {
@@ -83,7 +85,13 @@ function skippedReason(row: ServerDueRow, task: Extract<ServerLifecycleTask, "me
     : task === "adm_discovery"
       ? row.next_adm_discovery_due_at
       : row.next_adm_pull_due_at;
-  return isDue(dueAt) ? "due" : "not_due";
+  if (!isDue(dueAt)) return "not_due";
+  if (task === "adm_processing" && row.last_adm_sync_at) {
+    const lastSyncAt = Date.parse(row.last_adm_sync_at);
+    if (!Number.isFinite(lastSyncAt)) return "invalid_last_adm_sync_at";
+    if (Date.now() - lastSyncAt < ADM_MIN_SYNC_INTERVAL_MS) return "adm_minimum_interval";
+  }
+  return "due";
 }
 
 const rows = runWranglerQuery<ServerDueRow>(
@@ -103,10 +111,12 @@ const rows = runWranglerQuery<ServerDueRow>(
           server_sync_state.status_sync_started_at,
           server_sync_state.adm_sync_started_at,
           server_sync_state.last_adm_pull_at,
+          adm_sync_state.last_sync_at AS last_adm_sync_at,
           server_sync_state.updated_at
    FROM linked_servers
    LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
    LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
+   LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
    WHERE linked_servers.public_slug = ${sqlLiteral(target)}
       OR linked_servers.nitrado_service_id = ${sqlLiteral(target)}
       OR linked_servers.id = ${sqlLiteral(target)}
