@@ -20,6 +20,7 @@ import { formatPublicVisibilitySummary, publicListingPlanLabel, publicVisibility
 import { getPublicAdvancedLeaderboardsPayload, getServerAdvancedShowcasePayload, queryPositionSamples } from "../functions/_lib/advanced-leaderboards";
 import { onRequestGet as dashboardAdvancedStats } from "../functions/api/servers/[serverId]/dashboard/advanced-stats";
 import { onRequestGet as dashboardHealth } from "../functions/api/servers/[serverId]/dashboard/health";
+import { onRequestGet as admAutomationStatus } from "../functions/api/servers/[serverId]/adm/automation-status";
 import { onRequest as advertisingBump } from "../functions/api/servers/[serverId]/advertising/bump";
 import { dashboardSelectedServerAccess } from "../components/onboarding/dashboard-detail-display";
 import { createServerWarChallenge, getOwnerServerWarsPayload, getServerWarOpponentOptions } from "../functions/_lib/server-wars";
@@ -239,6 +240,45 @@ async function run() {
       const isolated = await readServerShowcaseAccess(env, id, inactive);
       assert.equal(isolated.source, "billing", id); assert.equal(canUseShowcaseFeature(isolated, "gallery_images"), false, id);
     }
+  });
+  await test("owner ADM diagnostics report exact complimentary automation access truthfully", async ({ db, env }) => {
+    await grant(env);
+    const billingBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
+    const response = await invoke(admAutomationStatus, env, actor, "GET");
+    assert.equal(response.status, 200);
+    const payload = await response.json() as {
+      plan: { plan_key: string; configured_plan_key: string; subscription_status: string; access_source: string };
+      problem_flags: string[];
+      next_action: string;
+    };
+    assert.deepEqual(payload.plan, {
+      plan_key: "pro",
+      configured_plan_key: "pro",
+      subscription_status: "canceled",
+      access_source: "complimentary_showcase",
+      complimentary_expires_at: null,
+      status_interval_minutes: 5,
+      adm_discovery_interval_minutes: 10,
+      adm_processing_interval_minutes: 30,
+    });
+    assert.ok(payload.problem_flags.includes("subscription_not_active"));
+    assert.ok(payload.problem_flags.includes("complimentary_showcase_access"));
+    assert.ok(!payload.problem_flags.includes("automation_access_inactive"));
+    assert.doesNotMatch(payload.next_action, /paid plan/i);
+    assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), billingBefore);
+
+    const unrelatedResponse = await invoke(admAutomationStatus, env, actor, "GET", undefined, "same-guild-other-server");
+    assert.equal(unrelatedResponse.status, 200);
+    const unrelated = await unrelatedResponse.json() as {
+      plan: { plan_key: string; subscription_status: string; access_source: string };
+      problem_flags: string[];
+      next_action: string;
+    };
+    assert.equal(unrelated.plan.plan_key, "free");
+    assert.equal(unrelated.plan.subscription_status, "canceled");
+    assert.equal(unrelated.plan.access_source, "billing");
+    assert.ok(unrelated.problem_flags.includes("automation_access_inactive"));
+    assert.match(unrelated.next_action, /paid plan/i);
   });
   await test("exact grant enables NukeTown Server Wars hosting without fabricating billing", async ({ db, env }) => {
     const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
