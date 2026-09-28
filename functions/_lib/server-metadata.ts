@@ -1,6 +1,7 @@
 import { decryptToken, sha256 } from "./crypto";
 import {
   type AutomationSyncServer,
+  claimAutomationServerExecution,
   clearStatusCheckLock,
   getAutomationContextForLinkedServer,
   getDueStatusAutomationServers,
@@ -665,6 +666,23 @@ async function refreshNitradoServerPlayerCountOnly(
     const nitradoToken = isMockNitrado(env.MOCK_NITRADO)
       ? null
       : await getNitradoTokenForLinkedServer(env, linkedServer);
+    const executionClaim = await claimAutomationServerExecution(env, row);
+    if (!executionClaim.ok) {
+      return {
+        ok: false,
+        changed: false,
+        skipped: true,
+        accessChanged: true,
+        message: "Server automation access changed before the Nitrado player-count request",
+        metadata_last_checked_at: row.metadata_last_checked_at,
+        metadata_last_changed_at: null,
+        metadata_source: row.player_count_source ?? "nitrado",
+        player_count_last_checked_at: row.player_count_last_checked_at,
+        player_count_source: row.player_count_source ?? "nitrado",
+        player_count_status: normalizePlayerCountStatus(row.player_count_status),
+        metadata: rowToMetadata(linkedServer),
+      };
+    }
     const livePlayerCount = isMockNitrado(env.MOCK_NITRADO)
       ? {
           currentPlayers: cleanNumber(row.current_players) ?? 0,
@@ -710,7 +728,26 @@ async function refreshNitradoServerPlayerCountOnly(
       };
     }
 
-    const metadataFallback = !isMockNitrado(env.MOCK_NITRADO) && cleanNumber(livePlayerCount.currentPlayers) === 0
+    const metadataFallbackClaim = !isMockNitrado(env.MOCK_NITRADO) && cleanNumber(livePlayerCount.currentPlayers) === 0
+      ? await claimAutomationServerExecution(env, row)
+      : null;
+    if (metadataFallbackClaim && !metadataFallbackClaim.ok) {
+      return {
+        ok: false,
+        changed: false,
+        skipped: true,
+        accessChanged: true,
+        message: "Server automation access changed before the Nitrado metadata cross-check",
+        metadata_last_checked_at: row.metadata_last_checked_at,
+        metadata_last_changed_at: null,
+        metadata_source: row.player_count_source ?? "nitrado",
+        player_count_last_checked_at: row.player_count_last_checked_at,
+        player_count_source: row.player_count_source ?? "nitrado",
+        player_count_status: normalizePlayerCountStatus(row.player_count_status),
+        metadata: rowToMetadata(linkedServer),
+      };
+    }
+    const metadataFallback = metadataFallbackClaim?.ok
       ? await fetchNitradoMetadataSnapshot(nitradoToken ?? "", linkedServer, now, options.timeoutMs).catch((error) => {
           console.warn("DZN PLAYER COUNT METADATA CROSS CHECK SKIPPED", {
             linkedServerId: row.id,
@@ -950,6 +987,25 @@ export async function refreshLivePlayerCountsForActiveServers(
       const beforeMax = cleanNumber(row.max_players);
       const attemptTimeoutMs = Math.max(500, Math.min(1500, deadlineAtMs - Date.now() - 700));
       const result = await refreshNitradoServerPlayerCountOnly(env, row, new Date().toISOString(), { timeoutMs: attemptTimeoutMs });
+      if (result.accessChanged) {
+        skipped += 1;
+        results.push({
+          linked_server_id: row.id,
+          service_id: row.nitrado_service_id,
+          server_name: serverName,
+          status: "skipped",
+          changed: false,
+          current_players: cleanNumber(row.current_players),
+          max_players: cleanNumber(row.max_players),
+          player_count_status: normalizePlayerCountStatus(row.player_count_status),
+          player_count_source: row.player_count_source ?? null,
+          player_count_last_checked_at: row.player_count_last_checked_at,
+          metadata_last_checked_at: row.metadata_last_checked_at,
+          message: result.message,
+          phase: "execution_claim",
+        });
+        continue;
+      }
       if (result.ok) succeeded += 1;
       else failed += 1;
       const resultCurrent = cleanNumber(result.metadata?.current_players);

@@ -24,6 +24,8 @@ import {
 } from "./nitrado";
 import { decryptToken } from "./crypto";
 import {
+  claimAutomationServerExecution,
+  clearAdmPullLock,
   ensureAutomationSchema,
   getDueAdmDiscoveryAutomationServers,
   getDueAdmAutomationServers,
@@ -57,6 +59,27 @@ import {
   serverLifecycleInSql,
   serverLifecycleSqlExpression,
 } from "../../lib/server-lifecycle";
+
+class AutomationExecutionClaimError extends Error {
+  constructor(readonly linkedServerId: string) {
+    super("Server automation access changed before Nitrado work");
+    this.name = "AutomationExecutionClaimError";
+  }
+}
+
+function isAutomationExecutionClaimError(error: unknown): error is AutomationExecutionClaimError {
+  return error instanceof AutomationExecutionClaimError;
+}
+
+async function requireAutomationExecutionClaim(
+  env: Env,
+  linkedServerId: string,
+  accessSource?: "billing" | "complimentary_showcase",
+) {
+  if (!accessSource) return;
+  const claim = await claimAutomationServerExecution(env, { id: linkedServerId, access_source: accessSource });
+  if (!claim.ok) throw new AutomationExecutionClaimError(linkedServerId);
+}
 
 export type SyncLinkedServer = {
   id: string;
@@ -3257,6 +3280,7 @@ export async function planAdmBackfillJobsForServer(
     chunksToProcess?: number;
     scheduledBudgeted?: boolean;
     skipMetadataRefresh?: boolean;
+    automationAccessSource?: "billing" | "complimentary_showcase";
   } = {},
 ): Promise<AdmBackfillPlanResult> {
   await ensureAdmSyncSchema(env);
@@ -3297,6 +3321,7 @@ export async function planAdmBackfillJobsForServer(
     maxReadAttemptsPerFile: scheduledBudgeted ? 1 : admBudget.maxReadAttemptsPerFile,
     broadLogFallback: scheduledBudgeted ? false : true,
     budget: admBudget,
+    automationAccessSource: options.automationAccessSource,
   });
   await recordDiscoveredAdmFiles(env, scope, batch.candidates);
 
@@ -3324,6 +3349,7 @@ export async function planAdmBackfillJobsForServer(
         limit: scheduledBudgeted ? scheduledUnreadableRetryLimit : Math.min(MANUAL_ADM_UNREADABLE_RETRY_FILES_PER_RUN, admBudget.maxUnreadableRetriesPerInvocation),
         onlyLatest: scheduledBudgeted,
         budget: admBudget,
+        automationAccessSource: options.automationAccessSource,
       });
   readableFiles.push(...retryPromotion.readableFiles);
   const readErrorByName = new Map<string, string | null>();
@@ -3366,7 +3392,13 @@ export async function planAdmBackfillJobsForServer(
     for (const filename of exactReadNames) {
       const candidate = batch.candidates.find((file) => normalizeAdmFilenameKey(file.name) === normalizeAdmFilenameKey(filename));
       if (!candidate) continue;
-      const read = await readSpecificAdmFileForBackfill(env, linkedServer, candidate, admBudget);
+      const read = await readSpecificAdmFileForBackfill(
+        env,
+        linkedServer,
+        candidate,
+        admBudget,
+        options.automationAccessSource,
+      );
       if (read.file) {
         readableFiles.push(read.file);
         readableByName.set(normalizeAdmFilenameKey(read.file.name), read.file);
@@ -6361,7 +6393,12 @@ export type AdmDiscoveryResult = {
   readableFilesFound: number;
 };
 
-export async function runAdmDiscoveryForLinkedServer(env: Env, userId: string, linkedServerId: string): Promise<AdmDiscoveryResult> {
+export async function runAdmDiscoveryForLinkedServer(
+  env: Env,
+  userId: string,
+  linkedServerId: string,
+  options: { automationAccessSource?: "billing" | "complimentary_showcase" } = {},
+): Promise<AdmDiscoveryResult> {
   await ensureAdmSyncSchema(env);
   const linkedServer = await getOwnedLinkedServer(env, userId, linkedServerId);
   if (!linkedServer) throw new Error("No linked server found");
@@ -6381,6 +6418,7 @@ export async function runAdmDiscoveryForLinkedServer(env: Env, userId: string, l
       directPreferredFirst: true,
       maxListDirs: 2,
       maxListSearches: 1,
+      automationAccessSource: options.automationAccessSource,
     });
     await recordDiscoveredAdmFiles(env, initialScope, batch.candidates);
     const newestAvailableAdm = selectNewestDiscoveredAdmFile(batch.candidates) ?? (batch.newestAdmFileName ? {
@@ -6418,6 +6456,19 @@ export async function runAdmDiscoveryForLinkedServer(env: Env, userId: string, l
       readableFilesFound: batch.files.length,
     };
   } catch (error) {
+    if (isAutomationExecutionClaimError(error)) {
+      return {
+        ok: true,
+        status: "access_changed",
+        message: error.message,
+        newestAvailableAdmFile: null,
+        newestAvailableAdmTimestamp: null,
+        newestReadableAdmFile: null,
+        newestReadableAdmTimestamp: null,
+        filesFound: 0,
+        readableFilesFound: 0,
+      };
+    }
     const latestAdmFile = existingState?.latest_adm_file ?? fileNameFromPath(preferredAdmPath);
     const status = classifyNitradoExceptionStatus(error, latestAdmFile);
     const normalizedStatus = normalizeAdmSyncStateMachineStatus(status);
@@ -6745,8 +6796,20 @@ export async function runAdmWorkerSyncTick(
           maxJobsToCreate: 1,
           scheduledBudgeted: true,
           skipMetadataRefresh: true,
+          automationAccessSource: selected.access_source,
         });
       } catch (error) {
+        if (isAutomationExecutionClaimError(error)) {
+          await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
+          return admWorkerResult({
+            metadata,
+            selectedLinkedServerId: selected.id,
+            selectedServiceId: selected.nitrado_service_id,
+            pendingJobs,
+            skippedNotDue: 1,
+            message: error.message,
+          });
+        }
         if (!isNitradoTokenDecryptFailure(error)) throw error;
         const tokenMessage = "Saved Nitrado token cannot be decrypted. Re-save the server owner's Nitrado long-life token.";
         const selectedFile = selected.target_adm_file ?? selected.latest_adm_file ?? fileNameFromPath(selected.target_adm_path ?? selected.latest_adm_path ?? selected.adm_path);
@@ -6942,6 +7005,22 @@ export async function runAdmWorkerSyncTick(
         pendingJobs,
         skippedNotDue: 1,
         message: "ADM Worker paused after token preparation to stay within the scheduled invocation budget. Work will continue next tick.",
+      });
+    }
+    try {
+      await requireAutomationExecutionClaim(env, selected.id, selected.access_source);
+    } catch (error) {
+      if (!isAutomationExecutionClaimError(error)) throw error;
+      await updateAdmWorkerCursor(env, options.cursorKey ?? "last_adm_linked_server_id", selected.id).catch(() => null);
+      return admWorkerResult({
+        metadata,
+        selectedLinkedServerId: selected.id,
+        selectedServiceId: selected.nitrado_service_id,
+        selectedAdmFile: directFileName,
+        selectedAdmPath: directPath ?? `dayzps/config/${directFileName}`,
+        pendingJobs,
+        skippedNotDue: 1,
+        message: error.message,
       });
     }
     const read = await readAdmFileTextWithFallback({
@@ -7696,7 +7775,10 @@ export async function runScheduledAdmSync(
   for (const server of discoveryServers) {
     try {
       if (!await isAutomationServerAccessCurrent(env, server)) continue;
-      const discovery = await runAdmDiscoveryForLinkedServer(env, server.user_id, server.id);
+      const discovery = await runAdmDiscoveryForLinkedServer(env, server.user_id, server.id, {
+        automationAccessSource: server.access_source,
+      });
+      if (discovery.status === "access_changed") continue;
       discoveryResults.set(server.guild_id, discovery);
       discoveryProcessed += 1;
       if (discovery.status === "waiting_after_restart" || discovery.status === "delayed_after_restart") waitingAfterRestartCount += 1;
@@ -7743,6 +7825,7 @@ export async function runScheduledAdmSync(
         maxJobsToCreate: normalizePlanKey(server.plan_key) === "partner" ? 2 : 1,
         scheduledBudgeted: true,
         skipMetadataRefresh: true,
+        automationAccessSource: server.access_source,
       });
       const ok = !isAdmSyncErrorStatus(result.status);
       if (!ok) failed += 1;
@@ -7776,6 +7859,11 @@ export async function runScheduledAdmSync(
       });
       if (newDataFound) newDataFoundCount += 1;
     } catch (error) {
+      if (isAutomationExecutionClaimError(error)) {
+        processingProcessed = Math.max(0, processingProcessed - 1);
+        await clearAdmPullLock(env, server.guild_id).catch(() => null);
+        continue;
+      }
       failed += 1;
       await recordAdmPullResult(env, {
         guildId: server.guild_id,
@@ -10197,10 +10285,12 @@ async function getReadableAdmFilesForLinkedServer(
     maxReadAttemptsPerFile?: number;
     adminLogsFirst?: boolean;
     budget?: AdmInvocationBudget;
+    automationAccessSource?: "billing" | "complimentary_showcase";
   } = {},
 ): Promise<{ files: ReadableAdmFileForSync[]; candidates: DiscoveredAdmFileForSync[]; filesFound: number; newestAdmFileName: string | null; apiStatus: string; message: string; readErrors: string[]; readError: string | null }> {
   const isMock = options.isMock ?? isMockNitrado(env.MOCK_NITRADO);
   if (isMock) {
+    await requireAutomationExecutionClaim(env, linkedServer.id, options.automationAccessSource);
     const diagnostics = mockNitradoLogAccessDiagnostics(linkedServer.nitrado_service_id ?? "mock-service");
     return {
       files: [{
@@ -10253,6 +10343,7 @@ async function getReadableAdmFilesForLinkedServer(
   }
 
   const token = await getNitradoTokenForLinkedServer(env, linkedServer);
+  await requireAutomationExecutionClaim(env, linkedServer.id, options.automationAccessSource);
   const batch = await fetchReadableNitradoAdmFiles(token, linkedServer.nitrado_service_id, {
     mode: options.readMode ?? "sample",
     previousLatestAdmFileName: options.previousLatestAdmFileName,
@@ -10297,6 +10388,7 @@ async function readSpecificAdmFileForBackfill(
   linkedServer: SyncLinkedServer,
   candidate: DiscoveredAdmFileForSync,
   budget: AdmInvocationBudget = getAdmInvocationBudget(env),
+  automationAccessSource?: "billing" | "complimentary_showcase",
 ): Promise<{
   file: ReadableAdmFileForSync | null;
   error: string | null;
@@ -10308,6 +10400,7 @@ async function readSpecificAdmFileForBackfill(
 
   try {
     const token = await getNitradoTokenForLinkedServer(env, linkedServer);
+    await requireAutomationExecutionClaim(env, linkedServer.id, automationAccessSource);
     const preferredBatch = await fetchReadableNitradoAdmFiles(token, linkedServer.nitrado_service_id, {
       mode: "full",
       preferredAdmFileName: candidate.name,
@@ -10358,6 +10451,7 @@ async function readSpecificAdmFileForBackfill(
       };
     }
 
+    await requireAutomationExecutionClaim(env, linkedServer.id, automationAccessSource);
     const read = await readAdmFileTextWithFallback({
       token,
       serviceId: linkedServer.nitrado_service_id,
@@ -10405,6 +10499,7 @@ async function readSpecificAdmFileForBackfill(
       diagnostic,
     };
   } catch (error) {
+    if (isAutomationExecutionClaimError(error)) throw error;
     return { file: null, error: safeSyncErrorMessage(error), diagnostic: null };
   }
 }
@@ -10427,6 +10522,7 @@ async function retryUnreadableAdmFileStatesForServer(
     limit: number;
     onlyLatest?: boolean;
     budget?: AdmInvocationBudget;
+    automationAccessSource?: "billing" | "complimentary_showcase";
   },
 ): Promise<{
   createdJobs: AdmImportJobProgressResult[];
@@ -10501,7 +10597,7 @@ async function retryUnreadableAdmFileStatesForServer(
       continue;
     }
 
-    const read = await readSpecificAdmFileForBackfill(env, linkedServer, candidate, budget);
+    const read = await readSpecificAdmFileForBackfill(env, linkedServer, candidate, budget, options.automationAccessSource);
     if (read.file?.lines.length) {
       readableFiles.push(read.file);
       await resetAdmReadFailureCounter(env, scope.linkedServerId);

@@ -700,9 +700,44 @@ export async function getAutomationContextForLinkedServer(
 }
 
 export async function isAutomationServerAccessCurrent(env: Env, server: Pick<AutomationSyncServer, "id" | "access_source">) {
-  if (server.access_source !== "complimentary_showcase") return true;
+  return (await claimAutomationServerExecution(env, server)).ok;
+}
+
+export type AutomationExecutionClaim =
+  | {
+      ok: true;
+      linkedServerId: string;
+      accessSource: "billing" | "complimentary_showcase";
+      grantId: string | null;
+    }
+  | {
+      ok: false;
+      linkedServerId: string;
+      accessSource: "complimentary_showcase";
+      grantId: null;
+    };
+
+/**
+ * Revalidates complimentary access at the operation boundary. A successful
+ * claim authorizes one immediately following external operation only.
+ */
+export async function claimAutomationServerExecution(
+  env: Env,
+  server: Pick<AutomationSyncServer, "id" | "access_source">,
+): Promise<AutomationExecutionClaim> {
+  if (server.access_source !== "complimentary_showcase") {
+    return { ok: true, linkedServerId: server.id, accessSource: "billing", grantId: null };
+  }
   const context = await getAutomationContextForLinkedServer(env, server.id, { skipSchemaEnsure: true });
-  return context?.accessSource === "complimentary_showcase";
+  if (context?.accessSource !== "complimentary_showcase" || !context.showcaseAccess.grantId) {
+    return { ok: false, linkedServerId: server.id, accessSource: "complimentary_showcase", grantId: null };
+  }
+  return {
+    ok: true,
+    linkedServerId: server.id,
+    accessSource: "complimentary_showcase",
+    grantId: context.showcaseAccess.grantId,
+  };
 }
 
 export async function getDiscordPublishingContextForLinkedServer(
@@ -1054,6 +1089,13 @@ export async function markAdmPullStarted(env: Env, guildId: string) {
   await requireDb(env)
     .prepare("UPDATE server_sync_state SET currently_syncing_adm = 1, adm_sync_started_at = ?, updated_at = ? WHERE guild_id = ?")
     .bind(now, now, guildId)
+    .run();
+}
+
+export async function clearAdmPullLock(env: Env, guildId: string) {
+  await requireDb(env)
+    .prepare("UPDATE server_sync_state SET currently_syncing_adm = 0, adm_sync_started_at = NULL, updated_at = ? WHERE guild_id = ?")
+    .bind(new Date().toISOString(), guildId)
     .run();
 }
 

@@ -371,6 +371,31 @@ async function run() {
     assert.equal(result.skipped, 1);
     assert.equal(result.results[0]?.phase, "access_recheck");
   });
+  await test("metadata scheduler claims access at the final Nitrado boundary", async ({ db, env }) => {
+    const grantId = await grant(env);
+    const before = db.sqlite.prepare(`SELECT current_players, max_players, player_count_last_checked_at,
+      metadata_last_checked_at FROM linked_servers WHERE id = ?`).get(scope.linkedServerId);
+    let accessReads = 0;
+    db.beforeFirst = (sql) => {
+      if (!sql.includes("WITH active_grant AS")) return;
+      accessReads += 1;
+      if (accessReads !== 2) return;
+      db.beforeFirst = null;
+      revokeSql(db, grantId);
+    };
+    const result = await refreshLivePlayerCountsForActiveServers({ ...env, MOCK_NITRADO: "true" }, {
+      maxServers: 1,
+      queueDiscordUpdates: false,
+      patchHomeStats: false,
+    });
+    assert.equal(accessReads, 2);
+    assert.equal(result.succeeded, 0);
+    assert.equal(result.failed, 0);
+    assert.equal(result.skipped, 1);
+    assert.equal(result.results[0]?.phase, "execution_claim");
+    assert.deepEqual(db.sqlite.prepare(`SELECT current_players, max_players, player_count_last_checked_at,
+      metadata_last_checked_at FROM linked_servers WHERE id = ?`).get(scope.linkedServerId), before);
+  });
   await test("ADM worker rechecks a selected grant before Nitrado work", async ({ db, env }) => {
     await getDueStatusAutomationServers(env, 10);
     const grantId = await grant(env);
@@ -390,6 +415,30 @@ async function run() {
     assert.equal(result.selected_linked_server_id, null);
     assert.equal(result.skipped_not_due, 1);
     assert.match(result.message, /access changed/i);
+  });
+  await test("ADM worker claims access at the final Nitrado boundary", async ({ db, env }) => {
+    await getDueStatusAutomationServers(env, 10);
+    const grantId = await grant(env);
+    let accessReads = 0;
+    db.beforeFirst = (sql) => {
+      if (!sql.includes("WITH active_grant AS")) return;
+      accessReads += 1;
+      if (accessReads !== 2) return;
+      db.beforeFirst = null;
+      revokeSql(db, grantId);
+    };
+    const result = await runAdmWorkerSyncTick({ ...env, MOCK_NITRADO: "true" }, {
+      linkedServerId: scope.linkedServerId,
+      force: true,
+      skipMetadataRefresh: true,
+      maxRuntimeMs: 5_000,
+    });
+    assert.equal(accessReads, 2);
+    assert.equal(result.selected_linked_server_id, scope.linkedServerId);
+    assert.equal(result.failed, 0);
+    assert.equal(result.skipped_not_due, 1);
+    assert.match(result.message, /access changed/i);
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM adm_import_jobs WHERE server_id = ?").get(scope.linkedServerId)?.n, 0);
   });
   await test("paid scheduler selection remains available before migration 0069", async ({ env }) => {
     await upsertBillingAccount(env, { discordUserId: actor.discord_id, planKey: "pro", planStatus: "active" });
