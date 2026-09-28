@@ -107,11 +107,14 @@ assert.equal(diagnosticsWorkflowSource.includes("echo \"$CRON_SECRET\""), false)
 const playerLinkDeliveryWorkflow = readFileSync(".github/workflows/dzn-player-link-notification-delivery.yml", "utf8");
 assert.equal(playerLinkDeliveryWorkflow.includes("workflow_dispatch:"), true);
 assert.equal(playerLinkDeliveryWorkflow.includes("APPROVE_ONE_PLAYER_LINK_NOTIFICATION_TEST"), true);
+assert.equal(playerLinkDeliveryWorkflow.includes("delivery_id:"), true);
+assert.equal(playerLinkDeliveryWorkflow.includes("/api/sync/player-link-notifications/prove-one-v1"), true);
+assert.equal(playerLinkDeliveryWorkflow.includes("/api/sync/player-link-notifications/run"), false);
+assert.equal(playerLinkDeliveryWorkflow.includes("player_notification_targeted_single_delivery_v1"), true);
 assert.equal(playerLinkDeliveryWorkflow.includes("DZN_CRON_SECRET: ${{ secrets.DZN_CRON_SECRET }}"), true);
 assert.equal(playerLinkDeliveryWorkflow.includes("SYNC_CRON_SECRET: ${{ secrets.SYNC_CRON_SECRET }}"), true);
 assert.equal(playerLinkDeliveryWorkflow.includes('CRON_SECRET="${DZN_CRON_SECRET:-${SYNC_CRON_SECRET:-}}"'), true);
 assert.equal(playerLinkDeliveryWorkflow.includes("::add-mask::${CRON_SECRET}"), true);
-assert.equal(playerLinkDeliveryWorkflow.includes("/api/sync/player-link-notifications/run"), true);
 assert.equal(playerLinkDeliveryWorkflow.includes('unauthenticated_status}" != "401"'), true);
 assert.equal(playerLinkDeliveryWorkflow.includes("processed: 1"), true);
 assert.equal(playerLinkDeliveryWorkflow.includes("delivered: 1"), true);
