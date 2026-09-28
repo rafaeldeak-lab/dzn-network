@@ -295,6 +295,11 @@ const serverDueStateSource = readFileSync("scripts/check-server-due-state.ts", "
 assert.equal(serverDueStateSource.includes("getAdmDiscoveryIntervalMinutes"), true);
 assert.equal(serverDueStateSource.includes("pandora-dayz"), true);
 assert.equal(serverDueStateSource.includes("currently_syncing_adm"), true);
+assert.equal(serverDueStateSource.includes("isAutomationBillingEligible"), true);
+assert.equal(serverDueStateSource.includes('return "not_live"'), true);
+assert.equal(serverDueStateSource.includes('return "no_automation_entitlement"'), true);
+assert.equal(serverDueStateSource.includes('return "missing_nitrado_service_id"'), true);
+assert.equal(serverDueStateSource.includes('"not locked"'), true);
 
 const buttonMapDoc = readFileSync("docs/DASHBOARD_BUTTON_MAP.md", "utf8");
 assert.equal(buttonMapDoc.includes("View Server Page"), true);
