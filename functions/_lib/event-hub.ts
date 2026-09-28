@@ -33,6 +33,7 @@ const REQUIRED_PERMISSION_LABELS = ["View Channel", "Send Messages", "Embed Link
 const EVENT_OFFICIAL_TYPES = new Set(["capture_the_flag", "server_vs_server", "bot_tournament", "faction_wars", "seasonal_wars"]);
 const PVP_METRICS = new Set(["pvp_kill_count", "pvp_headshot_count", "pvp_weapon_kill_count", "pvp_distance_qualified_kills", "pvp_longest_kill", "pvp_kd_ratio"]);
 const BUILD_METRICS = new Set(["build_score", "structures_built", "walls_built", "gates_built", "watchtower_parts_built", "storage_items_placed", "flags_raised"]);
+const SUCCESSFUL_ADM_SYNC_STATUSES = new Set(["completed", "completed_with_warnings", "new_data_found", "no_new_lines", "no_new_log_available", "no_supported_events"]);
 
 type OwnerServerRow = {
   id: string;
@@ -1128,19 +1129,35 @@ async function getAdmEligibility(env: Env, linkedServerId: string) {
        FROM adm_import_jobs
        WHERE server_id = ?
          AND source = 'scheduled_nitrado'
+         AND status IN ('completed', 'completed_with_warnings')
+         AND completed_at IS NOT NULL
        ORDER BY datetime(COALESCE(completed_at, updated_at, created_at)) DESC
        LIMIT 1`,
     )
     .bind(linkedServerId)
     .first<{ status: string | null; completed_at: string | null; updated_at: string | null }>()
     .catch(() => null);
-  const recentImportAt = row?.last_successful_import_at ?? job?.completed_at ?? job?.updated_at ?? null;
+  return resolveAdmEligibilityEvidence(row, job);
+}
+
+export function resolveAdmEligibilityEvidence(
+  row: { latest_adm_file: string | null; last_processed_file: string | null; last_successful_import_at: string | null; last_sync_status: string | null } | null,
+  job: { status: string | null; completed_at: string | null; updated_at: string | null } | null,
+) {
+  const syncStatus = String(row?.last_sync_status ?? "").trim().toLowerCase();
+  const successfulSyncAt = row?.last_successful_import_at && SUCCESSFUL_ADM_SYNC_STATUSES.has(syncStatus)
+    ? row.last_successful_import_at
+    : null;
+  const completedJobAt = job?.completed_at && ["completed", "completed_with_warnings"].includes(String(job.status ?? "").trim().toLowerCase())
+    ? job.completed_at
+    : null;
+  const recentImportAt = successfulSyncAt ?? completedJobAt;
   return {
-    ready: Boolean(recentImportAt || row?.latest_adm_file || job),
+    ready: Boolean(recentImportAt),
     latestAdmFile: row?.latest_adm_file ?? null,
     lastProcessedFile: row?.last_processed_file ?? null,
     lastSuccessfulImportAt: recentImportAt,
-    status: row?.last_sync_status ?? job?.status ?? "waiting",
+    status: successfulSyncAt ? row?.last_sync_status ?? "completed" : completedJobAt ? job?.status ?? "completed" : row?.last_sync_status ?? job?.status ?? "waiting",
   };
 }
 

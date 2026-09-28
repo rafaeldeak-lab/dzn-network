@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
 
 import { getEventsListPayload, hasQualifyingFullEventSubscription, resolveEventStatusFilter } from "../functions/_lib/events";
-import { buildChallengePhaseTemplates, renderEventProgressBar } from "../functions/_lib/event-hub";
+import { buildChallengePhaseTemplates, renderEventProgressBar, resolveAdmEligibilityEvidence } from "../functions/_lib/event-hub";
 import { assertSameServerCategory, categoryMismatchPayload, normalizeServerCategory } from "../functions/_lib/server-categories";
 import type { Env } from "../functions/_lib/types";
 
@@ -33,6 +33,39 @@ assert.deepEqual(categoryMismatchPayload(), {
   error: "CATEGORY_MISMATCH",
   message: "Only servers in the same category can compete in this event.",
 });
+assert.deepEqual(resolveAdmEligibilityEvidence({
+  latest_adm_file: "server.ADM",
+  last_processed_file: null,
+  last_successful_import_at: "2026-09-28T08:00:00.000Z",
+  last_sync_status: "adm_file_unreadable",
+}, null), {
+  ready: false,
+  latestAdmFile: "server.ADM",
+  lastProcessedFile: null,
+  lastSuccessfulImportAt: null,
+  status: "adm_file_unreadable",
+}, "A failed ADM attempt must not unlock event entry.");
+assert.equal(resolveAdmEligibilityEvidence(null, {
+  status: "queued",
+  completed_at: null,
+  updated_at: "2026-09-28T08:00:00.000Z",
+}).ready, false, "A queued scheduled ADM job must not unlock event entry.");
+assert.equal(resolveAdmEligibilityEvidence(null, {
+  status: "failed",
+  completed_at: null,
+  updated_at: "2026-09-28T08:00:00.000Z",
+}).ready, false, "A failed scheduled ADM job must not unlock event entry.");
+assert.equal(resolveAdmEligibilityEvidence({
+  latest_adm_file: "server.ADM",
+  last_processed_file: "server.ADM",
+  last_successful_import_at: "2026-09-28T08:00:00.000Z",
+  last_sync_status: "no_new_lines",
+}, null).ready, true, "A successful ADM sync state must unlock event entry.");
+assert.equal(resolveAdmEligibilityEvidence(null, {
+  status: "completed_with_warnings",
+  completed_at: "2026-09-28T08:00:00.000Z",
+  updated_at: "2026-09-28T08:00:00.000Z",
+}).ready, true, "A completed scheduled ADM import must unlock event entry.");
 assert.deepEqual(resolveEventStatusFilter("upcoming"), ["upcoming", "registration_open", "standby"]);
 assert.deepEqual(resolveEventStatusFilter("active"), ["live"]);
 assert.deepEqual(resolveEventStatusFilter("completed"), ["ended"]);
@@ -158,6 +191,7 @@ assert.equal(eventHubLib.includes('adm_sync_state: ["linked_server_id", "latest_
 assert.equal(eventHubLib.includes('adm_import_jobs: ["server_id", "source", "status", "completed_at", "created_at", "updated_at"]'), true, "Event Hub readiness must validate the established ADM import server key.");
 assert.equal(eventHubLib.includes("last_sync_at AS last_successful_import_at"), true, "Event Hub should expose the established ADM sync timestamp through its response contract.");
 assert.equal(eventHubLib.includes("FROM adm_import_jobs\n       WHERE server_id = ?"), true, "Event Hub should query scheduled ADM jobs by the established server key.");
+assert.equal(eventHubLib.includes("AND status IN ('completed', 'completed_with_warnings')"), true, "Event Hub should only accept completed scheduled ADM jobs as readiness evidence.");
 assert.equal(eventHubLib.includes("fetchNitrado"), false, "Event scoring must not read Nitrado directly.");
 assert.equal(eventHubLib.includes("TOKEN_ENCRYPTION_KEY"), false, "Event Hub must not touch Nitrado token encryption.");
 
