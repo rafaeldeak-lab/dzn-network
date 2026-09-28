@@ -219,7 +219,7 @@ export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJ
     processed += 1;
     await db.prepare("UPDATE automation_jobs SET status = 'running', attempts = attempts + 1, updated_at = ? WHERE id = ?").bind(now, job.id).run();
     try {
-      const result = await processPostJob(env, job);
+      const result = await processPostJob(env, job, budget);
       results.push(result);
       if (result.status === "edited") edited += 1;
       else if (result.status === "sent" || result.status === "success") sent += 1;
@@ -268,7 +268,7 @@ export async function dispatchQueuedDiscordPostUpdates(env: Env, options: { maxJ
   return { ok: failed === 0, processed, edited, sent, posted, skipped, failed, budgetExhausted, results };
 }
 
-async function processPostJob(env: Env, job: QueuedPostJob): Promise<DiscordPostDispatchDetail> {
+async function processPostJob(env: Env, job: QueuedPostJob, budget?: DiscordDispatchBudget): Promise<DiscordPostDispatchDetail> {
   const db = requireDb(env);
   const publishingAccess = await resolveDiscordPublishingAccessForGuild(env, job.guild_id);
   if (!["active_live", "active_degraded"].includes(publishingAccess.lifecycleStatus)) {
@@ -311,6 +311,7 @@ async function processPostJob(env: Env, job: QueuedPostJob): Promise<DiscordPost
   return processConfiguredPostingDestination(env, destination, listingContext, {
     force: true,
     revalidateAccessBeforeDelivery: requiresPublishingAccessRevalidation(publishingAccess),
+    budget,
   });
 }
 
@@ -318,7 +319,7 @@ async function processConfiguredPostingDestination(
   env: Env,
   destination: PostingDestination,
   listingContext: { plan_key?: unknown; planKey?: unknown; subscription_status?: unknown; subscriptionStatus?: unknown },
-  options: { force?: boolean; revalidateAccessBeforeDelivery?: boolean } = {},
+  options: { force?: boolean; revalidateAccessBeforeDelivery?: boolean; budget?: DiscordDispatchBudget } = {},
 ): Promise<DiscordPostDispatchDetail> {
   if (Number(destination.enabled ?? 0) !== 1) {
     await recordPostingDispatchStatus(env, destination, "skipped_disabled", "Posting destination is disabled.");
@@ -391,16 +392,20 @@ async function processConfiguredPostingDestination(
   const listingPlanKey = normalizeListingPlanKey(effectiveListingContext);
   const payload = renderDiscordPostPayload(destination.post_type, cache, listingPlanKey);
   const payloadHash = await hashPayload(payload);
-  const deliveryIdentity = await createPostingDeliveryIdentity(destination, cache, listingPlanKey);
+  const computedDeliveryIdentity = await createPostingDeliveryIdentity(destination, cache, listingPlanKey);
+  const deliveryIdentity = state?.last_dispatch_status === "bot_delivery_retry_pending" && state.last_payload_hash
+    ? state.last_payload_hash
+    : computedDeliveryIdentity;
   const oldPayloadHash = state?.last_payload_hash ?? null;
-  if (state?.last_dispatch_status === "webhook_delivery_ambiguous" && state.last_payload_hash === deliveryIdentity) {
+  if (["webhook_delivery_ambiguous", "bot_delivery_ambiguous"].includes(state?.last_dispatch_status ?? "")
+    && state?.last_payload_hash === deliveryIdentity) {
     return {
       guild_id: destination.guild_id,
       post_type: destination.post_type,
       channel_id: destination.discord_channel_id,
       status: "skipped_unchanged",
       message_id: state.discord_message_id ?? null,
-      reason: "A previous Discord create timed out after dispatch; automatic retry is suppressed to prevent a duplicate post.",
+      reason: "A previous Discord create remained ambiguous after safe retry; automatic retry is suppressed to prevent a duplicate post.",
       old_payload_hash: oldPayloadHash,
       new_payload_hash: deliveryIdentity,
       last_edited_at: state.last_edited_at ?? null,
@@ -426,6 +431,7 @@ async function processConfiguredPostingDestination(
   try {
     const delivery = await deliverDiscordPayload(env, destination, payload, state?.discord_message_id ?? null, {
       deliveryNonce: deliveryIdentity.slice(0, 25),
+      timeoutMs: getDiscordRequestTimeoutMs(options.budget),
     });
     if (delivery.mode === "not_configured") {
       await recordPostingStateError(env, destination, "Configure the DZN bot token/channel permission or add a webhook URL.");
@@ -459,8 +465,14 @@ async function processConfiguredPostingDestination(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Discord post update failed";
-    if (error instanceof DiscordRequestTimeoutError && error.mode === "webhook" && error.operation === "post") {
-      await recordAmbiguousDiscordDelivery(env, destination, deliveryIdentity, message);
+    if (error instanceof DiscordRequestTimeoutError && error.operation === "post") {
+      if (error.mode === "webhook") {
+        await recordAmbiguousDiscordDelivery(env, destination, deliveryIdentity, message, "webhook_delivery_ambiguous");
+      } else if (state?.last_dispatch_status === "bot_delivery_retry_pending" && state.last_payload_hash === deliveryIdentity) {
+        await recordAmbiguousDiscordDelivery(env, destination, deliveryIdentity, message, "bot_delivery_ambiguous");
+      } else {
+        await recordAmbiguousDiscordDelivery(env, destination, deliveryIdentity, message, "bot_delivery_retry_pending");
+      }
     } else {
       await recordPostingStateError(env, destination, message);
     }
@@ -548,6 +560,7 @@ async function processDuePostingDestinations(env: Env, options: { maxJobs: numbe
         const result = await processConfiguredPostingDestination(env, row, listingContext, {
           force: options.force,
           revalidateAccessBeforeDelivery: requiresPublishingAccessRevalidation(publishingAccess),
+          budget: options.budget,
         });
         results.push(result);
         if (result.status === "edited") edited += 1;
@@ -678,6 +691,13 @@ function isDiscordDispatchBudgetLow(budget: DiscordDispatchBudget) {
   return Date.now() >= budget.deadlineAtMs - 350;
 }
 
+function getDiscordRequestTimeoutMs(budget?: DiscordDispatchBudget) {
+  if (!budget) return DISCORD_REQUEST_TIMEOUT_MS;
+  const remainingMs = budget.deadlineAtMs - Date.now() - 100;
+  if (remainingMs < 100) throw new Error("discord_dispatch_budget_exhausted");
+  return Math.min(DISCORD_REQUEST_TIMEOUT_MS, remainingMs);
+}
+
 async function readDuePostingCursor(db: D1Database) {
   const row = await db
     .prepare(
@@ -746,15 +766,29 @@ export async function sendDiscordTestPost(env: Env, destination: {
       },
     ],
   };
+  const deliveryIdentity = await createTestPostDeliveryIdentity(destination);
   const result = await deliverDiscordPayload(env, {
     guild_id: destination.guild_id,
     post_type: destination.post_type,
     discord_channel_id: destination.discord_channel_id,
     discord_webhook_url: destination.discord_webhook_url ?? null,
     enabled: 1,
-  }, payload, existingMessageId);
+  }, payload, existingMessageId, { deliveryNonce: deliveryIdentity.slice(0, 25) });
   if (result.mode === "not_configured") throw new Error("Configure the DZN bot token/channel permission or add a webhook URL.");
   return result;
+}
+
+function createTestPostDeliveryIdentity(destination: Pick<PostingDestination, "guild_id" | "post_type" | "discord_channel_id">) {
+  return hashPayload({
+    purpose: "dzn-discord-test-post",
+    guild_id: destination.guild_id,
+    post_type: destination.post_type,
+    channel_id: destination.discord_channel_id,
+  });
+}
+
+export function createTestPostDeliveryIdentityForTest(destination: Pick<PostingDestination, "guild_id" | "post_type" | "discord_channel_id">) {
+  return createTestPostDeliveryIdentity(destination);
 }
 
 export async function recordDiscordPostingDeliveryState(env: Env, destination: {
@@ -1056,7 +1090,7 @@ async function deliverDiscordPayload(
   destination: PostingDestination,
   payload: DiscordPayload,
   existingMessageId: string | null,
-  options: { deliveryNonce?: string } = {},
+  options: { deliveryNonce?: string; timeoutMs?: number } = {},
 ): Promise<DiscordDeliveryResult> {
   const deliveryNonce = options.deliveryNonce ?? (await hashPayload({
     guild_id: destination.guild_id,
@@ -1067,7 +1101,7 @@ async function deliverDiscordPayload(
   const botToken = normalizeBotToken(env.DISCORD_BOT_TOKEN);
   if (botToken && destination.discord_channel_id) {
     try {
-      const delivery = await sendOrEditWithBot(botToken, destination.discord_channel_id, payload, existingMessageId, deliveryNonce);
+      const delivery = await sendOrEditWithBot(botToken, destination.discord_channel_id, payload, existingMessageId, deliveryNonce, options.timeoutMs);
       return { mode: "bot", ...delivery };
     } catch (error) {
       if (error instanceof DiscordRequestTimeoutError) throw error;
@@ -1081,7 +1115,7 @@ async function deliverDiscordPayload(
   }
 
   if (destination.discord_webhook_url) {
-    const delivery = await sendOrEditWithWebhook(destination.discord_webhook_url, payload, existingMessageId);
+    const delivery = await sendOrEditWithWebhook(destination.discord_webhook_url, payload, existingMessageId, options.timeoutMs);
     return { mode: "webhook", ...delivery };
   }
 
@@ -1130,13 +1164,13 @@ async function sendOrEditWithBot(
   return { messageId: typeof message?.id === "string" ? message.id : null, operation: "sent" as const };
 }
 
-async function sendOrEditWithWebhook(webhookUrl: string, payload: DiscordPayload, existingMessageId: string | null) {
+async function sendOrEditWithWebhook(webhookUrl: string, payload: DiscordPayload, existingMessageId: string | null, timeoutMs = DISCORD_REQUEST_TIMEOUT_MS) {
   let messageId = existingMessageId;
   if (messageId) {
     const editResponse = await fetchDiscordDeliveryRequest(
       `${webhookUrl}/messages/${encodeURIComponent(messageId)}`,
       { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) },
-      { mode: "webhook", operation: "edit" },
+      { mode: "webhook", operation: "edit", timeoutMs },
     );
     if (editResponse.ok) return { messageId, operation: "edited" as const };
     if (editResponse.status !== 404) {
@@ -1147,7 +1181,7 @@ async function sendOrEditWithWebhook(webhookUrl: string, payload: DiscordPayload
   const sendResponse = await fetchDiscordDeliveryRequest(
     `${webhookUrl}?wait=true`,
     { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) },
-    { mode: "webhook", operation: "post" },
+    { mode: "webhook", operation: "post", timeoutMs },
   );
   if (!sendResponse.ok) {
     throw new DiscordDeliveryError(`Discord webhook post failed with ${sendResponse.status}`, sendResponse.status, "post", "webhook");
@@ -1182,7 +1216,13 @@ async function recordPostingStateError(env: Env, destination: PostingDestination
     .run();
 }
 
-async function recordAmbiguousDiscordDelivery(env: Env, destination: PostingDestination, payloadHash: string, message: string) {
+async function recordAmbiguousDiscordDelivery(
+  env: Env,
+  destination: PostingDestination,
+  payloadHash: string,
+  message: string,
+  status: "webhook_delivery_ambiguous" | "bot_delivery_retry_pending" | "bot_delivery_ambiguous",
+) {
   const now = new Date().toISOString();
   await requireDb(env)
     .prepare(
@@ -1190,7 +1230,7 @@ async function recordAmbiguousDiscordDelivery(env: Env, destination: PostingDest
         id, guild_id, post_type, discord_channel_id, discord_message_id, last_posted_at,
         last_edited_at, last_payload_hash, last_error, last_dispatch_attempt_at,
         last_dispatch_status, last_dispatch_error, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, 'webhook_delivery_ambiguous', ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(guild_id, post_type, discord_channel_id) DO UPDATE SET
         last_payload_hash = excluded.last_payload_hash,
         last_error = excluded.last_error,
@@ -1199,7 +1239,7 @@ async function recordAmbiguousDiscordDelivery(env: Env, destination: PostingDest
         last_dispatch_error = excluded.last_dispatch_error,
         updated_at = excluded.updated_at`,
     )
-    .bind(crypto.randomUUID(), destination.guild_id, destination.post_type, destination.discord_channel_id, payloadHash, message, now, message, now, now)
+    .bind(crypto.randomUUID(), destination.guild_id, destination.post_type, destination.discord_channel_id, payloadHash, message, now, status, message, now, now)
     .run();
 }
 

@@ -8,6 +8,7 @@ import {
 } from "../functions/api/sync/discord-posts/run";
 import {
   createPostingDeliveryIdentityForTest,
+  createTestPostDeliveryIdentityForTest,
   fetchDiscordRequestForTest,
   sendDiscordBotMessageForTest,
 } from "../functions/_lib/discord-posting";
@@ -204,6 +205,11 @@ async function run() {
     const retryIdentity = await createPostingDeliveryIdentityForTest(stableDestination, { ...stableServerState }, "pro");
     assert.equal(firstIdentity, retryIdentity, "A retry must keep the same nonce identity when only render time changes.");
     assert.equal(firstIdentity.length, 64);
+
+    const firstTestIdentity = await createTestPostDeliveryIdentityForTest(stableDestination);
+    const retriedTestIdentity = await createTestPostDeliveryIdentityForTest({ ...stableDestination });
+    assert.equal(firstTestIdentity, retriedTestIdentity, "Owner test-post retries must reuse one delivery identity.");
+    assert.equal(firstTestIdentity.length, 64);
   } finally {
     globalThis.fetch = originalFetch;
   }
