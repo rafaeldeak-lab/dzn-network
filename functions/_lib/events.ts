@@ -1,6 +1,7 @@
 import { ensureLinkedServerMetadataColumns, requireDb } from "./db";
 import { eventCreateHostTransactionGuard, resolveAuthorizedEventCreationHost } from "./event-hosts";
 import { ensureBillingSchema, normalizePlanKey, type PlanKey } from "./plans";
+import { isShowcaseWriteAssertionError, showcaseWriteAssertionSql } from "./server-showcase-access";
 import {
   SERVER_CATEGORIES,
   assertSameServerCategory,
@@ -574,6 +575,8 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
 
   try {
     await db.batch([
+      db.prepare(showcaseWriteAssertionSql(`EXISTS (SELECT 1 FROM linked_servers WHERE ${hostWriteGuard.sql})`))
+        .bind(...hostWriteGuard.values),
       db
         .prepare(
           `INSERT INTO competitive_events (
@@ -631,7 +634,7 @@ export async function createCompetitiveEvent(env: Env, viewer: SessionUser | nul
         .bind(activityId, eventId, server.id, activityMessage, activityMetadata),
     ]);
   } catch (error) {
-    if (isHostAuthorizationChangedError(error)) return hostAuthorizationChangedPayload();
+    if (isShowcaseWriteAssertionError(error) || isHostAuthorizationChangedError(error)) return hostAuthorizationChangedPayload();
     return eventCreateFailed("transactional_create", requestId, error);
   }
 

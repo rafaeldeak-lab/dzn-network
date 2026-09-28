@@ -317,15 +317,22 @@ async function assertHostOwnershipAuthorization() {
 }
 
 async function assertTransactionTimeHostAuthorization() {
-  const env = memoryEnv({ raceHostOwnershipChange: true });
-  const result = await createCompetitiveEvent(env, creator, validCreateBody());
-  assert.equal(result.status, 409, "Transaction-time host ownership change should fail closed.");
-  assert.equal(result.error, "HOST_AUTHORIZATION_CHANGED");
-  assertNoPartialEvent(env.DB, "transaction_time_host_ownership");
-  assert.equal(env.DB.host.user_id, "other-owner-user", "The simulated external owner change should not be reverted by create rollback.");
-  assert.equal(env.DB.host.competitive_enabled, 0, "Race-denied host must not be made competitive.");
-  assert.equal(env.DB.host.last_event_at, "2026-01-01T00:00:00.000Z", "Race-denied host last_event_at must remain unchanged.");
-  assert.equal(env.DB.host.updated_at, "2026-01-02T00:00:00.000Z", "Race-denied host updated_at must remain unchanged.");
+  for (const [label, options] of [
+    ["host ownership", { raceHostOwnershipChange: true }],
+    ["duplicate billing", { raceDuplicateHostSubscription: true }],
+  ] as const) {
+    const env = memoryEnv(options);
+    const result = await createCompetitiveEvent(env, creator, validCreateBody());
+    assert.equal(result.status, 409, `Transaction-time ${label} change should fail closed.`);
+    assert.equal(result.error, "HOST_AUTHORIZATION_CHANGED");
+    assertNoPartialEvent(env.DB, `transaction_time_${label.replace(" ", "_")}`);
+    assert.equal(env.DB.host.competitive_enabled, 0, "Race-denied host must not be made competitive.");
+    assert.equal(env.DB.host.last_event_at, "2026-01-01T00:00:00.000Z", "Race-denied host last_event_at must remain unchanged.");
+    assert.equal(env.DB.host.updated_at, "2026-01-02T00:00:00.000Z", "Race-denied host updated_at must remain unchanged.");
+    if (options.raceHostOwnershipChange) {
+      assert.equal(env.DB.host.user_id, "other-owner-user", "The simulated external owner change should not be reverted by create rollback.");
+    }
+  }
 }
 
 function assertNoPartialEvent(db: MemoryD1, label: string) {
@@ -370,6 +377,7 @@ type MemoryD1Options = {
   subscriptionStatus?: string;
   duplicateHostSubscription?: boolean;
   raceHostOwnershipChange?: boolean;
+  raceDuplicateHostSubscription?: boolean;
 };
 
 function memoryEnv(options: MemoryD1Options = {}): Env & { DB: MemoryD1 } {
@@ -490,8 +498,8 @@ class MemoryD1 {
   }
 
   async batch(statements: MemoryStatement[]) {
-    if (this.options.raceHostOwnershipChange && !this.raceApplied) {
-      this.host.user_id = "other-owner-user";
+    if ((this.options.raceHostOwnershipChange || this.options.raceDuplicateHostSubscription) && !this.raceApplied) {
+      if (this.options.raceHostOwnershipChange) this.host.user_id = "other-owner-user";
       this.raceApplied = true;
     }
     const eventSnapshot = this.events.map((row) => ({ ...row }));
@@ -560,7 +568,9 @@ class MemoryD1 {
   }
 
   private subscriptionRowCount(host: Record<string, unknown>) {
-    return this.options.duplicateHostSubscription && host.id === this.host.id ? 2 : 1;
+    const duplicate = this.options.duplicateHostSubscription
+      || (this.options.raceDuplicateHostSubscription && this.raceApplied);
+    return duplicate && host.id === this.host.id ? 2 : 1;
   }
 
   private eligibleSubscriptionCount(host: Record<string, unknown>) {
@@ -612,6 +622,12 @@ class MemoryStatement {
 
   async run() {
     if (/ALTER\s+TABLE\s+linked_servers\s+ADD\s+COLUMN/i.test(this.query)) {
+      return { success: true };
+    }
+    if (this.query.includes("abs(-9223372036854775808)") && this.query.includes("FROM linked_servers")) {
+      if (!this.db.transactionHostAuthorized(String(this.bindings[0] ?? ""), String(this.bindings[1] ?? ""))) {
+        throw new Error("integer overflow");
+      }
       return { success: true };
     }
     if (this.query.includes("INSERT INTO competitive_events")) {

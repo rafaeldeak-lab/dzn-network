@@ -11,7 +11,7 @@ The capability remains limited to the immutable server, owner, Discord account, 
 - Existing active or trialing Pro-compatible subscriptions keep their established event-hosting path.
 - NukeTown can appear in the official event host inventory only while its exact complimentary grant is active.
 - Missing migration `0069`, an absent grant, expiry, revocation, owner transfer, hidden or archived state, and identity drift all fail closed.
-- Duplicate billing rows remain an invalid host state and cannot be masked by the complimentary grant.
+- Duplicate billing rows remain an invalid host state and are rechecked inside the event-creation transaction, so a concurrent insert cannot be masked by the complimentary grant.
 - Event creation rechecks exact ownership, server lifecycle, visibility, identity scope, and grant activity inside the atomic write batch.
 - A failed transaction-time recheck creates no event, registration, activity row, or host update.
 

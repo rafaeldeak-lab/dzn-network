@@ -354,6 +354,10 @@ export async function eventCreateHostTransactionGuard(env: Env, viewer: SessionU
         AND lower(COALESCE(event_host_state.status, 'pending')) NOT IN ('deleted', 'merged', 'archived')
         AND COALESCE(event_host_state.merged_into_server_id, '') = ''
         AND lower(COALESCE(event_host_state.listing_visibility, 'public')) != 'hidden'
+        AND (
+          SELECT COUNT(*) FROM server_subscriptions
+          WHERE server_subscriptions.guild_id = event_host_state.guild_id
+        ) <= 1
     )`,
     values: [server.id, viewer.id, ...grantGuard.values, server.id, viewer.id],
   };
