@@ -4,7 +4,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { applyLeaderboardsAccess, applyServerLeaderboardAccess } from "../functions/_lib/public-leaderboards";
 import { applyHomeStatsAccess, buildPublicBuildEventLeaderboardRows } from "../functions/api/public/home-stats";
 import { applyServerReviewsAccess } from "../functions/api/public/server-reviews";
-import { applyPublicServerAccess } from "../functions/api/public/servers";
+import { applyPublicServerAccess, publicListingStatus } from "../functions/api/public/servers";
 
 const baseServer = {
   linked_server_id: "pandora",
@@ -163,6 +163,28 @@ assert.equal(previewServer.top_players?.length, 0);
 assert.equal(previewServer.pvp_leaderboard?.length, 0);
 assert.equal(previewServer.network_status?.public_listing, "Active");
 assert.equal(JSON.stringify(previewServer).includes("reviewer_discord_id"), false);
+
+assert.equal(publicListingStatus("pending", false), "Setup pending");
+assert.equal(publicListingStatus("live", false), "Active");
+assert.equal(publicListingStatus("pending", true), "Historical");
+const pendingSetupPreview = applyPublicServerAccess({
+  ...baseServer,
+  status: "pending",
+  lifecycle: {
+    status: "active_live",
+    label: "Setup incomplete",
+    message: "This server has not completed its setup checks.",
+    owner_action: null,
+    historical: false,
+  },
+  network_status: {
+    adm_status: "Needs Review",
+    stats_sync: "Not Started",
+    public_listing: "Setup pending",
+    last_sync_at: null,
+  },
+}, false);
+assert.equal(pendingSetupPreview.network_status?.public_listing, "Setup pending", "Pending setup must never be relabelled as an active public listing.");
 
 const historicalPreviewServer = applyPublicServerAccess({
   ...baseServer,

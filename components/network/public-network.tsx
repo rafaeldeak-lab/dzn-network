@@ -174,7 +174,7 @@ type PublicServer = {
   network_status?: {
     adm_status: "Connected" | "Discovered" | "Needs Review";
     stats_sync: "Active" | "Pending" | "Not Started";
-    public_listing: "Active" | "Historical";
+    public_listing: "Active" | "Setup pending" | "Historical";
     last_sync_at: string | null;
   };
   access_level?: "full" | "preview";
@@ -2754,7 +2754,7 @@ function PlayerAvatar({ player }: { player: PublicLeaderboardPlayer }) {
 
 function NetworkStatusPanel({ server }: { server: PublicServer }) {
   const historicalLifecycle = Boolean(server.lifecycle?.historical);
-  const publicListing = server.network_status?.public_listing ?? (historicalLifecycle ? "Historical" : "Active");
+  const publicListing = server.network_status?.public_listing ?? (historicalLifecycle ? "Historical" : server.status.toLowerCase() === "live" ? "Active" : "Setup pending");
   const syncHealth = historicalLifecycle ? "Historical" : server.stats_sync === "Active" ? "Online" : "Watching";
   return (
     <GlassPanel title="Network Status" icon={BarChart3}>
@@ -2763,7 +2763,7 @@ function NetworkStatusPanel({ server }: { server: PublicServer }) {
         <StatusRow label="Stats Sync" value={historicalLifecycle ? "Preserved" : server.stats_sync} tone={historicalLifecycle ? "neutral" : server.stats_sync === "Active" ? "good" : server.stats_sync === "Pending" ? "warn" : "bad"} />
         <StatusRow label="Total Joins" value={String(server.total_joins)} tone="neutral" />
         <StatusRow label="Unique Players" value={String(server.unique_players)} tone="neutral" />
-        <StatusRow label="Public Listing" value={publicListing} tone={publicListing === "Historical" ? "neutral" : "good"} />
+        <StatusRow label="Public Listing" value={publicListing} tone={publicListing === "Historical" ? "neutral" : publicListing === "Setup pending" ? "warn" : "good"} />
         <StatusRow label="Last Sync" value={formatRelativeTime(server.last_sync_at ?? server.metadata_last_checked_at)} tone="neutral" />
         <StatusRow label="Sync Health" value={syncHealth} tone={historicalLifecycle ? "neutral" : server.stats_sync === "Active" ? "good" : "warn"} />
       </div>
