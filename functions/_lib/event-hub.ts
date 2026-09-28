@@ -179,6 +179,7 @@ const OWNER_EVENT_HUB_READ_COLUMNS: Record<string, readonly string[]> = {
   server_discord_channel_settings: ["linked_server_id", "guild_id", "channel_type", "channel_id", "channel_name", "channel_kind", "bot_can_view", "bot_can_send", "bot_can_embed", "bot_can_read_history", "last_verified_at", "updated_at"],
   event_cooldowns: ["linked_server_id", "event_type", "plan_key", "cooldown_until", "source_event_id", "reason"],
   adm_sync_state: ["linked_server_id", "latest_adm_file", "last_processed_file", "last_sync_at", "last_sync_status"],
+  adm_sync_file_state: ["linked_server_id", "status", "processed_at", "completed_at"],
   adm_import_jobs: ["server_id", "source", "status", "completed_at", "created_at", "updated_at"],
 };
 
@@ -1123,6 +1124,17 @@ async function getAdmEligibility(env: Env, linkedServerId: string) {
     .bind(linkedServerId)
     .first<{ latest_adm_file: string | null; last_processed_file: string | null; last_successful_import_at: string | null; last_sync_status: string | null }>()
     .catch(() => null);
+  const completedFile = await requireDb(env)
+    .prepare(
+      `SELECT MAX(COALESCE(completed_at, processed_at)) AS completed_at
+       FROM adm_sync_file_state
+       WHERE linked_server_id = ?
+         AND status IN ('processed', 'caught_up_waiting_for_growth', 'completed_empty', 'completed_closed')
+         AND COALESCE(completed_at, processed_at) IS NOT NULL`,
+    )
+    .bind(linkedServerId)
+    .first<{ completed_at: string | null }>()
+    .catch(() => null);
   const job = await requireDb(env)
     .prepare(
       `SELECT status, completed_at, updated_at
@@ -1137,12 +1149,13 @@ async function getAdmEligibility(env: Env, linkedServerId: string) {
     .bind(linkedServerId)
     .first<{ status: string | null; completed_at: string | null; updated_at: string | null }>()
     .catch(() => null);
-  return resolveAdmEligibilityEvidence(row, job);
+  return resolveAdmEligibilityEvidence(row, job, completedFile);
 }
 
 export function resolveAdmEligibilityEvidence(
   row: { latest_adm_file: string | null; last_processed_file: string | null; last_successful_import_at: string | null; last_sync_status: string | null } | null,
   job: { status: string | null; completed_at: string | null; updated_at: string | null } | null,
+  completedFile: { completed_at: string | null } | null = null,
 ) {
   const syncStatus = String(row?.last_sync_status ?? "").trim().toLowerCase();
   const successfulSyncAt = row?.last_successful_import_at && SUCCESSFUL_ADM_SYNC_STATUSES.has(syncStatus)
@@ -1151,13 +1164,14 @@ export function resolveAdmEligibilityEvidence(
   const completedJobAt = job?.completed_at && ["completed", "completed_with_warnings"].includes(String(job.status ?? "").trim().toLowerCase())
     ? job.completed_at
     : null;
-  const recentImportAt = successfulSyncAt ?? completedJobAt;
+  const completedFileAt = completedFile?.completed_at ?? null;
+  const recentImportAt = successfulSyncAt ?? completedFileAt ?? completedJobAt;
   return {
     ready: Boolean(recentImportAt),
     latestAdmFile: row?.latest_adm_file ?? null,
     lastProcessedFile: row?.last_processed_file ?? null,
     lastSuccessfulImportAt: recentImportAt,
-    status: successfulSyncAt ? row?.last_sync_status ?? "completed" : completedJobAt ? job?.status ?? "completed" : row?.last_sync_status ?? job?.status ?? "waiting",
+    status: successfulSyncAt || completedFileAt ? row?.last_sync_status ?? "completed" : completedJobAt ? job?.status ?? "completed" : row?.last_sync_status ?? job?.status ?? "waiting",
   };
 }
 

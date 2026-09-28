@@ -66,6 +66,20 @@ assert.equal(resolveAdmEligibilityEvidence(null, {
   completed_at: "2026-09-28T08:00:00.000Z",
   updated_at: "2026-09-28T08:00:00.000Z",
 }).ready, true, "A completed scheduled ADM import must unlock event entry.");
+assert.deepEqual(resolveAdmEligibilityEvidence({
+  latest_adm_file: "server.ADM",
+  last_processed_file: "server.ADM",
+  last_successful_import_at: "2026-09-28T08:05:00.000Z",
+  last_sync_status: "caught_up_waiting_for_growth",
+}, null, {
+  completed_at: "2026-09-28T08:00:00.000Z",
+}), {
+  ready: true,
+  latestAdmFile: "server.ADM",
+  lastProcessedFile: "server.ADM",
+  lastSuccessfulImportAt: "2026-09-28T08:00:00.000Z",
+  status: "caught_up_waiting_for_growth",
+}, "Durable completed file evidence must preserve readiness after a caught-up scheduler transition.");
 assert.deepEqual(resolveEventStatusFilter("upcoming"), ["upcoming", "registration_open", "standby"]);
 assert.deepEqual(resolveEventStatusFilter("active"), ["live"]);
 assert.deepEqual(resolveEventStatusFilter("completed"), ["ended"]);
@@ -189,6 +203,7 @@ assert.equal(ownerEventHubReadBlock.includes("validateOwnerEventHubReadSchema"),
 assert.equal(ownerEventHubReadBlock.includes("ensureEventHubSchema"), false, "Owner Event Hub GET must not run schema DDL.");
 assert.equal(eventHubLib.includes('adm_sync_state: ["linked_server_id", "latest_adm_file", "last_processed_file", "last_sync_at", "last_sync_status"]'), true, "Event Hub readiness must validate the established ADM sync timestamp column.");
 assert.equal(eventHubLib.includes('adm_import_jobs: ["server_id", "source", "status", "completed_at", "created_at", "updated_at"]'), true, "Event Hub readiness must validate the established ADM import server key.");
+assert.equal(eventHubLib.includes('adm_sync_file_state: ["linked_server_id", "status", "processed_at", "completed_at"]'), true, "Event Hub readiness must validate durable ADM file completion evidence.");
 assert.equal(eventHubLib.includes("last_sync_at AS last_successful_import_at"), true, "Event Hub should expose the established ADM sync timestamp through its response contract.");
 assert.equal(eventHubLib.includes("FROM adm_import_jobs\n       WHERE server_id = ?"), true, "Event Hub should query scheduled ADM jobs by the established server key.");
 assert.equal(eventHubLib.includes("AND status IN ('completed', 'completed_with_warnings')"), true, "Event Hub should only accept completed scheduled ADM jobs as readiness evidence.");
