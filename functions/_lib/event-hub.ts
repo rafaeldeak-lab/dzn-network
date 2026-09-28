@@ -179,7 +179,7 @@ const OWNER_EVENT_HUB_READ_COLUMNS: Record<string, readonly string[]> = {
   server_discord_channel_settings: ["linked_server_id", "guild_id", "channel_type", "channel_id", "channel_name", "channel_kind", "bot_can_view", "bot_can_send", "bot_can_embed", "bot_can_read_history", "last_verified_at", "updated_at"],
   event_cooldowns: ["linked_server_id", "event_type", "plan_key", "cooldown_until", "source_event_id", "reason"],
   adm_sync_state: ["linked_server_id", "latest_adm_file", "last_processed_file", "last_sync_at", "last_sync_status"],
-  adm_sync_file_state: ["linked_server_id", "status", "processed_at", "completed_at"],
+  adm_sync_file_state: ["linked_server_id", "processed_at", "completed_at"],
   adm_import_jobs: ["server_id", "source", "status", "completed_at", "created_at", "updated_at"],
 };
 
@@ -1129,8 +1129,7 @@ async function getAdmEligibility(env: Env, linkedServerId: string) {
       `SELECT MAX(COALESCE(completed_at, processed_at)) AS completed_at
        FROM adm_sync_file_state
        WHERE linked_server_id = ?
-         AND status IN ('processed', 'caught_up_waiting_for_growth', 'completed_empty', 'completed_closed')
-         AND COALESCE(completed_at, processed_at) IS NOT NULL`,
+         AND (completed_at IS NOT NULL OR processed_at IS NOT NULL)`,
     )
     .bind(linkedServerId)
     .first<{ completed_at: string | null }>()
