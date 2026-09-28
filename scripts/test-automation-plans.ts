@@ -296,6 +296,11 @@ assert.equal(serverDueStateSource.includes("getAdmDiscoveryIntervalMinutes"), tr
 assert.equal(serverDueStateSource.includes("pandora-dayz"), true);
 assert.equal(serverDueStateSource.includes("currently_syncing_adm"), true);
 assert.equal(serverDueStateSource.includes("isAutomationBillingEligible"), true);
+assert.equal(serverDueStateSource.includes("NUKETOWN_SHOWCASE_SCOPE"), true);
+assert.equal(serverDueStateSource.includes("complimentary_automation_access"), true);
+assert.equal(serverDueStateSource.includes("julianday(grant_row.created_at) <= julianday('now')"), true);
+assert.equal(serverDueStateSource.includes("server_subscriptions AS paid_pro"), true);
+assert.equal(serverDueStateSource.includes("'pro', 'premium', 'network', 'partner'"), true);
 assert.equal(serverDueStateSource.includes('return "not_live"'), true);
 assert.equal(serverDueStateSource.includes('return "no_automation_entitlement"'), true);
 assert.equal(serverDueStateSource.includes('return "missing_nitrado_service_id"'), true);

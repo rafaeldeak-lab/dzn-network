@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import { getAdmDiscoveryIntervalMinutes, getAdmPullInterval, getServerStatusInterval, normalizePlanKey } from "../functions/_lib/plans";
-import { isAutomationBillingEligible } from "../functions/_lib/server-showcase-access";
+import { isAutomationBillingEligible, NUKETOWN_SHOWCASE_SCOPE } from "../functions/_lib/server-showcase-access";
 import {
   canRunServerLifecycleTask,
   SERVER_LIFECYCLE_STATUSES,
@@ -22,6 +22,7 @@ type ServerDueRow = {
   final_sync_attempted_at: string | null;
   plan_key: string | null;
   subscription_status: string | null;
+  complimentary_automation_access: number | null;
   next_status_check_due_at: string | null;
   next_adm_discovery_due_at: string | null;
   next_adm_pull_due_at: string | null;
@@ -75,10 +76,11 @@ function skippedReason(row: ServerDueRow, task: Extract<ServerLifecycleTask, "me
   if (!row.nitrado_service_id) return "missing_nitrado_service_id";
   if ((row.linked_status ?? "pending").toLowerCase() !== "live") return "not_live";
   if (row.merged_into_server_id) return "merged";
-  if (!isAutomationBillingEligible(row.plan_key, row.subscription_status)) return "no_automation_entitlement";
+  if (Number(row.complimentary_automation_access ?? 0) !== 1
+    && !isAutomationBillingEligible(row.plan_key, row.subscription_status)) return "no_automation_entitlement";
   if (task === "metadata" && Number(row.currently_checking_status ?? 0) === 1) return "currently_checking_status";
   if (task !== "metadata" && Number(row.currently_syncing_adm ?? 0) === 1) return "currently_syncing_adm";
-  const lifecycleStatus = String(row.lifecycle_status ?? "active_live").trim().toLowerCase();
+  const lifecycleStatus = String(row.lifecycle_status ?? "active_live").toLowerCase();
   if (!SERVER_LIFECYCLE_STATUSES.includes(lifecycleStatus as typeof SERVER_LIFECYCLE_STATUSES[number])) {
     return "invalid_lifecycle_status";
   }
@@ -111,6 +113,31 @@ const rows = runWranglerQuery<ServerDueRow>(
           ${serverLifecycleSqlExpression("linked_servers")} AS lifecycle_status,
           linked_servers.merged_into_server_id, linked_servers.final_sync_attempted_at,
           server_subscriptions.plan_key, server_subscriptions.status AS subscription_status,
+          EXISTS (
+            SELECT 1 FROM server_showcase_grants AS grant_row
+            JOIN users AS grant_owner ON grant_owner.id = linked_servers.user_id
+            WHERE grant_row.linked_server_id = linked_servers.id
+              AND linked_servers.id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.linkedServerId)}
+              AND linked_servers.user_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.ownerUserId)}
+              AND grant_owner.discord_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.ownerDiscordId)}
+              AND linked_servers.guild_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.guildId)}
+              AND linked_servers.nitrado_service_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.nitradoServiceId)}
+              AND grant_row.owner_user_id = linked_servers.user_id
+              AND grant_row.owner_discord_id = grant_owner.discord_id
+              AND grant_row.guild_id = linked_servers.guild_id
+              AND grant_row.nitrado_service_id = linked_servers.nitrado_service_id
+              AND grant_row.plan_key = 'pro'
+              AND grant_row.purpose = 'platform_owner_showcase'
+              AND grant_row.revoked_at IS NULL
+              AND julianday(grant_row.created_at) <= julianday('now')
+              AND (grant_row.expires_at IS NULL OR julianday(grant_row.expires_at) > julianday('now'))
+              AND NOT EXISTS (
+                SELECT 1 FROM server_subscriptions AS paid_pro
+                WHERE paid_pro.guild_id = linked_servers.guild_id
+                  AND lower(COALESCE(paid_pro.status, '')) IN ('active', 'trialing')
+                  AND lower(COALESCE(paid_pro.plan_key, '')) IN ('pro', 'premium', 'network', 'partner')
+              )
+          ) AS complimentary_automation_access,
           server_sync_state.next_status_check_due_at,
           server_sync_state.next_adm_discovery_due_at,
           server_sync_state.next_adm_pull_due_at,
@@ -149,6 +176,7 @@ if (!rows.length) {
     console.log(`public slug: ${row.public_slug ?? "missing"}`);
     console.log(`nitrado service id: ${row.nitrado_service_id ?? "missing"}`);
     console.log(`subscription: ${plan} / ${row.subscription_status ?? "unknown"}`);
+    console.log(`automation entitlement: ${Number(row.complimentary_automation_access ?? 0) === 1 ? "complimentary Pro" : `${plan} billing`}`);
     console.log(`server setup status: ${row.linked_status ?? "unknown"}`);
     console.log(`lifecycle: ${row.lifecycle_status ?? "active_live"}`);
     console.log(`intervals: status ${getServerStatusInterval(plan)}m, ADM discovery ${getAdmDiscoveryIntervalMinutes(plan)}m, ADM processing ${getAdmPullInterval(plan)}m`);

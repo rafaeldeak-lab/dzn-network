@@ -214,6 +214,7 @@ assert.equal(dueStateCheckSource.includes("ADM discovery"), true);
 assert.equal(dueStateCheckSource.includes("canRunServerLifecycleTask"), true);
 assert.equal(dueStateCheckSource.includes("SERVER_LIFECYCLE_STATUSES"), true);
 assert.equal(dueStateCheckSource.includes('return "invalid_lifecycle_status"'), true);
+assert.equal(dueStateCheckSource.includes('String(row.lifecycle_status ?? "active_live").toLowerCase()'), true);
 assert.equal(dueStateCheckSource.includes("serverLifecycleSqlExpression"), true);
 assert.equal(dueStateCheckSource.includes('skippedReason(row, "adm_discovery")'), true);
 assert.equal(dueStateCheckSource.includes('skippedReason(row, "adm_processing")'), true);
