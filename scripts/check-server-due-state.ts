@@ -1,7 +1,12 @@
 import { execSync } from "node:child_process";
 import { getAdmDiscoveryIntervalMinutes, getAdmPullInterval, getServerStatusInterval, normalizePlanKey } from "../functions/_lib/plans";
 import { isAutomationBillingEligible } from "../functions/_lib/server-showcase-access";
-import { canRunServerLifecycleTask, serverLifecycleSqlExpression, type ServerLifecycleTask } from "../lib/server-lifecycle";
+import {
+  canRunServerLifecycleTask,
+  SERVER_LIFECYCLE_STATUSES,
+  serverLifecycleSqlExpression,
+  type ServerLifecycleTask,
+} from "../lib/server-lifecycle";
 
 type ServerDueRow = {
   id: string;
@@ -73,8 +78,12 @@ function skippedReason(row: ServerDueRow, task: Extract<ServerLifecycleTask, "me
   if (!isAutomationBillingEligible(row.plan_key, row.subscription_status)) return "no_automation_entitlement";
   if (task === "metadata" && Number(row.currently_checking_status ?? 0) === 1) return "currently_checking_status";
   if (task !== "metadata" && Number(row.currently_syncing_adm ?? 0) === 1) return "currently_syncing_adm";
+  const lifecycleStatus = String(row.lifecycle_status ?? "active_live").trim().toLowerCase();
+  if (!SERVER_LIFECYCLE_STATUSES.includes(lifecycleStatus as typeof SERVER_LIFECYCLE_STATUSES[number])) {
+    return "invalid_lifecycle_status";
+  }
   const lifecycle = canRunServerLifecycleTask({
-    lifecycle_status: row.lifecycle_status,
+    lifecycle_status: lifecycleStatus,
     status: row.linked_status,
     next_retry_after: row.next_retry_after,
     final_sync_attempted_at: row.final_sync_attempted_at,
