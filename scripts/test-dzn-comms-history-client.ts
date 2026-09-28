@@ -23,7 +23,7 @@ for (const [name, mutate] of Object.entries({
   membership: x => { x.access.private_group_membership_required = true; },
   publicAccess: x => { x.access.public_channel = false; },
   sending: x => { x.feature_flags.sending_enabled = true; },
-  reactions: x => { x.feature_flags.reactions_enabled = true; },
+  reactionWriteWithoutRead: x => { x.feature_flags.reactions_write_enabled = true; },
   routeOff: x => { x.feature_flags.route_enabled = false; },
   unsafe: x => { x.messages[0].public_safe = false; },
   mutable: x => { x.messages[0].read_only = false; },
@@ -37,6 +37,39 @@ for (const [name, mutate] of Object.entries({
 } satisfies Record<string, (input: ReturnType<typeof commsHistoryFixture>) => void>)) {
   test(`rejects ${name}`, () => { const input = commsHistoryFixture(); mutate(input); assert.throws(() => parseCommsHistory(input)); });
 }
+
+test("accepts, bounds and projects reaction-enabled history", async () => {
+  const input = commsHistoryFixture();
+  input.feature_flags.reactions_enabled = true;
+  Object.assign(input.messages[0], { reactions: {
+    revision: "2026-09-28T06:00:00.000Z",
+    available_reactions: [
+      { key: "heart", emoji: "\u{1F49C}", label: "Heart" }, { key: "boost", emoji: "\u{1F680}", label: "Boost" },
+      { key: "laugh", emoji: "\u{1F602}", label: "Laugh" }, { key: "salute", emoji: "\u{1FAE1}", label: "Salute" },
+      { key: "fire", emoji: "\u{1F525}", label: "Fire" }, { key: "skull", emoji: "\u{1F480}", label: "Skull" },
+    ],
+    counts: [{ key: "heart", emoji: "\u{1F49C}", label: "Heart", count: 2, current_user_reacted: true }],
+    private_actor_ids: ["must not pass through"],
+  } });
+  const parsed = parseCommsHistory(input);
+  assert.equal(parsed.feature_flags.reactions_enabled, true);
+  assert.equal(parsed.feature_flags.reactions_write_enabled, false);
+  assert.deepEqual(parsed.messages[0].reactions?.counts, [
+    { key: "heart", emoji: "\u{1F49C}", label: "Heart", count: 2, current_user_reacted: true },
+  ]);
+  assert.equal("private_actor_ids" in (parsed.messages[0].reactions as object), false);
+  const loaded = await load(async () => jsonResponse(input));
+  assert.equal(loaded.messages[0].body, "Local history fixture");
+  assert.equal(loaded.messages[0].reactions?.counts[0]?.count, 2);
+});
+
+test("rejects malformed or misplaced reaction projections", () => {
+  const malformed = commsHistoryFixture(); malformed.feature_flags.reactions_enabled = true;
+  Object.assign(malformed.messages[0], { reactions: { revision: "empty", available_reactions: [], counts: [] } });
+  assert.throws(() => parseCommsHistory(malformed));
+  const disabled = commsHistoryFixture(); Object.assign(disabled.messages[0], { reactions: {} });
+  assert.throws(() => parseCommsHistory(disabled));
+});
 
 test("rejects malformed nested collections and primitives without reaching the UI", () => {
   for (const key of ["channel", "access", "messages", "feature_flags", "fairness_boundary"]) {
