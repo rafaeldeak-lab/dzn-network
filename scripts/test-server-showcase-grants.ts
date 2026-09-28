@@ -141,6 +141,28 @@ function grantExpiring(db: LocalD1, seconds = 1) {
   const expiresAt = String(db.sqlite.prepare("SELECT expires_at FROM server_showcase_grants WHERE id = ?").get(id)?.expires_at);
   return { id, expiresAt };
 }
+function permitDuplicateSubscriptionRows(db: LocalD1) {
+  db.sqlite.exec(`
+    ALTER TABLE server_subscriptions RENAME TO server_subscriptions_unique_fixture;
+    CREATE TABLE server_subscriptions (
+      id TEXT PRIMARY KEY,
+      guild_id TEXT NOT NULL,
+      owner_discord_id TEXT NOT NULL,
+      stripe_customer_id TEXT,
+      stripe_subscription_id TEXT,
+      stripe_price_id TEXT,
+      plan_key TEXT NOT NULL DEFAULT 'starter',
+      status TEXT NOT NULL DEFAULT 'inactive',
+      current_period_start TEXT,
+      current_period_end TEXT,
+      cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO server_subscriptions SELECT * FROM server_subscriptions_unique_fixture;
+    DROP TABLE server_subscriptions_unique_fixture;
+  `);
+}
 function waitUntilAfter(iso: string) {
   const waitMs = Math.max(0, Date.parse(iso) - Date.now() + 50);
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
@@ -303,6 +325,32 @@ async function run() {
     db.beforeBatch = null;
     assert.equal(created.ok, false);
     assert.equal(created.error, "HOST_AUTHORIZATION_CHANGED");
+    for (const table of ["competitive_events", "competitive_event_servers", "competitive_event_activity"]) {
+      assert.equal(db.sqlite.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.n, 0, table);
+    }
+  });
+  await test("duplicate billing inserted after complimentary resolution rolls back official event creation", async ({ db, env }) => {
+    const creatorEnv = { ...env, DZN_PLATFORM_CREATOR_DISCORD_ID: scope.ownerDiscordId } as Env;
+    permitDuplicateSubscriptionRows(db);
+    await grant(creatorEnv);
+    db.beforeBatch = () => {
+      db.beforeBatch = null;
+      db.sqlite.prepare(`INSERT INTO server_subscriptions (id, guild_id, owner_discord_id, plan_key, status,
+        stripe_customer_id, stripe_subscription_id, current_period_end, created_at, updated_at)
+        VALUES ('racing-duplicate-subscription', ?, ?, 'starter', 'canceled',
+          'cus_racing_duplicate', 'sub_racing_duplicate', '2026-07-18', '2026-01-01', '2026-01-01')`)
+        .run(scope.guildId, scope.ownerDiscordId);
+    };
+    const created = await createCompetitiveEvent(creatorEnv, actor, {
+      hosting_server_id: scope.linkedServerId,
+      name: "Duplicate Billing Race Cup",
+      event_type: "community_cup",
+      status: "registration_open",
+      visibility: "public",
+    });
+    assert.equal(created.ok, false);
+    assert.equal(created.error, "HOST_AUTHORIZATION_CHANGED");
+    assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_subscriptions WHERE guild_id = ?").get(scope.guildId)?.n, 2);
     for (const table of ["competitive_events", "competitive_event_servers", "competitive_event_activity"]) {
       assert.equal(db.sqlite.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.n, 0, table);
     }
