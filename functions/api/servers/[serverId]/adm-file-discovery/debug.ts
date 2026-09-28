@@ -74,7 +74,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
     knownLatestFileName: knownLatestFile,
     sampleLimit: 12,
   });
-  const automationContext = await getAutomationContextForLinkedServer(env, server.id);
+  const automationContext = await getAutomationContextForLinkedServer(env, server.id, { skipSchemaEnsure: true });
   const automationPlanKey = automationContext
     ? effectiveEntitlementPlan(automationContext.planKey, automationContext.subscriptionStatus)
     : "free";

@@ -235,7 +235,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
 
     if (!server) return automationStatusError(404, "server_not_found", "Server not found.");
 
-    const automationContext = await getAutomationContextForLinkedServer(env, linkedServerId);
+    const automationContext = await getAutomationContextForLinkedServer(env, linkedServerId, { skipSchemaEnsure: true });
     const billingPlanKey = automationContext?.showcaseAccess.billingPlan ?? server.plan_key;
     const billingStatus = automationContext?.showcaseAccess.billingStatus ?? server.subscription_status;
     const planKey = normalizePlanKey(billingPlanKey);

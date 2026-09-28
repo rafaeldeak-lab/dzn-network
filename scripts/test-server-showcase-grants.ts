@@ -206,6 +206,8 @@ async function publicProfile(env: Env, id: string = scope.linkedServerId, logged
 }
 
 async function run() {
+  const admAutomationStatusSource = readFileSync("functions/api/servers/[serverId]/adm/automation-status.ts", "utf8");
+  assert.equal(admAutomationStatusSource.includes("{ skipSchemaEnsure: true }"), true);
   globalThis.fetch = async () => { throw new Error("Network is forbidden in showcase tests"); };
   await test("migration grants nobody and preserves billing", async ({ db, env }) => {
     assert.equal(db.sqlite.prepare("SELECT count(*) AS n FROM server_showcase_grants").get()?.n, 0);

@@ -160,6 +160,7 @@ assert.equal(admDiscoveryDebugEndpointSource.includes("debugNitradoAdmFileDiscov
 assert.equal(admDiscoveryDebugEndpointSource.includes("TOKEN_ENCRYPTION_KEY"), true);
 assert.equal(admDiscoveryDebugEndpointSource.includes("current_saved_state"), true);
 assert.equal(admDiscoveryDebugEndpointSource.includes("getAutomationContextForLinkedServer"), true);
+assert.equal(admDiscoveryDebugEndpointSource.includes("{ skipSchemaEnsure: true }"), true);
 assert.equal(admDiscoveryDebugEndpointSource.includes("automation_access"), true);
 assert.equal(admDiscoveryDebugEndpointSource.includes("planKey: discoveryPersistencePlanKey"), true);
 assert.equal(admDiscoveryDebugEndpointSource.includes("an exact-server grant must not change its cadence"), true);
