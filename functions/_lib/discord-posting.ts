@@ -164,6 +164,13 @@ class DiscordDeliveryError extends Error {
   }
 }
 
+class DiscordRequestTimeoutError extends Error {
+  constructor(public readonly operation: "post" | "edit", public readonly mode: "bot" | "webhook") {
+    super("discord_request_timeout");
+    this.name = "DiscordRequestTimeoutError";
+  }
+}
+
 type DiscordDispatchBudget = {
   startedAtMs: number;
   deadlineAtMs: number;
@@ -385,6 +392,20 @@ async function processConfiguredPostingDestination(
   const payload = renderDiscordPostPayload(destination.post_type, cache, listingPlanKey);
   const payloadHash = await hashPayload(payload);
   const oldPayloadHash = state?.last_payload_hash ?? null;
+  if (state?.last_dispatch_status === "delivery_ambiguous" && state.last_payload_hash === payloadHash) {
+    return {
+      guild_id: destination.guild_id,
+      post_type: destination.post_type,
+      channel_id: destination.discord_channel_id,
+      status: "skipped_unchanged",
+      message_id: state.discord_message_id ?? null,
+      reason: "A previous Discord create timed out after dispatch; automatic retry is suppressed to prevent a duplicate post.",
+      old_payload_hash: oldPayloadHash,
+      new_payload_hash: payloadHash,
+      last_edited_at: state.last_edited_at ?? null,
+      message_state_found: true,
+    };
+  }
   if (!options.force && state?.last_payload_hash === payloadHash) {
     await recordPostingDispatchStatus(env, destination, "skipped_unchanged", null);
     return {
@@ -435,7 +456,11 @@ async function processConfiguredPostingDestination(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Discord post update failed";
-    await recordPostingStateError(env, destination, message);
+    if (error instanceof DiscordRequestTimeoutError && error.operation === "post") {
+      await recordAmbiguousDiscordDelivery(env, destination, payloadHash, message);
+    } else {
+      await recordPostingStateError(env, destination, message);
+    }
     throw error;
   }
 }
@@ -1029,12 +1054,19 @@ async function deliverDiscordPayload(
   payload: DiscordPayload,
   existingMessageId: string | null,
 ): Promise<DiscordDeliveryResult> {
+  const deliveryNonce = (await hashPayload({
+    guild_id: destination.guild_id,
+    post_type: destination.post_type,
+    channel_id: destination.discord_channel_id,
+    payload,
+  })).slice(0, 25);
   const botToken = normalizeBotToken(env.DISCORD_BOT_TOKEN);
   if (botToken && destination.discord_channel_id) {
     try {
-      const delivery = await sendOrEditWithBot(botToken, destination.discord_channel_id, payload, existingMessageId);
+      const delivery = await sendOrEditWithBot(botToken, destination.discord_channel_id, payload, existingMessageId, deliveryNonce);
       return { mode: "bot", ...delivery };
     } catch (error) {
+      if (error instanceof DiscordRequestTimeoutError) throw error;
       if (!destination.discord_webhook_url) throw error;
       console.warn("DZN DISCORD BOT POST FAILED, WEBHOOK FALLBACK", {
         guildId: destination.guild_id,
@@ -1057,6 +1089,8 @@ async function sendOrEditWithBot(
   channelId: string,
   payload: DiscordPayload,
   existingMessageId: string | null,
+  deliveryNonce: string,
+  timeoutMs = DISCORD_REQUEST_TIMEOUT_MS,
 ) {
   const headers = {
     authorization: `Bot ${botToken}`,
@@ -1064,11 +1098,11 @@ async function sendOrEditWithBot(
   };
   let messageId = existingMessageId;
   if (messageId) {
-    const editResponse = await fetchDiscordRequest(`https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify(stripWebhookOnlyFields(payload)),
-    });
+    const editResponse = await fetchDiscordDeliveryRequest(
+      `https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}`,
+      { method: "PATCH", headers, body: JSON.stringify(stripWebhookOnlyFields(payload)) },
+      { mode: "bot", operation: "edit", timeoutMs },
+    );
     if (editResponse.ok) return { messageId, operation: "edited" as const };
     if (![403, 404].includes(editResponse.status)) {
       throw new DiscordDeliveryError(`Discord bot edit failed with ${editResponse.status}`, editResponse.status, "edit", "bot");
@@ -1076,11 +1110,15 @@ async function sendOrEditWithBot(
     messageId = null;
   }
 
-  const sendResponse = await fetchDiscordRequest(`https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(stripWebhookOnlyFields(payload)),
-  });
+  const sendResponse = await fetchDiscordDeliveryRequest(
+    `https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ ...stripWebhookOnlyFields(payload), nonce: deliveryNonce, enforce_nonce: true }),
+    },
+    { mode: "bot", operation: "post", timeoutMs },
+  );
   if (!sendResponse.ok) {
     throw new DiscordDeliveryError(`Discord bot post failed with ${sendResponse.status}`, sendResponse.status, "post", "bot");
   }
@@ -1091,22 +1129,22 @@ async function sendOrEditWithBot(
 async function sendOrEditWithWebhook(webhookUrl: string, payload: DiscordPayload, existingMessageId: string | null) {
   let messageId = existingMessageId;
   if (messageId) {
-    const editResponse = await fetchDiscordRequest(`${webhookUrl}/messages/${encodeURIComponent(messageId)}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    const editResponse = await fetchDiscordDeliveryRequest(
+      `${webhookUrl}/messages/${encodeURIComponent(messageId)}`,
+      { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) },
+      { mode: "webhook", operation: "edit" },
+    );
     if (editResponse.ok) return { messageId, operation: "edited" as const };
     if (editResponse.status !== 404) {
       throw new DiscordDeliveryError(`Discord webhook edit failed with ${editResponse.status}`, editResponse.status, "edit", "webhook");
     }
     messageId = null;
   }
-  const sendResponse = await fetchDiscordRequest(`${webhookUrl}?wait=true`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  const sendResponse = await fetchDiscordDeliveryRequest(
+    `${webhookUrl}?wait=true`,
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) },
+    { mode: "webhook", operation: "post" },
+  );
   if (!sendResponse.ok) {
     throw new DiscordDeliveryError(`Discord webhook post failed with ${sendResponse.status}`, sendResponse.status, "post", "webhook");
   }
@@ -1137,6 +1175,27 @@ async function recordPostingStateError(env: Env, destination: PostingDestination
         updated_at = excluded.updated_at`,
     )
     .bind(crypto.randomUUID(), destination.guild_id, destination.post_type, destination.discord_channel_id, message, now, message, now, now)
+    .run();
+}
+
+async function recordAmbiguousDiscordDelivery(env: Env, destination: PostingDestination, payloadHash: string, message: string) {
+  const now = new Date().toISOString();
+  await requireDb(env)
+    .prepare(
+      `INSERT INTO server_posting_state (
+        id, guild_id, post_type, discord_channel_id, discord_message_id, last_posted_at,
+        last_edited_at, last_payload_hash, last_error, last_dispatch_attempt_at,
+        last_dispatch_status, last_dispatch_error, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, 'delivery_ambiguous', ?, ?, ?)
+      ON CONFLICT(guild_id, post_type, discord_channel_id) DO UPDATE SET
+        last_payload_hash = excluded.last_payload_hash,
+        last_error = excluded.last_error,
+        last_dispatch_attempt_at = excluded.last_dispatch_attempt_at,
+        last_dispatch_status = excluded.last_dispatch_status,
+        last_dispatch_error = excluded.last_dispatch_error,
+        updated_at = excluded.updated_at`,
+    )
+    .bind(crypto.randomUUID(), destination.guild_id, destination.post_type, destination.discord_channel_id, payloadHash, message, now, message, now, now)
     .run();
 }
 
@@ -1222,7 +1281,13 @@ async function fetchDiscordRequest(input: RequestInfo | URL, init: RequestInit =
   const boundedTimeoutMs = Math.max(100, Math.min(Math.trunc(timeoutMs) || DISCORD_REQUEST_TIMEOUT_MS, 5000));
   const timeout = setTimeout(() => controller.abort("DZN_DISCORD_REQUEST_TIMEOUT"), boundedTimeoutMs);
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    const response = await fetch(input, { ...init, signal: controller.signal });
+    const body = await response.arrayBuffer();
+    return new Response(body.byteLength ? body : null, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
   } catch (error) {
     if (controller.signal.aborted) throw new Error("discord_request_timeout");
     throw error;
@@ -1231,8 +1296,27 @@ async function fetchDiscordRequest(input: RequestInfo | URL, init: RequestInit =
   }
 }
 
+async function fetchDiscordDeliveryRequest(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  options: { mode: "bot" | "webhook"; operation: "post" | "edit"; timeoutMs?: number },
+) {
+  try {
+    return await fetchDiscordRequest(input, init, options.timeoutMs);
+  } catch (error) {
+    if (error instanceof Error && error.message === "discord_request_timeout") {
+      throw new DiscordRequestTimeoutError(options.operation, options.mode);
+    }
+    throw error;
+  }
+}
+
 export function fetchDiscordRequestForTest(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = DISCORD_REQUEST_TIMEOUT_MS) {
   return fetchDiscordRequest(input, init, timeoutMs);
+}
+
+export function sendDiscordBotMessageForTest(payload: DiscordPayload, deliveryNonce: string, timeoutMs: number) {
+  return sendOrEditWithBot("test-token", "test-channel", payload, null, deliveryNonce, timeoutMs);
 }
 
 async function getBotChannelPermissionBits(botToken: string, channel: DiscordChannel | null): Promise<bigint | null> {

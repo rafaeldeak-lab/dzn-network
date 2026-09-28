@@ -6,7 +6,7 @@ import {
   onRequestGet,
   onRequestOptions,
 } from "../functions/api/sync/discord-posts/run";
-import { fetchDiscordRequestForTest } from "../functions/_lib/discord-posting";
+import { fetchDiscordRequestForTest, sendDiscordBotMessageForTest } from "../functions/_lib/discord-posting";
 import type { Env, PagesContext } from "../functions/_lib/types";
 
 const env = {
@@ -133,6 +133,51 @@ async function run() {
       () => fetchDiscordRequestForTest("https://discord.test/messages", {}, 20),
       /discord_request_timeout/,
     );
+
+    globalThis.fetch = async (_input, init) => {
+      const stream = new ReadableStream({
+        start(controller) {
+          init?.signal?.addEventListener("abort", () => controller.error(new DOMException("The operation was aborted", "AbortError")), { once: true });
+        },
+      });
+      return new Response(stream, { status: 200, headers: { "content-type": "application/json" } });
+    };
+    await assert.rejects(
+      () => fetchDiscordRequestForTest("https://discord.test/stalled-body", {}, 20),
+      /discord_request_timeout/,
+    );
+
+    const acceptedNonces: string[] = [];
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { nonce?: string; enforce_nonce?: boolean };
+      assert.equal(body.enforce_nonce, true);
+      assert.equal(typeof body.nonce, "string");
+      acceptedNonces.push(body.nonce ?? "");
+      if (acceptedNonces.length === 1) {
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted", "AbortError")), { once: true });
+        });
+      }
+      return new Response(JSON.stringify({ id: "same-discord-message" }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const retryNonce = "same-delivery-nonce";
+    const testPayload = {
+      username: "DZN",
+      embeds: [{
+        title: "Status",
+        description: "Test status",
+        color: 0x22d3ee,
+        footer: { text: "DZN test" },
+        timestamp: "2026-09-28T00:00:00.000Z",
+      }],
+    };
+    await assert.rejects(
+      () => sendDiscordBotMessageForTest(testPayload, retryNonce, 20),
+      /discord_request_timeout/,
+    );
+    const reconciled = await sendDiscordBotMessageForTest(testPayload, retryNonce, 20);
+    assert.equal(reconciled.messageId, "same-discord-message");
+    assert.deepEqual(acceptedNonces, [retryNonce, retryNonce]);
   } finally {
     globalThis.fetch = originalFetch;
   }
