@@ -17,6 +17,7 @@ import { isMockNitrado } from "./mock";
 import { parseAdmLine } from "./adm-parser";
 import { patchHomeStatsPlayerCountsFromFreshMetadata } from "./player-counts";
 import {
+  automationBillingEligibilitySql,
   isMissingShowcaseSchema,
   showcaseAutomationEntitlementBindings,
   showcaseAutomationEntitlementCteSql,
@@ -1157,7 +1158,7 @@ export async function getDueMetadataRefreshServersFast(
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
-         ${includeShowcase ? "" : "AND lower(COALESCE(automation_entitlements.status, 'inactive')) IN ('active', 'trialing')"}
+         ${includeShowcase ? "" : `AND ${automationBillingEligibilitySql("automation_entitlements")}`}
          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES)})
          AND (
            ${lifecycleStatusSql} = 'active_live'
@@ -1236,7 +1237,7 @@ export async function getDueMetadataRefreshServersFast(
        LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id = ?
-         ${includeShowcase ? "" : "AND lower(COALESCE(automation_entitlements.status, 'inactive')) IN ('active', 'trialing')"}
+         ${includeShowcase ? "" : `AND ${automationBillingEligibilitySql("automation_entitlements")}`}
          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES)})
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        LIMIT 1`,

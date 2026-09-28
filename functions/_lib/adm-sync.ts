@@ -45,6 +45,7 @@ import {
 import { getActiveNitradoRateLimit } from "./nitrado-diagnostics";
 import { normalizePlanKey, type PlanKey } from "./plans";
 import {
+  automationBillingEligibilitySql,
   isMissingShowcaseSchema,
   showcaseAutomationEntitlementBindings,
   showcaseAutomationEntitlementCteSql,
@@ -7420,7 +7421,7 @@ export async function selectAdmWorkerServer(env: Env, cursorKey: string, options
          WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
            AND linked_servers.nitrado_service_id IS NOT NULL
            AND linked_servers.nitrado_service_id != ''
-           ${includeShowcase ? "" : "AND lower(automation_entitlements.status) IN ('active', 'trialing')"}
+           ${includeShowcase ? "" : `AND ${automationBillingEligibilitySql("automation_entitlements")}`}
            AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
            AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
            AND (
@@ -7576,7 +7577,7 @@ async function refreshOldestStaleAdmWorkerMetadata(env: Env): Promise<ScheduledM
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
-         ${includeShowcase ? "" : "AND lower(automation_entitlements.status) IN ('active', 'trialing')"}
+         ${includeShowcase ? "" : `AND ${automationBillingEligibilitySql("automation_entitlements")}`}
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
          AND (
            linked_servers.metadata_last_checked_at IS NULL

@@ -339,8 +339,10 @@ async function run() {
     assert.equal(genuineFree.plan.plan_key, "free");
     assert.equal(genuineFree.plan.configured_plan_key, "free");
     assert.ok(!genuineFree.problem_flags.includes("subscription_not_active"));
+    assert.ok(!genuineFree.problem_flags.includes("automation_access_inactive"));
+    assert.ok(genuineFree.problem_flags.includes("adm_processing_limited_by_plan"));
     assert.doesNotMatch(genuineFree.next_action, /paid plan/i);
-    assert.match(genuineFree.next_action, /owner's decision/i);
+    assert.match(genuineFree.next_action, /cron freshness/i);
   });
   await test("owner ADM discovery diagnostics preserve exact-server access and guild billing cadence", async ({ db, env }) => {
     const diagnosticEnv = { ...env, TOKEN_ENCRYPTION_KEY: "synthetic-only-test-key" } as Env;
@@ -368,8 +370,8 @@ async function run() {
       assert.deepEqual(granted.automation_access, {
         source: "complimentary_showcase",
         effective_plan_key: "pro",
-        billing_plan_key: "free",
-        billing_status: "inactive",
+        billing_plan_key: "pro",
+        billing_status: "canceled",
         discovery_persistence_plan_key: "free",
       });
       assert.ok(granted.selected_newest_available?.name,
@@ -388,8 +390,8 @@ async function run() {
       assert.deepEqual(unrelated.automation_access, {
         source: "billing",
         effective_plan_key: "free",
-        billing_plan_key: "free",
-        billing_status: "inactive",
+        billing_plan_key: "pro",
+        billing_status: "canceled",
         discovery_persistence_plan_key: "free",
       });
       const unrelatedCadence = (Date.parse(unrelated.current_saved_state.next_adm_discovery_due_at)
@@ -490,16 +492,37 @@ async function run() {
     const discovery = await getDueAdmDiscoveryAutomationServers(env, 10);
     const adm = await getDueAdmAutomationServers(env, 10, 10 * 60 * 1000);
     for (const [kind, rows] of [["status", status], ["fast status", fastStatus], ["discovery", discovery], ["adm", adm]] as const) {
-      assert.deepEqual(rows.map((row) => row.id), [scope.linkedServerId], kind);
-      assert.equal(rows[0]?.plan_key, "pro", kind);
-      assert.equal(rows[0]?.subscription_status, "active", kind);
-      assert.equal(rows[0]?.access_source, "complimentary_showcase", kind);
+      const matching = rows.filter((row) => row.guild_id === scope.guildId);
+      assert.deepEqual(matching.map((row) => row.id), [scope.linkedServerId], kind);
+      assert.equal(matching[0]?.plan_key, "pro", kind);
+      assert.equal(matching[0]?.subscription_status, "active", kind);
+      assert.equal(matching[0]?.access_source, "complimentary_showcase", kind);
     }
     const worker = await selectAdmWorkerServer(env, "showcase-scheduler-test");
     assert.equal(worker?.id, scope.linkedServerId);
     assert.equal(worker?.access_source, "complimentary_showcase");
     assert.equal(worker?.plan_key, "pro");
     assert.deepEqual(materialSubscriptions(), subscriptionBefore);
+  });
+  await test("genuine Free servers receive Free scheduler coverage while canceled Pro remains excluded", async ({ db, env }) => {
+    const canceledStatus = await getDueStatusAutomationServers(env, 10);
+    assert.equal(canceledStatus.some((row) => row.guild_id === scope.guildId), false);
+
+    db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'free', status = 'inactive' WHERE guild_id = ?").run(scope.guildId);
+    const expectedIds = [scope.linkedServerId, "same-guild-other-server"].sort();
+    const selectors = [
+      ["status", await getDueStatusAutomationServers(env, 10)],
+      ["fast status", await getDueMetadataRefreshServersFast(env, 10)],
+      ["discovery", await getDueAdmDiscoveryAutomationServers(env, 10)],
+      ["adm", await getDueAdmAutomationServers(env, 10, 10 * 60 * 1000)],
+    ] as const;
+    for (const [kind, rows] of selectors) {
+      const matching = rows.filter((row) => row.guild_id === scope.guildId);
+      assert.deepEqual(matching.map((row) => row.id).sort(), expectedIds, kind);
+      assert.ok(matching.every((row) => row.plan_key === "free"), kind);
+      assert.ok(matching.every((row) => row.subscription_status === "inactive"), kind);
+      assert.ok(matching.every((row) => row.access_source === "billing"), kind);
+    }
   });
   await test("complimentary ADM worker records Pro discovery and pull cadence", async ({ db, env }) => {
     await getDueStatusAutomationServers(env, 10);
@@ -624,6 +647,13 @@ async function run() {
     await upsertBillingAccount(env, { discordUserId: actor.discord_id, planKey: "pro", planStatus: "active" });
     const status = await getDueStatusAutomationServers(env, 10);
     assert.ok(status.some((row) => row.id === scope.linkedServerId));
+    assert.ok(status.every((row) => row.access_source === "billing"));
+  }, false);
+  await test("Free scheduler selection remains available before migration 0069", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'free', status = 'inactive' WHERE guild_id = ?").run(scope.guildId);
+    const status = await getDueStatusAutomationServers(env, 10);
+    assert.deepEqual(status.filter((row) => row.guild_id === scope.guildId).map((row) => row.id).sort(),
+      [scope.linkedServerId, "same-guild-other-server"].sort());
     assert.ok(status.every((row) => row.access_source === "billing"));
   }, false);
   await test("revoked exact grant rolls back official event creation", async ({ db, env }) => {
