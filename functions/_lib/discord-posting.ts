@@ -393,7 +393,7 @@ async function processConfiguredPostingDestination(
   const payloadHash = await hashPayload(payload);
   const deliveryIdentity = await createPostingDeliveryIdentity(destination, cache, listingPlanKey);
   const oldPayloadHash = state?.last_payload_hash ?? null;
-  if (state?.last_dispatch_status === "delivery_ambiguous" && state.last_payload_hash === deliveryIdentity) {
+  if (state?.last_dispatch_status === "webhook_delivery_ambiguous" && state.last_payload_hash === deliveryIdentity) {
     return {
       guild_id: destination.guild_id,
       post_type: destination.post_type,
@@ -459,7 +459,7 @@ async function processConfiguredPostingDestination(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Discord post update failed";
-    if (error instanceof DiscordRequestTimeoutError && error.operation === "post") {
+    if (error instanceof DiscordRequestTimeoutError && error.mode === "webhook" && error.operation === "post") {
       await recordAmbiguousDiscordDelivery(env, destination, deliveryIdentity, message);
     } else {
       await recordPostingStateError(env, destination, message);
@@ -1190,7 +1190,7 @@ async function recordAmbiguousDiscordDelivery(env: Env, destination: PostingDest
         id, guild_id, post_type, discord_channel_id, discord_message_id, last_posted_at,
         last_edited_at, last_payload_hash, last_error, last_dispatch_attempt_at,
         last_dispatch_status, last_dispatch_error, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, 'delivery_ambiguous', ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, 'webhook_delivery_ambiguous', ?, ?, ?)
       ON CONFLICT(guild_id, post_type, discord_channel_id) DO UPDATE SET
         last_payload_hash = excluded.last_payload_hash,
         last_error = excluded.last_error,

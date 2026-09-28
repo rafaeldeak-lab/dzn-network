@@ -991,6 +991,53 @@ async function run() {
     assert.equal(dispatched.results[0]?.status, "skipped_plan_locked");
     assert.deepEqual(db.sqlite.prepare("SELECT * FROM server_subscriptions").all(), subscriptionBefore);
   });
+  await test("timed-out bot creates retry through the dispatcher with a stable nonce", async ({ db, env }) => {
+    env.DISCORD_BOT_TOKEN = "synthetic-bot-token";
+    const grantId = await grant(env);
+    db.sqlite.prepare("UPDATE linked_servers SET status = 'archived', lifecycle_status = 'archived_hidden' WHERE id = 'same-guild-other-server'").run();
+    db.sqlite.prepare(`INSERT INTO server_posting_destinations (
+      id, guild_id, post_type, discord_channel_id, enabled, created_by_discord_id, created_at, updated_at
+    ) VALUES ('bot-timeout-retry', ?, 'priority_status_embed', '99999999', 1, ?,
+      '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`)
+      .run(scope.guildId, actor.discord_id);
+    assert.equal(await queueDiscordPostUpdatesForGuild(env, scope.guildId, "free", ["priority_status_embed"], "bot-timeout-retry", {
+      linkedServerId: scope.linkedServerId,
+    }), 1);
+
+    const previousFetch = globalThis.fetch;
+    const nonces: string[] = [];
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { nonce?: string; enforce_nonce?: boolean };
+      assert.equal(body.enforce_nonce, true);
+      nonces.push(body.nonce ?? "");
+      if (nonces.length === 1) {
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted", "AbortError")), { once: true });
+        });
+      }
+      return new Response(JSON.stringify({ id: "reconciled-message" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    try {
+      const timedOut = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+      assert.equal(timedOut.failed, 1);
+      assert.equal(db.sqlite.prepare("SELECT status FROM automation_jobs WHERE job_type = 'discord-post-update'").get()?.status, "queued");
+      assert.notEqual(db.sqlite.prepare("SELECT last_dispatch_status FROM server_posting_state WHERE guild_id = ?").get(scope.guildId)?.last_dispatch_status, "webhook_delivery_ambiguous");
+
+      db.sqlite.prepare("UPDATE automation_jobs SET run_after = '2026-01-01T00:00:00.000Z' WHERE job_type = 'discord-post-update'").run();
+      const retried = await dispatchQueuedDiscordPostUpdates(env, { maxJobs: 1 });
+      assert.equal(retried.sent, 1);
+      assert.equal(retried.results[0]?.message_id, "reconciled-message");
+      assert.equal(db.sqlite.prepare("SELECT status FROM automation_jobs WHERE job_type = 'discord-post-update'").get()?.status, "completed");
+      assert.equal(nonces.length, 2);
+      assert.equal(nonces[0], nonces[1]);
+    } finally {
+      globalThis.fetch = previousFetch;
+      revokeSql(db, grantId);
+    }
+  });
   await test("Free-compatible delivery rerenders after grant revocation", async ({ db, env }) => {
     const subscriptionBefore = db.sqlite.prepare("SELECT * FROM server_subscriptions").all();
     const grantId = await grant(env);
