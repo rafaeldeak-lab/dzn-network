@@ -116,6 +116,38 @@ function skippedReason(row: ServerDueRow, task: Extract<ServerLifecycleTask, "me
   return "due";
 }
 
+const showcaseSchemaAvailable = Number(runWranglerQuery<{ available: number }>(
+  "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'server_showcase_grants') AS available",
+)[0]?.available ?? 0) === 1;
+const complimentaryAutomationSql = showcaseSchemaAvailable
+  ? `EXISTS (
+      SELECT 1 FROM server_showcase_grants AS grant_row
+      JOIN users AS grant_owner ON grant_owner.id = linked_servers.user_id
+      WHERE grant_row.linked_server_id = linked_servers.id
+        AND linked_servers.id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.linkedServerId)}
+        AND linked_servers.user_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.ownerUserId)}
+        AND grant_owner.discord_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.ownerDiscordId)}
+        AND linked_servers.guild_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.guildId)}
+        AND linked_servers.nitrado_service_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.nitradoServiceId)}
+        AND lower(COALESCE(linked_servers.lifecycle_status, '')) = 'active_live'
+        AND grant_row.owner_user_id = linked_servers.user_id
+        AND grant_row.owner_discord_id = grant_owner.discord_id
+        AND grant_row.guild_id = linked_servers.guild_id
+        AND grant_row.nitrado_service_id = linked_servers.nitrado_service_id
+        AND grant_row.plan_key = 'pro'
+        AND grant_row.purpose = 'platform_owner_showcase'
+        AND grant_row.revoked_at IS NULL
+        AND julianday(grant_row.created_at) <= julianday('now')
+        AND (grant_row.expires_at IS NULL OR julianday(grant_row.expires_at) > julianday('now'))
+        AND NOT EXISTS (
+          SELECT 1 FROM server_subscriptions AS paid_pro
+          WHERE paid_pro.guild_id = linked_servers.guild_id
+            AND lower(COALESCE(paid_pro.status, '')) IN ('active', 'trialing')
+            AND lower(COALESCE(paid_pro.plan_key, '')) IN ('pro', 'premium', 'network', 'partner')
+        )
+    )`
+  : "0";
+
 const rows = runWranglerQuery<ServerDueRow>(
   `SELECT linked_servers.id, linked_servers.guild_id, linked_servers.public_slug,
           linked_servers.nitrado_service_id, linked_servers.display_name,
@@ -124,32 +156,7 @@ const rows = runWranglerQuery<ServerDueRow>(
           ${serverLifecycleSqlExpression("linked_servers")} AS lifecycle_status,
           linked_servers.merged_into_server_id, linked_servers.final_sync_attempted_at,
           server_subscriptions.plan_key, server_subscriptions.status AS subscription_status,
-          EXISTS (
-            SELECT 1 FROM server_showcase_grants AS grant_row
-            JOIN users AS grant_owner ON grant_owner.id = linked_servers.user_id
-            WHERE grant_row.linked_server_id = linked_servers.id
-              AND linked_servers.id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.linkedServerId)}
-              AND linked_servers.user_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.ownerUserId)}
-              AND grant_owner.discord_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.ownerDiscordId)}
-              AND linked_servers.guild_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.guildId)}
-              AND linked_servers.nitrado_service_id = ${sqlLiteral(NUKETOWN_SHOWCASE_SCOPE.nitradoServiceId)}
-              AND lower(COALESCE(linked_servers.lifecycle_status, '')) = 'active_live'
-              AND grant_row.owner_user_id = linked_servers.user_id
-              AND grant_row.owner_discord_id = grant_owner.discord_id
-              AND grant_row.guild_id = linked_servers.guild_id
-              AND grant_row.nitrado_service_id = linked_servers.nitrado_service_id
-              AND grant_row.plan_key = 'pro'
-              AND grant_row.purpose = 'platform_owner_showcase'
-              AND grant_row.revoked_at IS NULL
-              AND julianday(grant_row.created_at) <= julianday('now')
-              AND (grant_row.expires_at IS NULL OR julianday(grant_row.expires_at) > julianday('now'))
-              AND NOT EXISTS (
-                SELECT 1 FROM server_subscriptions AS paid_pro
-                WHERE paid_pro.guild_id = linked_servers.guild_id
-                  AND lower(COALESCE(paid_pro.status, '')) IN ('active', 'trialing')
-                  AND lower(COALESCE(paid_pro.plan_key, '')) IN ('pro', 'premium', 'network', 'partner')
-              )
-          ) AS complimentary_automation_access,
+          ${complimentaryAutomationSql} AS complimentary_automation_access,
           server_sync_state.next_status_check_due_at,
           server_sync_state.next_adm_discovery_due_at,
           server_sync_state.next_adm_pull_due_at,
