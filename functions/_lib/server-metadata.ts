@@ -17,6 +17,7 @@ import { isMockNitrado } from "./mock";
 import { parseAdmLine } from "./adm-parser";
 import { patchHomeStatsPlayerCountsFromFreshMetadata } from "./player-counts";
 import {
+  automationBillingEligibilitySql,
   isMissingShowcaseSchema,
   showcaseAutomationEntitlementBindings,
   showcaseAutomationEntitlementCteSql,
@@ -1157,7 +1158,7 @@ export async function getDueMetadataRefreshServersFast(
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
-         ${includeShowcase ? "" : "AND lower(COALESCE(automation_entitlements.status, 'inactive')) IN ('active', 'trialing')"}
+         ${includeShowcase ? "" : `AND ${automationBillingEligibilitySql("automation_entitlements")}`}
          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES)})
          AND (
            ${lifecycleStatusSql} = 'active_live'
@@ -1165,9 +1166,14 @@ export async function getDueMetadataRefreshServersFast(
          )
          AND (
            COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
-           OR linked_servers.player_count_last_checked_at IS NULL
-           OR linked_servers.player_count_last_checked_at <= ?
-           OR COALESCE(server_sync_state.status_sync_started_at, server_sync_state.updated_at, '1970-01-01T00:00:00.000Z') <= ?
+           OR (
+             lower(COALESCE(automation_entitlements.plan_key, 'free')) != 'free'
+             AND (
+               linked_servers.player_count_last_checked_at IS NULL
+               OR linked_servers.player_count_last_checked_at <= ?
+               OR COALESCE(server_sync_state.status_sync_started_at, server_sync_state.updated_at, '1970-01-01T00:00:00.000Z') <= ?
+             )
+           )
          )
          AND (
            lower(COALESCE(linked_servers.player_count_status, 'unknown')) != 'unavailable'
@@ -1236,7 +1242,7 @@ export async function getDueMetadataRefreshServersFast(
        LEFT JOIN server_sync_state ON server_sync_state.guild_id = linked_servers.guild_id
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id = ?
-         ${includeShowcase ? "" : "AND lower(COALESCE(automation_entitlements.status, 'inactive')) IN ('active', 'trialing')"}
+         ${includeShowcase ? "" : `AND ${automationBillingEligibilitySql("automation_entitlements")}`}
          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES)})
          AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
        LIMIT 1`,

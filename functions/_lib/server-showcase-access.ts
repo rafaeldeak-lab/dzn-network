@@ -41,6 +41,19 @@ const ACTIVE_SHOWCASE_GRANT_FROM_SQL_AT_DB_TIME = activeShowcaseGrantFromSql("'n
 export const ACTIVE_SHOWCASE_GRANT_AT_DB_TIME_SQL = `SELECT grant_row.id, grant_row.expires_at ${ACTIVE_SHOWCASE_GRANT_FROM_SQL_AT_DB_TIME} LIMIT 1`;
 const SHOWCASE_WRITE_ASSERTION_FAILURE = /integer overflow/i;
 
+export function isAutomationBillingEligible(planKey: unknown, status: unknown) {
+  const normalizedPlan = String(planKey ?? "free").trim().toLowerCase();
+  const normalizedStatus = String(status ?? "inactive").trim().toLowerCase();
+  return normalizedStatus === "active" || normalizedStatus === "trialing"
+    || (normalizedPlan === "free" && (normalizedStatus === "free" || normalizedStatus === "inactive"));
+}
+
+export function automationBillingEligibilitySql(alias: "paid" | "automation_entitlements" | "server_subscriptions") {
+  return `(lower(COALESCE(${alias}.status, 'inactive')) IN ('active', 'trialing')
+    OR (lower(COALESCE(${alias}.plan_key, 'free')) = 'free'
+      AND lower(COALESCE(${alias}.status, 'inactive')) IN ('free', 'inactive')))`;
+}
+
 export function showcaseAutomationEntitlementCteSql() {
   return `WITH complimentary_automation_entitlements AS (
     SELECT entitlement_server.id AS linked_server_id, entitlement_server.guild_id,
@@ -61,7 +74,7 @@ export function showcaseAutomationEntitlementCteSql() {
            'billing' AS access_source
     FROM server_subscriptions AS paid
     JOIN linked_servers AS paid_server ON paid_server.guild_id = paid.guild_id
-    WHERE lower(COALESCE(paid.status, '')) IN ('active', 'trialing')
+    WHERE ${automationBillingEligibilitySql("paid")}
       AND NOT EXISTS (
         SELECT 1 FROM complimentary_automation_entitlements AS complimentary
         WHERE complimentary.linked_server_id = paid_server.id

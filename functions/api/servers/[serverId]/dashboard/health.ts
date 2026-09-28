@@ -5,7 +5,7 @@ import { effectiveEntitlementPlan, getAdmDiscoveryIntervalMinutes, getAdmPullInt
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
 import { calculateServerScore } from "../../../../_lib/server-ranking";
 import { getCanonicalServerRank, getCanonicalServerStats } from "../../../../_lib/server-stats";
-import { readServerShowcaseAccess, serializeShowcaseAccess } from "../../../../_lib/server-showcase-access";
+import { isAutomationBillingEligible, readServerShowcaseAccess, serializeShowcaseAccess } from "../../../../_lib/server-showcase-access";
 import type { PagesFunction } from "../../../../_lib/types";
 import { getServerLifecycleDisplay, normalizeServerLifecycleStatus } from "../../../../../lib/server-lifecycle";
 
@@ -404,7 +404,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
       ...(fileState && numberOrZero(fileState.missing_count) > 0 && !(currentLiveAdm.healthy && !backlogIssueAppliesToCurrent) ? ["adm_backfill_missing"] : []),
       ...(fileState && numberOrZero(fileState.unreadable_count) > 0 && !(currentLiveAdm.healthy && !backlogIssueAppliesToCurrent) ? ["nitrado_read_waiting"] : []),
       ...(admNitradoReadFailure && !(currentLiveAdm.healthy && !backlogIssueAppliesToCurrent) ? ["adm_nitrado_read_failure"] : []),
-      ...(server.subscription_status && !["active", "trialing"].includes(String(server.subscription_status).toLowerCase()) ? ["subscription_not_active"] : []),
+      ...(server.subscription_status && !isAutomationBillingEligible(server.plan_key, server.subscription_status) ? ["subscription_not_active"] : []),
     ];
 
     const generatedAt = new Date().toISOString();

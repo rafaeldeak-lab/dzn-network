@@ -4,6 +4,7 @@ import { json, methodNotAllowed } from "../../../../_lib/http";
 import { effectiveEntitlementPlan, getAdmDiscoveryIntervalMinutes, getAdmPullInterval, getServerStatusInterval, normalizePlanKey } from "../../../../_lib/plans";
 import { requireServerOwnerOrDznAdmin } from "../../../../_lib/public-cache";
 import { calculateServerScore } from "../../../../_lib/server-ranking";
+import { isAutomationBillingEligible } from "../../../../_lib/server-showcase-access";
 import { getCanonicalServerStats } from "../../../../_lib/server-stats";
 import type { PagesFunction } from "../../../../_lib/types";
 
@@ -244,7 +245,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
       : effectiveEntitlementPlan(planKey, billingStatus);
     const accessSource = automationContext?.accessSource ?? "billing";
     const automationEligible = accessSource === "complimentary_showcase"
-      || ["active", "trialing"].includes((billingStatus ?? "").toLowerCase());
+      || isAutomationBillingEligible(billingPlanKey, billingStatus);
     const statsSnapshot = canonicalStats ? buildStatsSnapshotFromCanonical(canonicalStats) : buildStatsSnapshot(stats);
     const completedJobs = completedJobsResult.results ?? [];
     const completedFiles = new Set(completedJobs.map((job) => job.filename));
@@ -497,6 +498,7 @@ function getNextAction(input: {
   if (input.missingFiles.length) return `Queue/import oldest missing ADM file ${input.missingFiles[0]}.`;
   if (input.unreadableFilesCount > 0) return "Retry unreadable Nitrado ADM files on the next discovery run.";
   if (!input.cronHealthy) return "Check Cloudflare cron freshness.";
+  if (input.effectivePlanKey === "free") return "Free tracking is active at its reduced cadence and waiting for the next Nitrado ADM file.";
   return "ADM automation is caught up and waiting for the next Nitrado ADM file.";
 }
 

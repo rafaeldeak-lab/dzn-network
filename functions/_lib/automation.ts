@@ -13,6 +13,7 @@ import {
 } from "./plans";
 import { rankServers } from "./server-ranking";
 import {
+  automationBillingEligibilitySql,
   isMissingShowcaseSchema,
   readServerShowcaseAccess,
   showcaseAutomationEntitlementBindings,
@@ -111,13 +112,27 @@ export async function ensureAutomationRowsForLinkedServers(env: Env) {
               linked_servers.max_players, linked_servers.is_online, linked_servers.server_status,
               linked_servers.metadata_last_checked_at, linked_servers.player_count_last_checked_at,
               linked_servers.user_id, users.discord_id AS owner_discord_id,
+              owner_billing_accounts.id AS owner_billing_account_id,
               owner_billing_accounts.stripe_customer_id, owner_billing_accounts.stripe_subscription_id,
               owner_billing_accounts.plan_key, owner_billing_accounts.plan_status,
               owner_billing_accounts.current_period_start, owner_billing_accounts.current_period_end,
-              owner_billing_accounts.cancel_at_period_end
+              owner_billing_accounts.cancel_at_period_end,
+              existing_subscription.owner_discord_id AS existing_owner_discord_id,
+              existing_subscription.stripe_customer_id AS existing_stripe_customer_id,
+              existing_subscription.stripe_subscription_id AS existing_stripe_subscription_id,
+              existing_subscription.plan_key AS existing_plan_key,
+              existing_subscription.status AS existing_status,
+              existing_subscription.current_period_start AS existing_current_period_start,
+              existing_subscription.current_period_end AS existing_current_period_end,
+              existing_subscription.cancel_at_period_end AS existing_cancel_at_period_end,
+              guild_subscription.owner_discord_id AS guild_subscription_owner_discord_id
        FROM linked_servers
        LEFT JOIN users ON users.id = linked_servers.user_id
        LEFT JOIN owner_billing_accounts ON owner_billing_accounts.discord_user_id = users.discord_id
+       LEFT JOIN server_subscriptions AS existing_subscription
+         ON existing_subscription.guild_id = linked_servers.guild_id
+        AND existing_subscription.owner_discord_id = users.discord_id
+       LEFT JOIN server_subscriptions AS guild_subscription ON guild_subscription.guild_id = linked_servers.guild_id
        WHERE linked_servers.guild_id IS NOT NULL
          AND linked_servers.guild_id != ''
           AND linked_servers.nitrado_service_id IS NOT NULL
@@ -139,6 +154,7 @@ export async function ensureAutomationRowsForLinkedServers(env: Env) {
       metadata_last_checked_at: string | null;
       player_count_last_checked_at: string | null;
       owner_discord_id: string | null;
+      owner_billing_account_id: string | null;
       stripe_customer_id: string | null;
       stripe_subscription_id: string | null;
       plan_key: string | null;
@@ -146,22 +162,38 @@ export async function ensureAutomationRowsForLinkedServers(env: Env) {
       current_period_start: string | null;
       current_period_end: string | null;
       cancel_at_period_end: number | null;
+      existing_owner_discord_id: string | null;
+      existing_stripe_customer_id: string | null;
+      existing_stripe_subscription_id: string | null;
+      existing_plan_key: string | null;
+      existing_status: string | null;
+      existing_current_period_start: string | null;
+      existing_current_period_end: string | null;
+      existing_cancel_at_period_end: number | null;
+      guild_subscription_owner_discord_id: string | null;
     }>();
 
   for (const row of rows.results ?? []) {
-    const status = row.plan_status ?? "inactive";
-    const planKey = normalizePlanKey(row.plan_key);
+    const hasOwnerBilling = Boolean(row.owner_billing_account_id);
+    const status = (hasOwnerBilling ? row.plan_status : row.existing_status) ?? "inactive";
+    const planKey = normalizePlanKey(hasOwnerBilling ? row.plan_key : row.existing_plan_key);
+    const ownerDiscordId = row.owner_discord_id ?? row.existing_owner_discord_id ?? "";
     await upsertServerSubscription(env, {
       guildId: row.guild_id,
-      ownerDiscordId: row.owner_discord_id ?? "",
-      stripeCustomerId: row.stripe_customer_id,
-      stripeSubscriptionId: row.stripe_subscription_id,
+      ownerDiscordId,
+      stripeCustomerId: hasOwnerBilling ? row.stripe_customer_id : row.existing_stripe_customer_id,
+      stripeSubscriptionId: hasOwnerBilling ? row.stripe_subscription_id : row.existing_stripe_subscription_id,
       stripePriceId: null,
       planKey,
       status,
-      currentPeriodStart: row.current_period_start,
-      currentPeriodEnd: row.current_period_end,
-      cancelAtPeriodEnd: Number(row.cancel_at_period_end ?? 0) === 1,
+      currentPeriodStart: hasOwnerBilling ? row.current_period_start : row.existing_current_period_start,
+      currentPeriodEnd: hasOwnerBilling ? row.current_period_end : row.existing_current_period_end,
+      cancelAtPeriodEnd: Number(hasOwnerBilling ? row.cancel_at_period_end : row.existing_cancel_at_period_end) === 1,
+      replaceBillingIdentity: Boolean(
+        row.guild_subscription_owner_discord_id
+        && ownerDiscordId
+        && row.guild_subscription_owner_discord_id !== ownerDiscordId,
+      ),
       forceDue: isActiveSubscriptionStatus(status),
     });
     await upsertServerPublicCache(env, {
@@ -489,6 +521,7 @@ export async function upsertServerSubscription(env: Env, input: {
   currentPeriodStart?: string | null;
   currentPeriodEnd?: string | null;
   cancelAtPeriodEnd?: boolean;
+  replaceBillingIdentity?: boolean;
   forceDue?: boolean;
 }) {
   await ensureAutomationSchema(env);
@@ -506,13 +539,13 @@ export function serverSubscriptionStatements(env: Env, input: Parameters<typeof 
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(guild_id) DO UPDATE SET
         owner_discord_id = excluded.owner_discord_id,
-        stripe_customer_id = COALESCE(excluded.stripe_customer_id, server_subscriptions.stripe_customer_id),
-        stripe_subscription_id = COALESCE(excluded.stripe_subscription_id, server_subscriptions.stripe_subscription_id),
-        stripe_price_id = COALESCE(excluded.stripe_price_id, server_subscriptions.stripe_price_id),
+        stripe_customer_id = CASE WHEN ? THEN excluded.stripe_customer_id ELSE COALESCE(excluded.stripe_customer_id, server_subscriptions.stripe_customer_id) END,
+        stripe_subscription_id = CASE WHEN ? THEN excluded.stripe_subscription_id ELSE COALESCE(excluded.stripe_subscription_id, server_subscriptions.stripe_subscription_id) END,
+        stripe_price_id = CASE WHEN ? THEN excluded.stripe_price_id ELSE COALESCE(excluded.stripe_price_id, server_subscriptions.stripe_price_id) END,
         plan_key = excluded.plan_key,
         status = excluded.status,
-        current_period_start = COALESCE(excluded.current_period_start, server_subscriptions.current_period_start),
-        current_period_end = COALESCE(excluded.current_period_end, server_subscriptions.current_period_end),
+        current_period_start = CASE WHEN ? THEN excluded.current_period_start ELSE COALESCE(excluded.current_period_start, server_subscriptions.current_period_start) END,
+        current_period_end = CASE WHEN ? THEN excluded.current_period_end ELSE COALESCE(excluded.current_period_end, server_subscriptions.current_period_end) END,
         cancel_at_period_end = excluded.cancel_at_period_end,
         updated_at = excluded.updated_at`,
     )
@@ -530,6 +563,11 @@ export function serverSubscriptionStatements(env: Env, input: Parameters<typeof 
       input.cancelAtPeriodEnd ? 1 : 0,
       now,
       now,
+      input.replaceBillingIdentity ? 1 : 0,
+      input.replaceBillingIdentity ? 1 : 0,
+      input.replaceBillingIdentity ? 1 : 0,
+      input.replaceBillingIdentity ? 1 : 0,
+      input.replaceBillingIdentity ? 1 : 0,
     );
 
   const sync = db
@@ -640,7 +678,7 @@ export async function getDueStatusAutomationServers(env: Env, maxServers: number
        WHERE lower(COALESCE(linked_servers.status, 'pending')) = 'live'
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
-          ${includeShowcase ? "" : "AND lower(automation_entitlements.status) IN ('active', 'trialing')"}
+          ${includeShowcase ? "" : `AND ${automationBillingEligibilitySql("automation_entitlements")}`}
           AND COALESCE(server_sync_state.currently_checking_status, 0) = 0
           AND COALESCE(server_sync_state.next_status_check_due_at, '1970-01-01T00:00:00.000Z') <= ?
           AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES)})
@@ -988,7 +1026,7 @@ export async function getDueAdmAutomationServers(env: Env, maxServers: number, m
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
          AND (? IS NULL OR linked_servers.id = ?)
-          ${includeShowcase ? "" : "AND lower(automation_entitlements.status) IN ('active', 'trialing')"}
+          ${includeShowcase ? "" : `AND ${automationBillingEligibilitySql("automation_entitlements")}`}
           AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
           AND COALESCE(server_sync_state.next_adm_pull_due_at, '1970-01-01T00:00:00.000Z') <= ?
           AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
@@ -1055,7 +1093,7 @@ export async function getDueAdmDiscoveryAutomationServers(env: Env, maxServers: 
          AND linked_servers.nitrado_service_id IS NOT NULL
          AND linked_servers.nitrado_service_id != ''
          AND (? IS NULL OR linked_servers.id = ?)
-          ${includeShowcase ? "" : "AND lower(automation_entitlements.status) IN ('active', 'trialing')"}
+          ${includeShowcase ? "" : `AND ${automationBillingEligibilitySql("automation_entitlements")}`}
           AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
           AND COALESCE(server_sync_state.next_adm_discovery_due_at, '1970-01-01T00:00:00.000Z') <= ?
           AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
@@ -1993,7 +2031,7 @@ export async function getAutomationHealth(env: Env) {
        FROM server_subscriptions
        JOIN server_sync_state ON server_sync_state.guild_id = server_subscriptions.guild_id
        JOIN linked_servers ON linked_servers.guild_id = server_subscriptions.guild_id
-       WHERE lower(server_subscriptions.status) IN ('active', 'trialing')
+       WHERE ${automationBillingEligibilitySql("server_subscriptions")}
          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_METADATA_STATUSES)})
          AND COALESCE(server_sync_state.currently_checking_status, 0) = 0
          AND (${lifecycleStatusSql} = 'active_live' OR COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') <= ?)
@@ -2004,7 +2042,7 @@ export async function getAutomationHealth(env: Env) {
        FROM server_subscriptions
        JOIN server_sync_state ON server_sync_state.guild_id = server_subscriptions.guild_id
        JOIN linked_servers ON linked_servers.guild_id = server_subscriptions.guild_id
-       WHERE lower(server_subscriptions.status) IN ('active', 'trialing')
+       WHERE ${automationBillingEligibilitySql("server_subscriptions")}
          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
          AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
          AND (${lifecycleStatusSql} NOT IN ('active_degraded', 'nitrado_upstream_down', 'stale_monitoring') OR COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') <= ?)
@@ -2016,7 +2054,7 @@ export async function getAutomationHealth(env: Env) {
        FROM server_subscriptions
        JOIN server_sync_state ON server_sync_state.guild_id = server_subscriptions.guild_id
        JOIN linked_servers ON linked_servers.guild_id = server_subscriptions.guild_id
-       WHERE lower(server_subscriptions.status) IN ('active', 'trialing')
+       WHERE ${automationBillingEligibilitySql("server_subscriptions")}
          AND ${lifecycleStatusSql} IN (${serverLifecycleInSql(SERVER_LIFECYCLE_ACTIVE_ADM_STATUSES)})
          AND COALESCE(server_sync_state.currently_syncing_adm, 0) = 0
          AND (${lifecycleStatusSql} NOT IN ('active_degraded', 'nitrado_upstream_down', 'stale_monitoring') OR COALESCE(server_sync_state.next_retry_after, '1970-01-01T00:00:00.000Z') <= ?)
@@ -2071,7 +2109,7 @@ export async function getAutomationHealth(env: Env) {
             WHEN ${lifecycleStatusSql} = 'token_needs_resave' THEN 'skipped_token_needs_resave'
             WHEN lower(COALESCE(linked_servers.status, 'pending')) != 'live' THEN 'not_live'
             WHEN linked_servers.nitrado_service_id IS NULL OR linked_servers.nitrado_service_id = '' THEN 'missing_nitrado_token'
-            WHEN lower(COALESCE(server_subscriptions.status, '')) NOT IN ('active', 'trialing') THEN 'no_active_subscription'
+            WHEN NOT ${automationBillingEligibilitySql("server_subscriptions")} THEN 'no_active_subscription'
             WHEN COALESCE(server_sync_state.currently_checking_status, 0) = 1 THEN 'currently_checking_status'
             WHEN COALESCE(server_sync_state.currently_syncing_adm, 0) = 1 THEN 'currently_syncing_adm'
             WHEN ${lifecycleStatusSql} IN ('active_degraded', 'nitrado_upstream_down', 'stale_monitoring')
@@ -2186,7 +2224,8 @@ export async function getAutomationHealth(env: Env) {
     admImportJobsTableExists ? db
       .prepare(
         `SELECT
-          MAX(CASE WHEN source = 'scheduled_nitrado' AND chunks_processed > 0 THEN updated_at ELSE NULL END) AS last_chunk_processed_at,
+          MAX(CASE WHEN adm_import_jobs.source = 'scheduled_nitrado' AND adm_import_jobs.chunks_processed > 0
+            THEN adm_import_jobs.updated_at ELSE NULL END) AS last_chunk_processed_at,
           (SELECT filename FROM adm_import_jobs
            WHERE source = 'scheduled_nitrado'
              AND status IN ('completed', 'completed_with_warnings')

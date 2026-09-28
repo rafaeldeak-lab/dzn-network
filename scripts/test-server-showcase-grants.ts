@@ -29,11 +29,13 @@ import { createServerWarChallenge, getOwnerServerWarsPayload, getServerWarOppone
 import { processServerMatchmakingOptIn } from "../functions/_lib/ctf-tournaments";
 import {
   getAutomationContextForLinkedServer,
+  getAutomationHealth,
   getDueAdmAutomationServers,
   getDueAdmDiscoveryAutomationServers,
   getDueStatusAutomationServers,
   queueDiscordPostUpdatesForGuild,
 } from "../functions/_lib/automation";
+import { getPublicCacheDebugForServer } from "../functions/_lib/public-cache";
 import { dispatchQueuedDiscordPostUpdates } from "../functions/_lib/discord-posting";
 import { onRequest as postingDestinations } from "../functions/api/servers/[serverId]/posting-destinations";
 import { getOwnerDiscordOverview } from "../functions/_lib/owner-discord-control";
@@ -339,8 +341,10 @@ async function run() {
     assert.equal(genuineFree.plan.plan_key, "free");
     assert.equal(genuineFree.plan.configured_plan_key, "free");
     assert.ok(!genuineFree.problem_flags.includes("subscription_not_active"));
+    assert.ok(!genuineFree.problem_flags.includes("automation_access_inactive"));
+    assert.ok(genuineFree.problem_flags.includes("adm_processing_limited_by_plan"));
     assert.doesNotMatch(genuineFree.next_action, /paid plan/i);
-    assert.match(genuineFree.next_action, /owner's decision/i);
+    assert.match(genuineFree.next_action, /cron freshness/i);
   });
   await test("owner ADM discovery diagnostics preserve exact-server access and guild billing cadence", async ({ db, env }) => {
     const diagnosticEnv = { ...env, TOKEN_ENCRYPTION_KEY: "synthetic-only-test-key" } as Env;
@@ -368,8 +372,8 @@ async function run() {
       assert.deepEqual(granted.automation_access, {
         source: "complimentary_showcase",
         effective_plan_key: "pro",
-        billing_plan_key: "free",
-        billing_status: "inactive",
+        billing_plan_key: "pro",
+        billing_status: "canceled",
         discovery_persistence_plan_key: "free",
       });
       assert.ok(granted.selected_newest_available?.name,
@@ -388,8 +392,8 @@ async function run() {
       assert.deepEqual(unrelated.automation_access, {
         source: "billing",
         effective_plan_key: "free",
-        billing_plan_key: "free",
-        billing_status: "inactive",
+        billing_plan_key: "pro",
+        billing_status: "canceled",
         discovery_persistence_plan_key: "free",
       });
       const unrelatedCadence = (Date.parse(unrelated.current_saved_state.next_adm_discovery_due_at)
@@ -490,16 +494,116 @@ async function run() {
     const discovery = await getDueAdmDiscoveryAutomationServers(env, 10);
     const adm = await getDueAdmAutomationServers(env, 10, 10 * 60 * 1000);
     for (const [kind, rows] of [["status", status], ["fast status", fastStatus], ["discovery", discovery], ["adm", adm]] as const) {
-      assert.deepEqual(rows.map((row) => row.id), [scope.linkedServerId], kind);
-      assert.equal(rows[0]?.plan_key, "pro", kind);
-      assert.equal(rows[0]?.subscription_status, "active", kind);
-      assert.equal(rows[0]?.access_source, "complimentary_showcase", kind);
+      const matching = rows.filter((row) => row.guild_id === scope.guildId);
+      assert.deepEqual(matching.map((row) => row.id), [scope.linkedServerId], kind);
+      assert.equal(matching[0]?.plan_key, "pro", kind);
+      assert.equal(matching[0]?.subscription_status, "active", kind);
+      assert.equal(matching[0]?.access_source, "complimentary_showcase", kind);
     }
     const worker = await selectAdmWorkerServer(env, "showcase-scheduler-test");
     assert.equal(worker?.id, scope.linkedServerId);
     assert.equal(worker?.access_source, "complimentary_showcase");
     assert.equal(worker?.plan_key, "pro");
     assert.deepEqual(materialSubscriptions(), subscriptionBefore);
+  });
+  await test("genuine Free servers receive Free scheduler coverage while canceled Pro remains excluded", async ({ db, env }) => {
+    const canceledStatus = await getDueStatusAutomationServers(env, 10);
+    assert.equal(canceledStatus.some((row) => row.guild_id === scope.guildId), false);
+
+    db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'free', status = 'inactive' WHERE guild_id = ?").run(scope.guildId);
+    const expectedIds = [scope.linkedServerId, "same-guild-other-server"].sort();
+    const selectors = [
+      ["status", await getDueStatusAutomationServers(env, 10)],
+      ["fast status", await getDueMetadataRefreshServersFast(env, 10)],
+      ["discovery", await getDueAdmDiscoveryAutomationServers(env, 10)],
+      ["adm", await getDueAdmAutomationServers(env, 10, 10 * 60 * 1000)],
+    ] as const;
+    for (const [kind, rows] of selectors) {
+      const matching = rows.filter((row) => row.guild_id === scope.guildId);
+      assert.deepEqual(matching.map((row) => row.id).sort(), expectedIds, kind);
+      assert.ok(matching.every((row) => row.plan_key === "free"), kind);
+      assert.ok(matching.every((row) => row.subscription_status === "inactive"), kind);
+      assert.ok(matching.every((row) => row.access_source === "billing"), kind);
+    }
+    const health = await getAutomationHealth(env);
+    assert.ok(health.due_metadata_jobs >= 2);
+    assert.ok(health.due_adm_discovery_jobs >= 2);
+    assert.ok(health.due_adm_jobs >= 2);
+    assert.ok(health.due_server_diagnostics
+      .filter((row) => row.guild_id === scope.guildId)
+      .every((row) => row.skipped_reason !== "no_active_subscription"));
+    const cacheDebug = await getPublicCacheDebugForServer(env, scope.linkedServerId);
+    assert.equal(cacheDebug.plan_due_state.skipped_reason, null);
+    assert.ok(!cacheDebug.problem_flags.includes("subscription_not_active"));
+  });
+  await test("transferred servers cannot inherit the former owner's paid automation identity", async ({ db, env }) => {
+    db.sqlite.prepare(`INSERT INTO server_subscriptions (id, guild_id, owner_discord_id, stripe_customer_id,
+      stripe_subscription_id, stripe_price_id, plan_key, status, current_period_start, current_period_end,
+      cancel_at_period_end, created_at, updated_at)
+      VALUES ('transferred-subscription', '11110000', ?, 'cus_previous', 'sub_previous', 'price_previous',
+        'pro', 'active', '2026-09-01', '2026-10-01', 1, '2026-09-01', '2026-09-01')`).run(actor.discord_id);
+    db.sqlite.prepare("UPDATE linked_servers SET user_id = ? WHERE id = 'same-owner-other-guild'").run(other.id);
+
+    await getDueStatusAutomationServers(env, 10);
+
+    const subscription = db.sqlite.prepare(`SELECT owner_discord_id, stripe_customer_id, stripe_subscription_id,
+      stripe_price_id, plan_key, status, current_period_start, current_period_end, cancel_at_period_end
+      FROM server_subscriptions WHERE guild_id = '11110000'`).get();
+    assert.deepEqual({ ...subscription }, {
+      owner_discord_id: other.discord_id,
+      stripe_customer_id: null,
+      stripe_subscription_id: null,
+      stripe_price_id: null,
+      plan_key: "free",
+      status: "inactive",
+      current_period_start: null,
+      current_period_end: null,
+      cancel_at_period_end: 0,
+    });
+    const due = await getDueStatusAutomationServers(env, 10);
+    const transferred = due.find((row) => row.id === "same-owner-other-guild");
+    assert.equal(transferred?.plan_key, "free");
+    assert.equal(transferred?.subscription_status, "inactive");
+  });
+  await test("transferred servers replace former billing when the new owner has a Free account", async ({ db, env }) => {
+    await upsertBillingAccount(env, { discordUserId: other.discord_id, planKey: "free", planStatus: "free" });
+    db.sqlite.prepare(`INSERT INTO server_subscriptions (id, guild_id, owner_discord_id, stripe_customer_id,
+      stripe_subscription_id, stripe_price_id, plan_key, status, current_period_start, current_period_end,
+      cancel_at_period_end, created_at, updated_at)
+      VALUES ('transferred-subscription', '11110000', ?, 'cus_previous', 'sub_previous', 'price_previous',
+        'pro', 'active', '2026-09-01', '2026-10-01', 1, '2026-09-01', '2026-09-01')`).run(actor.discord_id);
+    db.sqlite.prepare("UPDATE linked_servers SET user_id = ? WHERE id = 'same-owner-other-guild'").run(other.id);
+
+    await getDueStatusAutomationServers(env, 10);
+
+    const subscription = db.sqlite.prepare(`SELECT owner_discord_id, stripe_customer_id, stripe_subscription_id,
+      stripe_price_id, plan_key, status, current_period_start, current_period_end, cancel_at_period_end
+      FROM server_subscriptions WHERE guild_id = '11110000'`).get();
+    assert.deepEqual({ ...subscription }, {
+      owner_discord_id: other.discord_id,
+      stripe_customer_id: null,
+      stripe_subscription_id: null,
+      stripe_price_id: null,
+      plan_key: "free",
+      status: "free",
+      current_period_start: null,
+      current_period_end: null,
+      cancel_at_period_end: 0,
+    });
+  });
+  await test("Free metadata refresh honors the configured status cadence", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'free', status = 'inactive' WHERE guild_id = ?").run(scope.guildId);
+    await getDueStatusAutomationServers(env, 10);
+    db.sqlite.prepare(`UPDATE server_sync_state SET next_status_check_due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+30 minutes'),
+      status_sync_started_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE guild_id = ?`).run(scope.guildId);
+    db.sqlite.prepare(`UPDATE linked_servers SET player_count_last_checked_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-5 minutes'),
+      player_count_status = 'fresh' WHERE guild_id = ?`).run(scope.guildId);
+    const early = await getDueMetadataRefreshServersFast(env, 10, 60_000);
+    assert.equal(early.some((row) => row.guild_id === scope.guildId), false);
+    db.sqlite.prepare("UPDATE server_sync_state SET next_status_check_due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute') WHERE guild_id = ?").run(scope.guildId);
+    const due = await getDueMetadataRefreshServersFast(env, 10, 60_000);
+    assert.deepEqual(due.filter((row) => row.guild_id === scope.guildId).map((row) => row.id).sort(),
+      [scope.linkedServerId, "same-guild-other-server"].sort());
   });
   await test("complimentary ADM worker records Pro discovery and pull cadence", async ({ db, env }) => {
     await getDueStatusAutomationServers(env, 10);
@@ -624,6 +728,13 @@ async function run() {
     await upsertBillingAccount(env, { discordUserId: actor.discord_id, planKey: "pro", planStatus: "active" });
     const status = await getDueStatusAutomationServers(env, 10);
     assert.ok(status.some((row) => row.id === scope.linkedServerId));
+    assert.ok(status.every((row) => row.access_source === "billing"));
+  }, false);
+  await test("Free scheduler selection remains available before migration 0069", async ({ db, env }) => {
+    db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'free', status = 'inactive' WHERE guild_id = ?").run(scope.guildId);
+    const status = await getDueStatusAutomationServers(env, 10);
+    assert.deepEqual(status.filter((row) => row.guild_id === scope.guildId).map((row) => row.id).sort(),
+      [scope.linkedServerId, "same-guild-other-server"].sort());
     assert.ok(status.every((row) => row.access_source === "billing"));
   }, false);
   await test("revoked exact grant rolls back official event creation", async ({ db, env }) => {
