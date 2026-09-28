@@ -211,5 +211,19 @@ assert.equal(cronProductionCheckSource.includes("/api/sync/metadata/run"), true)
 const dueStateCheckSource = readFileSync("scripts/check-server-due-state.ts", "utf8");
 assert.equal(dueStateCheckSource.includes("getServerStatusInterval(plan)"), true);
 assert.equal(dueStateCheckSource.includes("ADM discovery"), true);
+assert.equal(dueStateCheckSource.includes("canRunServerLifecycleTask"), true);
+assert.equal(dueStateCheckSource.includes("SERVER_LIFECYCLE_STATUSES"), true);
+assert.equal(dueStateCheckSource.includes('return "invalid_lifecycle_status"'), true);
+assert.equal(dueStateCheckSource.includes('String(row.lifecycle_status ?? "active_live").toLowerCase()'), true);
+assert.equal(dueStateCheckSource.includes("serverLifecycleSqlExpression"), true);
+assert.equal(dueStateCheckSource.includes('skippedReason(row, "adm_discovery")'), true);
+assert.equal(dueStateCheckSource.includes('skippedReason(row, "adm_processing")'), true);
+assert.equal(dueStateCheckSource.includes("final_sync_attempted_at"), true);
+assert.equal(dueStateCheckSource.includes("ADM_MIN_SYNC_INTERVAL_MS = 10 * 60 * 1000"), true);
+assert.equal(dueStateCheckSource.includes("adm_sync_state.last_sync_at AS last_adm_sync_at"), true);
+assert.equal(dueStateCheckSource.includes('return "adm_minimum_interval"'), true);
+assert.equal(dueStateCheckSource.includes("hasActiveLock"), true);
+assert.equal(dueStateCheckSource.includes("staleAfterMinutes * 60 * 1000"), true);
+assert.equal(dueStateCheckSource.includes("next_retry_after"), true);
 
 console.log("Automation health hardening tests passed.");

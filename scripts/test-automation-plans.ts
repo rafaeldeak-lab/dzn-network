@@ -295,6 +295,22 @@ const serverDueStateSource = readFileSync("scripts/check-server-due-state.ts", "
 assert.equal(serverDueStateSource.includes("getAdmDiscoveryIntervalMinutes"), true);
 assert.equal(serverDueStateSource.includes("pandora-dayz"), true);
 assert.equal(serverDueStateSource.includes("currently_syncing_adm"), true);
+assert.equal(serverDueStateSource.includes("isSchedulerBillingEligible"), true);
+assert.equal(serverDueStateSource.includes('String(status ?? "inactive").toLowerCase()'), true);
+assert.equal(serverDueStateSource.includes("NUKETOWN_SHOWCASE_SCOPE"), true);
+assert.equal(serverDueStateSource.includes("complimentary_automation_access"), true);
+assert.equal(serverDueStateSource.includes("sqlite_master WHERE type = 'table' AND name = 'server_showcase_grants'"), true);
+assert.equal(serverDueStateSource.includes('const complimentaryAutomationSql = showcaseSchemaAvailable'), true);
+assert.equal(serverDueStateSource.includes(': "0"'), true);
+assert.equal(serverDueStateSource.includes("julianday(grant_row.created_at) <= julianday('now')"), true);
+assert.equal(serverDueStateSource.includes("server_subscriptions AS paid_pro"), true);
+assert.equal(serverDueStateSource.includes("'pro', 'premium', 'network', 'partner'"), true);
+assert.equal(serverDueStateSource.includes("COALESCE(linked_servers.lifecycle_status, '')"), true);
+assert.equal(serverDueStateSource.includes('normalizePlanKey(complimentaryAutomation ? "pro" : row.plan_key)'), true);
+assert.equal(serverDueStateSource.includes('return "not_live"'), true);
+assert.equal(serverDueStateSource.includes('return "no_automation_entitlement"'), true);
+assert.equal(serverDueStateSource.includes('return "missing_nitrado_service_id"'), true);
+assert.equal(serverDueStateSource.includes('"not locked"'), true);
 
 const buttonMapDoc = readFileSync("docs/DASHBOARD_BUTTON_MAP.md", "utf8");
 assert.equal(buttonMapDoc.includes("View Server Page"), true);
