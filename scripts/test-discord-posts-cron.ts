@@ -6,6 +6,12 @@ import {
   onRequestGet,
   onRequestOptions,
 } from "../functions/api/sync/discord-posts/run";
+import {
+  createPostingDeliveryIdentityForTest,
+  createTestPostDeliveryIdentityForTest,
+  fetchDiscordRequestForTest,
+  sendDiscordBotMessageForTest,
+} from "../functions/_lib/discord-posting";
 import type { Env, PagesContext } from "../functions/_lib/types";
 
 const env = {
@@ -122,6 +128,91 @@ async function run() {
   }), env));
   assert.equal(optionsResponse.status, 204);
   assert.equal(optionsResponse.headers.get("allow"), "POST, OPTIONS");
+
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted", "AbortError")), { once: true });
+    });
+    await assert.rejects(
+      () => fetchDiscordRequestForTest("https://discord.test/messages", {}, 20),
+      /discord_request_timeout/,
+    );
+
+    globalThis.fetch = async (_input, init) => {
+      const stream = new ReadableStream({
+        start(controller) {
+          init?.signal?.addEventListener("abort", () => controller.error(new DOMException("The operation was aborted", "AbortError")), { once: true });
+        },
+      });
+      return new Response(stream, { status: 200, headers: { "content-type": "application/json" } });
+    };
+    await assert.rejects(
+      () => fetchDiscordRequestForTest("https://discord.test/stalled-body", {}, 20),
+      /discord_request_timeout/,
+    );
+
+    const acceptedNonces: string[] = [];
+    globalThis.fetch = async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { nonce?: string; enforce_nonce?: boolean };
+      assert.equal(body.enforce_nonce, true);
+      assert.equal(typeof body.nonce, "string");
+      acceptedNonces.push(body.nonce ?? "");
+      if (acceptedNonces.length === 1) {
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted", "AbortError")), { once: true });
+        });
+      }
+      return new Response(JSON.stringify({ id: "same-discord-message" }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const retryNonce = "same-delivery-nonce";
+    const testPayload = {
+      username: "DZN",
+      embeds: [{
+        title: "Status",
+        description: "Test status",
+        color: 0x22d3ee,
+        footer: { text: "DZN test" },
+        timestamp: "2026-09-28T00:00:00.000Z",
+      }],
+    };
+    await assert.rejects(
+      () => sendDiscordBotMessageForTest(testPayload, retryNonce, 20),
+      /discord_request_timeout/,
+    );
+    const reconciled = await sendDiscordBotMessageForTest(testPayload, retryNonce, 20);
+    assert.equal(reconciled.messageId, "same-discord-message");
+    assert.deepEqual(acceptedNonces, [retryNonce, retryNonce]);
+
+    const stableDestination = {
+      guild_id: "guild-1",
+      post_type: "priority_status_embed" as const,
+      discord_channel_id: "channel-1",
+      discord_webhook_url: null,
+      enabled: 1,
+    };
+    const stableServerState = {
+      public_server_name: "NukeTown",
+      current_player_count: 4,
+      max_player_count: 10,
+      server_online: 1,
+      server_status: "online",
+      last_status_update_at: "2026-09-28T10:00:00.000Z",
+      last_adm_update_at: "2026-09-28T10:00:00.000Z",
+      network_rank: 1,
+    };
+    const firstIdentity = await createPostingDeliveryIdentityForTest(stableDestination, stableServerState, "pro");
+    const retryIdentity = await createPostingDeliveryIdentityForTest(stableDestination, { ...stableServerState }, "pro");
+    assert.equal(firstIdentity, retryIdentity, "A retry must keep the same nonce identity when only render time changes.");
+    assert.equal(firstIdentity.length, 64);
+
+    const firstTestIdentity = await createTestPostDeliveryIdentityForTest(stableDestination);
+    const retriedTestIdentity = await createTestPostDeliveryIdentityForTest({ ...stableDestination });
+    assert.equal(firstTestIdentity, retriedTestIdentity, "Owner test-post retries must reuse one delivery identity.");
+    assert.equal(firstTestIdentity.length, 64);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 }
 
 function makeContext(request: Request, testEnv: Env, waitUntil: PagesContext["waitUntil"] = () => undefined): PagesContext {
