@@ -6,7 +6,11 @@ import {
   onRequestGet,
   onRequestOptions,
 } from "../functions/api/sync/discord-posts/run";
-import { fetchDiscordRequestForTest, sendDiscordBotMessageForTest } from "../functions/_lib/discord-posting";
+import {
+  createPostingDeliveryIdentityForTest,
+  fetchDiscordRequestForTest,
+  sendDiscordBotMessageForTest,
+} from "../functions/_lib/discord-posting";
 import type { Env, PagesContext } from "../functions/_lib/types";
 
 const env = {
@@ -178,6 +182,28 @@ async function run() {
     const reconciled = await sendDiscordBotMessageForTest(testPayload, retryNonce, 20);
     assert.equal(reconciled.messageId, "same-discord-message");
     assert.deepEqual(acceptedNonces, [retryNonce, retryNonce]);
+
+    const stableDestination = {
+      guild_id: "guild-1",
+      post_type: "priority_status_embed" as const,
+      discord_channel_id: "channel-1",
+      discord_webhook_url: null,
+      enabled: 1,
+    };
+    const stableServerState = {
+      public_server_name: "NukeTown",
+      current_player_count: 4,
+      max_player_count: 10,
+      server_online: 1,
+      server_status: "online",
+      last_status_update_at: "2026-09-28T10:00:00.000Z",
+      last_adm_update_at: "2026-09-28T10:00:00.000Z",
+      network_rank: 1,
+    };
+    const firstIdentity = await createPostingDeliveryIdentityForTest(stableDestination, stableServerState, "pro");
+    const retryIdentity = await createPostingDeliveryIdentityForTest(stableDestination, { ...stableServerState }, "pro");
+    assert.equal(firstIdentity, retryIdentity, "A retry must keep the same nonce identity when only render time changes.");
+    assert.equal(firstIdentity.length, 64);
   } finally {
     globalThis.fetch = originalFetch;
   }

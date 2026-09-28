@@ -350,7 +350,7 @@ async function processConfiguredPostingDestination(
     .bind(destination.guild_id)
     .first<PublicCache>();
   const state = await db
-    .prepare("SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ? LIMIT 1")
+    .prepare("SELECT discord_message_id, last_payload_hash, last_edited_at, last_dispatch_status FROM server_posting_state WHERE guild_id = ? AND post_type = ? AND discord_channel_id = ? LIMIT 1")
     .bind(destination.guild_id, destination.post_type, destination.discord_channel_id)
     .first<PostingState>();
 
@@ -391,8 +391,9 @@ async function processConfiguredPostingDestination(
   const listingPlanKey = normalizeListingPlanKey(effectiveListingContext);
   const payload = renderDiscordPostPayload(destination.post_type, cache, listingPlanKey);
   const payloadHash = await hashPayload(payload);
+  const deliveryIdentity = await createPostingDeliveryIdentity(destination, cache, listingPlanKey);
   const oldPayloadHash = state?.last_payload_hash ?? null;
-  if (state?.last_dispatch_status === "delivery_ambiguous" && state.last_payload_hash === payloadHash) {
+  if (state?.last_dispatch_status === "delivery_ambiguous" && state.last_payload_hash === deliveryIdentity) {
     return {
       guild_id: destination.guild_id,
       post_type: destination.post_type,
@@ -401,7 +402,7 @@ async function processConfiguredPostingDestination(
       message_id: state.discord_message_id ?? null,
       reason: "A previous Discord create timed out after dispatch; automatic retry is suppressed to prevent a duplicate post.",
       old_payload_hash: oldPayloadHash,
-      new_payload_hash: payloadHash,
+      new_payload_hash: deliveryIdentity,
       last_edited_at: state.last_edited_at ?? null,
       message_state_found: true,
     };
@@ -423,7 +424,9 @@ async function processConfiguredPostingDestination(
   }
 
   try {
-    const delivery = await deliverDiscordPayload(env, destination, payload, state?.discord_message_id ?? null);
+    const delivery = await deliverDiscordPayload(env, destination, payload, state?.discord_message_id ?? null, {
+      deliveryNonce: deliveryIdentity.slice(0, 25),
+    });
     if (delivery.mode === "not_configured") {
       await recordPostingStateError(env, destination, "Configure the DZN bot token/channel permission or add a webhook URL.");
       return {
@@ -457,7 +460,7 @@ async function processConfiguredPostingDestination(
   } catch (error) {
     const message = error instanceof Error ? error.message : "Discord post update failed";
     if (error instanceof DiscordRequestTimeoutError && error.operation === "post") {
-      await recordAmbiguousDiscordDelivery(env, destination, payloadHash, message);
+      await recordAmbiguousDiscordDelivery(env, destination, deliveryIdentity, message);
     } else {
       await recordPostingStateError(env, destination, message);
     }
@@ -1053,8 +1056,9 @@ async function deliverDiscordPayload(
   destination: PostingDestination,
   payload: DiscordPayload,
   existingMessageId: string | null,
+  options: { deliveryNonce?: string } = {},
 ): Promise<DiscordDeliveryResult> {
-  const deliveryNonce = (await hashPayload({
+  const deliveryNonce = options.deliveryNonce ?? (await hashPayload({
     guild_id: destination.guild_id,
     post_type: destination.post_type,
     channel_id: destination.discord_channel_id,
@@ -1784,6 +1788,29 @@ async function hashPayload(value: unknown) {
   const encoded = new TextEncoder().encode(JSON.stringify(value));
   const digest = await crypto.subtle.digest("SHA-256", encoded);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function createPostingDeliveryIdentity(destination: PostingDestination, cache: PublicCache | null, planKey: string) {
+  return hashPayload({
+    guild_id: destination.guild_id,
+    post_type: destination.post_type,
+    channel_id: destination.discord_channel_id,
+    plan_key: planKey,
+    server_state: cache ? {
+      public_server_name: cache.public_server_name,
+      current_player_count: cache.current_player_count,
+      max_player_count: cache.max_player_count,
+      server_online: cache.server_online,
+      server_status: cache.server_status,
+      last_status_update_at: cache.last_status_update_at,
+      last_adm_update_at: cache.last_adm_update_at,
+      network_rank: cache.network_rank,
+    } : null,
+  });
+}
+
+export function createPostingDeliveryIdentityForTest(destination: PostingDestination, cache: PublicCache | null, planKey: string) {
+  return createPostingDeliveryIdentity(destination, cache, planKey);
 }
 
 function numberOrUnknown(value: unknown) {

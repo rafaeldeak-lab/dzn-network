@@ -981,7 +981,7 @@ async function run() {
     }), 1);
     let revoked = false;
     db.beforeFirst = (sql) => {
-      if (revoked || !/SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state/.test(sql)) return;
+      if (revoked || !/SELECT discord_message_id, last_payload_hash, last_edited_at, last_dispatch_status FROM server_posting_state/.test(sql)) return;
       revoked = true;
       revokeSql(db, grantId);
     };
@@ -1007,7 +1007,7 @@ async function run() {
     }), 1);
     let revoked = false;
     db.beforeFirst = (sql) => {
-      if (revoked || !/SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state/.test(sql)) return;
+      if (revoked || !/SELECT discord_message_id, last_payload_hash, last_edited_at, last_dispatch_status FROM server_posting_state/.test(sql)) return;
       revoked = true;
       revokeSql(db, grantId);
     };
@@ -1047,7 +1047,7 @@ async function run() {
     }), 1);
     let scopeChanged = false;
     db.beforeFirst = (sql) => {
-      if (scopeChanged || !/SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state/.test(sql)) return;
+      if (scopeChanged || !/SELECT discord_message_id, last_payload_hash, last_edited_at, last_dispatch_status FROM server_posting_state/.test(sql)) return;
       scopeChanged = true;
       db.sqlite.prepare("UPDATE linked_servers SET status = 'active', lifecycle_status = 'active_live' WHERE id = 'same-guild-other-server'").run();
     };
@@ -1077,7 +1077,7 @@ async function run() {
       .run(scope.guildId, lastEditedAt, lastEditedAt, lastEditedAt);
     let revoked = false;
     db.beforeFirst = (sql) => {
-      if (revoked || !/SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state/.test(sql)) return;
+      if (revoked || !/SELECT discord_message_id, last_payload_hash, last_edited_at, last_dispatch_status FROM server_posting_state/.test(sql)) return;
       revoked = true;
       revokeSql(db, grantId);
     };
@@ -1102,7 +1102,7 @@ async function run() {
     }
     let stateReads = 0;
     db.beforeFirst = (sql) => {
-      if (!/SELECT discord_message_id, last_payload_hash, last_edited_at FROM server_posting_state/.test(sql)) return;
+      if (!/SELECT discord_message_id, last_payload_hash, last_edited_at, last_dispatch_status FROM server_posting_state/.test(sql)) return;
       stateReads += 1;
       if (stateReads === 2) revokeSql(db, grantId);
     };
