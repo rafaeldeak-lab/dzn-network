@@ -536,6 +536,35 @@ async function run() {
     assert.equal(cacheDebug.plan_due_state.skipped_reason, null);
     assert.ok(!cacheDebug.problem_flags.includes("subscription_not_active"));
   });
+  await test("transferred servers cannot inherit the former owner's paid automation identity", async ({ db, env }) => {
+    db.sqlite.prepare(`INSERT INTO server_subscriptions (id, guild_id, owner_discord_id, stripe_customer_id,
+      stripe_subscription_id, stripe_price_id, plan_key, status, current_period_start, current_period_end,
+      cancel_at_period_end, created_at, updated_at)
+      VALUES ('transferred-subscription', '11110000', ?, 'cus_previous', 'sub_previous', 'price_previous',
+        'pro', 'active', '2026-09-01', '2026-10-01', 1, '2026-09-01', '2026-09-01')`).run(actor.discord_id);
+    db.sqlite.prepare("UPDATE linked_servers SET user_id = ? WHERE id = 'same-owner-other-guild'").run(other.id);
+
+    await getDueStatusAutomationServers(env, 10);
+
+    const subscription = db.sqlite.prepare(`SELECT owner_discord_id, stripe_customer_id, stripe_subscription_id,
+      stripe_price_id, plan_key, status, current_period_start, current_period_end, cancel_at_period_end
+      FROM server_subscriptions WHERE guild_id = '11110000'`).get();
+    assert.deepEqual({ ...subscription }, {
+      owner_discord_id: other.discord_id,
+      stripe_customer_id: null,
+      stripe_subscription_id: null,
+      stripe_price_id: null,
+      plan_key: "free",
+      status: "inactive",
+      current_period_start: null,
+      current_period_end: null,
+      cancel_at_period_end: 0,
+    });
+    const due = await getDueStatusAutomationServers(env, 10);
+    const transferred = due.find((row) => row.id === "same-owner-other-guild");
+    assert.equal(transferred?.plan_key, "free");
+    assert.equal(transferred?.subscription_status, "inactive");
+  });
   await test("Free metadata refresh honors the configured status cadence", async ({ db, env }) => {
     db.sqlite.prepare("UPDATE server_subscriptions SET plan_key = 'free', status = 'inactive' WHERE guild_id = ?").run(scope.guildId);
     await getDueStatusAutomationServers(env, 10);

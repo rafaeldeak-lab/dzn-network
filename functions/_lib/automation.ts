@@ -124,11 +124,15 @@ export async function ensureAutomationRowsForLinkedServers(env: Env) {
               existing_subscription.status AS existing_status,
               existing_subscription.current_period_start AS existing_current_period_start,
               existing_subscription.current_period_end AS existing_current_period_end,
-              existing_subscription.cancel_at_period_end AS existing_cancel_at_period_end
+              existing_subscription.cancel_at_period_end AS existing_cancel_at_period_end,
+              guild_subscription.owner_discord_id AS guild_subscription_owner_discord_id
        FROM linked_servers
        LEFT JOIN users ON users.id = linked_servers.user_id
        LEFT JOIN owner_billing_accounts ON owner_billing_accounts.discord_user_id = users.discord_id
-       LEFT JOIN server_subscriptions AS existing_subscription ON existing_subscription.guild_id = linked_servers.guild_id
+       LEFT JOIN server_subscriptions AS existing_subscription
+         ON existing_subscription.guild_id = linked_servers.guild_id
+        AND existing_subscription.owner_discord_id = users.discord_id
+       LEFT JOIN server_subscriptions AS guild_subscription ON guild_subscription.guild_id = linked_servers.guild_id
        WHERE linked_servers.guild_id IS NOT NULL
          AND linked_servers.guild_id != ''
           AND linked_servers.nitrado_service_id IS NOT NULL
@@ -166,6 +170,7 @@ export async function ensureAutomationRowsForLinkedServers(env: Env) {
       existing_current_period_start: string | null;
       existing_current_period_end: string | null;
       existing_cancel_at_period_end: number | null;
+      guild_subscription_owner_discord_id: string | null;
     }>();
 
   for (const row of rows.results ?? []) {
@@ -183,6 +188,7 @@ export async function ensureAutomationRowsForLinkedServers(env: Env) {
       currentPeriodStart: hasOwnerBilling ? row.current_period_start : row.existing_current_period_start,
       currentPeriodEnd: hasOwnerBilling ? row.current_period_end : row.existing_current_period_end,
       cancelAtPeriodEnd: Number(hasOwnerBilling ? row.cancel_at_period_end : row.existing_cancel_at_period_end) === 1,
+      clearBillingIdentity: Boolean(row.guild_subscription_owner_discord_id && !row.existing_owner_discord_id && !hasOwnerBilling),
       forceDue: isActiveSubscriptionStatus(status),
     });
     await upsertServerPublicCache(env, {
@@ -510,6 +516,7 @@ export async function upsertServerSubscription(env: Env, input: {
   currentPeriodStart?: string | null;
   currentPeriodEnd?: string | null;
   cancelAtPeriodEnd?: boolean;
+  clearBillingIdentity?: boolean;
   forceDue?: boolean;
 }) {
   await ensureAutomationSchema(env);
@@ -527,13 +534,13 @@ export function serverSubscriptionStatements(env: Env, input: Parameters<typeof 
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(guild_id) DO UPDATE SET
         owner_discord_id = excluded.owner_discord_id,
-        stripe_customer_id = COALESCE(excluded.stripe_customer_id, server_subscriptions.stripe_customer_id),
-        stripe_subscription_id = COALESCE(excluded.stripe_subscription_id, server_subscriptions.stripe_subscription_id),
-        stripe_price_id = COALESCE(excluded.stripe_price_id, server_subscriptions.stripe_price_id),
+        stripe_customer_id = CASE WHEN ? THEN NULL ELSE COALESCE(excluded.stripe_customer_id, server_subscriptions.stripe_customer_id) END,
+        stripe_subscription_id = CASE WHEN ? THEN NULL ELSE COALESCE(excluded.stripe_subscription_id, server_subscriptions.stripe_subscription_id) END,
+        stripe_price_id = CASE WHEN ? THEN NULL ELSE COALESCE(excluded.stripe_price_id, server_subscriptions.stripe_price_id) END,
         plan_key = excluded.plan_key,
         status = excluded.status,
-        current_period_start = COALESCE(excluded.current_period_start, server_subscriptions.current_period_start),
-        current_period_end = COALESCE(excluded.current_period_end, server_subscriptions.current_period_end),
+        current_period_start = CASE WHEN ? THEN NULL ELSE COALESCE(excluded.current_period_start, server_subscriptions.current_period_start) END,
+        current_period_end = CASE WHEN ? THEN NULL ELSE COALESCE(excluded.current_period_end, server_subscriptions.current_period_end) END,
         cancel_at_period_end = excluded.cancel_at_period_end,
         updated_at = excluded.updated_at`,
     )
@@ -551,6 +558,11 @@ export function serverSubscriptionStatements(env: Env, input: Parameters<typeof 
       input.cancelAtPeriodEnd ? 1 : 0,
       now,
       now,
+      input.clearBillingIdentity ? 1 : 0,
+      input.clearBillingIdentity ? 1 : 0,
+      input.clearBillingIdentity ? 1 : 0,
+      input.clearBillingIdentity ? 1 : 0,
+      input.clearBillingIdentity ? 1 : 0,
     );
 
   const sync = db
