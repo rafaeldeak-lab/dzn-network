@@ -177,8 +177,8 @@ const OWNER_EVENT_HUB_READ_COLUMNS: Record<string, readonly string[]> = {
   event_matchups: ["id", "event_id", "round_number", "server_a_id", "server_b_id", "status", "starts_at", "ends_at", "scoring_grace_until", "server_a_score", "server_b_score", "created_at"],
   server_discord_channel_settings: ["linked_server_id", "guild_id", "channel_type", "channel_id", "channel_name", "channel_kind", "bot_can_view", "bot_can_send", "bot_can_embed", "bot_can_read_history", "last_verified_at", "updated_at"],
   event_cooldowns: ["linked_server_id", "event_type", "plan_key", "cooldown_until", "source_event_id", "reason"],
-  adm_sync_state: ["linked_server_id", "latest_adm_file", "last_processed_file", "last_successful_import_at", "last_sync_status"],
-  adm_import_jobs: ["linked_server_id", "source", "status", "completed_at", "created_at", "updated_at"],
+  adm_sync_state: ["linked_server_id", "latest_adm_file", "last_processed_file", "last_sync_at", "last_sync_status"],
+  adm_import_jobs: ["server_id", "source", "status", "completed_at", "created_at", "updated_at"],
 };
 
 type OwnerEventHubReadiness =
@@ -1114,7 +1114,7 @@ async function getActiveEventCooldown(env: Env, linkedServerId: string) {
 async function getAdmEligibility(env: Env, linkedServerId: string) {
   const row = await requireDb(env)
     .prepare(
-      `SELECT latest_adm_file, last_processed_file, last_successful_import_at, last_sync_status
+      `SELECT latest_adm_file, last_processed_file, last_sync_at AS last_successful_import_at, last_sync_status
        FROM adm_sync_state
        WHERE linked_server_id = ?
        LIMIT 1`,
@@ -1126,7 +1126,7 @@ async function getAdmEligibility(env: Env, linkedServerId: string) {
     .prepare(
       `SELECT status, completed_at, updated_at
        FROM adm_import_jobs
-       WHERE linked_server_id = ?
+       WHERE server_id = ?
          AND source = 'scheduled_nitrado'
        ORDER BY datetime(COALESCE(completed_at, updated_at, created_at)) DESC
        LIMIT 1`,

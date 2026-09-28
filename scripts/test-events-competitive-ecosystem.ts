@@ -154,6 +154,10 @@ includesAll(eventHubLib, [
 const ownerEventHubReadBlock = eventHubLib.slice(eventHubLib.indexOf("export async function getOwnerEventHub"), eventHubLib.indexOf("export async function enterOwnerEvent"));
 assert.equal(ownerEventHubReadBlock.includes("validateOwnerEventHubReadSchema"), true, "Owner Event Hub reads must validate schema without mutating it.");
 assert.equal(ownerEventHubReadBlock.includes("ensureEventHubSchema"), false, "Owner Event Hub GET must not run schema DDL.");
+assert.equal(eventHubLib.includes('adm_sync_state: ["linked_server_id", "latest_adm_file", "last_processed_file", "last_sync_at", "last_sync_status"]'), true, "Event Hub readiness must validate the established ADM sync timestamp column.");
+assert.equal(eventHubLib.includes('adm_import_jobs: ["server_id", "source", "status", "completed_at", "created_at", "updated_at"]'), true, "Event Hub readiness must validate the established ADM import server key.");
+assert.equal(eventHubLib.includes("last_sync_at AS last_successful_import_at"), true, "Event Hub should expose the established ADM sync timestamp through its response contract.");
+assert.equal(eventHubLib.includes("FROM adm_import_jobs\n       WHERE server_id = ?"), true, "Event Hub should query scheduled ADM jobs by the established server key.");
 assert.equal(eventHubLib.includes("fetchNitrado"), false, "Event scoring must not read Nitrado directly.");
 assert.equal(eventHubLib.includes("TOKEN_ENCRYPTION_KEY"), false, "Event Hub must not touch Nitrado token encryption.");
 
