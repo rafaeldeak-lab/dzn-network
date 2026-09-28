@@ -125,6 +125,15 @@ export async function testPlayerGameIdentityTransactions() {
     assert.equal(restored.ok && restored.link_id, firstApproval.link_id, "Restoration must reactivate the exact audited link instead of creating a duplicate history row.");
     assert.equal(restoredLink.sqlite.prepare("SELECT COUNT(*) AS count FROM player_game_identity_links WHERE status='active'").get()?.count, 1);
     assert.equal(restoredLink.sqlite.prepare("SELECT COUNT(*) AS count FROM player_game_identity_links").get()?.count, 1);
+    const revokedAgain = await revokePlayerGameIdentityLink(restoredLink.env, owner, firstApproval.link_id, {
+      confirm: true,
+      reason: "Second verified revocation after restoration.",
+    });
+    assert.equal(revokedAgain.status, 200, "A restored link must remain revocable without reusing its first notification key.");
+    assert.equal(restoredLink.sqlite.prepare("SELECT COUNT(*) AS count FROM user_notifications WHERE type='player_link_revoked'").get()?.count, 2);
+    assert.equal(restoredLink.sqlite.prepare("SELECT COUNT(DISTINCT dedupe_key) AS count FROM user_notifications WHERE type='player_link_revoked'").get()?.count, 2);
+    assert.equal(restoredLink.sqlite.prepare("SELECT COUNT(*) AS count FROM player_game_identity_notification_deliveries WHERE event_type='revoked'").get()?.count, 2);
+    assert.equal(restoredLink.sqlite.prepare("SELECT status FROM player_game_identity_links WHERE id = ?").get(firstApproval.link_id)?.status, "revoked");
     assert.deepEqual(restoredLink.sqlite.prepare("PRAGMA foreign_key_check").all(), []);
   } finally { restoredLink.close(); }
   for (const action of ["approve", "reject"] as const) {

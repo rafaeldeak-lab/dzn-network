@@ -107,7 +107,7 @@ export async function revokePlayerGameIdentityLink(env: Env, actor: SessionUser,
         SELECT ?, ?, NULL, 'player_link_revoked', 'Game stats link revoked',
           ?,
           '/player/profile#game-account', 1, ?, ? WHERE ${gate}`)
-        .bind(decisionId, link.user_id, `A server owner or DZN support revoked one of your game stats links. Reason: ${reason}`, `player-link-revoked:${link.id}`,
+        .bind(decisionId, link.user_id, `A server owner or DZN support revoked one of your game stats links. Reason: ${reason}`, `player-link-revoked:${link.id}:${decisionId}`,
           JSON.stringify({ link_id: link.id, audit_id: decisionId }), decisionId),
       ...(deliveryId ? [db.prepare(`INSERT INTO player_game_identity_notification_deliveries (
           id, audit_id, claim_id, link_id, user_id, discord_id, linked_server_id, event_type,
