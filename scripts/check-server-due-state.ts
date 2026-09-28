@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import { getAdmDiscoveryIntervalMinutes, getAdmPullInterval, getServerStatusInterval, normalizePlanKey } from "../functions/_lib/plans";
-import { isAutomationBillingEligible, NUKETOWN_SHOWCASE_SCOPE } from "../functions/_lib/server-showcase-access";
+import { NUKETOWN_SHOWCASE_SCOPE } from "../functions/_lib/server-showcase-access";
 import {
   canRunServerLifecycleTask,
   SERVER_LIFECYCLE_STATUSES,
@@ -78,13 +78,20 @@ function hasActiveLock(flag: number | null | undefined, startedAt: string | null
   return Date.now() - timestamp < staleAfterMinutes * 60 * 1000;
 }
 
+function isSchedulerBillingEligible(planKey: string | null | undefined, status: string | null | undefined) {
+  const normalizedPlan = String(planKey ?? "free").toLowerCase();
+  const normalizedStatus = String(status ?? "inactive").toLowerCase();
+  return normalizedStatus === "active" || normalizedStatus === "trialing"
+    || (normalizedPlan === "free" && (normalizedStatus === "free" || normalizedStatus === "inactive"));
+}
+
 function skippedReason(row: ServerDueRow, task: Extract<ServerLifecycleTask, "metadata" | "adm_discovery" | "adm_processing">) {
   if (!row.guild_id) return "missing_guild_id";
   if (!row.nitrado_service_id) return "missing_nitrado_service_id";
   if ((row.linked_status ?? "pending").toLowerCase() !== "live") return "not_live";
   if (row.merged_into_server_id) return "merged";
   if (Number(row.complimentary_automation_access ?? 0) !== 1
-    && !isAutomationBillingEligible(row.plan_key, row.subscription_status)) return "no_automation_entitlement";
+    && !isSchedulerBillingEligible(row.plan_key, row.subscription_status)) return "no_automation_entitlement";
   if (task === "metadata" && hasActiveLock(row.currently_checking_status, row.status_sync_started_at, row.updated_at, 10)) {
     return "currently_checking_status";
   }

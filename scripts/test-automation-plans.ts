@@ -295,7 +295,8 @@ const serverDueStateSource = readFileSync("scripts/check-server-due-state.ts", "
 assert.equal(serverDueStateSource.includes("getAdmDiscoveryIntervalMinutes"), true);
 assert.equal(serverDueStateSource.includes("pandora-dayz"), true);
 assert.equal(serverDueStateSource.includes("currently_syncing_adm"), true);
-assert.equal(serverDueStateSource.includes("isAutomationBillingEligible"), true);
+assert.equal(serverDueStateSource.includes("isSchedulerBillingEligible"), true);
+assert.equal(serverDueStateSource.includes('String(status ?? "inactive").toLowerCase()'), true);
 assert.equal(serverDueStateSource.includes("NUKETOWN_SHOWCASE_SCOPE"), true);
 assert.equal(serverDueStateSource.includes("complimentary_automation_access"), true);
 assert.equal(serverDueStateSource.includes("sqlite_master WHERE type = 'table' AND name = 'server_showcase_grants'"), true);
