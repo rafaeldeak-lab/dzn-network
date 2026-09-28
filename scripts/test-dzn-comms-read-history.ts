@@ -65,7 +65,8 @@ assert.match(helper, /getSessionUser\(env, request\)/, "Private group reads must
 assert.match(helper, /membership_state = 'active'/, "Private group reads must require an active membership row.");
 assert.match(helper, /SUPPORT_HISTORY_BLOCKED/, "Private support history must remain blocked in this slice.");
 assert.match(helper, /sending_enabled: flags\.writeFeaturesEnabled/, "Route payload must derive sending state from the protected server flag.");
-assert.match(helper, /reactions_enabled: false/, "Route payload must report reactions disabled.");
+assert.match(helper, /reactions_enabled: reactionFlags\.readEnabled/, "Route payload must derive reaction reads from their separate server flag.");
+assert.match(helper, /reactions_write_enabled: reactionFlags\.writeEnabled/, "Route payload must derive reaction writes from their separate server flag.");
 assert.match(helper, /ai_assist_runtime_enabled: false/, "Route payload must report AI support runtime disabled.");
 assert.match(helper, /durable_objects_or_websockets_enabled: false/, "Route payload must report WebSocket/Durable Object runtime disabled.");
 assert.doesNotMatch(helper + route, /\b(?:\.run\(|batch\(|exec\(|fetch\(|WebSocket|DurableObject|EventSource|navigator|sendBeacon|localStorage|sessionStorage|STRIPE_SECRET|DZN_LIVE_CHECKOUT_ENABLED|OPENAI_API_KEY|AI_GATEWAY|VECTORIZE|R2_BUCKET)\b/i, "Comms route/helper must not write, call providers, use browser storage, or touch payment/AI/storage runtimes.");
