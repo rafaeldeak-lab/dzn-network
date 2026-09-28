@@ -46,6 +46,7 @@ export async function handleDiscordPostRun(
   const runOptions = {
     maxJobs: sanitizePositiveInteger(body.max_posts ?? body.max_jobs, 1, 10),
     deadlineMs: sanitizePositiveInteger(body.deadline_ms, 2500, 5000),
+    ensureSchema: false as const,
   };
 
   const result = await runDiscordPostDispatch(env, source, startedAt, runOptions, handlers);
@@ -63,7 +64,7 @@ async function runDiscordPostDispatch(
   env: Env,
   source: ReturnType<typeof normalizeAutomationCronSource>,
   startedAt: string,
-  options: { maxJobs: number; deadlineMs: number },
+  options: { maxJobs: number; deadlineMs: number; ensureSchema: false },
   handlers: DiscordPostRunHandlers,
 ) {
   try {

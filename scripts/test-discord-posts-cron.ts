@@ -40,6 +40,7 @@ async function run() {
       dispatchCalled = true;
       assert.equal(options.maxJobs, 2);
       assert.equal(options.deadlineMs, 2500);
+      assert.equal(options.ensureSchema, false);
       return {
         ok: true,
         processed: 1,
