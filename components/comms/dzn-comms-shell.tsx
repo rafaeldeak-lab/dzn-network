@@ -150,7 +150,16 @@ export function DznCommsShell() {
     };
   }, []);
 
+  const payload = history.payload;
+  const statusLabel = useMemo(() => statusCopy(history.status), [history.status]);
+  const sendingEnabled = liveUiEnabled && payload.feature_flags.sending_enabled;
+  const reportActionsEnabled = liveUiEnabled && payload.feature_flags.report_actions_enabled;
+  const reactionUiEnabled = liveUiEnabled && payload.feature_flags.reactions_enabled;
+  const reactionWritesAvailable = reactionUiEnabled && payload.feature_flags.reactions_write_enabled;
+
   useEffect(() => {
+    if (!reactionWritesAvailable) return;
+
     const controller = new AbortController();
     fetch("/api/auth/me", { cache: "no-store", credentials: "include", signal: controller.signal })
       .then(async (response) => {
@@ -165,14 +174,8 @@ export function DznCommsShell() {
         if (!controller.signal.aborted) setAuthStatus("signed-out");
       });
     return () => controller.abort();
-  }, []);
+  }, [reactionWritesAvailable]);
 
-  const payload = history.payload;
-  const statusLabel = useMemo(() => statusCopy(history.status), [history.status]);
-  const sendingEnabled = liveUiEnabled && payload.feature_flags.sending_enabled;
-  const reportActionsEnabled = liveUiEnabled && payload.feature_flags.report_actions_enabled;
-  const reactionUiEnabled = liveUiEnabled && payload.feature_flags.reactions_enabled;
-  const reactionWritesAvailable = reactionUiEnabled && payload.feature_flags.reactions_write_enabled;
   const reactionWritesEnabled = reactionWritesAvailable && authStatus === "authenticated";
   const reactionLoginRequired = reactionWritesAvailable && authStatus === "signed-out";
   const canSend = sendingEnabled && draft.trim().length > 0 && !sending;
