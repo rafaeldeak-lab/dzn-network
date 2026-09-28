@@ -30,8 +30,8 @@ Required order:
 
 1. Verify the production migration ledger and base Comms tables.
 2. Apply only `0078_dzn_comms_reactions.sql` and verify its ledger row, three tables, indexes, triggers, constraints and foreign keys.
-3. Keep `DZN_COMMS_REACTIONS_READ_ENABLED`, `DZN_COMMS_REACTIONS_WRITE_ENABLED` and the public reaction UI disabled.
+3. Keep `DZN_COMMS_REACTIONS_READ_ENABLED`, `DZN_COMMS_REACTIONS_WRITE_ENABLED` and `NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED` disabled.
 4. Run authenticated public/private read, add, replay, conflict, removal, rate-limit, moderation-removal and retention tests.
-5. Enable server-side reads, then server-side writes, and enable the existing public live UI switch last.
+5. Enable server-side reads, then server-side writes, and enable `NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED` last. The general live Comms UI may remain enabled throughout this reaction-specific activation.
 
 No production D1 write, feature-switch change, secret creation, Discord message, payment action, customer charge, Nitrado action or restart-schedule change is part of this source release.
