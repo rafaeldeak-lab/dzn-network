@@ -75,6 +75,10 @@ assert.match(route, /handleDznCommsMessageHistoryRequest/, "Function route shoul
 assert.match(communityPage, /DznCommsShell/, "The /community route must render the DZN Comms shell.");
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED/, "The /community shell must fetch only behind the public UI flag.");
 assert.match(shell, /loadCommsHistory\(controller.signal\)/, "The UI must use the bounded history client.");
+assert.match(shell, /fetch\("\/api\/auth\/me", \{ cache: "no-store", credentials: "include"/, "Reaction writes must use the current authenticated-session probe.");
+assert.match(shell, /reactionUiEnabled = liveUiEnabled && payload\.feature_flags\.reactions_enabled/, "Reaction rows must remain behind the public live UI switch.");
+assert.match(shell, /reactionWritesAvailable && authStatus === "authenticated"/, "Reaction mutations must remain disabled until authentication is confirmed.");
+assert.match(shell, /Log in to react/, "Signed-out users must receive a direct login action instead of enabled mutation controls.");
 assert.match(historyClient, /"\/api\/comms\/message-history\?channel=global-chat&limit=30"/, "The client should only fetch the read-only history route.");
 assert.match(historyClient, /credentials: "include"/, "The client should preserve current-user cookies for read checks.");
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED/, "The live composer must remain behind an explicit public UI flag.");

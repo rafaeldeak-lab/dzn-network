@@ -107,6 +107,7 @@ export function DznCommsShell() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [composerMessage, setComposerMessage] = useState("");
+  const [authStatus, setAuthStatus] = useState<"checking" | "authenticated" | "signed-out">("checking");
   const sendAttemptRef = useRef<{ draft: string; requestId: string } | null>(null);
   const reactionAttemptRef = useRef(new Map<string, string>());
   const [history, setHistory] = useState<CommsHistoryState>(() => ({
@@ -149,11 +150,31 @@ export function DznCommsShell() {
     };
   }, []);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/auth/me", { cache: "no-store", credentials: "include", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) return false;
+        const payload = await response.json().catch(() => null) as { authenticated?: unknown } | null;
+        return payload?.authenticated === true;
+      })
+      .then((authenticated) => {
+        if (!controller.signal.aborted) setAuthStatus(authenticated ? "authenticated" : "signed-out");
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setAuthStatus("signed-out");
+      });
+    return () => controller.abort();
+  }, []);
+
   const payload = history.payload;
   const statusLabel = useMemo(() => statusCopy(history.status), [history.status]);
   const sendingEnabled = liveUiEnabled && payload.feature_flags.sending_enabled;
   const reportActionsEnabled = liveUiEnabled && payload.feature_flags.report_actions_enabled;
-  const reactionWritesEnabled = liveUiEnabled && payload.feature_flags.reactions_write_enabled;
+  const reactionUiEnabled = liveUiEnabled && payload.feature_flags.reactions_enabled;
+  const reactionWritesAvailable = reactionUiEnabled && payload.feature_flags.reactions_write_enabled;
+  const reactionWritesEnabled = reactionWritesAvailable && authStatus === "authenticated";
+  const reactionLoginRequired = reactionWritesAvailable && authStatus === "signed-out";
   const canSend = sendingEnabled && draft.trim().length > 0 && !sending;
 
   async function handleSend(event: FormEvent) {
@@ -265,7 +286,9 @@ export function DznCommsShell() {
                     key={message.id}
                     message={message}
                     reportEnabled={reportActionsEnabled}
+                    reactionUiEnabled={reactionUiEnabled}
                     reactionWriteEnabled={reactionWritesEnabled}
+                    reactionLoginRequired={reactionLoginRequired}
                     onReactionChange={handleReaction}
                   />
                 ))}
@@ -323,10 +346,12 @@ export function DznCommsShell() {
   );
 }
 
-function MessageRow({ message, reportEnabled, reactionWriteEnabled, onReactionChange }: {
+function MessageRow({ message, reportEnabled, reactionUiEnabled, reactionWriteEnabled, reactionLoginRequired, onReactionChange }: {
   message: CommsHistoryMessage;
   reportEnabled: boolean;
+  reactionUiEnabled: boolean;
   reactionWriteEnabled: boolean;
+  reactionLoginRequired: boolean;
   onReactionChange: (messageId: string, reactionKey: CommsReactionKey, remove: boolean) => Promise<void>;
 }) {
   const muted = message.visibility_state !== "visible";
@@ -370,7 +395,7 @@ function MessageRow({ message, reportEnabled, reactionWriteEnabled, onReactionCh
             <CommsMessageTime value={message.created_at} />
           </div>
           <p className={`mt-2 text-sm font-semibold leading-6 [overflow-wrap:anywhere] ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
-          {message.reactions && !muted ? (
+          {reactionUiEnabled && message.reactions && !muted ? (
             <div className="mt-3 flex flex-wrap items-center gap-2" aria-label="Message reactions">
               {message.reactions.available_reactions.map((reaction) => {
                 const count = message.reactions?.counts.find((item) => item.key === reaction.key);
@@ -395,6 +420,11 @@ function MessageRow({ message, reportEnabled, reactionWriteEnabled, onReactionCh
                   </button>
                 );
               })}
+              {reactionLoginRequired ? (
+                <a href="/login?returnTo=%2Fcommunity" className="text-xs font-black text-cyan-200 hover:text-white">
+                  Log in to react
+                </a>
+              ) : null}
               {reactionState.status === "error" ? <span role="alert" className="text-xs font-bold text-amber-200">Reaction failed. Try again.</span> : null}
             </div>
           ) : null}
