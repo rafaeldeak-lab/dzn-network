@@ -55,6 +55,7 @@ const duplicateRow = {
   last_bumped_at: null,
   rail_priority_at: "2026-09-30T12:00:00.000Z",
   updated_at: "2026-09-30T12:00:00.000Z",
+  created_at: "2026-09-30T12:00:00.000Z",
   adm_logs_found: 1,
   adm_sync_status: "completed",
   total_kills: 5,
@@ -131,7 +132,8 @@ const equalScoreTieResponse = await invokeRail({
             id: "older-paid-duplicate",
             nitrado_service_id: "equal-score-service",
             public_slug: "older-paid-duplicate",
-            updated_at: "2026-01-01T00:00:00.000Z",
+            updated_at: "2026-09-30T00:00:00.000Z",
+            created_at: "2026-01-01T00:00:00.000Z",
           },
           {
             ...duplicateRow,
@@ -142,11 +144,12 @@ const equalScoreTieResponse = await invokeRail({
             subscription_status: null,
             rail_priority_at: "2026-01-01T00:00:00.000Z",
             updated_at: "2026-09-30T00:00:00.000Z",
+            created_at: "2026-09-30T00:00:00.000Z",
           },
         ]),
 });
 const equalScoreTiePayload = await equalScoreTieResponse.json() as { items?: Array<{ id: string }> };
-assert.deepEqual(equalScoreTiePayload.items?.map(({ id }) => id), ["newer-replacement"], "Equal-score duplicates must use the directory's newer-row tie-breaker.");
+assert.deepEqual(equalScoreTiePayload.items?.map(({ id }) => id), ["newer-replacement"], "Equal-score duplicates with matching update times must use the directory's creation-time tie-breaker.");
 
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts?: Record<string, string> };
 assert.equal(packageJson.scripts?.test?.includes("npm run test:live-server-rail"), true, "The main test suite must enforce the rail regression checks.");

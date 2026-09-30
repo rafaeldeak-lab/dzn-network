@@ -32,6 +32,7 @@ type RailRow = {
   last_bumped_at: string | null;
   rail_priority_at: string | null;
   updated_at: string | null;
+  created_at: string | null;
   adm_logs_found: number | null;
   adm_sync_status: string | null;
   total_kills: number | null;
@@ -83,6 +84,7 @@ async function queryServerRail(env: Env) {
        server_advertising_state.last_bumped_at,
        COALESCE(server_advertising_state.last_bumped_at, linked_servers.public_listing_updated_at, linked_servers.updated_at, linked_servers.created_at) AS rail_priority_at,
        linked_servers.updated_at,
+       linked_servers.created_at,
        onboarding_checks.adm_logs_found,
        adm_sync_state.last_sync_status AS adm_sync_status,
        COALESCE(server_stats.total_kills, 0) AS total_kills,
@@ -169,7 +171,9 @@ function dedupeRailRows(rows: RailRow[]) {
 function compareCanonicalRows(left: RailRow, right: RailRow) {
   const scoreDifference = railCanonicalScore(left) - railCanonicalScore(right);
   if (scoreDifference !== 0) return scoreDifference;
-  return timestampOrZero(left.updated_at) - timestampOrZero(right.updated_at);
+  const updatedDifference = timestampOrZero(left.updated_at) - timestampOrZero(right.updated_at);
+  if (updatedDifference !== 0) return updatedDifference;
+  return timestampOrZero(left.created_at) - timestampOrZero(right.created_at);
 }
 
 function compareRailPriority(left: RailRow, right: RailRow) {
