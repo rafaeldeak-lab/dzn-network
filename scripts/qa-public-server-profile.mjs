@@ -125,12 +125,17 @@ try {
       avatarImages: document.querySelectorAll('img[alt$="Discord profile"]').length,
     }));
     assert.equal(metrics.overflow, false, `Profile must not overflow at ${width}px`);
-    assert.ok(metrics.mapHeight < metrics.mapWidth, `Map should be compact landscape at ${width}px`);
+    assert.ok(Math.abs(metrics.mapHeight - metrics.mapWidth) <= 2, `Map should preserve its square geometry at ${width}px`);
+    assert.ok(metrics.mapWidth <= 416, `Map should remain compact at ${width}px`);
     assert.equal(metrics.avatarImages, 4, "Both ranking panels should render the two consented profile avatars");
     const disclosure = page.locator(".dzn-profile-mobile-disclosure").first();
     if (width === 390) {
       assert.equal(await disclosure.locator(".dzn-profile-mobile-disclosure__content").isVisible(), false, "Secondary mobile sections should start collapsed");
-      await disclosure.getByText("Server Wars history", { exact: true }).click();
+      const disclosureButton = disclosure.locator(".dzn-profile-mobile-disclosure__button");
+      assert.equal((await disclosureButton.innerText()).trim().toLowerCase(), "server wars history");
+      assert.equal(await disclosureButton.getAttribute("aria-expanded"), "false");
+      await disclosureButton.press("Enter");
+      assert.equal(await disclosureButton.getAttribute("aria-expanded"), "true");
       assert.equal(await disclosure.locator(".dzn-profile-mobile-disclosure__content").isVisible(), true, "Secondary mobile sections should expand on demand");
     } else {
       assert.equal(await disclosure.locator(".dzn-profile-mobile-disclosure__content").isVisible(), true, "Secondary sections should remain visible on larger screens");

@@ -1500,6 +1500,18 @@ function mapPlacementFor(row: MapNodeRow) {
     };
   }
 
+  const latitude = Number(row.geo_latitude);
+  const longitude = Number(row.geo_longitude);
+  if (publicCountry && Number.isFinite(latitude) && Number.isFinite(longitude)) {
+    return {
+      latitude: clamp(Math.round(latitude / 15) * 15, -75, 75),
+      longitude: clamp(Math.round(longitude / 15) * 15, -180, 180),
+      country: publicCountry,
+      region: publicGeoRegion ?? publicRegion ?? publicCountry,
+      locationLabel: publicCountry,
+    };
+  }
+
   return {
     latitude: 20,
     longitude: 0,

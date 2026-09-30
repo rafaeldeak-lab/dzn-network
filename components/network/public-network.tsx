@@ -2162,12 +2162,20 @@ function GlassPanel({ title, icon: Icon, children }: { title: string; icon: type
 }
 
 function ProfileDisclosure({ id, label, children, contentClassName = "" }: { id: string; label: string; children: React.ReactNode; contentClassName?: string }) {
-  const inputId = `dzn-profile-disclosure-${id}`;
+  const [expanded, setExpanded] = useState(false);
+  const contentId = `dzn-profile-disclosure-${id}`;
   return (
     <section className="dzn-profile-mobile-disclosure">
-      <input id={inputId} type="checkbox" className="dzn-profile-mobile-disclosure__toggle" />
-      <label htmlFor={inputId} className="dzn-profile-mobile-disclosure__label">{label}</label>
-      <div className={`dzn-profile-mobile-disclosure__content ${contentClassName}`}>{children}</div>
+      <button
+        type="button"
+        className="dzn-profile-mobile-disclosure__button"
+        aria-controls={contentId}
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        {label}
+      </button>
+      <div id={contentId} className={`dzn-profile-mobile-disclosure__content ${expanded ? "is-expanded" : ""} ${contentClassName}`}>{children}</div>
     </section>
   );
 }

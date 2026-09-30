@@ -78,6 +78,27 @@ async function main() {
   assert.equal(sameRegionNode.y, node.y);
   assert.equal(sameRegionNode.location_label, "United Kingdom");
 
+  for (const [country, latitude, longitude] of [
+    ["Sweden", 59.3293, 18.0686],
+    ["Russia", 55.7558, 37.6173],
+    ["South Africa", -33.9249, 18.4241],
+  ] as const) {
+    const countryNode = buildPublicMapNodeFromRow({
+      ...baseRow,
+      id: country.toLowerCase().replace(/\s+/g, "-"),
+      public_slug: country.toLowerCase().replace(/\s+/g, "-"),
+      geo_country: country,
+      geo_region: null,
+      geo_latitude: latitude,
+      geo_longitude: longitude,
+    });
+    assert.equal(countryNode.location_label, country);
+    assert.equal(countryNode.country, country);
+    assert.notEqual(`${countryNode.x}:${countryNode.y}`, "50:38.9");
+    assert.equal("latitude" in countryNode, false);
+    assert.equal("longitude" in countryNode, false);
+  }
+
   const unknownNode = buildPublicMapNodeFromRow({
     ...baseRow,
     id: "unknown",
