@@ -42,9 +42,13 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
         if (payload?.ok && Array.isArray(payload.items)) {
           setItems(payload.items);
           setResponseStale(payload.stale === true);
+        } else {
+          setResponseStale(true);
         }
       })
-      .catch(() => null)
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) setResponseStale(true);
+      })
       .finally(() => setLoaded(true));
     return () => controller.abort();
   }, []);
@@ -78,8 +82,8 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
             <RadioTower className="h-5 w-5" />
           </span>
           <div className="min-w-0 flex-1">
-            <strong>{loaded ? "No public server listings are available right now" : "Loading connected server listings"}</strong>
-            <p>{loaded ? "Only verified public servers appear here. Check the server directory for the latest available listings." : "Real server records will appear here when the network response is ready."}</p>
+            <strong>{!loaded ? "Loading connected server listings" : responseStale ? "Server listings are temporarily unavailable" : "No public server listings are available right now"}</strong>
+            <p>{!loaded ? "Real server records will appear here when the network response is ready." : responseStale ? "The latest server data could not be confirmed. Try again shortly or browse the server directory." : "Only verified public servers appear here. Check the server directory for the latest available listings."}</p>
           </div>
           {loaded ? (
             <Link href="/servers" className="dzn-live-server-rail__empty-link">

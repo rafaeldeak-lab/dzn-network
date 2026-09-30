@@ -73,7 +73,29 @@ try {
     await writeFile(path.join(output, `deduplicated-${label}.json`), JSON.stringify(metrics, null, 2));
     await context.close();
   }
-  console.log("Live server rail dedupe and motion QA passed at phone and desktop widths.");
+  const unavailableContext = await browser.newContext({ viewport: { width: 390, height: 800 } });
+  const unavailablePage = await unavailableContext.newPage();
+  await unavailablePage.route("**/api/public/server-rail", (route) => route.fulfill({
+    status: 503,
+    contentType: "application/json",
+    body: JSON.stringify({ ok: false, items: [], stale: true }),
+  }));
+  await unavailablePage.goto(origin, { waitUntil: "networkidle" });
+  const unavailableMetrics = await unavailablePage.evaluate(() => ({
+    overflow: document.documentElement.scrollWidth > innerWidth,
+    railCards: document.querySelectorAll(".dzn-live-server-card").length,
+    status: document.querySelector(".dzn-live-server-rail__header span:last-child")?.textContent?.trim() ?? "",
+    text: document.querySelector(".dzn-live-server-rail")?.textContent ?? "",
+  }));
+  assert.equal(unavailableMetrics.overflow, false);
+  assert.equal(unavailableMetrics.railCards, 0);
+  assert.equal(unavailableMetrics.status, "Latest data unavailable");
+  assert.equal(unavailableMetrics.text.includes("Server listings are temporarily unavailable"), true);
+  assert.equal(unavailableMetrics.text.includes("No public server listings are available right now"), false);
+  await unavailablePage.screenshot({ path: path.join(output, "unavailable-390.png"), fullPage: true });
+  await writeFile(path.join(output, "unavailable-390.json"), JSON.stringify(unavailableMetrics, null, 2));
+  await unavailableContext.close();
+  console.log("Live server rail dedupe, motion, and unavailable-state QA passed.");
 } finally {
   await browser.close();
   await new Promise((resolve) => server.close(resolve));

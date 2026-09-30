@@ -15,6 +15,8 @@ for (const fabricatedLabel of [
 assert.equal(source.includes('hasItems ? ('), true, "Real rail cards must require returned server items.");
 assert.equal(source.includes('role="status"'), true, "Empty and loading states must be announced accessibly.");
 assert.equal(source.includes("No public server listings are available right now"), true);
+assert.equal(source.includes("Server listings are temporarily unavailable"), true, "Failed and stale responses need a distinct unavailable state.");
+assert.equal(source.includes("setResponseStale(true)"), true, "Invalid and failed responses must not be presented as a successful empty result.");
 assert.equal(source.includes('href="/servers"'), true, "The truthful empty state should link to the server directory.");
 assert.equal(source.includes("[...items, ...items]"), false, "The animated rail must not clone visible server cards.");
 assert.equal(source.includes("dedupeRailItems(items)"), true, "The client must defensively deduplicate server identities.");
