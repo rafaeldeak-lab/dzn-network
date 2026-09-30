@@ -840,7 +840,8 @@ export async function reviewPlayerGameIdentityClaim(
       return { ok: false, status: 409, error: "PLAYER_ID_ALREADY_LINKED", message: "That game ID is already actively linked." };
     }
 
-    const linkId = crypto.randomUUID();
+    const revokedLink = activeLink ? null : await readRestorableGameIdentityLink(db, claim);
+    const linkId = revokedLink?.id ?? crypto.randomUUID();
     const verifiedSource = reviewerIsAdmin ? "dzn_admin_approved" : "owner_approved";
     // The conditional transition and its unique audit event fence every later write in this transaction.
     const decisionGate = `EXISTS (SELECT 1 FROM player_game_identity_audit_log WHERE id = ?)`;
@@ -870,7 +871,33 @@ export async function reviewPlayerGameIdentityClaim(
         actorUserId: actor.id, linkedServerId: claim.linked_server_id,
         playerProfileId: claim.player_profile_id, playerId: claim.player_id, note: parsed.note,
       }, { previousWrite: true, id: decisionId }),
-      db.prepare(
+      revokedLink
+        ? db.prepare(
+          `UPDATE player_game_identity_links
+           SET status = 'active', revoked_at = NULL, player_name = ?, verified_source = ?,
+               verified_by_user_id = ?, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ? AND user_id = ? AND discord_id = ? AND linked_server_id = ?
+             AND player_profile_id = ? AND player_id = ? AND status = 'revoked'
+             AND ${decisionGate} AND NOT EXISTS (
+               SELECT 1 FROM player_game_identity_links active_link
+               WHERE active_link.linked_server_id = ? AND active_link.player_id = ?
+                 AND active_link.status = 'active' AND active_link.revoked_at IS NULL
+             )`,
+        ).bind(
+          exactProfile.player_name,
+          verifiedSource,
+          actor.id,
+          linkId,
+          claim.user_id,
+          claim.discord_id,
+          claim.linked_server_id,
+          claim.player_profile_id,
+          claim.player_id,
+          decisionId,
+          claim.linked_server_id,
+          claim.player_id,
+        )
+        : db.prepare(
           `INSERT INTO player_game_identity_links (
             id, user_id, discord_id, linked_server_id, player_profile_id, player_id, player_name, status, verified_source, verified_by_user_id, verified_at, created_at, updated_at
           ) SELECT ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
@@ -878,8 +905,7 @@ export async function reviewPlayerGameIdentityClaim(
             SELECT 1 FROM player_game_identity_links WHERE linked_server_id = ? AND player_id = ?
               AND status = 'active' AND revoked_at IS NULL
           )`,
-        )
-        .bind(
+        ).bind(
           linkId,
           claim.user_id,
           claim.discord_id,
@@ -1058,6 +1084,21 @@ async function readActiveGameIdentityLink(db: D1Database, linkedServerId: string
        LIMIT 1`,
     )
     .bind(linkedServerId, playerId)
+    .first<ActiveLinkRow>();
+}
+
+async function readRestorableGameIdentityLink(db: D1Database, claim: ReviewableClaimRow) {
+  return db
+    .prepare(
+      `SELECT id, user_id, discord_id, linked_server_id
+       FROM player_game_identity_links
+       WHERE user_id = ? AND discord_id = ? AND linked_server_id = ?
+         AND player_profile_id = ? AND player_id = ?
+         AND status = 'revoked' AND revoked_at IS NOT NULL
+       ORDER BY datetime(revoked_at) DESC, datetime(updated_at) DESC
+       LIMIT 1`,
+    )
+    .bind(claim.user_id, claim.discord_id, claim.linked_server_id, claim.player_profile_id, claim.player_id)
     .first<ActiveLinkRow>();
 }
 
