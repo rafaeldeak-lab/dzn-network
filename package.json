@@ -47,6 +47,8 @@
     "test:automation-schedulers": "tsx scripts/test-automation-schedulers.ts",
     "test:metadata-fairness": "tsx scripts/test-metadata-fairness.ts",
     "test:public-servers-fallback": "tsx scripts/test-public-servers-fallback.ts",
+    "test:live-server-rail": "tsx scripts/test-live-server-rail.ts",
+    "qa:live-server-rail": "node scripts/qa-live-server-rail.mjs",
     "test:auto-update-worker": "tsx scripts/test-auto-update-worker.ts",
     "test:auth-mission-briefing": "tsx scripts/test-auth-mission-briefing.ts",
     "seed:advanced-showcase-preview": "tsx scripts/seed-advanced-showcase-preview.ts",

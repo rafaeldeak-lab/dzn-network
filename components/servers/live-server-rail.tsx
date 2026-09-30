@@ -23,48 +23,6 @@ type RailResponse = {
   items?: RailItem[];
 };
 
-const placeholderItems: RailItem[] = [
-  {
-    id: "placeholder-beta",
-    slug: null,
-    name: "Servers joining beta now",
-    logoUrl: null,
-    category: "DZN Network",
-    currentPlayers: null,
-    maxPlayers: null,
-    ratingAverage: null,
-    reviewCount: 0,
-    listingPlanKey: "free",
-    isPro: false,
-  },
-  {
-    id: "placeholder-free",
-    slug: null,
-    name: "Compare Starter and Pro",
-    logoUrl: null,
-    category: "Owner plans",
-    currentPlayers: null,
-    maxPlayers: null,
-    ratingAverage: null,
-    reviewCount: 0,
-    listingPlanKey: "free",
-    isPro: false,
-  },
-  {
-    id: "placeholder-pro",
-    slug: null,
-    name: "Pro adverts unlock visuals",
-    logoUrl: null,
-    category: "Pro Listing",
-    currentPlayers: null,
-    maxPlayers: null,
-    ratingAverage: null,
-    reviewCount: 0,
-    listingPlanKey: "pro",
-    isPro: true,
-  },
-];
-
 export function LiveServerRail({ className = "" }: { className?: string }) {
   const [items, setItems] = useState<RailItem[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -84,9 +42,8 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
     return () => controller.abort();
   }, []);
 
-  const displayItems = items.length ? items : placeholderItems;
-  const railItems = useMemo(() => [...displayItems, ...displayItems], [displayItems]);
-  const isPlaceholder = loaded && items.length === 0;
+  const railItems = useMemo(() => [...items, ...items], [items]);
+  const hasItems = items.length > 0;
 
   return (
     <section className={`dzn-live-server-rail ${className}`} aria-label="Live DZN server rail">
@@ -97,16 +54,34 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
         </div>
         <span className="inline-flex items-center gap-2 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-[10px] font-black uppercase text-emerald-100">
           <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(52,211,153,0.9)]" aria-hidden="true" />
-          {isPlaceholder ? "Beta onboarding" : "Cached live data"}
+          {!loaded ? "Loading listings" : hasItems ? "Cached live data" : "No live listings"}
         </span>
       </div>
-      <div className="dzn-live-server-rail__viewport" tabIndex={0}>
-        <div className="dzn-live-server-rail__track">
-          {railItems.map((item, index) => (
-            <RailCard key={`${item.id}-${index}`} item={item} duplicate={index >= displayItems.length} />
-          ))}
+      {hasItems ? (
+        <div className="dzn-live-server-rail__viewport" tabIndex={0}>
+          <div className="dzn-live-server-rail__track">
+            {railItems.map((item, index) => (
+              <RailCard key={`${item.id}-${index}`} item={item} duplicate={index >= items.length} />
+            ))}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="dzn-live-server-rail__empty" role="status" aria-live="polite">
+          <span className="dzn-live-server-rail__empty-icon" aria-hidden="true">
+            <RadioTower className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <strong>{loaded ? "No public server listings are available right now" : "Loading connected server listings"}</strong>
+            <p>{loaded ? "Only verified public servers appear here. Check the server directory for the latest available listings." : "Real server records will appear here when the network response is ready."}</p>
+          </div>
+          {loaded ? (
+            <Link href="/servers" className="dzn-live-server-rail__empty-link">
+              Browse servers
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          ) : null}
+        </div>
+      )}
     </section>
   );
 }
