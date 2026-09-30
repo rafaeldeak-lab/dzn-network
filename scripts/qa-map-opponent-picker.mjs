@@ -34,7 +34,7 @@ else {
   const browser = await chromium.launch({ headless: true });
   const results = [];
   try {
-    for (const width of [320, 390, 900, 1440]) {
+    for (const width of [320, 390, 900, 1024, 1180, 1440]) {
       const context = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion: "reduce" });
       const page = await context.newPage();
       const errors = [], writes = [], requests = [];
@@ -77,13 +77,16 @@ else {
       fail = false; await page.getByRole("button", { name: "Retry server search" }).click(); await choice.waitFor();
       assert.match(await page.locator(".dzn-advanced-showcase").innerText(), /Chernarus/i);
       assert.doesNotMatch(await page.locator(".dzn-advanced-showcase").innerText(), /Premium\+|ChernarusPlus|dayzOffline/);
-      const layout = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth > innerWidth, cells: [...document.querySelectorAll(".dzn-exploration-mini-grid span")].length, grid: getComputedStyle(document.querySelector(".dzn-exploration-mini-grid")).backgroundImage }));
-      assert.equal(layout.overflow, false); assert.equal(layout.cells, 40); assert.match(layout.grid, /repeating-linear-gradient/);
+      const layout = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth > innerWidth, cells: [...document.querySelectorAll(".dzn-exploration-mini-grid > span")].length, grid: getComputedStyle(document.querySelector(".dzn-exploration-mini-grid")).backgroundImage, privacy: document.querySelector(".dzn-exploration-privacy")?.textContent?.trim(), mapWidth: document.querySelector(".dzn-exploration-mini-grid")?.getBoundingClientRect().width }));
+      assert.equal(layout.overflow, false); assert.equal(layout.cells, 40); assert.match(layout.grid, /dzn-tactical-terrain-v1\.webp/);
+      assert.match(layout.privacy ?? "", /Exact locations, live positions and individual routes are never shown/);
+      assert.match(await page.locator(".dzn-exploration-figure figcaption").innerText(), /Fictional terrain backdrop; coverage is schematic/);
+      assert.ok((layout.mapWidth ?? 0) >= Math.min(width - 120, 220), `Tactical map must remain legible at ${width}px (rendered ${layout.mapWidth}px)`);
       assert.deepEqual(errors, []); assert.deepEqual(writes, []);
       await page.screenshot({ path: path.join(output, `panels-${width}.png`), fullPage: true });
       results.push({ width, ...layout, errors, writes }); await context.close();
     }
     await writeFile(path.join(output, "results.json"), JSON.stringify(results, null, 2));
-    console.log("Map and real dashboard-panel component QA passed at four widths; no challenge sent.");
+    console.log("Map and real dashboard-panel component QA passed at six widths; no challenge sent.");
   } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
 }
