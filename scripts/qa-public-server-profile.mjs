@@ -26,6 +26,28 @@ const players = Array.from({ length: 6 }, (_, index) => ({
   public_profile_href: index < 2 ? `/players/player-${index + 1}` : null,
   public_profile_avatar_url: index < 2 ? `/api/public/players/player-${index + 1}/avatar` : null,
 }));
+const badge = {
+  code: "death_dealer",
+  name: "Death Dealer",
+  category: "combat",
+  description: "Awarded for confirmed combat performance.",
+  points: 100,
+  permanent: true,
+  earnedAt: new Date().toISOString(),
+  locked: false,
+  staticIconUrl: "/badges/combat/death-dealer.svg",
+  animatedIconUrl: "/badges/combat/death-dealer-animated.svg",
+  imageAlt: "Death Dealer badge",
+  rarity: "rare",
+  theme: "combat",
+  glowColour: "#ef4444",
+  animationType: "pulse",
+  sortOrder: 70,
+  isShowcaseBadge: true,
+  isPublic: true,
+  displaySize: "md",
+  unlockType: "earned",
+};
 const serverData = {
   linked_server_id: "qa-server",
   public_slug: "nuketown-deathmatch",
@@ -81,8 +103,8 @@ const serverData = {
   premium_status: "premium",
   cardStyle: "pro",
   accentColour: "#22d3ee",
-  badges: [],
-  showcaseBadges: [],
+  badges: [badge],
+  showcaseBadges: [badge],
   recent_events: [],
   top_players: players,
   pvp_leaderboard: players,
@@ -104,7 +126,7 @@ const httpServer = createServer(async (request, response) => {
   if (url.pathname === "/api/public/servers/qa-server/wars") { response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ activeEvents: [], trophies: [], currentChampionTitles: [] })); return; }
   const file = path.resolve(root, decodeURIComponent(url.pathname).slice(1));
   if (!file.startsWith(root + path.sep) || !(await stat(file).catch(() => null))?.isFile()) { response.writeHead(404).end(); return; }
-  response.writeHead(200, { "content-type": file.endsWith(".css") ? "text/css" : file.endsWith(".woff2") ? "font/woff2" : file.endsWith(".webp") ? "image/webp" : "application/octet-stream" }).end(await readFile(file));
+  response.writeHead(200, { "content-type": file.endsWith(".css") ? "text/css" : file.endsWith(".woff2") ? "font/woff2" : file.endsWith(".webp") ? "image/webp" : file.endsWith(".svg") ? "image/svg+xml" : "application/octet-stream" }).end(await readFile(file));
 });
 
 await new Promise((resolve, reject) => { httpServer.once("error", reject); httpServer.listen(port, "127.0.0.1", resolve); });
@@ -128,6 +150,9 @@ try {
       visibleAvatarImages: [...document.querySelectorAll('img[alt$="Discord profile"]')].filter((image) => image.getBoundingClientRect().width > 0).length,
       brokenVisibleAvatarImages: [...document.querySelectorAll('img[alt$="Discord profile"]')].filter((image) => image.getBoundingClientRect().width > 0 && (!image.complete || image.naturalWidth === 0)).length,
       visibleFailedAvatarFallbacks: [...document.querySelectorAll('[data-player-avatar="Tara.W"]')].filter((avatar) => avatar.getBoundingClientRect().width > 0 && avatar.textContent.trim().length > 0 && !avatar.querySelector("img")).length,
+      visibleBadgeImages: [...document.querySelectorAll('.dzn-badge-icon__image')].filter((image) => image.getBoundingClientRect().width > 0 && image.complete && image.naturalWidth > 0).length,
+      visibleBadgeFallbacks: [...document.querySelectorAll('.dzn-badge-icon__fallback')].filter((fallback) => fallback.getBoundingClientRect().width > 0).length,
+      badgeImageOpacity: Number.parseFloat(getComputedStyle(document.querySelector('.dzn-badge-icon__image')).opacity),
       markerTop: Number.parseFloat(document.querySelector(".dzn-exploration-mini-grid > span")?.style.top ?? "NaN"),
     }));
     assert.equal(metrics.overflow, false, `Profile must not overflow at ${width}px`);
@@ -136,6 +161,9 @@ try {
     assert.ok(metrics.visibleAvatarImages >= 1, "A working consented Discord profile avatar should remain visible");
     assert.equal(metrics.brokenVisibleAvatarImages, 0, "Failed avatar requests should not leave visible broken images");
     assert.ok(metrics.visibleFailedAvatarFallbacks >= 1, "A failed avatar request should visibly fall back to player initials");
+    assert.ok(metrics.visibleBadgeImages >= 1, "Configured badge artwork should render successfully");
+    assert.equal(metrics.visibleBadgeFallbacks, 0, "Fallback glyphs should not cover successfully loaded badge artwork");
+    assert.ok(metrics.badgeImageOpacity >= 0.9, "Badge artwork should remain visually identifiable after glow reduction");
     assert.ok(Math.abs(metrics.markerTop - ((128 - 85 - 0.5) / 128 * 100)) < 0.01, "Map markers should invert world Y for the north-up map artwork");
     const disclosure = page.locator(".dzn-profile-mobile-disclosure").first();
     if (width === 390) {
