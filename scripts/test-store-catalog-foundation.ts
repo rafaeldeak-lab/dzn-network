@@ -74,6 +74,10 @@ for (const unsafe of [
   { grantsCompetitiveEligibility: true },
   { accountBound: false },
   { description: "Buy XP and rank advantages for your account." },
+  { name: "XP Pack" },
+  { description: "Get a ranking boost with this purchase." },
+  { metadataJson: JSON.stringify({ grantsXp: true }) },
+  { metadataJson: JSON.stringify({ presentation: { grantsCompetitiveEligibility: true } }) },
 ]) {
   const result = validateStoreProductDraft({
     productKey: "dzn-profile-theme-pack",
@@ -94,6 +98,9 @@ for (const unsafe of [
   { productId: "product_001", currency: "gbp", unitAmountMinor: 1000, active: true },
   { productId: "product_001", currency: "gbp", unitAmountMinor: 1000, stripePriceId: "price_live" },
   { productId: "product_001", currency: "gbp", unitAmountMinor: 1000, allowPayWhatYouWant: true },
+  { productId: "product_001", currency: "gbp", unitAmountMinor: true },
+  { productId: "product_001", currency: "gbp", unitAmountMinor: [1000] },
+  { productId: "product_001", currency: "gbp", unitAmountMinor: "1000" },
 ]) assert.equal(validateStorePriceDraft(unsafe).ok, false, JSON.stringify(unsafe));
 
 db.close();

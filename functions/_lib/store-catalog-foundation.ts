@@ -38,6 +38,7 @@ const OUTCOME_FIELDS = [
 const FORBIDDEN_BENEFIT_COPY = [
   /\b(?:grant|give|award|unlock|buy|purchase)\w*\s+(?:\w+\s+){0,4}(?:spin|spins|xp|rank|ranking|discovery|review score|reward odds|server wars|ctf|owner setup|nitrado|competitive eligibility)\b/i,
   /\b(?:boost|increase|improve|raise)\w*\s+(?:\w+\s+){0,4}(?:rank|ranking|discovery|review score|reward odds|server wars|ctf|score|eligibility)\b/i,
+  /\b(?:xp|experience points?|paid spins?|ranking? boost|ranking? advantage|discovery advantage|review score|reward odds|competitive eligibility|owner (?:setup|subscription)|nitrado access|server wars advantage|ctf advantage)\b/i,
   /\b(?:cash|gift cards?|physical prizes?|redeemable|transferable|tradeable|resellable)\b/i,
 ] as const;
 
@@ -103,6 +104,9 @@ export function validateStoreProductDraft(input: unknown): StoreCatalogResult<St
   }
 
   const metadataJson = metadata(value.metadataJson, errors);
+  if (metadataJson !== null && containsForbiddenMetadataOutcome(JSON.parse(metadataJson))) {
+    add(errors, "metadataJson", "FORBIDDEN_PAID_OUTCOME", "Metadata cannot declare progression, competitive, owner, or redeemable outcomes.");
+  }
   const searchable = `${productKey} ${name} ${description} ${metadataJson ?? ""}`;
   if (FORBIDDEN_BENEFIT_COPY.some((pattern) => pattern.test(searchable))) {
     add(errors, "description", "FORBIDDEN_PAID_BENEFIT", "Store products cannot sell progression, competitive, owner, or redeemable benefits.");
@@ -134,7 +138,7 @@ export function validateStorePriceDraft(input: unknown): StoreCatalogResult<Stor
   const errors: StoreCatalogError[] = [];
   const productId = text(value.productId) ?? "";
   const status = enumValue(value.status ?? "draft", DRAFT_STATUSES);
-  const unitAmountMinor = Number(value.unitAmountMinor);
+  const unitAmountMinor = typeof value.unitAmountMinor === "number" ? value.unitAmountMinor : Number.NaN;
 
   if (!RECORD_ID.test(productId)) add(errors, "productId", "INVALID_PRODUCT_ID", "Reference a local catalog product id.");
   if ((text(value.currency) ?? "gbp").toLowerCase() !== "gbp") add(errors, "currency", "INVALID_CURRENCY", "Initial Store drafts use GBP.");
@@ -173,6 +177,13 @@ function metadata(value: unknown, errors: StoreCatalogError[]) {
     add(errors, "metadataJson", "INVALID_METADATA", "Metadata must be a JSON object.");
     return null;
   }
+}
+
+function containsForbiddenMetadataOutcome(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsForbiddenMetadataOutcome);
+  if (!value || typeof value !== "object") return false;
+  const forbiddenKeys = new Set<string>(OUTCOME_FIELDS.map((field) => field.toLowerCase()));
+  return Object.entries(value as Record<string, unknown>).some(([key, nested]) => forbiddenKeys.has(key.toLowerCase()) || containsForbiddenMetadataOutcome(nested));
 }
 
 function enumValue<T extends readonly string[]>(value: unknown, allowed: T): T[number] | null {
