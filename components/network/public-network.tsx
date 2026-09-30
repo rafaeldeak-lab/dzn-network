@@ -1999,6 +1999,7 @@ function ExplorationMiniGrid({ exploration }: { exploration: NonNullable<ServerA
         <span><i className="dzn-exploration-legend dzn-exploration-legend--quiet" />Visited</span>
         <span><i className="dzn-exploration-legend dzn-exploration-legend--active" />Frequent</span>
         <b>{cells.length ? `${cells.length} sampled grid areas` : "No activity areas yet"}</b>
+        <small>Fictional terrain backdrop; coverage is schematic.</small>
       </figcaption>
     </figure>
   );
