@@ -38,7 +38,7 @@ const OUTCOME_FIELDS = [
 const FORBIDDEN_BENEFIT_COPY = [
   /\b(?:grant|give|award|unlock|buy|purchase)\w*\s+(?:\w+\s+){0,4}(?:spin|spins|xp|rank|ranking|discovery|review score|reward odds|server wars|ctf|owner setup|nitrado|competitive eligibility)\b/i,
   /\b(?:boost|increase|improve|raise)\w*\s+(?:\w+\s+){0,4}(?:rank|ranking|discovery|review score|reward odds|server wars|ctf|score|eligibility)\b/i,
-  /\b(?:xp|experience points?|paid spins?|rank(?:ing)? boost|rank(?:ing)? advantage|discovery advantage|review score|reward odds|competitive eligibility|owner (?:setup|subscription)|nitrado access|server wars advantage|ctf advantage)\b/i,
+  /\b(?:xp|experience points?|spins?|rank(?:ing)? boost|rank(?:ing)? advantage|discovery advantage|review score|reward odds|competitive eligibility|owner (?:setup|subscription)|nitrado access|server wars advantage|ctf advantage)\b/i,
   /\b(?:cash|gift cards?|physical prizes?|redeemable|transferable|tradeable|resellable)\b/i,
 ] as const;
 
