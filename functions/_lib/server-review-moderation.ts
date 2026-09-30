@@ -55,14 +55,14 @@ export function validateReviewModerationInput(value: unknown):
   | { ok: false; status: 400; message: string } {
   const input = value && typeof value === "object" ? value as Record<string, unknown> : {};
   const reviewId = typeof input.reviewId === "string" ? input.reviewId.trim() : "";
-  const moderationVersion = Number(input.moderationVersion);
+  const moderationVersion = input.moderationVersion;
   const action = input.action === "approve" || input.action === "hide" ? input.action : null;
   const reason = typeof input.reason === "string" ? input.reason.replace(/\s+/g, " ").trim() : "";
 
   if (!/^[a-zA-Z0-9-]{8,100}$/.test(reviewId)) {
     return { ok: false, status: 400, message: "Choose a valid review." };
   }
-  if (!Number.isInteger(moderationVersion) || moderationVersion < 0) {
+  if (typeof moderationVersion !== "number" || !Number.isInteger(moderationVersion) || moderationVersion < 0) {
     return { ok: false, status: 400, message: "Refresh the review queue before deciding." };
   }
   if (!action) return { ok: false, status: 400, message: "Choose approve or hide." };

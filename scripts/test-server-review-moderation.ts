@@ -14,6 +14,9 @@ assert.equal(validateReviewModerationInput({ reviewId: "review-12345678", modera
 assert.equal(validateReviewModerationInput({ reviewId: "review-12345678", moderationVersion: 0, action: "hide", reason: "no" }).ok, false);
 assert.equal(validateReviewModerationInput({ reviewId: "review-12345678", action: "hide", reason: "Valid reason" }).ok, false);
 assert.equal(validateReviewModerationInput({ reviewId: "review-12345678", moderationVersion: -1, action: "hide", reason: "Valid reason" }).ok, false);
+assert.equal(validateReviewModerationInput({ reviewId: "review-12345678", moderationVersion: null, action: "hide", reason: "Valid reason" }).ok, false);
+assert.equal(validateReviewModerationInput({ reviewId: "review-12345678", moderationVersion: false, action: "hide", reason: "Valid reason" }).ok, false);
+assert.equal(validateReviewModerationInput({ reviewId: "review-12345678", moderationVersion: "0", action: "hide", reason: "Valid reason" }).ok, false);
 
 const migration = readFileSync("migrations/0079_server_review_moderation.sql", "utf8");
 assert.match(migration, /server_review_moderation_audit/);
@@ -57,5 +60,7 @@ const moderationPage = readFileSync("components/owner/server-review-moderation-p
 assert.match(moderationPage, /const loadSequence = useRef\(0\)/);
 assert.match(moderationPage, /const requestSequence = \+\+loadSequence\.current/);
 assert.match(moderationPage, /requestSequence !== loadSequence\.current/);
+assert.match(moderationPage, /status: statusRef\.current/);
+assert.match(moderationPage, /appliedSearchRef\.current/);
 
 console.log("Server review moderation tests passed.");

@@ -47,14 +47,16 @@ export function ServerReviewModerationPage() {
   const [busy, setBusy] = useState<"approve" | "hide" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const loadSequence = useRef(0);
+  const statusRef = useRef(status);
+  const appliedSearchRef = useRef(appliedSearch);
 
   const load = useCallback(async (options?: { keepNotice?: boolean }) => {
     const requestSequence = ++loadSequence.current;
     setState("loading");
     if (!options?.keepNotice) setNotice(null);
     try {
-      const params = new URLSearchParams({ status });
-      if (appliedSearch) params.set("q", appliedSearch);
+      const params = new URLSearchParams({ status: statusRef.current });
+      if (appliedSearchRef.current) params.set("q", appliedSearchRef.current);
       const response = await fetch(`/api/owner/reviews/moderate?${params}`, { cache: "no-store", credentials: "include" });
       const payload = await response.json().catch(() => null) as QueuePayload | null;
       if (requestSequence !== loadSequence.current) return;
@@ -70,9 +72,9 @@ export function ServerReviewModerationPage() {
       setNotice(error instanceof Error ? error.message : "Review moderation is unavailable.");
       setState("error");
     }
-  }, [appliedSearch, status]);
+  }, []);
 
-  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [appliedSearch, load, status]);
   const selected = useMemo(() => reviews.find((review) => review.id === selectedId) ?? null, [reviews, selectedId]);
 
   async function decide(action: "approve" | "hide") {
@@ -109,9 +111,9 @@ export function ServerReviewModerationPage() {
           </div>
         </header>
 
-        <form onSubmit={(event) => { event.preventDefault(); setAppliedSearch(search.trim()); }} className="mt-4 grid gap-2 rounded-lg border border-white/10 bg-black/35 p-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+        <form onSubmit={(event) => { event.preventDefault(); const nextSearch = search.trim(); appliedSearchRef.current = nextSearch; setAppliedSearch(nextSearch); }} className="mt-4 grid gap-2 rounded-lg border border-white/10 bg-black/35 p-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
           <label className="relative"><span className="sr-only">Search reviews</span><Search className="pointer-events-none absolute left-3 top-3 text-zinc-500" size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} maxLength={80} placeholder="Search server, player, title, or review" className="h-11 w-full rounded-md border border-white/10 bg-[#070b13] pl-10 pr-3 text-sm outline-none focus:border-cyan-300/50" /></label>
-          <label className="relative"><span className="sr-only">Review status</span><Filter className="pointer-events-none absolute left-3 top-3 text-zinc-500" size={17} /><select value={status} onChange={(event) => setStatus(event.target.value as ReviewStatus)} className="h-11 min-w-40 appearance-none rounded-md border border-white/10 bg-[#070b13] pl-10 pr-8 text-sm font-bold outline-none"><option value="pending">Needs review</option><option value="approved">Approved</option><option value="hidden">Hidden</option></select></label>
+          <label className="relative"><span className="sr-only">Review status</span><Filter className="pointer-events-none absolute left-3 top-3 text-zinc-500" size={17} /><select value={status} onChange={(event) => { const nextStatus = event.target.value as ReviewStatus; statusRef.current = nextStatus; setStatus(nextStatus); }} className="h-11 min-w-40 appearance-none rounded-md border border-white/10 bg-[#070b13] pl-10 pr-8 text-sm font-bold outline-none"><option value="pending">Needs review</option><option value="approved">Approved</option><option value="hidden">Hidden</option></select></label>
           <button type="submit" className="h-11 rounded-md border border-cyan-300/30 bg-cyan-300/10 px-5 text-sm font-black text-cyan-100">Search</button>
         </form>
 
