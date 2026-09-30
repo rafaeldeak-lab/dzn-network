@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { PublicProfileOwnerPreviewPanel } from "@/components/player/public-profile-owner-preview-panel";
+import { CommunityDirectoryConsent } from "@/components/player/community-directory-consent";
 
 type PrivacyPreferenceKey =
   | "public_profile_enabled"
@@ -174,6 +175,8 @@ export function PlayerProfilePrivacySettings({ onSaved }: { onSaved?: () => void
             publicProfileHandle={state.data.public_profile_handle}
             sections={state.data.sections}
           />
+
+          <CommunityDirectoryConsent />
 
           <div className="rounded-md border border-violet-300/20 bg-violet-300/8 p-4">
             <p className="text-xs font-black uppercase text-violet-100">Saved Preference Boundary</p>

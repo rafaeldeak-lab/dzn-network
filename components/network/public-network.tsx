@@ -2245,6 +2245,10 @@ function CommunityInfoPanel({ server }: { server: PublicServer }) {
   return (
     <GlassPanel title="Community Info" icon={MessageSquare}>
       <div className="grid gap-4">
+        <Link href={`/servers/${encodeURIComponent(server.public_slug)}/community`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-4 py-3 text-xs font-black uppercase text-cyan-50 transition hover:border-cyan-200/55 hover:bg-cyan-400/18 sm:justify-self-start">
+          Community Members
+          <Users className="h-4 w-4" />
+        </Link>
         {hasDescription ? (
           <>
             {server.public_short_description ? <p className="text-base font-black leading-7 text-white">{server.public_short_description}</p> : null}
