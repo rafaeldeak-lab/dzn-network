@@ -122,6 +122,7 @@ function reviewRow(options: {
     status: options.status,
     moderation_reason: null,
     report_count: 0,
+    moderation_version: 0,
     created_at: "2026-05-16T10:00:00.000Z",
     updated_at: options.updatedAt ?? "2026-05-16T10:00:00.000Z",
     last_edited_at: null,

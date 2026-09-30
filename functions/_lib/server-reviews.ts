@@ -15,6 +15,7 @@ export type ServerReviewRow = {
   status: string;
   moderation_reason: string | null;
   report_count: number;
+  moderation_version: number;
   created_at: string;
   updated_at: string;
   last_edited_at: string | null;
@@ -103,7 +104,7 @@ export async function getApprovedReviewSummary(env: Env, linkedServerId: string,
   const result = await db
     .prepare(
       `SELECT id, linked_server_id, reviewer_discord_id, reviewer_name, reviewer_avatar_url, rating,
-              title, body, status, moderation_reason, report_count, created_at, updated_at, last_edited_at
+              title, body, status, moderation_reason, report_count, moderation_version, created_at, updated_at, last_edited_at
        FROM server_reviews
        WHERE linked_server_id = ?
          AND status = 'approved'
@@ -162,7 +163,7 @@ export async function getExistingActiveReview(env: Env, linkedServerId: string, 
   return db
     .prepare(
       `SELECT id, linked_server_id, reviewer_discord_id, reviewer_name, reviewer_avatar_url, rating,
-              title, body, status, moderation_reason, report_count, created_at, updated_at, last_edited_at
+              title, body, status, moderation_reason, report_count, moderation_version, created_at, updated_at, last_edited_at
        FROM server_reviews
        WHERE linked_server_id = ?
          AND reviewer_discord_id = ?

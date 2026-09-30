@@ -51,8 +51,9 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   const now = new Date().toISOString();
   const avatarUrl = discordAvatarUrl(user);
   if (existing) {
-    await db
-      .prepare(
+    const editId = crypto.randomUUID();
+    const results = await db.batch([
+      db.prepare(
         `UPDATE server_reviews SET
           reviewer_name = ?,
           reviewer_avatar_url = ?,
@@ -61,14 +62,27 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
           body = ?,
           status = 'approved',
           moderation_reason = NULL,
+          report_count = 0,
           updated_at = ?,
-          last_edited_at = ?
+          last_edited_at = ?,
+          moderation_version = moderation_version + 1,
+          moderation_decision_id = ?
          WHERE id = ?
            AND linked_server_id = ?
-           AND reviewer_discord_id = ?`,
+           AND reviewer_discord_id = ?
+           AND moderation_version = ?`,
       )
-      .bind(user.username, avatarUrl, validation.value.rating, validation.value.title, validation.value.body, now, now, existing.id, linkedServerId, user.discord_id)
-      .run();
+      .bind(user.username, avatarUrl, validation.value.rating, validation.value.title, validation.value.body, now, now, editId, existing.id, linkedServerId, user.discord_id, existing.moderation_version),
+      db.prepare(
+        `UPDATE server_review_reports
+            SET resolution_status = 'superseded_by_edit', resolved_at = ?, resolved_by_user_id = ?
+          WHERE review_id = ? AND resolution_status IS NULL
+            AND EXISTS (SELECT 1 FROM server_reviews WHERE id = ? AND moderation_decision_id = ?)`,
+      ).bind(now, user.id, existing.id, existing.id, editId),
+    ]);
+    if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
+      return json({ error: "This review changed while your edit was saved. Refresh and try again." }, { status: 409 });
+    }
   } else {
     await db
       .prepare(
