@@ -77,8 +77,10 @@ else {
       fail = false; await page.getByRole("button", { name: "Retry server search" }).click(); await choice.waitFor();
       assert.match(await page.locator(".dzn-advanced-showcase").innerText(), /Chernarus/i);
       assert.doesNotMatch(await page.locator(".dzn-advanced-showcase").innerText(), /Premium\+|ChernarusPlus|dayzOffline/);
-      const layout = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth > innerWidth, cells: [...document.querySelectorAll(".dzn-exploration-mini-grid span")].length, grid: getComputedStyle(document.querySelector(".dzn-exploration-mini-grid")).backgroundImage }));
-      assert.equal(layout.overflow, false); assert.equal(layout.cells, 40); assert.match(layout.grid, /repeating-linear-gradient/);
+      const layout = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth > innerWidth, cells: [...document.querySelectorAll(".dzn-exploration-mini-grid > span")].length, grid: getComputedStyle(document.querySelector(".dzn-exploration-mini-grid")).backgroundImage, privacy: document.querySelector(".dzn-exploration-privacy")?.textContent?.trim(), mapWidth: document.querySelector(".dzn-exploration-mini-grid")?.getBoundingClientRect().width }));
+      assert.equal(layout.overflow, false); assert.equal(layout.cells, 40); assert.match(layout.grid, /dzn-tactical-terrain-v1\.webp/);
+      assert.match(layout.privacy ?? "", /Exact locations, live positions and individual routes are never shown/);
+      assert.ok((layout.mapWidth ?? 0) >= Math.min(width - 120, 220), `Tactical map must remain legible at ${width}px (rendered ${layout.mapWidth}px)`);
       assert.deepEqual(errors, []); assert.deepEqual(writes, []);
       await page.screenshot({ path: path.join(output, `panels-${width}.png`), fullPage: true });
       results.push({ width, ...layout, errors, writes }); await context.close();

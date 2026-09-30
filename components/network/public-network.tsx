@@ -1821,13 +1821,20 @@ export function ServerAdvancedShowcasePanel({
 
       {exploration?.supported && payload?.access?.publicExplorationSummary ? (
         <div className="dzn-exploration-preview" aria-label="Aggregate map exploration preview">
-          <div>
+          <div className="dzn-exploration-preview__copy">
             <p className="text-[10px] font-black uppercase tracking-normal text-violet-200">Map Exploration</p>
             <h3>{publicMapLabel(exploration.mapDisplayName)}</h3>
             <p>
               {exploration.exploredCellsCount.toLocaleString("en-GB")} of {exploration.totalExplorableCells.toLocaleString("en-GB")} grid areas visited.
               {exploration.estimated ? " Estimated coverage, not a verified percentage of playable land." : ""}
             </p>
+            <div className="dzn-exploration-privacy" aria-label="Location privacy status">
+              <ShieldCheck aria-hidden="true" />
+              <div>
+                <strong>Aggregate coverage only</strong>
+                <span>Exact locations, live positions and individual routes are never shown.</span>
+              </div>
+            </div>
           </div>
           <ExplorationMiniGrid exploration={exploration} />
         </div>
@@ -1973,7 +1980,8 @@ function ExplorationMiniGrid({ exploration }: { exploration: NonNullable<ServerA
   const cells = explorationPreviewCells(exploration.overlayCells, gridSize);
   return (
     <figure className="dzn-exploration-figure">
-      <div className="dzn-exploration-mini-grid" role="img" aria-label={`${cells.length} highlighted aggregate areas. Schematic grid, not a terrain map or player route.`}>
+      <div className="dzn-exploration-mini-grid" role="img" aria-label={`${cells.length} highlighted aggregate areas on a fictional tactical terrain background. Not a live location or player route.`}>
+        <div className="dzn-exploration-mini-grid__shade" aria-hidden="true" />
         {cells.map((cell) => (
           <span
             key={cell.key}
@@ -1985,8 +1993,13 @@ function ExplorationMiniGrid({ exploration }: { exploration: NonNullable<ServerA
             } as CSSProperties}
           />
         ))}
+        <div className="dzn-exploration-mini-grid__stamp" aria-hidden="true">DZN GRID</div>
       </div>
-      <figcaption>{cells.length ? `Showing ${cells.length} sampled areas. Brighter areas have more visits.` : "No activity areas available yet."} Schematic only; player locations and routes stay private.</figcaption>
+      <figcaption>
+        <span><i className="dzn-exploration-legend dzn-exploration-legend--quiet" />Visited</span>
+        <span><i className="dzn-exploration-legend dzn-exploration-legend--active" />Frequent</span>
+        <b>{cells.length ? `${cells.length} sampled grid areas` : "No activity areas yet"}</b>
+      </figcaption>
     </figure>
   );
 }
