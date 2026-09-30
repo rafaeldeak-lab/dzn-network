@@ -76,6 +76,10 @@ export function identityTransactionFixture() {
 
 export async function testPlayerGameIdentityTransactions() {
   const owner = identityTestUser("owner-a");
+  const decisionSource = readFileSync("functions/_lib/player-game-identities.ts", "utf8");
+  const revocationSource = readFileSync("functions/_lib/player-game-identity-revocation.ts", "utf8");
+  assert.doesNotMatch(decisionSource, /dedupe_key LIKE \?/, "Player-link decisions must not use long bound LIKE patterns that production D1 rejects.");
+  assert.doesNotMatch(revocationSource, /dedupe_key LIKE 'player-link-review:/, "Player-link revocation must keep review-notification prefix checks within production D1 limits.");
   for (const action of ["approve", "reject"] as const) {
     const f = identityTransactionFixture();
     try {

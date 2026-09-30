@@ -1254,12 +1254,12 @@ function preparePlayerLinkReviewRequestNotificationResolution(
            '$.review_status', ?
          )
      WHERE type = 'player_link_review_requested'
-       AND dedupe_key LIKE ?
+       AND instr(dedupe_key, ?) = 1
        AND EXISTS (
          SELECT 1 FROM player_game_identity_audit_log
          WHERE id = ? AND result = 'accepted'
        )`,
-  ).bind(resolution, `player-link-review:${claimId}:%`, decisionId);
+  ).bind(resolution, `player-link-review:${claimId}:`, decisionId);
 }
 
 function decisionDelivery(
