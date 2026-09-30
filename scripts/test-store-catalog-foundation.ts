@@ -75,8 +75,12 @@ for (const unsafe of [
   { accountBound: false },
   { description: "Buy XP and rank advantages for your account." },
   { name: "XP Pack" },
+  { name: "Rank Boost" },
+  { name: "Rank Advantage" },
   { description: "Get a ranking boost with this purchase." },
   { metadataJson: JSON.stringify({ grantsXp: true }) },
+  { metadataJson: JSON.stringify({ grants_xp: true }) },
+  { metadataJson: JSON.stringify({ "grants-xp": true }) },
   { metadataJson: JSON.stringify({ presentation: { grantsCompetitiveEligibility: true } }) },
 ]) {
   const result = validateStoreProductDraft({

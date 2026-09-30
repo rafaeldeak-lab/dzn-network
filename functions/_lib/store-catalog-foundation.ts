@@ -38,7 +38,7 @@ const OUTCOME_FIELDS = [
 const FORBIDDEN_BENEFIT_COPY = [
   /\b(?:grant|give|award|unlock|buy|purchase)\w*\s+(?:\w+\s+){0,4}(?:spin|spins|xp|rank|ranking|discovery|review score|reward odds|server wars|ctf|owner setup|nitrado|competitive eligibility)\b/i,
   /\b(?:boost|increase|improve|raise)\w*\s+(?:\w+\s+){0,4}(?:rank|ranking|discovery|review score|reward odds|server wars|ctf|score|eligibility)\b/i,
-  /\b(?:xp|experience points?|paid spins?|ranking? boost|ranking? advantage|discovery advantage|review score|reward odds|competitive eligibility|owner (?:setup|subscription)|nitrado access|server wars advantage|ctf advantage)\b/i,
+  /\b(?:xp|experience points?|paid spins?|rank(?:ing)? boost|rank(?:ing)? advantage|discovery advantage|review score|reward odds|competitive eligibility|owner (?:setup|subscription)|nitrado access|server wars advantage|ctf advantage)\b/i,
   /\b(?:cash|gift cards?|physical prizes?|redeemable|transferable|tradeable|resellable)\b/i,
 ] as const;
 
@@ -182,9 +182,11 @@ function metadata(value: unknown, errors: StoreCatalogError[]) {
 function containsForbiddenMetadataOutcome(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsForbiddenMetadataOutcome);
   if (!value || typeof value !== "object") return false;
-  const forbiddenKeys = new Set<string>(OUTCOME_FIELDS.map((field) => field.toLowerCase()));
-  return Object.entries(value as Record<string, unknown>).some(([key, nested]) => forbiddenKeys.has(key.toLowerCase()) || containsForbiddenMetadataOutcome(nested));
+  const forbiddenKeys = new Set<string>(OUTCOME_FIELDS.map(normalizeMetadataKey));
+  return Object.entries(value as Record<string, unknown>).some(([key, nested]) => forbiddenKeys.has(normalizeMetadataKey(key)) || containsForbiddenMetadataOutcome(nested));
 }
+
+function normalizeMetadataKey(value: string) { return value.toLowerCase().replace(/[^a-z0-9]/g, ""); }
 
 function enumValue<T extends readonly string[]>(value: unknown, allowed: T): T[number] | null {
   const normalized = text(value)?.toLowerCase();
