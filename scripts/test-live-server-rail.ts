@@ -26,6 +26,10 @@ assert.equal(source.includes("[...items, ...items]"), false, "The animated rail 
 assert.equal(source.includes("dedupeRailItems(items)"), true, "The client must defensively deduplicate server identities.");
 assert.equal(source.includes('item.playerCountStatus !== "fresh"'), true, "Stale player counts must not be presented as live values.");
 
+const railRouteSource = readFileSync("functions/api/public/server-rail.ts", "utf8");
+assert.doesNotMatch(railRouteSource, /LIMIT\s+96/i, "Canonical server selection must happen before the public rail limit.");
+assert.match(railRouteSource, /readPublicServerCanonicalEvidence/, "Duplicate service records must use authoritative canonical evidence.");
+
 const missingDbResponse = await invokeRail({});
 assert.equal(missingDbResponse.status, 200);
 const missingDbPayload = await missingDbResponse.json() as { ok?: boolean; items?: unknown[]; generated_at?: string; stale?: boolean };
@@ -57,11 +61,8 @@ const duplicateRow = {
   latest_success_sync_status: "completed",
 };
 const duplicateDbResponse = await invokeRail({
-  DB: {
-    prepare: () => ({
-      all: async () => ({
-        results: [
-          { ...duplicateRow, id: "legacy-duplicate", public_slug: "legacy-nuketown", total_kills: 0, unique_players: 0, adm_logs_found: 0, adm_sync_status: null, latest_success_sync_status: null },
+  DB: createRailDb([
+          { ...duplicateRow, id: "legacy-duplicate", public_slug: "legacy-nuketown", total_kills: 500, unique_players: 500, adm_logs_found: 0, adm_sync_status: null, latest_success_sync_status: null },
           duplicateRow,
           ...Array.from({ length: 24 }, (_, index) => ({
             ...duplicateRow,
@@ -70,10 +71,10 @@ const duplicateDbResponse = await invokeRail({
             public_slug: `server-${index + 2}`,
             rail_priority_at: "2026-09-29T12:00:00.000Z",
           })),
-        ],
-      }),
-    }),
-  },
+        ], {
+          kills: { "legacy-duplicate": 0, "server-one": 5 },
+          players: { "legacy-duplicate": 0, "server-one": 3 },
+        }),
 });
 const duplicatePayload = await duplicateDbResponse.json() as { items?: Array<{ id: string; slug: string | null }> };
 assert.equal(duplicatePayload.items?.length, 24, "Duplicate rows must not consume the 24 unique-server rail limit.");
@@ -85,25 +86,16 @@ assert.deepEqual(canonicalDuplicateItem && { id: canonicalDuplicateItem.id, slug
 assert.equal(duplicatePayload.items?.some(({ id }) => id === "legacy-duplicate"), false, "The public API must deduplicate canonical server identities.");
 
 const namespaceCollisionResponse = await invokeRail({
-  DB: {
-    prepare: () => ({
-      all: async () => ({
-        results: [
+  DB: createRailDb([
           { ...duplicateRow, id: "service-owner", nitrado_service_id: "12345", public_slug: "service-owner" },
           { ...duplicateRow, id: "numeric-slug", nitrado_service_id: null, public_slug: "12345" },
-        ],
-      }),
-    }),
-  },
+        ]),
 });
 const namespaceCollisionPayload = await namespaceCollisionResponse.json() as { items?: Array<{ id: string }> };
 assert.equal(namespaceCollisionPayload.items?.length, 2, "Service IDs and public slugs must use separate identity namespaces.");
 
 const priorityOrderingResponse = await invokeRail({
-  DB: {
-    prepare: () => ({
-      all: async () => ({
-        results: [
+  DB: createRailDb([
           { ...duplicateRow, id: "stale-paid", nitrado_service_id: "shared-service", total_kills: 0, unique_players: 0 },
           ...Array.from({ length: 24 }, (_, index) => ({
             ...duplicateRow,
@@ -121,10 +113,10 @@ const priorityOrderingResponse = await invokeRail({
             rail_priority_at: "2026-01-01T00:00:00.000Z",
             total_kills: 50,
           },
-        ],
-      }),
-    }),
-  },
+        ], {
+          kills: { "stale-paid": 0, "canonical-free": 50 },
+          players: { "stale-paid": 0, "canonical-free": 3 },
+        }),
 });
 const priorityOrderingPayload = await priorityOrderingResponse.json() as { items?: Array<{ id: string }> };
 assert.equal(priorityOrderingPayload.items?.length, 24);
@@ -146,4 +138,27 @@ function invokeRail(env: object) {
     request: new Request("https://dayz-network.com/api/public/server-rail"),
     env,
   } as unknown as Parameters<typeof onRequest>[0]);
+}
+
+function createRailDb(
+  candidates: Array<Record<string, unknown>>,
+  evidence: { kills?: Record<string, number>; players?: Record<string, number> } = {},
+) {
+  return {
+    prepare: (query: string) => {
+      if (query.includes("FROM linked_servers")) {
+        return { all: async () => ({ results: candidates }) };
+      }
+      const values = query.includes("FROM kill_events") ? evidence.kills : evidence.players;
+      return {
+        bind: (...ids: string[]) => ({
+          all: async () => ({
+            results: ids
+              .filter((id) => values?.[id] !== undefined)
+              .map((id) => ({ linked_server_id: id, evidence_count: values?.[id] ?? 0 })),
+          }),
+        }),
+      };
+    },
+  };
 }

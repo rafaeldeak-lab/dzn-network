@@ -1,6 +1,7 @@
 import { requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { publicCacheHeaders } from "../../_lib/performance";
+import { readPublicServerCanonicalEvidence } from "../../_lib/public-server-canonical";
 import {
   PUBLIC_CURRENT_PLAYERS_SQL,
   PUBLIC_MAX_PLAYERS_SQL,
@@ -48,9 +49,10 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
 
   try {
     const rows = await queryServerRail(env);
+    const canonicalRows = await hydrateDuplicateCanonicalEvidence(env, rows);
     return json({
       ok: true,
-      items: dedupeRailRows(rows).slice(0, 24).map(toRailItem),
+      items: dedupeRailRows(canonicalRows).slice(0, 24).map(toRailItem),
       generated_at: new Date().toISOString(),
     }, { headers });
   } catch (error) {
@@ -119,10 +121,33 @@ async function queryServerRail(env: Env) {
          THEN 0 ELSE 1
        END,
        datetime(COALESCE(server_advertising_state.last_bumped_at, linked_servers.public_listing_updated_at, linked_servers.updated_at, linked_servers.created_at)) DESC,
-       linked_servers.id ASC
-     LIMIT 96`,
+       linked_servers.id ASC`,
   ).all<RailRow>();
   return result.results ?? [];
+}
+
+async function hydrateDuplicateCanonicalEvidence(env: Env, rows: RailRow[]) {
+  const serviceCounts = new Map<string, number>();
+  for (const row of rows) {
+    const serviceId = row.nitrado_service_id?.trim().toLowerCase();
+    if (serviceId) serviceCounts.set(serviceId, (serviceCounts.get(serviceId) ?? 0) + 1);
+  }
+
+  const duplicateIds = rows
+    .filter((row) => {
+      const serviceId = row.nitrado_service_id?.trim().toLowerCase();
+      return serviceId && (serviceCounts.get(serviceId) ?? 0) > 1;
+    })
+    .map((row) => row.id);
+  if (duplicateIds.length === 0) return rows;
+
+  const evidence = await readPublicServerCanonicalEvidence(requireDb(env), duplicateIds);
+  return rows.map((row) => {
+    const authoritative = evidence.get(row.id);
+    return authoritative
+      ? { ...row, total_kills: authoritative.totalKills, unique_players: authoritative.uniquePlayers }
+      : row;
+  });
 }
 
 function dedupeRailRows(rows: RailRow[]) {
