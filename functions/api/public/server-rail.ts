@@ -44,7 +44,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     const rows = await queryServerRail(env);
     return json({
       ok: true,
-      items: dedupeRailRows(rows).map(toRailItem),
+      items: dedupeRailRows(rows).slice(0, 24).map(toRailItem),
       generated_at: new Date().toISOString(),
     }, { headers });
   } catch (error) {
@@ -98,7 +98,7 @@ async function queryServerRail(env: Env) {
        END,
        datetime(COALESCE(server_advertising_state.last_bumped_at, linked_servers.public_listing_updated_at, linked_servers.updated_at, linked_servers.created_at)) DESC,
        linked_servers.id ASC
-     LIMIT 24`,
+     LIMIT 96`,
   ).all<RailRow>();
   return result.results ?? [];
 }

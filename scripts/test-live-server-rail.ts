@@ -53,14 +53,27 @@ const duplicateRow = {
 const duplicateDbResponse = await invokeRail({
   DB: {
     prepare: () => ({
-      all: async () => ({ results: [duplicateRow, { ...duplicateRow, id: "legacy-duplicate", public_slug: "legacy-nuketown" }] }),
+      all: async () => ({
+        results: [
+          duplicateRow,
+          { ...duplicateRow, id: "legacy-duplicate", public_slug: "legacy-nuketown" },
+          ...Array.from({ length: 24 }, (_, index) => ({
+            ...duplicateRow,
+            id: `server-${index + 2}`,
+            nitrado_service_id: `service-${index + 2}`,
+            public_slug: `server-${index + 2}`,
+          })),
+        ],
+      }),
     }),
   },
 });
 const duplicatePayload = await duplicateDbResponse.json() as { items?: Array<{ id: string; slug: string | null }> };
-assert.deepEqual(duplicatePayload.items?.map(({ id, slug }) => ({ id, slug })), [
+assert.equal(duplicatePayload.items?.length, 24, "Duplicate rows must not consume the 24 unique-server rail limit.");
+assert.deepEqual(duplicatePayload.items?.slice(0, 1).map(({ id, slug }) => ({ id, slug })), [
   { id: "server-one", slug: "nuketown-deathmatch" },
-], "The public API must deduplicate canonical server identities.");
+]);
+assert.equal(duplicatePayload.items?.some(({ id }) => id === "legacy-duplicate"), false, "The public API must deduplicate canonical server identities.");
 
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts?: Record<string, string> };
 assert.equal(packageJson.scripts?.test?.includes("npm run test:live-server-rail"), true, "The main test suite must enforce the rail regression checks.");
