@@ -54,6 +54,7 @@ const duplicateRow = {
   subscription_status: "active",
   last_bumped_at: null,
   rail_priority_at: "2026-09-30T12:00:00.000Z",
+  updated_at: "2026-09-30T12:00:00.000Z",
   adm_logs_found: 1,
   adm_sync_status: "completed",
   total_kills: 5,
@@ -122,6 +123,30 @@ const priorityOrderingPayload = await priorityOrderingResponse.json() as { items
 assert.equal(priorityOrderingPayload.items?.length, 24);
 assert.equal(priorityOrderingPayload.items?.some(({ id }) => id === "canonical-free"), false, "A free canonical replacement must not inherit a stale paid row's rail position.");
 assert.equal(priorityOrderingPayload.items?.every(({ id }) => id.startsWith("paid-")), true, "Paid rail priority must be reapplied after canonical selection.");
+
+const equalScoreTieResponse = await invokeRail({
+  DB: createRailDb([
+          {
+            ...duplicateRow,
+            id: "older-paid-duplicate",
+            nitrado_service_id: "equal-score-service",
+            public_slug: "older-paid-duplicate",
+            updated_at: "2026-01-01T00:00:00.000Z",
+          },
+          {
+            ...duplicateRow,
+            id: "newer-replacement",
+            nitrado_service_id: "equal-score-service",
+            public_slug: "newer-replacement",
+            plan_key: "free",
+            subscription_status: null,
+            rail_priority_at: "2026-01-01T00:00:00.000Z",
+            updated_at: "2026-09-30T00:00:00.000Z",
+          },
+        ]),
+});
+const equalScoreTiePayload = await equalScoreTieResponse.json() as { items?: Array<{ id: string }> };
+assert.deepEqual(equalScoreTiePayload.items?.map(({ id }) => id), ["newer-replacement"], "Equal-score duplicates must use the directory's newer-row tie-breaker.");
 
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts?: Record<string, string> };
 assert.equal(packageJson.scripts?.test?.includes("npm run test:live-server-rail"), true, "The main test suite must enforce the rail regression checks.");

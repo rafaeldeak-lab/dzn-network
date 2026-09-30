@@ -31,6 +31,7 @@ type RailRow = {
   subscription_status: string | null;
   last_bumped_at: string | null;
   rail_priority_at: string | null;
+  updated_at: string | null;
   adm_logs_found: number | null;
   adm_sync_status: string | null;
   total_kills: number | null;
@@ -81,6 +82,7 @@ async function queryServerRail(env: Env) {
        server_subscriptions.status AS subscription_status,
        server_advertising_state.last_bumped_at,
        COALESCE(server_advertising_state.last_bumped_at, linked_servers.public_listing_updated_at, linked_servers.updated_at, linked_servers.created_at) AS rail_priority_at,
+       linked_servers.updated_at,
        onboarding_checks.adm_logs_found,
        adm_sync_state.last_sync_status AS adm_sync_status,
        COALESCE(server_stats.total_kills, 0) AS total_kills,
@@ -159,9 +161,15 @@ function dedupeRailRows(rows: RailRow[]) {
         ? `slug:${row.public_slug.trim().toLowerCase()}`
         : `id:${row.id.trim().toLowerCase()}`;
     const existing = unique.get(identity);
-    if (!existing || railCanonicalScore(row) > railCanonicalScore(existing)) unique.set(identity, row);
+    if (!existing || compareCanonicalRows(row, existing) > 0) unique.set(identity, row);
   }
   return [...unique.values()].sort(compareRailPriority);
+}
+
+function compareCanonicalRows(left: RailRow, right: RailRow) {
+  const scoreDifference = railCanonicalScore(left) - railCanonicalScore(right);
+  if (scoreDifference !== 0) return scoreDifference;
+  return timestampOrZero(left.updated_at) - timestampOrZero(right.updated_at);
 }
 
 function compareRailPriority(left: RailRow, right: RailRow) {
