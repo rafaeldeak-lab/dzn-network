@@ -94,7 +94,7 @@ export async function revokePlayerGameIdentityLink(env: Env, actor: SessionUser,
           AND EXISTS (
             SELECT 1 FROM player_game_identity_claims c
             WHERE c.status = 'pending' AND ${sameProfile}
-              AND user_notifications.dedupe_key LIKE 'player-link-review:' || c.id || ':%'
+              AND instr(user_notifications.dedupe_key, 'player-link-review:' || c.id || ':') = 1
           )
           AND ${gate}`)
         .bind(link.linked_server_id, link.player_profile_id, link.player_id, decisionId),
