@@ -21,29 +21,47 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   await ensureServerReviewsSchema(env);
   const db = requireDb(env);
   const review = await db
-    .prepare("SELECT id, report_count FROM server_reviews WHERE id = ? AND status != 'deleted' LIMIT 1")
+    .prepare("SELECT id, moderation_version FROM server_reviews WHERE id = ? AND status = 'approved' LIMIT 1")
     .bind(reviewId)
-    .first<{ id: string; report_count: number }>();
+    .first<{ id: string; moderation_version: number }>();
   if (!review) return json({ error: "Review not found." }, { status: 404 });
 
   const body = await readJson<ReportBody>(request);
   const now = new Date().toISOString();
+  const reportId = crypto.randomUUID();
+  let results: Awaited<ReturnType<typeof db.batch>>;
   try {
-    await db
-      .prepare("INSERT INTO server_review_reports (id, review_id, reporter_discord_id, reason, created_at) VALUES (?, ?, ?, ?, ?)")
-      .bind(crypto.randomUUID(), reviewId, user.discord_id, validateReportReason(body.reason), now)
-      .run();
+    results = await db.batch([
+      db.prepare(
+        `INSERT INTO server_review_reports (id, review_id, reporter_discord_id, reason, created_at)
+         SELECT ?, ?, ?, ?, ?
+          WHERE EXISTS (
+            SELECT 1 FROM server_reviews
+             WHERE id = ? AND status = 'approved' AND moderation_version = ?
+          )`,
+      ).bind(reportId, reviewId, user.discord_id, validateReportReason(body.reason), now, reviewId, review.moderation_version),
+      db.prepare(
+        `UPDATE server_reviews
+            SET report_count = (SELECT COUNT(*) FROM server_review_reports WHERE review_id = ? AND resolution_status IS NULL),
+                status = CASE WHEN (SELECT COUNT(*) FROM server_review_reports WHERE review_id = ? AND resolution_status IS NULL) >= 3 THEN 'pending' ELSE status END,
+                updated_at = ?, moderation_version = moderation_version + 1
+          WHERE id = ? AND status = 'approved' AND moderation_version = ?
+            AND EXISTS (SELECT 1 FROM server_review_reports WHERE id = ? AND resolution_status IS NULL)`,
+      ).bind(reviewId, reviewId, now, reviewId, review.moderation_version, reportId),
+    ]);
   } catch {
     return json({ error: "You have already reported this review." }, { status: 409 });
   }
 
-  const nextReportCount = Number(review.report_count ?? 0) + 1;
-  await db
-    .prepare("UPDATE server_reviews SET report_count = ?, status = CASE WHEN ? >= 3 THEN 'pending' ELSE status END, updated_at = ? WHERE id = ?")
-    .bind(nextReportCount, nextReportCount, now, reviewId)
-    .run();
+  if (Number(results[0]?.meta?.changes ?? 0) !== 1 || Number(results[1]?.meta?.changes ?? 0) !== 1) {
+    return json({ error: "This review changed while the report was sent. Refresh and try again." }, { status: 409 });
+  }
 
-  return json({ ok: true, report_count: nextReportCount });
+  const nextReportCount = await db.prepare(
+    "SELECT COUNT(*) AS count FROM server_review_reports WHERE review_id = ? AND resolution_status IS NULL",
+  ).bind(reviewId).first<{ count: number }>();
+
+  return json({ ok: true, report_count: Number(nextReportCount?.count ?? 0) });
 };
 
 async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {
