@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 
-import { buildPublicMapNodeFromRow, buildPublicMapNodesFromRows, type MapNodeRow } from "../functions/api/public/home-stats";
+import {
+  buildPublicMapNodeFromRow,
+  buildPublicMapNodesFromRows,
+  sanitizePublicHomeStatsSnapshot,
+  type MapNodeRow,
+} from "../functions/api/public/home-stats";
 import { geolocateServerIp } from "../functions/_lib/geoip";
 
 main().catch((error) => {
@@ -99,6 +104,30 @@ async function main() {
     assert.equal("longitude" in countryNode, false);
   }
 
+  const southAmericaNode = buildPublicMapNodeFromRow({
+    ...baseRow,
+    id: "south-america",
+    public_slug: "south-america",
+    geo_country: null,
+    geo_region: "South America",
+    geo_latitude: null,
+    geo_longitude: null,
+  });
+  assert.equal(southAmericaNode.location_label, "South America");
+  assert.equal(southAmericaNode.x, 33.8);
+
+  const americanSamoaNode = buildPublicMapNodeFromRow({
+    ...baseRow,
+    id: "american-samoa",
+    public_slug: "american-samoa",
+    geo_country: "American Samoa",
+    geo_region: null,
+    geo_latitude: -14.271,
+    geo_longitude: -170.1322,
+  });
+  assert.equal(americanSamoaNode.location_label, "American Samoa");
+  assert.notEqual(`${americanSamoaNode.x}:${americanSamoaNode.y}`, `${node.x}:${node.y}`);
+
   for (const [id, latitude, longitude] of [
     ["country-only", null, null],
     ["missing-latitude", null, 18.0686],
@@ -176,6 +205,51 @@ async function main() {
     { ...baseRow, id: "merged", merged_into_server_id: "canonical", public_slug: "merged-server", server_name: "Merged Server" },
   ]);
   assert.equal(filteredNodes.length, 3);
+
+  const sanitizedSnapshot = sanitizePublicHomeStatsSnapshot({
+    map_nodes: [
+      {
+        id: "safe-current",
+        name: "Safe current node",
+        x: 40,
+        y: 60,
+        latitude: 51.5074,
+        longitude: -0.1278,
+        lat: 51.5074,
+        lng: -0.1278,
+        city: "London",
+        ip_address: "8.8.8.8",
+        approximate: false,
+      },
+      {
+        id: "legacy-exact",
+        name: "Legacy exact node",
+        latitude: 51.5074,
+        longitude: -0.1278,
+      },
+    ],
+  });
+  assert.equal(sanitizedSnapshot.map_nodes.length, 1);
+  assert.deepEqual(sanitizedSnapshot.map_nodes[0], {
+    id: "safe-current",
+    name: "Safe current node",
+    display_name: "Safe current node",
+    slug: null,
+    mode: "UNKNOWN",
+    server_type: "UNKNOWN",
+    status: "pending",
+    sync_status: "pending",
+    active: false,
+    x: 40,
+    y: 60,
+    country: null,
+    region: null,
+    approximate: true,
+    location_label: "Location awaiting metadata",
+  });
+  assert.equal(JSON.stringify(sanitizedSnapshot).includes("latitude"), false);
+  assert.equal(JSON.stringify(sanitizedSnapshot).includes("longitude"), false);
+  assert.equal(JSON.stringify(sanitizedSnapshot).includes("ip_address"), false);
 
   console.log("GeoIP and public map node tests passed.");
 }

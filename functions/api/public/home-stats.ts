@@ -179,7 +179,8 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   try {
     const cached = await readPublicApiCache<ReturnType<typeof emptyHomeStats>>(env, cacheKey).catch(() => null);
     if (cached && isFreshHomeStatsSnapshot(cached.generated_at, viewerLoggedIn)) {
-      const payloadWithFreshCounters = await refreshHomeStatsLiveCounters(env, cached.payload).catch(() => cached.payload);
+      const safeCachedPayload = sanitizePublicHomeStatsSnapshot(cached.payload);
+      const payloadWithFreshCounters = await refreshHomeStatsLiveCounters(env, safeCachedPayload).catch(() => safeCachedPayload);
       const payload = withHomeStatsEvidence(payloadWithFreshCounters, {
         generatedAt: cached.generated_at,
         source: "last_known",
@@ -214,7 +215,8 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     const cached = await readPublicApiCache<ReturnType<typeof emptyHomeStats>>(env, cacheKey).catch(() => null);
     if (cached) {
       logPublicApiSnapshotFallbackServed(endpoint, cacheKey, requestId);
-      const payloadWithFreshPlayerCounts = await refreshHomeStatsLiveCounters(env, cached.payload).catch(() => cached.payload);
+      const safeCachedPayload = sanitizePublicHomeStatsSnapshot(cached.payload);
+      const payloadWithFreshPlayerCounts = await refreshHomeStatsLiveCounters(env, safeCachedPayload).catch(() => safeCachedPayload);
       const payload = withHomeStatsEvidence(payloadWithFreshPlayerCounts, {
         generatedAt: cached.generated_at,
         source: "last_known",
@@ -278,6 +280,40 @@ function isFreshHomeStatsSnapshot(generatedAt: string | null | undefined, viewer
   const timestamp = Date.parse(generatedAt ?? "");
   const maxAgeMs = viewerLoggedIn ? HOME_STATS_AUTH_FAST_PATH_MAX_AGE_MS : HOME_STATS_PUBLIC_FAST_PATH_MAX_AGE_MS;
   return Number.isFinite(timestamp) && Date.now() - timestamp <= maxAgeMs;
+}
+
+export function sanitizePublicHomeStatsSnapshot<T>(payload: T): T {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const record = payload as Record<string, unknown>;
+  if (!Array.isArray(record.map_nodes)) return payload;
+
+  const mapNodes = record.map_nodes.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const node = value as Record<string, unknown>;
+    const x = finiteNumber(node.x);
+    const y = finiteNumber(node.y);
+    if (x == null || y == null) return [];
+
+    return [{
+      id: firstString(node.id),
+      name: firstString(node.name, node.display_name) ?? "Unnamed DZN Server",
+      display_name: firstString(node.display_name, node.name) ?? "Unnamed DZN Server",
+      slug: firstString(node.slug),
+      mode: normalizeText(firstString(node.mode, node.server_type), "UNKNOWN"),
+      server_type: normalizeText(firstString(node.server_type, node.mode), "UNKNOWN"),
+      status: node.status === "active" ? "active" : "pending",
+      sync_status: node.sync_status === "active" ? "active" : "pending",
+      active: node.active === true,
+      x: roundOne(clamp(x, 5, 95)),
+      y: roundOne(clamp(y, 8, 90)),
+      country: firstString(node.country),
+      region: firstString(node.region),
+      approximate: true,
+      location_label: firstString(node.location_label) ?? "Location awaiting metadata",
+    }];
+  });
+
+  return { ...record, map_nodes: mapNodes } as T;
 }
 
 async function refreshHomeStatsLiveCounters<T extends {
@@ -1524,17 +1560,21 @@ function mapPlacementFor(row: MapNodeRow) {
 
 function approximateRegion(value: string) {
   const checks: Array<{ terms: string[]; latitude: number; longitude: number; label: string; country: string | null }> = [
-    { terms: ["united kingdom", "great britain", " britain", " gb ", " uk ", "london", "england", "scotland", "wales"], latitude: 54.3, longitude: -2.5, label: "United Kingdom", country: "United Kingdom" },
+    { terms: ["united kingdom", "great britain", "britain", "gb", "uk", "london", "england", "scotland", "wales"], latitude: 54.3, longitude: -2.5, label: "United Kingdom", country: "United Kingdom" },
     { terms: ["germany", "deutschland", "berlin", "frankfurt", "eu-central"], latitude: 50.8, longitude: 10.2, label: "Europe", country: null },
-    { terms: ["europe", " eu ", "eu-west", "france", "spain", "italy", "netherlands", "poland"], latitude: 50.8, longitude: 10.2, label: "Europe", country: null },
-    { terms: ["north america", " usa", " us ", "united states", "america", "canada", "mexico", "us-east", "us-west"], latitude: 39.5, longitude: -98.35, label: "North America", country: null },
+    { terms: ["europe", "eu", "eu-west", "france", "spain", "italy", "netherlands", "poland"], latitude: 50.8, longitude: 10.2, label: "Europe", country: null },
     { terms: ["south america", "brazil", "argentina", "chile"], latitude: -15.7, longitude: -58.4, label: "South America", country: null },
+    { terms: ["north america", "usa", "us", "united states", "canada", "mexico", "us-east", "us-west"], latitude: 39.5, longitude: -98.35, label: "North America", country: null },
     { terms: ["asia", "singapore", "japan", "korea", "china", "india"], latitude: 32.4, longitude: 88.2, label: "Asia", country: null },
     { terms: ["oceania", "australia", "sydney", "new zealand"], latitude: -25.3, longitude: 134.5, label: "Oceania", country: null },
   ];
 
-  const padded = ` ${value} `;
-  return checks.find((check) => check.terms.some((term) => padded.includes(term)));
+  const normalized = ` ${normalizeRegionTerms(value)} `;
+  return checks.find((check) => check.terms.some((term) => normalized.includes(` ${normalizeRegionTerms(term)} `)));
+}
+
+function normalizeRegionTerms(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function safePublicRegion(value: string | null) {
