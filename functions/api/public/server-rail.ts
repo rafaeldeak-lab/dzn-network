@@ -1,6 +1,7 @@
 import { requireDb } from "../../_lib/db";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { publicCacheHeaders } from "../../_lib/performance";
+import { readPublicServerCanonicalEvidence } from "../../_lib/public-server-canonical";
 import {
   PUBLIC_CURRENT_PLAYERS_SQL,
   PUBLIC_MAX_PLAYERS_SQL,
@@ -16,6 +17,7 @@ import {
 
 type RailRow = {
   id: string;
+  nitrado_service_id: string | null;
   public_slug: string | null;
   server_name: string | null;
   server_type: string | null;
@@ -28,6 +30,14 @@ type RailRow = {
   plan_key: string | null;
   subscription_status: string | null;
   last_bumped_at: string | null;
+  rail_priority_at: string | null;
+  updated_at: string | null;
+  created_at: string | null;
+  adm_logs_found: number | null;
+  adm_sync_status: string | null;
+  total_kills: number | null;
+  unique_players: number | null;
+  latest_success_sync_status: string | null;
 };
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -36,14 +46,15 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   headers.set("x-dzn-cache-policy", "s-maxage=60; stale-while-revalidate=300");
 
   if (!env.DB) {
-    return json({ ok: true, items: [], generated_at: new Date().toISOString() }, { headers });
+    return json({ ok: true, items: [], generated_at: new Date().toISOString(), stale: true }, { headers });
   }
 
   try {
     const rows = await queryServerRail(env);
+    const canonicalRows = await hydrateDuplicateCanonicalEvidence(env, rows);
     return json({
       ok: true,
-      items: rows.map(toRailItem),
+      items: dedupeRailRows(canonicalRows).slice(0, 24).map(toRailItem),
       generated_at: new Date().toISOString(),
     }, { headers });
   } catch (error) {
@@ -58,6 +69,7 @@ async function queryServerRail(env: Env) {
   const result = await db.prepare(
     `SELECT
        linked_servers.id,
+       linked_servers.nitrado_service_id,
        linked_servers.public_slug,
        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
        COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
@@ -69,12 +81,30 @@ async function queryServerRail(env: Env) {
        COALESCE(review_summary.review_count, 0) AS review_count,
        COALESCE(server_subscriptions.plan_key, 'free') AS plan_key,
        server_subscriptions.status AS subscription_status,
-       server_advertising_state.last_bumped_at
+       server_advertising_state.last_bumped_at,
+       COALESCE(server_advertising_state.last_bumped_at, linked_servers.public_listing_updated_at, linked_servers.updated_at, linked_servers.created_at) AS rail_priority_at,
+       linked_servers.updated_at,
+       linked_servers.created_at,
+       onboarding_checks.adm_logs_found,
+       adm_sync_state.last_sync_status AS adm_sync_status,
+       COALESCE(server_stats.total_kills, 0) AS total_kills,
+       COALESCE(server_stats.unique_players, 0) AS unique_players,
+       (
+           SELECT status
+           FROM sync_runs
+           WHERE sync_runs.linked_server_id = linked_servers.id
+             AND lower(sync_runs.status) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
+           ORDER BY COALESCE(sync_runs.finished_at, sync_runs.started_at, sync_runs.created_at) DESC
+           LIMIT 1
+         ) AS latest_success_sync_status
      FROM linked_servers
      LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
      LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
      LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
      LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
+     LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
+     LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+     LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
      LEFT JOIN (
        SELECT linked_server_id,
               ROUND(AVG(rating), 1) AS average_rating,
@@ -95,10 +125,92 @@ async function queryServerRail(env: Env) {
          THEN 0 ELSE 1
        END,
        datetime(COALESCE(server_advertising_state.last_bumped_at, linked_servers.public_listing_updated_at, linked_servers.updated_at, linked_servers.created_at)) DESC,
-       linked_servers.id ASC
-     LIMIT 24`,
+       linked_servers.id ASC`,
   ).all<RailRow>();
   return result.results ?? [];
+}
+
+async function hydrateDuplicateCanonicalEvidence(env: Env, rows: RailRow[]) {
+  const serviceCounts = new Map<string, number>();
+  for (const row of rows) {
+    const serviceId = row.nitrado_service_id?.trim().toLowerCase();
+    if (serviceId) serviceCounts.set(serviceId, (serviceCounts.get(serviceId) ?? 0) + 1);
+  }
+
+  const duplicateIds = rows
+    .filter((row) => {
+      const serviceId = row.nitrado_service_id?.trim().toLowerCase();
+      return serviceId && (serviceCounts.get(serviceId) ?? 0) > 1;
+    })
+    .map((row) => row.id);
+  if (duplicateIds.length === 0) return rows;
+
+  const evidence = await readPublicServerCanonicalEvidence(requireDb(env), duplicateIds);
+  return rows.map((row) => {
+    const authoritative = evidence.get(row.id);
+    return authoritative
+      ? { ...row, total_kills: authoritative.totalKills, unique_players: authoritative.uniquePlayers }
+      : row;
+  });
+}
+
+function dedupeRailRows(rows: RailRow[]) {
+  const unique = new Map<string, RailRow>();
+  for (const row of rows) {
+    const identity = row.nitrado_service_id?.trim()
+      ? `service:${row.nitrado_service_id.trim().toLowerCase()}`
+      : row.public_slug?.trim()
+        ? `slug:${row.public_slug.trim().toLowerCase()}`
+        : `id:${row.id.trim().toLowerCase()}`;
+    const existing = unique.get(identity);
+    if (!existing || compareCanonicalRows(row, existing) > 0) unique.set(identity, row);
+  }
+  return [...unique.values()].sort(compareRailPriority);
+}
+
+function compareCanonicalRows(left: RailRow, right: RailRow) {
+  const scoreDifference = railCanonicalScore(left) - railCanonicalScore(right);
+  if (scoreDifference !== 0) return scoreDifference;
+  const updatedDifference = timestampOrZero(left.updated_at) - timestampOrZero(right.updated_at);
+  if (updatedDifference !== 0) return updatedDifference;
+  return timestampOrZero(left.created_at) - timestampOrZero(right.created_at);
+}
+
+function compareRailPriority(left: RailRow, right: RailRow) {
+  const paidDifference = Number(isActivePaidRailRow(left)) - Number(isActivePaidRailRow(right));
+  if (paidDifference !== 0) return -paidDifference;
+
+  const timeDifference = timestampOrZero(right.rail_priority_at) - timestampOrZero(left.rail_priority_at);
+  if (timeDifference !== 0) return timeDifference;
+  return left.id.localeCompare(right.id);
+}
+
+function isActivePaidRailRow(row: RailRow) {
+  const status = String(row.subscription_status ?? "").trim().toLowerCase();
+  const plan = String(row.plan_key ?? "free").trim().toLowerCase();
+  return ["active", "trialing"].includes(status) && !["", "free"].includes(plan);
+}
+
+function timestampOrZero(value: string | null) {
+  const timestamp = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function railCanonicalScore(row: RailRow) {
+  return numberOrZero(row.total_kills) * 1000
+    + numberOrZero(row.unique_players) * 100
+    + (row.public_slug ? 20 : 0)
+    + (isSuccessfulAdmSyncStatus(row.latest_success_sync_status) || isSuccessfulAdmSyncStatus(row.adm_sync_status) ? 10 : 0)
+    + (Number(row.adm_logs_found) === 1 ? 5 : 0);
+}
+
+function isSuccessfulAdmSyncStatus(value: string | null) {
+  return ["completed", "idle", "no_new_lines", "no_supported_events"].includes(String(value ?? "").toLowerCase());
+}
+
+function numberOrZero(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
 }
 
 function toRailItem(row: RailRow) {
