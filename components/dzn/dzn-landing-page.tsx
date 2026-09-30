@@ -2031,8 +2031,6 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
       ? payload.map_nodes.map((node, index) => {
           const rawNode = node as DznOperationalGlobeNode & {
             display_name?: unknown;
-            lat?: unknown;
-            lng?: unknown;
             server_type?: unknown;
           };
           const displayName =
@@ -2053,11 +2051,6 @@ function normalizeHomeStats(payload: HomeStatsResponse): HomeStats {
             sync_status: typeof rawNode.sync_status === "string" ? rawNode.sync_status : "pending",
             region: typeof rawNode.region === "string" && rawNode.region.trim() ? rawNode.region : "Location awaiting metadata",
             country: typeof rawNode.country === "string" ? rawNode.country : null,
-            city: typeof rawNode.city === "string" ? rawNode.city : null,
-            latitude: finiteNumberOrNull(rawNode.latitude),
-            longitude: finiteNumberOrNull(rawNode.longitude),
-            lat: finiteNumberOrNull(rawNode.lat),
-            lng: finiteNumberOrNull(rawNode.lng),
             x: clamp(numberOrZero(rawNode.x), 5, 95),
             y: clamp(numberOrZero(rawNode.y), 8, 90),
             active: Boolean(rawNode.active) || rawNode.sync_status === "active" || rawNode.status === "active",

@@ -56,9 +56,11 @@ export function AnimatedBadge({ badge, locked = false, size = badge.displaySize 
       ].join(" ")}
       style={style}
     >
-      <span className="dzn-badge-icon__fallback">
-        <BadgeFallbackIcon badge={badge} />
-      </span>
+      {!shouldShowImage ? (
+        <span className="dzn-badge-icon__fallback">
+          <BadgeFallbackIcon badge={badge} />
+        </span>
+      ) : null}
       {shouldShowImage ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img

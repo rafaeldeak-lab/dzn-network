@@ -78,9 +78,10 @@ else {
       assert.match(await page.locator(".dzn-advanced-showcase").innerText(), /Chernarus/i);
       assert.doesNotMatch(await page.locator(".dzn-advanced-showcase").innerText(), /Premium\+|ChernarusPlus|dayzOffline/);
       const layout = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth > innerWidth, cells: [...document.querySelectorAll(".dzn-exploration-mini-grid > span")].length, grid: getComputedStyle(document.querySelector(".dzn-exploration-mini-grid")).backgroundImage, privacy: document.querySelector(".dzn-exploration-privacy")?.textContent?.trim(), mapWidth: document.querySelector(".dzn-exploration-mini-grid")?.getBoundingClientRect().width }));
-      assert.equal(layout.overflow, false); assert.equal(layout.cells, 40); assert.match(layout.grid, /dzn-tactical-terrain-v1\.webp/);
+      assert.equal(layout.overflow, false); assert.equal(layout.cells, 40); assert.match(layout.grid, /dzn-chernarusplus-grid\.webp/);
       assert.match(layout.privacy ?? "", /Exact locations, live positions and individual routes are never shown/);
-      assert.match(await page.locator(".dzn-exploration-figure figcaption").innerText(), /Fictional terrain backdrop; coverage is schematic/);
+      assert.match(await page.locator(".dzn-exploration-figure figcaption").innerText(), /Original DZN Chernarus terrain reference\. Coverage remains schematic/);
+      assert.equal(await page.locator(".dzn-exploration-source-link").getAttribute("href"), "https://dayz.xam.nu/chernarusplus");
       assert.ok((layout.mapWidth ?? 0) >= Math.min(width - 120, 220), `Tactical map must remain legible at ${width}px (rendered ${layout.mapWidth}px)`);
       assert.deepEqual(errors, []); assert.deepEqual(writes, []);
       await page.screenshot({ path: path.join(output, `panels-${width}.png`), fullPage: true });

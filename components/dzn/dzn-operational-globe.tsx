@@ -19,12 +19,7 @@ export type DznOperationalGlobeNode = {
   sync_status: "active" | "pending" | string;
   region: string | null;
   country: string | null;
-  city: string | null;
   location_label?: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  lat?: number | null;
-  lng?: number | null;
   x: number;
   y: number;
   active: boolean;
@@ -977,7 +972,7 @@ function buildGlobePoints(nodes: DznOperationalGlobeNode[]) {
         node,
         lat: clamp(location.lat + offset.lat, -76, 76),
         lng: clamp(location.lng + offset.lng, -178, 178),
-        region: node.location_label || node.city || node.region || node.country || "Location awaiting metadata",
+        region: node.location_label || node.region || node.country || "Location awaiting metadata",
         active: Boolean(node.active) || node.sync_status === "active" || node.status === "active",
       };
     })
@@ -993,20 +988,14 @@ function globeNodeIdentityKey(nodes: DznOperationalGlobeNode[]) {
       node.sync_status,
       node.status,
       node.active ? "1" : "0",
-      node.latitude ?? node.lat ?? "",
-      node.longitude ?? node.lng ?? "",
+      node.x,
+      node.y,
       node.location_label ?? node.region ?? "",
     ].join(":"))
     .join("|");
 }
 
 function nodeLocation(node: DznOperationalGlobeNode) {
-  const lat = finiteNumber(node.lat ?? node.latitude);
-  const lng = finiteNumber(node.lng ?? node.longitude);
-  if (lat !== null && lng !== null) {
-    return { lat: clamp(lat, -82, 82), lng: clamp(lng, -180, 180) };
-  }
-
   const region = (node.region ?? "").trim().toLowerCase();
   const hasUsableRegion =
     region.length > 0 &&

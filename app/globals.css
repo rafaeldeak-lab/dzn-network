@@ -8404,25 +8404,21 @@ button.dzn-header-action {
 .dzn-server-card--visual-premium {
   border-color: color-mix(in srgb, var(--dzn-card-accent, #22d3ee) 32%, rgba(255, 255, 255, 0.12));
   box-shadow:
-    0 0 24px color-mix(in srgb, var(--dzn-card-accent, #22d3ee) 14%, transparent),
-    0 18px 70px rgba(0, 0, 0, 0.42),
+    0 12px 36px rgba(0, 0, 0, 0.34),
     inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
 
 .dzn-server-card--visual-premium {
   border-color: color-mix(in srgb, var(--dzn-card-accent, #facc15) 48%, rgba(255, 255, 255, 0.14));
   box-shadow:
-    0 0 30px color-mix(in srgb, var(--dzn-card-accent, #facc15) 22%, transparent),
-    0 18px 72px rgba(0, 0, 0, 0.45),
+    0 12px 36px rgba(0, 0, 0, 0.36),
     inset 0 1px 0 rgba(255, 255, 255, 0.11);
 }
 
 .dzn-profile-header--visual-pro,
 .dzn-profile-header--visual-premium {
   border-color: color-mix(in srgb, var(--dzn-profile-accent, #22d3ee) 40%, rgba(255, 255, 255, 0.12));
-  box-shadow:
-    0 0 42px color-mix(in srgb, var(--dzn-profile-accent, #22d3ee) 18%, transparent),
-    0 24px 90px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.34);
 }
 
 .dzn-boosted-card-line {
@@ -8905,14 +8901,12 @@ button.dzn-header-action {
   flex: 0 0 var(--dzn-badge-size);
   place-items: center;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: 7px;
   border: 1px solid color-mix(in srgb, var(--dzn-badge-glow, #22d3ee) 48%, rgba(255, 255, 255, 0.12));
-  background:
-    radial-gradient(circle at 50% 6%, color-mix(in srgb, var(--dzn-badge-glow, #22d3ee) 32%, transparent), transparent 44%),
-    linear-gradient(145deg, rgba(15, 23, 42, 0.94), rgba(2, 6, 23, 0.96));
+  background: linear-gradient(145deg, rgba(17, 24, 39, 0.98), rgba(2, 6, 23, 0.98));
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-    0 0 18px color-mix(in srgb, var(--dzn-badge-glow, #22d3ee) 30%, transparent);
+    0 4px 12px rgba(0, 0, 0, 0.32);
   color: #f8fafc;
   isolation: isolate;
 }
@@ -8952,6 +8946,8 @@ button.dzn-header-action {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  opacity: 0.94;
+  filter: saturate(0.9) contrast(1.04);
 }
 
 .dzn-badge-icon__shine {
@@ -8968,25 +8964,22 @@ button.dzn-header-action {
 .dzn-badge-icon--mythic,
 .dzn-badge-icon--crown,
 .dzn-badge-icon--premium {
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.06) inset,
-    0 0 24px color-mix(in srgb, var(--dzn-badge-glow, #facc15) 48%, transparent),
-    0 0 52px color-mix(in srgb, var(--dzn-badge-glow, #facc15) 22%, transparent);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07) inset, 0 4px 12px rgba(0, 0, 0, 0.34);
 }
 
 .dzn-badge-icon--anim-glow {
-  animation: dznBadgeGlowPulse 2.8s ease-in-out infinite;
+  animation: none;
 }
 
 .dzn-badge-icon--anim-pulse {
-  animation: dznBadgePulse 2.1s ease-in-out infinite;
+  animation: none;
 }
 
 .dzn-badge-icon--anim-shimmer .dzn-badge-icon__shine,
 .dzn-badge-icon--anim-crown .dzn-badge-icon__shine,
 .dzn-badge-icon--anim-premium .dzn-badge-icon__shine {
-  opacity: 0.92;
-  animation: dznBadgeShimmer 3.4s ease-in-out infinite;
+  opacity: 0;
+  animation: none;
 }
 
 .dzn-badge-icon--anim-sparks::before,
@@ -9001,13 +8994,13 @@ button.dzn-header-action {
     radial-gradient(circle at 20% 24%, rgba(255, 255, 255, 0.9) 0 2px, transparent 3px),
     radial-gradient(circle at 76% 36%, color-mix(in srgb, var(--dzn-badge-glow, #22d3ee) 85%, white) 0 2px, transparent 3px),
     radial-gradient(circle at 52% 76%, rgba(255, 255, 255, 0.82) 0 1.5px, transparent 3px);
-  opacity: 0.28;
-  animation: dznBadgeSparks 3.1s ease-in-out infinite;
+  opacity: 0;
+  animation: none;
   pointer-events: none;
 }
 
 .dzn-badge-icon--anim-electric {
-  animation: dznBadgeElectric 1.6s steps(2, end) infinite;
+  animation: none;
 }
 
 .dzn-badge-icon--anim-flame::after {
@@ -9021,24 +9014,24 @@ button.dzn-header-action {
     radial-gradient(circle at 36% 82%, rgba(251, 146, 60, 0.78), transparent 34%),
     radial-gradient(circle at 62% 74%, rgba(239, 68, 68, 0.74), transparent 42%);
   filter: blur(6px);
-  opacity: 0.82;
-  animation: dznBadgeFireAura 1.9s ease-in-out infinite;
+  opacity: 0;
+  animation: none;
 }
 
 .dzn-badge-icon--anim-crown {
-  animation: dznBadgeCrownShine 3.8s ease-in-out infinite;
+  animation: none;
 }
 
 .dzn-badge-icon--anim-seasonal {
-  animation: dznBadgeSeasonalSparkle 3.2s ease-in-out infinite;
+  animation: none;
 }
 
 .dzn-badge-icon--anim-legendary {
-  animation: dznBadgeLegendaryAura 4.2s ease-in-out infinite;
+  animation: none;
 }
 
 .dzn-badge-icon--anim-premium {
-  animation: dznBadgePremiumGlow 3.4s ease-in-out infinite;
+  animation: none;
 }
 
 .dzn-badge-tooltip {
@@ -9142,12 +9135,11 @@ button.dzn-header-action {
   display: inline-grid;
   width: fit-content;
   place-items: center;
-  border-radius: 16px;
-  padding: 5px;
-  background:
-    conic-gradient(from 0deg, color-mix(in srgb, var(--dzn-frame-glow, #22d3ee) 86%, transparent), transparent 24%, rgba(255, 255, 255, 0.18), transparent 66%, color-mix(in srgb, var(--dzn-frame-glow, #22d3ee) 66%, transparent)),
-    rgba(2, 6, 23, 0.7);
-  box-shadow: 0 0 34px color-mix(in srgb, var(--dzn-frame-glow, #22d3ee) 34%, transparent);
+  border-radius: 10px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--dzn-frame-glow, #22d3ee) 52%, rgba(255, 255, 255, 0.12));
+  background: rgba(2, 6, 23, 0.82);
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.3);
 }
 
 .dzn-profile-frame > :not(.dzn-profile-frame__image) {
@@ -9168,18 +9160,18 @@ button.dzn-header-action {
 .dzn-profile-frame--compact {
   border-radius: 13px;
   padding: 4px;
-  box-shadow: 0 0 22px color-mix(in srgb, var(--dzn-frame-glow, #22d3ee) 26%, transparent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
 }
 
 .dzn-profile-frame--anim-electric,
 .dzn-profile-frame--anim-legendary,
 .dzn-profile-frame--anim-premium,
 .dzn-profile-frame--anim-seasonal {
-  animation: dznProfileFrameOrbit 6s linear infinite;
+  animation: none;
 }
 
 .dzn-profile-frame--anim-flame {
-  animation: dznBadgeFireAura 2.4s ease-in-out infinite;
+  animation: none;
 }
 
 .dzn-theme-banner {
@@ -9203,16 +9195,14 @@ button.dzn-header-action {
   background-image: var(--dzn-theme-gradient), var(--dzn-theme-image);
   background-size: cover;
   background-position: center;
-  opacity: 0.92;
+  opacity: 0.76;
 }
 
 .dzn-theme-banner__wash {
   position: absolute;
   inset: 0;
   z-index: 1;
-  background:
-    radial-gradient(circle at 14% 18%, rgba(139, 92, 246, 0.24), transparent 30%),
-    linear-gradient(90deg, rgba(2, 3, 10, 0.95), rgba(2, 3, 10, 0.62), rgba(2, 3, 10, 0.9));
+  background: linear-gradient(90deg, rgba(2, 3, 10, 0.96), rgba(2, 3, 10, 0.7), rgba(2, 3, 10, 0.9));
   pointer-events: none;
 }
 
@@ -9311,6 +9301,68 @@ button.dzn-header-action {
 
   .dzn-badge-tooltip__content {
     width: min(220px, 82vw);
+  }
+}
+
+.dzn-profile-mobile-disclosure__button {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .dzn-profile-top-players-aside {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .dzn-profile-mobile-disclosure {
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(6, 9, 23, 0.9);
+  }
+
+  .dzn-profile-mobile-disclosure__button {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 44px;
+    padding: 0.75rem 0.9rem;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    color: #e4e4e7;
+    font-size: 0.72rem;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .dzn-profile-mobile-disclosure__button:focus-visible {
+    outline: 2px solid #67e8f9;
+    outline-offset: -3px;
+  }
+
+  .dzn-profile-mobile-disclosure__button::after {
+    content: "+";
+    color: #67e8f9;
+    font-size: 1rem;
+  }
+
+  .dzn-profile-mobile-disclosure__button[aria-expanded="true"]::after {
+    content: "-";
+  }
+
+  .dzn-profile-mobile-disclosure__content {
+    display: none;
+  }
+
+  .dzn-profile-mobile-disclosure__content.is-expanded {
+    display: block;
+  }
+
+  .dzn-profile-mobile-disclosure__content {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
   }
 }
 /* ===================================== */
@@ -9581,14 +9633,14 @@ button.dzn-header-action {
 
 .dzn-exploration-preview {
   display: grid;
-  grid-template-columns: minmax(15rem, 0.8fr) minmax(18rem, 1.2fr);
+  grid-template-columns: minmax(13rem, 0.8fr) minmax(18rem, 1.2fr);
   align-items: center;
   gap: 1rem;
   margin-top: 1rem;
   border: 1px solid rgba(34, 211, 238, 0.16);
   border-radius: 0.85rem;
   background: rgba(0, 0, 0, 0.24);
-  padding: 1rem;
+  padding: 0.85rem;
 }
 
 .dzn-exploration-preview__copy {
@@ -9618,13 +9670,13 @@ button.dzn-header-action {
   border: 1px solid rgba(103, 232, 249, 0.34);
   border-radius: 8px;
   background:
-    linear-gradient(rgba(1, 10, 13, 0.2), rgba(1, 10, 13, 0.36)),
-    url("/maps/dzn-tactical-terrain-v1.webp") center / cover no-repeat,
+    linear-gradient(rgba(1, 10, 13, 0.08), rgba(1, 10, 13, 0.24)),
+    var(--dzn-map-image) center / 100% 100% no-repeat,
     #061114;
-  box-shadow: inset 0 0 42px rgba(0, 0, 0, 0.66), 0 18px 40px rgba(0, 0, 0, 0.24);
+  box-shadow: inset 0 0 28px rgba(0, 0, 0, 0.48);
 }
 
-.dzn-exploration-figure { min-width: 0; margin: 0; }
+.dzn-exploration-figure { width: min(100%, 26rem); min-width: 0; margin: 0; justify-self: end; }
 .dzn-exploration-figure figcaption {
   display: flex;
   flex-wrap: wrap;
@@ -9639,14 +9691,14 @@ button.dzn-header-action {
 .dzn-exploration-figure figcaption span { display: inline-flex; align-items: center; gap: 0.35rem; }
 .dzn-exploration-figure figcaption b { margin-left: auto; color: #cffafe; font-weight: 900; }
 .dzn-exploration-figure figcaption small { width: 100%; color: rgba(161, 161, 170, 0.82); font-size: 10px; }
+.dzn-exploration-source-link { display: inline-flex; align-items: center; gap: 0.25rem; margin-left: 0.5rem; color: #a5f3fc; font-weight: 800; }
+.dzn-exploration-source-link svg { width: 0.7rem; height: 0.7rem; }
 
 .dzn-exploration-mini-grid__shade {
   position: absolute;
   inset: 0;
   z-index: 1;
   background:
-    repeating-linear-gradient(0deg, transparent 0 calc(12.5% - 1px), rgba(165, 243, 252, 0.12) calc(12.5% - 1px) 12.5%),
-    repeating-linear-gradient(90deg, transparent 0 calc(12.5% - 1px), rgba(165, 243, 252, 0.12) calc(12.5% - 1px) 12.5%),
     linear-gradient(135deg, rgba(34, 211, 238, 0.03), transparent 48%, rgba(16, 185, 129, 0.05));
   pointer-events: none;
 }
@@ -9726,8 +9778,10 @@ button.dzn-header-action {
   }
 
   .dzn-exploration-mini-grid {
-    width: min(100%, 28rem);
+    width: min(100%, 34rem);
   }
+
+  .dzn-exploration-figure { justify-self: start; }
 }
 
 @media (max-width: 420px) {

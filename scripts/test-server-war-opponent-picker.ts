@@ -19,7 +19,7 @@ export async function testServerWarOpponentPicker() {
   assert.equal(showcasePlanLabel("starter"), "Starter");
   assert.equal(showcasePlanLabel("free"), "Standard");
   const cells = explorationPreviewCells([{ cellX: 0, cellY: 127, visits: 3 }, { cellX: 128, cellY: 4, visits: 3 }, { cellX: -1, cellY: 0, visits: 3 }], 128);
-  assert.equal(cells.length, 1); assert.equal(cells[0].left, 0.390625); assert.equal(cells[0].top, 99.609375);
+  assert.equal(cells.length, 1); assert.equal(cells[0].left, 0.390625); assert.equal(cells[0].top, 0.390625);
   assert.deepEqual(explorationPreviewCells([], NaN), []);
   const db = new DatabaseSync(":memory:");
   let writes = 0;

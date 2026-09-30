@@ -186,6 +186,7 @@ for (const componentName of ["BadgeIcon", "AnimatedBadge", "BadgeTooltip", "Badg
 }
 assert.equal(componentSource.includes("loading=\"lazy\""), true);
 assert.equal(componentSource.includes("alt={badge.imageAlt}"), true);
+assert.equal(componentSource.includes("{!shouldShowImage ? ("), true, "Fallback glyphs should only render when badge artwork is unavailable.");
 assert.equal(componentSource.includes("tabIndex={0}"), true);
 assert.equal(componentSource.includes("dzn-profile-frame__image"), true);
 
@@ -194,6 +195,11 @@ for (const animation of ["dznBadgeGlowPulse", "dznBadgeShimmer", "dznBadgeSparks
   assert.equal(css.includes(animation), true, `${animation} should be defined.`);
 }
 assert.equal(css.includes("@media (prefers-reduced-motion: reduce)"), true);
+const badgeImageCss = css.match(/\.dzn-badge-icon__image\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+const badgeFallbackCss = css.match(/\.dzn-badge-icon__fallback\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+assert.equal(badgeImageCss.includes("z-index: 2;"), true, "Loaded badge artwork should remain above the fallback layer.");
+assert.equal(badgeImageCss.includes("opacity: 0.94;"), true, "Loaded badge artwork should remain visually identifiable.");
+assert.equal(badgeFallbackCss.includes("z-index: 1;"), true, "Fallback glyphs should stay behind loaded artwork.");
 
 const publicApiSource = readFileSync("functions/api/public/servers.ts", "utf8");
 for (const field of ["badges", "profileFrame", "themeBanner", "planVisualTreatment", "getServerVisualShowcase"]) {
