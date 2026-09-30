@@ -33,7 +33,12 @@ export const onRequest: PagesFunction = async ({ request, env, next }) => {
 };
 
 export function isProtectedAppPagePath(pathname: string) {
+  if (isPublicServerCommunityPath(pathname)) return false;
   return protectedAppPagePrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+function isPublicServerCommunityPath(pathname: string) {
+  return /^\/servers\/[a-z0-9](?:[a-z0-9-]{0,94}[a-z0-9])?\/community\/?$/.test(pathname.toLowerCase());
 }
 
 function isPageNavigationMethod(method: string) {

@@ -4226,6 +4226,7 @@ function ServerDashboard({
               </div>
               <div className="grid gap-2">
                 <ActionLink href={eventHubHref(server.id)} icon={<Flag className="h-4 w-4" />} label="Open Event Hub" tone="emerald" />
+                <ActionLink href={`/dashboard/community?serverId=${encodeURIComponent(server.id)}`} icon={<Users className="h-4 w-4" />} label="Community Directory" />
                 {!normalizedServerCategory ? <ActionLink href={serverSettingsHref(server.id, "category")} icon={<Gamepad2 className="h-4 w-4" />} label="Set Category" /> : null}
                 <ActionLink href={`/dashboard/server-settings?serverId=${encodeURIComponent(server.id)}#discord-event-channels`} icon={<Bell className="h-4 w-4" />} label="Choose Event Channel" />
                 <ActionLink href="/setup" icon={<Settings className="h-4 w-4" />} label="Complete Setup" />

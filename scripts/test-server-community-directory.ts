@@ -1,0 +1,76 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+const migration = readFileSync("migrations/0080_server_community_directory.sql", "utf8");
+const helper = readFileSync("functions/_lib/server-community-directory.ts", "utf8");
+const publicApi = readFileSync("functions/api/public/servers/[slug]/community-members.ts", "utf8");
+const ownerApi = readFileSync("functions/api/servers/[serverId]/community-members.ts", "utf8");
+const page = readFileSync("app/servers/[slug]/community/page.tsx", "utf8");
+const component = readFileSync("components/community/public-community-directory.tsx", "utf8");
+const shell = readFileSync("functions/servers/[slug]/community.ts", "utf8");
+const publicServer = readFileSync("components/network/public-network.tsx", "utf8");
+const manager = readFileSync("components/community/community-directory-manager.tsx", "utf8");
+const dashboard = readFileSync("components/onboarding/dashboard.tsx", "utf8");
+const playerApi = readFileSync("functions/api/player/community-directory.ts", "utf8");
+const playerConsent = readFileSync("components/player/community-directory-consent.tsx", "utf8");
+const middleware = readFileSync("functions/_middleware.ts", "utf8");
+
+assert.match(migration, /public_member_enabled INTEGER NOT NULL DEFAULT 0/, "New directory members must default private.");
+assert.match(migration, /UNIQUE\(linked_server_id, user_id\)/, "A member must be unique within each server.");
+assert.match(migration, /CHECK \(source = 'owner_public_handle'\)/, "The first import source must stay limited to a published DZN handle.");
+assert.match(migration, /server_community_member_audit/, "Owner changes must have a durable audit table.");
+assert.match(migration, /member_user_id TEXT,/, "Audit member references must be nullable for account deletion.");
+assert.match(migration, /ON DELETE SET NULL/, "Account deletion must redact audit references instead of failing.");
+assert.match(migration, /created_by_user_id TEXT,/, "Membership creator references must be nullable for account deletion.");
+assert.match(migration, /FOREIGN KEY\(created_by_user_id\) REFERENCES users\(id\) ON DELETE SET NULL/, "Membership rows must survive creator deletion without blocking it.");
+assert.match(migration, /REFERENCES linked_servers\(id\) ON DELETE CASCADE/, "Server deletion must remove its scoped audit history instead of failing.");
+assert.match(migration, /idx_server_community_members_user_updated[\s\S]*\(user_id, updated_at DESC\)/, "Player consent reads must have a user-first recency index.");
+assert.doesNotMatch(migration, /DROP TABLE|DELETE FROM|TRUNCATE/i, "The directory migration must be additive.");
+
+assert.match(helper, /server_community_members\.public_member_enabled = 1/, "Public reads must require explicit owner publication.");
+assert.match(helper, /server_community_members\.member_approved_at IS NOT NULL/, "Public reads must require separate player approval.");
+assert.match(helper, /player_profile_privacy_preferences\.public_profile_enabled = 1/, "Public reads must re-check player profile consent.");
+assert.match(helper, /player_public_profiles\.status = 'active'/, "Disabled profiles must disappear automatically.");
+assert.match(helper, /serverLifecycleSqlExpression\("linked_servers"\)/, "Public directory reads must enforce the shared server lifecycle visibility gate.");
+assert.match(helper, /SERVER_LIFECYCLE_PUBLIC_LIVE_STATUSES/, "Public directory reads must use the established public-live lifecycle set.");
+assert.match(helper, /player_public_discord_identity_preferences\.enabled/, "Avatars must respect independent Discord identity consent.");
+assert.match(helper, /row\.show_display_name === 1/, "Directory names must respect the public profile display-name preference.");
+assert.match(helper, /CASE WHEN player_profile_privacy_preferences\.show_display_name = 1 THEN users\.username ELSE 'DZN Player' END AS username/, "Owner projections must also redact hidden display names.");
+assert.match(helper, /affects_billing_rankings_reviews_progression_or_eligibility: false/, "The directory must state its presentation-only boundary.");
+assert.match(helper, /updateExistingCommunityMember/, "Existing membership submissions must use the update audit path.");
+assert.doesNotMatch(helper, /LIMIT (?:96|100|200)/, "Directory reads must not silently omit public, owner-managed, or player-revocable memberships.");
+assert.doesNotMatch(helper, /player_discord_community_memberships/, "Private Discord membership matching must not feed the public directory.");
+assert.doesNotMatch(helper, /account_entitlements|server_subscriptions|rankServers|server_reviews|badge_awards|xp_awards/i, "Directory logic must stay out of billing, ranking, review, and progression systems.");
+
+assert.match(ownerApi, /requireServerOwnerOrDznAdmin/, "Only the server owner or platform admin may manage members.");
+assert.match(ownerApi, /sameOrigin\(request\)/, "Owner mutations must reject cross-origin requests.");
+assert.match(ownerApi, /readBoundedJson/, "Owner imports must use a bounded request body.");
+assert.match(ownerApi, /resolvePublishedCommunityMember/, "Owner imports must resolve an active public DZN profile handle.");
+assert.match(ownerApi, /request\.method === "PATCH"/, "Owners must be able to publish or hide an existing member.");
+assert.match(ownerApi, /removeCommunityMember/, "Owners must be able to remove a member from their server directory.");
+assert.doesNotMatch(ownerApi, /fetchDiscordGuilds|guilds\/members|discord\.com\/api/i, "The controlled import must not pull raw Discord member lists.");
+
+assert.match(publicApi, /request\.method !== "GET"/, "The public endpoint must be read-only.");
+assert.match(publicApi, /privateNoStoreHeaders/, "Revocable directory data must never be served from a public cache.");
+assert.doesNotMatch(publicApi, /publicCacheHeaders/, "Revocable directory data must not use stale public caching.");
+assert.match(component, /credentials: "omit"/, "Public directory requests must not send account cookies.");
+assert.match(component, /window\.location\.pathname\.match/, "The dynamic shell must resolve the requested server slug from the browser URL.");
+assert.match(component, /avatarFailed/, "Broken avatars must fall back safely.");
+assert.match(page, /generateStaticParams/, "The exported dynamic route must ship a static shell.");
+assert.match(shell, /env\.ASSETS\.fetch/, "Cloudflare must serve the dynamic directory through the exported shell.");
+assert.match(middleware, /isPublicServerCommunityPath/, "The public directory route must be excluded narrowly from the private server-management gate.");
+assert.match(middleware, /\/servers\\\/\[a-z0-9\].*\\\/community/, "The public exception must be constrained to a server slug and community suffix.");
+assert.match(publicServer, /Community Members/, "Public server profiles must link to the directory.");
+assert.match(publicServer, /<div className="grid gap-4">[\s\S]*Community Members[\s\S]*\{hasDescription \? \(/, "Directory discovery must remain visible even when optional server profile copy is empty.");
+assert.match(manager, /New entries stay private unless you explicitly publish them/, "The owner UI must explain the private default.");
+assert.match(manager, /public profile handle/i, "The owner UI must use the bounded public-handle import flow.");
+assert.match(manager, /Make private/, "The owner UI must expose a direct privacy control.");
+assert.match(manager, /Awaiting player/, "Owner status must distinguish publication from pending player approval.");
+assert.match(manager, /Remove/, "The owner UI must expose server-scoped removal.");
+assert.match(dashboard, /Community Directory/, "The server dashboard must expose the owner management surface.");
+assert.match(playerApi, /decidePlayerCommunityDirectoryInvite/, "Players must own the approve and revoke decision route.");
+assert.match(playerApi, /getSessionUser/, "Player decisions must be bound to the signed-in account.");
+assert.match(playerConsent, /remains hidden.*until you approve it here/, "The player UI must explain the two-party publication boundary.");
+assert.match(playerConsent, /Revoke/, "Players must be able to withdraw directory approval.");
+
+console.log("Server community directory checks passed.");
