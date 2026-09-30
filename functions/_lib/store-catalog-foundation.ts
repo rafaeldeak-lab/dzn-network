@@ -104,10 +104,7 @@ export function validateStoreProductDraft(input: unknown): StoreCatalogResult<St
   }
 
   const metadataJson = metadata(value.metadataJson, errors);
-  if (metadataJson !== null && containsForbiddenMetadataOutcome(JSON.parse(metadataJson))) {
-    add(errors, "metadataJson", "FORBIDDEN_PAID_OUTCOME", "Metadata cannot declare progression, competitive, owner, or redeemable outcomes.");
-  }
-  const searchable = `${productKey} ${name} ${description} ${metadataJson ?? ""}`;
+  const searchable = `${productKey} ${name} ${description}`;
   if (FORBIDDEN_BENEFIT_COPY.some((pattern) => pattern.test(searchable))) {
     add(errors, "description", "FORBIDDEN_PAID_BENEFIT", "Store products cannot sell progression, competitive, owner, or redeemable benefits.");
   }
@@ -177,21 +174,16 @@ function metadata(value: unknown, errors: StoreCatalogError[]) {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
-    return JSON.stringify(parsed);
+    if (Object.keys(parsed as Record<string, unknown>).length > 0) {
+      add(errors, "metadataJson", "METADATA_BLOCKED", "Arbitrary metadata is not part of this foundation release.");
+      return null;
+    }
+    return "{}";
   } catch {
     add(errors, "metadataJson", "INVALID_METADATA", "Metadata must be a JSON object.");
     return null;
   }
 }
-
-function containsForbiddenMetadataOutcome(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(containsForbiddenMetadataOutcome);
-  if (!value || typeof value !== "object") return false;
-  const forbiddenKeys = new Set<string>(OUTCOME_FIELDS.map(normalizeMetadataKey));
-  return Object.entries(value as Record<string, unknown>).some(([key, nested]) => forbiddenKeys.has(normalizeMetadataKey(key)) || containsForbiddenMetadataOutcome(nested));
-}
-
-function normalizeMetadataKey(value: string) { return value.toLowerCase().replace(/[^a-z0-9]/g, ""); }
 
 function enumValue<T extends readonly string[]>(value: unknown, allowed: T): T[number] | null {
   const normalized = text(value)?.toLowerCase();

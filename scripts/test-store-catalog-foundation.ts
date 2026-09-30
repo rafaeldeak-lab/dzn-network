@@ -19,7 +19,7 @@ assert.match(migration, /active INTEGER NOT NULL DEFAULT 0 CHECK \(active = 0\)/
 assert.match(migration, /stripe_price_id TEXT UNIQUE CHECK \(stripe_price_id IS NULL\)/);
 assert.doesNotMatch(migration, /'approved'|'paused'|'archived'/);
 assert.match(migration, /grants_competitive_eligibility INTEGER NOT NULL DEFAULT 0 CHECK \(grants_competitive_eligibility = 0\)/);
-assert.match(migration, /json_valid\(metadata_json\) AND json_type\(metadata_json\) = 'object'/);
+assert.match(migration, /metadata_json TEXT NOT NULL DEFAULT '\{\}' CHECK \(metadata_json = '\{\}'\)/);
 assert.match(migration, /typeof\(unit_amount_minor\) = 'integer'/);
 assert.match(migration, /FOREIGN KEY\(product_id\) REFERENCES store_products\(id\) ON DELETE CASCADE/);
 
@@ -47,6 +47,7 @@ assert.throws(() => db.exec("UPDATE store_products SET active = 1 WHERE id = 'pr
 assert.throws(() => db.exec("UPDATE store_products SET status = 'approved' WHERE id = 'product_001'"), /CHECK constraint failed/);
 assert.throws(() => db.exec("UPDATE store_products SET metadata_json = 'not json' WHERE id = 'product_001'"), /CHECK constraint failed/);
 assert.throws(() => db.exec("UPDATE store_products SET metadata_json = '[]' WHERE id = 'product_001'"), /CHECK constraint failed/);
+assert.throws(() => db.exec(`UPDATE store_products SET metadata_json = '{"grantsXp":true}' WHERE id = 'product_001'`), /CHECK constraint failed/);
 assert.throws(() => db.exec("UPDATE store_products SET fulfilment_kind = 'event_theme' WHERE id = 'product_001'"), /CHECK constraint failed/);
 assert.throws(() => db.exec(`INSERT INTO store_prices (
   id, product_id, currency, unit_amount_minor, stripe_price_id
@@ -67,12 +68,11 @@ const validProduct = validateStoreProductDraft({
   accountBound: true,
   guaranteedPurchase: true,
   noCompetitiveAdvantage: true,
-  metadataJson: JSON.stringify({ theme: "signal-crown" }),
 });
 assert.equal(validProduct.ok, true);
 if (validProduct.ok) {
   assert.equal(validProduct.value.active, false);
-  assert.equal(validProduct.value.metadataJson, '{"theme":"signal-crown"}');
+  assert.equal(validProduct.value.metadataJson, '{}');
 }
 
 for (const unsafe of [
@@ -93,6 +93,7 @@ for (const unsafe of [
   { metadataJson: JSON.stringify({ grants_xp: true }) },
   { metadataJson: JSON.stringify({ "grants-xp": true }) },
   { metadataJson: JSON.stringify({ presentation: { grantsCompetitiveEligibility: true } }) },
+  { metadataJson: `${"[".repeat(3950)}0${"]".repeat(3950)}` },
 ]) {
   const result = validateStoreProductDraft({
     productKey: "dzn-profile-theme-pack",

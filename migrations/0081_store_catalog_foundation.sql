@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS store_products (
   grants_ctf_advantage INTEGER NOT NULL DEFAULT 0 CHECK (grants_ctf_advantage = 0),
   grants_owner_subscription_access INTEGER NOT NULL DEFAULT 0 CHECK (grants_owner_subscription_access = 0),
   grants_competitive_eligibility INTEGER NOT NULL DEFAULT 0 CHECK (grants_competitive_eligibility = 0),
-  metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json) AND json_type(metadata_json) = 'object'),
+  metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (metadata_json = '{}'),
   created_by_user_id TEXT,
   updated_by_user_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
