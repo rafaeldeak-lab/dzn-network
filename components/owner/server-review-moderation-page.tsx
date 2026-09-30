@@ -2,7 +2,7 @@
 
 import { ArrowLeft, CheckCircle2, EyeOff, Filter, Home, RefreshCw, Search, ShieldCheck, Star, XCircle } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ReviewStatus = "pending" | "approved" | "hidden";
 type ReviewItem = {
@@ -46,8 +46,10 @@ export function ServerReviewModerationPage() {
   const [state, setState] = useState<"loading" | "ready" | "blocked" | "error">("loading");
   const [busy, setBusy] = useState<"approve" | "hide" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const loadSequence = useRef(0);
 
   const load = useCallback(async (options?: { keepNotice?: boolean }) => {
+    const requestSequence = ++loadSequence.current;
     setState("loading");
     if (!options?.keepNotice) setNotice(null);
     try {
@@ -55,6 +57,7 @@ export function ServerReviewModerationPage() {
       if (appliedSearch) params.set("q", appliedSearch);
       const response = await fetch(`/api/owner/reviews/moderate?${params}`, { cache: "no-store", credentials: "include" });
       const payload = await response.json().catch(() => null) as QueuePayload | null;
+      if (requestSequence !== loadSequence.current) return;
       if (response.status === 401 || response.status === 403) { setState("blocked"); return; }
       if (!response.ok || !payload?.ok) throw new Error(payload?.message ?? "Review moderation is unavailable.");
       const nextReviews = payload.reviews ?? [];
@@ -63,6 +66,7 @@ export function ServerReviewModerationPage() {
       setSelectedId((current) => nextReviews.some((review) => review.id === current) ? current : nextReviews[0]?.id ?? null);
       setState("ready");
     } catch (error) {
+      if (requestSequence !== loadSequence.current) return;
       setNotice(error instanceof Error ? error.message : "Review moderation is unavailable.");
       setState("error");
     }

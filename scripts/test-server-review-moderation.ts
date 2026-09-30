@@ -53,4 +53,9 @@ const pageGuard = readFileSync("functions/owner/reviews.ts", "utf8");
 assert.match(pageGuard, /requirePlatformOwner/);
 assert.match(pageGuard, /mode: "page"/);
 
+const moderationPage = readFileSync("components/owner/server-review-moderation-page.tsx", "utf8");
+assert.match(moderationPage, /const loadSequence = useRef\(0\)/);
+assert.match(moderationPage, /const requestSequence = \+\+loadSequence\.current/);
+assert.match(moderationPage, /requestSequence !== loadSequence\.current/);
+
 console.log("Server review moderation tests passed.");
