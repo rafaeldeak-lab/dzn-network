@@ -24,6 +24,11 @@ assert.equal(source.includes('item.playerCountStatus !== "fresh"'), true, "Stale
 
 const apiSource = readFileSync("functions/api/public/server-rail.ts", "utf8");
 assert.equal(apiSource.includes("dedupeRailRows(rows).map(toRailItem)"), true, "The public API must deduplicate canonical server identities.");
+assert.equal(apiSource.includes("if (!env.DB)"), true);
+assert.match(apiSource, /if \(!env\.DB\)[\s\S]*?stale: true/, "A missing D1 binding must be reported as unavailable rather than an empty network.");
+
+const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts?: Record<string, string> };
+assert.equal(packageJson.scripts?.test?.includes("npm run test:live-server-rail"), true, "The main test suite must enforce the rail regression checks.");
 
 const css = readFileSync("app/globals.css", "utf8");
 assert.match(css, /\.dzn-live-server-rail__track\s*\{[\s\S]*animation:\s*dznLiveServerRail/, "The unique-card rail should retain motion.");

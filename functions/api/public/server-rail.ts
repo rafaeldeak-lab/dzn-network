@@ -36,7 +36,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   headers.set("x-dzn-cache-policy", "s-maxage=60; stale-while-revalidate=300");
 
   if (!env.DB) {
-    return json({ ok: true, items: [], generated_at: new Date().toISOString() }, { headers });
+    return json({ ok: true, items: [], generated_at: new Date().toISOString(), stale: true }, { headers });
   }
 
   try {
