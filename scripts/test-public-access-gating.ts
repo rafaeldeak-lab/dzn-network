@@ -690,7 +690,7 @@ assert.equal(pricingPageSource.includes("PricingCheckout"), true);
 assert.equal(pricingPageSource.includes("PAYMENT_FAQS"), true);
 assert.equal(pricingPageSource.includes('canonical: "/pricing"'), true);
 assert.equal(publicAccessPolicyDoc.includes("`/pricing`"), true);
-assert.equal(globalsSource.includes("body.dzn-pricing-modal-open .dzn-beta-ticker"), true);
+assert.equal(globalsSource.includes("dzn-beta-ticker"), false, "Pricing CSS must not retain retired beta-notice exceptions.");
 assert.equal(pricingEntryCssBlock.includes("url(\"/media/dzn-cinematic-survivor.png\")"), true);
 assert.equal(pricingEntryCssBlock.includes("grid-template-columns: minmax(0, 1.12fr) minmax(360px, 0.88fr);"), true);
 assert.equal(pricingEntryCssBlock.includes(".dzn-pricing-quick-answers__grid"), true);

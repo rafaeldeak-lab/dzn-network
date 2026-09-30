@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   authorizePlatformOwnerUser,
   isPlatformOwnerDiscordId,
@@ -627,12 +627,8 @@ assert.equal(ownerUiSource.includes("expandedSlot"), false, "Post destination se
 const globalsSource = readFileSync("app/globals.css", "utf8");
 assert.match(globalsSource, /body\.dzn-owner-console-active/);
 assert.match(globalsSource, /overflow:\s*hidden/);
-assert.match(globalsSource, /body\.dzn-owner-console-active \.dzn-beta-ticker/);
-
-const betaTickerSource = readFileSync("components/site/beta-ticker.tsx", "utf8");
-assert.match(betaTickerSource, /usePathname/);
-assert.match(betaTickerSource, /pathname === "\/owner" \|\| pathname\.startsWith\("\/owner\/"\)/);
-assert.match(betaTickerSource, /if \(isOwnerRoute \|\| !mounted \|\| hidden\) return null;/);
+assert.equal(globalsSource.includes("dzn-beta-ticker"), false, "Owner console CSS must not retain retired beta-notice exceptions.");
+assert.equal(existsSync("components/site/beta-ticker.tsx"), false, "Retired beta notice must stay removed.");
 
 const pageSource = readFileSync("app/owner/page.tsx", "utf8");
 assert.match(pageSource, /OwnerConsole/);

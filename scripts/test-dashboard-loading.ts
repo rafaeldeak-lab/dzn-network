@@ -626,10 +626,8 @@ includesAll(publicApiMigration, [
   "generated_at TEXT NOT NULL",
 ]);
 
-const betaTicker = source("components/site/beta-ticker.tsx");
-assert.ok(rootLayout.indexOf("<BetaTicker />") < rootLayout.indexOf("{children}"), "Beta notice belongs before page content, not over it.");
-assert.equal(betaTicker.includes("--dzn-beta-ticker-height"), false, "In-flow notice must not leave a fixed spacer behind.");
-assert.ok(betaTicker.includes("setHidden(true)"), "Dismissal must work even when persistent storage is unavailable.");
+assert.equal(rootLayout.includes("BetaTicker"), false, "The retired beta notice must not remain mounted globally.");
+assert.equal(existsSync("components/site/beta-ticker.tsx"), false, "Retired beta notice code must be removed.");
 const mobileLeaderboards = source("app/leaderboards/page.tsx");
 assert.ok(mobileLeaderboards.includes("data-label={headers[cellIndex]}"), "Responsive rows need visible metric labels.");
 assert.ok(mobileLeaderboards.includes('aria-label="Personal best kills"'), "Records retain an accessible table name.");
