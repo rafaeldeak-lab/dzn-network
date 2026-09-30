@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ArrowRight, Award, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, LoaderCircle,
   LogIn, Microchip, MousePointer2, Play, Radio, RefreshCw, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
@@ -10,6 +11,8 @@ import { GAME_MODES, HUB_BADGES, WORKSHOP_PART_COST, WORKSHOP_STAGES, type GameM
 import styles from "./games-hub.module.css";
 
 type View = "play" | "workshop" | "insignia" | "activity";
+type BoardView = "field" | "grid";
+const Minefield3D = dynamic(() => import("./minefield-3d").then(module => module.Minefield3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
 const modes = Object.keys(GAME_MODES) as GameMode[];
@@ -23,6 +26,7 @@ export function GamesHub() {
   const [view, setView] = useState<View>("play");
   const [mode, setMode] = useState<GameMode>("recon");
   const [tool, setTool] = useState<"reveal" | "flag">("reveal");
+  const [boardView, setBoardView] = useState<BoardView>("field");
   const [help, setHelp] = useState(false);
   const [replace, setReplace] = useState(false);
   const [now, setNow] = useState(0);
@@ -144,7 +148,13 @@ export function GamesHub() {
             </div>
             {game ? <>
               <div className={styles.boardStatus}><span><Target size={15} />{GAME_MODES[game.mode].label}</span><span><Flag size={15} />{game.cells.flat().filter(cell => cell === "flag").length} / {GAME_MODES[game.mode].mines}</span><span><Clock3 size={15} />{clock(game.expiresAt - (now || game.startedAt))}</span></div>
-              <MineBoard game={game} tool={tool} disabled={busy || !active} onMove={(x, y, selectedTool) => void mutate({ action: "move", gameId: game.id, version: game.version, x, y, tool: selectedTool })} />
+              <div className={styles.boardViewSwitch} role="group" aria-label="Minefield view">
+                <button aria-pressed={boardView === "field"} onClick={() => setBoardView("field")}><Sparkles size={16} />3D field</button>
+                <button aria-pressed={boardView === "grid"} onClick={() => setBoardView("grid")}><Target size={16} />Tactical grid</button>
+              </div>
+              {boardView === "field" ? <Minefield3D game={game} tool={tool} disabled={busy || !active} motionRunning={motionRunning}
+                onMove={(x, y, selectedTool) => void mutate({ action: "move", gameId: game.id, version: game.version, x, y, tool: selectedTool })} />
+                : <MineBoard game={game} tool={tool} disabled={busy || !active} onMove={(x, y, selectedTool) => void mutate({ action: "move", gameId: game.id, version: game.version, x, y, tool: selectedTool })} />}
               <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
                 {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Sector secured</strong><span>{summary?.today.includes(game.mode) ? `${GAME_MODES[game.mode].label} reward recorded for today. Further wins today are practice.` : "Daily rewards have reset. Start a new mission for today's reward."}</span></div></> : game.status === "lost" ? <><Target size={22} /><div><strong>Mine triggered</strong><span>Mission ended. Your earned XP and parts are unchanged.</span></div></> : !active ? <><Clock3 size={22} /><div><strong>Mission expired</strong><span>Start a new board when you are ready.</span></div></> : <><Radio size={20} /><div><strong>Mission in progress</strong><span>{tool === "flag" ? "Flag mode" : "Reveal mode"} / {game.cells.flat().filter(cell => typeof cell === "number").length} safe cells cleared</span></div></>}
               </div>
