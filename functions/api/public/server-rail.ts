@@ -16,6 +16,7 @@ import {
 
 type RailRow = {
   id: string;
+  nitrado_service_id: string | null;
   public_slug: string | null;
   server_name: string | null;
   server_type: string | null;
@@ -58,6 +59,7 @@ async function queryServerRail(env: Env) {
   const result = await db.prepare(
     `SELECT
        linked_servers.id,
+       linked_servers.nitrado_service_id,
        linked_servers.public_slug,
        COALESCE(NULLIF(linked_servers.display_name, ''), NULLIF(linked_servers.hostname, ''), linked_servers.server_name, linked_servers.nitrado_service_name) AS server_name,
        COALESCE(NULLIF(linked_servers.server_category, ''), NULLIF(linked_servers.server_mode, ''), linked_servers.server_type) AS server_type,
@@ -104,7 +106,9 @@ async function queryServerRail(env: Env) {
 function dedupeRailRows(rows: RailRow[]) {
   const unique = new Map<string, RailRow>();
   for (const row of rows) {
-    const identity = row.public_slug?.trim().toLowerCase() || row.id.trim().toLowerCase();
+    const identity = row.nitrado_service_id?.trim().toLowerCase()
+      || row.public_slug?.trim().toLowerCase()
+      || row.id.trim().toLowerCase();
     if (!unique.has(identity)) unique.set(identity, row);
   }
   return [...unique.values()];

@@ -36,6 +36,7 @@ assert.equal(Number.isNaN(Date.parse(missingDbPayload.generated_at ?? "")), fals
 
 const duplicateRow = {
   id: "server-one",
+  nitrado_service_id: "service-one",
   public_slug: "nuketown-deathmatch",
   server_name: "NukeTown DEATHMATCH",
   server_type: "Deathmatch",
@@ -52,7 +53,7 @@ const duplicateRow = {
 const duplicateDbResponse = await invokeRail({
   DB: {
     prepare: () => ({
-      all: async () => ({ results: [duplicateRow, { ...duplicateRow, id: "legacy-duplicate" }] }),
+      all: async () => ({ results: [duplicateRow, { ...duplicateRow, id: "legacy-duplicate", public_slug: "legacy-nuketown" }] }),
     }),
   },
 });

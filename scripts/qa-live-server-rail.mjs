@@ -14,6 +14,7 @@ const css = [...html.matchAll(/<link[^>]+href="([^"]+\.css)"[^>]*>/g)].map((matc
 const fixture = "import React from 'react';import{createRoot}from'react-dom/client';import{LiveServerRail}from'./components/servers/live-server-rail';createRoot(document.getElementById('root')).render(<main style={{maxWidth:1200,margin:'40px auto',padding:'0 16px'}}><LiveServerRail/></main>);";
 const bundle = await build({ stdin: { contents: fixture, resolveDir: process.cwd(), loader: "tsx" }, bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic", define: { "process.env.NODE_ENV": '"production"', "process.env": "{}" } });
 const realServer = { id: "server-one", slug: "nuketown-deathmatch", name: "NukeTown DEATHMATCH", logoUrl: null, category: "Deathmatch", currentPlayers: 7, maxPlayers: 20, playerCountStatus: "fresh", ratingAverage: 4.8, reviewCount: 28, listingPlanKey: "pro", isPro: true };
+const secondServer = { ...realServer, id: "server-two", slug: "second-server", name: "Second Server" };
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url, origin);
@@ -26,7 +27,7 @@ const server = createServer(async (request, response) => {
     return;
   }
   if (url.pathname === "/api/public/server-rail") {
-    response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true, items: [realServer, { ...realServer, id: "legacy-duplicate" }], generated_at: new Date().toISOString() }));
+    response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true, items: [realServer, secondServer, { ...realServer, id: "legacy-duplicate" }], generated_at: new Date().toISOString() }));
     return;
   }
   const file = path.resolve(root, decodeURIComponent(url.pathname).slice(1));
@@ -57,15 +58,27 @@ try {
       uniqueCardIds: [...document.querySelectorAll("[data-rail-card-id]")].map((card) => card.getAttribute("data-rail-card-id")),
       status: document.querySelector(".dzn-live-server-rail__header span:last-child")?.textContent?.trim() ?? "",
       animationName: getComputedStyle(document.querySelector(".dzn-live-server-rail__track")).animationName,
+      animationTransforms: (() => {
+        const track = document.querySelector(".dzn-live-server-rail__track");
+        const animation = track?.getAnimations()[0];
+        if (!animation || !track) return [];
+        animation.currentTime = 0;
+        const start = getComputedStyle(track).transform;
+        animation.currentTime = 42_000;
+        return [start, getComputedStyle(track).transform];
+      })(),
       text: document.querySelector(".dzn-live-server-rail")?.textContent ?? "",
     }));
     assert.equal(metrics.overflow, false, `Empty server rail must not overflow at ${width}px`);
-    assert.equal(metrics.railCards, 1, "Duplicate API identities must render as one server card.");
-    assert.deepEqual(metrics.uniqueCardIds, ["nuketown-deathmatch"]);
+    assert.equal(metrics.railCards, 2, "Duplicate API identities must render once while distinct servers remain visible.");
+    assert.deepEqual(metrics.uniqueCardIds, ["nuketown-deathmatch", "second-server"]);
     assert.equal(metrics.text.includes("7/20"), true, "Fresh player counts should render from the live response.");
     assert.equal(metrics.status, "Latest server data");
     if (reducedMotion === "reduce") assert.equal(metrics.animationName, "none", "Reduced-motion users should not receive rail animation.");
-    else assert.notEqual(metrics.animationName, "none", "The deduplicated rail should retain motion.");
+    else {
+      assert.notEqual(metrics.animationName, "none", "The deduplicated rail should retain motion.");
+      assert.notEqual(metrics.animationTransforms[0], metrics.animationTransforms[1], `A short multi-card rail must visibly move at ${width}px.`);
+    }
     assert.equal(metrics.text.includes("Beta onboarding"), false);
     assert.deepEqual(errors, []);
     const label = `${width}-${reducedMotion}`;
