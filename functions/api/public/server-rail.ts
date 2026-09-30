@@ -29,6 +29,7 @@ type RailRow = {
   plan_key: string | null;
   subscription_status: string | null;
   last_bumped_at: string | null;
+  rail_priority_at: string | null;
   adm_logs_found: number | null;
   adm_sync_status: string | null;
   total_kills: number | null;
@@ -77,6 +78,7 @@ async function queryServerRail(env: Env) {
        COALESCE(server_subscriptions.plan_key, 'free') AS plan_key,
        server_subscriptions.status AS subscription_status,
        server_advertising_state.last_bumped_at,
+       COALESCE(server_advertising_state.last_bumped_at, linked_servers.public_listing_updated_at, linked_servers.updated_at, linked_servers.created_at) AS rail_priority_at,
        onboarding_checks.adm_logs_found,
        adm_sync_state.last_sync_status AS adm_sync_status,
        COALESCE(server_stats.total_kills, 0) AS total_kills,
@@ -134,7 +136,27 @@ function dedupeRailRows(rows: RailRow[]) {
     const existing = unique.get(identity);
     if (!existing || railCanonicalScore(row) > railCanonicalScore(existing)) unique.set(identity, row);
   }
-  return [...unique.values()];
+  return [...unique.values()].sort(compareRailPriority);
+}
+
+function compareRailPriority(left: RailRow, right: RailRow) {
+  const paidDifference = Number(isActivePaidRailRow(left)) - Number(isActivePaidRailRow(right));
+  if (paidDifference !== 0) return -paidDifference;
+
+  const timeDifference = timestampOrZero(right.rail_priority_at) - timestampOrZero(left.rail_priority_at);
+  if (timeDifference !== 0) return timeDifference;
+  return left.id.localeCompare(right.id);
+}
+
+function isActivePaidRailRow(row: RailRow) {
+  const status = String(row.subscription_status ?? "").trim().toLowerCase();
+  const plan = String(row.plan_key ?? "free").trim().toLowerCase();
+  return ["active", "trialing"].includes(status) && !["", "free"].includes(plan);
+}
+
+function timestampOrZero(value: string | null) {
+  const timestamp = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function railCanonicalScore(row: RailRow) {

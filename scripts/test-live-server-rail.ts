@@ -49,6 +49,7 @@ const duplicateRow = {
   plan_key: "pro",
   subscription_status: "active",
   last_bumped_at: null,
+  rail_priority_at: "2026-09-30T12:00:00.000Z",
   adm_logs_found: 1,
   adm_sync_status: "completed",
   total_kills: 5,
@@ -67,6 +68,7 @@ const duplicateDbResponse = await invokeRail({
             id: `server-${index + 2}`,
             nitrado_service_id: `service-${index + 2}`,
             public_slug: `server-${index + 2}`,
+            rail_priority_at: "2026-09-29T12:00:00.000Z",
           })),
         ],
       }),
@@ -75,9 +77,11 @@ const duplicateDbResponse = await invokeRail({
 });
 const duplicatePayload = await duplicateDbResponse.json() as { items?: Array<{ id: string; slug: string | null }> };
 assert.equal(duplicatePayload.items?.length, 24, "Duplicate rows must not consume the 24 unique-server rail limit.");
-assert.deepEqual(duplicatePayload.items?.slice(0, 1).map(({ id, slug }) => ({ id, slug })), [
-  { id: "server-one", slug: "nuketown-deathmatch" },
-]);
+const canonicalDuplicateItem = duplicatePayload.items?.find(({ id }) => id === "server-one");
+assert.deepEqual(canonicalDuplicateItem && { id: canonicalDuplicateItem.id, slug: canonicalDuplicateItem.slug }, {
+  id: "server-one",
+  slug: "nuketown-deathmatch",
+});
 assert.equal(duplicatePayload.items?.some(({ id }) => id === "legacy-duplicate"), false, "The public API must deduplicate canonical server identities.");
 
 const namespaceCollisionResponse = await invokeRail({
@@ -94,6 +98,38 @@ const namespaceCollisionResponse = await invokeRail({
 });
 const namespaceCollisionPayload = await namespaceCollisionResponse.json() as { items?: Array<{ id: string }> };
 assert.equal(namespaceCollisionPayload.items?.length, 2, "Service IDs and public slugs must use separate identity namespaces.");
+
+const priorityOrderingResponse = await invokeRail({
+  DB: {
+    prepare: () => ({
+      all: async () => ({
+        results: [
+          { ...duplicateRow, id: "stale-paid", nitrado_service_id: "shared-service", total_kills: 0, unique_players: 0 },
+          ...Array.from({ length: 24 }, (_, index) => ({
+            ...duplicateRow,
+            id: `paid-${index + 1}`,
+            nitrado_service_id: `paid-${index + 1}`,
+            public_slug: `paid-${index + 1}`,
+          })),
+          {
+            ...duplicateRow,
+            id: "canonical-free",
+            nitrado_service_id: "shared-service",
+            public_slug: "canonical-free",
+            plan_key: "free",
+            subscription_status: null,
+            rail_priority_at: "2026-01-01T00:00:00.000Z",
+            total_kills: 50,
+          },
+        ],
+      }),
+    }),
+  },
+});
+const priorityOrderingPayload = await priorityOrderingResponse.json() as { items?: Array<{ id: string }> };
+assert.equal(priorityOrderingPayload.items?.length, 24);
+assert.equal(priorityOrderingPayload.items?.some(({ id }) => id === "canonical-free"), false, "A free canonical replacement must not inherit a stale paid row's rail position.");
+assert.equal(priorityOrderingPayload.items?.every(({ id }) => id.startsWith("paid-")), true, "Paid rail priority must be reapplied after canonical selection.");
 
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts?: Record<string, string> };
 assert.equal(packageJson.scripts?.test?.includes("npm run test:live-server-rail"), true, "The main test suite must enforce the rail regression checks.");
