@@ -29,6 +29,11 @@ type RailRow = {
   plan_key: string | null;
   subscription_status: string | null;
   last_bumped_at: string | null;
+  adm_logs_found: number | null;
+  adm_sync_status: string | null;
+  total_kills: number | null;
+  unique_players: number | null;
+  latest_success_sync_status: string | null;
 };
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -71,12 +76,27 @@ async function queryServerRail(env: Env) {
        COALESCE(review_summary.review_count, 0) AS review_count,
        COALESCE(server_subscriptions.plan_key, 'free') AS plan_key,
        server_subscriptions.status AS subscription_status,
-       server_advertising_state.last_bumped_at
+       server_advertising_state.last_bumped_at,
+       onboarding_checks.adm_logs_found,
+       adm_sync_state.last_sync_status AS adm_sync_status,
+       COALESCE(server_stats.total_kills, 0) AS total_kills,
+       COALESCE(server_stats.unique_players, 0) AS unique_players,
+       (
+           SELECT status
+           FROM sync_runs
+           WHERE sync_runs.linked_server_id = linked_servers.id
+             AND lower(sync_runs.status) IN ('completed', 'idle', 'no_new_lines', 'no_supported_events')
+           ORDER BY COALESCE(sync_runs.finished_at, sync_runs.started_at, sync_runs.created_at) DESC
+           LIMIT 1
+         ) AS latest_success_sync_status
      FROM linked_servers
      LEFT JOIN discord_guilds ON discord_guilds.id = linked_servers.discord_guild_id
      LEFT JOIN server_public_cache ON server_public_cache.guild_id = linked_servers.guild_id
      LEFT JOIN server_subscriptions ON server_subscriptions.guild_id = linked_servers.guild_id
      LEFT JOIN server_advertising_state ON server_advertising_state.linked_server_id = linked_servers.id
+     LEFT JOIN onboarding_checks ON onboarding_checks.linked_server_id = linked_servers.id
+     LEFT JOIN adm_sync_state ON adm_sync_state.linked_server_id = linked_servers.id
+     LEFT JOIN server_stats ON server_stats.linked_server_id = linked_servers.id
      LEFT JOIN (
        SELECT linked_server_id,
               ROUND(AVG(rating), 1) AS average_rating,
@@ -109,9 +129,27 @@ function dedupeRailRows(rows: RailRow[]) {
     const identity = row.nitrado_service_id?.trim().toLowerCase()
       || row.public_slug?.trim().toLowerCase()
       || row.id.trim().toLowerCase();
-    if (!unique.has(identity)) unique.set(identity, row);
+    const existing = unique.get(identity);
+    if (!existing || railCanonicalScore(row) > railCanonicalScore(existing)) unique.set(identity, row);
   }
   return [...unique.values()];
+}
+
+function railCanonicalScore(row: RailRow) {
+  return numberOrZero(row.total_kills) * 1000
+    + numberOrZero(row.unique_players) * 100
+    + (row.public_slug ? 20 : 0)
+    + (isSuccessfulAdmSyncStatus(row.latest_success_sync_status) || isSuccessfulAdmSyncStatus(row.adm_sync_status) ? 10 : 0)
+    + (Number(row.adm_logs_found) === 1 ? 5 : 0);
+}
+
+function isSuccessfulAdmSyncStatus(value: string | null) {
+  return ["completed", "idle", "no_new_lines", "no_supported_events"].includes(String(value ?? "").toLowerCase());
+}
+
+function numberOrZero(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
 }
 
 function toRailItem(row: RailRow) {

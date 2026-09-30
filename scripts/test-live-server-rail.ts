@@ -49,14 +49,19 @@ const duplicateRow = {
   plan_key: "pro",
   subscription_status: "active",
   last_bumped_at: null,
+  adm_logs_found: 1,
+  adm_sync_status: "completed",
+  total_kills: 5,
+  unique_players: 3,
+  latest_success_sync_status: "completed",
 };
 const duplicateDbResponse = await invokeRail({
   DB: {
     prepare: () => ({
       all: async () => ({
         results: [
+          { ...duplicateRow, id: "legacy-duplicate", public_slug: "legacy-nuketown", total_kills: 0, unique_players: 0, adm_logs_found: 0, adm_sync_status: null, latest_success_sync_status: null },
           duplicateRow,
-          { ...duplicateRow, id: "legacy-duplicate", public_slug: "legacy-nuketown" },
           ...Array.from({ length: 24 }, (_, index) => ({
             ...duplicateRow,
             id: `server-${index + 2}`,
