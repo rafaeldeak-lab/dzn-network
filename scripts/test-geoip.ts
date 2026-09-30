@@ -52,12 +52,31 @@ async function main() {
 
   const node = buildPublicMapNodeFromRow(baseRow);
   assert.ok(node);
-  assert.equal(node.latitude, 51.5074);
-  assert.equal(node.longitude, -0.1278);
-  assert.equal(node.location_label, "London, England, United Kingdom");
+  assert.equal(node.location_label, "United Kingdom");
+  assert.equal(node.region, "United Kingdom");
+  assert.equal(node.country, "United Kingdom");
+  assert.equal(node.approximate, true);
   assert.equal(node.active, true);
   assert.equal(JSON.stringify(node).includes("8.8.8.8"), false);
   assert.equal("ip_address" in node, false);
+  assert.equal("latitude" in node, false);
+  assert.equal("longitude" in node, false);
+  assert.equal("lat" in node, false);
+  assert.equal("lng" in node, false);
+  assert.equal("city" in node, false);
+
+  const sameRegionNode = buildPublicMapNodeFromRow({
+    ...baseRow,
+    id: "server-elsewhere",
+    public_slug: "elsewhere-uk",
+    geo_latitude: 57.1497,
+    geo_longitude: -2.0943,
+    geo_region: "Scotland",
+    geo_city: "Aberdeen",
+  });
+  assert.equal(sameRegionNode.x, node.x);
+  assert.equal(sameRegionNode.y, node.y);
+  assert.equal(sameRegionNode.location_label, "United Kingdom");
 
   const unknownNode = buildPublicMapNodeFromRow({
     ...baseRow,
@@ -76,15 +95,15 @@ async function main() {
   assert.ok(unknownNode);
   assert.equal(unknownNode.location_label, "Location awaiting metadata");
   assert.equal(unknownNode.approximate, true);
-  assert.equal(unknownNode.latitude, 20);
-  assert.equal(unknownNode.longitude, 0);
+  assert.equal("latitude" in unknownNode, false);
+  assert.equal("longitude" in unknownNode, false);
 
   const coordinateCounts = new Map<string, number>();
   const firstNode = buildPublicMapNodeFromRow(baseRow, 0, coordinateCounts);
   const secondNode = buildPublicMapNodeFromRow({ ...baseRow, id: "server-2", public_slug: "london-dayz-2" }, 1, coordinateCounts);
   assert.ok(firstNode);
   assert.ok(secondNode);
-  assert.notEqual(`${firstNode.latitude}:${firstNode.longitude}`, `${secondNode.latitude}:${secondNode.longitude}`);
+  assert.notEqual(`${firstNode.x}:${firstNode.y}`, `${secondNode.x}:${secondNode.y}`);
 
   const publicRows: MapNodeRow[] = [
     { ...baseRow, id: "pandora", public_slug: "pandora-dayz", server_name: "PANDORA DayZ" },
@@ -110,6 +129,7 @@ async function main() {
   assert.equal(publicNodes[2].sync_status, "pending");
   assert.equal(publicNodes[2].location_label, "Location awaiting metadata");
   assert.equal(JSON.stringify(publicNodes).includes("ip_address"), false);
+  assert.equal(JSON.stringify(publicNodes).includes("London"), false);
 
   const filteredNodes = buildPublicMapNodesFromRows([
     ...publicRows,

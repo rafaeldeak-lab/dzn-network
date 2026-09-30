@@ -1,7 +1,6 @@
 import { getRankedBuildServers } from "../../_lib/build-events";
 import type { PublicBuildLeaderboardRow } from "../../_lib/build-events";
 import { requireDb } from "../../_lib/db";
-import { locationLabel as formatLocationLabel } from "../../_lib/geoip";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { isPublicViewerLoggedIn, publicAccessCacheHeaders } from "../../_lib/public-auth";
 import {
@@ -1471,60 +1470,33 @@ export function buildPublicMapNodeFromRow(row: MapNodeRow, index = 0, coordinate
     status: active ? "active" : "pending",
     sync_status: active ? "active" : "pending",
     active,
-    latitude: roundFour(latitude),
-    longitude: roundFour(longitude),
-    lat: roundFour(latitude),
-    lng: roundFour(longitude),
     x: roundOne(clamp(x, 5, 95)),
     y: roundOne(clamp(y, 8, 90)),
     country: placement.country,
     region: placement.locationLabel,
-    city: placement.city,
-    approximate: placement.approximate,
+    approximate: true,
     location_label: placement.locationLabel,
   };
 }
 
 function mapPlacementFor(row: MapNodeRow) {
-  const geoLatitude = finiteNumber(row.geo_latitude);
-  const geoLongitude = finiteNumber(row.geo_longitude);
-  if (geoLatitude !== null && geoLongitude !== null) {
-    const approximate = row.geo_source === "region-fallback";
-    const location = {
-      latitude: clamp(geoLatitude, -90, 90),
-      longitude: clamp(geoLongitude, -180, 180),
-      country: row.geo_country,
-      region: row.geo_region,
-      city: row.geo_city,
-      approximate,
-    };
-    return {
-      ...location,
-      locationLabel: formatLocationLabel(location),
-    };
-  }
-
   const rawRegion = firstString(row.region);
   const publicRegion = safePublicRegion(rawRegion);
-  const searchable = [publicRegion, row.server_name, row.guild_name, row.platform, row.map_name]
+  const publicCountry = safePublicRegion(row.geo_country);
+  const publicGeoRegion = safePublicRegion(row.geo_region);
+  const searchable = [publicCountry, publicGeoRegion, publicRegion]
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
     .join(" ")
     .toLowerCase();
 
   const location = approximateRegion(searchable);
   if (location) {
-    const fallbackLocation = {
+    return {
       latitude: location.latitude,
       longitude: location.longitude,
-      country: location.country,
-      region: publicRegion ?? location.label,
-      city: null,
-      approximate: true,
-    };
-    return {
-      ...fallbackLocation,
-      locationLabel: formatLocationLabel(fallbackLocation),
-      approximate: true,
+      country: publicCountry ?? location.country,
+      region: publicGeoRegion ?? publicRegion ?? location.label,
+      locationLabel: publicCountry ?? publicGeoRegion ?? publicRegion ?? location.label,
     };
   }
 
@@ -1533,9 +1505,7 @@ function mapPlacementFor(row: MapNodeRow) {
     longitude: 0,
     country: null,
     region: null,
-    city: null,
     locationLabel: "Location awaiting metadata",
-    approximate: true,
   };
 }
 
@@ -1640,10 +1610,6 @@ function safeErrorMessage(error: unknown) {
 
 function roundOne(value: number) {
   return Math.round(numberOrZero(value) * 10) / 10;
-}
-
-function roundFour(value: number) {
-  return Math.round(numberOrZero(value) * 10000) / 10000;
 }
 
 function clamp(value: number, min: number, max: number) {
