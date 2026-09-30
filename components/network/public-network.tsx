@@ -2762,6 +2762,8 @@ function PublicPlayerProfileName({
 
 function PlayerAvatar({ player, compact = false }: { player: PublicLeaderboardPlayer; compact?: boolean }) {
   const avatarUrl = safePublicProfileAvatarUrl(player.public_profile_avatar_url);
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
+  const showAvatar = Boolean(avatarUrl && failedAvatarUrl !== avatarUrl);
   const initials = player.player_name
     .split(/[\s_-]+/)
     .map((part) => part[0])
@@ -2770,10 +2772,17 @@ function PlayerAvatar({ player, compact = false }: { player: PublicLeaderboardPl
     .toUpperCase();
 
   return (
-    <span className={`relative grid shrink-0 place-items-center overflow-hidden rounded-md border border-violet-300/25 bg-[#0b1020] text-xs font-black text-violet-100 ${compact ? "h-10 w-10" : "h-12 w-12"}`}>
-      {avatarUrl ? (
+    <span data-player-avatar={player.player_name} className={`relative grid shrink-0 place-items-center overflow-hidden rounded-md border border-violet-300/25 bg-[#0b1020] text-xs font-black text-violet-100 ${compact ? "h-10 w-10" : "h-12 w-12"}`}>
+      {showAvatar ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={avatarUrl} alt={`${player.player_name} Discord profile`} className="h-full w-full object-cover" loading="lazy" decoding="async" />
+        <img
+          src={avatarUrl ?? undefined}
+          alt={`${player.player_name} Discord profile`}
+          className="h-full w-full object-cover"
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailedAvatarUrl(avatarUrl)}
+        />
       ) : (
         <>
           <UserRound className="h-5 w-5 opacity-50" />

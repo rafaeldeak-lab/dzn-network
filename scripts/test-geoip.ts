@@ -99,6 +99,24 @@ async function main() {
     assert.equal("longitude" in countryNode, false);
   }
 
+  for (const [id, latitude, longitude] of [
+    ["country-only", null, null],
+    ["missing-latitude", null, 18.0686],
+    ["missing-longitude", 59.3293, null],
+  ] as const) {
+    const incompleteNode = buildPublicMapNodeFromRow({
+      ...baseRow,
+      id,
+      public_slug: id,
+      geo_country: "Sweden",
+      geo_region: null,
+      geo_latitude: latitude,
+      geo_longitude: longitude,
+    });
+    assert.equal(incompleteNode.location_label, "Location awaiting metadata");
+    assert.equal(incompleteNode.country, null);
+  }
+
   const unknownNode = buildPublicMapNodeFromRow({
     ...baseRow,
     id: "unknown",

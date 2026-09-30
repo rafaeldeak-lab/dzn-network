@@ -45,7 +45,7 @@ export function explorationPreviewCells(cells: { cellX: number; cellY: number; v
     .slice(0, 120).map(cell => ({
       key: `${cell.cellX}:${cell.cellY}`,
       left: (cell.cellX + 0.5) / gridSize * 100,
-      top: (cell.cellY + 0.5) / gridSize * 100,
+      top: (gridSize - cell.cellY - 0.5) / gridSize * 100,
       alpha: Number.isFinite(cell.visits) ? Math.min(0.9, Math.max(0.3, cell.visits / 12)) : 0.3,
     }));
 }

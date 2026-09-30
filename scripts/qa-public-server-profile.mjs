@@ -98,7 +98,8 @@ const httpServer = createServer(async (request, response) => {
   if (!["GET", "HEAD"].includes(request.method)) { response.writeHead(405).end(); return; }
   if (url.pathname === "/") { response.writeHead(200, { "content-type": "text/html" }).end(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">${css}</head><body><div id="root"></div><script src="/fixture.js"></script></body></html>`); return; }
   if (url.pathname === "/fixture.js") { response.writeHead(200, { "content-type": "text/javascript" }).end(bundle.outputFiles[0].contents); return; }
-  if (/^\/api\/public\/players\/player-[12]\/avatar$/.test(url.pathname) || url.pathname === "/media/dzn-logo.png") { response.writeHead(200, { "content-type": "image/png" }).end(logo); return; }
+  if (url.pathname === "/api/public/players/player-1/avatar" || url.pathname === "/media/dzn-logo.png") { response.writeHead(200, { "content-type": "image/png" }).end(logo); return; }
+  if (url.pathname === "/api/public/players/player-2/avatar") { response.writeHead(503).end(); return; }
   if (url.pathname === "/api/public/servers/qa-server/leaderboards") { response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(advanced)); return; }
   if (url.pathname === "/api/public/servers/qa-server/wars") { response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ activeEvents: [], trophies: [], currentChampionTitles: [] })); return; }
   const file = path.resolve(root, decodeURIComponent(url.pathname).slice(1));
@@ -117,17 +118,25 @@ try {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(origin, { waitUntil: "networkidle" });
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-player-avatar="Tara.W"]')]
+      .some((avatar) => avatar.getBoundingClientRect().width > 0 && !avatar.querySelector("img")));
     const metrics = await page.evaluate(() => ({
       overflow: document.documentElement.scrollWidth > innerWidth,
       height: document.documentElement.scrollHeight,
       mapWidth: document.querySelector(".dzn-exploration-mini-grid")?.getBoundingClientRect().width ?? 0,
       mapHeight: document.querySelector(".dzn-exploration-mini-grid")?.getBoundingClientRect().height ?? 0,
-      avatarImages: document.querySelectorAll('img[alt$="Discord profile"]').length,
+      visibleAvatarImages: [...document.querySelectorAll('img[alt$="Discord profile"]')].filter((image) => image.getBoundingClientRect().width > 0).length,
+      brokenVisibleAvatarImages: [...document.querySelectorAll('img[alt$="Discord profile"]')].filter((image) => image.getBoundingClientRect().width > 0 && (!image.complete || image.naturalWidth === 0)).length,
+      visibleFailedAvatarFallbacks: [...document.querySelectorAll('[data-player-avatar="Tara.W"]')].filter((avatar) => avatar.getBoundingClientRect().width > 0 && avatar.textContent.trim().length > 0 && !avatar.querySelector("img")).length,
+      markerTop: Number.parseFloat(document.querySelector(".dzn-exploration-mini-grid > span")?.style.top ?? "NaN"),
     }));
     assert.equal(metrics.overflow, false, `Profile must not overflow at ${width}px`);
     assert.ok(Math.abs(metrics.mapHeight - metrics.mapWidth) <= 2, `Map should preserve its square geometry at ${width}px`);
     assert.ok(metrics.mapWidth <= 416, `Map should remain compact at ${width}px`);
-    assert.equal(metrics.avatarImages, 4, "Both ranking panels should render the two consented profile avatars");
+    assert.ok(metrics.visibleAvatarImages >= 1, "A working consented Discord profile avatar should remain visible");
+    assert.equal(metrics.brokenVisibleAvatarImages, 0, "Failed avatar requests should not leave visible broken images");
+    assert.ok(metrics.visibleFailedAvatarFallbacks >= 1, "A failed avatar request should visibly fall back to player initials");
+    assert.ok(Math.abs(metrics.markerTop - ((128 - 85 - 0.5) / 128 * 100)) < 0.01, "Map markers should invert world Y for the north-up map artwork");
     const disclosure = page.locator(".dzn-profile-mobile-disclosure").first();
     if (width === 390) {
       assert.equal(await disclosure.locator(".dzn-profile-mobile-disclosure__content").isVisible(), false, "Secondary mobile sections should start collapsed");
