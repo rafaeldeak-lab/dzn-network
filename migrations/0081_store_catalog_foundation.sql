@@ -38,11 +38,19 @@ CREATE TABLE IF NOT EXISTS store_products (
   grants_ctf_advantage INTEGER NOT NULL DEFAULT 0 CHECK (grants_ctf_advantage = 0),
   grants_owner_subscription_access INTEGER NOT NULL DEFAULT 0 CHECK (grants_owner_subscription_access = 0),
   grants_competitive_eligibility INTEGER NOT NULL DEFAULT 0 CHECK (grants_competitive_eligibility = 0),
-  metadata_json TEXT NOT NULL DEFAULT '{}',
+  metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json) AND json_type(metadata_json) = 'object'),
   created_by_user_id TEXT,
   updated_by_user_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK (
+    (product_type = 'supporter_pack' AND fulfilment_kind = 'supporter_card') OR
+    (product_type = 'profile_theme' AND fulfilment_kind IN ('theme_pack', 'profile_frame', 'cosmetic_entitlement')) OR
+    (product_type = 'calling_card_pack' AND fulfilment_kind = 'cosmetic_entitlement') OR
+    (product_type = 'chat_cosmetic_pack' AND fulfilment_kind IN ('chat_badge', 'cosmetic_entitlement')) OR
+    (product_type = 'group_branding_pack' AND fulfilment_kind = 'cosmetic_entitlement') OR
+    (product_type = 'event_presentation_theme' AND fulfilment_kind IN ('event_theme', 'cosmetic_entitlement'))
+  ),
   FOREIGN KEY(created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   FOREIGN KEY(updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
@@ -51,7 +59,7 @@ CREATE TABLE IF NOT EXISTS store_prices (
   id TEXT PRIMARY KEY,
   product_id TEXT NOT NULL,
   currency TEXT NOT NULL DEFAULT 'gbp' CHECK (currency = 'gbp'),
-  unit_amount_minor INTEGER NOT NULL CHECK (unit_amount_minor > 0),
+  unit_amount_minor INTEGER NOT NULL CHECK (typeof(unit_amount_minor) = 'integer' AND unit_amount_minor > 0 AND unit_amount_minor <= 1000000),
   min_amount_minor INTEGER CHECK (min_amount_minor IS NULL),
   allow_pay_what_you_want INTEGER NOT NULL DEFAULT 0 CHECK (allow_pay_what_you_want = 0),
   stripe_price_id TEXT UNIQUE CHECK (stripe_price_id IS NULL),

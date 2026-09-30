@@ -19,6 +19,8 @@ assert.match(migration, /active INTEGER NOT NULL DEFAULT 0 CHECK \(active = 0\)/
 assert.match(migration, /stripe_price_id TEXT UNIQUE CHECK \(stripe_price_id IS NULL\)/);
 assert.doesNotMatch(migration, /'approved'|'paused'|'archived'/);
 assert.match(migration, /grants_competitive_eligibility INTEGER NOT NULL DEFAULT 0 CHECK \(grants_competitive_eligibility = 0\)/);
+assert.match(migration, /json_valid\(metadata_json\) AND json_type\(metadata_json\) = 'object'/);
+assert.match(migration, /typeof\(unit_amount_minor\) = 'integer'/);
 assert.match(migration, /FOREIGN KEY\(product_id\) REFERENCES store_products\(id\) ON DELETE CASCADE/);
 
 const db = new DatabaseSync(":memory:");
@@ -43,9 +45,14 @@ db.exec(`INSERT INTO store_products (
 )`);
 assert.throws(() => db.exec("UPDATE store_products SET active = 1 WHERE id = 'product_001'"), /CHECK constraint failed/);
 assert.throws(() => db.exec("UPDATE store_products SET status = 'approved' WHERE id = 'product_001'"), /CHECK constraint failed/);
+assert.throws(() => db.exec("UPDATE store_products SET metadata_json = 'not json' WHERE id = 'product_001'"), /CHECK constraint failed/);
+assert.throws(() => db.exec("UPDATE store_products SET metadata_json = '[]' WHERE id = 'product_001'"), /CHECK constraint failed/);
+assert.throws(() => db.exec("UPDATE store_products SET fulfilment_kind = 'event_theme' WHERE id = 'product_001'"), /CHECK constraint failed/);
 assert.throws(() => db.exec(`INSERT INTO store_prices (
   id, product_id, currency, unit_amount_minor, stripe_price_id
 ) VALUES ('price_001', 'product_001', 'gbp', 1000, 'price_live_blocked')`), /CHECK constraint failed/);
+assert.throws(() => db.exec("INSERT INTO store_prices (id, product_id, unit_amount_minor) VALUES ('price_real', 'product_001', 1.5)"), /CHECK constraint failed/);
+assert.throws(() => db.exec("INSERT INTO store_prices (id, product_id, unit_amount_minor) VALUES ('price_large', 'product_001', 1000001)"), /CHECK constraint failed/);
 
 assert.equal(canManageStoreDrafts({}, true), false);
 assert.equal(canManageStoreDrafts({ DZN_STORE_ENABLED: "true", DZN_STORE_ADMIN_ENABLED: "true" }, false), false);
@@ -73,6 +80,10 @@ for (const unsafe of [
   { grantsXp: true },
   { grantsCompetitiveEligibility: true },
   { accountBound: false },
+  { name: {} },
+  { description: {} },
+  { productType: ["profile_theme"] },
+  { metadataJson: { theme: "signal-crown" } },
   { description: "Buy XP and rank advantages for your account." },
   { name: "XP Pack" },
   { name: "Rank Boost" },
@@ -105,6 +116,9 @@ for (const unsafe of [
   { productId: "product_001", currency: "gbp", unitAmountMinor: true },
   { productId: "product_001", currency: "gbp", unitAmountMinor: [1000] },
   { productId: "product_001", currency: "gbp", unitAmountMinor: "1000" },
+  { productId: "product_001", currency: ["gbp"], unitAmountMinor: 1000 },
+  { productId: "product_001", currency: "gbp", unitAmountMinor: 1000, minAmountMinor: {} },
+  { productId: "product_001", currency: "gbp", unitAmountMinor: 1000, stripePriceId: {} },
 ]) assert.equal(validateStorePriceDraft(unsafe).ok, false, JSON.stringify(unsafe));
 
 db.close();

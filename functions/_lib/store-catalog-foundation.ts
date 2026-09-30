@@ -139,15 +139,16 @@ export function validateStorePriceDraft(input: unknown): StoreCatalogResult<Stor
   const productId = text(value.productId) ?? "";
   const status = enumValue(value.status ?? "draft", DRAFT_STATUSES);
   const unitAmountMinor = typeof value.unitAmountMinor === "number" ? value.unitAmountMinor : Number.NaN;
+  const currency = value.currency === undefined ? "gbp" : text(value.currency)?.toLowerCase();
 
   if (!RECORD_ID.test(productId)) add(errors, "productId", "INVALID_PRODUCT_ID", "Reference a local catalog product id.");
-  if ((text(value.currency) ?? "gbp").toLowerCase() !== "gbp") add(errors, "currency", "INVALID_CURRENCY", "Initial Store drafts use GBP.");
+  if (currency !== "gbp") add(errors, "currency", "INVALID_CURRENCY", "Initial Store drafts use GBP.");
   if (!Number.isInteger(unitAmountMinor) || unitAmountMinor <= 0 || unitAmountMinor > MAX_PRICE_MINOR) add(errors, "unitAmountMinor", "INVALID_AMOUNT", "Use a positive minor-unit amount no higher than 1000000.");
   if (!status) add(errors, "status", "INVALID_STATUS", "Price drafts may only be draft or review.");
   if (flag(value.active)) add(errors, "active", "ACTIVE_BLOCKED", "Price drafts remain inactive in this foundation release.");
   if (flag(value.allowPayWhatYouWant)) add(errors, "allowPayWhatYouWant", "VARIABLE_PRICE_BLOCKED", "Variable pricing is not part of this release.");
-  if (value.minAmountMinor !== null && value.minAmountMinor !== undefined && text(value.minAmountMinor)) add(errors, "minAmountMinor", "MINIMUM_BLOCKED", "Minimum amounts are not part of this release.");
-  if (text(value.stripePriceId)) add(errors, "stripePriceId", "STRIPE_BINDING_BLOCKED", "Stripe Price binding requires a separate release.");
+  if (value.minAmountMinor !== null && value.minAmountMinor !== undefined) add(errors, "minAmountMinor", "MINIMUM_BLOCKED", "Minimum amounts are not part of this release.");
+  if (value.stripePriceId !== null && value.stripePriceId !== undefined && value.stripePriceId !== "") add(errors, "stripePriceId", "STRIPE_BINDING_BLOCKED", "Stripe Price binding requires a separate release.");
 
   if (errors.length || !status) return { ok: false, errors };
   return { ok: true, value: { productId, currency: "gbp", unitAmountMinor, minAmountMinor: null, allowPayWhatYouWant: false, stripePriceId: null, status, active: false }, errors: [] };
@@ -167,7 +168,11 @@ function compatible(productType: ProductType | null, fulfilmentKind: FulfilmentK
 }
 
 function metadata(value: unknown, errors: StoreCatalogError[]) {
-  const raw = value === undefined || value === null || value === "" ? "{}" : String(value);
+  if (value !== undefined && value !== null && typeof value !== "string") {
+    add(errors, "metadataJson", "INVALID_METADATA", "Metadata must be a JSON object string.");
+    return null;
+  }
+  const raw = value === undefined || value === null || value === "" ? "{}" : value;
   if (raw.length > 8000) { add(errors, "metadataJson", "METADATA_TOO_LARGE", "Metadata must remain below 8000 characters."); return null; }
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -194,6 +199,6 @@ function enumValue<T extends readonly string[]>(value: unknown, allowed: T): T[n
 }
 
 function record(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
-function text(value: unknown) { if (value === null || value === undefined) return null; const normalized = String(value).trim(); return normalized || null; }
+function text(value: unknown) { if (typeof value !== "string") return null; const normalized = value.trim(); return normalized || null; }
 function flag(value: unknown) { return value === true || String(value ?? "").trim().toLowerCase() === "true" || String(value ?? "").trim() === "1"; }
 function add(errors: StoreCatalogError[], field: string, code: string, message: string) { errors.push({ field, code, message }); }
