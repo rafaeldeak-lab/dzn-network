@@ -6,6 +6,10 @@ import type { TravelPositionSample } from "../functions/_lib/travel-stats";
 
 const chernarus = resolveDznMapConfig("ChernarusPlus");
 assert.ok(chernarus, "ChernarusPlus map config should resolve");
+assert.equal(chernarus.publicAssetPath, "/maps/dzn-chernarusplus-grid.webp");
+assert.equal(chernarus.publicReferenceUrl, "https://dayz.xam.nu/chernarusplus");
+assert.equal(resolveDznMapConfig("Livonia")?.publicAssetPath, "/maps/dzn-livonia-grid.webp");
+assert.equal(resolveDznMapConfig("Sakhal")?.publicAssetPath, "/maps/dzn-sakhal-grid.webp");
 assert.equal(resolveDznMapConfig("enoch")?.key, "livonia");
 assert.equal(resolveDznMapConfig("Sakhal")?.key, "sakhal");
 

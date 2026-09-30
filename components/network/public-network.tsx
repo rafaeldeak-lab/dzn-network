@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { explorationPreviewCells, formatPublicVisibilitySummary, publicListingPlanLabel, publicMapLabel, publicVisibilityTierLabel, showcasePlanLabel } from "@/lib/showcase-labels";
+import { explorationPreviewCells, formatPublicVisibilitySummary, publicListingPlanLabel, publicMapLabel, publicMapPresentation, publicVisibilityTierLabel, showcasePlanLabel } from "@/lib/showcase-labels";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -349,6 +349,7 @@ type PublicLeaderboardPlayer = {
   last_seen: string | null;
   public_profile_handle?: string | null;
   public_profile_href?: string | null;
+  public_profile_avatar_url?: string | null;
 };
 
 type PublicStats = {
@@ -1495,7 +1496,7 @@ function ServerProfileShell({
   );
 }
 
-function ServerProfile({ server }: { server: PublicServer }) {
+export function ServerProfile({ server }: { server: PublicServer }) {
   const tags = parseTags(server.tags_json);
   const isLocked = Boolean(server.is_locked);
   const statsPending = server.stats_sync === "Pending";
@@ -1578,8 +1579,7 @@ function ServerProfile({ server }: { server: PublicServer }) {
   }, [server.linked_server_id]);
 
   return (
-    <div className="relative pb-12 pt-6">
-      <div className="pointer-events-none absolute inset-x-[-12vw] top-10 -z-10 h-[520px] bg-[radial-gradient(circle_at_18%_18%,rgba(139,92,246,0.28),transparent_34%),radial-gradient(circle_at_88%_12%,rgba(34,211,238,0.16),transparent_28%)] blur-2xl" />
+    <div className="relative pb-8 pt-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link href="/servers" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-black uppercase text-zinc-200 transition hover:border-violet-300/35 hover:text-white">
           <ArrowLeft className="h-4 w-4" />
@@ -1588,10 +1588,10 @@ function ServerProfile({ server }: { server: PublicServer }) {
         <SavedServerButton server={server} variant="profile" />
       </div>
 
-      <motion.header initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.42 }} className={`relative mt-5 overflow-hidden rounded-xl border border-white/10 bg-[#050815]/78 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl ${visualCardStyle !== "standard" ? `dzn-profile-header--visual-${visualCardStyle}` : ""}`} style={profileAccentStyle}>
+      <motion.header initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className={`relative mt-4 overflow-hidden rounded-lg border border-white/10 bg-[#050815]/88 ${visualCardStyle !== "standard" ? `dzn-profile-header--visual-${visualCardStyle}` : ""}`} style={profileAccentStyle}>
         <ServerThemeBanner theme={server.themeBanner} overlay />
-        <div className="relative z-10 grid gap-5 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_420px]">
-          <div className="flex min-w-0 flex-col gap-5 sm:flex-row">
+        <div className="relative z-10 grid gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="flex min-w-0 flex-col gap-4 sm:flex-row">
             <ServerProfileFrame frame={server.profileFrame}>
               <ServerHeroAvatar server={server} />
             </ServerProfileFrame>
@@ -1600,23 +1600,21 @@ function ServerProfile({ server }: { server: PublicServer }) {
                 <span className="rounded-full border border-violet-300/25 bg-violet-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-violet-100">DZN Network</span>
                 <StatusPill {...publicServerStatusPresentation(server)} />
               </div>
-              <h1 className="mt-3 max-w-full break-words text-4xl font-black uppercase leading-none text-white [overflow-wrap:anywhere] sm:text-5xl lg:text-6xl">
+              <h1 className="mt-2 max-w-full break-words text-3xl font-black uppercase leading-none text-white [overflow-wrap:anywhere] sm:text-4xl">
                 {server.server_name}
               </h1>
-              <p className="mt-3 break-words text-base font-bold text-zinc-300 [overflow-wrap:anywhere]">{server.nitrado_service_name ?? server.guild_name ?? "Verified DZN community"}</p>
-              <div className="mt-4 flex flex-wrap gap-3 text-xs font-bold uppercase text-zinc-400">
+              <p className="mt-2 break-words text-sm font-bold text-zinc-300 [overflow-wrap:anywhere]">{server.nitrado_service_name ?? server.guild_name ?? "Verified DZN community"}</p>
+              <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold uppercase text-zinc-400">
                 <MetaChip icon={Gamepad2} label={server.platform ?? "Platform awaiting data"} />
                 <MetaChip icon={Target} label={server.server_type} />
                 <MetaChip icon={Map} label={publicMapLabel(server.map_name ?? server.mission)} />
                 <MetaChip icon={MapPin} label={publicServerStatusPresentation(server).label} />
               </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <StatusPill label="Public Listing" tone="cyan" />
-                <StatusPill label={server.server_type} tone="violet" />
+              <div className="mt-3 flex flex-wrap gap-2">
                 <StatusPill label={server.adm_status === "Connected" ? "ADM Connected" : server.adm_status === "Discovered" ? "ADM Discovered" : "ADM Needs Review"} tone={server.adm_status === "Connected" ? "emerald" : server.adm_status === "Discovered" ? "cyan" : "orange"} />
                 <StatusPill label={historicalLifecycle ? "Stats Preserved" : `Stats Sync ${server.stats_sync}`} tone={historicalLifecycle ? "zinc" : server.stats_sync === "Active" ? "emerald" : server.stats_sync === "Pending" ? "orange" : "zinc"} />
               </div>
-              <ServerCardBadges badges={server.showcaseBadges ?? server.badges} max={8} className="mt-4" />
+              <ServerCardBadges badges={server.showcaseBadges ?? server.badges} max={5} className="mt-3" />
               <ServerReputationBadges server={server} />
             </div>
           </div>
@@ -1624,20 +1622,18 @@ function ServerProfile({ server }: { server: PublicServer }) {
           {isLocked ? (
             <LockedProfileStats server={server} />
           ) : (
-            <div className="grid gap-3 rounded-xl border border-white/10 bg-black/38 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-              <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-2 rounded-lg border border-white/10 bg-black/38 p-3">
+              <div className="grid grid-cols-2 gap-2">
                 <HeroStat label="Players" value={formatPlayers(server)} icon={UserRound} />
                 <HeroStat label="Unique Players" value={String(server.unique_players)} icon={Users} />
-                <HeroStat label="Server Type" value={server.server_type} icon={Target} />
                 <HeroStat label="Total Kills" value={String(server.total_kills)} icon={Crosshair} />
-                <HeroStat label="Total Deaths" value={String(server.total_deaths)} icon={Skull} />
                 <HeroStat label="K/D Ratio" value={kd} icon={BarChart3} />
                 <HeroStat label="Global Rank" value={server.rank ? `#${server.rank}` : "Pending"} icon={Trophy} />
                 <HeroStat label="Server Score" value={server.score_label} icon={Gauge} title={scoreTitle} />
               </div>
-              <div className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.06] p-3">
+              <div className="flex items-center justify-between gap-3 rounded-md border border-cyan-300/15 bg-cyan-300/[0.06] px-3 py-2">
                 <p className="text-[10px] font-black uppercase text-cyan-200/70">Last Sync</p>
-                <p className="mt-1 text-sm font-black text-white">{formatRelativeTime(server.last_sync_at ?? server.metadata_last_checked_at)}</p>
+                <p className="text-xs font-black text-white">{formatRelativeTime(server.last_sync_at ?? server.metadata_last_checked_at)}</p>
               </div>
             </div>
           )}
@@ -1672,12 +1668,12 @@ function ServerProfile({ server }: { server: PublicServer }) {
 
       <ProProfileAdvertPanel server={server} />
 
-      <section className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="grid gap-5">
+      <section className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="grid gap-4">
           <ServerTagsPanel tags={tags} />
           <CommunityInfoPanel server={server} />
           <ReviewsPanel server={server} />
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
             {isLocked ? (
               <>
                 <LockedSectionPanel title="PvP Leaderboard" icon={Trophy} returnTo={`/servers/profile?slug=${server.public_slug}`} text="Log in to view this server's ranked players, kills, K/D, deaths, and longest kill records." />
@@ -1692,22 +1688,26 @@ function ServerProfile({ server }: { server: PublicServer }) {
           </div>
 
           <ServerAdvancedShowcasePanel payload={advancedPayload} loading={advancedLoading} error={advancedError} server={server} />
-          <ServerWarsProfilePanel payload={serverWarsPayload} loading={serverWarsLoading} error={serverWarsError} />
+          <ProfileDisclosure id="server-wars" label="Server Wars history">
+              <ServerWarsProfilePanel payload={serverWarsPayload} loading={serverWarsLoading} error={serverWarsError} />
+          </ProfileDisclosure>
 
-          <div className="grid gap-5 md:grid-cols-2">
-            <FeaturePreviewPanel title="Factions" icon={Users} text="Faction profiles and territory status are planned for this public page." variant="faction" />
-            <ServerAchievementPanel server={server} />
-          </div>
+          <ProfileDisclosure id="factions-achievements" label="Factions and achievements" contentClassName="grid gap-4 md:grid-cols-2">
+              <FeaturePreviewPanel title="Factions" icon={Users} text="Faction profiles and territory status are planned for this public page." variant="faction" />
+              <ServerAchievementPanel server={server} />
+          </ProfileDisclosure>
         </div>
 
-        <aside className="grid content-start gap-5">
-          <GlassPanel title="Top Players" icon={Flame}>
-            {isLocked ? (
-              <LockedInlinePanel returnTo={`/servers/profile?slug=${server.public_slug}`} text="Log in to unlock detailed player rankings." />
-            ) : (
-              <TopPlayersPanel players={players} />
-            )}
-          </GlassPanel>
+        <aside className="grid content-start gap-4 lg:sticky lg:top-20 lg:self-start">
+          <div className="dzn-profile-top-players-aside">
+            <GlassPanel title="Top Players" icon={Flame}>
+              {isLocked ? (
+                <LockedInlinePanel returnTo={`/servers/profile?slug=${server.public_slug}`} text="Log in to unlock detailed player rankings." />
+              ) : (
+                <TopPlayersPanel players={players} />
+              )}
+            </GlassPanel>
+          </div>
           {isLocked ? (
             <LockedSectionPanel title="Network Status" icon={BarChart3} returnTo={`/servers/profile?slug=${server.public_slug}`} text="Sync health, joins, and detailed server status are available to logged-in members." />
           ) : (
@@ -1725,9 +1725,9 @@ function ProProfileAdvertPanel({ server }: { server: PublicServer }) {
   if (!hasProVisuals) return null;
 
   return (
-    <section className="mt-5 overflow-hidden rounded-xl border border-violet-300/24 bg-[#070b16]/88 shadow-[0_22px_80px_rgba(76,29,149,0.22)]">
+    <section className="mt-4 overflow-hidden rounded-lg border border-violet-300/24 bg-[#070b16]/92">
       {server.advert_banner_url ? (
-        <div className="relative aspect-[16/5] min-h-[170px] overflow-hidden border-b border-violet-300/18 bg-[radial-gradient(circle_at_20%_20%,rgba(168,85,247,0.25),transparent_34%),linear-gradient(135deg,rgba(6,10,22,0.98),rgba(17,24,39,0.88))]">
+        <div className="relative aspect-[16/4] min-h-[120px] max-h-[220px] overflow-hidden border-b border-violet-300/18 bg-[#060a16]">
           <img
             src={server.advert_banner_url}
             alt={server.advert_banner_alt || `${server.server_name} custom advert banner`}
@@ -1978,9 +1978,15 @@ function AdvancedBoardIcon({ category }: { category: string }) {
 function ExplorationMiniGrid({ exploration }: { exploration: NonNullable<ServerAdvancedPayload["exploration"]> }) {
   const gridSize = exploration.gridSize ?? 128;
   const cells = explorationPreviewCells(exploration.overlayCells, gridSize);
+  const map = publicMapPresentation(exploration.mapDisplayName);
   return (
     <figure className="dzn-exploration-figure">
-      <div className="dzn-exploration-mini-grid" role="img" aria-label={`${cells.length} highlighted aggregate areas on a fictional tactical terrain background. Not a live location or player route.`}>
+      <div
+        className="dzn-exploration-mini-grid"
+        role="img"
+        aria-label={`${cells.length} highlighted aggregate areas on a ${map.label} terrain reference. Not a live location or player route.`}
+        style={{ "--dzn-map-image": `url("${map.assetPath}")` } as CSSProperties}
+      >
         <div className="dzn-exploration-mini-grid__shade" aria-hidden="true" />
         {cells.map((cell) => (
           <span
@@ -1999,7 +2005,14 @@ function ExplorationMiniGrid({ exploration }: { exploration: NonNullable<ServerA
         <span><i className="dzn-exploration-legend dzn-exploration-legend--quiet" />Visited</span>
         <span><i className="dzn-exploration-legend dzn-exploration-legend--active" />Frequent</span>
         <b>{cells.length ? `${cells.length} sampled grid areas` : "No activity areas yet"}</b>
-        <small>Fictional terrain backdrop; coverage is schematic.</small>
+        <small>
+          Original DZN {map.label} terrain reference. Coverage remains schematic.
+          {map.referenceUrl ? (
+            <a href={map.referenceUrl} target="_blank" rel="noreferrer" className="dzn-exploration-source-link">
+              Open interactive map <ExternalLink aria-hidden="true" />
+            </a>
+          ) : null}
+        </small>
       </figcaption>
     </figure>
   );
@@ -2130,16 +2143,31 @@ function safePublicProfileHref(value: string | null | undefined) {
   return typeof value === "string" && /^\/players\/[a-z0-9-]{3,48}$/.test(value) ? value : null;
 }
 
+function safePublicProfileAvatarUrl(value: string | null | undefined) {
+  return typeof value === "string" && /^\/api\/public\/players\/[a-z0-9-]{3,48}\/avatar$/.test(value) ? value : null;
+}
+
 function GlassPanel({ title, icon: Icon, children }: { title: string; icon: typeof Activity; children: React.ReactNode }) {
   return (
-    <section className="glass-surface animated-border rounded-xl p-4 transition duration-300 hover:-translate-y-0.5 hover:border-violet-300/30 sm:p-5">
+    <section className="glass-surface animated-border rounded-lg p-4">
       <div className="relative z-10">
-        <div className="flex items-center gap-3">
-          <Icon className="h-6 w-6 text-violet-200" />
-          <h2 className="text-xl font-black uppercase text-white">{title}</h2>
+        <div className="flex items-center gap-2.5">
+          <Icon className="h-5 w-5 text-violet-200" />
+          <h2 className="text-base font-black uppercase text-white">{title}</h2>
         </div>
-        <div className="mt-5">{children}</div>
+        <div className="mt-3">{children}</div>
       </div>
+    </section>
+  );
+}
+
+function ProfileDisclosure({ id, label, children, contentClassName = "" }: { id: string; label: string; children: React.ReactNode; contentClassName?: string }) {
+  const inputId = `dzn-profile-disclosure-${id}`;
+  return (
+    <section className="dzn-profile-mobile-disclosure">
+      <input id={inputId} type="checkbox" className="dzn-profile-mobile-disclosure__toggle" />
+      <label htmlFor={inputId} className="dzn-profile-mobile-disclosure__label">{label}</label>
+      <div className={`dzn-profile-mobile-disclosure__content ${contentClassName}`}>{children}</div>
     </section>
   );
 }
@@ -2175,7 +2203,7 @@ function LockedInlinePanel({ text, returnTo }: { text: string; returnTo: string 
 function ServerHeroAvatar({ server }: { server: PublicServer }) {
   if (server.guild_icon_url) {
     return (
-      <div className="relative h-28 w-28 shrink-0 overflow-hidden rounded-xl border border-violet-300/30 bg-black shadow-[0_0_36px_rgba(139,92,246,0.35)]">
+      <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-lg border border-white/15 bg-black">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={server.guild_icon_url} alt="" className="h-full w-full object-cover" />
         <span className="absolute inset-0 rounded-xl border border-white/10" />
@@ -2184,10 +2212,10 @@ function ServerHeroAvatar({ server }: { server: PublicServer }) {
   }
 
   return (
-    <div className="relative grid h-28 w-28 shrink-0 place-items-center overflow-hidden rounded-xl border border-violet-300/30 bg-black shadow-[0_0_36px_rgba(139,92,246,0.35)]">
+    <div className="relative grid h-24 w-24 shrink-0 place-items-center overflow-hidden rounded-lg border border-white/15 bg-black">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/media/dzn-logo.png" alt="" className="h-20 w-20 object-contain" />
-      <span className="absolute inset-0 rounded-xl border border-white/10 bg-[radial-gradient(circle_at_50%_0%,rgba(168,85,247,0.28),transparent_42%)]" />
+      <img src="/media/dzn-logo.png" alt="" className="h-16 w-16 object-contain" />
+      <span className="absolute inset-0 rounded-lg border border-white/10" />
     </div>
   );
 }
@@ -2203,12 +2231,12 @@ function MetaChip({ icon: Icon, label }: { icon: typeof Activity; label: string 
 
 function HeroStat({ icon: Icon, label, value, title }: { icon: typeof Activity; label: string; value: string; title?: string }) {
   return (
-    <div title={title} className="min-w-0 rounded-lg border border-white/10 bg-black/28 p-3 transition duration-300 hover:-translate-y-0.5 hover:border-cyan-300/25 hover:bg-cyan-300/[0.06]">
+    <div title={title} className="min-w-0 rounded-md border border-white/10 bg-black/28 px-3 py-2.5">
       <div className="flex items-center gap-2">
         <Icon className="h-4 w-4 text-cyan-200" />
         <p className="text-[10px] font-black uppercase text-zinc-500">{label}</p>
       </div>
-      <p className="mt-2 break-words text-sm font-black text-white [overflow-wrap:anywhere]">{value}</p>
+      <p className="mt-1 break-words text-sm font-black text-white [overflow-wrap:anywhere]">{value}</p>
     </div>
   );
 }
@@ -2588,39 +2616,23 @@ function PvpLeaderboardPanel({ players }: { players: PublicLeaderboardPlayer[] }
     <GlassPanel title="PvP Leaderboard" icon={Trophy}>
       {players.length ? (
         <>
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-separate border-spacing-y-2 text-left">
-              <thead>
-                <tr className="text-[10px] font-black uppercase text-zinc-500">
-                  <th className="px-2 py-1">Rank</th>
-                  <th className="px-2 py-1">Player</th>
-                  <th className="px-2 py-1 text-right">Kills</th>
-                  <th className="px-2 py-1 text-right">Deaths</th>
-                  <th className="px-2 py-1 text-right">K/D</th>
-                  <th className="px-2 py-1 text-right">Longest Kill</th>
-                </tr>
-              </thead>
-              <tbody>
-                {players.slice(0, 6).map((player) => (
-                  <tr key={`pvp-${player.rank}-${player.player_name}`} className="bg-black/24">
-                    <td className="rounded-l-lg border-y border-l border-white/10 px-2 py-2 text-sm font-black text-violet-200">#{player.rank}</td>
-                    <td className="border-y border-white/10 px-2 py-2">
-                      <PublicPlayerProfileName
-                        name={player.player_name}
-                        href={player.public_profile_href}
-                        className="text-sm font-black text-white"
-                      />
-                    </td>
-                    <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-zinc-200">{player.kills}</td>
-                    <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-zinc-300">{player.deaths}</td>
-                    <td className="border-y border-white/10 px-2 py-2 text-right text-sm font-bold text-cyan-100">{formatKdLabel(player)}</td>
-                    <td className="rounded-r-lg border-y border-r border-white/10 px-2 py-2 text-right text-sm font-bold text-violet-100">{formatDistance(player.longest_kill)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="grid gap-1.5">
+            {players.slice(0, 6).map((player) => (
+              <div key={`pvp-${player.rank}-${player.player_name}`} className="grid min-w-0 grid-cols-[2rem_2.5rem_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-white/10 bg-black/24 px-2.5 py-2">
+                <span className={`text-center text-sm font-black ${player.rank <= 3 ? "text-amber-200" : "text-violet-200"}`}>#{player.rank}</span>
+                <PlayerAvatar player={player} compact />
+                <div className="min-w-0">
+                  <PublicPlayerProfileName name={player.player_name} href={player.public_profile_href} className="block truncate text-sm font-black text-white" />
+                  <p className="mt-0.5 truncate text-[10px] font-bold uppercase text-zinc-500">{player.deaths} deaths · {formatKdLabel(player)} K/D · {formatDistance(player.longest_kill)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-black text-emerald-200">{player.kills}</p>
+                  <p className="text-[9px] font-black uppercase text-zinc-600">kills</p>
+                </div>
+              </div>
+            ))}
           </div>
-          <Link href="/leaderboards" className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-violet-300/35 bg-violet-500/12 px-4 py-3 text-xs font-black uppercase text-violet-100 transition hover:border-violet-200/70 hover:bg-violet-500/22">
+          <Link href="/leaderboards" className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-violet-300/35 bg-violet-500/12 px-4 py-2.5 text-xs font-black uppercase text-violet-100 transition hover:border-violet-200/70 hover:bg-violet-500/22">
             View Full PvP Leaderboard
             <ArrowRight className="h-4 w-4" />
           </Link>
@@ -2689,30 +2701,18 @@ function TopPlayersPanel({ players }: { players: PublicLeaderboardPlayer[] }) {
   }
 
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-1.5">
       {players.slice(0, 5).map((player) => (
-        <div key={`${player.rank}-${player.player_name}`} className="group rounded-xl border border-white/10 bg-black/24 p-3 transition duration-300 hover:-translate-y-0.5 hover:border-violet-300/35 hover:bg-violet-400/[0.07]">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex min-w-0 gap-3">
-              <PlayerAvatar player={player} />
-              <div className="min-w-0">
-                <p className="text-[10px] font-black uppercase text-violet-200">#{player.rank}</p>
-                <PublicPlayerProfileName
-                  name={player.player_name}
-                  href={player.public_profile_href}
-                  className="mt-1 break-words text-sm font-black text-white [overflow-wrap:anywhere]"
-                  showBadge
-                />
-              </div>
-            </div>
-            <span className="rounded-md border border-emerald-300/20 bg-emerald-400/10 px-2 py-1 text-xs font-black text-emerald-100">
-              {player.kills} kills
-            </span>
+        <div key={`${player.rank}-${player.player_name}`} className="grid min-w-0 grid-cols-[2rem_2.75rem_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-white/10 bg-black/24 px-2.5 py-2 transition hover:border-violet-300/30">
+          <span className={`text-center text-sm font-black ${player.rank <= 3 ? "text-amber-200" : "text-violet-200"}`}>#{player.rank}</span>
+          <PlayerAvatar player={player} compact />
+          <div className="min-w-0">
+            <PublicPlayerProfileName name={player.player_name} href={player.public_profile_href} className="block truncate text-sm font-black text-white" showBadge />
+            <p className="mt-0.5 truncate text-[10px] font-bold text-zinc-500">K/D {formatKdLabel(player)} · {formatDistance(player.longest_kill)}</p>
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-2">
-            <MiniMetric label="Deaths" value={String(player.deaths)} />
-            <MiniMetric label="K/D" value={formatKdLabel(player)} />
-            <MiniMetric label="Longest Kill" value={formatDistance(player.longest_kill)} />
+          <div className="text-right">
+            <p className="text-sm font-black text-emerald-200">{player.kills}</p>
+            <p className="text-[9px] font-black uppercase text-zinc-600">kills</p>
           </div>
         </div>
       ))}
@@ -2752,7 +2752,8 @@ function PublicPlayerProfileName({
   );
 }
 
-function PlayerAvatar({ player }: { player: PublicLeaderboardPlayer }) {
+function PlayerAvatar({ player, compact = false }: { player: PublicLeaderboardPlayer; compact?: boolean }) {
+  const avatarUrl = safePublicProfileAvatarUrl(player.public_profile_avatar_url);
   const initials = player.player_name
     .split(/[\s_-]+/)
     .map((part) => part[0])
@@ -2761,10 +2762,16 @@ function PlayerAvatar({ player }: { player: PublicLeaderboardPlayer }) {
     .toUpperCase();
 
   return (
-    <span className="relative grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-violet-300/25 bg-[radial-gradient(circle_at_50%_10%,rgba(168,85,247,0.36),rgba(8,13,29,0.94)_58%)] text-sm font-black text-violet-100 shadow-[0_0_24px_rgba(139,92,246,0.22)]">
-      <span className="absolute inset-x-2 bottom-0 h-7 rounded-t-full bg-black/42" />
-      <UserRound className="relative h-6 w-6 opacity-45" />
-      <span className="absolute right-1 top-1 rounded bg-black/55 px-1 text-[9px] text-white">#{player.rank}</span>
+    <span className={`relative grid shrink-0 place-items-center overflow-hidden rounded-md border border-violet-300/25 bg-[#0b1020] text-xs font-black text-violet-100 ${compact ? "h-10 w-10" : "h-12 w-12"}`}>
+      {avatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={avatarUrl} alt={`${player.player_name} Discord profile`} className="h-full w-full object-cover" loading="lazy" decoding="async" />
+      ) : (
+        <>
+          <UserRound className="h-5 w-5 opacity-50" />
+          <span className="absolute bottom-0.5 text-[8px] text-zinc-500">{initials}</span>
+        </>
+      )}
       <span className="sr-only">{initials}</span>
     </span>
   );

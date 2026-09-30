@@ -29,6 +29,15 @@ export function publicMapLabel(value: unknown) {
     : "Map not specified";
 }
 
+export function publicMapPresentation(value: unknown) {
+  const map = resolveDznMapConfig(value);
+  return {
+    label: publicMapLabel(value),
+    assetPath: map?.publicAssetPath ?? "/maps/dzn-tactical-terrain-v1.webp",
+    referenceUrl: map?.publicReferenceUrl ?? null,
+  };
+}
+
 export function explorationPreviewCells(cells: { cellX: number; cellY: number; visits: number }[], gridSize: number) {
   if (!Number.isInteger(gridSize) || gridSize < 1 || gridSize > 512) return [];
   return cells.filter(cell => Number.isInteger(cell.cellX) && Number.isInteger(cell.cellY)

@@ -10,6 +10,7 @@ export type DznMapConfig = {
   maxY: number;
   gridSize: number;
   publicAssetPath: string | null;
+  publicReferenceUrl: string | null;
   boundsConfidence: "verified" | "estimated";
 };
 
@@ -23,7 +24,8 @@ export const DZN_MAP_CONFIGS: Record<SupportedMapKey, DznMapConfig> = {
     minY: 0,
     maxY: 15360,
     gridSize: 128,
-    publicAssetPath: null,
+    publicAssetPath: "/maps/dzn-chernarusplus-grid.webp",
+    publicReferenceUrl: "https://dayz.xam.nu/chernarusplus",
     boundsConfidence: "estimated",
   },
   livonia: {
@@ -35,7 +37,8 @@ export const DZN_MAP_CONFIGS: Record<SupportedMapKey, DznMapConfig> = {
     minY: 0,
     maxY: 12800,
     gridSize: 128,
-    publicAssetPath: null,
+    publicAssetPath: "/maps/dzn-livonia-grid.webp",
+    publicReferenceUrl: "https://dayz.xam.nu/livonia",
     boundsConfidence: "estimated",
   },
   sakhal: {
@@ -47,7 +50,8 @@ export const DZN_MAP_CONFIGS: Record<SupportedMapKey, DznMapConfig> = {
     minY: 0,
     maxY: 15360,
     gridSize: 128,
-    publicAssetPath: null,
+    publicAssetPath: "/maps/dzn-sakhal-grid.webp",
+    publicReferenceUrl: "https://dayz.xam.nu/sakhal",
     boundsConfidence: "estimated",
   },
 };
