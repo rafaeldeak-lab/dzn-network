@@ -80,6 +80,21 @@ assert.deepEqual(duplicatePayload.items?.slice(0, 1).map(({ id, slug }) => ({ id
 ]);
 assert.equal(duplicatePayload.items?.some(({ id }) => id === "legacy-duplicate"), false, "The public API must deduplicate canonical server identities.");
 
+const namespaceCollisionResponse = await invokeRail({
+  DB: {
+    prepare: () => ({
+      all: async () => ({
+        results: [
+          { ...duplicateRow, id: "service-owner", nitrado_service_id: "12345", public_slug: "service-owner" },
+          { ...duplicateRow, id: "numeric-slug", nitrado_service_id: null, public_slug: "12345" },
+        ],
+      }),
+    }),
+  },
+});
+const namespaceCollisionPayload = await namespaceCollisionResponse.json() as { items?: Array<{ id: string }> };
+assert.equal(namespaceCollisionPayload.items?.length, 2, "Service IDs and public slugs must use separate identity namespaces.");
+
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts?: Record<string, string> };
 assert.equal(packageJson.scripts?.test?.includes("npm run test:live-server-rail"), true, "The main test suite must enforce the rail regression checks.");
 

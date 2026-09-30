@@ -126,9 +126,11 @@ async function queryServerRail(env: Env) {
 function dedupeRailRows(rows: RailRow[]) {
   const unique = new Map<string, RailRow>();
   for (const row of rows) {
-    const identity = row.nitrado_service_id?.trim().toLowerCase()
-      || row.public_slug?.trim().toLowerCase()
-      || row.id.trim().toLowerCase();
+    const identity = row.nitrado_service_id?.trim()
+      ? `service:${row.nitrado_service_id.trim().toLowerCase()}`
+      : row.public_slug?.trim()
+        ? `slug:${row.public_slug.trim().toLowerCase()}`
+        : `id:${row.id.trim().toLowerCase()}`;
     const existing = unique.get(identity);
     if (!existing || railCanonicalScore(row) > railCanonicalScore(existing)) unique.set(identity, row);
   }
