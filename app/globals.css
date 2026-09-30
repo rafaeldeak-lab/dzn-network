@@ -131,6 +131,7 @@ body.dzn-pricing-modal-open {
 .dzn-live-server-rail__viewport {
   overflow: hidden;
   padding: 12px 0 18px;
+  container-type: inline-size;
 }
 
 .dzn-live-server-rail__empty {
@@ -194,7 +195,12 @@ body.dzn-pricing-modal-open {
   width: max-content;
   gap: 12px;
   padding-inline: 18px;
-  animation: dznLiveServerRail 42s linear infinite;
+  animation: dznLiveServerRail 42s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.dzn-live-server-rail__track--single {
+  animation: dznLiveServerRailSingle 8s ease-in-out infinite alternate;
 }
 
 .dzn-live-server-rail__viewport:hover .dzn-live-server-rail__track,
@@ -246,7 +252,16 @@ body.dzn-pricing-modal-open {
     transform: translateX(0);
   }
   to {
-    transform: translateX(-50%);
+    transform: translateX(min(0px, calc(100cqw - 100% - 36px)));
+  }
+}
+
+@keyframes dznLiveServerRailSingle {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(14px);
   }
 }
 

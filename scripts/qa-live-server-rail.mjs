@@ -13,6 +13,7 @@ const html = await readFile(path.join(root, "index.html"), "utf8");
 const css = [...html.matchAll(/<link[^>]+href="([^"]+\.css)"[^>]*>/g)].map((match) => `<link rel="stylesheet" href="${match[1]}">`).join("");
 const fixture = "import React from 'react';import{createRoot}from'react-dom/client';import{LiveServerRail}from'./components/servers/live-server-rail';createRoot(document.getElementById('root')).render(<main style={{maxWidth:1200,margin:'40px auto',padding:'0 16px'}}><LiveServerRail/></main>);";
 const bundle = await build({ stdin: { contents: fixture, resolveDir: process.cwd(), loader: "tsx" }, bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic", define: { "process.env.NODE_ENV": '"production"', "process.env": "{}" } });
+const realServer = { id: "server-one", slug: "nuketown-deathmatch", name: "NukeTown DEATHMATCH", logoUrl: null, category: "Deathmatch", currentPlayers: 7, maxPlayers: 20, playerCountStatus: "fresh", ratingAverage: 4.8, reviewCount: 28, listingPlanKey: "pro", isPro: true };
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url, origin);
@@ -25,7 +26,7 @@ const server = createServer(async (request, response) => {
     return;
   }
   if (url.pathname === "/api/public/server-rail") {
-    response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true, items: [] }));
+    response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true, items: [realServer, { ...realServer, id: "legacy-duplicate" }], generated_at: new Date().toISOString() }));
     return;
   }
   const file = path.resolve(root, decodeURIComponent(url.pathname).slice(1));
@@ -40,8 +41,12 @@ await new Promise((resolve, reject) => { server.once("error", reject); server.li
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 try {
-  for (const width of [390, 1440]) {
-    const context = await browser.newContext({ viewport: { width, height: 800 }, reducedMotion: "reduce" });
+  for (const { width, reducedMotion } of [
+    { width: 390, reducedMotion: "no-preference" },
+    { width: 1440, reducedMotion: "no-preference" },
+    { width: 390, reducedMotion: "reduce" },
+  ]) {
+    const context = await browser.newContext({ viewport: { width, height: 800 }, reducedMotion });
     const page = await context.newPage();
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -49,20 +54,26 @@ try {
     const metrics = await page.evaluate(() => ({
       overflow: document.documentElement.scrollWidth > innerWidth,
       railCards: document.querySelectorAll(".dzn-live-server-card").length,
-      emptyStates: document.querySelectorAll(".dzn-live-server-rail__empty").length,
+      uniqueCardIds: [...document.querySelectorAll("[data-rail-card-id]")].map((card) => card.getAttribute("data-rail-card-id")),
+      status: document.querySelector(".dzn-live-server-rail__header span:last-child")?.textContent?.trim() ?? "",
+      animationName: getComputedStyle(document.querySelector(".dzn-live-server-rail__track")).animationName,
       text: document.querySelector(".dzn-live-server-rail")?.textContent ?? "",
     }));
     assert.equal(metrics.overflow, false, `Empty server rail must not overflow at ${width}px`);
-    assert.equal(metrics.railCards, 0, "An empty API response must not create server cards.");
-    assert.equal(metrics.emptyStates, 1, "An empty API response must render one truthful empty state.");
-    assert.equal(metrics.text.includes("No public server listings are available right now"), true);
+    assert.equal(metrics.railCards, 1, "Duplicate API identities must render as one server card.");
+    assert.deepEqual(metrics.uniqueCardIds, ["nuketown-deathmatch"]);
+    assert.equal(metrics.text.includes("7/20"), true, "Fresh player counts should render from the live response.");
+    assert.equal(metrics.status, "Latest server data");
+    if (reducedMotion === "reduce") assert.equal(metrics.animationName, "none", "Reduced-motion users should not receive rail animation.");
+    else assert.notEqual(metrics.animationName, "none", "The deduplicated rail should retain motion.");
     assert.equal(metrics.text.includes("Beta onboarding"), false);
     assert.deepEqual(errors, []);
-    await page.screenshot({ path: path.join(output, `empty-${width}.png`), fullPage: true });
-    await writeFile(path.join(output, `empty-${width}.json`), JSON.stringify(metrics, null, 2));
+    const label = `${width}-${reducedMotion}`;
+    await page.screenshot({ path: path.join(output, `deduplicated-${label}.png`), fullPage: true });
+    await writeFile(path.join(output, `deduplicated-${label}.json`), JSON.stringify(metrics, null, 2));
     await context.close();
   }
-  console.log("Live server rail rendered QA passed at phone and desktop widths.");
+  console.log("Live server rail dedupe and motion QA passed at phone and desktop widths.");
 } finally {
   await browser.close();
   await new Promise((resolve) => server.close(resolve));

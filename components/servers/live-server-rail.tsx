@@ -12,6 +12,7 @@ type RailItem = {
   category: string;
   currentPlayers: number | null;
   maxPlayers: number | null;
+  playerCountStatus?: string;
   ratingAverage: number | null;
   reviewCount: number;
   listingPlanKey: "free" | "starter" | "pro";
@@ -21,11 +22,14 @@ type RailItem = {
 type RailResponse = {
   ok: boolean;
   items?: RailItem[];
+  generated_at?: string;
+  stale?: boolean;
 };
 
 export function LiveServerRail({ className = "" }: { className?: string }) {
   const [items, setItems] = useState<RailItem[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [responseStale, setResponseStale] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -35,15 +39,18 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
     })
       .then((response) => (response.ok ? response.json() as Promise<RailResponse> : null))
       .then((payload) => {
-        if (payload?.ok && Array.isArray(payload.items)) setItems(payload.items);
+        if (payload?.ok && Array.isArray(payload.items)) {
+          setItems(payload.items);
+          setResponseStale(payload.stale === true);
+        }
       })
       .catch(() => null)
       .finally(() => setLoaded(true));
     return () => controller.abort();
   }, []);
 
-  const railItems = useMemo(() => [...items, ...items], [items]);
-  const hasItems = items.length > 0;
+  const railItems = useMemo(() => dedupeRailItems(items), [items]);
+  const hasItems = railItems.length > 0;
 
   return (
     <section className={`dzn-live-server-rail ${className}`} aria-label="Live DZN server rail">
@@ -54,14 +61,14 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
         </div>
         <span className="inline-flex items-center gap-2 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-[10px] font-black uppercase text-emerald-100">
           <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_12px_rgba(52,211,153,0.9)]" aria-hidden="true" />
-          {!loaded ? "Loading listings" : hasItems ? "Cached live data" : "No live listings"}
+          {!loaded ? "Loading listings" : responseStale ? "Latest data unavailable" : hasItems ? "Latest server data" : "No live listings"}
         </span>
       </div>
       {hasItems ? (
         <div className="dzn-live-server-rail__viewport" tabIndex={0}>
-          <div className="dzn-live-server-rail__track">
-            {railItems.map((item, index) => (
-              <RailCard key={`${item.id}-${index}`} item={item} duplicate={index >= items.length} />
+          <div className={`dzn-live-server-rail__track ${railItems.length === 1 ? "dzn-live-server-rail__track--single" : ""}`}>
+            {railItems.map((item) => (
+              <RailCard key={railIdentity(item)} item={item} />
             ))}
           </div>
         </div>
@@ -86,9 +93,9 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
   );
 }
 
-function RailCard({ item, duplicate }: { item: RailItem; duplicate: boolean }) {
+function RailCard({ item }: { item: RailItem }) {
   const content = (
-    <div className={`dzn-live-server-card ${item.isPro ? "dzn-live-server-card--pro" : ""}`} aria-hidden={duplicate || undefined}>
+    <div className={`dzn-live-server-card ${item.isPro ? "dzn-live-server-card--pro" : ""}`} data-rail-card-id={railIdentity(item)}>
       <div className="dzn-live-server-card__icon">
         {item.logoUrl ? <img src={item.logoUrl} alt="" width={48} height={48} loading="lazy" decoding="async" /> : <RadioTower className="h-5 w-5" aria-hidden="true" />}
       </div>
@@ -113,7 +120,7 @@ function RailCard({ item, duplicate }: { item: RailItem; duplicate: boolean }) {
     </div>
   );
 
-  if (!item.slug || duplicate) return content;
+  if (!item.slug) return content;
   return (
     <Link href={`/servers/profile?slug=${encodeURIComponent(item.slug)}`} className="focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200">
       {content}
@@ -122,9 +129,23 @@ function RailCard({ item, duplicate }: { item: RailItem; duplicate: boolean }) {
 }
 
 function playersLabel(item: RailItem) {
+  if (item.playerCountStatus && item.playerCountStatus !== "fresh") return "Players syncing";
   if (typeof item.currentPlayers === "number" && typeof item.maxPlayers === "number" && item.maxPlayers > 0) return `${item.currentPlayers}/${item.maxPlayers}`;
   if (typeof item.currentPlayers === "number") return `${item.currentPlayers} online`;
   return "Players syncing";
+}
+
+function dedupeRailItems(items: RailItem[]) {
+  const unique = new Map<string, RailItem>();
+  for (const item of items) {
+    const identity = railIdentity(item);
+    if (!unique.has(identity)) unique.set(identity, item);
+  }
+  return [...unique.values()];
+}
+
+function railIdentity(item: RailItem) {
+  return (item.slug?.trim().toLowerCase() || item.id.trim().toLowerCase());
 }
 
 function ratingLabel(item: RailItem) {

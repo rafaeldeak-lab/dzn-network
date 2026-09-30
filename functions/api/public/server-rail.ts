@@ -43,7 +43,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
     const rows = await queryServerRail(env);
     return json({
       ok: true,
-      items: rows.map(toRailItem),
+      items: dedupeRailRows(rows).map(toRailItem),
       generated_at: new Date().toISOString(),
     }, { headers });
   } catch (error) {
@@ -99,6 +99,15 @@ async function queryServerRail(env: Env) {
      LIMIT 24`,
   ).all<RailRow>();
   return result.results ?? [];
+}
+
+function dedupeRailRows(rows: RailRow[]) {
+  const unique = new Map<string, RailRow>();
+  for (const row of rows) {
+    const identity = row.public_slug?.trim().toLowerCase() || row.id.trim().toLowerCase();
+    if (!unique.has(identity)) unique.set(identity, row);
+  }
+  return [...unique.values()];
 }
 
 function toRailItem(row: RailRow) {
