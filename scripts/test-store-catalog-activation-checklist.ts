@@ -59,6 +59,7 @@ assert.equal(hasRemoteMigrationInvocation("wrangler d1 migrations apply DB --loc
 assert.equal(hasRemoteMigrationInvocation("wrangler d1 migrations apply DB --local"), false);
 assert.equal(hasRemoteMigrationInvocation('spawnSync(process.execPath, ["node_modules/wrangler/bin/wrangler.js", "d1", "migrations", "apply", "DB", "--remote"])'), true);
 assert.equal(hasRemoteMigrationInvocation("node_modules\\.bin\\wrangler.cmd d1 migrations apply DB --remote"), true);
+assert.equal(hasRemoteMigrationInvocation("& .\\node_modules\\.bin\\wrangler.ps1 d1 migrations apply DB --remote"), true);
 assert.equal(hasWranglerMigrationApply('execFileSync("wrangler", ["d1", "migrations", "apply", "DB", "--remote"])'), true);
 assert.equal(hasRemoteStoreMigrationExecute("npx wrangler d1 execute DB --remote --file migrations/0081_store_catalog_foundation.sql"), true);
 assert.equal(hasRemoteStoreMigrationExecute("npx wrangler d1 execute DB --remote \\\n  --file migrations/0081_store_catalog_foundation.sql"), true);
@@ -89,6 +90,10 @@ assert.equal(callsRemoteMigrationHelper(
 ), true);
 assert.equal(callsRemoteMigrationHelper(
   "cd scripts && bash apply-migrations.sh",
+  { "scripts/apply-migrations.sh": `npm run ${remoteMigrationScripts[0]!}` },
+), true);
+assert.equal(callsRemoteMigrationHelper(
+  "working-directory: scripts\nrun: bash apply-migrations.sh",
   { "scripts/apply-migrations.sh": `npm run ${remoteMigrationScripts[0]!}` },
 ), true);
 assert.equal(extractNpmRunTargets("npm test").includes("test"), true);
@@ -220,6 +225,15 @@ function extractScriptReferences(source: string, fromFile?: string) {
     const helper = stripToken(match[2]);
     addScriptReference(references, root, resolve(workingDir, helper), Boolean(/\.[a-z]+$/i.test(helper)));
   }
+  const workflowDirs = [...source.matchAll(/\bworking-directory\s*:\s*["']?([^\s#"']+)/gi)]
+    .map((match) => stripToken(match[1]));
+  const workflowHelpers = [...source.matchAll(/(?:^|[\s|>])(?:bash|sh|source|\.)\s+([\w./-]+\.(?:ts|tsx|js|mjs|cjs|sh))/gim)]
+    .map((match) => stripToken(match[1]));
+  for (const workingDir of workflowDirs) {
+    for (const helper of workflowHelpers) {
+      addScriptReference(references, root, resolve(workingDir, helper), true);
+    }
+  }
   if (fromFile) {
     for (const match of source.matchAll(/["'`](\.{1,2}\/[\w./-]+)["'`]/g)) {
       addScriptReference(references, root, resolve(dirname(fromFile), match[1]), Boolean(/\.[a-z]+$/i.test(match[1])));
@@ -266,16 +280,16 @@ function extractNpmRunTargets(source: string) {
 }
 
 function hasRemoteMigrationInvocation(command: string) {
-  const invocations = wranglerInvocationWindows(command, /(?:npx\s+)?(?:[\w.@-]+[\\/])*wrangler(?:\.(?:js|cmd|exe))?\s+d1\s+migrations\s+apply\b/gi);
+  const invocations = wranglerInvocationWindows(command, /(?:npx\s+)?(?:[\w.@-]+[\\/])*wrangler(?:\.(?:js|cmd|exe|ps1))?\s+d1\s+migrations\s+apply\b/gi);
   return invocations.some((invocation) => /--remote\b/i.test(invocation) || !/--local\b/i.test(invocation));
 }
 
 function hasWranglerMigrationApply(source: string) {
-  return /(?:[\w.@-]+[\\/])*wrangler(?:\.(?:js|cmd|exe))?\s+d1\s+migrations\s+apply/i.test(normalizeCommandTokens(source));
+  return /(?:[\w.@-]+[\\/])*wrangler(?:\.(?:js|cmd|exe|ps1))?\s+d1\s+migrations\s+apply/i.test(normalizeCommandTokens(source));
 }
 
 function hasRemoteStoreMigrationExecute(source: string, storeTarget = isStoreTarget("", source)) {
-  const invocations = wranglerInvocationWindows(source, /(?:npx\s+)?(?:[\w.@-]+[\\/])*wrangler(?:\.(?:js|cmd|exe))?\s+d1\s+execute\b/gi);
+  const invocations = wranglerInvocationWindows(source, /(?:npx\s+)?(?:[\w.@-]+[\\/])*wrangler(?:\.(?:js|cmd|exe|ps1))?\s+d1\s+execute\b/gi);
   return invocations.some((invocation) => {
     if (!/--remote\b/i.test(invocation)) return false;
     if (storeTarget && /--command(?:=|\s)+/i.test(invocation)) return true;
@@ -295,7 +309,7 @@ function wranglerInvocationWindows(source: string, pattern: RegExp) {
     const tail = normalized.slice(start, start + 800);
     const boundaries = [tail.indexOf(" && "), tail.indexOf(" || "), tail.indexOf(" ; ")]
       .filter((index) => index > 0);
-    const nextWrangler = tail.slice(match[0].length).search(/\b(?:npx\s+)?(?:[\w.@-]+[\\/])*wrangler(?:\.(?:js|cmd|exe))?\b/i);
+    const nextWrangler = tail.slice(match[0].length).search(/\b(?:npx\s+)?(?:[\w.@-]+[\\/])*wrangler(?:\.(?:js|cmd|exe|ps1))?\b/i);
     if (nextWrangler >= 0) boundaries.push(match[0].length + nextWrangler);
     windows.push(tail.slice(0, boundaries.length ? Math.min(...boundaries) : undefined));
   }
@@ -308,7 +322,7 @@ function hasStoreFlagWranglerMutation(
   fixtureFiles: Record<string, string> = {},
   storeTarget = isStoreTarget("", source),
 ) {
-  return wranglerInvocationWindows(source, /(?:npx\s+)?(?:[\w.@-]+[\\/])*wrangler(?:\.(?:js|cmd|exe))?\b/gi).some((invocation) => {
+  return wranglerInvocationWindows(source, /(?:npx\s+)?(?:[\w.@-]+[\\/])*wrangler(?:\.(?:js|cmd|exe|ps1))?\b/gi).some((invocation) => {
     if (storeFlagWranglerMutationPattern.test(invocation)) return true;
     const putMatch = invocation.match(/\b(?:pages\s+)?secret\s+put\b\s+(\S+)/i);
     if (/\b(?:pages\s+)?secret\s+put\b/i.test(invocation)) {
