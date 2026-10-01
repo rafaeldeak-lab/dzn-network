@@ -40,18 +40,16 @@ const automationFiles = [
     .filter((path) => /(?:^|\/)wrangler[^/]*\.(?:toml|jsonc?)$/i.test(path)),
 ].filter((path) => path !== "scripts/test-store-catalog-activation-checklist.ts");
 const remoteMigrationScripts = Object.keys(scripts).filter((name) => resolvesRemoteMigration(name));
-const remoteWrapperPattern = remoteMigrationScripts.length
-  ? new RegExp(`npm\\s+(?:run|run-script|rum|urn)\\s+(?:${remoteMigrationScripts.map(escapeRegex).join("|")})\\b`, "i")
-  : /$a/;
 const storeFlagAssignmentPattern = /(?:^|[\s|;&])DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\s*=/im;
 const storeFlagConfigPattern = /["']?DZN_STORE_(?:ENABLED|ADMIN_ENABLED)["']?\s*:/i;
 const storeFlagWranglerMutationPattern = /wrangler[^\r\n]*(?:pages\s+)?secret\s+(?:put|bulk)[^\r\n]*DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\b/i;
 assert.equal(remoteMigrationScripts.length > 0, true, "The guard must discover the existing remote D1 migration wrapper.");
 for (const scriptName of remoteMigrationScripts) {
-  assert.equal(remoteWrapperPattern.test(`npm run ${scriptName}`), true, `The guard must recognize ${scriptName} callers.`);
-  assert.equal(remoteWrapperPattern.test(`npm run-script ${scriptName}`), true, `The guard must recognize the run-script alias for ${scriptName}.`);
-  assert.equal(remoteWrapperPattern.test(`npm rum ${scriptName}`), true, `The guard must recognize the rum alias for ${scriptName}.`);
-  assert.equal(remoteWrapperPattern.test(`npm urn ${scriptName}`), true, `The guard must recognize the urn alias for ${scriptName}.`);
+  assert.equal(callsRemoteMigrationWrapper(`npm run ${scriptName}`), true, `The guard must recognize ${scriptName} callers.`);
+  assert.equal(callsRemoteMigrationWrapper(`npm run-script ${scriptName}`), true, `The guard must recognize the run-script alias for ${scriptName}.`);
+  assert.equal(callsRemoteMigrationWrapper(`npm rum ${scriptName}`), true, `The guard must recognize the rum alias for ${scriptName}.`);
+  assert.equal(callsRemoteMigrationWrapper(`npm urn ${scriptName}`), true, `The guard must recognize the urn alias for ${scriptName}.`);
+  assert.equal(callsRemoteMigrationWrapper(`npm run --if-present ${scriptName}`), true, `The guard must recognize option-prefixed ${scriptName} callers.`);
 }
 assert.equal(isStoreMigrationAutomation("store:rollout", `npm run ${remoteMigrationScripts[0]!}`), true);
 assert.equal(isStoreMigrationAutomation("store:rollout", "echo ready", ["store:rollout"]), true);
@@ -76,8 +74,8 @@ for (const file of automationFiles) {
   const source = readFileSync(file, "utf8");
   const appliesMigration = hasWranglerMigrationApply(source);
   const targetsStore = isStoreTarget(file, source);
-  const callsRemoteMigrationWrapper = remoteWrapperPattern.test(source);
-  assert.equal((appliesMigration || callsRemoteMigrationWrapper) && targetsStore, false, `${file} must not automate Store production migration application.`);
+  const callsRemoteWrapper = callsRemoteMigrationWrapper(source);
+  assert.equal((appliesMigration || callsRemoteWrapper) && targetsStore, false, `${file} must not automate Store production migration application.`);
   assert.doesNotMatch(source, storeFlagAssignmentPattern, `${file} must not automate Store activation.`);
   assert.equal(hasStoreFlagWranglerMutation(source), false, `${file} must not mutate Store activation secrets.`);
   if (/\.(?:ya?ml|toml|jsonc?)$/i.test(file)) {
@@ -87,7 +85,7 @@ for (const file of automationFiles) {
 
 function isStoreMigrationAutomation(name: string, command: string, resolvedRemoteScripts = remoteMigrationScripts) {
   return isStoreTarget(name, command)
-    && (resolvedRemoteScripts.includes(name) || hasRemoteMigrationInvocation(command) || remoteWrapperPattern.test(command));
+    && (resolvedRemoteScripts.includes(name) || hasRemoteMigrationInvocation(command) || callsRemoteMigrationWrapper(command, resolvedRemoteScripts));
 }
 
 function isStoreTarget(pathOrName: string, content: string) {
@@ -103,10 +101,33 @@ function resolvesRemoteMigration(name: string, seen = new Set<string>()): boolea
   for (const hook of [`pre${name}`, `post${name}`]) {
     if (scripts[hook] && resolvesRemoteMigration(hook, nextSeen)) return true;
   }
-  for (const match of command.matchAll(/npm\s+(?:run|run-script|rum|urn)\s+([A-Za-z0-9:_-]+)/gi)) {
-    if (resolvesRemoteMigration(match[1], nextSeen)) return true;
+  for (const target of extractNpmRunTargets(command)) {
+    if (resolvesRemoteMigration(target, nextSeen)) return true;
   }
   return false;
+}
+
+function callsRemoteMigrationWrapper(source: string, resolvedRemoteScripts = remoteMigrationScripts) {
+  return extractNpmRunTargets(source).some((target) => resolvedRemoteScripts.includes(target));
+}
+
+function extractNpmRunTargets(source: string) {
+  const targets: string[] = [];
+  for (const match of source.matchAll(/npm\s+(?:run|run-script|rum|urn)\s+([^;&|\r\n]+)/gi)) {
+    const tokens = match[1].match(/"[^"]*"|'[^']*'|`[^`]*`|\S+/g) ?? [];
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = tokens[index].replace(/^["'`]|["'`,)\]}]+$/g, "");
+      if (token === "--") continue;
+      if (token === "--workspace" || token === "-w") {
+        index += 1;
+        continue;
+      }
+      if (token.startsWith("-")) continue;
+      targets.push(token);
+      break;
+    }
+  }
+  return targets;
 }
 
 function hasRemoteMigrationInvocation(command: string) {
@@ -136,10 +157,6 @@ function walk(dir: string, matcher: (path: string) => boolean): string[] {
     else if (matcher(path)) results.push(path);
   }
   return results;
-}
-
-function escapeRegex(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 console.log("Store catalog activation checklist checks passed.");
