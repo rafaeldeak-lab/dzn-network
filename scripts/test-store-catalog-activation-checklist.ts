@@ -41,7 +41,7 @@ const automationFiles = [
 ].filter((path) => path !== "scripts/test-store-catalog-activation-checklist.ts");
 const remoteMigrationScripts = Object.keys(scripts).filter((name) => resolvesRemoteMigration(name));
 const storeFlagAssignmentPattern = /(?:^|[\s|;&])DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\s*=/im;
-const storeFlagConfigPattern = /["']?DZN_STORE_(?:ENABLED|ADMIN_ENABLED)["']?\s*:/i;
+const storeFlagConfigPattern = /["']?DZN_STORE_(?:ENABLED|ADMIN_ENABLED)["']?\s*(?:=|:)/i;
 const storeFlagWranglerMutationPattern = /wrangler[^\r\n]*(?:pages\s+)?secret\s+(?:put|bulk)[^\r\n]*DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\b/i;
 assert.equal(remoteMigrationScripts.length > 0, true, "The guard must discover the existing remote D1 migration wrapper.");
 for (const scriptName of remoteMigrationScripts) {
@@ -51,6 +51,7 @@ for (const scriptName of remoteMigrationScripts) {
   assert.equal(callsRemoteMigrationWrapper(`npm urn ${scriptName}`), true, `The guard must recognize the urn alias for ${scriptName}.`);
   assert.equal(callsRemoteMigrationWrapper(`npm run --if-present ${scriptName}`), true, `The guard must recognize option-prefixed ${scriptName} callers.`);
   assert.equal(callsRemoteMigrationWrapper(`npm run --script-shell /bin/bash ${scriptName}`), true, `The guard must skip option values before ${scriptName}.`);
+  assert.equal(callsRemoteMigrationWrapper(`npm run \\\n  ${scriptName}`), true, `The guard must recognize continued ${scriptName} callers.`);
 }
 assert.equal(isStoreMigrationAutomation("store:rollout", `npm run ${remoteMigrationScripts[0]!}`), true);
 assert.equal(isStoreMigrationAutomation("store:rollout", "echo ready", ["store:rollout"]), true);
@@ -64,6 +65,8 @@ assert.equal(isStoreMigrationAutomation("store:rollout", 'node -e \'execFileSync
 assert.equal(storeFlagAssignmentPattern.test("DZN_STORE_ENABLED=$ENABLE_STORE next start"), true);
 assert.equal(storeFlagWranglerMutationPattern.test("printf true | npx wrangler pages secret put DZN_STORE_ENABLED"), true);
 assert.equal(hasStoreFlagWranglerMutation('execFileSync("wrangler", ["pages", "secret", "put", "DZN_STORE_ENABLED"])'), true);
+assert.equal(hasStoreFlagWranglerMutation('execFileSync("wrangler", [\n  "pages", "secret", "put",\n  "DZN_STORE_ENABLED",\n])'), true);
+assert.equal(storeFlagConfigPattern.test('"DZN_STORE_ENABLED" = "true"'), true);
 assert.equal(isStoreTarget("scripts/store-rollout.ts", `npm run ${remoteMigrationScripts[0]!}`), true);
 assert.equal(automationFiles.includes("wrangler.toml"), true, "The guard must scan the production Wrangler configuration.");
 assert.equal(automationFiles.includes("scripts/test-store-catalog-foundation.ts"), true, "The guard must scan executable test-prefixed helpers.");
@@ -120,7 +123,8 @@ function callsRemoteMigrationWrapper(source: string, resolvedRemoteScripts = rem
 
 function extractNpmRunTargets(source: string) {
   const targets = new Set<string>();
-  for (const match of source.matchAll(/npm\s+(?:run|run-script|rum|urn)\s+([^;&|\r\n]+)/gi)) {
+  const normalized = source.replace(/\\\s*\r?\n/g, " ");
+  for (const match of normalized.matchAll(/npm\s+(?:run|run-script|rum|urn)\s+([^;&|\r\n]+)/gi)) {
     const tokens = match[1].match(/"[^"]*"|'[^']*'|`[^`]*`|\S+/g) ?? [];
     for (const rawToken of tokens) {
       const token = rawToken.replace(/^["'`]|["'`,)\]}]+$/g, "");
@@ -161,7 +165,8 @@ function wranglerInvocationWindows(source: string, pattern: RegExp) {
 }
 
 function hasStoreFlagWranglerMutation(source: string) {
-  return storeFlagWranglerMutationPattern.test(normalizeCommandTokens(source));
+  return wranglerInvocationWindows(source, /(?:npx\s+)?wrangler\b/gi)
+    .some((invocation) => storeFlagWranglerMutationPattern.test(invocation));
 }
 
 function normalizeCommandTokens(source: string) {
