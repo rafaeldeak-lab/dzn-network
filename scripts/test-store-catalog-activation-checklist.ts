@@ -64,6 +64,9 @@ assert.equal(hasRemoteStoreMigrationExecute('execFileSync("wrangler", [\n  "d1",
 assert.equal(hasRemoteStoreMigrationExecute(
   'MIGRATION=migrations/0081_store_catalog_foundation.sql; npx wrangler d1 execute DB --remote --file "$MIGRATION"',
 ), true);
+assert.equal(hasRemoteStoreMigrationExecute(
+  'npx wrangler d1 execute DB --remote --command "$(cat migrations/0081_store_catalog_foundation.sql)"',
+), true);
 assert.equal(isStoreMigrationAutomation("store:rollout", 'node -e \'execFileSync("wrangler", ["d1", "migrations", "apply", "DB", "--remote"])\''), true);
 assert.equal(storeFlagAssignmentPattern.test("DZN_STORE_ENABLED=$ENABLE_STORE next start"), true);
 assert.equal(storeFlagWranglerMutationPattern.test("printf true | npx wrangler pages secret put DZN_STORE_ENABLED"), true);
@@ -171,6 +174,7 @@ function hasRemoteStoreMigrationExecute(source: string, storeTarget = isStoreTar
   const invocations = wranglerInvocationWindows(source, /(?:npx\s+)?wrangler\s+d1\s+execute\b/gi);
   return invocations.some((invocation) => {
     if (!/--remote\b/i.test(invocation)) return false;
+    if (storeTarget && /--command(?:=|\s)+/i.test(invocation)) return true;
     const fileMatch = invocation.match(/--file(?:=|\s)+(\S+)/i);
     if (!fileMatch) return false;
     const file = stripToken(fileMatch[1]);
