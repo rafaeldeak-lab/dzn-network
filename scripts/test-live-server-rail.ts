@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createRailLoader } from "../components/servers/live-server-rail";
 import { onRequest } from "../functions/api/public/server-rail";
 
 void main();
@@ -31,8 +32,31 @@ assert.equal(source.includes('document.addEventListener("visibilitychange"'), tr
 assert.equal(source.includes("requestInFlight"), true, "Timed and visibility refreshes must not overlap requests.");
 assert.match(source, /payload\.stale\s*===\s*true\s*&&\s*payload\.items\?\.length\s*===\s*0\s*&&\s*currentItems\.length\s*>\s*0/, "A stale empty refresh must preserve the last known-good server cards.");
 assert.equal(source.includes("SERVER_RAIL_REQUEST_TIMEOUT_MS = 10_000"), true, "A stalled rail request must be bounded so later refreshes can recover.");
-assert.match(source, /setTimeout\(\(\)\s*=>\s*requestController\.abort\(\),\s*SERVER_RAIL_REQUEST_TIMEOUT_MS\)/, "Each rail request must abort when its timeout expires.");
+assert.match(source, /setTimeout\(\(\)\s*=>\s*requestController\.abort\(\),\s*timeoutMs\)/, "Each rail request must abort when its timeout expires.");
 assert.match(source, /clearTimeout\(requestTimeout\)/, "Completed rail requests must clear their timeout.");
+
+let stalledRequestCount = 0;
+let unavailableCount = 0;
+let settledCount = 0;
+const recoveredPayloads: unknown[] = [];
+const stalledLoader = createRailLoader({
+  timeoutMs: 10,
+  fetchRail: (signal) => {
+    stalledRequestCount += 1;
+    if (stalledRequestCount > 1) return Promise.resolve(Response.json({ ok: true, items: [{ id: "recovered" }] }));
+    return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new DOMException("Timed out", "AbortError")), { once: true }));
+  },
+  onPayload: (payload) => recoveredPayloads.push(payload),
+  onUnavailable: () => { unavailableCount += 1; },
+  onSettled: () => { settledCount += 1; },
+});
+await stalledLoader.load();
+await stalledLoader.load();
+assert.equal(stalledRequestCount, 2, "A timed-out request must release the in-flight guard for the next refresh.");
+assert.equal(unavailableCount, 1, "The stalled request must produce one unavailable result.");
+assert.equal(settledCount, 2, "Both the timed-out and recovered requests must settle.");
+assert.deepEqual(recoveredPayloads, [{ ok: true, items: [{ id: "recovered" }] }], "The refresh after a timeout must publish its successful payload.");
+stalledLoader.dispose();
 
 const railRouteSource = readFileSync("functions/api/public/server-rail.ts", "utf8");
 assert.doesNotMatch(railRouteSource, /LIMIT\s+96/i, "Canonical server selection must happen before the public rail limit.");

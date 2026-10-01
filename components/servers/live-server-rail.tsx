@@ -29,58 +29,87 @@ type RailResponse = {
   stale?: boolean;
 };
 
+type RailLoaderOptions = {
+  fetchRail: (signal: AbortSignal) => Promise<Response>;
+  onPayload: (payload: RailResponse) => void;
+  onUnavailable: () => void;
+  onSettled: () => void;
+  timeoutMs?: number;
+};
+
+export function createRailLoader({
+  fetchRail,
+  onPayload,
+  onUnavailable,
+  onSettled,
+  timeoutMs = SERVER_RAIL_REQUEST_TIMEOUT_MS,
+}: RailLoaderOptions) {
+  let disposed = false;
+  let requestInFlight = false;
+  let activeRequestController: AbortController | null = null;
+
+  const load = async () => {
+    if (requestInFlight || disposed) return;
+    requestInFlight = true;
+    const requestController = new AbortController();
+    activeRequestController = requestController;
+    const requestTimeout = globalThis.setTimeout(() => requestController.abort(), timeoutMs);
+    try {
+      const response = await fetchRail(requestController.signal);
+      const payload = response.ok ? await response.json() as RailResponse : null;
+      if (payload?.ok && Array.isArray(payload.items)) onPayload(payload);
+      else onUnavailable();
+    } catch {
+      if (!disposed) onUnavailable();
+    } finally {
+      globalThis.clearTimeout(requestTimeout);
+      if (activeRequestController === requestController) activeRequestController = null;
+      requestInFlight = false;
+      if (!disposed) onSettled();
+    }
+  };
+
+  return {
+    load,
+    dispose() {
+      disposed = true;
+      activeRequestController?.abort();
+    },
+  };
+}
+
 export function LiveServerRail({ className = "" }: { className?: string }) {
   const [items, setItems] = useState<RailItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [responseStale, setResponseStale] = useState(false);
 
   useEffect(() => {
-    let disposed = false;
-    let requestInFlight = false;
-    let activeRequestController: AbortController | null = null;
-
-    const loadRail = async () => {
-      if (requestInFlight || disposed) return;
-      requestInFlight = true;
-      const requestController = new AbortController();
-      activeRequestController = requestController;
-      const requestTimeout = window.setTimeout(() => requestController.abort(), SERVER_RAIL_REQUEST_TIMEOUT_MS);
-      try {
-        const response = await fetch("/api/public/server-rail", {
+    const loader = createRailLoader({
+      fetchRail: (signal) => fetch("/api/public/server-rail", {
           headers: { accept: "application/json" },
-          signal: requestController.signal,
-        });
-        const payload = response.ok ? await response.json() as RailResponse : null;
-        if (payload?.ok && Array.isArray(payload.items)) {
-          setItems((currentItems) => (
-            payload.stale === true && payload.items?.length === 0 && currentItems.length > 0
-              ? currentItems
-              : payload.items ?? []
-          ));
-          setResponseStale(payload.stale === true);
-        } else {
-          setResponseStale(true);
-        }
-      } catch {
-        if (!disposed) setResponseStale(true);
-      } finally {
-        window.clearTimeout(requestTimeout);
-        if (activeRequestController === requestController) activeRequestController = null;
-        requestInFlight = false;
-        if (!disposed) setLoaded(true);
-      }
-    };
+          signal,
+        }),
+      onPayload: (payload) => {
+        setItems((currentItems) => (
+          payload.stale === true && payload.items?.length === 0 && currentItems.length > 0
+            ? currentItems
+            : payload.items ?? []
+        ));
+        setResponseStale(payload.stale === true);
+      },
+      onUnavailable: () => setResponseStale(true),
+      onSettled: () => setLoaded(true),
+    });
 
     const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void loadRail();
+      if (document.visibilityState === "visible") void loader.load();
     };
 
-    void loadRail();
+    void loader.load();
     const refreshTimer = window.setInterval(refreshWhenVisible, SERVER_RAIL_REFRESH_MS);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
-      disposed = true;
-      activeRequestController?.abort();
+      loader.dispose();
       window.clearInterval(refreshTimer);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
