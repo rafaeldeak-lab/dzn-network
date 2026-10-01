@@ -52,7 +52,6 @@ assert.equal(isStoreTarget("scripts/store-rollout.ts", `npm run ${remoteMigratio
 assert.equal(automationFiles.includes("wrangler.toml"), true, "The guard must scan the production Wrangler configuration.");
 
 for (const [name, command] of Object.entries(scripts)) {
-  if (/^test:/.test(name)) continue;
   assert.equal(isStoreMigrationAutomation(name, command), false, `${name} must not automate Store production migration application.`);
   assert.doesNotMatch(command, storeFlagAssignmentPattern, `${name} must not automate Store activation.`);
 }
@@ -80,6 +79,9 @@ function resolvesRemoteMigration(name: string, seen = new Set<string>()): boolea
   if (!command) return false;
   if (/wrangler\s+d1\s+migrations\s+apply/i.test(command) && !/--local\b/i.test(command)) return true;
   const nextSeen = new Set(seen).add(name);
+  for (const hook of [`pre${name}`, `post${name}`]) {
+    if (scripts[hook] && resolvesRemoteMigration(hook, nextSeen)) return true;
+  }
   for (const match of command.matchAll(/npm\s+(?:run|run-script)\s+([A-Za-z0-9:_-]+)/gi)) {
     if (resolvesRemoteMigration(match[1], nextSeen)) return true;
   }
