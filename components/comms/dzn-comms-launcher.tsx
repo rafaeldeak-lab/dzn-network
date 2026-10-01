@@ -59,6 +59,7 @@ export function DznCommsLauncher() {
           <div className="grid gap-2 p-3">
             <Link
               href="/community#global-chat"
+              onClick={() => setOpenPath(null)}
               className="group flex min-h-14 items-center gap-3 rounded-md border border-cyan-300/25 bg-cyan-300/8 px-3 py-2 transition hover:border-cyan-200/55 hover:bg-cyan-300/12"
             >
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-cyan-300/25 bg-cyan-300/10 text-cyan-100">
@@ -75,6 +76,7 @@ export function DznCommsLauncher() {
 
             <Link
               href="/community#dzn-assist"
+              onClick={() => setOpenPath(null)}
               className="group flex min-h-14 items-center gap-3 rounded-md border border-violet-300/20 bg-violet-300/6 px-3 py-2 transition hover:border-violet-200/45 hover:bg-violet-300/10"
             >
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-violet-300/20 bg-violet-300/8 text-violet-100">
