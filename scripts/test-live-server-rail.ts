@@ -29,6 +29,7 @@ assert.equal(source.includes("SERVER_RAIL_REFRESH_MS = 30_000"), true, "The rail
 assert.equal(source.includes('document.visibilityState === "visible"'), true, "Background tabs must not keep polling the public rail.");
 assert.equal(source.includes('document.addEventListener("visibilitychange"'), true, "Returning to the page must refresh the rail.");
 assert.equal(source.includes("requestInFlight"), true, "Timed and visibility refreshes must not overlap requests.");
+assert.match(source, /payload\.stale\s*===\s*true\s*&&\s*payload\.items\?\.length\s*===\s*0\s*&&\s*currentItems\.length\s*>\s*0/, "A stale empty refresh must preserve the last known-good server cards.");
 
 const railRouteSource = readFileSync("functions/api/public/server-rail.ts", "utf8");
 assert.doesNotMatch(railRouteSource, /LIMIT\s+96/i, "Canonical server selection must happen before the public rail limit.");

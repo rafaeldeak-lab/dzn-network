@@ -30,10 +30,13 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === "/api/public/server-rail") {
     refreshRequestCount += 1;
-    const items = railMode === "refresh" && refreshRequestCount === 1
-      ? [{ ...realServer, currentPlayers: null, maxPlayers: null, playerCountStatus: "stale" }]
-      : [realServer, secondServer, { ...realServer, id: "legacy-duplicate" }];
-    response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true, items, generated_at: new Date().toISOString() }));
+    const staleRefresh = railMode === "preserve" && refreshRequestCount > 1;
+    const items = staleRefresh
+      ? []
+      : railMode === "refresh" && refreshRequestCount === 1
+        ? [{ ...realServer, currentPlayers: null, maxPlayers: null, playerCountStatus: "stale" }]
+        : [realServer, secondServer, { ...realServer, id: "legacy-duplicate" }];
+    response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true, items, generated_at: new Date().toISOString(), stale: staleRefresh }));
     return;
   }
   const file = path.resolve(root, decodeURIComponent(url.pathname).slice(1));
@@ -102,6 +105,16 @@ try {
   await refreshPage.waitForFunction(() => document.querySelector(".dzn-live-server-rail")?.textContent?.includes("0/10"));
   assert.equal(await refreshPage.locator(".dzn-live-server-card").count(), 2, "A successful refresh should replace stale data without cloning cards.");
   await refreshContext.close();
+  railMode = "preserve";
+  refreshRequestCount = 0;
+  const preserveContext = await browser.newContext({ viewport: { width: 390, height: 800 } });
+  const preservePage = await preserveContext.newPage();
+  await preservePage.goto(origin, { waitUntil: "networkidle" });
+  await preservePage.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await preservePage.waitForFunction(() => document.querySelector(".dzn-live-server-rail__header span:last-child")?.textContent?.includes("Latest data unavailable"));
+  assert.equal(await preservePage.locator(".dzn-live-server-card").count(), 2, "A stale empty refresh must retain the last known-good cards.");
+  assert.equal((await preservePage.locator(".dzn-live-server-rail").innerText()).includes("0/10"), true, "A stale empty refresh must retain the last known-good live count.");
+  await preserveContext.close();
   railMode = "normal";
   const unavailableContext = await browser.newContext({ viewport: { width: 390, height: 800 } });
   const unavailablePage = await unavailableContext.newPage();

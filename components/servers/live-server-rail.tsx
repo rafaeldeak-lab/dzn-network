@@ -47,7 +47,11 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
         });
         const payload = response.ok ? await response.json() as RailResponse : null;
         if (payload?.ok && Array.isArray(payload.items)) {
-          setItems(payload.items);
+          setItems((currentItems) => (
+            payload.stale === true && payload.items?.length === 0 && currentItems.length > 0
+              ? currentItems
+              : payload.items ?? []
+          ));
           setResponseStale(payload.stale === true);
         } else {
           setResponseStale(true);
