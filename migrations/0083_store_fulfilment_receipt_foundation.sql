@@ -83,16 +83,17 @@ CREATE TABLE IF NOT EXISTS store_receipts (
 
 CREATE TRIGGER IF NOT EXISTS trg_store_fulfilment_request_matches_order
 BEFORE INSERT ON store_fulfilment_requests
+WHEN NOT EXISTS (
+  SELECT 1 FROM store_orders o
+  JOIN store_order_items i ON i.order_id = o.id
+  JOIN store_products p ON p.id = i.product_id
+  WHERE o.id = NEW.order_id
+    AND o.purchasing_user_id = NEW.purchasing_user_id
+    AND p.fulfilment_kind = NEW.fulfilment_kind
+    AND o.livemode = 0
+)
 BEGIN
-  SELECT CASE WHEN NOT EXISTS (
-    SELECT 1 FROM store_orders o
-    JOIN store_order_items i ON i.order_id = o.id
-    JOIN store_products p ON p.id = i.product_id
-    WHERE o.id = NEW.order_id
-      AND o.purchasing_user_id = NEW.purchasing_user_id
-      AND p.fulfilment_kind = NEW.fulfilment_kind
-      AND o.livemode = 0
-  ) THEN RAISE(ABORT, 'fulfilment request must match the sandbox order account and product') END;
+  SELECT RAISE(ABORT, 'fulfilment request must match the sandbox order account and product');
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_fulfilment_requests_immutable
@@ -110,28 +111,33 @@ END;
 CREATE TRIGGER IF NOT EXISTS trg_store_fulfilment_action_transition
 BEFORE INSERT ON store_fulfilment_actions
 BEGIN
-  SELECT CASE
-    WHEN NEW.sequence_number = 1 AND EXISTS (
-      SELECT 1 FROM store_fulfilment_actions WHERE fulfilment_request_id = NEW.fulfilment_request_id
-    ) THEN RAISE(ABORT, 'initial fulfilment action already exists')
-    WHEN NEW.sequence_number > 1 AND NOT EXISTS (
-      SELECT 1 FROM store_fulfilment_actions previous
-      WHERE previous.fulfilment_request_id = NEW.fulfilment_request_id
-        AND previous.sequence_number = NEW.sequence_number - 1
-        AND previous.to_status = NEW.from_status
-    ) THEN RAISE(ABORT, 'fulfilment action must continue the audited sequence')
-    WHEN NEW.action_type = 'request_created' AND NOT (
-      NEW.sequence_number = 1 AND NEW.from_status IS NULL AND NEW.to_status = 'pending_operator_review'
-    ) THEN RAISE(ABORT, 'request creation must be the initial fulfilment action')
-    WHEN NEW.action_type = 'operator_blocked' AND NOT (NEW.from_status IN ('pending_operator_review', 'ready') AND NEW.to_status = 'blocked')
-      THEN RAISE(ABORT, 'invalid blocked transition')
-    WHEN NEW.action_type = 'operator_cleared' AND NOT (NEW.from_status IN ('pending_operator_review', 'blocked') AND NEW.to_status = 'ready')
-      THEN RAISE(ABORT, 'invalid ready transition')
-    WHEN NEW.action_type = 'operator_completed' AND NOT (NEW.from_status = 'ready' AND NEW.to_status = 'completed')
-      THEN RAISE(ABORT, 'invalid completed transition')
-    WHEN NEW.action_type = 'operator_reversed' AND NOT (NEW.from_status = 'completed' AND NEW.to_status = 'reversed')
-      THEN RAISE(ABORT, 'invalid reversed transition')
-  END;
+  SELECT RAISE(ABORT, 'initial fulfilment action already exists')
+  WHERE NEW.sequence_number = 1 AND EXISTS (
+    SELECT 1 FROM store_fulfilment_actions WHERE fulfilment_request_id = NEW.fulfilment_request_id
+  );
+  SELECT RAISE(ABORT, 'fulfilment action must continue the audited sequence')
+  WHERE NEW.sequence_number > 1 AND NOT EXISTS (
+    SELECT 1 FROM store_fulfilment_actions previous
+    WHERE previous.fulfilment_request_id = NEW.fulfilment_request_id
+      AND previous.sequence_number = NEW.sequence_number - 1
+      AND previous.to_status = NEW.from_status
+  );
+  SELECT RAISE(ABORT, 'request creation must be the initial fulfilment action')
+  WHERE NEW.action_type = 'request_created' AND NOT (
+    NEW.sequence_number = 1 AND NEW.from_status IS NULL AND NEW.to_status = 'pending_operator_review'
+  );
+  SELECT RAISE(ABORT, 'invalid blocked transition')
+  WHERE NEW.action_type = 'operator_blocked'
+    AND NOT (NEW.from_status IN ('pending_operator_review', 'ready') AND NEW.to_status = 'blocked');
+  SELECT RAISE(ABORT, 'invalid ready transition')
+  WHERE NEW.action_type = 'operator_cleared'
+    AND NOT (NEW.from_status IN ('pending_operator_review', 'blocked') AND NEW.to_status = 'ready');
+  SELECT RAISE(ABORT, 'invalid completed transition')
+  WHERE NEW.action_type = 'operator_completed'
+    AND NOT (NEW.from_status = 'ready' AND NEW.to_status = 'completed');
+  SELECT RAISE(ABORT, 'invalid reversed transition')
+  WHERE NEW.action_type = 'operator_reversed'
+    AND NOT (NEW.from_status = 'completed' AND NEW.to_status = 'reversed');
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_fulfilment_actions_immutable
@@ -148,22 +154,23 @@ END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_receipt_matches_completed_fulfilment
 BEFORE INSERT ON store_receipts
+WHEN NOT EXISTS (
+  SELECT 1 FROM store_orders o
+  JOIN store_fulfilment_requests f ON f.order_id = o.id
+  WHERE o.id = NEW.order_id
+    AND f.id = NEW.fulfilment_request_id
+    AND o.purchasing_user_id = NEW.purchasing_user_id
+    AND o.currency = NEW.currency
+    AND o.subtotal_amount_minor = NEW.subtotal_amount_minor
+    AND o.tax_amount_minor = NEW.tax_amount_minor
+    AND o.total_amount_minor = NEW.total_amount_minor
+    AND o.livemode = 0
+    AND (SELECT a.to_status FROM store_fulfilment_actions a
+         WHERE a.fulfilment_request_id = f.id
+         ORDER BY a.sequence_number DESC LIMIT 1) = 'completed'
+)
 BEGIN
-  SELECT CASE WHEN NOT EXISTS (
-    SELECT 1 FROM store_orders o
-    JOIN store_fulfilment_requests f ON f.order_id = o.id
-    WHERE o.id = NEW.order_id
-      AND f.id = NEW.fulfilment_request_id
-      AND o.purchasing_user_id = NEW.purchasing_user_id
-      AND o.currency = NEW.currency
-      AND o.subtotal_amount_minor = NEW.subtotal_amount_minor
-      AND o.tax_amount_minor = NEW.tax_amount_minor
-      AND o.total_amount_minor = NEW.total_amount_minor
-      AND o.livemode = 0
-      AND (SELECT a.to_status FROM store_fulfilment_actions a
-           WHERE a.fulfilment_request_id = f.id
-           ORDER BY a.sequence_number DESC LIMIT 1) = 'completed'
-  ) THEN RAISE(ABORT, 'sandbox receipt must match a completed fulfilment and immutable order totals') END;
+  SELECT RAISE(ABORT, 'sandbox receipt must match a completed fulfilment and immutable order totals');
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_receipts_immutable
