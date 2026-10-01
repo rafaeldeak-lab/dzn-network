@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -34,14 +35,16 @@ assert.equal(scripts["test:store-catalog-foundation"].includes("test-store-catal
 const automationFiles = [
   ...walk(".github/workflows", (path) => /\.ya?ml$/i.test(path)),
   ...walk("scripts", (path) => /\.(?:ts|js|mjs|cjs|sh)$/i.test(path)),
-  ...readdirSync(".").filter((name) => /^wrangler[^/]*\.toml$/i.test(name)),
+  ...execFileSync("git", ["ls-files"], { encoding: "utf8" })
+    .split(/\r?\n/)
+    .filter((path) => /(?:^|\/)wrangler[^/]*\.(?:toml|jsonc?)$/i.test(path)),
 ].filter((path) => path !== "scripts/test-store-catalog-activation-checklist.ts");
 const remoteMigrationScripts = Object.keys(scripts).filter((name) => resolvesRemoteMigration(name));
 const remoteWrapperPattern = remoteMigrationScripts.length
   ? new RegExp(`npm\\s+(?:run|run-script|rum|urn)\\s+(?:${remoteMigrationScripts.map(escapeRegex).join("|")})\\b`, "i")
   : /$a/;
 const storeFlagAssignmentPattern = /(?:^|[\s|;&])DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\s*=/im;
-const storeFlagConfigPattern = /^\s*DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\s*:/im;
+const storeFlagConfigPattern = /["']?DZN_STORE_(?:ENABLED|ADMIN_ENABLED)["']?\s*:/i;
 const storeFlagWranglerMutationPattern = /wrangler[^\r\n]*(?:pages\s+)?secret\s+(?:put|bulk)[^\r\n]*DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\b/i;
 assert.equal(remoteMigrationScripts.length > 0, true, "The guard must discover the existing remote D1 migration wrapper.");
 for (const scriptName of remoteMigrationScripts) {
@@ -51,6 +54,8 @@ for (const scriptName of remoteMigrationScripts) {
   assert.equal(remoteWrapperPattern.test(`npm urn ${scriptName}`), true, `The guard must recognize the urn alias for ${scriptName}.`);
 }
 assert.equal(isStoreMigrationAutomation("store:rollout", `npm run ${remoteMigrationScripts[0]!}`), true);
+assert.equal(hasRemoteMigrationInvocation("wrangler d1 migrations apply DB --local && wrangler d1 migrations apply DB --remote"), true);
+assert.equal(hasRemoteMigrationInvocation("wrangler d1 migrations apply DB --local"), false);
 assert.equal(storeFlagAssignmentPattern.test("DZN_STORE_ENABLED=$ENABLE_STORE next start"), true);
 assert.equal(storeFlagWranglerMutationPattern.test("printf true | npx wrangler pages secret put DZN_STORE_ENABLED"), true);
 assert.equal(isStoreTarget("scripts/store-rollout.ts", `npm run ${remoteMigrationScripts[0]!}`), true);
@@ -71,7 +76,7 @@ for (const file of automationFiles) {
   assert.equal((appliesMigration || callsRemoteMigrationWrapper) && targetsStore, false, `${file} must not automate Store production migration application.`);
   assert.doesNotMatch(source, storeFlagAssignmentPattern, `${file} must not automate Store activation.`);
   assert.doesNotMatch(source, storeFlagWranglerMutationPattern, `${file} must not mutate Store activation secrets.`);
-  if (/\.(?:ya?ml|toml)$/i.test(file)) {
+  if (/\.(?:ya?ml|toml|jsonc?)$/i.test(file)) {
     assert.doesNotMatch(source, storeFlagConfigPattern, `${file} must not configure Store activation.`);
   }
 }
@@ -88,7 +93,7 @@ function resolvesRemoteMigration(name: string, seen = new Set<string>()): boolea
   if (seen.has(name)) return false;
   const command = scripts[name];
   if (!command) return false;
-  if (/wrangler\s+d1\s+migrations\s+apply/i.test(command) && !/--local\b/i.test(command)) return true;
+  if (hasRemoteMigrationInvocation(command)) return true;
   const nextSeen = new Set(seen).add(name);
   for (const hook of [`pre${name}`, `post${name}`]) {
     if (scripts[hook] && resolvesRemoteMigration(hook, nextSeen)) return true;
@@ -97,6 +102,11 @@ function resolvesRemoteMigration(name: string, seen = new Set<string>()): boolea
     if (resolvesRemoteMigration(match[1], nextSeen)) return true;
   }
   return false;
+}
+
+function hasRemoteMigrationInvocation(command: string) {
+  const invocations = command.match(/(?:npx\s+)?wrangler\s+d1\s+migrations\s+apply\b[^;&|\r\n]*/gi) ?? [];
+  return invocations.some((invocation) => /--remote\b/i.test(invocation) || !/--local\b/i.test(invocation));
 }
 
 function walk(dir: string, matcher: (path: string) => boolean): string[] {
