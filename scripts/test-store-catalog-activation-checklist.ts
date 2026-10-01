@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 const checklist = readFileSync("docs/STORE_CATALOG_ACTIVATION_CHECKLIST.md", "utf8");
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts?: Record<string, string> };
@@ -66,6 +66,12 @@ assert.equal(storeFlagAssignmentPattern.test("DZN_STORE_ENABLED=$ENABLE_STORE ne
 assert.equal(storeFlagWranglerMutationPattern.test("printf true | npx wrangler pages secret put DZN_STORE_ENABLED"), true);
 assert.equal(hasStoreFlagWranglerMutation('execFileSync("wrangler", ["pages", "secret", "put", "DZN_STORE_ENABLED"])'), true);
 assert.equal(hasStoreFlagWranglerMutation('execFileSync("wrangler", [\n  "pages", "secret", "put",\n  "DZN_STORE_ENABLED",\n])'), true);
+assert.equal(hasStoreFlagWranglerMutation(
+  "npx wrangler pages secret bulk store-secrets.json",
+  ".",
+  { "store-secrets.json": '{"DZN_STORE_ENABLED":"true"}' },
+), true);
+assert.equal(callsRemoteMigrationWrapper(`npm --silent run ${remoteMigrationScripts[0]!}`), true);
 assert.equal(storeFlagConfigPattern.test('"DZN_STORE_ENABLED" = "true"'), true);
 assert.equal(isStoreTarget("scripts/store-rollout.ts", `npm run ${remoteMigrationScripts[0]!}`), true);
 assert.equal(automationFiles.includes("wrangler.toml"), true, "The guard must scan the production Wrangler configuration.");
@@ -84,7 +90,7 @@ for (const file of automationFiles) {
   const callsRemoteWrapper = callsRemoteMigrationWrapper(source);
   assert.equal((appliesMigration || callsRemoteWrapper) && targetsStore, false, `${file} must not automate Store production migration application.`);
   assert.doesNotMatch(source, storeFlagAssignmentPattern, `${file} must not automate Store activation.`);
-  assert.equal(hasStoreFlagWranglerMutation(source), false, `${file} must not mutate Store activation secrets.`);
+  assert.equal(hasStoreFlagWranglerMutation(source, dirname(file)), false, `${file} must not mutate Store activation secrets.`);
   if (/\.(?:ya?ml|toml|jsonc?)$/i.test(file)) {
     assert.doesNotMatch(source, storeFlagConfigPattern, `${file} must not configure Store activation.`);
   }
@@ -124,9 +130,11 @@ function callsRemoteMigrationWrapper(source: string, resolvedRemoteScripts = rem
 function extractNpmRunTargets(source: string) {
   const targets = new Set<string>();
   const normalized = source.replace(/\\\s*\r?\n/g, " ");
-  for (const match of normalized.matchAll(/npm\s+(?:run|run-script|rum|urn)\s+([^;&|\r\n]+)/gi)) {
+  for (const match of normalized.matchAll(/npm\s+([^;&|\r\n]+)/gi)) {
     const tokens = match[1].match(/"[^"]*"|'[^']*'|`[^`]*`|\S+/g) ?? [];
-    for (const rawToken of tokens) {
+    const runIndex = tokens.findIndex((rawToken) => /^(?:run|run-script|rum|urn)$/i.test(stripToken(rawToken)));
+    if (runIndex < 0) continue;
+    for (const rawToken of tokens.slice(runIndex + 1)) {
       const token = rawToken.replace(/^["'`]|["'`,)\]}]+$/g, "");
       if (scripts[token]) targets.add(token);
     }
@@ -164,9 +172,45 @@ function wranglerInvocationWindows(source: string, pattern: RegExp) {
   return windows;
 }
 
-function hasStoreFlagWranglerMutation(source: string) {
-  return wranglerInvocationWindows(source, /(?:npx\s+)?wrangler\b/gi)
-    .some((invocation) => storeFlagWranglerMutationPattern.test(invocation));
+function hasStoreFlagWranglerMutation(
+  source: string,
+  baseDir = ".",
+  fixtureFiles: Record<string, string> = {},
+) {
+  return wranglerInvocationWindows(source, /(?:npx\s+)?wrangler\b/gi).some((invocation) => {
+    if (storeFlagWranglerMutationPattern.test(invocation)) return true;
+    const bulkMatch = invocation.match(/\b(?:pages\s+)?secret\s+bulk\b([\s\S]*)/i);
+    if (!bulkMatch) return false;
+
+    const candidates = (bulkMatch[1].match(/"[^"]*"|'[^']*'|`[^`]*`|\S+/g) ?? [])
+      .map(stripToken)
+      .filter((token) => token && token !== "-" && !token.startsWith("--"));
+    return candidates.some((candidate) => {
+      const fixture = fixtureFiles[candidate];
+      if (fixture !== undefined) return storeFlagConfigPattern.test(fixture);
+      for (const path of bulkInputCandidates(candidate, baseDir)) {
+        if (existsSync(path) && statSync(path).isFile() && storeFlagConfigPattern.test(readFileSync(path, "utf8"))) {
+          return true;
+        }
+      }
+      return false;
+    });
+  });
+}
+
+function bulkInputCandidates(candidate: string, baseDir: string) {
+  const root = resolve(".");
+  const paths = isAbsolute(candidate)
+    ? [resolve(candidate)]
+    : [resolve(baseDir, candidate), resolve(root, candidate)];
+  return [...new Set(paths)].filter((path) => {
+    const fromRoot = relative(root, path);
+    return fromRoot === "" || (!fromRoot.startsWith("..") && !isAbsolute(fromRoot));
+  });
+}
+
+function stripToken(token: string) {
+  return token.replace(/^["'`]|["'`,)\]}]+$/g, "");
 }
 
 function normalizeCommandTokens(source: string) {
