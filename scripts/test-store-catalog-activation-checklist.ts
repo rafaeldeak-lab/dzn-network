@@ -34,19 +34,22 @@ assert.equal(scripts["test:store-catalog-foundation"].includes("test-store-catal
 const automationFiles = [
   ...walk(".github/workflows", (path) => /\.ya?ml$/i.test(path)),
   ...walk("scripts", (path) => /\.(?:ts|js|mjs|cjs|sh)$/i.test(path)),
+  ...readdirSync(".").filter((name) => /^wrangler[^/]*\.toml$/i.test(name)),
 ].filter((path) => !/^scripts\/test-/.test(path));
 const remoteMigrationScripts = Object.keys(scripts).filter((name) => resolvesRemoteMigration(name));
 const remoteWrapperPattern = remoteMigrationScripts.length
-  ? new RegExp(`npm\\s+(?:run\\s+)?(?:${remoteMigrationScripts.map(escapeRegex).join("|")})\\b`, "i")
+  ? new RegExp(`npm\\s+(?:run|run-script)\\s+(?:${remoteMigrationScripts.map(escapeRegex).join("|")})\\b`, "i")
   : /$a/;
 const storeFlagAssignmentPattern = /DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\s*(?:=|:)/i;
 assert.equal(remoteMigrationScripts.length > 0, true, "The guard must discover the existing remote D1 migration wrapper.");
 for (const scriptName of remoteMigrationScripts) {
   assert.equal(remoteWrapperPattern.test(`npm run ${scriptName}`), true, `The guard must recognize ${scriptName} callers.`);
+  assert.equal(remoteWrapperPattern.test(`npm run-script ${scriptName}`), true, `The guard must recognize the run-script alias for ${scriptName}.`);
 }
 assert.equal(isStoreMigrationAutomation("store:rollout", `npm run ${remoteMigrationScripts[0]!}`), true);
 assert.equal(storeFlagAssignmentPattern.test("DZN_STORE_ENABLED=$ENABLE_STORE next start"), true);
 assert.equal(isStoreTarget("scripts/store-rollout.ts", `npm run ${remoteMigrationScripts[0]!}`), true);
+assert.equal(automationFiles.includes("wrangler.toml"), true, "The guard must scan the production Wrangler configuration.");
 
 for (const [name, command] of Object.entries(scripts)) {
   if (/^test:/.test(name)) continue;
@@ -77,7 +80,7 @@ function resolvesRemoteMigration(name: string, seen = new Set<string>()): boolea
   if (!command) return false;
   if (/wrangler\s+d1\s+migrations\s+apply/i.test(command) && !/--local\b/i.test(command)) return true;
   const nextSeen = new Set(seen).add(name);
-  for (const match of command.matchAll(/npm\s+(?:run\s+)?([A-Za-z0-9:_-]+)/gi)) {
+  for (const match of command.matchAll(/npm\s+(?:run|run-script)\s+([A-Za-z0-9:_-]+)/gi)) {
     if (resolvesRemoteMigration(match[1], nextSeen)) return true;
   }
   return false;
