@@ -108,8 +108,8 @@ for (const snippet of [
 assert.equal(/image\/png|image\/webp|base64|BLOB|Buffer/i.test(galleryRoute), false, "Gallery route should reject non-JPEGs and avoid storing image binaries in D1.");
 
 const railRoute = readFileSync("functions/api/public/server-rail.ts", "utf8");
-assert.equal(railRoute.includes("s-maxage=60"), true, "Server rail endpoint should be cached around 60 seconds.");
-assert.equal(railRoute.includes("stale-while-revalidate=300"), true, "Server rail endpoint should allow short stale revalidation.");
+assert.equal(railRoute.includes("s-maxage=15"), true, "Server rail endpoint should refresh cached live data every 15 seconds.");
+assert.equal(railRoute.includes("stale-while-revalidate=45"), true, "Server rail endpoint should allow only a short stale revalidation window.");
 assert.equal(/kill_events|player_events|player_profiles/i.test(railRoute), false, "Server rail endpoint must stay lightweight and avoid heavy gameplay tables.");
 
 const publicServers = readFileSync("functions/api/public/servers.ts", "utf8");
