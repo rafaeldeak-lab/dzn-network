@@ -23,6 +23,7 @@ assert.match(orderMigration, /trg_store_orders_immutable_totals/);
 assert.match(orderMigration, /trg_store_orders_immutable_identity/);
 assert.match(orderMigration, /trg_store_order_items_immutable/);
 assert.match(orderMigration, /trg_store_order_item_matches_order/);
+assert.doesNotMatch(orderMigration, /SELECT CASE WHEN NOT EXISTS/);
 
 const db = new DatabaseSync(":memory:");
 db.exec(`
