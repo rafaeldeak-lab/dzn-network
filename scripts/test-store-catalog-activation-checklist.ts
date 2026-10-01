@@ -56,8 +56,10 @@ for (const scriptName of remoteMigrationScripts) {
 assert.equal(isStoreMigrationAutomation("store:rollout", `npm run ${remoteMigrationScripts[0]!}`), true);
 assert.equal(hasRemoteMigrationInvocation("wrangler d1 migrations apply DB --local && wrangler d1 migrations apply DB --remote"), true);
 assert.equal(hasRemoteMigrationInvocation("wrangler d1 migrations apply DB --local"), false);
+assert.equal(hasWranglerMigrationApply('execFileSync("wrangler", ["d1", "migrations", "apply", "DB", "--remote"])'), true);
 assert.equal(storeFlagAssignmentPattern.test("DZN_STORE_ENABLED=$ENABLE_STORE next start"), true);
 assert.equal(storeFlagWranglerMutationPattern.test("printf true | npx wrangler pages secret put DZN_STORE_ENABLED"), true);
+assert.equal(hasStoreFlagWranglerMutation('execFileSync("wrangler", ["pages", "secret", "put", "DZN_STORE_ENABLED"])'), true);
 assert.equal(isStoreTarget("scripts/store-rollout.ts", `npm run ${remoteMigrationScripts[0]!}`), true);
 assert.equal(automationFiles.includes("wrangler.toml"), true, "The guard must scan the production Wrangler configuration.");
 assert.equal(automationFiles.includes("scripts/test-store-catalog-foundation.ts"), true, "The guard must scan executable test-prefixed helpers.");
@@ -65,17 +67,17 @@ assert.equal(automationFiles.includes("scripts/test-store-catalog-foundation.ts"
 for (const [name, command] of Object.entries(scripts)) {
   assert.equal(isStoreMigrationAutomation(name, command), false, `${name} must not automate Store production migration application.`);
   assert.doesNotMatch(command, storeFlagAssignmentPattern, `${name} must not automate Store activation.`);
-  assert.doesNotMatch(command, storeFlagWranglerMutationPattern, `${name} must not mutate Store activation secrets.`);
+  assert.equal(hasStoreFlagWranglerMutation(command), false, `${name} must not mutate Store activation secrets.`);
 }
 
 for (const file of automationFiles) {
   const source = readFileSync(file, "utf8");
-  const appliesMigration = /wrangler\s+d1\s+migrations\s+apply/i.test(source);
+  const appliesMigration = hasWranglerMigrationApply(source);
   const targetsStore = isStoreTarget(file, source);
   const callsRemoteMigrationWrapper = remoteWrapperPattern.test(source);
   assert.equal((appliesMigration || callsRemoteMigrationWrapper) && targetsStore, false, `${file} must not automate Store production migration application.`);
   assert.doesNotMatch(source, storeFlagAssignmentPattern, `${file} must not automate Store activation.`);
-  assert.doesNotMatch(source, storeFlagWranglerMutationPattern, `${file} must not mutate Store activation secrets.`);
+  assert.equal(hasStoreFlagWranglerMutation(source), false, `${file} must not mutate Store activation secrets.`);
   if (/\.(?:ya?ml|toml|jsonc?)$/i.test(file)) {
     assert.doesNotMatch(source, storeFlagConfigPattern, `${file} must not configure Store activation.`);
   }
@@ -107,6 +109,18 @@ function resolvesRemoteMigration(name: string, seen = new Set<string>()): boolea
 function hasRemoteMigrationInvocation(command: string) {
   const invocations = command.match(/(?:npx\s+)?wrangler\s+d1\s+migrations\s+apply\b[^;&|\r\n]*/gi) ?? [];
   return invocations.some((invocation) => /--remote\b/i.test(invocation) || !/--local\b/i.test(invocation));
+}
+
+function hasWranglerMigrationApply(source: string) {
+  return /wrangler\s+d1\s+migrations\s+apply/i.test(normalizeCommandTokens(source));
+}
+
+function hasStoreFlagWranglerMutation(source: string) {
+  return storeFlagWranglerMutationPattern.test(normalizeCommandTokens(source));
+}
+
+function normalizeCommandTokens(source: string) {
+  return source.replace(/["'`,()[\]{}]/g, " ");
 }
 
 function walk(dir: string, matcher: (path: string) => boolean): string[] {
