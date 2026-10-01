@@ -137,8 +137,10 @@ function resolvesRemoteMigration(name: string, seen = new Set<string>()): boolea
   if (seen.has(name)) return false;
   const command = scripts[name];
   if (!command) return false;
-  if (hasRemoteMigrationInvocation(command) || hasRemoteStoreMigrationExecute(command, isStoreTarget(name, command))) return true;
   const nextSeen = new Set(seen).add(name);
+  if (hasRemoteMigrationInvocation(command)
+    || hasRemoteStoreMigrationExecute(command, isStoreTarget(name, command))
+    || callsRemoteMigrationHelper(command, {}, new Set(), nextSeen)) return true;
   for (const hook of [`pre${name}`, `post${name}`]) {
     if (scripts[hook] && resolvesRemoteMigration(hook, nextSeen)) return true;
   }
@@ -156,6 +158,7 @@ function callsRemoteMigrationHelper(
   source: string,
   fixtureFiles: Record<string, string> = {},
   seen = new Set<string>(),
+  packageSeen = new Set<string>(),
 ): boolean {
   for (const referencedPath of extractScriptReferences(source)) {
     if (referencedPath === "scripts/test-store-catalog-activation-checklist.ts" || seen.has(referencedPath)) continue;
@@ -168,8 +171,8 @@ function callsRemoteMigrationHelper(
     const nextSeen = new Set(seen).add(referencedPath);
     if (hasRemoteMigrationInvocation(helperSource)
       || hasRemoteStoreMigrationExecute(helperSource, true)
-      || callsRemoteMigrationWrapper(helperSource)
-      || callsRemoteMigrationHelper(helperSource, fixtureFiles, nextSeen)) return true;
+      || extractNpmRunTargets(helperSource).some((target) => resolvesRemoteMigration(target, packageSeen))
+      || callsRemoteMigrationHelper(helperSource, fixtureFiles, nextSeen, packageSeen)) return true;
   }
   return false;
 }
