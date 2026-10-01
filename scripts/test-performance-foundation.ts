@@ -1701,7 +1701,7 @@ function assertPublicApiSafety() {
   assertIncludes(pulseConfig, "publicCacheHeaders");
 
   const serverRail = source("functions/api/public/server-rail.ts");
-  assertIncludes(serverRail, "publicCacheHeaders({ maxAge: 60, staleWhileRevalidate: 300 })");
+  assertIncludes(serverRail, "publicCacheHeaders({ maxAge: 15, staleWhileRevalidate: 45 })", "live server rail data must not remain behind the old five-minute stale cache");
 
   const leaderboards = source("functions/api/public/leaderboards.ts");
   assertIncludes(leaderboards, "boundedNumberParam");
