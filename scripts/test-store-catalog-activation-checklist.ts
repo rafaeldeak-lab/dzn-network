@@ -123,6 +123,13 @@ assert.equal(callsRemoteMigrationHelper(
     ".github/actions/apply-migrations/dist/main.js": `npm run ${remoteMigrationScripts[0]!}`,
   },
 ), true);
+assert.equal(callsRemoteMigrationHelper(
+  "uses: ./.github/actions/apply-migrations",
+  {
+    ".github/actions/apply-migrations/action.yml": '"runs": { "using": "node20", "main": "dist/main.js" }',
+    ".github/actions/apply-migrations/dist/main.js": `npm run ${remoteMigrationScripts[0]!}`,
+  },
+), true);
 assert.equal(extractNpmRunTargets("npm test").includes("test"), true);
 assert.equal(extractNpmRunTargets("npm restart").includes("start"), true);
 assert.equal(callsRemoteMigrationHelper(
@@ -288,7 +295,7 @@ function extractActionEntryPoints(source: string) {
   for (const match of source.matchAll(/^\s*["']?(?:main|pre|post)["']?\s*:\s*["']?([^\s#,"'}]+)/gim)) {
     entryPoints.add(stripToken(match[1]));
   }
-  for (const runsMatch of source.matchAll(/\bruns\s*:\s*\{([^}]*)\}/gi)) {
+  for (const runsMatch of source.matchAll(/["']?runs["']?\s*:\s*\{([^}]*)\}/gi)) {
     for (const match of runsMatch[1].matchAll(/(?:^|,)\s*["']?(?:main|pre|post)["']?\s*:\s*["']?([^\s,#"'}]+)/gi)) {
       entryPoints.add(stripToken(match[1]));
     }
