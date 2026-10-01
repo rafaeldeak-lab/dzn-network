@@ -104,7 +104,7 @@ export function validateStoreProductDraft(input: unknown): StoreCatalogResult<St
   }
 
   const metadataJson = metadata(value.metadataJson, errors);
-  const searchable = `${productKey} ${name} ${description}`;
+  const searchable = `${productKey} ${name} ${description}`.replace(/[^a-z0-9]+/gi, " ");
   if (FORBIDDEN_BENEFIT_COPY.some((pattern) => pattern.test(searchable))) {
     add(errors, "description", "FORBIDDEN_PAID_BENEFIT", "Store products cannot sell progression, competitive, owner, or redeemable benefits.");
   }
