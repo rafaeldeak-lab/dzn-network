@@ -71,6 +71,14 @@ assert.equal(callsRemoteMigrationHelper(
   "bash scripts/apply-migrations.sh",
   { "scripts/apply-migrations.sh": `npm run ${remoteMigrationScripts[0]!}` },
 ), true);
+assert.equal(callsRemoteMigrationHelper(
+  "tsx scripts/store-rollout.ts",
+  {
+    "scripts/store-rollout.ts": 'import "./apply-migrations";',
+    "scripts/apply-migrations.ts": `npm run ${remoteMigrationScripts[0]!}`,
+  },
+), true);
+assert.equal(extractNpmRunTargets("npm test").includes("test"), true);
 assert.equal(isStoreMigrationAutomation("store:rollout", 'node -e \'execFileSync("wrangler", ["d1", "migrations", "apply", "DB", "--remote"])\''), true);
 assert.equal(storeFlagAssignmentPattern.test("DZN_STORE_ENABLED=$ENABLE_STORE next start"), true);
 assert.equal(storeFlagWranglerMutationPattern.test("printf true | npx wrangler pages secret put DZN_STORE_ENABLED"), true);
@@ -159,8 +167,9 @@ function callsRemoteMigrationHelper(
   fixtureFiles: Record<string, string> = {},
   seen = new Set<string>(),
   packageSeen = new Set<string>(),
+  fromFile?: string,
 ): boolean {
-  for (const referencedPath of extractScriptReferences(source)) {
+  for (const referencedPath of extractScriptReferences(source, fromFile)) {
     if (referencedPath === "scripts/test-store-catalog-activation-checklist.ts" || seen.has(referencedPath)) continue;
     const fixture = fixtureFiles[referencedPath];
     const absolutePath = resolve(referencedPath);
@@ -172,21 +181,36 @@ function callsRemoteMigrationHelper(
     if (hasRemoteMigrationInvocation(helperSource)
       || hasRemoteStoreMigrationExecute(helperSource, true)
       || extractNpmRunTargets(helperSource).some((target) => resolvesRemoteMigration(target, packageSeen))
-      || callsRemoteMigrationHelper(helperSource, fixtureFiles, nextSeen, packageSeen)) return true;
+      || callsRemoteMigrationHelper(helperSource, fixtureFiles, nextSeen, packageSeen, referencedPath)) return true;
   }
   return false;
 }
 
-function extractScriptReferences(source: string) {
+function extractScriptReferences(source: string, fromFile?: string) {
   const root = resolve(".");
   const normalized = normalizeCommandTokens(source).replace(/\\\s*\r?\n/g, " ");
   const references = new Set<string>();
-  for (const match of normalized.matchAll(/(?:^|\s)((?:\.\/)?scripts\/[\w./-]+\.(?:ts|js|mjs|cjs|sh))\b/gi)) {
-    const absolutePath = resolve(match[1]);
-    const fromRoot = relative(root, absolutePath).replace(/\\/g, "/");
-    if (!fromRoot.startsWith("..") && !isAbsolute(fromRoot)) references.add(fromRoot);
+  for (const match of normalized.matchAll(/(?:^|\s)((?:\.\/)?scripts\/[\w./-]+(?:\.(?:ts|tsx|js|mjs|cjs|sh))?)\b/gi)) {
+    addScriptReference(references, root, resolve(match[1]), Boolean(/\.[a-z]+$/i.test(match[1])));
+  }
+  if (fromFile) {
+    for (const match of source.matchAll(/["'`](\.{1,2}\/[\w./-]+)["'`]/g)) {
+      addScriptReference(references, root, resolve(dirname(fromFile), match[1]), Boolean(/\.[a-z]+$/i.test(match[1])));
+    }
   }
   return [...references];
+}
+
+function addScriptReference(references: Set<string>, root: string, absoluteBase: string, hasExtension: boolean) {
+  const candidates = hasExtension
+    ? [absoluteBase]
+    : [".ts", ".tsx", ".js", ".mjs", ".cjs", ".sh"].map((extension) => `${absoluteBase}${extension}`);
+  for (const candidate of candidates) {
+    const fromRoot = relative(root, candidate).replace(/\\/g, "/");
+    if (!fromRoot.startsWith("..") && !isAbsolute(fromRoot)) {
+      references.add(fromRoot);
+    }
+  }
 }
 
 function extractNpmRunTargets(source: string) {
@@ -195,10 +219,10 @@ function extractNpmRunTargets(source: string) {
   for (const match of normalized.matchAll(/npm\s+([^;&|\r\n]+)/gi)) {
     const tokens = match[1].match(/"[^"]*"|'[^']*'|`[^`]*`|\S+/g) ?? [];
     const runIndex = tokens.findIndex((rawToken) => /^(?:run|run-script|rum|urn)$/i.test(stripToken(rawToken)));
-    if (runIndex < 0) continue;
-    for (const rawToken of tokens.slice(runIndex + 1)) {
+    const candidateTokens = runIndex >= 0 ? tokens.slice(runIndex + 1) : tokens;
+    for (const rawToken of candidateTokens) {
       const token = rawToken.replace(/^["'`]|["'`,)\]}]+$/g, "");
-      if (scripts[token]) targets.add(token);
+      if (scripts[token] && (runIndex >= 0 || /^(?:start|stop|restart|test)$/i.test(token))) targets.add(token);
     }
   }
   return [...targets];
