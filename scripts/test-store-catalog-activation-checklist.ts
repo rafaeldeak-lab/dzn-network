@@ -57,6 +57,7 @@ assert.equal(isStoreMigrationAutomation("store:rollout", `npm run ${remoteMigrat
 assert.equal(hasRemoteMigrationInvocation("wrangler d1 migrations apply DB --local && wrangler d1 migrations apply DB --remote"), true);
 assert.equal(hasRemoteMigrationInvocation("wrangler d1 migrations apply DB --local"), false);
 assert.equal(hasWranglerMigrationApply('execFileSync("wrangler", ["d1", "migrations", "apply", "DB", "--remote"])'), true);
+assert.equal(isStoreMigrationAutomation("store:rollout", 'node -e \'execFileSync("wrangler", ["d1", "migrations", "apply", "DB", "--remote"])\''), true);
 assert.equal(storeFlagAssignmentPattern.test("DZN_STORE_ENABLED=$ENABLE_STORE next start"), true);
 assert.equal(storeFlagWranglerMutationPattern.test("printf true | npx wrangler pages secret put DZN_STORE_ENABLED"), true);
 assert.equal(hasStoreFlagWranglerMutation('execFileSync("wrangler", ["pages", "secret", "put", "DZN_STORE_ENABLED"])'), true);
@@ -84,7 +85,7 @@ for (const file of automationFiles) {
 }
 
 function isStoreMigrationAutomation(name: string, command: string) {
-  return isStoreTarget(name, command) && (/wrangler\s+d1\s+migrations\s+apply/i.test(command) || remoteWrapperPattern.test(command));
+  return isStoreTarget(name, command) && (hasRemoteMigrationInvocation(command) || remoteWrapperPattern.test(command));
 }
 
 function isStoreTarget(pathOrName: string, content: string) {
@@ -107,7 +108,7 @@ function resolvesRemoteMigration(name: string, seen = new Set<string>()): boolea
 }
 
 function hasRemoteMigrationInvocation(command: string) {
-  const invocations = command.match(/(?:npx\s+)?wrangler\s+d1\s+migrations\s+apply\b[^;&|\r\n]*/gi) ?? [];
+  const invocations = normalizeCommandTokens(command).match(/(?:npx\s+)?wrangler\s+d1\s+migrations\s+apply\b[^;&|\r\n]*/gi) ?? [];
   return invocations.some((invocation) => /--remote\b/i.test(invocation) || !/--local\b/i.test(invocation));
 }
 
