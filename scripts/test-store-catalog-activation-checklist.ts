@@ -34,6 +34,7 @@ assert.equal(scripts["test:store-catalog-foundation"].includes("test-store-catal
 
 const automationFiles = [
   ...walk(".github/workflows", (path) => /\.ya?ml$/i.test(path)),
+  ...walk(".github/actions", (path) => /(?:^|\/)action\.ya?ml$/i.test(path)),
   ...walk("scripts", (path) => /\.(?:ts|tsx|js|mjs|cjs|sh|ps1|cmd|bat)$/i.test(path)),
   ...execFileSync("git", ["ls-files"], { encoding: "utf8" })
     .split(/\r?\n/)
@@ -99,6 +100,14 @@ assert.equal(callsRemoteMigrationHelper(
 assert.equal(callsRemoteMigrationHelper(
   "working-directory: scripts\nrun: ./apply-migrations.sh",
   { "scripts/apply-migrations.sh": `npm run ${remoteMigrationScripts[0]!}` },
+), true);
+assert.equal(callsRemoteMigrationHelper(
+  "working-directory: scripts\nrun: & .\\apply-migrations.ps1",
+  { "scripts/apply-migrations.ps1": `npm run ${remoteMigrationScripts[0]!}` },
+), true);
+assert.equal(callsRemoteMigrationHelper(
+  "uses: ./.github/workflows/apply-migrations.yml",
+  { ".github/workflows/apply-migrations.yml": `run: npm run ${remoteMigrationScripts[0]!}` },
 ), true);
 assert.equal(extractNpmRunTargets("npm test").includes("test"), true);
 assert.equal(extractNpmRunTargets("npm restart").includes("start"), true);
@@ -223,6 +232,9 @@ function extractScriptReferences(source: string, fromFile?: string) {
   for (const match of normalized.matchAll(/(?:^|\s)((?:\.\/)?scripts\/[\w./-]+(?:\.(?:ts|tsx|js|mjs|cjs|sh|ps1|cmd|bat))?)\b/gi)) {
     addScriptReference(references, root, resolve(match[1]), Boolean(/\.[a-z]+$/i.test(match[1])));
   }
+  for (const match of source.matchAll(/\buses\s*:\s*["']?(\.\/[\w./-]+)["']?/gi)) {
+    addScriptReference(references, root, resolve(match[1]), Boolean(/\.[a-z]+$/i.test(match[1])));
+  }
   for (const match of normalized.matchAll(/\bcd\s+([^\s;&|]+)\s*(?:&&|;)\s*(?:bash|sh|source|\.)\s+([^\s;&|]+)/gi)) {
     const baseDir = fromFile ? dirname(fromFile) : ".";
     const workingDir = resolve(baseDir, stripToken(match[1]));
@@ -234,7 +246,8 @@ function extractScriptReferences(source: string, fromFile?: string) {
   const workflowHelpers = [
     ...source.matchAll(/(?:^|[\s|>])(?:bash|sh|source|\.)\s+([\w./-]+\.(?:ts|tsx|js|mjs|cjs|sh|ps1|cmd|bat))/gim),
     ...source.matchAll(/(?:^|[\s|>])(\.{1,2}\/[\w./-]+\.(?:ts|tsx|js|mjs|cjs|sh|ps1|cmd|bat))/gim),
-  ].map((match) => stripToken(match[1]));
+    ...source.matchAll(/(?:^|[\s|>])(?:&\s+)?(\.{1,2}[\\/][\w./\\-]+\.(?:ts|tsx|js|mjs|cjs|sh|ps1|cmd|bat))/gim),
+  ].map((match) => stripToken(match[1]).replace(/\\/g, "/"));
   for (const workingDir of workflowDirs) {
     for (const helper of workflowHelpers) {
       addScriptReference(references, root, resolve(workingDir, helper), true);
@@ -257,7 +270,7 @@ function addScriptReference(references: Set<string>, root: string, absoluteBase:
     : [".ts", ".tsx", ".js", ".mjs", ".cjs", ".sh", ".ps1", ".cmd", ".bat"].flatMap((extension) => [
       `${absoluteBase}${extension}`,
       join(absoluteBase, `index${extension}`),
-    ]);
+    ]).concat(join(absoluteBase, "action.yml"), join(absoluteBase, "action.yaml"));
   for (const candidate of candidates) {
     const fromRoot = relative(root, candidate).replace(/\\/g, "/");
     if (!fromRoot.startsWith("..") && !isAbsolute(fromRoot)) {
