@@ -5,6 +5,7 @@ import { ArrowRight, RadioTower, Star, Users } from "lucide-react";
 import Link from "next/link";
 
 const SERVER_RAIL_REFRESH_MS = 30_000;
+const SERVER_RAIL_REQUEST_TIMEOUT_MS = 10_000;
 
 type RailItem = {
   id: string;
@@ -34,16 +35,20 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
   const [responseStale, setResponseStale] = useState(false);
 
   useEffect(() => {
-    const controller = new AbortController();
+    let disposed = false;
     let requestInFlight = false;
+    let activeRequestController: AbortController | null = null;
 
     const loadRail = async () => {
-      if (requestInFlight || controller.signal.aborted) return;
+      if (requestInFlight || disposed) return;
       requestInFlight = true;
+      const requestController = new AbortController();
+      activeRequestController = requestController;
+      const requestTimeout = window.setTimeout(() => requestController.abort(), SERVER_RAIL_REQUEST_TIMEOUT_MS);
       try {
         const response = await fetch("/api/public/server-rail", {
           headers: { accept: "application/json" },
-          signal: controller.signal,
+          signal: requestController.signal,
         });
         const payload = response.ok ? await response.json() as RailResponse : null;
         if (payload?.ok && Array.isArray(payload.items)) {
@@ -56,11 +61,13 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
         } else {
           setResponseStale(true);
         }
-      } catch (error: unknown) {
-        if (!(error instanceof DOMException && error.name === "AbortError")) setResponseStale(true);
+      } catch {
+        if (!disposed) setResponseStale(true);
       } finally {
+        window.clearTimeout(requestTimeout);
+        if (activeRequestController === requestController) activeRequestController = null;
         requestInFlight = false;
-        if (!controller.signal.aborted) setLoaded(true);
+        if (!disposed) setLoaded(true);
       }
     };
 
@@ -72,7 +79,8 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
     const refreshTimer = window.setInterval(refreshWhenVisible, SERVER_RAIL_REFRESH_MS);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
-      controller.abort();
+      disposed = true;
+      activeRequestController?.abort();
       window.clearInterval(refreshTimer);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
