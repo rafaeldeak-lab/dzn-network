@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS store_products (
     substr(product_key, 1, 1) GLOB '[a-z0-9]' AND
     product_key NOT GLOB '*[^a-z0-9-]*'
   ),
-  name TEXT NOT NULL,
-  description TEXT NOT NULL,
+  name TEXT NOT NULL CHECK (name = trim(name) AND length(name) BETWEEN 1 AND 120),
+  description TEXT NOT NULL CHECK (description = trim(description) AND length(description) BETWEEN 10 AND 1000),
   product_type TEXT NOT NULL CHECK (product_type IN (
     'supporter_pack',
     'profile_theme',
