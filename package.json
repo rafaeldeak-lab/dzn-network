@@ -89,7 +89,7 @@
     "test:public-listing-reviews": "tsx scripts/test-public-listing-reviews.ts",
     "test:server-review-moderation": "tsx scripts/test-server-review-moderation.ts",
     "test:server-community-directory": "tsx scripts/test-server-community-directory.ts && tsx scripts/test-server-community-directory-runtime.ts",
-    "test:store-catalog-foundation": "tsx scripts/test-store-catalog-foundation.ts && tsx scripts/test-store-catalog-admin.ts",
+    "test:store-catalog-foundation": "tsx scripts/test-store-catalog-foundation.ts && tsx scripts/test-store-catalog-admin.ts && tsx scripts/test-store-catalog-activation-checklist.ts",
     "qa:server-community-directory": "node scripts/qa-server-community-directory.mjs",
     "test:auth-return-flow": "tsx scripts/test-auth-return-flow.ts",
     "test:public-access-gating": "tsx scripts/test-public-access-gating.ts && npm run test:premium-showcase && npm run test:advanced-leaderboards",
