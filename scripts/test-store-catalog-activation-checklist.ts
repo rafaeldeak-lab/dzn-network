@@ -72,6 +72,8 @@ assert.equal(hasStoreFlagWranglerMutation(
   { "store-secrets.json": '{"DZN_STORE_ENABLED":"true"}' },
 ), true);
 assert.equal(callsRemoteMigrationWrapper(`npm --silent run ${remoteMigrationScripts[0]!}`), true);
+assert.equal(callsRemoteMigrationWrapper(`execFileSync("npm", ["run", "${remoteMigrationScripts[0]!}"])`), true);
+assert.equal(hasStoreFlagWranglerMutation("cd config && npx wrangler pages secret bulk store-secrets.json"), true);
 assert.equal(storeFlagConfigPattern.test('"DZN_STORE_ENABLED" = "true"'), true);
 assert.equal(isStoreTarget("scripts/store-rollout.ts", `npm run ${remoteMigrationScripts[0]!}`), true);
 assert.equal(automationFiles.includes("wrangler.toml"), true, "The guard must scan the production Wrangler configuration.");
@@ -129,7 +131,7 @@ function callsRemoteMigrationWrapper(source: string, resolvedRemoteScripts = rem
 
 function extractNpmRunTargets(source: string) {
   const targets = new Set<string>();
-  const normalized = source.replace(/\\\s*\r?\n/g, " ");
+  const normalized = normalizeCommandTokens(source).replace(/\\\s*\r?\n/g, " ");
   for (const match of normalized.matchAll(/npm\s+([^;&|\r\n]+)/gi)) {
     const tokens = match[1].match(/"[^"]*"|'[^']*'|`[^`]*`|\S+/g) ?? [];
     const runIndex = tokens.findIndex((rawToken) => /^(?:run|run-script|rum|urn)$/i.test(stripToken(rawToken)));
@@ -185,16 +187,23 @@ function hasStoreFlagWranglerMutation(
     const candidates = (bulkMatch[1].match(/"[^"]*"|'[^']*'|`[^`]*`|\S+/g) ?? [])
       .map(stripToken)
       .filter((token) => token && token !== "-" && !token.startsWith("--"));
-    return candidates.some((candidate) => {
+    if (/\bcd\s+[^;&|]+(?:&&|;)|\bworking-directory\s*:/i.test(source)) return true;
+    let resolvedInput = false;
+    const mutatesStoreFlag = candidates.some((candidate) => {
       const fixture = fixtureFiles[candidate];
-      if (fixture !== undefined) return storeFlagConfigPattern.test(fixture);
+      if (fixture !== undefined) {
+        resolvedInput = true;
+        return storeFlagConfigPattern.test(fixture);
+      }
       for (const path of bulkInputCandidates(candidate, baseDir)) {
-        if (existsSync(path) && statSync(path).isFile() && storeFlagConfigPattern.test(readFileSync(path, "utf8"))) {
-          return true;
+        if (existsSync(path) && statSync(path).isFile()) {
+          resolvedInput = true;
+          if (storeFlagConfigPattern.test(readFileSync(path, "utf8"))) return true;
         }
       }
       return false;
     });
+    return mutatesStoreFlag || !resolvedInput;
   });
 }
 
