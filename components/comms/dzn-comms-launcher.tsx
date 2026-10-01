@@ -3,20 +3,25 @@
 import { Bot, ChevronRight, MessageCircle, MessagesSquare, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export function DznCommsLauncher() {
   const pathname = usePathname();
   const [openPath, setOpenPath] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const triggerButtonRef = useRef<HTMLButtonElement | null>(null);
   const open = openPath === pathname;
+  const closeAndRestoreFocus = useCallback(() => {
+    setOpenPath(null);
+    window.requestAnimationFrame(() => triggerButtonRef.current?.focus());
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     closeButtonRef.current?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpenPath(null);
+      if (event.key === "Escape") closeAndRestoreFocus();
     };
     const closeOnOutsideClick = (event: PointerEvent) => {
       if (event.target instanceof Node && !panelRef.current?.contains(event.target)) setOpenPath(null);
@@ -27,7 +32,7 @@ export function DznCommsLauncher() {
       document.removeEventListener("keydown", closeOnEscape);
       document.removeEventListener("pointerdown", closeOnOutsideClick);
     };
-  }, [open]);
+  }, [closeAndRestoreFocus, open]);
 
   if (pathname.startsWith("/community")) return null;
 
@@ -47,7 +52,7 @@ export function DznCommsLauncher() {
             <button
               ref={closeButtonRef}
               type="button"
-              onClick={() => setOpenPath(null)}
+              onClick={closeAndRestoreFocus}
               className="grid h-9 w-9 place-items-center rounded-md border border-white/10 text-zinc-300 transition hover:border-cyan-300/40 hover:text-white"
               aria-label="Close DZN Comms menu"
               title="Close"
@@ -91,6 +96,7 @@ export function DznCommsLauncher() {
       ) : null}
 
       <button
+        ref={triggerButtonRef}
         type="button"
         onClick={() => setOpenPath((current) => current === pathname ? null : pathname)}
         aria-expanded={open}

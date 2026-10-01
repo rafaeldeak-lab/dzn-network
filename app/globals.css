@@ -3796,6 +3796,10 @@ button.dzn-header-action {
     clip-path: none;
   }
 
+  .dzn-header-nav--logged-out .dzn-header-links {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .dzn-header-links a {
     min-height: 42px;
     gap: 6px;
