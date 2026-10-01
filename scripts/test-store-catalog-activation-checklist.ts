@@ -54,6 +54,7 @@ for (const scriptName of remoteMigrationScripts) {
   assert.equal(remoteWrapperPattern.test(`npm urn ${scriptName}`), true, `The guard must recognize the urn alias for ${scriptName}.`);
 }
 assert.equal(isStoreMigrationAutomation("store:rollout", `npm run ${remoteMigrationScripts[0]!}`), true);
+assert.equal(isStoreMigrationAutomation("store:rollout", "echo ready", ["store:rollout"]), true);
 assert.equal(hasRemoteMigrationInvocation("wrangler d1 migrations apply DB --local && wrangler d1 migrations apply DB --remote"), true);
 assert.equal(hasRemoteMigrationInvocation("wrangler d1 migrations apply DB --local"), false);
 assert.equal(hasWranglerMigrationApply('execFileSync("wrangler", ["d1", "migrations", "apply", "DB", "--remote"])'), true);
@@ -84,8 +85,9 @@ for (const file of automationFiles) {
   }
 }
 
-function isStoreMigrationAutomation(name: string, command: string) {
-  return isStoreTarget(name, command) && (hasRemoteMigrationInvocation(command) || remoteWrapperPattern.test(command));
+function isStoreMigrationAutomation(name: string, command: string, resolvedRemoteScripts = remoteMigrationScripts) {
+  return isStoreTarget(name, command)
+    && (resolvedRemoteScripts.includes(name) || hasRemoteMigrationInvocation(command) || remoteWrapperPattern.test(command));
 }
 
 function isStoreTarget(pathOrName: string, content: string) {
