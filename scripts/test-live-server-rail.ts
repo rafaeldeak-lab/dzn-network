@@ -25,10 +25,15 @@ assert.equal(source.includes('href="/servers"'), true, "The truthful empty state
 assert.equal(source.includes("[...items, ...items]"), false, "The animated rail must not clone visible server cards.");
 assert.equal(source.includes("dedupeRailItems(items)"), true, "The client must defensively deduplicate server identities.");
 assert.equal(source.includes('item.playerCountStatus !== "fresh"'), true, "Stale player counts must not be presented as live values.");
+assert.equal(source.includes("SERVER_RAIL_REFRESH_MS = 30_000"), true, "The rail must refresh live server data without requiring a page reload.");
+assert.equal(source.includes('document.visibilityState === "visible"'), true, "Background tabs must not keep polling the public rail.");
+assert.equal(source.includes('document.addEventListener("visibilitychange"'), true, "Returning to the page must refresh the rail.");
+assert.equal(source.includes("requestInFlight"), true, "Timed and visibility refreshes must not overlap requests.");
 
 const railRouteSource = readFileSync("functions/api/public/server-rail.ts", "utf8");
 assert.doesNotMatch(railRouteSource, /LIMIT\s+96/i, "Canonical server selection must happen before the public rail limit.");
 assert.match(railRouteSource, /readPublicServerCanonicalEvidence/, "Duplicate service records must use authoritative canonical evidence.");
+assert.match(railRouteSource, /maxAge:\s*15,\s*staleWhileRevalidate:\s*45/, "Live player counts must not remain behind the five-minute stale rail cache.");
 
 const missingDbResponse = await invokeRail({});
 assert.equal(missingDbResponse.status, 200);
@@ -78,7 +83,9 @@ const duplicateDbResponse = await invokeRail({
           players: { "legacy-duplicate": 0, "server-one": 3 },
         }),
 });
-const duplicatePayload = await duplicateDbResponse.json() as { items?: Array<{ id: string; slug: string | null }> };
+const duplicatePayload = await duplicateDbResponse.json() as {
+  items?: Array<{ id: string; slug: string | null; currentPlayers: number | null }>;
+};
 assert.equal(duplicatePayload.items?.length, 24, "Duplicate rows must not consume the 24 unique-server rail limit.");
 const canonicalDuplicateItem = duplicatePayload.items?.find(({ id }) => id === "server-one");
 assert.deepEqual(canonicalDuplicateItem && { id: canonicalDuplicateItem.id, slug: canonicalDuplicateItem.slug }, {
@@ -86,6 +93,15 @@ assert.deepEqual(canonicalDuplicateItem && { id: canonicalDuplicateItem.id, slug
   slug: "nuketown-deathmatch",
 });
 assert.equal(duplicatePayload.items?.some(({ id }) => id === "legacy-duplicate"), false, "The public API must deduplicate canonical server identities.");
+assert.equal(canonicalDuplicateItem?.currentPlayers, 7, "Fresh zero and non-zero player counts must remain numeric in the public payload.");
+
+const zeroPlayerResponse = await invokeRail({
+  DB: createRailDb([{ ...duplicateRow, current_players: 0, max_players: 10 }]),
+});
+const zeroPlayerPayload = await zeroPlayerResponse.json() as { items?: Array<{ currentPlayers: number | null; maxPlayers: number | null; playerCountStatus?: string }> };
+assert.deepEqual(zeroPlayerPayload.items?.map(({ currentPlayers, maxPlayers, playerCountStatus }) => ({ currentPlayers, maxPlayers, playerCountStatus })), [
+  { currentPlayers: 0, maxPlayers: 10, playerCountStatus: "fresh" },
+], "Zero online players is valid live data and must not be converted into a syncing state.");
 
 const namespaceCollisionResponse = await invokeRail({
   DB: createRailDb([

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, RadioTower, Star, Users } from "lucide-react";
 import Link from "next/link";
 
+const SERVER_RAIL_REFRESH_MS = 30_000;
+
 type RailItem = {
   id: string;
   slug: string | null;
@@ -33,24 +35,43 @@ export function LiveServerRail({ className = "" }: { className?: string }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/public/server-rail", {
-      headers: { accept: "application/json" },
-      signal: controller.signal,
-    })
-      .then((response) => (response.ok ? response.json() as Promise<RailResponse> : null))
-      .then((payload) => {
+    let requestInFlight = false;
+
+    const loadRail = async () => {
+      if (requestInFlight || controller.signal.aborted) return;
+      requestInFlight = true;
+      try {
+        const response = await fetch("/api/public/server-rail", {
+          headers: { accept: "application/json" },
+          signal: controller.signal,
+        });
+        const payload = response.ok ? await response.json() as RailResponse : null;
         if (payload?.ok && Array.isArray(payload.items)) {
           setItems(payload.items);
           setResponseStale(payload.stale === true);
         } else {
           setResponseStale(true);
         }
-      })
-      .catch((error: unknown) => {
+      } catch (error: unknown) {
         if (!(error instanceof DOMException && error.name === "AbortError")) setResponseStale(true);
-      })
-      .finally(() => setLoaded(true));
-    return () => controller.abort();
+      } finally {
+        requestInFlight = false;
+        if (!controller.signal.aborted) setLoaded(true);
+      }
+    };
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void loadRail();
+    };
+
+    void loadRail();
+    const refreshTimer = window.setInterval(refreshWhenVisible, SERVER_RAIL_REFRESH_MS);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      controller.abort();
+      window.clearInterval(refreshTimer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, []);
 
   const railItems = useMemo(() => dedupeRailItems(items), [items]);
