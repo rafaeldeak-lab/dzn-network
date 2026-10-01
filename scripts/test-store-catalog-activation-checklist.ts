@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 const checklist = readFileSync("docs/STORE_CATALOG_ACTIVATION_CHECKLIST.md", "utf8");
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts?: Record<string, string> };
@@ -36,6 +37,31 @@ for (const [name, command] of Object.entries(scripts)) {
   const targetsStore = /(?:0081_store_catalog|DZN_STORE_)/i.test(`${name} ${command}`);
   assert.equal(appliesMigration && targetsStore, false, `${name} must not automate Store production migration application.`);
   assert.doesNotMatch(command, /DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\s*=\s*(?:true|1)/i, `${name} must not automate Store activation.`);
+}
+
+const automationFiles = [
+  ...walk(".github/workflows", (path) => /\.ya?ml$/i.test(path)),
+  ...walk("scripts", (path) => /\.(?:ts|js|mjs|cjs|sh)$/i.test(path)),
+].filter((path) => !/^scripts\/test-/.test(path));
+
+for (const file of automationFiles) {
+  const source = readFileSync(file, "utf8");
+  const appliesMigration = /wrangler\s+d1\s+migrations\s+apply/i.test(source);
+  const targetsStore = /(?:0081_store_catalog|DZN_STORE_)/i.test(source);
+  assert.equal(appliesMigration && targetsStore, false, `${file} must not automate Store production migration application.`);
+  assert.doesNotMatch(source, /DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\s*(?:=|:)\s*["'`]?(?:true|1|yes|on)\b/i, `${file} must not automate Store activation.`);
+}
+
+function walk(dir: string, matcher: (path: string) => boolean): string[] {
+  if (!existsSync(dir)) return [];
+  const results: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name).replace(/\\/g, "/");
+    const stats = statSync(path);
+    if (stats.isDirectory()) results.push(...walk(path, matcher));
+    else if (matcher(path)) results.push(path);
+  }
+  return results;
 }
 
 console.log("Store catalog activation checklist checks passed.");
