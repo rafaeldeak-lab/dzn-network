@@ -67,6 +67,10 @@ assert.equal(hasRemoteStoreMigrationExecute(
 assert.equal(hasRemoteStoreMigrationExecute(
   'npx wrangler d1 execute DB --remote --command "$(cat migrations/0081_store_catalog_foundation.sql)"',
 ), true);
+assert.equal(callsRemoteMigrationHelper(
+  "bash scripts/apply-migrations.sh",
+  { "scripts/apply-migrations.sh": `npm run ${remoteMigrationScripts[0]!}` },
+), true);
 assert.equal(isStoreMigrationAutomation("store:rollout", 'node -e \'execFileSync("wrangler", ["d1", "migrations", "apply", "DB", "--remote"])\''), true);
 assert.equal(storeFlagAssignmentPattern.test("DZN_STORE_ENABLED=$ENABLE_STORE next start"), true);
 assert.equal(storeFlagWranglerMutationPattern.test("printf true | npx wrangler pages secret put DZN_STORE_ENABLED"), true);
@@ -107,7 +111,8 @@ for (const file of automationFiles) {
   const targetsStore = isStoreTarget(file, source);
   const appliesMigration = hasRemoteMigrationInvocation(source) || hasRemoteStoreMigrationExecute(source, targetsStore);
   const callsRemoteWrapper = callsRemoteMigrationWrapper(source);
-  assert.equal((appliesMigration || callsRemoteWrapper) && targetsStore, false, `${file} must not automate Store production migration application.`);
+  const callsRemoteHelper = callsRemoteMigrationHelper(source);
+  assert.equal((appliesMigration || callsRemoteWrapper || callsRemoteHelper) && targetsStore, false, `${file} must not automate Store production migration application.`);
   assert.doesNotMatch(source, storeFlagAssignmentPattern, `${file} must not automate Store activation.`);
   assert.equal(hasStoreFlagWranglerMutation(source, dirname(file), {}, targetsStore), false, `${file} must not mutate Store activation secrets.`);
   if (/\.(?:ya?ml|toml|jsonc?)$/i.test(file)) {
@@ -120,7 +125,8 @@ function isStoreMigrationAutomation(name: string, command: string, resolvedRemot
     && (resolvedRemoteScripts.includes(name)
       || hasRemoteMigrationInvocation(command)
       || hasRemoteStoreMigrationExecute(command, isStoreTarget(name, command))
-      || callsRemoteMigrationWrapper(command, resolvedRemoteScripts));
+      || callsRemoteMigrationWrapper(command, resolvedRemoteScripts)
+      || callsRemoteMigrationHelper(command));
 }
 
 function isStoreTarget(pathOrName: string, content: string) {
@@ -144,6 +150,40 @@ function resolvesRemoteMigration(name: string, seen = new Set<string>()): boolea
 
 function callsRemoteMigrationWrapper(source: string, resolvedRemoteScripts = remoteMigrationScripts) {
   return extractNpmRunTargets(source).some((target) => resolvedRemoteScripts.includes(target));
+}
+
+function callsRemoteMigrationHelper(
+  source: string,
+  fixtureFiles: Record<string, string> = {},
+  seen = new Set<string>(),
+): boolean {
+  for (const referencedPath of extractScriptReferences(source)) {
+    if (referencedPath === "scripts/test-store-catalog-activation-checklist.ts" || seen.has(referencedPath)) continue;
+    const fixture = fixtureFiles[referencedPath];
+    const absolutePath = resolve(referencedPath);
+    const helperSource = fixture ?? (existsSync(absolutePath) && statSync(absolutePath).isFile()
+      ? readFileSync(absolutePath, "utf8")
+      : null);
+    if (helperSource === null) continue;
+    const nextSeen = new Set(seen).add(referencedPath);
+    if (hasRemoteMigrationInvocation(helperSource)
+      || hasRemoteStoreMigrationExecute(helperSource, true)
+      || callsRemoteMigrationWrapper(helperSource)
+      || callsRemoteMigrationHelper(helperSource, fixtureFiles, nextSeen)) return true;
+  }
+  return false;
+}
+
+function extractScriptReferences(source: string) {
+  const root = resolve(".");
+  const normalized = normalizeCommandTokens(source).replace(/\\\s*\r?\n/g, " ");
+  const references = new Set<string>();
+  for (const match of normalized.matchAll(/(?:^|\s)((?:\.\/)?scripts\/[\w./-]+\.(?:ts|js|mjs|cjs|sh))\b/gi)) {
+    const absolutePath = resolve(match[1]);
+    const fromRoot = relative(root, absolutePath).replace(/\\/g, "/");
+    if (!fromRoot.startsWith("..") && !isAbsolute(fromRoot)) references.add(fromRoot);
+  }
+  return [...references];
 }
 
 function extractNpmRunTargets(source: string) {
