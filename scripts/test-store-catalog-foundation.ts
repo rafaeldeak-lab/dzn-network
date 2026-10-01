@@ -90,6 +90,7 @@ for (const unsafe of [
   { name: "Rank Advantage" },
   { name: "Spin Pack" },
   { name: "Event Advantage Pack" },
+  { name: "Competitive Advantage Pack" },
   { description: "Get a ranking boost with this purchase." },
   { description: "Includes 10 spins with this purchase." },
   { description: "Cosmetic theme with an event advantage." },
