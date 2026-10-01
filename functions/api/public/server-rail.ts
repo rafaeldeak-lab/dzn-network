@@ -42,8 +42,8 @@ type RailRow = {
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method !== "GET") return methodNotAllowed();
-  const headers = publicCacheHeaders({ maxAge: 60, staleWhileRevalidate: 300 });
-  headers.set("x-dzn-cache-policy", "s-maxage=60; stale-while-revalidate=300");
+  const headers = publicCacheHeaders({ maxAge: 15, staleWhileRevalidate: 45 });
+  headers.set("x-dzn-cache-policy", "s-maxage=15; stale-while-revalidate=45");
 
   if (!env.DB) {
     return json({ ok: true, items: [], generated_at: new Date().toISOString(), stale: true }, { headers });

@@ -13,8 +13,10 @@ const html = await readFile(path.join(root, "index.html"), "utf8");
 const css = [...html.matchAll(/<link[^>]+href="([^"]+\.css)"[^>]*>/g)].map((match) => `<link rel="stylesheet" href="${match[1]}">`).join("");
 const fixture = "import React from 'react';import{createRoot}from'react-dom/client';import{LiveServerRail}from'./components/servers/live-server-rail';createRoot(document.getElementById('root')).render(<main style={{maxWidth:1200,margin:'40px auto',padding:'0 16px'}}><LiveServerRail/></main>);";
 const bundle = await build({ stdin: { contents: fixture, resolveDir: process.cwd(), loader: "tsx" }, bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic", define: { "process.env.NODE_ENV": '"production"', "process.env": "{}" } });
-const realServer = { id: "server-one", slug: "nuketown-deathmatch", name: "NukeTown DEATHMATCH", logoUrl: null, category: "Deathmatch", currentPlayers: 7, maxPlayers: 20, playerCountStatus: "fresh", ratingAverage: 4.8, reviewCount: 28, listingPlanKey: "pro", isPro: true };
+const realServer = { id: "server-one", slug: "nuketown-deathmatch", name: "NukeTown DEATHMATCH", logoUrl: null, category: "Deathmatch", currentPlayers: 0, maxPlayers: 10, playerCountStatus: "fresh", ratingAverage: 4.8, reviewCount: 28, listingPlanKey: "pro", isPro: true };
 const secondServer = { ...realServer, id: "server-two", slug: "second-server", name: "Second Server" };
+let railMode = "normal";
+let refreshRequestCount = 0;
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url, origin);
@@ -27,7 +29,14 @@ const server = createServer(async (request, response) => {
     return;
   }
   if (url.pathname === "/api/public/server-rail") {
-    response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true, items: [realServer, secondServer, { ...realServer, id: "legacy-duplicate" }], generated_at: new Date().toISOString() }));
+    refreshRequestCount += 1;
+    const staleRefresh = railMode === "preserve" && refreshRequestCount > 1;
+    const items = staleRefresh
+      ? []
+      : railMode === "refresh" && refreshRequestCount === 1
+        ? [{ ...realServer, currentPlayers: null, maxPlayers: null, playerCountStatus: "stale" }]
+        : [realServer, secondServer, { ...realServer, id: "legacy-duplicate" }];
+    response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true, items, generated_at: new Date().toISOString(), stale: staleRefresh }));
     return;
   }
   const file = path.resolve(root, decodeURIComponent(url.pathname).slice(1));
@@ -72,7 +81,7 @@ try {
     assert.equal(metrics.overflow, false, `Empty server rail must not overflow at ${width}px`);
     assert.equal(metrics.railCards, 2, "Duplicate API identities must render once while distinct servers remain visible.");
     assert.deepEqual(metrics.uniqueCardIds, ["nuketown-deathmatch", "second-server"]);
-    assert.equal(metrics.text.includes("7/20"), true, "Fresh player counts should render from the live response.");
+    assert.equal(metrics.text.includes("0/10"), true, "Zero online players should render as fresh live data.");
     assert.equal(metrics.status, "Latest server data");
     if (reducedMotion === "reduce") assert.equal(metrics.animationName, "none", "Reduced-motion users should not receive rail animation.");
     else {
@@ -86,6 +95,27 @@ try {
     await writeFile(path.join(output, `deduplicated-${label}.json`), JSON.stringify(metrics, null, 2));
     await context.close();
   }
+  railMode = "refresh";
+  refreshRequestCount = 0;
+  const refreshContext = await browser.newContext({ viewport: { width: 390, height: 800 } });
+  const refreshPage = await refreshContext.newPage();
+  await refreshPage.goto(origin, { waitUntil: "networkidle" });
+  assert.equal((await refreshPage.locator(".dzn-live-server-rail").innerText()).includes("Players syncing"), true);
+  await refreshPage.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await refreshPage.waitForFunction(() => document.querySelector(".dzn-live-server-rail")?.textContent?.includes("0/10"));
+  assert.equal(await refreshPage.locator(".dzn-live-server-card").count(), 2, "A successful refresh should replace stale data without cloning cards.");
+  await refreshContext.close();
+  railMode = "preserve";
+  refreshRequestCount = 0;
+  const preserveContext = await browser.newContext({ viewport: { width: 390, height: 800 } });
+  const preservePage = await preserveContext.newPage();
+  await preservePage.goto(origin, { waitUntil: "networkidle" });
+  await preservePage.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await preservePage.waitForFunction(() => document.querySelector(".dzn-live-server-rail__header span:last-child")?.textContent?.includes("Latest data unavailable"));
+  assert.equal(await preservePage.locator(".dzn-live-server-card").count(), 2, "A stale empty refresh must retain the last known-good cards.");
+  assert.equal((await preservePage.locator(".dzn-live-server-rail").innerText()).includes("0/10"), true, "A stale empty refresh must retain the last known-good live count.");
+  await preserveContext.close();
+  railMode = "normal";
   const unavailableContext = await browser.newContext({ viewport: { width: 390, height: 800 } });
   const unavailablePage = await unavailableContext.newPage();
   await unavailablePage.route("**/api/public/server-rail", (route) => route.fulfill({
