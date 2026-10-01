@@ -192,12 +192,10 @@ function hasStoreFlagWranglerMutation(
     if (!candidate || /[$%{}]/.test(candidate)) return true;
     const fixture = fixtureFiles[candidate];
     if (fixture !== undefined) return storeFlagConfigPattern.test(fixture);
-    for (const path of bulkInputCandidates(candidate, baseDir)) {
-      if (existsSync(path) && statSync(path).isFile()) {
-        return storeFlagConfigPattern.test(readFileSync(path, "utf8"));
-      }
-    }
-    return true;
+    const resolvedInputs = bulkInputCandidates(candidate, baseDir)
+      .filter((path) => existsSync(path) && statSync(path).isFile());
+    if (resolvedInputs.length === 0) return true;
+    return resolvedInputs.some((path) => storeFlagConfigPattern.test(readFileSync(path, "utf8")));
   });
 }
 
