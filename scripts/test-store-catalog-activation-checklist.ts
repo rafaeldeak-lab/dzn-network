@@ -35,38 +35,52 @@ const automationFiles = [
   ...walk(".github/workflows", (path) => /\.ya?ml$/i.test(path)),
   ...walk("scripts", (path) => /\.(?:ts|js|mjs|cjs|sh)$/i.test(path)),
 ].filter((path) => !/^scripts\/test-/.test(path));
-const remoteMigrationScripts = Object.entries(scripts)
-  .filter(([, command]) => /wrangler\s+d1\s+migrations\s+apply/i.test(command) && !/--local\b/i.test(command))
-  .map(([name]) => name);
+const remoteMigrationScripts = Object.keys(scripts).filter((name) => resolvesRemoteMigration(name));
 const remoteWrapperPattern = remoteMigrationScripts.length
   ? new RegExp(`npm\\s+(?:run\\s+)?(?:${remoteMigrationScripts.map(escapeRegex).join("|")})\\b`, "i")
   : /$a/;
-const storeFlagEnablePattern = /DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\s*(?:=|:)\s*["'`]?(?:true|1|yes|on)\b/i;
+const storeFlagAssignmentPattern = /DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\s*(?:=|:)/i;
 assert.equal(remoteMigrationScripts.length > 0, true, "The guard must discover the existing remote D1 migration wrapper.");
 for (const scriptName of remoteMigrationScripts) {
   assert.equal(remoteWrapperPattern.test(`npm run ${scriptName}`), true, `The guard must recognize ${scriptName} callers.`);
 }
 assert.equal(isStoreMigrationAutomation("store:rollout", `npm run ${remoteMigrationScripts[0]!}`), true);
-assert.equal(storeFlagEnablePattern.test("DZN_STORE_ENABLED='true' next start"), true);
+assert.equal(storeFlagAssignmentPattern.test("DZN_STORE_ENABLED=$ENABLE_STORE next start"), true);
+assert.equal(isStoreTarget("scripts/store-rollout.ts", `npm run ${remoteMigrationScripts[0]!}`), true);
 
 for (const [name, command] of Object.entries(scripts)) {
   if (/^test:/.test(name)) continue;
   assert.equal(isStoreMigrationAutomation(name, command), false, `${name} must not automate Store production migration application.`);
-  assert.doesNotMatch(command, storeFlagEnablePattern, `${name} must not automate Store activation.`);
+  assert.doesNotMatch(command, storeFlagAssignmentPattern, `${name} must not automate Store activation.`);
 }
 
 for (const file of automationFiles) {
   const source = readFileSync(file, "utf8");
   const appliesMigration = /wrangler\s+d1\s+migrations\s+apply/i.test(source);
-  const targetsStore = /(?:0081_store_catalog|DZN_STORE_)/i.test(source);
+  const targetsStore = isStoreTarget(file, source);
   const callsRemoteMigrationWrapper = remoteWrapperPattern.test(source);
   assert.equal((appliesMigration || callsRemoteMigrationWrapper) && targetsStore, false, `${file} must not automate Store production migration application.`);
-  assert.doesNotMatch(source, storeFlagEnablePattern, `${file} must not automate Store activation.`);
+  assert.doesNotMatch(source, storeFlagAssignmentPattern, `${file} must not automate Store activation.`);
 }
 
 function isStoreMigrationAutomation(name: string, command: string) {
-  const targetsStore = /(?:0081_store_catalog|DZN_STORE_)/i.test(`${name} ${command}`) || /(?:^|[:/_-])store(?:[:/_-]|$)/i.test(name);
-  return targetsStore && (/wrangler\s+d1\s+migrations\s+apply/i.test(command) || remoteWrapperPattern.test(command));
+  return isStoreTarget(name, command) && (/wrangler\s+d1\s+migrations\s+apply/i.test(command) || remoteWrapperPattern.test(command));
+}
+
+function isStoreTarget(pathOrName: string, content: string) {
+  return /(?:0081_store_catalog|DZN_STORE_)/i.test(content) || /(?:^|[:/_-])store(?:[:/_.-]|$)/i.test(pathOrName);
+}
+
+function resolvesRemoteMigration(name: string, seen = new Set<string>()): boolean {
+  if (seen.has(name)) return false;
+  const command = scripts[name];
+  if (!command) return false;
+  if (/wrangler\s+d1\s+migrations\s+apply/i.test(command) && !/--local\b/i.test(command)) return true;
+  const nextSeen = new Set(seen).add(name);
+  for (const match of command.matchAll(/npm\s+(?:run\s+)?([A-Za-z0-9:_-]+)/gi)) {
+    if (resolvesRemoteMigration(match[1], nextSeen)) return true;
+  }
+  return false;
 }
 
 function walk(dir: string, matcher: (path: string) => boolean): string[] {
