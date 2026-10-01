@@ -4,7 +4,12 @@
 
 CREATE TABLE IF NOT EXISTS store_products (
   id TEXT PRIMARY KEY,
-  product_key TEXT NOT NULL UNIQUE,
+  product_key TEXT NOT NULL UNIQUE CHECK (
+    length(product_key) BETWEEN 3 AND 81 AND
+    product_key = lower(product_key) AND
+    substr(product_key, 1, 1) GLOB '[a-z0-9]' AND
+    product_key NOT GLOB '*[^a-z0-9-]*'
+  ),
   name TEXT NOT NULL,
   description TEXT NOT NULL,
   product_type TEXT NOT NULL CHECK (product_type IN (

@@ -20,6 +20,8 @@ assert.match(migration, /stripe_price_id TEXT UNIQUE CHECK \(stripe_price_id IS 
 assert.doesNotMatch(migration, /'approved'|'paused'|'archived'/);
 assert.match(migration, /grants_competitive_eligibility INTEGER NOT NULL DEFAULT 0 CHECK \(grants_competitive_eligibility = 0\)/);
 assert.match(migration, /metadata_json TEXT NOT NULL DEFAULT '\{\}' CHECK \(metadata_json = '\{\}'\)/);
+assert.match(migration, /product_key = lower\(product_key\)/);
+assert.match(migration, /product_key NOT GLOB '\*\[\^a-z0-9-\]\*'/);
 assert.match(migration, /typeof\(unit_amount_minor\) = 'integer'/);
 assert.match(migration, /FOREIGN KEY\(product_id\) REFERENCES store_products\(id\) ON DELETE CASCADE/);
 
@@ -49,6 +51,14 @@ assert.throws(() => db.exec("UPDATE store_products SET metadata_json = 'not json
 assert.throws(() => db.exec("UPDATE store_products SET metadata_json = '[]' WHERE id = 'product_001'"), /CHECK constraint failed/);
 assert.throws(() => db.exec(`UPDATE store_products SET metadata_json = '{"grantsXp":true}' WHERE id = 'product_001'`), /CHECK constraint failed/);
 assert.throws(() => db.exec("UPDATE store_products SET fulfilment_kind = 'event_theme' WHERE id = 'product_001'"), /CHECK constraint failed/);
+for (const productKey of ["PACK", "pack_name", "-pack", "pa", `p${"a".repeat(81)}`]) {
+  assert.throws(() => db.exec(`INSERT INTO store_products (
+    id, product_key, name, description, product_type, fulfilment_kind
+  ) VALUES (
+    'product_${productKey.length}', '${productKey}', 'Profile theme',
+    'Account-bound profile presentation cosmetics.', 'profile_theme', 'theme_pack'
+  )`), /CHECK constraint failed/);
+}
 assert.throws(() => db.exec(`INSERT INTO store_prices (
   id, product_id, currency, unit_amount_minor, stripe_price_id
 ) VALUES ('price_001', 'product_001', 'gbp', 1000, 'price_live_blocked')`), /CHECK constraint failed/);
