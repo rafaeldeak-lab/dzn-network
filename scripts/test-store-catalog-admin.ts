@@ -12,6 +12,7 @@ import {
   onRequestGet as onStoreCatalogGet,
   onRequestPost as onStoreCatalogPost,
 } from "../functions/api/owner/store/catalog";
+import { onRequestGet as onStorePageGet } from "../functions/owner/store";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
 
 const actor: SessionUser = {
@@ -40,6 +41,18 @@ const validInput = {
 };
 
 async function run() {
+  const pageGuardSource = readFileSync("functions/owner/store.ts", "utf8");
+  const pageSource = readFileSync("app/owner/store/page.tsx", "utf8");
+  const workspaceSource = readFileSync("components/owner/store-draft-management-page.tsx", "utf8");
+  const ownerConsoleSource = readFileSync("components/owner/owner-console.tsx", "utf8");
+  assert.match(pageGuardSource, /requirePlatformOwner\(env, request, \{ mode: "page" \}\)/);
+  assert.match(pageSource, /StoreDraftManagementPage/);
+  assert.match(workspaceSource, /\/api\/owner\/store\/catalog/);
+  assert.match(workspaceSource, /STORE_DRAFT_ADMIN_DISABLED/);
+  assert.match(workspaceSource, /Public Store[\s\S]*Checkout[\s\S]*Payments[\s\S]*Fulfilment/);
+  assert.doesNotMatch(workspaceSource, /api\/stripe|create-checkout|checkout\/session|activateProduct|publishProduct/);
+  assert.match(ownerConsoleSource, /href="\/owner\/store"/);
+
   const mf = new Miniflare({
     modules: true,
     script: "export default { fetch() { return new Response('local test'); } }",
@@ -82,6 +95,18 @@ async function run() {
 
     const ownerSession = await createSession(env, actor.id);
     const nonOwnerSession = await createSession(env, nonOwner.id);
+
+    const anonymousPage = await onStorePageGet(context(env, request("GET")));
+    assert.equal(anonymousPage.status, 302);
+    assert.match(anonymousPage.headers.get("location") ?? "", /\/login/);
+    const forbiddenPage = await onStorePageGet(context(env, request("GET", undefined, nonOwnerSession.token)));
+    assert.equal(forbiddenPage.status, 403);
+    const ownerPage = await onStorePageGet(context(
+      env,
+      request("GET", undefined, ownerSession.token),
+      async () => new Response(null, { status: 204 }),
+    ));
+    assert.equal(ownerPage.status, 204);
 
     const anonymous = await onStoreCatalogGet(context(env, request("GET")));
     assert.equal(anonymous.status, 401);
@@ -208,13 +233,13 @@ function request(method: "GET" | "POST", body?: unknown, token?: string, origin?
   });
 }
 
-function context(env: Env, requestValue: Request): PagesContext {
+function context(env: Env, requestValue: Request, next: PagesContext["next"] = async () => new Response(null, { status: 404 })): PagesContext {
   return {
     env,
     request: requestValue,
     params: {},
     waitUntil: () => undefined,
-    next: async () => new Response(null, { status: 404 }),
+    next,
     data: {},
   };
 }

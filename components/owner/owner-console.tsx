@@ -628,6 +628,9 @@ function OwnerShell({ activeView, setActiveView, children }: {
             <Link href="/owner/reviews" className="block rounded-lg border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-sm font-bold text-amber-100 hover:border-amber-300/40 hover:text-white">
               Moderate Server Reviews
             </Link>
+            <Link href="/owner/store" className="block rounded-lg border border-emerald-300/20 bg-emerald-300/[0.06] px-3 py-2 text-sm font-bold text-emerald-100 hover:border-emerald-300/40 hover:text-white">
+              Manage Store Drafts
+            </Link>
           </div>
         </aside>
 
