@@ -119,6 +119,14 @@ assert.equal(callsRemoteMigrationHelper(
 assert.equal(callsRemoteMigrationHelper(
   "uses: ./.github/actions/apply-migrations",
   {
+    ".github/actions/apply-migrations/action.yml": "runs:\n  using: docker\n  image: Dockerfile\n  entrypoint: entrypoint.sh",
+    ".github/actions/apply-migrations/Dockerfile": `RUN npm run ${remoteMigrationScripts[0]!}`,
+    ".github/actions/apply-migrations/entrypoint.sh": "echo ready",
+  },
+), true);
+assert.equal(callsRemoteMigrationHelper(
+  "uses: ./.github/actions/apply-migrations",
+  {
     ".github/actions/apply-migrations/action.yml": "runs: { using: node20, main: dist/main.js }",
     ".github/actions/apply-migrations/dist/main.js": `npm run ${remoteMigrationScripts[0]!}`,
   },
@@ -283,7 +291,9 @@ function extractScriptReferences(source: string, fromFile?: string) {
     }
     if (/(?:^|\/)action\.ya?ml$/i.test(fromFile)) {
       for (const entryPoint of extractActionEntryPoints(source)) {
-        addScriptReference(references, root, resolve(dirname(fromFile), entryPoint), Boolean(/\.[a-z]+$/i.test(entryPoint)));
+        if (!/^docker:\/\//i.test(entryPoint)) {
+          addScriptReference(references, root, resolve(dirname(fromFile), entryPoint), true);
+        }
       }
     }
   }
@@ -292,11 +302,11 @@ function extractScriptReferences(source: string, fromFile?: string) {
 
 function extractActionEntryPoints(source: string) {
   const entryPoints = new Set<string>();
-  for (const match of source.matchAll(/^\s*["']?(?:main|pre|post)["']?\s*:\s*["']?([^\s#,"'}]+)/gim)) {
+  for (const match of source.matchAll(/^\s*["']?(?:main|pre|post|image|entrypoint)["']?\s*:\s*["']?([^\s#,"'}]+)/gim)) {
     entryPoints.add(stripToken(match[1]));
   }
   for (const runsMatch of source.matchAll(/["']?runs["']?\s*:\s*\{([^}]*)\}/gi)) {
-    for (const match of runsMatch[1].matchAll(/(?:^|,)\s*["']?(?:main|pre|post)["']?\s*:\s*["']?([^\s,#"'}]+)/gi)) {
+    for (const match of runsMatch[1].matchAll(/(?:^|,)\s*["']?(?:main|pre|post|image|entrypoint)["']?\s*:\s*["']?([^\s,#"'}]+)/gi)) {
       entryPoints.add(stripToken(match[1]));
     }
   }
