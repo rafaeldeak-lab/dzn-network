@@ -74,6 +74,9 @@ assert.equal(hasStoreFlagWranglerMutation(
 assert.equal(callsRemoteMigrationWrapper(`npm --silent run ${remoteMigrationScripts[0]!}`), true);
 assert.equal(callsRemoteMigrationWrapper(`execFileSync("npm", ["run", "${remoteMigrationScripts[0]!}"])`), true);
 assert.equal(hasStoreFlagWranglerMutation("cd config && npx wrangler pages secret bulk store-secrets.json"), true);
+assert.equal(hasStoreFlagWranglerMutation(
+  'npx wrangler pages secret bulk --config wrangler.toml "$STORE_SECRETS"',
+), true);
 assert.equal(storeFlagConfigPattern.test('"DZN_STORE_ENABLED" = "true"'), true);
 assert.equal(isStoreTarget("scripts/store-rollout.ts", `npm run ${remoteMigrationScripts[0]!}`), true);
 assert.equal(automationFiles.includes("wrangler.toml"), true, "The guard must scan the production Wrangler configuration.");
@@ -184,27 +187,33 @@ function hasStoreFlagWranglerMutation(
     const bulkMatch = invocation.match(/\b(?:pages\s+)?secret\s+bulk\b([\s\S]*)/i);
     if (!bulkMatch) return false;
 
-    const candidates = (bulkMatch[1].match(/"[^"]*"|'[^']*'|`[^`]*`|\S+/g) ?? [])
-      .map(stripToken)
-      .filter((token) => token && token !== "-" && !token.startsWith("--"));
     if (/\bcd\s+[^;&|]+(?:&&|;)|\bworking-directory\s*:/i.test(source)) return true;
-    let resolvedInput = false;
-    const mutatesStoreFlag = candidates.some((candidate) => {
-      const fixture = fixtureFiles[candidate];
-      if (fixture !== undefined) {
-        resolvedInput = true;
-        return storeFlagConfigPattern.test(fixture);
+    const candidate = extractSecretBulkInput(bulkMatch[1]);
+    if (!candidate || /[$%{}]/.test(candidate)) return true;
+    const fixture = fixtureFiles[candidate];
+    if (fixture !== undefined) return storeFlagConfigPattern.test(fixture);
+    for (const path of bulkInputCandidates(candidate, baseDir)) {
+      if (existsSync(path) && statSync(path).isFile()) {
+        return storeFlagConfigPattern.test(readFileSync(path, "utf8"));
       }
-      for (const path of bulkInputCandidates(candidate, baseDir)) {
-        if (existsSync(path) && statSync(path).isFile()) {
-          resolvedInput = true;
-          if (storeFlagConfigPattern.test(readFileSync(path, "utf8"))) return true;
-        }
-      }
-      return false;
-    });
-    return mutatesStoreFlag || !resolvedInput;
+    }
+    return true;
   });
+}
+
+function extractSecretBulkInput(tail: string) {
+  const tokens = (tail.match(/"[^"]*"|'[^']*'|`[^`]*`|\S+/g) ?? []).map(stripToken);
+  const valueOptions = new Set(["--config", "-c", "--env", "-e", "--cwd", "--name", "--project-name"]);
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (valueOptions.has(token)) {
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("-")) continue;
+    return token;
+  }
+  return null;
 }
 
 function bulkInputCandidates(candidate: string, baseDir: string) {
