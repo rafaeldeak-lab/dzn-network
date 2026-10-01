@@ -43,12 +43,23 @@ const automationFiles = [
   ...walk(".github/workflows", (path) => /\.ya?ml$/i.test(path)),
   ...walk("scripts", (path) => /\.(?:ts|js|mjs|cjs|sh)$/i.test(path)),
 ].filter((path) => !/^scripts\/test-/.test(path));
+const remoteMigrationScripts = Object.entries(scripts)
+  .filter(([, command]) => /wrangler\s+d1\s+migrations\s+apply/i.test(command) && !/--local\b/i.test(command))
+  .map(([name]) => name);
+const remoteWrapperPattern = remoteMigrationScripts.length
+  ? new RegExp(`npm\\s+(?:run\\s+)?(?:${remoteMigrationScripts.map(escapeRegex).join("|")})\\b`, "i")
+  : /$a/;
+assert.equal(remoteMigrationScripts.length > 0, true, "The guard must discover the existing remote D1 migration wrapper.");
+for (const scriptName of remoteMigrationScripts) {
+  assert.equal(remoteWrapperPattern.test(`npm run ${scriptName}`), true, `The guard must recognize ${scriptName} callers.`);
+}
 
 for (const file of automationFiles) {
   const source = readFileSync(file, "utf8");
   const appliesMigration = /wrangler\s+d1\s+migrations\s+apply/i.test(source);
   const targetsStore = /(?:0081_store_catalog|DZN_STORE_)/i.test(source);
-  assert.equal(appliesMigration && targetsStore, false, `${file} must not automate Store production migration application.`);
+  const callsRemoteMigrationWrapper = remoteWrapperPattern.test(source);
+  assert.equal((appliesMigration || callsRemoteMigrationWrapper) && targetsStore, false, `${file} must not automate Store production migration application.`);
   assert.doesNotMatch(source, /DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\s*(?:=|:)\s*["'`]?(?:true|1|yes|on)\b/i, `${file} must not automate Store activation.`);
 }
 
@@ -62,6 +73,10 @@ function walk(dir: string, matcher: (path: string) => boolean): string[] {
     else if (matcher(path)) results.push(path);
   }
   return results;
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 console.log("Store catalog activation checklist checks passed.");
