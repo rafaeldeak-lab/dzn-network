@@ -109,6 +109,13 @@ assert.equal(callsRemoteMigrationHelper(
   "uses: ./.github/workflows/apply-migrations.yml",
   { ".github/workflows/apply-migrations.yml": `run: npm run ${remoteMigrationScripts[0]!}` },
 ), true);
+assert.equal(callsRemoteMigrationHelper(
+  "uses: ./.github/actions/apply-migrations",
+  {
+    ".github/actions/apply-migrations/action.yml": "runs:\n  using: node20\n  main: dist/main.js",
+    ".github/actions/apply-migrations/dist/main.js": `npm run ${remoteMigrationScripts[0]!}`,
+  },
+), true);
 assert.equal(extractNpmRunTargets("npm test").includes("test"), true);
 assert.equal(extractNpmRunTargets("npm restart").includes("start"), true);
 assert.equal(callsRemoteMigrationHelper(
@@ -259,6 +266,12 @@ function extractScriptReferences(source: string, fromFile?: string) {
     }
     for (const match of source.matchAll(/(?:^|[\s;&|])(?:source\s+|\.\s+|(?:bash|sh)\s+)?(\.{1,2}\/[\w./-]+)/gm)) {
       addScriptReference(references, root, resolve(dirname(fromFile), match[1]), Boolean(/\.[a-z]+$/i.test(match[1])));
+    }
+    if (/(?:^|\/)action\.ya?ml$/i.test(fromFile)) {
+      for (const match of source.matchAll(/^\s*(?:main|pre|post)\s*:\s*["']?([^\s#"']+)/gim)) {
+        const entryPoint = stripToken(match[1]);
+        addScriptReference(references, root, resolve(dirname(fromFile), entryPoint), Boolean(/\.[a-z]+$/i.test(entryPoint)));
+      }
     }
   }
   return [...references];
