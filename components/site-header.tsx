@@ -26,7 +26,7 @@ import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding
 import type { AuthNavigationSummary } from "@/components/onboarding/types";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
 
-type SiteHeaderActive = "features" | "player" | "games" | "leaderboards" | "servers" | "pricing" | "stats" | "events" | "dashboard";
+type SiteHeaderActive = "features" | "player" | "games" | "leaderboards" | "servers" | "pricing" | "stats" | "events" | "community" | "dashboard";
 
 type SiteHeaderProps = {
   active?: SiteHeaderActive;
@@ -75,6 +75,7 @@ const rootHeaderHiddenPrefixes = [
 
 const loggedOutHeaderLinks: HeaderNavLink[] = [
   { href: "/#features", label: "Features", active: "features", icon: Sparkles },
+  { href: "/community", label: "Comms", active: "community", icon: MessageCircle },
   { href: "/pricing", label: "Pricing", active: "pricing", icon: Crown },
 ];
 
@@ -85,6 +86,7 @@ const starterHeaderLinks: HeaderNavLink[] = [
   { href: "/leaderboards", label: "Leaderboards", active: "leaderboards", icon: Trophy },
   { href: "/servers", label: "Servers", active: "servers", icon: Server },
   { href: "/events", label: "Events", active: "events", icon: CalendarDays },
+  { href: "/community", label: "Comms", active: "community", icon: MessageCircle },
 ];
 
 const proHeaderLinks: HeaderNavLink[] = [
@@ -95,6 +97,7 @@ const proHeaderLinks: HeaderNavLink[] = [
   { href: "/servers", label: "Servers", active: "servers", icon: Server },
   { href: "/#stats", label: "Stats", active: "stats", icon: Activity },
   { href: "/events", label: "Events", active: "events", icon: CalendarDays },
+  { href: "/community", label: "Comms", active: "community", icon: MessageCircle },
 ];
 
 let pageHeaderAuthState: SiteHeaderAuthStateProps | null = null;
@@ -362,6 +365,7 @@ function activeFromPathname(pathname: string): SiteHeaderActive | undefined {
   if (pathname.startsWith("/leaderboards")) return "leaderboards";
   if (pathname.startsWith("/servers")) return "servers";
   if (pathname.startsWith("/events")) return "events";
+  if (pathname.startsWith("/community")) return "community";
   if (pathname.startsWith("/dashboard")) return "dashboard";
   return undefined;
 }
