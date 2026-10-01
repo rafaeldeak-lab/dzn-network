@@ -181,6 +181,13 @@ export function DznCommsShell() {
   const reactionWritesEnabled = reactionWritesAvailable && authStatus === "authenticated";
   const reactionLoginRequired = reactionWritesAvailable && authStatus === "signed-out";
   const canSend = sendingEnabled && draft.trim().length > 0 && !sending;
+  const globalChatAccessLabel = sendingEnabled
+    ? "Live now"
+    : history.status === "ready"
+      ? "Read-only history"
+      : history.status === "loading"
+        ? "Checking access"
+        : "Preview only";
 
   async function handleSend(event: FormEvent) {
     event.preventDefault();
@@ -238,7 +245,7 @@ export function DznCommsShell() {
         <nav aria-label="DZN communication tools" className="grid gap-2 rounded-lg border border-white/10 bg-[#060a15]/95 p-2 sm:grid-cols-2">
           <a href="#global-chat" className="group flex min-h-14 items-center gap-3 rounded-md border border-cyan-300/35 bg-cyan-300/10 px-3 py-2">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-cyan-300/30 bg-cyan-300/10 text-cyan-100"><MessageCircle className="h-5 w-5" aria-hidden="true" /></span>
-            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">Global Chat</span><span className="block text-xs font-bold text-emerald-200">Available now</span></span>
+            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">Global Chat</span><span className="block text-xs font-bold text-emerald-200">{globalChatAccessLabel}</span></span>
             <ChevronRight className="h-4 w-4 text-cyan-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
           </a>
           <a href="#dzn-assist" className="group flex min-h-14 items-center gap-3 rounded-md border border-violet-300/20 bg-violet-300/6 px-3 py-2 transition hover:border-violet-200/45">

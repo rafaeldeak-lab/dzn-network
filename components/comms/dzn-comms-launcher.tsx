@@ -5,6 +5,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+const historyUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED === "true";
+const liveUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED === "true";
+
 export function DznCommsLauncher() {
   const pathname = usePathname();
   const [openPath, setOpenPath] = useState<string | null>(null);
@@ -30,7 +33,7 @@ export function DznCommsLauncher() {
   if (pathname.startsWith("/community")) return null;
 
   return (
-    <div ref={panelRef} className="fixed bottom-4 left-4 z-[70] flex max-w-[calc(100vw-2rem)] flex-col items-start gap-2">
+    <div ref={panelRef} className="fixed bottom-4 left-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-start gap-2">
       {open ? (
         <section
           id="dzn-comms-launcher-panel"
@@ -63,7 +66,9 @@ export function DznCommsLauncher() {
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-black uppercase text-white">Global Chat</span>
-                <span className="mt-0.5 block text-xs font-bold text-emerald-200">Open DZN Comms</span>
+                <span className="mt-0.5 block text-xs font-bold text-emerald-200">
+                  {liveUiEnabled ? "Open live chat" : historyUiEnabled ? "Open chat history" : "Open preview"}
+                </span>
               </span>
               <ChevronRight className="h-4 w-4 text-cyan-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
             </Link>

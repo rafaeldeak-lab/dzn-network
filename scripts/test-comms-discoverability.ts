@@ -16,10 +16,17 @@ assert.equal(launcherSource.includes("Not live yet"), true, "The launcher must n
 assert.equal(launcherSource.includes('pathname.startsWith("/community")'), true, "The floating launcher must not cover the Comms page itself.");
 assert.equal(launcherSource.includes('event.key === "Escape"'), true, "The launcher must close with Escape.");
 assert.equal(launcherSource.includes('document.addEventListener("pointerdown", closeOnOutsideClick)'), true, "The launcher must close when someone clicks elsewhere on the page.");
+assert.equal(launcherSource.includes("z-40"), true, "The launcher must remain below the shared header and modal layer.");
+assert.equal(launcherSource.includes("z-[70]"), false, "The launcher must not cover the DZN Pulse modal.");
+assert.equal(launcherSource.includes('liveUiEnabled ? "Open live chat" : historyUiEnabled ? "Open chat history" : "Open preview"'), true, "The launcher must describe the configured Comms access truthfully.");
 
 assert.equal(commsSource.includes('id="global-chat"'), true, "Global Chat must have a direct-link target.");
 assert.equal(commsSource.includes('id="dzn-assist"'), true, "DZN Assist must have a direct-link target.");
-assert.equal(commsSource.includes("Available now"), true, "Global Chat must show its available state.");
+assert.equal(commsSource.includes('sendingEnabled\n    ? "Live now"'), true, "Global Chat must identify a live sending runtime.");
+assert.equal(commsSource.includes('? "Read-only history"'), true, "Global Chat must identify read-only history.");
+assert.equal(commsSource.includes('? "Checking access"'), true, "Global Chat must identify access checks in progress.");
+assert.equal(commsSource.includes(': "Preview only"'), true, "Global Chat must identify the static preview state.");
+assert.equal(commsSource.includes("Available now"), false, "Global Chat must not claim unconditional availability.");
 assert.equal(commsSource.includes("No AI messages are being generated."), true, "DZN Assist status must state that no AI runtime is active.");
 assert.equal(commsSource.includes('pb-24 pt-4 text-zinc-100 sm:pt-6'), true, "Comms must begin directly below the shared header without the old empty spacer.");
 
