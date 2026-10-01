@@ -31,14 +31,6 @@ const scripts = packageJson.scripts ?? {};
 assert.equal(typeof scripts["test:store-catalog-foundation"], "string");
 assert.equal(scripts["test:store-catalog-foundation"].includes("test-store-catalog-activation-checklist.ts"), true);
 
-for (const [name, command] of Object.entries(scripts)) {
-  if (/^test:/.test(name)) continue;
-  const appliesMigration = /wrangler\s+d1\s+migrations\s+apply/i.test(command);
-  const targetsStore = /(?:0081_store_catalog|DZN_STORE_)/i.test(`${name} ${command}`);
-  assert.equal(appliesMigration && targetsStore, false, `${name} must not automate Store production migration application.`);
-  assert.doesNotMatch(command, /DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\s*=\s*(?:true|1)/i, `${name} must not automate Store activation.`);
-}
-
 const automationFiles = [
   ...walk(".github/workflows", (path) => /\.ya?ml$/i.test(path)),
   ...walk("scripts", (path) => /\.(?:ts|js|mjs|cjs|sh)$/i.test(path)),
@@ -49,9 +41,18 @@ const remoteMigrationScripts = Object.entries(scripts)
 const remoteWrapperPattern = remoteMigrationScripts.length
   ? new RegExp(`npm\\s+(?:run\\s+)?(?:${remoteMigrationScripts.map(escapeRegex).join("|")})\\b`, "i")
   : /$a/;
+const storeFlagEnablePattern = /DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\s*(?:=|:)\s*["'`]?(?:true|1|yes|on)\b/i;
 assert.equal(remoteMigrationScripts.length > 0, true, "The guard must discover the existing remote D1 migration wrapper.");
 for (const scriptName of remoteMigrationScripts) {
   assert.equal(remoteWrapperPattern.test(`npm run ${scriptName}`), true, `The guard must recognize ${scriptName} callers.`);
+}
+assert.equal(isStoreMigrationAutomation("store:rollout", `npm run ${remoteMigrationScripts[0]!}`), true);
+assert.equal(storeFlagEnablePattern.test("DZN_STORE_ENABLED='true' next start"), true);
+
+for (const [name, command] of Object.entries(scripts)) {
+  if (/^test:/.test(name)) continue;
+  assert.equal(isStoreMigrationAutomation(name, command), false, `${name} must not automate Store production migration application.`);
+  assert.doesNotMatch(command, storeFlagEnablePattern, `${name} must not automate Store activation.`);
 }
 
 for (const file of automationFiles) {
@@ -60,7 +61,12 @@ for (const file of automationFiles) {
   const targetsStore = /(?:0081_store_catalog|DZN_STORE_)/i.test(source);
   const callsRemoteMigrationWrapper = remoteWrapperPattern.test(source);
   assert.equal((appliesMigration || callsRemoteMigrationWrapper) && targetsStore, false, `${file} must not automate Store production migration application.`);
-  assert.doesNotMatch(source, /DZN_STORE_(?:ENABLED|ADMIN_ENABLED)\s*(?:=|:)\s*["'`]?(?:true|1|yes|on)\b/i, `${file} must not automate Store activation.`);
+  assert.doesNotMatch(source, storeFlagEnablePattern, `${file} must not automate Store activation.`);
+}
+
+function isStoreMigrationAutomation(name: string, command: string) {
+  const targetsStore = /(?:0081_store_catalog|DZN_STORE_)/i.test(`${name} ${command}`) || /(?:^|[:/_-])store(?:[:/_-]|$)/i.test(name);
+  return targetsStore && (/wrangler\s+d1\s+migrations\s+apply/i.test(command) || remoteWrapperPattern.test(command));
 }
 
 function walk(dir: string, matcher: (path: string) => boolean): string[] {
