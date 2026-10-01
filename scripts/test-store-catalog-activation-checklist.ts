@@ -79,6 +79,14 @@ assert.equal(callsRemoteMigrationHelper(
   },
 ), true);
 assert.equal(extractNpmRunTargets("npm test").includes("test"), true);
+assert.equal(extractNpmRunTargets("npm restart").includes("start"), true);
+assert.equal(callsRemoteMigrationHelper(
+  "tsx scripts/store-rollout.ts",
+  {
+    "scripts/store-rollout.ts": 'require("./apply-migrations")',
+    "scripts/apply-migrations/index.cjs": `npm run ${remoteMigrationScripts[0]!}`,
+  },
+), true);
 assert.equal(isStoreMigrationAutomation("store:rollout", 'node -e \'execFileSync("wrangler", ["d1", "migrations", "apply", "DB", "--remote"])\''), true);
 assert.equal(storeFlagAssignmentPattern.test("DZN_STORE_ENABLED=$ENABLE_STORE next start"), true);
 assert.equal(storeFlagWranglerMutationPattern.test("printf true | npx wrangler pages secret put DZN_STORE_ENABLED"), true);
@@ -204,7 +212,10 @@ function extractScriptReferences(source: string, fromFile?: string) {
 function addScriptReference(references: Set<string>, root: string, absoluteBase: string, hasExtension: boolean) {
   const candidates = hasExtension
     ? [absoluteBase]
-    : [".ts", ".tsx", ".js", ".mjs", ".cjs", ".sh"].map((extension) => `${absoluteBase}${extension}`);
+    : [".ts", ".tsx", ".js", ".mjs", ".cjs", ".sh"].flatMap((extension) => [
+      `${absoluteBase}${extension}`,
+      join(absoluteBase, `index${extension}`),
+    ]);
   for (const candidate of candidates) {
     const fromRoot = relative(root, candidate).replace(/\\/g, "/");
     if (!fromRoot.startsWith("..") && !isAbsolute(fromRoot)) {
@@ -222,7 +233,11 @@ function extractNpmRunTargets(source: string) {
     const candidateTokens = runIndex >= 0 ? tokens.slice(runIndex + 1) : tokens;
     for (const rawToken of candidateTokens) {
       const token = rawToken.replace(/^["'`]|["'`,)\]}]+$/g, "");
-      if (scripts[token] && (runIndex >= 0 || /^(?:start|stop|restart|test)$/i.test(token))) targets.add(token);
+      if (runIndex < 0 && /^restart$/i.test(token) && !scripts.restart) {
+        for (const fallback of ["stop", "start"]) if (scripts[fallback]) targets.add(fallback);
+      } else if (scripts[token] && (runIndex >= 0 || /^(?:start|stop|restart|test)$/i.test(token))) {
+        targets.add(token);
+      }
     }
   }
   return [...targets];
