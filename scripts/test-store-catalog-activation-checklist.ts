@@ -50,12 +50,14 @@ for (const scriptName of remoteMigrationScripts) {
   assert.equal(callsRemoteMigrationWrapper(`npm rum ${scriptName}`), true, `The guard must recognize the rum alias for ${scriptName}.`);
   assert.equal(callsRemoteMigrationWrapper(`npm urn ${scriptName}`), true, `The guard must recognize the urn alias for ${scriptName}.`);
   assert.equal(callsRemoteMigrationWrapper(`npm run --if-present ${scriptName}`), true, `The guard must recognize option-prefixed ${scriptName} callers.`);
+  assert.equal(callsRemoteMigrationWrapper(`npm run --script-shell /bin/bash ${scriptName}`), true, `The guard must skip option values before ${scriptName}.`);
 }
 assert.equal(isStoreMigrationAutomation("store:rollout", `npm run ${remoteMigrationScripts[0]!}`), true);
 assert.equal(isStoreMigrationAutomation("store:rollout", "echo ready", ["store:rollout"]), true);
 assert.equal(hasRemoteMigrationInvocation("wrangler d1 migrations apply DB --local && wrangler d1 migrations apply DB --remote"), true);
 assert.equal(hasRemoteMigrationInvocation("wrangler d1 migrations apply DB --local"), false);
 assert.equal(hasWranglerMigrationApply('execFileSync("wrangler", ["d1", "migrations", "apply", "DB", "--remote"])'), true);
+assert.equal(hasRemoteStoreMigrationExecute("npx wrangler d1 execute DB --remote --file migrations/0081_store_catalog_foundation.sql"), true);
 assert.equal(isStoreMigrationAutomation("store:rollout", 'node -e \'execFileSync("wrangler", ["d1", "migrations", "apply", "DB", "--remote"])\''), true);
 assert.equal(storeFlagAssignmentPattern.test("DZN_STORE_ENABLED=$ENABLE_STORE next start"), true);
 assert.equal(storeFlagWranglerMutationPattern.test("printf true | npx wrangler pages secret put DZN_STORE_ENABLED"), true);
@@ -72,7 +74,7 @@ for (const [name, command] of Object.entries(scripts)) {
 
 for (const file of automationFiles) {
   const source = readFileSync(file, "utf8");
-  const appliesMigration = hasWranglerMigrationApply(source);
+  const appliesMigration = hasWranglerMigrationApply(source) || hasRemoteStoreMigrationExecute(source);
   const targetsStore = isStoreTarget(file, source);
   const callsRemoteWrapper = callsRemoteMigrationWrapper(source);
   assert.equal((appliesMigration || callsRemoteWrapper) && targetsStore, false, `${file} must not automate Store production migration application.`);
@@ -85,7 +87,10 @@ for (const file of automationFiles) {
 
 function isStoreMigrationAutomation(name: string, command: string, resolvedRemoteScripts = remoteMigrationScripts) {
   return isStoreTarget(name, command)
-    && (resolvedRemoteScripts.includes(name) || hasRemoteMigrationInvocation(command) || callsRemoteMigrationWrapper(command, resolvedRemoteScripts));
+    && (resolvedRemoteScripts.includes(name)
+      || hasRemoteMigrationInvocation(command)
+      || hasRemoteStoreMigrationExecute(command)
+      || callsRemoteMigrationWrapper(command, resolvedRemoteScripts));
 }
 
 function isStoreTarget(pathOrName: string, content: string) {
@@ -96,7 +101,7 @@ function resolvesRemoteMigration(name: string, seen = new Set<string>()): boolea
   if (seen.has(name)) return false;
   const command = scripts[name];
   if (!command) return false;
-  if (hasRemoteMigrationInvocation(command)) return true;
+  if (hasRemoteMigrationInvocation(command) || hasRemoteStoreMigrationExecute(command)) return true;
   const nextSeen = new Set(seen).add(name);
   for (const hook of [`pre${name}`, `post${name}`]) {
     if (scripts[hook] && resolvesRemoteMigration(hook, nextSeen)) return true;
@@ -112,22 +117,15 @@ function callsRemoteMigrationWrapper(source: string, resolvedRemoteScripts = rem
 }
 
 function extractNpmRunTargets(source: string) {
-  const targets: string[] = [];
+  const targets = new Set<string>();
   for (const match of source.matchAll(/npm\s+(?:run|run-script|rum|urn)\s+([^;&|\r\n]+)/gi)) {
     const tokens = match[1].match(/"[^"]*"|'[^']*'|`[^`]*`|\S+/g) ?? [];
-    for (let index = 0; index < tokens.length; index += 1) {
-      const token = tokens[index].replace(/^["'`]|["'`,)\]}]+$/g, "");
-      if (token === "--") continue;
-      if (token === "--workspace" || token === "-w") {
-        index += 1;
-        continue;
-      }
-      if (token.startsWith("-")) continue;
-      targets.push(token);
-      break;
+    for (const rawToken of tokens) {
+      const token = rawToken.replace(/^["'`]|["'`,)\]}]+$/g, "");
+      if (scripts[token]) targets.add(token);
     }
   }
-  return targets;
+  return [...targets];
 }
 
 function hasRemoteMigrationInvocation(command: string) {
@@ -137,6 +135,13 @@ function hasRemoteMigrationInvocation(command: string) {
 
 function hasWranglerMigrationApply(source: string) {
   return /wrangler\s+d1\s+migrations\s+apply/i.test(normalizeCommandTokens(source));
+}
+
+function hasRemoteStoreMigrationExecute(source: string) {
+  const normalized = normalizeCommandTokens(source);
+  const invocations = normalized.match(/(?:npx\s+)?wrangler\s+d1\s+execute\b[^;&|\r\n]*/gi) ?? [];
+  return invocations.some((invocation) => /--remote\b/i.test(invocation)
+    && /--file(?:=|\s)+\S*0081_store_catalog_foundation\.sql\b/i.test(invocation));
 }
 
 function hasStoreFlagWranglerMutation(source: string) {
