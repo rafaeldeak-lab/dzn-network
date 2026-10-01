@@ -20,6 +20,7 @@ assert.doesNotMatch(migration, /STRIPE_|checkout|payment_intent|supporter_cards/
 assert.match(migration, /livemode INTEGER NOT NULL DEFAULT 0 CHECK \(livemode = 0\)/);
 assert.match(migration, /automated INTEGER NOT NULL DEFAULT 0 CHECK \(automated = 0\)/);
 assert.match(migration, /customer_visible INTEGER NOT NULL DEFAULT 0 CHECK \(customer_visible = 0\)/);
+assert.doesNotMatch(migration, /SELECT CASE/);
 
 const db = new DatabaseSync(":memory:");
 db.exec(`PRAGMA foreign_keys = ON; CREATE TABLE users (id TEXT PRIMARY KEY); ${migrations.join("\n")}`);
