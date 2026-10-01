@@ -159,18 +159,19 @@ END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_order_item_matches_order
 BEFORE INSERT ON store_order_items
+WHEN NOT EXISTS (
+  SELECT 1 FROM store_orders
+  WHERE id = NEW.order_id
+    AND currency = NEW.currency
+    AND subtotal_amount_minor = NEW.unit_amount_minor
+    AND tax_amount_minor = NEW.tax_amount_minor
+    AND total_amount_minor = NEW.total_amount_minor
+) OR NOT EXISTS (
+  SELECT 1 FROM store_prices
+  WHERE id = NEW.price_id AND product_id = NEW.product_id
+)
 BEGIN
-  SELECT CASE WHEN NOT EXISTS (
-    SELECT 1 FROM store_orders
-    WHERE id = NEW.order_id
-      AND currency = NEW.currency
-      AND subtotal_amount_minor = NEW.unit_amount_minor
-      AND tax_amount_minor = NEW.tax_amount_minor
-      AND total_amount_minor = NEW.total_amount_minor
-  ) OR NOT EXISTS (
-    SELECT 1 FROM store_prices
-    WHERE id = NEW.price_id AND product_id = NEW.product_id
-  ) THEN RAISE(ABORT, 'store order item totals and catalog references must match') END;
+  SELECT RAISE(ABORT, 'store order item totals and catalog references must match');
 END;
 
 CREATE INDEX IF NOT EXISTS idx_store_inventory_policies_active
