@@ -5,17 +5,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-const historyUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED === "true";
-const liveUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED === "true";
-
 export function DznCommsLauncher() {
   const pathname = usePathname();
   const [openPath, setOpenPath] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const open = openPath === pathname;
 
   useEffect(() => {
     if (!open) return;
+    closeButtonRef.current?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpenPath(null);
     };
@@ -46,6 +45,7 @@ export function DznCommsLauncher() {
               <span className="text-sm font-black uppercase text-white">DZN Comms</span>
             </div>
             <button
+              ref={closeButtonRef}
               type="button"
               onClick={() => setOpenPath(null)}
               className="grid h-9 w-9 place-items-center rounded-md border border-white/10 text-zinc-300 transition hover:border-cyan-300/40 hover:text-white"
@@ -67,9 +67,7 @@ export function DznCommsLauncher() {
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-black uppercase text-white">Global Chat</span>
-                <span className="mt-0.5 block text-xs font-bold text-emerald-200">
-                  {liveUiEnabled ? "Open live chat" : historyUiEnabled ? "Open chat history" : "Open preview"}
-                </span>
+                <span className="mt-0.5 block text-xs font-bold text-emerald-200">Open Global Chat</span>
               </span>
               <ChevronRight className="h-4 w-4 text-cyan-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
             </Link>

@@ -21,7 +21,10 @@ assert.equal(launcherSource.includes('document.addEventListener("pointerdown", c
 assert.equal(launcherSource.match(/onClick=\{\(\) => setOpenPath\(null\)\}/g)?.length, 3, "The launcher close control and both navigation links must clear its open state.");
 assert.equal(launcherSource.includes("z-40"), true, "The launcher must remain below the shared header and modal layer.");
 assert.equal(launcherSource.includes("z-[70]"), false, "The launcher must not cover the DZN Pulse modal.");
-assert.equal(launcherSource.includes('liveUiEnabled ? "Open live chat" : historyUiEnabled ? "Open chat history" : "Open preview"'), true, "The launcher must describe the configured Comms access truthfully.");
+assert.equal(launcherSource.includes("Open Global Chat"), true, "The launcher must use neutral copy until the authoritative runtime state is known.");
+assert.equal(launcherSource.includes("Open live chat"), false, "The launcher must not infer live availability from public build flags.");
+assert.equal(launcherSource.includes("closeButtonRef.current?.focus()"), true, "Opening the launcher must move keyboard focus into its menu.");
+assert.equal(launcherSource.includes("ref={closeButtonRef}"), true, "The launcher close control must be the initial focus target.");
 
 assert.equal(commsSource.includes('id="global-chat"'), true, "Global Chat must have a direct-link target.");
 assert.equal(commsSource.includes('id="dzn-assist"'), true, "DZN Assist must have a direct-link target.");
