@@ -34,33 +34,72 @@ type StorePriceRow = {
   created_at: string;
 };
 
+type StoreDraftListOptions = {
+  cursor?: string | null;
+  limit?: number;
+};
+
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 100;
+const STORE_DRAFT_CURSOR = /^([^~]{1,64})~([A-Za-z0-9_-]{3,128})$/;
+
 export function storeDraftAdminEnabled(env: Env) {
   return canManageStoreDrafts(env as unknown as Record<string, unknown>, true);
 }
 
-export async function listStoreCatalogDrafts(env: Env) {
+export async function listStoreCatalogDrafts(env: Env, options: StoreDraftListOptions = {}) {
+  const pageSize = options.limit ?? DEFAULT_PAGE_SIZE;
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
+    return invalidList("INVALID_PAGE_SIZE", `Use a page size between 1 and ${MAX_PAGE_SIZE}.`);
+  }
+  const cursor = decodeCursor(options.cursor);
+  if (!cursor.ok) return invalidList("INVALID_CURSOR", "The Store draft cursor is invalid.");
+
   try {
     const db = requireDb(env);
-    const [productsResult, pricesResult] = await db.batch([
-      db.prepare(`SELECT id, product_key, name, description, product_type, fulfilment_kind,
+    const cursorClause = cursor.value
+      ? "AND (created_at < ? OR (created_at = ? AND id < ?))"
+      : "";
+    const productStatement = db.prepare(`SELECT id, product_key, name, description, product_type, fulfilment_kind,
         status, created_at, updated_at
         FROM store_products
         WHERE active = 0 AND status IN ('draft', 'review')
+        ${cursorClause}
         ORDER BY created_at DESC, id DESC
-        LIMIT 200`),
-      db.prepare(`SELECT id, product_id, currency, unit_amount_minor, status,
+        LIMIT ?`);
+    const productResult = cursor.value
+      ? await productStatement.bind(cursor.value.createdAt, cursor.value.createdAt, cursor.value.id, pageSize + 1).all<StoreProductRow>()
+      : await productStatement.bind(pageSize + 1).all<StoreProductRow>();
+    if (!productResult.success) return unavailable();
+
+    const availableProducts = productResult.results ?? [];
+    const products = availableProducts.slice(0, pageSize);
+    const hasMore = availableProducts.length > pageSize;
+    const lastProduct = products.at(-1);
+    let prices: StorePriceRow[] = [];
+    if (products.length) {
+      const placeholders = products.map(() => "?").join(", ");
+      const pricesResult = await db.prepare(`SELECT id, product_id, currency, unit_amount_minor, status,
         effective_from, effective_to, created_at
         FROM store_prices
         WHERE active = 0 AND stripe_price_id IS NULL AND status IN ('draft', 'review')
-        ORDER BY created_at DESC, id DESC
-        LIMIT 400`),
-    ]);
-    if (!productsResult.success || !pricesResult.success) return unavailable();
+          AND product_id IN (${placeholders})
+        ORDER BY created_at DESC, id DESC`)
+        .bind(...products.map((product) => product.id))
+        .all<StorePriceRow>();
+      if (!pricesResult.success) return unavailable();
+      prices = pricesResult.results ?? [];
+    }
     return {
       ok: true as const,
       status: 200 as const,
-      products: (productsResult.results ?? []) as StoreProductRow[],
-      prices: (pricesResult.results ?? []) as StorePriceRow[],
+      products,
+      prices,
+      page: {
+        limit: pageSize,
+        hasMore,
+        nextCursor: hasMore && lastProduct ? encodeCursor(lastProduct) : null,
+      },
     };
   } catch {
     return unavailable();
@@ -124,6 +163,24 @@ export async function createStoreCatalogDraft(env: Env, actor: SessionUser, inpu
 
 function invalid(scope: "product" | "price", errors: unknown[]) {
   return { ok: false as const, status: 400 as const, error: "INVALID_STORE_DRAFT", scope, errors };
+}
+
+function invalidList(error: "INVALID_PAGE_SIZE" | "INVALID_CURSOR", message: string) {
+  return { ok: false as const, status: 400 as const, error, message };
+}
+
+function decodeCursor(raw: string | null | undefined) {
+  if (!raw) return { ok: true as const, value: null };
+  const match = STORE_DRAFT_CURSOR.exec(raw);
+  if (!match) return { ok: false as const };
+  const createdAt = match[1];
+  const id = match[2];
+  if (!Number.isFinite(Date.parse(createdAt))) return { ok: false as const };
+  return { ok: true as const, value: { createdAt, id } };
+}
+
+function encodeCursor(product: Pick<StoreProductRow, "created_at" | "id">) {
+  return `${product.created_at}~${product.id}`;
 }
 
 function unavailable() {

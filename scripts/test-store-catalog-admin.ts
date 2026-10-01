@@ -7,12 +7,24 @@ import {
   listStoreCatalogDrafts,
   storeDraftAdminEnabled,
 } from "../functions/_lib/store-catalog-admin";
-import type { Env, SessionUser } from "../functions/_lib/types";
+import { createSession } from "../functions/_lib/db";
+import {
+  onRequestGet as onStoreCatalogGet,
+  onRequestPost as onStoreCatalogPost,
+} from "../functions/api/owner/store/catalog";
+import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
 
 const actor: SessionUser = {
   id: "user_store_owner",
   discord_id: "831243159785701398",
   username: "store-owner",
+  avatar: null,
+};
+
+const nonOwner: SessionUser = {
+  id: "user_store_non_owner",
+  discord_id: "111111111111111111",
+  username: "store-non-owner",
   avatar: null,
 };
 
@@ -37,8 +49,25 @@ async function run() {
   });
   try {
     const db = await mf.getD1Database("DB");
-    await db.exec("PRAGMA foreign_keys = ON; CREATE TABLE users (id TEXT PRIMARY KEY);");
-    await db.prepare("INSERT INTO users (id) VALUES (?)").bind(actor.id).run();
+    await db.exec("PRAGMA foreign_keys = ON;");
+    await db.prepare(`CREATE TABLE users (
+        id TEXT PRIMARY KEY,
+        discord_id TEXT NOT NULL UNIQUE,
+        username TEXT NOT NULL,
+        avatar TEXT
+      )`).run();
+    await db.prepare(`CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        session_token_hash TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      )`).run();
+    await db.prepare("INSERT INTO users (id, discord_id, username, avatar) VALUES (?, ?, ?, ?)")
+      .bind(actor.id, actor.discord_id, actor.username, actor.avatar).run();
+    await db.prepare("INSERT INTO users (id, discord_id, username, avatar) VALUES (?, ?, ?, ?)")
+      .bind(nonOwner.id, nonOwner.discord_id, nonOwner.username, nonOwner.avatar).run();
     const migration = readFileSync("migrations/0081_store_catalog_foundation.sql", "utf8").replace(/^--.*$/gm, "");
     for (const statement of migration.split(/;\s*(?:\r?\n|$)/).map((value) => value.trim()).filter(Boolean)) {
       await db.prepare(statement).run();
@@ -47,9 +76,41 @@ async function run() {
       DB: db as unknown as D1Database,
       DZN_STORE_ENABLED: "true",
       DZN_STORE_ADMIN_ENABLED: "true",
+      DZN_PLATFORM_OWNER_DISCORD_IDS: actor.discord_id,
+      SESSION_SECRET: "store-admin-test-secret",
     } as Env;
 
+    const ownerSession = await createSession(env, actor.id);
+    const nonOwnerSession = await createSession(env, nonOwner.id);
+
+    const anonymous = await onStoreCatalogGet(context(env, request("GET")));
+    assert.equal(anonymous.status, 401);
+    assert.match(anonymous.headers.get("cache-control") ?? "", /private,\s*no-store/);
+
+    const forbidden = await onStoreCatalogGet(context(env, request("GET", undefined, nonOwnerSession.token)));
+    assert.equal(forbidden.status, 403);
+
+    const disabled = await onStoreCatalogGet(context(
+      { ...env, DZN_STORE_ADMIN_ENABLED: "false" },
+      request("GET", undefined, ownerSession.token),
+    ));
+    assert.equal(disabled.status, 404);
+    const storeDisabled = await onStoreCatalogGet(context(
+      { ...env, DZN_STORE_ENABLED: "false" },
+      request("GET", undefined, ownerSession.token),
+    ));
+    assert.equal(storeDisabled.status, 404);
+
+    const authorizedEmpty = await onStoreCatalogGet(context(env, request("GET", undefined, ownerSession.token)));
+    assert.equal(authorizedEmpty.status, 200);
+    assert.deepEqual(((await authorizedEmpty.json()) as { products: unknown[] }).products, []);
+
+    const crossOrigin = await onStoreCatalogPost(context(env, request("POST", validInput, ownerSession.token, "https://evil.example")));
+    assert.equal(crossOrigin.status, 403);
+    assert.equal((await db.prepare("SELECT count(*) AS total FROM store_products").first<{ total: number }>())?.total, 0);
+
     assert.equal(storeDraftAdminEnabled({ ...env, DZN_STORE_ADMIN_ENABLED: "false" }), false);
+    assert.equal(storeDraftAdminEnabled({ ...env, DZN_STORE_ENABLED: "false" }), false);
     assert.equal(storeDraftAdminEnabled(env), true);
 
     const unsafe = await createStoreCatalogDraft(env, actor, {
@@ -96,11 +157,66 @@ async function run() {
     if (!listed.ok) throw new Error("Expected Store draft listing to pass.");
     assert.equal(listed.products.length, 1);
     assert.equal(listed.prices.length, 1);
+
+    const routeCreated = await onStoreCatalogPost(context(env, request("POST", {
+      product: { ...validInput.product, productKey: "dzn-route-supporter-pack" },
+      price: validInput.price,
+    }, ownerSession.token)));
+    assert.equal(routeCreated.status, 201);
+    const routePayload = await routeCreated.json() as Record<string, unknown>;
+    assert.equal(routePayload.storeActive, false);
+    assert.equal(routePayload.checkoutEnabled, false);
+    assert.equal(routePayload.paymentsEnabled, false);
+
+    const firstPage = await listStoreCatalogDrafts(env, { limit: 1 });
+    assert.equal(firstPage.ok, true);
+    if (!firstPage.ok) throw new Error("Expected first Store draft page to pass.");
+    assert.equal(firstPage.products.length, 1);
+    assert.equal(firstPage.prices.length, 1);
+    assert.equal(firstPage.prices[0]?.product_id, firstPage.products[0]?.id);
+    assert.equal(firstPage.page.hasMore, true);
+    assert.ok(firstPage.page.nextCursor);
+
+    const secondPage = await listStoreCatalogDrafts(env, { limit: 1, cursor: firstPage.page.nextCursor });
+    assert.equal(secondPage.ok, true);
+    if (!secondPage.ok) throw new Error("Expected second Store draft page to pass.");
+    assert.equal(secondPage.products.length, 1);
+    assert.equal(secondPage.prices.length, 1);
+    assert.equal(secondPage.prices[0]?.product_id, secondPage.products[0]?.id);
+    assert.notEqual(secondPage.products[0]?.id, firstPage.products[0]?.id);
+
+    const invalidCursor = await listStoreCatalogDrafts(env, { cursor: "not-a-cursor" });
+    assert.equal(invalidCursor.ok, false);
+    if (invalidCursor.ok) throw new Error("Expected invalid Store cursor to fail.");
+    assert.equal(invalidCursor.status, 400);
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Store catalog admin checks passed.");
   } finally {
     await mf.dispose();
   }
+}
+
+function request(method: "GET" | "POST", body?: unknown, token?: string, origin?: string) {
+  const headers = new Headers();
+  if (token) headers.set("cookie", `dzn_session=${token}`);
+  if (origin) headers.set("origin", origin);
+  if (body !== undefined) headers.set("content-type", "application/json");
+  return new Request("https://dzn.test/api/owner/store/catalog", {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+function context(env: Env, requestValue: Request): PagesContext {
+  return {
+    env,
+    request: requestValue,
+    params: {},
+    waitUntil: () => undefined,
+    next: async () => new Response(null, { status: 404 }),
+    data: {},
+  };
 }
 
 run().catch((error) => {

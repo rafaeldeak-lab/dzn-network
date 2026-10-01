@@ -21,7 +21,13 @@ export const onRequestGet: PagesFunction = async ({ env, request }) => {
   if (!auth.ok) return privateResponse(auth.response);
   if (!storeDraftAdminEnabled(env)) return disabled();
 
-  const result = await listStoreCatalogDrafts(env);
+  const url = new URL(request.url);
+  const limitValue = url.searchParams.get("limit");
+  const limit = limitValue === null ? undefined : Number(limitValue);
+  const result = await listStoreCatalogDrafts(env, {
+    cursor: url.searchParams.get("cursor"),
+    limit,
+  });
   return json({ ...result, ...responseBoundary }, { status: result.status, headers: privateNoStoreHeaders() });
 };
 
