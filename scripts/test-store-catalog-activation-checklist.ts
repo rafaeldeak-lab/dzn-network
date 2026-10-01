@@ -77,6 +77,10 @@ assert.equal(hasStoreFlagWranglerMutation("cd config && npx wrangler pages secre
 assert.equal(hasStoreFlagWranglerMutation(
   'npx wrangler pages secret bulk --config wrangler.toml "$STORE_SECRETS"',
 ), true);
+assert.equal(hasStoreFlagWranglerMutation(
+  'STORE_FLAG=DZN_STORE_ENABLED; printf true | npx wrangler pages secret put "$STORE_FLAG"',
+), true);
+assert.equal(hasStoreFlagWranglerMutation("printf true | npx wrangler pages secret put UNRELATED_SECRET"), false);
 assert.equal(storeFlagConfigPattern.test('"DZN_STORE_ENABLED" = "true"'), true);
 assert.equal(isStoreTarget("scripts/store-rollout.ts", `npm run ${remoteMigrationScripts[0]!}`), true);
 assert.equal(automationFiles.includes("wrangler.toml"), true, "The guard must scan the production Wrangler configuration.");
@@ -85,7 +89,11 @@ assert.equal(automationFiles.includes("scripts/test-store-catalog-foundation.ts"
 for (const [name, command] of Object.entries(scripts)) {
   assert.equal(isStoreMigrationAutomation(name, command), false, `${name} must not automate Store production migration application.`);
   assert.doesNotMatch(command, storeFlagAssignmentPattern, `${name} must not automate Store activation.`);
-  assert.equal(hasStoreFlagWranglerMutation(command), false, `${name} must not mutate Store activation secrets.`);
+  assert.equal(
+    hasStoreFlagWranglerMutation(command, ".", {}, isStoreTarget(name, command)),
+    false,
+    `${name} must not mutate Store activation secrets.`,
+  );
 }
 
 for (const file of automationFiles) {
@@ -95,7 +103,7 @@ for (const file of automationFiles) {
   const callsRemoteWrapper = callsRemoteMigrationWrapper(source);
   assert.equal((appliesMigration || callsRemoteWrapper) && targetsStore, false, `${file} must not automate Store production migration application.`);
   assert.doesNotMatch(source, storeFlagAssignmentPattern, `${file} must not automate Store activation.`);
-  assert.equal(hasStoreFlagWranglerMutation(source, dirname(file)), false, `${file} must not mutate Store activation secrets.`);
+  assert.equal(hasStoreFlagWranglerMutation(source, dirname(file), {}, targetsStore), false, `${file} must not mutate Store activation secrets.`);
   if (/\.(?:ya?ml|toml|jsonc?)$/i.test(file)) {
     assert.doesNotMatch(source, storeFlagConfigPattern, `${file} must not configure Store activation.`);
   }
@@ -181,9 +189,15 @@ function hasStoreFlagWranglerMutation(
   source: string,
   baseDir = ".",
   fixtureFiles: Record<string, string> = {},
+  storeTarget = isStoreTarget("", source),
 ) {
   return wranglerInvocationWindows(source, /(?:npx\s+)?wrangler\b/gi).some((invocation) => {
     if (storeFlagWranglerMutationPattern.test(invocation)) return true;
+    const putMatch = invocation.match(/\b(?:pages\s+)?secret\s+put\b\s+(\S+)/i);
+    if (/\b(?:pages\s+)?secret\s+put\b/i.test(invocation)) {
+      const key = putMatch ? stripToken(putMatch[1]) : "";
+      if (!/^[A-Z][A-Z0-9_]*$/.test(key) && storeTarget) return true;
+    }
     const bulkMatch = invocation.match(/\b(?:pages\s+)?secret\s+bulk\b([\s\S]*)/i);
     if (!bulkMatch) return false;
 
