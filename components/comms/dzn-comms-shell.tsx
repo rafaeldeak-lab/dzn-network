@@ -3,6 +3,7 @@
 import {
   AlertTriangle,
   Bot,
+  ChevronRight,
   Flag,
   Hash,
   LockKeyhole,
@@ -180,6 +181,13 @@ export function DznCommsShell() {
   const reactionWritesEnabled = reactionWritesAvailable && authStatus === "authenticated";
   const reactionLoginRequired = reactionWritesAvailable && authStatus === "signed-out";
   const canSend = sendingEnabled && draft.trim().length > 0 && !sending;
+  const globalChatAccessLabel = sendingEnabled
+    ? "Live now"
+    : history.status === "ready"
+      ? "Read-only history"
+      : history.status === "loading"
+        ? "Checking access"
+        : "Preview only";
 
   async function handleSend(event: FormEvent) {
     event.preventDefault();
@@ -232,9 +240,22 @@ export function DznCommsShell() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#03050d] pb-24 pt-28 text-zinc-100 sm:pt-32">
+    <main className="min-h-screen overflow-hidden bg-[#03050d] pb-24 pt-4 text-zinc-100 sm:pt-6">
       <section className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 sm:px-6 lg:px-8">
-        <div className="overflow-hidden rounded-lg border border-cyan-400/20 bg-[radial-gradient(circle_at_18%_10%,rgba(34,211,238,0.18),transparent_28%),radial-gradient(circle_at_88%_0%,rgba(168,85,247,0.16),transparent_30%),rgba(5,9,22,0.88)] shadow-[0_26px_80px_rgba(0,0,0,0.42)]">
+        <nav aria-label="DZN communication tools" className="grid gap-2 rounded-lg border border-white/10 bg-[#060a15]/95 p-2 sm:grid-cols-2">
+          <a href="#global-chat" className="group flex min-h-14 items-center gap-3 rounded-md border border-cyan-300/35 bg-cyan-300/10 px-3 py-2">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-cyan-300/30 bg-cyan-300/10 text-cyan-100"><MessageCircle className="h-5 w-5" aria-hidden="true" /></span>
+            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">Global Chat</span><span className="block text-xs font-bold text-emerald-200">{globalChatAccessLabel}</span></span>
+            <ChevronRight className="h-4 w-4 text-cyan-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
+          </a>
+          <a href="#dzn-assist" className="group flex min-h-14 items-center gap-3 rounded-md border border-violet-300/20 bg-violet-300/6 px-3 py-2 transition hover:border-violet-200/45">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-violet-300/20 bg-violet-300/8 text-violet-100"><Bot className="h-5 w-5" aria-hidden="true" /></span>
+            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">DZN Assist</span><span className="block text-xs font-bold text-amber-200">Not live yet</span></span>
+            <ChevronRight className="h-4 w-4 text-violet-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
+          </a>
+        </nav>
+
+        <div id="global-chat" className="scroll-mt-6 overflow-hidden rounded-lg border border-cyan-400/20 bg-[radial-gradient(circle_at_18%_10%,rgba(34,211,238,0.18),transparent_28%),radial-gradient(circle_at_88%_0%,rgba(168,85,247,0.16),transparent_30%),rgba(5,9,22,0.88)] shadow-[0_26px_80px_rgba(0,0,0,0.42)]">
           <div className="flex flex-col gap-5 border-b border-white/10 px-5 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 items-center gap-4">
               <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg border border-cyan-300/30 bg-cyan-400/10 text-cyan-100 shadow-[0_0_28px_rgba(34,211,238,0.22)]">
@@ -334,7 +355,7 @@ export function DznCommsShell() {
               <div className="mt-4 space-y-3">
                 <SafetyCard icon={ShieldCheck} label="Authenticated" value="Discord login required to send" />
                 <SafetyCard icon={AlertTriangle} label="Moderation" value="Filters, reports and owner actions" />
-                <SafetyCard icon={Bot} label="DZN Assist" value="AI runtime blocked" />
+                <SafetyCard id="dzn-assist" icon={Bot} label="DZN Assist" value="Not live yet. No AI messages are being generated." />
                 <SafetyCard icon={Users} label="Private groups" value="Membership proof required" />
               </div>
               <div className="mt-5 rounded-lg border border-violet-300/18 bg-violet-400/8 p-4">
@@ -477,9 +498,9 @@ function ChannelButton({ active = false, icon: Icon, label, meta }: { active?: b
   );
 }
 
-function SafetyCard({ icon: Icon, label, value }: { icon: typeof ShieldCheck; label: string; value: string }) {
+function SafetyCard({ id, icon: Icon, label, value }: { id?: string; icon: typeof ShieldCheck; label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+    <div id={id} className="scroll-mt-6 rounded-lg border border-white/10 bg-white/5 p-3">
       <div className="flex items-center gap-2">
         <Icon className="h-4 w-4 text-cyan-200" aria-hidden="true" />
         <span className="text-xs font-black uppercase tracking-[0.14em] text-white">{label}</span>
