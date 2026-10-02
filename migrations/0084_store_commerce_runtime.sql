@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS store_catalog_publications (
   product_id TEXT NOT NULL,
   price_id TEXT NOT NULL,
   stripe_price_id TEXT NOT NULL UNIQUE CHECK (stripe_price_id GLOB 'price_*' AND length(stripe_price_id) BETWEEN 9 AND 128),
+  stripe_mode TEXT NOT NULL CHECK (stripe_mode IN ('test', 'live')),
+  livemode INTEGER NOT NULL CHECK (livemode IN (0, 1)),
   status TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('approved', 'published', 'paused', 'archived')),
   active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
   stock_mode TEXT NOT NULL DEFAULT 'unlimited' CHECK (stock_mode IN ('unlimited', 'finite')),
@@ -17,7 +19,8 @@ CREATE TABLE IF NOT EXISTS store_catalog_publications (
   published_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(product_id, price_id),
+  UNIQUE(product_id, price_id, stripe_mode),
+  CHECK ((stripe_mode = 'live' AND livemode = 1) OR (stripe_mode = 'test' AND livemode = 0)),
   CHECK ((active = 0) OR (status = 'published' AND published_at IS NOT NULL)),
   CHECK ((stock_mode = 'unlimited' AND stock_limit IS NULL) OR
     (stock_mode = 'finite' AND stock_limit BETWEEN 1 AND 1000000 AND reserved_quantity + sold_quantity <= stock_limit)),
@@ -245,8 +248,29 @@ BEGIN
   WHERE id = NEW.publication_id;
 END;
 
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_dispute_restoration_stock_guard
+BEFORE UPDATE OF status ON store_commerce_orders
+WHEN OLD.status = 'disputed' AND NEW.status = 'fulfilled'
+  AND NOT EXISTS (SELECT 1 FROM store_commerce_fulfilments WHERE order_id = NEW.id)
+  AND NOT EXISTS (
+    SELECT 1 FROM store_catalog_publications pub
+    WHERE pub.id = NEW.publication_id
+      AND (pub.stock_mode = 'unlimited' OR pub.reserved_quantity + pub.sold_quantity < pub.stock_limit)
+  )
+BEGIN SELECT RAISE(ABORT, 'won dispute Store stock requires manual review'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_dispute_restoration_stock_sale
+AFTER UPDATE OF status ON store_commerce_orders
+WHEN OLD.status = 'disputed' AND NEW.status = 'fulfilled'
+  AND NOT EXISTS (SELECT 1 FROM store_commerce_fulfilments WHERE order_id = NEW.id)
+BEGIN
+  UPDATE store_catalog_publications
+  SET sold_quantity = sold_quantity + 1, updated_at = CURRENT_TIMESTAMP
+  WHERE id = NEW.publication_id;
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_store_catalog_publication_identity_immutable
-BEFORE UPDATE OF product_id, price_id, stripe_price_id, published_by_user_id ON store_catalog_publications
+BEFORE UPDATE OF product_id, price_id, stripe_price_id, stripe_mode, livemode, published_by_user_id ON store_catalog_publications
 BEGIN SELECT RAISE(ABORT, 'Store publication identity is immutable'); END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_commerce_order_items_immutable

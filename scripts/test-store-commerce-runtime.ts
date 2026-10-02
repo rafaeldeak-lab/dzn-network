@@ -24,6 +24,8 @@ async function run() {
   assert.match(migration, /trg_store_commerce_order_release_stock/);
   assert.match(migration, /trg_store_commerce_reserved_stock_guard/);
   assert.match(migration, /trg_store_commerce_reserved_stock_sale/);
+  assert.match(migration, /trg_store_commerce_dispute_restoration_stock_guard/);
+  assert.match(migration, /trg_store_commerce_dispute_restoration_stock_sale/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS store_commerce_entitlements/);
   assert.match(migration, /no_competitive_advantage INTEGER NOT NULL DEFAULT 1 CHECK \(no_competitive_advantage = 1\)/);
 
@@ -64,6 +66,9 @@ async function run() {
     if (!published.ok) throw new Error("Publication failed");
     assert.equal(published.status, 200);
     assert.equal(published.publication.id, approved.publication.id);
+    assert.deepEqual(await db.prepare("SELECT stripe_mode, livemode FROM store_catalog_publications").first(), {
+      stripe_mode: "test", livemode: 0,
+    });
     const catalog = await listPublishedStore(env);
     assert.equal(catalog.ok, true);
     if (!catalog.ok) throw new Error("Catalog failed");
@@ -182,9 +187,15 @@ async function run() {
 
     await testEarlyDisputeWon(db, env, published.publication.id);
 
+    await testWonDisputeCapacityConflict(db, env, published.publication.id);
+
     await testLatePaymentStockConflict(db, env, published.publication.id);
 
     await testAtomicLimitAndReservationExpiry(db, env, published.publication.id);
+
+    await testMismatchedPaidSessionReview(db, env, published.publication.id);
+
+    await testPublicationModeIsolation(db, env);
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Store commerce runtime checks passed.");
   } finally { await mf.dispose(); }
@@ -250,6 +261,80 @@ async function testLatePaymentStockConflict(db: D1Database, env: Env, publicatio
     status: "manual_review", stripe_payment_intent_id: "pi_test_lateconflict",
   });
   assert.equal((await db.prepare("SELECT COUNT(*) AS total FROM store_commerce_entitlements WHERE order_id = 'store_order_lateorder'").first<{ total: number }>())?.total, 0);
+}
+
+async function testWonDisputeCapacityConflict(db: D1Database, env: Env, publicationId: string) {
+  await db.prepare("UPDATE store_catalog_publications SET stock_limit = 2, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
+  const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), owner,
+    { publicationId, requestKey: "won-capacity-conflict-0001" }, {
+      createId: sequence(["woncapacityorder", "woncapacityitem", "woncapacitynumber"]),
+      createCheckout: async () => ({ id: "cs_test_woncapacity", url: "https://checkout.stripe.com/c/pay/test_woncapacity",
+        status: "open", mode: "payment", livemode: false, client_reference_id: "store_order_woncapacityorder", expires_at: expiresAt,
+        metadata: { dzn_store_order_id: "store_order_woncapacityorder", dzn_store_user_id: owner.id } }),
+    });
+  assert.equal(checkout.ok, true);
+  const disputed = event("evt_won_capacity_dispute", "charge.dispute.created", {
+    id: "dp_test_woncapacity", object: "dispute", payment_intent: "pi_test_woncapacity", status: "needs_response", amount: 1200,
+    metadata: { dzn_store_order_id: "store_order_woncapacityorder" },
+  });
+  assert.equal((await reconcileStoreWebhook(env, disputed, JSON.stringify(disputed))).processingStatus, "processed");
+  await db.prepare("UPDATE store_catalog_publications SET stock_limit = 1, sold_quantity = 1 WHERE id = ?").bind(publicationId).run();
+  const won = event("evt_won_capacity_closed", "charge.dispute.closed", {
+    id: "dp_test_woncapacity", object: "dispute", payment_intent: "pi_test_woncapacity", status: "won",
+  });
+  assert.deepEqual(await reconcileStoreWebhook(env, won, JSON.stringify(won)), {
+    duplicate: false, processingStatus: "manual_review",
+  });
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE id = 'store_order_woncapacityorder'")
+    .first<{ status: string }>())?.status, "manual_review");
+  assert.equal((await db.prepare("SELECT COUNT(*) AS total FROM store_commerce_fulfilments WHERE order_id = 'store_order_woncapacityorder'")
+    .first<{ total: number }>())?.total, 0);
+}
+
+async function testMismatchedPaidSessionReview(db: D1Database, env: Env, publicationId: string) {
+  await db.prepare("UPDATE store_catalog_publications SET stock_limit = 5, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
+  const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), buyer,
+    { publicationId, requestKey: "mismatched-paid-0001" }, {
+      createId: sequence(["mismatchorder", "mismatchitem", "mismatchnumber"]),
+      createCheckout: async () => ({ id: "cs_test_mismatch", url: "https://checkout.stripe.com/c/pay/test_mismatch",
+        status: "open", mode: "payment", livemode: false, client_reference_id: "store_order_mismatchorder", expires_at: expiresAt,
+        metadata: { dzn_store_order_id: "store_order_mismatchorder", dzn_store_user_id: buyer.id } }),
+    });
+  assert.equal(checkout.ok, true);
+  const completed = event("evt_mismatched_paid", "checkout.session.completed", {
+    id: "cs_test_mismatch", object: "checkout.session", client_reference_id: "store_order_mismatchorder",
+    payment_intent: "pi_test_mismatch", payment_status: "paid", amount_total: 1199, currency: "gbp",
+    metadata: { dzn_store_order_id: "store_order_mismatchorder" },
+  });
+  assert.deepEqual(await reconcileStoreWebhook(env, completed, JSON.stringify(completed)), {
+    duplicate: false, processingStatus: "manual_review",
+  });
+  const order = await db.prepare(`SELECT status, stripe_payment_intent_id, paid_at
+    FROM store_commerce_orders WHERE id = 'store_order_mismatchorder'`).first<{
+      status: string; stripe_payment_intent_id: string | null; paid_at: string | null;
+    }>();
+  assert.equal(order?.status, "manual_review");
+  assert.equal(order?.stripe_payment_intent_id, "pi_test_mismatch");
+  assert.ok(order?.paid_at);
+}
+
+async function testPublicationModeIsolation(db: D1Database, env: Env) {
+  const liveEnv = { ...env, STRIPE_SECRET_KEY: "sk_live_store_live_key" } as unknown as Env;
+  const livePublication = await publishStoreProduct(liveEnv, owner, { productId: "product", priceId: "price",
+    stripePriceId: "price_live_supporter", stockLimit: 5, lifetimeLimit: 1, publish: true }, {
+      retrievePrice: async () => ({ id: "price_live_supporter", active: true, currency: "gbp",
+        unit_amount: 1200, livemode: true, type: "one_time" }),
+    });
+  assert.equal(livePublication.ok, true);
+  assert.deepEqual(await db.prepare("SELECT stripe_mode, livemode FROM store_catalog_publications WHERE stripe_price_id = 'price_live_supporter'").first(), {
+    stripe_mode: "live", livemode: 1,
+  });
+  const testCatalog = await listPublishedStore(env);
+  const liveCatalog = await listPublishedStore(liveEnv);
+  assert.equal(testCatalog.ok && testCatalog.products.length, 1);
+  assert.equal(liveCatalog.ok && liveCatalog.products.length, 1);
 }
 
 async function testRefundBeforeCompletion(db: D1Database, env: Env, publicationId: string) {

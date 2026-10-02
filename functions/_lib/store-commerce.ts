@@ -12,6 +12,8 @@ type PublicationRow = {
   product_id: string;
   price_id: string;
   stripe_price_id: string;
+  stripe_mode: "test" | "live";
+  livemode: number;
   stock_mode: "unlimited" | "finite";
   stock_limit: number | null;
   reserved_quantity: number;
@@ -68,6 +70,8 @@ type StorePublishOptions = { retrievePrice?: (priceId: string) => Promise<StoreS
 type ExistingPublication = {
   id: string;
   stripe_price_id: string;
+  stripe_mode: "test" | "live";
+  livemode: number;
   status: string;
   active: number;
   stock_mode: string;
@@ -125,12 +129,14 @@ export async function publishStoreProduct(
       return failure(422, "STRIPE_PRICE_MISMATCH", "The Stripe Price must be active, one-time, in GBP, and exactly match the reviewed draft and Stripe mode.");
     }
     const db = requireDb(env);
-    const existing = await db.prepare(`SELECT id, stripe_price_id, status, active, stock_mode, stock_limit,
-      lifetime_limit_per_account FROM store_catalog_publications WHERE product_id = ? AND price_id = ? LIMIT 1`)
-      .bind(productId, priceId).first<ExistingPublication>();
+    const stripeMode = expectedLive ? "live" : "test";
+    const existing = await db.prepare(`SELECT id, stripe_price_id, stripe_mode, livemode, status, active, stock_mode, stock_limit,
+      lifetime_limit_per_account FROM store_catalog_publications WHERE product_id = ? AND price_id = ? AND stripe_mode = ? LIMIT 1`)
+      .bind(productId, priceId, stripeMode).first<ExistingPublication>();
     if (existing) {
       const requestedStockMode = stockLimit === null ? "unlimited" : "finite";
-      const sameContract = existing.stripe_price_id === stripePriceId && existing.stock_mode === requestedStockMode
+      const sameContract = existing.stripe_price_id === stripePriceId && existing.stripe_mode === stripeMode
+        && Boolean(existing.livemode) === expectedLive && existing.stock_mode === requestedStockMode
         && existing.stock_limit === stockLimit && existing.lifetime_limit_per_account === lifetimeLimit;
       if (!sameContract) return failure(409, "PUBLICATION_CONTRACT_CHANGED", "The approved publication cannot be changed. Archive it through a separately audited owner action.");
       if (!active || existing.active === 1 || existing.status !== "approved") {
@@ -145,10 +151,10 @@ export async function publishStoreProduct(
         publication: { id: existing.id, productId, priceId, active: true, stockLimit, lifetimeLimit } };
     }
     await db.prepare(`INSERT INTO store_catalog_publications (
-      id, product_id, price_id, stripe_price_id, status, active, stock_mode, stock_limit,
+      id, product_id, price_id, stripe_price_id, stripe_mode, livemode, status, active, stock_mode, stock_limit,
       lifetime_limit_per_account, published_by_user_id, published_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(id, productId, priceId, stripePriceId, active ? "published" : "approved", active ? 1 : 0,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(id, productId, priceId, stripePriceId, stripeMode, expectedLive ? 1 : 0, active ? "published" : "approved", active ? 1 : 0,
         stockLimit === null ? "unlimited" : "finite", stockLimit, lifetimeLimit, actor.id, active ? now : null, now, now).run();
     return { ok: true as const, status: 201 as const, publication: { id, productId, priceId, active, stockLimit, lifetimeLimit } };
   } catch (error) {
@@ -163,6 +169,7 @@ export async function listPublishedStore(env: Env) {
   if (!flags.store || !flags.commerce || !flags.publicCatalog) return failure(404, "STORE_NOT_AVAILABLE", "The Store is not open yet.");
   const db = requireDb(env);
   await expireAbandonedStoreOrders(db, new Date());
+  const stripeMode = configuredStripeMode(env);
   const result = await db.prepare(`SELECT
       pub.id AS publication_id, p.product_key, p.name, p.description, p.product_type, p.fulfilment_kind,
       pr.currency, pr.unit_amount_minor, pub.stock_mode, pub.stock_limit, pub.reserved_quantity,
@@ -170,9 +177,9 @@ export async function listPublishedStore(env: Env) {
     FROM store_catalog_publications pub
     JOIN store_products p ON p.id = pub.product_id
     JOIN store_prices pr ON pr.id = pub.price_id
-    WHERE pub.active = 1 AND pub.status = 'published'
+    WHERE pub.active = 1 AND pub.status = 'published' AND pub.stripe_mode = ?
       AND (pub.stock_mode = 'unlimited' OR pub.reserved_quantity + pub.sold_quantity < pub.stock_limit)
-    ORDER BY pub.published_at DESC, pub.id DESC`).all();
+    ORDER BY pub.published_at DESC, pub.id DESC`).bind(stripeMode ?? "unconfigured").all();
   return { ok: true as const, status: 200 as const, products: result.results ?? [], checkoutEnabled: checkoutAccess(env).ok };
 }
 
@@ -201,6 +208,9 @@ export async function createOrResumeStoreCheckout(
   if (!order) {
     const publication = await readPublication(db, publicationId, true);
     if (!publication) return failure(404, "PRODUCT_NOT_AVAILABLE", "That Store item is not currently available.");
+    if (publication.stripe_mode !== access.mode || Boolean(publication.livemode) !== access.livemode) {
+      return failure(409, "PUBLICATION_MODE_CHANGED", "That Store item is not published for the active Stripe mode.");
+    }
     const purchased = await db.prepare(`SELECT COUNT(*) AS total FROM store_commerce_orders
       WHERE purchasing_user_id = ? AND publication_id = ? AND status IN (
         'checkout_pending','checkout_ready','paid','fulfilment_pending','fulfilled','disputed','manual_review'
@@ -247,6 +257,9 @@ export async function createOrResumeStoreCheckout(
   }
   const publication = await readPublication(db, order.publication_id, false);
   if (!publication) return failure(409, "PRODUCT_PAUSED", "That Store item is no longer available.");
+  if (publication.stripe_mode !== access.mode || Boolean(publication.livemode) !== access.livemode) {
+    return failure(409, "PUBLICATION_MODE_CHANGED", "That Store item is not published for the active Stripe mode.");
+  }
   const appUrl = getAppUrl(env, request);
   const params: Record<string, string | number> = {
     mode: "payment",
@@ -295,13 +308,28 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
   const statements = [] as D1PreparedStatement[];
   const now = new Date().toISOString();
   const eventId = `store_event_${crypto.randomUUID()}`;
-  if (order && Boolean(order.livemode) !== eventLive) processingStatus = "manual_review";
+  if (order && Boolean(order.livemode) !== eventLive) {
+    processingStatus = "manual_review";
+    const paymentStatus = text(object.payment_status);
+    const paidPaymentIntent = paymentStatus === "paid" ? stripeId(object.payment_intent) : null;
+    statements.push(db.prepare(`UPDATE store_commerce_orders
+      SET status = 'manual_review', stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, ?),
+        paid_at = CASE WHEN ? = 'paid' THEN COALESCE(paid_at, ?) ELSE paid_at END, updated_at = ?
+      WHERE id = ? AND status IN ('checkout_pending','checkout_ready','expired','paid','fulfilment_pending','fulfilled','disputed')`)
+      .bind(paidPaymentIntent, paymentStatus, now, now, order.id));
+  }
   else if (order && event.type === "checkout.session.completed" && ["checkout_ready", "expired"].includes(order.status)) {
     const amount = Number(object.amount_total);
     const paymentStatus = text(object.payment_status);
     const sessionId = stripeId(object.id);
     if (sessionId !== order.stripe_checkout_session_id || paymentStatus !== "paid" || amount !== order.total_amount_minor || text(object.currency)?.toLowerCase() !== "gbp") {
       processingStatus = "manual_review";
+      const paidPaymentIntent = paymentStatus === "paid" ? stripeId(object.payment_intent) : null;
+      statements.push(db.prepare(`UPDATE store_commerce_orders
+        SET status = 'manual_review', stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, ?),
+          paid_at = CASE WHEN ? = 'paid' THEN COALESCE(paid_at, ?) ELSE paid_at END, updated_at = ?
+        WHERE id = ? AND status IN ('checkout_ready','expired')`)
+        .bind(paidPaymentIntent, paymentStatus, now, now, order.id));
     } else {
       const publication = await db.prepare(`SELECT stock_mode, stock_limit, reserved_quantity, sold_quantity
         FROM store_catalog_publications WHERE id = ?`).bind(order.publication_id).first<{
@@ -350,19 +378,7 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
   } else if (order && event.type === "charge.dispute.closed" && text(object.status) === "won" && order.status === "disputed") {
     const existingFulfilment = await db.prepare("SELECT id FROM store_commerce_fulfilments WHERE order_id = ?")
       .bind(order.id).first<{ id: string }>();
-    const publication = !existingFulfilment
-      ? await db.prepare(`SELECT stock_mode, stock_limit, reserved_quantity, sold_quantity
-          FROM store_catalog_publications WHERE id = ?`).bind(order.publication_id).first<{
-          stock_mode: string; stock_limit: number | null; reserved_quantity: number; sold_quantity: number;
-        }>()
-      : null;
-    const capacityUnavailable = !existingFulfilment && publication?.stock_mode === "finite"
-      && Number(publication.reserved_quantity) + Number(publication.sold_quantity) >= Number(publication.stock_limit);
-    if (capacityUnavailable) {
-      processingStatus = "manual_review";
-      statements.push(db.prepare("UPDATE store_commerce_orders SET status = 'manual_review', updated_at = ? WHERE id = ? AND status = 'disputed'").bind(now, order.id));
-    } else {
-      processingStatus = "processed";
+    processingStatus = "processed";
       const paymentIntent = stripeId(object.payment_intent) ?? order.stripe_payment_intent_id;
       const fulfilmentId = existingFulfilment?.id ?? `store_fulfilment_${crypto.randomUUID()}`;
       const entitlementKey = `dzn_store_${await orderProductKey(db, order.id)}_${order.id}`;
@@ -370,10 +386,6 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
         db.prepare(`UPDATE store_commerce_orders SET status = 'fulfilled', stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, ?),
           paid_at = COALESCE(paid_at, ?), fulfilled_at = COALESCE(fulfilled_at, ?), updated_at = ?
           WHERE id = ? AND status = 'disputed'`).bind(paymentIntent, now, now, now, order.id),
-        db.prepare(`UPDATE store_catalog_publications SET sold_quantity = sold_quantity + 1, updated_at = ?
-          WHERE id = ? AND NOT EXISTS (SELECT 1 FROM store_commerce_fulfilments WHERE order_id = ?)
-            AND EXISTS (SELECT 1 FROM store_commerce_orders WHERE id = ? AND status = 'fulfilled')`)
-          .bind(now, order.publication_id, order.id, order.id),
         db.prepare(`INSERT INTO store_commerce_fulfilments (id, order_id, purchasing_user_id, fulfilment_kind,
           status, entitlement_key, granted_at, created_at, updated_at)
           SELECT ?, o.id, o.purchasing_user_id, i.fulfilment_kind, 'completed', ?, ?, ?, ?
@@ -406,7 +418,6 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
           WHERE order_id = ? AND status = 'void'
             AND EXISTS (SELECT 1 FROM store_commerce_orders WHERE id = ? AND status = 'fulfilled')`).bind(now, order.id, order.id),
       );
-    }
   } else if (order && event.type === "charge.dispute.closed" && order.status === "disputed") {
     processingStatus = "processed";
   } else if (order && (event.type === "charge.refunded" || event.type === "charge.dispute.created")) {
@@ -437,6 +448,30 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
   try {
     results = await db.batch(statements);
   } catch (error) {
+    const wonDisputeWithoutFulfilment = order?.status === "disputed" && event.type === "charge.dispute.closed"
+      && text(object.status) === "won"
+      && !(await db.prepare("SELECT id FROM store_commerce_fulfilments WHERE order_id = ?").bind(order.id).first());
+    const restorationPublication = wonDisputeWithoutFulfilment
+      ? await db.prepare(`SELECT stock_mode, stock_limit, reserved_quantity, sold_quantity
+          FROM store_catalog_publications WHERE id = ?`).bind(order.publication_id).first<{
+          stock_mode: string; stock_limit: number | null; reserved_quantity: number; sold_quantity: number;
+        }>()
+      : null;
+    const restorationCapacityWasTaken = restorationPublication?.stock_mode === "finite"
+      && Number(restorationPublication.reserved_quantity) + Number(restorationPublication.sold_quantity)
+        >= Number(restorationPublication.stock_limit);
+    if (wonDisputeWithoutFulfilment && restorationCapacityWasTaken) {
+      processingStatus = "manual_review";
+      const fallback = await db.batch([
+        db.prepare(`INSERT INTO store_commerce_events (id, stripe_event_id, order_id, event_type, livemode,
+          raw_body_sha256, processing_status, safe_summary_json, received_at, processed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .bind(eventId, event.id, order.id, event.type, eventLive ? 1 : 0, await sha256(rawBody), processingStatus, safeSummary, now, now),
+        db.prepare("UPDATE store_commerce_orders SET status = 'manual_review', updated_at = ? WHERE id = ? AND status = 'disputed'")
+          .bind(now, order.id),
+      ]);
+      if (fallback.some((result) => !result.success)) throw error;
+      return { duplicate: false, processingStatus };
+    }
     const latePaidSession = order?.status === "expired" && event.type === "checkout.session.completed";
     const publication = latePaidSession
       ? await db.prepare(`SELECT stock_mode, stock_limit, reserved_quantity, sold_quantity
@@ -491,7 +526,7 @@ async function orderProductKey(db: D1Database, orderId: string) {
 }
 
 async function readPublication(db: D1Database, publicationId: string, requireAvailableStock: boolean) {
-  return db.prepare(`SELECT pub.id AS publication_id, pub.product_id, pub.price_id, pub.stripe_price_id,
+  return db.prepare(`SELECT pub.id AS publication_id, pub.product_id, pub.price_id, pub.stripe_price_id, pub.stripe_mode, pub.livemode,
     pub.stock_mode, pub.stock_limit, pub.reserved_quantity, pub.sold_quantity, pub.lifetime_limit_per_account,
     p.product_key, p.name, p.description, p.product_type, p.fulfilment_kind, pr.unit_amount_minor
     FROM store_catalog_publications pub JOIN store_products p ON p.id = pub.product_id
@@ -504,8 +539,7 @@ async function readPublication(db: D1Database, publicationId: string, requireAva
 function checkoutAccess(env: Env) {
   const flags = storeCommerceFlags(env);
   if (!flags.store || !flags.commerce || !flags.publicCatalog || !flags.checkout) return failure(403, "STORE_CHECKOUT_DISABLED", "Store checkout is not open yet.");
-  const secret = text((env as unknown as Record<string, unknown>).STRIPE_SECRET_KEY);
-  const mode = secret?.startsWith("sk_live_") ? "live" : secret?.startsWith("sk_test_") ? "test" : null;
+  const mode = configuredStripeMode(env);
   if (!mode) return failure(503, "STRIPE_NOT_READY", "Store checkout is not configured.");
   const webhookSecret = text((env as unknown as Record<string, unknown>).STRIPE_STORE_WEBHOOK_SECRET);
   if (!webhookSecret?.startsWith("whsec_")) {
@@ -515,6 +549,11 @@ function checkoutAccess(env: Env) {
     return failure(403, "LIVE_CHECKOUT_PAUSED", "Live Store checkout is paused until its seller, webhook, and production URL checks pass.");
   }
   return { ok: true as const, mode, livemode: mode === "live" };
+}
+
+function configuredStripeMode(env: Env): "test" | "live" | null {
+  const secret = text((env as unknown as Record<string, unknown>).STRIPE_SECRET_KEY);
+  return secret?.startsWith("sk_live_") ? "live" : secret?.startsWith("sk_test_") ? "test" : null;
 }
 
 async function resumeCheckout(env: Env, order: OrderRow, options: StoreCommerceOptions) {
