@@ -37,6 +37,7 @@ type OrderRow = {
   currency: string;
   total_amount_minor: number;
   stripe_checkout_session_id: string | null;
+  reservation_expires_at: string;
 };
 
 type CheckoutSession = {
@@ -130,7 +131,9 @@ export async function publishStoreProduct(
 export async function listPublishedStore(env: Env) {
   const flags = storeCommerceFlags(env);
   if (!flags.store || !flags.commerce || !flags.publicCatalog) return failure(404, "STORE_NOT_AVAILABLE", "The Store is not open yet.");
-  const result = await requireDb(env).prepare(`SELECT
+  const db = requireDb(env);
+  await expireAbandonedStoreOrders(db, new Date());
+  const result = await db.prepare(`SELECT
       pub.id AS publication_id, p.product_key, p.name, p.description, p.product_type, p.fulfilment_kind,
       pr.currency, pr.unit_amount_minor, pub.stock_mode, pub.stock_limit, pub.reserved_quantity,
       pub.sold_quantity, pub.lifetime_limit_per_account
@@ -156,16 +159,22 @@ export async function createOrResumeStoreCheckout(
   const requestKey = text(input.requestKey);
   if (!publicationId || !requestKey || !REQUEST_KEY.test(requestKey)) return failure(400, "INVALID_ORDER_REQUEST", "Choose a valid product and retry key.");
   const db = requireDb(env);
+  const now = options.now ?? new Date();
+  await expireAbandonedStoreOrders(db, now);
   let order = await db.prepare("SELECT * FROM store_commerce_orders WHERE purchasing_user_id = ? AND request_key = ? LIMIT 1")
     .bind(user.id, requestKey).first<OrderRow>();
-  if (order?.stripe_checkout_session_id) return resumeCheckout(env, order, options);
+  if (order?.stripe_checkout_session_id && order.status === "checkout_ready") return resumeCheckout(env, order, options);
+  if (order && order.status !== "checkout_pending") {
+    return failure(409, "ORDER_EXPIRED", "That checkout attempt has ended. Start a new checkout for the item.");
+  }
 
-  const now = options.now ?? new Date();
   if (!order) {
     const publication = await readPublication(db, publicationId, true);
     if (!publication) return failure(404, "PRODUCT_NOT_AVAILABLE", "That Store item is not currently available.");
     const purchased = await db.prepare(`SELECT COUNT(*) AS total FROM store_commerce_orders
-      WHERE purchasing_user_id = ? AND publication_id = ? AND status IN ('paid','fulfilment_pending','fulfilled')`)
+      WHERE purchasing_user_id = ? AND publication_id = ? AND status IN (
+        'checkout_pending','checkout_ready','paid','fulfilment_pending','fulfilled','disputed','manual_review'
+      )`)
       .bind(user.id, publicationId).first<{ total: number }>();
     if (Number(purchased?.total ?? 0) >= publication.lifetime_limit_per_account) {
       return failure(409, "PURCHASE_LIMIT_REACHED", "This account has already reached the purchase limit for that item.");
@@ -180,10 +189,11 @@ export async function createOrResumeStoreCheckout(
       const writes = await db.batch([
         db.prepare(`INSERT INTO store_commerce_orders (id, order_number, purchasing_user_id, publication_id,
           request_key, status, stripe_mode, livemode, subtotal_amount_minor, tax_amount_minor,
-          total_amount_minor, immutable_item_snapshot_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, 'checkout_pending', ?, ?, ?, 0, ?, ?, ?, ?)`)
+          total_amount_minor, immutable_item_snapshot_json, reservation_expires_at, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 'checkout_pending', ?, ?, ?, 0, ?, ?, ?, ?, ?)`)
           .bind(orderId, orderNumber, user.id, publicationId, requestKey, access.mode, access.livemode ? 1 : 0,
-            publication.unit_amount_minor, publication.unit_amount_minor, snapshot, now.toISOString(), now.toISOString()),
+            publication.unit_amount_minor, publication.unit_amount_minor, snapshot,
+            new Date(now.getTime() + 30 * 60 * 1000).toISOString(), now.toISOString(), now.toISOString()),
         db.prepare(`INSERT INTO store_commerce_order_items (id, order_id, product_id, price_id, product_key,
           product_name, fulfilment_kind, unit_amount_minor, total_amount_minor)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -194,6 +204,7 @@ export async function createOrResumeStoreCheckout(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/sold out/i.test(message)) return failure(409, "PRODUCT_SOLD_OUT", "That Store item has just sold out.");
+      if (/purchase limit/i.test(message)) return failure(409, "PURCHASE_LIMIT_REACHED", "This account has already reached the purchase limit for that item.");
       order = await db.prepare("SELECT * FROM store_commerce_orders WHERE purchasing_user_id = ? AND request_key = ? LIMIT 1")
         .bind(user.id, requestKey).first<OrderRow>();
       if (!order) return failure(503, "ORDER_WRITE_FAILED", "The order could not be safely recorded.");
@@ -211,6 +222,9 @@ export async function createOrResumeStoreCheckout(
     mode: "payment",
     "line_items[0][price]": publication.stripe_price_id,
     "line_items[0][quantity]": 1,
+    payment_method_collection: "always",
+    "payment_method_types[0]": "card",
+    "adaptive_pricing[enabled]": "false",
     client_reference_id: order.id,
     "metadata[dzn_store_order_id]": order.id,
     "metadata[dzn_store_user_id]": user.id,
@@ -259,6 +273,8 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
     } else {
       processingStatus = "processed";
       const paymentIntent = stripeId(object.payment_intent);
+      const fulfilmentId = `store_fulfilment_${crypto.randomUUID()}`;
+      const entitlementKey = `dzn_store_${await orderProductKey(db, order.id)}_${order.id}`;
       statements.push(
         db.prepare(`UPDATE store_commerce_orders SET status = 'fulfilled', stripe_payment_intent_id = ?, paid_at = ?, fulfilled_at = ?, updated_at = ?
           WHERE id = ? AND status = 'checkout_ready'`).bind(paymentIntent, now, now, now, order.id),
@@ -266,9 +282,14 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
           sold_quantity = sold_quantity + 1, updated_at = ? WHERE id = ? AND reserved_quantity > 0`).bind(now, order.publication_id),
         db.prepare(`INSERT INTO store_commerce_fulfilments (id, order_id, purchasing_user_id, fulfilment_kind,
           status, entitlement_key, granted_at, created_at, updated_at)
-          SELECT ?, o.id, o.purchasing_user_id, i.fulfilment_kind, 'completed', 'dzn_store_' || i.product_key, ?, ?, ?
+          SELECT ?, o.id, o.purchasing_user_id, i.fulfilment_kind, 'completed', ?, ?, ?, ?
           FROM store_commerce_orders o JOIN store_commerce_order_items i ON i.order_id = o.id WHERE o.id = ?`)
-          .bind(`store_fulfilment_${crypto.randomUUID()}`, now, now, now, order.id),
+          .bind(fulfilmentId, entitlementKey, now, now, now, order.id),
+        db.prepare(`INSERT INTO store_commerce_entitlements (id, fulfilment_id, order_id, purchasing_user_id,
+          product_key, fulfilment_kind, entitlement_key, status, granted_at, created_at, updated_at)
+          SELECT ?, ?, o.id, o.purchasing_user_id, i.product_key, i.fulfilment_kind, ?, 'active', ?, ?, ?
+          FROM store_commerce_orders o JOIN store_commerce_order_items i ON i.order_id = o.id WHERE o.id = ?`)
+          .bind(`store_entitlement_${crypto.randomUUID()}`, fulfilmentId, entitlementKey, now, now, now, order.id),
         db.prepare(`INSERT INTO store_commerce_receipts (id, receipt_number, order_id, purchasing_user_id,
           subtotal_amount_minor, tax_amount_minor, total_amount_minor, seller_snapshot_json, issued_at, updated_at)
           SELECT ?, ?, id, purchasing_user_id, subtotal_amount_minor, tax_amount_minor, total_amount_minor, ?, ?, ?
@@ -280,7 +301,6 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
     processingStatus = "processed";
     statements.push(
       db.prepare("UPDATE store_commerce_orders SET status = 'expired', updated_at = ? WHERE id = ? AND status IN ('checkout_pending','checkout_ready')").bind(now, order.id),
-      db.prepare("UPDATE store_catalog_publications SET reserved_quantity = reserved_quantity - 1, updated_at = ? WHERE id = ? AND reserved_quantity > 0").bind(now, order.publication_id),
     );
   } else if (order && (event.type === "charge.refunded" || event.type === "charge.dispute.created")) {
     const fullRefund = event.type !== "charge.refunded" || (object.refunded === true && Number(object.amount_refunded) >= order.total_amount_minor);
@@ -293,6 +313,7 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
       db.prepare(`UPDATE store_commerce_orders SET status = ?, refunded_at = CASE WHEN ? = 'refunded' THEN ? ELSE refunded_at END, updated_at = ? WHERE id = ?`)
         .bind(nextStatus, nextStatus, now, now, order.id),
       db.prepare("UPDATE store_commerce_fulfilments SET status = 'reversed', reversed_at = ?, updated_at = ? WHERE order_id = ? AND status = 'completed'").bind(now, now, order.id),
+      db.prepare("UPDATE store_commerce_entitlements SET status = 'reversed', reversed_at = ?, updated_at = ? WHERE order_id = ? AND status = 'active'").bind(now, now, order.id),
       db.prepare("UPDATE store_commerce_receipts SET status = ?, updated_at = ? WHERE order_id = ?").bind(nextStatus === "refunded" ? "refunded" : "void", now, order.id),
     );
     }
@@ -310,11 +331,28 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
 export async function listStorePurchases(env: Env, user: SessionUser) {
   const result = await requireDb(env).prepare(`SELECT o.id, o.order_number, o.status, o.currency, o.total_amount_minor,
     o.created_at, o.paid_at, o.fulfilled_at, i.product_name, i.fulfilment_kind,
-    r.receipt_number, r.status AS receipt_status, r.issued_at
+    r.receipt_number, r.status AS receipt_status, r.issued_at,
+    e.entitlement_key, e.status AS entitlement_status, e.granted_at AS entitlement_granted_at
     FROM store_commerce_orders o JOIN store_commerce_order_items i ON i.order_id = o.id
     LEFT JOIN store_commerce_receipts r ON r.order_id = o.id
+    LEFT JOIN store_commerce_entitlements e ON e.order_id = o.id
     WHERE o.purchasing_user_id = ? ORDER BY o.created_at DESC LIMIT 100`).bind(user.id).all();
   return { ok: true as const, purchases: result.results ?? [] };
+}
+
+async function expireAbandonedStoreOrders(db: D1Database, now: Date) {
+  await db.prepare(`UPDATE store_commerce_orders SET status = 'expired', updated_at = ?
+    WHERE status IN ('checkout_pending','checkout_ready')
+      AND ((status = 'checkout_pending' AND reservation_expires_at <= ?)
+        OR (status = 'checkout_ready' AND checkout_url_expires_at IS NOT NULL AND checkout_url_expires_at <= ?))`)
+    .bind(now.toISOString(), now.toISOString(), now.toISOString()).run();
+}
+
+async function orderProductKey(db: D1Database, orderId: string) {
+  const row = await db.prepare("SELECT product_key FROM store_commerce_order_items WHERE order_id = ?")
+    .bind(orderId).first<{ product_key: string }>();
+  if (!row?.product_key) throw new Error("Store order item is missing");
+  return row.product_key;
 }
 
 async function readPublication(db: D1Database, publicationId: string, requireAvailableStock: boolean) {

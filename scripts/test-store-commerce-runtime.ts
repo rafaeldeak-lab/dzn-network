@@ -20,6 +20,9 @@ async function run() {
   assert.doesNotMatch(migration, /DROP TABLE|DELETE FROM|TRUNCATE|ALTER TABLE/i);
   assert.match(migration, /trg_store_commerce_order_stock_guard/);
   assert.match(migration, /trg_store_commerce_events_immutable/);
+  assert.match(migration, /trg_store_commerce_order_lifetime_limit/);
+  assert.match(migration, /trg_store_commerce_order_release_stock/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS store_commerce_entitlements/);
   assert.match(migration, /no_competitive_advantage INTEGER NOT NULL DEFAULT 1 CHECK \(no_competitive_advantage = 1\)/);
 
   const mf = new Miniflare({ modules: true, script: "export default { fetch() { return new Response('ok'); } }",
@@ -61,6 +64,9 @@ async function run() {
         createCheckout: async (params) => {
           checkoutCreates += 1;
           assert.equal(params["line_items[0][price]"], "price_test_supporter");
+          assert.equal(params["payment_method_types[0]"], "card");
+          assert.equal(params["adaptive_pricing[enabled]"], "false");
+          assert.equal(params.payment_method_collection, "always");
           return { id: "cs_test_checkout001", url: "https://checkout.stripe.com/c/pay/test_checkout001", status: "open",
             mode: "payment", livemode: false, client_reference_id: "store_order_orderid", expires_at: expiresAt,
             metadata: { dzn_store_order_id: "store_order_orderid", dzn_store_user_id: buyer.id } };
@@ -89,6 +95,9 @@ async function run() {
     assert.equal((await db.prepare("SELECT status FROM store_commerce_orders").first<{ status: string }>())?.status, "fulfilled");
     assert.deepEqual(await db.prepare("SELECT reserved_quantity, sold_quantity FROM store_catalog_publications").first(), { reserved_quantity: 0, sold_quantity: 1 });
     assert.equal((await db.prepare("SELECT COUNT(*) AS total FROM store_commerce_receipts").first<{ total: number }>())?.total, 1);
+    assert.deepEqual(await db.prepare("SELECT entitlement_key, status FROM store_commerce_entitlements").first(), {
+      entitlement_key: "dzn_store_founding-supporter_store_order_orderid", status: "active",
+    });
     assert.equal((await listStorePurchases(env, buyer)).purchases.length, 1);
 
     const second = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), buyer,
@@ -97,6 +106,16 @@ async function run() {
     if (second.ok) throw new Error("Purchase limit was not enforced");
     assert.equal(second.error, "PRODUCT_NOT_AVAILABLE");
 
+    const partialRefund = event("evt_partial_refund", "charge.refunded", {
+      id: "ch_test_001", object: "charge", payment_intent: "pi_test_001", refunded: false, amount_refunded: 600,
+      metadata: { dzn_store_order_id: "store_order_orderid" },
+    });
+    assert.deepEqual(await reconcileStoreWebhook(env, partialRefund, JSON.stringify(partialRefund)), {
+      duplicate: false, processingStatus: "manual_review",
+    });
+    assert.equal((await db.prepare("SELECT status FROM store_commerce_orders").first<{ status: string }>())?.status, "manual_review");
+    assert.equal((await db.prepare("SELECT status FROM store_commerce_entitlements").first<{ status: string }>())?.status, "active");
+
     const refunded = event("evt_refunded", "charge.refunded", {
       id: "ch_test_001", object: "charge", payment_intent: "pi_test_001", refunded: true, amount_refunded: 1200,
       metadata: { dzn_store_order_id: "store_order_orderid" },
@@ -104,10 +123,34 @@ async function run() {
     await reconcileStoreWebhook(env, refunded, JSON.stringify(refunded));
     assert.equal((await db.prepare("SELECT status FROM store_commerce_orders").first<{ status: string }>())?.status, "refunded");
     assert.equal((await db.prepare("SELECT status FROM store_commerce_fulfilments").first<{ status: string }>())?.status, "reversed");
+    assert.equal((await db.prepare("SELECT status FROM store_commerce_entitlements").first<{ status: string }>())?.status, "reversed");
     assert.equal((await db.prepare("SELECT status FROM store_commerce_receipts").first<{ status: string }>())?.status, "refunded");
+
+    await testAtomicLimitAndReservationExpiry(db, env, published.publication.id);
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Store commerce runtime checks passed.");
   } finally { await mf.dispose(); }
+}
+
+async function testAtomicLimitAndReservationExpiry(db: D1Database, env: Env, publicationId: string) {
+  await db.prepare("UPDATE store_catalog_publications SET stock_limit = 3, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
+  await db.prepare("UPDATE store_commerce_orders SET status = 'refunded' WHERE purchasing_user_id = 'buyer'").run();
+  const first = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), buyer,
+    { publicationId, requestKey: "buyer-expiring-0001" }, {
+      now: new Date("2026-10-02T00:00:00.000Z"), createId: sequence(["expiryorder", "expiryitem", "expirynumber"]),
+      createCheckout: async () => { throw new Error("provider unavailable"); },
+    });
+  assert.equal(first.ok, false);
+  assert.equal((await db.prepare("SELECT reserved_quantity FROM store_catalog_publications").first<{ reserved_quantity: number }>())?.reserved_quantity, 1);
+  const blocked = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), buyer,
+    { publicationId, requestKey: "buyer-expiring-0002" }, { now: new Date("2026-10-02T00:10:00.000Z") });
+  assert.equal(blocked.ok, false);
+  if (blocked.ok) throw new Error("Atomic lifetime limit was not enforced");
+  assert.equal(blocked.error, "PURCHASE_LIMIT_REACHED");
+  await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), buyer,
+    { publicationId, requestKey: "buyer-expiring-0003" }, { now: new Date("2026-10-02T00:31:00.000Z"),
+      createId: sequence(["afterexpiry", "afteritem", "afternumber"]), createCheckout: async () => { throw new Error("stop"); } });
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE request_key = 'buyer-expiring-0001'").first<{ status: string }>())?.status, "expired");
 }
 
 async function apply(db: D1Database, name: string) {

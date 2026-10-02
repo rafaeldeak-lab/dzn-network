@@ -31,6 +31,9 @@ type Purchase = {
   receipt_number: string | null;
   receipt_status: string | null;
   issued_at: string | null;
+  entitlement_key: string | null;
+  entitlement_status: "active" | "reversed" | null;
+  entitlement_granted_at: string | null;
 };
 
 export function Storefront() {
@@ -157,7 +160,7 @@ export function Storefront() {
             {purchases.map((purchase) => <div key={purchase.id} className="grid gap-3 py-4 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
               <div><p className="font-black text-white">{purchase.product_name}</p><p className="mt-1 text-xs font-bold text-zinc-500">{purchase.order_number}</p></div>
               <p className="text-sm font-black text-cyan-100">{money(purchase.total_amount_minor, purchase.currency)}</p>
-              <div className="sm:text-right"><p className="text-xs font-black uppercase text-emerald-200">{label(purchase.status)}</p><p className="mt-1 text-xs text-zinc-500">{purchase.receipt_number ?? "Receipt pending"}</p></div>
+              <div className="sm:text-right"><p className="text-xs font-black uppercase text-emerald-200">{purchase.entitlement_status === "active" ? "Entitlement active" : label(purchase.status)}</p><p className="mt-1 text-xs text-zinc-500">{purchase.receipt_number ?? "Receipt pending"}</p></div>
             </div>)}
           </div>
         </div>

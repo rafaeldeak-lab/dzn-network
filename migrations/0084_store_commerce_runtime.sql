@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS store_commerce_orders (
   stripe_checkout_session_id TEXT UNIQUE,
   stripe_payment_intent_id TEXT UNIQUE,
   checkout_url_expires_at TEXT,
+  reservation_expires_at TEXT NOT NULL,
   immutable_item_snapshot_json TEXT NOT NULL CHECK (json_valid(immutable_item_snapshot_json) AND json_type(immutable_item_snapshot_json) = 'object'),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -122,6 +123,26 @@ CREATE TABLE IF NOT EXISTS store_commerce_receipts (
   FOREIGN KEY(purchasing_user_id) REFERENCES users(id) ON DELETE RESTRICT
 );
 
+CREATE TABLE IF NOT EXISTS store_commerce_entitlements (
+  id TEXT PRIMARY KEY,
+  fulfilment_id TEXT NOT NULL UNIQUE,
+  order_id TEXT NOT NULL UNIQUE,
+  purchasing_user_id TEXT NOT NULL,
+  product_key TEXT NOT NULL,
+  fulfilment_kind TEXT NOT NULL,
+  entitlement_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'reversed')),
+  granted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  reversed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(purchasing_user_id, entitlement_key),
+  CHECK ((status = 'active' AND reversed_at IS NULL) OR (status = 'reversed' AND reversed_at IS NOT NULL)),
+  FOREIGN KEY(fulfilment_id) REFERENCES store_commerce_fulfilments(id) ON DELETE RESTRICT,
+  FOREIGN KEY(order_id) REFERENCES store_commerce_orders(id) ON DELETE RESTRICT,
+  FOREIGN KEY(purchasing_user_id) REFERENCES users(id) ON DELETE RESTRICT
+);
+
 CREATE TRIGGER IF NOT EXISTS trg_store_catalog_publication_matches_draft
 BEFORE INSERT ON store_catalog_publications
 WHEN NOT EXISTS (
@@ -154,11 +175,37 @@ WHEN NOT EXISTS (
 )
 BEGIN SELECT RAISE(ABORT, 'Store item is paused or sold out'); END;
 
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_order_lifetime_limit
+BEFORE INSERT ON store_commerce_orders
+WHEN (
+  SELECT COUNT(*) FROM store_commerce_orders existing
+  WHERE existing.purchasing_user_id = NEW.purchasing_user_id
+    AND existing.publication_id = NEW.publication_id
+    AND existing.status IN (
+      'checkout_pending', 'checkout_ready', 'paid', 'fulfilment_pending',
+      'fulfilled', 'disputed', 'manual_review'
+    )
+) >= (
+  SELECT lifetime_limit_per_account FROM store_catalog_publications
+  WHERE id = NEW.publication_id
+)
+BEGIN SELECT RAISE(ABORT, 'Store account purchase limit reached'); END;
+
 CREATE TRIGGER IF NOT EXISTS trg_store_commerce_order_reserve_stock
 AFTER INSERT ON store_commerce_orders
 BEGIN
   UPDATE store_catalog_publications SET reserved_quantity = reserved_quantity + 1, updated_at = CURRENT_TIMESTAMP
   WHERE id = NEW.publication_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_order_release_stock
+AFTER UPDATE OF status ON store_commerce_orders
+WHEN OLD.status IN ('checkout_pending', 'checkout_ready')
+  AND NEW.status IN ('cancelled', 'expired', 'payment_failed')
+BEGIN
+  UPDATE store_catalog_publications
+  SET reserved_quantity = reserved_quantity - 1, updated_at = CURRENT_TIMESTAMP
+  WHERE id = NEW.publication_id AND reserved_quantity > 0;
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_catalog_publication_identity_immutable
@@ -192,9 +239,37 @@ WHEN NOT (
   (OLD.status = 'paid' AND NEW.status IN ('fulfilment_pending','fulfilled','refunded','disputed','manual_review')) OR
   (OLD.status = 'fulfilment_pending' AND NEW.status IN ('fulfilled','refunded','disputed','manual_review')) OR
   (OLD.status = 'fulfilled' AND NEW.status IN ('refunded','disputed','manual_review')) OR
-  (OLD.status = 'disputed' AND NEW.status IN ('fulfilled','refunded','manual_review'))
+  (OLD.status = 'disputed' AND NEW.status IN ('fulfilled','refunded','manual_review')) OR
+  (OLD.status = 'manual_review' AND NEW.status IN ('fulfilled','refunded','disputed'))
 )
 BEGIN SELECT RAISE(ABORT, 'invalid commerce order status transition'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_entitlement_matches_fulfilment
+BEFORE INSERT ON store_commerce_entitlements
+WHEN NOT EXISTS (
+  SELECT 1 FROM store_commerce_fulfilments f
+  JOIN store_commerce_order_items i ON i.order_id = f.order_id
+  WHERE f.id = NEW.fulfilment_id AND f.order_id = NEW.order_id
+    AND f.purchasing_user_id = NEW.purchasing_user_id
+    AND f.status = 'completed' AND i.product_key = NEW.product_key
+    AND i.fulfilment_kind = NEW.fulfilment_kind
+    AND f.entitlement_key = NEW.entitlement_key
+)
+BEGIN SELECT RAISE(ABORT, 'Store entitlement must match a completed fulfilment'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_entitlement_identity_immutable
+BEFORE UPDATE OF fulfilment_id, order_id, purchasing_user_id, product_key, fulfilment_kind,
+  entitlement_key, granted_at, created_at ON store_commerce_entitlements
+BEGIN SELECT RAISE(ABORT, 'Store entitlement identity is immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_entitlement_status_transition
+BEFORE UPDATE OF status ON store_commerce_entitlements
+WHEN NOT (OLD.status = NEW.status OR (OLD.status = 'active' AND NEW.status = 'reversed'))
+BEGIN SELECT RAISE(ABORT, 'invalid Store entitlement status transition'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_entitlements_no_delete
+BEFORE DELETE ON store_commerce_entitlements
+BEGIN SELECT RAISE(ABORT, 'Store entitlements are immutable'); END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_commerce_order_items_no_delete
 BEFORE DELETE ON store_commerce_order_items
@@ -214,3 +289,4 @@ CREATE INDEX IF NOT EXISTS idx_store_commerce_orders_status ON store_commerce_or
 CREATE INDEX IF NOT EXISTS idx_store_commerce_events_order ON store_commerce_events(order_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_store_commerce_fulfilments_user ON store_commerce_fulfilments(purchasing_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_store_commerce_receipts_user ON store_commerce_receipts(purchasing_user_id, issued_at DESC);
+CREATE INDEX IF NOT EXISTS idx_store_commerce_entitlements_user ON store_commerce_entitlements(purchasing_user_id, status, granted_at DESC);
