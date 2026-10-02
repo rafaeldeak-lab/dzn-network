@@ -208,6 +208,24 @@ BEGIN
   WHERE id = NEW.publication_id AND reserved_quantity > 0;
 END;
 
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_late_paid_stock_guard
+BEFORE UPDATE OF status ON store_commerce_orders
+WHEN OLD.status = 'expired' AND NEW.status = 'fulfilled' AND NOT EXISTS (
+  SELECT 1 FROM store_catalog_publications pub
+  WHERE pub.id = NEW.publication_id
+    AND (pub.stock_mode = 'unlimited' OR pub.reserved_quantity + pub.sold_quantity < pub.stock_limit)
+)
+BEGIN SELECT RAISE(ABORT, 'late paid Store stock requires manual review'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_late_paid_stock_sale
+AFTER UPDATE OF status ON store_commerce_orders
+WHEN OLD.status = 'expired' AND NEW.status = 'fulfilled'
+BEGIN
+  UPDATE store_catalog_publications
+  SET sold_quantity = sold_quantity + 1, updated_at = CURRENT_TIMESTAMP
+  WHERE id = NEW.publication_id;
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_store_catalog_publication_identity_immutable
 BEFORE UPDATE OF product_id, price_id, stripe_price_id, published_by_user_id ON store_catalog_publications
 BEGIN SELECT RAISE(ABORT, 'Store publication identity is immutable'); END;
@@ -265,7 +283,9 @@ BEGIN SELECT RAISE(ABORT, 'Store entitlement identity is immutable'); END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_commerce_entitlement_status_transition
 BEFORE UPDATE OF status ON store_commerce_entitlements
-WHEN NOT (OLD.status = NEW.status OR (OLD.status = 'active' AND NEW.status = 'reversed'))
+WHEN NOT (OLD.status = NEW.status OR
+  (OLD.status = 'active' AND NEW.status = 'reversed') OR
+  (OLD.status = 'reversed' AND NEW.status = 'active'))
 BEGIN SELECT RAISE(ABORT, 'invalid Store entitlement status transition'); END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_commerce_entitlements_no_delete

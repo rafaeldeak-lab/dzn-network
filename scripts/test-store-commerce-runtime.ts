@@ -73,6 +73,7 @@ async function run() {
           assert.equal(params["adaptive_pricing[enabled]"], "false");
           assert.equal(params.payment_method_collection, "always");
           assert.equal(params["payment_intent_data[metadata][dzn_store_order_id]"], "store_order_orderid");
+          assert.equal(params.success_url, "https://dayz-network.com/store?store=success&order=store_order_orderid");
           return { id: "cs_test_checkout001", url: "https://checkout.stripe.com/c/pay/test_checkout001", status: "open",
             mode: "payment", livemode: false, client_reference_id: "store_order_orderid", expires_at: expiresAt,
             metadata: { dzn_store_order_id: "store_order_orderid", dzn_store_user_id: buyer.id } };
@@ -109,6 +110,26 @@ async function run() {
     });
     assert.equal((await listStorePurchases(env, buyer)).purchases.length, 1);
 
+    const disputed = event("evt_dispute_created", "charge.dispute.created", {
+      id: "dp_test_001", object: "dispute", payment_intent: "pi_test_001", status: "needs_response",
+    });
+    assert.deepEqual(await reconcileStoreWebhook(env, disputed, JSON.stringify(disputed)), {
+      duplicate: false, processingStatus: "processed",
+    });
+    assert.equal((await db.prepare("SELECT status FROM store_commerce_orders").first<{ status: string }>())?.status, "disputed");
+    assert.equal((await db.prepare("SELECT status FROM store_commerce_entitlements").first<{ status: string }>())?.status, "reversed");
+
+    const disputeWon = event("evt_dispute_won", "charge.dispute.closed", {
+      id: "dp_test_001", object: "dispute", payment_intent: "pi_test_001", status: "won",
+    });
+    assert.deepEqual(await reconcileStoreWebhook(env, disputeWon, JSON.stringify(disputeWon)), {
+      duplicate: false, processingStatus: "processed",
+    });
+    assert.equal((await db.prepare("SELECT status FROM store_commerce_orders").first<{ status: string }>())?.status, "fulfilled");
+    assert.equal((await db.prepare("SELECT status, reversed_at FROM store_commerce_entitlements").first<{ status: string; reversed_at: string | null }>())?.status, "active");
+    assert.equal((await db.prepare("SELECT reversed_at FROM store_commerce_entitlements").first<{ reversed_at: string | null }>())?.reversed_at, null);
+    assert.equal((await db.prepare("SELECT status FROM store_commerce_receipts").first<{ status: string }>())?.status, "issued");
+
     const second = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), buyer,
       { publicationId: published.publication.id, requestKey: "buyer-request-0002" });
     assert.equal(second.ok, false);
@@ -137,10 +158,40 @@ async function run() {
 
     await testRefundBeforeCompletion(db, env, published.publication.id);
 
+    await testLatePaymentStockConflict(db, env, published.publication.id);
+
     await testAtomicLimitAndReservationExpiry(db, env, published.publication.id);
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Store commerce runtime checks passed.");
   } finally { await mf.dispose(); }
+}
+
+async function testLatePaymentStockConflict(db: D1Database, env: Env, publicationId: string) {
+  const secondBuyer: SessionUser = { id: "buyer-two", discord_id: "100000000000000003", username: "buyer-two", avatar: null };
+  await db.prepare("UPDATE store_catalog_publications SET stock_limit = 2, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
+  const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), secondBuyer,
+    { publicationId, requestKey: "late-stock-conflict-0001" }, {
+      createId: sequence(["lateorder", "lateitem", "latenumber"]),
+      createCheckout: async () => ({ id: "cs_test_lateconflict", url: "https://checkout.stripe.com/c/pay/test_lateconflict",
+        status: "open", mode: "payment", livemode: false, client_reference_id: "store_order_lateorder", expires_at: expiresAt,
+        metadata: { dzn_store_order_id: "store_order_lateorder", dzn_store_user_id: secondBuyer.id } }),
+    });
+  assert.equal(checkout.ok, true);
+  await db.prepare("UPDATE store_commerce_orders SET status = 'expired' WHERE id = 'store_order_lateorder'").run();
+  await db.prepare("UPDATE store_catalog_publications SET stock_limit = 1, sold_quantity = 1 WHERE id = ?").bind(publicationId).run();
+  const completed = event("evt_late_stock_conflict", "checkout.session.completed", {
+    id: "cs_test_lateconflict", object: "checkout.session", client_reference_id: "store_order_lateorder",
+    payment_intent: "pi_test_lateconflict", payment_status: "paid", amount_total: 1200, currency: "gbp",
+    metadata: { dzn_store_order_id: "store_order_lateorder" },
+  });
+  assert.deepEqual(await reconcileStoreWebhook(env, completed, JSON.stringify(completed)), {
+    duplicate: false, processingStatus: "manual_review",
+  });
+  assert.deepEqual(await db.prepare("SELECT status, stripe_payment_intent_id FROM store_commerce_orders WHERE id = 'store_order_lateorder'").first(), {
+    status: "manual_review", stripe_payment_intent_id: "pi_test_lateconflict",
+  });
+  assert.equal((await db.prepare("SELECT COUNT(*) AS total FROM store_commerce_entitlements WHERE order_id = 'store_order_lateorder'").first<{ total: number }>())?.total, 0);
 }
 
 async function testRefundBeforeCompletion(db: D1Database, env: Env, publicationId: string) {
