@@ -11,6 +11,7 @@ import {
 } from "../functions/_lib/store-commerce";
 import type { Env, SessionUser } from "../functions/_lib/types";
 import type { StripeEvent } from "../functions/_lib/stripe";
+import { readActiveStoreSupporterCards } from "../functions/_lib/store-entitlements";
 
 const owner: SessionUser = { id: "owner", discord_id: "100000000000000001", username: "owner", avatar: null };
 const buyer: SessionUser = { id: "buyer", discord_id: "100000000000000002", username: "buyer", avatar: null };
@@ -28,6 +29,9 @@ async function run() {
   assert.match(migration, /trg_store_commerce_dispute_restoration_stock_sale/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS store_commerce_entitlements/);
   assert.match(migration, /no_competitive_advantage INTEGER NOT NULL DEFAULT 1 CHECK \(no_competitive_advantage = 1\)/);
+  const storefrontSource = readFileSync("components/store/storefront.tsx", "utf8");
+  assert.match(storefrontSource, /storedRetryKey\(storageKey\)/);
+  assert.match(storefrontSource, /sessionStorage\.setItem\(key, value\)/);
 
   const mf = new Miniflare({ modules: true, script: "export default { fetch() { return new Response('ok'); } }",
     compatibilityDate: "2026-05-08", d1Databases: ["DB"], d1Persist: false });
@@ -51,6 +55,18 @@ async function run() {
       created_by_user_id, updated_by_user_id) VALUES ('product','founding-supporter','Founding Supporter',
       'Permanent account-bound supporter recognition.', 'supporter_pack', 'supporter_card', 'owner', 'owner')`).run();
     await db.prepare("INSERT INTO store_prices (id, product_id, unit_amount_minor, created_by_user_id) VALUES ('price','product',1200,'owner')").run();
+    await db.prepare(`INSERT INTO store_products (id, product_key, name, description, product_type, fulfilment_kind,
+      created_by_user_id, updated_by_user_id) VALUES ('unsupported-product','unsupported-theme','Unsupported Theme',
+      'A theme without a live delivery consumer.', 'profile_theme', 'theme_pack', 'owner', 'owner')`).run();
+    await db.prepare("INSERT INTO store_prices (id, product_id, unit_amount_minor, created_by_user_id) VALUES ('unsupported-price','unsupported-product',900,'owner')").run();
+    const unsupported = await publishStoreProduct(env, owner, { productId: "unsupported-product", priceId: "unsupported-price",
+      stripePriceId: "price_test_unsupported", publish: false }, {
+        retrievePrice: async () => ({ id: "price_test_unsupported", active: true, currency: "gbp",
+          unit_amount: 900, livemode: false, type: "one_time" }),
+      });
+    assert.equal(unsupported.ok, false);
+    if (unsupported.ok) throw new Error("Unsupported fulfilment was published");
+    assert.equal(unsupported.error, "FULFILMENT_NOT_AVAILABLE");
 
     const approved = await publishStoreProduct(env, owner, { productId: "product", priceId: "price",
       stripePriceId: "price_test_supporter", stockLimit: 1, lifetimeLimit: 1, publish: false }, {
@@ -138,6 +154,11 @@ async function run() {
     assert.deepEqual(await db.prepare("SELECT entitlement_key, status FROM store_commerce_entitlements").first(), {
       entitlement_key: "dzn_store_founding-supporter_store_order_orderid", status: "active",
     });
+    const supporterCards = await readActiveStoreSupporterCards(db as unknown as D1Database, buyer.id);
+    assert.equal(supporterCards.length, 1);
+    assert.equal(supporterCards[0]?.product_key, "founding-supporter");
+    assert.equal(supporterCards[0]?.product_name, "Founding Supporter");
+    assert.match(supporterCards[0]?.granted_at ?? "", /^\d{4}-\d{2}-\d{2}T/);
     assert.equal((await listStorePurchases(env, buyer)).purchases.length, 1);
 
     const disputed = event("evt_dispute_created", "charge.dispute.created", {
@@ -232,11 +253,17 @@ async function testEarlyDisputeWon(db: D1Database, env: Env, publicationId: stri
   assert.equal(checkout.ok, true);
   const disputed = event("evt_early_dispute", "charge.dispute.created", {
     id: "dp_test_early", object: "dispute", payment_intent: "pi_test_earlydispute", status: "needs_response", amount: 1200,
-    metadata: { dzn_store_order_id: "store_order_disputeorder" },
   });
-  assert.deepEqual(await reconcileStoreWebhook(env, disputed, JSON.stringify(disputed)), {
+  let paymentIntentReads = 0;
+  assert.deepEqual(await reconcileStoreWebhook(env, disputed, JSON.stringify(disputed), {
+    retrievePaymentIntent: async (id) => {
+      paymentIntentReads += 1;
+      return { id, livemode: false, metadata: { dzn_store_order_id: "store_order_disputeorder" } };
+    },
+  }), {
     duplicate: false, processingStatus: "processed",
   });
+  assert.equal(paymentIntentReads, 1);
   assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE id = 'store_order_disputeorder'").first<{ status: string }>())?.status, "disputed");
   assert.equal((await db.prepare("SELECT COUNT(*) AS total FROM store_commerce_fulfilments WHERE order_id = 'store_order_disputeorder'").first<{ total: number }>())?.total, 0);
   const won = event("evt_early_dispute_won", "charge.dispute.closed", {
@@ -309,11 +336,14 @@ async function testFavorableCloseBeforeDisputeCreated(db: D1Database, env: Env, 
   const closed = event("evt_outoforder_closed", "charge.dispute.closed", {
     id: "dp_test_outoforder", object: "dispute", payment_intent: "pi_test_outoforder", status: "won",
   });
-  assert.equal((await reconcileStoreWebhook(env, closed, JSON.stringify(closed))).processingStatus, "processed");
   const created = event("evt_outoforder_created", "charge.dispute.created", {
     id: "dp_test_outoforder", object: "dispute", payment_intent: "pi_test_outoforder", status: "needs_response", amount: 1200,
   });
-  assert.equal((await reconcileStoreWebhook(env, created, JSON.stringify(created))).processingStatus, "processed");
+  const concurrent = await Promise.all([
+    reconcileStoreWebhook(env, closed, JSON.stringify(closed)),
+    reconcileStoreWebhook(env, created, JSON.stringify(created)),
+  ]);
+  assert.deepEqual(concurrent.map((result) => result.processingStatus), ["processed", "processed"]);
   assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE id = 'store_order_outoforder'")
     .first<{ status: string }>())?.status, "fulfilled");
   assert.equal((await db.prepare("SELECT status FROM store_commerce_entitlements WHERE order_id = 'store_order_outoforder'")

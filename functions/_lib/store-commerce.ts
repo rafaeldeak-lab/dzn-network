@@ -69,6 +69,11 @@ export type StoreCommerceOptions = {
 
 type StoreStripePrice = { id: string; active?: boolean; currency?: string; unit_amount?: number | null; livemode?: boolean; type?: string };
 type StorePublishOptions = { retrievePrice?: (priceId: string) => Promise<StoreStripePrice> };
+type StoreStripeReference = { id: string; livemode?: boolean; payment_intent?: unknown; metadata?: Record<string, string | null> | null };
+type StoreWebhookOptions = {
+  retrieveCharge?: (chargeId: string) => Promise<StoreStripeReference>;
+  retrievePaymentIntent?: (paymentIntentId: string) => Promise<StoreStripeReference>;
+};
 type ExistingPublication = {
   id: string;
   stripe_price_id: string;
@@ -117,9 +122,14 @@ export async function publishStoreProduct(
   const id = `store_publication_${crypto.randomUUID()}`;
   const now = new Date().toISOString();
   try {
-    const draftPrice = await requireDb(env).prepare("SELECT currency, unit_amount_minor FROM store_prices WHERE id = ? AND product_id = ?")
-      .bind(priceId, productId).first<{ currency: string; unit_amount_minor: number }>();
+    const draftPrice = await requireDb(env).prepare(`SELECT pr.currency, pr.unit_amount_minor, p.product_type, p.fulfilment_kind
+      FROM store_prices pr JOIN store_products p ON p.id = pr.product_id
+      WHERE pr.id = ? AND pr.product_id = ?`)
+      .bind(priceId, productId).first<{ currency: string; unit_amount_minor: number; product_type: string; fulfilment_kind: string }>();
     if (!draftPrice) return failure(404, "DRAFT_NOT_FOUND", "The Store draft price could not be found.");
+    if (draftPrice.product_type !== "supporter_pack" || draftPrice.fulfilment_kind !== "supporter_card") {
+      return failure(422, "FULFILMENT_NOT_AVAILABLE", "Only supporter cards with a proven player-profile delivery path can be published right now.");
+    }
     const retrievePrice = options.retrievePrice ?? ((providerId) => stripeGetRequest<StoreStripePrice>(env, `/prices/${encodeURIComponent(providerId)}`));
     let providerPrice: StoreStripePrice;
     try { providerPrice = await retrievePrice(stripePriceId); }
@@ -294,31 +304,34 @@ export async function createOrResumeStoreCheckout(
   return checkoutSuccess(order, session);
 }
 
-export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBody: string) {
+export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBody: string, options: StoreWebhookOptions = {}) {
   const db = requireDb(env);
   if (!event?.id || !event.type || !event.data?.object) throw new Error("Invalid Store webhook event");
   const existing = await db.prepare("SELECT id FROM store_commerce_events WHERE stripe_event_id = ?").bind(event.id).first();
   if (existing) return { duplicate: true };
   const object = event.data.object;
   const metadata = record(object.metadata);
-  const orderId = identifier(metadata.dzn_store_order_id ?? object.client_reference_id);
-  const paymentIntentId = stripeId(object.payment_intent);
-  const order = orderId
+  let orderId = identifier(metadata.dzn_store_order_id ?? object.client_reference_id);
+  let paymentIntentId = stripeId(object.payment_intent);
+  let order = orderId
     ? await db.prepare("SELECT * FROM store_commerce_orders WHERE id = ?").bind(orderId).first<OrderRow>()
     : paymentIntentId
       ? await db.prepare("SELECT * FROM store_commerce_orders WHERE stripe_payment_intent_id = ?").bind(paymentIntentId).first<OrderRow>()
       : null;
+  if (!order && !orderId && event.type.startsWith("charge.dispute.")) {
+    const resolved = await resolveDisputeReferences(env, object, event.livemode === true, options);
+    orderId = resolved.orderId;
+    paymentIntentId = resolved.paymentIntentId;
+    order = orderId
+      ? await db.prepare("SELECT * FROM store_commerce_orders WHERE id = ?").bind(orderId).first<OrderRow>()
+      : paymentIntentId
+        ? await db.prepare("SELECT * FROM store_commerce_orders WHERE stripe_payment_intent_id = ?").bind(paymentIntentId).first<OrderRow>()
+        : null;
+  }
   const eventLive = event.livemode === true;
   const disputeId = event.type.startsWith("charge.dispute.") ? stripeId(object.id) : null;
   const disputeOutcome = event.type === "charge.dispute.closed" ? text(object.status) : null;
   const favorableDisputeClose = disputeOutcome === "won" || disputeOutcome === "warning_closed";
-  const priorFavorableClose = order && event.type === "charge.dispute.created" && disputeId
-    ? await db.prepare(`SELECT id FROM store_commerce_events
-        WHERE order_id = ? AND event_type = 'charge.dispute.closed'
-          AND json_extract(safe_summary_json, '$.dispute.id') = ?
-          AND json_extract(safe_summary_json, '$.dispute.outcome') IN ('won','warning_closed')
-        LIMIT 1`).bind(order.id, disputeId).first<{ id: string }>()
-    : null;
   let processingStatus: "processed" | "ignored" | "manual_review" = "ignored";
   const statements = [] as D1PreparedStatement[];
   const now = new Date().toISOString();
@@ -390,10 +403,10 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
     statements.push(
       db.prepare("UPDATE store_commerce_orders SET status = 'expired', updated_at = ? WHERE id = ? AND status IN ('checkout_pending','checkout_ready')").bind(now, order.id),
     );
-  } else if (order && event.type === "charge.dispute.closed" && favorableDisputeClose && order.status === "disputed") {
+  } else if (order && event.type === "charge.dispute.closed" && favorableDisputeClose) {
     const existingFulfilment = await db.prepare("SELECT id FROM store_commerce_fulfilments WHERE order_id = ?")
       .bind(order.id).first<{ id: string }>();
-    processingStatus = "processed";
+    processingStatus = ["disputed", "fulfilled"].includes(order.status) ? "processed" : "manual_review";
       const paymentIntent = stripeId(object.payment_intent) ?? order.stripe_payment_intent_id;
       const fulfilmentId = existingFulfilment?.id ?? `store_fulfilment_${crypto.randomUUID()}`;
       const entitlementKey = `dzn_store_${await orderProductKey(db, order.id)}_${order.id}`;
@@ -433,44 +446,50 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
           WHERE order_id = ? AND status = 'void'
             AND EXISTS (SELECT 1 FROM store_commerce_orders WHERE id = ? AND status = 'fulfilled')`).bind(now, order.id, order.id),
       );
-  } else if (order && event.type === "charge.dispute.closed" && favorableDisputeClose) {
-    processingStatus = order.status === "fulfilled" ? "processed" : "manual_review";
-    if (["checkout_pending", "checkout_ready", "paid", "fulfilment_pending", "expired", "manual_review"].includes(order.status)) {
-      statements.push(db.prepare("UPDATE store_commerce_orders SET status = 'manual_review', updated_at = ? WHERE id = ?")
-        .bind(now, order.id));
-    }
+      if (processingStatus === "manual_review") {
+        statements.push(db.prepare(`UPDATE store_commerce_orders SET status = 'manual_review', updated_at = ?
+          WHERE id = ? AND status IN ('checkout_pending','checkout_ready','paid','fulfilment_pending','expired')`).bind(now, order.id));
+      }
   } else if (order && event.type === "charge.dispute.closed" && order.status === "disputed") {
     processingStatus = "processed";
   } else if (order && (event.type === "charge.refunded" || event.type === "charge.dispute.created")) {
     const fullReversal = event.type === "charge.refunded"
       ? object.refunded === true && Number(object.amount_refunded) >= order.total_amount_minor
       : Number(object.amount) >= order.total_amount_minor;
-    const favorableCloseAlreadyRecorded = event.type === "charge.dispute.created" && Boolean(priorFavorableClose);
-    processingStatus = favorableCloseAlreadyRecorded
-      ? (order.status === "fulfilled" ? "processed" : "manual_review")
-      : fullReversal ? "processed" : "manual_review";
-    if (favorableCloseAlreadyRecorded) {
-      if (["checkout_pending", "checkout_ready", "paid", "fulfilment_pending", "expired"].includes(order.status)) {
-        statements.push(db.prepare("UPDATE store_commerce_orders SET status = 'manual_review', updated_at = ? WHERE id = ?")
-          .bind(now, order.id));
-      }
-    } else if (!fullReversal) {
+    processingStatus = fullReversal ? "processed" : "manual_review";
+    if (!fullReversal) {
       statements.push(db.prepare("UPDATE store_commerce_orders SET status = 'manual_review', updated_at = ? WHERE id = ?").bind(now, order.id));
     } else {
     const nextStatus = event.type === "charge.refunded" ? "refunded" : "disputed";
+    const favorableCloseGuard = event.type === "charge.dispute.created"
+      ? ` AND NOT EXISTS (SELECT 1 FROM store_commerce_events
+          WHERE order_id = ? AND event_type = 'charge.dispute.closed'
+            AND json_extract(safe_summary_json, '$.dispute.id') = ?
+            AND json_extract(safe_summary_json, '$.dispute.outcome') IN ('won','warning_closed'))`
+      : "";
+    const orderUpdate = db.prepare(`UPDATE store_commerce_orders SET status = ?, stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, ?),
+        refunded_at = CASE WHEN ? = 'refunded' THEN ? ELSE refunded_at END, updated_at = ? WHERE id = ?${favorableCloseGuard}`);
     statements.push(
-      db.prepare(`UPDATE store_commerce_orders SET status = ?, stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, ?),
-        refunded_at = CASE WHEN ? = 'refunded' THEN ? ELSE refunded_at END, updated_at = ? WHERE id = ?`)
-        .bind(nextStatus, stripeId(object.payment_intent), nextStatus, now, now, order.id),
-      db.prepare("UPDATE store_commerce_fulfilments SET status = 'reversed', reversed_at = ?, updated_at = ? WHERE order_id = ? AND status = 'completed'").bind(now, now, order.id),
-      db.prepare("UPDATE store_commerce_entitlements SET status = 'reversed', reversed_at = ?, updated_at = ? WHERE order_id = ? AND status = 'active'").bind(now, now, order.id),
-      db.prepare("UPDATE store_commerce_receipts SET status = ?, updated_at = ? WHERE order_id = ?").bind(nextStatus === "refunded" ? "refunded" : "void", now, order.id),
+      event.type === "charge.dispute.created"
+        ? orderUpdate.bind(nextStatus, paymentIntentId, nextStatus, now, now, order.id, order.id, disputeId)
+        : orderUpdate.bind(nextStatus, paymentIntentId, nextStatus, now, now, order.id),
+      db.prepare(`UPDATE store_commerce_fulfilments SET status = 'reversed', reversed_at = ?, updated_at = ?
+        WHERE order_id = ? AND status = 'completed'
+          AND EXISTS (SELECT 1 FROM store_commerce_orders WHERE id = ? AND status = ?)`)
+        .bind(now, now, order.id, order.id, nextStatus),
+      db.prepare(`UPDATE store_commerce_entitlements SET status = 'reversed', reversed_at = ?, updated_at = ?
+        WHERE order_id = ? AND status = 'active'
+          AND EXISTS (SELECT 1 FROM store_commerce_orders WHERE id = ? AND status = ?)`)
+        .bind(now, now, order.id, order.id, nextStatus),
+      db.prepare(`UPDATE store_commerce_receipts SET status = ?, updated_at = ? WHERE order_id = ?
+        AND EXISTS (SELECT 1 FROM store_commerce_orders WHERE id = ? AND status = ?)`)
+        .bind(nextStatus === "refunded" ? "refunded" : "void", now, order.id, order.id, nextStatus),
     );
     }
   }
   const safeSummary = JSON.stringify({ eventType: event.type, orderLinked: Boolean(order), livemode: eventLive,
     dispute: disputeId ? { id: disputeId, outcome: disputeOutcome } : null,
-    providerReferences: { session: Boolean(stripeId(object.id)), paymentIntent: Boolean(stripeId(object.payment_intent)) } });
+    providerReferences: { session: Boolean(stripeId(object.id)), paymentIntent: Boolean(paymentIntentId) } });
   statements.unshift(db.prepare(`INSERT INTO store_commerce_events (id, stripe_event_id, order_id, event_type, livemode,
     raw_body_sha256, processing_status, safe_summary_json, received_at, processed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(eventId, event.id, order?.id ?? null, event.type, eventLive ? 1 : 0, await sha256(rawBody), processingStatus, safeSummary, now, now));
@@ -483,7 +502,7 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
       && !(await db.prepare("SELECT id FROM store_commerce_fulfilments WHERE order_id = ?").bind(order.id).first());
     const restorationPublication = wonDisputeWithoutFulfilment
       ? await db.prepare(`SELECT stock_mode, stock_limit, reserved_quantity, sold_quantity
-          FROM store_catalog_publications WHERE id = ?`).bind(order.publication_id).first<{
+          FROM store_catalog_publications WHERE id = ?`).bind(order!.publication_id).first<{
           stock_mode: string; stock_limit: number | null; reserved_quantity: number; sold_quantity: number;
         }>()
       : null;
@@ -495,9 +514,9 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
       const fallback = await db.batch([
         db.prepare(`INSERT INTO store_commerce_events (id, stripe_event_id, order_id, event_type, livemode,
           raw_body_sha256, processing_status, safe_summary_json, received_at, processed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .bind(eventId, event.id, order.id, event.type, eventLive ? 1 : 0, await sha256(rawBody), processingStatus, safeSummary, now, now),
+          .bind(eventId, event.id, order!.id, event.type, eventLive ? 1 : 0, await sha256(rawBody), processingStatus, safeSummary, now, now),
         db.prepare("UPDATE store_commerce_orders SET status = 'manual_review', updated_at = ? WHERE id = ? AND status = 'disputed'")
-          .bind(now, order.id),
+          .bind(now, order!.id),
       ]);
       if (fallback.some((result) => !result.success)) throw error;
       return { duplicate: false, processingStatus };
@@ -505,7 +524,7 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
     const latePaidSession = order?.status === "expired" && event.type === "checkout.session.completed";
     const publication = latePaidSession
       ? await db.prepare(`SELECT stock_mode, stock_limit, reserved_quantity, sold_quantity
-        FROM store_catalog_publications WHERE id = ?`).bind(order.publication_id).first<{
+        FROM store_catalog_publications WHERE id = ?`).bind(order!.publication_id).first<{
           stock_mode: string; stock_limit: number | null; reserved_quantity: number; sold_quantity: number;
         }>()
       : null;
@@ -516,10 +535,10 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
     const fallback = await db.batch([
       db.prepare(`INSERT INTO store_commerce_events (id, stripe_event_id, order_id, event_type, livemode,
         raw_body_sha256, processing_status, safe_summary_json, received_at, processed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(eventId, event.id, order.id, event.type, eventLive ? 1 : 0, await sha256(rawBody), processingStatus, safeSummary, now, now),
+        .bind(eventId, event.id, order!.id, event.type, eventLive ? 1 : 0, await sha256(rawBody), processingStatus, safeSummary, now, now),
       db.prepare(`UPDATE store_commerce_orders
         SET status = 'manual_review', stripe_payment_intent_id = ?, paid_at = ?, updated_at = ?
-        WHERE id = ? AND status = 'expired'`).bind(stripeId(object.payment_intent), now, now, order.id),
+        WHERE id = ? AND status = 'expired'`).bind(stripeId(object.payment_intent), now, now, order!.id),
     ]);
     if (fallback.some((result) => !result.success)) throw error;
     return { duplicate: false, processingStatus };
@@ -553,6 +572,35 @@ async function orderProductKey(db: D1Database, orderId: string) {
     .bind(orderId).first<{ product_key: string }>();
   if (!row?.product_key) throw new Error("Store order item is missing");
   return row.product_key;
+}
+
+async function resolveDisputeReferences(
+  env: Env,
+  object: Record<string, unknown>,
+  livemode: boolean,
+  options: StoreWebhookOptions,
+) {
+  let paymentIntentId = stripeId(object.payment_intent);
+  let orderId: string | null = null;
+  const chargeId = stripeId(object.charge);
+  if (!paymentIntentId && chargeId) {
+    const retrieveCharge = options.retrieveCharge
+      ?? ((id: string) => stripeGetRequest<StoreStripeReference>(env, `/charges/${encodeURIComponent(id)}`));
+    const charge = await retrieveCharge(chargeId);
+    if (charge.id !== chargeId || charge.livemode !== livemode) throw new Error("Store dispute Charge did not match the signed event");
+    orderId = identifier(record(charge.metadata).dzn_store_order_id);
+    paymentIntentId = stripeId(charge.payment_intent);
+  }
+  if (!orderId && paymentIntentId) {
+    const retrievePaymentIntent = options.retrievePaymentIntent
+      ?? ((id: string) => stripeGetRequest<StoreStripeReference>(env, `/payment_intents/${encodeURIComponent(id)}`));
+    const paymentIntent = await retrievePaymentIntent(paymentIntentId);
+    if (paymentIntent.id !== paymentIntentId || paymentIntent.livemode !== livemode) {
+      throw new Error("Store dispute PaymentIntent did not match the signed event");
+    }
+    orderId = identifier(record(paymentIntent.metadata).dzn_store_order_id);
+  }
+  return { orderId, paymentIntentId };
 }
 
 async function readPublication(db: D1Database, publicationId: string, requireAvailableStock: boolean) {

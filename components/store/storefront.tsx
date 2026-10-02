@@ -77,8 +77,10 @@ export function Storefront() {
     if (busyId || !checkoutEnabled) return;
     setBusyId(product.publication_id);
     setMessage("");
-    const requestKey = retryKeys.current.get(product.publication_id) ?? crypto.randomUUID();
+    const storageKey = `dzn-store-retry:${product.publication_id}`;
+    const requestKey = retryKeys.current.get(product.publication_id) ?? storedRetryKey(storageKey) ?? crypto.randomUUID();
     retryKeys.current.set(product.publication_id, requestKey);
+    persistRetryKey(storageKey, requestKey);
     try {
       const response = await fetch("/api/store/orders", {
         method: "POST",
@@ -178,3 +180,5 @@ function StoreStatus({ icon: Icon, title, detail, spinning = false }: { icon: ty
 }
 function money(amount: number, currency: string) { return new Intl.NumberFormat("en-GB", { style: "currency", currency: currency.toUpperCase() }).format(amount / 100); }
 function label(value: string) { return value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase()); }
+function storedRetryKey(key: string) { try { return window.sessionStorage.getItem(key); } catch { return null; } }
+function persistRetryKey(key: string, value: string) { try { window.sessionStorage.setItem(key, value); } catch { /* in-memory retry still applies */ } }

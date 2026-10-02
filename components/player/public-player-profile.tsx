@@ -9,6 +9,7 @@ import { publicGameplayPresentation } from "@/lib/public-profile-gameplay";
 import { publicMapLabel } from "@/lib/showcase-labels";
 
 type FutureSection = { visible: boolean; status: "not_available_yet" | "hidden"; message: string };
+type CallingCardSection = { visible: boolean; status: "available" | "not_available_yet" | "hidden"; message: string; items: Array<{ product_key: string; name: string; granted_at: string }> };
 type PublicPlayerProfilePayload = {
   ok: true; handle: string; href: string; display_name: string;
   discord_profile: { visible: boolean; connected: boolean; avatar_url: string | null };
@@ -17,7 +18,7 @@ type PublicPlayerProfilePayload = {
     display_name: { visible: boolean; value: string | null };
     gameplay_summary: { visible: boolean; totals: { kills: number; deaths: number; suicides: number; longest_kill_distance: number; linked_public_servers: number } | null; last_seen_at: string | null };
     featured_server: { visible: boolean; server: { public_slug: string; href: string; server_name: string; server_type: string; platform: string | null; map_name: string | null; kills: number; deaths: number; longest_kill_distance: number; last_seen_at: string | null } | null };
-    xp_progress: FutureSection; challenge_progress: FutureSection; calling_cards: FutureSection; award_dates: FutureSection;
+    xp_progress: FutureSection; challenge_progress: FutureSection; calling_cards: CallingCardSection; award_dates: FutureSection;
   };
   privacy: { public_profile_enabled: true; visible_sections: string[] };
   safety: { public_safe: true; read_only: true; presentation_only: true; private_identifiers_exposed: false; raw_award_evidence_exposed: false };
@@ -141,7 +142,7 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
             <div className="grid gap-2 sm:grid-cols-2">
               <FutureRow label="XP Progress" section={data.sections.xp_progress} icon={<Activity aria-hidden="true" className="h-5 w-5" />} />
               <FutureRow label="Challenges" section={data.sections.challenge_progress} icon={<Trophy aria-hidden="true" className="h-5 w-5" />} />
-              <FutureRow label="Calling Cards" section={data.sections.calling_cards} icon={<Gamepad2 aria-hidden="true" className="h-5 w-5" />} />
+              <CallingCardRow section={data.sections.calling_cards} />
               <FutureRow label="Award Dates" section={data.sections.award_dates} icon={<CalendarDays aria-hidden="true" className="h-5 w-5" />} />
             </div>
           </ProfileBand>
@@ -229,6 +230,9 @@ function DetailTile({ label, value }: { label: string; value: string }) {
 }
 function FutureRow({ label, section, icon }: { label: string; section: FutureSection; icon: ReactNode }) {
   return <div className="flex min-h-24 gap-3 border border-violet-300/15 bg-violet-300/[0.055] p-3"><span className="mt-0.5 text-violet-200">{icon}</span><div><div className="flex flex-wrap items-center gap-2"><p className="text-xs font-black uppercase text-white">{label}</p><span className="text-[9px] font-black uppercase text-violet-200">{section.status.replace(/_/g, " ")}</span></div><p className="mt-2 text-xs font-semibold leading-5 text-slate-400">{section.message}</p></div></div>;
+}
+function CallingCardRow({ section }: { section: CallingCardSection }) {
+  return <div className="min-h-24 border border-violet-300/15 bg-violet-300/[0.055] p-3"><div className="flex gap-3"><Gamepad2 aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-violet-200" /><div><div className="flex flex-wrap items-center gap-2"><p className="text-xs font-black uppercase text-white">Supporter Cards</p><span className="text-[9px] font-black uppercase text-violet-200">{section.status.replace(/_/g, " ")}</span></div><p className="mt-2 text-xs font-semibold leading-5 text-slate-400">{section.message}</p></div></div>{section.visible && section.items.length ? <div className="mt-3 flex flex-wrap gap-2">{section.items.map((item) => <span key={item.product_key} className="rounded-md border border-cyan-300/30 bg-cyan-300/10 px-2 py-1 text-[10px] font-black uppercase text-cyan-100">{item.name}</span>)}</div> : null}</div>;
 }
 function TruthfulEmpty({ message }: { message: string }) { return <p className="border-l-2 border-amber-300 bg-amber-300/8 p-3 text-sm font-semibold leading-6 text-amber-50">{message}</p>; }
 function EmptyHandleState() { return <p className="text-sm font-semibold leading-6 text-amber-50">Public player profiles open from a generated handle such as /players/example-handle. Log in to manage your own profile publishing settings.</p>; }
