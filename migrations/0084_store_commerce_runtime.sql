@@ -201,7 +201,7 @@ END;
 CREATE TRIGGER IF NOT EXISTS trg_store_commerce_order_release_stock
 AFTER UPDATE OF status ON store_commerce_orders
 WHEN OLD.status IN ('checkout_pending', 'checkout_ready')
-  AND NEW.status IN ('cancelled', 'expired', 'payment_failed')
+  AND NEW.status IN ('cancelled', 'expired', 'payment_failed', 'refunded', 'disputed')
 BEGIN
   UPDATE store_catalog_publications
   SET reserved_quantity = reserved_quantity - 1, updated_at = CURRENT_TIMESTAMP
@@ -235,10 +235,11 @@ BEFORE UPDATE OF status ON store_commerce_orders
 WHEN NOT (
   OLD.status = NEW.status OR
   (OLD.status = 'checkout_pending' AND NEW.status IN ('checkout_ready','cancelled','expired','manual_review')) OR
-  (OLD.status = 'checkout_ready' AND NEW.status IN ('paid','fulfilment_pending','fulfilled','cancelled','expired','payment_failed','manual_review')) OR
+  (OLD.status = 'checkout_ready' AND NEW.status IN ('paid','fulfilment_pending','fulfilled','cancelled','expired','payment_failed','refunded','disputed','manual_review')) OR
   (OLD.status = 'paid' AND NEW.status IN ('fulfilment_pending','fulfilled','refunded','disputed','manual_review')) OR
   (OLD.status = 'fulfilment_pending' AND NEW.status IN ('fulfilled','refunded','disputed','manual_review')) OR
   (OLD.status = 'fulfilled' AND NEW.status IN ('refunded','disputed','manual_review')) OR
+  (OLD.status = 'expired' AND NEW.status IN ('fulfilled','refunded','disputed','manual_review')) OR
   (OLD.status = 'disputed' AND NEW.status IN ('fulfilled','refunded','manual_review')) OR
   (OLD.status = 'manual_review' AND NEW.status IN ('fulfilled','refunded','disputed'))
 )

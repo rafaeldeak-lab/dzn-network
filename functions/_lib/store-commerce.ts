@@ -228,6 +228,8 @@ export async function createOrResumeStoreCheckout(
     client_reference_id: order.id,
     "metadata[dzn_store_order_id]": order.id,
     "metadata[dzn_store_user_id]": user.id,
+    "payment_intent_data[metadata][dzn_store_order_id]": order.id,
+    "payment_intent_data[metadata][dzn_store_user_id]": user.id,
     success_url: `${appUrl}/account?store=success&order=${encodeURIComponent(order.id)}`,
     cancel_url: `${appUrl}/store?store=cancelled&order=${encodeURIComponent(order.id)}`,
   };
@@ -264,7 +266,7 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
   const now = new Date().toISOString();
   const eventId = `store_event_${crypto.randomUUID()}`;
   if (order && Boolean(order.livemode) !== eventLive) processingStatus = "manual_review";
-  else if (order && event.type === "checkout.session.completed" && order.status === "checkout_ready") {
+  else if (order && event.type === "checkout.session.completed" && ["checkout_ready", "expired"].includes(order.status)) {
     const amount = Number(object.amount_total);
     const paymentStatus = text(object.payment_status);
     const sessionId = stripeId(object.id);
@@ -277,9 +279,12 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
       const entitlementKey = `dzn_store_${await orderProductKey(db, order.id)}_${order.id}`;
       statements.push(
         db.prepare(`UPDATE store_commerce_orders SET status = 'fulfilled', stripe_payment_intent_id = ?, paid_at = ?, fulfilled_at = ?, updated_at = ?
-          WHERE id = ? AND status = 'checkout_ready'`).bind(paymentIntent, now, now, now, order.id),
-        db.prepare(`UPDATE store_catalog_publications SET reserved_quantity = reserved_quantity - 1,
-          sold_quantity = sold_quantity + 1, updated_at = ? WHERE id = ? AND reserved_quantity > 0`).bind(now, order.publication_id),
+          WHERE id = ? AND status IN ('checkout_ready','expired')`).bind(paymentIntent, now, now, now, order.id),
+        db.prepare(`UPDATE store_catalog_publications
+          SET reserved_quantity = reserved_quantity - CASE WHEN ? = 'checkout_ready' THEN 1 ELSE 0 END,
+            sold_quantity = sold_quantity + 1, updated_at = ?
+          WHERE id = ? AND (? <> 'checkout_ready' OR reserved_quantity > 0)`)
+          .bind(order.status, now, order.publication_id, order.status),
         db.prepare(`INSERT INTO store_commerce_fulfilments (id, order_id, purchasing_user_id, fulfilment_kind,
           status, entitlement_key, granted_at, created_at, updated_at)
           SELECT ?, o.id, o.purchasing_user_id, i.fulfilment_kind, 'completed', ?, ?, ?, ?
@@ -372,6 +377,10 @@ function checkoutAccess(env: Env) {
   const secret = text((env as unknown as Record<string, unknown>).STRIPE_SECRET_KEY);
   const mode = secret?.startsWith("sk_live_") ? "live" : secret?.startsWith("sk_test_") ? "test" : null;
   if (!mode) return failure(503, "STRIPE_NOT_READY", "Store checkout is not configured.");
+  const webhookSecret = text((env as unknown as Record<string, unknown>).STRIPE_STORE_WEBHOOK_SECRET);
+  if (!webhookSecret?.startsWith("whsec_")) {
+    return failure(503, "STORE_WEBHOOK_NOT_READY", "Store checkout is paused until its payment webhook is configured.");
+  }
   if (mode === "live" && (!flags.liveCheckout || !liveStorePrerequisites(env))) {
     return failure(403, "LIVE_CHECKOUT_PAUSED", "Live Store checkout is paused until its seller, webhook, and production URL checks pass.");
   }

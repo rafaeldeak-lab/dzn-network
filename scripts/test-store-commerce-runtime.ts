@@ -31,13 +31,14 @@ async function run() {
     const db = await mf.getD1Database("DB");
     await db.exec("PRAGMA foreign_keys = ON;");
     await db.prepare("CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT, username TEXT, avatar TEXT)").run();
-    await db.prepare("INSERT INTO users (id, discord_id, username) VALUES ('owner','100000000000000001','owner'),('buyer','100000000000000002','buyer')").run();
+    await db.prepare("INSERT INTO users (id, discord_id, username) VALUES ('owner','100000000000000001','owner'),('buyer','100000000000000002','buyer'),('buyer-two','100000000000000003','buyer-two')").run();
     for (const name of ["0081_store_catalog_foundation.sql", "0082_store_order_inventory_foundation.sql",
       "0083_store_fulfilment_receipt_foundation.sql", "0084_store_commerce_runtime.sql"]) await apply(db, name);
     const env = { DB: db as unknown as D1Database, DZN_STORE_ENABLED: "true", DZN_STORE_ADMIN_ENABLED: "true",
       DZN_STORE_COMMERCE_ENABLED: "true", DZN_STORE_PUBLIC_ENABLED: "true", DZN_STORE_CHECKOUT_ENABLED: "true",
       STRIPE_SECRET_KEY: "sk_test_store_test_key", DZN_APP_URL: "https://dayz-network.com",
-      DZN_BILLING_SELLER_NAME: "DZN Network", DZN_BILLING_SUPPORT_EMAIL: "support@example.test" } as unknown as Env;
+      STRIPE_STORE_WEBHOOK_SECRET: "whsec_store_test", DZN_BILLING_SELLER_NAME: "DZN Network",
+      DZN_BILLING_SUPPORT_EMAIL: "support@example.test" } as unknown as Env;
 
     await db.prepare(`INSERT INTO store_products (id, product_key, name, description, product_type, fulfilment_kind,
       created_by_user_id, updated_by_user_id) VALUES ('product','founding-supporter','Founding Supporter',
@@ -55,6 +56,10 @@ async function run() {
     assert.equal(catalog.ok, true);
     if (!catalog.ok) throw new Error("Catalog failed");
     assert.equal(catalog.products.length, 1);
+    const noWebhookCatalog = await listPublishedStore({ ...env, STRIPE_STORE_WEBHOOK_SECRET: undefined } as unknown as Env);
+    assert.equal(noWebhookCatalog.ok, true);
+    if (!noWebhookCatalog.ok) throw new Error("Catalog without webhook failed");
+    assert.equal(noWebhookCatalog.checkoutEnabled, false);
 
     let checkoutCreates = 0;
     const expiresAt = Math.floor(Date.now() / 1000) + 1800;
@@ -67,6 +72,7 @@ async function run() {
           assert.equal(params["payment_method_types[0]"], "card");
           assert.equal(params["adaptive_pricing[enabled]"], "false");
           assert.equal(params.payment_method_collection, "always");
+          assert.equal(params["payment_intent_data[metadata][dzn_store_order_id]"], "store_order_orderid");
           return { id: "cs_test_checkout001", url: "https://checkout.stripe.com/c/pay/test_checkout001", status: "open",
             mode: "payment", livemode: false, client_reference_id: "store_order_orderid", expires_at: expiresAt,
             metadata: { dzn_store_order_id: "store_order_orderid", dzn_store_user_id: buyer.id } };
@@ -84,6 +90,9 @@ async function run() {
       });
     assert.equal(resumed.ok, true);
     assert.equal(checkoutCreates, 1);
+
+    await db.prepare("UPDATE store_commerce_orders SET status = 'expired' WHERE id = 'store_order_orderid'").run();
+    assert.equal((await db.prepare("SELECT reserved_quantity FROM store_catalog_publications").first<{ reserved_quantity: number }>())?.reserved_quantity, 0);
 
     const completed = event("evt_completed", "checkout.session.completed", {
       id: "cs_test_checkout001", object: "checkout.session", client_reference_id: "store_order_orderid",
@@ -126,10 +135,43 @@ async function run() {
     assert.equal((await db.prepare("SELECT status FROM store_commerce_entitlements").first<{ status: string }>())?.status, "reversed");
     assert.equal((await db.prepare("SELECT status FROM store_commerce_receipts").first<{ status: string }>())?.status, "refunded");
 
+    await testRefundBeforeCompletion(db, env, published.publication.id);
+
     await testAtomicLimitAndReservationExpiry(db, env, published.publication.id);
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Store commerce runtime checks passed.");
   } finally { await mf.dispose(); }
+}
+
+async function testRefundBeforeCompletion(db: D1Database, env: Env, publicationId: string) {
+  const secondBuyer: SessionUser = { id: "buyer-two", discord_id: "100000000000000003", username: "buyer-two", avatar: null };
+  await db.prepare("UPDATE store_catalog_publications SET stock_limit = 3, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
+  const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), secondBuyer,
+    { publicationId, requestKey: "refund-first-0001" }, {
+      createId: sequence(["refundorder", "refunditem", "refundnumber"]),
+      createCheckout: async () => ({ id: "cs_test_refundfirst", url: "https://checkout.stripe.com/c/pay/test_refundfirst",
+        status: "open", mode: "payment", livemode: false, client_reference_id: "store_order_refundorder", expires_at: expiresAt,
+        metadata: { dzn_store_order_id: "store_order_refundorder", dzn_store_user_id: secondBuyer.id } }),
+    });
+  assert.equal(checkout.ok, true);
+  const refunded = event("evt_refund_before_completion", "charge.refunded", {
+    id: "ch_test_refundfirst", object: "charge", payment_intent: "pi_test_refundfirst", refunded: true,
+    amount_refunded: 1200, metadata: { dzn_store_order_id: "store_order_refundorder" },
+  });
+  assert.deepEqual(await reconcileStoreWebhook(env, refunded, JSON.stringify(refunded)), {
+    duplicate: false, processingStatus: "processed",
+  });
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE id = 'store_order_refundorder'").first<{ status: string }>())?.status, "refunded");
+  const completion = event("evt_completion_after_refund", "checkout.session.completed", {
+    id: "cs_test_refundfirst", object: "checkout.session", client_reference_id: "store_order_refundorder",
+    payment_intent: "pi_test_refundfirst", payment_status: "paid", amount_total: 1200, currency: "gbp",
+    metadata: { dzn_store_order_id: "store_order_refundorder" },
+  });
+  assert.deepEqual(await reconcileStoreWebhook(env, completion, JSON.stringify(completion)), {
+    duplicate: false, processingStatus: "ignored",
+  });
+  assert.equal((await db.prepare("SELECT COUNT(*) AS total FROM store_commerce_entitlements WHERE order_id = 'store_order_refundorder'").first<{ total: number }>())?.total, 0);
 }
 
 async function testAtomicLimitAndReservationExpiry(db: D1Database, env: Env, publicationId: string) {
