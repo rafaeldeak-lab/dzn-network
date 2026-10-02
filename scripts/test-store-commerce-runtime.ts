@@ -83,7 +83,8 @@ async function run() {
 
     let checkoutCreates = 0;
     const checkoutNow = new Date();
-    const expiresAt = Math.floor(checkoutNow.getTime() / 1000) + 1800;
+    const checkoutStartedAt = Math.floor(checkoutNow.getTime() / 1000);
+    const expiresAt = checkoutStartedAt + 35 * 60;
     const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), buyer,
       { publicationId: published.publication.id, requestKey: "buyer-request-0001" }, {
         createId: sequence(["orderid", "itemid", "numberid"]),
@@ -95,6 +96,7 @@ async function run() {
           assert.equal(params["adaptive_pricing[enabled]"], "false");
           assert.equal(params.payment_method_collection, "always");
           assert.equal(params.expires_at, expiresAt);
+          assert.ok(Number(params.expires_at) - checkoutStartedAt > 30 * 60);
           assert.equal(params["payment_intent_data[metadata][dzn_store_order_id]"], "store_order_orderid");
           assert.equal(params.success_url, "https://dayz-network.com/store?store=success&order=store_order_orderid");
           return { id: "cs_test_checkout001", url: "https://checkout.stripe.com/c/pay/test_checkout001", status: "open",
@@ -219,7 +221,7 @@ async function run() {
 async function testEarlyDisputeWon(db: D1Database, env: Env, publicationId: string) {
   const thirdBuyer: SessionUser = { id: "buyer-three", discord_id: "100000000000000004", username: "buyer-three", avatar: null };
   await db.prepare("UPDATE store_catalog_publications SET stock_limit = 5, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
-  const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const expiresAt = Math.floor(Date.now() / 1000) + 35 * 60;
   const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), thirdBuyer,
     { publicationId, requestKey: "early-dispute-won-0001" }, {
       createId: sequence(["disputeorder", "disputeitem", "disputenumber"]),
@@ -253,7 +255,7 @@ async function testEarlyDisputeWon(db: D1Database, env: Env, publicationId: stri
 async function testWarningClosedRestoresPurchase(db: D1Database, env: Env, publicationId: string) {
   const user: SessionUser = { id: "buyer-four", discord_id: "100000000000000005", username: "buyer-four", avatar: null };
   await db.prepare("UPDATE store_catalog_publications SET stock_limit = 5, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
-  const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const expiresAt = Math.floor(Date.now() / 1000) + 35 * 60;
   const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), user,
     { publicationId, requestKey: "warning-closed-0001" }, {
       createId: sequence(["warningorder", "warningitem", "warningnumber"]),
@@ -289,7 +291,7 @@ async function testWarningClosedRestoresPurchase(db: D1Database, env: Env, publi
 async function testFavorableCloseBeforeDisputeCreated(db: D1Database, env: Env, publicationId: string) {
   const user: SessionUser = { id: "buyer-five", discord_id: "100000000000000006", username: "buyer-five", avatar: null };
   await db.prepare("UPDATE store_catalog_publications SET stock_limit = 5, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
-  const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const expiresAt = Math.floor(Date.now() / 1000) + 35 * 60;
   const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), user,
     { publicationId, requestKey: "out-of-order-dispute-0001" }, {
       createId: sequence(["outoforder", "outoforderitem", "outofordernumber"]),
@@ -330,7 +332,7 @@ async function testFavorableCloseBeforeDisputeCreated(db: D1Database, env: Env, 
 async function testLatePaymentStockConflict(db: D1Database, env: Env, publicationId: string) {
   const secondBuyer: SessionUser = { id: "buyer-two", discord_id: "100000000000000003", username: "buyer-two", avatar: null };
   await db.prepare("UPDATE store_catalog_publications SET stock_limit = 2, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
-  const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const expiresAt = Math.floor(Date.now() / 1000) + 35 * 60;
   const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), secondBuyer,
     { publicationId, requestKey: "late-stock-conflict-0001" }, {
       createId: sequence(["lateorder", "lateitem", "latenumber"]),
@@ -357,7 +359,7 @@ async function testLatePaymentStockConflict(db: D1Database, env: Env, publicatio
 
 async function testWonDisputeCapacityConflict(db: D1Database, env: Env, publicationId: string) {
   await db.prepare("UPDATE store_catalog_publications SET stock_limit = 2, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
-  const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const expiresAt = Math.floor(Date.now() / 1000) + 35 * 60;
   const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), owner,
     { publicationId, requestKey: "won-capacity-conflict-0001" }, {
       createId: sequence(["woncapacityorder", "woncapacityitem", "woncapacitynumber"]),
@@ -386,7 +388,7 @@ async function testWonDisputeCapacityConflict(db: D1Database, env: Env, publicat
 
 async function testMismatchedPaidSessionReview(db: D1Database, env: Env, publicationId: string) {
   await db.prepare("UPDATE store_catalog_publications SET stock_limit = 5, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
-  const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const expiresAt = Math.floor(Date.now() / 1000) + 35 * 60;
   const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), buyer,
     { publicationId, requestKey: "mismatched-paid-0001" }, {
       createId: sequence(["mismatchorder", "mismatchitem", "mismatchnumber"]),
@@ -432,7 +434,7 @@ async function testPublicationModeIsolation(db: D1Database, env: Env) {
 async function testRefundBeforeCompletion(db: D1Database, env: Env, publicationId: string) {
   const secondBuyer: SessionUser = { id: "buyer-two", discord_id: "100000000000000003", username: "buyer-two", avatar: null };
   await db.prepare("UPDATE store_catalog_publications SET stock_limit = 3, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
-  const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const expiresAt = Math.floor(Date.now() / 1000) + 35 * 60;
   const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), secondBuyer,
     { publicationId, requestKey: "refund-first-0001" }, {
       createId: sequence(["refundorder", "refunditem", "refundnumber"]),
@@ -476,7 +478,7 @@ async function testAtomicLimitAndReservationExpiry(db: D1Database, env: Env, pub
   if (blocked.ok) throw new Error("Atomic lifetime limit was not enforced");
   assert.equal(blocked.error, "PURCHASE_LIMIT_REACHED");
   await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), buyer,
-    { publicationId, requestKey: "buyer-expiring-0003" }, { now: new Date("2026-10-02T00:31:00.000Z"),
+    { publicationId, requestKey: "buyer-expiring-0003" }, { now: new Date("2026-10-02T00:36:00.000Z"),
       createId: sequence(["afterexpiry", "afteritem", "afternumber"]), createCheckout: async () => { throw new Error("stop"); } });
   assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE request_key = 'buyer-expiring-0001'").first<{ status: string }>())?.status, "expired");
 }

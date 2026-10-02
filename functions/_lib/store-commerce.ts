@@ -6,6 +6,7 @@ const ID = /^[A-Za-z0-9_-]{3,128}$/;
 const REQUEST_KEY = /^[A-Za-z0-9_-]{12,128}$/;
 const STRIPE_PRICE = /^price_[A-Za-z0-9_]{3,122}$/;
 const STRIPE_SESSION = /^cs_(?:test_|live_)?[A-Za-z0-9_]+$/;
+const CHECKOUT_RESERVATION_SECONDS = 35 * 60;
 
 type PublicationRow = {
   publication_id: string;
@@ -226,7 +227,7 @@ export async function createOrResumeStoreCheckout(
     const snapshot = JSON.stringify({ productKey: publication.product_key, name: publication.name,
       productType: publication.product_type, fulfilmentKind: publication.fulfilment_kind,
       publicationId, accountBound: true, noCompetitiveAdvantage: true });
-    const checkoutExpiresAt = Math.floor(now.getTime() / 1000) + 30 * 60;
+    const checkoutExpiresAt = Math.floor(now.getTime() / 1000) + CHECKOUT_RESERVATION_SECONDS;
     try {
       const writes = await db.batch([
         db.prepare(`INSERT INTO store_commerce_orders (id, order_number, purchasing_user_id, publication_id,
