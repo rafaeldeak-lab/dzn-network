@@ -13,6 +13,7 @@ import {
   MessageCircle,
   Plus,
   Server,
+  ShoppingBag,
   Sparkles,
   Trophy,
   User,
@@ -26,7 +27,7 @@ import { clearClientAuthState, logoutAndRedirect } from "@/components/onboarding
 import type { AuthNavigationSummary } from "@/components/onboarding/types";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
 
-type SiteHeaderActive = "features" | "player" | "games" | "leaderboards" | "servers" | "pricing" | "stats" | "events" | "community" | "dashboard";
+type SiteHeaderActive = "features" | "player" | "games" | "leaderboards" | "servers" | "store" | "pricing" | "stats" | "events" | "community" | "dashboard";
 
 type SiteHeaderProps = {
   active?: SiteHeaderActive;
@@ -76,6 +77,7 @@ const rootHeaderHiddenPrefixes = [
 const loggedOutHeaderLinks: HeaderNavLink[] = [
   { href: "/#features", label: "Features", active: "features", icon: Sparkles },
   { href: "/community", label: "Comms", active: "community", icon: MessageCircle },
+  { href: "/store", label: "Store", active: "store", icon: ShoppingBag },
   { href: "/pricing", label: "Pricing", active: "pricing", icon: Crown },
 ];
 
@@ -83,6 +85,7 @@ const starterHeaderLinks: HeaderNavLink[] = [
   { href: "/#features", label: "Features", active: "features", icon: Sparkles },
   { href: "/player", label: "Player Hub", active: "player", icon: User },
   { href: "/games", label: "Games", active: "games", icon: Gamepad2 },
+  { href: "/store", label: "Store", active: "store", icon: ShoppingBag },
   { href: "/leaderboards", label: "Leaderboards", active: "leaderboards", icon: Trophy },
   { href: "/servers", label: "Servers", active: "servers", icon: Server },
   { href: "/events", label: "Events", active: "events", icon: CalendarDays },
@@ -93,6 +96,7 @@ const proHeaderLinks: HeaderNavLink[] = [
   { href: "/#features", label: "Features", active: "features", icon: Sparkles },
   { href: "/player", label: "Player Hub", active: "player", icon: User },
   { href: "/games", label: "Games", active: "games", icon: Gamepad2 },
+  { href: "/store", label: "Store", active: "store", icon: ShoppingBag },
   { href: "/leaderboards", label: "Leaderboards", active: "leaderboards", icon: Trophy },
   { href: "/servers", label: "Servers", active: "servers", icon: Server },
   { href: "/#stats", label: "Stats", active: "stats", icon: Activity },
@@ -361,6 +365,7 @@ function HeaderLogoVideo() {
 
 function activeFromPathname(pathname: string): SiteHeaderActive | undefined {
   if (pathname.startsWith("/games")) return "games";
+  if (pathname.startsWith("/store")) return "store";
   if (pathname.startsWith("/player")) return "player";
   if (pathname.startsWith("/leaderboards")) return "leaderboards";
   if (pathname.startsWith("/servers")) return "servers";

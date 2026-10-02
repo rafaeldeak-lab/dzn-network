@@ -1,5 +1,6 @@
 import { requireDb } from "./db";
 import { readTrustedPlayerFeaturedServer, readTrustedPlayerGameplayAggregate } from "./player-stat-bridge";
+import { readActiveStoreSupporterCards } from "./store-entitlements";
 import type { Env, SessionUser } from "./types";
 
 export type PlayerPublicProfilePreferences = {
@@ -95,8 +96,9 @@ export type PublicPlayerProfilePayload = {
     };
     calling_cards: {
       visible: boolean;
-      status: "not_available_yet" | "hidden";
+      status: "available" | "not_available_yet" | "hidden";
       message: string;
+      items: Array<{ product_key: string; name: string; granted_at: string }>;
     };
     award_dates: {
       visible: boolean;
@@ -380,9 +382,17 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
 
   const preferences = rowToPreferences(row);
   preferences.show_discord_identity = await readDiscordIdentityConsent(db, row.user_id);
-  const [aggregate, featuredServer] = await Promise.all([
+  const supporterCardLivemode = env.STRIPE_SECRET_KEY?.startsWith("sk_live_")
+    ? true
+    : env.STRIPE_SECRET_KEY?.startsWith("sk_test_")
+      ? false
+      : null;
+  const [aggregate, featuredServer, supporterCards] = await Promise.all([
     preferences.show_gameplay_summary ? readPublicPlayerAggregate(db, row.discord_id) : Promise.resolve(null),
     preferences.show_featured_server ? readPublicPlayerFeaturedServer(db, row.discord_id) : Promise.resolve(null),
+    preferences.show_calling_cards && supporterCardLivemode !== null
+      ? readActiveStoreSupporterCards(db, row.user_id, supporterCardLivemode)
+      : Promise.resolve([]),
   ]);
 
   const visibleSections = visiblePublicProfileSections(preferences);
@@ -436,7 +446,14 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
       },
       xp_progress: futureEarnedSection(preferences.show_xp_progress, "XP progress is not published until trusted award sources exist."),
       challenge_progress: futureEarnedSection(preferences.show_challenge_progress, "Challenge progress is not published until challenge participation exists."),
-      calling_cards: futureEarnedSection(preferences.show_calling_cards, "Calling cards are not published until account-bound earned cards exist."),
+      calling_cards: {
+        visible: preferences.show_calling_cards,
+        status: !preferences.show_calling_cards ? "hidden" : supporterCards.length ? "available" : "not_available_yet",
+        message: !preferences.show_calling_cards
+          ? "This section is hidden by the player's saved profile preferences."
+          : supporterCards.length ? "Account-bound DZN supporter cards." : "No supporter cards are available yet.",
+        items: supporterCards.map((card) => ({ product_key: card.product_key, name: card.product_name, granted_at: card.granted_at })),
+      },
       award_dates: futureEarnedSection(preferences.show_award_dates, "Award dates are not published until public-safe award records exist."),
     },
     privacy: {

@@ -48,6 +48,8 @@ assert.match(helper, /private_identifiers_exposed: false/, "Public profile paylo
 assert.match(helper, /raw_award_evidence_exposed: false/, "Public profile payload must mark raw award evidence as hidden.");
 assert.match(helper, /Profile visibility cannot alter billing, rankings, discovery, reviews, badges, seasons, events, Server Wars, CTF, XP awards, calling-card awards, or competitive eligibility/, "Public profile helper must keep the fairness boundary explicit.");
 assert.match(helper, /readTrustedPlayerGameplayAggregate/, "Public profile gameplay summaries must use the shared trusted stat bridge.");
+assert.match(helper, /supporterCardLivemode !== null/, "Store supporter cards must stay hidden when Stripe mode is unavailable.");
+assert.match(helper, /STRIPE_SECRET_KEY\?\.startsWith\("sk_test_"\)/, "Store supporter cards must recognize test mode explicitly rather than by fallback.");
 assert.doesNotMatch(
   helper,
   /\b(?:account_entitlements|supporter_cards|earned_spins|spin_ledger|wheel_cooldowns|nitrado_connections|server_reviews|review_score|badge_awards|user_badges|dzn_season|server_war_events|ctf_tournaments|xp_award|calling_card_awards|dynamic_visibility_score|network_rank|rankServers|competitive_event_servers)\b/i,
