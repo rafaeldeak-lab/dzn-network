@@ -332,6 +332,12 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
   const disputeId = event.type.startsWith("charge.dispute.") ? stripeId(object.id) : null;
   const disputeOutcome = event.type === "charge.dispute.closed" ? text(object.status) : null;
   const favorableDisputeClose = disputeOutcome === "won" || disputeOutcome === "warning_closed";
+  const completionAfterFavorableClose = order?.status === "manual_review" && event.type === "checkout.session.completed"
+    ? Boolean(await db.prepare(`SELECT 1 AS found FROM store_commerce_events
+        WHERE order_id = ? AND event_type = 'charge.dispute.closed'
+          AND json_extract(safe_summary_json, '$.dispute.outcome') IN ('won','warning_closed')
+        LIMIT 1`).bind(order.id).first<{ found: number }>())
+    : false;
   let processingStatus: "processed" | "ignored" | "manual_review" = "ignored";
   const statements = [] as D1PreparedStatement[];
   const now = new Date().toISOString();
@@ -346,7 +352,8 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
       WHERE id = ? AND status IN ('checkout_pending','checkout_ready','expired','paid','fulfilment_pending','fulfilled','disputed')`)
       .bind(paidPaymentIntent, paymentStatus, now, now, order.id));
   }
-  else if (order && event.type === "checkout.session.completed" && ["checkout_ready", "expired"].includes(order.status)) {
+  else if (order && event.type === "checkout.session.completed"
+    && (["checkout_ready", "expired"].includes(order.status) || completionAfterFavorableClose)) {
     const amount = Number(object.amount_total);
     const paymentStatus = text(object.payment_status);
     const sessionId = stripeId(object.id);
@@ -377,7 +384,7 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
         const entitlementKey = `dzn_store_${await orderProductKey(db, order.id)}_${order.id}`;
         statements.push(
           db.prepare(`UPDATE store_commerce_orders SET status = 'fulfilled', stripe_payment_intent_id = ?, paid_at = ?, fulfilled_at = ?, updated_at = ?
-            WHERE id = ? AND status IN ('checkout_ready','expired')`).bind(paymentIntent, now, now, now, order.id),
+            WHERE id = ? AND status IN ('checkout_ready','expired','manual_review')`).bind(paymentIntent, now, now, now, order.id),
           db.prepare(`INSERT INTO store_commerce_fulfilments (id, order_id, purchasing_user_id, fulfilment_kind,
             status, entitlement_key, granted_at, created_at, updated_at)
             SELECT ?, o.id, o.purchasing_user_id, i.fulfilment_kind, 'completed', ?, ?, ?, ?

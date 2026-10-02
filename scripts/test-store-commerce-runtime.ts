@@ -12,6 +12,7 @@ import {
 import type { Env, SessionUser } from "../functions/_lib/types";
 import type { StripeEvent } from "../functions/_lib/stripe";
 import { readActiveStoreSupporterCards } from "../functions/_lib/store-entitlements";
+import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 
 const owner: SessionUser = { id: "owner", discord_id: "100000000000000001", username: "owner", avatar: null };
 const buyer: SessionUser = { id: "buyer", discord_id: "100000000000000002", username: "buyer", avatar: null };
@@ -48,7 +49,8 @@ async function run() {
     await db.prepare(`INSERT INTO users (id, discord_id, username) VALUES
       ('owner','100000000000000001','owner'),('buyer','100000000000000002','buyer'),
       ('buyer-two','100000000000000003','buyer-two'),('buyer-three','100000000000000004','buyer-three'),
-      ('buyer-four','100000000000000005','buyer-four'),('buyer-five','100000000000000006','buyer-five')`).run();
+      ('buyer-four','100000000000000005','buyer-four'),('buyer-five','100000000000000006','buyer-five'),
+      ('buyer-six','100000000000000007','buyer-six'),('no-store-user','100000000000000008','no-store-user')`).run();
     for (const name of ["0081_store_catalog_foundation.sql", "0082_store_order_inventory_foundation.sql",
       "0083_store_fulfilment_receipt_foundation.sql", "0084_store_commerce_runtime.sql"]) await apply(db, name);
     const env = { DB: db as unknown as D1Database, DZN_STORE_ENABLED: "true", DZN_STORE_ADMIN_ENABLED: "true",
@@ -231,6 +233,8 @@ async function run() {
 
     await testFavorableCloseBeforeDisputeCreated(db, env, published.publication.id);
 
+    await testFavorableCloseBeforeCompletion(db, env, published.publication.id);
+
     await testWonDisputeCapacityConflict(db, env, published.publication.id);
 
     await testLatePaymentStockConflict(db, env, published.publication.id);
@@ -240,9 +244,48 @@ async function run() {
     await testMismatchedPaidSessionReview(db, env, published.publication.id);
 
     await testPublicationModeIsolation(db, env);
+    assert.equal(await eraseOrRetainAccountUser(db as unknown as D1Database, buyer.id), 1);
+    const retainedBuyer = await db.prepare("SELECT discord_id, username, avatar FROM users WHERE id = ?")
+      .bind(buyer.id).first<{ discord_id: string; username: string | null; avatar: string | null }>();
+    assert.match(retainedBuyer?.discord_id ?? "", /^deleted-[0-9a-f-]{36}$/);
+    assert.equal(retainedBuyer?.username, null);
+    assert.equal(retainedBuyer?.avatar, null);
+    assert.equal(await eraseOrRetainAccountUser(db as unknown as D1Database, "no-store-user"), 1);
+    assert.equal(await db.prepare("SELECT id FROM users WHERE id = 'no-store-user'").first(), null);
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Store commerce runtime checks passed.");
   } finally { await mf.dispose(); }
+}
+
+async function testFavorableCloseBeforeCompletion(db: D1Database, env: Env, publicationId: string) {
+  const user: SessionUser = { id: "buyer-six", discord_id: "100000000000000007", username: "buyer-six", avatar: null };
+  await db.prepare("UPDATE store_catalog_publications SET stock_limit = 5, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
+  const expiresAt = Math.floor(Date.now() / 1000) + 35 * 60;
+  const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), user,
+    { publicationId, requestKey: "favorable-before-completion-0001" }, {
+      createId: sequence(["favorfirst", "favorfirstitem", "favorfirstnumber"]),
+      createCheckout: async () => ({ id: "cs_test_favorfirst", url: "https://checkout.stripe.com/c/pay/test_favorfirst",
+        status: "open", mode: "payment", livemode: false, client_reference_id: "store_order_favorfirst", expires_at: expiresAt,
+        metadata: { dzn_store_order_id: "store_order_favorfirst", dzn_store_user_id: user.id } }),
+    });
+  assert.equal(checkout.ok, true);
+  const closed = event("evt_favorfirst_closed", "charge.dispute.closed", {
+    id: "dp_test_favorfirst", object: "dispute", payment_intent: "pi_test_favorfirst", status: "won",
+    metadata: { dzn_store_order_id: "store_order_favorfirst" },
+  });
+  assert.equal((await reconcileStoreWebhook(env, closed, JSON.stringify(closed))).processingStatus, "manual_review");
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE id = 'store_order_favorfirst'")
+    .first<{ status: string }>())?.status, "manual_review");
+  const completed = event("evt_favorfirst_completed", "checkout.session.completed", {
+    id: "cs_test_favorfirst", object: "checkout.session", client_reference_id: "store_order_favorfirst",
+    payment_intent: "pi_test_favorfirst", payment_status: "paid", amount_total: 1200, currency: "gbp",
+    metadata: { dzn_store_order_id: "store_order_favorfirst" },
+  });
+  assert.equal((await reconcileStoreWebhook(env, completed, JSON.stringify(completed))).processingStatus, "processed");
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE id = 'store_order_favorfirst'")
+    .first<{ status: string }>())?.status, "fulfilled");
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_entitlements WHERE order_id = 'store_order_favorfirst'")
+    .first<{ status: string }>())?.status, "active");
 }
 
 async function testEarlyDisputeWon(db: D1Database, env: Env, publicationId: string) {

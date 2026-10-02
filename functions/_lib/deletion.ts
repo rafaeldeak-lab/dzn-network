@@ -166,9 +166,47 @@ export async function deleteOwnedAccountData(env: Env, userId: string) {
     }
     await deleteRows(db, "DELETE FROM user_notifications WHERE user_id = ?", [userId]);
   }
-  deleted.users += await deleteRows(db, "DELETE FROM users WHERE id = ?", [userId]);
+  deleted.users += await eraseOrRetainAccountUser(db, userId);
 
   return { ok: true as const, deleted };
+}
+
+export async function eraseOrRetainAccountUser(db: D1Database, userId: string) {
+  if (!(await hasRetainedStoreLedgerReferences(db, userId))) {
+    return deleteRows(db, "DELETE FROM users WHERE id = ?", [userId]);
+  }
+
+  const touchesUpdatedAt = await tableHasColumn(db, "users", "updated_at");
+  const result = await db.prepare(`UPDATE users
+    SET discord_id = ?, username = NULL, avatar = NULL${touchesUpdatedAt ? ", updated_at = CURRENT_TIMESTAMP" : ""}
+    WHERE id = ?`)
+    .bind(`deleted-${crypto.randomUUID()}`, userId)
+    .run();
+  return changes(result);
+}
+
+async function hasRetainedStoreLedgerReferences(db: D1Database, userId: string) {
+  const references = [
+    ["store_orders", "purchasing_user_id"],
+    ["store_fulfilment_requests", "purchasing_user_id"],
+    ["store_fulfilment_actions", "actor_user_id"],
+    ["store_receipts", "purchasing_user_id"],
+    ["store_receipts", "issued_by_user_id"],
+    ["store_catalog_publications", "published_by_user_id"],
+    ["store_commerce_orders", "purchasing_user_id"],
+    ["store_commerce_fulfilments", "purchasing_user_id"],
+    ["store_commerce_receipts", "purchasing_user_id"],
+    ["store_commerce_entitlements", "purchasing_user_id"],
+  ] as const;
+
+  for (const [tableName, columnName] of references) {
+    if (!(await tableExists(db, tableName)) || !(await tableHasColumn(db, tableName, columnName))) continue;
+    const row = await db.prepare(`SELECT 1 AS found FROM ${tableName} WHERE ${columnName} = ? LIMIT 1`)
+      .bind(userId)
+      .first<{ found: number }>();
+    if (row) return true;
+  }
+  return false;
 }
 
 function mergeDeletionCounts(target: DeletionCounts, source: DeletionCounts) {
