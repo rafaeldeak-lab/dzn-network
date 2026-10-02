@@ -41,6 +41,7 @@ type OrderRow = {
   stripe_checkout_session_id: string | null;
   stripe_payment_intent_id: string | null;
   reservation_expires_at: string;
+  checkout_url_expires_at: string | null;
 };
 
 type CheckoutSession = {
@@ -225,6 +226,7 @@ export async function createOrResumeStoreCheckout(
     const snapshot = JSON.stringify({ productKey: publication.product_key, name: publication.name,
       productType: publication.product_type, fulfilmentKind: publication.fulfilment_kind,
       publicationId, accountBound: true, noCompetitiveAdvantage: true });
+    const checkoutExpiresAt = Math.floor(now.getTime() / 1000) + 30 * 60;
     try {
       const writes = await db.batch([
         db.prepare(`INSERT INTO store_commerce_orders (id, order_number, purchasing_user_id, publication_id,
@@ -233,7 +235,7 @@ export async function createOrResumeStoreCheckout(
           VALUES (?, ?, ?, ?, ?, 'checkout_pending', ?, ?, ?, 0, ?, ?, ?, ?, ?)`)
           .bind(orderId, orderNumber, user.id, publicationId, requestKey, access.mode, access.livemode ? 1 : 0,
             publication.unit_amount_minor, publication.unit_amount_minor, snapshot,
-            new Date(now.getTime() + 30 * 60 * 1000).toISOString(), now.toISOString(), now.toISOString()),
+            new Date(checkoutExpiresAt * 1000).toISOString(), now.toISOString(), now.toISOString()),
         db.prepare(`INSERT INTO store_commerce_order_items (id, order_id, product_id, price_id, product_key,
           product_name, fulfilment_kind, unit_amount_minor, total_amount_minor)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -261,6 +263,7 @@ export async function createOrResumeStoreCheckout(
     return failure(409, "PUBLICATION_MODE_CHANGED", "That Store item is not published for the active Stripe mode.");
   }
   const appUrl = getAppUrl(env, request);
+  const checkoutExpiresAt = Math.floor(new Date(order.reservation_expires_at).getTime() / 1000);
   const params: Record<string, string | number> = {
     mode: "payment",
     "line_items[0][price]": publication.stripe_price_id,
@@ -273,6 +276,7 @@ export async function createOrResumeStoreCheckout(
     "metadata[dzn_store_user_id]": user.id,
     "payment_intent_data[metadata][dzn_store_order_id]": order.id,
     "payment_intent_data[metadata][dzn_store_user_id]": user.id,
+    expires_at: checkoutExpiresAt,
     success_url: `${appUrl}/store?store=success&order=${encodeURIComponent(order.id)}`,
     cancel_url: `${appUrl}/store?store=cancelled&order=${encodeURIComponent(order.id)}`,
   };
@@ -280,7 +284,7 @@ export async function createOrResumeStoreCheckout(
   let session: CheckoutSession;
   try { session = await createCheckout(params, `dzn-store-${order.id}`); }
   catch { return failure(503, "CHECKOUT_RETRY_REQUIRED", "Checkout could not be confirmed. Retry this order; a duplicate payment will not be created."); }
-  const valid = validateCheckoutSession(session, order, access.livemode);
+  const valid = validateCheckoutSession(session, order, access.livemode, checkoutExpiresAt);
   if (!valid.ok) return valid;
   const updated = await db.prepare(`UPDATE store_commerce_orders SET stripe_checkout_session_id = ?, status = 'checkout_ready',
     checkout_url_expires_at = ?, updated_at = ? WHERE id = ? AND status = 'checkout_pending' AND stripe_checkout_session_id IS NULL`)
@@ -304,6 +308,16 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
       ? await db.prepare("SELECT * FROM store_commerce_orders WHERE stripe_payment_intent_id = ?").bind(paymentIntentId).first<OrderRow>()
       : null;
   const eventLive = event.livemode === true;
+  const disputeId = event.type.startsWith("charge.dispute.") ? stripeId(object.id) : null;
+  const disputeOutcome = event.type === "charge.dispute.closed" ? text(object.status) : null;
+  const favorableDisputeClose = disputeOutcome === "won" || disputeOutcome === "warning_closed";
+  const priorFavorableClose = order && event.type === "charge.dispute.created" && disputeId
+    ? await db.prepare(`SELECT id FROM store_commerce_events
+        WHERE order_id = ? AND event_type = 'charge.dispute.closed'
+          AND json_extract(safe_summary_json, '$.dispute.id') = ?
+          AND json_extract(safe_summary_json, '$.dispute.outcome') IN ('won','warning_closed')
+        LIMIT 1`).bind(order.id, disputeId).first<{ id: string }>()
+    : null;
   let processingStatus: "processed" | "ignored" | "manual_review" = "ignored";
   const statements = [] as D1PreparedStatement[];
   const now = new Date().toISOString();
@@ -375,7 +389,7 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
     statements.push(
       db.prepare("UPDATE store_commerce_orders SET status = 'expired', updated_at = ? WHERE id = ? AND status IN ('checkout_pending','checkout_ready')").bind(now, order.id),
     );
-  } else if (order && event.type === "charge.dispute.closed" && text(object.status) === "won" && order.status === "disputed") {
+  } else if (order && event.type === "charge.dispute.closed" && favorableDisputeClose && order.status === "disputed") {
     const existingFulfilment = await db.prepare("SELECT id FROM store_commerce_fulfilments WHERE order_id = ?")
       .bind(order.id).first<{ id: string }>();
     processingStatus = "processed";
@@ -418,14 +432,28 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
           WHERE order_id = ? AND status = 'void'
             AND EXISTS (SELECT 1 FROM store_commerce_orders WHERE id = ? AND status = 'fulfilled')`).bind(now, order.id, order.id),
       );
+  } else if (order && event.type === "charge.dispute.closed" && favorableDisputeClose) {
+    processingStatus = order.status === "fulfilled" ? "processed" : "manual_review";
+    if (["checkout_pending", "checkout_ready", "paid", "fulfilment_pending", "expired", "manual_review"].includes(order.status)) {
+      statements.push(db.prepare("UPDATE store_commerce_orders SET status = 'manual_review', updated_at = ? WHERE id = ?")
+        .bind(now, order.id));
+    }
   } else if (order && event.type === "charge.dispute.closed" && order.status === "disputed") {
     processingStatus = "processed";
   } else if (order && (event.type === "charge.refunded" || event.type === "charge.dispute.created")) {
     const fullReversal = event.type === "charge.refunded"
       ? object.refunded === true && Number(object.amount_refunded) >= order.total_amount_minor
       : Number(object.amount) >= order.total_amount_minor;
-    processingStatus = fullReversal ? "processed" : "manual_review";
-    if (!fullReversal) {
+    const favorableCloseAlreadyRecorded = event.type === "charge.dispute.created" && Boolean(priorFavorableClose);
+    processingStatus = favorableCloseAlreadyRecorded
+      ? (order.status === "fulfilled" ? "processed" : "manual_review")
+      : fullReversal ? "processed" : "manual_review";
+    if (favorableCloseAlreadyRecorded) {
+      if (["checkout_pending", "checkout_ready", "paid", "fulfilment_pending", "expired"].includes(order.status)) {
+        statements.push(db.prepare("UPDATE store_commerce_orders SET status = 'manual_review', updated_at = ? WHERE id = ?")
+          .bind(now, order.id));
+      }
+    } else if (!fullReversal) {
       statements.push(db.prepare("UPDATE store_commerce_orders SET status = 'manual_review', updated_at = ? WHERE id = ?").bind(now, order.id));
     } else {
     const nextStatus = event.type === "charge.refunded" ? "refunded" : "disputed";
@@ -440,6 +468,7 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
     }
   }
   const safeSummary = JSON.stringify({ eventType: event.type, orderLinked: Boolean(order), livemode: eventLive,
+    dispute: disputeId ? { id: disputeId, outcome: disputeOutcome } : null,
     providerReferences: { session: Boolean(stripeId(object.id)), paymentIntent: Boolean(stripeId(object.payment_intent)) } });
   statements.unshift(db.prepare(`INSERT INTO store_commerce_events (id, stripe_event_id, order_id, event_type, livemode,
     raw_body_sha256, processing_status, safe_summary_json, received_at, processed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -449,7 +478,7 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
     results = await db.batch(statements);
   } catch (error) {
     const wonDisputeWithoutFulfilment = order?.status === "disputed" && event.type === "charge.dispute.closed"
-      && text(object.status) === "won"
+      && favorableDisputeClose
       && !(await db.prepare("SELECT id FROM store_commerce_fulfilments WHERE order_id = ?").bind(order.id).first());
     const restorationPublication = wonDisputeWithoutFulfilment
       ? await db.prepare(`SELECT stock_mode, stock_limit, reserved_quantity, sold_quantity
@@ -565,13 +594,14 @@ async function resumeCheckout(env: Env, order: OrderRow, options: StoreCommerceO
   return valid.ok ? checkoutSuccess(order, session) : valid;
 }
 
-function validateCheckoutSession(session: CheckoutSession, order: OrderRow, livemode: boolean) {
+function validateCheckoutSession(session: CheckoutSession, order: OrderRow, livemode: boolean, expectedExpiresAt?: number) {
   let url: URL;
   try { url = new URL(session.url ?? ""); } catch { return failure(503, "INVALID_CHECKOUT_SESSION", "Stripe returned an invalid checkout session."); }
   if (!STRIPE_SESSION.test(session.id) || session.mode !== "payment" || session.status !== "open" || session.livemode !== livemode ||
     session.client_reference_id !== order.id || session.metadata?.dzn_store_order_id !== order.id ||
     url.protocol !== "https:" || url.hostname !== "checkout.stripe.com" || url.username || url.password || url.port ||
-    !Number.isSafeInteger(session.expires_at) || Number(session.expires_at) <= Math.floor(Date.now() / 1000)) {
+    !Number.isSafeInteger(session.expires_at) || Number(session.expires_at) <= Math.floor(Date.now() / 1000) ||
+    (expectedExpiresAt !== undefined && session.expires_at !== expectedExpiresAt)) {
     return failure(503, "INVALID_CHECKOUT_SESSION", "Stripe returned a checkout session that did not match this order.");
   }
   return { ok: true as const };

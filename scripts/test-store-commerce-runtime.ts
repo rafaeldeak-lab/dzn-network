@@ -35,7 +35,10 @@ async function run() {
     const db = await mf.getD1Database("DB");
     await db.exec("PRAGMA foreign_keys = ON;");
     await db.prepare("CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT, username TEXT, avatar TEXT)").run();
-    await db.prepare("INSERT INTO users (id, discord_id, username) VALUES ('owner','100000000000000001','owner'),('buyer','100000000000000002','buyer'),('buyer-two','100000000000000003','buyer-two'),('buyer-three','100000000000000004','buyer-three')").run();
+    await db.prepare(`INSERT INTO users (id, discord_id, username) VALUES
+      ('owner','100000000000000001','owner'),('buyer','100000000000000002','buyer'),
+      ('buyer-two','100000000000000003','buyer-two'),('buyer-three','100000000000000004','buyer-three'),
+      ('buyer-four','100000000000000005','buyer-four'),('buyer-five','100000000000000006','buyer-five')`).run();
     for (const name of ["0081_store_catalog_foundation.sql", "0082_store_order_inventory_foundation.sql",
       "0083_store_fulfilment_receipt_foundation.sql", "0084_store_commerce_runtime.sql"]) await apply(db, name);
     const env = { DB: db as unknown as D1Database, DZN_STORE_ENABLED: "true", DZN_STORE_ADMIN_ENABLED: "true",
@@ -79,16 +82,19 @@ async function run() {
     assert.equal(noWebhookCatalog.checkoutEnabled, false);
 
     let checkoutCreates = 0;
-    const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+    const checkoutNow = new Date();
+    const expiresAt = Math.floor(checkoutNow.getTime() / 1000) + 1800;
     const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), buyer,
       { publicationId: published.publication.id, requestKey: "buyer-request-0001" }, {
         createId: sequence(["orderid", "itemid", "numberid"]),
+        now: checkoutNow,
         createCheckout: async (params) => {
           checkoutCreates += 1;
           assert.equal(params["line_items[0][price]"], "price_test_supporter");
           assert.equal(params["payment_method_types[0]"], "card");
           assert.equal(params["adaptive_pricing[enabled]"], "false");
           assert.equal(params.payment_method_collection, "always");
+          assert.equal(params.expires_at, expiresAt);
           assert.equal(params["payment_intent_data[metadata][dzn_store_order_id]"], "store_order_orderid");
           assert.equal(params.success_url, "https://dayz-network.com/store?store=success&order=store_order_orderid");
           return { id: "cs_test_checkout001", url: "https://checkout.stripe.com/c/pay/test_checkout001", status: "open",
@@ -98,6 +104,11 @@ async function run() {
       });
     assert.equal(checkout.ok, true);
     assert.equal(checkoutCreates, 1);
+    assert.deepEqual(await db.prepare(`SELECT reservation_expires_at, checkout_url_expires_at
+      FROM store_commerce_orders WHERE id = 'store_order_orderid'`).first(), {
+      reservation_expires_at: new Date(expiresAt * 1000).toISOString(),
+      checkout_url_expires_at: new Date(expiresAt * 1000).toISOString(),
+    });
     assert.equal((await db.prepare("SELECT reserved_quantity FROM store_catalog_publications").first<{ reserved_quantity: number }>())?.reserved_quantity, 1);
 
     const resumed = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), buyer,
@@ -187,6 +198,10 @@ async function run() {
 
     await testEarlyDisputeWon(db, env, published.publication.id);
 
+    await testWarningClosedRestoresPurchase(db, env, published.publication.id);
+
+    await testFavorableCloseBeforeDisputeCreated(db, env, published.publication.id);
+
     await testWonDisputeCapacityConflict(db, env, published.publication.id);
 
     await testLatePaymentStockConflict(db, env, published.publication.id);
@@ -233,6 +248,83 @@ async function testEarlyDisputeWon(db: D1Database, env: Env, publicationId: stri
   assert.equal((await db.prepare("SELECT status FROM store_commerce_entitlements WHERE order_id = 'store_order_disputeorder'").first<{ status: string }>())?.status, "active");
   assert.equal((await db.prepare("SELECT status FROM store_commerce_receipts WHERE order_id = 'store_order_disputeorder'").first<{ status: string }>())?.status, "issued");
   assert.equal((await db.prepare("SELECT sold_quantity FROM store_catalog_publications WHERE id = ?").bind(publicationId).first<{ sold_quantity: number }>())?.sold_quantity, 1);
+}
+
+async function testWarningClosedRestoresPurchase(db: D1Database, env: Env, publicationId: string) {
+  const user: SessionUser = { id: "buyer-four", discord_id: "100000000000000005", username: "buyer-four", avatar: null };
+  await db.prepare("UPDATE store_catalog_publications SET stock_limit = 5, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
+  const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), user,
+    { publicationId, requestKey: "warning-closed-0001" }, {
+      createId: sequence(["warningorder", "warningitem", "warningnumber"]),
+      createCheckout: async () => ({ id: "cs_test_warningclosed", url: "https://checkout.stripe.com/c/pay/test_warningclosed",
+        status: "open", mode: "payment", livemode: false, client_reference_id: "store_order_warningorder", expires_at: expiresAt,
+        metadata: { dzn_store_order_id: "store_order_warningorder", dzn_store_user_id: user.id } }),
+    });
+  assert.equal(checkout.ok, true);
+  const completion = event("evt_warning_completion", "checkout.session.completed", {
+    id: "cs_test_warningclosed", object: "checkout.session", client_reference_id: "store_order_warningorder",
+    payment_intent: "pi_test_warningclosed", payment_status: "paid", amount_total: 1200, currency: "gbp",
+    metadata: { dzn_store_order_id: "store_order_warningorder" },
+  });
+  assert.equal((await reconcileStoreWebhook(env, completion, JSON.stringify(completion))).processingStatus, "processed");
+  const disputed = event("evt_warning_dispute", "charge.dispute.created", {
+    id: "dp_test_warningclosed", object: "dispute", payment_intent: "pi_test_warningclosed", status: "warning_needs_response", amount: 1200,
+  });
+  assert.equal((await reconcileStoreWebhook(env, disputed, JSON.stringify(disputed))).processingStatus, "processed");
+  const warningClosed = event("evt_warning_closed", "charge.dispute.closed", {
+    id: "dp_test_warningclosed", object: "dispute", payment_intent: "pi_test_warningclosed", status: "warning_closed",
+  });
+  assert.deepEqual(await reconcileStoreWebhook(env, warningClosed, JSON.stringify(warningClosed)), {
+    duplicate: false, processingStatus: "processed",
+  });
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE id = 'store_order_warningorder'")
+    .first<{ status: string }>())?.status, "fulfilled");
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_entitlements WHERE order_id = 'store_order_warningorder'")
+    .first<{ status: string }>())?.status, "active");
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_receipts WHERE order_id = 'store_order_warningorder'")
+    .first<{ status: string }>())?.status, "issued");
+}
+
+async function testFavorableCloseBeforeDisputeCreated(db: D1Database, env: Env, publicationId: string) {
+  const user: SessionUser = { id: "buyer-five", discord_id: "100000000000000006", username: "buyer-five", avatar: null };
+  await db.prepare("UPDATE store_catalog_publications SET stock_limit = 5, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
+  const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), user,
+    { publicationId, requestKey: "out-of-order-dispute-0001" }, {
+      createId: sequence(["outoforder", "outoforderitem", "outofordernumber"]),
+      createCheckout: async () => ({ id: "cs_test_outoforder", url: "https://checkout.stripe.com/c/pay/test_outoforder",
+        status: "open", mode: "payment", livemode: false, client_reference_id: "store_order_outoforder", expires_at: expiresAt,
+        metadata: { dzn_store_order_id: "store_order_outoforder", dzn_store_user_id: user.id } }),
+    });
+  assert.equal(checkout.ok, true);
+  const completion = event("evt_outoforder_completion", "checkout.session.completed", {
+    id: "cs_test_outoforder", object: "checkout.session", client_reference_id: "store_order_outoforder",
+    payment_intent: "pi_test_outoforder", payment_status: "paid", amount_total: 1200, currency: "gbp",
+    metadata: { dzn_store_order_id: "store_order_outoforder" },
+  });
+  assert.equal((await reconcileStoreWebhook(env, completion, JSON.stringify(completion))).processingStatus, "processed");
+  const closed = event("evt_outoforder_closed", "charge.dispute.closed", {
+    id: "dp_test_outoforder", object: "dispute", payment_intent: "pi_test_outoforder", status: "won",
+  });
+  assert.equal((await reconcileStoreWebhook(env, closed, JSON.stringify(closed))).processingStatus, "processed");
+  const created = event("evt_outoforder_created", "charge.dispute.created", {
+    id: "dp_test_outoforder", object: "dispute", payment_intent: "pi_test_outoforder", status: "needs_response", amount: 1200,
+  });
+  assert.equal((await reconcileStoreWebhook(env, created, JSON.stringify(created))).processingStatus, "processed");
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE id = 'store_order_outoforder'")
+    .first<{ status: string }>())?.status, "fulfilled");
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_entitlements WHERE order_id = 'store_order_outoforder'")
+    .first<{ status: string }>())?.status, "active");
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_receipts WHERE order_id = 'store_order_outoforder'")
+    .first<{ status: string }>())?.status, "issued");
+  const summary = await db.prepare("SELECT safe_summary_json FROM store_commerce_events WHERE stripe_event_id = 'evt_outoforder_closed'")
+    .first<{ safe_summary_json: string }>();
+  assert.deepEqual(JSON.parse(summary?.safe_summary_json ?? "{}"), {
+    eventType: "charge.dispute.closed", orderLinked: true, livemode: false,
+    dispute: { id: "dp_test_outoforder", outcome: "won" },
+    providerReferences: { session: true, paymentIntent: true },
+  });
 }
 
 async function testLatePaymentStockConflict(db: D1Database, env: Env, publicationId: string) {
