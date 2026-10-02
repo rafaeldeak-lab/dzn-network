@@ -2,6 +2,7 @@
 
 import { geoEquirectangular, geoGraticule10, geoPath } from "d3-geo";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { MutableRefObject } from "react";
 import { feature } from "topojson-client";
 import type { FeatureCollection, Geometry } from "geojson";
@@ -74,6 +75,7 @@ const MIN_MARKER_SCALE = 0.56;
 const MAX_MARKER_SCALE = 1.04;
 
 function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNode[] }) {
+  const router = useRouter();
   const stageRef = useRef<HTMLDivElement | null>(null);
   const loggedRef = useRef(false);
   const globeControlsRef = useRef<GlobeControls | null>(null);
@@ -136,6 +138,7 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
           isDraggingRef,
           lastPointerRef,
           onTooltip: setTooltip,
+          onNavigate: (slug) => router.push(`/servers/profile?slug=${encodeURIComponent(slug)}`),
           onReady: () => {
             setReady(true);
             if (!loggedRef.current) {
@@ -169,7 +172,7 @@ function DznOperationalGlobeComponent({ nodes }: { nodes: DznOperationalGlobeNod
       disposed = true;
       cleanup?.();
     };
-  }, [globePoints]);
+  }, [globePoints, router]);
 
   return (
     <div
@@ -244,6 +247,7 @@ function createThreeGlobe({
   isDraggingRef,
   lastPointerRef,
   onTooltip,
+  onNavigate,
   onReady,
 }: {
   THREE: typeof import("three");
@@ -256,6 +260,7 @@ function createThreeGlobe({
   isDraggingRef: MutableRefObject<boolean>;
   lastPointerRef: MutableRefObject<PointerState>;
   onTooltip: (tooltip: TooltipState) => void;
+  onNavigate: (slug: string) => void;
   onReady: () => void;
 }) {
   const scene = new THREE.Scene();
@@ -468,7 +473,7 @@ function createThreeGlobe({
     stage.releasePointerCapture?.(event.pointerId);
     const picked = pickNode(event);
     if (wasDragClick && picked?.node.slug) {
-      window.location.href = `/servers/profile?slug=${encodeURIComponent(picked.node.slug)}`;
+      onNavigate(picked.node.slug);
     }
   }
 

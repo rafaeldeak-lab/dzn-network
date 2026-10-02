@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, CheckCircle2, Flag, Lightbulb, Loader2, MessageSquareWarning, ShieldCheck } from "lucide-react";
 
@@ -152,6 +153,7 @@ const initialForm = {
 };
 
 export function EventSuggestionsPage() {
+  const router = useRouter();
   const [sort, setSort] = useState("trending");
   const [statusFilter, setStatusFilter] = useState("all_public");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -361,7 +363,7 @@ export function EventSuggestionsPage() {
       setForm(initialForm);
     } catch (error) {
       if (error instanceof FetchJsonError && error.status === 401) {
-        window.location.href = `/login?returnTo=${encodeURIComponent("/events/suggest")}`;
+        router.push(`/login?returnTo=${encodeURIComponent("/events/suggest")}`);
         return;
       }
       setSubmitMessage({ tone: "error", text: error instanceof Error ? error.message : "Suggestion could not be submitted." });
@@ -401,7 +403,7 @@ export function EventSuggestionsPage() {
       setSuggestions((current) => current.map((item) => item.id === suggestion.id ? previousSuggestion : item));
       setVoteState((current) => ({ ...current, [suggestion.id]: previousVote }));
       if (error instanceof FetchJsonError && error.status === 401) {
-        window.location.href = `/login?returnTo=${encodeURIComponent("/events/suggest")}`;
+        router.push(`/login?returnTo=${encodeURIComponent("/events/suggest")}`);
       }
     } finally {
       setPendingVotes((current) => ({ ...current, [suggestion.id]: false }));
@@ -427,7 +429,7 @@ export function EventSuggestionsPage() {
       setReportDraft(null);
     } catch (error) {
       if (error instanceof FetchJsonError && error.status === 401) {
-        window.location.href = `/login?returnTo=${encodeURIComponent("/events/suggest")}`;
+        router.push(`/login?returnTo=${encodeURIComponent("/events/suggest")}`);
         return;
       }
       setReportMessage({ tone: "error", text: error instanceof Error ? error.message : "Report could not be submitted." });

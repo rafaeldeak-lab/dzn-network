@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { ArrowLeft, ShieldCheck, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -51,7 +52,7 @@ export function PublicCommunityDirectory({ slug }: { slug: string }) {
             <ArrowLeft size={15} /> Server profile
           </Link>
           <div className="mt-7 flex min-w-0 items-center gap-4">
-            {data?.community.icon_url ? <img src={data.community.icon_url} alt="" className="h-16 w-16 rounded-md border border-cyan-300/25 object-cover" /> : <div className="grid h-16 w-16 place-items-center rounded-md border border-cyan-300/25 bg-cyan-300/10"><Users /></div>}
+            {data?.community.icon_url ? <Image src={data.community.icon_url} alt="" width={64} height={64} unoptimized className="h-16 w-16 rounded-md border border-cyan-300/25 object-cover" /> : <div className="grid h-16 w-16 place-items-center rounded-md border border-cyan-300/25 bg-cyan-300/10"><Users /></div>}
             <div className="min-w-0"><p className="text-xs font-black uppercase text-cyan-200">Public community directory</p><h1 className="mt-1 break-words text-3xl font-black uppercase sm:text-5xl">{title}</h1></div>
           </div>
           <p className="mt-5 max-w-2xl text-sm font-semibold leading-6 text-zinc-300">Only members explicitly added by this server owner and using an active public DZN profile appear here.</p>
@@ -93,7 +94,7 @@ function MemberCard({ member }: { member: DirectoryPayload["members"][number] })
     <Link href={member.profile.href} className="group min-w-0 rounded-md border border-white/10 bg-[#08101d] p-4 transition hover:border-cyan-300/40 hover:bg-[#0b1727]">
       <div className="flex items-center gap-3">
         <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full border border-cyan-300/25 bg-cyan-300/10 font-black text-cyan-100">
-          {member.profile.avatar_url && !avatarFailed ? <img src={member.profile.avatar_url} alt={`${member.display_name} profile`} onError={() => setAvatarFailed(true)} className="h-full w-full object-cover" /> : member.display_name.slice(0, 1).toUpperCase()}
+          {member.profile.avatar_url && !avatarFailed ? <Image src={member.profile.avatar_url} alt={`${member.display_name} profile`} width={48} height={48} unoptimized onError={() => setAvatarFailed(true)} className="h-full w-full object-cover" /> : member.display_name.slice(0, 1).toUpperCase()}
         </div>
         <div className="min-w-0"><h3 className="truncate font-black text-white">{member.display_name}</h3><p className="truncate text-xs font-bold uppercase text-cyan-200">{member.role_label ?? "Community member"}</p></div>
       </div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, RadioTower, Star, Users } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 
 const SERVER_RAIL_REFRESH_MS = 30_000;
@@ -163,7 +164,7 @@ function RailCard({ item }: { item: RailItem }) {
   const content = (
     <div className={`dzn-live-server-card ${item.isPro ? "dzn-live-server-card--pro" : ""}`} data-rail-card-id={railIdentity(item)}>
       <div className="dzn-live-server-card__icon">
-        {item.logoUrl ? <img src={item.logoUrl} alt="" width={48} height={48} loading="lazy" decoding="async" /> : <RadioTower className="h-5 w-5" aria-hidden="true" />}
+        {item.logoUrl ? <Image src={item.logoUrl} alt="" width={48} height={48} unoptimized /> : <RadioTower className="h-5 w-5" aria-hidden="true" />}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">

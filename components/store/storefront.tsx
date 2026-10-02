@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Check, LoaderCircle, PackageCheck, ReceiptText, RefreshCw, ShieldCheck, ShoppingBag } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -37,6 +38,7 @@ type Purchase = {
 };
 
 export function Storefront() {
+  const router = useRouter();
   const [state, setState] = useState<"loading" | "ready" | "closed" | "error">("loading");
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
@@ -90,7 +92,7 @@ export function Storefront() {
       });
       const payload = await response.json().catch(() => null) as { checkout?: { url?: string }; message?: string; error?: string } | null;
       if (response.status === 401) {
-        window.location.assign(`/login?returnTo=${encodeURIComponent("/store")}`);
+        router.push(`/login?returnTo=${encodeURIComponent("/store")}`);
         return;
       }
       if (!response.ok && payload?.error === "ORDER_EXPIRED") {
