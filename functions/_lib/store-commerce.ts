@@ -37,6 +37,7 @@ type OrderRow = {
   currency: string;
   total_amount_minor: number;
   stripe_checkout_session_id: string | null;
+  stripe_payment_intent_id: string | null;
   reservation_expires_at: string;
 };
 
@@ -64,6 +65,15 @@ export type StoreCommerceOptions = {
 
 type StoreStripePrice = { id: string; active?: boolean; currency?: string; unit_amount?: number | null; livemode?: boolean; type?: string };
 type StorePublishOptions = { retrievePrice?: (priceId: string) => Promise<StoreStripePrice> };
+type ExistingPublication = {
+  id: string;
+  stripe_price_id: string;
+  status: string;
+  active: number;
+  stock_mode: string;
+  stock_limit: number | null;
+  lifetime_limit_per_account: number;
+};
 
 export function storeCommerceFlags(env: Env) {
   const values = env as unknown as Record<string, unknown>;
@@ -114,7 +124,27 @@ export async function publishStoreProduct(
       providerPrice.unit_amount !== draftPrice.unit_amount_minor || providerPrice.type !== "one_time" || providerPrice.livemode !== expectedLive) {
       return failure(422, "STRIPE_PRICE_MISMATCH", "The Stripe Price must be active, one-time, in GBP, and exactly match the reviewed draft and Stripe mode.");
     }
-    await requireDb(env).prepare(`INSERT INTO store_catalog_publications (
+    const db = requireDb(env);
+    const existing = await db.prepare(`SELECT id, stripe_price_id, status, active, stock_mode, stock_limit,
+      lifetime_limit_per_account FROM store_catalog_publications WHERE product_id = ? AND price_id = ? LIMIT 1`)
+      .bind(productId, priceId).first<ExistingPublication>();
+    if (existing) {
+      const requestedStockMode = stockLimit === null ? "unlimited" : "finite";
+      const sameContract = existing.stripe_price_id === stripePriceId && existing.stock_mode === requestedStockMode
+        && existing.stock_limit === stockLimit && existing.lifetime_limit_per_account === lifetimeLimit;
+      if (!sameContract) return failure(409, "PUBLICATION_CONTRACT_CHANGED", "The approved publication cannot be changed. Archive it through a separately audited owner action.");
+      if (!active || existing.active === 1 || existing.status !== "approved") {
+        return failure(409, "PUBLICATION_EXISTS", "That Store publication already exists in its current state.");
+      }
+      const activated = await db.prepare(`UPDATE store_catalog_publications
+        SET status = 'published', active = 1, published_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'approved' AND active = 0`)
+        .bind(now, now, existing.id).run();
+      if (changes(activated) !== 1) return failure(409, "PUBLICATION_STATE_CHANGED", "The publication changed before it could be activated.");
+      return { ok: true as const, status: 200 as const,
+        publication: { id: existing.id, productId, priceId, active: true, stockLimit, lifetimeLimit } };
+    }
+    await db.prepare(`INSERT INTO store_catalog_publications (
       id, product_id, price_id, stripe_price_id, status, active, stock_mode, stock_limit,
       lifetime_limit_per_account, published_by_user_id, published_at, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -293,25 +323,28 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
           db.prepare(`UPDATE store_commerce_orders SET status = 'fulfilled', stripe_payment_intent_id = ?, paid_at = ?, fulfilled_at = ?, updated_at = ?
             WHERE id = ? AND status IN ('checkout_ready','expired')`).bind(paymentIntent, now, now, now, order.id),
           db.prepare(`UPDATE store_catalog_publications
-            SET reserved_quantity = reserved_quantity - CASE WHEN ? = 'checkout_ready' THEN 1 ELSE 0 END,
-              sold_quantity = sold_quantity + CASE WHEN ? = 'checkout_ready' THEN 1 ELSE 0 END, updated_at = ?
-            WHERE id = ? AND (? <> 'checkout_ready' OR reserved_quantity > 0)`)
-            .bind(order.status, order.status, now, order.publication_id, order.status),
+            SET reserved_quantity = reserved_quantity - 1, sold_quantity = sold_quantity + 1, updated_at = ?
+            WHERE id = ? AND ? = 'checkout_ready' AND reserved_quantity > 0
+              AND EXISTS (SELECT 1 FROM store_commerce_orders
+                WHERE id = ? AND status = 'fulfilled' AND stripe_payment_intent_id = ?)`)
+            .bind(now, order.publication_id, order.status, order.id, paymentIntent),
           db.prepare(`INSERT INTO store_commerce_fulfilments (id, order_id, purchasing_user_id, fulfilment_kind,
             status, entitlement_key, granted_at, created_at, updated_at)
             SELECT ?, o.id, o.purchasing_user_id, i.fulfilment_kind, 'completed', ?, ?, ?, ?
-            FROM store_commerce_orders o JOIN store_commerce_order_items i ON i.order_id = o.id WHERE o.id = ?`)
-            .bind(fulfilmentId, entitlementKey, now, now, now, order.id),
+            FROM store_commerce_orders o JOIN store_commerce_order_items i ON i.order_id = o.id
+            WHERE o.id = ? AND o.status = 'fulfilled' AND o.stripe_payment_intent_id = ?`)
+            .bind(fulfilmentId, entitlementKey, now, now, now, order.id, paymentIntent),
           db.prepare(`INSERT INTO store_commerce_entitlements (id, fulfilment_id, order_id, purchasing_user_id,
             product_key, fulfilment_kind, entitlement_key, status, granted_at, created_at, updated_at)
             SELECT ?, ?, o.id, o.purchasing_user_id, i.product_key, i.fulfilment_kind, ?, 'active', ?, ?, ?
-            FROM store_commerce_orders o JOIN store_commerce_order_items i ON i.order_id = o.id WHERE o.id = ?`)
-            .bind(`store_entitlement_${crypto.randomUUID()}`, fulfilmentId, entitlementKey, now, now, now, order.id),
+            FROM store_commerce_orders o JOIN store_commerce_order_items i ON i.order_id = o.id
+            WHERE o.id = ? AND o.status = 'fulfilled' AND o.stripe_payment_intent_id = ?`)
+            .bind(`store_entitlement_${crypto.randomUUID()}`, fulfilmentId, entitlementKey, now, now, now, order.id, paymentIntent),
           db.prepare(`INSERT INTO store_commerce_receipts (id, receipt_number, order_id, purchasing_user_id,
             subtotal_amount_minor, tax_amount_minor, total_amount_minor, seller_snapshot_json, issued_at, updated_at)
             SELECT ?, ?, id, purchasing_user_id, subtotal_amount_minor, tax_amount_minor, total_amount_minor, ?, ?, ?
-            FROM store_commerce_orders WHERE id = ?`)
-            .bind(`store_receipt_${crypto.randomUUID()}`, `DZN-R-${crypto.randomUUID().slice(0, 12).toUpperCase()}`, sellerSnapshot(env), now, now, order.id),
+            FROM store_commerce_orders WHERE id = ? AND status = 'fulfilled' AND stripe_payment_intent_id = ?`)
+            .bind(`store_receipt_${crypto.randomUUID()}`, `DZN-R-${crypto.randomUUID().slice(0, 12).toUpperCase()}`, sellerSnapshot(env), now, now, order.id, paymentIntent),
         );
       }
     }
@@ -321,13 +354,65 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
       db.prepare("UPDATE store_commerce_orders SET status = 'expired', updated_at = ? WHERE id = ? AND status IN ('checkout_pending','checkout_ready')").bind(now, order.id),
     );
   } else if (order && event.type === "charge.dispute.closed" && text(object.status) === "won" && order.status === "disputed") {
-    processingStatus = "processed";
-    statements.push(
-      db.prepare("UPDATE store_commerce_orders SET status = 'fulfilled', updated_at = ? WHERE id = ? AND status = 'disputed'").bind(now, order.id),
-      db.prepare("UPDATE store_commerce_fulfilments SET status = 'completed', reversed_at = NULL, updated_at = ? WHERE order_id = ? AND status = 'reversed'").bind(now, order.id),
-      db.prepare("UPDATE store_commerce_entitlements SET status = 'active', reversed_at = NULL, updated_at = ? WHERE order_id = ? AND status = 'reversed'").bind(now, order.id),
-      db.prepare("UPDATE store_commerce_receipts SET status = 'issued', updated_at = ? WHERE order_id = ? AND status = 'void'").bind(now, order.id),
-    );
+    const existingFulfilment = await db.prepare("SELECT id FROM store_commerce_fulfilments WHERE order_id = ?")
+      .bind(order.id).first<{ id: string }>();
+    const publication = !existingFulfilment
+      ? await db.prepare(`SELECT stock_mode, stock_limit, reserved_quantity, sold_quantity
+          FROM store_catalog_publications WHERE id = ?`).bind(order.publication_id).first<{
+          stock_mode: string; stock_limit: number | null; reserved_quantity: number; sold_quantity: number;
+        }>()
+      : null;
+    const capacityUnavailable = !existingFulfilment && publication?.stock_mode === "finite"
+      && Number(publication.reserved_quantity) + Number(publication.sold_quantity) >= Number(publication.stock_limit);
+    if (capacityUnavailable) {
+      processingStatus = "manual_review";
+      statements.push(db.prepare("UPDATE store_commerce_orders SET status = 'manual_review', updated_at = ? WHERE id = ? AND status = 'disputed'").bind(now, order.id));
+    } else {
+      processingStatus = "processed";
+      const paymentIntent = stripeId(object.payment_intent) ?? order.stripe_payment_intent_id;
+      const fulfilmentId = existingFulfilment?.id ?? `store_fulfilment_${crypto.randomUUID()}`;
+      const entitlementKey = `dzn_store_${await orderProductKey(db, order.id)}_${order.id}`;
+      statements.push(
+        db.prepare(`UPDATE store_commerce_orders SET status = 'fulfilled', stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, ?),
+          paid_at = COALESCE(paid_at, ?), fulfilled_at = COALESCE(fulfilled_at, ?), updated_at = ?
+          WHERE id = ? AND status = 'disputed'`).bind(paymentIntent, now, now, now, order.id),
+        db.prepare(`UPDATE store_catalog_publications SET sold_quantity = sold_quantity + 1, updated_at = ?
+          WHERE id = ? AND NOT EXISTS (SELECT 1 FROM store_commerce_fulfilments WHERE order_id = ?)
+            AND EXISTS (SELECT 1 FROM store_commerce_orders WHERE id = ? AND status = 'fulfilled')`)
+          .bind(now, order.publication_id, order.id, order.id),
+        db.prepare(`INSERT INTO store_commerce_fulfilments (id, order_id, purchasing_user_id, fulfilment_kind,
+          status, entitlement_key, granted_at, created_at, updated_at)
+          SELECT ?, o.id, o.purchasing_user_id, i.fulfilment_kind, 'completed', ?, ?, ?, ?
+          FROM store_commerce_orders o JOIN store_commerce_order_items i ON i.order_id = o.id
+          WHERE o.id = ? AND o.status = 'fulfilled'
+            AND NOT EXISTS (SELECT 1 FROM store_commerce_fulfilments WHERE order_id = o.id)`)
+          .bind(fulfilmentId, entitlementKey, now, now, now, order.id),
+        db.prepare(`INSERT INTO store_commerce_entitlements (id, fulfilment_id, order_id, purchasing_user_id,
+          product_key, fulfilment_kind, entitlement_key, status, granted_at, created_at, updated_at)
+          SELECT ?, f.id, o.id, o.purchasing_user_id, i.product_key, i.fulfilment_kind, f.entitlement_key, 'active', ?, ?, ?
+          FROM store_commerce_orders o JOIN store_commerce_order_items i ON i.order_id = o.id
+          JOIN store_commerce_fulfilments f ON f.order_id = o.id
+          WHERE o.id = ? AND o.status = 'fulfilled'
+            AND NOT EXISTS (SELECT 1 FROM store_commerce_entitlements WHERE order_id = o.id)`)
+          .bind(`store_entitlement_${crypto.randomUUID()}`, now, now, now, order.id),
+        db.prepare(`INSERT INTO store_commerce_receipts (id, receipt_number, order_id, purchasing_user_id,
+          subtotal_amount_minor, tax_amount_minor, total_amount_minor, seller_snapshot_json, issued_at, updated_at)
+          SELECT ?, ?, id, purchasing_user_id, subtotal_amount_minor, tax_amount_minor, total_amount_minor, ?, ?, ?
+          FROM store_commerce_orders WHERE id = ? AND status = 'fulfilled'
+            AND NOT EXISTS (SELECT 1 FROM store_commerce_receipts WHERE order_id = ?)`)
+          .bind(`store_receipt_${crypto.randomUUID()}`, `DZN-R-${crypto.randomUUID().slice(0, 12).toUpperCase()}`,
+            sellerSnapshot(env), now, now, order.id, order.id),
+        db.prepare(`UPDATE store_commerce_fulfilments SET status = 'completed', reversed_at = NULL, updated_at = ?
+          WHERE order_id = ? AND status = 'reversed'
+            AND EXISTS (SELECT 1 FROM store_commerce_orders WHERE id = ? AND status = 'fulfilled')`).bind(now, order.id, order.id),
+        db.prepare(`UPDATE store_commerce_entitlements SET status = 'active', reversed_at = NULL, updated_at = ?
+          WHERE order_id = ? AND status = 'reversed'
+            AND EXISTS (SELECT 1 FROM store_commerce_orders WHERE id = ? AND status = 'fulfilled')`).bind(now, order.id, order.id),
+        db.prepare(`UPDATE store_commerce_receipts SET status = 'issued', updated_at = ?
+          WHERE order_id = ? AND status = 'void'
+            AND EXISTS (SELECT 1 FROM store_commerce_orders WHERE id = ? AND status = 'fulfilled')`).bind(now, order.id, order.id),
+      );
+    }
   } else if (order && event.type === "charge.dispute.closed" && order.status === "disputed") {
     processingStatus = "processed";
   } else if (order && (event.type === "charge.refunded" || event.type === "charge.dispute.created")) {
@@ -338,8 +423,9 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
     } else {
     const nextStatus = event.type === "charge.refunded" ? "refunded" : "disputed";
     statements.push(
-      db.prepare(`UPDATE store_commerce_orders SET status = ?, refunded_at = CASE WHEN ? = 'refunded' THEN ? ELSE refunded_at END, updated_at = ? WHERE id = ?`)
-        .bind(nextStatus, nextStatus, now, now, order.id),
+      db.prepare(`UPDATE store_commerce_orders SET status = ?, stripe_payment_intent_id = COALESCE(stripe_payment_intent_id, ?),
+        refunded_at = CASE WHEN ? = 'refunded' THEN ? ELSE refunded_at END, updated_at = ? WHERE id = ?`)
+        .bind(nextStatus, stripeId(object.payment_intent), nextStatus, now, now, order.id),
       db.prepare("UPDATE store_commerce_fulfilments SET status = 'reversed', reversed_at = ?, updated_at = ? WHERE order_id = ? AND status = 'completed'").bind(now, now, order.id),
       db.prepare("UPDATE store_commerce_entitlements SET status = 'reversed', reversed_at = ?, updated_at = ? WHERE order_id = ? AND status = 'active'").bind(now, now, order.id),
       db.prepare("UPDATE store_commerce_receipts SET status = ?, updated_at = ? WHERE order_id = ?").bind(nextStatus === "refunded" ? "refunded" : "void", now, order.id),

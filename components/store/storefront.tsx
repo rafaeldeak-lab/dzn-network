@@ -49,18 +49,20 @@ export function Storefront() {
     setState("loading");
     setMessage("");
     try {
-      const response = await fetch("/api/store/catalog", { cache: "no-store" });
+      const [response, purchasesResponse] = await Promise.all([
+        fetch("/api/store/catalog", { cache: "no-store" }),
+        fetch("/api/store/purchases", { cache: "no-store", credentials: "include" }),
+      ]);
+      if (purchasesResponse.ok) {
+        const purchasesPayload = await purchasesResponse.json().catch(() => null) as { purchases?: Purchase[] } | null;
+        setPurchases(Array.isArray(purchasesPayload?.purchases) ? purchasesPayload.purchases : []);
+      } else setPurchases([]);
       const payload = await response.json().catch(() => null) as { products?: CatalogProduct[]; checkoutEnabled?: boolean } | null;
       if (response.status === 404) { setState("closed"); return; }
       if (!response.ok || !payload) throw new Error("Store unavailable");
       setProducts(Array.isArray(payload.products) ? payload.products : []);
       setCheckoutEnabled(payload.checkoutEnabled === true);
       setState("ready");
-      const purchasesResponse = await fetch("/api/store/purchases", { cache: "no-store", credentials: "include" });
-      if (purchasesResponse.ok) {
-        const purchasesPayload = await purchasesResponse.json().catch(() => null) as { purchases?: Purchase[] } | null;
-        setPurchases(Array.isArray(purchasesPayload?.purchases) ? purchasesPayload.purchases : []);
-      } else setPurchases([]);
     } catch {
       setState("error");
     }

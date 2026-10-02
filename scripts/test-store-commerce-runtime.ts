@@ -31,7 +31,7 @@ async function run() {
     const db = await mf.getD1Database("DB");
     await db.exec("PRAGMA foreign_keys = ON;");
     await db.prepare("CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT, username TEXT, avatar TEXT)").run();
-    await db.prepare("INSERT INTO users (id, discord_id, username) VALUES ('owner','100000000000000001','owner'),('buyer','100000000000000002','buyer'),('buyer-two','100000000000000003','buyer-two')").run();
+    await db.prepare("INSERT INTO users (id, discord_id, username) VALUES ('owner','100000000000000001','owner'),('buyer','100000000000000002','buyer'),('buyer-two','100000000000000003','buyer-two'),('buyer-three','100000000000000004','buyer-three')").run();
     for (const name of ["0081_store_catalog_foundation.sql", "0082_store_order_inventory_foundation.sql",
       "0083_store_fulfilment_receipt_foundation.sql", "0084_store_commerce_runtime.sql"]) await apply(db, name);
     const env = { DB: db as unknown as D1Database, DZN_STORE_ENABLED: "true", DZN_STORE_ADMIN_ENABLED: "true",
@@ -45,6 +45,14 @@ async function run() {
       'Permanent account-bound supporter recognition.', 'supporter_pack', 'supporter_card', 'owner', 'owner')`).run();
     await db.prepare("INSERT INTO store_prices (id, product_id, unit_amount_minor, created_by_user_id) VALUES ('price','product',1200,'owner')").run();
 
+    const approved = await publishStoreProduct(env, owner, { productId: "product", priceId: "price",
+      stripePriceId: "price_test_supporter", stockLimit: 1, lifetimeLimit: 1, publish: false }, {
+        retrievePrice: async () => ({ id: "price_test_supporter", active: true, currency: "gbp",
+          unit_amount: 1200, livemode: false, type: "one_time" }),
+      });
+    assert.equal(approved.ok, true);
+    if (!approved.ok) throw new Error("Approval failed");
+    assert.equal(approved.publication.active, false);
     const published = await publishStoreProduct(env, owner, { productId: "product", priceId: "price",
       stripePriceId: "price_test_supporter", stockLimit: 1, lifetimeLimit: 1, publish: true }, {
         retrievePrice: async () => ({ id: "price_test_supporter", active: true, currency: "gbp",
@@ -52,6 +60,8 @@ async function run() {
       });
     assert.equal(published.ok, true);
     if (!published.ok) throw new Error("Publication failed");
+    assert.equal(published.status, 200);
+    assert.equal(published.publication.id, approved.publication.id);
     const catalog = await listPublishedStore(env);
     assert.equal(catalog.ok, true);
     if (!catalog.ok) throw new Error("Catalog failed");
@@ -158,12 +168,48 @@ async function run() {
 
     await testRefundBeforeCompletion(db, env, published.publication.id);
 
+    await testEarlyDisputeWon(db, env, published.publication.id);
+
     await testLatePaymentStockConflict(db, env, published.publication.id);
 
     await testAtomicLimitAndReservationExpiry(db, env, published.publication.id);
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Store commerce runtime checks passed.");
   } finally { await mf.dispose(); }
+}
+
+async function testEarlyDisputeWon(db: D1Database, env: Env, publicationId: string) {
+  const thirdBuyer: SessionUser = { id: "buyer-three", discord_id: "100000000000000004", username: "buyer-three", avatar: null };
+  await db.prepare("UPDATE store_catalog_publications SET stock_limit = 5, sold_quantity = 0 WHERE id = ?").bind(publicationId).run();
+  const expiresAt = Math.floor(Date.now() / 1000) + 1800;
+  const checkout = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), thirdBuyer,
+    { publicationId, requestKey: "early-dispute-won-0001" }, {
+      createId: sequence(["disputeorder", "disputeitem", "disputenumber"]),
+      createCheckout: async () => ({ id: "cs_test_earlydispute", url: "https://checkout.stripe.com/c/pay/test_earlydispute",
+        status: "open", mode: "payment", livemode: false, client_reference_id: "store_order_disputeorder", expires_at: expiresAt,
+        metadata: { dzn_store_order_id: "store_order_disputeorder", dzn_store_user_id: thirdBuyer.id } }),
+    });
+  assert.equal(checkout.ok, true);
+  const disputed = event("evt_early_dispute", "charge.dispute.created", {
+    id: "dp_test_early", object: "dispute", payment_intent: "pi_test_earlydispute", status: "needs_response",
+    metadata: { dzn_store_order_id: "store_order_disputeorder" },
+  });
+  assert.deepEqual(await reconcileStoreWebhook(env, disputed, JSON.stringify(disputed)), {
+    duplicate: false, processingStatus: "processed",
+  });
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE id = 'store_order_disputeorder'").first<{ status: string }>())?.status, "disputed");
+  assert.equal((await db.prepare("SELECT COUNT(*) AS total FROM store_commerce_fulfilments WHERE order_id = 'store_order_disputeorder'").first<{ total: number }>())?.total, 0);
+  const won = event("evt_early_dispute_won", "charge.dispute.closed", {
+    id: "dp_test_early", object: "dispute", payment_intent: "pi_test_earlydispute", status: "won",
+  });
+  assert.deepEqual(await reconcileStoreWebhook(env, won, JSON.stringify(won)), {
+    duplicate: false, processingStatus: "processed",
+  });
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE id = 'store_order_disputeorder'").first<{ status: string }>())?.status, "fulfilled");
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_fulfilments WHERE order_id = 'store_order_disputeorder'").first<{ status: string }>())?.status, "completed");
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_entitlements WHERE order_id = 'store_order_disputeorder'").first<{ status: string }>())?.status, "active");
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_receipts WHERE order_id = 'store_order_disputeorder'").first<{ status: string }>())?.status, "issued");
+  assert.equal((await db.prepare("SELECT sold_quantity FROM store_catalog_publications WHERE id = ?").bind(publicationId).first<{ sold_quantity: number }>())?.sold_quantity, 1);
 }
 
 async function testLatePaymentStockConflict(db: D1Database, env: Env, publicationId: string) {
