@@ -176,6 +176,7 @@ export async function eraseOrRetainAccountUser(db: D1Database, userId: string) {
     return deleteRows(db, "DELETE FROM users WHERE id = ?", [userId]);
   }
 
+  await deleteDirectUserCascadeRows(db, userId);
   const touchesUpdatedAt = await tableHasColumn(db, "users", "updated_at");
   const result = await db.prepare(`UPDATE users
     SET discord_id = ?, username = NULL, avatar = NULL${touchesUpdatedAt ? ", updated_at = CURRENT_TIMESTAMP" : ""}
@@ -183,6 +184,35 @@ export async function eraseOrRetainAccountUser(db: D1Database, userId: string) {
     .bind(`deleted-${crypto.randomUUID()}`, userId)
     .run();
   return changes(result);
+}
+
+async function deleteDirectUserCascadeRows(db: D1Database, userId: string) {
+  const cascadeReferences = [
+    ["player_saved_servers", "user_id"],
+    ["player_discord_community_memberships", "user_id"],
+    ["player_profile_privacy_preferences", "user_id"],
+    ["player_public_profiles", "user_id"],
+    ["player_game_identity_claims", "user_id"],
+    ["player_game_identity_links", "user_id"],
+    ["player_game_identity_audit_log", "user_id"],
+    ["dzn_comms_private_group_members", "user_id"],
+    ["dzn_comms_send_receipts", "actor_user_id"],
+    ["dzn_comms_send_slots", "actor_user_id"],
+    ["dzn_comms_attempt_slots", "actor_user_id"],
+    ["dzn_comms_report_slots", "reporter_user_id"],
+    ["dzn_comms_timeouts", "actor_user_id"],
+    ["dzn_comms_reports", "reporter_user_id"],
+    ["player_game_identity_notification_deliveries", "user_id"],
+    ["onboarding_drafts", "user_id"],
+    ["player_game_identity_owner_notification_deliveries", "recipient_user_id"],
+    ["player_public_discord_identity_preferences", "user_id"],
+    ["dzn_comms_message_reactions", "actor_user_id"],
+    ["server_community_members", "user_id"],
+  ] as const;
+  for (const [tableName, columnName] of cascadeReferences) {
+    if (!(await tableExists(db, tableName))) continue;
+    await deleteRows(db, `DELETE FROM ${tableName} WHERE ${columnName} = ?`, [userId]);
+  }
 }
 
 async function hasRetainedStoreLedgerReferences(db: D1Database, userId: string) {

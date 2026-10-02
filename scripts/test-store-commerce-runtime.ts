@@ -46,6 +46,12 @@ async function run() {
     const db = await mf.getD1Database("DB");
     await db.exec("PRAGMA foreign_keys = ON;");
     await db.prepare("CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT, username TEXT, avatar TEXT)").run();
+    await db.prepare(`CREATE TABLE player_public_profiles (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      handle TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`).run();
     await db.prepare(`INSERT INTO users (id, discord_id, username) VALUES
       ('owner','100000000000000001','owner'),('buyer','100000000000000002','buyer'),
       ('buyer-two','100000000000000003','buyer-two'),('buyer-three','100000000000000004','buyer-three'),
@@ -244,12 +250,17 @@ async function run() {
     await testMismatchedPaidSessionReview(db, env, published.publication.id);
 
     await testPublicationModeIsolation(db, env);
+    await db.prepare("INSERT INTO player_public_profiles (id, user_id, handle) VALUES ('public-buyer', ?, 'buyer-public')")
+      .bind(buyer.id).run();
     assert.equal(await eraseOrRetainAccountUser(db as unknown as D1Database, buyer.id), 1);
     const retainedBuyer = await db.prepare("SELECT discord_id, username, avatar FROM users WHERE id = ?")
       .bind(buyer.id).first<{ discord_id: string; username: string | null; avatar: string | null }>();
     assert.match(retainedBuyer?.discord_id ?? "", /^deleted-[0-9a-f-]{36}$/);
     assert.equal(retainedBuyer?.username, null);
     assert.equal(retainedBuyer?.avatar, null);
+    assert.equal(await db.prepare("SELECT id FROM player_public_profiles WHERE user_id = ?").bind(buyer.id).first(), null);
+    assert.ok(await db.prepare("SELECT id FROM store_commerce_orders WHERE purchasing_user_id = ? LIMIT 1")
+      .bind(buyer.id).first());
     assert.equal(await eraseOrRetainAccountUser(db as unknown as D1Database, "no-store-user"), 1);
     assert.equal(await db.prepare("SELECT id FROM users WHERE id = 'no-store-user'").first(), null);
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
