@@ -23,6 +23,11 @@ assert.equal(launcherSource.includes("z-40"), true, "The launcher must remain be
 assert.equal(launcherSource.includes("z-[70]"), false, "The launcher must not cover the DZN Pulse modal.");
 assert.equal(launcherSource.includes("Open Global Chat"), true, "The launcher must use neutral copy until the authoritative runtime state is known.");
 assert.equal(launcherSource.includes("Open live chat"), false, "The launcher must not infer live availability from public build flags.");
+assert.equal(launcherSource.includes("DZN Comms"), true, "The persistent launcher control must identify DZN Comms without relying on an icon or tooltip.");
+assert.equal(launcherSource.includes("Chat &amp; status"), true, "The persistent launcher must explain that it opens chat and availability information.");
+assert.equal(launcherSource.includes("max-[359px]:sr-only"), true, "Only exceptionally narrow screens may collapse the visible launcher label.");
+assert.equal(launcherSource.includes("safe-area-inset-bottom"), true, "The launcher must clear mobile safe-area controls.");
+assert.equal(launcherSource.includes("safe-area-inset-left"), true, "The launcher must clear mobile safe-area controls in landscape.");
 assert.equal(launcherSource.includes("closeButtonRef.current?.focus()"), true, "Opening the launcher must move keyboard focus into its menu.");
 assert.equal(launcherSource.includes("ref={closeButtonRef}"), true, "The launcher close control must be the initial focus target.");
 assert.equal(launcherSource.includes("window.requestAnimationFrame(() => triggerButtonRef.current?.focus())"), true, "Closing the launcher with its keyboard paths must restore trigger focus.");
