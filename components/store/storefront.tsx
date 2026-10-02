@@ -93,6 +93,10 @@ export function Storefront() {
         window.location.assign(`/login?returnTo=${encodeURIComponent("/store")}`);
         return;
       }
+      if (!response.ok && payload?.error === "ORDER_EXPIRED") {
+        retryKeys.current.delete(product.publication_id);
+        clearRetryKey(storageKey);
+      }
       if (!response.ok || !payload?.checkout?.url) throw new Error(payload?.message ?? "Checkout is unavailable. No payment was started.");
       window.location.assign(payload.checkout.url);
     } catch (error) {
@@ -182,3 +186,4 @@ function money(amount: number, currency: string) { return new Intl.NumberFormat(
 function label(value: string) { return value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase()); }
 function storedRetryKey(key: string) { try { return window.sessionStorage.getItem(key); } catch { return null; } }
 function persistRetryKey(key: string, value: string) { try { window.sessionStorage.setItem(key, value); } catch { /* in-memory retry still applies */ } }
+function clearRetryKey(key: string) { try { window.sessionStorage.removeItem(key); } catch { /* in-memory key was already cleared */ } }

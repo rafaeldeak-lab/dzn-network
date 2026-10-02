@@ -32,6 +32,9 @@ async function run() {
   const storefrontSource = readFileSync("components/store/storefront.tsx", "utf8");
   assert.match(storefrontSource, /storedRetryKey\(storageKey\)/);
   assert.match(storefrontSource, /sessionStorage\.setItem\(key, value\)/);
+  assert.match(storefrontSource, /payload\?\.error === "ORDER_EXPIRED"/);
+  assert.match(storefrontSource, /retryKeys\.current\.delete\(product\.publication_id\)/);
+  assert.match(storefrontSource, /sessionStorage\.removeItem\(key\)/);
 
   const mf = new Miniflare({ modules: true, script: "export default { fetch() { return new Response('ok'); } }",
     compatibilityDate: "2026-05-08", d1Databases: ["DB"], d1Persist: false });
