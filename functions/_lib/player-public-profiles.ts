@@ -382,11 +382,16 @@ export async function readPublicPlayerProfileByHandle(env: Env, rawHandle: unkno
 
   const preferences = rowToPreferences(row);
   preferences.show_discord_identity = await readDiscordIdentityConsent(db, row.user_id);
+  const supporterCardLivemode = env.STRIPE_SECRET_KEY?.startsWith("sk_live_")
+    ? true
+    : env.STRIPE_SECRET_KEY?.startsWith("sk_test_")
+      ? false
+      : null;
   const [aggregate, featuredServer, supporterCards] = await Promise.all([
     preferences.show_gameplay_summary ? readPublicPlayerAggregate(db, row.discord_id) : Promise.resolve(null),
     preferences.show_featured_server ? readPublicPlayerFeaturedServer(db, row.discord_id) : Promise.resolve(null),
-    preferences.show_calling_cards
-      ? readActiveStoreSupporterCards(db, row.user_id, env.STRIPE_SECRET_KEY?.startsWith("sk_live_") === true)
+    preferences.show_calling_cards && supporterCardLivemode !== null
+      ? readActiveStoreSupporterCards(db, row.user_id, supporterCardLivemode)
       : Promise.resolve([]),
   ]);
 
