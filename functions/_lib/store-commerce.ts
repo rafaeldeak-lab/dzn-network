@@ -384,7 +384,11 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
         const entitlementKey = `dzn_store_${await orderProductKey(db, order.id)}_${order.id}`;
         statements.push(
           db.prepare(`UPDATE store_commerce_orders SET status = 'fulfilled', stripe_payment_intent_id = ?, paid_at = ?, fulfilled_at = ?, updated_at = ?
-            WHERE id = ? AND status IN ('checkout_ready','expired','manual_review')`).bind(paymentIntent, now, now, now, order.id),
+            WHERE id = ? AND (status IN ('checkout_ready','expired') OR (status = 'manual_review'
+              AND EXISTS (SELECT 1 FROM store_commerce_events
+                WHERE order_id = store_commerce_orders.id AND event_type = 'charge.dispute.closed'
+                  AND json_extract(safe_summary_json, '$.dispute.outcome') IN ('won','warning_closed'))))`)
+            .bind(paymentIntent, now, now, now, order.id),
           db.prepare(`INSERT INTO store_commerce_fulfilments (id, order_id, purchasing_user_id, fulfilment_kind,
             status, entitlement_key, granted_at, created_at, updated_at)
             SELECT ?, o.id, o.purchasing_user_id, i.fulfilment_kind, 'completed', ?, ?, ?, ?
@@ -464,7 +468,9 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
       ? object.refunded === true && Number(object.amount_refunded) >= order.total_amount_minor
       : Number(object.amount) >= order.total_amount_minor;
     processingStatus = fullReversal ? "processed" : "manual_review";
-    if (!fullReversal) {
+    if (fullReversal && event.type === "charge.dispute.created" && order.status === "refunded") {
+      processingStatus = "processed";
+    } else if (!fullReversal) {
       statements.push(db.prepare("UPDATE store_commerce_orders SET status = 'manual_review', updated_at = ? WHERE id = ?").bind(now, order.id));
     } else {
     const nextStatus = event.type === "charge.refunded" ? "refunded" : "disputed";

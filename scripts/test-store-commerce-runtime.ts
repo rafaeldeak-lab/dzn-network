@@ -33,6 +33,9 @@ async function run() {
   assert.match(migration, /trg_store_commerce_dispute_restoration_stock_sale/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS store_commerce_entitlements/);
   assert.match(migration, /no_competitive_advantage INTEGER NOT NULL DEFAULT 1 CHECK \(no_competitive_advantage = 1\)/);
+  const commerceSource = readFileSync("functions/_lib/store-commerce.ts", "utf8");
+  assert.match(commerceSource, /status = 'manual_review'[\s\S]*EXISTS \(SELECT 1 FROM store_commerce_events[\s\S]*charge\.dispute\.closed/);
+  assert.match(commerceSource, /event\.type === "charge\.dispute\.created" && order\.status === "refunded"/);
   const storefrontSource = readFileSync("components/store/storefront.tsx", "utf8");
   assert.match(storefrontSource, /storedRetryKey\(storageKey\)/);
   assert.match(storefrontSource, /sessionStorage\.setItem\(key, value\)/);
@@ -57,7 +60,7 @@ async function run() {
       ('buyer-two','100000000000000003','buyer-two'),('buyer-three','100000000000000004','buyer-three'),
       ('buyer-four','100000000000000005','buyer-four'),('buyer-five','100000000000000006','buyer-five'),
       ('buyer-six','100000000000000007','buyer-six'),('no-store-user','100000000000000008','no-store-user'),
-      ('buyer-seven','100000000000000009','buyer-seven')`).run();
+      ('buyer-seven','100000000000000009','buyer-seven'),('buyer-eight','100000000000000010','buyer-eight')`).run();
     for (const name of ["0081_store_catalog_foundation.sql", "0082_store_order_inventory_foundation.sql",
       "0083_store_fulfilment_receipt_foundation.sql", "0084_store_commerce_runtime.sql"]) await apply(db, name);
     const env = { DB: db as unknown as D1Database, DZN_STORE_ENABLED: "true", DZN_STORE_ADMIN_ENABLED: "true",
@@ -252,6 +255,8 @@ async function run() {
     await testMismatchedPaidSessionReview(db, env, published.publication.id);
 
     await testMismatchedPaidSessionDispute(db, env, published.publication.id);
+
+    await testPartialReviewBeforeCompletion(db, env, published.publication.id);
 
     await testPublicationModeIsolation(db, env);
     await db.prepare("INSERT INTO player_public_profiles (id, user_id, handle) VALUES ('public-buyer', ?, 'buyer-public')")
@@ -597,6 +602,68 @@ async function testMismatchedPaidSessionDispute(db: D1Database, env: Env, public
   });
 }
 
+async function testPartialReviewBeforeCompletion(db: D1Database, env: Env, publicationId: string) {
+  const user: SessionUser = {
+    id: "buyer-eight",
+    discord_id: "100000000000000010",
+    username: "buyer-eight",
+    avatar: null,
+  };
+  await db.prepare("UPDATE store_catalog_publications SET stock_limit = 5, sold_quantity = 0 WHERE id = ?")
+    .bind(publicationId).run();
+  const expiresAt = Math.floor(Date.now() / 1000) + 35 * 60;
+  const checkout = await createOrResumeStoreCheckout(
+    env,
+    new Request("https://dayz-network.com/api/store/orders"),
+    user,
+    { publicationId, requestKey: "partial-before-completion-0001" },
+    {
+      createId: sequence(["partialfirst", "partialfirstitem", "partialfirstnumber"]),
+      createCheckout: async () => ({
+        id: "cs_test_partialfirst",
+        url: "https://checkout.stripe.com/c/pay/test_partialfirst",
+        status: "open",
+        mode: "payment",
+        livemode: false,
+        client_reference_id: "store_order_partialfirst",
+        expires_at: expiresAt,
+        metadata: { dzn_store_order_id: "store_order_partialfirst", dzn_store_user_id: user.id },
+      }),
+    },
+  );
+  assert.equal(checkout.ok, true);
+  const partialDispute = event("evt_partial_before_completion", "charge.dispute.created", {
+    id: "dp_test_partialfirst",
+    object: "dispute",
+    payment_intent: "pi_test_partialfirst",
+    status: "needs_response",
+    amount: 600,
+    metadata: { dzn_store_order_id: "store_order_partialfirst" },
+  });
+  assert.deepEqual(await reconcileStoreWebhook(env, partialDispute, JSON.stringify(partialDispute)), {
+    duplicate: false,
+    processingStatus: "manual_review",
+  });
+  const completion = event("evt_completion_after_partial_review", "checkout.session.completed", {
+    id: "cs_test_partialfirst",
+    object: "checkout.session",
+    client_reference_id: "store_order_partialfirst",
+    payment_intent: "pi_test_partialfirst",
+    payment_status: "paid",
+    amount_total: 1200,
+    currency: "gbp",
+    metadata: { dzn_store_order_id: "store_order_partialfirst" },
+  });
+  assert.deepEqual(await reconcileStoreWebhook(env, completion, JSON.stringify(completion)), {
+    duplicate: false,
+    processingStatus: "ignored",
+  });
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE id = 'store_order_partialfirst'")
+    .first<{ status: string }>())?.status, "manual_review");
+  assert.equal((await db.prepare("SELECT COUNT(*) AS total FROM store_commerce_entitlements WHERE order_id = 'store_order_partialfirst'")
+    .first<{ total: number }>())?.total, 0);
+}
+
 async function testPublicationModeIsolation(db: D1Database, env: Env) {
   const liveEnv = { ...env, STRIPE_SECRET_KEY: "sk_live_store_live_key" } as unknown as Env;
   const livePublication = await publishStoreProduct(liveEnv, owner, { productId: "product", priceId: "price",
@@ -634,6 +701,18 @@ async function testRefundBeforeCompletion(db: D1Database, env: Env, publicationI
     duplicate: false, processingStatus: "processed",
   });
   assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE id = 'store_order_refundorder'").first<{ status: string }>())?.status, "refunded");
+  const disputedAfterRefund = event("evt_dispute_after_refund", "charge.dispute.created", {
+    id: "dp_test_refundfirst",
+    object: "dispute",
+    payment_intent: "pi_test_refundfirst",
+    status: "needs_response",
+    amount: 1200,
+  });
+  assert.deepEqual(await reconcileStoreWebhook(env, disputedAfterRefund, JSON.stringify(disputedAfterRefund)), {
+    duplicate: false, processingStatus: "processed",
+  });
+  assert.equal((await db.prepare("SELECT status FROM store_commerce_orders WHERE id = 'store_order_refundorder'")
+    .first<{ status: string }>())?.status, "refunded");
   const completion = event("evt_completion_after_refund", "checkout.session.completed", {
     id: "cs_test_refundfirst", object: "checkout.session", client_reference_id: "store_order_refundorder",
     payment_intent: "pi_test_refundfirst", payment_status: "paid", amount_total: 1200, currency: "gbp",
