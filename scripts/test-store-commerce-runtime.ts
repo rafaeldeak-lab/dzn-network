@@ -25,7 +25,7 @@ async function run() {
   assert.match(migration, /trg_store_commerce_order_lifetime_limit/);
   assert.match(migration, /trg_store_commerce_order_release_stock/);
   assert.match(migration, /stock_reservation_state TEXT NOT NULL DEFAULT 'held'/);
-  assert.match(migration, /OLD\.status = 'manual_review' AND NEW\.status = 'refunded'/);
+  assert.match(migration, /OLD\.status = 'manual_review' AND NEW\.status IN \('refunded', 'disputed'\)/);
   assert.match(migration, /trg_store_commerce_reviewed_stock_sale/);
   assert.match(migration, /trg_store_commerce_reserved_stock_guard/);
   assert.match(migration, /trg_store_commerce_reserved_stock_sale/);
@@ -56,7 +56,8 @@ async function run() {
       ('owner','100000000000000001','owner'),('buyer','100000000000000002','buyer'),
       ('buyer-two','100000000000000003','buyer-two'),('buyer-three','100000000000000004','buyer-three'),
       ('buyer-four','100000000000000005','buyer-four'),('buyer-five','100000000000000006','buyer-five'),
-      ('buyer-six','100000000000000007','buyer-six'),('no-store-user','100000000000000008','no-store-user')`).run();
+      ('buyer-six','100000000000000007','buyer-six'),('no-store-user','100000000000000008','no-store-user'),
+      ('buyer-seven','100000000000000009','buyer-seven')`).run();
     for (const name of ["0081_store_catalog_foundation.sql", "0082_store_order_inventory_foundation.sql",
       "0083_store_fulfilment_receipt_foundation.sql", "0084_store_commerce_runtime.sql"]) await apply(db, name);
     const env = { DB: db as unknown as D1Database, DZN_STORE_ENABLED: "true", DZN_STORE_ADMIN_ENABLED: "true",
@@ -168,11 +169,12 @@ async function run() {
     assert.deepEqual(await db.prepare("SELECT entitlement_key, status FROM store_commerce_entitlements").first(), {
       entitlement_key: "dzn_store_founding-supporter_store_order_orderid", status: "active",
     });
-    const supporterCards = await readActiveStoreSupporterCards(db as unknown as D1Database, buyer.id);
+    const supporterCards = await readActiveStoreSupporterCards(db as unknown as D1Database, buyer.id, false);
     assert.equal(supporterCards.length, 1);
     assert.equal(supporterCards[0]?.product_key, "founding-supporter");
     assert.equal(supporterCards[0]?.product_name, "Founding Supporter");
     assert.match(supporterCards[0]?.granted_at ?? "", /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal((await readActiveStoreSupporterCards(db as unknown as D1Database, buyer.id, true)).length, 0);
     assert.equal((await listStorePurchases(env, buyer)).purchases.length, 1);
 
     const disputed = event("evt_dispute_created", "charge.dispute.created", {
@@ -248,6 +250,8 @@ async function run() {
     await testAtomicLimitAndReservationExpiry(db, env, published.publication.id);
 
     await testMismatchedPaidSessionReview(db, env, published.publication.id);
+
+    await testMismatchedPaidSessionDispute(db, env, published.publication.id);
 
     await testPublicationModeIsolation(db, env);
     await db.prepare("INSERT INTO player_public_profiles (id, user_id, handle) VALUES ('public-buyer', ?, 'buyer-public')")
@@ -518,6 +522,78 @@ async function testMismatchedPaidSessionReview(db: D1Database, env: Env, publica
     FROM store_commerce_orders o JOIN store_catalog_publications pub ON pub.id = o.publication_id
     WHERE o.id = 'store_order_mismatchorder'`).first(), {
     status: "refunded", stock_reservation_state: "released", reserved_quantity: 0,
+  });
+}
+
+async function testMismatchedPaidSessionDispute(db: D1Database, env: Env, publicationId: string) {
+  const user: SessionUser = {
+    id: "buyer-seven",
+    discord_id: "100000000000000009",
+    username: "buyer-seven",
+    avatar: null,
+  };
+  await db.prepare("UPDATE store_catalog_publications SET stock_limit = 5, sold_quantity = 0 WHERE id = ?")
+    .bind(publicationId).run();
+  const expiresAt = Math.floor(Date.now() / 1000) + 35 * 60;
+  const checkout = await createOrResumeStoreCheckout(
+    env,
+    new Request("https://dayz-network.com/api/store/orders"),
+    user,
+    { publicationId, requestKey: "mismatched-dispute-0001" },
+    {
+      createId: sequence(["mismatchdispute", "mismatchdisputeitem", "mismatchdisputenumber"]),
+      createCheckout: async () => ({
+        id: "cs_test_mismatchdispute",
+        url: "https://checkout.stripe.com/c/pay/test_mismatchdispute",
+        status: "open",
+        mode: "payment",
+        livemode: false,
+        client_reference_id: "store_order_mismatchdispute",
+        expires_at: expiresAt,
+        metadata: { dzn_store_order_id: "store_order_mismatchdispute", dzn_store_user_id: user.id },
+      }),
+    },
+  );
+  assert.equal(checkout.ok, true);
+  const completed = event("evt_mismatched_dispute_paid", "checkout.session.completed", {
+    id: "cs_test_mismatchdispute",
+    object: "checkout.session",
+    client_reference_id: "store_order_mismatchdispute",
+    payment_intent: "pi_test_mismatchdispute",
+    payment_status: "paid",
+    amount_total: 1199,
+    currency: "gbp",
+    metadata: { dzn_store_order_id: "store_order_mismatchdispute" },
+  });
+  assert.deepEqual(await reconcileStoreWebhook(env, completed, JSON.stringify(completed)), {
+    duplicate: false,
+    processingStatus: "manual_review",
+  });
+  assert.deepEqual(await db.prepare(`SELECT o.status, o.stock_reservation_state, pub.reserved_quantity
+    FROM store_commerce_orders o JOIN store_catalog_publications pub ON pub.id = o.publication_id
+    WHERE o.id = 'store_order_mismatchdispute'`).first(), {
+    status: "manual_review",
+    stock_reservation_state: "held",
+    reserved_quantity: 1,
+  });
+
+  const disputed = event("evt_mismatched_dispute_created", "charge.dispute.created", {
+    id: "dp_test_mismatchdispute",
+    object: "dispute",
+    payment_intent: "pi_test_mismatchdispute",
+    status: "needs_response",
+    amount: 1200,
+  });
+  assert.deepEqual(await reconcileStoreWebhook(env, disputed, JSON.stringify(disputed)), {
+    duplicate: false,
+    processingStatus: "processed",
+  });
+  assert.deepEqual(await db.prepare(`SELECT o.status, o.stock_reservation_state, pub.reserved_quantity
+    FROM store_commerce_orders o JOIN store_catalog_publications pub ON pub.id = o.publication_id
+    WHERE o.id = 'store_order_mismatchdispute'`).first(), {
+    status: "disputed",
+    stock_reservation_state: "released",
+    reserved_quantity: 0,
   });
 }
 

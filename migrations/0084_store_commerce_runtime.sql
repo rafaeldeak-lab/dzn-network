@@ -207,7 +207,7 @@ AFTER UPDATE OF status ON store_commerce_orders
 WHEN OLD.stock_reservation_state = 'held' AND (
   (OLD.status IN ('checkout_pending', 'checkout_ready')
     AND NEW.status IN ('cancelled', 'expired', 'payment_failed', 'refunded', 'disputed'))
-  OR (OLD.status = 'manual_review' AND NEW.status = 'refunded')
+  OR (OLD.status = 'manual_review' AND NEW.status IN ('refunded', 'disputed'))
 )
 BEGIN
   UPDATE store_catalog_publications
