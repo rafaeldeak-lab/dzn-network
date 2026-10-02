@@ -221,7 +221,7 @@
     "tailwindcss": "^4",
     "tsx": "^4.22.0",
     "typescript": "^5",
-    "wrangler": "4.115.0"
+    "wrangler": "4.113.0"
   },
   "overrides": {
     "sharp": "0.35.5",
