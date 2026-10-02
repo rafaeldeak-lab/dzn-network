@@ -208,6 +208,25 @@ BEGIN
   WHERE id = NEW.publication_id AND reserved_quantity > 0;
 END;
 
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_reserved_stock_guard
+BEFORE UPDATE OF status ON store_commerce_orders
+WHEN OLD.status = 'checkout_ready' AND NEW.status = 'fulfilled' AND NOT EXISTS (
+  SELECT 1 FROM store_catalog_publications pub
+  WHERE pub.id = NEW.publication_id AND pub.reserved_quantity > 0
+)
+BEGIN SELECT RAISE(ABORT, 'reserved Store stock is unavailable'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_reserved_stock_sale
+AFTER UPDATE OF status ON store_commerce_orders
+WHEN OLD.status = 'checkout_ready' AND NEW.status = 'fulfilled'
+BEGIN
+  UPDATE store_catalog_publications
+  SET reserved_quantity = reserved_quantity - 1,
+      sold_quantity = sold_quantity + 1,
+      updated_at = CURRENT_TIMESTAMP
+  WHERE id = NEW.publication_id AND reserved_quantity > 0;
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_store_commerce_late_paid_stock_guard
 BEFORE UPDATE OF status ON store_commerce_orders
 WHEN OLD.status = 'expired' AND NEW.status = 'fulfilled' AND NOT EXISTS (

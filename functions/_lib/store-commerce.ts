@@ -322,12 +322,6 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
         statements.push(
           db.prepare(`UPDATE store_commerce_orders SET status = 'fulfilled', stripe_payment_intent_id = ?, paid_at = ?, fulfilled_at = ?, updated_at = ?
             WHERE id = ? AND status IN ('checkout_ready','expired')`).bind(paymentIntent, now, now, now, order.id),
-          db.prepare(`UPDATE store_catalog_publications
-            SET reserved_quantity = reserved_quantity - 1, sold_quantity = sold_quantity + 1, updated_at = ?
-            WHERE id = ? AND ? = 'checkout_ready' AND reserved_quantity > 0
-              AND EXISTS (SELECT 1 FROM store_commerce_orders
-                WHERE id = ? AND status = 'fulfilled' AND stripe_payment_intent_id = ?)`)
-            .bind(now, order.publication_id, order.status, order.id, paymentIntent),
           db.prepare(`INSERT INTO store_commerce_fulfilments (id, order_id, purchasing_user_id, fulfilment_kind,
             status, entitlement_key, granted_at, created_at, updated_at)
             SELECT ?, o.id, o.purchasing_user_id, i.fulfilment_kind, 'completed', ?, ?, ?, ?
@@ -416,9 +410,11 @@ export async function reconcileStoreWebhook(env: Env, event: StripeEvent, rawBod
   } else if (order && event.type === "charge.dispute.closed" && order.status === "disputed") {
     processingStatus = "processed";
   } else if (order && (event.type === "charge.refunded" || event.type === "charge.dispute.created")) {
-    const fullRefund = event.type !== "charge.refunded" || (object.refunded === true && Number(object.amount_refunded) >= order.total_amount_minor);
-    processingStatus = fullRefund ? "processed" : "manual_review";
-    if (!fullRefund) {
+    const fullReversal = event.type === "charge.refunded"
+      ? object.refunded === true && Number(object.amount_refunded) >= order.total_amount_minor
+      : Number(object.amount) >= order.total_amount_minor;
+    processingStatus = fullReversal ? "processed" : "manual_review";
+    if (!fullReversal) {
       statements.push(db.prepare("UPDATE store_commerce_orders SET status = 'manual_review', updated_at = ? WHERE id = ?").bind(now, order.id));
     } else {
     const nextStatus = event.type === "charge.refunded" ? "refunded" : "disputed";

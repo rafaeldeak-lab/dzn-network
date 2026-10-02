@@ -22,6 +22,8 @@ async function run() {
   assert.match(migration, /trg_store_commerce_events_immutable/);
   assert.match(migration, /trg_store_commerce_order_lifetime_limit/);
   assert.match(migration, /trg_store_commerce_order_release_stock/);
+  assert.match(migration, /trg_store_commerce_reserved_stock_guard/);
+  assert.match(migration, /trg_store_commerce_reserved_stock_sale/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS store_commerce_entitlements/);
   assert.match(migration, /no_competitive_advantage INTEGER NOT NULL DEFAULT 1 CHECK \(no_competitive_advantage = 1\)/);
 
@@ -121,7 +123,7 @@ async function run() {
     assert.equal((await listStorePurchases(env, buyer)).purchases.length, 1);
 
     const disputed = event("evt_dispute_created", "charge.dispute.created", {
-      id: "dp_test_001", object: "dispute", payment_intent: "pi_test_001", status: "needs_response",
+      id: "dp_test_001", object: "dispute", payment_intent: "pi_test_001", status: "needs_response", amount: 1200,
     });
     assert.deepEqual(await reconcileStoreWebhook(env, disputed, JSON.stringify(disputed)), {
       duplicate: false, processingStatus: "processed",
@@ -138,6 +140,16 @@ async function run() {
     assert.equal((await db.prepare("SELECT status FROM store_commerce_orders").first<{ status: string }>())?.status, "fulfilled");
     assert.equal((await db.prepare("SELECT status, reversed_at FROM store_commerce_entitlements").first<{ status: string; reversed_at: string | null }>())?.status, "active");
     assert.equal((await db.prepare("SELECT reversed_at FROM store_commerce_entitlements").first<{ reversed_at: string | null }>())?.reversed_at, null);
+    assert.equal((await db.prepare("SELECT status FROM store_commerce_receipts").first<{ status: string }>())?.status, "issued");
+
+    const partialDispute = event("evt_partial_dispute", "charge.dispute.created", {
+      id: "dp_test_partial", object: "dispute", payment_intent: "pi_test_001", status: "needs_response", amount: 600,
+    });
+    assert.deepEqual(await reconcileStoreWebhook(env, partialDispute, JSON.stringify(partialDispute)), {
+      duplicate: false, processingStatus: "manual_review",
+    });
+    assert.equal((await db.prepare("SELECT status FROM store_commerce_orders").first<{ status: string }>())?.status, "manual_review");
+    assert.equal((await db.prepare("SELECT status FROM store_commerce_entitlements").first<{ status: string }>())?.status, "active");
     assert.equal((await db.prepare("SELECT status FROM store_commerce_receipts").first<{ status: string }>())?.status, "issued");
 
     const second = await createOrResumeStoreCheckout(env, new Request("https://dayz-network.com/api/store/orders"), buyer,
@@ -191,7 +203,7 @@ async function testEarlyDisputeWon(db: D1Database, env: Env, publicationId: stri
     });
   assert.equal(checkout.ok, true);
   const disputed = event("evt_early_dispute", "charge.dispute.created", {
-    id: "dp_test_early", object: "dispute", payment_intent: "pi_test_earlydispute", status: "needs_response",
+    id: "dp_test_early", object: "dispute", payment_intent: "pi_test_earlydispute", status: "needs_response", amount: 1200,
     metadata: { dzn_store_order_id: "store_order_disputeorder" },
   });
   assert.deepEqual(await reconcileStoreWebhook(env, disputed, JSON.stringify(disputed)), {
