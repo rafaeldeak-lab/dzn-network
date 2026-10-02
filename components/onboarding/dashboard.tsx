@@ -41,6 +41,7 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { BadgeShowcase, ServerCardBadges, ServerProfileFrame, ServerThemeBanner } from "@/components/badges/server-visuals";
 import { DznLogo } from "@/components/dzn/dzn-logo";
@@ -301,6 +302,7 @@ function clampActionProgress(progress: number | null | undefined) {
 }
 
 export function Dashboard() {
+  const router = useRouter();
   const [auth, setAuth] = useState<AuthResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
@@ -363,9 +365,9 @@ export function Dashboard() {
 
   useEffect(() => {
     if (!loading && auth && !auth.authenticated) {
-      window.location.href = "/login?returnTo=/dashboard";
+      router.replace("/login?returnTo=/dashboard");
     }
-  }, [auth, loading]);
+  }, [auth, loading, router]);
 
   useEffect(() => {
     if (!auth?.authenticated) return;
@@ -486,6 +488,7 @@ function ServerDashboard({
   onLogout: () => void;
   onRefresh: () => Promise<void>;
 }) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<DashboardTabKey>("overview");
   const [checkingLogs, setCheckingLogs] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -3303,7 +3306,7 @@ function ServerDashboard({
       setDangerAction(null);
       setActionMessage(result.message);
       window.setTimeout(() => {
-        window.location.href = result.redirectTarget;
+        router.replace(result.redirectTarget);
       }, 900);
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : "Unable to complete deletion.");
@@ -3890,7 +3893,7 @@ function ServerDashboard({
             refreshing={refreshingSyncData || manualRefreshing}
             onRefresh={() => void refreshNow()}
             publicProfileHref={server.public_slug ? publicServerProfileHref(server.public_slug) : null}
-            onOpenSettings={() => { window.location.href = serverSettingsHref(server.id); }}
+            onOpenSettings={() => { router.push(serverSettingsHref(server.id)); }}
           />
           ) : null}
 

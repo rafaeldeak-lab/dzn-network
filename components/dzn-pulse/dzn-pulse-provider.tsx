@@ -460,28 +460,29 @@ function PulseBellFocusBridge({ buttonRef }: { buttonRef: React.MutableRefObject
 
 function DznPulseDrawer() {
   const pulse = useDznPulse();
+  const { closeDrawer, drawerOpen } = pulse;
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!pulse.drawerOpen) return;
+    if (!drawerOpen) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     window.setTimeout(() => closeRef.current?.focus(), 0);
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") pulse.closeDrawer();
+      if (event.key === "Escape") closeDrawer();
     };
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
       previous?.focus();
     };
-  }, [pulse.closeDrawer, pulse.drawerOpen]);
+  }, [closeDrawer, drawerOpen]);
 
-  if (!pulse.drawerOpen) return null;
+  if (!drawerOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[80] flex justify-end bg-black/58 backdrop-blur-sm" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) pulse.closeDrawer();
+      if (event.target === event.currentTarget) closeDrawer();
     }}>
       <aside
         ref={panelRef}
@@ -498,7 +499,7 @@ function DznPulseDrawer() {
               <h2 id="dzn-pulse-drawer-title" className="mt-1 text-lg font-black uppercase text-white">Stay in the loop.</h2>
               <p className="mt-1 text-xs font-bold text-zinc-400">Never miss a moment.</p>
             </div>
-            <button ref={closeRef} type="button" onClick={pulse.closeDrawer} className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-zinc-300 transition hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/60" aria-label="Close DZN Pulse">
+            <button ref={closeRef} type="button" onClick={closeDrawer} className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-zinc-300 transition hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/60" aria-label="Close DZN Pulse">
               <X className="h-4 w-4" />
             </button>
           </div>

@@ -29,6 +29,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import {
   clearOnboardingDraft,
@@ -140,6 +141,7 @@ async function loadOnboardingDraftWithRetry() {
 }
 
 export function SetupWizard() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
   const [step, setStep] = useState(0);
@@ -374,9 +376,9 @@ export function SetupWizard() {
 
   useEffect(() => {
     if (!loading && !authenticated) {
-      window.location.href = "/login?returnTo=/setup";
+      router.replace("/login?returnTo=/setup");
     }
-  }, [authenticated, loading]);
+  }, [authenticated, loading, router]);
 
   async function refreshDiscordGuilds() {
     setGuildRefreshing(true);

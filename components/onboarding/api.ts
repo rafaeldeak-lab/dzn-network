@@ -622,7 +622,7 @@ export function clearClientAuthState() {
 export async function logoutAndRedirect() {
   await logout().catch(() => null);
   clearClientAuthState();
-  window.location.href = "/";
+  window.location.replace(new URL("/", window.location.origin).href);
 }
 
 export class ApiRequestError extends Error {

@@ -39,6 +39,8 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { publicServerStatusPresentation } from "@/lib/public-server-status";
 
 import { AnimatedBackground } from "@/components/dzn/animated-background";
@@ -462,6 +464,7 @@ type SavedServersPayload = {
 const SavedServersContext = createContext<SavedServersContextValue | null>(null);
 
 export function PublicNetwork() {
+  const router = useRouter();
   const slug = useSyncExternalStore(subscribeToPath, getCurrentSlug, getServerSlugSnapshot);
   const initialCache = loadPublicNetworkCache(slug);
   const [servers, setServers] = useState<PublicServer[]>(() => slug ? [] : initialCache?.servers ?? []);
@@ -660,7 +663,7 @@ export function PublicNetwork() {
   const toggleSavedServer = useCallback(async (linkedServerId: string) => {
     if (!linkedServerId || savingServerIds.has(linkedServerId)) return;
     if (savedServersStatus === "logged_out") {
-      window.location.href = `/login?returnTo=${encodeURIComponent(currentPageReturnTo("/servers"))}`;
+      router.push(`/login?returnTo=${encodeURIComponent(currentPageReturnTo("/servers"))}`);
       return;
     }
     if (savedServersStatus !== "ready" && savedServersStatus !== "error") return;
@@ -704,7 +707,7 @@ export function PublicNetwork() {
         return next;
       });
     }
-  }, [savedServerIds, savedServersStatus, savingServerIds]);
+  }, [router, savedServerIds, savedServersStatus, savingServerIds]);
 
   const savedServersContext = useMemo<SavedServersContextValue>(() => ({
     savedServerIds,
@@ -1728,14 +1731,15 @@ function ProProfileAdvertPanel({ server }: { server: PublicServer }) {
     <section className="mt-4 overflow-hidden rounded-lg border border-violet-300/24 bg-[#070b16]/92">
       {server.advert_banner_url ? (
         <div className="relative aspect-[16/4] min-h-[120px] max-h-[220px] overflow-hidden border-b border-violet-300/18 bg-[#060a16]">
-          <img
+          <Image
             src={server.advert_banner_url}
             alt={server.advert_banner_alt || `${server.server_name} custom advert banner`}
+            width={1280}
+            height={320}
+            unoptimized
             className="h-full w-full object-cover"
             loading="lazy"
             decoding="async"
-            width={1280}
-            height={400}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-[#050812] via-[#050812]/35 to-transparent" aria-hidden="true" />
           <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-end justify-between gap-3">
@@ -1768,7 +1772,7 @@ function ProProfileAdvertPanel({ server }: { server: PublicServer }) {
           <div className="grid grid-cols-2 gap-2">
             {gallery.map((image) => (
               <a key={image.id} href={image.url} target="_blank" rel="noreferrer" className="group relative aspect-video overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-200">
-                <img src={image.url} alt={`${server.server_name} gallery image`} className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.03]" loading="lazy" decoding="async" width={640} height={360} />
+                <Image src={image.url} alt={`${server.server_name} gallery image`} className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.03]" loading="lazy" width={640} height={360} unoptimized />
                 <span className="sr-only">Open gallery image</span>
               </a>
             ))}
