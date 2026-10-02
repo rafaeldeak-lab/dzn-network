@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS store_commerce_orders (
   stripe_payment_intent_id TEXT UNIQUE,
   checkout_url_expires_at TEXT,
   reservation_expires_at TEXT NOT NULL,
+  stock_reservation_state TEXT NOT NULL DEFAULT 'held' CHECK (stock_reservation_state IN ('held', 'released', 'converted')),
   immutable_item_snapshot_json TEXT NOT NULL CHECK (json_valid(immutable_item_snapshot_json) AND json_type(immutable_item_snapshot_json) = 'object'),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -203,17 +204,23 @@ END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_commerce_order_release_stock
 AFTER UPDATE OF status ON store_commerce_orders
-WHEN OLD.status IN ('checkout_pending', 'checkout_ready')
-  AND NEW.status IN ('cancelled', 'expired', 'payment_failed', 'refunded', 'disputed')
+WHEN OLD.stock_reservation_state = 'held' AND (
+  (OLD.status IN ('checkout_pending', 'checkout_ready')
+    AND NEW.status IN ('cancelled', 'expired', 'payment_failed', 'refunded', 'disputed'))
+  OR (OLD.status = 'manual_review' AND NEW.status = 'refunded')
+)
 BEGIN
   UPDATE store_catalog_publications
   SET reserved_quantity = reserved_quantity - 1, updated_at = CURRENT_TIMESTAMP
   WHERE id = NEW.publication_id AND reserved_quantity > 0;
+  UPDATE store_commerce_orders SET stock_reservation_state = 'released'
+  WHERE id = NEW.id AND stock_reservation_state = 'held';
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_commerce_reserved_stock_guard
 BEFORE UPDATE OF status ON store_commerce_orders
-WHEN OLD.status = 'checkout_ready' AND NEW.status = 'fulfilled' AND NOT EXISTS (
+WHEN OLD.status = 'checkout_ready' AND NEW.status = 'fulfilled'
+  AND OLD.stock_reservation_state = 'held' AND NOT EXISTS (
   SELECT 1 FROM store_catalog_publications pub
   WHERE pub.id = NEW.publication_id AND pub.reserved_quantity > 0
 )
@@ -221,13 +228,15 @@ BEGIN SELECT RAISE(ABORT, 'reserved Store stock is unavailable'); END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_commerce_reserved_stock_sale
 AFTER UPDATE OF status ON store_commerce_orders
-WHEN OLD.status = 'checkout_ready' AND NEW.status = 'fulfilled'
+WHEN OLD.status = 'checkout_ready' AND NEW.status = 'fulfilled' AND OLD.stock_reservation_state = 'held'
 BEGIN
   UPDATE store_catalog_publications
   SET reserved_quantity = reserved_quantity - 1,
       sold_quantity = sold_quantity + 1,
       updated_at = CURRENT_TIMESTAMP
   WHERE id = NEW.publication_id AND reserved_quantity > 0;
+  UPDATE store_commerce_orders SET stock_reservation_state = 'converted'
+  WHERE id = NEW.id AND stock_reservation_state = 'held';
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_commerce_late_paid_stock_guard
@@ -246,6 +255,8 @@ BEGIN
   UPDATE store_catalog_publications
   SET sold_quantity = sold_quantity + 1, updated_at = CURRENT_TIMESTAMP
   WHERE id = NEW.publication_id;
+  UPDATE store_commerce_orders SET stock_reservation_state = 'converted'
+  WHERE id = NEW.id AND stock_reservation_state = 'released';
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_commerce_dispute_restoration_stock_guard
@@ -267,7 +278,46 @@ BEGIN
   UPDATE store_catalog_publications
   SET sold_quantity = sold_quantity + 1, updated_at = CURRENT_TIMESTAMP
   WHERE id = NEW.publication_id;
+  UPDATE store_commerce_orders SET stock_reservation_state = 'converted'
+  WHERE id = NEW.id AND stock_reservation_state = 'released';
 END;
+
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_reviewed_stock_guard
+BEFORE UPDATE OF status ON store_commerce_orders
+WHEN OLD.status = 'manual_review' AND NEW.status = 'fulfilled' AND NOT EXISTS (
+  SELECT 1 FROM store_catalog_publications pub
+  WHERE pub.id = NEW.publication_id AND (
+    (OLD.stock_reservation_state = 'held' AND pub.reserved_quantity > 0) OR
+    (OLD.stock_reservation_state = 'released' AND
+      (pub.stock_mode = 'unlimited' OR pub.reserved_quantity + pub.sold_quantity < pub.stock_limit)) OR
+    OLD.stock_reservation_state = 'converted'
+  )
+)
+BEGIN SELECT RAISE(ABORT, 'reviewed Store stock requires manual reconciliation'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_reviewed_stock_sale
+AFTER UPDATE OF status ON store_commerce_orders
+WHEN OLD.status = 'manual_review' AND NEW.status = 'fulfilled'
+  AND OLD.stock_reservation_state IN ('held', 'released')
+BEGIN
+  UPDATE store_catalog_publications
+  SET reserved_quantity = reserved_quantity - CASE WHEN OLD.stock_reservation_state = 'held' THEN 1 ELSE 0 END,
+      sold_quantity = sold_quantity + 1,
+      updated_at = CURRENT_TIMESTAMP
+  WHERE id = NEW.publication_id
+    AND (OLD.stock_reservation_state <> 'held' OR reserved_quantity > 0);
+  UPDATE store_commerce_orders SET stock_reservation_state = 'converted'
+  WHERE id = NEW.id AND stock_reservation_state = OLD.stock_reservation_state;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_store_commerce_reservation_state_transition
+BEFORE UPDATE OF stock_reservation_state ON store_commerce_orders
+WHEN NOT (
+  OLD.stock_reservation_state = NEW.stock_reservation_state OR
+  (OLD.stock_reservation_state = 'held' AND NEW.stock_reservation_state IN ('released', 'converted')) OR
+  (OLD.stock_reservation_state = 'released' AND NEW.stock_reservation_state = 'converted')
+)
+BEGIN SELECT RAISE(ABORT, 'invalid Store stock reservation transition'); END;
 
 CREATE TRIGGER IF NOT EXISTS trg_store_catalog_publication_identity_immutable
 BEFORE UPDATE OF product_id, price_id, stripe_price_id, stripe_mode, livemode, published_by_user_id ON store_catalog_publications

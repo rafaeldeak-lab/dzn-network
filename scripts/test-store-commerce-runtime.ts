@@ -23,6 +23,9 @@ async function run() {
   assert.match(migration, /trg_store_commerce_events_immutable/);
   assert.match(migration, /trg_store_commerce_order_lifetime_limit/);
   assert.match(migration, /trg_store_commerce_order_release_stock/);
+  assert.match(migration, /stock_reservation_state TEXT NOT NULL DEFAULT 'held'/);
+  assert.match(migration, /OLD\.status = 'manual_review' AND NEW\.status = 'refunded'/);
+  assert.match(migration, /trg_store_commerce_reviewed_stock_sale/);
   assert.match(migration, /trg_store_commerce_reserved_stock_guard/);
   assert.match(migration, /trg_store_commerce_reserved_stock_sale/);
   assert.match(migration, /trg_store_commerce_dispute_restoration_stock_guard/);
@@ -445,6 +448,23 @@ async function testMismatchedPaidSessionReview(db: D1Database, env: Env, publica
   assert.equal(order?.status, "manual_review");
   assert.equal(order?.stripe_payment_intent_id, "pi_test_mismatch");
   assert.ok(order?.paid_at);
+  assert.deepEqual(await db.prepare(`SELECT o.stock_reservation_state, pub.reserved_quantity
+    FROM store_commerce_orders o JOIN store_catalog_publications pub ON pub.id = o.publication_id
+    WHERE o.id = 'store_order_mismatchorder'`).first(), {
+    stock_reservation_state: "held", reserved_quantity: 1,
+  });
+  const refunded = event("evt_mismatched_paid_refunded", "charge.refunded", {
+    id: "ch_test_mismatch", object: "charge", payment_intent: "pi_test_mismatch", refunded: true,
+    amount_refunded: 1200, metadata: { dzn_store_order_id: "store_order_mismatchorder" },
+  });
+  assert.deepEqual(await reconcileStoreWebhook(env, refunded, JSON.stringify(refunded)), {
+    duplicate: false, processingStatus: "processed",
+  });
+  assert.deepEqual(await db.prepare(`SELECT o.status, o.stock_reservation_state, pub.reserved_quantity
+    FROM store_commerce_orders o JOIN store_catalog_publications pub ON pub.id = o.publication_id
+    WHERE o.id = 'store_order_mismatchorder'`).first(), {
+    status: "refunded", stock_reservation_state: "released", reserved_quantity: 0,
+  });
 }
 
 async function testPublicationModeIsolation(db: D1Database, env: Env) {
