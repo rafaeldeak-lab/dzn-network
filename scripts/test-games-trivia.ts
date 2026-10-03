@@ -98,7 +98,7 @@ async function run() {
     assert.equal(completed.game?.correct, 3);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_trivia_reward_ledger").get()?.count, 0);
   });
-  await test("shared Hub totals and workshop spending include Trivia rewards only when enabled", async fixture => {
+  await test("shared Hub totals and workshop spending keep earned Trivia rewards after play is disabled", async fixture => {
     for (const difficulty of ["specialist", "specialist", "specialist", "specialist"] as const) {
       await payload(await call(fixture, { action: "start", difficulty }));
       await answerRound(fixture, 5);
@@ -112,6 +112,11 @@ async function run() {
     assert.equal(assembled.status, 200, await assembled.clone().text());
     const after = await assembled.json() as { summary: { xp: number; parts: number; assemblies: number } };
     assert.equal(after.summary.parts, 0); assert.equal(after.summary.assemblies, 1);
+    fixture.env.DZN_GAMES_TRIVIA_ENABLED = "false";
+    const disabled = await hubCall().then(response => response.json()) as { summary: { xp: number; parts: number; history: Array<{ kind: string }> } };
+    assert.equal(disabled.summary.xp, 480); assert.equal(disabled.summary.parts, 0);
+    assert.ok(disabled.summary.history.some(entry => entry.kind === "trivia:specialist"));
+    assert.equal((await hubCall({ action: "assemble", requestId: randomUUID() })).status, 409);
   });
   await test("stale transactions cannot advance or mint rewards", async fixture => {
     const state = await payload(await call(fixture, { action: "start", difficulty: "recruit" }));

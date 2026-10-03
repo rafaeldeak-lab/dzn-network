@@ -33,6 +33,15 @@ try {
     }
     await answers.first().waitFor();
     assert.equal(await answers.count(), 4);
+    await page.reload({ waitUntil: "networkidle" });
+    const [resumeResponse] = await Promise.all([
+      page.waitForResponse(response => response.url().endsWith("/api/games/trivia") && response.request().method() === "GET"),
+      page.getByRole("button", { name: /DZN Trivia/ }).click(),
+    ]);
+    const resumed = await resumeResponse.json();
+    await answers.first().waitFor();
+    assert.ok(resumed.game?.difficulty);
+    assert.equal(await page.getByLabel("Trivia difficulty").inputValue(), resumed.game.difficulty);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     const [answerResponse] = await Promise.all([
       page.waitForResponse(response => response.url().endsWith("/api/games/trivia") && response.request().method() === "POST"),

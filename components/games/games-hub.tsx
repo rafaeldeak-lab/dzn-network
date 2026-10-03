@@ -221,7 +221,7 @@ function TriviaPanel({ now, onProgress }: { now: number; onProgress: () => void 
       const response = await fetch("/api/games/trivia", { credentials: "include", cache: "no-store" });
       const result = await response.json() as TriviaPayload & { error?: string };
       if (!response.ok) throw new Error(result.error || "DZN Trivia is unavailable.");
-      setPayload(result); setError("");
+      setPayload(result); if (result.game) setDifficulty(result.game.difficulty); setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "DZN Trivia is unavailable.");
     } finally { setBusy(false); }
@@ -240,7 +240,7 @@ function TriviaPanel({ now, onProgress }: { now: number; onProgress: () => void 
         headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = await response.json() as TriviaPayload & { error?: string };
       if (!response.ok) { setError(result.error || "The trivia request failed."); return; }
-      setPayload(result); onProgress();
+      setPayload(result); if (result.game) setDifficulty(result.game.difficulty); onProgress();
     } catch { setError("The trivia request could not be completed."); }
     finally { setBusy(false); }
   }

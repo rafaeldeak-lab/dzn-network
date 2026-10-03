@@ -15,7 +15,13 @@ async function readGame(db: D1Database, userId: string) {
   return db.prepare("SELECT * FROM dzn_game_sessions WHERE user_id = ?").bind(userId).first<GameRow>();
 }
 
-export async function readHub(db: D1Database, user: SessionUser, now: number, includeTrivia = false): Promise<HubPayload> {
+async function hasTriviaRewardLedger(db: D1Database) {
+  const row = await db.prepare(`SELECT 1 AS present FROM sqlite_master
+    WHERE type = 'table' AND name = 'dzn_trivia_reward_ledger'`).first<{ present: number }>();
+  return row?.present === 1;
+}
+
+export async function readHub(db: D1Database, user: SessionUser, now: number, includeTriviaRewards = false): Promise<HubPayload> {
   const totals = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts,
     COALESCE(SUM(CASE WHEN kind = 'workshop' THEN 1 ELSE 0 END), 0) AS assemblies
     FROM dzn_game_reward_ledger WHERE user_id = ?`).bind(user.id).first<{ xp: number; parts: number; assemblies: number }>();
@@ -30,7 +36,7 @@ export async function readHub(db: D1Database, user: SessionUser, now: number, in
     WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`).bind(user.id).all<HubPayload["summary"]["history"][number]>();
   let triviaTotals = { xp: 0, parts: 0 };
   let triviaHistory: HubPayload["summary"]["history"] = [];
-  if (includeTrivia) {
+  if (includeTriviaRewards) {
     const trivia = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts
       FROM dzn_trivia_reward_ledger WHERE user_id = ?`).bind(user.id).first<{ xp: number; parts: number }>();
     triviaTotals = { xp: trivia?.xp ?? 0, parts: trivia?.parts ?? 0 };
@@ -58,8 +64,8 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
     if (env.DZN_GAMES_HUB_ENABLED !== "true") return reply({ error: "The Games Hub is not open on this environment yet." }, 503);
     const db = requireDb(env);
     const now = Date.now();
-    const includeTrivia = env.DZN_GAMES_TRIVIA_ENABLED === "true";
-    if (request.method === "GET") return reply(await readHub(db, user, now, includeTrivia));
+    const includeTriviaRewards = await hasTriviaRewardLedger(db);
+    if (request.method === "GET") return reply(await readHub(db, user, now, includeTriviaRewards));
     const parsed = await readBoundedJson<Record<string, unknown>>(request, 2048);
     if (!parsed.ok) return reply({ error: "Invalid game request." }, parsed.status);
     const body = parsed.value;
@@ -108,7 +114,7 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
     } else if (body.action === "assemble") {
       if (!isId(body.requestId)) return reply({ error: "Invalid assembly request." }, 400);
       const rewardKey = `workshop:${body.requestId}`;
-      const availableParts = includeTrivia
+      const availableParts = includeTriviaRewards
         ? `(SELECT COALESCE(SUM(parts), 0) FROM dzn_game_reward_ledger WHERE user_id = ?)
           + (SELECT COALESCE(SUM(parts), 0) FROM dzn_trivia_reward_ledger WHERE user_id = ?)`
         : `(SELECT COALESCE(SUM(parts), 0) FROM dzn_game_reward_ledger WHERE user_id = ?)`;
@@ -116,7 +122,7 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
         SELECT ?, ?, ?, 'workshop', NULL, 0, ?, ? WHERE
           (${availableParts}) >= ?
         ON CONFLICT(user_id, reward_key) DO NOTHING`);
-      const bindings = includeTrivia
+      const bindings = includeTriviaRewards
         ? [crypto.randomUUID(), user.id, rewardKey, -WORKSHOP_PART_COST, now, user.id, user.id, WORKSHOP_PART_COST]
         : [crypto.randomUUID(), user.id, rewardKey, -WORKSHOP_PART_COST, now, user.id, WORKSHOP_PART_COST];
       const result = await statement.bind(...bindings).run();
@@ -126,7 +132,7 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
         if (!alreadyDone) return reply({ error: "More parts are needed for this assembly." }, 409);
       }
     } else return reply({ error: "Unknown game action." }, 400);
-    return reply(await readHub(db, user, now, includeTrivia));
+    return reply(await readHub(db, user, now, includeTriviaRewards));
   } catch {
     // Never return SQL, stored board state or session diagnostics to the browser.
     return reply({ error: "Games Hub is temporarily unavailable. Your saved progress has not been reset." }, 503);
