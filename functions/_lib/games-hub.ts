@@ -17,15 +17,16 @@ async function readGame(db: D1Database, userId: string) {
 
 async function availableRewardLedgers(db: D1Database) {
   const rows = await db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'
-    AND name IN ('dzn_trivia_reward_ledger', 'dzn_word_chain_reward_ledger')`).all<{ name: string }>();
+    AND name IN ('dzn_trivia_reward_ledger', 'dzn_word_chain_reward_ledger', 'dzn_hide_seek_reward_ledger')`).all<{ name: string }>();
   const names = new Set((rows.results ?? []).map(row => row.name));
-  return { trivia: names.has("dzn_trivia_reward_ledger"), wordChain: names.has("dzn_word_chain_reward_ledger") };
+  return { trivia: names.has("dzn_trivia_reward_ledger"), wordChain: names.has("dzn_word_chain_reward_ledger"),
+    hideSeek: names.has("dzn_hide_seek_reward_ledger") };
 }
 
-type ExtraLedgers = { trivia: boolean; wordChain: boolean };
+type ExtraLedgers = { trivia: boolean; wordChain: boolean; hideSeek: boolean };
 
 export async function readHub(db: D1Database, user: SessionUser, now: number,
-  extraLedgers: ExtraLedgers = { trivia: false, wordChain: false }): Promise<HubPayload> {
+  extraLedgers: ExtraLedgers = { trivia: false, wordChain: false, hideSeek: false }): Promise<HubPayload> {
   const totals = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts,
     COALESCE(SUM(CASE WHEN kind = 'workshop' THEN 1 ELSE 0 END), 0) AS assemblies
     FROM dzn_game_reward_ledger WHERE user_id = ?`).bind(user.id).first<{ xp: number; parts: number; assemblies: number }>();
@@ -61,6 +62,18 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
     extraHistory.push(...(entries.results ?? []));
     const days = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
       FROM dzn_word_chain_reward_ledger WHERE user_id = ?`).bind(DAY, user.id).all<{ day: number }>();
+    for (const row of days.results ?? []) rewardDays.add(row.day);
+  }
+  if (extraLedgers.hideSeek) {
+    const hideSeek = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts
+      FROM dzn_hide_seek_reward_ledger WHERE user_id = ?`).bind(user.id).first<{ xp: number; parts: number }>();
+    extraTotals.xp += hideSeek?.xp ?? 0; extraTotals.parts += hideSeek?.parts ?? 0;
+    const entries = await db.prepare(`SELECT 'hide-seek' AS kind, xp, parts, created_at
+      FROM dzn_hide_seek_reward_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`)
+      .bind(user.id).all<HubPayload["summary"]["history"][number]>();
+    extraHistory.push(...(entries.results ?? []));
+    const days = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
+      FROM dzn_hide_seek_reward_ledger WHERE user_id = ?`).bind(DAY, user.id).all<{ day: number }>();
     for (const row of days.results ?? []) rewardDays.add(row.day);
   }
   const combinedHistory = [...(history.results ?? []), ...extraHistory]
@@ -140,6 +153,7 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
       const extraPartQueries = [
         extraLedgers.trivia ? `(SELECT COALESCE(SUM(parts), 0) FROM dzn_trivia_reward_ledger WHERE user_id = ?)` : null,
         extraLedgers.wordChain ? `(SELECT COALESCE(SUM(parts), 0) FROM dzn_word_chain_reward_ledger WHERE user_id = ?)` : null,
+        extraLedgers.hideSeek ? `(SELECT COALESCE(SUM(parts), 0) FROM dzn_hide_seek_reward_ledger WHERE user_id = ?)` : null,
       ].filter((value): value is string => Boolean(value));
       const availableParts = [`(SELECT COALESCE(SUM(parts), 0) FROM dzn_game_reward_ledger WHERE user_id = ?)`, ...extraPartQueries].join(" + ");
       const statement = db.prepare(`INSERT INTO dzn_game_reward_ledger (id, user_id, reward_key, kind, game_id, xp, parts, created_at)
@@ -147,7 +161,8 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
           (${availableParts}) >= ?
         ON CONFLICT(user_id, reward_key) DO NOTHING`);
       const bindings = [crypto.randomUUID(), user.id, rewardKey, -WORKSHOP_PART_COST, now, user.id,
-        ...(extraLedgers.trivia ? [user.id] : []), ...(extraLedgers.wordChain ? [user.id] : []), WORKSHOP_PART_COST];
+        ...(extraLedgers.trivia ? [user.id] : []), ...(extraLedgers.wordChain ? [user.id] : []),
+        ...(extraLedgers.hideSeek ? [user.id] : []), WORKSHOP_PART_COST];
       const result = await statement.bind(...bindings).run();
       if (!result.meta.changes) {
         const alreadyDone = await db.prepare("SELECT id FROM dzn_game_reward_ledger WHERE user_id = ? AND reward_key = ?")

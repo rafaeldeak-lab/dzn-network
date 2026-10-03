@@ -42,7 +42,7 @@ There is no paid spin, checkout, new payment method, customer charge, public cha
 
 1. DZN Trivia: original question bank, repeat-safe server validation, difficulty rules and earned rewards.
 2. DZN Word Chain: the default-off source foundation now provides one shared daily chain, a curated real-word dictionary, duplicate prevention, moderated input, optimistic turn locking and a bounded daily reward. Accepted words remain inside the game feed and do not create Global Chat messages. Migration `0086` and `DZN_GAMES_WORD_CHAIN_ENABLED` require a separate production activation and live multiplayer proof.
-3. DZN Hide & Seek: original DZN scenes, fair item placement, accessible input and server-validated claims.
+3. DZN Signal Hunt (Hide & Seek): the default-off source foundation now uses the original DZN outpost scene, server-selected fair target slots, pointer/touch/keyboard input, server-validated finds, stale-write protection, a five-minute limit and one bounded daily reward. Migration `0087` and `DZN_GAMES_HIDE_SEEK_ENABLED` require a separate production activation and live proof. Network payloads can reveal target coordinates, so this remains a low-stakes personal game and is not a competitive or bot-proof claim.
 4. DZN Coin Flip / spin wheel: settle a non-cash, non-staked design before implementation. Paid random outcomes remain excluded; a cooldown is not treated as compliance clearance.
 5. Multi-game lobby, mission categories, equipment collections, challenges and opt-in PvP/community events. No purchased competitive advantage, fabricated population or fake leaderboard.
 6. Global chat: authenticated membership, rate limits, mute/report/block, moderation, retention and audited platform-owner oversight before publication.
