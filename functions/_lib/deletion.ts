@@ -173,22 +173,29 @@ export async function deleteOwnedAccountData(env: Env, userId: string) {
 
 export async function eraseOrRetainAccountUser(db: D1Database, userId: string) {
   const retainForStoreLedger = await hasRetainedStoreLedgerReferences(db, userId);
-  await deleteDirectUserCascadeRows(db, userId);
+  const cleanupStatements = await directUserCleanupStatements(db, userId);
 
   if (!retainForStoreLedger) {
-    return deleteRows(db, "DELETE FROM users WHERE id = ?", [userId]);
+    const results = await db.batch([
+      ...cleanupStatements,
+      db.prepare("DELETE FROM users WHERE id = ?").bind(userId),
+    ]);
+    return changes(results[results.length - 1]);
   }
 
   const touchesUpdatedAt = await tableHasColumn(db, "users", "updated_at");
-  const result = await db.prepare(`UPDATE users
-    SET discord_id = ?, username = NULL, avatar = NULL${touchesUpdatedAt ? ", updated_at = CURRENT_TIMESTAMP" : ""}
-    WHERE id = ?`)
-    .bind(`deleted-${crypto.randomUUID()}`, userId)
-    .run();
-  return changes(result);
+  const results = await db.batch([
+    ...cleanupStatements,
+    db.prepare(`UPDATE users
+      SET discord_id = ?, username = NULL, avatar = NULL${touchesUpdatedAt ? ", updated_at = CURRENT_TIMESTAMP" : ""}
+      WHERE id = ?`)
+      .bind(`deleted-${crypto.randomUUID()}`, userId),
+  ]);
+  return changes(results[results.length - 1]);
 }
 
-async function deleteDirectUserCascadeRows(db: D1Database, userId: string) {
+async function directUserCleanupStatements(db: D1Database, userId: string) {
+  const statements: D1PreparedStatement[] = [];
   const cascadeReferences = [
     ["dzn_word_chain_reward_ledger", "user_id"],
     ["dzn_word_chain_entries", "user_id"],
@@ -219,16 +226,16 @@ async function deleteDirectUserCascadeRows(db: D1Database, userId: string) {
   ] as const;
   for (const [tableName, columnName] of cascadeReferences) {
     if (!(await tableExists(db, tableName))) continue;
-    await deleteRows(db, `DELETE FROM ${tableName} WHERE ${columnName} = ?`, [userId]);
+    statements.push(db.prepare(`DELETE FROM ${tableName} WHERE ${columnName} = ?`).bind(userId));
   }
 
   if (await tableExists(db, "dzn_word_chain_rounds")) {
-    await db.prepare(`UPDATE dzn_word_chain_rounds
+    statements.push(db.prepare(`UPDATE dzn_word_chain_rounds
       SET current_user_id = NULL
       WHERE current_user_id = ?`)
-      .bind(userId)
-      .run();
+      .bind(userId));
   }
+  return statements;
 }
 
 async function hasRetainedStoreLedgerReferences(db: D1Database, userId: string) {
