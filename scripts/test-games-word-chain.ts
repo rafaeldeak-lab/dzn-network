@@ -170,9 +170,13 @@ async function run() {
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM users WHERE id = 'local-player'").get()?.count, 0);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_reward_ledger WHERE user_id = 'local-player'").get()?.count, 0);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_entries WHERE user_id = 'local-player'").get()?.count, 0);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_entries WHERE user_id IS NULL").get()?.count, 1);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_entries WHERE user_id = 'other-player'").get()?.count, 1);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_entries").get()?.count, 2);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_rounds").get()?.count, 1);
     assert.equal(fixture.db.sqlite.prepare("SELECT current_user_id FROM dzn_word_chain_rounds").get()?.current_user_id, "other-player");
+    const preserved = await payload(await call(fixture, undefined, { cookie: fixture.otherCookie }));
+    assert.ok(preserved.round.entries.some(entry => entry.word === first && entry.player === "Former player"));
     assert.equal(fixture.db.sqlite.prepare("PRAGMA foreign_key_check").all().length, 0);
   });
   await test("blocked account deletion atomically preserves the account and all Word Chain progress", async fixture => {
