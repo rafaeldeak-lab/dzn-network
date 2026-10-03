@@ -10,7 +10,7 @@ import {
 import type { Env, PagesFunction, SessionUser } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ env, request }) => {
-  if (request.method !== "GET") return methodNotAllowed();
+  if (request.method !== "GET" && request.method !== "HEAD") return methodNotAllowed();
   const values = env as unknown as Record<string, unknown>;
   if (!privateSupporterCardsEnabled(values)) {
     return json({ ok: false, error: "SUPPORTER_CARDS_UNAVAILABLE" }, { status: 404, headers: privateNoStoreHeaders() });
@@ -24,6 +24,9 @@ export const onRequest: PagesFunction = async ({ env, request }) => {
   const livemode = configuredStoreLivemode(values);
   if (livemode === null || !env.DB) {
     return json({ ok: false, error: "SUPPORTER_CARDS_NOT_READY" }, { status: 503, headers: privateNoStoreHeaders() });
+  }
+  if (request.method === "HEAD") {
+    return new Response(null, { status: 204, headers: privateNoStoreHeaders() });
   }
 
   try {

@@ -1,7 +1,7 @@
 "use client";
 
 import { Crown, Eye, Loader2, ReceiptText, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 type PrivateCard = {
@@ -20,11 +20,26 @@ type RevealState =
   | { status: "error"; cards: PrivateCard[]; message: string };
 
 export function PrivateSupporterCards() {
+  const [available, setAvailable] = useState(false);
   const [state, setState] = useState<RevealState>({
     status: "hidden",
     cards: [],
     message: "Your card details stay concealed until you choose to reveal them on this private page.",
   });
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/player/supporter-cards", {
+      method: "HEAD",
+      cache: "no-store",
+      credentials: "include",
+    }).then((response) => {
+      if (active && response.ok) setAvailable(true);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+  if (!available) return null;
 
   async function reveal() {
     if (state.status === "loading") return;

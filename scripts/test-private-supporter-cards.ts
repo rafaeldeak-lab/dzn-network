@@ -18,10 +18,14 @@ assert.equal(configuredStoreLivemode({ STRIPE_SECRET_KEY: "sk_test_example" }), 
 assert.equal(configuredStoreLivemode({ STRIPE_SECRET_KEY: "sk_live_example" }), true);
 assert.equal(configuredStoreLivemode({}), null);
 assert.match(route, /getSessionUser/);
+assert.match(route, /request\.method !== "GET" && request\.method !== "HEAD"/);
+assert.match(route, /request\.method === "HEAD"/);
 assert.match(route, /privateNoStoreHeaders\(\)/);
 assert.match(route, /scope: "current_user"/);
 assert.doesNotMatch(route, /stripe_payment_intent|stripe_checkout_session|entitlement_key/);
 assert.match(component, /Reveal my cards/);
+assert.match(component, /method: "HEAD"/);
+assert.match(component, /if \(!available\) return null/);
 assert.match(component, /credentials: "include"/);
 assert.match(component, /cache: "no-store"/);
 assert.doesNotMatch(component, /localStorage|sessionStorage|navigator\.share|navigator\.clipboard|sendBeacon|analytics/i);

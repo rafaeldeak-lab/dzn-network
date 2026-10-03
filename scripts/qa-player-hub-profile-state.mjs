@@ -98,7 +98,7 @@ if (process.argv.includes("--serve")) {
           const request = route.request(), url = new URL(request.url());
           if (url.origin !== origin) { await route.abort(); return; }
           if (!url.pathname.startsWith("/api/")) { await route.continue(); return; }
-          if (request.method() !== "GET") {
+          if (request.method() !== "GET" && request.method() !== "HEAD") {
             mutations.push(`${request.method()} ${url.pathname}`);
             assert.equal(url.pathname, "/api/player/profile/privacy");
             assert.equal(request.method(), "PATCH");
