@@ -172,11 +172,13 @@ export async function deleteOwnedAccountData(env: Env, userId: string) {
 }
 
 export async function eraseOrRetainAccountUser(db: D1Database, userId: string) {
-  if (!(await hasRetainedStoreLedgerReferences(db, userId))) {
+  const retainForStoreLedger = await hasRetainedStoreLedgerReferences(db, userId);
+  await deleteDirectUserCascadeRows(db, userId);
+
+  if (!retainForStoreLedger) {
     return deleteRows(db, "DELETE FROM users WHERE id = ?", [userId]);
   }
 
-  await deleteDirectUserCascadeRows(db, userId);
   const touchesUpdatedAt = await tableHasColumn(db, "users", "updated_at");
   const result = await db.prepare(`UPDATE users
     SET discord_id = ?, username = NULL, avatar = NULL${touchesUpdatedAt ? ", updated_at = CURRENT_TIMESTAMP" : ""}
@@ -188,6 +190,12 @@ export async function eraseOrRetainAccountUser(db: D1Database, userId: string) {
 
 async function deleteDirectUserCascadeRows(db: D1Database, userId: string) {
   const cascadeReferences = [
+    ["dzn_word_chain_reward_ledger", "user_id"],
+    ["dzn_word_chain_entries", "user_id"],
+    ["dzn_trivia_reward_ledger", "user_id"],
+    ["dzn_trivia_sessions", "user_id"],
+    ["dzn_game_reward_ledger", "user_id"],
+    ["dzn_game_sessions", "user_id"],
     ["player_saved_servers", "user_id"],
     ["player_discord_community_memberships", "user_id"],
     ["player_profile_privacy_preferences", "user_id"],
@@ -212,6 +220,14 @@ async function deleteDirectUserCascadeRows(db: D1Database, userId: string) {
   for (const [tableName, columnName] of cascadeReferences) {
     if (!(await tableExists(db, tableName))) continue;
     await deleteRows(db, `DELETE FROM ${tableName} WHERE ${columnName} = ?`, [userId]);
+  }
+
+  if (await tableExists(db, "dzn_word_chain_rounds")) {
+    await db.prepare(`UPDATE dzn_word_chain_rounds
+      SET current_user_id = NULL
+      WHERE current_user_id = ?`)
+      .bind(userId)
+      .run();
   }
 }
 
