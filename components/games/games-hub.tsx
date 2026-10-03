@@ -78,7 +78,8 @@ export function GamesHub() {
     if (!payload) return;
     const timer = window.setInterval(() => {
       const clock = serverClock.current;
-      if (!lock.current && document.visibilityState === "visible" && clock.time + performance.now() - clock.measuredAt >= payload.summary.resetAt) void refresh();
+      const refreshAt = Math.min(payload.summary.resetAt, payload.summary.challenges.weeklyExpiresAt ?? Number.POSITIVE_INFINITY);
+      if (!lock.current && document.visibilityState === "visible" && clock.time + performance.now() - clock.measuredAt >= refreshAt) void refresh();
     }, 5000);
     return () => clearInterval(timer);
   }, [payload, refresh]);
@@ -111,7 +112,7 @@ export function GamesHub() {
   const rank = HUB_BADGES[rankIndex];
   const nextRank = HUB_BADGES.find(badge => badge.xp > xp);
   const progress = nextRank ? Math.min(100, xp / nextRank.xp * 100) : 100;
-  const challengeProgress = summary?.challenges ?? { dailyRewards: summary?.today.length ?? 0, weeklyXp: 0, streak: summary?.streak ?? 0 };
+  const challengeProgress = summary?.challenges ?? { dailyRewards: summary?.today.length ?? 0, weeklyXp: 0, streak: summary?.streak ?? 0, weeklyExpiresAt: null };
   const challenges = summary ? [
     { id: "daily", label: "Daily operator", detail: "Rewarded activities today", icon: Target,
       value: challengeProgress.dailyRewards, target: HUB_CHALLENGE_TARGETS.dailyRewards },
@@ -203,7 +204,7 @@ export function GamesHub() {
 
         <aside className={styles.sidebar}>
           <section className={styles.missions}><div className={styles.asideHeading}><span className={styles.eyebrow}>NETWORK CHALLENGES</span><span>{challenges.filter(item => item.value >= item.target).length} / {challenges.length}</span></div><h3>Play across the Hub.</h3>
-            <div className={styles.reset}><Clock3 size={13} /><span>Resets {new Date(summary!.resetAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span><span><Flame size={14} />{summary?.streak} day streak</span></div>
+            <div className={styles.reset}><Clock3 size={13} /><span>Daily resets {new Date(summary!.resetAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span><span><Flame size={14} />{summary?.streak} day streak</span></div>
             <ul>{challenges.map(item => { const done = item.value >= item.target; const shown = Math.min(item.value, item.target); return <li key={item.id} data-complete={done}><span className={styles.missionCheck}>{done ? <Check size={17} /> : <item.icon size={17} />}</span><div><strong>{item.label}</strong><span>{item.detail}</span><progress value={shown} max={item.target} aria-label={`${item.label} progress`} /></div><span>{shown.toLocaleString()} / {item.target.toLocaleString()}</span></li>; })}</ul>
           </section>
           <section className={styles.rankProgress}><div className={styles.asideHeading}><span className={styles.eyebrow}>NEXT INSIGNIA</span><Sparkles size={17} /></div><div className={styles.nextBadge}><Insignia position={(nextRank ?? rank).position} small /><div><h3>{nextRank?.name ?? "Network Legend"}</h3><span>{xp.toLocaleString()} / {(nextRank?.xp ?? xp).toLocaleString()} XP</span></div></div><progress value={progress} max={100} aria-label="Next insignia progress" /></section>

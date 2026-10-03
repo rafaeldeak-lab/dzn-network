@@ -32,9 +32,10 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
   const totals = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts,
     COALESCE(SUM(CASE WHEN kind = 'workshop' THEN 1 ELSE 0 END), 0) AS assemblies,
     COALESCE(SUM(CASE WHEN kind != 'workshop' AND created_at BETWEEN ? AND ? THEN 1 ELSE 0 END), 0) AS daily_rewards,
-    COALESCE(SUM(CASE WHEN kind != 'workshop' AND created_at BETWEEN ? AND ? THEN xp ELSE 0 END), 0) AS weekly_xp
-    FROM dzn_game_reward_ledger WHERE user_id = ?`).bind(dayStart, now, rollingWeekStart, now, user.id)
-    .first<{ xp: number; parts: number; assemblies: number; daily_rewards: number; weekly_xp: number }>();
+    COALESCE(SUM(CASE WHEN kind != 'workshop' AND created_at > ? AND created_at <= ? THEN xp ELSE 0 END), 0) AS weekly_xp,
+    MIN(CASE WHEN kind != 'workshop' AND created_at > ? AND created_at <= ? THEN created_at END) AS weekly_oldest
+    FROM dzn_game_reward_ledger WHERE user_id = ?`).bind(dayStart, now, rollingWeekStart, now, rollingWeekStart, now, user.id)
+    .first<{ xp: number; parts: number; assemblies: number; daily_rewards: number; weekly_xp: number; weekly_oldest: number | null }>();
   const today = await db.prepare(`SELECT kind FROM dzn_game_reward_ledger
     WHERE user_id = ? AND created_at BETWEEN ? AND ? AND kind != 'workshop'`).bind(user.id, dayStart, now).all<{ kind: GameMode }>();
   const baseDays = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
@@ -45,15 +46,18 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
     WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`).bind(user.id).all<HubPayload["summary"]["history"][number]>();
   const extraTotals = { xp: 0, parts: 0 };
   const challengeTotals = { dailyRewards: totals?.daily_rewards ?? 0, weeklyXp: totals?.weekly_xp ?? 0 };
+  const weeklyOldest = [totals?.weekly_oldest ?? null];
   const extraHistory: HubPayload["summary"]["history"] = [];
   if (extraLedgers.trivia) {
     const trivia = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts,
       COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN 1 ELSE 0 END), 0) AS daily_rewards,
-      COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN xp ELSE 0 END), 0) AS weekly_xp
-      FROM dzn_trivia_reward_ledger WHERE user_id = ?`).bind(dayStart, now, rollingWeekStart, now, user.id)
-      .first<{ xp: number; parts: number; daily_rewards: number; weekly_xp: number }>();
+      COALESCE(SUM(CASE WHEN created_at > ? AND created_at <= ? THEN xp ELSE 0 END), 0) AS weekly_xp,
+      MIN(CASE WHEN created_at > ? AND created_at <= ? THEN created_at END) AS weekly_oldest
+      FROM dzn_trivia_reward_ledger WHERE user_id = ?`).bind(dayStart, now, rollingWeekStart, now, rollingWeekStart, now, user.id)
+      .first<{ xp: number; parts: number; daily_rewards: number; weekly_xp: number; weekly_oldest: number | null }>();
     extraTotals.xp += trivia?.xp ?? 0; extraTotals.parts += trivia?.parts ?? 0;
     challengeTotals.dailyRewards += trivia?.daily_rewards ?? 0; challengeTotals.weeklyXp += trivia?.weekly_xp ?? 0;
+    weeklyOldest.push(trivia?.weekly_oldest ?? null);
     const entries = await db.prepare(`SELECT 'trivia:' || difficulty AS kind, xp, parts, created_at
       FROM dzn_trivia_reward_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`)
       .bind(user.id).all<HubPayload["summary"]["history"][number]>();
@@ -65,11 +69,13 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
   if (extraLedgers.wordChain) {
     const wordChain = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts,
       COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN 1 ELSE 0 END), 0) AS daily_rewards,
-      COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN xp ELSE 0 END), 0) AS weekly_xp
-      FROM dzn_word_chain_reward_ledger WHERE user_id = ?`).bind(dayStart, now, rollingWeekStart, now, user.id)
-      .first<{ xp: number; parts: number; daily_rewards: number; weekly_xp: number }>();
+      COALESCE(SUM(CASE WHEN created_at > ? AND created_at <= ? THEN xp ELSE 0 END), 0) AS weekly_xp,
+      MIN(CASE WHEN created_at > ? AND created_at <= ? THEN created_at END) AS weekly_oldest
+      FROM dzn_word_chain_reward_ledger WHERE user_id = ?`).bind(dayStart, now, rollingWeekStart, now, rollingWeekStart, now, user.id)
+      .first<{ xp: number; parts: number; daily_rewards: number; weekly_xp: number; weekly_oldest: number | null }>();
     extraTotals.xp += wordChain?.xp ?? 0; extraTotals.parts += wordChain?.parts ?? 0;
     challengeTotals.dailyRewards += wordChain?.daily_rewards ?? 0; challengeTotals.weeklyXp += wordChain?.weekly_xp ?? 0;
+    weeklyOldest.push(wordChain?.weekly_oldest ?? null);
     const entries = await db.prepare(`SELECT 'word-chain' AS kind, xp, parts, created_at
       FROM dzn_word_chain_reward_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`)
       .bind(user.id).all<HubPayload["summary"]["history"][number]>();
@@ -81,11 +87,13 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
   if (extraLedgers.hideSeek) {
     const hideSeek = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts,
       COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN 1 ELSE 0 END), 0) AS daily_rewards,
-      COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN xp ELSE 0 END), 0) AS weekly_xp
-      FROM dzn_hide_seek_reward_ledger WHERE user_id = ?`).bind(dayStart, now, rollingWeekStart, now, user.id)
-      .first<{ xp: number; parts: number; daily_rewards: number; weekly_xp: number }>();
+      COALESCE(SUM(CASE WHEN created_at > ? AND created_at <= ? THEN xp ELSE 0 END), 0) AS weekly_xp,
+      MIN(CASE WHEN created_at > ? AND created_at <= ? THEN created_at END) AS weekly_oldest
+      FROM dzn_hide_seek_reward_ledger WHERE user_id = ?`).bind(dayStart, now, rollingWeekStart, now, rollingWeekStart, now, user.id)
+      .first<{ xp: number; parts: number; daily_rewards: number; weekly_xp: number; weekly_oldest: number | null }>();
     extraTotals.xp += hideSeek?.xp ?? 0; extraTotals.parts += hideSeek?.parts ?? 0;
     challengeTotals.dailyRewards += hideSeek?.daily_rewards ?? 0; challengeTotals.weeklyXp += hideSeek?.weekly_xp ?? 0;
+    weeklyOldest.push(hideSeek?.weekly_oldest ?? null);
     const entries = await db.prepare(`SELECT 'hide-seek' AS kind, xp, parts, created_at
       FROM dzn_hide_seek_reward_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`)
       .bind(user.id).all<HubPayload["summary"]["history"][number]>();
@@ -101,10 +109,13 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
   if (latestRewardDay >= Math.floor(now / DAY) - 1) {
     while (rewardDays.has(latestRewardDay - streak)) streak++;
   }
+  const oldestActiveWeeklyReward = weeklyOldest.filter((value): value is number => value !== null)
+    .reduce<number | null>((oldest, value) => oldest === null || value < oldest ? value : oldest, null);
   const row = await readGame(db, user.id);
   return { serverTime: now, summary: { username: user.username, xp: (totals?.xp ?? 0) + extraTotals.xp, parts: (totals?.parts ?? 0) + extraTotals.parts,
     assemblies: totals?.assemblies ?? 0, streak, today: (today.results ?? []).map(item => item.kind),
-    challenges: { ...challengeTotals, streak }, resetAt: (Math.floor(now / DAY) + 1) * DAY, history: combinedHistory },
+    challenges: { ...challengeTotals, streak, weeklyExpiresAt: oldestActiveWeeklyReward === null ? null : oldestActiveWeeklyReward + 7 * DAY },
+    resetAt: (Math.floor(now / DAY) + 1) * DAY, history: combinedHistory },
     game: row ? gameView(row, now) : null };
 }
 

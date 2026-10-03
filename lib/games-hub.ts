@@ -24,7 +24,7 @@ export const HUB_BADGES = [
 export type HubSummary = {
   username: string; xp: number; parts: number; streak: number; assemblies: number;
   today: GameMode[]; resetAt: number;
-  challenges: { dailyRewards: number; weeklyXp: number; streak: number };
+  challenges: { dailyRewards: number; weeklyXp: number; streak: number; weeklyExpiresAt: number | null };
   history: { kind: string; xp: number; parts: number; created_at: number }[];
 };
 export type HubPayload = { serverTime: number; summary: HubSummary; game: GameView | null };

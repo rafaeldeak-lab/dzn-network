@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
 import { unstable_readConfig } from "wrangler";
 import { hasMine, hasFlag, isRevealed, setIsRevealed, setHasFlag } from "@taros-minesweeper/lib";
-import { handleGamesHub } from "../functions/_lib/games-hub";
+import { handleGamesHub, readHub } from "../functions/_lib/games-hub";
 import { createGameBoard, gameView, moveGame, type GameRow } from "../functions/_lib/games-hub-engine";
 import { GAME_MODES, type GameMode, type HubPayload } from "../lib/games-hub";
 import { gamesFixture } from "./lib/games-hub-local";
@@ -111,7 +111,8 @@ async function run() {
     const won = await payload(await call(f, move));
     assert.equal(won.game?.status, "won"); assert.equal(won.summary.xp, 50); assert.equal(won.summary.parts, 1);
     assert.deepEqual(won.summary.today, ["recon"]);
-    assert.deepEqual(won.summary.challenges, { dailyRewards: 1, weeklyXp: 50, streak: 1 });
+    assert.equal(won.summary.challenges.dailyRewards, 1); assert.equal(won.summary.challenges.weeklyXp, 50);
+    assert.equal(won.summary.challenges.streak, 1); assert.ok((won.summary.challenges.weeklyExpiresAt ?? 0) > won.serverTime);
     assert.equal((await call(f, move)).status, 409);
     const second = await payload(await call(f, almostWon(f)));
     assert.equal(second.summary.xp, 50); assert.equal(second.summary.history.length, 1);
@@ -133,8 +134,23 @@ async function run() {
     f.db.sqlite.prepare("INSERT INTO dzn_hide_seek_reward_ledger VALUES (?, 'local-player', ?, ?, 60, 2, ?)")
       .run(randomUUID(), `challenge:${randomUUID()}`, randomUUID(), now);
     const result = await payload(await call(f));
-    assert.deepEqual(result.summary.challenges, { dailyRewards: 3, weeklyXp: 150, streak: 1 });
+    assert.equal(result.summary.challenges.dailyRewards, 3); assert.equal(result.summary.challenges.weeklyXp, 150);
+    assert.equal(result.summary.challenges.streak, 1);
+    assert.ok((result.summary.challenges.weeklyExpiresAt ?? 0) > result.serverTime);
+    assert.ok((result.summary.challenges.weeklyExpiresAt ?? Infinity) <= result.serverTime + 7 * 86400000);
     assert.equal(result.summary.xp, 150); assert.equal(result.summary.parts, 4);
+  });
+  await test("rolling challenge excludes the exact seven-day boundary and exposes its next expiry", async f => {
+    const now = Date.UTC(2026, 9, 3, 21, 30);
+    const boundary = now - 7 * 86400000;
+    for (const createdAt of [boundary, boundary + 1000]) {
+      f.db.sqlite.prepare("INSERT INTO dzn_game_reward_ledger VALUES (?, 'local-player', ?, 'recon', ?, 50, 1, ?)")
+        .run(randomUUID(), `rolling:${createdAt}`, randomUUID(), createdAt);
+    }
+    const result = await readHub(f.db as unknown as D1Database,
+      { id: "local-player", discord_id: "local-discord", username: "Local Player", avatar: null }, now);
+    assert.equal(result.summary.challenges.weeklyXp, 50);
+    assert.equal(result.summary.challenges.weeklyExpiresAt, boundary + 1000 + 7 * 86400000);
   });
   await test("lost, expired, stale and excessive-version games cannot earn", async f => {
     const move = almostWon(f);
