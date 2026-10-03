@@ -370,13 +370,16 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
 
   const game = payload?.game;
   const active = game?.status === "playing" && game.expiresAt > now;
+  const restartCoolingDown = Boolean(game && now < game.startedAt + 5000);
   function scan(x: number, y: number) { if (game && active && !busy) void mutate({ action: "scan", gameId: game.id, version: game.version, x, y }); }
   return <section aria-labelledby="hide-seek-title" className={styles.hideSeekPanel}>
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>04 / RECONNAISSANCE</span><h2 id="hide-seek-title">DZN Signal Hunt</h2></div><Search size={24} /></div>
     {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Signal Hunt" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
     <div className={styles.hideSeekTools}>
       <div><strong>{game ? `${game.foundCount} / ${game.targets.length} signals` : "Four concealed signals"}</strong><span>{game ? `${game.maxMisses - game.misses} scan errors remaining` : "Five minutes. Six scan errors."}</span></div>
-      <button className={styles.primary} disabled={busy || Boolean(active)} onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Hunt in progress" : game ? "New hunt" : "Start hunt"}</button>
+      <button className={styles.primary} disabled={busy || Boolean(active) || restartCoolingDown}
+        title={restartCoolingDown && !active ? "New hunt available five seconds after the last start" : undefined}
+        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Hunt in progress" : game ? "New hunt" : "Start hunt"}</button>
     </div>
     {game ? <>
       <div className={styles.hideSeekMeta}><span><Search size={14} />{game.foundCount} found</span><span><Target size={14} />{game.misses} misses</span><span><Clock3 size={14} />{clock(game.expiresAt - now)}</span></div>
