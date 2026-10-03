@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
+import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import { handleGamesWordChain } from "../functions/_lib/games-word-chain";
 import { WORD_CHAIN_DICTIONARY, WORD_CHAIN_SEEDS } from "../functions/_lib/games-word-chain-dictionary";
@@ -157,6 +158,22 @@ async function run() {
     const hub = await response.json() as { summary: { xp: number; parts: number; streak: number; history: Array<{ kind: string }> } };
     assert.equal(hub.summary.xp, 50); assert.equal(hub.summary.parts, 2); assert.equal(hub.summary.streak, 2);
     assert.ok(hub.summary.history.some(entry => entry.kind === "word-chain"));
+  });
+  await test("account deletion removes private Word Chain rows but preserves the shared round", async fixture => {
+    let state = await payload(await call(fixture));
+    const first = candidate(state.round.requiredLetter);
+    state = await payload(await call(fixture, { action: "play", roundId: state.round.id, version: 0, word: first }));
+    const second = candidate(first.at(-1)!, new Set([first]));
+    await payload(await call(fixture, { action: "play", roundId: state.round.id, version: 1, word: second }, { cookie: fixture.otherCookie }));
+
+    assert.equal(await eraseOrRetainAccountUser(fixture.env.DB, "local-player"), 1);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM users WHERE id = 'local-player'").get()?.count, 0);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_reward_ledger WHERE user_id = 'local-player'").get()?.count, 0);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_entries WHERE user_id = 'local-player'").get()?.count, 0);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_entries WHERE user_id = 'other-player'").get()?.count, 1);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_rounds").get()?.count, 1);
+    assert.equal(fixture.db.sqlite.prepare("SELECT current_user_id FROM dzn_word_chain_rounds").get()?.current_user_id, "other-player");
+    assert.equal(fixture.db.sqlite.prepare("PRAGMA foreign_key_check").all().length, 0);
   });
   await test("migration constraints reject forged rewards and preserve foreign keys", async fixture => {
     assert.throws(() => fixture.db.sqlite.prepare("INSERT INTO dzn_word_chain_reward_ledger VALUES (?, 'local-player', ?, ?, ?, 999, 99, 0)").run(randomUUID(), randomUUID(), randomUUID(), randomUUID()));
