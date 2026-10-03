@@ -41,7 +41,7 @@ There is no paid spin, checkout, new payment method, customer charge, public cha
 ## Retained Games and Platform Backlog
 
 1. DZN Trivia: original question bank, repeat-safe server validation, difficulty rules and earned rewards.
-2. DZN Word Chain: shared turns, real-word validation, duplicate detection and moderated global chat. No chat messages are sent by this release.
+2. DZN Word Chain: the default-off source foundation now provides one shared daily chain, a curated real-word dictionary, duplicate prevention, moderated input, optimistic turn locking and a bounded daily reward. Accepted words remain inside the game feed and do not create Global Chat messages. Migration `0086` and `DZN_GAMES_WORD_CHAIN_ENABLED` require a separate production activation and live multiplayer proof.
 3. DZN Hide & Seek: original DZN scenes, fair item placement, accessible input and server-validated claims.
 4. DZN Coin Flip / spin wheel: settle a non-cash, non-staked design before implementation. Paid random outcomes remain excluded; a cooldown is not treated as compliance clearance.
 5. Multi-game lobby, mission categories, equipment collections, challenges and opt-in PvP/community events. No purchased competitive advantage, fabricated population or fake leaderboard.
