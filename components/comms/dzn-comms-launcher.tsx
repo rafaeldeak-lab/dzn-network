@@ -39,7 +39,7 @@ export function DznCommsLauncher() {
   return (
     <div
       ref={panelRef}
-      className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-[max(1rem,env(safe-area-inset-left))] z-40 flex max-w-[calc(100vw-2rem)] flex-col items-start gap-2"
+      className="fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2 md:right-auto md:left-[max(1rem,env(safe-area-inset-left))] md:items-start"
     >
       {open ? (
         <section
@@ -106,15 +106,15 @@ export function DznCommsLauncher() {
         aria-controls="dzn-comms-launcher-panel"
         aria-label={open ? "Close DZN Comms menu" : "Open DZN Comms"}
         title="DZN Comms"
-        className="group flex h-12 min-w-12 items-center justify-center gap-2 rounded-md border border-cyan-200/55 bg-[#07111f]/98 px-3 text-cyan-100 shadow-[0_0_0_3px_rgba(2,6,23,0.9),0_10px_28px_rgba(0,0,0,0.42),0_0_24px_rgba(34,211,238,0.24)] backdrop-blur-xl transition hover:border-white hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 max-[359px]:w-12 max-[359px]:px-0"
+        className="group flex h-12 w-12 min-w-12 items-center justify-center gap-2 rounded-md border border-cyan-200/55 bg-[#07111f]/98 px-0 text-cyan-100 shadow-[0_0_0_3px_rgba(2,6,23,0.9),0_10px_28px_rgba(0,0,0,0.42),0_0_24px_rgba(34,211,238,0.24)] backdrop-blur-xl transition hover:border-white hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 md:w-auto md:px-3"
       >
         {open ? <X className="h-5 w-5" aria-hidden="true" /> : <MessagesSquare className="h-5 w-5" aria-hidden="true" />}
-        <span className="text-left leading-none max-[359px]:sr-only">
+        <span className="sr-only text-left leading-none md:not-sr-only">
           <span className="block text-[0.7rem] font-black uppercase text-white">DZN Comms</span>
           <span className="mt-1 block text-[0.62rem] font-bold uppercase text-cyan-200">Chat &amp; status</span>
         </span>
         <ChevronRight
-          className={`h-4 w-4 text-cyan-300 transition max-[359px]:hidden ${open ? "rotate-90" : "group-hover:translate-x-0.5"}`}
+          className={`hidden h-4 w-4 text-cyan-300 transition md:block ${open ? "rotate-90" : "group-hover:translate-x-0.5"}`}
           aria-hidden="true"
         />
       </button>

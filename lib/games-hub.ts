@@ -12,6 +12,17 @@ export type GameView = {
 };
 export const WORKSHOP_PART_COST = 12;
 export const WORKSHOP_STAGES = ["Power unit", "Signal array", "Field relay"] as const;
+export const HUB_EQUIPMENT = [
+  { id: "field-scanner", name: "Field scanner", detail: "Survey display calibrated", requirement: { kind: "xp", value: 50 } },
+  { id: "signal-decoder", name: "Signal decoder", detail: "Encrypted channels opened", requirement: { kind: "xp", value: 300 } },
+  { id: "relay-core", name: "Relay core", detail: "First assembly completed", requirement: { kind: "assemblies", value: 1 } },
+  { id: "field-case", name: "Field case", detail: "First relay restored", requirement: { kind: "assemblies", value: 3 } },
+  { id: "network-beacon", name: "Network beacon", detail: "Three relays restored", requirement: { kind: "assemblies", value: 9 } },
+] as const;
+export type HubEquipment = (typeof HUB_EQUIPMENT)[number];
+export function hubEquipmentUnlocked(item: HubEquipment, progress: { xp: number; assemblies: number }) {
+  return progress[item.requirement.kind] >= item.requirement.value;
+}
 export const HUB_CHALLENGE_TARGETS = { dailyRewards: 2, weeklyXp: 500, streak: 3 } as const;
 export const HUB_BADGES = [
   { name: "First Signal", xp: 50, position: "0% 0%" },

@@ -7,7 +7,8 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "re
 import { ArrowRight, Award, BookOpen, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, LoaderCircle,
   LogIn, Microchip, MousePointer2, Play, Radio, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
-import { GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, WORKSHOP_PART_COST, WORKSHOP_STAGES, type GameMode, type GameView, type HubPayload } from "@/lib/games-hub";
+import { GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, HUB_EQUIPMENT, WORKSHOP_PART_COST, WORKSHOP_STAGES,
+  hubEquipmentUnlocked, type GameMode, type GameView, type HubEquipment, type HubPayload } from "@/lib/games-hub";
 import { TRIVIA_DIFFICULTIES, type TriviaDifficulty, type TriviaPayload } from "@/lib/games-trivia";
 import { WORD_CHAIN_REWARD, type WordChainPayload } from "@/lib/games-word-chain";
 import { HIDE_SEEK_REWARD, type HideSeekPayload } from "@/lib/games-hide-seek";
@@ -121,6 +122,8 @@ export function GamesHub() {
     { id: "streak", label: "Hold the line", detail: "Consecutive reward days", icon: Flame,
       value: challengeProgress.streak, target: HUB_CHALLENGE_TARGETS.streak },
   ] : [];
+  const equipmentProgress = { xp, assemblies: summary?.assemblies ?? 0 };
+  const equipmentCollected = HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, equipmentProgress)).length;
 
   function start() {
     setReplace(false); setTool("reveal");
@@ -191,6 +194,12 @@ export function GamesHub() {
             <div className={styles.projectLine}><div><h3>Restore the signal</h3><p>Prestige {Math.floor((summary?.assemblies ?? 0) / 3)} / {(summary?.assemblies ?? 0) % 3} of 3 assemblies</p></div><span className={styles.materialCount}><Microchip />{summary?.parts} <small>parts</small></span></div>
             <ol className={styles.stages}>{WORKSHOP_STAGES.map((name, index) => <li key={name} data-complete={index < (summary?.assemblies ?? 0) % 3}><span>{index < (summary?.assemblies ?? 0) % 3 ? <Check size={16} /> : `0${index + 1}`}</span><strong>{name}</strong><small>{WORKSHOP_PART_COST} parts</small></li>)}</ol>
             <button className={styles.primary} disabled={busy || (summary?.parts ?? 0) < WORKSHOP_PART_COST} onClick={() => { assemblyKey.current ??= crypto.randomUUID(); void mutate({ action: "assemble", requestId: assemblyKey.current }); }}><Hammer size={18} />Assemble {WORKSHOP_STAGES[(summary?.assemblies ?? 0) % 3]}<span>{WORKSHOP_PART_COST} parts</span></button>
+            <div className={styles.collectionHeading}><div><span className={styles.eyebrow}>YOUR / FIELD EQUIPMENT</span><h3>Equipment rack</h3></div><strong>{equipmentCollected} / {HUB_EQUIPMENT.length}</strong></div>
+            <div className={styles.equipmentRack}>{HUB_EQUIPMENT.map(item => { const unlocked = hubEquipmentUnlocked(item, equipmentProgress); return <article key={item.id} data-collected={unlocked}>
+              <span className={styles.equipmentIcon}>{unlocked ? <EquipmentIcon item={item} /> : <ShieldCheck size={21} />}</span>
+              <div><h4>{item.name}</h4><p>{unlocked ? item.detail : equipmentRequirement(item)}</p></div>
+              <span>{unlocked ? <><Check size={13} />Collected</> : "Locked"}</span>
+            </article>; })}</div>
           </section>}
 
           {view === "insignia" && <section><div className={styles.sectionTitle}><div><span className={styles.eyebrow}>COLLECTION / EARNED RECOGNITION</span><h2>Field insignia</h2></div><span>{HUB_BADGES.filter(badge => xp >= badge.xp).length} / 6</span></div>
@@ -224,6 +233,18 @@ export function GamesHub() {
     {replace && <Dialog title="Start a new board?" onClose={() => setReplace(false)}><p>The current unfinished board will be replaced. Earned XP and parts are kept.</p><div className={styles.dialogActions}><button onClick={() => setReplace(false)}>Keep playing</button><button className={styles.primary} onClick={start}><RefreshCw size={17} />New board</button></div></Dialog>}
     </div>
   </main>;
+}
+
+function equipmentRequirement(item: HubEquipment) {
+  return item.requirement.kind === "xp" ? `${item.requirement.value.toLocaleString()} verified XP` : `${item.requirement.value} workshop ${item.requirement.value === 1 ? "assembly" : "assemblies"}`;
+}
+
+function EquipmentIcon({ item }: { item: HubEquipment }) {
+  if (item.id === "field-scanner") return <Search size={21} />;
+  if (item.id === "signal-decoder") return <Radio size={21} />;
+  if (item.id === "relay-core") return <Microchip size={21} />;
+  if (item.id === "field-case") return <Hammer size={21} />;
+  return <Sparkles size={21} />;
 }
 
 function TriviaPanel({ now, onProgress }: { now: number; onProgress: () => void }) {

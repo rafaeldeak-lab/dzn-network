@@ -126,6 +126,7 @@ try {
     await page.getByRole("button", { name: "New board", exact: true }).click();
     if (await page.getByRole("dialog").count()) await page.getByRole("dialog").getByRole("button", { name: "New board" }).click();
   }
+  await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
   await page.getByRole("group", { name: "Recon Minesweeper board" }).waitFor();
   const before = await (await context.request.get(`${base}/api/games/hub`)).json();
   assert.equal(before.game.cells.flat().every(cell => cell === "hidden"), true);
@@ -137,6 +138,7 @@ try {
   await page.locator('button[data-state="flag"]').waitFor();
   const saved = await (await context.request.get(`${base}/api/games/hub`)).json();
   await page.reload();
+  await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
   await page.locator('button[data-state="flag"]').waitFor();
   const resumed = await (await context.request.get(`${base}/api/games/hub`)).json();
   assert.deepEqual(resumed.game, saved.game);
@@ -144,6 +146,7 @@ try {
   await page.waitForURL(`${base}/`);
   await page.getByRole("link", { name: "DZN Network home", exact: true }).waitFor();
   await page.goBack();
+  await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
   await page.locator('button[data-state="flag"]').waitFor();
   assert.deepEqual((await (await context.request.get(`${base}/api/games/hub`)).json()).game, saved.game);
   checks.push("DZN logo navigates home and browser Back restores the saved mission");
@@ -189,14 +192,23 @@ try {
   await page.getByRole("link", { name: "Workshop", exact: true }).click();
   await page.getByRole("heading", { name: "Field relay workshop" }).waitFor();
   assert.equal(await page.getByRole("button", { name: /Assemble Power unit/ }).isDisabled(), true);
-  await page.screenshot({ path: `${output}/mobile-workshop.png`, fullPage: true });
+  assert.equal(await page.getByRole("heading", { name: "Equipment rack" }).count(), 1);
+  assert.equal(await page.locator('[class*="equipmentRack"] article').count(), 5);
+  for (const [label, width, height] of [["narrow-tablet", 700, 900], ["mobile", 390, 844], ["small-phone", 320, 780]]) {
+    await page.setViewportSize({ width, height });
+    const launcherBox = await page.getByRole("button", { name: "Open DZN Comms", exact: true }).boundingBox();
+    assert.ok(launcherBox && launcherBox.width <= 50 && launcherBox.x >= width - 70, `${label}: Comms launcher must stay compact at the right edge`);
+    await page.screenshot({ path: `${output}/${label}-workshop.png`, fullPage: true });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${label}: equipment rack overflow`);
+  }
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: `${output}/desktop-workshop.png`, fullPage: true });
-  checks.push("Workshop correctly requires earned parts; view persists after reload");
+  checks.push("Workshop requires earned parts; five-item equipment rack fits desktop and both phone widths; mobile Comms stays a compact right-edge icon");
   await page.getByRole("link", { name: "Play", exact: true }).click();
   await page.getByLabel("Difficulty", { exact: true }).selectOption("survival");
   await page.getByRole("button", { name: "New board", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "New board" }).click();
+  await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
   await page.getByRole("group", { name: "Survival Minesweeper board" }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: `${output}/mobile-survival.png`, fullPage: true });
@@ -221,10 +233,12 @@ try {
   checks.push("Unavailable screen keeps Display accessible and scenery controllable");
   await page.screenshot({ path: `${output}/offline.png`, fullPage: true });
   await page.unroute("**/api/games/hub"); await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
   await page.getByRole("group", { name: "Survival Minesweeper board" }).waitFor();
   checks.push("Disconnected read has an honest retry state and restores saved board");
   await page.addInitScript(() => { const original = Date.now; Date.now = () => original() + 3600000; });
   await page.reload();
+  await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
   await page.getByRole("group", { name: "Survival Minesweeper board" }).waitFor();
   await page.waitForTimeout(1200);
   assert.equal(await page.locator('[data-index="0"]').getAttribute("aria-disabled"), "false");
