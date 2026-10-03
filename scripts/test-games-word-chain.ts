@@ -175,6 +175,23 @@ async function run() {
     assert.equal(fixture.db.sqlite.prepare("SELECT current_user_id FROM dzn_word_chain_rounds").get()?.current_user_id, "other-player");
     assert.equal(fixture.db.sqlite.prepare("PRAGMA foreign_key_check").all().length, 0);
   });
+  await test("blocked account deletion atomically preserves the account and all Word Chain progress", async fixture => {
+    const state = await payload(await call(fixture));
+    const word = candidate(state.round.requiredLetter);
+    await payload(await call(fixture, { action: "play", roundId: state.round.id, version: 0, word }));
+    fixture.db.sqlite.exec(`CREATE TABLE event_suggestions (
+      id TEXT PRIMARY KEY,
+      submitted_by_user_id TEXT NOT NULL REFERENCES users(id)
+    );
+    INSERT INTO event_suggestions VALUES ('blocking-suggestion', 'local-player');`);
+
+    await assert.rejects(() => eraseOrRetainAccountUser(fixture.env.DB, "local-player"));
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM users WHERE id = 'local-player'").get()?.count, 1);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_reward_ledger WHERE user_id = 'local-player'").get()?.count, 1);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_entries WHERE user_id = 'local-player'").get()?.count, 1);
+    assert.equal(fixture.db.sqlite.prepare("SELECT current_user_id FROM dzn_word_chain_rounds").get()?.current_user_id, "local-player");
+    assert.equal(fixture.db.sqlite.prepare("PRAGMA foreign_key_check").all().length, 0);
+  });
   await test("migration constraints reject forged rewards and preserve foreign keys", async fixture => {
     assert.throws(() => fixture.db.sqlite.prepare("INSERT INTO dzn_word_chain_reward_ledger VALUES (?, 'local-player', ?, ?, ?, 999, 99, 0)").run(randomUUID(), randomUUID(), randomUUID(), randomUUID()));
     assert.equal(fixture.db.sqlite.prepare("PRAGMA foreign_key_check").all().length, 0);
