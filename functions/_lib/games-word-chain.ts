@@ -70,7 +70,7 @@ export async function handleGamesWordChain(request: Request, env: Env): Promise<
     if (!word.startsWith(round.current_word.at(-1)!)) return reply({ error: `The next word must start with ${round.current_word.at(-1)!.toUpperCase()}.` }, 422);
     const duplicate = await db.prepare("SELECT 1 AS used FROM dzn_word_chain_entries WHERE round_id = ? AND word = ?")
       .bind(id, word).first<{ used: number }>();
-    if (duplicate) return reply({ error: "That word has already been used today." }, 409);
+    if (word === seed || duplicate) return reply({ error: "That word has already been used today." }, 409);
     const recent = await db.prepare("SELECT created_at FROM dzn_word_chain_entries WHERE user_id = ? ORDER BY created_at DESC LIMIT 1")
       .bind(user.id).first<{ created_at: number }>();
     if (recent && recent.created_at > now - 5000) return reply({ error: "Wait a few seconds before taking another turn." }, 429);

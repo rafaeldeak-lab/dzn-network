@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import { handleGamesWordChain } from "../functions/_lib/games-word-chain";
-import { WORD_CHAIN_DICTIONARY } from "../functions/_lib/games-word-chain-dictionary";
+import { WORD_CHAIN_DICTIONARY, WORD_CHAIN_SEEDS } from "../functions/_lib/games-word-chain-dictionary";
 import type { Env } from "../functions/_lib/types";
 import type { WordChainPayload } from "../lib/games-word-chain";
 import { gamesFixture } from "./lib/games-hub-local";
@@ -65,6 +65,28 @@ async function run() {
     assert.equal((await call(fixture, { action: "play", roundId: state.round.id, version: 0, word: `${state.round.requiredLetter}zzzz` })).status, 422);
     const wrong = [...WORD_CHAIN_DICTIONARY].find(word => !word.startsWith(state.round.requiredLetter))!;
     assert.equal((await call(fixture, { action: "play", roundId: state.round.id, version: 0, word: wrong })).status, 422);
+  });
+  await test("the daily opening seed cannot be replayed later in the chain", async fixture => {
+    const originalNow = Date.now;
+    let selected = originalNow();
+    while (true) {
+      const id = new Date(selected).toISOString().slice(0, 10);
+      const score = [...id].reduce((total, value) => total + value.charCodeAt(0), 0);
+      if (WORD_CHAIN_SEEDS[score % WORD_CHAIN_SEEDS.length] === "radio") break;
+      selected += 86400000;
+    }
+    Date.now = () => selected;
+    try {
+      const state = await payload(await call(fixture));
+      assert.equal(state.round.currentWord, "radio");
+      fixture.db.sqlite.prepare(`INSERT INTO dzn_word_chain_rounds
+        (id, current_word, current_user_id, version, created_at, updated_at) VALUES (?, 'radar', NULL, 0, 0, 0)`)
+        .run(state.round.id);
+      const response = await call(fixture, { action: "play", roundId: state.round.id, version: 0, word: "radio" });
+      assert.equal(response.status, 409);
+      assert.match(await response.text(), /already been used/i);
+      assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_entries").get()?.count, 0);
+    } finally { Date.now = originalNow; }
   });
   await test("shared turns alternate players and mint one bounded daily reward", async fixture => {
     let state = await payload(await call(fixture));
