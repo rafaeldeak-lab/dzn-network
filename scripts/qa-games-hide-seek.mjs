@@ -11,9 +11,10 @@ let previewLog = "";
 preview.stdout.setEncoding("utf8"); preview.stderr.setEncoding("utf8");
 preview.stdout.on("data", chunk => { previewLog += chunk; }); preview.stderr.on("data", chunk => { previewLog += chunk; });
 
-const origin = await waitForOrigin();
-const browser = await chromium.launch({ headless: true });
+let browser;
 try {
+  const origin = await waitForOrigin();
+  browser = await chromium.launch({ headless: true });
   for (const [index, viewport] of [{ name: "desktop", width: 1440, height: 1000 }, { name: "phone", width: 390, height: 844 }].entries()) {
     const context = await browser.newContext({ viewport, reducedMotion: "reduce" });
     const page = await context.newPage();
@@ -53,7 +54,7 @@ try {
     await context.close();
   }
   console.log("DZN Signal Hunt desktop and phone rendered QA passed.");
-} finally { await browser.close(); preview.kill(); }
+} finally { await browser?.close(); preview.kill(); }
 
 async function waitForOrigin() {
   const deadline = Date.now() + 20_000;

@@ -372,7 +372,8 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
   }
 
   const game = payload?.game;
-  const active = game?.status === "playing" && game.expiresAt > now;
+  const available = Boolean(payload) && !error;
+  const active = available && game?.status === "playing" && game.expiresAt > now;
   const restartCoolingDown = Boolean(game && now < game.startedAt + 5000);
   function scan(x: number, y: number) { if (game && active && !busy) void mutate({ action: "scan", gameId: game.id, version: game.version, x, y }); }
   return <section aria-labelledby="hide-seek-title" className={styles.hideSeekPanel}>
@@ -380,7 +381,7 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
     {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Signal Hunt" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
     <div className={styles.hideSeekTools}>
       <div><strong>{game ? `${game.foundCount} / ${game.targets.length} signals` : "Four concealed signals"}</strong><span>{game ? `${game.maxMisses - game.misses} scan errors remaining` : "Five minutes. Six scan errors."}</span></div>
-      <button className={styles.primary} disabled={busy || Boolean(active) || restartCoolingDown}
+      <button className={styles.primary} disabled={busy || !available || Boolean(active) || restartCoolingDown}
         title={restartCoolingDown && !active ? "New hunt available five seconds after the last start" : undefined}
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Hunt in progress" : game ? "New hunt" : "Start hunt"}</button>
     </div>
