@@ -25,7 +25,7 @@ assert.equal(launcherSource.includes("Open Global Chat"), true, "The launcher mu
 assert.equal(launcherSource.includes("Open live chat"), false, "The launcher must not infer live availability from public build flags.");
 assert.equal(launcherSource.includes("DZN Comms"), true, "The persistent launcher control must identify DZN Comms without relying on an icon or tooltip.");
 assert.equal(launcherSource.includes("Chat &amp; status"), true, "The persistent launcher must explain that it opens chat and availability information.");
-assert.equal(launcherSource.includes('className="sr-only text-left leading-none sm:not-sr-only"'), true, "Phone screens must use the compact launcher while tablet and desktop retain its visible label.");
+assert.equal(launcherSource.includes('className="sr-only text-left leading-none md:not-sr-only"'), true, "Phone and narrow-tablet screens must use the compact launcher while desktop retains its visible label.");
 assert.equal(launcherSource.includes('aria-label={open ? "Close DZN Comms menu" : "Open DZN Comms"}'), true, "The compact phone launcher must keep an explicit accessible name.");
 assert.equal(launcherSource.includes("safe-area-inset-bottom"), true, "The launcher must clear mobile safe-area controls.");
 assert.equal(launcherSource.includes("safe-area-inset-left"), true, "The launcher must clear mobile safe-area controls in landscape.");

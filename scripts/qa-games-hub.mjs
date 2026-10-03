@@ -194,7 +194,7 @@ try {
   assert.equal(await page.getByRole("button", { name: /Assemble Power unit/ }).isDisabled(), true);
   assert.equal(await page.getByRole("heading", { name: "Equipment rack" }).count(), 1);
   assert.equal(await page.locator('[class*="equipmentRack"] article').count(), 5);
-  for (const [label, width, height] of [["mobile", 390, 844], ["small-phone", 320, 780]]) {
+  for (const [label, width, height] of [["narrow-tablet", 700, 900], ["mobile", 390, 844], ["small-phone", 320, 780]]) {
     await page.setViewportSize({ width, height });
     const launcherBox = await page.getByRole("button", { name: "Open DZN Comms", exact: true }).boundingBox();
     assert.ok(launcherBox && launcherBox.width <= 50 && launcherBox.x >= width - 70, `${label}: Comms launcher must stay compact at the right edge`);
