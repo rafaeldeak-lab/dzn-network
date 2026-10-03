@@ -5,16 +5,17 @@ import Image from "next/image";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ArrowRight, Award, BookOpen, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, LoaderCircle,
-  LogIn, Microchip, MousePointer2, Play, Radio, RefreshCw, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
+  LogIn, Microchip, MousePointer2, Play, Radio, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
 import { GAME_MODES, HUB_BADGES, WORKSHOP_PART_COST, WORKSHOP_STAGES, type GameMode, type GameView, type HubPayload } from "@/lib/games-hub";
 import { TRIVIA_DIFFICULTIES, type TriviaDifficulty, type TriviaPayload } from "@/lib/games-trivia";
 import { WORD_CHAIN_REWARD, type WordChainPayload } from "@/lib/games-word-chain";
+import { HIDE_SEEK_REWARD, type HideSeekPayload } from "@/lib/games-hide-seek";
 import styles from "./games-hub.module.css";
 
 type View = "play" | "workshop" | "insignia" | "activity";
 type BoardView = "field" | "grid";
-type PlayGame = "minefield" | "trivia" | "word-chain";
+type PlayGame = "minefield" | "trivia" | "word-chain" | "hide-seek";
 const Minefield3D = dynamic(() => import("./minefield-3d").then(module => module.Minefield3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
@@ -147,6 +148,7 @@ export function GamesHub() {
             <button aria-pressed={playGame === "minefield"} onClick={() => setPlayGame("minefield")}><Target size={17} /><span><strong>Minefield</strong><small>3D tactical sweep</small></span></button>
             <button aria-pressed={playGame === "trivia"} onClick={() => setPlayGame("trivia")}><BookOpen size={17} /><span><strong>DZN Trivia</strong><small>Survival knowledge</small></span></button>
             <button aria-pressed={playGame === "word-chain"} onClick={() => setPlayGame("word-chain")}><Radio size={17} /><span><strong>Word Chain</strong><small>Shared daily relay</small></span></button>
+            <button aria-pressed={playGame === "hide-seek"} onClick={() => setPlayGame("hide-seek")}><Search size={17} /><span><strong>Signal Hunt</strong><small>Find concealed beacons</small></span></button>
           </div>}
           {view === "play" && playGame === "minefield" && <section aria-labelledby="mines-title">
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">Minesweeper</h2></div><button className={styles.iconButton} title="Game rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
@@ -171,6 +173,7 @@ export function GamesHub() {
           </section>}
           {view === "play" && playGame === "trivia" && <TriviaPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && playGame === "word-chain" && <WordChainPanel onProgress={() => void refresh()} />}
+          {view === "play" && playGame === "hide-seek" && <HideSeekPanel now={now} onProgress={() => void refresh()} />}
 
           {view === "workshop" && <section>
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>COLLECTION / PROJECT {(Math.floor((summary?.assemblies ?? 0) / 3) + 1).toString().padStart(2, "0")}</span><h2>Field relay workshop</h2></div><Hammer size={24} /></div>
@@ -185,7 +188,7 @@ export function GamesHub() {
           </section>}
 
           {view === "activity" && <section><div className={styles.sectionTitle}><div><span className={styles.eyebrow}>YOUR / REWARD HISTORY</span><h2>Recent activity</h2></div><Clock3 size={24} /></div>
-            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
+            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; const hideSeek = entry.kind === "hide-seek"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : hideSeek ? <Search size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : hideSeek ? "Signal Hunt cleared" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
           </section>}
         </div>
 
@@ -329,6 +332,69 @@ function WordChainPanel({ onProgress }: { onProgress: () => void }) {
       </div>
     </>}
     {!payload && busy && <div className={styles.triviaReady}><LoaderCircle className={styles.spinner} size={34} /><h3>Joining the daily chain</h3></div>}
+  </section>;
+}
+
+function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+  const [payload, setPayload] = useState<HideSeekPayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const generation = useRef(0);
+
+  const load = useCallback(async () => {
+    const sequence = ++generation.current;
+    try {
+      const response = await fetch("/api/games/hide-seek", { credentials: "include", cache: "no-store" });
+      const result = await response.json() as HideSeekPayload & { error?: string };
+      if (!response.ok) throw new Error(result.error || "DZN Signal Hunt is unavailable.");
+      if (sequence === generation.current) { setPayload(result); setError(""); }
+    } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Signal Hunt is unavailable."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, []);
+
+  useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
+
+  async function mutate(body: Record<string, unknown>) {
+    if (busy) return;
+    const sequence = ++generation.current; setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/games/hide-seek", { method: "POST", credentials: "include", cache: "no-store",
+        headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as HideSeekPayload & { error?: string };
+      if (!response.ok) { setError(result.error || "That scan could not be recorded."); if (response.status === 409) void load(); return; }
+      if (sequence !== generation.current) return;
+      setPayload(result); onProgress();
+    } catch { if (sequence === generation.current) setError("That scan could not be recorded. Refresh before retrying."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }
+
+  const game = payload?.game;
+  const active = game?.status === "playing" && game.expiresAt > now;
+  function scan(x: number, y: number) { if (game && active && !busy) void mutate({ action: "scan", gameId: game.id, version: game.version, x, y }); }
+  return <section aria-labelledby="hide-seek-title" className={styles.hideSeekPanel}>
+    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>04 / RECONNAISSANCE</span><h2 id="hide-seek-title">DZN Signal Hunt</h2></div><Search size={24} /></div>
+    {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Signal Hunt" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
+    <div className={styles.hideSeekTools}>
+      <div><strong>{game ? `${game.foundCount} / ${game.targets.length} signals` : "Four concealed signals"}</strong><span>{game ? `${game.maxMisses - game.misses} scan errors remaining` : "Five minutes. Six scan errors."}</span></div>
+      <button className={styles.primary} disabled={busy || Boolean(active)} onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Hunt in progress" : game ? "New hunt" : "Start hunt"}</button>
+    </div>
+    {game ? <>
+      <div className={styles.hideSeekMeta}><span><Search size={14} />{game.foundCount} found</span><span><Target size={14} />{game.misses} misses</span><span><Clock3 size={14} />{clock(game.expiresAt - now)}</span></div>
+      <div className={styles.hideSeekScene} role="group" aria-label="DZN outpost signal hunt scene" aria-disabled={!active || busy}
+        onClick={event => { const bounds = event.currentTarget.getBoundingClientRect(); scan(Math.round((event.clientX - bounds.left) / bounds.width * 1000), Math.round((event.clientY - bounds.top) / bounds.height * 1000)); }}>
+        <Image src="/images/games/dzn-outpost.webp" alt="DZN mountain communications outpost" fill sizes="(max-width: 760px) 100vw, 760px" />
+        {game.targets.map((target, index) => <button key={target.id} type="button" className={styles.hideSeekTarget} data-found={target.found}
+          style={{ left: `${target.x / 10}%`, top: `${target.y / 10}%` }} disabled={!active || busy || target.found}
+          aria-label={target.found ? `Signal ${index + 1} found` : `Investigate concealed signal ${index + 1}`}
+          onClick={event => { event.stopPropagation(); scan(target.x, target.y); }}>{target.found ? <Check size={15} /> : <Search size={14} />}</button>)}
+      </div>
+      <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
+        {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>All signals recovered</strong><span>{payload.rewardedToday ? `Daily reward recorded: +${HIDE_SEEK_REWARD.xp} XP and +${HIDE_SEEK_REWARD.parts} parts.` : "Hunt complete."}</span></div></>
+          : game.status === "failed" ? <><Target size={22} /><div><strong>Search window closed</strong><span>Too many empty scans. Your existing progress is unchanged.</span></div></>
+            : !active ? <><Clock3 size={22} /><div><strong>Hunt expired</strong><span>Start a new reconnaissance run when ready.</span></div></>
+              : <><Radio size={20} /><div><strong>Signals concealed</strong><span>Inspect the scene closely. Every find is checked by DZN.</span></div></>}
+      </div>
+    </> : <div className={styles.triviaReady}><Search size={34} /><h3>Search the outpost.</h3><p>Find four concealed DZN signals. Mouse, touch and keyboard targets are supported.</p><div className={styles.rewardPills}><span>+{HIDE_SEEK_REWARD.xp} XP</span><span>+{HIDE_SEEK_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 
