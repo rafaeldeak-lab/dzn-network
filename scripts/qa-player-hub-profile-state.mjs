@@ -40,6 +40,8 @@ function privacy(enabled) {
 function api(pathname, publicState = "published", statsState = "stats_available") {
   if (pathname === "/api/auth/me") return { authenticated: true, user: { id: "profile-qa", username: name, avatar: null }, linkedServers: [], linkedServer: null };
   if (pathname === "/api/player/hub") return hub(publicState, statsState);
+  if (pathname === "/api/player/supporter-cards") return { ok: true, private: true, scope: "current_user", cards: [{ product_key: "founding-supporter", product_name: "Founding Supporter", granted_at: "2026-10-02T20:00:00.000Z", order_number: "DZN-S-PRIVATE-001", receipt_number: "DZN-R-PRIVATE001", receipt_status: "issued" }] };
+  if (pathname === "/api/player/community-directory") return { ok: true, source: "server_community_directory", communities: [], private: true, presentation_only: true };
   if (pathname === "/api/player/profile/privacy") return privacy(publicState === "published");
   if (pathname === "/api/player/game-identities") return { ok: true, source: "player_game_identity_links", active_links: [], claims: [], revoked_links: [{ id: "revoked-fixture", player_name: "Example Game Account", server_name: "Example Server", revoked_at: "2026-09-09 12:00:00", reason: "The proof did not match this game account. Contact support to submit current evidence." }], proof_flow: { player_step: "Choose your server.", owner_step: "Request approval.", match_rule: "A server owner checks the link." }, boundary: "Fixture game account data" };
   if (pathname === "/api/public/servers") return { ok: true, servers: [] };
@@ -96,7 +98,7 @@ if (process.argv.includes("--serve")) {
           const request = route.request(), url = new URL(request.url());
           if (url.origin !== origin) { await route.abort(); return; }
           if (!url.pathname.startsWith("/api/")) { await route.continue(); return; }
-          if (request.method() !== "GET") {
+          if (request.method() !== "GET" && request.method() !== "HEAD") {
             mutations.push(`${request.method()} ${url.pathname}`);
             assert.equal(url.pathname, "/api/player/profile/privacy");
             assert.equal(request.method(), "PATCH");
@@ -121,6 +123,16 @@ if (process.argv.includes("--serve")) {
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `Page overflow at ${width}`);
           assert.deepEqual(mutations, [], "Reading the hub must not mutate anything");
           if (routePath === "/player/profile") {
+            const supporterCards = panel.getByRole("heading", { name: "My Supporter Cards", exact: true }).locator("..").locator("..").locator("..").locator("..");
+            assert.doesNotMatch(await supporterCards.innerText(), /Founding Supporter|DZN-R-PRIVATE001/, "Private card details must stay concealed before reveal");
+            await supporterCards.getByRole("button", { name: "Reveal my cards", exact: true }).click();
+            await supporterCards.getByText("Founding Supporter", { exact: true }).waitFor();
+            assert.match(await supporterCards.innerText(), /DZN-S-PRIVATE-001/);
+            assert.match(await supporterCards.innerText(), /DZN-R-PRIVATE001/);
+            assert.ok(await supporterCards.evaluate(element => element.scrollWidth <= element.clientWidth), `Supporter Cards overflow at ${width}`);
+            if (publicState === "published" && statsState === "stats_available") {
+              await supporterCards.screenshot({ path: path.join(output, `private-supporter-cards-${width}.png`) });
+            }
             await panel.getByRole("link", { name: "Game account", exact: true }).click();
             await page.waitForFunction(() => location.hash === "#game-account" && Boolean(document.getElementById("game-account")));
             const revoked = page.getByRole("region", { name: "Revoked game stats links" });
