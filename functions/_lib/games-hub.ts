@@ -15,7 +15,7 @@ async function readGame(db: D1Database, userId: string) {
   return db.prepare("SELECT * FROM dzn_game_sessions WHERE user_id = ?").bind(userId).first<GameRow>();
 }
 
-export async function readHub(db: D1Database, user: SessionUser, now: number): Promise<HubPayload> {
+export async function readHub(db: D1Database, user: SessionUser, now: number, includeTrivia = false): Promise<HubPayload> {
   const totals = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts,
     COALESCE(SUM(CASE WHEN kind = 'workshop' THEN 1 ELSE 0 END), 0) AS assemblies
     FROM dzn_game_reward_ledger WHERE user_id = ?`).bind(user.id).first<{ xp: number; parts: number; assemblies: number }>();
@@ -28,10 +28,23 @@ export async function readHub(db: D1Database, user: SessionUser, now: number): P
     .bind(DAY, user.id, Math.floor(now / DAY) - 1).first<{ streak: number }>();
   const history = await db.prepare(`SELECT kind, xp, parts, created_at FROM dzn_game_reward_ledger
     WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`).bind(user.id).all<HubPayload["summary"]["history"][number]>();
+  let triviaTotals = { xp: 0, parts: 0 };
+  let triviaHistory: HubPayload["summary"]["history"] = [];
+  if (includeTrivia) {
+    const trivia = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts
+      FROM dzn_trivia_reward_ledger WHERE user_id = ?`).bind(user.id).first<{ xp: number; parts: number }>();
+    triviaTotals = { xp: trivia?.xp ?? 0, parts: trivia?.parts ?? 0 };
+    const entries = await db.prepare(`SELECT 'trivia:' || difficulty AS kind, xp, parts, created_at
+      FROM dzn_trivia_reward_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`)
+      .bind(user.id).all<HubPayload["summary"]["history"][number]>();
+    triviaHistory = entries.results ?? [];
+  }
+  const combinedHistory = [...(history.results ?? []), ...triviaHistory]
+    .sort((left, right) => right.created_at - left.created_at).slice(0, 12);
   const row = await readGame(db, user.id);
-  return { serverTime: now, summary: { username: user.username, xp: totals?.xp ?? 0, parts: totals?.parts ?? 0,
+  return { serverTime: now, summary: { username: user.username, xp: (totals?.xp ?? 0) + triviaTotals.xp, parts: (totals?.parts ?? 0) + triviaTotals.parts,
     assemblies: totals?.assemblies ?? 0, streak: streakRow?.streak ?? 0, today: (today.results ?? []).map(item => item.kind),
-    resetAt: (Math.floor(now / DAY) + 1) * DAY, history: history.results ?? [] }, game: row ? gameView(row, now) : null };
+    resetAt: (Math.floor(now / DAY) + 1) * DAY, history: combinedHistory }, game: row ? gameView(row, now) : null };
 }
 
 export async function handleGamesHub(request: Request, env: Env): Promise<Response> {
@@ -45,7 +58,8 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
     if (env.DZN_GAMES_HUB_ENABLED !== "true") return reply({ error: "The Games Hub is not open on this environment yet." }, 503);
     const db = requireDb(env);
     const now = Date.now();
-    if (request.method === "GET") return reply(await readHub(db, user, now));
+    const includeTrivia = env.DZN_GAMES_TRIVIA_ENABLED === "true";
+    if (request.method === "GET") return reply(await readHub(db, user, now, includeTrivia));
     const parsed = await readBoundedJson<Record<string, unknown>>(request, 2048);
     if (!parsed.ok) return reply({ error: "Invalid game request." }, parsed.status);
     const body = parsed.value;
@@ -94,18 +108,25 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
     } else if (body.action === "assemble") {
       if (!isId(body.requestId)) return reply({ error: "Invalid assembly request." }, 400);
       const rewardKey = `workshop:${body.requestId}`;
-      const result = await db.prepare(`INSERT INTO dzn_game_reward_ledger (id, user_id, reward_key, kind, game_id, xp, parts, created_at)
+      const availableParts = includeTrivia
+        ? `(SELECT COALESCE(SUM(parts), 0) FROM dzn_game_reward_ledger WHERE user_id = ?)
+          + (SELECT COALESCE(SUM(parts), 0) FROM dzn_trivia_reward_ledger WHERE user_id = ?)`
+        : `(SELECT COALESCE(SUM(parts), 0) FROM dzn_game_reward_ledger WHERE user_id = ?)`;
+      const statement = db.prepare(`INSERT INTO dzn_game_reward_ledger (id, user_id, reward_key, kind, game_id, xp, parts, created_at)
         SELECT ?, ?, ?, 'workshop', NULL, 0, ?, ? WHERE
-          (SELECT COALESCE(SUM(parts), 0) FROM dzn_game_reward_ledger WHERE user_id = ?) >= ?
-        ON CONFLICT(user_id, reward_key) DO NOTHING`)
-        .bind(crypto.randomUUID(), user.id, rewardKey, -WORKSHOP_PART_COST, now, user.id, WORKSHOP_PART_COST).run();
+          (${availableParts}) >= ?
+        ON CONFLICT(user_id, reward_key) DO NOTHING`);
+      const bindings = includeTrivia
+        ? [crypto.randomUUID(), user.id, rewardKey, -WORKSHOP_PART_COST, now, user.id, user.id, WORKSHOP_PART_COST]
+        : [crypto.randomUUID(), user.id, rewardKey, -WORKSHOP_PART_COST, now, user.id, WORKSHOP_PART_COST];
+      const result = await statement.bind(...bindings).run();
       if (!result.meta.changes) {
         const alreadyDone = await db.prepare("SELECT id FROM dzn_game_reward_ledger WHERE user_id = ? AND reward_key = ?")
           .bind(user.id, rewardKey).first();
         if (!alreadyDone) return reply({ error: "More parts are needed for this assembly." }, 409);
       }
     } else return reply({ error: "Unknown game action." }, 400);
-    return reply(await readHub(db, user, now));
+    return reply(await readHub(db, user, now, includeTrivia));
   } catch {
     // Never return SQL, stored board state or session diagnostics to the browser.
     return reply({ error: "Games Hub is temporarily unavailable. Your saved progress has not been reset." }, 503);
