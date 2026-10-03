@@ -279,8 +279,10 @@ function WordChainPanel({ onProgress }: { onProgress: () => void }) {
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const generation = useRef(0);
+  const submitting = useRef(false);
 
   const load = useCallback(async () => {
+    if (submitting.current) return;
     const sequence = ++generation.current;
     try {
       const response = await fetch("/api/games/word-chain", { credentials: "include", cache: "no-store" });
@@ -300,17 +302,18 @@ function WordChainPanel({ onProgress }: { onProgress: () => void }) {
 
   async function play() {
     if (!payload || busy) return;
-    const sequence = ++generation.current;
+    let refreshAfter = false;
+    submitting.current = true;
+    generation.current++;
     setBusy(true); setError("");
     try {
       const response = await fetch("/api/games/word-chain", { method: "POST", credentials: "include", cache: "no-store",
         headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "play", roundId: payload.round.id, version: payload.round.version, word }) });
       const result = await response.json() as WordChainPayload & { error?: string };
-      if (!response.ok) { setError(result.error || "That turn could not be recorded."); if (response.status === 409) void load(); return; }
-      if (sequence !== generation.current) return;
+      if (!response.ok) { setError(result.error || "That turn could not be recorded."); refreshAfter = response.status === 409; return; }
       setPayload(result); setWord(""); onProgress();
-    } catch { if (sequence === generation.current) setError("That turn could not be recorded. Refresh before retrying."); }
-    finally { if (sequence === generation.current) setBusy(false); }
+    } catch { setError("That turn could not be recorded. Refresh before retrying."); }
+    finally { submitting.current = false; setBusy(false); if (refreshAfter) void load(); }
   }
 
   const required = payload?.round.requiredLetter.toUpperCase() ?? "-";
@@ -323,7 +326,7 @@ function WordChainPanel({ onProgress }: { onProgress: () => void }) {
         <label htmlFor="word-chain-entry">Your word</label><div><input id="word-chain-entry" value={word} maxLength={18} autoComplete="off" spellCheck
           placeholder={`${required.toLowerCase()}...`} disabled={busy || !payload.round.canPlay} onChange={event => setWord(event.target.value.replace(/[^a-zA-Z]/g, "").slice(0, 18))} />
         <button className={styles.primary} disabled={busy || !payload.round.canPlay || word.length < 3}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <ArrowRight size={17} />}Send turn</button></div>
-        <small>{payload.round.canPlay ? "Real words only. Used words cannot repeat." : "Another player must take the next turn."}</small>
+        <small>{payload.round.completed ? "Signal complete. A new shared chain starts tomorrow." : payload.round.canPlay ? "Real words only. Used words cannot repeat." : "Another player must take the next turn."}</small>
       </form>
       <div className={styles.chainReward}><ShieldCheck size={18} /><div><strong>{payload.rewardedToday ? "Daily relay reward earned" : `First accepted turn: +${WORD_CHAIN_REWARD.xp} XP and +${WORD_CHAIN_REWARD.parts} part`}</strong><span>Game words stay in this game feed and are not posted to Global Chat.</span></div></div>
       <div className={styles.chainFeed}><div className={styles.triviaMeta}><span>Latest accepted turns</span><span>Turn {payload.round.version}</span></div>

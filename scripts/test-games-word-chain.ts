@@ -88,6 +88,34 @@ async function run() {
       assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_entries").get()?.count, 0);
     } finally { Date.now = originalNow; }
   });
+  await test("a chain with no unused continuation completes instead of staying playable", async fixture => {
+    const originalNow = Date.now;
+    let selected = originalNow();
+    while (true) {
+      const id = new Date(selected).toISOString().slice(0, 10);
+      const score = [...id].reduce((total, value) => total + value.charCodeAt(0), 0);
+      if (WORD_CHAIN_SEEDS[score % WORD_CHAIN_SEEDS.length] === "compass") break;
+      selected += 86400000;
+    }
+    Date.now = () => selected;
+    try {
+      let state = await payload(await call(fixture));
+      state = await payload(await call(fixture, { action: "play", roundId: state.round.id, version: 0, word: "story" }));
+      state = await payload(await call(fixture, { action: "play", roundId: state.round.id, version: 1, word: "young" }, { cookie: fixture.otherCookie }));
+      fixture.db.sqlite.exec("UPDATE dzn_word_chain_entries SET created_at = created_at - 6000 WHERE user_id = 'local-player'");
+      state = await payload(await call(fixture, { action: "play", roundId: state.round.id, version: 2, word: "glory" }));
+      assert.equal(state.round.completed, true);
+      assert.equal(state.round.canPlay, false);
+      assert.equal(state.round.requiredLetter, "y");
+      assert.equal((await call(fixture, { action: "play", roundId: state.round.id, version: 3, word: "young" }, { cookie: fixture.otherCookie })).status, 409);
+    } finally { Date.now = originalNow; }
+  });
+  await test("the client keeps background reads from superseding a submitted turn", async () => {
+    const source = readFileSync("components/games/games-hub.tsx", "utf8");
+    assert.match(source, /if \(submitting\.current\) return;/);
+    assert.match(source, /submitting\.current = true;\s*generation\.current\+\+;/);
+    assert.match(source, /finally \{ submitting\.current = false; setBusy\(false\); if \(refreshAfter\) void load\(\); \}/);
+  });
   await test("shared turns alternate players and mint one bounded daily reward", async fixture => {
     let state = await payload(await call(fixture));
     const first = candidate(state.round.requiredLetter);

@@ -14,6 +14,7 @@ export type WordChainRound = {
   requiredLetter: string;
   version: number;
   canPlay: boolean;
+  completed: boolean;
   entries: WordChainEntry[];
 };
 

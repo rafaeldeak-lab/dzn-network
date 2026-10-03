@@ -27,12 +27,18 @@ async function readRound(db: D1Database, user: SessionUser, now: number): Promis
     WHERE entries.round_id = ? ORDER BY entries.turn_number DESC LIMIT 12`).bind(id).all<{
       id: string; word: string; player: string; turn_number: number; created_at: number;
     }>() : { results: [] };
+  const used = row ? await db.prepare("SELECT word FROM dzn_word_chain_entries WHERE round_id = ?")
+    .bind(id).all<{ word: string }>() : { results: [] };
   const reward = await db.prepare("SELECT 1 AS rewarded FROM dzn_word_chain_reward_ledger WHERE user_id = ? AND reward_key = ?")
     .bind(user.id, id).first<{ rewarded: number }>();
   const currentWord = row?.current_word ?? seed;
+  const usedWords = new Set([seed, ...(used.results ?? []).map(entry => entry.word)]);
+  const completed = row ? ![...WORD_CHAIN_DICTIONARY].some(word =>
+    word.startsWith(currentWord.at(-1)!) && !usedWords.has(word)) : false;
   return { serverTime: now, rewardedToday: reward?.rewarded === 1, round: {
     id, currentWord, requiredLetter: currentWord.at(-1)!, version: row?.version ?? 0,
-    canPlay: row?.current_user_id !== user.id && (row?.version ?? 0) < 500,
+    canPlay: !completed && row?.current_user_id !== user.id && (row?.version ?? 0) < 500,
+    completed,
     entries: (entries.results ?? []).map(entry => ({ id: entry.id, word: entry.word, player: entry.player,
       turn: entry.turn_number, createdAt: entry.created_at })),
   } };
