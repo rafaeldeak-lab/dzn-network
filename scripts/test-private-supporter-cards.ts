@@ -7,6 +7,8 @@ import {
   privateSupporterCardsEnabled,
   readPrivateStoreSupporterCards,
 } from "../functions/_lib/store-entitlements";
+import { onRequest as supporterCardsHandler } from "../functions/api/player/supporter-cards";
+import type { Env, PagesFunction } from "../functions/_lib/types";
 
 const route = readFileSync("functions/api/player/supporter-cards.ts", "utf8");
 const component = readFileSync("components/player/private-supporter-cards.tsx", "utf8");
@@ -32,11 +34,27 @@ assert.doesNotMatch(component, /localStorage|sessionStorage|navigator\.share|nav
 assert.match(profile, /showPrivateSupporterCards/);
 
 async function run() {
+  const disabledResponse = await callSupporterCards(new Request("https://dzn.test/api/player/supporter-cards"), {} as Env);
+  assert.equal(disabledResponse.status, 404);
+  assert.deepEqual(await disabledResponse.json(), { ok: false, error: "SUPPORTER_CARDS_UNAVAILABLE" });
+
+  const methodResponse = await callSupporterCards(new Request("https://dzn.test/api/player/supporter-cards", { method: "POST" }), {} as Env);
+  assert.equal(methodResponse.status, 405);
+  assert.deepEqual(await methodResponse.json(), { error: "Method not allowed" });
+
   const mf = new Miniflare({ modules: true, script: "export default { fetch() { return new Response('ok'); } }", compatibilityDate: "2026-05-08", d1Databases: ["DB"], d1Persist: false });
   try {
     const db = await mf.getD1Database("DB");
     await db.exec("PRAGMA foreign_keys = ON;");
-    await db.prepare("CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT, username TEXT, avatar TEXT)").run();
+    await db.prepare(`CREATE TABLE users (
+      id TEXT PRIMARY KEY, discord_id TEXT UNIQUE NOT NULL, username TEXT, avatar TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )`).run();
+    await db.prepare(`CREATE TABLE discord_guilds (
+      id TEXT PRIMARY KEY, guild_id TEXT UNIQUE NOT NULL, owner_user_id TEXT NOT NULL,
+      name TEXT NOT NULL, icon TEXT, icon_url TEXT, permissions TEXT, is_owner INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )`).run();
     for (const name of ["0081_store_catalog_foundation.sql", "0082_store_order_inventory_foundation.sql", "0083_store_fulfilment_receipt_foundation.sql", "0084_store_commerce_runtime.sql"]) {
       await apply(db as unknown as D1Database, name);
     }
@@ -69,10 +87,60 @@ async function run() {
     assert.equal((await readPrivateStoreSupporterCards(db as unknown as D1Database, "buyer", true)).length, 0);
     await db.prepare("UPDATE store_commerce_entitlements SET status = 'reversed', reversed_at = CURRENT_TIMESTAMP WHERE id = 'entitlement'").run();
     assert.equal((await readPrivateStoreSupporterCards(db as unknown as D1Database, "buyer", false)).length, 0);
+
+    const enabledEnv = {
+      DB: db as unknown as D1Database,
+      DZN_STORE_ENABLED: "true",
+      DZN_STORE_COMMERCE_ENABLED: "true",
+      DZN_SUPPORTER_CARDS_PRIVATE_ENABLED: "true",
+      STRIPE_SECRET_KEY: "sk_test_fixture",
+    } as Env;
+    const unauthorizedResponse = await callSupporterCards(new Request("https://dzn.test/api/player/supporter-cards"), enabledEnv);
+    assert.equal(unauthorizedResponse.status, 401);
+    assert.deepEqual(await unauthorizedResponse.json(), { ok: false, error: "UNAUTHORIZED" });
+
+    const mockEnv = { ...enabledEnv, MOCK_AUTH: "true" } as Env;
+    const headResponse = await callSupporterCards(new Request("https://dzn.test/api/player/supporter-cards", { method: "HEAD" }), mockEnv);
+    assert.equal(headResponse.status, 204);
+    assert.equal(await headResponse.text(), "");
+    assert.match(headResponse.headers.get("cache-control") ?? "", /private/);
+
+    const getResponse = await callSupporterCards(new Request("https://dzn.test/api/player/supporter-cards"), mockEnv);
+    assert.equal(getResponse.status, 200);
+    assert.deepEqual(await getResponse.json(), {
+      ok: true,
+      private: true,
+      scope: "current_user",
+      cards: [],
+      safety: {
+        read_only: true,
+        current_user_only: true,
+        internal_ids_exposed: false,
+        stripe_references_exposed: false,
+        payment_details_exposed: false,
+        public_profile_changed: false,
+        competitive_effect: false,
+      },
+    });
   } finally {
     await mf.dispose();
   }
   console.log("Private Supporter Card tests passed.");
+}
+
+async function callSupporterCards(request: Request, env: Env) {
+  return supporterCardsHandler(makeContext(supporterCardsHandler, request, env)) as Promise<Response>;
+}
+
+function makeContext(handler: PagesFunction, request: Request, env: Env): Parameters<typeof handler>[0] {
+  return {
+    request,
+    env,
+    params: {},
+    waitUntil() {},
+    next: async () => new Response(null, { status: 404 }),
+    data: {},
+  };
 }
 
 async function apply(db: D1Database, name: string) {
