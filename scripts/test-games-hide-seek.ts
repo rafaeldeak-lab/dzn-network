@@ -74,11 +74,13 @@ async function run() {
     let state = await start(fixture);
     for (const target of state.game!.targets) state = await payload(await call(fixture, scan(state, target)));
     assert.equal(state.game?.status, "won"); assert.equal(state.game?.foundCount, 4); assert.equal(state.rewardedToday, true);
+    assert.equal(state.rewardGranted, true);
     const reward = fixture.db.sqlite.prepare("SELECT xp, parts FROM dzn_hide_seek_reward_ledger").get();
     assert.equal(reward?.xp, 60); assert.equal(reward?.parts, 2);
     fixture.db.sqlite.exec("UPDATE dzn_hide_seek_sessions SET started_at = started_at - 6000");
     state = await start(fixture);
     for (const target of state.game!.targets) state = await payload(await call(fixture, scan(state, target)));
+    assert.equal(state.rewardedToday, true); assert.equal(state.rewardGranted, false);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_hide_seek_reward_ledger").get()?.count, 1);
   });
   await test("six empty scans fail without a reward", async fixture => {

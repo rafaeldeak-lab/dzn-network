@@ -24,5 +24,6 @@ export type HideSeekGame = {
 export type HideSeekPayload = {
   serverTime: number;
   rewardedToday: boolean;
+  rewardGranted: boolean;
   game: HideSeekGame | null;
 };

@@ -37,11 +37,11 @@ function gameView(row: HideSeekRow, now: number): HideSeekGame {
       return { ...target, found: found.has(id) }; }) };
 }
 
-async function readState(db: D1Database, user: SessionUser, now: number): Promise<HideSeekPayload> {
+async function readState(db: D1Database, user: SessionUser, now: number, rewardGranted = false): Promise<HideSeekPayload> {
   const row = await db.prepare("SELECT * FROM dzn_hide_seek_sessions WHERE user_id = ?").bind(user.id).first<HideSeekRow>();
   const reward = await db.prepare("SELECT 1 AS rewarded FROM dzn_hide_seek_reward_ledger WHERE user_id = ? AND reward_key = ?")
     .bind(user.id, dayKey(now)).first<{ rewarded: number }>();
-  return { serverTime: now, rewardedToday: reward?.rewarded === 1, game: row ? gameView(row, now) : null };
+  return { serverTime: now, rewardedToday: reward?.rewarded === 1, rewardGranted, game: row ? gameView(row, now) : null };
 }
 
 export async function handleGamesHideSeek(request: Request, env: Env): Promise<Response> {
@@ -59,6 +59,7 @@ export async function handleGamesHideSeek(request: Request, env: Env): Promise<R
     const body = parsed.value;
     if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.action !== "string") return reply({ error: "Invalid Signal Hunt request." }, 400);
 
+    let rewardGranted = false;
     if (body.action === "start") {
       if (Object.keys(body).length !== 1) return reply({ error: "Invalid Signal Hunt request." }, 400);
       const result = await db.prepare(`INSERT INTO dzn_hide_seek_sessions
@@ -95,8 +96,9 @@ export async function handleGamesHideSeek(request: Request, env: Env): Promise<R
           HIDE_SEEK_REWARD.xp, HIDE_SEEK_REWARD.parts, now));
       const result = await db.batch(statements);
       if (!result[0].meta.changes) return reply({ error: "Another scan reached this hunt first. Refresh to continue." }, 409);
+      rewardGranted = status === "won" && Boolean(result[1]?.meta.changes);
     } else return reply({ error: "Unknown Signal Hunt action." }, 400);
-    return reply(await readState(db, user, now));
+    return reply(await readState(db, user, now, rewardGranted));
   } catch {
     return reply({ error: "DZN Signal Hunt is temporarily unavailable. Your Hub progress is unchanged." }, 503);
   }
