@@ -143,10 +143,19 @@ async function run() {
   await test("Hub keeps earned Word Chain progress after the play flag is disabled", async fixture => {
     const state = await payload(await call(fixture)); const word = candidate(state.round.requiredLetter);
     await payload(await call(fixture, { action: "play", roundId: state.round.id, version: 0, word }));
+    const yesterday = Date.now() - 86400000;
+    const yesterdayKey = new Date(yesterday).toISOString().slice(0, 10);
+    const entryId = randomUUID();
+    fixture.db.sqlite.prepare("INSERT INTO dzn_word_chain_rounds VALUES (?, 'radio', 'local-player', 1, ?, ?)")
+      .run(yesterdayKey, yesterday, yesterday);
+    fixture.db.sqlite.prepare("INSERT INTO dzn_word_chain_entries VALUES (?, ?, 'local-player', 'radio', 1, ?)")
+      .run(entryId, yesterdayKey, yesterday);
+    fixture.db.sqlite.prepare("INSERT INTO dzn_word_chain_reward_ledger VALUES (?, 'local-player', ?, ?, ?, 25, 1, ?)")
+      .run(randomUUID(), yesterdayKey, yesterdayKey, entryId, yesterday);
     fixture.env.DZN_GAMES_WORD_CHAIN_ENABLED = "false";
     const response = await handleGamesHub(new Request("https://local.test/api/games/hub", { headers: { cookie: fixture.cookie } }), fixture.env);
-    const hub = await response.json() as { summary: { xp: number; parts: number; history: Array<{ kind: string }> } };
-    assert.equal(hub.summary.xp, 25); assert.equal(hub.summary.parts, 1);
+    const hub = await response.json() as { summary: { xp: number; parts: number; streak: number; history: Array<{ kind: string }> } };
+    assert.equal(hub.summary.xp, 50); assert.equal(hub.summary.parts, 2); assert.equal(hub.summary.streak, 2);
     assert.ok(hub.summary.history.some(entry => entry.kind === "word-chain"));
   });
   await test("migration constraints reject forged rewards and preserve foreign keys", async fixture => {
