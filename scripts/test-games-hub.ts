@@ -6,7 +6,7 @@ import { unstable_readConfig } from "wrangler";
 import { hasMine, hasFlag, isRevealed, setIsRevealed, setHasFlag } from "@taros-minesweeper/lib";
 import { handleGamesHub, readHub } from "../functions/_lib/games-hub";
 import { createGameBoard, gameView, moveGame, type GameRow } from "../functions/_lib/games-hub-engine";
-import { GAME_MODES, type GameMode, type HubPayload } from "../lib/games-hub";
+import { GAME_MODES, HUB_EQUIPMENT, hubEquipmentUnlocked, type GameMode, type HubPayload } from "../lib/games-hub";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof gamesFixture>>;
@@ -39,6 +39,13 @@ function seedParts(f: Fixture, count = 12) {
 }
 
 async function run() {
+  await test("equipment collection unlocks only at verified XP and assembly thresholds", async () => {
+    assert.deepEqual(HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, { xp: 0, assemblies: 0 })).map(item => item.id), []);
+    assert.deepEqual(HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, { xp: 299, assemblies: 2 })).map(item => item.id),
+      ["field-scanner", "relay-core"]);
+    assert.deepEqual(HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, { xp: 300, assemblies: 9 })).map(item => item.id),
+      HUB_EQUIPMENT.map(item => item.id));
+  });
   await test("approved production flag persists in Pages config without enabling preview", async () => {
     const base = unstable_readConfig({ config: "wrangler.toml" });
     const production = unstable_readConfig({ config: "wrangler.toml", env: "production" });
