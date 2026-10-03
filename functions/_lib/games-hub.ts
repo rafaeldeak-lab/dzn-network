@@ -15,41 +15,64 @@ async function readGame(db: D1Database, userId: string) {
   return db.prepare("SELECT * FROM dzn_game_sessions WHERE user_id = ?").bind(userId).first<GameRow>();
 }
 
-async function hasTriviaRewardLedger(db: D1Database) {
-  const row = await db.prepare(`SELECT 1 AS present FROM sqlite_master
-    WHERE type = 'table' AND name = 'dzn_trivia_reward_ledger'`).first<{ present: number }>();
-  return row?.present === 1;
+async function availableRewardLedgers(db: D1Database) {
+  const rows = await db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'
+    AND name IN ('dzn_trivia_reward_ledger', 'dzn_word_chain_reward_ledger')`).all<{ name: string }>();
+  const names = new Set((rows.results ?? []).map(row => row.name));
+  return { trivia: names.has("dzn_trivia_reward_ledger"), wordChain: names.has("dzn_word_chain_reward_ledger") };
 }
 
-export async function readHub(db: D1Database, user: SessionUser, now: number, includeTriviaRewards = false): Promise<HubPayload> {
+type ExtraLedgers = { trivia: boolean; wordChain: boolean };
+
+export async function readHub(db: D1Database, user: SessionUser, now: number,
+  extraLedgers: ExtraLedgers = { trivia: false, wordChain: false }): Promise<HubPayload> {
   const totals = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts,
     COALESCE(SUM(CASE WHEN kind = 'workshop' THEN 1 ELSE 0 END), 0) AS assemblies
     FROM dzn_game_reward_ledger WHERE user_id = ?`).bind(user.id).first<{ xp: number; parts: number; assemblies: number }>();
   const today = await db.prepare(`SELECT kind FROM dzn_game_reward_ledger
     WHERE user_id = ? AND created_at >= ? AND kind != 'workshop'`).bind(user.id, Math.floor(now / DAY) * DAY).all<{ kind: GameMode }>();
-  const streakRow = await db.prepare(`WITH days AS (
-      SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day FROM dzn_game_reward_ledger WHERE user_id = ? AND kind != 'workshop'
-    ), ordered AS (SELECT day, ROW_NUMBER() OVER (ORDER BY day DESC) AS position, MAX(day) OVER () AS latest FROM days)
-    SELECT COUNT(*) AS streak FROM ordered WHERE latest >= ? AND day = latest - position + 1`)
-    .bind(DAY, user.id, Math.floor(now / DAY) - 1).first<{ streak: number }>();
+  const baseDays = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
+    FROM dzn_game_reward_ledger WHERE user_id = ? AND kind != 'workshop'`)
+    .bind(DAY, user.id).all<{ day: number }>();
+  const rewardDays = new Set((baseDays.results ?? []).map(row => row.day));
   const history = await db.prepare(`SELECT kind, xp, parts, created_at FROM dzn_game_reward_ledger
     WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`).bind(user.id).all<HubPayload["summary"]["history"][number]>();
-  let triviaTotals = { xp: 0, parts: 0 };
-  let triviaHistory: HubPayload["summary"]["history"] = [];
-  if (includeTriviaRewards) {
+  const extraTotals = { xp: 0, parts: 0 };
+  const extraHistory: HubPayload["summary"]["history"] = [];
+  if (extraLedgers.trivia) {
     const trivia = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts
       FROM dzn_trivia_reward_ledger WHERE user_id = ?`).bind(user.id).first<{ xp: number; parts: number }>();
-    triviaTotals = { xp: trivia?.xp ?? 0, parts: trivia?.parts ?? 0 };
+    extraTotals.xp += trivia?.xp ?? 0; extraTotals.parts += trivia?.parts ?? 0;
     const entries = await db.prepare(`SELECT 'trivia:' || difficulty AS kind, xp, parts, created_at
       FROM dzn_trivia_reward_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`)
       .bind(user.id).all<HubPayload["summary"]["history"][number]>();
-    triviaHistory = entries.results ?? [];
+    extraHistory.push(...(entries.results ?? []));
+    const days = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
+      FROM dzn_trivia_reward_ledger WHERE user_id = ?`).bind(DAY, user.id).all<{ day: number }>();
+    for (const row of days.results ?? []) rewardDays.add(row.day);
   }
-  const combinedHistory = [...(history.results ?? []), ...triviaHistory]
+  if (extraLedgers.wordChain) {
+    const wordChain = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts
+      FROM dzn_word_chain_reward_ledger WHERE user_id = ?`).bind(user.id).first<{ xp: number; parts: number }>();
+    extraTotals.xp += wordChain?.xp ?? 0; extraTotals.parts += wordChain?.parts ?? 0;
+    const entries = await db.prepare(`SELECT 'word-chain' AS kind, xp, parts, created_at
+      FROM dzn_word_chain_reward_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`)
+      .bind(user.id).all<HubPayload["summary"]["history"][number]>();
+    extraHistory.push(...(entries.results ?? []));
+    const days = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
+      FROM dzn_word_chain_reward_ledger WHERE user_id = ?`).bind(DAY, user.id).all<{ day: number }>();
+    for (const row of days.results ?? []) rewardDays.add(row.day);
+  }
+  const combinedHistory = [...(history.results ?? []), ...extraHistory]
     .sort((left, right) => right.created_at - left.created_at).slice(0, 12);
+  const latestRewardDay = rewardDays.size ? Math.max(...rewardDays) : -1;
+  let streak = 0;
+  if (latestRewardDay >= Math.floor(now / DAY) - 1) {
+    while (rewardDays.has(latestRewardDay - streak)) streak++;
+  }
   const row = await readGame(db, user.id);
-  return { serverTime: now, summary: { username: user.username, xp: (totals?.xp ?? 0) + triviaTotals.xp, parts: (totals?.parts ?? 0) + triviaTotals.parts,
-    assemblies: totals?.assemblies ?? 0, streak: streakRow?.streak ?? 0, today: (today.results ?? []).map(item => item.kind),
+  return { serverTime: now, summary: { username: user.username, xp: (totals?.xp ?? 0) + extraTotals.xp, parts: (totals?.parts ?? 0) + extraTotals.parts,
+    assemblies: totals?.assemblies ?? 0, streak, today: (today.results ?? []).map(item => item.kind),
     resetAt: (Math.floor(now / DAY) + 1) * DAY, history: combinedHistory }, game: row ? gameView(row, now) : null };
 }
 
@@ -64,8 +87,8 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
     if (env.DZN_GAMES_HUB_ENABLED !== "true") return reply({ error: "The Games Hub is not open on this environment yet." }, 503);
     const db = requireDb(env);
     const now = Date.now();
-    const includeTriviaRewards = await hasTriviaRewardLedger(db);
-    if (request.method === "GET") return reply(await readHub(db, user, now, includeTriviaRewards));
+    const extraLedgers = await availableRewardLedgers(db);
+    if (request.method === "GET") return reply(await readHub(db, user, now, extraLedgers));
     const parsed = await readBoundedJson<Record<string, unknown>>(request, 2048);
     if (!parsed.ok) return reply({ error: "Invalid game request." }, parsed.status);
     const body = parsed.value;
@@ -114,17 +137,17 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
     } else if (body.action === "assemble") {
       if (!isId(body.requestId)) return reply({ error: "Invalid assembly request." }, 400);
       const rewardKey = `workshop:${body.requestId}`;
-      const availableParts = includeTriviaRewards
-        ? `(SELECT COALESCE(SUM(parts), 0) FROM dzn_game_reward_ledger WHERE user_id = ?)
-          + (SELECT COALESCE(SUM(parts), 0) FROM dzn_trivia_reward_ledger WHERE user_id = ?)`
-        : `(SELECT COALESCE(SUM(parts), 0) FROM dzn_game_reward_ledger WHERE user_id = ?)`;
+      const extraPartQueries = [
+        extraLedgers.trivia ? `(SELECT COALESCE(SUM(parts), 0) FROM dzn_trivia_reward_ledger WHERE user_id = ?)` : null,
+        extraLedgers.wordChain ? `(SELECT COALESCE(SUM(parts), 0) FROM dzn_word_chain_reward_ledger WHERE user_id = ?)` : null,
+      ].filter((value): value is string => Boolean(value));
+      const availableParts = [`(SELECT COALESCE(SUM(parts), 0) FROM dzn_game_reward_ledger WHERE user_id = ?)`, ...extraPartQueries].join(" + ");
       const statement = db.prepare(`INSERT INTO dzn_game_reward_ledger (id, user_id, reward_key, kind, game_id, xp, parts, created_at)
         SELECT ?, ?, ?, 'workshop', NULL, 0, ?, ? WHERE
           (${availableParts}) >= ?
         ON CONFLICT(user_id, reward_key) DO NOTHING`);
-      const bindings = includeTriviaRewards
-        ? [crypto.randomUUID(), user.id, rewardKey, -WORKSHOP_PART_COST, now, user.id, user.id, WORKSHOP_PART_COST]
-        : [crypto.randomUUID(), user.id, rewardKey, -WORKSHOP_PART_COST, now, user.id, WORKSHOP_PART_COST];
+      const bindings = [crypto.randomUUID(), user.id, rewardKey, -WORKSHOP_PART_COST, now, user.id,
+        ...(extraLedgers.trivia ? [user.id] : []), ...(extraLedgers.wordChain ? [user.id] : []), WORKSHOP_PART_COST];
       const result = await statement.bind(...bindings).run();
       if (!result.meta.changes) {
         const alreadyDone = await db.prepare("SELECT id FROM dzn_game_reward_ledger WHERE user_id = ? AND reward_key = ?")
@@ -132,7 +155,7 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
         if (!alreadyDone) return reply({ error: "More parts are needed for this assembly." }, 409);
       }
     } else return reply({ error: "Unknown game action." }, 400);
-    return reply(await readHub(db, user, now, includeTriviaRewards));
+    return reply(await readHub(db, user, now, extraLedgers));
   } catch {
     // Never return SQL, stored board state or session diagnostics to the browser.
     return reply({ error: "Games Hub is temporarily unavailable. Your saved progress has not been reset." }, 503);
