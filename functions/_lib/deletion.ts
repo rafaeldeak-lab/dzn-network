@@ -198,7 +198,6 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
   const statements: D1PreparedStatement[] = [];
   const cascadeReferences = [
     ["dzn_word_chain_reward_ledger", "user_id"],
-    ["dzn_word_chain_entries", "user_id"],
     ["dzn_trivia_reward_ledger", "user_id"],
     ["dzn_trivia_sessions", "user_id"],
     ["dzn_game_reward_ledger", "user_id"],
@@ -233,6 +232,12 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
     statements.push(db.prepare(`UPDATE dzn_word_chain_rounds
       SET current_user_id = NULL
       WHERE current_user_id = ?`)
+      .bind(userId));
+  }
+  if (await tableExists(db, "dzn_word_chain_entries")) {
+    statements.push(db.prepare(`UPDATE dzn_word_chain_entries
+      SET user_id = NULL
+      WHERE user_id = ?`)
       .bind(userId));
   }
   return statements;

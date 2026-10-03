@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS dzn_word_chain_rounds (
 CREATE TABLE IF NOT EXISTS dzn_word_chain_entries (
   id TEXT PRIMARY KEY,
   round_id TEXT NOT NULL REFERENCES dzn_word_chain_rounds(id) ON DELETE RESTRICT,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   word TEXT NOT NULL CHECK (length(word) BETWEEN 3 AND 18 AND word = lower(word)),
   turn_number INTEGER NOT NULL CHECK (turn_number BETWEEN 1 AND 500),
   created_at INTEGER NOT NULL,

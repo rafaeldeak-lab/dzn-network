@@ -21,9 +21,9 @@ async function readRound(db: D1Database, user: SessionUser, now: number): Promis
   const id = dayKey(now);
   const seed = seedForDay(id);
   const row = await db.prepare("SELECT * FROM dzn_word_chain_rounds WHERE id = ?").bind(id).first<RoundRow>();
-  const entries = row ? await db.prepare(`SELECT entries.id, entries.word, users.username AS player,
+  const entries = row ? await db.prepare(`SELECT entries.id, entries.word, COALESCE(users.username, 'Former player') AS player,
       entries.turn_number, entries.created_at
-    FROM dzn_word_chain_entries AS entries JOIN users ON users.id = entries.user_id
+    FROM dzn_word_chain_entries AS entries LEFT JOIN users ON users.id = entries.user_id
     WHERE entries.round_id = ? ORDER BY entries.turn_number DESC LIMIT 12`).bind(id).all<{
       id: string; word: string; player: string; turn_number: number; created_at: number;
     }>() : { results: [] };
