@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
+import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleGamesHideSeek } from "../functions/_lib/games-hide-seek";
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import type { Env } from "../functions/_lib/types";
@@ -96,11 +97,24 @@ async function run() {
   await test("Hub preserves Signal Hunt rewards after the play flag is disabled", async fixture => {
     let state = await start(fixture);
     for (const target of state.game!.targets) state = await payload(await call(fixture, scan(state, target)));
+    const yesterday = Date.now() - 86400000;
+    fixture.db.sqlite.prepare(`INSERT INTO dzn_hide_seek_reward_ledger
+      (id, user_id, reward_key, game_id, xp, parts, created_at) VALUES (?, 'local-player', ?, ?, 60, 2, ?)`)
+      .run(randomUUID(), new Date(yesterday).toISOString().slice(0, 10), randomUUID(), yesterday);
     fixture.env.DZN_GAMES_HIDE_SEEK_ENABLED = "false";
     const response = await handleGamesHub(new Request("https://local.test/api/games/hub", { headers: { cookie: fixture.cookie } }), fixture.env);
-    const hub = await response.json() as { summary: { xp: number; parts: number; history: Array<{ kind: string }> } };
-    assert.equal(hub.summary.xp, 60); assert.equal(hub.summary.parts, 2);
+    const hub = await response.json() as { summary: { xp: number; parts: number; streak: number; history: Array<{ kind: string }> } };
+    assert.equal(hub.summary.xp, 120); assert.equal(hub.summary.parts, 4); assert.equal(hub.summary.streak, 2);
     assert.ok(hub.summary.history.some(entry => entry.kind === "hide-seek"));
+  });
+  await test("account deletion removes Signal Hunt sessions and rewards atomically", async fixture => {
+    let state = await start(fixture);
+    for (const target of state.game!.targets) state = await payload(await call(fixture, scan(state, target)));
+    assert.equal(await eraseOrRetainAccountUser(fixture.env.DB, "local-player"), 1);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM users WHERE id = 'local-player'").get()?.count, 0);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_hide_seek_sessions WHERE user_id = 'local-player'").get()?.count, 0);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_hide_seek_reward_ledger WHERE user_id = 'local-player'").get()?.count, 0);
+    assert.equal(fixture.db.sqlite.prepare("PRAGMA foreign_key_check").all().length, 0);
   });
   await test("migration constraints reject forged rewards and preserve foreign keys", async fixture => {
     assert.throws(() => fixture.db.sqlite.prepare("INSERT INTO dzn_hide_seek_reward_ledger VALUES (?, 'local-player', ?, ?, 999, 99, 0)").run(randomUUID(), randomUUID(), randomUUID()));

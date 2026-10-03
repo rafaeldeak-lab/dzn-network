@@ -197,6 +197,8 @@ export async function eraseOrRetainAccountUser(db: D1Database, userId: string) {
 async function directUserCleanupStatements(db: D1Database, userId: string) {
   const statements: D1PreparedStatement[] = [];
   const cascadeReferences = [
+    ["dzn_hide_seek_reward_ledger", "user_id"],
+    ["dzn_hide_seek_sessions", "user_id"],
     ["dzn_word_chain_reward_ledger", "user_id"],
     ["dzn_trivia_reward_ledger", "user_id"],
     ["dzn_trivia_sessions", "user_id"],

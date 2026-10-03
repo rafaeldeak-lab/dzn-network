@@ -72,6 +72,9 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
       FROM dzn_hide_seek_reward_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`)
       .bind(user.id).all<HubPayload["summary"]["history"][number]>();
     extraHistory.push(...(entries.results ?? []));
+    const days = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
+      FROM dzn_hide_seek_reward_ledger WHERE user_id = ?`).bind(DAY, user.id).all<{ day: number }>();
+    for (const row of days.results ?? []) rewardDays.add(row.day);
   }
   const combinedHistory = [...(history.results ?? []), ...extraHistory]
     .sort((left, right) => right.created_at - left.created_at).slice(0, 12);
