@@ -32,11 +32,10 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
     FROM dzn_game_reward_ledger WHERE user_id = ?`).bind(user.id).first<{ xp: number; parts: number; assemblies: number }>();
   const today = await db.prepare(`SELECT kind FROM dzn_game_reward_ledger
     WHERE user_id = ? AND created_at >= ? AND kind != 'workshop'`).bind(user.id, Math.floor(now / DAY) * DAY).all<{ kind: GameMode }>();
-  const streakRow = await db.prepare(`WITH days AS (
-      SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day FROM dzn_game_reward_ledger WHERE user_id = ? AND kind != 'workshop'
-    ), ordered AS (SELECT day, ROW_NUMBER() OVER (ORDER BY day DESC) AS position, MAX(day) OVER () AS latest FROM days)
-    SELECT COUNT(*) AS streak FROM ordered WHERE latest >= ? AND day = latest - position + 1`)
-    .bind(DAY, user.id, Math.floor(now / DAY) - 1).first<{ streak: number }>();
+  const baseDays = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
+    FROM dzn_game_reward_ledger WHERE user_id = ? AND kind != 'workshop'`)
+    .bind(DAY, user.id).all<{ day: number }>();
+  const rewardDays = new Set((baseDays.results ?? []).map(row => row.day));
   const history = await db.prepare(`SELECT kind, xp, parts, created_at FROM dzn_game_reward_ledger
     WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`).bind(user.id).all<HubPayload["summary"]["history"][number]>();
   const extraTotals = { xp: 0, parts: 0 };
@@ -49,6 +48,9 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
       FROM dzn_trivia_reward_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`)
       .bind(user.id).all<HubPayload["summary"]["history"][number]>();
     extraHistory.push(...(entries.results ?? []));
+    const days = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
+      FROM dzn_trivia_reward_ledger WHERE user_id = ?`).bind(DAY, user.id).all<{ day: number }>();
+    for (const row of days.results ?? []) rewardDays.add(row.day);
   }
   if (extraLedgers.wordChain) {
     const wordChain = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts
@@ -58,6 +60,9 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
       FROM dzn_word_chain_reward_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`)
       .bind(user.id).all<HubPayload["summary"]["history"][number]>();
     extraHistory.push(...(entries.results ?? []));
+    const days = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
+      FROM dzn_word_chain_reward_ledger WHERE user_id = ?`).bind(DAY, user.id).all<{ day: number }>();
+    for (const row of days.results ?? []) rewardDays.add(row.day);
   }
   if (extraLedgers.hideSeek) {
     const hideSeek = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts
@@ -70,9 +75,14 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
   }
   const combinedHistory = [...(history.results ?? []), ...extraHistory]
     .sort((left, right) => right.created_at - left.created_at).slice(0, 12);
+  const latestRewardDay = rewardDays.size ? Math.max(...rewardDays) : -1;
+  let streak = 0;
+  if (latestRewardDay >= Math.floor(now / DAY) - 1) {
+    while (rewardDays.has(latestRewardDay - streak)) streak++;
+  }
   const row = await readGame(db, user.id);
   return { serverTime: now, summary: { username: user.username, xp: (totals?.xp ?? 0) + extraTotals.xp, parts: (totals?.parts ?? 0) + extraTotals.parts,
-    assemblies: totals?.assemblies ?? 0, streak: streakRow?.streak ?? 0, today: (today.results ?? []).map(item => item.kind),
+    assemblies: totals?.assemblies ?? 0, streak, today: (today.results ?? []).map(item => item.kind),
     resetAt: (Math.floor(now / DAY) + 1) * DAY, history: combinedHistory }, game: row ? gameView(row, now) : null };
 }
 
