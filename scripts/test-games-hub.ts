@@ -111,6 +111,7 @@ async function run() {
     const won = await payload(await call(f, move));
     assert.equal(won.game?.status, "won"); assert.equal(won.summary.xp, 50); assert.equal(won.summary.parts, 1);
     assert.deepEqual(won.summary.today, ["recon"]);
+    assert.deepEqual(won.summary.challenges, { dailyRewards: 1, weeklyXp: 50, streak: 1 });
     assert.equal((await call(f, move)).status, 409);
     const second = await payload(await call(f, almostWon(f)));
     assert.equal(second.summary.xp, 50); assert.equal(second.summary.history.length, 1);
@@ -119,6 +120,21 @@ async function run() {
     for (const mode of Object.keys(GAME_MODES) as GameMode[]) await payload(await call(f, almostWon(f, mode)));
     const result = await payload(await call(f));
     assert.equal(result.summary.xp, 300); assert.equal(result.summary.parts, 6); assert.equal(result.summary.today.length, 3);
+    assert.equal(result.summary.challenges.dailyRewards, 3); assert.equal(result.summary.challenges.weeklyXp, 300);
+  });
+  await test("network challenges aggregate every available game reward ledger", async f => {
+    f.db.sqlite.exec(readFileSync("migrations/0085_games_hub_trivia.sql", "utf8"));
+    f.db.sqlite.exec(readFileSync("migrations/0087_games_hub_hide_seek.sql", "utf8"));
+    const now = Date.now();
+    f.db.sqlite.prepare("INSERT INTO dzn_game_reward_ledger VALUES (?, 'local-player', ?, 'recon', ?, 50, 1, ?)")
+      .run(randomUUID(), `challenge:${randomUUID()}`, randomUUID(), now);
+    f.db.sqlite.prepare("INSERT INTO dzn_trivia_reward_ledger VALUES (?, 'local-player', ?, 'recruit', ?, 40, 1, ?)")
+      .run(randomUUID(), `challenge:${randomUUID()}`, randomUUID(), now);
+    f.db.sqlite.prepare("INSERT INTO dzn_hide_seek_reward_ledger VALUES (?, 'local-player', ?, ?, 60, 2, ?)")
+      .run(randomUUID(), `challenge:${randomUUID()}`, randomUUID(), now);
+    const result = await payload(await call(f));
+    assert.deepEqual(result.summary.challenges, { dailyRewards: 3, weeklyXp: 150, streak: 1 });
+    assert.equal(result.summary.xp, 150); assert.equal(result.summary.parts, 4);
   });
   await test("lost, expired, stale and excessive-version games cannot earn", async f => {
     const move = almostWon(f);
@@ -172,9 +188,13 @@ async function run() {
   });
   await test("streak spans days, expires after a gap, and never deletes progress", async f => {
     seedParts(f, 4);
+    const futureState = await payload(await call(f));
+    assert.equal(futureState.summary.streak, 4); assert.equal(futureState.summary.challenges.weeklyXp, 200);
+    f.db.sqlite.prepare("INSERT INTO dzn_game_reward_ledger VALUES (?, 'local-player', ?, 'recon', ?, 50, 1, ?)")
+      .run(randomUUID(), `future:${randomUUID()}`, randomUUID(), Date.now() + 2 * 86400000);
     assert.equal((await payload(await call(f))).summary.streak, 4);
     f.db.sqlite.exec("UPDATE dzn_game_reward_ledger SET created_at = created_at - 86400000");
-    const state = await payload(await call(f)); assert.equal(state.summary.streak, 0); assert.equal(state.summary.parts, 4);
+    const state = await payload(await call(f)); assert.equal(state.summary.streak, 0); assert.equal(state.summary.parts, 5);
   });
   await test("rapid board creation is limited and only one current board is kept", async f => {
     await payload(await call(f, { action: "start", mode: "recon" }));

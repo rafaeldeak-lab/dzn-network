@@ -27,53 +27,71 @@ type ExtraLedgers = { trivia: boolean; wordChain: boolean; hideSeek: boolean };
 
 export async function readHub(db: D1Database, user: SessionUser, now: number,
   extraLedgers: ExtraLedgers = { trivia: false, wordChain: false, hideSeek: false }): Promise<HubPayload> {
+  const dayStart = Math.floor(now / DAY) * DAY;
+  const rollingWeekStart = now - 7 * DAY;
   const totals = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts,
-    COALESCE(SUM(CASE WHEN kind = 'workshop' THEN 1 ELSE 0 END), 0) AS assemblies
-    FROM dzn_game_reward_ledger WHERE user_id = ?`).bind(user.id).first<{ xp: number; parts: number; assemblies: number }>();
+    COALESCE(SUM(CASE WHEN kind = 'workshop' THEN 1 ELSE 0 END), 0) AS assemblies,
+    COALESCE(SUM(CASE WHEN kind != 'workshop' AND created_at BETWEEN ? AND ? THEN 1 ELSE 0 END), 0) AS daily_rewards,
+    COALESCE(SUM(CASE WHEN kind != 'workshop' AND created_at BETWEEN ? AND ? THEN xp ELSE 0 END), 0) AS weekly_xp
+    FROM dzn_game_reward_ledger WHERE user_id = ?`).bind(dayStart, now, rollingWeekStart, now, user.id)
+    .first<{ xp: number; parts: number; assemblies: number; daily_rewards: number; weekly_xp: number }>();
   const today = await db.prepare(`SELECT kind FROM dzn_game_reward_ledger
-    WHERE user_id = ? AND created_at >= ? AND kind != 'workshop'`).bind(user.id, Math.floor(now / DAY) * DAY).all<{ kind: GameMode }>();
+    WHERE user_id = ? AND created_at BETWEEN ? AND ? AND kind != 'workshop'`).bind(user.id, dayStart, now).all<{ kind: GameMode }>();
   const baseDays = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
-    FROM dzn_game_reward_ledger WHERE user_id = ? AND kind != 'workshop'`)
-    .bind(DAY, user.id).all<{ day: number }>();
+    FROM dzn_game_reward_ledger WHERE user_id = ? AND kind != 'workshop' AND created_at <= ?`)
+    .bind(DAY, user.id, now).all<{ day: number }>();
   const rewardDays = new Set((baseDays.results ?? []).map(row => row.day));
   const history = await db.prepare(`SELECT kind, xp, parts, created_at FROM dzn_game_reward_ledger
     WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`).bind(user.id).all<HubPayload["summary"]["history"][number]>();
   const extraTotals = { xp: 0, parts: 0 };
+  const challengeTotals = { dailyRewards: totals?.daily_rewards ?? 0, weeklyXp: totals?.weekly_xp ?? 0 };
   const extraHistory: HubPayload["summary"]["history"] = [];
   if (extraLedgers.trivia) {
-    const trivia = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts
-      FROM dzn_trivia_reward_ledger WHERE user_id = ?`).bind(user.id).first<{ xp: number; parts: number }>();
+    const trivia = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts,
+      COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN 1 ELSE 0 END), 0) AS daily_rewards,
+      COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN xp ELSE 0 END), 0) AS weekly_xp
+      FROM dzn_trivia_reward_ledger WHERE user_id = ?`).bind(dayStart, now, rollingWeekStart, now, user.id)
+      .first<{ xp: number; parts: number; daily_rewards: number; weekly_xp: number }>();
     extraTotals.xp += trivia?.xp ?? 0; extraTotals.parts += trivia?.parts ?? 0;
+    challengeTotals.dailyRewards += trivia?.daily_rewards ?? 0; challengeTotals.weeklyXp += trivia?.weekly_xp ?? 0;
     const entries = await db.prepare(`SELECT 'trivia:' || difficulty AS kind, xp, parts, created_at
       FROM dzn_trivia_reward_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`)
       .bind(user.id).all<HubPayload["summary"]["history"][number]>();
     extraHistory.push(...(entries.results ?? []));
     const days = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
-      FROM dzn_trivia_reward_ledger WHERE user_id = ?`).bind(DAY, user.id).all<{ day: number }>();
+      FROM dzn_trivia_reward_ledger WHERE user_id = ? AND created_at <= ?`).bind(DAY, user.id, now).all<{ day: number }>();
     for (const row of days.results ?? []) rewardDays.add(row.day);
   }
   if (extraLedgers.wordChain) {
-    const wordChain = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts
-      FROM dzn_word_chain_reward_ledger WHERE user_id = ?`).bind(user.id).first<{ xp: number; parts: number }>();
+    const wordChain = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts,
+      COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN 1 ELSE 0 END), 0) AS daily_rewards,
+      COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN xp ELSE 0 END), 0) AS weekly_xp
+      FROM dzn_word_chain_reward_ledger WHERE user_id = ?`).bind(dayStart, now, rollingWeekStart, now, user.id)
+      .first<{ xp: number; parts: number; daily_rewards: number; weekly_xp: number }>();
     extraTotals.xp += wordChain?.xp ?? 0; extraTotals.parts += wordChain?.parts ?? 0;
+    challengeTotals.dailyRewards += wordChain?.daily_rewards ?? 0; challengeTotals.weeklyXp += wordChain?.weekly_xp ?? 0;
     const entries = await db.prepare(`SELECT 'word-chain' AS kind, xp, parts, created_at
       FROM dzn_word_chain_reward_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`)
       .bind(user.id).all<HubPayload["summary"]["history"][number]>();
     extraHistory.push(...(entries.results ?? []));
     const days = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
-      FROM dzn_word_chain_reward_ledger WHERE user_id = ?`).bind(DAY, user.id).all<{ day: number }>();
+      FROM dzn_word_chain_reward_ledger WHERE user_id = ? AND created_at <= ?`).bind(DAY, user.id, now).all<{ day: number }>();
     for (const row of days.results ?? []) rewardDays.add(row.day);
   }
   if (extraLedgers.hideSeek) {
-    const hideSeek = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts
-      FROM dzn_hide_seek_reward_ledger WHERE user_id = ?`).bind(user.id).first<{ xp: number; parts: number }>();
+    const hideSeek = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts,
+      COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN 1 ELSE 0 END), 0) AS daily_rewards,
+      COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN xp ELSE 0 END), 0) AS weekly_xp
+      FROM dzn_hide_seek_reward_ledger WHERE user_id = ?`).bind(dayStart, now, rollingWeekStart, now, user.id)
+      .first<{ xp: number; parts: number; daily_rewards: number; weekly_xp: number }>();
     extraTotals.xp += hideSeek?.xp ?? 0; extraTotals.parts += hideSeek?.parts ?? 0;
+    challengeTotals.dailyRewards += hideSeek?.daily_rewards ?? 0; challengeTotals.weeklyXp += hideSeek?.weekly_xp ?? 0;
     const entries = await db.prepare(`SELECT 'hide-seek' AS kind, xp, parts, created_at
       FROM dzn_hide_seek_reward_ledger WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 12`)
       .bind(user.id).all<HubPayload["summary"]["history"][number]>();
     extraHistory.push(...(entries.results ?? []));
     const days = await db.prepare(`SELECT DISTINCT CAST(created_at / ? AS INTEGER) AS day
-      FROM dzn_hide_seek_reward_ledger WHERE user_id = ?`).bind(DAY, user.id).all<{ day: number }>();
+      FROM dzn_hide_seek_reward_ledger WHERE user_id = ? AND created_at <= ?`).bind(DAY, user.id, now).all<{ day: number }>();
     for (const row of days.results ?? []) rewardDays.add(row.day);
   }
   const combinedHistory = [...(history.results ?? []), ...extraHistory]
@@ -86,7 +104,8 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
   const row = await readGame(db, user.id);
   return { serverTime: now, summary: { username: user.username, xp: (totals?.xp ?? 0) + extraTotals.xp, parts: (totals?.parts ?? 0) + extraTotals.parts,
     assemblies: totals?.assemblies ?? 0, streak, today: (today.results ?? []).map(item => item.kind),
-    resetAt: (Math.floor(now / DAY) + 1) * DAY, history: combinedHistory }, game: row ? gameView(row, now) : null };
+    challenges: { ...challengeTotals, streak }, resetAt: (Math.floor(now / DAY) + 1) * DAY, history: combinedHistory },
+    game: row ? gameView(row, now) : null };
 }
 
 export async function handleGamesHub(request: Request, env: Env): Promise<Response> {

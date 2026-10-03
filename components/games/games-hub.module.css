@@ -139,6 +139,10 @@
 .missions li strong { font-size: 13px; }
 .missions li div span { font-size: 11px; color: var(--muted); }
 .missions li > span:last-child { color: var(--muted); font-size: 10px; }
+.missions li progress { appearance: none; width: 100%; height: 4px; border: 0; background: #293537; }
+.missions li progress::-webkit-progress-bar { background: #293537; }
+.missions li progress::-webkit-progress-value { background: var(--cyan); }
+.missions li progress::-moz-progress-bar { background: var(--cyan); }
 .rankProgress { border-top: 1px solid #303738; padding-top: 24px; margin-top: 10px; }
 .nextBadge { display: flex; gap: 9px; align-items: center; }
 .nextBadge h3 { font-size: 14px; }

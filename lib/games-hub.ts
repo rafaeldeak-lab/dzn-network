@@ -12,6 +12,7 @@ export type GameView = {
 };
 export const WORKSHOP_PART_COST = 12;
 export const WORKSHOP_STAGES = ["Power unit", "Signal array", "Field relay"] as const;
+export const HUB_CHALLENGE_TARGETS = { dailyRewards: 2, weeklyXp: 500, streak: 3 } as const;
 export const HUB_BADGES = [
   { name: "First Signal", xp: 50, position: "0% 0%" },
   { name: "Field Engineer", xp: 150, position: "50% 0%" },
@@ -23,6 +24,7 @@ export const HUB_BADGES = [
 export type HubSummary = {
   username: string; xp: number; parts: number; streak: number; assemblies: number;
   today: GameMode[]; resetAt: number;
+  challenges: { dailyRewards: number; weeklyXp: number; streak: number };
   history: { kind: string; xp: number; parts: number; created_at: number }[];
 };
 export type HubPayload = { serverTime: number; summary: HubSummary; game: GameView | null };

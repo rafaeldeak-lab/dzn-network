@@ -7,7 +7,7 @@ https://chatgpt.com/share/6aa5adde-2070-83ed-8b35-5378cb3f7c21
 
 The latest requirement makes website games available to every Discord-signed-in player, not just Pro server owners. This supersedes the earlier Pro-only games proposal. References are inspiration, not evidence of implemented features or permission to publish fabricated ranks, online counts or rewards.
 
-This release implements `/games` with DZN Minesweeper, Recon/Patrol/Survival difficulties, saved boards, touch flags, keyboard controls, daily earned website XP and parts, six original insignia, a three-stage field-relay workshop, prestige counts, and personal reward history. It is not the complete multi-game lobby.
+This release implements `/games` with DZN Minesweeper, Recon/Patrol/Survival difficulties, saved boards, touch flags, keyboard controls, daily earned website XP and parts, six original insignia, a three-stage field-relay workshop, prestige counts, personal reward history, and compact network-wide challenge progress derived from every available game reward ledger. It is not the complete multi-game lobby.
 
 ## Rules and Boundaries
 
@@ -16,6 +16,7 @@ This release implements `/games` with DZN Minesweeper, Recon/Patrol/Survival dif
 - Board state stays server-side. The client receives only revealed adjacent counts and player flags while playing. The adapter preserves flagged cells during engine flood-fill and uses the all-safe-cells win rule rather than the library's all-cells-revealed helper.
 - Each difficulty rewards once per UTC day: Recon 50 XP/1 part, Patrol 100 XP/2 parts, Survival 150 XP/3 parts. Maximum 300 XP/6 parts per day. Further wins are practice.
 - XP and parts are not purchasable, transferable, redeemable, or usable for DayZ statistics, competitive ranking, paid plans, billing credit or cash.
+- Network challenges are read-only progress goals. They do not mint rewards: daily activity count, rolling seven-day XP and streak progress come only from already verified game reward rows.
 - Every 12 earned parts builds one assembly. Three assemblies complete a relay and increment prestige. XP and completed projects survive a missed day. Streaks count consecutive days with an earned game reward, allowing yesterday's streak to continue today.
 - Server-controlled time, owner-scoped session reads, compare-and-swap moves, an atomic win/reward transaction, daily uniqueness and idempotent workshop request IDs prevent stale writes and duplicate rewards. No client-supplied score or reward amount is trusted.
 - One current board per player bounds session storage. Starting another board is limited to once per five seconds; board versions are capped at 2,000. This is not a claim of bot-proof competitive play. Ranked PvP needs separate anti-automation rules and controls.

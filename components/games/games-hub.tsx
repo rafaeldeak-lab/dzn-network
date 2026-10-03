@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "re
 import { ArrowRight, Award, BookOpen, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, LoaderCircle,
   LogIn, Microchip, MousePointer2, Play, Radio, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
-import { GAME_MODES, HUB_BADGES, WORKSHOP_PART_COST, WORKSHOP_STAGES, type GameMode, type GameView, type HubPayload } from "@/lib/games-hub";
+import { GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, WORKSHOP_PART_COST, WORKSHOP_STAGES, type GameMode, type GameView, type HubPayload } from "@/lib/games-hub";
 import { TRIVIA_DIFFICULTIES, type TriviaDifficulty, type TriviaPayload } from "@/lib/games-trivia";
 import { WORD_CHAIN_REWARD, type WordChainPayload } from "@/lib/games-word-chain";
 import { HIDE_SEEK_REWARD, type HideSeekPayload } from "@/lib/games-hide-seek";
@@ -111,6 +111,15 @@ export function GamesHub() {
   const rank = HUB_BADGES[rankIndex];
   const nextRank = HUB_BADGES.find(badge => badge.xp > xp);
   const progress = nextRank ? Math.min(100, xp / nextRank.xp * 100) : 100;
+  const challengeProgress = summary?.challenges ?? { dailyRewards: summary?.today.length ?? 0, weeklyXp: 0, streak: summary?.streak ?? 0 };
+  const challenges = summary ? [
+    { id: "daily", label: "Daily operator", detail: "Rewarded activities today", icon: Target,
+      value: challengeProgress.dailyRewards, target: HUB_CHALLENGE_TARGETS.dailyRewards },
+    { id: "weekly", label: "Seven-day signal", detail: "Website XP earned in 7 days", icon: Zap,
+      value: challengeProgress.weeklyXp, target: HUB_CHALLENGE_TARGETS.weeklyXp },
+    { id: "streak", label: "Hold the line", detail: "Consecutive reward days", icon: Flame,
+      value: challengeProgress.streak, target: HUB_CHALLENGE_TARGETS.streak },
+  ] : [];
 
   function start() {
     setReplace(false); setTool("reveal");
@@ -193,9 +202,9 @@ export function GamesHub() {
         </div>
 
         <aside className={styles.sidebar}>
-          <section className={styles.missions}><div className={styles.asideHeading}><span className={styles.eyebrow}>DAILY MISSIONS</span><span>{summary?.today.length} / 3</span></div><h3>Clear. Collect. Construct.</h3>
+          <section className={styles.missions}><div className={styles.asideHeading}><span className={styles.eyebrow}>NETWORK CHALLENGES</span><span>{challenges.filter(item => item.value >= item.target).length} / {challenges.length}</span></div><h3>Play across the Hub.</h3>
             <div className={styles.reset}><Clock3 size={13} /><span>Resets {new Date(summary!.resetAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span><span><Flame size={14} />{summary?.streak} day streak</span></div>
-            <ul>{modes.map(key => { const done = summary?.today.includes(key); return <li key={key} data-complete={done}><span className={styles.missionCheck}>{done ? <Check size={17} /> : <Target size={17} />}</span><div><strong>{GAME_MODES[key].label} sweep</strong><span>{GAME_MODES[key].xp} XP + {GAME_MODES[key].parts} parts</span></div><span>{done ? "Done" : "0 / 1"}</span></li>; })}</ul>
+            <ul>{challenges.map(item => { const done = item.value >= item.target; const shown = Math.min(item.value, item.target); return <li key={item.id} data-complete={done}><span className={styles.missionCheck}>{done ? <Check size={17} /> : <item.icon size={17} />}</span><div><strong>{item.label}</strong><span>{item.detail}</span><progress value={shown} max={item.target} aria-label={`${item.label} progress`} /></div><span>{shown.toLocaleString()} / {item.target.toLocaleString()}</span></li>; })}</ul>
           </section>
           <section className={styles.rankProgress}><div className={styles.asideHeading}><span className={styles.eyebrow}>NEXT INSIGNIA</span><Sparkles size={17} /></div><div className={styles.nextBadge}><Insignia position={(nextRank ?? rank).position} small /><div><h3>{nextRank?.name ?? "Network Legend"}</h3><span>{xp.toLocaleString()} / {(nextRank?.xp ?? xp).toLocaleString()} XP</span></div></div><progress value={progress} max={100} aria-label="Next insignia progress" /></section>
           {view !== "workshop" && <a href="#workshop" onClick={() => setView("workshop")} className={styles.projectTeaser}><div className={styles.projectTeaserImage} /><div><span className={styles.eyebrow}>THE WORKSHOP</span><h3>Your field relay</h3><span>{summary?.parts} parts collected<ArrowRight size={18} /></span></div></a>}
