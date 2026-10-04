@@ -197,6 +197,7 @@
     "autodev:all": "npm run autodev:audit && npm run autodev:quality && npm run autodev:production-smoke",
     "test:full-system": "npm run lint && npm run test && npm run build && npm run audit:system && npm run audit:adm-sync && npm run test:public-profile-sync && npm run check:automation-live",
     "test:comms-discoverability": "tsx scripts/test-comms-discoverability.ts",
+    "qa:dzn-assist": "node scripts/qa-dzn-assist.mjs",
     "test:dzn-comms-read-history": "tsx scripts/test-dzn-comms-read-history.ts && npm run test:dzn-comms-history-client",
     "test:dzn-comms-history-client": "tsx --test scripts/test-dzn-comms-history-client.ts",
     "test:dzn-comms-message-sending-contract": "node --test scripts/test-dzn-comms-message-sending-contract.mjs && tsx scripts/test-dzn-comms-live-runtime.ts && npm run test:dzn-comms-reactions",
