@@ -50,6 +50,7 @@ assert.equal(assistSource.includes('window.location.hash !== "#dzn-assist"'), tr
 assert.equal(assistSource.includes('scrollIntoView({ block: "start" })'), true, "DZN Assist must move the direct-linked panel into view after hydration.");
 assert.equal(assistSource.includes("document.fonts?.ready.then(scrollToAssist)"), true, "DZN Assist must restore the anchor after web fonts settle.");
 assert.equal(assistSource.includes("Your search stays in this browser."), true, "DZN Assist must explain its local-only search boundary.");
+assert.equal(assistSource.includes('normalizedQuery.split(/\\s+/).every((term) => searchableGuide.includes(term))'), true, "DZN Assist must match every search term across the guide's combined searchable fields.");
 assert.equal(assistSource.includes("DZN_SUPPORT_EMAIL_HREF"), true, "DZN Assist must provide a private human-support route.");
 assert.equal(assistSource.includes("DZN_PUBLIC_DISCORD_INVITE_URL"), true, "DZN Assist must provide the public DZN Discord route.");
 assert.equal(assistGuidesSource.includes('href: "/setup"'), true, "DZN Assist must guide owners to resumable server setup.");

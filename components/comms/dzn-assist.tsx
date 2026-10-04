@@ -17,8 +17,10 @@ export function DznAssist() {
   const guides = useMemo(() => DZN_ASSIST_GUIDES.filter((guide) => {
     if (category !== "All" && guide.category !== category) return false;
     if (!normalizedQuery) return true;
-    return [guide.title, guide.summary, guide.category, ...guide.keywords]
-      .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
+    const searchableGuide = [guide.title, guide.summary, guide.category, ...guide.keywords]
+      .join(" ")
+      .toLocaleLowerCase();
+    return normalizedQuery.split(/\s+/).every((term) => searchableGuide.includes(term));
   }), [category, normalizedQuery]);
 
   useEffect(() => {

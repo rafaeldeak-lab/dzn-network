@@ -24,8 +24,8 @@ try {
       const rect = document.querySelector("#dzn-assist")?.getBoundingClientRect();
       return Boolean(rect && rect.top < window.innerHeight && rect.bottom > 0);
     });
-    await page.locator("#dzn-assist-search").fill("server setup");
-    await page.getByRole("heading", { name: "Add or resume a server setup" }).waitFor({ state: "visible" });
+    await page.locator("#dzn-assist-search").fill("link stats");
+    await page.getByRole("heading", { name: "Connect your DayZ stats" }).waitFor({ state: "visible" });
 
     const layout = await page.evaluate(() => ({
       bodyWidth: document.body.scrollWidth,
