@@ -37,10 +37,8 @@ assert.deepEqual(dispositions.requests.map(row => row.number), Array.from({ leng
 const closed = dispositions.requests.filter(row => row.status === "closed_superseded").map(row => row.number);
 assert.deepEqual(closed, [
   52, 63, 64,
-  ...Array.from({ length: 9 }, (_, i) => i + 82),
-  ...Array.from({ length: 12 }, (_, i) => i + 97),
-  109,
-  ...Array.from({ length: 8 }, (_, i) => i + 110),
+  ...Array.from({ length: 13 }, (_, i) => i + 82),
+  ...Array.from({ length: 27 }, (_, i) => i + 96),
 ]);
 assert.equal(dispositions.closed_superseded, closed.length);
 assert.equal(dispositions.open_legacy, 73 - closed.length);
@@ -50,9 +48,10 @@ for (const row of dispositions.requests) {
   assert.ok(["closed_superseded", "port_required", "partial", "design_reconcile", "in_progress"].includes(row.status));
 }
 const currentBacklog = read("docs/DZN_RELEASE_BACKLOG_2026-09-13.md");
-assert.match(currentBacklog, /remaining 40 older requests are still open/);
-assert.match(currentBacklog, /#52, #63, #64, #82-#90 and #97-#117/);
-assert.match(currentBacklog, /#96 \| Earned-spin and reward-wheel policy remains deferred/);
+assert.match(currentBacklog, /remaining 30 older requests are still open/);
+assert.match(currentBacklog, /#52, #63, #64, #82-#94, #96-#122/);
+assert.match(currentBacklog, /#95 \| Real Comms presence/);
+assert.doesNotMatch(currentBacklog, /#96 \| Earned-spin and reward-wheel policy remains deferred/);
 assert.doesNotMatch(currentBacklog, /#109 \| Platform-owner Store order reconciliation/);
 for (const subject of ["NukeTown", "FED & FERAL", "Nitrado", "Discord", "Customer billing", "Spin/reward", "DZN Games Hub"]) {
   assert.ok(currentBacklog.includes(subject), `Retain wider user priority: ${subject}`);

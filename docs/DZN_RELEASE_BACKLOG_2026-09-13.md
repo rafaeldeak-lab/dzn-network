@@ -7,17 +7,17 @@ individual dispositions are recorded in `dzn-legacy-request-dispositions-2026-09
 This supersedes the open-count wording in the September 12 snapshot, which is
 retained as historical evidence. A disposition is not implementation or live proof.
 
-Thirty-three requests were verified against current source and closed as superseded:
-#52, #63, #64, #82-#90 and #97-#117. Each has an individual GitHub comment with
+Forty-three requests were verified against current source and closed as superseded:
+#52, #63, #64, #82-#94, #96-#122. Each has an individual GitHub comment with
 replacement releases and evidence. Their original branches and history remain.
-The remaining 40 older requests are still open because their unique requirements
+The remaining 30 older requests are still open because their unique requirements
 have not all been implemented. No blind old-stack merge or migration was performed.
 Each open description begins with a current, request-specific
 reconciliation note linking replacement work and this record. Every original
 description is retained below it, and every original head was checked before the
-update. The 33 verified closures plus 40 open requests account for all 73.
+update. The 43 verified closures plus 30 open requests account for all 73.
 
-Current source comparison: `3f25cca7f9ba927853f9553c6635922e13ae9215`.
+Current source comparison: `da206314957f63a8cc31dc2a60c25f92f2d36bba`.
 Board UI release: PR #185, merge `ee43f3f1f445af92ffd423409441b42d9e7b257d`.
 The board release passed 23 rendered checks and independent review. It removes the
 header pause button, adds DZN field-board styling, and keeps a Display setting
@@ -65,10 +65,7 @@ revocation cannot consume the old cadence.
 | #58-#62 | Genuine gameplay challenges, XP, calling cards and award audit | Separate from website-game XP; verified source and identity required |
 | #65-#68 | Missing profile discovery/attribution controls, CTF and event provenance | Explicit public opt-in; no name-only account linking |
 | #69-#81 | Public community directory, trusted member imports, audit and private exports | Private Discord guild matching is not a public member directory; no retained export activation |
-| #91-#95 | Multi-room Comms/support design, interaction/runtime contracts and presence | Existing read-only shell is not a live chat service |
-| #96 | Earned-spin and reward-wheel policy remains deferred; Store catalog, orders, receipts, fulfilment, purchases and private Supporter Cards were rebuilt in #247-#261 | No paid random rewards; live Stripe and customer mutations remain separate controlled operations |
-| #118-#119 | Authenticated public history intent and tie-safe pagination | Current read API is not equivalent to every older contract |
-| #120-#122 | Remaining multi-room/runtime contracts beyond current-model response handling and rendered regression checks released in #186 | No production flags or schema changed; live Comms remains separate |
+| #95 | Real Comms presence | Do not substitute static labels or inferred page views for a server-backed presence contract |
 
 ## Wider User Requests Retained
 
