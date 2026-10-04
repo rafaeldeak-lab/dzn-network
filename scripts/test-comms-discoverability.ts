@@ -40,7 +40,7 @@ assert.equal(launcherSource.includes("onClick={closeAndRestoreFocus}"), true, "T
 assert.equal(launcherSource.includes("ref={triggerButtonRef}"), true, "The launcher trigger must remain available as the focus return target.");
 
 assert.equal(commsSource.includes('id="global-chat"'), true, "Global Chat must have a direct-link target.");
-assert.equal(commsSource.includes('sendingEnabled\n    ? "Live now"'), true, "Global Chat must identify a live sending runtime.");
+assert.equal(commsSource.includes('selectedChannelAccessLabel = sendingEnabled\n    ? "Live now"'), true, "The selected Comms channel must identify a live sending runtime.");
 assert.equal(commsSource.includes('? "Read-only history"'), true, "Global Chat must identify read-only history.");
 assert.equal(commsSource.includes('? "Checking access"'), true, "Global Chat must identify access checks in progress.");
 assert.equal(commsSource.includes(': "Preview only"'), true, "Global Chat must identify the static preview state.");

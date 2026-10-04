@@ -19,18 +19,33 @@ export type CommsHistoryMessage = {
   reactions?: CommsReactionSummary;
 };
 
+export type CommsChannel = {
+  slug: string;
+  kind: "public" | "private_group";
+  name: string;
+  description: string | null;
+  visibility: "public" | "private_group";
+  current_user_member_role: "owner" | "moderator" | "member" | null;
+};
+
 export type CommsHistoryPayload = {
   ok: true;
   generated_at: string;
   read_only: true;
   presentation_only: true;
-  channel: { slug: string; kind: "public"; name: string; description: string | null; visibility: "public" };
-  access: { public_channel: true; private_group_membership_required: false; current_user_member_role: null };
+  channel: Omit<CommsChannel, "current_user_member_role">;
+  access: {
+    public_channel: boolean;
+    private_group_membership_required: boolean;
+    current_user_member_role: "owner" | "moderator" | "member" | null;
+  };
+  available_channels: CommsChannel[];
   messages: CommsHistoryMessage[];
   page: { next_cursor: string | null; has_more: boolean; limit: number };
   feature_flags: {
     route_enabled: boolean;
     sending_enabled: boolean;
+    private_groups_enabled: boolean;
     reactions_enabled: boolean;
     reactions_write_enabled: boolean;
     report_actions_enabled: boolean;
@@ -76,6 +91,34 @@ function timestamp(value: unknown): string | null {
   return result;
 }
 
+function channelSlug(value: unknown): string {
+  const slug = text(value, 64).toLowerCase();
+  if (!/^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/.test(slug)) throw unavailable();
+  return slug;
+}
+
+function memberRole(value: unknown): CommsChannel["current_user_member_role"] {
+  if (value === null || value === "owner" || value === "moderator" || value === "member") return value;
+  throw unavailable();
+}
+
+function projectChannel(value: unknown): CommsChannel {
+  const input = record(value);
+  const kind = input.kind;
+  const visibility = input.visibility;
+  if ((kind !== "public" && kind !== "private_group") || visibility !== kind) throw unavailable();
+  const role = memberRole(input.current_user_member_role);
+  if ((kind === "public" && (input.slug !== "global-chat" || role !== null)) || (kind === "private_group" && role === null)) throw unavailable();
+  return {
+    slug: channelSlug(input.slug),
+    kind,
+    name: text(input.name, 80),
+    description: nullableText(input.description, 180),
+    visibility: kind,
+    current_user_member_role: role,
+  };
+}
+
 function reactionSummary(value: unknown): CommsReactionSummary {
   const input = record(value);
   const revision = text(input.revision, 40);
@@ -98,26 +141,39 @@ function reactionSummary(value: unknown): CommsReactionSummary {
   return { revision, available_reactions: available, counts };
 }
 
-// Project only the current public channel contract. Never pass an arbitrary response through to JSX.
+// Project only public Global Chat or an explicitly membership-scoped private group.
 export function parseCommsHistory(value: unknown): CommsHistoryPayload {
   const input = record(value), channel = record(input.channel), access = record(input.access), flags = record(input.feature_flags), page = record(input.page);
+  const kind = channel.kind;
+  const visibility = channel.visibility;
+  const role = memberRole(access.current_user_member_role);
+  const isPublic = kind === "public" && visibility === "public" && channel.slug === "global-chat";
+  const isPrivate = kind === "private_group" && visibility === "private_group" && role !== null;
   if (input.ok !== true || input.read_only !== true || input.presentation_only !== true
-    || channel.slug !== "global-chat" || channel.kind !== "public" || channel.visibility !== "public"
-    || access.public_channel !== true || access.private_group_membership_required !== false
-    || access.current_user_member_role !== null || flags.route_enabled !== true
+    || (!isPublic && !isPrivate)
+    || access.public_channel !== isPublic || access.private_group_membership_required !== isPrivate
+    || flags.route_enabled !== true || typeof flags.private_groups_enabled !== "boolean"
     || typeof flags.sending_enabled !== "boolean" || typeof flags.report_actions_enabled !== "boolean"
     || typeof flags.reactions_enabled !== "boolean" || typeof flags.reactions_write_enabled !== "boolean"
     || typeof flags.moderation_mutations_enabled !== "boolean"
     || (flags.reactions_write_enabled === true && flags.reactions_enabled !== true)
     || flags.report_actions_enabled !== flags.sending_enabled
     || flags.moderation_mutations_enabled !== flags.sending_enabled
+    || (isPrivate && flags.private_groups_enabled !== true)
     || disabledFeatures.some(key => flags[key] !== false)
     || typeof page.has_more !== "boolean" || !Number.isSafeInteger(page.limit) || Number(page.limit) < 1 || Number(page.limit) > 50
     || (page.next_cursor !== null && (typeof page.next_cursor !== "string" || !/^[A-Za-z0-9_-]{8,1024}$/.test(page.next_cursor)))
     || (page.has_more !== (page.next_cursor !== null))) throw unavailable();
   const generatedAt = timestamp(input.generated_at);
   if (!generatedAt || !Array.isArray(input.messages) || input.messages.length > 30
+    || !Array.isArray(input.available_channels) || input.available_channels.length > 21
     || !Array.isArray(input.fairness_boundary) || input.fairness_boundary.length > 8) throw unavailable();
+  const availableChannels = input.available_channels.map(projectChannel);
+  const availableSlugs = new Set(availableChannels.map((item) => item.slug));
+  const selectedAvailable = availableChannels.find((item) => item.slug === channel.slug);
+  if (availableSlugs.size !== availableChannels.length || !selectedAvailable
+    || selectedAvailable.kind !== kind || selectedAvailable.current_user_member_role !== role
+    || (flags.private_groups_enabled !== true && availableChannels.some((item) => item.kind === "private_group"))) throw unavailable();
   const ids = new Set<string>();
   const messages = input.messages.map((value): CommsHistoryMessage => {
     const row = record(value), id = text(row.id, 120);
@@ -145,12 +201,13 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
   if (new Set(boundary).size !== boundary.length) throw unavailable();
   return {
     ok: true, generated_at: generatedAt, read_only: true, presentation_only: true,
-    channel: { slug: "global-chat", kind: "public", visibility: "public", name: text(channel.name, 80), description: nullableText(channel.description, 180) },
-    access: { public_channel: true, private_group_membership_required: false, current_user_member_role: null },
+    channel: { slug: channelSlug(channel.slug), kind: kind as CommsChannel["kind"], visibility: visibility as CommsChannel["visibility"], name: text(channel.name, 80), description: nullableText(channel.description, 180) },
+    access: { public_channel: isPublic, private_group_membership_required: isPrivate, current_user_member_role: role },
+    available_channels: availableChannels,
     messages,
     page: { next_cursor: page.next_cursor as string | null, has_more: page.has_more as boolean, limit: Number(page.limit) },
     feature_flags: {
-      route_enabled: true, sending_enabled: flags.sending_enabled,
+      route_enabled: true, sending_enabled: flags.sending_enabled, private_groups_enabled: flags.private_groups_enabled,
       reactions_enabled: flags.reactions_enabled, reactions_write_enabled: flags.reactions_write_enabled,
       report_actions_enabled: flags.report_actions_enabled, moderation_mutations_enabled: flags.moderation_mutations_enabled,
       ai_assist_runtime_enabled: false, durable_objects_or_websockets_enabled: false, analytics_or_tracking_enabled: false,
@@ -190,7 +247,7 @@ async function readResponse(response: Response, signal: AbortSignal): Promise<Co
   }
 }
 
-export async function loadCommsHistory(signal: AbortSignal, options: { fetcher?: typeof fetch; timeoutMs?: number } = {}): Promise<CommsHistoryPayload> {
+export async function loadCommsHistory(signal: AbortSignal, options: { fetcher?: typeof fetch; timeoutMs?: number; channelSlug?: string } = {}): Promise<CommsHistoryPayload> {
   const controller = new AbortController();
   const abort = () => controller.abort();
   signal.addEventListener("abort", abort, { once: true });
@@ -202,7 +259,8 @@ export async function loadCommsHistory(signal: AbortSignal, options: { fetcher?:
   try {
     controller.signal.throwIfAborted();
     const request = (async () => {
-      const response = await (options.fetcher ?? fetch)("/api/comms/message-history?channel=global-chat&limit=30", {
+      const selectedChannel = channelSlug(options.channelSlug ?? "global-chat");
+      const response = await (options.fetcher ?? fetch)(`/api/comms/message-history?channel=${encodeURIComponent(selectedChannel)}&limit=30`, {
         method: "GET", cache: "no-store", credentials: "include", redirect: "error", headers: { accept: "application/json" }, signal: controller.signal,
       });
       return readResponse(response, controller.signal);
@@ -239,8 +297,8 @@ async function postCommsMutation(path: string, body: unknown, fallbackMessage: s
   return requestCommsMutation("POST", path, body, fallbackMessage);
 }
 
-export async function sendCommsMessage(body: string, clientRequestId: string) {
-  await postCommsMutation("/api/comms/messages", { channelSlug: "global-chat", clientRequestId, body }, "Message could not be sent.");
+export async function sendCommsMessage(channel: string, body: string, clientRequestId: string) {
+  await postCommsMutation("/api/comms/messages", { channelSlug: channelSlug(channel), clientRequestId, body }, "Message could not be sent.");
 }
 
 export async function reportCommsMessage(messageId: string, reason = "other") {

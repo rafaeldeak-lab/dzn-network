@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addCommsReaction, COMMS_HISTORY_MAX_BYTES, loadCommsHistory, parseCommsHistory, removeCommsReaction } from "../components/comms/comms-history-client";
+import { addCommsReaction, COMMS_HISTORY_MAX_BYTES, loadCommsHistory, parseCommsHistory, removeCommsReaction, sendCommsMessage } from "../components/comms/comms-history-client";
 import { commsHistoryFixture } from "./fixtures/comms-history";
 
 const encoder = new TextEncoder();
 const jsonResponse = (value: unknown) => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
 const load = (fetcher: typeof fetch, signal = new AbortController().signal, timeoutMs = 250) => loadCommsHistory(signal, { fetcher, timeoutMs });
+type MutableFixture = Omit<ReturnType<typeof commsHistoryFixture>, "channel" | "access" | "available_channels"> & {
+  channel: { slug: string; kind: "public" | "private_group"; name: string; description: string | null; visibility: "public" | "private_group" };
+  access: { public_channel: boolean; private_group_membership_required: boolean; current_user_member_role: "owner" | "moderator" | "member" | null };
+  available_channels: Array<{ slug: string; kind: "public" | "private_group"; name: string; description: string | null; visibility: "public" | "private_group"; current_user_member_role: "owner" | "moderator" | "member" | null }>;
+};
+const mutableFixture = () => commsHistoryFixture() as unknown as MutableFixture;
 
 test("accepts the current Global Chat projection and strips unknown properties at each level", () => {
   const input = commsHistoryFixture();
@@ -15,6 +21,43 @@ test("accepts the current Global Chat projection and strips unknown properties a
   assert.equal(parsed.messages[0].body, "Local history fixture");
   assert.equal("secret" in parsed, false); assert.equal("owner_id" in parsed.channel, false);
   assert.equal("author_id" in parsed.messages[0], false); assert.equal("raw_body" in parsed.messages[0], false);
+});
+
+test("accepts only a membership-scoped private group projection", async () => {
+  const input = mutableFixture();
+  Object.assign(input.channel, { slug: "pandora-squad", kind: "private_group", name: "Pandora Squad", visibility: "private_group" });
+  Object.assign(input.access, { public_channel: false, private_group_membership_required: true, current_user_member_role: "member" });
+  input.available_channels.push({
+    slug: "pandora-squad", kind: "private_group", name: "Pandora Squad", description: "Members only",
+    visibility: "private_group", current_user_member_role: "member",
+  });
+  input.feature_flags.private_groups_enabled = true;
+  const parsed = parseCommsHistory(input);
+  assert.equal(parsed.channel.slug, "pandora-squad");
+  assert.equal(parsed.access.current_user_member_role, "member");
+  assert.deepEqual(parsed.available_channels.map((channel) => channel.slug), ["global-chat", "pandora-squad"]);
+
+  let requested = "";
+  await loadCommsHistory(new AbortController().signal, {
+    channelSlug: "pandora-squad",
+    fetcher: async (url) => { requested = String(url); return jsonResponse(input); },
+  });
+  assert.equal(requested, "/api/comms/message-history?channel=pandora-squad&limit=30");
+});
+
+test("rejects unlisted, duplicate, role-mismatched or disabled private channel projections", () => {
+  const privateFixture = () => {
+    const input = mutableFixture();
+    Object.assign(input.channel, { slug: "pandora-squad", kind: "private_group", name: "Pandora Squad", visibility: "private_group" });
+    Object.assign(input.access, { public_channel: false, private_group_membership_required: true, current_user_member_role: "member" });
+    input.available_channels.push({ slug: "pandora-squad", kind: "private_group", name: "Pandora Squad", description: null, visibility: "private_group", current_user_member_role: "member" });
+    input.feature_flags.private_groups_enabled = true;
+    return input;
+  };
+  const unlisted = privateFixture(); unlisted.available_channels.pop(); assert.throws(() => parseCommsHistory(unlisted));
+  const duplicate = privateFixture(); duplicate.available_channels.push({ ...duplicate.available_channels[1] }); assert.throws(() => parseCommsHistory(duplicate));
+  const roleMismatch = privateFixture(); roleMismatch.available_channels[1].current_user_member_role = "owner"; assert.throws(() => parseCommsHistory(roleMismatch));
+  const disabled = privateFixture(); disabled.feature_flags.private_groups_enabled = false; assert.throws(() => parseCommsHistory(disabled));
 });
 
 for (const [name, mutate] of Object.entries({
@@ -92,6 +135,22 @@ test("sends bounded own-reaction add and remove requests", async () => {
     { url: "/api/comms/messages/message%2Fone/reactions", method: "POST", body: { reactionKey: "heart", clientMutationId: "reaction-client-0001" } },
     { url: "/api/comms/messages/message%2Fone/reactions/heart", method: "DELETE", body: { clientMutationId: "reaction-client-0002" } },
   ]);
+});
+
+test("sends messages only to a validated selected channel slug", async () => {
+  const originalFetch = globalThis.fetch;
+  let body: unknown;
+  globalThis.fetch = (async (_url, options) => {
+    body = JSON.parse(String(options?.body));
+    return jsonResponse({ ok: true });
+  }) as typeof fetch;
+  try {
+    await sendCommsMessage("pandora-squad", "Hello group", "message-client-0001");
+    await assert.rejects(sendCommsMessage("../billing", "No", "message-client-0002"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(body, { channelSlug: "pandora-squad", clientRequestId: "message-client-0001", body: "Hello group" });
 });
 
 test("rejects malformed nested collections and primitives without reaching the UI", () => {
