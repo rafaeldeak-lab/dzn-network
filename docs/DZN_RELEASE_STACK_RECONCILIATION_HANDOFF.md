@@ -3,12 +3,13 @@
 ## Latest Reconciliation: 2026-10-04
 
 Use `DZN_RELEASE_BACKLOG_2026-09-13.md` and its complete 73-row JSON manifest for
-the current per-request disposition. Twenty-five verified replacements are closed;
-48 older requests remain open with unique requirements retained. The original
-branches are preserved. PRs #97-#114 were closed only after their catalog,
-orders, checkout, webhook, fulfilment, purchases, Supporter Card and reaction
-requirements were matched to current-main replacement releases and focused tests.
-PR #96 remains open because earned-spin and reward-wheel work is still deferred.
+the current per-request disposition. Twenty-six verified replacements are closed;
+47 older requests remain open with unique requirements retained. The original
+branches are preserved. PRs #97-#108 and #110-#117 were closed only after their
+catalog, orders, checkout, webhook, fulfilment, purchases, Supporter Card and
+reaction requirements were matched to current-main replacements and focused tests.
+PR #96 remains open because earned-spin and reward-wheel work is still deferred;
+PR #109 remains open for the missing audited operator reconciliation surface.
 
 ## Current Handoff: 2026-09-12
 

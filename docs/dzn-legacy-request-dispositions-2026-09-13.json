@@ -1,10 +1,10 @@
 {
   "as_of": "2026-10-04",
   "compared_main": "2b8c20ae45fbe1bf8628cb633eff219e00668a6e",
-  "ui_release": "2b8c20ae45fbe1bf8628cb633eff219e00668a6e",
+  "ui_release": "ee43f3f1f445af92ffd423409441b42d9e7b257d",
   "original_count": 73,
-  "closed_superseded": 25,
-  "open_legacy": 48,
+  "closed_superseded": 26,
+  "open_legacy": 47,
   "notes": [
     "A disposition is not a claim of implementation or production activation.",
     "Closed requests have per-request GitHub comments and preserved branches. Open original branches remain unchanged.",
@@ -548,8 +548,8 @@
       "original_head": "fe1a668b5abacc6f9fd85dc06cb936fcf28116f3",
       "original_branch": "codex/dzn-store-fulfilment-reconciliation-preflight-20260829",
       "original_base": "codex/dzn-store-fulfilment-runtime-implementation-20260828",
-      "status": "closed_superseded",
-      "disposition": "Superseded by PR #257 with private purchases, reconciliation reads and operator-safe lifecycle handling."
+      "status": "design_reconcile",
+      "disposition": "Customer-scoped purchases are released, but platform-owner manual-review reconciliation still needs an audited current-main operator surface."
     },
     {
       "number": 110,
@@ -611,8 +611,8 @@
       "original_head": "4b5958f49361c87e8b809c2fd5b7e29951a72834",
       "original_branch": "codex/dzn-comms-reaction-contract-preflight-20260831",
       "original_base": "codex/dzn-player-nav-access-polish-20260831",
-      "status": "design_reconcile",
-      "disposition": "Reaction contract must reconcile with current #149 message-sending plan; no reaction runtime exists."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PRs #225, #226 and #228, which rebuilt the allow-list, privacy, idempotency, quota, moderation inheritance, retention and gated reaction UI contracts on current main."
     },
     {
       "number": 117,
@@ -620,8 +620,8 @@
       "original_head": "2c6c2e36202cb188f65707b1893deb633070c417",
       "original_branch": "codex/dzn-comms-reaction-runtime-approval-preflight-20260831",
       "original_base": "codex/dzn-comms-reaction-contract-preflight-20260831",
-      "status": "design_reconcile",
-      "disposition": "Reaction runtime approval needs schema, moderation, access and abuse controls before release."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PRs #225, #226 and #228 with migration 0078, disabled-by-default reaction runtime, moderation and access enforcement, abuse controls and separate UI activation."
     },
     {
       "number": 118,
