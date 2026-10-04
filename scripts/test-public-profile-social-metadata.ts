@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   buildPublicProfileSocialMetadata,
   injectPublicProfileSocialMetadata,
-  withoutContentLength,
+  withoutStaticShellValidators,
 } from "../functions/_lib/public-profile-social-metadata";
 import type { PublicPlayerProfilePayload } from "../functions/_lib/player-public-profiles";
 
@@ -47,9 +47,17 @@ assert.match(rendered, /dzn:profile-preview-source" content="public_profile/);
 assert.match(rendered, /property="og:type" content="profile/);
 assert.doesNotMatch(rendered, /https:\/\/old\.test|content="Old"/);
 
-const headers = withoutContentLength(new Headers({ "content-length": "123", etag: "profile-shell", "x-test": "yes" }));
+const headers = withoutStaticShellValidators(new Headers({
+  "content-length": "123",
+  etag: "profile-shell",
+  "last-modified": "Sat, 03 Oct 2026 12:00:00 GMT",
+  "cache-control": "public, max-age=14400",
+  "x-test": "yes",
+}));
 assert.equal(headers.has("content-length"), false);
-assert.equal(headers.get("etag"), "profile-shell");
+assert.equal(headers.has("etag"), false);
+assert.equal(headers.has("last-modified"), false);
+assert.equal(headers.get("cache-control"), "public, max-age=14400");
 assert.equal(headers.get("x-test"), "yes");
 
 assert.deepEqual([...image.subarray(1, 4)], [80, 78, 71]);
@@ -58,7 +66,7 @@ assert.ok(image.readUInt32BE(20) >= 630, "Social preview artwork must remain at 
 
 assert.match(route, /readPublicPlayerProfileByHandle\(env, params\.handle\)/);
 assert.match(route, /\.catch\(\(\) => null\)/, "Profile read failures must fall back to generic noindex metadata.");
-assert.match(route, /withoutContentLength\(shellResponse\.headers\)/);
+assert.match(route, /withoutStaticShellValidators\(shellResponse\.headers\)/);
 assert.match(route, /cache-control", "no-store"/);
 assert.match(route, /injectPublicProfileSocialMetadata\(await shellResponse\.text\(\), metadata\)/);
 assert.doesNotMatch(route, /discord_id|user_id|player_id|analytics|tracking/i);

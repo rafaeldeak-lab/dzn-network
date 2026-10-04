@@ -3,7 +3,7 @@ import { readPublicPlayerProfileByHandle } from "../_lib/player-public-profiles"
 import {
   buildPublicProfileSocialMetadata,
   injectPublicProfileSocialMetadata,
-  withoutContentLength,
+  withoutStaticShellValidators,
 } from "../_lib/public-profile-social-metadata";
 import type { PagesFunction } from "../_lib/types";
 
@@ -17,7 +17,7 @@ export const onRequestGet: PagesFunction = async ({ request, env, next, params }
 
   if (!shellResponse.ok) return next();
 
-  const headers = secureHeaders(withoutContentLength(shellResponse.headers));
+  const headers = secureHeaders(withoutStaticShellValidators(shellResponse.headers));
   headers.set("cache-control", "no-store");
   headers.set("content-type", "text/html; charset=utf-8");
 

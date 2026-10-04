@@ -68,10 +68,10 @@ export function injectPublicProfileSocialMetadata(html: string, metadata: Public
     : `${tags}\n${cleanHead}`;
 }
 
-export function withoutContentLength(headers: Headers) {
+export function withoutStaticShellValidators(headers: Headers) {
   const result = new Headers();
   headers.forEach((value, key) => {
-    if (key.toLowerCase() !== "content-length") result.set(key, value);
+    if (!new Set(["content-length", "etag", "last-modified"]).has(key.toLowerCase())) result.set(key, value);
   });
   return result;
 }
