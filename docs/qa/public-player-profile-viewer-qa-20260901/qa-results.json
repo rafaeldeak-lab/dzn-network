@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-27T14:49:50.841Z",
+  "generated_at": "2026-10-04T00:40:02.882Z",
   "results": [
     {
       "scenario": "published",
       "viewport": "desktop",
       "screenshot": "screenshots/published-desktop.png",
-      "assertions": 18,
+      "assertions": 19,
       "consoleMessages": [],
       "failedRequests": []
     },
@@ -13,7 +13,15 @@
       "scenario": "published",
       "viewport": "mobile",
       "screenshot": "screenshots/published-mobile.png",
-      "assertions": 18,
+      "assertions": 19,
+      "consoleMessages": [],
+      "failedRequests": []
+    },
+    {
+      "scenario": "published",
+      "viewport": "narrow",
+      "screenshot": "screenshots/published-narrow.png",
+      "assertions": 19,
       "consoleMessages": [],
       "failedRequests": []
     },

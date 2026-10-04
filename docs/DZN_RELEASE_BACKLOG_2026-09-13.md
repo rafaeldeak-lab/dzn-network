@@ -7,17 +7,17 @@ individual dispositions are recorded in `dzn-legacy-request-dispositions-2026-09
 This supersedes the open-count wording in the September 12 snapshot, which is
 retained as historical evidence. A disposition is not implementation or live proof.
 
-Twenty-six requests were verified against current source and closed as superseded:
-#52, #63, #64, #83-#85, #97-#108 and #110-#117. Each has an individual GitHub comment with
+Thirty-two requests were verified against current source and closed as superseded:
+#52, #63, #64, #82-#90, #97-#108 and #110-#117. Each has an individual GitHub comment with
 replacement releases and evidence. Their original branches and history remain.
-The remaining 47 older requests are still open because their unique requirements
+The remaining 41 older requests are still open because their unique requirements
 have not all been implemented. No blind old-stack merge or migration was performed.
 Each open description begins with a current, request-specific
 reconciliation note linking replacement work and this record. Every original
 description is retained below it, and every original head was checked before the
-update. The 26 verified closures plus 47 open requests account for all 73.
+update. The 32 verified closures plus 41 open requests account for all 73.
 
-Current source comparison: `2b8c20ae45fbe1bf8628cb633eff219e00668a6e`.
+Current source comparison: `3f25cca7f9ba927853f9553c6635922e13ae9215`.
 Board UI release: PR #185, merge `ee43f3f1f445af92ffd423409441b42d9e7b257d`.
 The board release passed 23 rendered checks and independent review. It removes the
 header pause button, adds DZN field-board styling, and keeps a Display setting
@@ -65,7 +65,6 @@ revocation cannot consume the old cadence.
 | #58-#62 | Genuine gameplay challenges, XP, calling cards and award audit | Separate from website-game XP; verified source and identity required |
 | #65-#68 | Missing profile discovery/attribution controls, CTF and event provenance | Explicit public opt-in; no name-only account linking |
 | #69-#81 | Public community directory, trusted member imports, audit and private exports | Private Discord guild matching is not a public member directory; no retained export activation |
-| #82, #86-#90 | Profile visuals, per-profile social metadata and crawler/image QA | Public-safe projections and private/missing-profile fallback |
 | #91-#95 | Multi-room Comms/support design, interaction/runtime contracts and presence | Existing read-only shell is not a live chat service |
 | #96 | Earned-spin and reward-wheel policy remains deferred; Store catalog, orders, receipts, fulfilment, purchases and private Supporter Cards were rebuilt in #247-#261 | No paid random rewards; live Stripe and customer mutations remain separate controlled operations |
 | #109 | Platform-owner Store order reconciliation, manual-review inspection and audited operator action | Customer purchase history is account-scoped and does not grant operator access |
