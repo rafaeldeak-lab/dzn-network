@@ -119,30 +119,32 @@ async function run() {
   });
   await test("shared turns alternate players and mint one bounded daily reward", async fixture => {
     let state = await payload(await call(fixture));
-    const first = candidate(state.round.requiredLetter);
+    const seed = state.round.currentWord;
+    const first = candidate(state.round.requiredLetter, new Set([seed]));
     state = await payload(await call(fixture, { action: "play", roundId: state.round.id, version: state.round.version, word: first }));
     assert.equal(state.round.currentWord, first); assert.equal(state.round.version, 1); assert.equal(state.rewardedToday, true); assert.equal(state.round.canPlay, false);
-    assert.equal((await call(fixture, { action: "play", roundId: state.round.id, version: 1, word: candidate(first.at(-1)!, new Set([first])) })).status, 409);
-    const second = candidate(first.at(-1)!, new Set([first]));
+    const second = candidate(first.at(-1)!, new Set([seed, first]));
+    assert.equal((await call(fixture, { action: "play", roundId: state.round.id, version: 1, word: second })).status, 409);
     state = await payload(await call(fixture, { action: "play", roundId: state.round.id, version: 1, word: second }, { cookie: fixture.otherCookie }));
     assert.equal(state.round.version, 2); assert.equal(state.round.entries[0].player, "Other test player");
     fixture.db.sqlite.exec("UPDATE dzn_word_chain_entries SET created_at = created_at - 6000 WHERE user_id = 'local-player'");
-    const third = candidate(second.at(-1)!, new Set([first, second]));
+    const third = candidate(second.at(-1)!, new Set([seed, first, second]));
     await payload(await call(fixture, { action: "play", roundId: state.round.id, version: 2, word: third }));
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_reward_ledger WHERE user_id = 'local-player'").get()?.count, 1);
   });
   await test("duplicate, replay, rapid retry and stale races fail without extra rewards", async fixture => {
-    let state = await payload(await call(fixture)); const first = candidate(state.round.requiredLetter);
+    let state = await payload(await call(fixture)); const seed = state.round.currentWord;
+    const first = candidate(state.round.requiredLetter, new Set([seed]));
     state = await payload(await call(fixture, { action: "play", roundId: state.round.id, version: 0, word: first }));
     assert.equal((await call(fixture, { action: "play", roundId: state.round.id, version: 0, word: first }, { cookie: fixture.otherCookie })).status, 409);
-    const second = candidate(first.at(-1)!, new Set([first]));
+    const second = candidate(first.at(-1)!, new Set([seed, first]));
     fixture.db.beforeBatch = () => { fixture.db.beforeBatch = null; fixture.db.sqlite.exec("UPDATE dzn_word_chain_rounds SET version = version + 1"); };
     assert.equal((await call(fixture, { action: "play", roundId: state.round.id, version: 1, word: second }, { cookie: fixture.otherCookie })).status, 409);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_entries").get()?.count, 1);
     assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_word_chain_reward_ledger").get()?.count, 1);
   });
   await test("Hub keeps earned Word Chain progress after the play flag is disabled", async fixture => {
-    const state = await payload(await call(fixture)); const word = candidate(state.round.requiredLetter);
+    const state = await payload(await call(fixture)); const word = candidate(state.round.requiredLetter, new Set([state.round.currentWord]));
     await payload(await call(fixture, { action: "play", roundId: state.round.id, version: 0, word }));
     const yesterday = Date.now() - 86400000;
     const yesterdayKey = new Date(yesterday).toISOString().slice(0, 10);
@@ -161,9 +163,10 @@ async function run() {
   });
   await test("account deletion removes private Word Chain rows but preserves the shared round", async fixture => {
     let state = await payload(await call(fixture));
-    const first = candidate(state.round.requiredLetter);
+    const seed = state.round.currentWord;
+    const first = candidate(state.round.requiredLetter, new Set([seed]));
     state = await payload(await call(fixture, { action: "play", roundId: state.round.id, version: 0, word: first }));
-    const second = candidate(first.at(-1)!, new Set([first]));
+    const second = candidate(first.at(-1)!, new Set([seed, first]));
     await payload(await call(fixture, { action: "play", roundId: state.round.id, version: 1, word: second }, { cookie: fixture.otherCookie }));
 
     assert.equal(await eraseOrRetainAccountUser(fixture.env.DB, "local-player"), 1);
@@ -181,7 +184,7 @@ async function run() {
   });
   await test("blocked account deletion atomically preserves the account and all Word Chain progress", async fixture => {
     const state = await payload(await call(fixture));
-    const word = candidate(state.round.requiredLetter);
+    const word = candidate(state.round.requiredLetter, new Set([state.round.currentWord]));
     await payload(await call(fixture, { action: "play", roundId: state.round.id, version: 0, word }));
     fixture.db.sqlite.exec(`CREATE TABLE event_suggestions (
       id TEXT PRIMARY KEY,
