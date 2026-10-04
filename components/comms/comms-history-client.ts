@@ -27,6 +27,7 @@ export type CommsHistoryPayload = {
   channel: { slug: string; kind: "public"; name: string; description: string | null; visibility: "public" };
   access: { public_channel: true; private_group_membership_required: false; current_user_member_role: null };
   messages: CommsHistoryMessage[];
+  page: { next_cursor: string | null; has_more: boolean; limit: number };
   feature_flags: {
     route_enabled: boolean;
     sending_enabled: boolean;
@@ -99,7 +100,7 @@ function reactionSummary(value: unknown): CommsReactionSummary {
 
 // Project only the current public channel contract. Never pass an arbitrary response through to JSX.
 export function parseCommsHistory(value: unknown): CommsHistoryPayload {
-  const input = record(value), channel = record(input.channel), access = record(input.access), flags = record(input.feature_flags);
+  const input = record(value), channel = record(input.channel), access = record(input.access), flags = record(input.feature_flags), page = record(input.page);
   if (input.ok !== true || input.read_only !== true || input.presentation_only !== true
     || channel.slug !== "global-chat" || channel.kind !== "public" || channel.visibility !== "public"
     || access.public_channel !== true || access.private_group_membership_required !== false
@@ -110,7 +111,10 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
     || (flags.reactions_write_enabled === true && flags.reactions_enabled !== true)
     || flags.report_actions_enabled !== flags.sending_enabled
     || flags.moderation_mutations_enabled !== flags.sending_enabled
-    || disabledFeatures.some(key => flags[key] !== false)) throw unavailable();
+    || disabledFeatures.some(key => flags[key] !== false)
+    || typeof page.has_more !== "boolean" || !Number.isSafeInteger(page.limit) || Number(page.limit) < 1 || Number(page.limit) > 50
+    || (page.next_cursor !== null && (typeof page.next_cursor !== "string" || !/^[A-Za-z0-9_-]{8,512}$/.test(page.next_cursor)))
+    || (page.has_more !== (page.next_cursor !== null))) throw unavailable();
   const generatedAt = timestamp(input.generated_at);
   if (!generatedAt || !Array.isArray(input.messages) || input.messages.length > 30
     || !Array.isArray(input.fairness_boundary) || input.fairness_boundary.length > 8) throw unavailable();
@@ -144,6 +148,7 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
     channel: { slug: "global-chat", kind: "public", visibility: "public", name: text(channel.name, 80), description: nullableText(channel.description, 180) },
     access: { public_channel: true, private_group_membership_required: false, current_user_member_role: null },
     messages,
+    page: { next_cursor: page.next_cursor as string | null, has_more: page.has_more as boolean, limit: Number(page.limit) },
     feature_flags: {
       route_enabled: true, sending_enabled: flags.sending_enabled,
       reactions_enabled: flags.reactions_enabled, reactions_write_enabled: flags.reactions_write_enabled,

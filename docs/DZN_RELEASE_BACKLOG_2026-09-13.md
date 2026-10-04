@@ -7,16 +7,15 @@ individual dispositions are recorded in `dzn-legacy-request-dispositions-2026-09
 This supersedes the open-count wording in the September 12 snapshot, which is
 retained as historical evidence. A disposition is not implementation or live proof.
 
-Forty-one requests were verified against current source and closed as superseded:
-#52, #63, #64, #82-#94, #96-#117 and #120-#122. Each has an individual GitHub comment with
+Forty-three requests were verified against current source and closed as superseded:
+#52, #63, #64, #82-#94 and #96-#122. Each has an individual GitHub comment with
 replacement releases and evidence. Their original branches and history remain.
-The remaining 32 older requirements have not all been implemented. GitHub has 30
-open legacy PRs; #118 and #119 are already-closed branches whose unresolved login
-and cursor requirements remain recorded as partial. No blind old-stack merge or migration was performed.
+The remaining 30 older requirements have not all been implemented and correspond to
+the 30 open legacy PRs on GitHub. No blind old-stack merge or migration was performed.
 Each open description begins with a current, request-specific
 reconciliation note linking replacement work and this record. Every original
 description is retained below it, and every original head was checked before the
-update. The 41 verified closures plus 32 open requests account for all 73.
+update. The 43 verified closures plus 30 open requests account for all 73.
 
 Current source comparison: `da206314957f63a8cc31dc2a60c25f92f2d36bba`.
 Board UI release: PR #185, merge `ee43f3f1f445af92ffd423409441b42d9e7b257d`.
@@ -67,7 +66,6 @@ revocation cannot consume the old cadence.
 | #65-#68 | Missing profile discovery/attribution controls, CTF and event provenance | Explicit public opt-in; no name-only account linking |
 | #69-#81 | Public community directory, trusted member imports, audit and private exports | Private Discord guild matching is not a public member directory; no retained export activation |
 | #95 | Real Comms presence | Do not substitute static labels or inferred page views for a server-backed presence contract |
-| #118-#119 | Login-only public history and tie-safe pagination | Current timestamp-only cursor can skip rows that share a timestamp; retain until the current API contract is repaired and tested |
 
 ## Wider User Requests Retained
 

@@ -89,6 +89,7 @@ const staticPayload: CommsHistoryPayload = {
       read_only: true,
     },
   ],
+  page: { next_cursor: null, has_more: false, limit: 30 },
   feature_flags: {
     route_enabled: false,
     sending_enabled: false,
