@@ -52,6 +52,7 @@ async function fixture(includeReactionMigration = true) {
   }
 
   let queryCount = 0;
+  let afterMembershipCheck: (() => void) | null = null;
   const prepare = (sql: string, bindings: unknown[] = []) => {
     const execute = () => {
       queryCount += 1;
@@ -63,7 +64,13 @@ async function fixture(includeReactionMigration = true) {
       bind: (...values: unknown[]) => prepare(sql, values),
       first: async <T>() => {
         queryCount += 1;
-        return sqlite.prepare(sql).get(...bindings) as T | undefined ?? null;
+        const result = sqlite.prepare(sql).get(...bindings) as T | undefined ?? null;
+        if (sql.includes("SELECT 1 AS allowed FROM dzn_comms_private_group_members") && afterMembershipCheck) {
+          const hook = afterMembershipCheck;
+          afterMembershipCheck = null;
+          hook();
+        }
+        return result;
       },
       all: async () => execute(),
       run: async () => execute(),
@@ -93,6 +100,7 @@ async function fixture(includeReactionMigration = true) {
     DZN_COMMS_REACTIONS_READ_ENABLED: "true",
     DZN_COMMS_REACTIONS_WRITE_ENABLED: "true",
     DZN_COMMS_REACTIONS_SCOPE: "local_test",
+    DZN_COMMS_PRIVATE_GROUPS_ENABLED: "true",
   } as unknown as Env;
   return {
     sqlite,
@@ -100,6 +108,7 @@ async function fixture(includeReactionMigration = true) {
     count: (table: string) => Number(sqlite.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count ?? 0),
     queryCount: () => queryCount,
     resetQueryCount: () => { queryCount = 0; },
+    setAfterMembershipCheck: (hook: (() => void) | null) => { afterMembershipCheck = hook; },
     close: () => sqlite.close(),
   };
 }
@@ -206,6 +215,15 @@ async function testPrivateScopeAndModerationRemoval() {
   const f = await fixture();
   try {
     const privatePath = "/api/comms/messages/private-message/reactions";
+    const privateDisabled = { ...f.env, DZN_COMMS_PRIVATE_GROUPS_ENABLED: "false" } as Env;
+    assert.equal((await handleDznCommsReactions(request("GET", privatePath, "player-token"), privateDisabled, "private-message")).status, 404);
+    assert.equal((await handleDznCommsReactions(request("POST", privatePath, "player-token", {
+      clientMutationId: "reaction-private-disabled-add", reactionKey: "salute",
+    }), privateDisabled, "private-message")).status, 404);
+    assert.equal((await handleDznCommsReactionRemoval(request("DELETE", `${privatePath}/salute`, "player-token", {
+      clientMutationId: "reaction-private-disabled-remove",
+    }), privateDisabled, "private-message", "salute")).status, 404);
+    assert.equal(f.count("dzn_comms_reaction_mutations"), 0, "A disabled private-group switch must prevent reaction receipts and writes.");
     assert.equal((await handleDznCommsReactions(request("GET", privatePath, "outsider-token"), f.env, "private-message")).status, 404);
     assert.equal((await handleDznCommsReactions(request("GET", privatePath, "player-token"), f.env, "private-message")).status, 200);
     assert.equal((await handleDznCommsReactions(request("POST", privatePath, "outsider-token", {
@@ -214,6 +232,9 @@ async function testPrivateScopeAndModerationRemoval() {
     assert.equal((await handleDznCommsReactions(request("POST", privatePath, "player-token", {
       clientMutationId: "reaction-private-0002", reactionKey: "salute",
     }), f.env, "private-message")).status, 201);
+    assert.equal((await handleDznCommsReactions(request("POST", privatePath, "player-token", {
+      clientMutationId: "reaction-private-0002", reactionKey: "salute",
+    }), privateDisabled, "private-message")).status, 404, "A disabled switch must block mutation replay receipts.");
     f.sqlite.prepare("UPDATE dzn_comms_private_group_members SET membership_state = 'removed' WHERE channel_id = ? AND user_id = ?")
       .run("private-channel", "player");
     assert.equal((await handleDznCommsReactionRemoval(request("DELETE", `${privatePath}/salute`, "player-token", {
@@ -266,10 +287,60 @@ async function testRateLimitAndRetentionCompatibility() {
   } finally { legacy.close(); }
 }
 
+async function testPrivateRevocationRaces() {
+  const read = await fixture();
+  try {
+    read.setAfterMembershipCheck(() => read.sqlite.prepare(
+      "UPDATE dzn_comms_private_group_members SET membership_state = 'removed' WHERE channel_id = 'private-channel' AND user_id = 'player'",
+    ).run());
+    assert.equal((await handleDznCommsReactions(
+      request("GET", "/api/comms/messages/private-message/reactions", "player-token"), read.env, "private-message",
+    )).status, 404, "A reaction summary must not survive in-flight membership revocation.");
+  } finally { read.close(); }
+
+  const added = await fixture();
+  try {
+    added.setAfterMembershipCheck(() => added.sqlite.prepare(
+      "UPDATE dzn_comms_private_group_members SET membership_state = 'removed' WHERE channel_id = 'private-channel' AND user_id = 'player'",
+    ).run());
+    const response = await handleDznCommsReactions(request("POST", "/api/comms/messages/private-message/reactions", "player-token", {
+      clientMutationId: "reaction-private-race-add", reactionKey: "salute",
+    }), added.env, "private-message");
+    assert.equal(response.status, 404);
+    assert.equal(added.count("dzn_comms_message_reactions"), 0, "Revoked membership must prevent the private reaction write.");
+    assert.equal(added.count("dzn_comms_reaction_mutations"), 0, "Revoked membership must prevent a private mutation receipt.");
+  } finally { added.close(); }
+
+  const replay = await fixture();
+  try {
+    const input = { clientMutationId: "reaction-private-race-replay", reactionKey: "salute" };
+    assert.equal((await handleDznCommsReactions(request("POST", "/api/comms/messages/private-message/reactions", "player-token", input), replay.env, "private-message")).status, 201);
+    replay.setAfterMembershipCheck(() => replay.sqlite.prepare(
+      "UPDATE dzn_comms_private_group_members SET membership_state = 'removed' WHERE channel_id = 'private-channel' AND user_id = 'player'",
+    ).run());
+    assert.equal((await handleDznCommsReactions(request("POST", "/api/comms/messages/private-message/reactions", "player-token", input), replay.env, "private-message")).status, 404, "A replay must recheck current private membership.");
+  } finally { replay.close(); }
+
+  const removed = await fixture();
+  try {
+    assert.equal((await handleDznCommsReactions(request("POST", "/api/comms/messages/private-message/reactions", "player-token", {
+      clientMutationId: "reaction-private-race-remove-seed", reactionKey: "salute",
+    }), removed.env, "private-message")).status, 201);
+    removed.setAfterMembershipCheck(() => removed.sqlite.prepare(
+      "UPDATE dzn_comms_private_group_members SET membership_state = 'removed' WHERE channel_id = 'private-channel' AND user_id = 'player'",
+    ).run());
+    assert.equal((await handleDznCommsReactionRemoval(request("DELETE", "/api/comms/messages/private-message/reactions/salute", "player-token", {
+      clientMutationId: "reaction-private-race-remove",
+    }), removed.env, "private-message", "salute")).status, 404);
+    assert.equal(removed.sqlite.prepare("SELECT active FROM dzn_comms_message_reactions WHERE message_id='private-message' AND actor_user_id='player' AND reaction_key='salute'").get()?.active, 1, "Revoked membership must prevent the private reaction removal.");
+  } finally { removed.close(); }
+}
+
 async function main() {
   await testMigrationAndFlags();
   await testPublicReactionLifecycle();
   await testPrivateScopeAndModerationRemoval();
+  await testPrivateRevocationRaces();
   await testRateLimitAndRetentionCompatibility();
   console.log("DZN Comms reaction runtime tests passed.");
 }

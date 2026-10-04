@@ -17,7 +17,9 @@ test("live Comms implementation remains default-off and migration-gated", () => 
   assert.match(env, /^DZN_COMMS_LIVE_ENABLED=false$/m);
   assert.match(env, /^DZN_COMMS_LIVE_SCOPE=local_test$/m);
   assert.match(env, /^DZN_COMMS_LEDGER_SECRET=$/m);
+  assert.match(env, /^DZN_COMMS_PRIVATE_GROUPS_ENABLED=false$/m);
   assert.match(cloudflareEnv, /DZN_COMMS_LEDGER_SECRET\?: string/);
+  assert.match(cloudflareEnv, /DZN_COMMS_PRIVATE_GROUPS_ENABLED\?: string/);
   assert.match(env, /^NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED=false$/m);
   assert.match(env, /^DZN_COMMS_OWNER_MODERATION_ENABLED=false$/m);
   assert.match(env, /^DZN_COMMS_RETENTION_ENABLED=false$/m);
@@ -58,7 +60,15 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /readBoundedJson<SendInput>\(request, MAX_REQUEST_BYTES\)/);
   assert.match(runtime, /MAX_BODY_CODE_POINTS = 2_000/);
   assert.match(runtime, /MAX_BODY_BYTES = 8_000/);
-  assert.match(runtime, /channelSlug !== "global-chat"/);
+  assert.match(runtime, /\^\[a-z0-9-\]\{1,64\}\$/);
+  assert.match(runtime, /readDznCommsPrivateGroupFlags/);
+  assert.match(runtime, /membership_state = 'active'/);
+  assert.match(runtime, /PRIVATE_GROUP_ACCESS_REVOKED/);
+  assert.match(runtime, /FROM dzn_comms_send_receipts AS receipts[\s\S]*membership_state = 'active'/, "Private receipt replays must atomically require current exact-channel membership.");
+  assert.match(runtime, /slug = 'global-chat' AND kind = 'public'/, "Only the established Global Chat may use the public send path.");
+  assert.match(runtime, /: privateGroupUnavailable\(\)/, "Unknown private slugs must not reveal whether a private channel exists.");
+  assert.match(runtime, /message\.kind === "private_group"[\s\S]*hasActivePrivateGroupMembership/, "Private reports must require current exact-channel membership.");
+  assert.match(runtime, /privateGroupsEnabled/, "The platform-owner moderation queue must expose private reports only behind the private-group flag.");
   assert.match(runtime, /requirePlatformOwner\(env, request\)/);
   assert.match(runtime, /db\.batch\(statements\)/);
   assert.match(runtime, /channels\.slug = 'global-chat'/);
@@ -100,12 +110,18 @@ test("moderation publishes only allow decisions and never stores rejected text",
 test("browser UI polls history, posts through protected routes and stays isolated", () => {
   assert.match(shell, /window\.setInterval/);
   assert.match(shell, /sendAttemptRef/);
-  assert.match(shell, /sendCommsMessage\(draft, pendingAttempt\.requestId\)/);
+  assert.match(shell, /const targetChannel = payload\.channel\.slug;[\s\S]*selectedChannelRef\.current !== targetChannel[\s\S]*sendCommsMessage\(targetChannel, draft, pendingAttempt\.requestId\)/, "The composer target must match the channel represented by the visible validated payload.");
+  assert.match(shell, /selectedChannelRef\.current === targetChannel[\s\S]*refreshed\.channel\.slug === targetChannel/, "A stale mutation refresh must not replace a newer channel selection.");
+  assert.match(shell, /const historyRequestGenerationRef = useRef\(0\)/, "History reads must share a monotonic request generation.");
+  assert.ok((shell.match(/const requestGeneration = \+\+historyRequestGenerationRef\.current/g) ?? []).length >= 3, "Polling, send refreshes and reaction refreshes must all advance the shared request generation.");
+  assert.ok((shell.match(/historyRequestGenerationRef\.current === requestGeneration/g) ?? []).length >= 3, "All successful history refresh paths must reject older same-channel responses.");
+  assert.match(shell, /historyRequestGenerationRef\.current !== requestGeneration[\s\S]*selectedChannelRef\.current !== selectedChannel/, "Polling failures must not replace state after a newer same-channel request.");
+  assert.match(shell, /historyRequestGenerationRef\.current \+= 1;[\s\S]*selectedChannelRef\.current = channel\.slug/, "Changing channels must invalidate in-flight history reads immediately.");
   assert.match(shell, /Message sent\. Chat history will refresh shortly\./);
   assert.match(shell, /reportCommsMessage\(message\.id\)/);
   assert.match(shell, /reportActionsEnabled = liveUiEnabled && payload\.feature_flags\.report_actions_enabled/, "Report controls must stay behind the matching live UI gate.");
   assert.match(shell, /sendingEnabled = liveUiEnabled && payload\.feature_flags\.sending_enabled/, "Composer controls must stay behind the matching live UI gate.");
-  assert.match(shell, /liveUiEnabled && payload\.feature_flags\.sending_enabled \? "Global Chat is live/, "Read-only history must not claim chat is live before the matching UI release gate.");
+  assert.match(shell, /liveUiEnabled && payload\.feature_flags\.sending_enabled \? `\$\{payload\.channel\.name\} is live/, "Read-only history must not claim chat is live before the matching UI release gate.");
   assert.match(shell, /Report received\./);
   assert.match(shell, /Report failed\. Try again\./);
   assert.match(shell, /liveUiEnabled \? "Live" : "History"/, "Production history must not be labelled Local/Test.");

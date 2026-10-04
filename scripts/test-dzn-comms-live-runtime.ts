@@ -49,6 +49,7 @@ async function fixture() {
 
   let failAt = -1;
   let beforeBatch: (() => void) | undefined;
+  let beforeReceiptRead: (() => void) | undefined;
   const prepare = (sql: string, bindings: unknown[] = []) => {
     const execute = () => {
       if (/^\s*SELECT/i.test(sql)) return { results: sqlite.prepare(sql).all(...bindings), success: true, meta: { changes: 0 } };
@@ -57,7 +58,14 @@ async function fixture() {
     };
     return {
       bind: (...values: unknown[]) => prepare(sql, values),
-      first: async <T>() => sqlite.prepare(sql).get(...bindings) as T | undefined ?? null,
+      first: async <T>() => {
+        if (/FROM dzn_comms_send_receipts AS receipts/i.test(sql)) {
+          const hook = beforeReceiptRead;
+          beforeReceiptRead = undefined;
+          hook?.();
+        }
+        return sqlite.prepare(sql).get(...bindings) as T | undefined ?? null;
+      },
       all: async () => execute(),
       run: async () => execute(),
       execute,
@@ -89,6 +97,7 @@ async function fixture() {
     DZN_COMMS_LEDGER_SECRET: ledgerSecret,
     DZN_COMMS_LIVE_ENABLED: "true",
     DZN_COMMS_LIVE_SCOPE: "local_test",
+    DZN_COMMS_PRIVATE_GROUPS_ENABLED: "true",
     DZN_COMMS_OWNER_MODERATION_ENABLED: "true",
     DZN_COMMS_OWNER_MODERATION_SCOPE: "local_test",
     DZN_PLATFORM_OWNER_DISCORD_IDS: "999",
@@ -98,6 +107,7 @@ async function fixture() {
     env,
     failAt: (index: number) => { failAt = index; },
     beforeBatch: (hook: () => void) => { beforeBatch = hook; },
+    beforeReceiptRead: (hook: () => void) => { beforeReceiptRead = hook; },
     count: (table: string) => Number(sqlite.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count ?? 0),
     close: () => sqlite.close(),
   };
@@ -215,6 +225,121 @@ async function testSendRuntime() {
   } finally { raced.close(); }
 }
 
+async function testPrivateGroupSendRuntime() {
+  const f = await fixture();
+  try {
+    f.sqlite.prepare(`INSERT INTO dzn_comms_channels
+      (id, slug, kind, name, visibility, is_readable)
+      VALUES ('private-alpha', 'private-alpha', 'private_group', 'Private Alpha', 'private_group', 1)`).run();
+    f.sqlite.prepare(`INSERT INTO dzn_comms_private_group_members
+      (channel_id, user_id, role, membership_state)
+      VALUES ('private-alpha', 'player', 'member', 'active')`).run();
+
+    const input = { channelSlug: "private-alpha", clientRequestId: "private-request-001", body: "Private hello" };
+    const disabled = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), {
+      ...f.env,
+      DZN_COMMS_PRIVATE_GROUPS_ENABLED: "false",
+    } as Env);
+    assert.equal(disabled.status, 403, "Private groups must remain behind their dedicated server flag.");
+
+    const nonMember = await handleDznCommsSend(request("/api/comms/messages", "other-token", {
+      ...input,
+      clientRequestId: "private-request-002",
+    }), f.env);
+    assert.equal(nonMember.status, 403, "A signed-in non-member must not send to a private group.");
+    const unavailablePayload = await payload(await handleDznCommsSend(request("/api/comms/messages", "other-token", {
+      ...input,
+      channelSlug: "private-does-not-exist",
+      clientRequestId: "private-request-003",
+    }), f.env));
+    assert.equal(unavailablePayload.code, "PRIVATE_GROUP_UNAVAILABLE", "Unknown and inaccessible private-group slugs must be indistinguishable.");
+    assert.equal((await payload(nonMember)).code, unavailablePayload.code, "Channel existence must not be disclosed to non-members.");
+
+    const sent = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), f.env);
+    assert.equal(sent.status, 201);
+    const stored = f.sqlite.prepare("SELECT channel_id, body FROM dzn_comms_messages WHERE id = ?").get((await payload(sent)).message_id);
+    assert.equal(stored?.channel_id, "private-alpha");
+    assert.equal(stored?.body, "Private hello");
+
+    f.sqlite.prepare("UPDATE dzn_comms_private_group_members SET membership_state = 'removed' WHERE channel_id = 'private-alpha' AND user_id = 'player'").run();
+    const replayAfterRemoval = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), f.env);
+    assert.equal(replayAfterRemoval.status, 403, "Removing a member must block even an idempotent replay.");
+  } finally { f.close(); }
+
+  const replayRace = await fixture();
+  try {
+    replayRace.sqlite.prepare(`INSERT INTO dzn_comms_channels
+      (id, slug, kind, name, visibility, is_readable)
+      VALUES ('private-replay-race', 'private-replay-race', 'private_group', 'Private Replay Race', 'private_group', 1)`).run();
+    replayRace.sqlite.prepare(`INSERT INTO dzn_comms_private_group_members
+      (channel_id, user_id, role, membership_state)
+      VALUES ('private-replay-race', 'player', 'member', 'active')`).run();
+    const input = {
+      channelSlug: "private-replay-race",
+      clientRequestId: "private-replay-race-request",
+      body: "Private replay must stay private",
+    };
+    const sent = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), replayRace.env);
+    assert.equal(sent.status, 201);
+    const originalMessageId = (await payload(sent)).message_id;
+
+    replayRace.beforeReceiptRead(() => replayRace.sqlite.prepare(`UPDATE dzn_comms_private_group_members
+      SET membership_state = 'removed', updated_at = CURRENT_TIMESTAMP
+      WHERE channel_id = 'private-replay-race' AND user_id = 'player'`).run());
+    const replay = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), replayRace.env);
+    assert.equal(replay.status, 403, "A revocation racing the receipt read must not disclose a prior private message ID.");
+    assert.equal((await payload(replay)).message_id, undefined);
+    assert.equal(replayRace.count("dzn_comms_messages"), 1);
+    assert.equal(replayRace.sqlite.prepare("SELECT id FROM dzn_comms_messages").get()?.id, originalMessageId);
+  } finally { replayRace.close(); }
+
+  const raced = await fixture();
+  try {
+    raced.sqlite.prepare(`INSERT INTO dzn_comms_channels
+      (id, slug, kind, name, visibility, is_readable)
+      VALUES ('private-race', 'private-race', 'private_group', 'Private Race', 'private_group', 1)`).run();
+    raced.sqlite.prepare(`INSERT INTO dzn_comms_private_group_members
+      (channel_id, user_id, role, membership_state)
+      VALUES ('private-race', 'player', 'member', 'active')`).run();
+    raced.beforeBatch(() => raced.sqlite.prepare(`UPDATE dzn_comms_private_group_members
+      SET membership_state = 'removed', updated_at = CURRENT_TIMESTAMP
+      WHERE channel_id = 'private-race' AND user_id = 'player'`).run());
+
+    const response = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+      channelSlug: "private-race",
+      clientRequestId: "private-race-request",
+      body: "This must not be stored",
+    }), raced.env);
+    assert.equal(response.status, 403, "A membership revocation racing the write must fail closed.");
+    assert.equal((await payload(response)).code, "PRIVATE_GROUP_ACCESS_REVOKED");
+    assert.equal(raced.count("dzn_comms_messages"), 0);
+    assert.equal(raced.count("dzn_comms_send_receipts"), 0);
+    assert.equal(raced.count("dzn_comms_send_slots"), 1, "A raced denial must not refund its accepted-send quota slot.");
+  } finally { raced.close(); }
+
+  const rejectedRace = await fixture();
+  try {
+    rejectedRace.sqlite.prepare(`INSERT INTO dzn_comms_channels
+      (id, slug, kind, name, visibility, is_readable)
+      VALUES ('private-rejected', 'private-rejected', 'private_group', 'Private Rejected', 'private_group', 1)`).run();
+    rejectedRace.sqlite.prepare(`INSERT INTO dzn_comms_private_group_members
+      (channel_id, user_id, role, membership_state)
+      VALUES ('private-rejected', 'player', 'member', 'active')`).run();
+    rejectedRace.beforeBatch(() => rejectedRace.sqlite.prepare(`UPDATE dzn_comms_private_group_members
+      SET membership_state = 'blocked', updated_at = CURRENT_TIMESTAMP
+      WHERE channel_id = 'private-rejected' AND user_id = 'player'`).run());
+
+    const response = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+      channelSlug: "private-rejected",
+      clientRequestId: "private-rejected-request",
+      body: "discord.gg/not-allowed",
+    }), rejectedRace.env);
+    assert.equal(response.status, 403, "A removed member must not retain a blocked-message replay decision.");
+    assert.equal(rejectedRace.count("dzn_comms_send_receipts"), 0);
+    assert.equal(rejectedRace.count("dzn_comms_timeouts"), 0);
+  } finally { rejectedRace.close(); }
+}
+
 async function testReportAndModerationRuntime() {
   const f = await fixture();
   try {
@@ -259,6 +384,57 @@ async function testReportAndModerationRuntime() {
     assert.equal(resolveNoOp.status, 409);
     assert.equal(f.count("dzn_comms_moderation_audit"), 2);
   } finally { f.close(); }
+
+  const privateGroup = await fixture();
+  try {
+    privateGroup.sqlite.prepare(`INSERT INTO dzn_comms_channels
+      (id, slug, kind, name, visibility, is_readable)
+      VALUES ('private-report', 'private-report', 'private_group', 'Private Report', 'private_group', 1)`).run();
+    privateGroup.sqlite.prepare(`INSERT INTO dzn_comms_private_group_members
+      (channel_id, user_id, role, membership_state)
+      VALUES ('private-report', 'player', 'member', 'active')`).run();
+    privateGroup.sqlite.prepare(`INSERT INTO dzn_comms_messages
+      (id, channel_id, author_user_id, author_display_name, body, visibility_state)
+      VALUES ('private-message', 'private-report', 'other', 'Other', 'Private review', 'visible')`).run();
+
+    const nonMember = await handleDznCommsReport(request("/api/comms/reports", "owner-token", {
+      messageId: "private-message", reason: "other",
+    }), privateGroup.env);
+    assert.equal(nonMember.status, 400, "A non-member must not report or confirm a private message.");
+
+    const reported = await handleDznCommsReport(request("/api/comms/reports", "player-token", {
+      messageId: "private-message", reason: "other",
+    }), privateGroup.env);
+    assert.equal(reported.status, 202, "An active member may report a message in the exact private group.");
+    const queue = await handleDznCommsModeration(getRequest("/api/owner/comms/moderate", "owner-token"), privateGroup.env);
+    const queuePayload = await queue.json() as { reports?: Array<{ message_id: string }> };
+    assert.equal(queuePayload.reports?.some((row) => row.message_id === "private-message"), true, "The platform-owner queue must include private-group reports while the flag is enabled.");
+    const hidden = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {
+      messageId: "private-message", action: "hide", reason: "review",
+    }), privateGroup.env);
+    assert.equal(hidden.status, 200, "The platform owner must be able to moderate an enabled private group.");
+  } finally { privateGroup.close(); }
+
+  const privateReportRace = await fixture();
+  try {
+    privateReportRace.sqlite.prepare(`INSERT INTO dzn_comms_channels
+      (id, slug, kind, name, visibility, is_readable)
+      VALUES ('private-report-race', 'private-report-race', 'private_group', 'Private Report Race', 'private_group', 1)`).run();
+    privateReportRace.sqlite.prepare(`INSERT INTO dzn_comms_private_group_members
+      (channel_id, user_id, role, membership_state)
+      VALUES ('private-report-race', 'player', 'member', 'active')`).run();
+    privateReportRace.sqlite.prepare(`INSERT INTO dzn_comms_messages
+      (id, channel_id, author_user_id, author_display_name, body, visibility_state)
+      VALUES ('private-race-message', 'private-report-race', 'other', 'Other', 'Private review', 'visible')`).run();
+    privateReportRace.beforeBatch(() => privateReportRace.sqlite.prepare(`UPDATE dzn_comms_private_group_members
+      SET membership_state = 'removed' WHERE channel_id = 'private-report-race' AND user_id = 'player'`).run());
+    const response = await handleDznCommsReport(request("/api/comms/reports", "player-token", {
+      messageId: "private-race-message", reason: "other",
+    }), privateReportRace.env);
+    assert.equal(response.status, 403, "A membership revocation racing report storage must fail closed.");
+    assert.equal(privateReportRace.count("dzn_comms_reports"), 0);
+    assert.equal(privateReportRace.count("dzn_comms_report_slots"), 1, "A raced report denial must not refund its quota slot.");
+  } finally { privateReportRace.close(); }
 
   const erased = await fixture();
   try {
@@ -456,6 +632,7 @@ async function main() {
   testPrivateLedgerMigrationRejectsActiveQuotas();
   testPrivateLedgerMigrationRuntime();
   await testSendRuntime();
+  await testPrivateGroupSendRuntime();
   await testReportAndModerationRuntime();
   await testRetentionRuntime();
   console.log("Live Comms handlers: auth, origin, idempotency, conflict, quota, rollback, report and moderation behavior passed.");
