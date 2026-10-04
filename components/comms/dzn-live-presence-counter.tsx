@@ -25,10 +25,10 @@ export function DznLivePresenceCounter() {
 
     async function refresh() {
       try {
-        if (authenticated) {
-          await fetch(endpoint, { method: "POST", cache: "no-store", credentials: "include", redirect: "error", signal: controller.signal });
+        let response = await fetch(endpoint, { method: authenticated ? "POST" : "GET", cache: "no-store", credentials: "include", redirect: "error", signal: controller.signal });
+        if (authenticated && !response.ok) {
+          response = await fetch(endpoint, { method: "GET", cache: "no-store", credentials: "include", redirect: "error", signal: controller.signal });
         }
-        const response = await fetch(endpoint, { method: "GET", cache: "no-store", credentials: "include", redirect: "error", signal: controller.signal });
         const payload = await response.json() as { ok?: unknown; online_count?: unknown; precision?: unknown };
         if (!response.ok || payload.ok !== true || payload.precision !== "approximate" || !Number.isSafeInteger(payload.online_count) || Number(payload.online_count) < 0) throw new Error("invalid presence");
         if (!controller.signal.aborted) setPresence({ count: Number(payload.online_count), state: "live" });

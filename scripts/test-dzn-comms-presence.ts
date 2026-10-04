@@ -46,8 +46,8 @@ assert.match(helper, /dzn-comms-presence:/, "Presence must have an isolated dige
 assert.match(route, /handleDznCommsPresence/);
 assert.match(component, /NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED/);
 assert.match(component, /fetch\("\/api\/auth\/me"/);
-assert.match(component, /method: "POST"/);
-assert.match(component, /method: "GET"/);
+assert.match(component, /method: authenticated \? "POST" : "GET"/, "Authenticated refreshes must reuse the heartbeat response.");
+assert.match(component, /authenticated && !response\.ok/, "A failed heartbeat must fall back to the public aggregate read.");
 assert.match(component, /if \(!enabled\) return null/, "Disabled presence UI must not render an unavailable placeholder.");
 assert.doesNotMatch(component, /localStorage|sessionStorage|sendBeacon|WebSocket|EventSource/);
 assert.match(shell, /DznLivePresenceCounter/);
