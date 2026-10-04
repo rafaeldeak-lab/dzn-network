@@ -392,6 +392,7 @@ function publishedProfilePayload() {
         visible: true,
         status: "not_available_yet",
         message: "Calling cards are not published until account-bound earned cards exist.",
+        items: [],
       },
       award_dates: {
         visible: false,

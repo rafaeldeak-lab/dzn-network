@@ -8,8 +8,9 @@ No production D1, Stripe, Cloudflare secret/config, Nitrado, Discord runtime, St
 
 | Scenario | Viewport | Screenshot | Proof |
 | --- | --- | --- | --- |
-| published | desktop | [screenshots/published-desktop.png](screenshots/published-desktop.png) | 18 text/boundary/overlap/stable-paint checks |
-| published | mobile | [screenshots/published-mobile.png](screenshots/published-mobile.png) | 18 text/boundary/overlap/stable-paint checks |
+| published | desktop | [screenshots/published-desktop.png](screenshots/published-desktop.png) | 19 text/boundary/overlap/stable-paint checks |
+| published | mobile | [screenshots/published-mobile.png](screenshots/published-mobile.png) | 19 text/boundary/overlap/stable-paint checks |
+| published | narrow | [screenshots/published-narrow.png](screenshots/published-narrow.png) | 19 text/boundary/overlap/stable-paint checks |
 | identityHidden | desktop | [screenshots/identityHidden-desktop.png](screenshots/identityHidden-desktop.png) | 13 text/boundary/overlap/stable-paint checks |
 | hidden | desktop | [screenshots/hidden-desktop.png](screenshots/hidden-desktop.png) | 11 text/boundary/overlap/stable-paint checks |
 | unavailable | desktop | [screenshots/unavailable-desktop.png](screenshots/unavailable-desktop.png) | 9 text/boundary/overlap/stable-paint checks |
@@ -33,6 +34,12 @@ Console warnings/errors: none captured.
 Network failures: none captured.
 
 ### published / mobile
+
+Console warnings/errors: none captured.
+
+Network failures: none captured.
+
+### published / narrow
 
 Console warnings/errors: none captured.
 

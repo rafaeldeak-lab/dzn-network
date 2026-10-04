@@ -182,8 +182,8 @@ function assertDocsAndPackageWiring() {
   );
   assert.match(
     packageJson,
-    /test:public-player-profile-viewer && npm run test:public-profile-owner-preview-share-polish && npm run test:public-profile-discovery-linking/,
-    "Full test chain should run owner preview/share guards before discovery-linking guards.",
+    /test:public-player-profile-viewer && npm run test:public-profile-social-metadata && npm run test:public-profile-owner-preview-share-polish && npm run test:public-profile-discovery-linking/,
+    "Full test chain should run crawler privacy and owner preview/share guards before discovery-linking guards.",
   );
 }
 

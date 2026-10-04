@@ -1,10 +1,10 @@
 {
   "as_of": "2026-10-04",
-  "compared_main": "2b8c20ae45fbe1bf8628cb633eff219e00668a6e",
+  "compared_main": "3f25cca7f9ba927853f9553c6635922e13ae9215",
   "ui_release": "ee43f3f1f445af92ffd423409441b42d9e7b257d",
   "original_count": 73,
-  "closed_superseded": 26,
-  "open_legacy": 47,
+  "closed_superseded": 32,
+  "open_legacy": 41,
   "notes": [
     "A disposition is not a claim of implementation or production activation.",
     "Closed requests have per-request GitHub comments and preserved branches. Open original branches remain unchanged.",
@@ -305,8 +305,8 @@
       "original_head": "b3b1567e6ba1f7f86efdbd264a5505746af63252",
       "original_branch": "codex/player-public-profile-visual-polish-20260826",
       "original_base": "codex/public-community-member-card-preview-polish-20260826",
-      "status": "partial",
-      "disposition": "Public profile functionality exists, but richer visual cards/timelines need deliberate visual-port review."
+      "status": "closed_superseded",
+      "disposition": "Superseded by the current public Player Hub profile redesign released in PR #213 and the refreshed desktop, phone, narrow, privacy and unavailable-state rendered QA in the public-profile social metadata release."
     },
     {
       "number": 83,
@@ -341,8 +341,8 @@
       "original_head": "a00f4abfc9ea388a20df99aeb8f02802cf11b83c",
       "original_branch": "codex/public-profile-share-preview-metadata-polish-20260826",
       "original_base": "codex/public-profile-share-a11y-fallback-polish-20260826",
-      "status": "port_required",
-      "disposition": "Per-handle crawler metadata is absent: current Functions route serves the shared static profile shell. Build privacy-safe metadata on the current public projection."
+      "status": "closed_superseded",
+      "disposition": "Superseded by the current-main social metadata release: the per-handle Pages route injects bounded canonical, Open Graph and Twitter metadata from the consent-aware public projection, with generic noindex fallback."
     },
     {
       "number": 87,
@@ -350,8 +350,8 @@
       "original_head": "6274f713760f025db2a127d2b5b1370d4ec2f1e4",
       "original_branch": "codex/public-profile-share-preview-crawler-qa-20260826",
       "original_base": "codex/public-profile-share-preview-metadata-polish-20260826",
-      "status": "port_required",
-      "disposition": "Crawler response tests must target the current profile route after #86, including missing/private profiles."
+      "status": "closed_superseded",
+      "disposition": "Superseded by current route and helper regression tests covering published, hidden, missing, error and hostile-host crawler metadata behavior."
     },
     {
       "number": 88,
@@ -359,8 +359,8 @@
       "original_head": "6a4b6a99a713546eb9bc263792be17fdb859f184",
       "original_branch": "codex/public-profile-share-preview-image-card-polish-20260826",
       "original_base": "codex/public-profile-share-preview-crawler-qa-20260826",
-      "status": "port_required",
-      "disposition": "Share image-card rendering and artwork QA must use permitted public data only."
+      "status": "closed_superseded",
+      "disposition": "Superseded by the fixed local 1983x793 DZN preview artwork check and metadata tests proving private fields and remote Discord avatar URLs are excluded."
     },
     {
       "number": 89,
@@ -368,8 +368,8 @@
       "original_head": "f2bab6184714651d9e9a2b51ee29e0d025336ce8",
       "original_branch": "codex/public-profile-share-card-crawler-visual-qa-20260826",
       "original_base": "codex/public-profile-share-preview-image-card-polish-20260826",
-      "status": "port_required",
-      "disposition": "Crawler visual QA must run against the replacement share metadata/image implementation."
+      "status": "closed_superseded",
+      "disposition": "Superseded by the current metadata/image implementation, focused crawler checks and refreshed desktop, phone and narrow public-profile rendered QA."
     },
     {
       "number": 90,
@@ -377,8 +377,8 @@
       "original_head": "a986a8effc422a5506452d835e6d6ba96419228e",
       "original_branch": "codex/public-profile-social-preview-validation-package-20260826",
       "original_base": "codex/public-profile-share-card-crawler-visual-qa-20260826",
-      "status": "port_required",
-      "disposition": "Social-preview validation package must describe tested current behavior, not old stack evidence."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PUBLIC_PROFILE_SOCIAL_METADATA_2026-10-04.md, focused current-source validation, production build evidence and the completed privacy security-diff review."
     },
     {
       "number": 91,
