@@ -58,6 +58,7 @@ export function StoreManualReviewPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const requestSequence = useRef(0);
+  const pendingActionKeys = useRef(new Map<string, string>());
 
   const load = useCallback(async (cursor?: string) => {
     const sequence = ++requestSequence.current;
@@ -92,6 +93,9 @@ export function StoreManualReviewPage() {
 
   async function record(item: ReviewItem, action: "note" | "hold" | "escalate", reason: string, evidenceCategory: string) {
     const key = `${item.id}:${action}`;
+    const fingerprint = JSON.stringify([item.id, action, reason, evidenceCategory]);
+    const requestKey = pendingActionKeys.current.get(fingerprint) ?? crypto.randomUUID();
+    pendingActionKeys.current.set(fingerprint, requestKey);
     setBusy(key);
     setNotice(null);
     try {
@@ -99,9 +103,10 @@ export function StoreManualReviewPage() {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ orderId: item.id, requestKey: crypto.randomUUID(), action, reason, evidenceCategory }),
+        body: JSON.stringify({ orderId: item.id, requestKey, action, reason, evidenceCategory }),
       });
       const payload = await response.json().catch(() => null) as Payload | null;
+      if (payload) pendingActionKeys.current.delete(fingerprint);
       if (!response.ok || !payload?.ok) throw new Error(payload?.message ?? "The review action was not recorded.");
       await load();
       setNotice("Review action recorded in the immutable audit history. Payment and fulfilment state were not changed.");

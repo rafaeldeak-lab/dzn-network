@@ -2,7 +2,8 @@
 -- This migration does not change payment, order, fulfilment, receipt, or entitlement state.
 
 CREATE TABLE IF NOT EXISTS store_commerce_manual_review_actions (
-  id TEXT PRIMARY KEY,
+  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
   request_key TEXT NOT NULL UNIQUE CHECK (
     length(request_key) BETWEEN 8 AND 128 AND request_key NOT GLOB '*[^A-Za-z0-9_-]*'
   ),
@@ -43,10 +44,10 @@ BEGIN
 END;
 
 CREATE INDEX IF NOT EXISTS idx_store_manual_review_actions_order_created
-ON store_commerce_manual_review_actions(order_id, created_at DESC, id DESC);
+ON store_commerce_manual_review_actions(order_id, sequence DESC);
 
 CREATE INDEX IF NOT EXISTS idx_store_manual_review_actions_actor_created
-ON store_commerce_manual_review_actions(actor_user_id, created_at DESC, id DESC);
+ON store_commerce_manual_review_actions(actor_user_id, sequence DESC);
 
 CREATE INDEX IF NOT EXISTS idx_store_manual_review_actions_action_created
-ON store_commerce_manual_review_actions(action, created_at DESC, id DESC);
+ON store_commerce_manual_review_actions(action, sequence DESC);

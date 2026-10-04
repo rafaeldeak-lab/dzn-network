@@ -15,7 +15,7 @@ const EVIDENCE_CATEGORIES = new Set([
 const IDENTIFIER = /^[A-Za-z0-9_-]{3,128}$/;
 const REQUEST_KEY = /^[A-Za-z0-9_-]{8,128}$/;
 const CURSOR = /^([^~]{1,64})~([A-Za-z0-9_-]{3,128})$/;
-const PROVIDER_IDENTIFIER = /\b(?:ch|cs|cus|evt|in|pi|pm|seti|src|sub|tok)_[A-Za-z0-9_]+\b/i;
+const PROVIDER_IDENTIFIER = /\b(?:ch|cs|cus|dp|evt|in|pi|pm|re|seti|src|sub|tok)_[A-Za-z0-9_]+\b/i;
 const DISCORD_SNOWFLAKE = /(?:^|\D)\d{17,20}(?:\D|$)/;
 const MAX_PAGE_SIZE = 100;
 
@@ -97,10 +97,10 @@ export async function listStoreManualReviewOrders(env: Env, options: ListOptions
       (SELECT e.event_type FROM store_commerce_events e WHERE e.order_id = o.id ORDER BY e.received_at DESC, e.id DESC LIMIT 1) AS latest_event_type,
       (SELECT e.processing_status FROM store_commerce_events e WHERE e.order_id = o.id ORDER BY e.received_at DESC, e.id DESC LIMIT 1) AS latest_event_status,
       (SELECT e.received_at FROM store_commerce_events e WHERE e.order_id = o.id ORDER BY e.received_at DESC, e.id DESC LIMIT 1) AS latest_event_at,
-      (SELECT a.action FROM store_commerce_manual_review_actions a WHERE a.order_id = o.id ORDER BY a.created_at DESC, a.id DESC LIMIT 1) AS latest_action,
-      (SELECT a.reason FROM store_commerce_manual_review_actions a WHERE a.order_id = o.id ORDER BY a.created_at DESC, a.id DESC LIMIT 1) AS latest_action_reason,
-      (SELECT a.evidence_category FROM store_commerce_manual_review_actions a WHERE a.order_id = o.id ORDER BY a.created_at DESC, a.id DESC LIMIT 1) AS latest_action_evidence_category,
-      (SELECT a.created_at FROM store_commerce_manual_review_actions a WHERE a.order_id = o.id ORDER BY a.created_at DESC, a.id DESC LIMIT 1) AS latest_action_at,
+      (SELECT a.action FROM store_commerce_manual_review_actions a WHERE a.order_id = o.id ORDER BY a.sequence DESC LIMIT 1) AS latest_action,
+      (SELECT a.reason FROM store_commerce_manual_review_actions a WHERE a.order_id = o.id ORDER BY a.sequence DESC LIMIT 1) AS latest_action_reason,
+      (SELECT a.evidence_category FROM store_commerce_manual_review_actions a WHERE a.order_id = o.id ORDER BY a.sequence DESC LIMIT 1) AS latest_action_evidence_category,
+      (SELECT a.created_at FROM store_commerce_manual_review_actions a WHERE a.order_id = o.id ORDER BY a.sequence DESC LIMIT 1) AS latest_action_at,
       (SELECT COUNT(*) FROM store_commerce_manual_review_actions a WHERE a.order_id = o.id) AS action_count
       FROM store_commerce_orders o
       JOIN store_commerce_order_items i ON i.order_id = o.id

@@ -17,12 +17,15 @@ async function run() {
   assert.match(migration, /store_commerce_manual_review_actions/);
   assert.match(migration, /BEFORE UPDATE ON store_commerce_manual_review_actions/);
   assert.match(migration, /BEFORE DELETE ON store_commerce_manual_review_actions/);
+  assert.match(migration, /sequence INTEGER PRIMARY KEY AUTOINCREMENT/);
   assert.doesNotMatch(migration, /UPDATE\s+store_commerce_orders/i);
 
   const component = readFileSync("components/owner/store-manual-review-page.tsx", "utf8");
   assert.match(component, /Store review queue/);
   assert.match(component, /note[\s\S]*hold[\s\S]*escalate/);
   assert.match(component, /cannot fulfil, refund, dispute, or charge/);
+  assert.match(component, /pendingActionKeys/);
+  assert.match(component, /pendingActionKeys\.current\.get\(fingerprint\) \?\? crypto\.randomUUID\(\)/);
   assert.doesNotMatch(component, /stripe_payment_intent|stripe_checkout_session|refunds\.create|checkout\.sessions/);
   const avatarRoute = readFileSync("functions/api/owner/store/manual-review-avatar/[orderId].ts", "utf8");
   assert.match(avatarRoute, /redirect:\s*"error"/);
@@ -101,6 +104,8 @@ async function run() {
     const body = { orderId: "order_review_001", requestKey: "review-request-0001", action: "hold", reason: "Waiting for provider evidence.", evidenceCategory: "payment_state_mismatch" };
     assert.equal((await recordStoreManualReviewAction(env, owner, { ...body, requestKey: "review-sensitive-01", reason: "Provider pi_12345 must be checked." })).status, 400);
     assert.equal((await recordStoreManualReviewAction(env, owner, { ...body, requestKey: "review-sensitive-02", reason: "Discord account 111111111111111111 needs checking." })).status, 400);
+    assert.equal((await recordStoreManualReviewAction(env, owner, { ...body, requestKey: "review-sensitive-03", reason: "Dispute dp_12345 must be checked." })).status, 400);
+    assert.equal((await recordStoreManualReviewAction(env, owner, { ...body, requestKey: "review-sensitive-04", reason: "Refund re_12345 must be checked." })).status, 400);
     assert.equal((await onRequestPost(context(env, request("POST", body, ownerSession.token)))).status, 403);
     assert.equal((await onRequestPost(context(env, request("POST", body, ownerSession.token, "https://evil.example")))).status, 403);
     const recorded = await onRequestPost(context(env, request("POST", body, ownerSession.token, "https://dzn.test")));
@@ -114,12 +119,19 @@ async function run() {
     assert.equal(duplicate.duplicate, true);
     assert.equal((await recordStoreManualReviewAction(env, owner, { ...body, action: "escalate" })).status, 409);
 
+    const second = await recordStoreManualReviewAction(env, owner, { ...body, requestKey: "review-request-0002", action: "note", reason: "Second same-second action is newest." });
+    assert.equal(second.status, 201);
+    const ordered = await listStoreManualReviewOrders(env);
+    assert.equal(ordered.ok, true);
+    if (!ordered.ok) throw new Error("Expected ordered Store review queue");
+    assert.equal(ordered.items[0]?.latest_action_reason, "Second same-second action is newest.");
+
     await assert.rejects(() => db.prepare("UPDATE store_commerce_manual_review_actions SET reason = 'Changed' WHERE request_key = ?").bind(body.requestKey).run(), /immutable/i);
     await assert.rejects(() => db.prepare("DELETE FROM store_commerce_manual_review_actions WHERE request_key = ?").bind(body.requestKey).run(), /immutable/i);
     await db.prepare("UPDATE store_commerce_orders SET status = 'refunded' WHERE id = ?").bind(body.orderId).run();
-    const stale = await recordStoreManualReviewAction(env, owner, { ...body, requestKey: "review-request-0002", action: "note" });
+    const stale = await recordStoreManualReviewAction(env, owner, { ...body, requestKey: "review-request-0003", action: "note" });
     assert.equal(stale.status, 409);
-    assert.equal((await db.prepare("SELECT COUNT(*) AS total FROM store_commerce_manual_review_actions").first<{ total: number }>())?.total, 1);
+    assert.equal((await db.prepare("SELECT COUNT(*) AS total FROM store_commerce_manual_review_actions").first<{ total: number }>())?.total, 2);
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Store manual-review queue checks passed.");
   } finally {
