@@ -166,16 +166,35 @@ export async function handleDznCommsReport(request: Request, env: Env) {
   const reason = clean(parsed.value.reason, 40);
   if (!messageId || !reportReasons.has(reason)) return error(400, "INVALID_REPORT", "Choose a valid report reason.");
   const db = requireDb(env);
-  const message = await db.prepare("SELECT messages.id, messages.author_user_id FROM dzn_comms_messages AS messages JOIN dzn_comms_channels AS channels ON channels.id = messages.channel_id WHERE messages.id = ? AND messages.visibility_state = 'visible' AND channels.slug = 'global-chat' AND channels.kind = 'public' AND channels.visibility = 'public' LIMIT 1").bind(messageId).first<{ id: string; author_user_id: string | null }>();
+  const message = await db.prepare(`SELECT messages.id, messages.author_user_id,
+      channels.id AS channel_id, channels.kind, channels.visibility
+    FROM dzn_comms_messages AS messages
+    JOIN dzn_comms_channels AS channels ON channels.id = messages.channel_id
+    WHERE messages.id = ? AND messages.visibility_state = 'visible'
+      AND ((channels.slug = 'global-chat' AND channels.kind = 'public' AND channels.visibility = 'public')
+        OR (channels.kind = 'private_group' AND channels.visibility = 'private_group'))
+    LIMIT 1`).bind(messageId).first<SendChannel & { author_user_id: string | null; channel_id: string }>();
   if (!message || message.author_user_id === user.id) return error(400, "INVALID_REPORT", "That message cannot be reported by this account.");
+  if (message.kind === "private_group") {
+    if (!readDznCommsPrivateGroupFlags(env, request).enabled) return error(400, "INVALID_REPORT", "That message cannot be reported by this account.");
+    if (!await hasActivePrivateGroupMembership(db, message.channel_id, user.id)) return error(400, "INVALID_REPORT", "That message cannot be reported by this account.");
+  }
   const dbReport = await db.prepare("SELECT id FROM dzn_comms_reports WHERE message_id = ? AND reporter_user_id = ? LIMIT 1").bind(messageId, user.id).first<{ id: string }>();
   if (dbReport) return json({ ok: true, code: "REPORT_RECEIVED", replayed: true }, { status: 202, headers: privateNoStoreHeaders() });
   const now = new Date();
   try {
-    await db.batch([
+    const results = await db.batch([
       allocateReportSlot(db, user.id, now.toISOString().slice(0, 16)),
-      db.prepare("INSERT INTO dzn_comms_reports (id, message_id, reporter_user_id, reason_code) VALUES (?, ?, ?, ?)").bind(crypto.randomUUID(), messageId, user.id, reason),
+      db.prepare(`INSERT INTO dzn_comms_reports (id, message_id, reporter_user_id, reason_code)
+        SELECT ?, ?, ?, ?
+        WHERE ? = 'public' OR EXISTS (
+          SELECT 1 FROM dzn_comms_private_group_members
+          WHERE channel_id = ? AND user_id = ? AND membership_state = 'active'
+        )`).bind(crypto.randomUUID(), messageId, user.id, reason, message.kind, message.channel_id, user.id),
     ]);
+    if (message.kind === "private_group" && Number(results[1]?.meta?.changes ?? 0) !== 1) {
+      return error(403, "PRIVATE_GROUP_ACCESS_REVOKED", "Your access to this private DZN Comms group has changed.");
+    }
   } catch (cause) {
     const replay = await db.prepare("SELECT id FROM dzn_comms_reports WHERE message_id = ? AND reporter_user_id = ? LIMIT 1").bind(messageId, user.id).first<{ id: string }>();
     if (!replay && isQuotaConstraintError(cause)) return error(429, "REPORT_RATE_LIMITED", "Too many reports were sent. Wait a moment and retry.");
@@ -200,8 +219,16 @@ export async function handleDznCommsModeration(request: Request, env: Env) {
   if (!messageId || !moderationActions.has(action) || !reason) return error(400, "INVALID_MODERATION", "Message, action and reason are required.");
   const state = action === "restore" ? "visible" : action === "delete" ? "deleted" : action === "hide" ? "hidden" : null;
   const db = requireDb(env);
-  const target = await db.prepare("SELECT messages.id FROM dzn_comms_messages AS messages JOIN dzn_comms_channels AS channels ON channels.id = messages.channel_id WHERE messages.id = ? AND channels.slug = 'global-chat' AND channels.kind = 'public' AND channels.visibility = 'public' LIMIT 1").bind(messageId).first<{ id: string }>();
-  if (!target) return error(404, "MESSAGE_NOT_FOUND", "That Global Chat message is unavailable.");
+  const target = await db.prepare(`SELECT messages.id, channels.kind
+    FROM dzn_comms_messages AS messages
+    JOIN dzn_comms_channels AS channels ON channels.id = messages.channel_id
+    WHERE messages.id = ?
+      AND ((channels.slug = 'global-chat' AND channels.kind = 'public' AND channels.visibility = 'public')
+        OR (channels.kind = 'private_group' AND channels.visibility = 'private_group'))
+    LIMIT 1`).bind(messageId).first<{ id: string; kind: "public" | "private_group" }>();
+  if (!target || (target.kind === "private_group" && !readDznCommsPrivateGroupFlags(env, request).enabled)) {
+    return error(404, "MESSAGE_NOT_FOUND", "That DZN Comms message is unavailable.");
+  }
   const statements: D1PreparedStatement[] = [];
   if (state === "deleted") statements.push(db.prepare("UPDATE dzn_comms_messages SET body = 'Message deleted.', author_user_id = NULL, author_display_name = 'DZN Safety', author_role_label = 'System', visibility_state = 'deleted', edited_at = CURRENT_TIMESTAMP WHERE id = ? AND visibility_state != 'deleted'").bind(messageId));
   else if (state) statements.push(db.prepare("UPDATE dzn_comms_messages SET visibility_state = ?, edited_at = CURRENT_TIMESTAMP WHERE id = ? AND visibility_state != 'deleted' AND visibility_state != ?").bind(state, messageId, state));
@@ -223,6 +250,7 @@ export async function handleDznCommsModerationQueue(request: Request, env: Env) 
   const auth = await requirePlatformOwner(env, request);
   if (!auth.ok) return auth.response;
   const db = requireDb(env);
+  const privateGroupsEnabled = readDznCommsPrivateGroupFlags(env, request).enabled ? 1 : 0;
   const [reports, audit] = await Promise.all([
     db.prepare(`SELECT messages.id AS message_id, messages.author_display_name, messages.body,
         messages.visibility_state, messages.created_at, messages.expires_at,
@@ -231,10 +259,12 @@ export async function handleDznCommsModerationQueue(request: Request, env: Env) 
       FROM dzn_comms_reports AS reports
       JOIN dzn_comms_messages AS messages ON messages.id = reports.message_id
       JOIN dzn_comms_channels AS channels ON channels.id = messages.channel_id
-      WHERE reports.status = 'open' AND channels.slug = 'global-chat'
+      WHERE reports.status = 'open'
+        AND ((channels.slug = 'global-chat' AND channels.kind = 'public' AND channels.visibility = 'public')
+          OR (? = 1 AND channels.kind = 'private_group' AND channels.visibility = 'private_group'))
       GROUP BY messages.id
       ORDER BY MIN(reports.created_at) ASC
-      LIMIT 100`).all<Record<string, unknown>>(),
+      LIMIT 100`).bind(privateGroupsEnabled).all<Record<string, unknown>>(),
     db.prepare(`SELECT audit.id, audit.message_id, audit.action, audit.reason_code, audit.created_at,
         users.username AS actor_name
       FROM dzn_comms_moderation_audit AS audit

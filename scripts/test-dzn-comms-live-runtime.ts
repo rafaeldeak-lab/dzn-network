@@ -349,6 +349,57 @@ async function testReportAndModerationRuntime() {
     assert.equal(f.count("dzn_comms_moderation_audit"), 2);
   } finally { f.close(); }
 
+  const privateGroup = await fixture();
+  try {
+    privateGroup.sqlite.prepare(`INSERT INTO dzn_comms_channels
+      (id, slug, kind, name, visibility, is_readable)
+      VALUES ('private-report', 'private-report', 'private_group', 'Private Report', 'private_group', 1)`).run();
+    privateGroup.sqlite.prepare(`INSERT INTO dzn_comms_private_group_members
+      (channel_id, user_id, role, membership_state)
+      VALUES ('private-report', 'player', 'member', 'active')`).run();
+    privateGroup.sqlite.prepare(`INSERT INTO dzn_comms_messages
+      (id, channel_id, author_user_id, author_display_name, body, visibility_state)
+      VALUES ('private-message', 'private-report', 'other', 'Other', 'Private review', 'visible')`).run();
+
+    const nonMember = await handleDznCommsReport(request("/api/comms/reports", "owner-token", {
+      messageId: "private-message", reason: "other",
+    }), privateGroup.env);
+    assert.equal(nonMember.status, 400, "A non-member must not report or confirm a private message.");
+
+    const reported = await handleDznCommsReport(request("/api/comms/reports", "player-token", {
+      messageId: "private-message", reason: "other",
+    }), privateGroup.env);
+    assert.equal(reported.status, 202, "An active member may report a message in the exact private group.");
+    const queue = await handleDznCommsModeration(getRequest("/api/owner/comms/moderate", "owner-token"), privateGroup.env);
+    const queuePayload = await queue.json() as { reports?: Array<{ message_id: string }> };
+    assert.equal(queuePayload.reports?.some((row) => row.message_id === "private-message"), true, "The platform-owner queue must include private-group reports while the flag is enabled.");
+    const hidden = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {
+      messageId: "private-message", action: "hide", reason: "review",
+    }), privateGroup.env);
+    assert.equal(hidden.status, 200, "The platform owner must be able to moderate an enabled private group.");
+  } finally { privateGroup.close(); }
+
+  const privateReportRace = await fixture();
+  try {
+    privateReportRace.sqlite.prepare(`INSERT INTO dzn_comms_channels
+      (id, slug, kind, name, visibility, is_readable)
+      VALUES ('private-report-race', 'private-report-race', 'private_group', 'Private Report Race', 'private_group', 1)`).run();
+    privateReportRace.sqlite.prepare(`INSERT INTO dzn_comms_private_group_members
+      (channel_id, user_id, role, membership_state)
+      VALUES ('private-report-race', 'player', 'member', 'active')`).run();
+    privateReportRace.sqlite.prepare(`INSERT INTO dzn_comms_messages
+      (id, channel_id, author_user_id, author_display_name, body, visibility_state)
+      VALUES ('private-race-message', 'private-report-race', 'other', 'Other', 'Private review', 'visible')`).run();
+    privateReportRace.beforeBatch(() => privateReportRace.sqlite.prepare(`UPDATE dzn_comms_private_group_members
+      SET membership_state = 'removed' WHERE channel_id = 'private-report-race' AND user_id = 'player'`).run());
+    const response = await handleDznCommsReport(request("/api/comms/reports", "player-token", {
+      messageId: "private-race-message", reason: "other",
+    }), privateReportRace.env);
+    assert.equal(response.status, 403, "A membership revocation racing report storage must fail closed.");
+    assert.equal(privateReportRace.count("dzn_comms_reports"), 0);
+    assert.equal(privateReportRace.count("dzn_comms_report_slots"), 1, "A raced report denial must not refund its quota slot.");
+  } finally { privateReportRace.close(); }
+
   const erased = await fixture();
   try {
     const sent = await handleDznCommsSend(request("/api/comms/messages", "other-token", {

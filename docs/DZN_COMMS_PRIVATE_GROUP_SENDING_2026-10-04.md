@@ -11,6 +11,9 @@ This source release extends the existing authenticated Comms send route to priva
 - A removed member cannot replay an earlier successful request through the private channel.
 - Unknown and inaccessible private-group slugs return the same generic denial, so membership checks do not expose channel existence.
 - The only public channel accepted by this route remains the established `global-chat` channel.
+- Private reports require active membership before lookup and again when the report is stored; a raced removal stores no report.
+- Private reports enter the existing platform-owner moderation queue only while the private-group flag is enabled.
+- Only the authenticated platform owner can hide, restore, delete, resolve or dismiss private-group content through the existing moderation route.
 - Public Global Chat behavior, reporting, moderation, retention and reaction flags remain unchanged.
 
 ## Validation

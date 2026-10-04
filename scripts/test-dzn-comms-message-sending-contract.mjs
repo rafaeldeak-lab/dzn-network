@@ -66,6 +66,8 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /PRIVATE_GROUP_ACCESS_REVOKED/);
   assert.match(runtime, /slug = 'global-chat' AND kind = 'public'/, "Only the established Global Chat may use the public send path.");
   assert.match(runtime, /: privateGroupUnavailable\(\)/, "Unknown private slugs must not reveal whether a private channel exists.");
+  assert.match(runtime, /message\.kind === "private_group"[\s\S]*hasActivePrivateGroupMembership/, "Private reports must require current exact-channel membership.");
+  assert.match(runtime, /privateGroupsEnabled/, "The platform-owner moderation queue must expose private reports only behind the private-group flag.");
   assert.match(runtime, /requirePlatformOwner\(env, request\)/);
   assert.match(runtime, /db\.batch\(statements\)/);
   assert.match(runtime, /channels\.slug = 'global-chat'/);
