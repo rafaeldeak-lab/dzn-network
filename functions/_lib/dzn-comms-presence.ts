@@ -4,11 +4,12 @@ import { noStoreForErrorHeaders, privateNoStoreHeaders } from "./performance";
 import type { Env } from "./types";
 
 export const DZN_COMMS_PRESENCE_TTL_SECONDS = 75;
+export const DZN_COMMS_PRESENCE_MIN_REFRESH_SECONDS = 20;
 const scope = "global_chat" as const;
 
 type PresenceStorage = {
   countActive(nowIso: string): Promise<number>;
-  refresh(actorKeyHash: string, nowIso: string, expiresAt: string): Promise<void>;
+  refresh(actorKeyHash: string, nowIso: string, expiresAt: string, refreshNotBefore: string): Promise<void>;
 };
 
 class D1PresenceStorage implements PresenceStorage {
@@ -23,15 +24,16 @@ class D1PresenceStorage implements PresenceStorage {
     return normalizeCount(row?.online_count);
   }
 
-  async refresh(actorKeyHash: string, nowIso: string, expiresAt: string) {
+  async refresh(actorKeyHash: string, nowIso: string, expiresAt: string, refreshNotBefore: string) {
     await this.db.prepare(
       `INSERT INTO dzn_comms_presence_sessions
          (actor_key_hash, scope, first_seen_at, last_seen_at, expires_at)
        VALUES (?, 'global_chat', ?, ?, ?)
        ON CONFLICT(actor_key_hash, scope) DO UPDATE SET
          last_seen_at = excluded.last_seen_at,
-         expires_at = excluded.expires_at`,
-    ).bind(actorKeyHash, nowIso, nowIso, expiresAt).run();
+         expires_at = excluded.expires_at
+       WHERE dzn_comms_presence_sessions.last_seen_at <= ?`,
+    ).bind(actorKeyHash, nowIso, nowIso, expiresAt, refreshNotBefore).run();
   }
 }
 export function readDznCommsPresenceFlags(env: Env, request?: Request) {
@@ -65,8 +67,9 @@ export async function handleDznCommsPresence(request: Request, env: Env) {
     if (!user) return error(401, "UNAUTHORIZED", "Log in with Discord to join the online count.");
     const actorKeyHash = await actorDigest(user.id, env.DZN_COMMS_PRESENCE_SECRET!);
     const expiresAt = new Date(now.getTime() + DZN_COMMS_PRESENCE_TTL_SECONDS * 1000).toISOString();
+    const refreshNotBefore = new Date(now.getTime() - DZN_COMMS_PRESENCE_MIN_REFRESH_SECONDS * 1000).toISOString();
     try {
-      await storage.refresh(actorKeyHash, now.toISOString(), expiresAt);
+      await storage.refresh(actorKeyHash, now.toISOString(), expiresAt, refreshNotBefore);
     } catch {
       return error(503, "PRESENCE_STORAGE_UNAVAILABLE", "DZN presence could not be refreshed.");
     }
@@ -93,7 +96,8 @@ export async function readPresence(storage: PresenceStorage, now = new Date()) {
 export async function refreshPresence(storage: PresenceStorage, actorId: string, secret: string, now = new Date()) {
   const actorKeyHash = await actorDigest(actorId, secret);
   const expiresAt = new Date(now.getTime() + DZN_COMMS_PRESENCE_TTL_SECONDS * 1000).toISOString();
-  await storage.refresh(actorKeyHash, now.toISOString(), expiresAt);
+  const refreshNotBefore = new Date(now.getTime() - DZN_COMMS_PRESENCE_MIN_REFRESH_SECONDS * 1000).toISOString();
+  await storage.refresh(actorKeyHash, now.toISOString(), expiresAt, refreshNotBefore);
   return readPresence(storage, now);
 }
 

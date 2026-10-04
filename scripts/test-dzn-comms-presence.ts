@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 
-import { DZN_COMMS_PRESENCE_TTL_SECONDS, handleDznCommsPresence, readDznCommsPresenceFlags, readPresence, refreshPresence } from "../functions/_lib/dzn-comms-presence";
+import { DZN_COMMS_PRESENCE_MIN_REFRESH_SECONDS, DZN_COMMS_PRESENCE_TTL_SECONDS, handleDznCommsPresence, readDznCommsPresenceFlags, readPresence, refreshPresence } from "../functions/_lib/dzn-comms-presence";
 import type { Env } from "../functions/_lib/types";
 
 const migrationName = "0089_dzn_comms_presence.sql";
@@ -45,6 +45,7 @@ assert.match(helper, /HMAC/, "Presence actor keys must use a keyed digest.");
 assert.match(helper, /dzn-comms-presence:/, "Presence must have an isolated digest domain.");
 assert.match(helper, /scope = 'global_chat' AND expires_at > \?/, "Presence counts must use the scope and expiry index with canonical ISO timestamps.");
 assert.doesNotMatch(helper, /julianday\(expires_at\)/, "Presence counts must not wrap the indexed expiry column in a function.");
+assert.match(helper, /WHERE dzn_comms_presence_sessions\.last_seen_at <= \?/, "Presence writes must enforce an atomic per-actor minimum refresh interval.");
 assert.match(route, /handleDznCommsPresence/);
 assert.match(component, /NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED/);
 assert.match(component, /fetch\("\/api\/auth\/me"/);
@@ -71,8 +72,11 @@ assert.equal(readDznCommsPresenceFlags(localEnv, new Request("https://dayz-netwo
 assert.equal(readDznCommsPresenceFlags({ ...localEnv, DZN_COMMS_PRESENCE_SECRET: "short" }, new Request("http://localhost/community")).writeEnabled, false);
 
 class MemoryPresenceStorage {
-  rows = new Map<string, { expiresAt: string }>();
-  async refresh(actorKeyHash: string, _nowIso: string, expiresAt: string) { this.rows.set(actorKeyHash, { expiresAt }); }
+  rows = new Map<string, { lastSeenAt: string; expiresAt: string }>();
+  async refresh(actorKeyHash: string, nowIso: string, expiresAt: string, refreshNotBefore: string) {
+    const current = this.rows.get(actorKeyHash);
+    if (!current || current.lastSeenAt <= refreshNotBefore) this.rows.set(actorKeyHash, { lastSeenAt: nowIso, expiresAt });
+  }
   async countActive(nowIso: string) { return [...this.rows.values()].filter((row) => row.expiresAt > nowIso).length; }
 }
 
@@ -138,12 +142,16 @@ async function main() {
   const storage = new MemoryPresenceStorage();
   const now = new Date("2026-10-04T09:00:00.000Z");
   await refreshPresence(storage, "internal-user-one", localEnv.DZN_COMMS_PRESENCE_SECRET!, now);
+  const firstExpiry = [...storage.rows.values()][0]?.expiresAt;
   await refreshPresence(storage, "internal-user-one", localEnv.DZN_COMMS_PRESENCE_SECRET!, new Date(now.getTime() + 1_000));
   assert.equal(storage.rows.size, 1, "One account must occupy one aggregate presence slot.");
+  assert.equal([...storage.rows.values()][0]?.expiresAt, firstExpiry, "Rapid repeated heartbeats must not extend presence before the server minimum interval.");
+  await refreshPresence(storage, "internal-user-one", localEnv.DZN_COMMS_PRESENCE_SECRET!, new Date(now.getTime() + (DZN_COMMS_PRESENCE_MIN_REFRESH_SECONDS + 1) * 1_000));
+  assert.notEqual([...storage.rows.values()][0]?.expiresAt, firstExpiry, "A heartbeat after the server minimum interval may extend presence.");
   assert.equal([...storage.rows.keys()].some((key) => key.includes("internal-user-one")), false, "Raw user IDs must never be stored.");
   await refreshPresence(storage, "internal-user-two", localEnv.DZN_COMMS_PRESENCE_SECRET!, now);
   assert.equal((await readPresence(storage, now)).online_count, 2);
-  assert.equal((await readPresence(storage, new Date(now.getTime() + (DZN_COMMS_PRESENCE_TTL_SECONDS + 2) * 1_000))).online_count, 0, "Expired heartbeats must not count.");
+  assert.equal((await readPresence(storage, new Date(now.getTime() + (DZN_COMMS_PRESENCE_MIN_REFRESH_SECONDS + DZN_COMMS_PRESENCE_TTL_SECONDS + 3) * 1_000))).online_count, 0, "Expired heartbeats must not count.");
 
   console.log("DZN Comms presence foundation checks passed.");
 }
