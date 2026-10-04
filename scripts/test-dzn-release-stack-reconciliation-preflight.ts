@@ -59,7 +59,7 @@ assert.doesNotMatch(currentBacklog, /#109 \| Platform-owner Store order reconcil
 assert.match(handoff, /Forty-one verified replacements are closed/);
 assert.match(handoff, /32 older requirements remain unresolved/);
 assert.match(handoff, /GitHub has 30 open legacy PRs/);
-assert.match(handoff, /PRs #118-#119 remain open for login-only history and tie-safe pagination/);
+assert.match(handoff, /requirements from closed PRs #118-#119 remain unresolved/);
 for (const subject of ["NukeTown", "FED & FERAL", "Nitrado", "Discord", "Customer billing", "Spin/reward", "DZN Games Hub"]) {
   assert.ok(currentBacklog.includes(subject), `Retain wider user priority: ${subject}`);
 }

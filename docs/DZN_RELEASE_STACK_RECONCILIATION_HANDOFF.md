@@ -14,7 +14,8 @@ release, consent-aware per-handle social metadata, focused crawler/privacy tests
 and refreshed desktop, phone and narrow rendered QA.
 PRs #96 and #109 are superseded by the current Store safety and audited operator
 reconciliation releases. PR #95 remains open for real server-backed presence, and
-PRs #118-#119 remain open for login-only history and tie-safe pagination.
+the requirements from closed PRs #118-#119 remain unresolved for login-only history
+and tie-safe pagination.
 
 ## Current Handoff: 2026-09-12
 
