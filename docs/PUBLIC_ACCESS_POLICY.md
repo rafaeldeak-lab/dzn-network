@@ -14,7 +14,7 @@ Logged-out visitors may access:
 - `/signup`
 - the public Discord invite link
 
-Logged-out navigation must only expose the public funnel: homepage/features, DZN Comms, pricing, Login/Signup, and Discord. It must not show dashboard, server browser, leaderboards, stats, events, owner tools, or add-server controls before a session is known. Signed-out visitors may open the moderated Global Chat surface, but sending remains protected by Discord authentication and the live Comms feature switches. DZN Assist remains visibly unavailable until its separately approved runtime exists.
+Logged-out navigation must only expose the public funnel: homepage/features, DZN Comms, pricing, Login/Signup, and Discord. It must not show dashboard, server browser, leaderboards, stats, events, owner tools, or add-server controls before a session is known. Signed-out visitors may open the moderated Global Chat surface, but sending remains protected by Discord authentication and the live Comms feature switches. The browser-local DZN Assist guide may remain public because it searches only trusted static guidance and does not inspect accounts, send prompts, track searches, or change settings. Any account-aware or generative AI runtime remains a separate release requiring explicit privacy, moderation, credential, cost, and operational controls.
 
 Logged-out visitors are redirected to `/login?returnTo=...` before app-page rendering for:
 

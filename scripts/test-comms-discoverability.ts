@@ -9,6 +9,7 @@ const launcherSource = readFileSync("components/comms/dzn-comms-launcher.tsx", "
 const commsSource = readFileSync("components/comms/dzn-comms-shell.tsx", "utf8");
 const assistSource = readFileSync("components/comms/dzn-assist.tsx", "utf8");
 const assistGuidesSource = readFileSync("lib/dzn-assist.ts", "utf8");
+const publicAccessPolicy = readFileSync("docs/PUBLIC_ACCESS_POLICY.md", "utf8");
 
 assert.equal(layoutSource.includes("<DznCommsLauncher />"), true, "The Comms launcher must be mounted across the site.");
 assert.equal(headerSource.includes('{ href: "/community", label: "Comms", active: "community", icon: MessageCircle }'), true, "The shared header must link to Comms.");
@@ -56,6 +57,8 @@ assert.equal(assistSource.includes("DZN_PUBLIC_DISCORD_INVITE_URL"), true, "DZN 
 assert.equal(assistGuidesSource.includes('href: "/setup"'), true, "DZN Assist must guide owners to resumable server setup.");
 assert.equal(assistGuidesSource.includes('href: "/login?returnTo=%2Fplayer%2Fprofile%23game-account"'), true, "DZN Assist must preserve the game-account anchor across Discord sign-in.");
 assert.equal(assistGuidesSource.includes('href: "/login?returnTo=%2Fdashboard", label: "Manage billing"'), true, "DZN Assist must route cancellation and payment-recovery help to account billing controls.");
+assert.equal(publicAccessPolicy.includes("The browser-local DZN Assist guide may remain public"), true, "The public access policy must permit the released local-only guide.");
+assert.equal(publicAccessPolicy.includes("Any account-aware or generative AI runtime remains a separate release"), true, "The public access policy must keep future AI runtime activation separate.");
 assert.equal(commsSource.includes('pb-24 pt-4 text-zinc-100 sm:pt-6'), true, "Comms must begin directly below the shared header without the old empty spacer.");
 assert.equal(communityPageSource.includes("Open moderated DZN Global Chat"), true, "Default share metadata must describe the Comms destination accurately.");
 assert.equal(globalStylesSource.includes(".dzn-header-nav--logged-out .dzn-header-links {\n  grid-template-columns: repeat(3, minmax(96px, 1fr));"), true, "The signed-out desktop header must allocate one column for each public link.");
