@@ -48,7 +48,11 @@ export const DZN_ASSIST_GUIDES: DznAssistGuide[] = [
     title: "Plans, payments or cancellation",
     summary: "Compare owner plans on Pricing. Subscription, receipt, cancellation and recovery controls belong to the signed-in account that made the purchase; never share payment details in Global Chat.",
     keywords: ["billing", "cancel", "card", "invoice", "payment", "plan", "price", "receipt", "refund", "subscription"],
-    links: [{ href: "/pricing", label: "Compare plans" }, { href: "/refunds", label: "Refund policy" }],
+    links: [
+      { href: "/login?returnTo=%2Fdashboard", label: "Manage billing" },
+      { href: "/pricing", label: "Compare plans" },
+      { href: "/refunds", label: "Refund policy" },
+    ],
   },
   {
     id: "comms-safety",
