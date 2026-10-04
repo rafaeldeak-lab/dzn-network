@@ -1,13 +1,14 @@
 {
   "as_of": "2026-10-04",
-  "compared_main": "3f25cca7f9ba927853f9553c6635922e13ae9215",
+  "compared_main": "da206314957f63a8cc31dc2a60c25f92f2d36bba",
   "ui_release": "ee43f3f1f445af92ffd423409441b42d9e7b257d",
   "original_count": 73,
-  "closed_superseded": 33,
-  "open_legacy": 40,
+  "closed_superseded": 41,
+  "open_legacy": 32,
   "notes": [
     "A disposition is not a claim of implementation or production activation.",
     "Closed requests have per-request GitHub comments and preserved branches. Open original branches remain unchanged.",
+    "open_legacy counts unresolved requirements; GitHub currently has 30 open legacy PRs because #118 and #119 are closed branches with requirements retained as partial.",
     "Historical migration numbers collide with current releases; port unique behavior instead of merging old trees."
   ],
   "requests": [
@@ -386,8 +387,8 @@
       "original_head": "3d0989ef7ec1bd19e2da1ea67be7db7d040c5848",
       "original_branch": "codex/dzn-chat-support-architecture-preflight-20260826",
       "original_base": "codex/public-profile-social-preview-validation-package-20260826",
-      "status": "design_reconcile",
-      "disposition": "Reconcile chat/support architecture with current #144 read history and #149 sending contract; live chat/support is not enabled."
+      "status": "closed_superseded",
+      "disposition": "Superseded by current authenticated Comms history/sending/moderation architecture, the site-wide launcher and browser-local DZN Assist. Live presence remains separately open in #95."
     },
     {
       "number": 92,
@@ -395,8 +396,8 @@
       "original_head": "45e36c6f6103eb0a2393e4f1f0ad10b9782e6d55",
       "original_branch": "codex/dzn-comms-visual-shell-20260826",
       "original_base": "codex/dzn-chat-support-architecture-preflight-20260826",
-      "status": "partial",
-      "disposition": "Current /community is a read-only shell. Old multi-room/group/support layouts are not all present."
+      "status": "closed_superseded",
+      "disposition": "Superseded by the current /community Comms shell and site-wide launcher. Private groups and presence remain separate future capabilities; the obsolete stacked tree was not merged."
     },
     {
       "number": 93,
@@ -404,8 +405,8 @@
       "original_head": "633eae9454cebe9cffbcbf890abcdb34e99724c9",
       "original_branch": "codex/dzn-comms-contract-preflight-20260826",
       "original_base": "codex/dzn-comms-visual-shell-20260826",
-      "status": "design_reconcile",
-      "disposition": "Port applicable interaction contracts to current shell without representing disabled controls as live."
+      "status": "closed_superseded",
+      "disposition": "Superseded by current tested history, sending, reporting, moderation, reactions, privacy, quota, deletion and retention contracts."
     },
     {
       "number": 94,
@@ -413,8 +414,8 @@
       "original_head": "413c6299c729d0f98db3c12a29269ab8f5aad20f",
       "original_branch": "codex/dzn-comms-runtime-approval-preflight-20260826",
       "original_base": "codex/dzn-comms-contract-preflight-20260826",
-      "status": "design_reconcile",
-      "disposition": "Runtime design/approval notes must reconcile moderation, privacy and operating controls before activation."
+      "status": "closed_superseded",
+      "disposition": "Superseded by current Comms activation-readiness, moderation, reactions and retention runbooks/tests. Production activation remains separate operational work."
     },
     {
       "number": 95,
@@ -431,8 +432,8 @@
       "original_head": "a27ab99dfd93976cf6a370d085baaaf5bfbce7ec",
       "original_branch": "codex/dzn-safe-monetisation-supporter-preflight-20260826",
       "original_base": "codex/dzn-comms-live-presence-counter-foundation-20260826",
-      "status": "design_reconcile",
-      "disposition": "Reconcile safe monetisation design with current billing and website-game economy; no paid random rewards or fake subscription grants."
+      "status": "closed_superseded",
+      "disposition": "Superseded by current billing safety, Store catalogue/order/fulfilment/receipt/manual-review foundations and private Supporter Cards. Live Stripe activation remains separate."
     },
     {
       "number": 97,
@@ -630,7 +631,7 @@
       "original_branch": "codex/dzn-comms-message-read-model-approval-preflight-20260831",
       "original_base": "codex/dzn-comms-reaction-runtime-approval-preflight-20260831",
       "status": "partial",
-      "disposition": "Current #144 read-history model differs from the old authenticated-public/id-cursor design. Retain login-only intent and tie-safe cursor work."
+      "disposition": "Current history is bounded and production-safe, but login-only public history and tie-safe pagination across equal timestamps remain unresolved."
     },
     {
       "number": 119,
@@ -639,7 +640,7 @@
       "original_branch": "codex/dzn-comms-message-read-model-local-read-foundation-20260831",
       "original_base": "codex/dzn-comms-message-read-model-approval-preflight-20260831",
       "status": "partial",
-      "disposition": "Read-only API exists in #144; original login-only public reads and opaque tie-safe pagination are not equivalent. Do not close as fully superseded."
+      "disposition": "Current API has private-channel denial, bounded responses and fail-closed schema handling; retain the unresolved authentication and tie-safe cursor requirements."
     },
     {
       "number": 120,
@@ -647,8 +648,8 @@
       "original_head": "6057c16b16b6c5c920c4f7f21e39cead1442302f",
       "original_branch": "codex/dzn-comms-message-history-ui-integration-approval-preflight-20260831",
       "original_base": "codex/dzn-comms-message-read-model-local-read-foundation-20260831",
-      "status": "in_progress",
-      "disposition": "Adapt UI read contract to current #144 Global Chat projection, including bounded reads, cancellation, private-channel rejection and safe fallback."
+      "status": "closed_superseded",
+      "disposition": "Superseded by the released strict Comms history UI integration and current projection contract."
     },
     {
       "number": 121,
@@ -656,8 +657,8 @@
       "original_head": "b2b138f4df45e198f4986ca5ad72c7cee7274f99",
       "original_branch": "codex/dzn-comms-message-history-ui-integration-implementation-20260831",
       "original_base": "codex/dzn-comms-message-history-ui-integration-approval-preflight-20260831",
-      "status": "in_progress",
-      "disposition": "Current-branch client implementation adds strict projection, 512-KiB cap sized for full Unicode pages, 5-second timeout, abort cleanup and safe hidden-message handling. Not yet released."
+      "status": "closed_superseded",
+      "disposition": "Superseded by the released strict client projection, response cap, timeout, abort cleanup and hidden-message handling."
     },
     {
       "number": 122,
@@ -665,8 +666,8 @@
       "original_head": "fb05b2b36925e4a355195db7bca4bed4fa01dfc2",
       "original_branch": "codex/dzn-comms-message-history-rendered-qa-20260831",
       "original_base": "codex/dzn-comms-message-history-ui-integration-implementation-20260831",
-      "status": "in_progress",
-      "disposition": "Current-branch rendered QA covers successful/empty/malformed/private/hidden/oversized/offline/timeout responses at phone and desktop widths. Not yet validated/released."
+      "status": "closed_superseded",
+      "disposition": "Superseded by the released rendered Comms history QA covering phone/desktop success and failure states."
     }
   ]
 }

@@ -3,16 +3,19 @@
 ## Latest Reconciliation: 2026-10-04
 
 Use `DZN_RELEASE_BACKLOG_2026-09-13.md` and its complete 73-row JSON manifest for
-the current per-request disposition. Thirty-two verified replacements are closed;
-41 older requests remain open with unique requirements retained. The original
+the current per-request disposition. Forty-one verified replacements are closed;
+32 older requirements remain unresolved. GitHub has 30 open legacy PRs because
+#118 and #119 are closed branches with requirements retained as partial. The original
 branches are preserved. PRs #97-#108 and #110-#117 were closed only after their
 catalog, orders, checkout, webhook, fulfilment, purchases, Supporter Card and
 reaction requirements were matched to current-main replacements and focused tests.
 PR #82 and PRs #86-#90 are also superseded by the current public-profile visual
 release, consent-aware per-handle social metadata, focused crawler/privacy tests
 and refreshed desktop, phone and narrow rendered QA.
-PR #96 remains open because earned-spin and reward-wheel work is still deferred;
-PR #109 remains open for the missing audited operator reconciliation surface.
+PRs #96 and #109 are superseded by the current Store safety and audited operator
+reconciliation releases. PR #95 remains open for real server-backed presence, and
+the requirements from closed PRs #118-#119 remain unresolved for login-only history
+and tie-safe pagination.
 
 ## Current Handoff: 2026-09-12
 

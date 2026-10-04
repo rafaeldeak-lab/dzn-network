@@ -37,10 +37,9 @@ assert.deepEqual(dispositions.requests.map(row => row.number), Array.from({ leng
 const closed = dispositions.requests.filter(row => row.status === "closed_superseded").map(row => row.number);
 assert.deepEqual(closed, [
   52, 63, 64,
-  ...Array.from({ length: 9 }, (_, i) => i + 82),
-  ...Array.from({ length: 12 }, (_, i) => i + 97),
-  109,
-  ...Array.from({ length: 8 }, (_, i) => i + 110),
+  ...Array.from({ length: 13 }, (_, i) => i + 82),
+  ...Array.from({ length: 22 }, (_, i) => i + 96),
+  ...Array.from({ length: 3 }, (_, i) => i + 120),
 ]);
 assert.equal(dispositions.closed_superseded, closed.length);
 assert.equal(dispositions.open_legacy, 73 - closed.length);
@@ -50,10 +49,17 @@ for (const row of dispositions.requests) {
   assert.ok(["closed_superseded", "port_required", "partial", "design_reconcile", "in_progress"].includes(row.status));
 }
 const currentBacklog = read("docs/DZN_RELEASE_BACKLOG_2026-09-13.md");
-assert.match(currentBacklog, /remaining 40 older requests are still open/);
-assert.match(currentBacklog, /#52, #63, #64, #82-#90 and #97-#117/);
-assert.match(currentBacklog, /#96 \| Earned-spin and reward-wheel policy remains deferred/);
+assert.match(currentBacklog, /remaining 32 older requirements have not all been implemented/);
+assert.match(currentBacklog, /GitHub has 30[\s\S]*open legacy PRs/);
+assert.match(currentBacklog, /#52, #63, #64, #82-#94, #96-#117 and #120-#122/);
+assert.match(currentBacklog, /#95 \| Real Comms presence/);
+assert.match(currentBacklog, /#118-#119 \| Login-only public history and tie-safe pagination/);
+assert.doesNotMatch(currentBacklog, /#96 \| Earned-spin and reward-wheel policy remains deferred/);
 assert.doesNotMatch(currentBacklog, /#109 \| Platform-owner Store order reconciliation/);
+assert.match(handoff, /Forty-one verified replacements are closed/);
+assert.match(handoff, /32 older requirements remain unresolved/);
+assert.match(handoff, /GitHub has 30 open legacy PRs/);
+assert.match(handoff, /requirements from closed PRs #118-#119 remain unresolved/);
 for (const subject of ["NukeTown", "FED & FERAL", "Nitrado", "Discord", "Customer billing", "Spin/reward", "DZN Games Hub"]) {
   assert.ok(currentBacklog.includes(subject), `Retain wider user priority: ${subject}`);
 }
