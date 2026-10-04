@@ -17,7 +17,9 @@ test("live Comms implementation remains default-off and migration-gated", () => 
   assert.match(env, /^DZN_COMMS_LIVE_ENABLED=false$/m);
   assert.match(env, /^DZN_COMMS_LIVE_SCOPE=local_test$/m);
   assert.match(env, /^DZN_COMMS_LEDGER_SECRET=$/m);
+  assert.match(env, /^DZN_COMMS_PRIVATE_GROUPS_ENABLED=false$/m);
   assert.match(cloudflareEnv, /DZN_COMMS_LEDGER_SECRET\?: string/);
+  assert.match(cloudflareEnv, /DZN_COMMS_PRIVATE_GROUPS_ENABLED\?: string/);
   assert.match(env, /^NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED=false$/m);
   assert.match(env, /^DZN_COMMS_OWNER_MODERATION_ENABLED=false$/m);
   assert.match(env, /^DZN_COMMS_RETENTION_ENABLED=false$/m);
@@ -58,7 +60,15 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /readBoundedJson<SendInput>\(request, MAX_REQUEST_BYTES\)/);
   assert.match(runtime, /MAX_BODY_CODE_POINTS = 2_000/);
   assert.match(runtime, /MAX_BODY_BYTES = 8_000/);
-  assert.match(runtime, /channelSlug !== "global-chat"/);
+  assert.match(runtime, /\^\[a-z0-9-\]\{1,64\}\$/);
+  assert.match(runtime, /readDznCommsPrivateGroupFlags/);
+  assert.match(runtime, /membership_state = 'active'/);
+  assert.match(runtime, /PRIVATE_GROUP_ACCESS_REVOKED/);
+  assert.match(runtime, /FROM dzn_comms_send_receipts AS receipts[\s\S]*membership_state = 'active'/, "Private receipt replays must atomically require current exact-channel membership.");
+  assert.match(runtime, /slug = 'global-chat' AND kind = 'public'/, "Only the established Global Chat may use the public send path.");
+  assert.match(runtime, /: privateGroupUnavailable\(\)/, "Unknown private slugs must not reveal whether a private channel exists.");
+  assert.match(runtime, /message\.kind === "private_group"[\s\S]*hasActivePrivateGroupMembership/, "Private reports must require current exact-channel membership.");
+  assert.match(runtime, /privateGroupsEnabled/, "The platform-owner moderation queue must expose private reports only behind the private-group flag.");
   assert.match(runtime, /requirePlatformOwner\(env, request\)/);
   assert.match(runtime, /db\.batch\(statements\)/);
   assert.match(runtime, /channels\.slug = 'global-chat'/);
