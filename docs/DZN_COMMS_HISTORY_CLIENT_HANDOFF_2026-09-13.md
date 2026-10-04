@@ -17,9 +17,21 @@ responses. The five-second deadline covers both headers and body. Unmount aborts
 the request; stale results cannot update the component. Bad responses, denial,
 network errors and timeout return to the existing clearly labelled static view.
 
+The current API now returns a bounded opaque cursor containing the message timestamp
+and ID. Its SQL comparison uses both fields in the same order as the query, so rows
+that share a timestamp are not skipped between pages. The old timestamp-only
+`before` parameter remains temporarily supported for compatibility, but callers
+cannot combine it with the opaque cursor.
+
+Public Global Chat history remains deliberately readable without login because its
+projection contains only public-safe fields and moderation placeholders. Responses
+remain private/no-store and vary by cookie because signed-in reaction state can be
+included. Sending, reactions, reports and moderation still require authentication;
+private groups still require a current authenticated membership check.
+
 ## Validation
 
-- 28 client tests cover current projection, malformed fields, access/channel mismatch,
+- 34 client tests cover current projection, malformed fields, access/channel mismatch,
   hidden content, disabled-feature assertions, byte limits, UTF-8 boundaries,
   headers/body timeout, unmount cancellation, full Unicode pages and worst-case
   JSON-escaped text. The byte cap fits the maximum valid 30-message projection.
@@ -41,9 +53,10 @@ not read real chat messages, connect a production database or alter live setting
 ## Still Separate
 
 This does not enable live Global Chat, sending, reactions, presence, groups,
-support messages or paid AI. It does not implement the old #119 login-only public
-history or tie-safe cursor contract. Multi-room interaction and those server-side
-requirements remain in the per-request manifest. Website-game XP, gameplay awards,
+support messages or paid AI. The old login-only public-history proposal is retired
+in favor of the explicit public-safe Global Chat read policy above; tie-safe opaque
+pagination is implemented and tested. Multi-room interaction remains separate.
+Website-game XP, gameplay awards,
 owner subscriptions, Discord decisions and billing are unchanged.
 
 No database migration is needed for this client correction. The existing Comms

@@ -5,6 +5,7 @@ export function commsHistoryFixture() {
     access: { public_channel: true, private_group_membership_required: false, current_user_member_role: null },
     messages: [{ id: "qa-message-1", author_display_name: "DZN QA", author_role_label: "Member", body: "Local history fixture",
       visibility_state: "visible", created_at: "2026-09-13 00:00:00", edited_at: null, public_safe: true, read_only: true }],
+    page: { next_cursor: null as string | null, has_more: false, limit: 30 },
     feature_flags: { route_enabled: true, sending_enabled: false, reactions_enabled: false, reactions_write_enabled: false, report_actions_enabled: false,
       moderation_mutations_enabled: false, ai_assist_runtime_enabled: false, durable_objects_or_websockets_enabled: false,
       analytics_or_tracking_enabled: false },

@@ -66,6 +66,9 @@ assert.match(helper, /liveScope === "production"/, "Released live history must r
 assert.match(helper, /getSessionUser\(env, request\)/, "Private group reads must resolve the current Discord session.");
 assert.match(helper, /membership_state = 'active'/, "Private group reads must require an active membership row.");
 assert.match(helper, /SUPPORT_HISTORY_BLOCKED/, "Private support history must remain blocked in this slice.");
+assert.match(helper, /julianday\(created_at\) = julianday\(\?\) AND id < \?/, "Pagination must break equal-timestamp ties with message ID.");
+assert.match(helper, /encodeHistoryCursor\(lastRow\)/, "The API must issue an opaque cursor from the last row in the page.");
+assert.match(helper, /Use either before or cursor, not both/, "Legacy and opaque cursors must not be combined.");
 assert.match(helper, /sending_enabled: flags\.writeFeaturesEnabled/, "Route payload must derive sending state from the protected server flag.");
 assert.match(helper, /reactions_enabled: reactionFlags\.readEnabled/, "Route payload must derive reaction reads from their separate server flag.");
 assert.match(helper, /reactions_write_enabled: reactionFlags\.writeEnabled/, "Route payload must derive reaction writes from their separate server flag.");
@@ -209,6 +212,36 @@ async function testRuntimeContracts() {
   );
   const paged = await callMessageHistoryRoute(paginationDb, "GET", "https://dzn.test/api/comms/message-history?limit=1&before=2026-09-01T10:30:00.000Z", enabledEnv(paginationDb));
   assert.deepEqual(((await paged.json()) as CommsPayload).messages.map(row => row.id), ["older"], "SQLite timestamps and expired-state rows must respect the cursor and limit");
+  const tieDb = seededDb();
+  tieDb.messages.splice(0, tieDb.messages.length,
+    message({ id: "same-a", channelId: "channel-global", body: "A", createdAt: "2026-09-01T10:00:00.000Z" }),
+    message({ id: "same-b", channelId: "channel-global", body: "B", createdAt: "2026-09-01T10:00:00.000Z" }),
+    message({ id: "same-c", channelId: "channel-global", body: "C", createdAt: "2026-09-01T10:00:00.000Z" }),
+  );
+  const tieFirst = await callMessageHistoryRoute(tieDb, "GET", "https://dzn.test/api/comms/message-history?limit=2", enabledEnv(tieDb));
+  const tieFirstPayload = await tieFirst.json() as CommsPayload;
+  assert.deepEqual(tieFirstPayload.messages.map(row => row.id), ["same-b", "same-c"]);
+  assert.equal(tieFirstPayload.page.has_more, true);
+  assert.match(tieFirstPayload.page.next_cursor ?? "", /^[A-Za-z0-9_-]{8,1024}$/);
+  const tieSecond = await callMessageHistoryRoute(tieDb, "GET", `https://dzn.test/api/comms/message-history?limit=2&cursor=${encodeURIComponent(tieFirstPayload.page.next_cursor ?? "")}`, enabledEnv(tieDb));
+  const tieSecondPayload = await tieSecond.json() as CommsPayload;
+  assert.deepEqual(tieSecondPayload.messages.map(row => row.id), ["same-a"], "Opaque cursors must not skip rows sharing the same timestamp.");
+  assert.deepEqual(tieSecondPayload.page, { next_cursor: null, has_more: false, limit: 2 });
+  const unusualDb = seededDb();
+  unusualDb.messages.splice(0, unusualDb.messages.length,
+    { ...message({ id: "unsortable", channelId: "channel-global", body: "No timestamp", createdAt: "2026-09-01T10:00:00.000Z" }), created_at: null as unknown as string },
+    message({ id: "odd id/😀", channelId: "channel-global", body: "Odd ID", createdAt: "2026-09-01T10:00:00.000Z" }),
+    message({ id: "older", channelId: "channel-global", body: "Older", createdAt: "2026-08-31T10:00:00.000Z" }),
+  );
+  const unusualFirst = await callMessageHistoryRoute(unusualDb, "GET", "https://dzn.test/api/comms/message-history?limit=1", enabledEnv(unusualDb));
+  const unusualFirstPayload = await unusualFirst.json() as CommsPayload;
+  assert.deepEqual(unusualFirstPayload.messages.map(row => row.id), ["odd id/😀"]);
+  assert.equal(unusualFirstPayload.page.has_more, true);
+  assert.ok(unusualFirstPayload.page.next_cursor);
+  const unusualSecond = await callMessageHistoryRoute(unusualDb, "GET", `https://dzn.test/api/comms/message-history?limit=1&cursor=${encodeURIComponent(unusualFirstPayload.page.next_cursor ?? "")}`, enabledEnv(unusualDb));
+  assert.deepEqual(((await unusualSecond.json()) as CommsPayload).messages.map(row => row.id), ["older"], "Every bounded text ID must produce a usable cursor; unsortable timestamps stay out of history.");
+  const malformedCursor = await callMessageHistoryRoute(tieDb, "GET", "https://dzn.test/api/comms/message-history?cursor=not+a+cursor", enabledEnv(tieDb));
+  assert.equal(malformedCursor.status, 400);
   const disabledDb = new FakeD1Database();
   const disabled = await callMessageHistoryRoute(disabledDb, "GET", "https://dzn.test/api/comms/message-history");
   assert.equal(disabled.status, 404, "Unset flags must keep the read-history route disabled.");
@@ -380,6 +413,11 @@ type CommsPayload = {
     author_display_name: string;
     body: string;
   }>;
+  page: {
+    next_cursor: string | null;
+    has_more: boolean;
+    limit: number;
+  };
   feature_flags: {
     sending_enabled: boolean;
     reactions_enabled: boolean;

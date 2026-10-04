@@ -34,6 +34,9 @@ for (const [name, mutate] of Object.entries({
   invalidTime: x => { x.messages[0].created_at = "not a time"; },
   tooManyRows: x => { x.messages = Array.from({ length: 31 }, (_, i) => ({ ...x.messages[0], id: String(i) })); },
   duplicateBoundary: x => { x.fairness_boundary.push(x.fairness_boundary[0]); },
+  missingCursor: x => { x.page.has_more = true; },
+  unexpectedCursor: x => { x.page.next_cursor = "opaque_123"; },
+  malformedCursor: x => { x.page.next_cursor = "not+a+cursor"; x.page.has_more = true; },
 } satisfies Record<string, (input: ReturnType<typeof commsHistoryFixture>) => void>)) {
   test(`rejects ${name}`, () => { const input = commsHistoryFixture(); mutate(input); assert.throws(() => parseCommsHistory(input)); });
 }
@@ -92,7 +95,7 @@ test("sends bounded own-reaction add and remove requests", async () => {
 });
 
 test("rejects malformed nested collections and primitives without reaching the UI", () => {
-  for (const key of ["channel", "access", "messages", "feature_flags", "fairness_boundary"]) {
+  for (const key of ["channel", "access", "messages", "page", "feature_flags", "fairness_boundary"]) {
     for (const value of [null, "invalid", 7, true, {}]) {
       assert.throws(() => parseCommsHistory({ ...commsHistoryFixture(), [key]: value }), `${key}: ${JSON.stringify(value)}`);
     }

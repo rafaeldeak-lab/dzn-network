@@ -44,6 +44,11 @@ type DznCommsReactionSummary = {
   counts: { key: string; emoji: string; label: string; count: number; current_user_reacted: boolean }[];
 };
 
+type DznCommsHistoryCursor = {
+  createdAt: string;
+  messageId: string;
+};
+
 export type DznCommsReadHistoryFlags = {
   enabled: boolean;
   readFlag: boolean;
@@ -95,6 +100,19 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
       { status: 400, headers: noStoreForErrorHeaders() },
     );
   }
+  const cursor = decodeHistoryCursor(url.searchParams.get("cursor"));
+  if (url.searchParams.has("cursor") && !cursor) {
+    return json(
+      { ok: false, code: "INVALID_CURSOR", message: "The message-history cursor is invalid." },
+      { status: 400, headers: noStoreForErrorHeaders() },
+    );
+  }
+  if (before && cursor) {
+    return json(
+      { ok: false, code: "AMBIGUOUS_CURSOR", message: "Use either before or cursor, not both." },
+      { status: 400, headers: noStoreForErrorHeaders() },
+    );
+  }
 
   const db = requireDb(env);
   const channel = await readChannel(db, channelSlug);
@@ -128,12 +146,15 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
     );
   }
 
-  const rows = await readMessages(db, channel.id, limit, before);
+  const rows = await readMessages(db, channel.id, limit + 1, cursor, before);
+  const pageRows = rows.slice(0, limit);
+  const lastRow = pageRows.at(-1) ?? null;
+  const nextCursor = rows.length > limit && lastRow ? encodeHistoryCursor(lastRow) : null;
   const reactionFlags = readDznCommsReactionFlags(env, request);
   const reactionSummaries = reactionFlags.readEnabled
-    ? await readDznCommsReactionSummaries(db, rows.map((row) => row.id), user?.id ?? null)
+    ? await readDznCommsReactionSummaries(db, pageRows.map((row) => row.id), user?.id ?? null)
     : new Map<string, DznCommsReactionSummary>();
-  const messages = rows
+  const messages = pageRows
     .filter((row) => !isExpired(row.expires_at) && normalizeVisibilityState(row.visibility_state) !== "expired")
     .map((row) => publicSafeMessage(row, reactionSummaries.get(row.id)))
     .reverse();
@@ -157,6 +178,11 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
         current_user_member_role: membership?.role ?? null,
       },
       messages,
+      page: {
+        next_cursor: nextCursor,
+        has_more: nextCursor !== null,
+        limit,
+      },
       feature_flags: {
         route_enabled: flags.enabled,
         ui_flag_name: flags.uiFlagName,
@@ -255,19 +281,28 @@ async function readMembership(db: D1Database, channelId: string, userId: Session
     .first<DznCommsMembershipRow>();
 }
 
-async function readMessages(db: D1Database, channelId: string, limit: number, before: string | null): Promise<DznCommsMessageRow[]> {
+async function readMessages(
+  db: D1Database,
+  channelId: string,
+  limit: number,
+  cursor: DznCommsHistoryCursor | null,
+  before: string | null,
+): Promise<DznCommsMessageRow[]> {
   const result = await db
     .prepare(
       `SELECT id, author_display_name, author_role_label, body, visibility_state, created_at, edited_at, expires_at
        FROM dzn_comms_messages
        WHERE channel_id = ?
+         AND julianday(created_at) IS NOT NULL
+         AND id IS NOT NULL AND length(id) BETWEEN 1 AND 120
+         AND (? IS NULL OR julianday(created_at) < julianday(?) OR (julianday(created_at) = julianday(?) AND id < ?))
          AND (? IS NULL OR julianday(created_at) < julianday(?))
          AND visibility_state != 'expired'
          AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
        ORDER BY julianday(created_at) DESC, id DESC
        LIMIT ?`,
     )
-    .bind(channelId, before, before, limit)
+    .bind(channelId, cursor?.createdAt ?? null, cursor?.createdAt ?? null, cursor?.createdAt ?? null, cursor?.messageId ?? null, before, before, limit)
     .all<DznCommsMessageRow>();
 
   return result.results ?? [];
@@ -317,6 +352,48 @@ function sanitizeBefore(value: string | null) {
   const timestamp = Date.parse(trimmed);
   if (!Number.isFinite(timestamp)) return null;
   return new Date(timestamp).toISOString();
+}
+
+function encodeHistoryCursor(row: DznCommsMessageRow) {
+  const createdAt = canonicalTimestamp(row.created_at);
+  const messageId = sanitizeCursorMessageId(row.id);
+  if (!createdAt || !messageId) return null;
+  return base64UrlEncode(JSON.stringify({ v: 1, t: createdAt, id: messageId }));
+}
+
+function decodeHistoryCursor(value: string | null): DznCommsHistoryCursor | null {
+  if (!value || !/^[A-Za-z0-9_-]{8,1024}$/.test(value)) return null;
+  try {
+    const parsed = JSON.parse(base64UrlDecode(value)) as Partial<{ v: number; t: string; id: string }>;
+    const createdAt = parsed.v === 1 ? canonicalTimestamp(parsed.t) : null;
+    const messageId = sanitizeCursorMessageId(parsed.id);
+    return createdAt && messageId ? { createdAt, messageId } : null;
+  } catch {
+    return null;
+  }
+}
+
+function canonicalTimestamp(value: unknown) {
+  if (typeof value !== "string" || value.length > 40) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
+function sanitizeCursorMessageId(value: unknown) {
+  return typeof value === "string" && [...value].length >= 1 && [...value].length <= 120 ? value : null;
+}
+
+function base64UrlEncode(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlDecode(value: string) {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const binary = atob(padded);
+  return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(binary, (character) => character.charCodeAt(0)));
 }
 
 function normalizeChannelKind(value: DznCommsChannelRow["kind"]) {
