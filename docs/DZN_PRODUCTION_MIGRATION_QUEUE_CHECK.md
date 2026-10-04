@@ -10,7 +10,7 @@ $env:DZN_EXPECTED_PENDING_MIGRATIONS = "0085_games_hub_trivia.sql,0086_games_hub
 npm run check:production-migration-queue
 ```
 
-The optional expected queue makes the check fail when production or the repository has moved. Set it to an empty string to assert that no migrations are pending. The check also fails when the production ledger contains a migration absent from the current checkout. The checker cannot apply migrations, execute SQL files, edit the ledger, create a recovery bookmark, change Cloudflare configuration, deploy, or enable feature switches.
+The optional expected queue makes the check fail when production or the repository has moved. Set it to the literal `NONE` to assert that no migrations are pending; this non-empty sentinel works on Windows PowerShell versions that remove environment variables assigned an empty string. The check also fails when the production ledger contains a migration absent from the current checkout. The checker cannot apply migrations, execute SQL files, edit the ledger, create a recovery bookmark, change Cloudflare configuration, deploy, or enable feature switches.
 
 The read-only check on 4 October 2026 found this production queue, in order:
 

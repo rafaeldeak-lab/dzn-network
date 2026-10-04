@@ -47,10 +47,12 @@ if (unknownApplied.length > 0) {
 }
 const pending = localMigrations.filter((name) => !applied.has(name));
 const expectedValue = process.env.DZN_EXPECTED_PENDING_MIGRATIONS;
-const expected = String(expectedValue ?? "")
-  .split(",")
-  .map((name) => name.trim())
-  .filter(Boolean);
+const expected = expectedValue === "NONE"
+  ? []
+  : String(expectedValue ?? "")
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
 
 if (expectedValue !== undefined && JSON.stringify(pending) !== JSON.stringify(expected)) {
   throw new Error(`Pending migration queue mismatch. Expected ${JSON.stringify(expected)}, received ${JSON.stringify(pending)}.`);

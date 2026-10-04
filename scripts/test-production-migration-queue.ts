@@ -12,6 +12,7 @@ assert.equal(
 );
 assert.match(source, /DZN_EXPECTED_PENDING_MIGRATIONS/);
 assert.match(source, /Production ledger contains migrations absent from this checkout/);
+assert.match(source, /expectedValue === "NONE"/);
 assert.match(source, /expectedValue !== undefined/);
 assert.match(source, /Duplicate migration prefixes/);
 assert.match(source, /databaseName = "dzn_network_db"/);
