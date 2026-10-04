@@ -94,9 +94,9 @@ export async function listStoreManualReviewOrders(env: Env, options: ListOptions
       CASE WHEN u.avatar IS NOT NULL AND u.avatar <> '' THEN
         '/api/owner/store/manual-review-avatar/' || o.id
         ELSE NULL END AS customer_avatar,
-      (SELECT e.event_type FROM store_commerce_events e WHERE e.order_id = o.id ORDER BY e.received_at DESC, e.id DESC LIMIT 1) AS latest_event_type,
-      (SELECT e.processing_status FROM store_commerce_events e WHERE e.order_id = o.id ORDER BY e.received_at DESC, e.id DESC LIMIT 1) AS latest_event_status,
-      (SELECT e.received_at FROM store_commerce_events e WHERE e.order_id = o.id ORDER BY e.received_at DESC, e.id DESC LIMIT 1) AS latest_event_at,
+      (SELECT e.event_type FROM store_commerce_events e WHERE e.order_id = o.id ORDER BY e.received_at DESC, e.rowid DESC LIMIT 1) AS latest_event_type,
+      (SELECT e.processing_status FROM store_commerce_events e WHERE e.order_id = o.id ORDER BY e.received_at DESC, e.rowid DESC LIMIT 1) AS latest_event_status,
+      (SELECT e.received_at FROM store_commerce_events e WHERE e.order_id = o.id ORDER BY e.received_at DESC, e.rowid DESC LIMIT 1) AS latest_event_at,
       (SELECT a.action FROM store_commerce_manual_review_actions a WHERE a.order_id = o.id ORDER BY a.sequence DESC LIMIT 1) AS latest_action,
       (SELECT a.reason FROM store_commerce_manual_review_actions a WHERE a.order_id = o.id ORDER BY a.sequence DESC LIMIT 1) AS latest_action_reason,
       (SELECT a.evidence_category FROM store_commerce_manual_review_actions a WHERE a.order_id = o.id ORDER BY a.sequence DESC LIMIT 1) AS latest_action_evidence_category,

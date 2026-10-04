@@ -95,6 +95,15 @@ async function run() {
       rawStripeReferencesExposed: false,
     });
 
+    await db.prepare(`INSERT INTO store_commerce_events (
+      id, stripe_event_id, order_id, event_type, livemode, raw_body_sha256, processing_status, safe_summary_json, received_at
+    ) VALUES ('event_review_000','evt_review_000','order_review_001','charge.dispute.created',0,?,'manual_review','{"eventType":"charge.dispute.created","orderLinked":true,"livemode":false}','2026-10-04T10:00:00.000Z')`)
+      .bind("b".repeat(64)).run();
+    const eventOrdered = await listStoreManualReviewOrders(env);
+    assert.equal(eventOrdered.ok, true);
+    if (!eventOrdered.ok) throw new Error("Expected event-ordered Store review queue");
+    assert.equal(eventOrdered.items[0]?.latest_event_type, "charge.dispute.created");
+
     const search = await listStoreManualReviewOrders(env, { query: "Founding", mode: "test", limit: 1 });
     assert.equal(search.ok, true);
     if (!search.ok) throw new Error("Expected Store review search to pass");
@@ -162,8 +171,8 @@ async function seed(db: D1Database) {
     VALUES ('order_review_001','DZN-REVIEW-001',?,'publication_review','buyer-review-0001','manual_review','test',0,1200,1200,'2026-10-05T00:00:00.000Z','{}')`).bind(buyer.id).run();
   await db.prepare(`INSERT INTO store_commerce_order_items (id, order_id, product_id, price_id, product_key, product_name, fulfilment_kind, unit_amount_minor, total_amount_minor)
     VALUES ('item_review_001','order_review_001','product_review','price_review','founding-supporter','Founding Supporter','supporter_card',1200,1200)`).run();
-  await db.prepare(`INSERT INTO store_commerce_events (id, stripe_event_id, order_id, event_type, livemode, raw_body_sha256, processing_status, safe_summary_json)
-    VALUES ('event_review_001','evt_review_001','order_review_001','checkout.session.completed',0,?,'manual_review','{"eventType":"checkout.session.completed","orderLinked":true,"livemode":false}')`).bind("a".repeat(64)).run();
+  await db.prepare(`INSERT INTO store_commerce_events (id, stripe_event_id, order_id, event_type, livemode, raw_body_sha256, processing_status, safe_summary_json, received_at)
+    VALUES ('event_review_001','evt_review_001','order_review_001','checkout.session.completed',0,?,'manual_review','{"eventType":"checkout.session.completed","orderLinked":true,"livemode":false}','2026-10-04T10:00:00.000Z')`).bind("a".repeat(64)).run();
 }
 
 function request(method: "GET" | "POST", body?: unknown, token?: string, origin?: string) {
