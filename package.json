@@ -202,6 +202,7 @@
     "qa:dzn-assist": "node scripts/qa-dzn-assist.mjs",
     "test:dzn-comms-read-history": "tsx scripts/test-dzn-comms-read-history.ts && npm run test:dzn-comms-history-client",
     "test:dzn-comms-history-client": "tsx --test scripts/test-dzn-comms-history-client.ts",
+    "qa:dzn-comms-private-groups": "tsx scripts/qa-dzn-comms-private-groups.ts",
     "test:dzn-comms-message-sending-contract": "node --test scripts/test-dzn-comms-message-sending-contract.mjs && tsx scripts/test-dzn-comms-live-runtime.ts && npm run test:dzn-comms-reactions",
     "test:dzn-comms-reactions": "tsx scripts/test-dzn-comms-reactions.ts",
     "qa:dzn-comms-owner-moderation": "node scripts/qa-dzn-comms-owner-moderation.mjs",

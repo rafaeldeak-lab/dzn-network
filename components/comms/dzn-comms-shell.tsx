@@ -36,6 +36,7 @@ type CommsHistoryState =
 const historyUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED === "true";
 const liveUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED === "true";
 const reactionUiFlagEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED === "true";
+const privateGroupsUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_PRIVATE_GROUPS_UI_ENABLED === "true";
 
 const staticPayload: CommsHistoryPayload = {
   ok: true,
@@ -54,6 +55,14 @@ const staticPayload: CommsHistoryPayload = {
     private_group_membership_required: false,
     current_user_member_role: null,
   },
+  available_channels: [{
+    slug: "global-chat",
+    kind: "public",
+    name: "Global Chat",
+    description: "Public DZN community chat.",
+    visibility: "public",
+    current_user_member_role: null,
+  }],
   messages: [
     {
       id: "static-1",
@@ -93,6 +102,7 @@ const staticPayload: CommsHistoryPayload = {
   feature_flags: {
     route_enabled: false,
     sending_enabled: false,
+    private_groups_enabled: false,
     reactions_enabled: false,
     reactions_write_enabled: false,
     report_actions_enabled: false,
@@ -108,11 +118,14 @@ const staticPayload: CommsHistoryPayload = {
 };
 
 export function DznCommsShell() {
+  const [selectedChannel, setSelectedChannel] = useState("global-chat");
+  const selectedChannelRef = useRef("global-chat");
+  const historyRequestGenerationRef = useRef(0);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [composerMessage, setComposerMessage] = useState("");
   const [authStatus, setAuthStatus] = useState<"checking" | "authenticated" | "signed-out">("checking");
-  const sendAttemptRef = useRef<{ draft: string; requestId: string } | null>(null);
+  const sendAttemptRef = useRef<{ channelSlug: string; draft: string; requestId: string } | null>(null);
   const reactionAttemptRef = useRef(new Map<string, string>());
   const [history, setHistory] = useState<CommsHistoryState>(() => ({
     status: historyUiEnabled || liveUiEnabled ? "loading" : "static",
@@ -126,33 +139,55 @@ export function DznCommsShell() {
     if (!historyUiEnabled && !liveUiEnabled) return;
 
     const controller = new AbortController();
-    const refresh = () => loadCommsHistory(controller.signal)
+    const refresh = () => {
+      const requestGeneration = ++historyRequestGenerationRef.current;
+      return loadCommsHistory(controller.signal, { channelSlug: selectedChannel })
       .then((payload) => {
-        if (controller.signal.aborted) return;
+        if (
+          controller.signal.aborted
+          || historyRequestGenerationRef.current !== requestGeneration
+          || selectedChannelRef.current !== selectedChannel
+          || payload.channel.slug !== selectedChannel
+        ) return;
         setHistory({
           status: "ready",
           payload,
-          message: liveUiEnabled && payload.feature_flags.sending_enabled ? "Global Chat is live. Keep it respectful and report abuse." : "Message history is available. Sending is not enabled yet.",
+          message: liveUiEnabled && payload.feature_flags.sending_enabled ? `${payload.channel.name} is live. Keep it respectful and report abuse.` : "Message history is available. Sending is not enabled yet.",
         });
       })
       .catch(() => {
-        if (controller.signal.aborted) return;
+        if (
+          controller.signal.aborted
+          || historyRequestGenerationRef.current !== requestGeneration
+          || selectedChannelRef.current !== selectedChannel
+        ) return;
+        if (selectedChannel !== "global-chat") {
+          setHistory({
+            status: "loading",
+            payload: staticPayload,
+            message: "Private group access changed. Returning to Global Chat.",
+          });
+          selectedChannelRef.current = "global-chat";
+          setSelectedChannel("global-chat");
+          return;
+        }
         setHistory((current) => current.status === "ready"
-          ? { ...current, message: "Global Chat could not refresh. Showing the last received messages while DZN reconnects." }
+          ? { ...current, message: `${current.payload.channel.name} could not refresh. Showing the last received messages while DZN reconnects.` }
           : {
               status: "fallback",
               payload: staticPayload,
               message: "Message history could not be reached, so DZN is showing the static read-only fallback.",
             });
       });
+    };
     void refresh();
-    const poller = liveUiEnabled ? window.setInterval(() => void refresh(), 5_000) : undefined;
+    const poller = window.setInterval(() => void refresh(), 5_000);
 
     return () => {
       controller.abort();
-      if (poller !== undefined) window.clearInterval(poller);
+      window.clearInterval(poller);
     };
-  }, []);
+  }, [selectedChannel]);
 
   const payload = history.payload;
   const statusLabel = useMemo(() => statusCopy(history.status), [history.status]);
@@ -183,7 +218,7 @@ export function DznCommsShell() {
   const reactionWritesEnabled = reactionWritesAvailable && authStatus === "authenticated";
   const reactionLoginRequired = reactionWritesAvailable && authStatus === "signed-out";
   const canSend = sendingEnabled && draft.trim().length > 0 && !sending;
-  const globalChatAccessLabel = sendingEnabled
+  const selectedChannelAccessLabel = sendingEnabled
     ? "Live now"
     : history.status === "ready"
       ? "Read-only history"
@@ -194,25 +229,43 @@ export function DznCommsShell() {
   async function handleSend(event: FormEvent) {
     event.preventDefault();
     if (!canSend) return;
-    const pendingAttempt = sendAttemptRef.current?.draft === draft
+    const targetChannel = payload.channel.slug;
+    if (selectedChannelRef.current !== targetChannel) {
+      setComposerMessage("The selected channel changed. Review the channel and send again.");
+      return;
+    }
+    const pendingAttempt = sendAttemptRef.current?.channelSlug === targetChannel && sendAttemptRef.current.draft === draft
       ? sendAttemptRef.current
-      : { draft, requestId: crypto.randomUUID() };
+      : { channelSlug: targetChannel, draft, requestId: crypto.randomUUID() };
     sendAttemptRef.current = pendingAttempt;
     setSending(true);
     setComposerMessage("");
     try {
-      await sendCommsMessage(draft, pendingAttempt.requestId);
+      await sendCommsMessage(targetChannel, draft, pendingAttempt.requestId);
       sendAttemptRef.current = null;
-      setDraft("");
-      setComposerMessage("Message sent to Global Chat.");
+      if (selectedChannelRef.current === targetChannel) {
+        setDraft("");
+        setComposerMessage(`Message sent to ${payload.channel.name}.`);
+      }
+      const requestGeneration = ++historyRequestGenerationRef.current;
       try {
-        const refreshed = await loadCommsHistory(new AbortController().signal);
-        setHistory({ status: "ready", payload: refreshed, message: "Message sent to Global Chat." });
+        const refreshed = await loadCommsHistory(new AbortController().signal, { channelSlug: targetChannel });
+        if (
+          historyRequestGenerationRef.current === requestGeneration
+          && selectedChannelRef.current === targetChannel
+          && refreshed.channel.slug === targetChannel
+        ) {
+          setHistory({ status: "ready", payload: refreshed, message: `Message sent to ${refreshed.channel.name}.` });
+        }
       } catch {
-        setHistory((current) => ({ ...current, message: "Message sent. Chat history will refresh shortly." }));
+        if (historyRequestGenerationRef.current === requestGeneration && selectedChannelRef.current === targetChannel) {
+          setHistory((current) => ({ ...current, message: "Message sent. Chat history will refresh shortly." }));
+        }
       }
     } catch (error) {
-      setComposerMessage(error instanceof Error ? error.message : "Message could not be sent.");
+      if (selectedChannelRef.current === targetChannel) {
+        setComposerMessage(error instanceof Error ? error.message : "Message could not be sent.");
+      }
     } finally {
       setSending(false);
     }
@@ -220,6 +273,8 @@ export function DznCommsShell() {
 
   async function handleReaction(messageId: string, reactionKey: CommsReactionKey, remove: boolean) {
     if (!reactionWritesEnabled) throw new Error("Reactions are not enabled yet.");
+    const targetChannel = payload.channel.slug;
+    if (selectedChannelRef.current !== targetChannel) throw new Error("The selected channel changed. Retry the reaction.");
     const addAttemptKey = `${messageId}:${reactionKey}:add`;
     const removeAttemptKey = `${messageId}:${reactionKey}:remove`;
     const attemptKey = remove ? removeAttemptKey : addAttemptKey;
@@ -233,11 +288,20 @@ export function DznCommsShell() {
     } catch (error) {
       throw error;
     }
+    const requestGeneration = ++historyRequestGenerationRef.current;
     try {
-      const refreshed = await loadCommsHistory(new AbortController().signal);
-      setHistory({ status: "ready", payload: refreshed, message: "Reaction saved." });
+      const refreshed = await loadCommsHistory(new AbortController().signal, { channelSlug: targetChannel });
+      if (
+        historyRequestGenerationRef.current === requestGeneration
+        && selectedChannelRef.current === targetChannel
+        && refreshed.channel.slug === targetChannel
+      ) {
+        setHistory({ status: "ready", payload: refreshed, message: "Reaction saved." });
+      }
     } catch {
-      setHistory((current) => ({ ...current, message: "Reaction saved. Counts will refresh shortly." }));
+      if (historyRequestGenerationRef.current === requestGeneration && selectedChannelRef.current === targetChannel) {
+        setHistory((current) => ({ ...current, message: "Reaction saved. Counts will refresh shortly." }));
+      }
     }
   }
 
@@ -247,7 +311,7 @@ export function DznCommsShell() {
         <nav aria-label="DZN communication tools" className="grid gap-2 rounded-lg border border-white/10 bg-[#060a15]/95 p-2 sm:grid-cols-2">
           <a href="#global-chat" className="group flex min-h-14 items-center gap-3 rounded-md border border-cyan-300/35 bg-cyan-300/10 px-3 py-2">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-cyan-300/30 bg-cyan-300/10 text-cyan-100"><MessageCircle className="h-5 w-5" aria-hidden="true" /></span>
-            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">Global Chat</span><span className="block text-xs font-bold text-emerald-200">{globalChatAccessLabel}</span></span>
+            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">DZN Comms</span><span className="block text-xs font-bold text-emerald-200">{selectedChannelAccessLabel}</span></span>
             <ChevronRight className="h-4 w-4 text-cyan-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
           </a>
           <a href="#dzn-assist" className="group flex min-h-14 items-center gap-3 rounded-md border border-violet-300/20 bg-violet-300/6 px-3 py-2 transition hover:border-violet-200/45">
@@ -265,10 +329,9 @@ export function DznCommsShell() {
               </span>
               <div className="min-w-0">
                 <p className="text-xs font-black uppercase tracking-[0.28em] text-cyan-200">DZN Comms</p>
-                <h1 className="mt-1 text-3xl font-black uppercase leading-none text-white sm:text-4xl">Global Chat</h1>
+                <h1 className="mt-1 text-3xl font-black uppercase leading-none text-white sm:text-4xl">{payload.channel.name}</h1>
                 <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-zinc-300">
-                  Discord-authenticated members can talk in one moderated DZN channel. Private chat and presence remain
-                  separate releases; public DZN guidance is available below.
+                  {payload.channel.description ?? "Discord-authenticated members can talk in this moderated DZN channel."}
                 </p>
               </div>
             </div>
@@ -282,10 +345,31 @@ export function DznCommsShell() {
             <aside className="border-b border-white/10 bg-black/18 p-4 lg:border-b-0 lg:border-r">
               <PanelTitle icon={Hash} label="Channels" />
               <div className="mt-4 space-y-2">
-                <ChannelButton active icon={Hash} label="Global Chat" meta={sendingEnabled ? "Live" : "Read-only"} />
+                {payload.available_channels
+                  .filter((channel) => channel.kind === "public" || privateGroupsUiEnabled)
+                  .map((channel) => (
+                    <ChannelButton
+                      key={channel.slug}
+                      active={channel.slug === payload.channel.slug}
+                      icon={channel.kind === "private_group" ? LockKeyhole : Hash}
+                      label={channel.name}
+                      meta={channel.kind === "private_group" ? channel.current_user_member_role ?? "Member" : sendingEnabled ? "Live" : "Read-only"}
+                      onSelect={() => {
+                        if (channel.slug === selectedChannelRef.current) return;
+                        historyRequestGenerationRef.current += 1;
+                        setDraft("");
+                        setComposerMessage("");
+                        selectedChannelRef.current = channel.slug;
+                        setHistory({ status: "loading", payload: staticPayload, message: "Opening the selected DZN Comms channel." });
+                        setSelectedChannel(channel.slug);
+                      }}
+                    />
+                  ))}
                 <ChannelButton icon={Hash} label="New Players" meta="Future" />
                 <ChannelButton icon={Hash} label="Server Owners" meta="Future" />
-                <ChannelButton icon={LockKeyhole} label="Private Groups" meta="Blocked" />
+                {!privateGroupsUiEnabled || !payload.feature_flags.private_groups_enabled
+                  ? <ChannelButton icon={LockKeyhole} label="Private Groups" meta="Unavailable" />
+                  : null}
               </div>
               <div className="mt-5 rounded-lg border border-amber-300/20 bg-amber-300/8 p-3">
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-200">Community Safety</p>
@@ -337,7 +421,7 @@ export function DznCommsShell() {
                   disabled={!sendingEnabled || sending}
                   value={draft}
                   onChange={(event) => setDraft([...event.target.value].slice(0, 2_000).join(""))}
-                  placeholder={sendingEnabled ? "Message Global Chat" : "Sending unavailable"}
+                  placeholder={sendingEnabled ? `Message ${payload.channel.name}` : "Sending unavailable"}
                   className="min-w-0 flex-1 bg-transparent px-2 text-sm font-semibold text-zinc-300 placeholder:text-zinc-500 focus:outline-none"
                 />
                 <button
@@ -483,14 +567,16 @@ function PanelTitle({ icon: Icon, label }: { icon: typeof Hash; label: string })
   );
 }
 
-function ChannelButton({ active = false, icon: Icon, label, meta }: { active?: boolean; icon: typeof Hash; label: string; meta: string }) {
+function ChannelButton({ active = false, icon: Icon, label, meta, onSelect }: { active?: boolean; icon: typeof Hash; label: string; meta: string; onSelect?: () => void }) {
   return (
     <button
       type="button"
-      disabled
+      disabled={!onSelect || active}
+      onClick={onSelect}
+      aria-current={active ? "page" : undefined}
       className={`flex w-full items-center justify-between rounded-lg border px-3 py-3 text-left ${
         active ? "border-cyan-300/40 bg-cyan-400/12 text-white" : "border-white/8 bg-white/4 text-zinc-400"
-      }`}
+      } disabled:cursor-default enabled:hover:border-cyan-300/30 enabled:hover:text-white`}
     >
       <span className="flex min-w-0 items-center gap-2">
         <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />

@@ -46,10 +46,12 @@ assert.doesNotMatch(
 assert.match(envExample, /DZN_COMMS_MESSAGE_HISTORY_READ_ENABLED=false/, "Comms route flag must default off.");
 assert.match(envExample, /DZN_COMMS_MESSAGE_HISTORY_READ_SCOPE=local_test/, "Comms route scope must be local/test by default.");
 assert.match(envExample, /NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED=false/, "Comms UI flag must default off.");
+assert.match(envExample, /NEXT_PUBLIC_DZN_COMMS_PRIVATE_GROUPS_UI_ENABLED=false/, "Private-group selection must have a separate default-off UI flag.");
 assert.match(envExample, /NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED=false/, "Comms reaction UI flag must default off.");
 assert.match(cloudflareEnv, /DZN_COMMS_MESSAGE_HISTORY_READ_ENABLED\?: string/, "Cloudflare Env type must include the route flag.");
 assert.match(cloudflareEnv, /DZN_COMMS_MESSAGE_HISTORY_READ_SCOPE\?: string/, "Cloudflare Env type must include the local/test scope.");
 assert.match(cloudflareEnv, /NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED\?: string/, "Cloudflare Env type must include the reaction UI flag.");
+assert.match(cloudflareEnv, /NEXT_PUBLIC_DZN_COMMS_PRIVATE_GROUPS_UI_ENABLED\?: string/, "Cloudflare Env type must include the private-group UI flag.");
 
 const helperWriteTargets = [...helper.matchAll(/\b(?:INSERT\s+INTO|UPDATE\s+[a-z_]+|DELETE\s+FROM|UPSERT|REPLACE\s+INTO)\s+([a-z_]+)/gi)];
 assert.deepEqual(helperWriteTargets, [], "DZN Comms read-history helper must contain no SQL write statements.");
@@ -65,11 +67,14 @@ assert.match(helper, /DZN_COMMS_MESSAGE_HISTORY_READ_SCOPE/, "Route must require
 assert.match(helper, /liveScope === "production"/, "Released live history must require an explicit production scope.");
 assert.match(helper, /getSessionUser\(env, request\)/, "Private group reads must resolve the current Discord session.");
 assert.match(helper, /membership_state = 'active'/, "Private group reads must require an active membership row.");
-assert.match(helper, /SUPPORT_HISTORY_BLOCKED/, "Private support history must remain blocked in this slice.");
+assert.match(helper, /readDznCommsPrivateGroupFlags/, "Private group reads and discovery must require the dedicated server flag.");
+assert.match(helper, /LIMIT 20/, "Private group discovery must remain bounded.");
+assert.match(helper, /channel\.visibility === "support_private"\) return unavailableChannel\(\)/, "Private support history must remain indistinguishably unavailable in this slice.");
+assert.match(helper, /membership\.channel_id = messages\.channel_id[\s\S]*membership\.user_id = \?[\s\S]*membership\.membership_state = 'active'/, "The private message query must recheck active membership in the same SQL statement.");
 assert.match(helper, /julianday\(created_at\) = julianday\(\?\) AND id < \?/, "Pagination must break equal-timestamp ties with message ID.");
 assert.match(helper, /encodeHistoryCursor\(lastRow\)/, "The API must issue an opaque cursor from the last row in the page.");
 assert.match(helper, /Use either before or cursor, not both/, "Legacy and opaque cursors must not be combined.");
-assert.match(helper, /sending_enabled: flags\.writeFeaturesEnabled/, "Route payload must derive sending state from the protected server flag.");
+assert.match(helper, /sending_enabled: channel\.visibility === "private_group" \? privateGroupFlags\.enabled : flags\.writeFeaturesEnabled/, "Route payload must derive sending state from the protected channel-specific server flag.");
 assert.match(helper, /reactions_enabled: reactionFlags\.readEnabled/, "Route payload must derive reaction reads from their separate server flag.");
 assert.match(helper, /reactions_write_enabled: reactionFlags\.writeEnabled/, "Route payload must derive reaction writes from their separate server flag.");
 assert.match(helper, /ai_assist_runtime_enabled: false/, "Route payload must report AI support runtime disabled.");
@@ -79,7 +84,13 @@ assert.doesNotMatch(helper + route, /\b(?:\.run\(|batch\(|exec\(|fetch\(|WebSock
 assert.match(route, /handleDznCommsMessageHistoryRequest/, "Function route should delegate to the read-history helper.");
 assert.match(communityPage, /DznCommsShell/, "The /community route must render the DZN Comms shell.");
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED/, "The /community shell must fetch only behind the public UI flag.");
-assert.match(shell, /loadCommsHistory\(controller.signal\)/, "The UI must use the bounded history client.");
+assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_PRIVATE_GROUPS_UI_ENABLED/, "Private channel controls must have a separate public UI switch.");
+assert.match(shell, /loadCommsHistory\(controller.signal, \{ channelSlug: selectedChannel \}\)/, "The UI must use the bounded history client for the selected channel.");
+assert.match(shell, /if \(selectedChannel !== "global-chat"\)[\s\S]*Private group access changed\. Returning to Global Chat\.[\s\S]*setSelectedChannel\("global-chat"\)/, "A failed private refresh must clear private history and return to Global Chat.");
+assert.match(shell, /selectedChannelRef\.current !== selectedChannel[\s\S]*payload\.channel\.slug !== selectedChannel/, "History refreshes must discard responses for a channel that is no longer selected.");
+assert.match(shell, /const poller = window\.setInterval/, "Read-only and live private history must both recheck revoked access.");
+assert.match(shell, /const targetChannel = payload\.channel\.slug;[\s\S]*selectedChannelRef\.current !== targetChannel[\s\S]*sendCommsMessage\(targetChannel/, "The composer must send only to the channel represented by the visible validated payload.");
+assert.match(shell, /selectedChannelRef\.current === targetChannel[\s\S]*refreshed\.channel\.slug === targetChannel/, "Mutation refreshes must not overwrite a newer channel selection.");
 assert.match(shell, /fetch\("\/api\/auth\/me", \{ cache: "no-store", credentials: "include"/, "Reaction writes must use the current authenticated-session probe.");
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED/, "Reaction controls must have a dedicated public activation switch.");
 assert.match(shell, /reactionUiEnabled = liveUiEnabled && reactionUiFlagEnabled && payload\.feature_flags\.reactions_enabled/, "Reaction rows must require the live UI, dedicated reaction UI and server read switches.");
@@ -88,7 +99,7 @@ assert.match(shell, /Log in to react/, "Signed-out users must receive a direct l
 assert.match(shell, /if \(!reactionWritesAvailable\) return;/, "The auth probe must remain dormant until reaction writes are available.");
 assert.match(shell, /\}, \[reactionWritesAvailable\]\);/, "The auth probe must follow the authoritative reaction-write availability state.");
 assert.match(shell, /reactionAttemptRef\.current\.delete\(addAttemptKey\)[\s\S]*reactionAttemptRef\.current\.delete\(removeAttemptKey\)/, "A successful reaction mutation must clear stale retry IDs for both action directions.");
-assert.match(historyClient, /"\/api\/comms\/message-history\?channel=global-chat&limit=30"/, "The client should only fetch the read-only history route.");
+assert.match(historyClient, /`\/api\/comms\/message-history\?channel=\$\{encodeURIComponent\(selectedChannel\)\}&limit=30`/, "The client should fetch only the selected read-only history route.");
 assert.match(historyClient, /credentials: "include"/, "The client should preserve current-user cookies for read checks.");
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED/, "The live composer must remain behind an explicit public UI flag.");
 assert.doesNotMatch(shell, /\b(?:sendBeacon|analytics|localStorage|sessionStorage|WebSocket|EventSource|DurableObject|OPENAI_API_KEY|AI_GATEWAY|stripe|checkout|DZN_LIVE_CHECKOUT_ENABLED)\b/i, "The /community shell must not track, call AI, or touch checkout.");
@@ -286,29 +297,93 @@ async function testRuntimeContracts() {
   }
   assert.deepEqual(publicDb.writeTargets, [], "Public read route must not write to D1.");
 
-  const privateDb = seededDb();
-  const anonymousPrivate = await callMessageHistoryRoute(privateDb, "GET", "https://dzn.test/api/comms/message-history?channel=pandora-squad", enabledEnv(privateDb));
-  assert.equal(anonymousPrivate.status, 401, "Private group reads must require a logged-in user.");
+  const memberDirectory = await callMessageHistoryRoute(publicDb, "GET", "https://dzn.test/api/comms/message-history?channel=global-chat", privateEnabledEnv(publicDb), {
+    cookie: "dzn_session=member-token",
+  });
+  const memberDirectoryPayload = await memberDirectory.json() as CommsPayload;
+  assert.deepEqual(memberDirectoryPayload.available_channels?.map((channel) => channel.slug), ["global-chat", "pandora-squad"], "An active member should discover only Global Chat and their own groups.");
+  assert.doesNotMatch(JSON.stringify(memberDirectoryPayload.available_channels), /channel-private|member-user|discord-member/, "Channel discovery must not expose internal channel, user or Discord IDs.");
 
-  const deniedPrivate = await callMessageHistoryRoute(privateDb, "GET", "https://dzn.test/api/comms/message-history?channel=pandora-squad", enabledEnv(privateDb), {
+  const nonMemberDirectory = await callMessageHistoryRoute(publicDb, "GET", "https://dzn.test/api/comms/message-history?channel=global-chat", privateEnabledEnv(publicDb), {
     cookie: "dzn_session=other-token",
   });
-  assert.equal(deniedPrivate.status, 403, "Private group reads must deny users without active membership.");
+  const nonMemberDirectoryPayload = await nonMemberDirectory.json() as CommsPayload;
+  assert.deepEqual(nonMemberDirectoryPayload.available_channels?.map((channel) => channel.slug), ["global-chat"], "A signed-in non-member must not enumerate private groups.");
 
-  const allowedPrivate = await callMessageHistoryRoute(privateDb, "GET", "https://dzn.test/api/comms/message-history?channel=pandora-squad", enabledEnv(privateDb), {
+  const privateDb = seededDb();
+  const privateDisabled = await callMessageHistoryRoute(privateDb, "GET", "https://dzn.test/api/comms/message-history?channel=pandora-squad", enabledEnv(privateDb), {
+    cookie: "dzn_session=member-token",
+  });
+  assert.equal(privateDisabled.status, 404, "Private group reads must remain unavailable while their dedicated server flag is off.");
+
+  const anonymousPrivate = await callMessageHistoryRoute(privateDb, "GET", "https://dzn.test/api/comms/message-history?channel=pandora-squad", privateEnabledEnv(privateDb));
+  assert.equal(anonymousPrivate.status, 404, "Private group reads must not reveal channel existence to signed-out users.");
+
+  const deniedQueryStart = privateDb.queries.length;
+  const deniedPrivate = await callMessageHistoryRoute(privateDb, "GET", "https://dzn.test/api/comms/message-history?channel=pandora-squad", privateEnabledEnv(privateDb), {
+    cookie: "dzn_session=other-token",
+  });
+  const deniedQueryCount = privateDb.queries.length - deniedQueryStart;
+  assert.equal(deniedPrivate.status, 404, "Private group reads must not reveal channel existence to non-members.");
+
+  const unknownQueryStart = privateDb.queries.length;
+  const unknownPrivate = await callMessageHistoryRoute(privateDb, "GET", "https://dzn.test/api/comms/message-history?channel=unknown-squad", privateEnabledEnv(privateDb), {
+    cookie: "dzn_session=other-token",
+  });
+  const unknownQueryCount = privateDb.queries.length - unknownQueryStart;
+  assert.equal(deniedQueryCount, unknownQueryCount, "Unknown and unauthorized private slugs must perform equivalent database work.");
+  const unavailableBodies = await Promise.all([anonymousPrivate.clone().text(), deniedPrivate.clone().text(), unknownPrivate.clone().text()]);
+  assert.equal(new Set(unavailableBodies).size, 1, "Unknown, signed-out and non-member private requests must be indistinguishable.");
+  assert.deepEqual(
+    [anonymousPrivate, deniedPrivate, unknownPrivate].map((response) => response.headers.get("cache-control")),
+    Array(3).fill(anonymousPrivate.headers.get("cache-control")),
+    "Unavailable private responses must use identical cache protection.",
+  );
+
+  const allowedPrivate = await callMessageHistoryRoute(privateDb, "GET", "https://dzn.test/api/comms/message-history?channel=pandora-squad", privateEnabledEnv(privateDb), {
     cookie: "dzn_session=member-token",
   });
   assert.equal(allowedPrivate.status, 200, "Private group reads should succeed for active members.");
   const privatePayload = await allowedPrivate.json() as CommsPayload;
   assert.equal(privatePayload.access.private_group_membership_required, true);
   assert.equal(privatePayload.access.current_user_member_role, "member");
+  assert.deepEqual(privatePayload.available_channels?.map((channel) => channel.slug), ["global-chat", "pandora-squad"]);
   assert.deepEqual(privatePayload.messages.map((message) => message.id), ["private-1"]);
   assert.deepEqual(privateDb.writeTargets, [], "Private read route must not write to D1.");
+
+  const revocationRaceDb = seededDb();
+  revocationRaceDb.beforeMessageRead = () => {
+    revocationRaceDb.privateGroupMembers.delete("channel-private:member-user");
+  };
+  const revokedDuringRead = await callMessageHistoryRoute(
+    revocationRaceDb,
+    "GET",
+    "https://dzn.test/api/comms/message-history?channel=pandora-squad",
+    privateEnabledEnv(revocationRaceDb),
+    { cookie: "dzn_session=member-token" },
+  );
+  assert.equal(revokedDuringRead.status, 404, "A membership revoked during the read must invalidate the complete private response.");
+  const revokedDuringReadText = await revokedDuringRead.text();
+  assert.doesNotMatch(revokedDuringReadText, /Pandora Squad|pandora-squad|member|private-1/i, "A revoked in-flight response must not leak channel metadata, role or messages.");
+
+  const lateRevocationDb = seededDb();
+  lateRevocationDb.beforeAvailableChannels = () => {
+    lateRevocationDb.privateGroupMembers.delete("channel-private:member-user");
+  };
+  const revokedAfterMessageRead = await callMessageHistoryRoute(
+    lateRevocationDb,
+    "GET",
+    "https://dzn.test/api/comms/message-history?channel=pandora-squad",
+    privateEnabledEnv(lateRevocationDb),
+    { cookie: "dzn_session=member-token" },
+  );
+  assert.equal(revokedAfterMessageRead.status, 404, "A revocation during later private-data reads must invalidate the complete response.");
+  assert.doesNotMatch(await revokedAfterMessageRead.text(), /Pandora Squad|pandora-squad|member|private-1/i);
 
   const supportRead = await callMessageHistoryRoute(privateDb, "GET", "https://dzn.test/api/comms/message-history?channel=support-case", enabledEnv(privateDb), {
     cookie: "dzn_session=member-token",
   });
-  assert.equal(supportRead.status, 403, "Private support history must remain blocked in this foundation.");
+  assert.equal(supportRead.status, 404, "Private support history must remain indistinguishably unavailable in this foundation.");
 }
 
 function seededDb() {
@@ -351,7 +426,7 @@ function seededDb() {
   );
   db.sessionUsers.set("member-token", { id: "member-user", discord_id: "discord-member", username: "Member", avatar: null });
   db.sessionUsers.set("other-token", { id: "other-user", discord_id: "discord-other", username: "Other", avatar: null });
-  db.privateGroupMembers.set("channel-private:member-user", { role: "member" });
+  db.privateGroupMembers.set("channel-private:member-user", { role: "member", membershipState: "active" });
   return db;
 }
 
@@ -375,6 +450,17 @@ function enabledEnv(db: FakeD1Database) {
     SESSION_SECRET: "test-secret",
     DZN_COMMS_MESSAGE_HISTORY_READ_ENABLED: "true",
     DZN_COMMS_MESSAGE_HISTORY_READ_SCOPE: "local_test",
+  } as unknown as Env;
+}
+
+function privateEnabledEnv(db: FakeD1Database) {
+  return {
+    ...enabledEnv(db),
+    SESSION_SECRET: "session-secret-at-least-32-bytes-long",
+    DZN_COMMS_LEDGER_SECRET: "ledger-secret-at-least-32-bytes-long",
+    DZN_COMMS_LIVE_ENABLED: "true",
+    DZN_COMMS_LIVE_SCOPE: "production",
+    DZN_COMMS_PRIVATE_GROUPS_ENABLED: "true",
   } as unknown as Env;
 }
 
@@ -408,6 +494,7 @@ type CommsPayload = {
     private_group_membership_required: boolean;
     current_user_member_role: string | null;
   };
+  available_channels?: Array<{ slug: string }>;
   messages: Array<{
     id: string;
     author_display_name: string;
@@ -469,9 +556,11 @@ class FakeD1Database {
   readonly channels = new Map<string, FakeChannel>();
   readonly messages: FakeMessage[] = [];
   readonly sessionUsers = new Map<string, FakeSessionUser>();
-  readonly privateGroupMembers = new Map<string, { role: "owner" | "moderator" | "member" }>();
+  readonly privateGroupMembers = new Map<string, { role: "owner" | "moderator" | "member"; membershipState: "active" | "removed" }>();
   readonly queries: string[] = [];
   readonly writeTargets: string[] = [];
+  beforeMessageRead: (() => void) | null = null;
+  beforeAvailableChannels: (() => void) | null = null;
 
   prepare(query: string) {
     this.queries.push(query);
@@ -502,6 +591,15 @@ class FakeD1PreparedStatement {
   }
 
   async first<T>() {
+    if (this.query.includes("JOIN dzn_comms_private_group_members AS m")) {
+      const [slug, userId] = this.bindings.map((value) => String(value));
+      const channel = this.db.channels.get(slug);
+      const member = channel ? this.db.privateGroupMembers.get(`${channel.id}:${userId}`) : null;
+      return (channel?.kind === "private_group" && channel.visibility === "private_group" && channel.is_readable === 1 && member?.membershipState === "active"
+        ? { ...channel, role: member.role }
+        : null) as T | null;
+    }
+
     if (this.query.includes("FROM dzn_comms_channels")) {
       const slug = String(this.bindings[0]);
       const row = this.db.channels.get(slug);
@@ -517,14 +615,31 @@ class FakeD1PreparedStatement {
     if (this.query.includes("FROM dzn_comms_private_group_members")) {
       const [channelId, userId] = this.bindings.map((value) => String(value));
       const row = this.db.privateGroupMembers.get(`${channelId}:${userId}`);
-      return (row ? { role: row.role } : null) as T | null;
+      return (row?.membershipState === "active" ? { role: row.role } : null) as T | null;
     }
 
     return null;
   }
 
   async all<T>() {
+    if (this.query.includes("JOIN dzn_comms_channels c ON c.id = m.channel_id")) {
+      this.db.beforeAvailableChannels?.();
+      this.db.beforeAvailableChannels = null;
+      const userId = String(this.bindings[0]);
+      const results = [...this.db.privateGroupMembers.entries()].flatMap(([key, member]) => {
+        const [channelId, memberUserId] = key.split(":");
+        if (memberUserId !== userId || member.membershipState !== "active") return [];
+        const channel = [...this.db.channels.values()].find((candidate) => candidate.id === channelId);
+        return channel?.kind === "private_group" && channel.visibility === "private_group" && channel.is_readable === 1
+          ? [{ slug: channel.slug, kind: channel.kind, name: channel.name, description: channel.description, visibility: channel.visibility, role: member.role }]
+          : [];
+      });
+      return { results: results as T[], success: true, meta: {} };
+    }
+
     if (this.query.includes("FROM dzn_comms_messages")) {
+      this.db.beforeMessageRead?.();
+      this.db.beforeMessageRead = null;
       const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
         DatabaseSync: new (file: string) => {
           exec(sql: string): void;
@@ -534,9 +649,15 @@ class FakeD1PreparedStatement {
       };
       const sqlite = new DatabaseSync(":memory:");
       try {
-        sqlite.exec("CREATE TABLE dzn_comms_messages (id TEXT, channel_id TEXT, author_display_name TEXT, author_role_label TEXT, body TEXT, visibility_state TEXT, created_at TEXT, edited_at TEXT, expires_at TEXT)");
+        sqlite.exec(`CREATE TABLE dzn_comms_messages (id TEXT, channel_id TEXT, author_display_name TEXT, author_role_label TEXT, body TEXT, visibility_state TEXT, created_at TEXT, edited_at TEXT, expires_at TEXT);
+          CREATE TABLE dzn_comms_private_group_members (channel_id TEXT, user_id TEXT, role TEXT, membership_state TEXT);`);
         const insert = sqlite.prepare("INSERT INTO dzn_comms_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
         for (const row of this.db.messages) insert.run(row.id, row.channel_id, row.author_display_name, row.author_role_label, row.body, row.visibility_state, row.created_at, row.edited_at, row.expires_at);
+        const insertMember = sqlite.prepare("INSERT INTO dzn_comms_private_group_members VALUES (?, ?, ?, ?)");
+        for (const [key, member] of this.db.privateGroupMembers) {
+          const separator = key.indexOf(":");
+          insertMember.run(key.slice(0, separator), key.slice(separator + 1), member.role, member.membershipState);
+        }
         return { results: sqlite.prepare(this.query).all(...this.bindings), success: true, meta: {} };
       } finally { sqlite.close(); }
     }

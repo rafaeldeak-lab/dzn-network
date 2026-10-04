@@ -1,7 +1,7 @@
 import { getSessionUser, requireDb } from "./db";
 import { json, methodNotAllowed, readBoundedJson } from "./http";
 import { privateNoStoreHeaders } from "./performance";
-import { readDznCommsLiveFlags } from "./dzn-comms-live";
+import { readDznCommsLiveFlags, readDznCommsPrivateGroupFlags } from "./dzn-comms-live";
 import type { Env, SessionUser } from "./types";
 
 const MAX_REQUEST_BYTES = 2_048;
@@ -88,8 +88,12 @@ async function readReactions(request: Request, env: Env, rawMessageId: unknown) 
   const db = requireDb(env);
   const user = await getSessionUser(env, request);
   const access = await readMessageAccess(db, messageId);
+  if (access?.channel_visibility === "private_group" && !readDznCommsPrivateGroupFlags(env, request).enabled) {
+    return error(404, "MESSAGE_UNAVAILABLE", "That message is unavailable.");
+  }
   if (!access || !(await canReadMessage(db, access, user))) return error(404, "MESSAGE_UNAVAILABLE", "That message is unavailable.");
   const summary = await readReactionSummary(db, messageId, user?.id ?? null);
+  if (!(await canReadMessage(db, access, user))) return error(404, "MESSAGE_UNAVAILABLE", "That message is unavailable.");
   return json({ ok: true, message_id: messageId, ...summary }, { headers: privateNoStoreHeaders() });
 }
 
@@ -122,6 +126,9 @@ async function mutateReaction(
 ) {
   const db = requireDb(env);
   const access = await readMessageAccess(db, messageId);
+  if (access?.channel_visibility === "private_group" && !readDznCommsPrivateGroupFlags(env, request).enabled) {
+    return error(404, "MESSAGE_UNAVAILABLE", "That message is unavailable.");
+  }
   const readable = access ? await canReadMessage(db, access, user) : false;
   if (!readable) {
     return error(404, "MESSAGE_UNAVAILABLE", "That message is unavailable.");
@@ -132,10 +139,11 @@ async function mutateReaction(
   const actorMutationKey = await digest(`mutation:${user.id}\n${clientMutationId}`, secret);
   const actorRateKey = await digest(`reaction-rate:${user.id}`, secret);
   const requestHash = await digest(`${action}\n${messageId}\n${reactionKey}`, secret);
+  const privateChannelId = access!.channel_visibility === "private_group" ? access!.channel_id : null;
   const replay = await readMutationReceipt(db, actorMutationKey);
   if (replay) {
     if (replay.request_hash !== requestHash) return error(409, "MUTATION_ID_CONFLICT", "This reaction retry ID was already used for another change.");
-    return mutationResponse(db, messageId, reactionKey, user.id, replay.result, replay.response_status, true);
+    return mutationResponse(db, access!, user, messageId, reactionKey, replay.result, replay.response_status, true);
   }
 
   const active = existing?.active === 1;
@@ -150,38 +158,58 @@ async function mutateReaction(
       action === "add"
         ? db.prepare(`INSERT INTO dzn_comms_message_reactions
             (id, message_id, actor_user_id, reaction_key, active, removed_at)
-          VALUES (?, ?, ?, ?, 1, NULL)
+          SELECT ?, ?, ?, ?, 1, NULL
+          WHERE ? IS NULL OR EXISTS (
+            SELECT 1 FROM dzn_comms_private_group_members
+            WHERE channel_id = ? AND user_id = ? AND membership_state = 'active'
+          )
           ON CONFLICT(message_id, actor_user_id, reaction_key) DO UPDATE SET
-            active = 1, updated_at = CURRENT_TIMESTAMP, removed_at = NULL`).bind(crypto.randomUUID(), messageId, user.id, reactionKey)
+            active = 1, updated_at = CURRENT_TIMESTAMP, removed_at = NULL`).bind(
+              crypto.randomUUID(), messageId, user.id, reactionKey,
+              privateChannelId, privateChannelId, user.id,
+            )
         : db.prepare(`UPDATE dzn_comms_message_reactions
           SET active = 0, updated_at = CURRENT_TIMESTAMP, removed_at = CURRENT_TIMESTAMP
-          WHERE message_id = ? AND actor_user_id = ? AND reaction_key = ? AND active = 1`).bind(messageId, user.id, reactionKey),
+          WHERE message_id = ? AND actor_user_id = ? AND reaction_key = ? AND active = 1
+            AND (? IS NULL OR EXISTS (
+              SELECT 1 FROM dzn_comms_private_group_members
+              WHERE channel_id = ? AND user_id = ? AND membership_state = 'active'
+            ))`).bind(messageId, user.id, reactionKey, privateChannelId, privateChannelId, user.id),
       db.prepare(`INSERT INTO dzn_comms_reaction_mutations
         (id, actor_mutation_key, message_id, reaction_key, action, request_hash, result, response_status, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(crypto.randomUUID(), actorMutationKey, messageId, reactionKey, action, requestHash, result, status, expiresAt),
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+        WHERE ? IS NULL OR EXISTS (
+          SELECT 1 FROM dzn_comms_private_group_members
+          WHERE channel_id = ? AND user_id = ? AND membership_state = 'active'
+        )`).bind(
+          crypto.randomUUID(), actorMutationKey, messageId, reactionKey, action, requestHash, result, status, expiresAt,
+          privateChannelId, privateChannelId, user.id,
+        ),
     ]);
   } catch (cause) {
     const concurrentReplay = await readMutationReceipt(db, actorMutationKey);
     if (concurrentReplay?.request_hash === requestHash) {
-      return mutationResponse(db, messageId, reactionKey, user.id, concurrentReplay.result, concurrentReplay.response_status, true);
+      return mutationResponse(db, access!, user, messageId, reactionKey, concurrentReplay.result, concurrentReplay.response_status, true);
     }
     if (concurrentReplay) return error(409, "MUTATION_ID_CONFLICT", "This reaction retry ID was already used for another change.");
     if (isReactionQuotaError(cause)) return error(429, "REACTION_RATE_LIMITED", "Too many reactions were changed. Wait a moment and retry.");
     return error(503, "REACTION_STORAGE_UNAVAILABLE", "That reaction could not be saved. Retry shortly.");
   }
-  return mutationResponse(db, messageId, reactionKey, user.id, result, status, false);
+  return mutationResponse(db, access!, user, messageId, reactionKey, result, status, false);
 }
 
 async function mutationResponse(
   db: D1Database,
+  access: MessageAccessRow,
+  user: SessionUser,
   messageId: string,
   reactionKey: ReactionKey,
-  userId: string,
   result: MutationReceipt["result"],
   status: number,
   replayed: boolean,
 ) {
-  const summary = await readReactionSummary(db, messageId, userId);
+  const summary = await readReactionSummary(db, messageId, user.id);
+  if (!(await canReadMessage(db, access, user))) return error(404, "MESSAGE_UNAVAILABLE", "That message is unavailable.");
   const selected = summary.counts.find((reaction) => reaction.key === reactionKey);
   return json({
     ok: true,

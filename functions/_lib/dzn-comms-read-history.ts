@@ -2,6 +2,7 @@ import { getSessionUser, requireDb } from "./db";
 import { json, methodNotAllowed } from "./http";
 import { noStoreForErrorHeaders, privateNoStoreHeaders } from "./performance";
 import { readDznCommsReactionFlags, readDznCommsReactionSummaries } from "./dzn-comms-reactions";
+import { readDznCommsPrivateGroupFlags } from "./dzn-comms-live";
 import type { Env, SessionUser } from "./types";
 
 type DznCommsChannelRow = {
@@ -15,6 +16,15 @@ type DznCommsChannelRow = {
 };
 
 type DznCommsMembershipRow = {
+  role: "owner" | "moderator" | "member" | null;
+};
+
+type DznCommsAvailableChannelRow = {
+  slug: string | null;
+  kind: "private_group" | null;
+  name: string | null;
+  description: string | null;
+  visibility: "private_group" | null;
   role: "owner" | "moderator" | "member" | null;
 };
 
@@ -115,38 +125,31 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
   }
 
   const db = requireDb(env);
-  const channel = await readChannel(db, channelSlug);
-  if (!channel) {
-    return json(
-      { ok: false, code: "CHANNEL_NOT_FOUND", message: "That DZN Comms channel is not available." },
-      { status: 404, headers: noStoreForErrorHeaders() },
-    );
-  }
-
   const user = await getSessionUser(env, request);
-  if (channel.visibility !== "public" && !user) {
-    return json(
-      { ok: false, code: "UNAUTHORIZED", message: "Log in with Discord to read this DZN Comms group." },
-      { status: 401, headers: privateNoStoreHeaders() },
-    );
+  const privateGroupFlags = readDznCommsPrivateGroupFlags(env, request);
+  let channel: DznCommsReadableChannel | null;
+  let membership: DznCommsMembershipRow | null = null;
+  if (channelSlug === "global-chat") {
+    channel = await readChannel(db, channelSlug);
+  } else {
+    if (!user || !privateGroupFlags.enabled) return unavailableChannel();
+    const authorized = await readPrivateChannelForMember(db, channelSlug, user.id);
+    if (!authorized) return unavailableChannel();
+    channel = authorized.channel;
+    membership = authorized.membership;
   }
+  if (!channel || channel.visibility === "support_private") return unavailableChannel();
 
-  const membership = user ? await readMembership(db, channel.id, user.id) : null;
-  if (channel.visibility === "private_group" && !membership) {
-    return json(
-      { ok: false, code: "FORBIDDEN", message: "This private DZN Comms group is not available to your account." },
-      { status: 403, headers: privateNoStoreHeaders() },
-    );
-  }
 
-  if (channel.visibility === "support_private") {
-    return json(
-      { ok: false, code: "SUPPORT_HISTORY_BLOCKED", message: "Private support history is not exposed in this read-history foundation." },
-      { status: 403, headers: privateNoStoreHeaders() },
-    );
-  }
-
-  const rows = await readMessages(db, channel.id, limit + 1, cursor, before);
+  const rows = await readMessages(
+    db,
+    channel.id,
+    limit + 1,
+    cursor,
+    before,
+    channel.visibility === "private_group" ? user!.id : null,
+  );
+  const availableChannels = await readAvailableChannels(db, user, privateGroupFlags.enabled);
   const pageRows = rows.slice(0, limit);
   const lastRow = pageRows.at(-1) ?? null;
   const nextCursor = rows.length > limit && lastRow ? encodeHistoryCursor(lastRow) : null;
@@ -158,6 +161,10 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
     .filter((row) => !isExpired(row.expires_at) && normalizeVisibilityState(row.visibility_state) !== "expired")
     .map((row) => publicSafeMessage(row, reactionSummaries.get(row.id)))
     .reverse();
+  const finalMembership = channel.visibility === "private_group"
+    ? await readMembership(db, channel.id, user!.id)
+    : membership;
+  if (channel.visibility === "private_group" && !finalMembership) return unavailableChannel();
 
   return json(
     {
@@ -175,8 +182,9 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
       access: {
         public_channel: channel.visibility === "public",
         private_group_membership_required: channel.visibility === "private_group",
-        current_user_member_role: membership?.role ?? null,
+        current_user_member_role: finalMembership?.role ?? null,
       },
+      available_channels: availableChannels,
       messages,
       page: {
         next_cursor: nextCursor,
@@ -186,11 +194,12 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
       feature_flags: {
         route_enabled: flags.enabled,
         ui_flag_name: flags.uiFlagName,
-        sending_enabled: flags.writeFeaturesEnabled,
+        sending_enabled: channel.visibility === "private_group" ? privateGroupFlags.enabled : flags.writeFeaturesEnabled,
+        private_groups_enabled: privateGroupFlags.enabled,
         reactions_enabled: reactionFlags.readEnabled,
         reactions_write_enabled: reactionFlags.writeEnabled,
-        report_actions_enabled: flags.writeFeaturesEnabled,
-        moderation_mutations_enabled: flags.writeFeaturesEnabled,
+        report_actions_enabled: channel.visibility === "private_group" ? privateGroupFlags.enabled : flags.writeFeaturesEnabled,
+        moderation_mutations_enabled: channel.visibility === "private_group" ? privateGroupFlags.enabled : flags.writeFeaturesEnabled,
         ai_assist_runtime_enabled: false,
         durable_objects_or_websockets_enabled: false,
         analytics_or_tracking_enabled: false,
@@ -198,6 +207,13 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
       fairness_boundary: dznCommsReadHistoryBoundary(),
     },
     { headers: privateNoStoreHeaders() },
+  );
+}
+
+function unavailableChannel() {
+  return json(
+    { ok: false, code: "CHANNEL_NOT_FOUND", message: "That DZN Comms channel is not available." },
+    { status: 404, headers: privateNoStoreHeaders() },
   );
 }
 
@@ -281,28 +297,133 @@ async function readMembership(db: D1Database, channelId: string, userId: Session
     .first<DznCommsMembershipRow>();
 }
 
+async function readPrivateChannelForMember(db: D1Database, slug: string, userId: SessionUser["id"]): Promise<{
+  channel: DznCommsReadableChannel;
+  membership: DznCommsMembershipRow;
+} | null> {
+  const row = await db.prepare(
+    `SELECT c.id, c.slug, c.kind, c.name, c.description, c.visibility, c.is_readable, m.role
+     FROM dzn_comms_channels AS c
+     JOIN dzn_comms_private_group_members AS m ON m.channel_id = c.id
+     WHERE c.slug = ?
+       AND c.kind = 'private_group'
+       AND c.visibility = 'private_group'
+       AND c.is_readable = 1
+       AND m.user_id = ?
+       AND m.membership_state = 'active'
+     LIMIT 1`,
+  ).bind(slug, userId).first<DznCommsChannelRow & DznCommsMembershipRow>();
+  if (!row || !row.id || !row.slug || !row.name || row.kind !== "private_group" || row.visibility !== "private_group") return null;
+  const role = normalizeMemberRole(row.role);
+  if (!role) return null;
+  return {
+    channel: {
+      id: row.id,
+      slug: row.slug,
+      kind: "private_group",
+      name: cleanText(row.name, 80) || "DZN Comms",
+      description: cleanNullableText(row.description, 180),
+      visibility: "private_group",
+    },
+    membership: { role },
+  };
+}
+
+async function readAvailableChannels(db: D1Database, user: SessionUser | null, privateGroupsEnabled: boolean) {
+  const globalChannel = await readChannel(db, "global-chat");
+  const channels: Array<{
+    slug: string;
+    kind: "public" | "private_group";
+    name: string;
+    description: string | null;
+    visibility: "public" | "private_group";
+    current_user_member_role: "owner" | "moderator" | "member" | null;
+  }> = [];
+
+  if (globalChannel?.kind === "public" && globalChannel.visibility === "public") {
+    channels.push({
+      slug: globalChannel.slug,
+      kind: "public",
+      name: globalChannel.name,
+      description: globalChannel.description,
+      visibility: "public",
+      current_user_member_role: null,
+    });
+  }
+
+  if (!user || !privateGroupsEnabled) return channels;
+  const result = await db.prepare(
+    `SELECT c.slug, c.kind, c.name, c.description, c.visibility, m.role
+     FROM dzn_comms_private_group_members m
+     JOIN dzn_comms_channels c ON c.id = m.channel_id
+     WHERE m.user_id = ?
+       AND m.membership_state = 'active'
+       AND c.kind = 'private_group'
+       AND c.visibility = 'private_group'
+       AND c.is_readable = 1
+     ORDER BY lower(c.name), c.slug
+     LIMIT 20`,
+  ).bind(user.id).all<DznCommsAvailableChannelRow>();
+
+  for (const row of result.results ?? []) {
+    const role = normalizeMemberRole(row.role);
+    const slug = sanitizeChannelSlug(row.slug ?? "");
+    const name = cleanText(row.name, 80);
+    if (!role || !slug || !name || row.kind !== "private_group" || row.visibility !== "private_group") continue;
+    channels.push({
+      slug,
+      kind: "private_group",
+      name,
+      description: cleanNullableText(row.description, 180),
+      visibility: "private_group",
+      current_user_member_role: role,
+    });
+  }
+
+  return channels;
+}
+
 async function readMessages(
   db: D1Database,
   channelId: string,
   limit: number,
   cursor: DznCommsHistoryCursor | null,
   before: string | null,
+  privateUserId: string | null,
 ): Promise<DznCommsMessageRow[]> {
   const result = await db
     .prepare(
       `SELECT id, author_display_name, author_role_label, body, visibility_state, created_at, edited_at, expires_at
-       FROM dzn_comms_messages
-       WHERE channel_id = ?
+       FROM dzn_comms_messages AS messages
+       WHERE messages.channel_id = ?
          AND julianday(created_at) IS NOT NULL
          AND id IS NOT NULL AND length(id) BETWEEN 1 AND 120
          AND (? IS NULL OR julianday(created_at) < julianday(?) OR (julianday(created_at) = julianday(?) AND id < ?))
          AND (? IS NULL OR julianday(created_at) < julianday(?))
          AND visibility_state != 'expired'
          AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
+         AND (? IS NULL OR EXISTS (
+           SELECT 1
+           FROM dzn_comms_private_group_members AS membership
+           WHERE membership.channel_id = messages.channel_id
+             AND membership.user_id = ?
+             AND membership.membership_state = 'active'
+         ))
        ORDER BY julianday(created_at) DESC, id DESC
        LIMIT ?`,
     )
-    .bind(channelId, cursor?.createdAt ?? null, cursor?.createdAt ?? null, cursor?.createdAt ?? null, cursor?.messageId ?? null, before, before, limit)
+    .bind(
+      channelId,
+      cursor?.createdAt ?? null,
+      cursor?.createdAt ?? null,
+      cursor?.createdAt ?? null,
+      cursor?.messageId ?? null,
+      before,
+      before,
+      privateUserId,
+      privateUserId,
+      limit,
+    )
     .all<DznCommsMessageRow>();
 
   return result.results ?? [];
@@ -403,6 +524,11 @@ function normalizeChannelKind(value: DznCommsChannelRow["kind"]) {
 
 function normalizeChannelVisibility(value: DznCommsChannelRow["visibility"]) {
   if (value === "public" || value === "private_group" || value === "support_private") return value;
+  return null;
+}
+
+function normalizeMemberRole(value: DznCommsMembershipRow["role"]) {
+  if (value === "owner" || value === "moderator" || value === "member") return value;
   return null;
 }
 
