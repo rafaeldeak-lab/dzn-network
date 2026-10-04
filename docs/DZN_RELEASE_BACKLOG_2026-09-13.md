@@ -8,7 +8,7 @@ This supersedes the open-count wording in the September 12 snapshot, which is
 retained as historical evidence. A disposition is not implementation or live proof.
 
 Thirty-three requests were verified against current source and closed as superseded:
-#52, #63, #64, #82-#90, #97-#117 except #109. Each has an individual GitHub comment with
+#52, #63, #64, #82-#90 and #97-#117. Each has an individual GitHub comment with
 replacement releases and evidence. Their original branches and history remain.
 The remaining 40 older requests are still open because their unique requirements
 have not all been implemented. No blind old-stack merge or migration was performed.

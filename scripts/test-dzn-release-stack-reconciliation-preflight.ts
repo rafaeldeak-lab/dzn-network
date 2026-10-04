@@ -51,6 +51,7 @@ for (const row of dispositions.requests) {
 }
 const currentBacklog = read("docs/DZN_RELEASE_BACKLOG_2026-09-13.md");
 assert.match(currentBacklog, /remaining 40 older requests are still open/);
+assert.match(currentBacklog, /#52, #63, #64, #82-#90 and #97-#117/);
 assert.match(currentBacklog, /#96 \| Earned-spin and reward-wheel policy remains deferred/);
 assert.doesNotMatch(currentBacklog, /#109 \| Platform-owner Store order reconciliation/);
 for (const subject of ["NukeTown", "FED & FERAL", "Nitrado", "Discord", "Customer billing", "Spin/reward", "DZN Games Hub"]) {
