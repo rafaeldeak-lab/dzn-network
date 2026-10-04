@@ -3,11 +3,12 @@
   "compared_main": "da206314957f63a8cc31dc2a60c25f92f2d36bba",
   "ui_release": "ee43f3f1f445af92ffd423409441b42d9e7b257d",
   "original_count": 73,
-  "closed_superseded": 43,
-  "open_legacy": 30,
+  "closed_superseded": 41,
+  "open_legacy": 32,
   "notes": [
     "A disposition is not a claim of implementation or production activation.",
     "Closed requests have per-request GitHub comments and preserved branches. Open original branches remain unchanged.",
+    "open_legacy counts unresolved requirements; GitHub currently has 30 open legacy PRs because #118 and #119 are closed branches with requirements retained as partial.",
     "Historical migration numbers collide with current releases; port unique behavior instead of merging old trees."
   ],
   "requests": [
@@ -629,8 +630,8 @@
       "original_head": "fc9bb80c10a0bc2e07fea7635e31e95a48be126f",
       "original_branch": "codex/dzn-comms-message-read-model-approval-preflight-20260831",
       "original_base": "codex/dzn-comms-reaction-runtime-approval-preflight-20260831",
-      "status": "closed_superseded",
-      "disposition": "Superseded by the current bounded Comms history model and production-safe client contract; old stacked design was not merged."
+      "status": "partial",
+      "disposition": "Current history is bounded and production-safe, but login-only public history and tie-safe pagination across equal timestamps remain unresolved."
     },
     {
       "number": 119,
@@ -638,8 +639,8 @@
       "original_head": "552ea2230cead831c96ad8a60243c7eb03920adc",
       "original_branch": "codex/dzn-comms-message-read-model-local-read-foundation-20260831",
       "original_base": "codex/dzn-comms-message-read-model-approval-preflight-20260831",
-      "status": "closed_superseded",
-      "disposition": "Superseded by current authenticated read-history API tests, private-channel denial, bounded responses and fail-closed schema handling."
+      "status": "partial",
+      "disposition": "Current API has private-channel denial, bounded responses and fail-closed schema handling; retain the unresolved authentication and tie-safe cursor requirements."
     },
     {
       "number": 120,
