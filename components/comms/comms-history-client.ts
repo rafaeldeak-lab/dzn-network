@@ -113,7 +113,7 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
     || flags.moderation_mutations_enabled !== flags.sending_enabled
     || disabledFeatures.some(key => flags[key] !== false)
     || typeof page.has_more !== "boolean" || !Number.isSafeInteger(page.limit) || Number(page.limit) < 1 || Number(page.limit) > 50
-    || (page.next_cursor !== null && (typeof page.next_cursor !== "string" || !/^[A-Za-z0-9_-]{8,512}$/.test(page.next_cursor)))
+    || (page.next_cursor !== null && (typeof page.next_cursor !== "string" || !/^[A-Za-z0-9_-]{8,1024}$/.test(page.next_cursor)))
     || (page.has_more !== (page.next_cursor !== null))) throw unavailable();
   const generatedAt = timestamp(input.generated_at);
   if (!generatedAt || !Array.isArray(input.messages) || input.messages.length > 30

@@ -149,6 +149,7 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
   const rows = await readMessages(db, channel.id, limit + 1, cursor, before);
   const pageRows = rows.slice(0, limit);
   const lastRow = pageRows.at(-1) ?? null;
+  const nextCursor = rows.length > limit && lastRow ? encodeHistoryCursor(lastRow) : null;
   const reactionFlags = readDznCommsReactionFlags(env, request);
   const reactionSummaries = reactionFlags.readEnabled
     ? await readDznCommsReactionSummaries(db, pageRows.map((row) => row.id), user?.id ?? null)
@@ -178,8 +179,8 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
       },
       messages,
       page: {
-        next_cursor: rows.length > limit && lastRow ? encodeHistoryCursor(lastRow) : null,
-        has_more: rows.length > limit,
+        next_cursor: nextCursor,
+        has_more: nextCursor !== null,
         limit,
       },
       feature_flags: {
@@ -292,6 +293,8 @@ async function readMessages(
       `SELECT id, author_display_name, author_role_label, body, visibility_state, created_at, edited_at, expires_at
        FROM dzn_comms_messages
        WHERE channel_id = ?
+         AND julianday(created_at) IS NOT NULL
+         AND id IS NOT NULL AND length(id) BETWEEN 1 AND 120
          AND (? IS NULL OR julianday(created_at) < julianday(?) OR (julianday(created_at) = julianday(?) AND id < ?))
          AND (? IS NULL OR julianday(created_at) < julianday(?))
          AND visibility_state != 'expired'
@@ -359,7 +362,7 @@ function encodeHistoryCursor(row: DznCommsMessageRow) {
 }
 
 function decodeHistoryCursor(value: string | null): DznCommsHistoryCursor | null {
-  if (!value || !/^[A-Za-z0-9_-]{8,512}$/.test(value)) return null;
+  if (!value || !/^[A-Za-z0-9_-]{8,1024}$/.test(value)) return null;
   try {
     const parsed = JSON.parse(base64UrlDecode(value)) as Partial<{ v: number; t: string; id: string }>;
     const createdAt = parsed.v === 1 ? canonicalTimestamp(parsed.t) : null;
@@ -377,7 +380,7 @@ function canonicalTimestamp(value: unknown) {
 }
 
 function sanitizeCursorMessageId(value: unknown) {
-  return typeof value === "string" && /^[A-Za-z0-9:_-]{1,120}$/.test(value) ? value : null;
+  return typeof value === "string" && [...value].length >= 1 && [...value].length <= 120 ? value : null;
 }
 
 function base64UrlEncode(value: string) {
