@@ -15,6 +15,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { DznAssist } from "./dzn-assist";
+import { DznLivePresenceCounter } from "./dzn-live-presence-counter";
 import { CommsMessageTime } from "./comms-message-time";
 import {
   addCommsReaction,
@@ -36,6 +37,7 @@ type CommsHistoryState =
 const historyUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED === "true";
 const liveUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED === "true";
 const reactionUiFlagEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED === "true";
+const presenceUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED === "true";
 
 const staticPayload: CommsHistoryPayload = {
   ok: true,
@@ -267,14 +269,15 @@ export function DznCommsShell() {
                 <p className="text-xs font-black uppercase tracking-[0.28em] text-cyan-200">DZN Comms</p>
                 <h1 className="mt-1 text-3xl font-black uppercase leading-none text-white sm:text-4xl">Global Chat</h1>
                 <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-zinc-300">
-                  Discord-authenticated members can talk in one moderated DZN channel. Private chat and presence remain
-                  separate releases; public DZN guidance is available below.
+                  Discord-authenticated members can talk in one moderated DZN channel. Private chat remains a separate
+                  release; public DZN guidance is available below.
                 </p>
               </div>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:w-[330px]">
+            <div className={presenceUiEnabled ? "grid gap-2 sm:grid-cols-3 lg:w-[500px]" : "grid gap-2 sm:grid-cols-2 lg:w-[330px]"}>
               <StatusPill label="History" value={statusLabel} tone={history.status === "ready" ? "cyan" : "violet"} />
               <StatusPill label="Runtime" value={sendingEnabled ? "Live" : "Read Only"} tone={sendingEnabled ? "cyan" : "gold"} />
+              {presenceUiEnabled ? <DznLivePresenceCounter /> : null}
             </div>
           </div>
 
