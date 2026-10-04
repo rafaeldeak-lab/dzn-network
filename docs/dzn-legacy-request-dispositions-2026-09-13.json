@@ -1,10 +1,10 @@
 {
-  "as_of": "2026-09-13",
-  "compared_main": "d36da3945241ed38a6115ebb212d0569fbad0ee6",
+  "as_of": "2026-10-04",
+  "compared_main": "2b8c20ae45fbe1bf8628cb633eff219e00668a6e",
   "ui_release": "ee43f3f1f445af92ffd423409441b42d9e7b257d",
   "original_count": 73,
-  "closed_superseded": 7,
-  "open_legacy": 66,
+  "closed_superseded": 26,
+  "open_legacy": 47,
   "notes": [
     "A disposition is not a claim of implementation or production activation.",
     "Closed requests have per-request GitHub comments and preserved branches. Open original branches remain unchanged.",
@@ -440,8 +440,8 @@
       "original_head": "2a2de04d76f34b1395ab99328a2060f5855044d0",
       "original_branch": "codex/dzn-store-catalog-admin-draft-20260826",
       "original_base": "codex/dzn-safe-monetisation-supporter-preflight-20260826",
-      "status": "port_required",
-      "disposition": "Store catalog draft and price validation are separate from owner subscriptions and need current schemas."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PRs #247-#250, which rebuilt the canonical catalog schema, validation, private admin API/UI and activation safeguards on current main."
     },
     {
       "number": 98,
@@ -449,8 +449,8 @@
       "original_head": "d83e1856c4a5f7ac0512bcfb52fd550ada878884",
       "original_branch": "codex/dzn-store-public-preview-contract-20260826",
       "original_base": "codex/dzn-store-catalog-admin-draft-20260826",
-      "status": "port_required",
-      "disposition": "Store preview is absent; disabled preview must not imply purchasable inventory or live checkout."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PRs #247-#250 and #257, which rebuilt the guarded catalog and Store surface with public catalog and checkout independently gated."
     },
     {
       "number": 99,
@@ -458,8 +458,8 @@
       "original_head": "1bd43139a11322d558ed27e5e30eb55c397381dc",
       "original_branch": "codex/dzn-store-sandbox-checkout-preflight-20260827",
       "original_base": "codex/dzn-store-public-preview-contract-20260826",
-      "status": "design_reconcile",
-      "disposition": "Checkout preflight needs current products, currency, account scope and explicit financial review."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PRs #250, #253, #254 and #257, which provide current activation guards and a fail-closed commerce runtime."
     },
     {
       "number": 100,
@@ -467,8 +467,8 @@
       "original_head": "b95c52f1efbbeaad8dda9aeb98684b392eaf7c3a",
       "original_branch": "codex/dzn-store-order-ledger-schema-20260827",
       "original_base": "codex/dzn-store-sandbox-checkout-preflight-20260827",
-      "status": "port_required",
-      "disposition": "Draft order/item/webhook receipt schema needs new canonical migration numbers and test-only isolation."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PR #253 and canonical migration 0082 with current order and inventory constraints."
     },
     {
       "number": 101,
@@ -476,8 +476,8 @@
       "original_head": "309e0fa0766f963e8f0d93e452fb9089602861c0",
       "original_branch": "codex/dzn-store-sandbox-order-route-approval-20260827",
       "original_base": "codex/dzn-store-order-ledger-schema-20260827",
-      "status": "port_required",
-      "disposition": "Draft order route guard needs current session/ownership checks and idempotency; do not activate historical test routes on production."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PR #257 with authenticated same-origin checks, inventory reservation, ownership scope and idempotent retry handling."
     },
     {
       "number": 102,
@@ -485,8 +485,8 @@
       "original_head": "72ffe1d8cb3aa650b7fbd3355a3bd82b0c51f1b1",
       "original_branch": "codex/dzn-store-sandbox-checkout-session-approval-20260827",
       "original_base": "codex/dzn-store-sandbox-order-route-approval-20260827",
-      "status": "port_required",
-      "disposition": "Test-only one-time checkout requires current Stripe compatibility and safeguards. No production payment-setting changes in this reconciliation."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PR #257 with guarded Stripe Checkout creation, retry handling, strict mode matching and disabled-by-default live checkout."
     },
     {
       "number": 103,
@@ -494,8 +494,8 @@
       "original_head": "cb4aae9716548e294eee6a3866d77e7addd64984",
       "original_branch": "codex/dzn-store-sandbox-webhook-ledger-receipt-20260828",
       "original_base": "codex/dzn-store-sandbox-checkout-session-approval-20260827",
-      "status": "port_required",
-      "disposition": "Signed test webhook receipt ledger and dedupe must stay isolated from existing subscription webhooks."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PRs #254 and #257 with canonical receipt and fulfilment schema plus signed idempotent Store webhook reconciliation."
     },
     {
       "number": 104,
@@ -503,8 +503,8 @@
       "original_head": "a28706da104863a9e6926ab0d2fec812b60f9935",
       "original_branch": "codex/dzn-store-webhook-fulfilment-approval-preflight-20260828",
       "original_base": "codex/dzn-store-sandbox-webhook-ledger-receipt-20260828",
-      "status": "design_reconcile",
-      "disposition": "Fulfilment approval contract must be updated after order/receipt model is reconciled."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PRs #254 and #257, which implement and test the current webhook fulfilment boundary."
     },
     {
       "number": 105,
@@ -512,8 +512,8 @@
       "original_head": "a6921336f40b1bd4193e3071f355dd9fa713c74d",
       "original_branch": "codex/dzn-store-fulfilment-ledger-schema-preflight-20260828",
       "original_base": "codex/dzn-store-webhook-fulfilment-approval-preflight-20260828",
-      "status": "design_reconcile",
-      "disposition": "Fulfilment ledger schema design needs current ownership, source and refund/revoke invariants."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PR #254 and canonical migration 0083 with ownership, source, receipt, fulfilment and revocation invariants."
     },
     {
       "number": 106,
@@ -521,8 +521,8 @@
       "original_head": "f3089b924a196437a44160cde8d067b129539761",
       "original_branch": "codex/dzn-store-fulfilment-ledger-schema-migration-20260828",
       "original_base": "codex/dzn-store-fulfilment-ledger-schema-preflight-20260828",
-      "status": "port_required",
-      "disposition": "Entitlement/supporter-card/fulfilment history schema needs current isolated implementation, not paid-plan fabrication."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PR #254 and canonical migration 0083; D1 compatibility fixes followed in PRs #255 and #256."
     },
     {
       "number": 107,
@@ -530,8 +530,8 @@
       "original_head": "1bc16535d4aa7d1095241360a4a61bd51b556add",
       "original_branch": "codex/dzn-store-fulfilment-runtime-preflight-20260828",
       "original_base": "codex/dzn-store-fulfilment-ledger-schema-migration-20260828",
-      "status": "design_reconcile",
-      "disposition": "Runtime preflight must match the replacement order and ledger implementation."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PR #257 and its current disabled-by-default commerce and fulfilment runtime."
     },
     {
       "number": 108,
@@ -539,8 +539,8 @@
       "original_head": "9ac2a92cd4b622823ff0bae0e3f10054101c651e",
       "original_branch": "codex/dzn-store-fulfilment-runtime-implementation-20260828",
       "original_base": "codex/dzn-store-fulfilment-runtime-preflight-20260828",
-      "status": "port_required",
-      "disposition": "Verified test fulfilment, refund/dispute revoke and dedupe are unfinished; no live fulfilment is inferred."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PR #257 with hardened fulfilment, dedupe, expiry, refund, dispute and reconciliation handling."
     },
     {
       "number": 109,
@@ -549,7 +549,7 @@
       "original_branch": "codex/dzn-store-fulfilment-reconciliation-preflight-20260829",
       "original_base": "codex/dzn-store-fulfilment-runtime-implementation-20260828",
       "status": "design_reconcile",
-      "disposition": "Private purchases/admin reconciliation contract requires current ledger and audited platform-owner support."
+      "disposition": "Customer-scoped purchases are released, but platform-owner manual-review reconciliation still needs an audited current-main operator surface."
     },
     {
       "number": 110,
@@ -557,8 +557,8 @@
       "original_head": "388be9fc28ef5851f07b7464b9088f9ea6698e90",
       "original_branch": "codex/dzn-store-account-purchases-read-model-20260829",
       "original_base": "codex/dzn-store-fulfilment-reconciliation-preflight-20260829",
-      "status": "port_required",
-      "disposition": "Current-user purchases read model is absent and must not expose other customers' orders."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PR #257 and the authenticated no-store current-user purchases read model at /api/store/purchases."
     },
     {
       "number": 111,
@@ -566,8 +566,8 @@
       "original_head": "c023a3fe2bb1fd0278b2f312e3e9bd409653d034",
       "original_branch": "codex/dzn-store-account-purchases-ui-shell-20260831",
       "original_base": "codex/dzn-store-account-purchases-read-model-20260829",
-      "status": "port_required",
-      "disposition": "Purchases UI depends on genuine current-user orders, not seeded live purchases."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PR #257 and the current Store purchase-history UI backed by private current-user reads."
     },
     {
       "number": 112,
@@ -575,8 +575,8 @@
       "original_head": "15da99a1b3ba3b7e0ceb2a002c95dc40c06301db",
       "original_branch": "codex/dzn-store-supporter-card-reveal-preflight-20260831",
       "original_base": "codex/dzn-store-account-purchases-ui-shell-20260831",
-      "status": "design_reconcile",
-      "disposition": "Supporter Card reveal preflight must preserve ownership, provenance and private defaults."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PR #261 with current private account-owned Supporter Card contracts, provenance checks and tests."
     },
     {
       "number": 113,
@@ -584,8 +584,8 @@
       "original_head": "c82af969b6d5e88b09a0ccd69284f94a0f03248c",
       "original_branch": "codex/dzn-store-supporter-card-private-reveal-implementation-20260831",
       "original_base": "codex/dzn-store-supporter-card-reveal-preflight-20260831",
-      "status": "port_required",
-      "disposition": "Private verified owned-card reveal is absent; no public ownership leakage or fabricated card awards."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PR #261 with private Supporter Card reveal in Player Hub and ownership, payment-mode and no-store safeguards."
     },
     {
       "number": 114,
@@ -593,8 +593,8 @@
       "original_head": "5f0c5c09e2b9fcad8ddef736920816264c4f67cb",
       "original_branch": "codex/dzn-store-supporter-card-reveal-visual-qa-20260831",
       "original_base": "codex/dzn-store-supporter-card-private-reveal-implementation-20260831",
-      "status": "port_required",
-      "disposition": "Supporter-card styling and Comms reaction chips are separate unfinished work; static chips do not enable reaction writes."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PR #261 for Supporter Cards and PRs #225, #226 and #228 for the gated Comms reaction schema, runtime and UI."
     },
     {
       "number": 115,
@@ -611,8 +611,8 @@
       "original_head": "4b5958f49361c87e8b809c2fd5b7e29951a72834",
       "original_branch": "codex/dzn-comms-reaction-contract-preflight-20260831",
       "original_base": "codex/dzn-player-nav-access-polish-20260831",
-      "status": "design_reconcile",
-      "disposition": "Reaction contract must reconcile with current #149 message-sending plan; no reaction runtime exists."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PRs #225, #226 and #228, which rebuilt the allow-list, privacy, idempotency, quota, moderation inheritance, retention and gated reaction UI contracts on current main."
     },
     {
       "number": 117,
@@ -620,8 +620,8 @@
       "original_head": "2c6c2e36202cb188f65707b1893deb633070c417",
       "original_branch": "codex/dzn-comms-reaction-runtime-approval-preflight-20260831",
       "original_base": "codex/dzn-comms-reaction-contract-preflight-20260831",
-      "status": "design_reconcile",
-      "disposition": "Reaction runtime approval needs schema, moderation, access and abuse controls before release."
+      "status": "closed_superseded",
+      "disposition": "Superseded by PRs #225, #226 and #228 with migration 0078, disabled-by-default reaction runtime, moderation and access enforcement, abuse controls and separate UI activation."
     },
     {
       "number": 118,
