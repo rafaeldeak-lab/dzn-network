@@ -89,6 +89,7 @@ async function fixture() {
     DZN_COMMS_LEDGER_SECRET: ledgerSecret,
     DZN_COMMS_LIVE_ENABLED: "true",
     DZN_COMMS_LIVE_SCOPE: "local_test",
+    DZN_COMMS_PRIVATE_GROUPS_ENABLED: "true",
     DZN_COMMS_OWNER_MODERATION_ENABLED: "true",
     DZN_COMMS_OWNER_MODERATION_SCOPE: "local_test",
     DZN_PLATFORM_OWNER_DISCORD_IDS: "999",
@@ -213,6 +214,94 @@ async function testSendRuntime() {
     assert.equal((await payload(result)).code, "REQUEST_ID_CONFLICT");
     assert.equal(raced.count("dzn_comms_messages"), 0);
   } finally { raced.close(); }
+}
+
+async function testPrivateGroupSendRuntime() {
+  const f = await fixture();
+  try {
+    f.sqlite.prepare(`INSERT INTO dzn_comms_channels
+      (id, slug, kind, name, visibility, is_readable)
+      VALUES ('private-alpha', 'private-alpha', 'private_group', 'Private Alpha', 'private_group', 1)`).run();
+    f.sqlite.prepare(`INSERT INTO dzn_comms_private_group_members
+      (channel_id, user_id, role, membership_state)
+      VALUES ('private-alpha', 'player', 'member', 'active')`).run();
+
+    const input = { channelSlug: "private-alpha", clientRequestId: "private-request-001", body: "Private hello" };
+    const disabled = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), {
+      ...f.env,
+      DZN_COMMS_PRIVATE_GROUPS_ENABLED: "false",
+    } as Env);
+    assert.equal(disabled.status, 403, "Private groups must remain behind their dedicated server flag.");
+
+    const nonMember = await handleDznCommsSend(request("/api/comms/messages", "other-token", {
+      ...input,
+      clientRequestId: "private-request-002",
+    }), f.env);
+    assert.equal(nonMember.status, 403, "A signed-in non-member must not send to a private group.");
+    const unavailablePayload = await payload(await handleDznCommsSend(request("/api/comms/messages", "other-token", {
+      ...input,
+      channelSlug: "private-does-not-exist",
+      clientRequestId: "private-request-003",
+    }), f.env));
+    assert.equal(unavailablePayload.code, "PRIVATE_GROUP_UNAVAILABLE", "Unknown and inaccessible private-group slugs must be indistinguishable.");
+    assert.equal((await payload(nonMember)).code, unavailablePayload.code, "Channel existence must not be disclosed to non-members.");
+
+    const sent = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), f.env);
+    assert.equal(sent.status, 201);
+    const stored = f.sqlite.prepare("SELECT channel_id, body FROM dzn_comms_messages WHERE id = ?").get((await payload(sent)).message_id);
+    assert.equal(stored?.channel_id, "private-alpha");
+    assert.equal(stored?.body, "Private hello");
+
+    f.sqlite.prepare("UPDATE dzn_comms_private_group_members SET membership_state = 'removed' WHERE channel_id = 'private-alpha' AND user_id = 'player'").run();
+    const replayAfterRemoval = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), f.env);
+    assert.equal(replayAfterRemoval.status, 403, "Removing a member must block even an idempotent replay.");
+  } finally { f.close(); }
+
+  const raced = await fixture();
+  try {
+    raced.sqlite.prepare(`INSERT INTO dzn_comms_channels
+      (id, slug, kind, name, visibility, is_readable)
+      VALUES ('private-race', 'private-race', 'private_group', 'Private Race', 'private_group', 1)`).run();
+    raced.sqlite.prepare(`INSERT INTO dzn_comms_private_group_members
+      (channel_id, user_id, role, membership_state)
+      VALUES ('private-race', 'player', 'member', 'active')`).run();
+    raced.beforeBatch(() => raced.sqlite.prepare(`UPDATE dzn_comms_private_group_members
+      SET membership_state = 'removed', updated_at = CURRENT_TIMESTAMP
+      WHERE channel_id = 'private-race' AND user_id = 'player'`).run());
+
+    const response = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+      channelSlug: "private-race",
+      clientRequestId: "private-race-request",
+      body: "This must not be stored",
+    }), raced.env);
+    assert.equal(response.status, 403, "A membership revocation racing the write must fail closed.");
+    assert.equal((await payload(response)).code, "PRIVATE_GROUP_ACCESS_REVOKED");
+    assert.equal(raced.count("dzn_comms_messages"), 0);
+    assert.equal(raced.count("dzn_comms_send_receipts"), 0);
+    assert.equal(raced.count("dzn_comms_send_slots"), 1, "A raced denial must not refund its accepted-send quota slot.");
+  } finally { raced.close(); }
+
+  const rejectedRace = await fixture();
+  try {
+    rejectedRace.sqlite.prepare(`INSERT INTO dzn_comms_channels
+      (id, slug, kind, name, visibility, is_readable)
+      VALUES ('private-rejected', 'private-rejected', 'private_group', 'Private Rejected', 'private_group', 1)`).run();
+    rejectedRace.sqlite.prepare(`INSERT INTO dzn_comms_private_group_members
+      (channel_id, user_id, role, membership_state)
+      VALUES ('private-rejected', 'player', 'member', 'active')`).run();
+    rejectedRace.beforeBatch(() => rejectedRace.sqlite.prepare(`UPDATE dzn_comms_private_group_members
+      SET membership_state = 'blocked', updated_at = CURRENT_TIMESTAMP
+      WHERE channel_id = 'private-rejected' AND user_id = 'player'`).run());
+
+    const response = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+      channelSlug: "private-rejected",
+      clientRequestId: "private-rejected-request",
+      body: "discord.gg/not-allowed",
+    }), rejectedRace.env);
+    assert.equal(response.status, 403, "A removed member must not retain a blocked-message replay decision.");
+    assert.equal(rejectedRace.count("dzn_comms_send_receipts"), 0);
+    assert.equal(rejectedRace.count("dzn_comms_timeouts"), 0);
+  } finally { rejectedRace.close(); }
 }
 
 async function testReportAndModerationRuntime() {
@@ -456,6 +545,7 @@ async function main() {
   testPrivateLedgerMigrationRejectsActiveQuotas();
   testPrivateLedgerMigrationRuntime();
   await testSendRuntime();
+  await testPrivateGroupSendRuntime();
   await testReportAndModerationRuntime();
   await testRetentionRuntime();
   console.log("Live Comms handlers: auth, origin, idempotency, conflict, quota, rollback, report and moderation behavior passed.");

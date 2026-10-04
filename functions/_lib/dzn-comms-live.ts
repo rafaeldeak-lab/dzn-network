@@ -18,6 +18,11 @@ const moderationActions = new Set(["hide", "restore", "delete", "resolve_report"
 type SendInput = { channelSlug?: unknown; clientRequestId?: unknown; body?: unknown };
 type ReportInput = { messageId?: unknown; reason?: unknown };
 type ModerateInput = { messageId?: unknown; action?: unknown; reason?: unknown };
+type SendChannel = {
+  id: string;
+  kind: "public" | "private_group";
+  visibility: "public" | "private_group";
+};
 
 export function readDznCommsLiveFlags(env: Env, request?: Request) {
   const enabled = booleanFlag(env.DZN_COMMS_LIVE_ENABLED);
@@ -35,6 +40,11 @@ export function readDznCommsOwnerModerationFlags(env: Env, request?: Request) {
 
 export function readDznCommsRetentionFlags(env: Env, request?: Request) {
   return readScopedFlag(env.DZN_COMMS_RETENTION_ENABLED, env.DZN_COMMS_RETENTION_SCOPE, request);
+}
+
+export function readDznCommsPrivateGroupFlags(env: Env, request?: Request) {
+  const live = readDznCommsLiveFlags(env, request);
+  return { ...live, enabled: live.enabled && booleanFlag(env.DZN_COMMS_PRIVATE_GROUPS_ENABLED) };
 }
 
 export function moderateDznCommsBody(value: unknown) {
@@ -63,17 +73,27 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   if (!readDznCommsLiveFlags(env, request).enabled) return unavailable();
   if (!sameOrigin(request)) return error(403, "CROSS_ORIGIN", "Cross-origin chat requests are not allowed.");
   const user = await getSessionUser(env, request);
-  if (!user) return error(401, "UNAUTHORIZED", "Log in with Discord to join Global Chat.");
+  if (!user) return error(401, "UNAUTHORIZED", "Log in with Discord to join DZN Comms.");
   const parsed = await readBoundedJson<SendInput>(request, MAX_REQUEST_BYTES);
   if (!parsed.ok) return error(parsed.status, parsed.error, parsed.message);
   if (!exactKeys(parsed.value, ["channelSlug", "clientRequestId", "body"])) return error(400, "INVALID_REQUEST", "Chat request fields are invalid.");
   const channelSlug = clean(parsed.value.channelSlug, 64).toLowerCase();
   const requestId = clean(parsed.value.clientRequestId, 80);
-  if (channelSlug !== "global-chat" || !/^[a-zA-Z0-9_-]{16,80}$/.test(requestId)) return error(400, "INVALID_REQUEST", "Choose Global Chat and retry.");
+  if (!/^[a-z0-9-]{1,64}$/.test(channelSlug) || !/^[a-zA-Z0-9_-]{16,80}$/.test(requestId)) {
+    return error(400, "INVALID_REQUEST", "Choose an available DZN Comms channel and retry.");
+  }
   const moderated = moderateDznCommsBody(parsed.value.body);
   const db = requireDb(env);
-  const channel = await db.prepare("SELECT id FROM dzn_comms_channels WHERE slug = 'global-chat' AND kind = 'public' AND visibility = 'public' AND is_readable = 1 LIMIT 1").first<{ id: string }>();
-  if (!channel?.id) return error(503, "CHAT_NOT_READY", "Global Chat is not ready yet.");
+  const channel = await readSendChannel(db, channelSlug);
+  if (!channel) {
+    return channelSlug === "global-chat"
+      ? error(503, "CHAT_NOT_READY", "Global Chat is not ready yet.")
+      : privateGroupUnavailable();
+  }
+  if (channel.kind === "private_group") {
+    if (!readDznCommsPrivateGroupFlags(env, request).enabled) return privateGroupUnavailable();
+    if (!await hasActivePrivateGroupMembership(db, channel.id, user.id)) return privateGroupUnavailable();
+  }
   const bodyHash = await keyedDigest(typeof parsed.value.body === "string" ? parsed.value.body : "", env.DZN_COMMS_LEDGER_SECRET!);
   const actorReceiptKey = await receiptDigest(user.id, requestId, env.DZN_COMMS_LEDGER_SECRET!);
   const actorRateKey = await rateLimitDigest(user.id, env.DZN_COMMS_LEDGER_SECRET!);
@@ -93,25 +113,36 @@ export async function handleDznCommsSend(request: Request, env: Env) {
   }
   const timeout = await db.prepare("SELECT expires_at FROM dzn_comms_timeouts WHERE actor_user_id = ? AND julianday(expires_at) > julianday('now') LIMIT 1").bind(user.id).first<{ expires_at: string }>();
   if (timeout) return error(423, "CHAT_TIMEOUT", "Chat is temporarily unavailable for this account.");
-  if (moderated.decision !== "allow") return storeRejected(db, user, actorReceiptKey, channel.id, requestId, bodyHash, moderated.decision, moderated.code);
+  if (moderated.decision !== "allow") return storeRejected(db, user, actorReceiptKey, channel, requestId, bodyHash, moderated.decision, moderated.code);
   const messageId = crypto.randomUUID();
   const receiptId = crypto.randomUUID();
   const expires = new Date(now.getTime() + 7 * 86_400_000).toISOString();
   const messageExpires = new Date(now.getTime() + MESSAGE_RETENTION_DAYS * 86_400_000).toISOString();
   try {
-    await db.batch([
+    const results = await db.batch([
       deleteExpiredReceipt(db, actorReceiptKey, channel.id, requestId),
       allocateSendSlot(db, actorRateKey, minuteBucket, now.toISOString()),
-      db.prepare("INSERT INTO dzn_comms_messages (id, channel_id, author_user_id, author_display_name, author_role_label, body, visibility_state, source_label, expires_at) VALUES (?, ?, ?, ?, 'Member', ?, 'visible', 'authenticated_web_chat', ?)").bind(messageId, channel.id, user.id, safeName(user), moderated.body, messageExpires),
+      db.prepare(`INSERT INTO dzn_comms_messages
+        (id, channel_id, author_user_id, author_display_name, author_role_label, body, visibility_state, source_label, expires_at)
+        SELECT ?, ?, ?, ?, 'Member', ?, 'visible', 'authenticated_web_chat', ?
+        WHERE ? = 'public' OR EXISTS (
+          SELECT 1 FROM dzn_comms_private_group_members
+          WHERE channel_id = ? AND user_id = ? AND membership_state = 'active'
+        )`).bind(messageId, channel.id, user.id, safeName(user), moderated.body, messageExpires,
+          channel.kind, channel.id, user.id),
       db.prepare(`INSERT INTO dzn_comms_send_receipts
         (id, actor_receipt_key, channel_id, client_request_id, body_hash, decision, response_status, reason_code,
           message_id, send_rate_key, send_minute_bucket, send_slot, expires_at)
         SELECT ?, ?, ?, ?, ?, 'allow', 201, 'MESSAGE_ALLOWED', ?, ?, ?, slots.slot, ?
         FROM dzn_comms_send_slots AS slots
+        JOIN dzn_comms_messages AS messages ON messages.id = ? AND messages.channel_id = ?
         WHERE slots.actor_rate_key = ? AND slots.minute_bucket = ? AND slots.accepted_at = ?
         LIMIT 1`).bind(receiptId, actorReceiptKey, channel.id, requestId, bodyHash, messageId, actorRateKey, minuteBucket, expires,
-          actorRateKey, minuteBucket, now.toISOString()),
+          messageId, channel.id, actorRateKey, minuteBucket, now.toISOString()),
     ]);
+    if (channel.kind === "private_group" && Number(results[2]?.meta?.changes ?? 0) !== 1) {
+      return error(403, "PRIVATE_GROUP_ACCESS_REVOKED", "Your access to this private DZN Comms group has changed.");
+    }
   } catch (cause) {
     const concurrentReplay = await readReceipt(db, actorReceiptKey, channel.id, requestId);
     if (concurrentReplay?.body_hash === bodyHash) return receiptResponse(concurrentReplay, true);
@@ -265,19 +296,32 @@ export async function runDznCommsRetention(db: D1Database, now = new Date()) {
   };
 }
 
-async function storeRejected(db: D1Database, user: SessionUser, actorReceiptKey: string, channelId: string, requestId: string, bodyHash: string, decision: "block" | "timeout", reason: string) {
+async function storeRejected(db: D1Database, user: SessionUser, actorReceiptKey: string, channel: SendChannel, requestId: string, bodyHash: string, decision: "block" | "timeout", reason: string) {
   const status = decision === "timeout" ? 423 : 422;
   const receiptId = crypto.randomUUID();
   const now = Date.now();
   const statements = [
-    deleteExpiredReceipt(db, actorReceiptKey, channelId, requestId),
-    db.prepare("INSERT INTO dzn_comms_send_receipts (id, actor_receipt_key, channel_id, client_request_id, body_hash, decision, response_status, reason_code, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(receiptId, actorReceiptKey, channelId, requestId, bodyHash, decision, status, reason, new Date(now + 7 * 86_400_000).toISOString()),
+    deleteExpiredReceipt(db, actorReceiptKey, channel.id, requestId),
+    db.prepare(`INSERT INTO dzn_comms_send_receipts
+      (id, actor_receipt_key, channel_id, client_request_id, body_hash, decision, response_status, reason_code, expires_at)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE ? = 'public' OR EXISTS (
+        SELECT 1 FROM dzn_comms_private_group_members
+        WHERE channel_id = ? AND user_id = ? AND membership_state = 'active'
+      )`).bind(receiptId, actorReceiptKey, channel.id, requestId, bodyHash, decision, status, reason,
+        new Date(now + 7 * 86_400_000).toISOString(), channel.kind, channel.id, user.id),
   ];
-  if (decision === "timeout") statements.push(db.prepare("INSERT INTO dzn_comms_timeouts (actor_user_id, reason_code, expires_at) VALUES (?, ?, ?) ON CONFLICT(actor_user_id) DO UPDATE SET reason_code = excluded.reason_code, expires_at = excluded.expires_at, updated_at = CURRENT_TIMESTAMP").bind(user.id, reason, new Date(now + 10 * 60_000).toISOString()));
+  if (decision === "timeout") statements.push(db.prepare(`INSERT INTO dzn_comms_timeouts (actor_user_id, reason_code, expires_at)
+    SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM dzn_comms_send_receipts WHERE id = ?)
+    ON CONFLICT(actor_user_id) DO UPDATE SET reason_code = excluded.reason_code,
+      expires_at = excluded.expires_at, updated_at = CURRENT_TIMESTAMP`).bind(user.id, reason, new Date(now + 10 * 60_000).toISOString(), receiptId));
   try {
-    await db.batch(statements);
+    const results = await db.batch(statements);
+    if (channel.kind === "private_group" && Number(results[1]?.meta?.changes ?? 0) !== 1) {
+      return error(403, "PRIVATE_GROUP_ACCESS_REVOKED", "Your access to this private DZN Comms group has changed.");
+    }
   } catch {
-    const replay = await readReceipt(db, actorReceiptKey, channelId, requestId);
+    const replay = await readReceipt(db, actorReceiptKey, channel.id, requestId);
     if (replay?.body_hash === bodyHash) return receiptResponse(replay, true);
     if (replay) return error(409, "REQUEST_ID_CONFLICT", "This retry ID was already used for different text.");
     return error(503, "CHAT_STORAGE_UNAVAILABLE", "Global Chat could not store that safety decision. Retry shortly.");
@@ -289,6 +333,23 @@ async function readReceipt(db: D1Database, actorReceiptKey: string, channelId: s
   return db.prepare("SELECT body_hash, decision, response_status, reason_code, message_id FROM dzn_comms_send_receipts WHERE actor_receipt_key = ? AND channel_id = ? AND client_request_id = ? AND julianday(expires_at) > julianday('now') LIMIT 1").bind(actorReceiptKey, channelId, requestId).first<{ body_hash: string; decision: string; response_status: number; reason_code: string | null; message_id: string | null }>();
 }
 
+async function readSendChannel(db: D1Database, slug: string) {
+  return db.prepare(`SELECT id, kind, visibility
+    FROM dzn_comms_channels
+    WHERE slug = ? AND is_readable = 1
+      AND ((slug = 'global-chat' AND kind = 'public' AND visibility = 'public')
+        OR (kind = 'private_group' AND visibility = 'private_group'))
+    LIMIT 1`).bind(slug).first<SendChannel>();
+}
+
+async function hasActivePrivateGroupMembership(db: D1Database, channelId: string, userId: string) {
+  const membership = await db.prepare(`SELECT 1 AS allowed
+    FROM dzn_comms_private_group_members
+    WHERE channel_id = ? AND user_id = ? AND membership_state = 'active'
+    LIMIT 1`).bind(channelId, userId).first<{ allowed: number }>();
+  return membership?.allowed === 1;
+}
+
 function deleteExpiredReceipt(db: D1Database, actorReceiptKey: string, channelId: string, requestId: string) {
   return db.prepare("DELETE FROM dzn_comms_send_receipts WHERE actor_receipt_key = ? AND channel_id = ? AND client_request_id = ? AND julianday(expires_at) <= julianday('now')").bind(actorReceiptKey, channelId, requestId);
 }
@@ -298,6 +359,7 @@ function receiptResponse(row: { decision: string; response_status: number; reaso
   return json({ ok, code: ok ? "MESSAGE_SENT" : row.reason_code, message_id: row.message_id, replayed }, { status: replayed && ok ? 200 : row.response_status, headers: privateNoStoreHeaders() });
 }
 function unavailable() { return error(404, "DZN_COMMS_LIVE_DISABLED", "Live DZN Comms is not enabled in this environment."); }
+function privateGroupUnavailable() { return error(403, "PRIVATE_GROUP_UNAVAILABLE", "This private DZN Comms group is not available to your account."); }
 function error(status: number, code: string, message: string) { return json({ ok: false, code, message }, { status, headers: privateNoStoreHeaders() }); }
 function booleanFlag(value: unknown) { return typeof value === "string" && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase()); }
 function clean(value: unknown, max: number) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
