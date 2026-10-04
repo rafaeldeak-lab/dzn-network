@@ -151,6 +151,8 @@
     "test:dzn-seasons": "tsx scripts/test-dzn-seasons.ts",
     "check:badge-assets": "tsx scripts/check-badge-assets.ts",
     "check:billing-config": "tsx scripts/check-billing-config.ts",
+    "check:production-migration-queue": "tsx scripts/check-production-migration-queue.ts",
+    "test:production-migration-queue": "tsx scripts/test-production-migration-queue.ts",
     "adm:audit-health": "tsx scripts/adm-audit-health.ts",
     "qa:player-hub-rendered": "node scripts/qa-player-hub-rendered.mjs",
     "qa:public-player-profile-rendered": "node scripts/qa-public-player-profile-rendered.mjs",
