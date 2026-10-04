@@ -40,13 +40,19 @@ if (result.status !== 0) throw new Error(`Production migration ledger read faile
 const payload = parseWranglerJson(result.stdout);
 const rows = payload.flatMap((entry) => entry.results ?? entry.result?.[0]?.results ?? []);
 const applied = new Set(rows.map((row) => String(row.name ?? "")).filter(Boolean));
+const localMigrationSet = new Set(localMigrations);
+const unknownApplied = [...applied].filter((name) => !localMigrationSet.has(name)).sort();
+if (unknownApplied.length > 0) {
+  throw new Error(`Production ledger contains migrations absent from this checkout: ${unknownApplied.join(", ")}.`);
+}
 const pending = localMigrations.filter((name) => !applied.has(name));
-const expected = String(process.env.DZN_EXPECTED_PENDING_MIGRATIONS ?? "")
+const expectedValue = process.env.DZN_EXPECTED_PENDING_MIGRATIONS;
+const expected = String(expectedValue ?? "")
   .split(",")
   .map((name) => name.trim())
   .filter(Boolean);
 
-if (expected.length > 0 && JSON.stringify(pending) !== JSON.stringify(expected)) {
+if (expectedValue !== undefined && JSON.stringify(pending) !== JSON.stringify(expected)) {
   throw new Error(`Pending migration queue mismatch. Expected ${JSON.stringify(expected)}, received ${JSON.stringify(pending)}.`);
 }
 
