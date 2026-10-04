@@ -53,7 +53,7 @@ assert.equal(assistSource.includes("Your search stays in this browser."), true, 
 assert.equal(assistSource.includes("DZN_SUPPORT_EMAIL_HREF"), true, "DZN Assist must provide a private human-support route.");
 assert.equal(assistSource.includes("DZN_PUBLIC_DISCORD_INVITE_URL"), true, "DZN Assist must provide the public DZN Discord route.");
 assert.equal(assistGuidesSource.includes('href: "/setup"'), true, "DZN Assist must guide owners to resumable server setup.");
-assert.equal(assistGuidesSource.includes('href: "/player/profile#game-account"'), true, "DZN Assist must guide players to game-stat linking.");
+assert.equal(assistGuidesSource.includes('href: "/login?returnTo=%2Fplayer%2Fprofile%23game-account"'), true, "DZN Assist must preserve the game-account anchor across Discord sign-in.");
 assert.equal(commsSource.includes('pb-24 pt-4 text-zinc-100 sm:pt-6'), true, "Comms must begin directly below the shared header without the old empty spacer.");
 assert.equal(communityPageSource.includes("Open moderated DZN Global Chat"), true, "Default share metadata must describe the Comms destination accurately.");
 assert.equal(globalStylesSource.includes(".dzn-header-nav--logged-out .dzn-header-links {\n  grid-template-columns: repeat(3, minmax(96px, 1fr));"), true, "The signed-out desktop header must allocate one column for each public link.");

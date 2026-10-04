@@ -24,7 +24,7 @@ export const DZN_ASSIST_GUIDES: DznAssistGuide[] = [
     title: "Connect your DayZ stats",
     summary: "Choose the server you play on and submit the exact gamertag shown in its imported leaderboard. The matching owner or a DZN admin must verify the imported game profile before it is linked.",
     keywords: ["claim", "dayz", "game account", "gamertag", "link", "player", "profile", "stats"],
-    links: [{ href: "/player/profile#game-account", label: "Link game stats" }, { href: "/player", label: "View Player Hub" }],
+    links: [{ href: "/login?returnTo=%2Fplayer%2Fprofile%23game-account", label: "Link game stats" }, { href: "/player", label: "View Player Hub" }],
   },
   {
     id: "server-setup",
