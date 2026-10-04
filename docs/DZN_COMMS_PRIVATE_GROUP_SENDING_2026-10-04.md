@@ -6,7 +6,7 @@ This source release extends the existing authenticated Comms send route to priva
 
 - `DZN_COMMS_PRIVATE_GROUPS_ENABLED` defaults to `false` and also requires the existing live Comms flag, scope and secrets.
 - A sender must have an active `dzn_comms_private_group_members` row for the exact channel.
-- Membership is checked before replay lookup and checked again inside the atomic message write.
+- Receipt replay lookup requires active membership for the exact private channel in the same database query, then membership is checked again before subsequent processing and inside the atomic message write.
 - A concurrent removal stores no message and no receipt. Its accepted-send quota remains consumed so a revocation race cannot refund rate limits.
 - A removed member cannot replay an earlier successful request through the private channel.
 - Unknown and inaccessible private-group slugs return the same generic denial, so membership checks do not expose channel existence.
@@ -26,7 +26,7 @@ npm run test:dzn-comms-message-sending-contract
 npm run test:dzn-comms-read-history
 ```
 
-The runtime suite covers disabled flags, non-members, active members, removal before replay, and removal racing the database write.
+The runtime suite covers disabled flags, non-members, active members, removal before replay, removal racing the receipt lookup, and removal racing the database write.
 
 ## Release boundary
 
