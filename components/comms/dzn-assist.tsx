@@ -2,7 +2,7 @@
 
 import { Bot, ChevronRight, CircleHelp, Search, ShieldCheck } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { DZN_ASSIST_CATEGORIES, DZN_ASSIST_GUIDES } from "@/lib/dzn-assist";
 import { DZN_PUBLIC_DISCORD_INVITE_URL } from "@/lib/public-discord";
@@ -20,6 +20,24 @@ export function DznAssist() {
     return [guide.title, guide.summary, guide.category, ...guide.keywords]
       .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
   }), [category, normalizedQuery]);
+
+  useEffect(() => {
+    if (window.location.hash !== "#dzn-assist") return;
+    let cancelled = false;
+    const scrollToAssist = () => {
+      if (!cancelled && window.location.hash === "#dzn-assist") {
+        document.getElementById("dzn-assist")?.scrollIntoView({ block: "start" });
+      }
+    };
+    const frame = window.requestAnimationFrame(() => window.requestAnimationFrame(scrollToAssist));
+    const settledLayoutTimer = window.setTimeout(scrollToAssist, 400);
+    void document.fonts?.ready.then(scrollToAssist);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(settledLayoutTimer);
+    };
+  }, []);
 
   return (
     <section id="dzn-assist" aria-labelledby="dzn-assist-title" className="scroll-mt-6 overflow-hidden rounded-lg border border-violet-300/20 bg-[#070817] shadow-[0_22px_70px_rgba(0,0,0,0.35)]">

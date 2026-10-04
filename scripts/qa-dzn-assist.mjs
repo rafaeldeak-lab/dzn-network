@@ -17,9 +17,13 @@ const viewports = [
 try {
   for (const viewport of viewports) {
     const page = await browser.newPage({ viewport });
-    await page.goto(`${baseUrl}/community#dzn-assist`, { waitUntil: "networkidle" });
+    await page.goto(`${baseUrl}/community#dzn-assist`, { waitUntil: "domcontentloaded" });
     const assist = page.locator("#dzn-assist");
     await assist.waitFor({ state: "visible" });
+    await page.waitForFunction(() => {
+      const rect = document.querySelector("#dzn-assist")?.getBoundingClientRect();
+      return Boolean(rect && rect.top < window.innerHeight && rect.bottom > 0);
+    });
     await page.locator("#dzn-assist-search").fill("server setup");
     await page.getByRole("heading", { name: "Add or resume a server setup" }).waitFor({ state: "visible" });
 
@@ -36,7 +40,7 @@ try {
   }
 
   const launcherPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
-  await launcherPage.goto(baseUrl, { waitUntil: "networkidle" });
+  await launcherPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await launcherPage.getByRole("button", { name: "Open DZN Comms" }).click();
   await launcherPage.getByRole("link", { name: /DZN Assist Guided help live/ }).waitFor({ state: "visible" });
   await launcherPage.screenshot({ path: path.join(outputDir, "phone-launcher.png"), fullPage: false });
