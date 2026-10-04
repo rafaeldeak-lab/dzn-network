@@ -18,7 +18,7 @@ class D1PresenceStorage implements PresenceStorage {
     const row = await this.db.prepare(
       `SELECT COUNT(*) AS online_count
        FROM dzn_comms_presence_sessions
-       WHERE scope = 'global_chat' AND julianday(expires_at) > julianday(?)`,
+       WHERE scope = 'global_chat' AND expires_at > ?`,
     ).bind(nowIso).first<{ online_count?: number | string | null }>();
     return normalizeCount(row?.online_count);
   }

@@ -43,6 +43,8 @@ assert.match(helper, /getSessionUser\(env, request\)/, "Presence writes must use
 assert.match(helper, /sameOrigin\(request\)/, "Presence writes must be same-origin.");
 assert.match(helper, /HMAC/, "Presence actor keys must use a keyed digest.");
 assert.match(helper, /dzn-comms-presence:/, "Presence must have an isolated digest domain.");
+assert.match(helper, /scope = 'global_chat' AND expires_at > \?/, "Presence counts must use the scope and expiry index with canonical ISO timestamps.");
+assert.doesNotMatch(helper, /julianday\(expires_at\)/, "Presence counts must not wrap the indexed expiry column in a function.");
 assert.match(route, /handleDznCommsPresence/);
 assert.match(component, /NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED/);
 assert.match(component, /fetch\("\/api\/auth\/me"/);
