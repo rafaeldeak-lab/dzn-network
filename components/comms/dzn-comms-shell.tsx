@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
+import { DznAssist } from "./dzn-assist";
 import { CommsMessageTime } from "./comms-message-time";
 import {
   addCommsReaction,
@@ -250,7 +251,7 @@ export function DznCommsShell() {
           </a>
           <a href="#dzn-assist" className="group flex min-h-14 items-center gap-3 rounded-md border border-violet-300/20 bg-violet-300/6 px-3 py-2 transition hover:border-violet-200/45">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-violet-300/20 bg-violet-300/8 text-violet-100"><Bot className="h-5 w-5" aria-hidden="true" /></span>
-            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">DZN Assist</span><span className="block text-xs font-bold text-amber-200">Not live yet</span></span>
+            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">DZN Assist</span><span className="block text-xs font-bold text-emerald-200">Guided help live</span></span>
             <ChevronRight className="h-4 w-4 text-violet-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
           </a>
         </nav>
@@ -265,8 +266,8 @@ export function DznCommsShell() {
                 <p className="text-xs font-black uppercase tracking-[0.28em] text-cyan-200">DZN Comms</p>
                 <h1 className="mt-1 text-3xl font-black uppercase leading-none text-white sm:text-4xl">Global Chat</h1>
                 <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-zinc-300">
-                  Discord-authenticated members can talk in one moderated DZN channel. Private chat, presence and AI support
-                  remain separate future releases.
+                  Discord-authenticated members can talk in one moderated DZN channel. Private chat and presence remain
+                  separate releases; public DZN guidance is available below.
                 </p>
               </div>
             </div>
@@ -355,7 +356,7 @@ export function DznCommsShell() {
               <div className="mt-4 space-y-3">
                 <SafetyCard icon={ShieldCheck} label="Authenticated" value="Discord login required to send" />
                 <SafetyCard icon={AlertTriangle} label="Moderation" value="Filters, reports and owner actions" />
-                <SafetyCard id="dzn-assist" icon={Bot} label="DZN Assist" value="Not live yet. No AI messages are being generated." />
+                <SafetyCard icon={Bot} label="DZN Assist" value="Guided public help is available below." />
                 <SafetyCard icon={Users} label="Private groups" value="Membership proof required" />
               </div>
               <div className="mt-5 rounded-lg border border-violet-300/18 bg-violet-400/8 p-4">
@@ -369,6 +370,7 @@ export function DznCommsShell() {
             </aside>
           </div>
         </div>
+        <DznAssist />
       </section>
     </main>
   );

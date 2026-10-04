@@ -90,7 +90,7 @@ export function DznCommsLauncher() {
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-black uppercase text-white">DZN Assist</span>
-                <span className="mt-0.5 block text-xs font-bold text-amber-200">Not live yet</span>
+                <span className="mt-0.5 block text-xs font-bold text-emerald-200">Guided help live</span>
               </span>
               <ChevronRight className="h-4 w-4 text-violet-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
             </Link>
@@ -111,7 +111,7 @@ export function DznCommsLauncher() {
         {open ? <X className="h-5 w-5" aria-hidden="true" /> : <MessagesSquare className="h-5 w-5" aria-hidden="true" />}
         <span className="sr-only text-left leading-none md:not-sr-only">
           <span className="block text-[0.7rem] font-black uppercase text-white">DZN Comms</span>
-          <span className="mt-1 block text-[0.62rem] font-bold uppercase text-cyan-200">Chat &amp; status</span>
+          <span className="mt-1 block text-[0.62rem] font-bold uppercase text-cyan-200">Chat &amp; help</span>
         </span>
         <ChevronRight
           className={`hidden h-4 w-4 text-cyan-300 transition md:block ${open ? "rotate-90" : "group-hover:translate-x-0.5"}`}

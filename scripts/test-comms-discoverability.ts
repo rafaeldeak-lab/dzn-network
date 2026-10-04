@@ -7,6 +7,8 @@ const globalStylesSource = readFileSync("app/globals.css", "utf8");
 const headerSource = readFileSync("components/site-header.tsx", "utf8");
 const launcherSource = readFileSync("components/comms/dzn-comms-launcher.tsx", "utf8");
 const commsSource = readFileSync("components/comms/dzn-comms-shell.tsx", "utf8");
+const assistSource = readFileSync("components/comms/dzn-assist.tsx", "utf8");
+const assistGuidesSource = readFileSync("lib/dzn-assist.ts", "utf8");
 
 assert.equal(layoutSource.includes("<DznCommsLauncher />"), true, "The Comms launcher must be mounted across the site.");
 assert.equal(headerSource.includes('{ href: "/community", label: "Comms", active: "community", icon: MessageCircle }'), true, "The shared header must link to Comms.");
@@ -14,7 +16,7 @@ assert.equal(headerSource.includes('if (pathname.startsWith("/community")) retur
 
 assert.equal(launcherSource.includes('href="/community#global-chat"'), true, "The global launcher must open Global Chat directly.");
 assert.equal(launcherSource.includes('href="/community#dzn-assist"'), true, "The global launcher must expose the DZN Assist status location.");
-assert.equal(launcherSource.includes("Not live yet"), true, "The launcher must not present DZN Assist as active.");
+assert.equal(launcherSource.includes("Guided help live"), true, "The launcher must identify the available guided-help experience.");
 assert.equal(launcherSource.includes('pathname.startsWith("/community")'), true, "The floating launcher must not cover the Comms page itself.");
 assert.equal(launcherSource.includes('event.key === "Escape"'), true, "The launcher must close with Escape.");
 assert.equal(launcherSource.includes('document.addEventListener("pointerdown", closeOnOutsideClick)'), true, "The launcher must close when someone clicks elsewhere on the page.");
@@ -24,7 +26,7 @@ assert.equal(launcherSource.includes("z-[70]"), false, "The launcher must not co
 assert.equal(launcherSource.includes("Open Global Chat"), true, "The launcher must use neutral copy until the authoritative runtime state is known.");
 assert.equal(launcherSource.includes("Open live chat"), false, "The launcher must not infer live availability from public build flags.");
 assert.equal(launcherSource.includes("DZN Comms"), true, "The persistent launcher control must identify DZN Comms without relying on an icon or tooltip.");
-assert.equal(launcherSource.includes("Chat &amp; status"), true, "The persistent launcher must explain that it opens chat and availability information.");
+assert.equal(launcherSource.includes("Chat &amp; help"), true, "The persistent launcher must explain that it opens chat and help.");
 assert.equal(launcherSource.includes('className="sr-only text-left leading-none md:not-sr-only"'), true, "Phone and narrow-tablet screens must use the compact launcher while desktop retains its visible label.");
 assert.equal(launcherSource.includes('aria-label={open ? "Close DZN Comms menu" : "Open DZN Comms"}'), true, "The compact phone launcher must keep an explicit accessible name.");
 assert.equal(launcherSource.includes("safe-area-inset-bottom"), true, "The launcher must clear mobile safe-area controls.");
@@ -37,21 +39,27 @@ assert.equal(launcherSource.includes("onClick={closeAndRestoreFocus}"), true, "T
 assert.equal(launcherSource.includes("ref={triggerButtonRef}"), true, "The launcher trigger must remain available as the focus return target.");
 
 assert.equal(commsSource.includes('id="global-chat"'), true, "Global Chat must have a direct-link target.");
-assert.equal(commsSource.includes('id="dzn-assist"'), true, "DZN Assist must have a direct-link target.");
 assert.equal(commsSource.includes('sendingEnabled\n    ? "Live now"'), true, "Global Chat must identify a live sending runtime.");
 assert.equal(commsSource.includes('? "Read-only history"'), true, "Global Chat must identify read-only history.");
 assert.equal(commsSource.includes('? "Checking access"'), true, "Global Chat must identify access checks in progress.");
 assert.equal(commsSource.includes(': "Preview only"'), true, "Global Chat must identify the static preview state.");
 assert.equal(commsSource.includes("Available now"), false, "Global Chat must not claim unconditional availability.");
-assert.equal(commsSource.includes("No AI messages are being generated."), true, "DZN Assist status must state that no AI runtime is active.");
+assert.equal(commsSource.includes("<DznAssist />"), true, "The Comms page must render the working DZN Assist experience.");
+assert.equal(assistSource.includes('id="dzn-assist"'), true, "DZN Assist must keep its direct-link target on the functional panel.");
+assert.equal(assistSource.includes("Your search stays in this browser."), true, "DZN Assist must explain its local-only search boundary.");
+assert.equal(assistSource.includes("DZN_SUPPORT_EMAIL_HREF"), true, "DZN Assist must provide a private human-support route.");
+assert.equal(assistSource.includes("DZN_PUBLIC_DISCORD_INVITE_URL"), true, "DZN Assist must provide the public DZN Discord route.");
+assert.equal(assistGuidesSource.includes('href: "/setup"'), true, "DZN Assist must guide owners to resumable server setup.");
+assert.equal(assistGuidesSource.includes('href: "/player/profile#game-account"'), true, "DZN Assist must guide players to game-stat linking.");
 assert.equal(commsSource.includes('pb-24 pt-4 text-zinc-100 sm:pt-6'), true, "Comms must begin directly below the shared header without the old empty spacer.");
-assert.equal(communityPageSource.includes("Preview moderated DZN Global Chat"), true, "Default share metadata must describe the Comms preview accurately.");
-assert.equal(communityPageSource.includes("Open moderated DZN Global Chat"), false, "Default share metadata must not advertise inactive chat as live.");
+assert.equal(communityPageSource.includes("Open moderated DZN Global Chat"), true, "Default share metadata must describe the Comms destination accurately.");
 assert.equal(globalStylesSource.includes(".dzn-header-nav--logged-out .dzn-header-links {\n  grid-template-columns: repeat(3, minmax(96px, 1fr));"), true, "The signed-out desktop header must allocate one column for each public link.");
 assert.equal(globalStylesSource.includes(".dzn-header-nav--logged-out .dzn-header-links {\n    grid-template-columns: repeat(2, minmax(0, 1fr));"), true, "The signed-out mobile header must restore its two-column wrapping.");
 
 for (const forbidden of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "chat.completions", "responses.create", "trackEvent", "checkout.sessions.create"]) {
   assert.equal(launcherSource.includes(forbidden), false, `Comms discovery must not introduce ${forbidden}.`);
+  assert.equal(assistSource.includes(forbidden), false, `DZN Assist must not introduce ${forbidden}.`);
+  assert.equal(assistGuidesSource.includes(forbidden), false, `DZN Assist guides must not introduce ${forbidden}.`);
 }
 
 console.log("Comms discoverability tests passed.");
