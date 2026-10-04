@@ -106,7 +106,7 @@ export function StoreManualReviewPage() {
         body: JSON.stringify({ orderId: item.id, requestKey, action, reason, evidenceCategory }),
       });
       const payload = await response.json().catch(() => null) as Payload | null;
-      if (payload) pendingActionKeys.current.delete(fingerprint);
+      if (payload && response.status < 500) pendingActionKeys.current.delete(fingerprint);
       if (!response.ok || !payload?.ok) throw new Error(payload?.message ?? "The review action was not recorded.");
       await load();
       setNotice("Review action recorded in the immutable audit history. Payment and fulfilment state were not changed.");

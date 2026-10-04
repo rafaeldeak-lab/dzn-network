@@ -4,7 +4,7 @@ This release rebuilds the still-valid platform-owner reconciliation requirement 
 
 The available actions are deliberately non-financial: `note`, `hold`, and `escalate` append audit context only. They cannot charge, refund, dispute, cancel, fulfil, issue a receipt, grant an entitlement, reserve stock, change an order state, call Stripe, or alter competitive systems.
 
-Security boundaries include platform-owner authorization, same-origin writes, private no-store responses, bounded inputs and pagination, prepared D1 statements, retry-stable idempotency keys, monotonic audit ordering, append-only database triggers, rejection of raw payment references and Discord account IDs in notes, fixed-destination redirect-denying avatar fetches, strict image types, and a one MiB avatar limit.
+Security boundaries include platform-owner authorization, same-origin writes, private no-store responses, bounded inputs and pagination, prepared D1 statements, retry-stable idempotency keys that survive ambiguous server failures, monotonic audit ordering, append-only database triggers, retained-ledger account anonymization for audit actors, rejection of raw payment references and Discord account IDs in notes, fixed-destination redirect-denying avatar fetches, strict image types, and a one MiB avatar limit.
 
 ## Production activation remains separate
 

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
 
 import { createSession } from "../functions/_lib/db";
+import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { listStoreManualReviewOrders, readStoreManualReviewAvatarSource, recordStoreManualReviewAction } from "../functions/_lib/store-manual-review";
 import { onRequestGet, onRequestPost } from "../functions/api/owner/store/manual-review";
 import { onRequestGet as onPageGet } from "../functions/owner/store/reconciliation";
@@ -26,6 +27,7 @@ async function run() {
   assert.match(component, /cannot fulfil, refund, dispute, or charge/);
   assert.match(component, /pendingActionKeys/);
   assert.match(component, /pendingActionKeys\.current\.get\(fingerprint\) \?\? crypto\.randomUUID\(\)/);
+  assert.match(component, /payload && response\.status < 500/);
   assert.doesNotMatch(component, /stripe_payment_intent|stripe_checkout_session|refunds\.create|checkout\.sessions/);
   const avatarRoute = readFileSync("functions/api/owner/store/manual-review-avatar/[orderId].ts", "utf8");
   assert.match(avatarRoute, /redirect:\s*"error"/);
@@ -37,7 +39,7 @@ async function run() {
     const db = await mf.getD1Database("DB");
     await db.exec("PRAGMA foreign_keys = ON;");
     await db.prepare(`CREATE TABLE users (
-      id TEXT PRIMARY KEY, discord_id TEXT NOT NULL UNIQUE, username TEXT NOT NULL, avatar TEXT,
+      id TEXT PRIMARY KEY, discord_id TEXT NOT NULL UNIQUE, username TEXT, avatar TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )`).run();
     await db.prepare(`CREATE TABLE sessions (
@@ -126,12 +128,23 @@ async function run() {
     if (!ordered.ok) throw new Error("Expected ordered Store review queue");
     assert.equal(ordered.items[0]?.latest_action_reason, "Second same-second action is newest.");
 
+    const retainedActor = await recordStoreManualReviewAction(env, outsider, { ...body, requestKey: "review-request-actor", action: "note", reason: "Independent operator annotation." });
+    assert.equal(retainedActor.status, 201);
+    assert.equal(await eraseOrRetainAccountUser(db as unknown as D1Database, outsider.id), 1);
+    const anonymizedActor = await db.prepare("SELECT discord_id, username, avatar FROM users WHERE id = ?").bind(outsider.id)
+      .first<{ discord_id: string; username: string | null; avatar: string | null }>();
+    assert.match(anonymizedActor?.discord_id ?? "", /^deleted-[0-9a-f-]{36}$/);
+    assert.equal(anonymizedActor?.username, null);
+    assert.equal(anonymizedActor?.avatar, null);
+    assert.equal((await db.prepare("SELECT COUNT(*) AS total FROM store_commerce_manual_review_actions WHERE actor_user_id = ?").bind(outsider.id)
+      .first<{ total: number }>())?.total, 1);
+
     await assert.rejects(() => db.prepare("UPDATE store_commerce_manual_review_actions SET reason = 'Changed' WHERE request_key = ?").bind(body.requestKey).run(), /immutable/i);
     await assert.rejects(() => db.prepare("DELETE FROM store_commerce_manual_review_actions WHERE request_key = ?").bind(body.requestKey).run(), /immutable/i);
     await db.prepare("UPDATE store_commerce_orders SET status = 'refunded' WHERE id = ?").bind(body.orderId).run();
     const stale = await recordStoreManualReviewAction(env, owner, { ...body, requestKey: "review-request-0003", action: "note" });
     assert.equal(stale.status, 409);
-    assert.equal((await db.prepare("SELECT COUNT(*) AS total FROM store_commerce_manual_review_actions").first<{ total: number }>())?.total, 2);
+    assert.equal((await db.prepare("SELECT COUNT(*) AS total FROM store_commerce_manual_review_actions").first<{ total: number }>())?.total, 3);
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Store manual-review queue checks passed.");
   } finally {
