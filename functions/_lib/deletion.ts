@@ -257,6 +257,7 @@ async function hasRetainedStoreLedgerReferences(db: D1Database, userId: string) 
     ["store_commerce_fulfilments", "purchasing_user_id"],
     ["store_commerce_receipts", "purchasing_user_id"],
     ["store_commerce_entitlements", "purchasing_user_id"],
+    ["store_commerce_manual_review_actions", "actor_user_id"],
   ] as const;
 
   for (const [tableName, columnName] of references) {

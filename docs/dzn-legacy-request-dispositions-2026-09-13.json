@@ -3,8 +3,8 @@
   "compared_main": "3f25cca7f9ba927853f9553c6635922e13ae9215",
   "ui_release": "ee43f3f1f445af92ffd423409441b42d9e7b257d",
   "original_count": 73,
-  "closed_superseded": 32,
-  "open_legacy": 41,
+  "closed_superseded": 33,
+  "open_legacy": 40,
   "notes": [
     "A disposition is not a claim of implementation or production activation.",
     "Closed requests have per-request GitHub comments and preserved branches. Open original branches remain unchanged.",
@@ -548,8 +548,8 @@
       "original_head": "fe1a668b5abacc6f9fd85dc06cb936fcf28116f3",
       "original_branch": "codex/dzn-store-fulfilment-reconciliation-preflight-20260829",
       "original_base": "codex/dzn-store-fulfilment-runtime-implementation-20260828",
-      "status": "design_reconcile",
-      "disposition": "Customer-scoped purchases are released, but platform-owner manual-review reconciliation still needs an audited current-main operator surface."
+      "status": "closed_superseded",
+      "disposition": "Superseded by the current-main Store manual-review queue, protected customer context and immutable non-financial operator audit release."
     },
     {
       "number": 110,
