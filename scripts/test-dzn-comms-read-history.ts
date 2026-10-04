@@ -88,7 +88,7 @@ assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_PRIVATE_GROUPS_UI_ENABLED/, "Private 
 assert.match(shell, /loadCommsHistory\(controller.signal, \{ channelSlug: selectedChannel \}\)/, "The UI must use the bounded history client for the selected channel.");
 assert.match(shell, /if \(selectedChannel !== "global-chat"\)[\s\S]*Private group access changed\. Returning to Global Chat\.[\s\S]*setSelectedChannel\("global-chat"\)/, "A failed private refresh must clear private history and return to Global Chat.");
 assert.match(shell, /selectedChannelRef\.current !== selectedChannel[\s\S]*payload\.channel\.slug !== selectedChannel/, "History refreshes must discard responses for a channel that is no longer selected.");
-assert.match(shell, /const poller = window\.setInterval/, "Read-only and live private history must both recheck revoked access.");
+assert.match(shell, /const poller = liveUiEnabled \|\| selectedChannel !== "global-chat"[\s\S]*window\.setInterval/, "Live history and selected private history must recheck revoked access without continuously polling public read-only history.");
 assert.match(shell, /const targetChannel = payload\.channel\.slug;[\s\S]*selectedChannelRef\.current !== targetChannel[\s\S]*sendCommsMessage\(targetChannel/, "The composer must send only to the channel represented by the visible validated payload.");
 assert.match(shell, /selectedChannelRef\.current === targetChannel[\s\S]*refreshed\.channel\.slug === targetChannel/, "Mutation refreshes must not overwrite a newer channel selection.");
 assert.match(shell, /fetch\("\/api\/auth\/me", \{ cache: "no-store", credentials: "include"/, "Reaction writes must use the current authenticated-session probe.");
@@ -317,26 +317,27 @@ async function testRuntimeContracts() {
   assert.equal(privateDisabled.status, 404, "Private group reads must remain unavailable while their dedicated server flag is off.");
 
   const anonymousPrivate = await callMessageHistoryRoute(privateDb, "GET", "https://dzn.test/api/comms/message-history?channel=pandora-squad", privateEnabledEnv(privateDb));
-  assert.equal(anonymousPrivate.status, 404, "Private group reads must not reveal channel existence to signed-out users.");
+  assert.equal(anonymousPrivate.status, 401, "Signed-out private group reads must preserve the endpoint authentication contract.");
 
   const deniedQueryStart = privateDb.queries.length;
   const deniedPrivate = await callMessageHistoryRoute(privateDb, "GET", "https://dzn.test/api/comms/message-history?channel=pandora-squad", privateEnabledEnv(privateDb), {
     cookie: "dzn_session=other-token",
   });
   const deniedQueryCount = privateDb.queries.length - deniedQueryStart;
-  assert.equal(deniedPrivate.status, 404, "Private group reads must not reveal channel existence to non-members.");
+  assert.equal(deniedPrivate.status, 403, "Signed-in private group reads must preserve the endpoint authorization contract.");
 
   const unknownQueryStart = privateDb.queries.length;
   const unknownPrivate = await callMessageHistoryRoute(privateDb, "GET", "https://dzn.test/api/comms/message-history?channel=unknown-squad", privateEnabledEnv(privateDb), {
     cookie: "dzn_session=other-token",
   });
   const unknownQueryCount = privateDb.queries.length - unknownQueryStart;
+  assert.equal(unknownPrivate.status, 403, "Unknown and unauthorized private slugs must share the signed-in access-denied response.");
   assert.equal(deniedQueryCount, unknownQueryCount, "Unknown and unauthorized private slugs must perform equivalent database work.");
-  const unavailableBodies = await Promise.all([anonymousPrivate.clone().text(), deniedPrivate.clone().text(), unknownPrivate.clone().text()]);
-  assert.equal(new Set(unavailableBodies).size, 1, "Unknown, signed-out and non-member private requests must be indistinguishable.");
+  const unavailableBodies = await Promise.all([deniedPrivate.clone().text(), unknownPrivate.clone().text()]);
+  assert.equal(new Set(unavailableBodies).size, 1, "Unknown and non-member private requests must be indistinguishable within the signed-in authorization contract.");
   assert.deepEqual(
-    [anonymousPrivate, deniedPrivate, unknownPrivate].map((response) => response.headers.get("cache-control")),
-    Array(3).fill(anonymousPrivate.headers.get("cache-control")),
+    [deniedPrivate, unknownPrivate].map((response) => response.headers.get("cache-control")),
+    Array(2).fill(deniedPrivate.headers.get("cache-control")),
     "Unavailable private responses must use identical cache protection.",
   );
 
@@ -362,7 +363,7 @@ async function testRuntimeContracts() {
     privateEnabledEnv(revocationRaceDb),
     { cookie: "dzn_session=member-token" },
   );
-  assert.equal(revokedDuringRead.status, 404, "A membership revoked during the read must invalidate the complete private response.");
+  assert.equal(revokedDuringRead.status, 403, "A membership revoked during the read must invalidate the complete private response while preserving authorization semantics.");
   const revokedDuringReadText = await revokedDuringRead.text();
   assert.doesNotMatch(revokedDuringReadText, /Pandora Squad|pandora-squad|member|private-1/i, "A revoked in-flight response must not leak channel metadata, role or messages.");
 
@@ -377,7 +378,7 @@ async function testRuntimeContracts() {
     privateEnabledEnv(lateRevocationDb),
     { cookie: "dzn_session=member-token" },
   );
-  assert.equal(revokedAfterMessageRead.status, 404, "A revocation during later private-data reads must invalidate the complete response.");
+  assert.equal(revokedAfterMessageRead.status, 403, "A revocation during later private-data reads must invalidate the complete response while preserving authorization semantics.");
   assert.doesNotMatch(await revokedAfterMessageRead.text(), /Pandora Squad|pandora-squad|member|private-1/i);
 
   const supportRead = await callMessageHistoryRoute(privateDb, "GET", "https://dzn.test/api/comms/message-history?channel=support-case", enabledEnv(privateDb), {

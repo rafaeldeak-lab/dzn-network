@@ -181,11 +181,13 @@ export function DznCommsShell() {
       });
     };
     void refresh();
-    const poller = window.setInterval(() => void refresh(), 5_000);
+    const poller = liveUiEnabled || selectedChannel !== "global-chat"
+      ? window.setInterval(() => void refresh(), 5_000)
+      : undefined;
 
     return () => {
       controller.abort();
-      window.clearInterval(poller);
+      if (poller !== undefined) window.clearInterval(poller);
     };
   }, [selectedChannel]);
 

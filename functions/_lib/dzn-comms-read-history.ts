@@ -132,9 +132,10 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
   if (channelSlug === "global-chat") {
     channel = await readChannel(db, channelSlug);
   } else {
-    if (!user || !privateGroupFlags.enabled) return unavailableChannel();
+    if (!privateGroupFlags.enabled) return unavailableChannel();
+    if (!user) return authenticationRequired();
     const authorized = await readPrivateChannelForMember(db, channelSlug, user.id);
-    if (!authorized) return unavailableChannel();
+    if (!authorized) return accessDenied();
     channel = authorized.channel;
     membership = authorized.membership;
   }
@@ -164,7 +165,7 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
   const finalMembership = channel.visibility === "private_group"
     ? await readMembership(db, channel.id, user!.id)
     : membership;
-  if (channel.visibility === "private_group" && !finalMembership) return unavailableChannel();
+  if (channel.visibility === "private_group" && !finalMembership) return accessDenied();
 
   return json(
     {
@@ -214,6 +215,20 @@ function unavailableChannel() {
   return json(
     { ok: false, code: "CHANNEL_NOT_FOUND", message: "That DZN Comms channel is not available." },
     { status: 404, headers: privateNoStoreHeaders() },
+  );
+}
+
+function authenticationRequired() {
+  return json(
+    { ok: false, code: "AUTHENTICATION_REQUIRED", message: "Log in with Discord to open private DZN Comms channels." },
+    { status: 401, headers: privateNoStoreHeaders() },
+  );
+}
+
+function accessDenied() {
+  return json(
+    { ok: false, code: "PRIVATE_CHANNEL_ACCESS_DENIED", message: "You do not have access to that private DZN Comms channel." },
+    { status: 403, headers: privateNoStoreHeaders() },
   );
 }
 
