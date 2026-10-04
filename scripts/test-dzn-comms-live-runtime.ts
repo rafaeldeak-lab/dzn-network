@@ -49,6 +49,7 @@ async function fixture() {
 
   let failAt = -1;
   let beforeBatch: (() => void) | undefined;
+  let beforeReceiptRead: (() => void) | undefined;
   const prepare = (sql: string, bindings: unknown[] = []) => {
     const execute = () => {
       if (/^\s*SELECT/i.test(sql)) return { results: sqlite.prepare(sql).all(...bindings), success: true, meta: { changes: 0 } };
@@ -57,7 +58,14 @@ async function fixture() {
     };
     return {
       bind: (...values: unknown[]) => prepare(sql, values),
-      first: async <T>() => sqlite.prepare(sql).get(...bindings) as T | undefined ?? null,
+      first: async <T>() => {
+        if (/FROM dzn_comms_send_receipts AS receipts/i.test(sql)) {
+          const hook = beforeReceiptRead;
+          beforeReceiptRead = undefined;
+          hook?.();
+        }
+        return sqlite.prepare(sql).get(...bindings) as T | undefined ?? null;
+      },
       all: async () => execute(),
       run: async () => execute(),
       execute,
@@ -99,6 +107,7 @@ async function fixture() {
     env,
     failAt: (index: number) => { failAt = index; },
     beforeBatch: (hook: () => void) => { beforeBatch = hook; },
+    beforeReceiptRead: (hook: () => void) => { beforeReceiptRead = hook; },
     count: (table: string) => Number(sqlite.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count ?? 0),
     close: () => sqlite.close(),
   };
@@ -256,6 +265,33 @@ async function testPrivateGroupSendRuntime() {
     const replayAfterRemoval = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), f.env);
     assert.equal(replayAfterRemoval.status, 403, "Removing a member must block even an idempotent replay.");
   } finally { f.close(); }
+
+  const replayRace = await fixture();
+  try {
+    replayRace.sqlite.prepare(`INSERT INTO dzn_comms_channels
+      (id, slug, kind, name, visibility, is_readable)
+      VALUES ('private-replay-race', 'private-replay-race', 'private_group', 'Private Replay Race', 'private_group', 1)`).run();
+    replayRace.sqlite.prepare(`INSERT INTO dzn_comms_private_group_members
+      (channel_id, user_id, role, membership_state)
+      VALUES ('private-replay-race', 'player', 'member', 'active')`).run();
+    const input = {
+      channelSlug: "private-replay-race",
+      clientRequestId: "private-replay-race-request",
+      body: "Private replay must stay private",
+    };
+    const sent = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), replayRace.env);
+    assert.equal(sent.status, 201);
+    const originalMessageId = (await payload(sent)).message_id;
+
+    replayRace.beforeReceiptRead(() => replayRace.sqlite.prepare(`UPDATE dzn_comms_private_group_members
+      SET membership_state = 'removed', updated_at = CURRENT_TIMESTAMP
+      WHERE channel_id = 'private-replay-race' AND user_id = 'player'`).run());
+    const replay = await handleDznCommsSend(request("/api/comms/messages", "player-token", input), replayRace.env);
+    assert.equal(replay.status, 403, "A revocation racing the receipt read must not disclose a prior private message ID.");
+    assert.equal((await payload(replay)).message_id, undefined);
+    assert.equal(replayRace.count("dzn_comms_messages"), 1);
+    assert.equal(replayRace.sqlite.prepare("SELECT id FROM dzn_comms_messages").get()?.id, originalMessageId);
+  } finally { replayRace.close(); }
 
   const raced = await fixture();
   try {

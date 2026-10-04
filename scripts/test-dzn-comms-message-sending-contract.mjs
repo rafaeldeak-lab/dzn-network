@@ -64,6 +64,7 @@ test("send and report routes are session-bound, same-origin and bounded", () => 
   assert.match(runtime, /readDznCommsPrivateGroupFlags/);
   assert.match(runtime, /membership_state = 'active'/);
   assert.match(runtime, /PRIVATE_GROUP_ACCESS_REVOKED/);
+  assert.match(runtime, /FROM dzn_comms_send_receipts AS receipts[\s\S]*membership_state = 'active'/, "Private receipt replays must atomically require current exact-channel membership.");
   assert.match(runtime, /slug = 'global-chat' AND kind = 'public'/, "Only the established Global Chat may use the public send path.");
   assert.match(runtime, /: privateGroupUnavailable\(\)/, "Unknown private slugs must not reveal whether a private channel exists.");
   assert.match(runtime, /message\.kind === "private_group"[\s\S]*hasActivePrivateGroupMembership/, "Private reports must require current exact-channel membership.");
