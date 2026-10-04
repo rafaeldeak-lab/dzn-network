@@ -3,8 +3,8 @@
   "compared_main": "3f25cca7f9ba927853f9553c6635922e13ae9215",
   "ui_release": "ee43f3f1f445af92ffd423409441b42d9e7b257d",
   "original_count": 73,
-  "closed_superseded": 32,
-  "open_legacy": 41,
+  "closed_superseded": 33,
+  "open_legacy": 40,
   "notes": [
     "A disposition is not a claim of implementation or production activation.",
     "Closed requests have per-request GitHub comments and preserved branches. Open original branches remain unchanged.",
