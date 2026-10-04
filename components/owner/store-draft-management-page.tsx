@@ -7,6 +7,7 @@ import {
   Home,
   LoaderCircle,
   PackageOpen,
+  ClipboardCheck,
   RefreshCw,
   ShieldCheck,
   Store,
@@ -187,6 +188,7 @@ export function StoreDraftManagementPage() {
           <nav className="flex flex-wrap gap-2">
             <Link href="/owner" className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs font-black"><ArrowLeft size={14} />Command Centre</Link>
             <Link href="/" className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs font-black"><Home size={14} />Home</Link>
+            <Link href="/owner/store/reconciliation" className="inline-flex items-center gap-2 rounded-md border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-xs font-black text-amber-100"><ClipboardCheck size={14} />Review queue</Link>
             <button type="button" onClick={() => void load()} className="ml-auto inline-flex items-center gap-2 rounded-md border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-xs font-black text-cyan-100"><RefreshCw size={14} />Refresh</button>
           </nav>
           <div className="mt-5 flex flex-col justify-between gap-4 md:flex-row md:items-end">

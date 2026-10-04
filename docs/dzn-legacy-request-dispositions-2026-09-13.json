@@ -548,8 +548,8 @@
       "original_head": "fe1a668b5abacc6f9fd85dc06cb936fcf28116f3",
       "original_branch": "codex/dzn-store-fulfilment-reconciliation-preflight-20260829",
       "original_base": "codex/dzn-store-fulfilment-runtime-implementation-20260828",
-      "status": "design_reconcile",
-      "disposition": "Customer-scoped purchases are released, but platform-owner manual-review reconciliation still needs an audited current-main operator surface."
+      "status": "closed_superseded",
+      "disposition": "Superseded by the current-main Store manual-review queue, protected customer context and immutable non-financial operator audit release."
     },
     {
       "number": 110,
