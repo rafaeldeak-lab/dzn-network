@@ -1,6 +1,8 @@
 import { ensureMockUser, getSessionUser, requireDb } from "../../../../_lib/db";
+import { isDznPulseEnabled } from "../../../../_lib/feature-flags";
 import { json, methodNotAllowed, readJson } from "../../../../_lib/http";
 import { isMockAuth } from "../../../../_lib/mock";
+import { parsePlatformOwnerDiscordIds } from "../../../../_lib/platform-owner";
 import { validateReportReason } from "../../../../_lib/review-moderation";
 import { ensureServerReviewsSchema } from "../../../../_lib/server-reviews";
 import type { Env, PagesFunction, SessionUser } from "../../../../_lib/types";
@@ -21,14 +23,17 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   await ensureServerReviewsSchema(env);
   const db = requireDb(env);
   const review = await db
-    .prepare("SELECT id, moderation_version FROM server_reviews WHERE id = ? AND status = 'approved' LIMIT 1")
+    .prepare("SELECT id, linked_server_id, moderation_version FROM server_reviews WHERE id = ? AND status = 'approved' LIMIT 1")
     .bind(reviewId)
-    .first<{ id: string; moderation_version: number }>();
+    .first<{ id: string; linked_server_id: string; moderation_version: number }>();
   if (!review) return json({ error: "Review not found." }, { status: 404 });
 
   const body = await readJson<ReportBody>(request);
   const now = new Date().toISOString();
   const reportId = crypto.randomUUID();
+  const ownerNotificationStatements = await preparePlatformOwnerNotifications(
+    env, db, review.id, review.linked_server_id, review.moderation_version + 1, now,
+  );
   let results: Awaited<ReturnType<typeof db.batch>>;
   try {
     results = await db.batch([
@@ -48,6 +53,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
           WHERE id = ? AND status = 'approved' AND moderation_version = ?
             AND EXISTS (SELECT 1 FROM server_review_reports WHERE id = ? AND resolution_status IS NULL)`,
       ).bind(reviewId, reviewId, now, reviewId, review.moderation_version, reportId),
+      ...ownerNotificationStatements,
     ]);
   } catch {
     return json({ error: "You have already reported this review." }, { status: 409 });
@@ -63,6 +69,41 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
 
   return json({ ok: true, report_count: Number(nextReportCount?.count ?? 0) });
 };
+
+async function preparePlatformOwnerNotifications(
+  env: Env,
+  db: D1Database,
+  reviewId: string,
+  serverId: string,
+  moderationVersion: number,
+  now: string,
+): Promise<D1PreparedStatement[]> {
+  if (!isDznPulseEnabled(env)) return [];
+  const discordIds = parsePlatformOwnerDiscordIds(env.DZN_PLATFORM_OWNER_DISCORD_IDS);
+  if (discordIds.length === 0) return [];
+  const placeholders = discordIds.map(() => "?").join(", ");
+  const recipients = await db.prepare(
+    `SELECT id FROM users WHERE discord_id IN (${placeholders})`,
+  ).bind(...discordIds).all<{ id: string }>();
+  const expiresAt = new Date(new Date(now).getTime() + 30 * 24 * 60 * 60 * 1_000).toISOString();
+  return (recipients.results ?? []).map((recipient) => db.prepare(
+    `INSERT OR IGNORE INTO user_notifications (
+       id, user_id, server_id, type, title, body, action_url, priority,
+       dedupe_key, metadata, created_at, expires_at
+     )
+     SELECT ?, ?, ?, 'review_moderation_required', ?, ?, '/owner/reviews', 80, ?, ?, ?, ?
+      WHERE EXISTS (
+        SELECT 1 FROM server_reviews
+         WHERE id = ? AND status = 'pending' AND moderation_version = ?
+      )`,
+  ).bind(
+    crypto.randomUUID(), recipient.id, serverId, "Review needs moderation",
+    "A server review reached the report threshold and is waiting in the private moderation queue.",
+    `review-moderation:${reviewId}:${moderationVersion}`,
+    JSON.stringify({ review_id: reviewId, moderation_version: moderationVersion }),
+    now, expiresAt, reviewId, moderationVersion,
+  ));
+}
 
 async function resolveUser(env: Env, request: Request): Promise<SessionUser | null> {
   const user = await getSessionUser(env, request);

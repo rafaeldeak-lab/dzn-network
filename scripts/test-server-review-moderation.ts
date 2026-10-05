@@ -3,12 +3,17 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 import { hmacSha256 } from "../functions/_lib/crypto";
+import { countUnreadReviewNotifications } from "../functions/_lib/dzn-pulse";
 import {
   applyReviewModerationDecision,
   parseReviewModerationFilters,
   validateReviewModerationInput,
 } from "../functions/_lib/server-review-moderation";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
+import {
+  onRequestGet as getReviewNotificationState,
+  onRequestPost as markReviewNotificationStateRead,
+} from "../functions/api/owner/reviews/notifications/read";
 import { onRequest as reportReview } from "../functions/api/public/server-reviews/[reviewId]/report";
 import { onRequest as saveReview } from "../functions/api/servers/[serverId]/reviews";
 
@@ -143,6 +148,7 @@ assert.match(migration, /CHECK \(action IN \('approve', 'hide'\)\)/);
 
 const route = readFileSync("functions/api/owner/reviews/moderate.ts", "utf8");
 assert.match(route, /requirePlatformOwner/);
+assert.match(route, /countUnreadReviewNotifications/);
 assert.match(route, /readBoundedJson|readReviewModerationRequest/);
 assert.doesNotMatch(route, /getSessionUser/);
 
@@ -169,6 +175,16 @@ assert.match(reportRoute, /await db\.batch\(\[/);
 assert.match(reportRoute, /status = 'approved' AND moderation_version = \?/);
 assert.match(reportRoute, /moderation_version = moderation_version \+ 1/);
 assert.match(reportRoute, /resolution_status IS NULL/);
+assert.match(reportRoute, /review_moderation_required/);
+assert.match(reportRoute, /parsePlatformOwnerDiscordIds/);
+
+const notificationReadRoute = readFileSync("functions/api/owner/reviews/notifications/read.ts", "utf8");
+assert.match(notificationReadRoute, /requirePlatformOwner/);
+assert.match(notificationReadRoute, /markReviewNotificationsRead/);
+
+const pulseProvider = readFileSync("components/dzn-pulse/dzn-pulse-provider.tsx", "utf8");
+assert.match(pulseProvider, /key: "reviews", label: "Reviews"/);
+assert.match(pulseProvider, /review_moderation_required/);
 
 const editRoute = readFileSync(
   "functions/api/servers/[serverId]/reviews.ts",
@@ -208,6 +224,8 @@ async function runExecutableModerationTransactions() {
     "ALTER TABLE linked_servers ADD COLUMN merged_into_server_id TEXT",
   );
   sqlite.exec(readFileSync("migrations/0010_server_reviews.sql", "utf8"));
+  sqlite.exec("CREATE TABLE competitive_events (id TEXT PRIMARY KEY)");
+  sqlite.exec(readFileSync("migrations/0052_dzn_pulse.sql", "utf8"));
   sqlite.exec(migration);
 
   const prepare = (sql: string, bindings: unknown[] = []) => {
@@ -250,13 +268,20 @@ async function runExecutableModerationTransactions() {
     },
   };
   const sessionSecret = "review-moderation-session-secret";
-  const env = { DB: db, SESSION_SECRET: sessionSecret } as unknown as Env;
+  const env = {
+    DB: db,
+    SESSION_SECRET: sessionSecret,
+    DZN_PULSE_ENABLED: "true",
+    DZN_PLATFORM_OWNER_DISCORD_IDS: "111111111111111111",
+  } as unknown as Env;
   const old = "2026-01-01T00:00:00.000Z";
   sqlite.exec(`
   INSERT INTO users (id, discord_id, username, avatar) VALUES
-    ('owner-user', 'owner-discord', 'DZN Owner', NULL),
+    ('owner-user', '111111111111111111', 'DZN Owner', NULL),
     ('reviewer-user', 'reviewer-discord', 'Reviewer', NULL),
-    ('reporter-user', 'reporter-discord', 'Reporter', NULL);
+    ('reporter-user', 'reporter-discord', 'Reporter', NULL),
+    ('reporter-two', 'reporter-two-discord', 'Reporter Two', NULL),
+    ('reporter-three', 'reporter-three-discord', 'Reporter Three', NULL);
   INSERT INTO linked_servers (id, user_id, guild_id, discord_guild_id, server_name, server_type, status, public_slug)
     VALUES ('server-12345678', 'owner-user', 'guild-1', 'guild-row-1', 'Test Server', 'PVP', 'active', 'test-server');
   INSERT INTO server_reviews (
@@ -265,11 +290,17 @@ async function runExecutableModerationTransactions() {
   ) VALUES (
     'review-12345678', 'server-12345678', 'reviewer-discord', 'Reviewer', 4,
     'Original title', 'Original review body', 'approved', 0, 0, '${old}', '${old}', NULL
+  ), (
+    'review-threshold-1234', 'server-12345678', 'threshold-reviewer-discord', 'Threshold Reviewer', 3,
+    'Threshold title', 'Review that will reach the moderation threshold.', 'approved', 0, 0, '${old}', '${old}', NULL
   );
 `);
   for (const [id, token] of [
+    ["owner-user", "owner-token"],
     ["reviewer-user", "reviewer-token"],
     ["reporter-user", "reporter-token"],
+    ["reporter-two", "reporter-two-token"],
+    ["reporter-three", "reporter-three-token"],
   ]) {
     sqlite
       .prepare(
@@ -328,12 +359,70 @@ async function runExecutableModerationTransactions() {
     },
   );
 
+  const thresholdReports = [
+    ["reporter-token", "Threshold report one"],
+    ["reporter-two-token", "Threshold report two"],
+    ["reporter-three-token", "Threshold report three"],
+  ] as const;
+  for (const [index, [token, reason]] of thresholdReports.entries()) {
+    const response = await reportReview(context(authenticatedPost(
+      "/api/public/server-reviews/review-threshold-1234/report",
+      token,
+      { reason },
+    ), { reviewId: "review-threshold-1234" }));
+    assert.equal(response.status, 200);
+    assert.equal(
+      Number(sqlite.prepare("SELECT COUNT(*) AS count FROM user_notifications WHERE type = 'review_moderation_required'").get()?.count ?? 0),
+      index === thresholdReports.length - 1 ? 1 : 0,
+      "The owner alert must be created exactly when the third open report moves the review to pending.",
+    );
+  }
+  assert.deepEqual({ ...sqlite.prepare(
+    "SELECT status, report_count, moderation_version FROM server_reviews WHERE id = ?",
+  ).get("review-threshold-1234") }, { status: "pending", report_count: 3, moderation_version: 3 });
   const owner: SessionUser = {
     id: "owner-user",
-    discord_id: "owner-discord",
+    discord_id: "111111111111111111",
     username: "DZN Owner",
     avatar: null,
   };
+  const reviewAlertRows = sqlite.prepare("SELECT id, user_id, type, action_url FROM user_notifications ORDER BY id").all();
+  assert.deepEqual(reviewAlertRows.map(({ user_id, type, action_url }) => ({ user_id, type, action_url })), [{
+    user_id: "owner-user",
+    type: "review_moderation_required",
+    action_url: "/owner/reviews",
+  }]);
+  assert.equal(await countUnreadReviewNotifications(env, owner), 1, `The threshold transition must create one private owner alert. Rows: ${JSON.stringify(reviewAlertRows)}`);
+  sqlite.prepare(`INSERT INTO user_notifications
+    (id, user_id, type, title, body, priority, dedupe_key, created_at)
+    VALUES ('general-owner-alert', 'owner-user', 'dzn_announcement', 'General', 'Keep unread', 1, 'general-owner-alert', ?)`)
+    .run(new Date().toISOString());
+  const anonymousReadState = await getReviewNotificationState(context(
+    new Request("https://dzn.test/api/owner/reviews/notifications/read"),
+    {},
+  ));
+  assert.equal(anonymousReadState.status, 401);
+  const nonOwnerReadState = await getReviewNotificationState(context(
+    new Request("https://dzn.test/api/owner/reviews/notifications/read", { headers: { cookie: "dzn_session=reporter-token" } }),
+    {},
+  ));
+  assert.equal(nonOwnerReadState.status, 403);
+  const ownerReadState = await getReviewNotificationState(context(
+    new Request("https://dzn.test/api/owner/reviews/notifications/read", { headers: { cookie: "dzn_session=owner-token" } }),
+    {},
+  ));
+  assert.equal(ownerReadState.status, 200);
+  assert.equal((await ownerReadState.json() as { reviewUnreadCount: number }).reviewUnreadCount, 1);
+  const markedResponse = await markReviewNotificationStateRead(context(
+    new Request("https://dzn.test/api/owner/reviews/notifications/read", { method: "POST", headers: { cookie: "dzn_session=owner-token" } }),
+    {},
+  ));
+  assert.equal(markedResponse.status, 200);
+  const marked = await markedResponse.json() as { marked: number; reviewUnreadCount: number };
+  assert.equal(marked.marked, 1);
+  assert.equal(marked.reviewUnreadCount, 0);
+  assert.equal(sqlite.prepare("SELECT read_at FROM user_notifications WHERE id = 'general-owner-alert'").get()?.read_at, null, "Review read state must not clear general notifications.");
+
   const moderation = await applyReviewModerationDecision(env, owner, {
     reviewId: "review-12345678",
     moderationVersion: 1,

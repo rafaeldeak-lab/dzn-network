@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, CheckCircle2, EyeOff, Filter, Home, RefreshCw, Search, ShieldCheck, Star, XCircle } from "lucide-react";
+import { ArrowLeft, Bell, CheckCircle2, EyeOff, Filter, Home, RefreshCw, Search, ShieldCheck, Star, XCircle } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -34,7 +34,7 @@ type AuditItem = {
   server_name: string | null;
   reviewer_name: string | null;
 };
-type QueuePayload = { ok?: boolean; reviews?: ReviewItem[]; audit?: AuditItem[]; message?: string };
+type QueuePayload = { ok?: boolean; reviews?: ReviewItem[]; audit?: AuditItem[]; reviewUnreadCount?: number; message?: string };
 
 export function ServerReviewModerationPage() {
   const [status, setStatus] = useState<ReviewStatus>("pending");
@@ -46,6 +46,8 @@ export function ServerReviewModerationPage() {
   const [reason, setReason] = useState("");
   const [state, setState] = useState<"loading" | "ready" | "blocked" | "error">("loading");
   const [busy, setBusy] = useState<"approve" | "hide" | null>(null);
+  const [reviewAlertsBusy, setReviewAlertsBusy] = useState(false);
+  const [reviewUnreadCount, setReviewUnreadCount] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const loadSequence = useRef(0);
   const statusRef = useRef(status);
@@ -66,6 +68,7 @@ export function ServerReviewModerationPage() {
       const nextReviews = payload.reviews ?? [];
       setReviews(nextReviews);
       setAudit(payload.audit ?? []);
+      setReviewUnreadCount(Math.max(0, Number(payload.reviewUnreadCount ?? 0) || 0));
       setSelectedId((current) => nextReviews.some((review) => review.id === current) ? current : nextReviews[0]?.id ?? null);
       setState("ready");
     } catch (error) {
@@ -97,6 +100,21 @@ export function ServerReviewModerationPage() {
     } finally { setBusy(null); }
   }
 
+  async function markReviewAlertsRead() {
+    if (reviewAlertsBusy || reviewUnreadCount === 0) return;
+    setReviewAlertsBusy(true); setNotice(null);
+    try {
+      const response = await fetch("/api/owner/reviews/notifications/read", { method: "POST", credentials: "include" });
+      const payload = await response.json().catch(() => null) as { ok?: boolean; marked?: number; reviewUnreadCount?: number; message?: string } | null;
+      if (!response.ok || !payload?.ok) throw new Error(payload?.message ?? "Review alerts could not be marked read.");
+      const marked = Math.max(0, Number(payload.marked ?? 0) || 0);
+      setReviewUnreadCount(Math.max(0, Number(payload.reviewUnreadCount ?? 0) || 0));
+      setNotice(marked === 1 ? "One review alert marked read." : `${marked} review alerts marked read.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Review alerts could not be marked read.");
+    } finally { setReviewAlertsBusy(false); }
+  }
+
   return (
     <main className="min-h-screen bg-[#02050b] px-3 py-4 text-zinc-100 sm:px-5 lg:px-8">
       <div className="mx-auto max-w-[1540px]">
@@ -108,7 +126,13 @@ export function ServerReviewModerationPage() {
           </nav>
           <div className="mt-5 flex flex-col justify-between gap-4 md:flex-row md:items-end">
             <div><p className="text-[11px] font-black uppercase tracking-[0.22em] text-cyan-200">Private platform-owner workspace</p><h1 className="mt-2 text-3xl font-black sm:text-4xl">Review moderation</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">Resolve reported server reviews without changing rankings, gameplay statistics, billing, or competitive results.</p></div>
-            <div className="rounded-md border border-amber-300/20 bg-amber-300/[0.06] p-3"><p className="text-[10px] font-black uppercase text-amber-200">Showing</p><p className="mt-1 text-2xl font-black">{reviews.length}</p></div>
+            <div className="flex flex-wrap gap-2">
+              <div className="rounded-md border border-amber-300/20 bg-amber-300/[0.06] p-3"><p className="text-[10px] font-black uppercase text-amber-200">Showing</p><p className="mt-1 text-2xl font-black">{reviews.length}</p></div>
+              <button type="button" disabled={reviewAlertsBusy || reviewUnreadCount === 0} onClick={() => void markReviewAlertsRead()} className="inline-flex min-h-14 items-center gap-3 rounded-md border border-rose-300/25 bg-rose-300/[0.08] px-4 text-left disabled:cursor-not-allowed disabled:opacity-45">
+                <Bell size={18} className="text-rose-200" aria-hidden="true" />
+                <span><span className="block text-[10px] font-black uppercase text-rose-200">Review alerts</span><span className="mt-1 block text-sm font-black">{reviewAlertsBusy ? "Clearing..." : `${reviewUnreadCount} unread`}</span></span>
+              </button>
+            </div>
           </div>
         </header>
 

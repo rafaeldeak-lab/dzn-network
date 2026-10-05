@@ -11,6 +11,7 @@ import {
   Clock,
   Crown,
   CreditCard,
+  MessageSquareReply,
   Radio,
   Sparkles,
   Trophy,
@@ -44,7 +45,7 @@ type PulseConfig = {
   discordNotificationsEnabled: boolean;
 };
 
-export type PulseFilter = "all" | "events" | "scores" | "achievements" | "news" | "billing";
+export type PulseFilter = "all" | "events" | "scores" | "achievements" | "reviews" | "news" | "billing";
 
 export type PulseNotification = {
   id: string;
@@ -542,6 +543,7 @@ function NotificationTabs() {
     { key: "events", label: "Events" },
     { key: "scores", label: "Scores" },
     { key: "achievements", label: "Achievements" },
+    { key: "reviews", label: "Reviews" },
     { key: "news", label: "News" },
     { key: "billing", label: "Billing" },
   ];
@@ -882,6 +884,7 @@ function NotificationErrorState({ message, onRetry }: { message: string; onRetry
 }
 
 function NotificationIcon({ type, className }: { type: string; className: string }) {
+  if (type === "review_moderation_required") return <MessageSquareReply className={className} />;
   if (type === "billing_payment_setup" || type === "billing_trial_ending") return <CreditCard className={className} />;
   if (type.includes("achievement") || type.includes("prize")) return <Trophy className={className} />;
   if (type.includes("rank") || type.includes("score")) return <Crown className={className} />;
@@ -1009,6 +1012,7 @@ function rememberAccountDecisionPopup(id: string) {
 
 function toneForNotification(category: PulseFilter) {
   if (category === "billing") return tone("border-emerald-300/24", "bg-emerald-400/8", "border-emerald-300/28", "bg-emerald-400/12", "text-emerald-100", "text-emerald-200");
+  if (category === "reviews") return tone("border-rose-300/30", "bg-rose-400/10", "border-rose-300/32", "bg-rose-400/14", "text-rose-100", "text-rose-200");
   if (category === "scores") return tone("border-cyan-300/24", "bg-cyan-400/8", "border-cyan-300/28", "bg-cyan-400/12", "text-cyan-100", "text-cyan-200");
   if (category === "achievements") return tone("border-amber-300/28", "bg-amber-400/8", "border-amber-300/30", "bg-amber-400/12", "text-amber-100", "text-amber-200");
   if (category === "news") return tone("border-blue-300/24", "bg-blue-400/8", "border-blue-300/28", "bg-blue-400/12", "text-blue-100", "text-blue-200");
