@@ -225,7 +225,40 @@ export async function createCommunityMemberCandidate(
         LIMIT 1`,
     ).bind(linkedServerId, linkedServerId, discordId, ...writeAccess).first<{ id: string; member_exists: number; latest_status: CandidateRow["status"] | null }>();
     if (currentMatch?.member_exists) {
-      return { ok: true as const, status: 200, candidate_status: "duplicate" as const, message: "That DZN account is already in this server directory." };
+      await db.batch([
+        db.prepare(
+          `INSERT INTO server_community_member_candidates (
+             id, linked_server_id, candidate_discord_id, candidate_username, role_label,
+             status, matched_user_id, reason, created_by_user_id, created_at, updated_at
+           ) SELECT ?, ?, NULL, ?, ?, 'duplicate', users.id, ?,
+                    (SELECT id FROM users WHERE id = ? AND discord_id = ?), ?, ?
+               FROM users
+              WHERE users.discord_id = ?
+                AND EXISTS (
+                  SELECT 1 FROM server_community_members
+                   WHERE linked_server_id = ? AND user_id = users.id
+                )
+                AND ${CURRENT_WRITE_ACCESS}`,
+        ).bind(candidateId, linkedServerId, candidateUsername, roleLabel, duplicateReason, actor.id, actor.discord_id, now, now, discordId, linkedServerId, ...writeAccess),
+        db.prepare(
+          `INSERT INTO server_community_member_source_audit (
+             id, linked_server_id, candidate_id, member_user_id, actor_user_id,
+             action, result_status, reason, created_at
+           ) SELECT ?, linked_server_id, id, matched_user_id,
+                    (SELECT id FROM users WHERE id = ? AND discord_id = ?),
+                    'candidate_duplicate', 'skipped', reason, ?
+               FROM server_community_member_candidates
+              WHERE id = ? AND linked_server_id = ? AND status = 'duplicate'`,
+        ).bind(crypto.randomUUID(), actor.id, actor.discord_id, now, candidateId, linkedServerId),
+      ]);
+      const recoveredDuplicate = await db.prepare(
+        `SELECT status FROM server_community_member_candidates
+          WHERE id = ? AND linked_server_id = ? AND ${CURRENT_WRITE_ACCESS}
+          LIMIT 1`,
+      ).bind(candidateId, linkedServerId, ...writeAccess).first<{ status: string }>();
+      return recoveredDuplicate?.status === "duplicate"
+        ? { ok: true as const, status: 200, candidate_status: "duplicate" as const, message: "That DZN account is already in this server directory." }
+        : { ok: false as const, status: 409, error: "SOURCE_STATE_CHANGED", message: "The account source state changed while it was being queued. Refresh and try again." };
     }
     if (currentMatch?.latest_status) {
       return {

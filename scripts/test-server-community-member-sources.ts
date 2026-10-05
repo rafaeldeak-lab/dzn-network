@@ -152,6 +152,8 @@ async function main() {
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-twenty-four", "10000000000000024", "Player Twenty Four");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-twenty-five", "10000000000000025", "Player Twenty Five");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-twenty-six", "10000000000000026", "Player Twenty Six");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-twenty-seven", "10000000000000027", "Player Twenty Seven");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-twenty-eight", "10000000000000028", "Player Twenty Eight");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server", "owner");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server-race", "owner");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server-admin-race", "player-eleven");
@@ -524,6 +526,19 @@ async function main() {
   const reassignedMemberDecision = seed("SELECT status, matched_user_id FROM server_community_member_candidates WHERE id = ?").get(reassignedMemberCandidate?.id);
   assert.equal(reassignedMemberDecision?.status, "duplicate");
   assert.equal(reassignedMemberDecision?.matched_user_id, "player-twenty-six");
+
+  seed(`INSERT INTO server_community_members
+        (id, linked_server_id, user_id, role_label, public_member_enabled, member_approved_at, source, created_by_user_id, created_at, updated_at)
+        VALUES ('create-race-current-member', 'server', 'player-twenty-eight', 'Existing', 0, NULL, 'owner_public_handle', 'owner', '2026-10-05T00:00:00.000Z', '2026-10-05T00:00:00.000Z')`).run();
+  db.beforeNextBatch = () => {
+    seed("UPDATE users SET discord_id = '10000000000000927' WHERE id = 'player-twenty-seven'").run();
+    seed("UPDATE users SET discord_id = '10000000000000027' WHERE id = 'player-twenty-eight'").run();
+  };
+  const duplicateDuringCreate = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000027", username: "Player Twenty Seven", roleLabel: "Member" });
+  assert.equal(duplicateDuringCreate.candidate_status, "duplicate");
+  const recoveredCreateDuplicate = seed("SELECT id, candidate_discord_id, matched_user_id FROM server_community_member_candidates WHERE linked_server_id = 'server' AND matched_user_id = 'player-twenty-eight' AND status = 'duplicate' ORDER BY rowid DESC LIMIT 1").get();
+  assert.equal(recoveredCreateDuplicate?.candidate_discord_id, null);
+  assert.equal(seed("SELECT member_user_id FROM server_community_member_source_audit WHERE candidate_id = ? AND action = 'candidate_duplicate'").get(recoveredCreateDuplicate?.id)?.member_user_id, "player-twenty-eight", "A duplicate discovered during creation must remain in the immutable audit history.");
 
   db.beforeNextBatch = () => {
     seed("UPDATE linked_servers SET user_id = 'player-eleven' WHERE id = 'server-race'").run();
