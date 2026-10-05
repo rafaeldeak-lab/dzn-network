@@ -94,8 +94,9 @@ async function main() {
   assert.match(helper, /SET status = 'rejected'[\s\S]*matched_user_id = \([\s\S]*WHERE discord_id = server_community_member_candidates\.candidate_discord_id/, "Rejection must resolve the Discord owner at write time before writing its audit.");
   assert.match(helper, /SET status = 'duplicate'[\s\S]*matched_user_id = \(SELECT id FROM users WHERE discord_id = server_community_member_candidates\.candidate_discord_id\)/, "Duplicate reconciliation must persist the current Discord owner.");
   assert.match(helper, /server_community_members[\s\S]*user_id = \(SELECT id FROM users WHERE discord_id = server_community_member_candidates\.candidate_discord_id\)/, "Duplicate reconciliation must verify that the current Discord owner is the existing member.");
+  assert.match(helper, /CURRENT_WRITE_ACCESS[\s\S]*access_server\.user_id = \?/, "Candidate mutations must recheck current server ownership in their write predicates.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
-  assert.match(deletion, /candidate_discord_id = NULL/, "Account deletion must erase retained source identifiers.");
+  assert.match(deletion, /candidate_discord_id = CASE[\s\S]*THEN NULL/, "Account deletion must erase retained source identifiers owned by the deleting account.");
   assert.match(deletion, /candidate_discord_id = \(SELECT discord_id FROM users WHERE id = \?\)/, "Account deletion must scrub sources currently owned by the deleting Discord account.");
   assert.match(deletion, /matched_user_id = CASE WHEN matched_user_id = \? THEN NULL ELSE matched_user_id END/, "Source erasure must preserve a different account's decided identity.");
   assert.match(deletion, /created_by_user_id = CASE[\s\S]*reviewed_by_user_id = CASE/, "Retained Store accounts must be unlinked from candidate creator and reviewer fields.");
@@ -106,7 +107,7 @@ async function main() {
   db.sqlite.exec(`
     PRAGMA foreign_keys = ON;
     CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT NOT NULL UNIQUE, username TEXT, avatar TEXT);
-    CREATE TABLE linked_servers (id TEXT PRIMARY KEY, user_id TEXT NOT NULL);
+    CREATE TABLE linked_servers (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', merged_into_server_id TEXT);
     CREATE TABLE player_public_profiles (user_id TEXT PRIMARY KEY, handle TEXT NOT NULL UNIQUE, status TEXT NOT NULL);
     CREATE TABLE player_profile_privacy_preferences (user_id TEXT PRIMARY KEY, public_profile_enabled INTEGER NOT NULL, show_display_name INTEGER NOT NULL);
     CREATE TABLE server_community_members (
@@ -144,6 +145,7 @@ async function main() {
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-nineteen", "10000000000000019", "Player Nineteen");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-twenty", "10000000000000020", "Player Twenty");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server", "owner");
+  seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server-race", "owner");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player", "player-one");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-two", "player-two");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-three", "player-three");
@@ -423,6 +425,17 @@ async function main() {
   assert.match(duplicateReassignedDuringWrite.message, /already decided as pending/i);
   assert.equal(seed("SELECT status FROM server_community_member_candidates WHERE id = ?").get(nineteenthCandidate.id)?.status, "pending", "A reassignment to a non-member must not finalize a false duplicate.");
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_source_audit WHERE candidate_id = ? AND action = 'candidate_duplicate'").get(nineteenthCandidate.id)?.count, 0);
+  assert.equal(await eraseOrRetainAccountUser(db as unknown as D1Database, "player-nineteen"), 1);
+  const formerOwnerDeleted = seed("SELECT candidate_discord_id, matched_user_id FROM server_community_member_candidates WHERE id = ?").get(nineteenthCandidate.id);
+  assert.equal(formerOwnerDeleted?.candidate_discord_id, "10000000000000019", "Deleting the former match must preserve a source now owned by another account.");
+  assert.equal(formerOwnerDeleted?.matched_user_id, null, "Deleting the former match must clear only its stale matched identity.");
+
+  db.beforeNextBatch = () => {
+    seed("UPDATE linked_servers SET user_id = 'player-eleven' WHERE id = 'server-race'").run();
+  };
+  const ownershipChanged = await createCommunityMemberCandidate(env, owner, "server-race", { discordId: "10000000000000011", username: "Player Ten", roleLabel: "Member" });
+  assert.equal(ownershipChanged.status, 409, "A stale owner request must lose write access after ownership changes.");
+  assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_candidates WHERE linked_server_id = 'server-race'").get()?.count, 0, "An ownership race must not create a candidate.");
 
   db.beforeNextBatch = () => {
     seed("UPDATE users SET discord_id = 'deleted-owner' WHERE id = 'owner'").run();

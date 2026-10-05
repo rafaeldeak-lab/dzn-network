@@ -232,13 +232,24 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
 
   if (await tableExists(db, "server_community_member_candidates")) {
     statements.push(db.prepare(`UPDATE server_community_member_candidates
-      SET candidate_discord_id = NULL,
-          candidate_username = NULL,
+      SET candidate_discord_id = CASE
+            WHEN candidate_discord_id = (SELECT discord_id FROM users WHERE id = ?) THEN NULL
+            ELSE candidate_discord_id
+          END,
+          candidate_username = CASE
+            WHEN candidate_discord_id = (SELECT discord_id FROM users WHERE id = ?) THEN NULL
+            ELSE candidate_username
+          END,
           matched_user_id = CASE WHEN matched_user_id = ? THEN NULL ELSE matched_user_id END,
-          reason = CASE WHEN matched_user_id = ? THEN 'Player account deleted' ELSE reason END,
+          reason = CASE
+            WHEN matched_user_id = ?
+             AND candidate_discord_id = (SELECT discord_id FROM users WHERE id = ?)
+            THEN 'Player account deleted'
+            ELSE reason
+          END,
           updated_at = CURRENT_TIMESTAMP
       WHERE matched_user_id = ?
-         OR candidate_discord_id = (SELECT discord_id FROM users WHERE id = ?)`).bind(userId, userId, userId, userId));
+         OR candidate_discord_id = (SELECT discord_id FROM users WHERE id = ?)`).bind(userId, userId, userId, userId, userId, userId, userId));
     statements.push(db.prepare(`UPDATE server_community_member_candidates
       SET created_by_user_id = CASE WHEN created_by_user_id = ? THEN NULL ELSE created_by_user_id END,
           reviewed_by_user_id = CASE WHEN reviewed_by_user_id = ? THEN NULL ELSE reviewed_by_user_id END,
