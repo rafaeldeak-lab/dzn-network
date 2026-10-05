@@ -443,6 +443,8 @@ async function main() {
   const newOwner: SessionUser = { id: "player-eleven", discord_id: "10000000000000012", username: "Player Eleven", avatar: null };
   const currentOwnerCreate = await createCommunityMemberCandidate(env, newOwner, "server-race", { discordId: "10000000000000011", username: "Player Ten", roleLabel: "Member" });
   assert.equal(currentOwnerCreate.status, 201);
+  const staleOwnerRepeat = await createCommunityMemberCandidate(env, owner, "server-race", { discordId: "10000000000000011", username: "Player Ten", roleLabel: "Member" });
+  assert.equal(staleOwnerRepeat.status, 409, "A stale former owner must not learn that a private candidate is already pending.");
   assert.equal((await listCommunityMemberSourceQueue(env, owner, "server-race")).candidates.length, 0, "A stale former owner must not read the transferred server's private queue.");
   assert.equal((await listCommunityMemberSourceQueue(env, newOwner, "server-race")).candidates.length, 1);
 

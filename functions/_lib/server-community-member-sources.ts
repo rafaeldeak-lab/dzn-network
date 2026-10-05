@@ -121,8 +121,9 @@ export async function createCommunityMemberCandidate(
     const pending = await db.prepare(
       `SELECT id FROM server_community_member_candidates
        WHERE linked_server_id = ? AND candidate_discord_id = ? AND status = 'pending'
+         AND ${CURRENT_WRITE_ACCESS}
        LIMIT 1`,
-    ).bind(linkedServerId, discordId).first<{ id: string }>();
+    ).bind(linkedServerId, discordId, ...writeAccess).first<{ id: string }>();
     if (pending) {
       return { ok: true as const, status: 200, candidate_status: "pending" as const, message: "That DZN account is already awaiting an owner decision." };
     }
@@ -195,8 +196,9 @@ export async function createCommunityMemberCandidate(
       ? await db.prepare(
           `SELECT id FROM server_community_member_candidates
            WHERE linked_server_id = ? AND candidate_discord_id = ? AND status = 'pending'
+             AND ${CURRENT_WRITE_ACCESS}
            LIMIT 1`,
-        ).bind(linkedServerId, discordId).first<{ id: string }>()
+        ).bind(linkedServerId, discordId, ...writeAccess).first<{ id: string }>()
       : null;
     if (concurrentPending) {
       return { ok: true as const, status: 200, candidate_status: "pending" as const, message: "That DZN account is already awaiting an owner decision." };
@@ -216,8 +218,9 @@ export async function createCommunityMemberCandidate(
               ) AS latest_status
          FROM users
         WHERE users.discord_id = ?
+          AND ${CURRENT_WRITE_ACCESS}
         LIMIT 1`,
-    ).bind(linkedServerId, linkedServerId, discordId).first<{ id: string; member_exists: number; latest_status: CandidateRow["status"] | null }>();
+    ).bind(linkedServerId, linkedServerId, discordId, ...writeAccess).first<{ id: string; member_exists: number; latest_status: CandidateRow["status"] | null }>();
     if (currentMatch?.member_exists) {
       return { ok: true as const, status: 200, candidate_status: "duplicate" as const, message: "That DZN account is already in this server directory." };
     }
