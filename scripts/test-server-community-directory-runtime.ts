@@ -5,6 +5,7 @@ import { createSession, SESSION_COOKIE } from "../functions/_lib/db";
 import type { Env, PagesFunction } from "../functions/_lib/types";
 import { onRequest as playerDirectory } from "../functions/api/player/community-directory";
 import { onRequest as publicDirectory } from "../functions/api/public/servers/[slug]/community-members";
+import { onRequest as candidateDirectory } from "../functions/api/servers/[serverId]/community-member-candidates";
 import { onRequest as ownerDirectory } from "../functions/api/servers/[serverId]/community-members";
 
 type SqliteStatement = {
@@ -113,6 +114,7 @@ db.sqlite.exec(`
     enabled INTEGER NOT NULL
   );
   ${require("node:fs").readFileSync("migrations/0080_server_community_directory.sql", "utf8")}
+  ${require("node:fs").readFileSync("migrations/0090_server_community_member_sources.sql", "utf8")}
 `);
 
 const seed = db.sqlite.prepare.bind(db.sqlite);
@@ -135,6 +137,76 @@ const env = { DB: db as unknown as D1Database, SESSION_SECRET: "community-runtim
 const ownerSession = await createSession(env, "owner");
 const otherSession = await createSession(env, "other-owner");
 const playerSession = await createSession(env, "player");
+
+const unsupportedCandidates = await invoke(candidateDirectory, new Request("https://dzn.test/api/servers/server/community-member-candidates", {
+  method: "DELETE",
+}), env, { serverId: "server" });
+assert.equal(unsupportedCandidates.status, 405, "The private candidate endpoint must reject unsupported methods.");
+
+const anonymousCandidates = await invoke(candidateDirectory, new Request("https://dzn.test/api/servers/server/community-member-candidates"), env, { serverId: "server" });
+assert.equal(anonymousCandidates.status, 401, "The private candidate queue must require authentication.");
+assert.match(anonymousCandidates.headers.get("cache-control") ?? "", /private.*no-store/, "Private candidate responses must never be cached.");
+
+const forbiddenCandidates = await invoke(candidateDirectory, new Request("https://dzn.test/api/servers/server/community-member-candidates", {
+  headers: cookie(otherSession.token),
+}), env, { serverId: "server" });
+assert.equal(forbiddenCandidates.status, 403, "Another server owner must not read the private candidate queue.");
+
+const missingServerCandidates = await invoke(candidateDirectory, new Request("https://dzn.test/api/servers/missing/community-member-candidates", {
+  headers: cookie(ownerSession.token),
+}), env, { serverId: "missing" });
+assert.equal(missingServerCandidates.status, 404, "Unknown servers must not expose a candidate queue.");
+
+const crossOriginCandidate = await invoke(candidateDirectory, new Request("https://dzn.test/api/servers/server/community-member-candidates", {
+  method: "POST",
+  headers: { ...cookie(ownerSession.token), "content-type": "application/json", origin: "https://attacker.test" },
+  body: JSON.stringify({ discord_id: "100000000000000003", username: "Private Name" }),
+}), env, { serverId: "server" });
+assert.equal(crossOriginCandidate.status, 403, "Candidate writes must require the website's exact origin.");
+
+const oversizedCandidate = await invoke(candidateDirectory, new Request("https://dzn.test/api/servers/server/community-member-candidates", {
+  method: "POST",
+  headers: { ...cookie(ownerSession.token), "content-type": "application/json", origin: "https://dzn.test" },
+  body: JSON.stringify({ discord_id: "100000000000000003", username: "x".repeat(5000) }),
+}), env, { serverId: "server" });
+assert.equal(oversizedCandidate.status, 413, "Candidate request bodies must remain bounded.");
+
+const invalidCandidate = await invoke(candidateDirectory, new Request("https://dzn.test/api/servers/server/community-member-candidates", {
+  method: "POST",
+  headers: { ...cookie(ownerSession.token), "content-type": "application/json", origin: "https://dzn.test" },
+  body: JSON.stringify({ discord_id: "not-a-discord-id", username: "Private Name" }),
+}), env, { serverId: "server" });
+assert.equal(invalidCandidate.status, 400, "Helper validation status must propagate through the candidate endpoint.");
+
+const nullCandidate = await invoke(candidateDirectory, new Request("https://dzn.test/api/servers/server/community-member-candidates", {
+  method: "POST",
+  headers: { ...cookie(ownerSession.token), "content-type": "application/json", origin: "https://dzn.test" },
+  body: "null",
+}), env, { serverId: "server" });
+assert.equal(nullCandidate.status, 400, "JSON primitives must be rejected as invalid request bodies rather than reported as unavailable infrastructure.");
+
+const createCandidateResponse = await invoke(candidateDirectory, new Request("https://dzn.test/api/servers/server/community-member-candidates", {
+  method: "POST",
+  headers: { ...cookie(ownerSession.token), "content-type": "application/json", origin: "https://dzn.test" },
+  body: JSON.stringify({ discord_id: "100000000000000003", username: "Private Name", role_label: "Member" }),
+}), env, { serverId: "server" });
+assert.equal(createCandidateResponse.status, 201, "The current server owner must be able to queue an exact Discord account match.");
+
+const candidateQueueResponse = await invoke(candidateDirectory, new Request("https://dzn.test/api/servers/server/community-member-candidates", {
+  headers: cookie(ownerSession.token),
+}), env, { serverId: "server" });
+assert.equal(candidateQueueResponse.status, 200);
+const candidateQueue = await candidateQueueResponse.json() as { candidates: Array<{ id: string; status: string }> };
+assert.equal(candidateQueue.candidates.length, 1);
+assert.equal(candidateQueue.candidates[0].status, "pending");
+
+const rejectCandidateResponse = await invoke(candidateDirectory, new Request("https://dzn.test/api/servers/server/community-member-candidates", {
+  method: "PATCH",
+  headers: { ...cookie(ownerSession.token), "content-type": "application/json", origin: "https://dzn.test" },
+  body: JSON.stringify({ id: candidateQueue.candidates[0].id, action: "reject", reason: "Runtime route proof" }),
+}), env, { serverId: "server" });
+assert.equal(rejectCandidateResponse.status, 200, "Decision helper status must propagate through the candidate endpoint.");
+assert.equal(db.sqlite.prepare("SELECT status FROM server_community_member_candidates WHERE id = ?").get(candidateQueue.candidates[0].id)?.status, "rejected");
 
 const anonymousPlayer = await invoke(playerDirectory, new Request("https://dzn.test/api/player/community-directory"), env);
 assert.equal(anonymousPlayer.status, 401, "Player directory reads must require authentication.");
@@ -205,6 +277,12 @@ assert.equal(invitationsAfter.invitations[0].member_approved_at, null, "The revo
 db.sqlite.prepare("UPDATE linked_servers SET lifecycle_status = 'archived_hidden' WHERE id = 'server'").run();
 const archivedResponse = await invoke(publicDirectory, new Request("https://dzn.test/api/public/servers/test-server/community-members"), env, { slug: "test-server" });
 assert.equal(archivedResponse.status, 404, "An archived server directory must not remain accessible through its direct public URL.");
+
+db.sqlite.exec("DROP TABLE server_community_member_source_audit; DROP TABLE server_community_member_candidates;");
+const unavailableCandidates = await invoke(candidateDirectory, new Request("https://dzn.test/api/servers/server/community-member-candidates", {
+  headers: cookie(ownerSession.token),
+}), env, { serverId: "server" });
+assert.equal(unavailableCandidates.status, 503, "An unavailable candidate schema must fail closed with the sanitized endpoint response.");
 
 db.sqlite.close();
 console.log("Server community directory runtime checks passed.");

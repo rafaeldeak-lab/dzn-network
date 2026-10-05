@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, Eye, EyeOff, Plus, ShieldCheck, Trash2, Users } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
+import { CommunitySourceQueue } from "./community-source-queue";
 
 type ManagedMember = { id: string; handle: string; username: string | null; role_label: string | null; public_member_enabled: number; member_approved_at: string | null; updated_at: string };
 
@@ -58,7 +59,7 @@ export function CommunityDirectoryManager() {
       <div className="mx-auto max-w-5xl">
         <Link href="/dashboard" className="inline-flex min-h-10 items-center gap-2 text-xs font-black uppercase text-zinc-300"><ArrowLeft size={15} /> Dashboard</Link>
         <div className="mt-5 border-b border-cyan-300/15 pb-6"><p className="text-xs font-black uppercase text-cyan-200">Owner controls</p><h1 className="mt-2 text-3xl font-black uppercase sm:text-5xl">Community Directory</h1><p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-zinc-300">Add an existing public DZN profile by handle. New entries stay private unless you explicitly publish them.</p></div>
-        {!serverId ? <Notice text="Open this page from a server dashboard so DZN can keep the change server-scoped." /> : (
+        {!serverId ? <Notice text="Open this page from a server dashboard so DZN can keep the change server-scoped." /> : (<>
           <div className="mt-6 grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
             <form onSubmit={submit} className="self-start rounded-md border border-white/10 bg-[#08101d] p-4">
               <h2 className="flex items-center gap-2 font-black uppercase"><Plus size={18} className="text-cyan-300" /> Add published profile</h2>
@@ -70,7 +71,8 @@ export function CommunityDirectoryManager() {
             </form>
             <section className="min-w-0 rounded-md border border-white/10 bg-[#08101d] p-4"><h2 className="flex items-center gap-2 font-black uppercase"><Users size={18} className="text-cyan-300" /> Saved members</h2><div className="mt-4 grid gap-2">{members.length === 0 ? <Notice text="No community profiles have been added to this server yet." /> : members.map((member) => { const publicNow = member.public_member_enabled === 1 && Boolean(member.member_approved_at); const awaitingPlayer = member.public_member_enabled === 1 && !member.member_approved_at; return <div key={member.id} className="min-w-0 rounded-md border border-white/10 bg-black/20 p-3"><div className="flex min-w-0 items-center justify-between gap-3"><div className="min-w-0"><p className="truncate font-black">{member.username ?? member.handle}</p><p className="truncate text-xs font-bold text-zinc-400">/{member.handle} · {member.role_label ?? "Community member"}</p></div><span className={`inline-flex shrink-0 items-center gap-1 rounded px-2 py-1 text-[10px] font-black uppercase ${publicNow ? "bg-emerald-300/10 text-emerald-200" : awaitingPlayer ? "bg-amber-300/10 text-amber-200" : "bg-zinc-300/10 text-zinc-400"}`}><Eye size={13} />{publicNow ? "Public" : awaitingPlayer ? "Awaiting player" : "Private"}</span></div><div className="mt-3 grid grid-cols-2 gap-2 border-t border-white/10 pt-3">{member.public_member_enabled === 1 ? <button type="button" disabled={memberBusy === member.id} onClick={() => void changeMember(member, "hide")} className="inline-flex min-h-9 items-center justify-center gap-2 rounded border border-white/10 text-xs font-black uppercase text-zinc-200 disabled:opacity-50"><EyeOff size={14} /> Make private</button> : <button type="button" disabled={memberBusy === member.id} onClick={() => void changeMember(member, "publish")} className="inline-flex min-h-9 items-center justify-center gap-2 rounded border border-emerald-300/20 text-xs font-black uppercase text-emerald-200 disabled:opacity-50"><Eye size={14} /> Publish</button>}<button type="button" disabled={memberBusy === member.id} onClick={() => void changeMember(member, "remove")} className="inline-flex min-h-9 items-center justify-center gap-2 rounded border border-red-300/20 text-xs font-black uppercase text-red-200 disabled:opacity-50"><Trash2 size={14} /> Remove</button></div></div>; })}</div></section>
           </div>
-        )}
+          <CommunitySourceQueue serverId={serverId} onImported={() => loadMembers(serverId, setMembers, setMessage, true)} />
+        </>)}
       </div>
     </main>
   );

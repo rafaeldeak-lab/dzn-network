@@ -95,7 +95,7 @@
     "test:premium-analytics-telemetry": "tsx scripts/test-premium-analytics-telemetry.ts",
     "test:public-listing-reviews": "tsx scripts/test-public-listing-reviews.ts",
     "test:server-review-moderation": "tsx scripts/test-server-review-moderation.ts",
-    "test:server-community-directory": "tsx scripts/test-server-community-directory.ts && tsx scripts/test-server-community-directory-runtime.ts",
+    "test:server-community-directory": "tsx scripts/test-server-community-directory.ts && tsx scripts/test-server-community-directory-runtime.ts && tsx scripts/test-server-community-member-sources.ts",
     "test:store-catalog-foundation": "tsx scripts/test-store-catalog-foundation.ts && tsx scripts/test-store-catalog-admin.ts && tsx scripts/test-store-catalog-activation-checklist.ts",
     "test:store-order-inventory-foundation": "tsx scripts/test-store-order-inventory-foundation.ts",
     "test:store-fulfilment-receipt-foundation": "tsx scripts/test-store-fulfilment-receipt-foundation.ts",

@@ -19,6 +19,12 @@ const managedPayload = { ok: true, members: [
   { id: "member-1", handle: "tara-w", username: "Tara.W", role_label: "Community Leader", public_member_enabled: 1, member_approved_at: "2026-09-30T10:00:00.000Z", updated_at: "2026-09-30T10:00:00.000Z" },
   { id: "member-3", handle: "private-helper", username: "Private Helper", role_label: "Moderator", public_member_enabled: 0, member_approved_at: null, updated_at: "2026-09-30T10:00:00.000Z" },
 ] };
+const sourcePayload = { ok: true, candidates: [
+  { id: "candidate-1", candidate_discord_id_masked: "1000...0004", candidate_username: "New Survivor", role_label: "Builder", status: "pending", matched_username: "New Survivor", public_handle: "new-survivor", reason: "Exact DZN Discord account match found. Owner review is required.", can_import: true, updated_at: "2026-09-30T10:00:00.000Z" },
+  { id: "candidate-2", candidate_discord_id_masked: null, candidate_username: "Unknown Player", role_label: null, status: "no_match", matched_username: null, public_handle: null, reason: "No DZN account currently matches that Discord user ID.", can_import: false, updated_at: "2026-09-30T10:00:00.000Z" },
+], audit: [
+  { id: "audit-1", candidate_id: "candidate-1", action: "candidate_created", result_status: "accepted", reason: "Exact DZN Discord account match found. Owner review is required.", created_at: "2026-09-30T10:00:00.000Z" },
+] };
 
 const browser = await chromium.launch({ headless: true });
 for (const [name, width, height] of [["desktop", 1440, 1000], ["mobile", 390, 844]]) {
@@ -33,10 +39,12 @@ for (const [name, width, height] of [["desktop", 1440, 1000], ["mobile", 390, 84
   await page.screenshot({ path: `${output}/${name}-public.png`, fullPage: true });
 
   await page.route("**/api/servers/server-qa/community-members", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(managedPayload) }));
+  await page.route("**/api/servers/server-qa/community-member-candidates", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(sourcePayload) }));
   await page.goto(`${baseUrl}/dashboard/community?serverId=server-qa`, { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.getByText("Private Helper", { exact: true }).waitFor();
-  const ownerResult = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, hasPrivate: document.body.innerText.includes("PRIVATE"), hasPublic: document.body.innerText.includes("PUBLIC") }));
-  if (ownerResult.overflow !== 0 || !ownerResult.hasPrivate || !ownerResult.hasPublic || errors.length) throw new Error(`${name} owner directory failed: ${JSON.stringify({ ownerResult, errors })}`);
+  await page.getByText("New Survivor", { exact: true }).waitFor();
+  const ownerResult = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, hasPrivate: document.body.innerText.includes("PRIVATE"), hasPublic: document.body.innerText.includes("PUBLIC"), hasCandidateQueue: document.body.innerText.includes("DISCORD CANDIDATE QUEUE"), hasPlayerBoundary: document.body.innerText.toLowerCase().includes("player still decides") }));
+  if (ownerResult.overflow !== 0 || !ownerResult.hasPrivate || !ownerResult.hasPublic || !ownerResult.hasCandidateQueue || !ownerResult.hasPlayerBoundary || errors.length) throw new Error(`${name} owner directory failed: ${JSON.stringify({ ownerResult, errors })}`);
   await page.screenshot({ path: `${output}/${name}-owner.png`, fullPage: true });
   console.log(`${name}: ${JSON.stringify({ publicResult, ownerResult })}`);
   await page.close();
