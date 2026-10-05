@@ -16,6 +16,16 @@ const CURRENT_WRITE_ACCESS = `(
 
 export type CommunityCandidateAction = "import" | "reject";
 
+const COMMUNITY_SOURCE_EXPORT_MAX_ROWS = 160;
+const COMMUNITY_SOURCE_EXPORT_ACTIONS = new Set([
+  "candidate_created",
+  "candidate_imported",
+  "candidate_rejected",
+  "candidate_duplicate",
+  "candidate_no_match",
+]);
+const COMMUNITY_SOURCE_EXPORT_RESULTS = new Set(["accepted", "rejected", "skipped"]);
+
 type CandidateRow = {
   id: string;
   candidate_discord_id: string | null;
@@ -98,6 +108,60 @@ export async function listCommunityMemberSourceQueue(env: Env, actor: SessionUse
   return {
     candidates: (candidates.results ?? []).map(toCandidatePayload),
     audit: audit.results ?? [],
+  };
+}
+
+export async function exportCommunityMemberSourceAudit(
+  env: Env,
+  actor: SessionUser,
+  linkedServerId: string,
+  input: { action?: unknown; result?: unknown; limit?: unknown } = {},
+) {
+  const db = requireDb(env);
+  const access = currentWriteAccessBindings(env, actor, linkedServerId);
+  const action = normalizeExportFilter(input.action, COMMUNITY_SOURCE_EXPORT_ACTIONS);
+  const result = normalizeExportFilter(input.result, COMMUNITY_SOURCE_EXPORT_RESULTS);
+  const requestedLimit = Number(input.limit);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(Math.trunc(requestedLimit), COMMUNITY_SOURCE_EXPORT_MAX_ROWS))
+    : COMMUNITY_SOURCE_EXPORT_MAX_ROWS;
+  const conditions = ["linked_server_id = ?", CURRENT_WRITE_ACCESS];
+  const bindings: unknown[] = [linkedServerId, ...access];
+  if (action !== "all") {
+    conditions.push("action = ?");
+    bindings.push(action);
+  }
+  if (result !== "all") {
+    conditions.push("result_status = ?");
+    bindings.push(result);
+  }
+  bindings.push(limit + 1);
+  const rows = await db.prepare(
+    `SELECT id, candidate_id, action, result_status, reason, created_at
+       FROM server_community_member_source_audit
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY created_at DESC
+      LIMIT ?`,
+  ).bind(...bindings).all<Record<string, unknown>>();
+  const safeRows = (rows.results ?? []).slice(0, limit).map(toExportSafeAuditRow);
+  const generatedAt = new Date().toISOString();
+  return {
+    ok: true as const,
+    status: 200 as const,
+    body: buildCommunitySourceAuditCsv(safeRows, { action, result, linkedServerId }, generatedAt),
+    filename: `dzn-community-source-audit-${generatedAt.slice(0, 19).replace(/[-:]/g, "").replace("T", "-")}.csv`,
+    rowCount: safeRows.length,
+    truncated: (rows.results ?? []).length > limit,
+    limit,
+    generatedAt,
+    policy: {
+      ownerAdminOnly: true,
+      maxRowsPerDownload: COMMUNITY_SOURCE_EXPORT_MAX_ROWS,
+      persistence: "download_only" as const,
+      exportHistory: "session_only" as const,
+      sharingLinks: false,
+      rawIdentifiers: false,
+    },
   };
 }
 
@@ -752,6 +816,67 @@ function candidateReadiness(row: CandidateRow, canImport: boolean, hasExistingMe
     return { state: "no_match" as const, label: "No account match", detail: "No current DZN account owns the submitted Discord identity." };
   }
   return { state: "complete" as const, label: row.status.replace("_", " "), detail: "This source check is complete and remains available in decision history." };
+}
+
+function normalizeExportFilter(value: unknown, allowed: Set<string>) {
+  const text = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return allowed.has(text) ? text : "all";
+}
+
+function toExportSafeAuditRow(row: Record<string, unknown>) {
+  return {
+    auditRef: exportSafeRef(row.id) ?? "audit",
+    candidateRef: exportSafeRef(row.candidate_id),
+    action: cleanText(row.action, 64) ?? "unknown",
+    result: cleanText(row.result_status, 32) ?? "unknown",
+    reason: exportSafeText(row.reason, 220),
+    createdAt: cleanText(row.created_at, 64) ?? "",
+  };
+}
+
+function buildCommunitySourceAuditCsv(
+  rows: Array<{ auditRef: string; candidateRef: string | null; action: string; result: string; reason: string | null; createdAt: string }>,
+  filters: { action: string; result: string; linkedServerId: string },
+  generatedAt: string,
+) {
+  const header = ["exported_at", "export_safe", "server_ref", "filter_action", "filter_result", "audit_ref", "candidate_ref", "action", "result", "reason", "created_at"];
+  const lines = rows.map((row) => [
+    generatedAt,
+    "true",
+    exportSafeRef(filters.linkedServerId) ?? "server",
+    filters.action,
+    filters.result,
+    row.auditRef,
+    row.candidateRef ?? "",
+    row.action,
+    row.result,
+    row.reason ?? "",
+    row.createdAt,
+  ]);
+  return [header.map(csvCell).join(","), ...lines.map((line) => line.map(csvCell).join(","))].join("\r\n") + "\r\n";
+}
+
+function csvCell(value: unknown) {
+  const text = String(value ?? "");
+  const formulaSafe = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  return /[",\r\n]/.test(formulaSafe) ? `"${formulaSafe.replaceAll("\"", "\"\"")}"` : formulaSafe;
+}
+
+function exportSafeText(value: unknown, maxLength: number) {
+  const text = cleanText(value, maxLength);
+  return text?.replace(/\b\d{5,32}\b/g, "[identifier]")
+    .replace(/\b(?:admin|owner|player|user|usr)[_-][a-z0-9][a-z0-9_-]*\b/gi, "[identifier]") ?? null;
+}
+
+function exportSafeRef(value: unknown) {
+  const text = cleanText(value, 96);
+  if (!text) return null;
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `ref-${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 function cleanDiscordId(value: unknown) {

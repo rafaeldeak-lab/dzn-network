@@ -6,6 +6,7 @@ import {
   createCommunityMemberCandidate,
   decideCommunityMemberCandidate,
   decideCommunityMemberCandidates,
+  exportCommunityMemberSourceAudit,
   listCommunityMemberSourceQueue,
 } from "../functions/_lib/server-community-member-sources";
 import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
@@ -64,6 +65,7 @@ async function main() {
   const migration = readFileSync("migrations/0090_server_community_member_sources.sql", "utf8");
   const helper = readFileSync("functions/_lib/server-community-member-sources.ts", "utf8");
   const api = readFileSync("functions/api/servers/[serverId]/community-member-candidates.ts", "utf8");
+  const exportApi = readFileSync("functions/api/servers/[serverId]/community-member-candidates-export.ts", "utf8");
   const component = readFileSync("components/community/community-source-queue.tsx", "utf8");
   const deletion = readFileSync("functions/_lib/deletion.ts", "utf8");
 
@@ -71,6 +73,15 @@ async function main() {
   assert.match(migration, /ON DELETE SET NULL/, "Account deletion must not break the retained decision audit.");
   assert.doesNotMatch(migration, /DROP TABLE|TRUNCATE|DELETE FROM/i, "The migration must be additive.");
   assert.match(api, /requireServerOwnerOrDznAdmin/, "The queue must remain server-owner or platform-admin scoped.");
+  assert.match(exportApi, /requireServerOwnerOrDznAdmin/, "Private audit exports must remain server-owner or platform-admin scoped.");
+  assert.match(exportApi, /privateNoStoreHeaders/, "Private audit exports must disable browser and shared caching.");
+  assert.match(exportApi, /content-disposition/, "Private audit exports must be downloads rather than a public JSON surface.");
+  assert.match(helper, /COMMUNITY_SOURCE_EXPORT_MAX_ROWS = 160/, "Audit downloads must have a fixed bounded row limit.");
+  assert.match(helper, /persistence: "download_only"/, "DZN must not retain downloaded audit files.");
+  assert.match(helper, /exportHistory: "session_only"/, "The export contract must not create retained DZN history.");
+  assert.match(helper, /rawIdentifiers: false/, "The export contract must explicitly exclude raw private identifiers.");
+  assert.match(helper, /function exportSafeRef/, "Audit exports must replace internal identifiers with opaque refs.");
+  assert.match(helper, /function csvCell[\s\S]*formulaSafe/, "Audit exports must neutralize spreadsheet formula cells.");
   assert.match(api, /sameOrigin\(request\)/, "Candidate writes must reject cross-origin requests.");
   assert.match(api, /Array\.isArray\(body\.value\.ids\)[\s\S]*decideCommunityMemberCandidates/, "The private route must dispatch explicit selected-row batches through the bounded bulk helper.");
   assert.match(helper, /public_member_enabled, source[\s\S]*0, 'owner_public_handle'/, "Imports must create a private directory invitation.");
@@ -588,6 +599,14 @@ async function main() {
   assert.equal(bulkRejected.failed, 0);
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_candidates WHERE id IN (?, ?) AND status = 'rejected'").get(...bulkIds)?.count, 2, "Every selected row must receive its own decision.");
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_source_audit WHERE candidate_id IN (?, ?) AND action = 'candidate_rejected'").get(...bulkIds)?.count, 2, "Every selected row must receive its own audit entry.");
+
+  const auditExport = await exportCommunityMemberSourceAudit(env, owner, "server", { action: "candidate_rejected", result: "rejected", limit: 1 });
+  assert.equal(auditExport.ok, true);
+  assert.equal(auditExport.limit, 1);
+  assert.equal(auditExport.truncated, true, "The download must disclose when its fixed row cap is reached.");
+  assert.equal(auditExport.policy.persistence, "download_only");
+  assert.equal(auditExport.policy.exportHistory, "session_only");
+  assert.doesNotMatch(auditExport.body, /10000000000000001|player\b|owner\b|server\b/, "The audit export must not expose raw account or server identifiers.");
 
   db.beforeNextBatch = () => {
     seed("UPDATE linked_servers SET user_id = 'player-eleven' WHERE id = 'server-race'").run();
