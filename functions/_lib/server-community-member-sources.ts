@@ -16,6 +16,8 @@ type CandidateRow = {
   updated_at: string;
   matched_username: string | null;
   public_handle: string | null;
+  public_profile_status: string | null;
+  public_profile_enabled: number | null;
 };
 
 export async function listCommunityMemberSourceQueue(env: Env, linkedServerId: string) {
@@ -26,10 +28,13 @@ export async function listCommunityMemberSourceQueue(env: Env, linkedServerId: s
               candidates.role_label, candidates.status, candidates.matched_user_id,
               candidates.imported_member_id, candidates.reason, candidates.created_at,
               candidates.updated_at, users.username AS matched_username,
-              player_public_profiles.handle AS public_handle
+              player_public_profiles.handle AS public_handle,
+              player_public_profiles.status AS public_profile_status,
+              player_profile_privacy_preferences.public_profile_enabled
        FROM server_community_member_candidates candidates
        LEFT JOIN users ON users.id = candidates.matched_user_id
        LEFT JOIN player_public_profiles ON player_public_profiles.user_id = candidates.matched_user_id
+       LEFT JOIN player_profile_privacy_preferences ON player_profile_privacy_preferences.user_id = candidates.matched_user_id
        WHERE candidates.linked_server_id = ?
        ORDER BY candidates.updated_at DESC
        LIMIT 100`,
@@ -141,19 +146,21 @@ export async function decideCommunityMemberCandidate(
          id, linked_server_id, user_id, role_label, public_member_enabled, source,
          created_by_user_id, created_at, updated_at
        ) SELECT ?, ?, ?, ?, 0, 'owner_public_handle', ?, ?, ?
-         FROM server_community_member_candidates
-        WHERE id = ? AND linked_server_id = ? AND status = 'pending'
-       ON CONFLICT(linked_server_id, user_id) DO UPDATE SET
-         role_label = excluded.role_label,
-         updated_at = excluded.updated_at`,
-    ).bind(memberId, linkedServerId, candidate.matched_user_id, candidate.role_label, actor.id, now, now, id, linkedServerId),
+         FROM server_community_member_candidates candidates
+        WHERE candidates.id = ? AND candidates.linked_server_id = ? AND candidates.status = 'pending'
+          AND NOT EXISTS (
+            SELECT 1 FROM server_community_members members
+             WHERE members.linked_server_id = ? AND members.user_id = ?
+          )`,
+    ).bind(memberId, linkedServerId, candidate.matched_user_id, candidate.role_label, actor.id, now, now, id, linkedServerId, linkedServerId, candidate.matched_user_id),
     db.prepare(
       `UPDATE server_community_member_candidates
        SET status = 'imported', matched_user_id = ?,
-           imported_member_id = (SELECT id FROM server_community_members WHERE linked_server_id = ? AND user_id = ?),
+           imported_member_id = ?,
            reason = ?, reviewed_by_user_id = ?, reviewed_at = ?, updated_at = ?
-       WHERE id = ? AND linked_server_id = ? AND status = 'pending'`,
-    ).bind(candidate.matched_user_id, linkedServerId, candidate.matched_user_id, reason ?? "Imported privately; player approval is still required.", actor.id, now, now, id, linkedServerId),
+       WHERE id = ? AND linked_server_id = ? AND status = 'pending'
+         AND EXISTS (SELECT 1 FROM server_community_members WHERE id = ? AND linked_server_id = ? AND user_id = ?)`,
+    ).bind(candidate.matched_user_id, memberId, reason ?? "Imported privately; player approval is still required.", actor.id, now, now, id, linkedServerId, memberId, linkedServerId, candidate.matched_user_id),
     db.prepare(
       `INSERT INTO server_community_member_audit (
          id, linked_server_id, member_user_id, actor_user_id, action,
@@ -165,10 +172,24 @@ export async function decideCommunityMemberCandidate(
     ).bind(crypto.randomUUID(), linkedServerId, candidate.matched_user_id, actor.id, candidate.role_label, now, id, linkedServerId, actor.id, now),
     conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, memberUserId: candidate.matched_user_id, actorId: actor.id, action: "candidate_imported", result: "accepted", reason: reason ?? "Imported privately; player approval is still required.", now, status: "imported" }),
   ]);
+  const imported = await db.prepare("SELECT status FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
+    .bind(id, linkedServerId).first<{ status: string }>();
+  if (imported?.status !== "imported") {
+    const duplicateReason = "That DZN account is already in this server directory. The existing member was not changed.";
+    await db.batch([
+      db.prepare(
+        `UPDATE server_community_member_candidates
+         SET status = 'duplicate', reason = ?, reviewed_by_user_id = ?, reviewed_at = ?, updated_at = ?
+         WHERE id = ? AND linked_server_id = ? AND status = 'pending'`,
+      ).bind(duplicateReason, actor.id, now, now, id, linkedServerId),
+      conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, memberUserId: candidate.matched_user_id, actorId: actor.id, action: "candidate_duplicate", result: "skipped", reason: duplicateReason, now, status: "duplicate" }),
+    ]);
+    return { ok: true as const, status: 200, message: duplicateReason };
+  }
   return { ok: true as const, status: 200, message: "Candidate imported privately. The player must approve the directory invitation." };
 }
 
-function conditionalDecisionAuditStatement(db: D1Database, input: { linkedServerId: string; candidateId: string; memberUserId: string | null; actorId: string; action: string; result: string; reason: string; now: string; status: "imported" | "rejected" }) {
+function conditionalDecisionAuditStatement(db: D1Database, input: { linkedServerId: string; candidateId: string; memberUserId: string | null; actorId: string; action: string; result: string; reason: string; now: string; status: "imported" | "rejected" | "duplicate" }) {
   return db.prepare(
     `INSERT INTO server_community_member_source_audit (
        id, linked_server_id, candidate_id, member_user_id, actor_user_id,
@@ -192,7 +213,10 @@ function toCandidatePayload(row: CandidateRow) {
     updated_at: row.updated_at,
     matched_username: row.matched_username,
     public_handle: row.public_handle,
-    can_import: row.status === "pending" && Boolean(row.matched_user_id && row.public_handle),
+    can_import: row.status === "pending"
+      && Boolean(row.matched_user_id && row.public_handle)
+      && row.public_profile_status === "active"
+      && row.public_profile_enabled === 1,
   };
 }
 

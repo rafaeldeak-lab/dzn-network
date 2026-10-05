@@ -88,11 +88,14 @@ async function main() {
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("owner", "10000000000000001", "Owner");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player", "10000000000000002", "Player");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-two", "10000000000000003", "Player Two");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-three", "10000000000000004", "Player Three");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server", "owner");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player", "player-one");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-two", "player-two");
+  seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-three", "player-three");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled) VALUES (?, 1)").run("player");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled) VALUES (?, 1)").run("player-two");
+  seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled) VALUES (?, 1)").run("player-three");
 
   const env = { DB: db as unknown as D1Database } as Env;
   const owner: SessionUser = { id: "owner", discord_id: "10000000000000001", username: "Owner", avatar: null };
@@ -125,10 +128,29 @@ async function main() {
   queue = await listCommunityMemberSourceQueue(env, "server");
   const secondCandidate = queue.candidates.find((candidate) => candidate.public_handle === "player-two");
   assert.ok(secondCandidate);
-  const rejected = await decideCommunityMemberCandidate(env, owner, "server", secondCandidate.id, "reject", "Not yet verified by the owner.");
+  seed(`INSERT INTO server_community_members (id, linked_server_id, user_id, role_label, public_member_enabled, member_approved_at, source, created_by_user_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 1, ?, 'owner_public_handle', ?, ?, ?)`).run("existing-member", "server", "player-two", "Existing role", "2026-10-05T00:00:00.000Z", "owner", "2026-10-05T00:00:00.000Z", "2026-10-05T00:00:00.000Z");
+  const staleImport = await decideCommunityMemberCandidate(env, owner, "server", secondCandidate.id, "import", null);
+  assert.equal(staleImport.status, 200);
+  assert.match(staleImport.message, /existing member was not changed/i);
+  const existingMember = seed("SELECT role_label, public_member_enabled, member_approved_at FROM server_community_members WHERE id = 'existing-member'").get();
+  assert.equal(existingMember?.role_label, "Existing role", "A stale import must not overwrite an existing member role.");
+  assert.equal(existingMember?.public_member_enabled, 1, "A stale import must not change existing publication.");
+  assert.equal(existingMember?.member_approved_at, "2026-10-05T00:00:00.000Z", "A stale import must not change player approval.");
+  assert.equal(seed("SELECT status FROM server_community_member_candidates WHERE id = ?").get(secondCandidate.id)?.status, "duplicate");
+
+  const third = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000004", username: "Player Three", roleLabel: "Member" });
+  assert.equal(third.candidate_status, "pending");
+  seed("UPDATE player_profile_privacy_preferences SET public_profile_enabled = 0 WHERE user_id = 'player-three'").run();
+  queue = await listCommunityMemberSourceQueue(env, "server");
+  const thirdCandidate = queue.candidates.find((candidate) => candidate.public_handle === "player-three");
+  assert.ok(thirdCandidate);
+  assert.equal(thirdCandidate.can_import, false, "Disabled public profiles must not be advertised as importable.");
+  seed("UPDATE player_profile_privacy_preferences SET public_profile_enabled = 1 WHERE user_id = 'player-three'").run();
+  const rejected = await decideCommunityMemberCandidate(env, owner, "server", thirdCandidate.id, "reject", "Not yet verified by the owner.");
   assert.equal(rejected.status, 200);
-  assert.equal(seed("SELECT status FROM server_community_member_candidates WHERE id = ?").get(secondCandidate.id)?.status, "rejected");
-  assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_source_audit").get()?.count, 6);
+  assert.equal(seed("SELECT status FROM server_community_member_candidates WHERE id = ?").get(thirdCandidate.id)?.status, "rejected");
+  assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_source_audit").get()?.count, 8);
 
   db.sqlite.close();
   console.log("Server community member source checks passed.");
