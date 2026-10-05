@@ -178,6 +178,13 @@ const invalidCandidate = await invoke(candidateDirectory, new Request("https://d
 }), env, { serverId: "server" });
 assert.equal(invalidCandidate.status, 400, "Helper validation status must propagate through the candidate endpoint.");
 
+const nullCandidate = await invoke(candidateDirectory, new Request("https://dzn.test/api/servers/server/community-member-candidates", {
+  method: "POST",
+  headers: { ...cookie(ownerSession.token), "content-type": "application/json", origin: "https://dzn.test" },
+  body: "null",
+}), env, { serverId: "server" });
+assert.equal(nullCandidate.status, 400, "JSON primitives must be rejected as invalid request bodies rather than reported as unavailable infrastructure.");
+
 const createCandidateResponse = await invoke(candidateDirectory, new Request("https://dzn.test/api/servers/server/community-member-candidates", {
   method: "POST",
   headers: { ...cookie(ownerSession.token), "content-type": "application/json", origin: "https://dzn.test" },

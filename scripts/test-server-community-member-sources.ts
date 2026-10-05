@@ -150,6 +150,8 @@ async function main() {
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-twenty-two", "10000000000000022", "Player Twenty Two");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-twenty-three", "10000000000000023", "Player Twenty Three");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-twenty-four", "10000000000000024", "Player Twenty Four");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-twenty-five", "10000000000000025", "Player Twenty Five");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-twenty-six", "10000000000000026", "Player Twenty Six");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server", "owner");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server-race", "owner");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server-admin-race", "player-eleven");
@@ -170,6 +172,8 @@ async function main() {
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-twenty-two", "player-twenty-two");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-twenty-three", "player-twenty-three");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-twenty-four", "player-twenty-four");
+  seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-twenty-five", "player-twenty-five");
+  seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-twenty-six", "player-twenty-six");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-two");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-three");
@@ -186,6 +190,8 @@ async function main() {
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-twenty-two");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-twenty-three");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-twenty-four");
+  seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-twenty-five");
+  seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-twenty-six");
 
   const env = { DB: db as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "10000000000000999" } as Env;
   const owner: SessionUser = { id: "owner", discord_id: "10000000000000001", username: "Owner", avatar: null };
@@ -493,6 +499,22 @@ async function main() {
   const reconciledConcurrentMember = await decideCommunityMemberCandidate(env, owner, "server", concurrentMemberCandidate?.id, "import", null);
   assert.match(reconciledConcurrentMember.message, /already in this server directory/i, "Current membership must be reconciled before changed profile eligibility.");
   assert.equal(seed("SELECT status FROM server_community_member_candidates WHERE id = ?").get(concurrentMemberCandidate?.id)?.status, "duplicate");
+
+  const reassignedMemberSource = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000025", username: "Player Twenty Five", roleLabel: "Member" });
+  assert.equal(reassignedMemberSource.candidate_status, "pending");
+  const reassignedMemberCandidate = seed("SELECT id FROM server_community_member_candidates WHERE linked_server_id = 'server' AND candidate_discord_id = '10000000000000025' AND status = 'pending'").get();
+  db.beforeNextBatch = () => {
+    seed("UPDATE users SET discord_id = '10000000000000925' WHERE id = 'player-twenty-five'").run();
+    seed("UPDATE users SET discord_id = '10000000000000025' WHERE id = 'player-twenty-six'").run();
+    seed(`INSERT INTO server_community_members
+          (id, linked_server_id, user_id, role_label, public_member_enabled, member_approved_at, source, created_by_user_id, created_at, updated_at)
+          VALUES ('reassigned-current-member', 'server', 'player-twenty-six', 'Existing', 0, NULL, 'owner_public_handle', 'owner', '2026-10-05T00:00:00.000Z', '2026-10-05T00:00:00.000Z')`).run();
+  };
+  const reconciledReassignedMember = await decideCommunityMemberCandidate(env, owner, "server", reassignedMemberCandidate?.id, "import", null);
+  assert.match(reconciledReassignedMember.message, /already in this server directory/i, "Recovery must reconcile membership for the Discord source's current owner.");
+  const reassignedMemberDecision = seed("SELECT status, matched_user_id FROM server_community_member_candidates WHERE id = ?").get(reassignedMemberCandidate?.id);
+  assert.equal(reassignedMemberDecision?.status, "duplicate");
+  assert.equal(reassignedMemberDecision?.matched_user_id, "player-twenty-six");
 
   db.beforeNextBatch = () => {
     seed("UPDATE linked_servers SET user_id = 'player-eleven' WHERE id = 'server-race'").run();

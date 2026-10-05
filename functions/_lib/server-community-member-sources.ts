@@ -462,8 +462,14 @@ export async function decideCommunityMemberCandidate(
     const currentState = await db.prepare(
       `SELECT
          EXISTS (
-           SELECT 1 FROM server_community_members
-            WHERE linked_server_id = ? AND user_id = ?
+            SELECT 1
+              FROM server_community_member_candidates current_candidates
+              INNER JOIN users current_users
+                      ON current_users.discord_id = current_candidates.candidate_discord_id
+              INNER JOIN server_community_members current_members
+                      ON current_members.linked_server_id = current_candidates.linked_server_id
+                     AND current_members.user_id = current_users.id
+             WHERE current_candidates.id = ? AND current_candidates.linked_server_id = ?
          ) AS member_exists,
          EXISTS (
            SELECT 1
@@ -489,7 +495,7 @@ export async function decideCommunityMemberCandidate(
           ) AS eligible
        WHERE ${CURRENT_WRITE_ACCESS}`,
     ).bind(
-      linkedServerId, candidate.matched_user_id,
+      id, linkedServerId,
       candidate.matched_user_id, id, linkedServerId,
       candidate.matched_user_id, id, linkedServerId,
       ...writeAccess,

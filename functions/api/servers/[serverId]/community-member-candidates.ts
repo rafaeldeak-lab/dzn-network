@@ -24,6 +24,9 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   if (!sameOrigin(request)) return json({ ok: false, error: "forbidden" }, { status: 403, headers: privateNoStoreHeaders() });
   const body = await readBoundedJson<Record<string, unknown>>(request, 4096);
   if (!body.ok) return json({ ok: false, error: body.error, message: body.message }, { status: body.status, headers: privateNoStoreHeaders() });
+  if (!body.value || typeof body.value !== "object" || Array.isArray(body.value)) {
+    return json({ ok: false, error: "INVALID_BODY", message: "Request body must be a JSON object." }, { status: 400, headers: privateNoStoreHeaders() });
+  }
   try {
     const result = request.method === "POST"
       ? await createCommunityMemberCandidate(env, user, serverId, {
