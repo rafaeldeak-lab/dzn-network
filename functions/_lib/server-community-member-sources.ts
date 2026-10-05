@@ -349,9 +349,26 @@ export async function decideCommunityMemberCandidate(
       ]);
       const duplicate = await db.prepare("SELECT status, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
         .bind(id, linkedServerId).first<{ status: string; decision_nonce: string | null }>();
-      return duplicate?.status === "duplicate" && duplicate.decision_nonce === decisionNonce
-        ? { ok: true as const, status: 200, message: duplicateReason }
-        : { ok: true as const, status: 200, message: `Candidate was already decided as ${duplicate?.status ?? "unavailable"} by another request.` };
+      if (duplicate?.status === "duplicate" && duplicate.decision_nonce === decisionNonce) {
+        return { ok: true as const, status: 200, message: duplicateReason };
+      }
+      if (duplicate?.status && duplicate.status !== "pending") {
+        return { ok: true as const, status: 200, message: `Candidate was already decided as ${duplicate.status} by another request.` };
+      }
+      const refreshedIdentity = await db.prepare(
+        `SELECT users.id AS matched_user_id
+           FROM server_community_member_candidates candidates
+           INNER JOIN users ON users.discord_id = candidates.candidate_discord_id
+          WHERE candidates.id = ? AND candidates.linked_server_id = ? AND candidates.status = 'pending'
+            AND ${CURRENT_WRITE_ACCESS}
+          LIMIT 1`,
+      ).bind(id, linkedServerId, ...writeAccess).first<{ matched_user_id: string }>();
+      if (!refreshedIdentity) {
+        return { ok: false as const, status: 409, error: "SOURCE_STATE_CHANGED", message: "The candidate or your server access changed. Refresh and try again." };
+      }
+      if (refreshedIdentity.matched_user_id !== candidate.matched_user_id) {
+        return { ok: true as const, status: 200, message: "Candidate remains pending because the linked Discord identity changed. Refresh before deciding." };
+      }
     }
   }
   if (!candidate.matched_user_id || !candidate.handle || candidate.public_profile_enabled !== 1) {
