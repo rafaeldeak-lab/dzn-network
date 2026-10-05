@@ -530,14 +530,6 @@ export async function decideCommunityMemberCandidate(
       }
     }
 
-    if (!currentState?.eligible) {
-      return {
-        ok: true as const,
-        status: 200,
-        message: "Candidate remains pending because the player's public-profile eligibility changed. Refresh and retry after the player restores it.",
-      };
-    }
-
     const duplicateReason = "That DZN account is already in this server directory. The existing member was not changed.";
     if (currentState.member_exists) {
       await db.batch([
@@ -569,6 +561,14 @@ export async function decideCommunityMemberCandidate(
       if (duplicate?.status === "duplicate" && duplicate.decision_nonce === decisionNonce) {
         return { ok: true as const, status: 200, message: duplicateReason };
       }
+    }
+
+    if (!currentState.eligible) {
+      return {
+        ok: true as const,
+        status: 200,
+        message: "Candidate remains pending because the player's public-profile eligibility changed. Refresh and retry after the player restores it.",
+      };
     }
 
     return { ok: true as const, status: 200, message: "Candidate remains pending because eligibility changed during import. Refresh and retry." };
