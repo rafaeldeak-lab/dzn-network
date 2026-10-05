@@ -12,6 +12,7 @@ type Candidate = {
   matched_username: string | null;
   public_handle: string | null;
   reason: string | null;
+  has_existing_member: boolean;
   can_import: boolean;
   updated_at: string;
 };
@@ -107,7 +108,7 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
               <span className={`rounded px-2 py-1 text-[10px] font-black uppercase ${candidate.status === "pending" ? "bg-amber-300/10 text-amber-200" : candidate.status === "imported" ? "bg-emerald-300/10 text-emerald-200" : "bg-zinc-300/10 text-zinc-400"}`}>{candidate.status.replace("_", " ")}</span>
             </div>
             {candidate.reason ? <p className="mt-2 text-xs font-semibold text-zinc-400">{candidate.reason}</p> : null}
-            {candidate.status === "pending" ? <div className="mt-3 flex flex-wrap gap-2 border-t border-white/10 pt-3"><button type="button" disabled={busy !== null || !candidate.can_import} onClick={() => void decide(candidate, "import")} className="inline-flex min-h-9 items-center gap-2 rounded border border-emerald-300/25 px-3 text-xs font-black uppercase text-emerald-200 disabled:opacity-40"><Check size={14} /> Import privately</button><button type="button" disabled={busy !== null} onClick={() => void decide(candidate, "reject")} className="inline-flex min-h-9 items-center gap-2 rounded border border-red-300/20 px-3 text-xs font-black uppercase text-red-200 disabled:opacity-40"><ShieldX size={14} /> Reject</button></div> : null}
+            {candidate.status === "pending" ? <div className="mt-3 flex flex-wrap gap-2 border-t border-white/10 pt-3"><button type="button" disabled={busy !== null || !candidate.can_import} onClick={() => void decide(candidate, "import")} className="inline-flex min-h-9 items-center gap-2 rounded border border-emerald-300/25 px-3 text-xs font-black uppercase text-emerald-200 disabled:opacity-40"><Check size={14} /> {candidate.has_existing_member ? "Reconcile existing" : "Import privately"}</button><button type="button" disabled={busy !== null} onClick={() => void decide(candidate, "reject")} className="inline-flex min-h-9 items-center gap-2 rounded border border-red-300/20 px-3 text-xs font-black uppercase text-red-200 disabled:opacity-40"><ShieldX size={14} /> Reject</button></div> : null}
           </article>
         ))}
       </div>
