@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Clock3, Search, ShieldX } from "lucide-react";
+import { Check, ChevronDown, Clock3, Search, ShieldX } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 
 type Candidate = {
@@ -33,6 +33,12 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
   const [username, setUsername] = useState("");
   const [role, setRole] = useState("");
   const [filter, setFilter] = useState("");
+  const [candidateScope, setCandidateScope] = useState<"all" | "pending" | "complete">("pending");
+  const [candidateLimit, setCandidateLimit] = useState(8);
+  const [auditQuery, setAuditQuery] = useState("");
+  const [auditAction, setAuditAction] = useState("all");
+  const [auditResult, setAuditResult] = useState("all");
+  const [auditLimit, setAuditLimit] = useState(8);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -77,7 +83,20 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
   }
 
   const query = filter.trim().toLowerCase();
-  const visible = query ? candidates.filter((candidate) => [candidate.candidate_username, candidate.matched_username, candidate.public_handle, candidate.candidate_discord_id_masked, candidate.status].some((value) => value?.toLowerCase().includes(query))) : candidates;
+  const filteredCandidates = candidates.filter((candidate) => {
+    const matchesScope = candidateScope === "all" || (candidateScope === "pending" ? candidate.status === "pending" : candidate.status !== "pending");
+    const matchesQuery = !query || [candidate.candidate_username, candidate.matched_username, candidate.public_handle, candidate.candidate_discord_id_masked, candidate.status, candidate.role_label].some((value) => value?.toLowerCase().includes(query));
+    return matchesScope && matchesQuery;
+  });
+  const visibleCandidates = filteredCandidates.slice(0, candidateLimit);
+  const normalizedAuditQuery = auditQuery.trim().toLowerCase();
+  const filteredAudit = audit.filter((item) => {
+    const matchesQuery = !normalizedAuditQuery || [item.action, item.result_status, item.reason].some((value) => value?.toLowerCase().includes(normalizedAuditQuery));
+    return matchesQuery && (auditAction === "all" || item.action === auditAction) && (auditResult === "all" || item.result_status === auditResult);
+  });
+  const visibleAudit = filteredAudit.slice(0, auditLimit);
+  const pendingCount = candidates.filter((candidate) => candidate.status === "pending").length;
+  const completeCount = candidates.length - pendingCount;
 
   return (
     <section className="mt-5 rounded-md border border-cyan-300/15 bg-[#08101d] p-4">
@@ -94,14 +113,24 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
       </form>
       {message ? <p className="mt-3 text-sm font-semibold text-cyan-100">{message}</p> : null}
 
-      <div className="mt-5 flex items-center gap-2 border-t border-white/10 pt-4">
-        <Search size={16} className="shrink-0 text-zinc-500" />
-        <input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Search candidates" className="min-h-10 min-w-0 flex-1 bg-transparent text-sm font-semibold text-white outline-none placeholder:text-zinc-600" />
-        <span className="text-xs font-black text-zinc-500">{visible.length}</span>
+      <div className="mt-5 border-t border-white/10 pt-4">
+        <div className="grid gap-3 lg:grid-cols-[auto_1fr] lg:items-center">
+          <div className="grid grid-cols-3 rounded-md border border-white/10 bg-black/20 p-1" aria-label="Candidate status filter">
+            <ScopeButton active={candidateScope === "pending"} label="Pending" count={pendingCount} onClick={() => { setCandidateScope("pending"); setCandidateLimit(8); }} />
+            <ScopeButton active={candidateScope === "complete"} label="Complete" count={completeCount} onClick={() => { setCandidateScope("complete"); setCandidateLimit(8); }} />
+            <ScopeButton active={candidateScope === "all"} label="All" count={candidates.length} onClick={() => { setCandidateScope("all"); setCandidateLimit(8); }} />
+          </div>
+          <label className="flex min-h-11 min-w-0 items-center gap-2 rounded-md border border-white/10 bg-black/20 px-3 focus-within:border-cyan-300/50">
+            <Search size={16} className="shrink-0 text-zinc-500" />
+            <span className="sr-only">Search candidates</span>
+            <input value={filter} onChange={(event) => { setFilter(event.target.value); setCandidateLimit(8); }} placeholder="Search name, handle, role or status" className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-white outline-none placeholder:text-zinc-600" />
+            <span className="text-xs font-black text-zinc-500">{filteredCandidates.length}</span>
+          </label>
+        </div>
       </div>
 
       <div className="mt-3 grid gap-2">
-        {visible.length === 0 ? <QueueNotice text="No matching source candidates." /> : visible.map((candidate) => (
+        {visibleCandidates.length === 0 ? <QueueNotice text="No matching source candidates." /> : visibleCandidates.map((candidate) => (
           <article key={candidate.id} className="rounded-md border border-white/10 bg-black/20 p-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0"><p className="truncate font-black">{candidate.matched_username ?? candidate.candidate_username ?? "Unknown Discord account"}</p><p className="mt-1 text-xs font-bold text-zinc-500">{candidate.candidate_discord_id_masked ?? "ID erased"}{candidate.public_handle ? ` · /${candidate.public_handle}` : ""}{candidate.role_label ? ` · ${candidate.role_label}` : ""}</p></div>
@@ -112,8 +141,20 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
           </article>
         ))}
       </div>
+      {visibleCandidates.length < filteredCandidates.length ? <button type="button" onClick={() => setCandidateLimit((value) => value + 8)} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-white/10 text-xs font-black uppercase text-zinc-300 hover:border-cyan-300/30 hover:text-cyan-100"><ChevronDown size={15} /> Show 8 more candidates</button> : null}
 
-      <details className="mt-5 border-t border-white/10 pt-4"><summary className="cursor-pointer text-xs font-black uppercase text-zinc-300">Decision history ({audit.length})</summary><div className="mt-3 grid gap-2">{audit.length === 0 ? <QueueNotice text="No source decisions recorded yet." /> : audit.map((item) => <div key={item.id} className="flex flex-wrap items-start justify-between gap-3 rounded border border-white/10 bg-black/20 p-3 text-xs"><div><p className="font-black uppercase text-zinc-200">{item.action.replaceAll("_", " ")}</p><p className="mt-1 font-semibold text-zinc-500">{item.reason ?? "No reason recorded."}</p></div><span className="font-bold uppercase text-zinc-500">{item.result_status}</span></div>)}</div></details>
+      <details className="mt-5 border-t border-white/10 pt-4">
+        <summary className="cursor-pointer text-xs font-black uppercase text-zinc-300">Decision history ({audit.length})</summary>
+        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_180px_150px]">
+          <label className="flex min-h-10 min-w-0 items-center gap-2 rounded-md border border-white/10 bg-black/20 px-3 focus-within:border-cyan-300/50"><Search size={15} className="shrink-0 text-zinc-500" /><span className="sr-only">Search decision history</span><input value={auditQuery} onChange={(event) => { setAuditQuery(event.target.value); setAuditLimit(8); }} placeholder="Search decision history" className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-white outline-none placeholder:text-zinc-600" /></label>
+          <label className="text-[10px] font-black uppercase text-zinc-500">Action<select value={auditAction} onChange={(event) => { setAuditAction(event.target.value); setAuditLimit(8); }} className="mt-1 min-h-10 w-full rounded-md border border-white/10 bg-[#0a1220] px-3 text-xs font-bold text-zinc-200 outline-none focus:border-cyan-300/50"><option value="all">All actions</option><option value="candidate_created">Created</option><option value="candidate_imported">Imported</option><option value="candidate_rejected">Rejected</option><option value="candidate_duplicate">Duplicate</option><option value="candidate_no_match">No match</option></select></label>
+          <label className="text-[10px] font-black uppercase text-zinc-500">Result<select value={auditResult} onChange={(event) => { setAuditResult(event.target.value); setAuditLimit(8); }} className="mt-1 min-h-10 w-full rounded-md border border-white/10 bg-[#0a1220] px-3 text-xs font-bold text-zinc-200 outline-none focus:border-cyan-300/50"><option value="all">All results</option><option value="accepted">Accepted</option><option value="rejected">Rejected</option><option value="skipped">Skipped</option></select></label>
+        </div>
+        <div className="mt-3 grid gap-2">
+          {visibleAudit.length === 0 ? <QueueNotice text="No matching source decisions." /> : visibleAudit.map((item) => <div key={item.id} className="grid gap-2 rounded border border-white/10 bg-black/20 p-3 text-xs sm:grid-cols-[1fr_auto] sm:items-start"><div className="min-w-0"><p className="font-black uppercase text-zinc-200">{item.action.replaceAll("_", " ")}</p><p className="mt-1 font-semibold text-zinc-500">{item.reason ?? "No reason recorded."}</p></div><div className="flex items-center justify-between gap-3 sm:block sm:text-right"><span className="font-bold uppercase text-zinc-400">{item.result_status}</span><time className="block text-[10px] font-bold uppercase text-zinc-600" dateTime={item.created_at}>{formatCompactDate(item.created_at)}</time></div></div>)}
+        </div>
+        {visibleAudit.length < filteredAudit.length ? <button type="button" onClick={() => setAuditLimit((value) => value + 8)} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-white/10 text-xs font-black uppercase text-zinc-300 hover:border-cyan-300/30 hover:text-cyan-100"><ChevronDown size={15} /> Show 8 more decisions</button> : null}
+      </details>
     </section>
   );
 }
@@ -128,3 +169,13 @@ async function loadQueue(serverId: string, setCandidates: (items: Candidate[]) =
 }
 
 function QueueNotice({ text }: { text: string }) { return <div className="rounded-md border border-white/10 bg-white/[0.03] p-4 text-sm font-semibold text-zinc-400">{text}</div>; }
+
+function ScopeButton({ active, label, count, onClick }: { active: boolean; label: string; count: number; onClick: () => void }) {
+  return <button type="button" aria-pressed={active} onClick={onClick} className={`min-h-9 px-3 text-xs font-black uppercase ${active ? "rounded border border-cyan-300/25 bg-cyan-300/10 text-cyan-100" : "text-zinc-500 hover:text-zinc-200"}`}>{label} <span className="ml-1 text-[10px]">{count}</span></button>;
+}
+
+function formatCompactDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown time";
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date);
+}
