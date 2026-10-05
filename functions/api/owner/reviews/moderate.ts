@@ -1,4 +1,5 @@
 import { json, methodNotAllowed } from "../../../_lib/http";
+import { countUnreadReviewNotifications } from "../../../_lib/dzn-pulse";
 import { requirePlatformOwner } from "../../../_lib/platform-owner";
 import {
   applyReviewModerationDecision,
@@ -15,7 +16,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   if (request.method === "GET") {
     const filters = parseReviewModerationFilters(new URL(request.url));
     const result = await readReviewModerationQueue(env, filters);
-    return json({ ok: true, filters, ...result });
+    return json({ ok: true, filters, ...result, reviewUnreadCount: await countUnreadReviewNotifications(env, auth.user) });
   }
   if (request.method === "POST") {
     const input = await readReviewModerationRequest(request);

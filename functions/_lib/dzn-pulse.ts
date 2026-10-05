@@ -31,10 +31,11 @@ export const PULSE_NOTIFICATION_TYPES = [
   "player_link_approved",
   "player_link_rejected",
   "player_link_review_requested",
+  "review_moderation_required",
 ] as const;
 
 export type PulseNotificationType = typeof PULSE_NOTIFICATION_TYPES[number];
-export type PulseNotificationFilter = "all" | "events" | "scores" | "achievements" | "news" | "billing";
+export type PulseNotificationFilter = "all" | "events" | "scores" | "achievements" | "reviews" | "news" | "billing";
 
 export type PulseNotification = {
   id: string;
@@ -423,6 +424,47 @@ export async function markAllNotificationsRead(env: Env, user: SessionUser) {
   return { ok: true, status: 200, read_at: now, unreadCount: 0 };
 }
 
+export async function countUnreadReviewNotifications(env: Env, user: SessionUser) {
+  if (!isDznPulseEnabled(env)) return 0;
+  const row = await requireDb(env)
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM user_notifications
+       WHERE user_id = ?
+         AND type = 'review_moderation_required'
+         AND read_at IS NULL
+         AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`,
+    )
+    .bind(user.id)
+    .first<{ count: number | null }>()
+    .catch(() => ({ count: 0 }));
+  return Math.max(0, Number(row?.count ?? 0) || 0);
+}
+
+export async function markReviewNotificationsRead(env: Env, user: SessionUser) {
+  if (!isDznPulseEnabled(env)) return { status: 404, ...pulseFeatureDisabledPayload() };
+  const now = new Date().toISOString();
+  const result = await requireDb(env)
+    .prepare(
+      `UPDATE user_notifications
+       SET read_at = COALESCE(read_at, ?)
+       WHERE user_id = ?
+         AND type = 'review_moderation_required'
+         AND read_at IS NULL
+         AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`,
+    )
+    .bind(now, user.id)
+    .run();
+  return {
+    ok: true,
+    status: 200,
+    marked: Math.max(0, Number(result.meta?.changes ?? 0) || 0),
+    read_at: now,
+    reviewUnreadCount: await countUnreadReviewNotifications(env, user),
+    unreadCount: await countUnreadNotifications(env, user),
+  };
+}
+
 export async function clearReadNotifications(env: Env, user: SessionUser) {
   if (!isDznPulseEnabled(env)) return { status: 404, ...pulseFeatureDisabledPayload() };
   const db = requireDb(env);
@@ -767,6 +809,7 @@ export function sanitizePulseActionUrl(value: string | null | undefined) {
       "/servers",
       "/seasons",
       "/dzn-pulse",
+      "/owner/reviews",
       "/setup",
     ];
     const allowedPrefixes = [
@@ -1123,6 +1166,7 @@ function toNotification(row: NotificationRow): PulseNotification {
 
 function notificationTypesForFilter(filter: PulseNotificationFilter): PulseNotificationType[] {
   if (filter === "billing") return [PAYMENT_SETUP_NOTIFICATION_TYPE, TRIAL_ENDING_NOTIFICATION_TYPE];
+  if (filter === "reviews") return ["review_moderation_required"];
   if (filter === "events") return ["upcoming_event", "event_starting", "event_started", "event_countdown", "event_entry_confirmed", "event_result", "prize_unlocked"];
   if (filter === "scores") return ["event_score_update", "event_rank_update", "monthly_global_rank"];
   if (filter === "achievements") return ["achievement_unlocked"];
@@ -1132,6 +1176,7 @@ function notificationTypesForFilter(filter: PulseNotificationFilter): PulseNotif
 
 function categoryForNotificationType(type: PulseNotificationType): PulseNotificationFilter {
   if (type === PAYMENT_SETUP_NOTIFICATION_TYPE || type === TRIAL_ENDING_NOTIFICATION_TYPE) return "billing";
+  if (type === "review_moderation_required") return "reviews";
   if (notificationTypesForFilter("events").includes(type)) return "events";
   if (notificationTypesForFilter("scores").includes(type)) return "scores";
   if (notificationTypesForFilter("achievements").includes(type)) return "achievements";
@@ -1141,6 +1186,7 @@ function categoryForNotificationType(type: PulseNotificationType): PulseNotifica
 
 function categoryLabel(category: PulseNotificationFilter) {
   if (category === "billing") return "Billing";
+  if (category === "reviews") return "Reviews";
   if (category === "events") return "Events";
   if (category === "scores") return "Scores";
   if (category === "achievements") return "Achievements";
@@ -1150,7 +1196,7 @@ function categoryLabel(category: PulseNotificationFilter) {
 
 function normalizeNotificationFilter(value: unknown): PulseNotificationFilter {
   const normalized = String(value ?? "all").trim().toLowerCase();
-  return normalized === "events" || normalized === "scores" || normalized === "achievements" || normalized === "news" || normalized === "billing" ? normalized : "all";
+  return normalized === "events" || normalized === "scores" || normalized === "achievements" || normalized === "reviews" || normalized === "news" || normalized === "billing" ? normalized : "all";
 }
 
 function normalizeNotificationType(value: unknown): PulseNotificationType {
