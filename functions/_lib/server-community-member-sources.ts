@@ -615,6 +615,39 @@ export async function decideCommunityMemberCandidate(
   return { ok: true as const, status: 200, message: "Candidate imported privately. The player must approve the directory invitation." };
 }
 
+export async function decideCommunityMemberCandidates(
+  env: Env,
+  actor: SessionUser,
+  linkedServerId: string,
+  candidateIds: unknown,
+  action: unknown,
+  reasonInput: unknown,
+) {
+  const decision: CommunityCandidateAction | null = action === "import" || action === "reject" ? action : null;
+  const ids = Array.isArray(candidateIds) ? candidateIds.map(cleanId) : [];
+  if (!decision || ids.length === 0 || ids.length > 25 || ids.some((id) => !id) || new Set(ids).size !== ids.length) {
+    return { ok: false as const, status: 400, error: "INVALID_BULK_DECISION", message: "Choose between 1 and 25 unique pending candidates." };
+  }
+
+  const results: Array<{ id: string; ok: boolean; status: number; error: string | null; message: string }> = [];
+  for (const id of ids as string[]) {
+    const result = await decideCommunityMemberCandidate(env, actor, linkedServerId, id, decision, reasonInput);
+    results.push({ id, ok: result.ok, status: result.status, error: "error" in result && typeof result.error === "string" ? result.error : null, message: result.message });
+  }
+  const processed = results.filter((result) => result.ok).length;
+  const failed = results.length - processed;
+  return {
+    ok: failed === 0,
+    status: failed === 0 ? 200 : 207,
+    processed,
+    failed,
+    results,
+    message: failed === 0
+      ? `${processed} candidate${processed === 1 ? "" : "s"} processed.`
+      : `${processed} processed and ${failed} could not be processed. Review the remaining pending rows.`,
+  };
+}
+
 function conditionalDecisionAuditStatement(db: D1Database, input: { linkedServerId: string; candidateId: string; actorId: string; actorDiscordId: string; action: string; result: string; reason: string; now: string; status: "imported" | "rejected" | "duplicate" | "no_match"; decisionNonce: string; importedMemberId?: string }) {
   return db.prepare(
     `INSERT INTO server_community_member_source_audit (

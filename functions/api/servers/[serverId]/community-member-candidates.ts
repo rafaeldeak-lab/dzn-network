@@ -2,7 +2,7 @@ import { getSessionUser } from "../../../_lib/db";
 import { json, methodNotAllowed, readBoundedJson } from "../../../_lib/http";
 import { privateNoStoreHeaders } from "../../../_lib/performance";
 import { requireServerOwnerOrDznAdmin } from "../../../_lib/public-cache";
-import { createCommunityMemberCandidate, decideCommunityMemberCandidate, listCommunityMemberSourceQueue } from "../../../_lib/server-community-member-sources";
+import { createCommunityMemberCandidate, decideCommunityMemberCandidate, decideCommunityMemberCandidates, listCommunityMemberSourceQueue } from "../../../_lib/server-community-member-sources";
 import type { PagesFunction } from "../../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env, params }) => {
@@ -34,6 +34,8 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
           username: body.value.username,
           roleLabel: body.value.role_label,
         })
+      : Array.isArray(body.value.ids)
+        ? await decideCommunityMemberCandidates(env, user, serverId, body.value.ids, body.value.action, body.value.reason)
       : await decideCommunityMemberCandidate(env, user, serverId, body.value.id, body.value.action, body.value.reason);
     return json(result, { status: result.status, headers: privateNoStoreHeaders() });
   } catch {

@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import {
   createCommunityMemberCandidate,
   decideCommunityMemberCandidate,
+  decideCommunityMemberCandidates,
   listCommunityMemberSourceQueue,
 } from "../functions/_lib/server-community-member-sources";
 import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
@@ -71,6 +72,7 @@ async function main() {
   assert.doesNotMatch(migration, /DROP TABLE|TRUNCATE|DELETE FROM/i, "The migration must be additive.");
   assert.match(api, /requireServerOwnerOrDznAdmin/, "The queue must remain server-owner or platform-admin scoped.");
   assert.match(api, /sameOrigin\(request\)/, "Candidate writes must reject cross-origin requests.");
+  assert.match(api, /Array\.isArray\(body\.value\.ids\)[\s\S]*decideCommunityMemberCandidates/, "The private route must dispatch explicit selected-row batches through the bounded bulk helper.");
   assert.match(helper, /public_member_enabled, source[\s\S]*0, 'owner_public_handle'/, "Imports must create a private directory invitation.");
   assert.match(helper, /imported\.imported_member_id !== memberId/, "Only the request that created the exact member may report import success.");
   assert.match(helper, /imported_member_id = \?/, "Import audit writes must be fenced to the request's exact member ID.");
@@ -95,6 +97,7 @@ async function main() {
   assert.match(helper, /SET status = 'duplicate'[\s\S]*matched_user_id = \(SELECT id FROM users WHERE discord_id = server_community_member_candidates\.candidate_discord_id\)/, "Duplicate reconciliation must persist the current Discord owner.");
   assert.match(helper, /server_community_members[\s\S]*user_id = \(SELECT id FROM users WHERE discord_id = server_community_member_candidates\.candidate_discord_id\)/, "Duplicate reconciliation must verify that the current Discord owner is the existing member.");
   assert.match(helper, /CURRENT_WRITE_ACCESS[\s\S]*access_server\.user_id = \?/, "Candidate mutations must recheck current server ownership in their write predicates.");
+  assert.match(helper, /ids\.length > 25[\s\S]*for \(const id of ids as string\[\]\)[\s\S]*decideCommunityMemberCandidate/, "Bulk decisions must be bounded and reuse the guarded single-row decision path.");
   assert.match(helper, /access_actor\.id = \? AND access_actor\.discord_id = \?/, "Privileged access must recheck the admin's current Discord identity.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(component, /useState<"all" \| "pending" \| "complete">\("pending"\)/, "The compact queue must open on actionable pending candidates.");
@@ -105,6 +108,7 @@ async function main() {
   assert.match(component, /normalizeSearchText[\s\S]*replaceAll\("_", " "\)/, "Search must match status and action labels exactly as owners see them.");
   assert.match(component, /All actions[\s\S]*All results/, "Decision history must support action and result filters.");
   assert.match(component, /Show 8 more candidates[\s\S]*Decision history[\s\S]*Show 8 more decisions/, "Both long lists must expand in predictable eight-row batches.");
+  assert.match(component, /Select visible[\s\S]*Import selected[\s\S]*Reject selected/, "Owners must be able to act on an explicit selected set without processing hidden rows.");
   assert.match(deletion, /candidate_discord_id = CASE[\s\S]*THEN NULL/, "Account deletion must erase retained source identifiers owned by the deleting account.");
   assert.match(deletion, /candidate_discord_id = \(SELECT discord_id FROM users WHERE id = \?\)/, "Account deletion must scrub sources currently owned by the deleting Discord account.");
   assert.match(deletion, /status = CASE[\s\S]*status = 'pending'[\s\S]*THEN 'no_match'[\s\S]*matched_user_id = CASE[\s\S]*matched_user_id = \?[\s\S]*OR \(status = 'pending'/, "Pending source-owner deletion must finalize the row while decided history keeps unrelated identities.");
@@ -547,6 +551,22 @@ async function main() {
   const recoveredCreateDuplicate = seed("SELECT id, candidate_discord_id, matched_user_id FROM server_community_member_candidates WHERE linked_server_id = 'server' AND matched_user_id = 'player-twenty-eight' AND status = 'duplicate' ORDER BY rowid DESC LIMIT 1").get();
   assert.equal(recoveredCreateDuplicate?.candidate_discord_id, null);
   assert.equal(seed("SELECT member_user_id FROM server_community_member_source_audit WHERE candidate_id = ? AND action = 'candidate_duplicate'").get(recoveredCreateDuplicate?.id)?.member_user_id, "player-twenty-eight", "A duplicate discovered during creation must remain in the immutable audit history.");
+
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("bulk-one", "10000000000000801", "Bulk One");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("bulk-two", "10000000000000802", "Bulk Two");
+  const bulkOne = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000801", username: "Bulk One", roleLabel: "Member" });
+  const bulkTwo = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000802", username: "Bulk Two", roleLabel: "Member" });
+  assert.equal(bulkOne.candidate_status, "pending");
+  assert.equal(bulkTwo.candidate_status, "pending");
+  const bulkIds = seed("SELECT id FROM server_community_member_candidates WHERE linked_server_id = 'server' AND candidate_discord_id IN ('10000000000000801', '10000000000000802') ORDER BY candidate_discord_id").all().map((row) => String(row.id));
+  const duplicateBulkIds = await decideCommunityMemberCandidates(env, owner, "server", [bulkIds[0], bulkIds[0]], "reject", "Bulk rejected.");
+  assert.equal(duplicateBulkIds.status, 400, "A repeated row must not be processed twice in one batch.");
+  const bulkRejected = await decideCommunityMemberCandidates(env, owner, "server", bulkIds, "reject", "Bulk rejected.");
+  assert.equal(bulkRejected.ok, true);
+  assert.equal(bulkRejected.processed, 2);
+  assert.equal(bulkRejected.failed, 0);
+  assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_candidates WHERE id IN (?, ?) AND status = 'rejected'").get(...bulkIds)?.count, 2, "Every selected row must receive its own decision.");
+  assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_source_audit WHERE candidate_id IN (?, ?) AND action = 'candidate_rejected'").get(...bulkIds)?.count, 2, "Every selected row must receive its own audit entry.");
 
   db.beforeNextBatch = () => {
     seed("UPDATE linked_servers SET user_id = 'player-eleven' WHERE id = 'server-race'").run();
