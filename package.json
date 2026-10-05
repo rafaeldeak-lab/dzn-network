@@ -93,6 +93,7 @@
     "test:durable-rank-snapshot": "tsx scripts/test-durable-rank-snapshot.ts",
     "test:geoip": "tsx scripts/test-geoip.ts",
     "test:public-leaderboards": "tsx scripts/test-public-leaderboards.ts",
+    "qa:mobile-leaderboards": "node scripts/qa-mobile-leaderboards.mjs",
     "test:premium-analytics-telemetry": "tsx scripts/test-premium-analytics-telemetry.ts",
     "test:public-listing-reviews": "tsx scripts/test-public-listing-reviews.ts",
     "test:server-review-moderation": "tsx scripts/test-server-review-moderation.ts",
