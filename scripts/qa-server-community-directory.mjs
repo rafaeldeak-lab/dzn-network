@@ -20,8 +20,8 @@ const managedPayload = { ok: true, members: [
   { id: "member-3", handle: "private-helper", username: "Private Helper", role_label: "Moderator", public_member_enabled: 0, member_approved_at: null, updated_at: "2026-09-30T10:00:00.000Z" },
 ] };
 const sourcePayload = { ok: true, candidates: [
-  { id: "candidate-1", candidate_discord_id_masked: "1000...0004", candidate_username: "New Survivor", role_label: "Builder", status: "pending", matched_username: "New Survivor", public_handle: "new-survivor", reason: "Exact DZN Discord account match found. Owner review is required.", can_import: true, updated_at: "2026-09-30T10:00:00.000Z" },
-  { id: "candidate-2", candidate_discord_id_masked: null, candidate_username: "Unknown Player", role_label: null, status: "no_match", matched_username: null, public_handle: null, reason: "No DZN account currently matches that Discord user ID.", can_import: false, updated_at: "2026-09-30T10:00:00.000Z" },
+  { id: "candidate-1", candidate_discord_id_masked: "1000...0004", candidate_username: "New Survivor", role_label: "Builder", status: "pending", matched_username: "New Survivor", public_handle: "new-survivor", reason: "Exact DZN Discord account match found. Owner review is required.", can_import: true, readiness: { state: "ready", label: "Ready to import", detail: "A unique eligible DZN profile is matched. Import stays private until the player approves visibility." }, updated_at: "2026-09-30T10:00:00.000Z" },
+  { id: "candidate-2", candidate_discord_id_masked: null, candidate_username: "Unknown Player", role_label: null, status: "no_match", matched_username: null, public_handle: null, reason: "No DZN account currently matches that Discord user ID.", can_import: false, readiness: { state: "no_match", label: "No account match", detail: "No current DZN account owns the submitted Discord identity." }, updated_at: "2026-09-30T10:00:00.000Z" },
 ], audit: [
   { id: "audit-1", candidate_id: "candidate-1", action: "candidate_created", result_status: "accepted", reason: "Exact DZN Discord account match found. Owner review is required.", created_at: "2026-09-30T10:00:00.000Z" },
 ] };
@@ -45,8 +45,9 @@ for (const [name, width, height] of [["desktop", 1440, 1000], ["mobile", 390, 84
   await page.getByText("New Survivor", { exact: true }).waitFor();
   await page.getByLabel("Select visible").check();
   const ownerResult = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, hasPrivate: document.body.innerText.includes("PRIVATE"), hasPublic: document.body.innerText.includes("PUBLIC"), hasCandidateQueue: document.body.innerText.includes("DISCORD CANDIDATE QUEUE"), hasPlayerBoundary: document.body.innerText.toLowerCase().includes("player still decides"), hasSelectedCount: document.body.innerText.includes("1 selected") }));
+  const hasReadiness = await page.getByText("Ready to import", { exact: true }).isVisible() && await page.getByRole("combobox", { name: "Readiness" }).isVisible();
   const importSelectedEnabled = await page.getByRole("button", { name: "Import selected" }).isEnabled();
-  if (ownerResult.overflow !== 0 || !ownerResult.hasPrivate || !ownerResult.hasPublic || !ownerResult.hasCandidateQueue || !ownerResult.hasPlayerBoundary || !ownerResult.hasSelectedCount || !importSelectedEnabled || errors.length) throw new Error(`${name} owner directory failed: ${JSON.stringify({ ownerResult, importSelectedEnabled, errors })}`);
+  if (ownerResult.overflow !== 0 || !ownerResult.hasPrivate || !ownerResult.hasPublic || !ownerResult.hasCandidateQueue || !ownerResult.hasPlayerBoundary || !ownerResult.hasSelectedCount || !hasReadiness || !importSelectedEnabled || errors.length) throw new Error(`${name} owner directory failed: ${JSON.stringify({ ownerResult, hasReadiness, importSelectedEnabled, errors })}`);
   await page.screenshot({ path: `${output}/${name}-owner.png`, fullPage: true });
   console.log(`${name}: ${JSON.stringify({ publicResult, ownerResult })}`);
   await page.close();
