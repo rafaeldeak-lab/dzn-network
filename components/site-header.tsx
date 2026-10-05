@@ -76,7 +76,7 @@ const rootHeaderHiddenPrefixes = [
 
 const loggedOutHeaderLinks: HeaderNavLink[] = [
   { href: "/#features", label: "Features", active: "features", icon: Sparkles },
-  { href: "/community", label: "Comms", active: "community", icon: MessageCircle },
+  { href: "/community", label: "Chat & Help", active: "community", icon: MessageCircle },
   { href: "/store", label: "Store", active: "store", icon: ShoppingBag },
   { href: "/pricing", label: "Pricing", active: "pricing", icon: Crown },
 ];
@@ -89,7 +89,7 @@ const starterHeaderLinks: HeaderNavLink[] = [
   { href: "/leaderboards", label: "Leaderboards", active: "leaderboards", icon: Trophy },
   { href: "/servers", label: "Servers", active: "servers", icon: Server },
   { href: "/events", label: "Events", active: "events", icon: CalendarDays },
-  { href: "/community", label: "Comms", active: "community", icon: MessageCircle },
+  { href: "/community", label: "Chat & Help", active: "community", icon: MessageCircle },
 ];
 
 const proHeaderLinks: HeaderNavLink[] = [
@@ -101,7 +101,7 @@ const proHeaderLinks: HeaderNavLink[] = [
   { href: "/servers", label: "Servers", active: "servers", icon: Server },
   { href: "/#stats", label: "Stats", active: "stats", icon: Activity },
   { href: "/events", label: "Events", active: "events", icon: CalendarDays },
-  { href: "/community", label: "Comms", active: "community", icon: MessageCircle },
+  { href: "/community", label: "Chat & Help", active: "community", icon: MessageCircle },
 ];
 
 let pageHeaderAuthState: SiteHeaderAuthStateProps | null = null;

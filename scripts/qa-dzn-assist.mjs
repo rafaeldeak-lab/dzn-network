@@ -41,9 +41,12 @@ try {
 
   const launcherPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await launcherPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
-  await launcherPage.getByRole("button", { name: "Open DZN Comms" }).click();
+  await launcherPage.getByLabel("Chat and Help").click();
   await launcherPage.getByRole("link", { name: /DZN Assist Guided help live/ }).waitFor({ state: "visible" });
   await launcherPage.screenshot({ path: path.join(outputDir, "phone-launcher.png"), fullPage: false });
+  await launcherPage.keyboard.press("Escape");
+  await launcherPage.getByRole("link", { name: /DZN Assist Guided help live/ }).waitFor({ state: "hidden" });
+  await launcherPage.getByLabel("Chat and Help").waitFor({ state: "visible" });
   await launcherPage.close();
 } finally {
   await browser.close();

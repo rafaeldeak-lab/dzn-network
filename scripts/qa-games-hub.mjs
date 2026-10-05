@@ -196,14 +196,14 @@ try {
   assert.equal(await page.locator('[class*="equipmentRack"] article').count(), 5);
   for (const [label, width, height] of [["narrow-tablet", 700, 900], ["mobile", 390, 844], ["small-phone", 320, 780]]) {
     await page.setViewportSize({ width, height });
-    const launcherBox = await page.getByRole("button", { name: "Open DZN Comms", exact: true }).boundingBox();
-    assert.ok(launcherBox && launcherBox.width <= 50 && launcherBox.x >= width - 70, `${label}: Comms launcher must stay compact at the right edge`);
+    const launcherBox = await page.getByLabel("Chat and Help", { exact: true }).boundingBox();
+    assert.ok(launcherBox && launcherBox.width <= width - 32 && launcherBox.x >= 0, `${label}: Chat and Help launcher must remain fully visible`);
     await page.screenshot({ path: `${output}/${label}-workshop.png`, fullPage: true });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${label}: equipment rack overflow`);
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: `${output}/desktop-workshop.png`, fullPage: true });
-  checks.push("Workshop requires earned parts; five-item equipment rack fits desktop and both phone widths; mobile Comms stays a compact right-edge icon");
+  checks.push("Workshop requires earned parts; five-item equipment rack fits desktop and both phone widths; the labelled Chat and Help launcher remains fully visible");
   await page.getByRole("link", { name: "Play", exact: true }).click();
   await page.getByLabel("Difficulty", { exact: true }).selectOption("survival");
   await page.getByRole("button", { name: "New board", exact: true }).click();
