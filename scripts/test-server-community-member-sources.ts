@@ -101,13 +101,16 @@ async function main() {
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player", "10000000000000002", "Player");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-two", "10000000000000003", "Player Two");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-three", "10000000000000004", "Player Three");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-four", "10000000000000005", "Player Four");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server", "owner");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player", "player-one");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-two", "player-two");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-three", "player-three");
+  seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-four", "player-four");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-two");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-three");
+  seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-four");
 
   const env = { DB: db as unknown as D1Database } as Env;
   const owner: SessionUser = { id: "owner", discord_id: "10000000000000001", username: "Owner", avatar: null };
@@ -185,7 +188,25 @@ async function main() {
   assert.equal(retriedImport.status, 200);
   assert.match(retriedImport.message, /imported privately/i);
   assert.equal(seed("SELECT status FROM server_community_member_candidates WHERE id = ?").get(thirdCandidate.id)?.status, "imported");
-  assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_source_audit").get()?.count, 8);
+
+  const fourth = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000005", username: "Player Four", roleLabel: "Member" });
+  assert.equal(fourth.candidate_status, "pending");
+  queue = await listCommunityMemberSourceQueue(env, "server");
+  const fourthCandidate = queue.candidates.find((candidate) => candidate.public_handle === "player-four");
+  assert.ok(fourthCandidate);
+  db.beforeNextBatch = () => {
+    seed("UPDATE users SET discord_id = '10000000000000995' WHERE id = 'player-four'").run();
+  };
+  const identityChanged = await decideCommunityMemberCandidate(env, owner, "server", fourthCandidate.id, "import", null);
+  assert.equal(identityChanged.status, 200);
+  assert.match(identityChanged.message, /identity changed.*No source identifier was retained/i);
+  const scrubbed = seed("SELECT status, candidate_discord_id, candidate_username, matched_user_id FROM server_community_member_candidates WHERE id = ?").get(fourthCandidate.id);
+  assert.equal(scrubbed?.status, "no_match");
+  assert.equal(scrubbed?.candidate_discord_id, null);
+  assert.equal(scrubbed?.candidate_username, null);
+  assert.equal(scrubbed?.matched_user_id, null);
+  assert.equal(seed("SELECT result_status FROM server_community_member_source_audit WHERE candidate_id = ? AND action = 'candidate_no_match'").get(fourthCandidate.id)?.result_status, "skipped");
+  assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_source_audit").get()?.count, 10);
 
   db.sqlite.close();
   console.log("Server community member source checks passed.");

@@ -326,7 +326,7 @@ export async function decideCommunityMemberCandidate(
                   AND users.discord_id = server_community_member_candidates.candidate_discord_id
              )`,
         ).bind(noMatchReason, actor.id, now, decisionNonce, now, id, linkedServerId, candidate.matched_user_id),
-        conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, memberUserId: null, actorId: actor.id, action: "candidate_no_match", result: "no_match", reason: noMatchReason, now, status: "no_match", decisionNonce }),
+        conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, memberUserId: null, actorId: actor.id, action: "candidate_no_match", result: "skipped", reason: noMatchReason, now, status: "no_match", decisionNonce }),
       ]);
       const noMatch = await db.prepare("SELECT status, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
         .bind(id, linkedServerId).first<{ status: string; decision_nonce: string | null }>();
