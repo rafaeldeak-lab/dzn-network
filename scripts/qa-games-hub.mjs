@@ -18,10 +18,12 @@ preview?.stdout.setEncoding("utf8");
 preview?.stderr.setEncoding("utf8");
 preview?.stdout.on("data", chunk => { previewLog += chunk; });
 preview?.stderr.on("data", chunk => { previewLog += chunk; });
-const base = configuredOrigin ?? await waitForOrigin();
-const browser = await chromium.launch({ headless: true });
+let base;
+let browser;
 const failures = [], pageErrors = [], checks = [];
 try {
+  base = configuredOrigin ?? await waitForOrigin();
+  browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" });
   const page = await context.newPage();
   page.on("pageerror", error => pageErrors.push(error.message));
@@ -282,7 +284,7 @@ try {
   await writeFile(`${output}/results.json`, JSON.stringify({ base, synthetic: true, productionTouched: false, checks, pageErrors, failures }, null, 2));
   console.log(JSON.stringify({ checks, pageErrors, failures }, null, 2));
 } finally {
-  await browser.close();
+  await browser?.close();
   preview?.kill();
 }
 
