@@ -12,32 +12,26 @@ const assistGuidesSource = readFileSync("lib/dzn-assist.ts", "utf8");
 const publicAccessPolicy = readFileSync("docs/PUBLIC_ACCESS_POLICY.md", "utf8");
 
 assert.equal(layoutSource.includes("<DznCommsLauncher />"), true, "The Comms launcher must be mounted across the site.");
-assert.equal(headerSource.includes('{ href: "/community", label: "Comms", active: "community", icon: MessageCircle }'), true, "The shared header must link to Comms.");
+assert.equal(headerSource.includes('{ href: "/community", label: "Chat & Help", active: "community", icon: MessageCircle }'), true, "The shared header must clearly link to chat and help.");
 assert.equal(headerSource.includes('if (pathname.startsWith("/community")) return "community";'), true, "The Comms header link must receive the active state.");
 
 assert.equal(launcherSource.includes('href="/community#global-chat"'), true, "The global launcher must open Global Chat directly.");
 assert.equal(launcherSource.includes('href="/community#dzn-assist"'), true, "The global launcher must expose the DZN Assist status location.");
 assert.equal(launcherSource.includes("Guided help live"), true, "The launcher must identify the available guided-help experience.");
 assert.equal(launcherSource.includes('pathname.startsWith("/community")'), true, "The floating launcher must not cover the Comms page itself.");
-assert.equal(launcherSource.includes('event.key === "Escape"'), true, "The launcher must close with Escape.");
-assert.equal(launcherSource.includes('document.addEventListener("pointerdown", closeOnOutsideClick)'), true, "The launcher must close when someone clicks elsewhere on the page.");
-assert.equal(launcherSource.match(/onClick=\{\(\) => setOpenPath\(null\)\}/g)?.length, 2, "Both launcher navigation links must clear its open state.");
+assert.equal(launcherSource.includes("<details"), true, "The launcher must use a native disclosure so it works before client hydration completes.");
+assert.equal(launcherSource.includes('aria-label="Open Chat and Help"'), true, "The launcher disclosure must have an explicit accessible name.");
 assert.equal(launcherSource.includes("z-40"), true, "The launcher must remain below the shared header and modal layer.");
 assert.equal(launcherSource.includes("z-[70]"), false, "The launcher must not cover the DZN Pulse modal.");
 assert.equal(launcherSource.includes("Open Global Chat"), true, "The launcher must use neutral copy until the authoritative runtime state is known.");
 assert.equal(launcherSource.includes("Open live chat"), false, "The launcher must not infer live availability from public build flags.");
-assert.equal(launcherSource.includes("DZN Comms"), true, "The persistent launcher control must identify DZN Comms without relying on an icon or tooltip.");
+assert.equal(launcherSource.includes("Chat &amp; Help"), true, "The persistent launcher control must identify chat and help without relying on an icon or tooltip.");
 assert.equal(launcherSource.includes("Chat &amp; help"), true, "The persistent launcher must explain that it opens chat and help.");
-assert.equal(launcherSource.includes('className="sr-only text-left leading-none md:not-sr-only"'), true, "Phone and narrow-tablet screens must use the compact launcher while desktop retains its visible label.");
-assert.equal(launcherSource.includes('aria-label={open ? "Close DZN Comms menu" : "Open DZN Comms"}'), true, "The compact phone launcher must keep an explicit accessible name.");
+assert.equal(launcherSource.includes('className="text-left leading-none"'), true, "Phone and narrow-tablet screens must retain a visible chat and help label.");
 assert.equal(launcherSource.includes("safe-area-inset-bottom"), true, "The launcher must clear mobile safe-area controls.");
 assert.equal(launcherSource.includes("safe-area-inset-left"), true, "The launcher must clear mobile safe-area controls in landscape.");
 assert.equal(launcherSource.includes("safe-area-inset-right"), true, "The compact phone launcher must clear the right safe-area control.");
-assert.equal(launcherSource.includes("closeButtonRef.current?.focus()"), true, "Opening the launcher must move keyboard focus into its menu.");
-assert.equal(launcherSource.includes("ref={closeButtonRef}"), true, "The launcher close control must be the initial focus target.");
-assert.equal(launcherSource.includes("window.requestAnimationFrame(() => triggerButtonRef.current?.focus())"), true, "Closing the launcher with its keyboard paths must restore trigger focus.");
-assert.equal(launcherSource.includes("onClick={closeAndRestoreFocus}"), true, "The panel close control must restore focus to the launcher trigger.");
-assert.equal(launcherSource.includes("ref={triggerButtonRef}"), true, "The launcher trigger must remain available as the focus return target.");
+assert.equal(launcherSource.includes('disclosure.open = false'), true, "The panel close control must close the native disclosure.");
 
 assert.equal(commsSource.includes('id="global-chat"'), true, "Global Chat must have a direct-link target.");
 assert.equal(commsSource.includes('selectedChannelAccessLabel = sendingEnabled\n    ? "Live now"'), true, "The selected Comms channel must identify a live sending runtime.");
@@ -61,7 +55,7 @@ assert.equal(publicAccessPolicy.includes("The browser-local DZN Assist guide may
 assert.equal(publicAccessPolicy.includes("Any account-aware or generative AI runtime remains a separate release"), true, "The public access policy must keep future AI runtime activation separate.");
 assert.equal(commsSource.includes('pb-24 pt-4 text-zinc-100 sm:pt-6'), true, "Comms must begin directly below the shared header without the old empty spacer.");
 assert.equal(communityPageSource.includes("Open moderated DZN Global Chat"), true, "Default share metadata must describe the Comms destination accurately.");
-assert.equal(globalStylesSource.includes(".dzn-header-nav--logged-out .dzn-header-links {\n  grid-template-columns: repeat(3, minmax(96px, 1fr));"), true, "The signed-out desktop header must allocate one column for each public link.");
+assert.equal(globalStylesSource.includes(".dzn-header-nav--logged-out .dzn-header-links {\n  grid-template-columns: repeat(4, minmax(96px, 1fr));"), true, "The signed-out desktop header must allocate one column for each public link.");
 assert.equal(globalStylesSource.includes(".dzn-header-nav--logged-out .dzn-header-links {\n    grid-template-columns: repeat(2, minmax(0, 1fr));"), true, "The signed-out mobile header must restore its two-column wrapping.");
 
 for (const forbidden of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "chat.completions", "responses.create", "trackEvent", "checkout.sessions.create"]) {
