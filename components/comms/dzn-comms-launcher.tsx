@@ -9,6 +9,13 @@ export function DznCommsLauncher() {
   const pathname = usePathname() ?? "/";
   const disclosureRef = useRef<HTMLDetailsElement | null>(null);
 
+  function closeDisclosure() {
+    const disclosure = disclosureRef.current;
+    if (!disclosure) return;
+    disclosure.open = false;
+    disclosure.querySelector<HTMLElement>("summary")?.focus();
+  }
+
   useEffect(() => {
     disclosureRef.current?.removeAttribute("open");
   }, [pathname]);
@@ -44,10 +51,7 @@ export function DznCommsLauncher() {
             </div>
             <button
               type="button"
-              onClick={(event) => {
-                const disclosure = event.currentTarget.closest("details");
-                if (disclosure) disclosure.open = false;
-              }}
+              onClick={closeDisclosure}
               className="grid h-9 w-9 place-items-center rounded-md border border-white/10 text-zinc-300 transition hover:border-cyan-300/40 hover:text-white"
               aria-label="Close DZN Comms menu"
               title="Close"

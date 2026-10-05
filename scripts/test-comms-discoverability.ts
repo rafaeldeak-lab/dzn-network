@@ -22,6 +22,7 @@ assert.equal(launcherSource.includes('pathname.startsWith("/community")'), true,
 assert.equal(launcherSource.includes("<details"), true, "The launcher must use a native disclosure so it works before client hydration completes.");
 assert.equal(launcherSource.includes('aria-label="Open Chat and Help"'), true, "The launcher disclosure must have an explicit accessible name.");
 assert.equal(launcherSource.includes('disclosureRef.current?.removeAttribute("open")'), true, "The launcher must close when client-side navigation changes the route.");
+assert.equal(launcherSource.includes('disclosure.querySelector<HTMLElement>("summary")?.focus()'), true, "The launcher must restore focus to its summary after closing the panel.");
 assert.equal(launcherSource.includes("z-40"), true, "The launcher must remain below the shared header and modal layer.");
 assert.equal(launcherSource.includes("z-[70]"), false, "The launcher must not cover the DZN Pulse modal.");
 assert.equal(launcherSource.includes("Open Global Chat"), true, "The launcher must use neutral copy until the authoritative runtime state is known.");
