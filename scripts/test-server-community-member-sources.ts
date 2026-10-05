@@ -150,6 +150,7 @@ async function main() {
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server", "owner");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server-race", "owner");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server-admin-race", "player-eleven");
+  seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server-decision-race", "owner");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player", "player-one");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-two", "player-two");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-three", "player-three");
@@ -475,6 +476,16 @@ async function main() {
   const deletedAdminWrite = await createCommunityMemberCandidate(env, admin, "server-admin-race", { discordId: "10000000000000011", username: "Player Ten", roleLabel: "Member" });
   assert.equal(deletedAdminWrite.status, 409, "An allowlisted admin must lose access when its current identity disappears before the write.");
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_candidates WHERE linked_server_id = 'server-admin-race'").get()?.count, 0);
+
+  const decisionRace = await createCommunityMemberCandidate(env, owner, "server-decision-race", { discordId: "10000000000000011", username: "Player Ten", roleLabel: "Member" });
+  assert.equal(decisionRace.candidate_status, "pending");
+  const decisionRaceCandidate = seed("SELECT id FROM server_community_member_candidates WHERE linked_server_id = 'server-decision-race' AND status = 'pending'").get();
+  db.beforeNextBatch = () => {
+    seed("UPDATE linked_servers SET user_id = 'player-thirteen' WHERE id = 'server-decision-race'").run();
+  };
+  const transferredDuringReject = await decideCommunityMemberCandidate(env, owner, "server-decision-race", decisionRaceCandidate?.id, "reject", null);
+  assert.equal(transferredDuringReject.status, 409, "A decision that loses server access before its write must return only a generic changed-state response.");
+  assert.equal(seed("SELECT status FROM server_community_member_candidates WHERE id = ?").get(decisionRaceCandidate?.id)?.status, "pending");
 
   db.beforeNextBatch = () => {
     seed("UPDATE users SET discord_id = 'deleted-owner' WHERE id = 'owner'").run();

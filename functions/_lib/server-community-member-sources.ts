@@ -189,8 +189,11 @@ export async function createCommunityMemberCandidate(
           WHERE id = ? AND linked_server_id = ?`,
     ).bind(crypto.randomUUID(), actor.id, actor.discord_id, now, candidateId, linkedServerId),
   ]);
-  const saved = await db.prepare("SELECT status, reason FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
-    .bind(candidateId, linkedServerId).first<{ status: CandidateRow["status"]; reason: string | null }>();
+  const saved = await db.prepare(
+    `SELECT status, reason FROM server_community_member_candidates
+      WHERE id = ? AND linked_server_id = ? AND ${CURRENT_WRITE_ACCESS}
+      LIMIT 1`,
+  ).bind(candidateId, linkedServerId, ...writeAccess).first<{ status: CandidateRow["status"]; reason: string | null }>();
   if (!saved) {
     const concurrentPending = matched && !existing
       ? await db.prepare(
@@ -258,8 +261,11 @@ export async function createCommunityMemberCandidate(
             WHERE id = ? AND linked_server_id = ?`,
       ).bind(crypto.randomUUID(), actor.id, actor.discord_id, deletedReason, now, candidateId, linkedServerId),
     ]);
-    const noMatchSaved = await db.prepare("SELECT status FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
-      .bind(candidateId, linkedServerId).first<{ status: string }>();
+    const noMatchSaved = await db.prepare(
+      `SELECT status FROM server_community_member_candidates
+        WHERE id = ? AND linked_server_id = ? AND ${CURRENT_WRITE_ACCESS}
+        LIMIT 1`,
+    ).bind(candidateId, linkedServerId, ...writeAccess).first<{ status: string }>();
     return noMatchSaved?.status === "no_match"
       ? { ok: true as const, status: 201, candidate_status: "no_match" as const, message: deletedReason }
       : { ok: false as const, status: 409, error: "SOURCE_STATE_CHANGED", message: "The account source state changed while it was being queued. Refresh and try again." };
@@ -317,17 +323,30 @@ export async function decideCommunityMemberCandidate(
       ).bind(reason ?? "Rejected by the server owner.", actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId, ...writeAccess),
       conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, actorDiscordId: actor.discord_id, action: "candidate_rejected", result: "rejected", reason: reason ?? "Rejected by the server owner.", now, status: "rejected", decisionNonce }),
     ]);
-    const rejected = await db.prepare("SELECT status, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
-      .bind(id, linkedServerId).first<{ status: string; decision_nonce: string | null }>();
+    const rejected = await db.prepare(
+      `SELECT status, decision_nonce FROM server_community_member_candidates
+        WHERE id = ? AND linked_server_id = ? AND ${CURRENT_WRITE_ACCESS}
+        LIMIT 1`,
+    ).bind(id, linkedServerId, ...writeAccess).first<{ status: string; decision_nonce: string | null }>();
+    if (!rejected) {
+      return { ok: false as const, status: 409, error: "SOURCE_STATE_CHANGED", message: "The candidate or your server access changed. Refresh and try again." };
+    }
     return rejected?.status === "rejected" && rejected.decision_nonce === decisionNonce
       ? { ok: true as const, status: 200, message: "Candidate rejected and recorded." }
       : { ok: true as const, status: 200, message: `Candidate was already decided as ${rejected?.status ?? "unavailable"} by another request.` };
   }
   if (candidate.matched_user_id) {
-    const existingMember = await db.prepare(
-      "SELECT id FROM server_community_members WHERE linked_server_id = ? AND user_id = ? LIMIT 1",
-    ).bind(linkedServerId, candidate.matched_user_id).first<{ id: string }>();
-    if (existingMember) {
+    const existingMemberState = await db.prepare(
+      `SELECT EXISTS (
+         SELECT 1 FROM server_community_members
+          WHERE linked_server_id = ? AND user_id = ?
+       ) AS member_exists
+       WHERE ${CURRENT_WRITE_ACCESS}`,
+    ).bind(linkedServerId, candidate.matched_user_id, ...writeAccess).first<{ member_exists: number }>();
+    if (!existingMemberState) {
+      return { ok: false as const, status: 409, error: "SOURCE_STATE_CHANGED", message: "The candidate or your server access changed. Refresh and try again." };
+    }
+    if (existingMemberState.member_exists) {
       const duplicateReason = "That DZN account is already in this server directory. The existing member was not changed.";
       await db.batch([
         db.prepare(
@@ -347,8 +366,11 @@ export async function decideCommunityMemberCandidate(
         ).bind(duplicateReason, actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId, linkedServerId, ...writeAccess),
         conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, actorDiscordId: actor.discord_id, action: "candidate_duplicate", result: "skipped", reason: duplicateReason, now, status: "duplicate", decisionNonce }),
       ]);
-      const duplicate = await db.prepare("SELECT status, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
-        .bind(id, linkedServerId).first<{ status: string; decision_nonce: string | null }>();
+      const duplicate = await db.prepare(
+        `SELECT status, decision_nonce FROM server_community_member_candidates
+          WHERE id = ? AND linked_server_id = ? AND ${CURRENT_WRITE_ACCESS}
+          LIMIT 1`,
+      ).bind(id, linkedServerId, ...writeAccess).first<{ status: string; decision_nonce: string | null }>();
       if (duplicate?.status === "duplicate" && duplicate.decision_nonce === decisionNonce) {
         return { ok: true as const, status: 200, message: duplicateReason };
       }
@@ -422,8 +444,14 @@ export async function decideCommunityMemberCandidate(
     ).bind(crypto.randomUUID(), linkedServerId, candidate.matched_user_id, actor.id, actor.discord_id, candidate.role_label, now, id, linkedServerId, decisionNonce, memberId),
     conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, actorDiscordId: actor.discord_id, action: "candidate_imported", result: "accepted", reason: reason ?? "Imported privately; player approval is still required.", now, status: "imported", decisionNonce, importedMemberId: memberId }),
   ]);
-  const imported = await db.prepare("SELECT status, imported_member_id, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
-    .bind(id, linkedServerId).first<{ status: string; imported_member_id: string | null; decision_nonce: string | null }>();
+  const imported = await db.prepare(
+    `SELECT status, imported_member_id, decision_nonce FROM server_community_member_candidates
+      WHERE id = ? AND linked_server_id = ? AND ${CURRENT_WRITE_ACCESS}
+      LIMIT 1`,
+  ).bind(id, linkedServerId, ...writeAccess).first<{ status: string; imported_member_id: string | null; decision_nonce: string | null }>();
+  if (!imported) {
+    return { ok: false as const, status: 409, error: "SOURCE_STATE_CHANGED", message: "The candidate or your server access changed. Refresh and try again." };
+  }
   if (imported?.status === "imported" && (imported.imported_member_id !== memberId || imported.decision_nonce !== decisionNonce)) {
     return { ok: true as const, status: 200, message: "Candidate was already imported by another request." };
   }
@@ -458,12 +486,17 @@ export async function decideCommunityMemberCandidate(
                      ON privacy.user_id = users.id
                     AND privacy.public_profile_enabled = 1
             WHERE candidates.id = ? AND candidates.linked_server_id = ?
-         ) AS eligible`,
+          ) AS eligible
+       WHERE ${CURRENT_WRITE_ACCESS}`,
     ).bind(
       linkedServerId, candidate.matched_user_id,
       candidate.matched_user_id, id, linkedServerId,
       candidate.matched_user_id, id, linkedServerId,
+      ...writeAccess,
     ).first<{ member_exists: number; identity_current: number; eligible: number }>();
+    if (!currentState) {
+      return { ok: false as const, status: 409, error: "SOURCE_STATE_CHANGED", message: "The candidate or your server access changed. Refresh and try again." };
+    }
 
     if (!currentState?.identity_current) {
       const noMatchReason = "The linked Discord identity changed or is no longer available. No source identifier was retained.";
@@ -484,8 +517,14 @@ export async function decideCommunityMemberCandidate(
         ).bind(noMatchReason, actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId, ...writeAccess),
         conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, actorDiscordId: actor.discord_id, action: "candidate_no_match", result: "skipped", reason: noMatchReason, now, status: "no_match", decisionNonce }),
       ]);
-      const noMatch = await db.prepare("SELECT status, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
-        .bind(id, linkedServerId).first<{ status: string; decision_nonce: string | null }>();
+      const noMatch = await db.prepare(
+        `SELECT status, decision_nonce FROM server_community_member_candidates
+          WHERE id = ? AND linked_server_id = ? AND ${CURRENT_WRITE_ACCESS}
+          LIMIT 1`,
+      ).bind(id, linkedServerId, ...writeAccess).first<{ status: string; decision_nonce: string | null }>();
+      if (!noMatch) {
+        return { ok: false as const, status: 409, error: "SOURCE_STATE_CHANGED", message: "The candidate or your server access changed. Refresh and try again." };
+      }
       if (noMatch?.status === "no_match" && noMatch.decision_nonce === decisionNonce) {
         return { ok: true as const, status: 200, message: noMatchReason };
       }
@@ -519,8 +558,14 @@ export async function decideCommunityMemberCandidate(
         ).bind(duplicateReason, actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId, linkedServerId, ...writeAccess),
         conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, actorDiscordId: actor.discord_id, action: "candidate_duplicate", result: "skipped", reason: duplicateReason, now, status: "duplicate", decisionNonce }),
       ]);
-      const duplicate = await db.prepare("SELECT status, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
-        .bind(id, linkedServerId).first<{ status: string; decision_nonce: string | null }>();
+      const duplicate = await db.prepare(
+        `SELECT status, decision_nonce FROM server_community_member_candidates
+          WHERE id = ? AND linked_server_id = ? AND ${CURRENT_WRITE_ACCESS}
+          LIMIT 1`,
+      ).bind(id, linkedServerId, ...writeAccess).first<{ status: string; decision_nonce: string | null }>();
+      if (!duplicate) {
+        return { ok: false as const, status: 409, error: "SOURCE_STATE_CHANGED", message: "The candidate or your server access changed. Refresh and try again." };
+      }
       if (duplicate?.status === "duplicate" && duplicate.decision_nonce === decisionNonce) {
         return { ok: true as const, status: 200, message: duplicateReason };
       }
