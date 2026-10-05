@@ -307,7 +307,9 @@ export async function decideCommunityMemberCandidate(
       await db.batch([
         db.prepare(
           `UPDATE server_community_member_candidates
-           SET status = 'duplicate', reason = ?,
+           SET status = 'duplicate',
+               matched_user_id = (SELECT id FROM users WHERE discord_id = server_community_member_candidates.candidate_discord_id),
+               reason = ?,
                reviewed_by_user_id = (SELECT id FROM users WHERE id = ? AND discord_id = ?), reviewed_at = ?,
                decision_nonce = ?, updated_at = ?
            WHERE id = ? AND linked_server_id = ? AND status = 'pending'
@@ -456,7 +458,9 @@ export async function decideCommunityMemberCandidate(
       await db.batch([
         db.prepare(
           `UPDATE server_community_member_candidates
-           SET status = 'duplicate', reason = ?,
+           SET status = 'duplicate',
+               matched_user_id = (SELECT id FROM users WHERE discord_id = server_community_member_candidates.candidate_discord_id),
+               reason = ?,
                reviewed_by_user_id = (SELECT id FROM users WHERE id = ? AND discord_id = ?), reviewed_at = ?,
                decision_nonce = ?, updated_at = ?
            WHERE id = ? AND linked_server_id = ? AND status = 'pending'
