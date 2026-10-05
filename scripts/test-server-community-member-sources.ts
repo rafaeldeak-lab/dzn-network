@@ -85,6 +85,7 @@ async function main() {
   assert.match(helper, /SELECT \?, \?, \?, matched_user_id/, "Decision audits must use the candidate's current write-time identity.");
   assert.match(helper, /CASE WHEN EXISTS \([\s\S]*server_community_members[\s\S]*THEN 'duplicate' ELSE 'pending'/, "Candidate status must use write-time directory membership.");
   assert.match(helper, /'no_match'[\s\S]*WHERE NOT EXISTS \(SELECT 1 FROM users WHERE discord_id = \?\)/, "No-match creation must be fenced against a concurrent account link.");
+  assert.match(helper, /created_by_user_id[\s\S]*SELECT id FROM users WHERE id = \? AND discord_id = \?/, "Candidate actor links must be fenced to the current authenticated identity.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(deletion, /candidate_discord_id = NULL/, "Account deletion must erase retained source identifiers.");
   assert.match(deletion, /created_by_user_id = CASE[\s\S]*reviewed_by_user_id = CASE/, "Retained Store accounts must be unlinked from candidate creator and reviewer fields.");
@@ -122,6 +123,7 @@ async function main() {
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-six", "10000000000000007", "Player Six");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-seven", "10000000000000008", "Player Seven");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-eight", "10000000000000009", "Player Eight");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-ten", "10000000000000011", "Player Ten");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server", "owner");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player", "player-one");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-two", "player-two");
@@ -131,6 +133,7 @@ async function main() {
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-six", "player-six");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-seven", "player-seven");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-eight", "player-eight");
+  seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-ten", "player-ten");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-two");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-three");
@@ -139,6 +142,7 @@ async function main() {
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-six");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-seven");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-eight");
+  seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-ten");
 
   const env = { DB: db as unknown as D1Database } as Env;
   const owner: SessionUser = { id: "owner", discord_id: "10000000000000001", username: "Owner", avatar: null };
@@ -289,6 +293,18 @@ async function main() {
   const accountLinked = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000010", username: "Player Nine", roleLabel: "Member" });
   assert.equal(accountLinked.status, 409, "A concurrently linked account must make the caller refresh instead of recording a false no-match.");
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_candidates WHERE candidate_username = 'Player Nine'").get()?.count, 0);
+
+  db.beforeNextBatch = () => {
+    seed("UPDATE users SET discord_id = 'deleted-owner' WHERE id = 'owner'").run();
+    seed("UPDATE server_community_member_candidates SET created_by_user_id = NULL, reviewed_by_user_id = NULL WHERE created_by_user_id = 'owner' OR reviewed_by_user_id = 'owner'").run();
+    seed("UPDATE server_community_member_source_audit SET actor_user_id = NULL WHERE actor_user_id = 'owner'").run();
+    seed("UPDATE server_community_member_audit SET actor_user_id = NULL WHERE actor_user_id = 'owner'").run();
+  };
+  const erasedActorCreate = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000011", username: "Player Ten", roleLabel: "Member" });
+  assert.equal(erasedActorCreate.candidate_status, "pending");
+  const erasedActorCandidate = seed("SELECT id, created_by_user_id FROM server_community_member_candidates WHERE matched_user_id = 'player-ten'").get();
+  assert.equal(erasedActorCandidate?.created_by_user_id, null, "A stale session must not restore an anonymized candidate creator link.");
+  assert.equal(seed("SELECT actor_user_id FROM server_community_member_source_audit WHERE candidate_id = ?").get(erasedActorCandidate?.id)?.actor_user_id, null, "A stale session must not restore an anonymized source-audit actor link.");
 
   seed("CREATE TABLE store_orders (id TEXT PRIMARY KEY, purchasing_user_id TEXT)").run();
   seed("INSERT INTO store_orders (id, purchasing_user_id) VALUES ('retained-order', 'player-four')").run();

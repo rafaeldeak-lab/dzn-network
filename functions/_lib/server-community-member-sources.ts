@@ -130,26 +130,28 @@ export async function createCommunityMemberCandidate(
                     SELECT 1 FROM server_community_members
                      WHERE linked_server_id = ? AND user_id = users.id
                   ) THEN ? ELSE ? END,
-                  ?, ?, ?
+                  (SELECT id FROM users WHERE id = ? AND discord_id = ?), ?, ?
              FROM users
             WHERE users.id = ? AND users.discord_id = ?
          ON CONFLICT DO NOTHING`,
-      ).bind(candidateId, linkedServerId, linkedServerId, discordId, candidateUsername, roleLabel, linkedServerId, linkedServerId, duplicateReason, pendingReason, actor.id, now, now, matched.id, discordId)
+      ).bind(candidateId, linkedServerId, linkedServerId, discordId, candidateUsername, roleLabel, linkedServerId, linkedServerId, duplicateReason, pendingReason, actor.id, actor.discord_id, now, now, matched.id, discordId)
     : db.prepare(
         `INSERT INTO server_community_member_candidates (
            id, linked_server_id, candidate_discord_id, candidate_username, role_label,
            status, matched_user_id, reason, created_by_user_id, created_at, updated_at
-         ) SELECT ?, ?, NULL, ?, ?, 'no_match', NULL, ?, ?, ?, ?
+         ) SELECT ?, ?, NULL, ?, ?, 'no_match', NULL, ?,
+                  (SELECT id FROM users WHERE id = ? AND discord_id = ?), ?, ?
             WHERE NOT EXISTS (SELECT 1 FROM users WHERE discord_id = ?)
          ON CONFLICT DO NOTHING`,
-      ).bind(candidateId, linkedServerId, candidateUsername, roleLabel, noMatchReason, actor.id, now, now, discordId);
+      ).bind(candidateId, linkedServerId, candidateUsername, roleLabel, noMatchReason, actor.id, actor.discord_id, now, now, discordId);
   await db.batch([
     candidateInsert,
     db.prepare(
       `INSERT INTO server_community_member_source_audit (
          id, linked_server_id, candidate_id, member_user_id, actor_user_id,
          action, result_status, reason, created_at
-       ) SELECT ?, linked_server_id, id, matched_user_id, ?,
+       ) SELECT ?, linked_server_id, id, matched_user_id,
+                (SELECT id FROM users WHERE id = ? AND discord_id = ?),
                 CASE status
                   WHEN 'pending' THEN 'candidate_created'
                   WHEN 'duplicate' THEN 'candidate_duplicate'
@@ -159,7 +161,7 @@ export async function createCommunityMemberCandidate(
                 reason, ?
            FROM server_community_member_candidates
           WHERE id = ? AND linked_server_id = ?`,
-    ).bind(crypto.randomUUID(), actor.id, now, candidateId, linkedServerId),
+    ).bind(crypto.randomUUID(), actor.id, actor.discord_id, now, candidateId, linkedServerId),
   ]);
   const saved = await db.prepare("SELECT status, reason FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
     .bind(candidateId, linkedServerId).first<{ status: CandidateRow["status"]; reason: string | null }>();
@@ -212,17 +214,20 @@ export async function createCommunityMemberCandidate(
         `INSERT INTO server_community_member_candidates (
            id, linked_server_id, candidate_discord_id, candidate_username, role_label,
            status, matched_user_id, reason, created_by_user_id, created_at, updated_at
-         ) SELECT ?, ?, NULL, ?, ?, 'no_match', NULL, ?, ?, ?, ?
+         ) SELECT ?, ?, NULL, ?, ?, 'no_match', NULL, ?,
+                  (SELECT id FROM users WHERE id = ? AND discord_id = ?), ?, ?
             WHERE NOT EXISTS (SELECT 1 FROM users WHERE discord_id = ?)`,
-      ).bind(candidateId, linkedServerId, candidateUsername, roleLabel, deletedReason, actor.id, now, now, discordId),
+      ).bind(candidateId, linkedServerId, candidateUsername, roleLabel, deletedReason, actor.id, actor.discord_id, now, now, discordId),
       db.prepare(
         `INSERT INTO server_community_member_source_audit (
            id, linked_server_id, candidate_id, member_user_id, actor_user_id,
            action, result_status, reason, created_at
-         ) SELECT ?, linked_server_id, id, NULL, ?, 'candidate_no_match', 'skipped', ?, ?
+         ) SELECT ?, linked_server_id, id, NULL,
+                  (SELECT id FROM users WHERE id = ? AND discord_id = ?),
+                  'candidate_no_match', 'skipped', ?, ?
              FROM server_community_member_candidates
             WHERE id = ? AND linked_server_id = ?`,
-      ).bind(crypto.randomUUID(), actor.id, deletedReason, now, candidateId, linkedServerId),
+      ).bind(crypto.randomUUID(), actor.id, actor.discord_id, deletedReason, now, candidateId, linkedServerId),
     ]);
     const noMatchSaved = await db.prepare("SELECT status FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
       .bind(candidateId, linkedServerId).first<{ status: string }>();
@@ -268,11 +273,12 @@ export async function decideCommunityMemberCandidate(
     await db.batch([
       db.prepare(
         `UPDATE server_community_member_candidates
-         SET status = 'rejected', reason = ?, reviewed_by_user_id = ?, reviewed_at = ?,
+         SET status = 'rejected', reason = ?,
+             reviewed_by_user_id = (SELECT id FROM users WHERE id = ? AND discord_id = ?), reviewed_at = ?,
              decision_nonce = ?, updated_at = ?
          WHERE id = ? AND linked_server_id = ? AND status = 'pending'`,
-      ).bind(reason ?? "Rejected by the server owner.", actor.id, now, decisionNonce, now, id, linkedServerId),
-      conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, action: "candidate_rejected", result: "rejected", reason: reason ?? "Rejected by the server owner.", now, status: "rejected", decisionNonce }),
+      ).bind(reason ?? "Rejected by the server owner.", actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId),
+      conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, actorDiscordId: actor.discord_id, action: "candidate_rejected", result: "rejected", reason: reason ?? "Rejected by the server owner.", now, status: "rejected", decisionNonce }),
     ]);
     const rejected = await db.prepare("SELECT status, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
       .bind(id, linkedServerId).first<{ status: string; decision_nonce: string | null }>();
@@ -289,7 +295,8 @@ export async function decideCommunityMemberCandidate(
       `INSERT INTO server_community_members (
          id, linked_server_id, user_id, role_label, public_member_enabled, source,
          created_by_user_id, created_at, updated_at
-       ) SELECT ?, ?, users.id, ?, 0, 'owner_public_handle', ?, ?, ?
+       ) SELECT ?, ?, users.id, ?, 0, 'owner_public_handle',
+                (SELECT id FROM users WHERE id = ? AND discord_id = ?), ?, ?
          FROM server_community_member_candidates candidates
          INNER JOIN users
                  ON users.id = ?
@@ -305,25 +312,29 @@ export async function decideCommunityMemberCandidate(
             SELECT 1 FROM server_community_members members
              WHERE members.linked_server_id = ? AND members.user_id = ?
           )`,
-    ).bind(memberId, linkedServerId, candidate.role_label, actor.id, now, now, candidate.matched_user_id, id, linkedServerId, linkedServerId, candidate.matched_user_id),
+    ).bind(memberId, linkedServerId, candidate.role_label, actor.id, actor.discord_id, now, now, candidate.matched_user_id, id, linkedServerId, linkedServerId, candidate.matched_user_id),
     db.prepare(
       `UPDATE server_community_member_candidates
        SET status = 'imported', matched_user_id = ?,
            imported_member_id = ?,
-           reason = ?, reviewed_by_user_id = ?, reviewed_at = ?, decision_nonce = ?, updated_at = ?
+           reason = ?,
+           reviewed_by_user_id = (SELECT id FROM users WHERE id = ? AND discord_id = ?),
+           reviewed_at = ?, decision_nonce = ?, updated_at = ?
        WHERE id = ? AND linked_server_id = ? AND status = 'pending'
          AND EXISTS (SELECT 1 FROM server_community_members WHERE id = ? AND linked_server_id = ? AND user_id = ?)`,
-    ).bind(candidate.matched_user_id, memberId, reason ?? "Imported privately; player approval is still required.", actor.id, now, decisionNonce, now, id, linkedServerId, memberId, linkedServerId, candidate.matched_user_id),
+    ).bind(candidate.matched_user_id, memberId, reason ?? "Imported privately; player approval is still required.", actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId, memberId, linkedServerId, candidate.matched_user_id),
     db.prepare(
       `INSERT INTO server_community_member_audit (
          id, linked_server_id, member_user_id, actor_user_id, action,
          role_label, public_member_enabled, created_at
-       ) SELECT ?, ?, ?, ?, 'add', ?, 0, ?
+       ) SELECT ?, ?, ?,
+                (SELECT id FROM users WHERE id = ? AND discord_id = ?),
+                'add', ?, 0, ?
          FROM server_community_member_candidates
         WHERE id = ? AND linked_server_id = ? AND status = 'imported'
           AND decision_nonce = ? AND imported_member_id = ?`,
-    ).bind(crypto.randomUUID(), linkedServerId, candidate.matched_user_id, actor.id, candidate.role_label, now, id, linkedServerId, decisionNonce, memberId),
-    conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, action: "candidate_imported", result: "accepted", reason: reason ?? "Imported privately; player approval is still required.", now, status: "imported", decisionNonce, importedMemberId: memberId }),
+    ).bind(crypto.randomUUID(), linkedServerId, candidate.matched_user_id, actor.id, actor.discord_id, candidate.role_label, now, id, linkedServerId, decisionNonce, memberId),
+    conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, actorDiscordId: actor.discord_id, action: "candidate_imported", result: "accepted", reason: reason ?? "Imported privately; player approval is still required.", now, status: "imported", decisionNonce, importedMemberId: memberId }),
   ]);
   const imported = await db.prepare("SELECT status, imported_member_id, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
     .bind(id, linkedServerId).first<{ status: string; imported_member_id: string | null; decision_nonce: string | null }>();
@@ -374,7 +385,8 @@ export async function decideCommunityMemberCandidate(
         db.prepare(
           `UPDATE server_community_member_candidates
            SET status = 'no_match', candidate_discord_id = NULL, candidate_username = NULL,
-               matched_user_id = NULL, reason = ?, reviewed_by_user_id = ?, reviewed_at = ?,
+               matched_user_id = NULL, reason = ?,
+               reviewed_by_user_id = (SELECT id FROM users WHERE id = ? AND discord_id = ?), reviewed_at = ?,
                decision_nonce = ?, updated_at = ?
            WHERE id = ? AND linked_server_id = ? AND status = 'pending'
              AND NOT EXISTS (
@@ -383,8 +395,8 @@ export async function decideCommunityMemberCandidate(
                 WHERE users.id = ?
                   AND users.discord_id = server_community_member_candidates.candidate_discord_id
              )`,
-        ).bind(noMatchReason, actor.id, now, decisionNonce, now, id, linkedServerId, candidate.matched_user_id),
-        conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, action: "candidate_no_match", result: "skipped", reason: noMatchReason, now, status: "no_match", decisionNonce }),
+        ).bind(noMatchReason, actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId, candidate.matched_user_id),
+        conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, actorDiscordId: actor.discord_id, action: "candidate_no_match", result: "skipped", reason: noMatchReason, now, status: "no_match", decisionNonce }),
       ]);
       const noMatch = await db.prepare("SELECT status, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
         .bind(id, linkedServerId).first<{ status: string; decision_nonce: string | null }>();
@@ -406,15 +418,16 @@ export async function decideCommunityMemberCandidate(
       await db.batch([
         db.prepare(
           `UPDATE server_community_member_candidates
-           SET status = 'duplicate', reason = ?, reviewed_by_user_id = ?, reviewed_at = ?,
+           SET status = 'duplicate', reason = ?,
+               reviewed_by_user_id = (SELECT id FROM users WHERE id = ? AND discord_id = ?), reviewed_at = ?,
                decision_nonce = ?, updated_at = ?
            WHERE id = ? AND linked_server_id = ? AND status = 'pending'
              AND EXISTS (
                SELECT 1 FROM server_community_members
                 WHERE linked_server_id = ? AND user_id = ?
              )`,
-        ).bind(duplicateReason, actor.id, now, decisionNonce, now, id, linkedServerId, linkedServerId, candidate.matched_user_id),
-        conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, action: "candidate_duplicate", result: "skipped", reason: duplicateReason, now, status: "duplicate", decisionNonce }),
+        ).bind(duplicateReason, actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId, linkedServerId, candidate.matched_user_id),
+        conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, actorDiscordId: actor.discord_id, action: "candidate_duplicate", result: "skipped", reason: duplicateReason, now, status: "duplicate", decisionNonce }),
       ]);
       const duplicate = await db.prepare("SELECT status, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
         .bind(id, linkedServerId).first<{ status: string; decision_nonce: string | null }>();
@@ -428,17 +441,19 @@ export async function decideCommunityMemberCandidate(
   return { ok: true as const, status: 200, message: "Candidate imported privately. The player must approve the directory invitation." };
 }
 
-function conditionalDecisionAuditStatement(db: D1Database, input: { linkedServerId: string; candidateId: string; actorId: string; action: string; result: string; reason: string; now: string; status: "imported" | "rejected" | "duplicate" | "no_match"; decisionNonce: string; importedMemberId?: string }) {
+function conditionalDecisionAuditStatement(db: D1Database, input: { linkedServerId: string; candidateId: string; actorId: string; actorDiscordId: string; action: string; result: string; reason: string; now: string; status: "imported" | "rejected" | "duplicate" | "no_match"; decisionNonce: string; importedMemberId?: string }) {
   return db.prepare(
     `INSERT INTO server_community_member_source_audit (
        id, linked_server_id, candidate_id, member_user_id, actor_user_id,
        action, result_status, reason, created_at
-     ) SELECT ?, ?, ?, matched_user_id, ?, ?, ?, ?, ?
+     ) SELECT ?, ?, ?, matched_user_id,
+              (SELECT id FROM users WHERE id = ? AND discord_id = ?),
+              ?, ?, ?, ?
        FROM server_community_member_candidates
       WHERE id = ? AND linked_server_id = ? AND status = ?
         AND decision_nonce = ?
         AND (? IS NULL OR imported_member_id = ?)`,
-  ).bind(crypto.randomUUID(), input.linkedServerId, input.candidateId, input.actorId, input.action, input.result, input.reason, input.now, input.candidateId, input.linkedServerId, input.status, input.decisionNonce, input.importedMemberId ?? null, input.importedMemberId ?? null);
+  ).bind(crypto.randomUUID(), input.linkedServerId, input.candidateId, input.actorId, input.actorDiscordId, input.action, input.result, input.reason, input.now, input.candidateId, input.linkedServerId, input.status, input.decisionNonce, input.importedMemberId ?? null, input.importedMemberId ?? null);
 }
 
 function toCandidatePayload(row: CandidateRow) {
