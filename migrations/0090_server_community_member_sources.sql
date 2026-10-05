@@ -33,10 +33,6 @@ ON server_community_member_candidates(linked_server_id, status, updated_at DESC)
 CREATE INDEX IF NOT EXISTS idx_server_community_member_candidates_match
 ON server_community_member_candidates(matched_user_id, status);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_server_community_member_candidates_one_pending
-ON server_community_member_candidates(linked_server_id, matched_user_id)
-WHERE status = 'pending' AND matched_user_id IS NOT NULL;
-
 CREATE UNIQUE INDEX IF NOT EXISTS idx_server_community_member_candidates_one_pending_discord
 ON server_community_member_candidates(linked_server_id, candidate_discord_id)
 WHERE status = 'pending' AND candidate_discord_id IS NOT NULL;

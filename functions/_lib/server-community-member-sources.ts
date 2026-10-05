@@ -215,7 +215,7 @@ export async function createCommunityMemberCandidate(
               ) AS member_exists,
               (
                 SELECT status FROM server_community_member_candidates
-                 WHERE linked_server_id = ? AND matched_user_id = users.id
+                 WHERE linked_server_id = ? AND candidate_discord_id = users.discord_id
                  ORDER BY created_at DESC, id DESC
                  LIMIT 1
               ) AS latest_status
