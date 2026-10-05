@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS server_community_member_candidates (
   created_by_user_id TEXT,
   reviewed_by_user_id TEXT,
   reviewed_at TEXT,
+  decision_nonce TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id) ON DELETE CASCADE,

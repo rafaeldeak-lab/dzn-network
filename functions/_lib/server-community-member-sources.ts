@@ -51,7 +51,8 @@ export async function listCommunityMemberSourceQueue(env: Env, linkedServerId: s
        LEFT JOIN player_public_profiles ON player_public_profiles.user_id = candidates.matched_user_id
        LEFT JOIN player_profile_privacy_preferences ON player_profile_privacy_preferences.user_id = candidates.matched_user_id
        WHERE candidates.linked_server_id = ?
-       ORDER BY candidates.updated_at DESC
+       ORDER BY CASE candidates.status WHEN 'pending' THEN 0 ELSE 1 END,
+                candidates.updated_at DESC
        LIMIT 100`,
     ).bind(linkedServerId).all<CandidateRow>(),
     db.prepare(
@@ -140,16 +141,22 @@ export async function decideCommunityMemberCandidate(
   if (candidate.status !== "pending") return { ok: false as const, status: 409, error: "CANDIDATE_ALREADY_DECIDED", message: "That candidate has already been decided." };
   const now = new Date().toISOString();
   const reason = cleanText(reasonInput, 220);
+  const decisionNonce = crypto.randomUUID();
   if (decision === "reject") {
     await db.batch([
       db.prepare(
         `UPDATE server_community_member_candidates
-         SET status = 'rejected', reason = ?, reviewed_by_user_id = ?, reviewed_at = ?, updated_at = ?
+         SET status = 'rejected', reason = ?, reviewed_by_user_id = ?, reviewed_at = ?,
+             decision_nonce = ?, updated_at = ?
          WHERE id = ? AND linked_server_id = ? AND status = 'pending'`,
-      ).bind(reason ?? "Rejected by the server owner.", actor.id, now, now, id, linkedServerId),
-      conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, memberUserId: candidate.matched_user_id, actorId: actor.id, action: "candidate_rejected", result: "rejected", reason: reason ?? "Rejected by the server owner.", now, status: "rejected" }),
+      ).bind(reason ?? "Rejected by the server owner.", actor.id, now, decisionNonce, now, id, linkedServerId),
+      conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, memberUserId: candidate.matched_user_id, actorId: actor.id, action: "candidate_rejected", result: "rejected", reason: reason ?? "Rejected by the server owner.", now, status: "rejected", decisionNonce }),
     ]);
-    return { ok: true as const, status: 200, message: "Candidate rejected and recorded." };
+    const rejected = await db.prepare("SELECT status, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
+      .bind(id, linkedServerId).first<{ status: string; decision_nonce: string | null }>();
+    return rejected?.status === "rejected" && rejected.decision_nonce === decisionNonce
+      ? { ok: true as const, status: 200, message: "Candidate rejected and recorded." }
+      : { ok: true as const, status: 200, message: `Candidate was already decided as ${rejected?.status ?? "unavailable"} by another request.` };
   }
   if (!candidate.matched_user_id || !candidate.handle || candidate.public_profile_enabled !== 1) {
     return { ok: false as const, status: 409, error: "PUBLIC_PROFILE_REQUIRED", message: "The matched player must have an active public DZN profile before import." };
@@ -172,10 +179,10 @@ export async function decideCommunityMemberCandidate(
       `UPDATE server_community_member_candidates
        SET status = 'imported', matched_user_id = ?,
            imported_member_id = ?,
-           reason = ?, reviewed_by_user_id = ?, reviewed_at = ?, updated_at = ?
+           reason = ?, reviewed_by_user_id = ?, reviewed_at = ?, decision_nonce = ?, updated_at = ?
        WHERE id = ? AND linked_server_id = ? AND status = 'pending'
          AND EXISTS (SELECT 1 FROM server_community_members WHERE id = ? AND linked_server_id = ? AND user_id = ?)`,
-    ).bind(candidate.matched_user_id, memberId, reason ?? "Imported privately; player approval is still required.", actor.id, now, now, id, linkedServerId, memberId, linkedServerId, candidate.matched_user_id),
+    ).bind(candidate.matched_user_id, memberId, reason ?? "Imported privately; player approval is still required.", actor.id, now, decisionNonce, now, id, linkedServerId, memberId, linkedServerId, candidate.matched_user_id),
     db.prepare(
       `INSERT INTO server_community_member_audit (
          id, linked_server_id, member_user_id, actor_user_id, action,
@@ -183,31 +190,32 @@ export async function decideCommunityMemberCandidate(
        ) SELECT ?, ?, ?, ?, 'add', ?, 0, ?
          FROM server_community_member_candidates
         WHERE id = ? AND linked_server_id = ? AND status = 'imported'
-          AND reviewed_by_user_id = ? AND reviewed_at = ? AND imported_member_id = ?`,
-    ).bind(crypto.randomUUID(), linkedServerId, candidate.matched_user_id, actor.id, candidate.role_label, now, id, linkedServerId, actor.id, now, memberId),
-    conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, memberUserId: candidate.matched_user_id, actorId: actor.id, action: "candidate_imported", result: "accepted", reason: reason ?? "Imported privately; player approval is still required.", now, status: "imported", importedMemberId: memberId }),
+          AND decision_nonce = ? AND imported_member_id = ?`,
+    ).bind(crypto.randomUUID(), linkedServerId, candidate.matched_user_id, actor.id, candidate.role_label, now, id, linkedServerId, decisionNonce, memberId),
+    conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, memberUserId: candidate.matched_user_id, actorId: actor.id, action: "candidate_imported", result: "accepted", reason: reason ?? "Imported privately; player approval is still required.", now, status: "imported", decisionNonce, importedMemberId: memberId }),
   ]);
-  const imported = await db.prepare("SELECT status, imported_member_id FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
-    .bind(id, linkedServerId).first<{ status: string; imported_member_id: string | null }>();
-  if (imported?.status === "imported" && imported.imported_member_id !== memberId) {
+  const imported = await db.prepare("SELECT status, imported_member_id, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
+    .bind(id, linkedServerId).first<{ status: string; imported_member_id: string | null; decision_nonce: string | null }>();
+  if (imported?.status === "imported" && (imported.imported_member_id !== memberId || imported.decision_nonce !== decisionNonce)) {
     return { ok: true as const, status: 200, message: "Candidate was already imported by another request." };
   }
-  if (imported?.status !== "imported" || imported.imported_member_id !== memberId) {
+  if (imported?.status !== "imported" || imported.imported_member_id !== memberId || imported.decision_nonce !== decisionNonce) {
     const duplicateReason = "That DZN account is already in this server directory. The existing member was not changed.";
     await db.batch([
       db.prepare(
         `UPDATE server_community_member_candidates
-         SET status = 'duplicate', reason = ?, reviewed_by_user_id = ?, reviewed_at = ?, updated_at = ?
+         SET status = 'duplicate', reason = ?, reviewed_by_user_id = ?, reviewed_at = ?,
+             decision_nonce = ?, updated_at = ?
          WHERE id = ? AND linked_server_id = ? AND status = 'pending'`,
-      ).bind(duplicateReason, actor.id, now, now, id, linkedServerId),
-      conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, memberUserId: candidate.matched_user_id, actorId: actor.id, action: "candidate_duplicate", result: "skipped", reason: duplicateReason, now, status: "duplicate" }),
+      ).bind(duplicateReason, actor.id, now, decisionNonce, now, id, linkedServerId),
+      conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, memberUserId: candidate.matched_user_id, actorId: actor.id, action: "candidate_duplicate", result: "skipped", reason: duplicateReason, now, status: "duplicate", decisionNonce }),
     ]);
     return { ok: true as const, status: 200, message: duplicateReason };
   }
   return { ok: true as const, status: 200, message: "Candidate imported privately. The player must approve the directory invitation." };
 }
 
-function conditionalDecisionAuditStatement(db: D1Database, input: { linkedServerId: string; candidateId: string; memberUserId: string | null; actorId: string; action: string; result: string; reason: string; now: string; status: "imported" | "rejected" | "duplicate"; importedMemberId?: string }) {
+function conditionalDecisionAuditStatement(db: D1Database, input: { linkedServerId: string; candidateId: string; memberUserId: string | null; actorId: string; action: string; result: string; reason: string; now: string; status: "imported" | "rejected" | "duplicate"; decisionNonce: string; importedMemberId?: string }) {
   return db.prepare(
     `INSERT INTO server_community_member_source_audit (
        id, linked_server_id, candidate_id, member_user_id, actor_user_id,
@@ -215,9 +223,9 @@ function conditionalDecisionAuditStatement(db: D1Database, input: { linkedServer
      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
        FROM server_community_member_candidates
       WHERE id = ? AND linked_server_id = ? AND status = ?
-        AND reviewed_by_user_id = ? AND reviewed_at = ?
+        AND decision_nonce = ?
         AND (? IS NULL OR imported_member_id = ?)`,
-  ).bind(crypto.randomUUID(), input.linkedServerId, input.candidateId, input.memberUserId, input.actorId, input.action, input.result, input.reason, input.now, input.candidateId, input.linkedServerId, input.status, input.actorId, input.now, input.importedMemberId ?? null, input.importedMemberId ?? null);
+  ).bind(crypto.randomUUID(), input.linkedServerId, input.candidateId, input.memberUserId, input.actorId, input.action, input.result, input.reason, input.now, input.candidateId, input.linkedServerId, input.status, input.decisionNonce, input.importedMemberId ?? null, input.importedMemberId ?? null);
 }
 
 function toCandidatePayload(row: CandidateRow) {

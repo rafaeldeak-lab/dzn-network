@@ -62,6 +62,8 @@ async function main() {
   assert.match(helper, /public_member_enabled, source[\s\S]*0, 'owner_public_handle'/, "Imports must create a private directory invitation.");
   assert.match(helper, /imported\.imported_member_id !== memberId/, "Only the request that created the exact member may report import success.");
   assert.match(helper, /imported_member_id = \?/, "Import audit writes must be fenced to the request's exact member ID.");
+  assert.match(helper, /decision_nonce = \?/, "Decision responses and audit writes must be fenced to the winning request.");
+  assert.match(helper, /CASE candidates\.status WHEN 'pending' THEN 0 ELSE 1 END/, "Pending candidates must remain reachable ahead of decided history.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(deletion, /candidate_discord_id = NULL/, "Account deletion must erase retained source identifiers.");
 
