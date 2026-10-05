@@ -12,6 +12,7 @@ Status: source implemented and default-off; production migration and activation 
 - Signed-out visitors can read the aggregate count after activation but cannot create a presence slot.
 - The Comms page polls every 30 seconds and stops when the component unmounts.
 - The 75-second expiry prevents stale rows from contributing to the displayed count.
+- Accepted heartbeats opportunistically erase up to 250 expired rows; a separately gated cron route provides the same bounded cleanup when traffic is quiet.
 
 ## Privacy boundary
 
@@ -28,6 +29,7 @@ Server switches:
 - `DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED=false`
 - `DZN_COMMS_PRESENCE_READ_ENABLED=false`
 - `DZN_COMMS_PRESENCE_WRITE_ENABLED=false`
+- `DZN_COMMS_PRESENCE_RETENTION_ENABLED=false`
 - `DZN_COMMS_PRESENCE_SCOPE=local_test`
 - `DZN_COMMS_PRESENCE_SECRET=`
 
@@ -45,14 +47,16 @@ Public UI switch:
 6. Set `DZN_COMMS_PRESENCE_SCOPE=production`.
 7. Enable the server counter and read switches while keeping writes and the public UI disabled.
 8. Verify aggregate `GET` behavior, cache prevention, invalid-scope rejection and absence of identities.
-9. Enable the server write switch and run authenticated same-origin heartbeat, signed-out rejection, cross-origin rejection, same-account deduplication, second-account counting and expiry tests.
-10. Enable the public UI switch last, deploy, and verify phone, tablet, desktop and reduced-motion behavior.
-11. Keep every switch off or roll it back if any ledger, schema, privacy, authorization, count or rendering check fails.
+9. Enable only the presence-retention switch. Seed controlled active and expired fixtures, invoke the cron-authenticated presence-retention route manually, and prove that it deletes no more than 250 expired Global Chat rows while preserving every active row.
+10. Register the authenticated presence-retention route with the existing scheduler and prove a successful scheduled run. Do not enable presence writes until both the manual and scheduled cleanup proofs pass.
+11. Enable the server write switch and run authenticated same-origin heartbeat, signed-out rejection, cross-origin rejection, same-account deduplication, second-account counting, heartbeat throttling, opportunistic cleanup and expiry tests.
+12. Enable the public UI switch last, deploy, and verify phone, tablet, desktop and reduced-motion behavior.
+13. Keep every switch off or roll it back if any ledger, schema, privacy, authorization, cleanup, count or rendering check fails.
 
 ## Cleanup boundary
 
-Expired rows are excluded from counts immediately. Physical deletion is intentionally not scheduled by this source release. Add and schedule cleanup only after manual production heartbeat and expiry proof succeeds; deletion must target only expired rows in `dzn_comms_presence_sessions`.
+Expired rows are excluded from counts immediately. The source provides two bounded deletion paths: accepted heartbeats remove up to 250 expired rows, and the cron-authenticated retention route removes another batch when scheduled. Both paths constrain deletion to expired `global_chat` rows ordered oldest first. Production writes must remain disabled until the dedicated retention switch, controlled-fixture cleanup test and scheduled-run proof have all passed.
 
 ## Not performed
 
-This source release does not apply migration `0089`, create or expose a secret, change production flags, deploy, write production presence, schedule cleanup, send Discord messages, alter payments, or change competitive systems.
+This source release does not apply migration `0089`, create or expose a secret, change production flags, deploy, write production presence, register the cleanup schedule, send Discord messages, alter payments, or change competitive systems.

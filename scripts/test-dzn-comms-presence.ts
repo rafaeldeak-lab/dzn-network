@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 
-import { DZN_COMMS_PRESENCE_MIN_REFRESH_SECONDS, DZN_COMMS_PRESENCE_TTL_SECONDS, handleDznCommsPresence, readDznCommsPresenceFlags, readPresence, refreshPresence } from "../functions/_lib/dzn-comms-presence";
+import { DZN_COMMS_PRESENCE_CLEANUP_BATCH_SIZE, DZN_COMMS_PRESENCE_MIN_REFRESH_SECONDS, DZN_COMMS_PRESENCE_TTL_SECONDS, cleanupExpiredPresence, handleDznCommsPresence, readDznCommsPresenceFlags, readPresence, refreshPresence } from "../functions/_lib/dzn-comms-presence";
 import type { Env } from "../functions/_lib/types";
 
 const migrationName = "0089_dzn_comms_presence.sql";
 const migration = readFileSync(`migrations/${migrationName}`, "utf8");
 const helper = readFileSync("functions/_lib/dzn-comms-presence.ts", "utf8");
 const route = readFileSync("functions/api/comms/presence.ts", "utf8");
+const retentionRoute = readFileSync("functions/api/cron/comms/presence-retention.ts", "utf8");
 const component = readFileSync("components/comms/dzn-live-presence-counter.tsx", "utf8");
 const shell = readFileSync("components/comms/dzn-comms-shell.tsx", "utf8");
 const envExample = readFileSync(".env.example", "utf8");
@@ -28,6 +29,7 @@ for (const flag of [
   "DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED",
   "DZN_COMMS_PRESENCE_READ_ENABLED",
   "DZN_COMMS_PRESENCE_WRITE_ENABLED",
+  "DZN_COMMS_PRESENCE_RETENTION_ENABLED",
   "DZN_COMMS_PRESENCE_SCOPE",
   "DZN_COMMS_PRESENCE_SECRET",
   "NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED",
@@ -38,6 +40,7 @@ for (const flag of [
 assert.match(envExample, /DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED=false/);
 assert.match(envExample, /DZN_COMMS_PRESENCE_READ_ENABLED=false/);
 assert.match(envExample, /DZN_COMMS_PRESENCE_WRITE_ENABLED=false/);
+assert.match(envExample, /DZN_COMMS_PRESENCE_RETENTION_ENABLED=false/);
 assert.match(envExample, /NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED=false/);
 assert.match(helper, /getSessionUser\(env, request\)/, "Presence writes must use the Discord session.");
 assert.match(helper, /sameOrigin\(request\)/, "Presence writes must be same-origin.");
@@ -46,7 +49,12 @@ assert.match(helper, /dzn-comms-presence:/, "Presence must have an isolated dige
 assert.match(helper, /scope = 'global_chat' AND expires_at > \?/, "Presence counts must use the scope and expiry index with canonical ISO timestamps.");
 assert.doesNotMatch(helper, /julianday\(expires_at\)/, "Presence counts must not wrap the indexed expiry column in a function.");
 assert.match(helper, /WHERE dzn_comms_presence_sessions\.last_seen_at <= \?/, "Presence writes must enforce an atomic per-actor minimum refresh interval.");
+assert.match(helper, /WHERE scope = 'global_chat' AND expires_at <= \?/, "Presence cleanup must target only expired Global Chat rows.");
+assert.match(helper, /ORDER BY expires_at ASC\s+LIMIT \?/, "Presence cleanup must use a fixed-size oldest-first batch.");
 assert.match(route, /handleDznCommsPresence/);
+assert.match(retentionRoute, /requireCronSecret\(request, env\)/, "Presence cleanup must require cron authorization.");
+assert.match(retentionRoute, /retentionEnabled/, "Presence cleanup must remain separately default-off.");
+assert.match(retentionRoute, /cleanupExpiredPresence/, "Presence cleanup route must use the bounded cleanup helper.");
 assert.match(component, /NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED/);
 assert.match(component, /fetch\("\/api\/auth\/me"/);
 assert.match(component, /method: authenticated \? "POST" : "GET"/, "Authenticated refreshes must reuse the heartbeat response.");
@@ -58,12 +66,13 @@ assert.match(shell, /presenceUiEnabled \? <DznLivePresenceCounter \/>/);
 assert.equal(typeof packageJson.scripts?.["test:dzn-comms-presence"], "string");
 
 assert.deepEqual(readDznCommsPresenceFlags({} as Env), {
-  readEnabled: false, writeEnabled: false, scope: "", secretReady: false, localRequest: false,
+  readEnabled: false, writeEnabled: false, retentionEnabled: false, scope: "", secretReady: false, localRequest: false,
 });
 const localEnv = {
   DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED: "true",
   DZN_COMMS_PRESENCE_READ_ENABLED: "true",
   DZN_COMMS_PRESENCE_WRITE_ENABLED: "true",
+  DZN_COMMS_PRESENCE_RETENTION_ENABLED: "true",
   DZN_COMMS_PRESENCE_SCOPE: "local_test",
   DZN_COMMS_PRESENCE_SECRET: "presence-secret-at-least-32-bytes-long",
 } as unknown as Env;
@@ -73,11 +82,23 @@ assert.equal(readDznCommsPresenceFlags({ ...localEnv, DZN_COMMS_PRESENCE_SECRET:
 
 class MemoryPresenceStorage {
   rows = new Map<string, { lastSeenAt: string; expiresAt: string }>();
+  cleanupRuns = 0;
   async refresh(actorKeyHash: string, nowIso: string, expiresAt: string, refreshNotBefore: string) {
     const current = this.rows.get(actorKeyHash);
-    if (!current || current.lastSeenAt <= refreshNotBefore) this.rows.set(actorKeyHash, { lastSeenAt: nowIso, expiresAt });
+    if (current && current.lastSeenAt > refreshNotBefore) return false;
+    this.rows.set(actorKeyHash, { lastSeenAt: nowIso, expiresAt });
+    return true;
   }
   async countActive(nowIso: string) { return [...this.rows.values()].filter((row) => row.expiresAt > nowIso).length; }
+  async deleteExpired(nowIso: string, limit: number) {
+    this.cleanupRuns += 1;
+    const expired = [...this.rows.entries()]
+      .filter(([, row]) => row.expiresAt <= nowIso)
+      .sort((left, right) => left[1].expiresAt.localeCompare(right[1].expiresAt))
+      .slice(0, limit);
+    for (const [key] of expired) this.rows.delete(key);
+    return expired.length;
+  }
 }
 
 class RouteD1 {
@@ -94,8 +115,12 @@ class RouteD1 {
           return null;
         },
         run: async () => {
-          if (sql.includes("INSERT INTO dzn_comms_presence_sessions")) this.actorHashes.add(String(values[0]));
-          return { success: true };
+          if (sql.includes("INSERT INTO dzn_comms_presence_sessions")) {
+            const before = this.actorHashes.size;
+            this.actorHashes.add(String(values[0]));
+            return { success: true, meta: { changes: this.actorHashes.size > before ? 1 : 0 } };
+          }
+          return { success: true, meta: { changes: 0 } };
         },
       }),
     };
@@ -141,17 +166,31 @@ async function main() {
 
   const storage = new MemoryPresenceStorage();
   const now = new Date("2026-10-04T09:00:00.000Z");
+  storage.rows.set("already-expired", { lastSeenAt: "2026-10-04T08:00:00.000Z", expiresAt: "2026-10-04T08:01:15.000Z" });
   await refreshPresence(storage, "internal-user-one", localEnv.DZN_COMMS_PRESENCE_SECRET!, now);
+  assert.equal(storage.rows.has("already-expired"), false, "An accepted heartbeat must opportunistically erase expired presence rows.");
+  assert.equal(storage.cleanupRuns, 1);
   const firstExpiry = [...storage.rows.values()][0]?.expiresAt;
   await refreshPresence(storage, "internal-user-one", localEnv.DZN_COMMS_PRESENCE_SECRET!, new Date(now.getTime() + 1_000));
   assert.equal(storage.rows.size, 1, "One account must occupy one aggregate presence slot.");
   assert.equal([...storage.rows.values()][0]?.expiresAt, firstExpiry, "Rapid repeated heartbeats must not extend presence before the server minimum interval.");
+  assert.equal(storage.cleanupRuns, 1, "A throttled heartbeat must not create extra cleanup work.");
   await refreshPresence(storage, "internal-user-one", localEnv.DZN_COMMS_PRESENCE_SECRET!, new Date(now.getTime() + (DZN_COMMS_PRESENCE_MIN_REFRESH_SECONDS + 1) * 1_000));
   assert.notEqual([...storage.rows.values()][0]?.expiresAt, firstExpiry, "A heartbeat after the server minimum interval may extend presence.");
   assert.equal([...storage.rows.keys()].some((key) => key.includes("internal-user-one")), false, "Raw user IDs must never be stored.");
   await refreshPresence(storage, "internal-user-two", localEnv.DZN_COMMS_PRESENCE_SECRET!, now);
   assert.equal((await readPresence(storage, now)).online_count, 2);
   assert.equal((await readPresence(storage, new Date(now.getTime() + (DZN_COMMS_PRESENCE_MIN_REFRESH_SECONDS + DZN_COMMS_PRESENCE_TTL_SECONDS + 3) * 1_000))).online_count, 0, "Expired heartbeats must not count.");
+
+  const cleanupStorage = new MemoryPresenceStorage();
+  for (let index = 0; index < DZN_COMMS_PRESENCE_CLEANUP_BATCH_SIZE + 5; index += 1) {
+    cleanupStorage.rows.set(`expired-${index}`, { lastSeenAt: "2026-10-04T08:00:00.000Z", expiresAt: "2026-10-04T08:01:15.000Z" });
+  }
+  cleanupStorage.rows.set("active", { lastSeenAt: now.toISOString(), expiresAt: new Date(now.getTime() + 60_000).toISOString() });
+  const cleanupResult = await cleanupExpiredPresence(cleanupStorage, now);
+  assert.equal(cleanupResult.deleted_count, DZN_COMMS_PRESENCE_CLEANUP_BATCH_SIZE, "Each cleanup invocation must stay bounded.");
+  assert.equal(cleanupStorage.rows.size, 6, "Cleanup must retain overflow for the next batch and preserve active rows.");
+  assert.equal(cleanupStorage.rows.has("active"), true, "Cleanup must never delete active presence.");
 
   console.log("DZN Comms presence foundation checks passed.");
 }

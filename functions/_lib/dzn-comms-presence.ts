@@ -5,14 +5,16 @@ import type { Env } from "./types";
 
 export const DZN_COMMS_PRESENCE_TTL_SECONDS = 75;
 export const DZN_COMMS_PRESENCE_MIN_REFRESH_SECONDS = 20;
+export const DZN_COMMS_PRESENCE_CLEANUP_BATCH_SIZE = 250;
 const scope = "global_chat" as const;
 
-type PresenceStorage = {
+export type PresenceStorage = {
   countActive(nowIso: string): Promise<number>;
-  refresh(actorKeyHash: string, nowIso: string, expiresAt: string, refreshNotBefore: string): Promise<void>;
+  refresh(actorKeyHash: string, nowIso: string, expiresAt: string, refreshNotBefore: string): Promise<boolean>;
+  deleteExpired(nowIso: string, limit: number): Promise<number>;
 };
 
-class D1PresenceStorage implements PresenceStorage {
+export class D1PresenceStorage implements PresenceStorage {
   constructor(private readonly db: D1Database) {}
 
   async countActive(nowIso: string) {
@@ -25,7 +27,7 @@ class D1PresenceStorage implements PresenceStorage {
   }
 
   async refresh(actorKeyHash: string, nowIso: string, expiresAt: string, refreshNotBefore: string) {
-    await this.db.prepare(
+    const result = await this.db.prepare(
       `INSERT INTO dzn_comms_presence_sessions
          (actor_key_hash, scope, first_seen_at, last_seen_at, expires_at)
        VALUES (?, 'global_chat', ?, ?, ?)
@@ -34,6 +36,21 @@ class D1PresenceStorage implements PresenceStorage {
          expires_at = excluded.expires_at
        WHERE dzn_comms_presence_sessions.last_seen_at <= ?`,
     ).bind(actorKeyHash, nowIso, nowIso, expiresAt, refreshNotBefore).run();
+    return Number(result.meta?.changes ?? 0) > 0;
+  }
+
+  async deleteExpired(nowIso: string, limit: number) {
+    const result = await this.db.prepare(
+      `DELETE FROM dzn_comms_presence_sessions
+       WHERE rowid IN (
+         SELECT rowid
+         FROM dzn_comms_presence_sessions
+         WHERE scope = 'global_chat' AND expires_at <= ?
+         ORDER BY expires_at ASC
+         LIMIT ?
+       )`,
+    ).bind(nowIso, limit).run();
+    return Math.max(0, Number(result.meta?.changes ?? 0));
   }
 }
 export function readDznCommsPresenceFlags(env: Env, request?: Request) {
@@ -45,6 +62,7 @@ export function readDznCommsPresenceFlags(env: Env, request?: Request) {
   return {
     readEnabled: counterEnabled && booleanFlag(env.DZN_COMMS_PRESENCE_READ_ENABLED) && scoped && secretReady,
     writeEnabled: counterEnabled && booleanFlag(env.DZN_COMMS_PRESENCE_WRITE_ENABLED) && scoped && secretReady,
+    retentionEnabled: counterEnabled && booleanFlag(env.DZN_COMMS_PRESENCE_RETENTION_ENABLED) && scoped && secretReady,
     scope: releaseScope,
     secretReady,
     localRequest,
@@ -69,7 +87,8 @@ export async function handleDznCommsPresence(request: Request, env: Env) {
     const expiresAt = new Date(now.getTime() + DZN_COMMS_PRESENCE_TTL_SECONDS * 1000).toISOString();
     const refreshNotBefore = new Date(now.getTime() - DZN_COMMS_PRESENCE_MIN_REFRESH_SECONDS * 1000).toISOString();
     try {
-      await storage.refresh(actorKeyHash, now.toISOString(), expiresAt, refreshNotBefore);
+      const refreshed = await storage.refresh(actorKeyHash, now.toISOString(), expiresAt, refreshNotBefore);
+      if (refreshed) await cleanupExpiredPresence(storage, now);
     } catch {
       return error(503, "PRESENCE_STORAGE_UNAVAILABLE", "DZN presence could not be refreshed.");
     }
@@ -97,8 +116,17 @@ export async function refreshPresence(storage: PresenceStorage, actorId: string,
   const actorKeyHash = await actorDigest(actorId, secret);
   const expiresAt = new Date(now.getTime() + DZN_COMMS_PRESENCE_TTL_SECONDS * 1000).toISOString();
   const refreshNotBefore = new Date(now.getTime() - DZN_COMMS_PRESENCE_MIN_REFRESH_SECONDS * 1000).toISOString();
-  await storage.refresh(actorKeyHash, now.toISOString(), expiresAt, refreshNotBefore);
+  const refreshed = await storage.refresh(actorKeyHash, now.toISOString(), expiresAt, refreshNotBefore);
+  if (refreshed) await cleanupExpiredPresence(storage, now);
   return readPresence(storage, now);
+}
+
+export async function cleanupExpiredPresence(storage: PresenceStorage, now = new Date()) {
+  return {
+    deleted_count: await storage.deleteExpired(now.toISOString(), DZN_COMMS_PRESENCE_CLEANUP_BATCH_SIZE),
+    batch_limit: DZN_COMMS_PRESENCE_CLEANUP_BATCH_SIZE,
+    scope,
+  };
 }
 
 async function actorDigest(actorId: string, secret: string) {
