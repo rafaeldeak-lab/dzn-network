@@ -94,6 +94,16 @@ export async function createCommunityMemberCandidate(
     ? await db.prepare("SELECT id FROM server_community_members WHERE linked_server_id = ? AND user_id = ? LIMIT 1")
       .bind(linkedServerId, matched.id).first<{ id: string }>()
     : null;
+  if (matched && !existing) {
+    const pending = await db.prepare(
+      `SELECT id FROM server_community_member_candidates
+       WHERE linked_server_id = ? AND matched_user_id = ? AND status = 'pending'
+       LIMIT 1`,
+    ).bind(linkedServerId, matched.id).first<{ id: string }>();
+    if (pending) {
+      return { ok: true as const, status: 200, candidate_status: "pending" as const, message: "That DZN account is already awaiting an owner decision." };
+    }
+  }
   const status = existing ? "duplicate" : matched ? "pending" : "no_match";
   const action = existing ? "candidate_duplicate" : matched ? "candidate_created" : "candidate_no_match";
   const result = matched && !existing ? "accepted" : "skipped";
@@ -112,7 +122,8 @@ export async function createCommunityMemberCandidate(
            status, matched_user_id, reason, created_by_user_id, created_at, updated_at
          ) SELECT ?, ?, ?, ?, ?, ?, users.id, ?, ?, ?, ?
              FROM users
-            WHERE users.id = ? AND users.discord_id = ?`,
+            WHERE users.id = ? AND users.discord_id = ?
+         ON CONFLICT DO NOTHING`,
       ).bind(candidateId, linkedServerId, existing ? null : discordId, candidateUsername, roleLabel, status, reason, actor.id, now, now, matched.id, discordId)
     : db.prepare(
         `INSERT INTO server_community_member_candidates (
@@ -134,6 +145,16 @@ export async function createCommunityMemberCandidate(
   const saved = await db.prepare("SELECT status FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
     .bind(candidateId, linkedServerId).first<{ status: string }>();
   if (!saved) {
+    const concurrentPending = matched && !existing
+      ? await db.prepare(
+          `SELECT id FROM server_community_member_candidates
+           WHERE linked_server_id = ? AND matched_user_id = ? AND status = 'pending'
+           LIMIT 1`,
+        ).bind(linkedServerId, matched.id).first<{ id: string }>()
+      : null;
+    if (concurrentPending) {
+      return { ok: true as const, status: 200, candidate_status: "pending" as const, message: "That DZN account is already awaiting an owner decision." };
+    }
     const deletedReason = "No DZN account currently matches that Discord user ID.";
     await db.batch([
       db.prepare(
@@ -210,14 +231,23 @@ export async function decideCommunityMemberCandidate(
       `INSERT INTO server_community_members (
          id, linked_server_id, user_id, role_label, public_member_enabled, source,
          created_by_user_id, created_at, updated_at
-       ) SELECT ?, ?, ?, ?, 0, 'owner_public_handle', ?, ?, ?
+       ) SELECT ?, ?, users.id, ?, 0, 'owner_public_handle', ?, ?, ?
          FROM server_community_member_candidates candidates
+         INNER JOIN users
+                 ON users.id = ?
+                AND users.discord_id = candidates.candidate_discord_id
+         INNER JOIN player_public_profiles profiles
+                 ON profiles.user_id = users.id
+                AND profiles.status = 'active'
+         INNER JOIN player_profile_privacy_preferences privacy
+                 ON privacy.user_id = users.id
+                AND privacy.public_profile_enabled = 1
         WHERE candidates.id = ? AND candidates.linked_server_id = ? AND candidates.status = 'pending'
           AND NOT EXISTS (
             SELECT 1 FROM server_community_members members
              WHERE members.linked_server_id = ? AND members.user_id = ?
           )`,
-    ).bind(memberId, linkedServerId, candidate.matched_user_id, candidate.role_label, actor.id, now, now, id, linkedServerId, linkedServerId, candidate.matched_user_id),
+    ).bind(memberId, linkedServerId, candidate.role_label, actor.id, now, now, candidate.matched_user_id, id, linkedServerId, linkedServerId, candidate.matched_user_id),
     db.prepare(
       `UPDATE server_community_member_candidates
        SET status = 'imported', matched_user_id = ?,
@@ -294,7 +324,7 @@ function toCandidatePayload(row: CandidateRow) {
 }
 
 function cleanDiscordId(value: unknown) {
-  const text = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+  const text = typeof value === "string" ? value.trim() : "";
   return /^\d{17,32}$/.test(text) ? text : null;
 }
 

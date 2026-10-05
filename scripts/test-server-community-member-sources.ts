@@ -65,6 +65,8 @@ async function main() {
   assert.match(helper, /decision_nonce = \?/, "Decision responses and audit writes must be fenced to the winning request.");
   assert.match(helper, /candidates\.status = 'pending'[\s\S]*recent\.status != 'pending'[\s\S]*LIMIT 100/, "Every pending candidate must remain reachable while decided history stays bounded.");
   assert.match(helper, /WHERE users\.id = \? AND users\.discord_id = \?/, "Candidate insertion must recheck the exact account identity at write time.");
+  assert.match(migration, /UNIQUE INDEX[\s\S]*linked_server_id, matched_user_id[\s\S]*status = 'pending'/, "The database must enforce one pending candidate per server and matched player.");
+  assert.match(helper, /INNER JOIN users[\s\S]*users\.discord_id = candidates\.candidate_discord_id[\s\S]*profiles\.status = 'active'[\s\S]*privacy\.public_profile_enabled = 1/, "The import write must recheck identity and profile consent atomically.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(deletion, /candidate_discord_id = NULL/, "Account deletion must erase retained source identifiers.");
 
@@ -114,6 +116,12 @@ async function main() {
   assert.equal("matched_user_id" in queue.candidates[0], false, "Internal user IDs must not leave the private helper.");
   assert.equal(queue.candidates[0].candidate_discord_id_masked, "1000...0002");
   assert.equal(queue.candidates[0].can_import, true);
+  const repeated = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000002", username: "Player", roleLabel: "Builder" });
+  assert.equal(repeated.status, 200);
+  assert.equal(repeated.candidate_status, "pending");
+  assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_candidates WHERE status = 'pending'").get()?.count, 1, "Repeated checks must reuse one pending candidate.");
+  const numericId = await createCommunityMemberCandidate(env, owner, "server", { discordId: 10000000000000002, username: "Rounded", roleLabel: null });
+  assert.equal(numericId.status, 400, "Numeric Discord snowflakes must be rejected before JavaScript precision can alter them.");
 
   const imported = await decideCommunityMemberCandidate(env, owner, "server", queue.candidates[0].id, "import", null);
   assert.equal(imported.status, 200);
