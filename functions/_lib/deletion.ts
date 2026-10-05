@@ -230,6 +230,16 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
     statements.push(db.prepare(`DELETE FROM ${tableName} WHERE ${columnName} = ?`).bind(userId));
   }
 
+  if (await tableExists(db, "server_community_member_candidates")) {
+    statements.push(db.prepare(`UPDATE server_community_member_candidates
+      SET candidate_discord_id = NULL,
+          candidate_username = NULL,
+          matched_user_id = NULL,
+          reason = 'Player account deleted',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE matched_user_id = ?`).bind(userId));
+  }
+
   if (await tableExists(db, "dzn_word_chain_rounds")) {
     statements.push(db.prepare(`UPDATE dzn_word_chain_rounds
       SET current_user_id = NULL

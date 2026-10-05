@@ -1,0 +1,217 @@
+import { requireDb } from "./db";
+import type { Env, SessionUser } from "./types";
+
+export type CommunityCandidateAction = "import" | "reject";
+
+type CandidateRow = {
+  id: string;
+  candidate_discord_id: string | null;
+  candidate_username: string | null;
+  role_label: string | null;
+  status: "pending" | "imported" | "rejected" | "duplicate" | "no_match";
+  matched_user_id: string | null;
+  imported_member_id: string | null;
+  reason: string | null;
+  created_at: string;
+  updated_at: string;
+  matched_username: string | null;
+  public_handle: string | null;
+};
+
+export async function listCommunityMemberSourceQueue(env: Env, linkedServerId: string) {
+  const db = requireDb(env);
+  const [candidates, audit] = await Promise.all([
+    db.prepare(
+      `SELECT candidates.id, candidates.candidate_discord_id, candidates.candidate_username,
+              candidates.role_label, candidates.status, candidates.matched_user_id,
+              candidates.imported_member_id, candidates.reason, candidates.created_at,
+              candidates.updated_at, users.username AS matched_username,
+              player_public_profiles.handle AS public_handle
+       FROM server_community_member_candidates candidates
+       LEFT JOIN users ON users.id = candidates.matched_user_id
+       LEFT JOIN player_public_profiles ON player_public_profiles.user_id = candidates.matched_user_id
+       WHERE candidates.linked_server_id = ?
+       ORDER BY candidates.updated_at DESC
+       LIMIT 100`,
+    ).bind(linkedServerId).all<CandidateRow>(),
+    db.prepare(
+      `SELECT id, candidate_id, action, result_status, reason, created_at
+       FROM server_community_member_source_audit
+       WHERE linked_server_id = ?
+       ORDER BY created_at DESC
+       LIMIT 100`,
+    ).bind(linkedServerId).all<Record<string, unknown>>(),
+  ]);
+  return {
+    candidates: (candidates.results ?? []).map(toCandidatePayload),
+    audit: audit.results ?? [],
+  };
+}
+
+export async function createCommunityMemberCandidate(
+  env: Env,
+  actor: SessionUser,
+  linkedServerId: string,
+  input: { discordId: unknown; username: unknown; roleLabel: unknown },
+) {
+  const discordId = cleanDiscordId(input.discordId);
+  if (!discordId) return { ok: false as const, status: 400, error: "INVALID_DISCORD_ID", message: "Enter the player's exact Discord user ID." };
+  const db = requireDb(env);
+  const now = new Date().toISOString();
+  const matched = await db.prepare("SELECT id, username FROM users WHERE discord_id = ? LIMIT 1")
+    .bind(discordId).first<{ id: string; username: string | null }>();
+  const existing = matched
+    ? await db.prepare("SELECT id FROM server_community_members WHERE linked_server_id = ? AND user_id = ? LIMIT 1")
+      .bind(linkedServerId, matched.id).first<{ id: string }>()
+    : null;
+  const status = existing ? "duplicate" : matched ? "pending" : "no_match";
+  const action = existing ? "candidate_duplicate" : matched ? "candidate_created" : "candidate_no_match";
+  const result = matched && !existing ? "accepted" : "skipped";
+  const reason = existing
+    ? "That DZN account is already in this server directory."
+    : matched
+      ? "Exact DZN Discord account match found. Owner review is required."
+      : "No DZN account currently matches that Discord user ID.";
+  const candidateId = crypto.randomUUID();
+  await db.batch([
+    db.prepare(
+      `INSERT INTO server_community_member_candidates (
+         id, linked_server_id, candidate_discord_id, candidate_username, role_label,
+         status, matched_user_id, reason, created_by_user_id, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(candidateId, linkedServerId, matched && !existing ? discordId : null, cleanText(input.username, 64), cleanText(input.roleLabel, 36), status, matched?.id ?? null, reason, actor.id, now, now),
+    db.prepare(
+      `INSERT INTO server_community_member_source_audit (
+         id, linked_server_id, candidate_id, member_user_id, actor_user_id,
+         action, result_status, reason, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(crypto.randomUUID(), linkedServerId, candidateId, matched?.id ?? null, actor.id, action, result, reason, now),
+  ]);
+  return { ok: true as const, status: 201, candidate_status: status, message: reason };
+}
+
+export async function decideCommunityMemberCandidate(
+  env: Env,
+  actor: SessionUser,
+  linkedServerId: string,
+  candidateId: unknown,
+  action: unknown,
+  reasonInput: unknown,
+) {
+  const id = cleanId(candidateId);
+  const decision: CommunityCandidateAction | null = action === "import" || action === "reject" ? action : null;
+  if (!id || !decision) return { ok: false as const, status: 400, error: "INVALID_DECISION", message: "Choose a valid pending candidate and decision." };
+  const db = requireDb(env);
+  const candidate = await db.prepare(
+    `SELECT candidates.id, candidates.candidate_discord_id, candidates.role_label,
+            candidates.status, users.id AS matched_user_id, player_public_profiles.handle,
+            player_profile_privacy_preferences.public_profile_enabled
+     FROM server_community_member_candidates candidates
+     LEFT JOIN users ON users.discord_id = candidates.candidate_discord_id
+     LEFT JOIN player_public_profiles ON player_public_profiles.user_id = users.id AND player_public_profiles.status = 'active'
+     LEFT JOIN player_profile_privacy_preferences ON player_profile_privacy_preferences.user_id = users.id
+     WHERE candidates.id = ? AND candidates.linked_server_id = ?
+     LIMIT 1`,
+  ).bind(id, linkedServerId).first<{
+    id: string; candidate_discord_id: string | null; role_label: string | null; status: string;
+    matched_user_id: string | null; handle: string | null; public_profile_enabled: number | null;
+  }>();
+  if (!candidate) return { ok: false as const, status: 404, error: "CANDIDATE_NOT_FOUND", message: "That candidate is not available for this server." };
+  if (candidate.status !== "pending") return { ok: false as const, status: 409, error: "CANDIDATE_ALREADY_DECIDED", message: "That candidate has already been decided." };
+  const now = new Date().toISOString();
+  const reason = cleanText(reasonInput, 220);
+  if (decision === "reject") {
+    await db.batch([
+      db.prepare(
+        `UPDATE server_community_member_candidates
+         SET status = 'rejected', reason = ?, reviewed_by_user_id = ?, reviewed_at = ?, updated_at = ?
+         WHERE id = ? AND linked_server_id = ? AND status = 'pending'`,
+      ).bind(reason ?? "Rejected by the server owner.", actor.id, now, now, id, linkedServerId),
+      conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, memberUserId: candidate.matched_user_id, actorId: actor.id, action: "candidate_rejected", result: "rejected", reason: reason ?? "Rejected by the server owner.", now, status: "rejected" }),
+    ]);
+    return { ok: true as const, status: 200, message: "Candidate rejected and recorded." };
+  }
+  if (!candidate.matched_user_id || !candidate.handle || candidate.public_profile_enabled !== 1) {
+    return { ok: false as const, status: 409, error: "PUBLIC_PROFILE_REQUIRED", message: "The matched player must have an active public DZN profile before import." };
+  }
+  const memberId = crypto.randomUUID();
+  await db.batch([
+    db.prepare(
+      `INSERT INTO server_community_members (
+         id, linked_server_id, user_id, role_label, public_member_enabled, source,
+         created_by_user_id, created_at, updated_at
+       ) SELECT ?, ?, ?, ?, 0, 'owner_public_handle', ?, ?, ?
+         FROM server_community_member_candidates
+        WHERE id = ? AND linked_server_id = ? AND status = 'pending'
+       ON CONFLICT(linked_server_id, user_id) DO UPDATE SET
+         role_label = excluded.role_label,
+         updated_at = excluded.updated_at`,
+    ).bind(memberId, linkedServerId, candidate.matched_user_id, candidate.role_label, actor.id, now, now, id, linkedServerId),
+    db.prepare(
+      `UPDATE server_community_member_candidates
+       SET status = 'imported', matched_user_id = ?,
+           imported_member_id = (SELECT id FROM server_community_members WHERE linked_server_id = ? AND user_id = ?),
+           reason = ?, reviewed_by_user_id = ?, reviewed_at = ?, updated_at = ?
+       WHERE id = ? AND linked_server_id = ? AND status = 'pending'`,
+    ).bind(candidate.matched_user_id, linkedServerId, candidate.matched_user_id, reason ?? "Imported privately; player approval is still required.", actor.id, now, now, id, linkedServerId),
+    db.prepare(
+      `INSERT INTO server_community_member_audit (
+         id, linked_server_id, member_user_id, actor_user_id, action,
+         role_label, public_member_enabled, created_at
+       ) SELECT ?, ?, ?, ?, 'add', ?, 0, ?
+         FROM server_community_member_candidates
+        WHERE id = ? AND linked_server_id = ? AND status = 'imported'
+          AND reviewed_by_user_id = ? AND reviewed_at = ?`,
+    ).bind(crypto.randomUUID(), linkedServerId, candidate.matched_user_id, actor.id, candidate.role_label, now, id, linkedServerId, actor.id, now),
+    conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, memberUserId: candidate.matched_user_id, actorId: actor.id, action: "candidate_imported", result: "accepted", reason: reason ?? "Imported privately; player approval is still required.", now, status: "imported" }),
+  ]);
+  return { ok: true as const, status: 200, message: "Candidate imported privately. The player must approve the directory invitation." };
+}
+
+function conditionalDecisionAuditStatement(db: D1Database, input: { linkedServerId: string; candidateId: string; memberUserId: string | null; actorId: string; action: string; result: string; reason: string; now: string; status: "imported" | "rejected" }) {
+  return db.prepare(
+    `INSERT INTO server_community_member_source_audit (
+       id, linked_server_id, candidate_id, member_user_id, actor_user_id,
+       action, result_status, reason, created_at
+     ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+       FROM server_community_member_candidates
+      WHERE id = ? AND linked_server_id = ? AND status = ?
+        AND reviewed_by_user_id = ? AND reviewed_at = ?`,
+  ).bind(crypto.randomUUID(), input.linkedServerId, input.candidateId, input.memberUserId, input.actorId, input.action, input.result, input.reason, input.now, input.candidateId, input.linkedServerId, input.status, input.actorId, input.now);
+}
+
+function toCandidatePayload(row: CandidateRow) {
+  return {
+    id: row.id,
+    candidate_discord_id_masked: maskDiscordId(row.candidate_discord_id),
+    candidate_username: row.candidate_username,
+    role_label: row.role_label,
+    status: row.status,
+    reason: row.reason,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    matched_username: row.matched_username,
+    public_handle: row.public_handle,
+    can_import: row.status === "pending" && Boolean(row.matched_user_id && row.public_handle),
+  };
+}
+
+function cleanDiscordId(value: unknown) {
+  const text = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+  return /^\d{17,32}$/.test(text) ? text : null;
+}
+
+function cleanId(value: unknown) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return /^[a-zA-Z0-9-]{8,80}$/.test(text) ? text : null;
+}
+
+function cleanText(value: unknown, maxLength: number) {
+  const text = typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+  return text.slice(0, maxLength) || null;
+}
+
+function maskDiscordId(value: string | null) {
+  if (!value) return null;
+  return `${value.slice(0, 4)}...${value.slice(-4)}`;
+}
