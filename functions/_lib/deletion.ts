@@ -250,6 +250,12 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
           actor_user_id = CASE WHEN actor_user_id = ? THEN NULL ELSE actor_user_id END
       WHERE member_user_id = ? OR actor_user_id = ?`).bind(userId, userId, userId, userId));
   }
+  if (await tableExists(db, "server_community_member_audit")) {
+    statements.push(db.prepare(`UPDATE server_community_member_audit
+      SET member_user_id = CASE WHEN member_user_id = ? THEN NULL ELSE member_user_id END,
+          actor_user_id = CASE WHEN actor_user_id = ? THEN NULL ELSE actor_user_id END
+      WHERE member_user_id = ? OR actor_user_id = ?`).bind(userId, userId, userId, userId));
+  }
 
   if (await tableExists(db, "dzn_word_chain_rounds")) {
     statements.push(db.prepare(`UPDATE dzn_word_chain_rounds

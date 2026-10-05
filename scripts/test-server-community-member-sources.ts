@@ -89,6 +89,7 @@ async function main() {
   assert.match(deletion, /candidate_discord_id = NULL/, "Account deletion must erase retained source identifiers.");
   assert.match(deletion, /created_by_user_id = CASE[\s\S]*reviewed_by_user_id = CASE/, "Retained Store accounts must be unlinked from candidate creator and reviewer fields.");
   assert.match(deletion, /UPDATE server_community_member_source_audit[\s\S]*member_user_id[\s\S]*actor_user_id/, "Retained Store accounts must be unlinked from both source-audit identity columns.");
+  assert.match(deletion, /UPDATE server_community_member_audit[\s\S]*member_user_id[\s\S]*actor_user_id/, "Retained Store accounts must be unlinked from both member-audit identity columns.");
 
   const db = new SqliteD1Database();
   db.sqlite.exec(`
@@ -295,10 +296,16 @@ async function main() {
   seed(`INSERT INTO server_community_member_source_audit
         (id, linked_server_id, candidate_id, member_user_id, actor_user_id, action, result_status, reason, created_at)
         VALUES ('retained-audit', 'server', NULL, 'player-four', 'player-four', 'candidate_created', 'accepted', NULL, '2026-10-05T00:00:00.000Z')`).run();
+  seed(`INSERT INTO server_community_member_audit
+        (id, linked_server_id, member_user_id, actor_user_id, action, role_label, public_member_enabled, created_at)
+        VALUES ('retained-member-audit', 'server', 'player-four', 'player-four', 'add', 'Member', 0, '2026-10-05T00:00:00.000Z')`).run();
   assert.equal(await eraseOrRetainAccountUser(db as unknown as D1Database, "player-four"), 1);
   const retainedAudit = seed("SELECT member_user_id, actor_user_id FROM server_community_member_source_audit WHERE id = 'retained-audit'").get();
   assert.equal(retainedAudit?.member_user_id, null, "A retained account must not remain linked as the candidate member.");
   assert.equal(retainedAudit?.actor_user_id, null, "A retained account must not remain linked as the audit actor.");
+  const retainedMemberAudit = seed("SELECT member_user_id, actor_user_id FROM server_community_member_audit WHERE id = 'retained-member-audit'").get();
+  assert.equal(retainedMemberAudit?.member_user_id, null, "A retained account must not remain linked in the member audit.");
+  assert.equal(retainedMemberAudit?.actor_user_id, null, "A retained account must not remain linked as the member-audit actor.");
   const retainedCandidate = seed("SELECT created_by_user_id, reviewed_by_user_id FROM server_community_member_candidates WHERE id = ?").get(fourthCandidate.id);
   assert.equal(retainedCandidate?.created_by_user_id, null, "A retained account must not remain linked as the candidate creator.");
   assert.equal(retainedCandidate?.reviewed_by_user_id, null, "A retained account must not remain linked as the candidate reviewer.");
