@@ -196,7 +196,7 @@ try {
   assert.equal(await page.locator('[class*="equipmentRack"] article').count(), 5);
   for (const [label, width, height] of [["narrow-tablet", 700, 900], ["mobile", 390, 844], ["small-phone", 320, 780]]) {
     await page.setViewportSize({ width, height });
-    const launcherBox = await page.getByLabel("Open Chat and Help", { exact: true }).boundingBox();
+    const launcherBox = await page.getByLabel("Chat and Help", { exact: true }).boundingBox();
     assert.ok(launcherBox && launcherBox.width <= width - 32 && launcherBox.x >= 0, `${label}: Chat and Help launcher must remain fully visible`);
     await page.screenshot({ path: `${output}/${label}-workshop.png`, fullPage: true });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${label}: equipment rack overflow`);

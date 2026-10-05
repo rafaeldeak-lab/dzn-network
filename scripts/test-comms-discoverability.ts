@@ -20,7 +20,7 @@ assert.equal(launcherSource.includes('href="/community#dzn-assist"'), true, "The
 assert.equal(launcherSource.includes("Guided help live"), true, "The launcher must identify the available guided-help experience.");
 assert.equal(launcherSource.includes('pathname.startsWith("/community")'), true, "The floating launcher must not cover the Comms page itself.");
 assert.equal(launcherSource.includes("<details"), true, "The launcher must use a native disclosure so it works before client hydration completes.");
-assert.equal(launcherSource.includes('aria-label="Open Chat and Help"'), true, "The launcher disclosure must have an explicit accessible name.");
+assert.equal(launcherSource.includes('aria-label="Chat and Help"'), true, "The launcher disclosure must have an explicit accessible name.");
 assert.equal(launcherSource.includes('disclosureRef.current?.removeAttribute("open")'), true, "The launcher must close when client-side navigation changes the route.");
 assert.equal(launcherSource.includes('disclosure.querySelector<HTMLElement>("summary")?.focus()'), true, "The launcher must restore focus to its summary after closing the panel.");
 assert.equal(launcherSource.includes("z-40"), true, "The launcher must remain below the shared header and modal layer.");

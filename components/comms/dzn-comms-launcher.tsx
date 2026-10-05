@@ -8,6 +8,7 @@ import { useEffect, useRef } from "react";
 export function DznCommsLauncher() {
   const pathname = usePathname() ?? "/";
   const disclosureRef = useRef<HTMLDetailsElement | null>(null);
+  const didMountRef = useRef(false);
 
   function closeDisclosure() {
     const disclosure = disclosureRef.current;
@@ -17,6 +18,10 @@ export function DznCommsLauncher() {
   }
 
   useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
     disclosureRef.current?.removeAttribute("open");
   }, [pathname]);
 
@@ -25,7 +30,7 @@ export function DznCommsLauncher() {
   return (
     <details ref={disclosureRef} className="group fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 flex max-w-[calc(100vw-2rem)] flex-col-reverse items-end gap-2 md:right-auto md:left-[max(1rem,env(safe-area-inset-left))] md:items-start">
       <summary
-        aria-label="Open Chat and Help"
+        aria-label="Chat and Help"
         title="Chat and Help"
         className="group flex h-12 min-w-12 list-none items-center justify-center gap-2 rounded-md border border-cyan-200/55 bg-[#07111f]/98 px-3 text-cyan-100 shadow-[0_0_0_3px_rgba(2,6,23,0.9),0_10px_28px_rgba(0,0,0,0.42),0_0_24px_rgba(34,211,238,0.24)] backdrop-blur-xl transition hover:border-white hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 [&::-webkit-details-marker]:hidden"
       >
