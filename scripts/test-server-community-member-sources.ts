@@ -91,7 +91,7 @@ async function main() {
   assert.match(helper, /NOT EXISTS \([\s\S]*FROM users[\s\S]*users\.discord_id = server_community_member_candidates\.candidate_discord_id/, "No-match cleanup must check every account for the submitted Discord ID.");
   assert.match(helper, /candidates\.status = 'pending' AND users\.discord_id = candidates\.candidate_discord_id/, "The queue must display a pending source's current Discord owner.");
   assert.match(helper, /candidates\.status != 'pending' AND users\.id = candidates\.matched_user_id/, "Decided history must remain bound to the account that was decided.");
-  assert.match(helper, /SET status = 'rejected'[\s\S]*matched_user_id = \([\s\S]*candidate_discord_id/, "Rejection must persist the current Discord owner before writing its audit.");
+  assert.match(helper, /SET status = 'rejected'[\s\S]*matched_user_id = \([\s\S]*WHERE discord_id = server_community_member_candidates\.candidate_discord_id/, "Rejection must resolve the Discord owner at write time before writing its audit.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(deletion, /candidate_discord_id = NULL/, "Account deletion must erase retained source identifiers.");
   assert.match(deletion, /candidate_discord_id = \(SELECT discord_id FROM users WHERE id = \?\)/, "Account deletion must scrub sources currently owned by the deleting Discord account.");
@@ -134,6 +134,8 @@ async function main() {
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-eleven", "10000000000000012", "Player Eleven");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-thirteen", "10000000000000013", "Player Thirteen");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-fourteen", "10000000000000014", "Player Fourteen");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-fifteen", "10000000000000015", "Player Fifteen");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-sixteen", "10000000000000016", "Player Sixteen");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server", "owner");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player", "player-one");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-two", "player-two");
@@ -364,6 +366,20 @@ async function main() {
   const scrubbedCurrentSource = seed("SELECT candidate_discord_id, candidate_username FROM server_community_member_candidates WHERE id = ?").get(thirteenthCandidate.id);
   assert.equal(scrubbedCurrentSource?.candidate_discord_id, null, "Deleting the current Discord owner must erase the source ID even when matched_user_id points elsewhere.");
   assert.equal(scrubbedCurrentSource?.candidate_username, null);
+
+  const fifteenth = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000015", username: "Player Fifteen", roleLabel: "Member" });
+  assert.equal(fifteenth.candidate_status, "pending");
+  queue = await listCommunityMemberSourceQueue(env, "server");
+  const fifteenthCandidate = queue.candidates.find((candidate) => candidate.candidate_username === "Player Fifteen");
+  assert.ok(fifteenthCandidate);
+  db.beforeNextBatch = () => {
+    seed("UPDATE users SET discord_id = '10000000000000915' WHERE id = 'player-fifteen'").run();
+    seed("UPDATE users SET discord_id = '10000000000000015' WHERE id = 'player-sixteen'").run();
+  };
+  const rejectionReassignedDuringWrite = await decideCommunityMemberCandidate(env, owner, "server", fifteenthCandidate.id, "reject", "Reassigned during rejection.");
+  assert.equal(rejectionReassignedDuringWrite.status, 200);
+  assert.equal(seed("SELECT matched_user_id FROM server_community_member_candidates WHERE id = ?").get(fifteenthCandidate.id)?.matched_user_id, "player-sixteen", "Rejection must resolve a reassignment that occurs after the decision read.");
+  assert.equal(seed("SELECT member_user_id FROM server_community_member_source_audit WHERE candidate_id = ? AND action = 'candidate_rejected'").get(fifteenthCandidate.id)?.member_user_id, "player-sixteen");
 
   db.beforeNextBatch = () => {
     seed("UPDATE users SET discord_id = 'deleted-owner' WHERE id = 'owner'").run();

@@ -283,13 +283,13 @@ export async function decideCommunityMemberCandidate(
          SET status = 'rejected',
              matched_user_id = (
                SELECT id FROM users
-                WHERE id = ? AND discord_id = server_community_member_candidates.candidate_discord_id
+                WHERE discord_id = server_community_member_candidates.candidate_discord_id
              ),
              reason = ?,
              reviewed_by_user_id = (SELECT id FROM users WHERE id = ? AND discord_id = ?), reviewed_at = ?,
              decision_nonce = ?, updated_at = ?
          WHERE id = ? AND linked_server_id = ? AND status = 'pending'`,
-      ).bind(candidate.matched_user_id, reason ?? "Rejected by the server owner.", actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId),
+      ).bind(reason ?? "Rejected by the server owner.", actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId),
       conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, actorDiscordId: actor.discord_id, action: "candidate_rejected", result: "rejected", reason: reason ?? "Rejected by the server owner.", now, status: "rejected", decisionNonce }),
     ]);
     const rejected = await db.prepare("SELECT status, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
