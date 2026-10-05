@@ -289,8 +289,9 @@ export async function decideCommunityMemberCandidate(
      LEFT JOIN player_public_profiles ON player_public_profiles.user_id = users.id AND player_public_profiles.status = 'active'
      LEFT JOIN player_profile_privacy_preferences ON player_profile_privacy_preferences.user_id = users.id
      WHERE candidates.id = ? AND candidates.linked_server_id = ?
+       AND ${CURRENT_WRITE_ACCESS}
      LIMIT 1`,
-  ).bind(id, linkedServerId).first<{
+  ).bind(id, linkedServerId, ...writeAccess).first<{
     id: string; candidate_discord_id: string | null; role_label: string | null; status: string;
     matched_user_id: string | null; handle: string | null; public_profile_enabled: number | null;
   }>();
