@@ -102,9 +102,9 @@ export async function createCommunityMemberCandidate(
   if (matched && !existing) {
     const pending = await db.prepare(
       `SELECT id FROM server_community_member_candidates
-       WHERE linked_server_id = ? AND matched_user_id = ? AND status = 'pending'
+       WHERE linked_server_id = ? AND candidate_discord_id = ? AND status = 'pending'
        LIMIT 1`,
-    ).bind(linkedServerId, matched.id).first<{ id: string }>();
+    ).bind(linkedServerId, discordId).first<{ id: string }>();
     if (pending) {
       return { ok: true as const, status: 200, candidate_status: "pending" as const, message: "That DZN account is already awaiting an owner decision." };
     }
@@ -174,9 +174,9 @@ export async function createCommunityMemberCandidate(
     const concurrentPending = matched && !existing
       ? await db.prepare(
           `SELECT id FROM server_community_member_candidates
-           WHERE linked_server_id = ? AND matched_user_id = ? AND status = 'pending'
+           WHERE linked_server_id = ? AND candidate_discord_id = ? AND status = 'pending'
            LIMIT 1`,
-        ).bind(linkedServerId, matched.id).first<{ id: string }>()
+        ).bind(linkedServerId, discordId).first<{ id: string }>()
       : null;
     if (concurrentPending) {
       return { ok: true as const, status: 200, candidate_status: "pending" as const, message: "That DZN account is already awaiting an owner decision." };

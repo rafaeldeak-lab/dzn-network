@@ -37,6 +37,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_server_community_member_candidates_one_pen
 ON server_community_member_candidates(linked_server_id, matched_user_id)
 WHERE status = 'pending' AND matched_user_id IS NOT NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_server_community_member_candidates_one_pending_discord
+ON server_community_member_candidates(linked_server_id, candidate_discord_id)
+WHERE status = 'pending' AND candidate_discord_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS server_community_member_source_audit (
   id TEXT PRIMARY KEY,
   linked_server_id TEXT NOT NULL,

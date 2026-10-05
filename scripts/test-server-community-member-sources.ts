@@ -78,6 +78,7 @@ async function main() {
   assert.match(helper, /candidates\.status = 'pending'[\s\S]*recent\.status != 'pending'[\s\S]*LIMIT 100/, "Every pending candidate must remain reachable while decided history stays bounded.");
   assert.match(helper, /WHERE users\.id = \? AND users\.discord_id = \?/, "Candidate insertion must recheck the exact account identity at write time.");
   assert.match(migration, /UNIQUE INDEX[\s\S]*linked_server_id, matched_user_id[\s\S]*status = 'pending'/, "The database must enforce one pending candidate per server and matched player.");
+  assert.match(migration, /UNIQUE INDEX[\s\S]*linked_server_id, candidate_discord_id[\s\S]*status = 'pending'/, "The database must enforce one pending candidate per server and Discord source ID.");
   assert.match(helper, /INNER JOIN users[\s\S]*users\.discord_id = candidates\.candidate_discord_id[\s\S]*profiles\.status = 'active'[\s\S]*privacy\.public_profile_enabled = 1/, "The import write must recheck identity and profile consent atomically.");
   assert.match(helper, /Candidate remains pending because the player's public-profile eligibility changed/, "Revoked eligibility must remain retryable instead of being mislabeled as a duplicate.");
   assert.match(helper, /status = 'duplicate'[\s\S]*EXISTS \([\s\S]*server_community_members/, "Duplicate decisions must require a current server member.");
@@ -343,6 +344,10 @@ async function main() {
   assert.equal(reassignedQueueCandidate?.public_handle, "player-fourteen", "The refreshed queue must display the current Discord owner.");
   assert.equal(reassignedQueueCandidate?.matched_username, "Player Fourteen");
   assert.equal(reassignedQueueCandidate?.can_import, true);
+  const reassignedRepeat = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000013", username: "Player Fourteen", roleLabel: "Member" });
+  assert.equal(reassignedRepeat.status, 200);
+  assert.equal(reassignedRepeat.candidate_status, "pending");
+  assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_candidates WHERE linked_server_id = 'server' AND candidate_discord_id = '10000000000000013' AND status = 'pending'").get()?.count, 1, "Rechecking a reassigned Discord identity must reuse the existing pending candidate.");
 
   db.beforeNextBatch = () => {
     seed("UPDATE users SET discord_id = 'deleted-owner' WHERE id = 'owner'").run();
