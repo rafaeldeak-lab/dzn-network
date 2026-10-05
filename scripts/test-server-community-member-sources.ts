@@ -7,6 +7,7 @@ import {
   decideCommunityMemberCandidate,
   listCommunityMemberSourceQueue,
 } from "../functions/_lib/server-community-member-sources";
+import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import type { Env, SessionUser } from "../functions/_lib/types";
 
 type SqliteStatement = {
@@ -74,6 +75,7 @@ async function main() {
   assert.match(helper, /status = 'duplicate'[\s\S]*EXISTS \([\s\S]*server_community_members/, "Duplicate decisions must require a current server member.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(deletion, /candidate_discord_id = NULL/, "Account deletion must erase retained source identifiers.");
+  assert.match(deletion, /UPDATE server_community_member_source_audit[\s\S]*member_user_id[\s\S]*actor_user_id/, "Retained Store accounts must be unlinked from both source-audit identity columns.");
 
   const db = new SqliteD1Database();
   db.sqlite.exec(`
@@ -207,6 +209,17 @@ async function main() {
   assert.equal(scrubbed?.matched_user_id, null);
   assert.equal(seed("SELECT result_status FROM server_community_member_source_audit WHERE candidate_id = ? AND action = 'candidate_no_match'").get(fourthCandidate.id)?.result_status, "skipped");
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_source_audit").get()?.count, 10);
+
+  seed("CREATE TABLE store_orders (id TEXT PRIMARY KEY, purchasing_user_id TEXT)").run();
+  seed("INSERT INTO store_orders (id, purchasing_user_id) VALUES ('retained-order', 'player-four')").run();
+  seed(`INSERT INTO server_community_member_source_audit
+        (id, linked_server_id, candidate_id, member_user_id, actor_user_id, action, result_status, reason, created_at)
+        VALUES ('retained-audit', 'server', NULL, 'player-four', 'player-four', 'candidate_created', 'accepted', NULL, '2026-10-05T00:00:00.000Z')`).run();
+  assert.equal(await eraseOrRetainAccountUser(db as unknown as D1Database, "player-four"), 1);
+  const retainedAudit = seed("SELECT member_user_id, actor_user_id FROM server_community_member_source_audit WHERE id = 'retained-audit'").get();
+  assert.equal(retainedAudit?.member_user_id, null, "A retained account must not remain linked as the candidate member.");
+  assert.equal(retainedAudit?.actor_user_id, null, "A retained account must not remain linked as the audit actor.");
+  assert.match(String(seed("SELECT discord_id FROM users WHERE id = 'player-four'").get()?.discord_id), /^deleted-/, "The Store ledger account should be retained only in anonymized form.");
 
   db.sqlite.close();
   console.log("Server community member source checks passed.");
