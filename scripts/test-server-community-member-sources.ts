@@ -97,6 +97,14 @@ async function main() {
   assert.match(helper, /CURRENT_WRITE_ACCESS[\s\S]*access_server\.user_id = \?/, "Candidate mutations must recheck current server ownership in their write predicates.");
   assert.match(helper, /access_actor\.id = \? AND access_actor\.discord_id = \?/, "Privileged access must recheck the admin's current Discord identity.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
+  assert.match(component, /useState<"all" \| "pending" \| "complete">\("pending"\)/, "The compact queue must open on actionable pending candidates.");
+  assert.match(component, /filteredCandidates\.slice\(0, candidateLimit\)/, "The candidate queue must render a bounded initial result set.");
+  assert.match(component, /filteredAudit\.slice\(0, auditLimit\)/, "Decision history must render a bounded initial result set.");
+  assert.match(component, /Search name, handle, role or status/, "Candidate search must cover the owner-facing identity and workflow fields.");
+  assert.match(component, /Search decision history/, "Decision history must remain searchable.");
+  assert.match(component, /normalizeSearchText[\s\S]*replaceAll\("_", " "\)/, "Search must match status and action labels exactly as owners see them.");
+  assert.match(component, /All actions[\s\S]*All results/, "Decision history must support action and result filters.");
+  assert.match(component, /Show 8 more candidates[\s\S]*Decision history[\s\S]*Show 8 more decisions/, "Both long lists must expand in predictable eight-row batches.");
   assert.match(deletion, /candidate_discord_id = CASE[\s\S]*THEN NULL/, "Account deletion must erase retained source identifiers owned by the deleting account.");
   assert.match(deletion, /candidate_discord_id = \(SELECT discord_id FROM users WHERE id = \?\)/, "Account deletion must scrub sources currently owned by the deleting Discord account.");
   assert.match(deletion, /status = CASE[\s\S]*status = 'pending'[\s\S]*THEN 'no_match'[\s\S]*matched_user_id = CASE[\s\S]*matched_user_id = \?[\s\S]*OR \(status = 'pending'/, "Pending source-owner deletion must finalize the row while decided history keeps unrelated identities.");
