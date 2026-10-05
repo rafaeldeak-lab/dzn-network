@@ -237,7 +237,8 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
           matched_user_id = NULL,
           reason = 'Player account deleted',
           updated_at = CURRENT_TIMESTAMP
-      WHERE matched_user_id = ?`).bind(userId));
+      WHERE matched_user_id = ?
+         OR candidate_discord_id = (SELECT discord_id FROM users WHERE id = ?)`).bind(userId, userId));
     statements.push(db.prepare(`UPDATE server_community_member_candidates
       SET created_by_user_id = CASE WHEN created_by_user_id = ? THEN NULL ELSE created_by_user_id END,
           reviewed_by_user_id = CASE WHEN reviewed_by_user_id = ? THEN NULL ELSE reviewed_by_user_id END,

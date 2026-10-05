@@ -89,9 +89,12 @@ async function main() {
   assert.match(helper, /created_by_user_id[\s\S]*SELECT id FROM users WHERE id = \? AND discord_id = \?/, "Candidate actor links must be fenced to the current authenticated identity.");
   assert.match(helper, /existingMember[\s\S]*candidate_duplicate[\s\S]*PUBLIC_PROFILE_REQUIRED/, "Existing members must be reconciled before public-profile eligibility is checked.");
   assert.match(helper, /NOT EXISTS \([\s\S]*FROM users[\s\S]*users\.discord_id = server_community_member_candidates\.candidate_discord_id/, "No-match cleanup must check every account for the submitted Discord ID.");
-  assert.match(helper, /LEFT JOIN users ON users\.discord_id = candidates\.candidate_discord_id/, "The queue must display the account that currently owns the candidate Discord ID.");
+  assert.match(helper, /candidates\.status = 'pending' AND users\.discord_id = candidates\.candidate_discord_id/, "The queue must display a pending source's current Discord owner.");
+  assert.match(helper, /candidates\.status != 'pending' AND users\.id = candidates\.matched_user_id/, "Decided history must remain bound to the account that was decided.");
+  assert.match(helper, /SET status = 'rejected'[\s\S]*matched_user_id = \([\s\S]*candidate_discord_id/, "Rejection must persist the current Discord owner before writing its audit.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(deletion, /candidate_discord_id = NULL/, "Account deletion must erase retained source identifiers.");
+  assert.match(deletion, /candidate_discord_id = \(SELECT discord_id FROM users WHERE id = \?\)/, "Account deletion must scrub sources currently owned by the deleting Discord account.");
   assert.match(deletion, /created_by_user_id = CASE[\s\S]*reviewed_by_user_id = CASE/, "Retained Store accounts must be unlinked from candidate creator and reviewer fields.");
   assert.match(deletion, /UPDATE server_community_member_source_audit[\s\S]*member_user_id[\s\S]*actor_user_id/, "Retained Store accounts must be unlinked from both source-audit identity columns.");
   assert.match(deletion, /UPDATE server_community_member_audit[\s\S]*member_user_id[\s\S]*actor_user_id/, "Retained Store accounts must be unlinked from both member-audit identity columns.");
@@ -348,6 +351,19 @@ async function main() {
   assert.equal(reassignedRepeat.status, 200);
   assert.equal(reassignedRepeat.candidate_status, "pending");
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_candidates WHERE linked_server_id = 'server' AND candidate_discord_id = '10000000000000013' AND status = 'pending'").get()?.count, 1, "Rechecking a reassigned Discord identity must reuse the existing pending candidate.");
+  const rejectedReassignment = await decideCommunityMemberCandidate(env, owner, "server", thirteenthCandidate.id, "reject", "Current Discord owner rejected.");
+  assert.equal(rejectedReassignment.status, 200);
+  assert.equal(seed("SELECT matched_user_id FROM server_community_member_candidates WHERE id = ?").get(thirteenthCandidate.id)?.matched_user_id, "player-fourteen", "Rejection must persist the current Discord owner.");
+  assert.equal(seed("SELECT member_user_id FROM server_community_member_source_audit WHERE candidate_id = ? AND action = 'candidate_rejected'").get(thirteenthCandidate.id)?.member_user_id, "player-fourteen", "Rejection audit must identify the account actually rejected.");
+  seed("UPDATE users SET discord_id = '10000000000000014' WHERE id = 'player-fourteen'").run();
+  seed("UPDATE users SET discord_id = '10000000000000013' WHERE id = 'player-thirteen'").run();
+  queue = await listCommunityMemberSourceQueue(env, "server");
+  const decidedAfterReassignment = queue.candidates.find((candidate) => candidate.id === thirteenthCandidate.id);
+  assert.equal(decidedAfterReassignment?.public_handle, "player-fourteen", "Decided history must not be relabeled as the new Discord owner.");
+  assert.equal(await eraseOrRetainAccountUser(db as unknown as D1Database, "player-thirteen"), 1);
+  const scrubbedCurrentSource = seed("SELECT candidate_discord_id, candidate_username FROM server_community_member_candidates WHERE id = ?").get(thirteenthCandidate.id);
+  assert.equal(scrubbedCurrentSource?.candidate_discord_id, null, "Deleting the current Discord owner must erase the source ID even when matched_user_id points elsewhere.");
+  assert.equal(scrubbedCurrentSource?.candidate_username, null);
 
   db.beforeNextBatch = () => {
     seed("UPDATE users SET discord_id = 'deleted-owner' WHERE id = 'owner'").run();
