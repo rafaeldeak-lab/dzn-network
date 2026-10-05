@@ -63,7 +63,8 @@ async function main() {
   assert.match(helper, /imported\.imported_member_id !== memberId/, "Only the request that created the exact member may report import success.");
   assert.match(helper, /imported_member_id = \?/, "Import audit writes must be fenced to the request's exact member ID.");
   assert.match(helper, /decision_nonce = \?/, "Decision responses and audit writes must be fenced to the winning request.");
-  assert.match(helper, /CASE candidates\.status WHEN 'pending' THEN 0 ELSE 1 END/, "Pending candidates must remain reachable ahead of decided history.");
+  assert.match(helper, /candidates\.status = 'pending'[\s\S]*recent\.status != 'pending'[\s\S]*LIMIT 100/, "Every pending candidate must remain reachable while decided history stays bounded.");
+  assert.match(helper, /WHERE users\.id = \? AND users\.discord_id = \?/, "Candidate insertion must recheck the exact account identity at write time.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(deletion, /candidate_discord_id = NULL/, "Account deletion must erase retained source identifiers.");
 

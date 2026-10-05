@@ -51,10 +51,19 @@ export async function listCommunityMemberSourceQueue(env: Env, linkedServerId: s
        LEFT JOIN player_public_profiles ON player_public_profiles.user_id = candidates.matched_user_id
        LEFT JOIN player_profile_privacy_preferences ON player_profile_privacy_preferences.user_id = candidates.matched_user_id
        WHERE candidates.linked_server_id = ?
+         AND (
+           candidates.status = 'pending'
+           OR candidates.id IN (
+             SELECT recent.id
+             FROM server_community_member_candidates recent
+             WHERE recent.linked_server_id = ? AND recent.status != 'pending'
+             ORDER BY recent.updated_at DESC
+             LIMIT 100
+           )
+         )
        ORDER BY CASE candidates.status WHEN 'pending' THEN 0 ELSE 1 END,
-                candidates.updated_at DESC
-       LIMIT 100`,
-    ).bind(linkedServerId).all<CandidateRow>(),
+                candidates.updated_at DESC`,
+    ).bind(linkedServerId, linkedServerId).all<CandidateRow>(),
     db.prepare(
       `SELECT id, candidate_id, action, result_status, reason, created_at
        FROM server_community_member_source_audit
@@ -94,20 +103,54 @@ export async function createCommunityMemberCandidate(
       ? "Exact DZN Discord account match found. Owner review is required."
       : "No DZN account currently matches that Discord user ID.";
   const candidateId = crypto.randomUUID();
+  const candidateUsername = cleanText(input.username, 64);
+  const roleLabel = cleanText(input.roleLabel, 36);
+  const candidateInsert = matched
+    ? db.prepare(
+        `INSERT INTO server_community_member_candidates (
+           id, linked_server_id, candidate_discord_id, candidate_username, role_label,
+           status, matched_user_id, reason, created_by_user_id, created_at, updated_at
+         ) SELECT ?, ?, ?, ?, ?, ?, users.id, ?, ?, ?, ?
+             FROM users
+            WHERE users.id = ? AND users.discord_id = ?`,
+      ).bind(candidateId, linkedServerId, existing ? null : discordId, candidateUsername, roleLabel, status, reason, actor.id, now, now, matched.id, discordId)
+    : db.prepare(
+        `INSERT INTO server_community_member_candidates (
+           id, linked_server_id, candidate_discord_id, candidate_username, role_label,
+           status, matched_user_id, reason, created_by_user_id, created_at, updated_at
+         ) VALUES (?, ?, NULL, ?, ?, 'no_match', NULL, ?, ?, ?, ?)`,
+      ).bind(candidateId, linkedServerId, candidateUsername, roleLabel, reason, actor.id, now, now);
   await db.batch([
-    db.prepare(
-      `INSERT INTO server_community_member_candidates (
-         id, linked_server_id, candidate_discord_id, candidate_username, role_label,
-         status, matched_user_id, reason, created_by_user_id, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(candidateId, linkedServerId, matched && !existing ? discordId : null, cleanText(input.username, 64), cleanText(input.roleLabel, 36), status, matched?.id ?? null, reason, actor.id, now, now),
+    candidateInsert,
     db.prepare(
       `INSERT INTO server_community_member_source_audit (
          id, linked_server_id, candidate_id, member_user_id, actor_user_id,
          action, result_status, reason, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(crypto.randomUUID(), linkedServerId, candidateId, matched?.id ?? null, actor.id, action, result, reason, now),
+       ) SELECT ?, linked_server_id, id, matched_user_id, ?, ?, ?, ?, ?
+           FROM server_community_member_candidates
+          WHERE id = ? AND linked_server_id = ?`,
+    ).bind(crypto.randomUUID(), actor.id, action, result, reason, now, candidateId, linkedServerId),
   ]);
+  const saved = await db.prepare("SELECT status FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
+    .bind(candidateId, linkedServerId).first<{ status: string }>();
+  if (!saved) {
+    const deletedReason = "No DZN account currently matches that Discord user ID.";
+    await db.batch([
+      db.prepare(
+        `INSERT INTO server_community_member_candidates (
+           id, linked_server_id, candidate_discord_id, candidate_username, role_label,
+           status, matched_user_id, reason, created_by_user_id, created_at, updated_at
+         ) VALUES (?, ?, NULL, ?, ?, 'no_match', NULL, ?, ?, ?, ?)`,
+      ).bind(candidateId, linkedServerId, candidateUsername, roleLabel, deletedReason, actor.id, now, now),
+      db.prepare(
+        `INSERT INTO server_community_member_source_audit (
+           id, linked_server_id, candidate_id, member_user_id, actor_user_id,
+           action, result_status, reason, created_at
+         ) VALUES (?, ?, ?, NULL, ?, 'candidate_no_match', 'skipped', ?, ?)`,
+      ).bind(crypto.randomUUID(), linkedServerId, candidateId, actor.id, deletedReason, now),
+    ]);
+    return { ok: true as const, status: 201, candidate_status: "no_match" as const, message: deletedReason };
+  }
   return { ok: true as const, status: 201, candidate_status: status, message: reason };
 }
 
@@ -198,6 +241,9 @@ export async function decideCommunityMemberCandidate(
     .bind(id, linkedServerId).first<{ status: string; imported_member_id: string | null; decision_nonce: string | null }>();
   if (imported?.status === "imported" && (imported.imported_member_id !== memberId || imported.decision_nonce !== decisionNonce)) {
     return { ok: true as const, status: 200, message: "Candidate was already imported by another request." };
+  }
+  if (imported && imported.status !== "pending" && imported.status !== "imported") {
+    return { ok: true as const, status: 200, message: `Candidate was already decided as ${imported.status} by another request.` };
   }
   if (imported?.status !== "imported" || imported.imported_member_id !== memberId || imported.decision_nonce !== decisionNonce) {
     const duplicateReason = "That DZN account is already in this server directory. The existing member was not changed.";
