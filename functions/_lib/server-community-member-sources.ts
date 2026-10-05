@@ -424,10 +424,9 @@ export async function decideCommunityMemberCandidate(
              AND NOT EXISTS (
                SELECT 1
                  FROM users
-                WHERE users.id = ?
-                  AND users.discord_id = server_community_member_candidates.candidate_discord_id
+                WHERE users.discord_id = server_community_member_candidates.candidate_discord_id
              )`,
-        ).bind(noMatchReason, actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId, candidate.matched_user_id),
+        ).bind(noMatchReason, actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId),
         conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, actorDiscordId: actor.discord_id, action: "candidate_no_match", result: "skipped", reason: noMatchReason, now, status: "no_match", decisionNonce }),
       ]);
       const noMatch = await db.prepare("SELECT status, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
