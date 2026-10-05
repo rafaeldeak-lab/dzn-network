@@ -20,6 +20,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
     const result = await exportCommunityMemberSourceAudit(env, user, serverId, {
       action: url.searchParams.get("action"),
       result: url.searchParams.get("result"),
+      query: url.searchParams.get("query"),
       limit: url.searchParams.get("limit"),
     });
     return new Response(result.body, {

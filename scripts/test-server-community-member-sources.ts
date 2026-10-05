@@ -76,12 +76,14 @@ async function main() {
   assert.match(exportApi, /requireServerOwnerOrDznAdmin/, "Private audit exports must remain server-owner or platform-admin scoped.");
   assert.match(exportApi, /privateNoStoreHeaders/, "Private audit exports must disable browser and shared caching.");
   assert.match(exportApi, /content-disposition/, "Private audit exports must be downloads rather than a public JSON surface.");
+  assert.match(exportApi, /query: url\.searchParams\.get\("query"\)/, "Private audit exports must accept the active decision-history search.");
   assert.match(helper, /COMMUNITY_SOURCE_EXPORT_MAX_ROWS = 160/, "Audit downloads must have a fixed bounded row limit.");
   assert.match(helper, /persistence: "download_only"/, "DZN must not retain downloaded audit files.");
   assert.match(helper, /exportHistory: "session_only"/, "The export contract must not create retained DZN history.");
   assert.match(helper, /rawIdentifiers: false/, "The export contract must explicitly exclude raw private identifiers.");
   assert.match(helper, /function exportSafeRef/, "Audit exports must replace internal identifiers with opaque refs.");
   assert.match(helper, /function csvCell[\s\S]*formulaSafe/, "Audit exports must neutralize spreadsheet formula cells.");
+  assert.match(helper, /function escapeSqlLike/, "Private audit search must safely escape SQL LIKE wildcards.");
   assert.match(api, /sameOrigin\(request\)/, "Candidate writes must reject cross-origin requests.");
   assert.match(api, /Array\.isArray\(body\.value\.ids\)[\s\S]*decideCommunityMemberCandidates/, "The private route must dispatch explicit selected-row batches through the bounded bulk helper.");
   assert.match(helper, /public_member_enabled, source[\s\S]*0, 'owner_public_handle'/, "Imports must create a private directory invitation.");
@@ -607,6 +609,11 @@ async function main() {
   assert.equal(auditExport.policy.persistence, "download_only");
   assert.equal(auditExport.policy.exportHistory, "session_only");
   assert.doesNotMatch(auditExport.body, /10000000000000001|player\b|owner\b|server\b/, "The audit export must not expose raw account or server identifiers.");
+
+  const defaultLimitExport = await exportCommunityMemberSourceAudit(env, owner, "server", { action: "candidate_rejected", result: "rejected" });
+  assert.equal(defaultLimitExport.limit, 160, "Omitting a limit must use the normal bounded export cap.");
+  const filteredExport = await exportCommunityMemberSourceAudit(env, owner, "server", { query: "not-a-real-audit-query" });
+  assert.equal(filteredExport.rowCount, 0, "Audit export search must match the current decision-history search semantics.");
 
   db.beforeNextBatch = () => {
     seed("UPDATE linked_servers SET user_id = 'player-eleven' WHERE id = 'server-race'").run();

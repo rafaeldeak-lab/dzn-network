@@ -115,14 +115,16 @@ export async function exportCommunityMemberSourceAudit(
   env: Env,
   actor: SessionUser,
   linkedServerId: string,
-  input: { action?: unknown; result?: unknown; limit?: unknown } = {},
+  input: { action?: unknown; result?: unknown; query?: unknown; limit?: unknown } = {},
 ) {
   const db = requireDb(env);
   const access = currentWriteAccessBindings(env, actor, linkedServerId);
   const action = normalizeExportFilter(input.action, COMMUNITY_SOURCE_EXPORT_ACTIONS);
   const result = normalizeExportFilter(input.result, COMMUNITY_SOURCE_EXPORT_RESULTS);
-  const requestedLimit = Number(input.limit);
-  const limit = Number.isFinite(requestedLimit)
+  const query = cleanText(input.query, 96)?.toLowerCase() ?? "";
+  const requestedLimitText = typeof input.limit === "string" ? input.limit.trim() : input.limit;
+  const requestedLimit = requestedLimitText === "" || requestedLimitText == null ? null : Number(requestedLimitText);
+  const limit = requestedLimit !== null && Number.isFinite(requestedLimit)
     ? Math.max(1, Math.min(Math.trunc(requestedLimit), COMMUNITY_SOURCE_EXPORT_MAX_ROWS))
     : COMMUNITY_SOURCE_EXPORT_MAX_ROWS;
   const conditions = ["linked_server_id = ?", CURRENT_WRITE_ACCESS];
@@ -134,6 +136,11 @@ export async function exportCommunityMemberSourceAudit(
   if (result !== "all") {
     conditions.push("result_status = ?");
     bindings.push(result);
+  }
+  if (query) {
+    conditions.push("(LOWER(COALESCE(action, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(result_status, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(reason, '')) LIKE ? ESCAPE '\\')");
+    const search = `%${escapeSqlLike(query)}%`;
+    bindings.push(search, search, search);
   }
   bindings.push(limit + 1);
   const rows = await db.prepare(
@@ -821,6 +828,10 @@ function candidateReadiness(row: CandidateRow, canImport: boolean, hasExistingMe
 function normalizeExportFilter(value: unknown, allowed: Set<string>) {
   const text = typeof value === "string" ? value.trim().toLowerCase() : "";
   return allowed.has(text) ? text : "all";
+}
+
+function escapeSqlLike(value: string) {
+  return value.replace(/[\\%_]/g, "\\$&");
 }
 
 function toExportSafeAuditRow(row: Record<string, unknown>) {

@@ -143,7 +143,7 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
     if (busy) return;
     setBusy("export"); setMessage("");
     try {
-      const params = new URLSearchParams({ action: auditAction, result: auditResult, limit: "160" });
+      const params = new URLSearchParams({ action: auditAction, result: auditResult, query: auditQuery.trim(), limit: "160" });
       const response = await fetch(`/api/servers/${encodeURIComponent(serverId)}/community-member-candidates-export?${params.toString()}`, { credentials: "include", cache: "no-store" });
       if (!response.ok) throw new Error("The private audit download could not be created.");
       const filename = response.headers.get("content-disposition")?.match(/filename="?([^";]+)"?/i)?.[1] ?? "dzn-community-source-audit.csv";
@@ -151,7 +151,8 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
       const link = document.createElement("a");
       link.href = blobUrl; link.download = filename; link.click();
       window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1_000);
-      setMessage("Private audit download prepared. DZN does not retain export files or history.");
+      const truncated = response.headers.get("x-dzn-export-truncated") === "true";
+      setMessage(truncated ? "Private audit download prepared with the newest 160 matching decisions. Older matching decisions were not included. DZN does not retain export files or history." : "Private audit download prepared. DZN does not retain export files or history.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "The private audit download could not be created."); }
     finally { setBusy(null); }
   }
