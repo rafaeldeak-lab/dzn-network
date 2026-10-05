@@ -43,8 +43,10 @@ for (const [name, width, height] of [["desktop", 1440, 1000], ["mobile", 390, 84
   await page.goto(`${baseUrl}/dashboard/community?serverId=server-qa`, { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.getByText("Private Helper", { exact: true }).waitFor();
   await page.getByText("New Survivor", { exact: true }).waitFor();
-  const ownerResult = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, hasPrivate: document.body.innerText.includes("PRIVATE"), hasPublic: document.body.innerText.includes("PUBLIC"), hasCandidateQueue: document.body.innerText.includes("DISCORD CANDIDATE QUEUE"), hasPlayerBoundary: document.body.innerText.toLowerCase().includes("player still decides") }));
-  if (ownerResult.overflow !== 0 || !ownerResult.hasPrivate || !ownerResult.hasPublic || !ownerResult.hasCandidateQueue || !ownerResult.hasPlayerBoundary || errors.length) throw new Error(`${name} owner directory failed: ${JSON.stringify({ ownerResult, errors })}`);
+  await page.getByLabel("Select visible").check();
+  const ownerResult = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, hasPrivate: document.body.innerText.includes("PRIVATE"), hasPublic: document.body.innerText.includes("PUBLIC"), hasCandidateQueue: document.body.innerText.includes("DISCORD CANDIDATE QUEUE"), hasPlayerBoundary: document.body.innerText.toLowerCase().includes("player still decides"), hasSelectedCount: document.body.innerText.includes("1 selected") }));
+  const importSelectedEnabled = await page.getByRole("button", { name: "Import selected" }).isEnabled();
+  if (ownerResult.overflow !== 0 || !ownerResult.hasPrivate || !ownerResult.hasPublic || !ownerResult.hasCandidateQueue || !ownerResult.hasPlayerBoundary || !ownerResult.hasSelectedCount || !importSelectedEnabled || errors.length) throw new Error(`${name} owner directory failed: ${JSON.stringify({ ownerResult, importSelectedEnabled, errors })}`);
   await page.screenshot({ path: `${output}/${name}-owner.png`, fullPage: true });
   console.log(`${name}: ${JSON.stringify({ publicResult, ownerResult })}`);
   await page.close();

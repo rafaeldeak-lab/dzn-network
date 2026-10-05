@@ -39,6 +39,7 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
   const [auditAction, setAuditAction] = useState("all");
   const [auditResult, setAuditResult] = useState("all");
   const [auditLimit, setAuditLimit] = useState(8);
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -76,6 +77,7 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
       const payload = await response.json() as { ok?: boolean; message?: string };
       if (!response.ok || !payload.ok) throw new Error(payload.message ?? "The decision could not be saved.");
       setMessage(payload.message ?? "Decision saved.");
+      setSelectedCandidateIds((current) => current.filter((id) => id !== candidate.id));
       await loadQueue(serverId, setCandidates, setAudit, setMessage, true);
       if (action === "import") await onImported();
     } catch (error) { setMessage(error instanceof Error ? error.message : "The decision could not be saved."); }
@@ -97,6 +99,42 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
   const visibleAudit = filteredAudit.slice(0, auditLimit);
   const pendingCount = candidates.filter((candidate) => candidate.status === "pending").length;
   const completeCount = candidates.length - pendingCount;
+  const selectedCandidateSet = new Set(selectedCandidateIds);
+  const selectedPendingCandidates = candidates.filter((candidate) => candidate.status === "pending" && selectedCandidateSet.has(candidate.id));
+  const visiblePendingCandidates = visibleCandidates.filter((candidate) => candidate.status === "pending");
+  const allVisiblePendingSelected = visiblePendingCandidates.length > 0 && visiblePendingCandidates.every((candidate) => selectedCandidateSet.has(candidate.id));
+  const selectedCanImport = selectedPendingCandidates.length > 0 && selectedPendingCandidates.every((candidate) => candidate.can_import);
+
+  function toggleCandidate(candidateId: string, checked: boolean) {
+    setSelectedCandidateIds((current) => checked ? Array.from(new Set([...current, candidateId])) : current.filter((id) => id !== candidateId));
+  }
+
+  function toggleVisibleCandidates(checked: boolean) {
+    const visibleIds = new Set(visiblePendingCandidates.map((candidate) => candidate.id));
+    setSelectedCandidateIds((current) => checked
+      ? Array.from(new Set([...current, ...visibleIds]))
+      : current.filter((id) => !visibleIds.has(id)));
+  }
+
+  async function decideSelected(action: "import" | "reject") {
+    if (busy || selectedPendingCandidates.length === 0 || selectedPendingCandidates.length > 25) return;
+    setBusy(`bulk-${action}`); setMessage("");
+    try {
+      const response = await fetch(`/api/servers/${encodeURIComponent(serverId)}/community-member-candidates`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids: selectedPendingCandidates.map((candidate) => candidate.id), action }),
+      });
+      const payload = await response.json() as { message?: string; processed?: number; failed?: number };
+      if (!response.ok) throw new Error(payload.message ?? "The selected candidates could not be processed.");
+      setMessage(payload.message ?? "Selected candidates processed.");
+      setSelectedCandidateIds([]);
+      await loadQueue(serverId, setCandidates, setAudit, setMessage, true);
+      if (action === "import" && (payload.processed ?? 0) > 0) await onImported();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "The selected candidates could not be processed."); }
+    finally { setBusy(null); }
+  }
 
   return (
     <section className="mt-5 rounded-md border border-cyan-300/15 bg-[#08101d] p-4">
@@ -116,14 +154,14 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
       <div className="mt-5 border-t border-white/10 pt-4">
         <div className="grid gap-3 lg:grid-cols-[auto_1fr] lg:items-center">
           <div className="grid grid-cols-3 rounded-md border border-white/10 bg-black/20 p-1" aria-label="Candidate status filter">
-            <ScopeButton active={candidateScope === "pending"} label="Pending" count={pendingCount} onClick={() => { setCandidateScope("pending"); setCandidateLimit(8); }} />
-            <ScopeButton active={candidateScope === "complete"} label="Complete" count={completeCount} onClick={() => { setCandidateScope("complete"); setCandidateLimit(8); }} />
-            <ScopeButton active={candidateScope === "all"} label="All" count={candidates.length} onClick={() => { setCandidateScope("all"); setCandidateLimit(8); }} />
+            <ScopeButton active={candidateScope === "pending"} label="Pending" count={pendingCount} onClick={() => { setCandidateScope("pending"); setCandidateLimit(8); setSelectedCandidateIds([]); }} />
+            <ScopeButton active={candidateScope === "complete"} label="Complete" count={completeCount} onClick={() => { setCandidateScope("complete"); setCandidateLimit(8); setSelectedCandidateIds([]); }} />
+            <ScopeButton active={candidateScope === "all"} label="All" count={candidates.length} onClick={() => { setCandidateScope("all"); setCandidateLimit(8); setSelectedCandidateIds([]); }} />
           </div>
           <label className="flex min-h-11 min-w-0 items-center gap-2 rounded-md border border-white/10 bg-black/20 px-3 focus-within:border-cyan-300/50">
             <Search size={16} className="shrink-0 text-zinc-500" />
             <span className="sr-only">Search candidates</span>
-            <input value={filter} onChange={(event) => { setFilter(event.target.value); setCandidateLimit(8); }} placeholder="Search name, handle, role or status" className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-white outline-none placeholder:text-zinc-600" />
+            <input value={filter} onChange={(event) => { setFilter(event.target.value); setCandidateLimit(8); setSelectedCandidateIds([]); }} placeholder="Search name, handle, role or status" className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-white outline-none placeholder:text-zinc-600" />
             <span className="text-xs font-black text-zinc-500">{filteredCandidates.length}</span>
           </label>
         </div>
@@ -133,7 +171,7 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
         {visibleCandidates.length === 0 ? <QueueNotice text="No matching source candidates." /> : visibleCandidates.map((candidate) => (
           <article key={candidate.id} className="rounded-md border border-white/10 bg-black/20 p-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0"><p className="truncate font-black">{candidate.matched_username ?? candidate.candidate_username ?? "Unknown Discord account"}</p><p className="mt-1 text-xs font-bold text-zinc-500">{candidate.candidate_discord_id_masked ?? "ID erased"}{candidate.public_handle ? ` · /${candidate.public_handle}` : ""}{candidate.role_label ? ` · ${candidate.role_label}` : ""}</p></div>
+              <div className="flex min-w-0 items-start gap-3">{candidate.status === "pending" ? <input type="checkbox" checked={selectedCandidateSet.has(candidate.id)} onChange={(event) => toggleCandidate(candidate.id, event.target.checked)} aria-label={`Select ${candidate.matched_username ?? candidate.candidate_username ?? "candidate"}`} className="mt-1 h-4 w-4 shrink-0 accent-cyan-300" /> : null}<div className="min-w-0"><p className="truncate font-black">{candidate.matched_username ?? candidate.candidate_username ?? "Unknown Discord account"}</p><p className="mt-1 text-xs font-bold text-zinc-500">{candidate.candidate_discord_id_masked ?? "ID erased"}{candidate.public_handle ? ` · /${candidate.public_handle}` : ""}{candidate.role_label ? ` · ${candidate.role_label}` : ""}</p></div></div>
               <span className={`rounded px-2 py-1 text-[10px] font-black uppercase ${candidate.status === "pending" ? "bg-amber-300/10 text-amber-200" : candidate.status === "imported" ? "bg-emerald-300/10 text-emerald-200" : "bg-zinc-300/10 text-zinc-400"}`}>{candidate.status.replace("_", " ")}</span>
             </div>
             {candidate.reason ? <p className="mt-2 text-xs font-semibold text-zinc-400">{candidate.reason}</p> : null}
@@ -142,6 +180,7 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
         ))}
       </div>
       {visibleCandidates.length < filteredCandidates.length ? <button type="button" onClick={() => setCandidateLimit((value) => value + 8)} className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-white/10 text-xs font-black uppercase text-zinc-300 hover:border-cyan-300/30 hover:text-cyan-100"><ChevronDown size={15} /> Show 8 more candidates</button> : null}
+      {visiblePendingCandidates.length > 0 ? <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-white/10 bg-black/20 p-2"><label className="mr-auto inline-flex min-h-9 items-center gap-2 px-2 text-xs font-black uppercase text-zinc-300"><input type="checkbox" checked={allVisiblePendingSelected} onChange={(event) => toggleVisibleCandidates(event.target.checked)} className="h-4 w-4 accent-cyan-300" /> Select visible</label><span className="px-2 text-xs font-black text-zinc-500">{selectedPendingCandidates.length} selected</span><button type="button" disabled={busy !== null || !selectedCanImport || selectedPendingCandidates.length > 25} onClick={() => void decideSelected("import")} className="inline-flex min-h-9 items-center gap-2 rounded border border-emerald-300/25 px-3 text-xs font-black uppercase text-emerald-200 disabled:opacity-40"><Check size={14} /> Import selected</button><button type="button" disabled={busy !== null || selectedPendingCandidates.length === 0 || selectedPendingCandidates.length > 25} onClick={() => void decideSelected("reject")} className="inline-flex min-h-9 items-center gap-2 rounded border border-red-300/20 px-3 text-xs font-black uppercase text-red-200 disabled:opacity-40"><ShieldX size={14} /> Reject selected</button>{selectedPendingCandidates.length > 25 ? <p className="w-full px-2 text-xs font-bold text-amber-200">Choose no more than 25 candidates at once.</p> : null}</div> : null}
 
       <details className="mt-5 border-t border-white/10 pt-4">
         <summary className="cursor-pointer text-xs font-black uppercase text-zinc-300">Decision history ({audit.length})</summary>
