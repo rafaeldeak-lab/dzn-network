@@ -3,14 +3,20 @@
 import { Bot, ChevronRight, MessageCircle, MessagesSquare, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
 
 export function DznCommsLauncher() {
   const pathname = usePathname() ?? "/";
+  const disclosureRef = useRef<HTMLDetailsElement | null>(null);
+
+  useEffect(() => {
+    disclosureRef.current?.removeAttribute("open");
+  }, [pathname]);
 
   if (pathname.startsWith("/community")) return null;
 
   return (
-    <details className="group fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 flex max-w-[calc(100vw-2rem)] flex-col-reverse items-end gap-2 md:right-auto md:left-[max(1rem,env(safe-area-inset-left))] md:items-start">
+    <details ref={disclosureRef} className="group fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 flex max-w-[calc(100vw-2rem)] flex-col-reverse items-end gap-2 md:right-auto md:left-[max(1rem,env(safe-area-inset-left))] md:items-start">
       <summary
         aria-label="Open Chat and Help"
         title="Chat and Help"
