@@ -16,7 +16,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   }
   if (request.method === "GET") {
     try {
-      return json({ ok: true, ...(await listCommunityMemberSourceQueue(env, serverId)) }, { headers: privateNoStoreHeaders() });
+      return json({ ok: true, ...(await listCommunityMemberSourceQueue(env, user, serverId)) }, { headers: privateNoStoreHeaders() });
     } catch {
       return unavailable();
     }

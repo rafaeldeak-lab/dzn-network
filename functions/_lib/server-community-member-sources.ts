@@ -3,7 +3,8 @@ import { isDznAdminDiscordId } from "./admin";
 import type { Env, SessionUser } from "./types";
 
 const CURRENT_WRITE_ACCESS = `(
-  ? = 1 OR EXISTS (
+  (? = 1 AND EXISTS (SELECT 1 FROM users access_actor WHERE access_actor.id = ? AND access_actor.discord_id = ?))
+  OR EXISTS (
     SELECT 1 FROM linked_servers access_server
      WHERE access_server.id = ?
        AND access_server.user_id = ?
@@ -32,8 +33,9 @@ type CandidateRow = {
   public_profile_enabled: number | null;
 };
 
-export async function listCommunityMemberSourceQueue(env: Env, linkedServerId: string) {
+export async function listCommunityMemberSourceQueue(env: Env, actor: SessionUser, linkedServerId: string) {
   const db = requireDb(env);
+  const readAccess = currentWriteAccessBindings(env, actor, linkedServerId);
   const [candidates, audit] = await Promise.all([
     db.prepare(
       `SELECT candidates.id, candidates.candidate_discord_id, candidates.candidate_username,
@@ -69,6 +71,7 @@ export async function listCommunityMemberSourceQueue(env: Env, linkedServerId: s
               ON existing_members.linked_server_id = candidates.linked_server_id
              AND existing_members.user_id = users.id
        WHERE candidates.linked_server_id = ?
+         AND ${CURRENT_WRITE_ACCESS}
          AND (
            candidates.status = 'pending'
            OR candidates.id IN (
@@ -81,14 +84,15 @@ export async function listCommunityMemberSourceQueue(env: Env, linkedServerId: s
          )
        ORDER BY CASE candidates.status WHEN 'pending' THEN 0 ELSE 1 END,
                 candidates.updated_at DESC`,
-    ).bind(linkedServerId, linkedServerId).all<CandidateRow>(),
+    ).bind(linkedServerId, ...readAccess, linkedServerId).all<CandidateRow>(),
     db.prepare(
       `SELECT id, candidate_id, action, result_status, reason, created_at
        FROM server_community_member_source_audit
        WHERE linked_server_id = ?
+         AND ${CURRENT_WRITE_ACCESS}
        ORDER BY created_at DESC
        LIMIT 100`,
-    ).bind(linkedServerId).all<Record<string, unknown>>(),
+    ).bind(linkedServerId, ...readAccess).all<Record<string, unknown>>(),
   ]);
   return {
     candidates: (candidates.results ?? []).map(toCandidatePayload),
@@ -521,9 +525,9 @@ function conditionalDecisionAuditStatement(db: D1Database, input: { linkedServer
   ).bind(crypto.randomUUID(), input.linkedServerId, input.candidateId, input.actorId, input.actorDiscordId, input.action, input.result, input.reason, input.now, input.candidateId, input.linkedServerId, input.status, input.decisionNonce, input.importedMemberId ?? null, input.importedMemberId ?? null);
 }
 
-function currentWriteAccessBindings(env: Env, actor: SessionUser, linkedServerId: string): [number, string, string] {
+function currentWriteAccessBindings(env: Env, actor: SessionUser, linkedServerId: string): [number, string, string, string, string] {
   const globalAccess = isDznAdminDiscordId(env, actor.discord_id) || env.MOCK_AUTH === "1" || env.MOCK_AUTH === "true";
-  return [globalAccess ? 1 : 0, linkedServerId, actor.id];
+  return [globalAccess ? 1 : 0, actor.id, actor.discord_id, linkedServerId, actor.id];
 }
 
 function toCandidatePayload(row: CandidateRow) {

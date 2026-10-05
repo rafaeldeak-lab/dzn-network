@@ -95,6 +95,7 @@ async function main() {
   assert.match(helper, /SET status = 'duplicate'[\s\S]*matched_user_id = \(SELECT id FROM users WHERE discord_id = server_community_member_candidates\.candidate_discord_id\)/, "Duplicate reconciliation must persist the current Discord owner.");
   assert.match(helper, /server_community_members[\s\S]*user_id = \(SELECT id FROM users WHERE discord_id = server_community_member_candidates\.candidate_discord_id\)/, "Duplicate reconciliation must verify that the current Discord owner is the existing member.");
   assert.match(helper, /CURRENT_WRITE_ACCESS[\s\S]*access_server\.user_id = \?/, "Candidate mutations must recheck current server ownership in their write predicates.");
+  assert.match(helper, /access_actor\.id = \? AND access_actor\.discord_id = \?/, "Privileged access must recheck the admin's current Discord identity.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(deletion, /candidate_discord_id = CASE[\s\S]*THEN NULL/, "Account deletion must erase retained source identifiers owned by the deleting account.");
   assert.match(deletion, /candidate_discord_id = \(SELECT discord_id FROM users WHERE id = \?\)/, "Account deletion must scrub sources currently owned by the deleting Discord account.");
@@ -126,6 +127,7 @@ async function main() {
   `);
   const seed = db.sqlite.prepare.bind(db.sqlite);
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("owner", "10000000000000001", "Owner");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("admin", "10000000000000999", "Admin");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player", "10000000000000002", "Player");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-two", "10000000000000003", "Player Two");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-three", "10000000000000004", "Player Three");
@@ -146,6 +148,7 @@ async function main() {
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-twenty", "10000000000000020", "Player Twenty");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server", "owner");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server-race", "owner");
+  seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server-admin-race", "player-eleven");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player", "player-one");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-two", "player-two");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-three", "player-three");
@@ -171,13 +174,14 @@ async function main() {
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-thirteen");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-fourteen");
 
-  const env = { DB: db as unknown as D1Database } as Env;
+  const env = { DB: db as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "10000000000000999" } as Env;
   const owner: SessionUser = { id: "owner", discord_id: "10000000000000001", username: "Owner", avatar: null };
+  const admin: SessionUser = { id: "admin", discord_id: "10000000000000999", username: "Admin", avatar: null };
 
   const created = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000002", username: "Player", roleLabel: "Builder" });
   assert.equal(created.status, 201);
   assert.equal(created.candidate_status, "pending");
-  let queue = await listCommunityMemberSourceQueue(env, "server");
+  let queue = await listCommunityMemberSourceQueue(env, owner, "server");
   assert.equal(queue.candidates.length, 1);
   assert.equal("candidate_discord_id" in queue.candidates[0], false, "Raw Discord IDs must not leave the private helper.");
   assert.equal("matched_user_id" in queue.candidates[0], false, "Internal user IDs must not leave the private helper.");
@@ -199,13 +203,13 @@ async function main() {
 
   const duplicate = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000002", username: "Player", roleLabel: "Builder" });
   assert.equal(duplicate.candidate_status, "duplicate");
-  const missing = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000999", username: "Missing", roleLabel: null });
+  const missing = await createCommunityMemberCandidate(env, owner, "server", { discordId: "19999999999999999", username: "Missing", roleLabel: null });
   assert.equal(missing.candidate_status, "no_match");
   assert.equal(seed("SELECT candidate_discord_id FROM server_community_member_candidates WHERE status = 'no_match'").get()?.candidate_discord_id, null, "Unmatched Discord IDs must not be retained.");
 
   const second = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000003", username: "Player Two", roleLabel: "Member" });
   assert.equal(second.candidate_status, "pending");
-  queue = await listCommunityMemberSourceQueue(env, "server");
+  queue = await listCommunityMemberSourceQueue(env, owner, "server");
   const secondCandidate = queue.candidates.find((candidate) => candidate.public_handle === "player-two");
   assert.ok(secondCandidate);
   seed(`INSERT INTO server_community_members (id, linked_server_id, user_id, role_label, public_member_enabled, member_approved_at, source, created_by_user_id, created_at, updated_at)
@@ -221,7 +225,7 @@ async function main() {
 
   const third = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000004", username: "Player Three", roleLabel: "Member" });
   assert.equal(third.candidate_status, "pending");
-  queue = await listCommunityMemberSourceQueue(env, "server");
+  queue = await listCommunityMemberSourceQueue(env, owner, "server");
   let thirdCandidate = queue.candidates.find((candidate) => candidate.candidate_username === "Player Three");
   assert.ok(thirdCandidate);
   db.beforeNextBatch = () => {
@@ -232,14 +236,14 @@ async function main() {
   assert.match(revokedDuringImport.message, /remains pending.*eligibility changed/i);
   assert.equal(seed("SELECT status FROM server_community_member_candidates WHERE id = ?").get(thirdCandidate.id)?.status, "pending", "Revoked consent must leave the candidate retryable.");
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_members WHERE user_id = 'player-three'").get()?.count, 0);
-  queue = await listCommunityMemberSourceQueue(env, "server");
+  queue = await listCommunityMemberSourceQueue(env, owner, "server");
   thirdCandidate = queue.candidates.find((candidate) => candidate.candidate_username === "Player Three");
   assert.ok(thirdCandidate);
   assert.equal(thirdCandidate.can_import, false, "Disabled public profiles must not be advertised as importable.");
   assert.equal(thirdCandidate.public_handle, null, "Disabled public profile handles must remain private.");
   assert.equal(thirdCandidate.matched_username, null, "Disabled profile usernames must remain private.");
   seed("UPDATE player_profile_privacy_preferences SET public_profile_enabled = 1, show_display_name = 0 WHERE user_id = 'player-three'").run();
-  queue = await listCommunityMemberSourceQueue(env, "server");
+  queue = await listCommunityMemberSourceQueue(env, owner, "server");
   thirdCandidate = queue.candidates.find((candidate) => candidate.public_handle === "player-three");
   assert.ok(thirdCandidate);
   assert.equal(thirdCandidate.matched_username, "DZN Player", "Hidden display names must use the public redaction label.");
@@ -250,7 +254,7 @@ async function main() {
 
   const fourth = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000005", username: "Player Four", roleLabel: "Member" });
   assert.equal(fourth.candidate_status, "pending");
-  queue = await listCommunityMemberSourceQueue(env, "server");
+  queue = await listCommunityMemberSourceQueue(env, owner, "server");
   const fourthCandidate = queue.candidates.find((candidate) => candidate.public_handle === "player-four");
   assert.ok(fourthCandidate);
   db.beforeNextBatch = () => {
@@ -283,7 +287,7 @@ async function main() {
 
   const sixth = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000007", username: "Player Six", roleLabel: "Member" });
   assert.equal(sixth.candidate_status, "pending");
-  queue = await listCommunityMemberSourceQueue(env, "server");
+  queue = await listCommunityMemberSourceQueue(env, owner, "server");
   const sixthCandidate = queue.candidates.find((candidate) => candidate.public_handle === "player-six");
   assert.ok(sixthCandidate);
   db.beforeNextBatch = () => {
@@ -327,7 +331,7 @@ async function main() {
         (id, linked_server_id, user_id, role_label, public_member_enabled, member_approved_at, source, created_by_user_id, created_at, updated_at)
         VALUES ('existing-eleven', 'server', 'player-eleven', 'Existing', 0, NULL, 'owner_public_handle', 'owner', '2026-10-05T00:00:00.000Z', '2026-10-05T00:00:00.000Z')`).run();
   seed("UPDATE player_profile_privacy_preferences SET public_profile_enabled = 0 WHERE user_id = 'player-eleven'").run();
-  queue = await listCommunityMemberSourceQueue(env, "server");
+  queue = await listCommunityMemberSourceQueue(env, owner, "server");
   const eleventhCandidate = queue.candidates.find((candidate) => candidate.candidate_username === "Player Eleven");
   assert.ok(eleventhCandidate);
   assert.equal(eleventhCandidate.has_existing_member, true);
@@ -339,7 +343,7 @@ async function main() {
 
   const thirteenth = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000013", username: "Player Thirteen", roleLabel: "Member" });
   assert.equal(thirteenth.candidate_status, "pending");
-  queue = await listCommunityMemberSourceQueue(env, "server");
+  queue = await listCommunityMemberSourceQueue(env, owner, "server");
   const thirteenthCandidate = queue.candidates.find((candidate) => candidate.public_handle === "player-thirteen");
   assert.ok(thirteenthCandidate);
   db.beforeNextBatch = () => {
@@ -353,7 +357,7 @@ async function main() {
   assert.equal(reassignedCandidate?.status, "pending", "A Discord ID reassigned to another DZN account must not become no-match.");
   assert.equal(reassignedCandidate?.candidate_discord_id, "10000000000000013", "The retryable source ID must remain available for refreshed matching.");
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_source_audit WHERE candidate_id = ? AND action = 'candidate_no_match'").get(thirteenthCandidate.id)?.count, 0);
-  queue = await listCommunityMemberSourceQueue(env, "server");
+  queue = await listCommunityMemberSourceQueue(env, owner, "server");
   const reassignedQueueCandidate = queue.candidates.find((candidate) => candidate.id === thirteenthCandidate.id);
   assert.equal(reassignedQueueCandidate?.public_handle, "player-fourteen", "The refreshed queue must display the current Discord owner.");
   assert.equal(reassignedQueueCandidate?.matched_username, "Player Fourteen");
@@ -368,7 +372,7 @@ async function main() {
   assert.equal(seed("SELECT member_user_id FROM server_community_member_source_audit WHERE candidate_id = ? AND action = 'candidate_rejected'").get(thirteenthCandidate.id)?.member_user_id, "player-fourteen", "Rejection audit must identify the account actually rejected.");
   seed("UPDATE users SET discord_id = '10000000000000014' WHERE id = 'player-fourteen'").run();
   seed("UPDATE users SET discord_id = '10000000000000013' WHERE id = 'player-thirteen'").run();
-  queue = await listCommunityMemberSourceQueue(env, "server");
+  queue = await listCommunityMemberSourceQueue(env, owner, "server");
   const decidedAfterReassignment = queue.candidates.find((candidate) => candidate.id === thirteenthCandidate.id);
   assert.equal(decidedAfterReassignment?.public_handle, "player-fourteen", "Decided history must not be relabeled as the new Discord owner.");
   assert.equal(await eraseOrRetainAccountUser(db as unknown as D1Database, "player-thirteen"), 1);
@@ -380,7 +384,7 @@ async function main() {
 
   const fifteenth = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000015", username: "Player Fifteen", roleLabel: "Member" });
   assert.equal(fifteenth.candidate_status, "pending");
-  queue = await listCommunityMemberSourceQueue(env, "server");
+  queue = await listCommunityMemberSourceQueue(env, owner, "server");
   const fifteenthCandidate = queue.candidates.find((candidate) => candidate.candidate_username === "Player Fifteen");
   assert.ok(fifteenthCandidate);
   db.beforeNextBatch = () => {
@@ -394,7 +398,7 @@ async function main() {
 
   const seventeenth = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000017", username: "Player Seventeen", roleLabel: "Member" });
   assert.equal(seventeenth.candidate_status, "pending");
-  queue = await listCommunityMemberSourceQueue(env, "server");
+  queue = await listCommunityMemberSourceQueue(env, owner, "server");
   const seventeenthCandidate = queue.candidates.find((candidate) => candidate.candidate_username === "Player Seventeen");
   assert.ok(seventeenthCandidate);
   seed("UPDATE users SET discord_id = '10000000000000917' WHERE id = 'player-seventeen'").run();
@@ -410,7 +414,7 @@ async function main() {
 
   const nineteenth = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000019", username: "Player Nineteen", roleLabel: "Member" });
   assert.equal(nineteenth.candidate_status, "pending");
-  queue = await listCommunityMemberSourceQueue(env, "server");
+  queue = await listCommunityMemberSourceQueue(env, owner, "server");
   const nineteenthCandidate = queue.candidates.find((candidate) => candidate.candidate_username === "Player Nineteen");
   assert.ok(nineteenthCandidate);
   seed(`INSERT INTO server_community_members
@@ -436,6 +440,18 @@ async function main() {
   const ownershipChanged = await createCommunityMemberCandidate(env, owner, "server-race", { discordId: "10000000000000011", username: "Player Ten", roleLabel: "Member" });
   assert.equal(ownershipChanged.status, 409, "A stale owner request must lose write access after ownership changes.");
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_candidates WHERE linked_server_id = 'server-race'").get()?.count, 0, "An ownership race must not create a candidate.");
+  const newOwner: SessionUser = { id: "player-eleven", discord_id: "10000000000000012", username: "Player Eleven", avatar: null };
+  const currentOwnerCreate = await createCommunityMemberCandidate(env, newOwner, "server-race", { discordId: "10000000000000011", username: "Player Ten", roleLabel: "Member" });
+  assert.equal(currentOwnerCreate.status, 201);
+  assert.equal((await listCommunityMemberSourceQueue(env, owner, "server-race")).candidates.length, 0, "A stale former owner must not read the transferred server's private queue.");
+  assert.equal((await listCommunityMemberSourceQueue(env, newOwner, "server-race")).candidates.length, 1);
+
+  db.beforeNextBatch = () => {
+    seed("UPDATE users SET discord_id = 'deleted-admin' WHERE id = 'admin'").run();
+  };
+  const deletedAdminWrite = await createCommunityMemberCandidate(env, admin, "server-admin-race", { discordId: "10000000000000011", username: "Player Ten", roleLabel: "Member" });
+  assert.equal(deletedAdminWrite.status, 409, "An allowlisted admin must lose access when its current identity disappears before the write.");
+  assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_candidates WHERE linked_server_id = 'server-admin-race'").get()?.count, 0);
 
   db.beforeNextBatch = () => {
     seed("UPDATE users SET discord_id = 'deleted-owner' WHERE id = 'owner'").run();
@@ -445,7 +461,7 @@ async function main() {
   };
   const erasedActorCreate = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000011", username: "Player Ten", roleLabel: "Member" });
   assert.equal(erasedActorCreate.candidate_status, "pending");
-  const erasedActorCandidate = seed("SELECT id, created_by_user_id FROM server_community_member_candidates WHERE matched_user_id = 'player-ten'").get();
+  const erasedActorCandidate = seed("SELECT id, created_by_user_id FROM server_community_member_candidates WHERE linked_server_id = 'server' AND matched_user_id = 'player-ten'").get();
   assert.equal(erasedActorCandidate?.created_by_user_id, null, "A stale session must not restore an anonymized candidate creator link.");
   assert.equal(seed("SELECT actor_user_id FROM server_community_member_source_audit WHERE candidate_id = ?").get(erasedActorCandidate?.id)?.actor_user_id, null, "A stale session must not restore an anonymized source-audit actor link.");
 
