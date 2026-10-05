@@ -82,16 +82,16 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
     finally { setBusy(null); }
   }
 
-  const query = filter.trim().toLowerCase();
+  const query = normalizeSearchText(filter);
   const filteredCandidates = candidates.filter((candidate) => {
     const matchesScope = candidateScope === "all" || (candidateScope === "pending" ? candidate.status === "pending" : candidate.status !== "pending");
-    const matchesQuery = !query || [candidate.candidate_username, candidate.matched_username, candidate.public_handle, candidate.candidate_discord_id_masked, candidate.status, candidate.role_label].some((value) => value?.toLowerCase().includes(query));
+    const matchesQuery = !query || [candidate.candidate_username, candidate.matched_username, candidate.public_handle, candidate.candidate_discord_id_masked, candidate.status, candidate.role_label].some((value) => normalizeSearchText(value).includes(query));
     return matchesScope && matchesQuery;
   });
   const visibleCandidates = filteredCandidates.slice(0, candidateLimit);
-  const normalizedAuditQuery = auditQuery.trim().toLowerCase();
+  const normalizedAuditQuery = normalizeSearchText(auditQuery);
   const filteredAudit = audit.filter((item) => {
-    const matchesQuery = !normalizedAuditQuery || [item.action, item.result_status, item.reason].some((value) => value?.toLowerCase().includes(normalizedAuditQuery));
+    const matchesQuery = !normalizedAuditQuery || [item.action, item.result_status, item.reason].some((value) => normalizeSearchText(value).includes(normalizedAuditQuery));
     return matchesQuery && (auditAction === "all" || item.action === auditAction) && (auditResult === "all" || item.result_status === auditResult);
   });
   const visibleAudit = filteredAudit.slice(0, auditLimit);
@@ -178,4 +178,8 @@ function formatCompactDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Unknown time";
   return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
+function normalizeSearchText(value: string | null | undefined) {
+  return value?.trim().toLowerCase().replaceAll("_", " ") ?? "";
 }

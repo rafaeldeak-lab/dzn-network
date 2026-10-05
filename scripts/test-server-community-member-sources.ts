@@ -102,6 +102,7 @@ async function main() {
   assert.match(component, /filteredAudit\.slice\(0, auditLimit\)/, "Decision history must render a bounded initial result set.");
   assert.match(component, /Search name, handle, role or status/, "Candidate search must cover the owner-facing identity and workflow fields.");
   assert.match(component, /Search decision history/, "Decision history must remain searchable.");
+  assert.match(component, /normalizeSearchText[\s\S]*replaceAll\("_", " "\)/, "Search must match status and action labels exactly as owners see them.");
   assert.match(component, /All actions[\s\S]*All results/, "Decision history must support action and result filters.");
   assert.match(component, /Show 8 more candidates[\s\S]*Decision history[\s\S]*Show 8 more decisions/, "Both long lists must expand in predictable eight-row batches.");
   assert.match(deletion, /candidate_discord_id = CASE[\s\S]*THEN NULL/, "Account deletion must erase retained source identifiers owned by the deleting account.");
