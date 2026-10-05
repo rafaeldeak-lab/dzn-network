@@ -15,6 +15,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { DznAssist } from "./dzn-assist";
+import { DznLivePresenceCounter } from "./dzn-live-presence-counter";
 import { CommsMessageTime } from "./comms-message-time";
 import {
   addCommsReaction,
@@ -36,6 +37,7 @@ type CommsHistoryState =
 const historyUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED === "true";
 const liveUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED === "true";
 const reactionUiFlagEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED === "true";
+const presenceUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED === "true";
 const privateGroupsUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_PRIVATE_GROUPS_UI_ENABLED === "true";
 
 const staticPayload: CommsHistoryPayload = {
@@ -337,9 +339,10 @@ export function DznCommsShell() {
                 </p>
               </div>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:w-[330px]">
+            <div className={presenceUiEnabled ? "grid gap-2 sm:grid-cols-3 lg:w-[500px]" : "grid gap-2 sm:grid-cols-2 lg:w-[330px]"}>
               <StatusPill label="History" value={statusLabel} tone={history.status === "ready" ? "cyan" : "violet"} />
               <StatusPill label="Runtime" value={sendingEnabled ? "Live" : "Read Only"} tone={sendingEnabled ? "cyan" : "gold"} />
+              {presenceUiEnabled ? <DznLivePresenceCounter /> : null}
             </div>
           </div>
 
