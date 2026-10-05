@@ -14,6 +14,7 @@
     "test:games-hide-seek": "tsx scripts/test-games-hide-seek.ts",
     "qa:games-hide-seek": "node scripts/qa-games-hide-seek.mjs",
     "qa:games-hub-3d": "node scripts/qa-games-hub-3d.mjs",
+    "qa:games-hub": "npm run build && node scripts/qa-games-hub.mjs",
     "dev": "next dev",
     "prebuild": "tsx scripts/autodev/typecheck-cache.ts",
     "build": "next build && node scripts/patch-pages-routes.mjs",

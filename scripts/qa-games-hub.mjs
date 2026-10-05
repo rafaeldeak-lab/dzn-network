@@ -1,12 +1,24 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { chromium } from "playwright";
 import sharp from "sharp";
 
-const base = process.env.GAMES_PREVIEW_URL;
-if (!base || new URL(base).hostname !== "127.0.0.1") throw new Error("Set GAMES_PREVIEW_URL to the loopback-only synthetic preview.");
+const configuredOrigin = process.env.GAMES_PREVIEW_URL;
+if (configuredOrigin && new URL(configuredOrigin).hostname !== "127.0.0.1") throw new Error("GAMES_PREVIEW_URL must use the loopback-only synthetic preview.");
 const output = process.env.GAMES_QA_OUTPUT ?? "output/games-qa";
 await mkdir(output, { recursive: true });
+const preview = configuredOrigin ? null : spawn(process.execPath, [path.resolve("node_modules/tsx/dist/cli.mjs"), "scripts/dev-games-hub.ts"], {
+  cwd: process.cwd(),
+  stdio: ["ignore", "pipe", "pipe"],
+});
+let previewLog = "";
+preview?.stdout.setEncoding("utf8");
+preview?.stderr.setEncoding("utf8");
+preview?.stdout.on("data", chunk => { previewLog += chunk; });
+preview?.stderr.on("data", chunk => { previewLog += chunk; });
+const base = configuredOrigin ?? await waitForOrigin();
 const browser = await chromium.launch({ headless: true });
 const failures = [], pageErrors = [], checks = [];
 try {
@@ -269,4 +281,18 @@ try {
   assert.deepEqual(pageErrors, []); assert.deepEqual(failures, []);
   await writeFile(`${output}/results.json`, JSON.stringify({ base, synthetic: true, productionTouched: false, checks, pageErrors, failures }, null, 2));
   console.log(JSON.stringify({ checks, pageErrors, failures }, null, 2));
-} finally { await browser.close(); }
+} finally {
+  await browser.close();
+  preview?.kill();
+}
+
+async function waitForOrigin() {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const match = previewLog.match(/Local-only synthetic Games Hub: (http:\/\/127\.0\.0\.1:\d+)\/__local-login/);
+    if (match) return match[1];
+    if (preview?.exitCode !== null) throw new Error(`Games preview exited before start: ${previewLog}`);
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error(`Games preview did not start: ${previewLog}`);
+}
