@@ -315,9 +315,10 @@ export async function decideCommunityMemberCandidate(
            WHERE id = ? AND linked_server_id = ? AND status = 'pending'
              AND EXISTS (
                SELECT 1 FROM server_community_members
-                WHERE linked_server_id = ? AND user_id = ?
+                 WHERE linked_server_id = ?
+                   AND user_id = (SELECT id FROM users WHERE discord_id = server_community_member_candidates.candidate_discord_id)
              )`,
-        ).bind(duplicateReason, actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId, linkedServerId, candidate.matched_user_id),
+        ).bind(duplicateReason, actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId, linkedServerId),
         conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, actorDiscordId: actor.discord_id, action: "candidate_duplicate", result: "skipped", reason: duplicateReason, now, status: "duplicate", decisionNonce }),
       ]);
       const duplicate = await db.prepare("SELECT status, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
@@ -466,9 +467,10 @@ export async function decideCommunityMemberCandidate(
            WHERE id = ? AND linked_server_id = ? AND status = 'pending'
              AND EXISTS (
                SELECT 1 FROM server_community_members
-                WHERE linked_server_id = ? AND user_id = ?
+                 WHERE linked_server_id = ?
+                   AND user_id = (SELECT id FROM users WHERE discord_id = server_community_member_candidates.candidate_discord_id)
              )`,
-        ).bind(duplicateReason, actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId, linkedServerId, candidate.matched_user_id),
+        ).bind(duplicateReason, actor.id, actor.discord_id, now, decisionNonce, now, id, linkedServerId, linkedServerId),
         conditionalDecisionAuditStatement(db, { linkedServerId, candidateId: id, actorId: actor.id, actorDiscordId: actor.discord_id, action: "candidate_duplicate", result: "skipped", reason: duplicateReason, now, status: "duplicate", decisionNonce }),
       ]);
       const duplicate = await db.prepare("SELECT status, decision_nonce FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")

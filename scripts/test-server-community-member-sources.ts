@@ -93,6 +93,7 @@ async function main() {
   assert.match(helper, /candidates\.status != 'pending' AND users\.id = candidates\.matched_user_id/, "Decided history must remain bound to the account that was decided.");
   assert.match(helper, /SET status = 'rejected'[\s\S]*matched_user_id = \([\s\S]*WHERE discord_id = server_community_member_candidates\.candidate_discord_id/, "Rejection must resolve the Discord owner at write time before writing its audit.");
   assert.match(helper, /SET status = 'duplicate'[\s\S]*matched_user_id = \(SELECT id FROM users WHERE discord_id = server_community_member_candidates\.candidate_discord_id\)/, "Duplicate reconciliation must persist the current Discord owner.");
+  assert.match(helper, /server_community_members[\s\S]*user_id = \(SELECT id FROM users WHERE discord_id = server_community_member_candidates\.candidate_discord_id\)/, "Duplicate reconciliation must verify that the current Discord owner is the existing member.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(deletion, /candidate_discord_id = NULL/, "Account deletion must erase retained source identifiers.");
   assert.match(deletion, /candidate_discord_id = \(SELECT discord_id FROM users WHERE id = \?\)/, "Account deletion must scrub sources currently owned by the deleting Discord account.");
@@ -140,6 +141,8 @@ async function main() {
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-sixteen", "10000000000000016", "Player Sixteen");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-seventeen", "10000000000000017", "Player Seventeen");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-eighteen", "10000000000000018", "Player Eighteen");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-nineteen", "10000000000000019", "Player Nineteen");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-twenty", "10000000000000020", "Player Twenty");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server", "owner");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player", "player-one");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-two", "player-two");
@@ -402,6 +405,24 @@ async function main() {
   assert.match(reconciledReassignment.message, /already in this server directory/i);
   assert.equal(seed("SELECT matched_user_id FROM server_community_member_candidates WHERE id = ?").get(seventeenthCandidate.id)?.matched_user_id, "player-eighteen", "Duplicate reconciliation must persist the current member.");
   assert.equal(seed("SELECT member_user_id FROM server_community_member_source_audit WHERE candidate_id = ? AND action = 'candidate_duplicate'").get(seventeenthCandidate.id)?.member_user_id, "player-eighteen");
+
+  const nineteenth = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000019", username: "Player Nineteen", roleLabel: "Member" });
+  assert.equal(nineteenth.candidate_status, "pending");
+  queue = await listCommunityMemberSourceQueue(env, "server");
+  const nineteenthCandidate = queue.candidates.find((candidate) => candidate.candidate_username === "Player Nineteen");
+  assert.ok(nineteenthCandidate);
+  seed(`INSERT INTO server_community_members
+        (id, linked_server_id, user_id, role_label, public_member_enabled, member_approved_at, source, created_by_user_id, created_at, updated_at)
+        VALUES ('existing-nineteen', 'server', 'player-nineteen', 'Existing', 0, NULL, 'owner_public_handle', 'owner', '2026-10-05T00:00:00.000Z', '2026-10-05T00:00:00.000Z')`).run();
+  db.beforeNextBatch = () => {
+    seed("UPDATE users SET discord_id = '10000000000000919' WHERE id = 'player-nineteen'").run();
+    seed("UPDATE users SET discord_id = '10000000000000019' WHERE id = 'player-twenty'").run();
+  };
+  const duplicateReassignedDuringWrite = await decideCommunityMemberCandidate(env, owner, "server", nineteenthCandidate.id, "import", null);
+  assert.equal(duplicateReassignedDuringWrite.status, 200);
+  assert.match(duplicateReassignedDuringWrite.message, /already decided as pending/i);
+  assert.equal(seed("SELECT status FROM server_community_member_candidates WHERE id = ?").get(nineteenthCandidate.id)?.status, "pending", "A reassignment to a non-member must not finalize a false duplicate.");
+  assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_source_audit WHERE candidate_id = ? AND action = 'candidate_duplicate'").get(nineteenthCandidate.id)?.count, 0);
 
   db.beforeNextBatch = () => {
     seed("UPDATE users SET discord_id = 'deleted-owner' WHERE id = 'owner'").run();
