@@ -5,8 +5,10 @@ import { createRequire } from "node:module";
 import { hmacSha256 } from "../functions/_lib/crypto";
 import { countUnreadReviewNotifications } from "../functions/_lib/dzn-pulse";
 import {
+  applyBulkReviewModerationDecision,
   applyReviewModerationDecision,
   parseReviewModerationFilters,
+  validateReviewModerationBulkInput,
   validateReviewModerationInput,
 } from "../functions/_lib/server-review-moderation";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
@@ -14,6 +16,7 @@ import {
   onRequestGet as getReviewNotificationState,
   onRequestPost as markReviewNotificationStateRead,
 } from "../functions/api/owner/reviews/notifications/read";
+import { onRequestPost as bulkModerateReviews } from "../functions/api/owner/reviews/bulk";
 import { onRequest as reportReview } from "../functions/api/public/server-reviews/[reviewId]/report";
 import { onRequest as saveReview } from "../functions/api/servers/[serverId]/reviews";
 
@@ -69,6 +72,22 @@ assert.equal(
   }).ok,
   false,
 );
+assert.equal(validateReviewModerationBulkInput({
+  items: [
+    { reviewId: "review-one-1234", moderationVersion: 0 },
+    { reviewId: "review-two-1234", moderationVersion: 2 },
+  ],
+  action: "hide",
+  reason: "Confirmed repeated policy breach.",
+}).ok, true);
+assert.equal(validateReviewModerationBulkInput({
+  items: [
+    { reviewId: "review-one-1234", moderationVersion: 0 },
+    { reviewId: "review-one-1234", moderationVersion: 0 },
+  ],
+  action: "hide",
+  reason: "Duplicate selection must fail.",
+}).ok, false);
 assert.equal(
   validateReviewModerationInput({
     reviewId: "review-12345678",
@@ -182,6 +201,17 @@ const notificationReadRoute = readFileSync("functions/api/owner/reviews/notifica
 assert.match(notificationReadRoute, /requirePlatformOwner/);
 assert.match(notificationReadRoute, /markReviewNotificationsRead/);
 
+const bulkRoute = readFileSync("functions/api/owner/reviews/bulk.ts", "utf8");
+assert.match(bulkRoute, /requirePlatformOwner/);
+assert.match(bulkRoute, /readReviewModerationBulkRequest/);
+assert.match(bulkRoute, /applyBulkReviewModerationDecision/);
+assert.match(bulkRoute, /PULSE_NO_STORE_HEADERS/);
+assert.match(bulkRoute, /sameOrigin/);
+
+assert.match(implementation, /input\.items\.length/);
+assert.match(implementation, /WITH expected\(id, moderation_version, decision_id\) AS \(VALUES/);
+assert.match(implementation, /JOIN expected ON expected\.id = current\.id/);
+
 const pulseProvider = readFileSync("components/dzn-pulse/dzn-pulse-provider.tsx", "utf8");
 assert.match(pulseProvider, /key: "reviews", label: "Reviews"/);
 assert.match(pulseProvider, /review_moderation_required/);
@@ -215,6 +245,9 @@ assert.match(
 assert.match(moderationPage, /requestSequence !== loadSequence\.current/);
 assert.match(moderationPage, /status: statusRef\.current/);
 assert.match(moderationPage, /appliedSearchRef\.current/);
+assert.match(moderationPage, /\/api\/owner\/reviews\/bulk/);
+assert.match(moderationPage, /maximum 20/i);
+assert.match(moderationPage, /selectedReviewIds\.size >= 20/);
 
 async function runExecutableModerationTransactions() {
   const sqlite = new DatabaseSync(":memory:");
@@ -253,9 +286,13 @@ async function runExecutableModerationTransactions() {
       execute,
     };
   };
+  let beforeNextBatch: (() => void) | null = null;
   const db = {
     prepare,
     batch: async (statements: ReturnType<typeof prepare>[]) => {
+      const beforeBatch = beforeNextBatch;
+      beforeNextBatch = null;
+      beforeBatch?.();
       sqlite.exec("BEGIN IMMEDIATE");
       try {
         const results = statements.map((statement) => statement.execute());
@@ -569,6 +606,72 @@ async function runExecutableModerationTransactions() {
       .get("review-12345678")?.count,
     1,
   );
+
+  sqlite.exec(`
+    INSERT INTO server_reviews (
+      id, linked_server_id, reviewer_discord_id, reviewer_name, rating, title, body,
+      status, report_count, moderation_version, created_at, updated_at, last_edited_at
+    ) VALUES
+      ('bulk-review-a1', 'server-12345678', 'bulk-reviewer-a', 'Bulk A', 2, 'Bulk A', 'Bulk review A', 'pending', 2, 0, '${old}', '${old}', NULL),
+      ('bulk-review-b2', 'server-12345678', 'bulk-reviewer-b', 'Bulk B', 1, 'Bulk B', 'Bulk review B', 'pending', 3, 0, '${old}', '${old}', NULL),
+      ('bulk-review-c3', 'server-12345678', 'bulk-reviewer-c', 'Bulk C', 3, 'Bulk C', 'Bulk review C', 'pending', 1, 0, '${old}', '${old}', NULL),
+      ('bulk-review-d4', 'server-12345678', 'bulk-reviewer-d', 'Bulk D', 4, 'Bulk D', 'Bulk review D', 'pending', 1, 0, '${old}', '${old}', NULL);
+  `);
+  const bulkBody = {
+    items: [
+      { reviewId: "bulk-review-a1", moderationVersion: 0 },
+      { reviewId: "bulk-review-b2", moderationVersion: 0 },
+    ],
+    action: "hide",
+    reason: "Repeated policy breach confirmed across both reviews.",
+  };
+  const crossOriginBulk = await bulkModerateReviews(context(new Request("https://dzn.test/api/owner/reviews/bulk", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "dzn_session=owner-token", origin: "https://attacker.test", "sec-fetch-site": "cross-site" },
+    body: JSON.stringify(bulkBody),
+  }), {}));
+  assert.equal(crossOriginBulk.status, 403);
+  const bulkResponse = await bulkModerateReviews(context(new Request("https://dzn.test/api/owner/reviews/bulk", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: "dzn_session=owner-token", origin: "https://dzn.test", "sec-fetch-site": "same-origin" },
+    body: JSON.stringify(bulkBody),
+  }), {}));
+  assert.equal(bulkResponse.status, 200);
+  const bulkResult = await bulkResponse.json() as { ok: boolean; updated: number };
+  assert.equal(bulkResult.ok, true);
+  assert.equal(bulkResult.updated, 2);
+  assert.deepEqual(sqlite.prepare(
+    "SELECT id, status, report_count, moderation_version FROM server_reviews WHERE id IN ('bulk-review-a1', 'bulk-review-b2') ORDER BY id",
+  ).all().map((row) => ({ ...row })), [
+    { id: "bulk-review-a1", status: "hidden", report_count: 0, moderation_version: 1 },
+    { id: "bulk-review-b2", status: "hidden", report_count: 0, moderation_version: 1 },
+  ]);
+  assert.equal(sqlite.prepare(
+    "SELECT COUNT(*) AS count FROM server_review_moderation_audit WHERE review_id IN ('bulk-review-a1', 'bulk-review-b2')",
+  ).get()?.count, 2, "Every grouped decision must have its own audit row.");
+
+  beforeNextBatch = () => {
+    sqlite.prepare("UPDATE server_reviews SET moderation_version = moderation_version + 1 WHERE id = 'bulk-review-d4'").run();
+  };
+  const racedBulkResult = await applyBulkReviewModerationDecision(env, owner, {
+    items: [
+      { reviewId: "bulk-review-c3", moderationVersion: 0 },
+      { reviewId: "bulk-review-d4", moderationVersion: 0 },
+    ],
+    action: "approve",
+    reason: "This stale group decision must not partially apply.",
+  });
+  assert.equal(racedBulkResult.ok, false);
+  assert.equal(racedBulkResult.status, 409);
+  assert.deepEqual(sqlite.prepare(
+    "SELECT id, status, report_count, moderation_version FROM server_reviews WHERE id IN ('bulk-review-c3', 'bulk-review-d4') ORDER BY id",
+  ).all().map((row) => ({ ...row })), [
+    { id: "bulk-review-c3", status: "pending", report_count: 1, moderation_version: 0 },
+    { id: "bulk-review-d4", status: "pending", report_count: 1, moderation_version: 1 },
+  ], "A concurrent change must prevent every group moderation write.");
+  assert.equal(sqlite.prepare(
+    "SELECT COUNT(*) AS count FROM server_review_moderation_audit WHERE review_id IN ('bulk-review-c3', 'bulk-review-d4')",
+  ).get()?.count, 0);
   assert.deepEqual(sqlite.prepare("PRAGMA foreign_key_check").all(), []);
   sqlite.close();
 }

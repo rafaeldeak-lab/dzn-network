@@ -18,6 +18,12 @@ export type ReviewModerationInput = {
   reason: string;
 };
 
+export type ReviewModerationBulkInput = {
+  items: Array<{ reviewId: string; moderationVersion: number }>;
+  action: ReviewModerationAction;
+  reason: string;
+};
+
 type ReviewModerationRow = {
   id: string;
   linked_server_id: string;
@@ -70,6 +76,34 @@ export function validateReviewModerationInput(value: unknown):
     return { ok: false, status: 400, message: "Enter a clear reason between 5 and 240 characters." };
   }
   return { ok: true, value: { reviewId, moderationVersion, action, reason } };
+}
+
+export function validateReviewModerationBulkInput(value: unknown):
+  | { ok: true; value: ReviewModerationBulkInput }
+  | { ok: false; status: 400; message: string } {
+  const input = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const items = Array.isArray(input.items) ? input.items : [];
+  const action = input.action === "approve" || input.action === "hide" ? input.action : null;
+  const reason = typeof input.reason === "string" ? input.reason.replace(/\s+/g, " ").trim() : "";
+  if (items.length < 2 || items.length > 20) {
+    return { ok: false, status: 400, message: "Select between 2 and 20 reviews." };
+  }
+  const normalized = items.map((item) => {
+    const candidate = item && typeof item === "object" ? item as Record<string, unknown> : {};
+    return { reviewId: typeof candidate.reviewId === "string" ? candidate.reviewId.trim() : "", moderationVersion: candidate.moderationVersion };
+  });
+  if (normalized.some((item) => !/^[a-zA-Z0-9-]{8,100}$/.test(item.reviewId)
+    || typeof item.moderationVersion !== "number" || !Number.isInteger(item.moderationVersion) || item.moderationVersion < 0)) {
+    return { ok: false, status: 400, message: "Refresh the review queue before deciding." };
+  }
+  if (new Set(normalized.map((item) => item.reviewId)).size !== normalized.length) {
+    return { ok: false, status: 400, message: "Each selected review may appear only once." };
+  }
+  if (!action) return { ok: false, status: 400, message: "Choose approve or hide." };
+  if (reason.length < 5 || reason.length > 240) {
+    return { ok: false, status: 400, message: "Enter a clear reason between 5 and 240 characters." };
+  }
+  return { ok: true, value: { items: normalized as ReviewModerationBulkInput["items"], action, reason } };
 }
 
 export async function readReviewModerationQueue(env: Env, filters: ReviewModerationFilters) {
@@ -156,10 +190,78 @@ export async function applyReviewModerationDecision(env: Env, actor: SessionUser
   return { ok: true as const, reviewId: input.reviewId, status: nextStatus };
 }
 
+export async function applyBulkReviewModerationDecision(env: Env, actor: SessionUser, input: ReviewModerationBulkInput) {
+  const db = requireDb(env);
+  const ids = input.items.map((item) => item.reviewId);
+  const placeholders = ids.map(() => "?").join(", ");
+  const rows = await db.prepare(
+    `SELECT reviews.id, reviews.linked_server_id, reviews.status, reviews.moderation_version,
+            COUNT(CASE WHEN reports.id IS NOT NULL AND reports.resolution_status IS NULL THEN 1 END) AS active_report_count
+       FROM server_reviews AS reviews
+       LEFT JOIN server_review_reports AS reports ON reports.review_id = reviews.id
+      WHERE reviews.id IN (${placeholders}) AND reviews.status != 'deleted'
+      GROUP BY reviews.id`,
+  ).bind(...ids).all<{ id: string; linked_server_id: string; status: string; moderation_version: number; active_report_count: number }>();
+  const existing = rows.results ?? [];
+  const expectedVersions = new Map(input.items.map((item) => [item.reviewId, item.moderationVersion]));
+  if (existing.length !== input.items.length || existing.some((row) => row.moderation_version !== expectedVersions.get(row.id))) {
+    return { ok: false as const, status: 409, message: "One or more reviews changed. Refresh the queue before applying a group decision." };
+  }
+
+  const now = new Date().toISOString();
+  const nextStatus = input.action === "approve" ? "approved" : "hidden";
+  const decisions = existing.map((row) => ({ ...row, decisionId: crypto.randomUUID() }));
+  const expectedRows = decisions.map(() => "(?, ?, ?)").join(", ");
+  const expectedBindings = decisions.flatMap((row) => [row.id, expectedVersions.get(row.id), row.decisionId]);
+  const decisionPredicates = decisions.map(() => "(reviews.id = ? AND reviews.moderation_decision_id = ?)").join(" OR ");
+  const decisionBindings = decisions.flatMap((row) => [row.id, row.decisionId]);
+
+  const results = await db.batch([
+    db.prepare(
+      `WITH expected(id, moderation_version, decision_id) AS (VALUES ${expectedRows})
+       UPDATE server_reviews
+          SET status = ?, moderation_reason = ?, report_count = 0, updated_at = ?,
+              moderation_version = moderation_version + 1,
+              moderation_decision_id = (SELECT decision_id FROM expected WHERE expected.id = server_reviews.id)
+        WHERE id IN (SELECT id FROM expected)
+          AND (SELECT COUNT(*) FROM server_reviews AS current
+               JOIN expected ON expected.id = current.id AND expected.moderation_version = current.moderation_version
+              WHERE current.status != 'deleted') = ?`,
+    ).bind(...expectedBindings, nextStatus, input.reason, now, input.items.length),
+    db.prepare(
+      `UPDATE server_review_reports AS reports
+          SET resolution_status = ?, resolved_at = ?, resolved_by_user_id = ?
+        WHERE reports.review_id IN (${placeholders}) AND reports.resolution_status IS NULL
+          AND EXISTS (SELECT 1 FROM server_reviews AS reviews WHERE ${decisionPredicates})`,
+    ).bind(input.action === "approve" ? "dismissed" : "actioned", now, actor.id, ...ids, ...decisionBindings),
+    ...decisions.map((row) => db.prepare(
+      `INSERT INTO server_review_moderation_audit (
+         id, review_id, linked_server_id, actor_user_id, actor_discord_id, actor_name,
+         action, previous_status, next_status, reason, report_count, created_at
+       ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          WHERE EXISTS (SELECT 1 FROM server_reviews WHERE id = ? AND moderation_decision_id = ?)`,
+    ).bind(
+      row.decisionId, row.id, row.linked_server_id, actor.id, actor.discord_id, actor.username,
+      input.action, row.status, nextStatus, input.reason, Number(row.active_report_count ?? 0), now,
+      row.id, row.decisionId,
+    )),
+  ]);
+  if (Number(results[0]?.meta?.changes ?? 0) !== input.items.length) {
+    return { ok: false as const, status: 409, message: "One or more reviews changed. Refresh the queue before applying a group decision." };
+  }
+  return { ok: true as const, reviewIds: ids, updated: input.items.length, status: nextStatus };
+}
+
 export async function readReviewModerationRequest(request: Request) {
   const parsed = await readBoundedJson<unknown>(request, 2_048);
   if (!parsed.ok) return { ok: false as const, status: parsed.status, message: parsed.message };
   return validateReviewModerationInput(parsed.value);
+}
+
+export async function readReviewModerationBulkRequest(request: Request) {
+  const parsed = await readBoundedJson<unknown>(request, 8_192);
+  if (!parsed.ok) return { ok: false as const, status: parsed.status, message: parsed.message };
+  return validateReviewModerationBulkInput(parsed.value);
 }
 
 function normalizeSearch(value: string | null) {
