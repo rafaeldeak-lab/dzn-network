@@ -238,6 +238,11 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
           reason = 'Player account deleted',
           updated_at = CURRENT_TIMESTAMP
       WHERE matched_user_id = ?`).bind(userId));
+    statements.push(db.prepare(`UPDATE server_community_member_candidates
+      SET created_by_user_id = CASE WHEN created_by_user_id = ? THEN NULL ELSE created_by_user_id END,
+          reviewed_by_user_id = CASE WHEN reviewed_by_user_id = ? THEN NULL ELSE reviewed_by_user_id END,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE created_by_user_id = ? OR reviewed_by_user_id = ?`).bind(userId, userId, userId, userId));
   }
   if (await tableExists(db, "server_community_member_source_audit")) {
     statements.push(db.prepare(`UPDATE server_community_member_source_audit
