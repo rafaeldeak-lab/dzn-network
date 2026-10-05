@@ -6,6 +6,7 @@ import {
   createCommunityMemberCandidate,
   decideCommunityMemberCandidate,
   decideCommunityMemberCandidates,
+  exportCommunityMemberSourceAudit,
   listCommunityMemberSourceQueue,
 } from "../functions/_lib/server-community-member-sources";
 import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
@@ -64,6 +65,7 @@ async function main() {
   const migration = readFileSync("migrations/0090_server_community_member_sources.sql", "utf8");
   const helper = readFileSync("functions/_lib/server-community-member-sources.ts", "utf8");
   const api = readFileSync("functions/api/servers/[serverId]/community-member-candidates.ts", "utf8");
+  const exportApi = readFileSync("functions/api/servers/[serverId]/community-member-candidates-export.ts", "utf8");
   const component = readFileSync("components/community/community-source-queue.tsx", "utf8");
   const deletion = readFileSync("functions/_lib/deletion.ts", "utf8");
 
@@ -71,6 +73,19 @@ async function main() {
   assert.match(migration, /ON DELETE SET NULL/, "Account deletion must not break the retained decision audit.");
   assert.doesNotMatch(migration, /DROP TABLE|TRUNCATE|DELETE FROM/i, "The migration must be additive.");
   assert.match(api, /requireServerOwnerOrDznAdmin/, "The queue must remain server-owner or platform-admin scoped.");
+  assert.match(exportApi, /requireServerOwnerOrDznAdmin/, "Private audit exports must remain server-owner or platform-admin scoped.");
+  assert.match(exportApi, /privateNoStoreHeaders/, "Private audit exports must disable browser and shared caching.");
+  assert.match(exportApi, /content-disposition/, "Private audit exports must be downloads rather than a public JSON surface.");
+  assert.match(exportApi, /query: url\.searchParams\.get\("query"\)/, "Private audit exports must accept the active decision-history search.");
+  assert.match(helper, /COMMUNITY_SOURCE_EXPORT_MAX_ROWS = 160/, "Audit downloads must have a fixed bounded row limit.");
+  assert.match(helper, /persistence: "download_only"/, "DZN must not retain downloaded audit files.");
+  assert.match(helper, /exportHistory: "session_only"/, "The export contract must not create retained DZN history.");
+  assert.match(helper, /rawIdentifiers: false/, "The export contract must explicitly exclude raw private identifiers.");
+  assert.match(helper, /function exportSafeRef/, "Audit exports must replace internal identifiers with opaque refs.");
+  assert.match(helper, /function csvCell[\s\S]*formulaSafe/, "Audit exports must neutralize spreadsheet formula cells.");
+  assert.match(helper, /function escapeSqlLike/, "Private audit search must safely escape SQL LIKE wildcards.");
+  assert.match(helper, /function normalizeExportSearch/, "Private audit search must use the same readable action labels as the owner interface.");
+  assert.ok(helper.includes("replace(/\\b[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\\b/gi"), "Private audit exports must redact UUID identifiers from decision reasons.");
   assert.match(api, /sameOrigin\(request\)/, "Candidate writes must reject cross-origin requests.");
   assert.match(api, /Array\.isArray\(body\.value\.ids\)[\s\S]*decideCommunityMemberCandidates/, "The private route must dispatch explicit selected-row batches through the bounded bulk helper.");
   assert.match(helper, /public_member_enabled, source[\s\S]*0, 'owner_public_handle'/, "Imports must create a private directory invitation.");
@@ -588,6 +603,25 @@ async function main() {
   assert.equal(bulkRejected.failed, 0);
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_candidates WHERE id IN (?, ?) AND status = 'rejected'").get(...bulkIds)?.count, 2, "Every selected row must receive its own decision.");
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_source_audit WHERE candidate_id IN (?, ?) AND action = 'candidate_rejected'").get(...bulkIds)?.count, 2, "Every selected row must receive its own audit entry.");
+
+  const auditExport = await exportCommunityMemberSourceAudit(env, owner, "server", { action: "candidate_rejected", result: "rejected", limit: 1 });
+  assert.equal(auditExport.ok, true);
+  assert.equal(auditExport.limit, 1);
+  assert.equal(auditExport.truncated, true, "The download must disclose when its fixed row cap is reached.");
+  assert.equal(auditExport.policy.persistence, "download_only");
+  assert.equal(auditExport.policy.exportHistory, "session_only");
+  assert.doesNotMatch(auditExport.body, /10000000000000001|player\b|owner\b|server\b/, "The audit export must not expose raw account or server identifiers.");
+
+  const defaultLimitExport = await exportCommunityMemberSourceAudit(env, owner, "server", { action: "candidate_rejected", result: "rejected" });
+  assert.equal(defaultLimitExport.limit, 160, "Omitting a limit must use the normal bounded export cap.");
+  const filteredExport = await exportCommunityMemberSourceAudit(env, owner, "server", { query: "not-a-real-audit-query" });
+  assert.equal(filteredExport.rowCount, 0, "Audit export search must match the current decision-history search semantics.");
+  const normalizedActionExport = await exportCommunityMemberSourceAudit(env, owner, "server", { query: "candidate rejected" });
+  assert.ok(normalizedActionExport.rowCount > 0, "Audit export search must match the readable action label used by the owner interface.");
+  seed("UPDATE server_community_member_source_audit SET reason = ? WHERE candidate_id = ?").run("UUID marker 550e8400-e29b-41d4-a716-abcdefabcdef", bulkIds[0]);
+  const uuidExport = await exportCommunityMemberSourceAudit(env, owner, "server", { query: "uuid marker" });
+  assert.doesNotMatch(uuidExport.body, /550e8400-e29b-41d4-a716-abcdefabcdef/, "Audit exports must redact UUID values from free-text reasons.");
+  assert.match(uuidExport.body, /\[identifier\]/, "Audit exports must mark redacted UUID values clearly.");
 
   db.beforeNextBatch = () => {
     seed("UPDATE linked_servers SET user_id = 'player-eleven' WHERE id = 'server-race'").run();

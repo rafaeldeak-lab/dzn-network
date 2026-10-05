@@ -44,10 +44,14 @@ for (const [name, width, height] of [["desktop", 1440, 1000], ["mobile", 390, 84
   await page.getByText("Private Helper", { exact: true }).waitFor();
   await page.getByText("New Survivor", { exact: true }).waitFor();
   await page.getByLabel("Select visible").check();
+  const decisionHistory = page.locator("details").filter({ hasText: "Decision history" });
+  await decisionHistory.locator("summary").click();
+  await decisionHistory.locator("button", { hasText: "Download CSV" }).waitFor();
   const ownerResult = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, hasPrivate: document.body.innerText.includes("PRIVATE"), hasPublic: document.body.innerText.includes("PUBLIC"), hasCandidateQueue: document.body.innerText.includes("DISCORD CANDIDATE QUEUE"), hasPlayerBoundary: document.body.innerText.toLowerCase().includes("player still decides"), hasSelectedCount: document.body.innerText.includes("1 selected") }));
   const hasReadiness = await page.getByText("Ready to import", { exact: true }).isVisible() && await page.getByRole("combobox", { name: "Readiness" }).isVisible();
   const importSelectedEnabled = await page.getByRole("button", { name: "Import selected" }).isEnabled();
-  if (ownerResult.overflow !== 0 || !ownerResult.hasPrivate || !ownerResult.hasPublic || !ownerResult.hasCandidateQueue || !ownerResult.hasPlayerBoundary || !ownerResult.hasSelectedCount || !hasReadiness || !importSelectedEnabled || errors.length) throw new Error(`${name} owner directory failed: ${JSON.stringify({ ownerResult, hasReadiness, importSelectedEnabled, errors })}`);
+  const hasExportControl = await page.getByRole("button", { name: "Download CSV" }).isVisible() && await page.getByText("Files are not stored by DZN", { exact: false }).isVisible();
+  if (ownerResult.overflow !== 0 || !ownerResult.hasPrivate || !ownerResult.hasPublic || !ownerResult.hasCandidateQueue || !ownerResult.hasPlayerBoundary || !ownerResult.hasSelectedCount || !hasReadiness || !importSelectedEnabled || !hasExportControl || errors.length) throw new Error(`${name} owner directory failed: ${JSON.stringify({ ownerResult, hasReadiness, importSelectedEnabled, hasExportControl, errors })}`);
   await page.screenshot({ path: `${output}/${name}-owner.png`, fullPage: true });
   console.log(`${name}: ${JSON.stringify({ publicResult, ownerResult })}`);
   await page.close();

@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, Clock3, Search, ShieldX } from "lucide-react";
+import { Check, ChevronDown, Clock3, Download, Search, ShieldX } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 
 type Candidate = {
@@ -139,6 +139,24 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
     finally { setBusy(null); }
   }
 
+  async function downloadAudit() {
+    if (busy) return;
+    setBusy("export"); setMessage("");
+    try {
+      const params = new URLSearchParams({ action: auditAction, result: auditResult, query: auditQuery.trim(), limit: "160" });
+      const response = await fetch(`/api/servers/${encodeURIComponent(serverId)}/community-member-candidates-export?${params.toString()}`, { credentials: "include", cache: "no-store" });
+      if (!response.ok) throw new Error("The private audit download could not be created.");
+      const filename = response.headers.get("content-disposition")?.match(/filename="?([^";]+)"?/i)?.[1] ?? "dzn-community-source-audit.csv";
+      const blobUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = blobUrl; link.download = filename; link.click();
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1_000);
+      const truncated = response.headers.get("x-dzn-export-truncated") === "true";
+      setMessage(truncated ? "Private audit download prepared with the newest 160 matching decisions. Older matching decisions were not included. DZN does not retain export files or history." : "Private audit download prepared. DZN does not retain export files or history.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "The private audit download could not be created."); }
+    finally { setBusy(null); }
+  }
+
   return (
     <section className="mt-5 rounded-md border border-cyan-300/15 bg-[#08101d] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -189,6 +207,10 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
 
       <details className="mt-5 border-t border-white/10 pt-4">
         <summary className="cursor-pointer text-xs font-black uppercase text-zinc-300">Decision history ({audit.length})</summary>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-white/10 bg-black/20 p-3">
+          <p className="max-w-2xl text-xs font-semibold leading-5 text-zinc-400">Download a bounded, private CSV of this server&apos;s decision history. Files are not stored by DZN and never include raw account or server identifiers.</p>
+          <button type="button" disabled={busy !== null} onClick={() => void downloadAudit()} className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded border border-cyan-300/25 px-3 text-xs font-black uppercase text-cyan-100 disabled:opacity-40"><Download size={15} /> Download CSV</button>
+        </div>
         <div className="mt-4 grid gap-3 md:grid-cols-[1fr_180px_150px]">
           <label className="flex min-h-10 min-w-0 items-center gap-2 rounded-md border border-white/10 bg-black/20 px-3 focus-within:border-cyan-300/50"><Search size={15} className="shrink-0 text-zinc-500" /><span className="sr-only">Search decision history</span><input value={auditQuery} onChange={(event) => { setAuditQuery(event.target.value); setAuditLimit(8); }} placeholder="Search decision history" className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-white outline-none placeholder:text-zinc-600" /></label>
           <label className="text-[10px] font-black uppercase text-zinc-500">Action<select value={auditAction} onChange={(event) => { setAuditAction(event.target.value); setAuditLimit(8); }} className="mt-1 min-h-10 w-full rounded-md border border-white/10 bg-[#0a1220] px-3 text-xs font-bold text-zinc-200 outline-none focus:border-cyan-300/50"><option value="all">All actions</option><option value="candidate_created">Created</option><option value="candidate_imported">Imported</option><option value="candidate_rejected">Rejected</option><option value="candidate_duplicate">Duplicate</option><option value="candidate_no_match">No match</option></select></label>
