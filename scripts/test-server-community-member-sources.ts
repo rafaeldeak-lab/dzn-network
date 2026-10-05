@@ -88,6 +88,7 @@ async function main() {
   assert.match(helper, /created_by_user_id[\s\S]*SELECT id FROM users WHERE id = \? AND discord_id = \?/, "Candidate actor links must be fenced to the current authenticated identity.");
   assert.match(helper, /existingMember[\s\S]*candidate_duplicate[\s\S]*PUBLIC_PROFILE_REQUIRED/, "Existing members must be reconciled before public-profile eligibility is checked.");
   assert.match(helper, /NOT EXISTS \([\s\S]*FROM users[\s\S]*users\.discord_id = server_community_member_candidates\.candidate_discord_id/, "No-match cleanup must check every account for the submitted Discord ID.");
+  assert.match(helper, /LEFT JOIN users ON users\.discord_id = candidates\.candidate_discord_id/, "The queue must display the account that currently owns the candidate Discord ID.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(deletion, /candidate_discord_id = NULL/, "Account deletion must erase retained source identifiers.");
   assert.match(deletion, /created_by_user_id = CASE[\s\S]*reviewed_by_user_id = CASE/, "Retained Store accounts must be unlinked from candidate creator and reviewer fields.");
@@ -337,6 +338,11 @@ async function main() {
   assert.equal(reassignedCandidate?.status, "pending", "A Discord ID reassigned to another DZN account must not become no-match.");
   assert.equal(reassignedCandidate?.candidate_discord_id, "10000000000000013", "The retryable source ID must remain available for refreshed matching.");
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_source_audit WHERE candidate_id = ? AND action = 'candidate_no_match'").get(thirteenthCandidate.id)?.count, 0);
+  queue = await listCommunityMemberSourceQueue(env, "server");
+  const reassignedQueueCandidate = queue.candidates.find((candidate) => candidate.id === thirteenthCandidate.id);
+  assert.equal(reassignedQueueCandidate?.public_handle, "player-fourteen", "The refreshed queue must display the current Discord owner.");
+  assert.equal(reassignedQueueCandidate?.matched_username, "Player Fourteen");
+  assert.equal(reassignedQueueCandidate?.can_import, true);
 
   db.beforeNextBatch = () => {
     seed("UPDATE users SET discord_id = 'deleted-owner' WHERE id = 'owner'").run();

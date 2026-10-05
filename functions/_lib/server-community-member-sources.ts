@@ -26,7 +26,7 @@ export async function listCommunityMemberSourceQueue(env: Env, linkedServerId: s
   const [candidates, audit] = await Promise.all([
     db.prepare(
       `SELECT candidates.id, candidates.candidate_discord_id, candidates.candidate_username,
-              candidates.role_label, candidates.status, candidates.matched_user_id,
+              candidates.role_label, candidates.status, users.id AS matched_user_id,
               candidates.imported_member_id, existing_members.id AS existing_member_id,
               candidates.reason, candidates.created_at,
               candidates.updated_at,
@@ -49,12 +49,12 @@ export async function listCommunityMemberSourceQueue(env: Env, linkedServerId: s
               player_public_profiles.status AS public_profile_status,
               player_profile_privacy_preferences.public_profile_enabled
        FROM server_community_member_candidates candidates
-       LEFT JOIN users ON users.id = candidates.matched_user_id
-       LEFT JOIN player_public_profiles ON player_public_profiles.user_id = candidates.matched_user_id
-       LEFT JOIN player_profile_privacy_preferences ON player_profile_privacy_preferences.user_id = candidates.matched_user_id
+       LEFT JOIN users ON users.discord_id = candidates.candidate_discord_id
+       LEFT JOIN player_public_profiles ON player_public_profiles.user_id = users.id
+       LEFT JOIN player_profile_privacy_preferences ON player_profile_privacy_preferences.user_id = users.id
        LEFT JOIN server_community_members existing_members
               ON existing_members.linked_server_id = candidates.linked_server_id
-             AND existing_members.user_id = candidates.matched_user_id
+             AND existing_members.user_id = users.id
        WHERE candidates.linked_server_id = ?
          AND (
            candidates.status = 'pending'
