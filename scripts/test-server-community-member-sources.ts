@@ -83,6 +83,8 @@ async function main() {
   assert.match(helper, /status = 'duplicate'[\s\S]*EXISTS \([\s\S]*server_community_members/, "Duplicate decisions must require a current server member.");
   assert.match(helper, /latest_status[\s\S]*source request was already processed/, "A lost pending-candidate race must report the current decision instead of a false no-match.");
   assert.match(helper, /SELECT \?, \?, \?, matched_user_id/, "Decision audits must use the candidate's current write-time identity.");
+  assert.match(helper, /CASE WHEN EXISTS \([\s\S]*server_community_members[\s\S]*THEN 'duplicate' ELSE 'pending'/, "Candidate status must use write-time directory membership.");
+  assert.match(helper, /'no_match'[\s\S]*WHERE NOT EXISTS \(SELECT 1 FROM users WHERE discord_id = \?\)/, "No-match creation must be fenced against a concurrent account link.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(deletion, /candidate_discord_id = NULL/, "Account deletion must erase retained source identifiers.");
   assert.match(deletion, /created_by_user_id = CASE[\s\S]*reviewed_by_user_id = CASE/, "Retained Store accounts must be unlinked from candidate creator and reviewer fields.");
@@ -117,6 +119,8 @@ async function main() {
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-four", "10000000000000005", "Player Four");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-five", "10000000000000006", "Player Five");
   seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-six", "10000000000000007", "Player Six");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-seven", "10000000000000008", "Player Seven");
+  seed("INSERT INTO users (id, discord_id, username) VALUES (?, ?, ?)").run("player-eight", "10000000000000009", "Player Eight");
   seed("INSERT INTO linked_servers (id, user_id) VALUES (?, ?)").run("server", "owner");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player", "player-one");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-two", "player-two");
@@ -124,12 +128,16 @@ async function main() {
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-four", "player-four");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-five", "player-five");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-six", "player-six");
+  seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-seven", "player-seven");
+  seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-eight", "player-eight");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-two");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-three");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-four");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-five");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-six");
+  seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-seven");
+  seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-eight");
 
   const env = { DB: db as unknown as D1Database } as Env;
   const owner: SessionUser = { id: "owner", discord_id: "10000000000000001", username: "Owner", avatar: null };
@@ -254,6 +262,32 @@ async function main() {
   assert.equal(rejectedAfterErasure.status, 200);
   assert.equal(seed("SELECT member_user_id FROM server_community_member_source_audit WHERE candidate_id = ? AND action = 'candidate_rejected'").get(sixthCandidate.id)?.member_user_id, null, "A rejection audit must not restore a user link cleared during erasure.");
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_source_audit").get()?.count, 12);
+
+  db.beforeNextBatch = () => {
+    seed(`INSERT INTO server_community_members
+          (id, linked_server_id, user_id, role_label, public_member_enabled, member_approved_at, source, created_by_user_id, created_at, updated_at)
+          VALUES ('concurrent-member', 'server', 'player-seven', 'Existing', 0, NULL, 'owner_public_handle', 'owner', '2026-10-05T00:00:00.000Z', '2026-10-05T00:00:00.000Z')`).run();
+  };
+  const membershipAdded = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000008", username: "Player Seven", roleLabel: "Member" });
+  assert.equal(membershipAdded.candidate_status, "duplicate", "A membership added after the read must produce a duplicate candidate.");
+  assert.equal(seed("SELECT action FROM server_community_member_source_audit WHERE candidate_id = (SELECT id FROM server_community_member_candidates WHERE matched_user_id = 'player-seven')").get()?.action, "candidate_duplicate");
+
+  seed(`INSERT INTO server_community_members
+        (id, linked_server_id, user_id, role_label, public_member_enabled, member_approved_at, source, created_by_user_id, created_at, updated_at)
+        VALUES ('removed-member', 'server', 'player-eight', 'Existing', 0, NULL, 'owner_public_handle', 'owner', '2026-10-05T00:00:00.000Z', '2026-10-05T00:00:00.000Z')`).run();
+  db.beforeNextBatch = () => {
+    seed("DELETE FROM server_community_members WHERE id = 'removed-member'").run();
+  };
+  const membershipRemoved = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000009", username: "Player Eight", roleLabel: "Member" });
+  assert.equal(membershipRemoved.candidate_status, "pending", "A membership removed after the read must produce a pending candidate.");
+  assert.equal(seed("SELECT action FROM server_community_member_source_audit WHERE candidate_id = (SELECT id FROM server_community_member_candidates WHERE matched_user_id = 'player-eight')").get()?.action, "candidate_created");
+
+  db.beforeNextBatch = () => {
+    seed("INSERT INTO users (id, discord_id, username) VALUES ('player-nine', '10000000000000010', 'Player Nine')").run();
+  };
+  const accountLinked = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000010", username: "Player Nine", roleLabel: "Member" });
+  assert.equal(accountLinked.status, 409, "A concurrently linked account must make the caller refresh instead of recording a false no-match.");
+  assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_candidates WHERE candidate_username = 'Player Nine'").get()?.count, 0);
 
   seed("CREATE TABLE store_orders (id TEXT PRIMARY KEY, purchasing_user_id TEXT)").run();
   seed("INSERT INTO store_orders (id, purchasing_user_id) VALUES ('retained-order', 'player-four')").run();

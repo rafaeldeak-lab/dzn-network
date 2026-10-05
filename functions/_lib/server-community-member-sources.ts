@@ -104,14 +104,9 @@ export async function createCommunityMemberCandidate(
       return { ok: true as const, status: 200, candidate_status: "pending" as const, message: "That DZN account is already awaiting an owner decision." };
     }
   }
-  const status = existing ? "duplicate" : matched ? "pending" : "no_match";
-  const action = existing ? "candidate_duplicate" : matched ? "candidate_created" : "candidate_no_match";
-  const result = matched && !existing ? "accepted" : "skipped";
-  const reason = existing
-    ? "That DZN account is already in this server directory."
-    : matched
-      ? "Exact DZN Discord account match found. Owner review is required."
-      : "No DZN account currently matches that Discord user ID.";
+  const duplicateReason = "That DZN account is already in this server directory.";
+  const pendingReason = "Exact DZN Discord account match found. Owner review is required.";
+  const noMatchReason = "No DZN account currently matches that Discord user ID.";
   const candidateId = crypto.randomUUID();
   const candidateUsername = cleanText(input.username, 64);
   const roleLabel = cleanText(input.roleLabel, 36);
@@ -120,30 +115,54 @@ export async function createCommunityMemberCandidate(
         `INSERT INTO server_community_member_candidates (
            id, linked_server_id, candidate_discord_id, candidate_username, role_label,
            status, matched_user_id, reason, created_by_user_id, created_at, updated_at
-         ) SELECT ?, ?, ?, ?, ?, ?, users.id, ?, ?, ?, ?
+         ) SELECT ?, ?,
+                  CASE WHEN EXISTS (
+                    SELECT 1 FROM server_community_members
+                     WHERE linked_server_id = ? AND user_id = users.id
+                  ) THEN NULL ELSE ? END,
+                  ?, ?,
+                  CASE WHEN EXISTS (
+                    SELECT 1 FROM server_community_members
+                     WHERE linked_server_id = ? AND user_id = users.id
+                  ) THEN 'duplicate' ELSE 'pending' END,
+                  users.id,
+                  CASE WHEN EXISTS (
+                    SELECT 1 FROM server_community_members
+                     WHERE linked_server_id = ? AND user_id = users.id
+                  ) THEN ? ELSE ? END,
+                  ?, ?, ?
              FROM users
             WHERE users.id = ? AND users.discord_id = ?
          ON CONFLICT DO NOTHING`,
-      ).bind(candidateId, linkedServerId, existing ? null : discordId, candidateUsername, roleLabel, status, reason, actor.id, now, now, matched.id, discordId)
+      ).bind(candidateId, linkedServerId, linkedServerId, discordId, candidateUsername, roleLabel, linkedServerId, linkedServerId, duplicateReason, pendingReason, actor.id, now, now, matched.id, discordId)
     : db.prepare(
         `INSERT INTO server_community_member_candidates (
            id, linked_server_id, candidate_discord_id, candidate_username, role_label,
            status, matched_user_id, reason, created_by_user_id, created_at, updated_at
-         ) VALUES (?, ?, NULL, ?, ?, 'no_match', NULL, ?, ?, ?, ?)`,
-      ).bind(candidateId, linkedServerId, candidateUsername, roleLabel, reason, actor.id, now, now);
+         ) SELECT ?, ?, NULL, ?, ?, 'no_match', NULL, ?, ?, ?, ?
+            WHERE NOT EXISTS (SELECT 1 FROM users WHERE discord_id = ?)
+         ON CONFLICT DO NOTHING`,
+      ).bind(candidateId, linkedServerId, candidateUsername, roleLabel, noMatchReason, actor.id, now, now, discordId);
   await db.batch([
     candidateInsert,
     db.prepare(
       `INSERT INTO server_community_member_source_audit (
          id, linked_server_id, candidate_id, member_user_id, actor_user_id,
          action, result_status, reason, created_at
-       ) SELECT ?, linked_server_id, id, matched_user_id, ?, ?, ?, ?, ?
+       ) SELECT ?, linked_server_id, id, matched_user_id, ?,
+                CASE status
+                  WHEN 'pending' THEN 'candidate_created'
+                  WHEN 'duplicate' THEN 'candidate_duplicate'
+                  ELSE 'candidate_no_match'
+                END,
+                CASE WHEN status = 'pending' THEN 'accepted' ELSE 'skipped' END,
+                reason, ?
            FROM server_community_member_candidates
           WHERE id = ? AND linked_server_id = ?`,
-    ).bind(crypto.randomUUID(), actor.id, action, result, reason, now, candidateId, linkedServerId),
+    ).bind(crypto.randomUUID(), actor.id, now, candidateId, linkedServerId),
   ]);
-  const saved = await db.prepare("SELECT status FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
-    .bind(candidateId, linkedServerId).first<{ status: string }>();
+  const saved = await db.prepare("SELECT status, reason FROM server_community_member_candidates WHERE id = ? AND linked_server_id = ? LIMIT 1")
+    .bind(candidateId, linkedServerId).first<{ status: CandidateRow["status"]; reason: string | null }>();
   if (!saved) {
     const concurrentPending = matched && !existing
       ? await db.prepare(
@@ -211,7 +230,7 @@ export async function createCommunityMemberCandidate(
       ? { ok: true as const, status: 201, candidate_status: "no_match" as const, message: deletedReason }
       : { ok: false as const, status: 409, error: "SOURCE_STATE_CHANGED", message: "The account source state changed while it was being queued. Refresh and try again." };
   }
-  return { ok: true as const, status: 201, candidate_status: status, message: reason };
+  return { ok: true as const, status: 201, candidate_status: saved.status, message: saved.reason ?? "Candidate source recorded." };
 }
 
 export async function decideCommunityMemberCandidate(
