@@ -21,8 +21,11 @@ const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: new (path: st
 
 class SqliteD1Database {
   readonly sqlite = new DatabaseSync(":memory:");
+  beforeNextBatch: (() => void) | null = null;
   prepare(query: string) { return new SqliteD1PreparedStatement(this.sqlite, query); }
   async batch(statements: SqliteD1PreparedStatement[]) {
+    this.beforeNextBatch?.();
+    this.beforeNextBatch = null;
     this.sqlite.exec("BEGIN");
     try {
       const results = [];
@@ -67,6 +70,8 @@ async function main() {
   assert.match(helper, /WHERE users\.id = \? AND users\.discord_id = \?/, "Candidate insertion must recheck the exact account identity at write time.");
   assert.match(migration, /UNIQUE INDEX[\s\S]*linked_server_id, matched_user_id[\s\S]*status = 'pending'/, "The database must enforce one pending candidate per server and matched player.");
   assert.match(helper, /INNER JOIN users[\s\S]*users\.discord_id = candidates\.candidate_discord_id[\s\S]*profiles\.status = 'active'[\s\S]*privacy\.public_profile_enabled = 1/, "The import write must recheck identity and profile consent atomically.");
+  assert.match(helper, /Candidate remains pending because the player's public-profile eligibility changed/, "Revoked eligibility must remain retryable instead of being mislabeled as a duplicate.");
+  assert.match(helper, /status = 'duplicate'[\s\S]*EXISTS \([\s\S]*server_community_members/, "Duplicate decisions must require a current server member.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(deletion, /candidate_discord_id = NULL/, "Account deletion must erase retained source identifiers.");
 
@@ -154,9 +159,19 @@ async function main() {
 
   const third = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000004", username: "Player Three", roleLabel: "Member" });
   assert.equal(third.candidate_status, "pending");
-  seed("UPDATE player_profile_privacy_preferences SET public_profile_enabled = 0 WHERE user_id = 'player-three'").run();
   queue = await listCommunityMemberSourceQueue(env, "server");
   let thirdCandidate = queue.candidates.find((candidate) => candidate.candidate_username === "Player Three");
+  assert.ok(thirdCandidate);
+  db.beforeNextBatch = () => {
+    seed("UPDATE player_profile_privacy_preferences SET public_profile_enabled = 0 WHERE user_id = 'player-three'").run();
+  };
+  const revokedDuringImport = await decideCommunityMemberCandidate(env, owner, "server", thirdCandidate.id, "import", null);
+  assert.equal(revokedDuringImport.status, 200);
+  assert.match(revokedDuringImport.message, /remains pending.*eligibility changed/i);
+  assert.equal(seed("SELECT status FROM server_community_member_candidates WHERE id = ?").get(thirdCandidate.id)?.status, "pending", "Revoked consent must leave the candidate retryable.");
+  assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_members WHERE user_id = 'player-three'").get()?.count, 0);
+  queue = await listCommunityMemberSourceQueue(env, "server");
+  thirdCandidate = queue.candidates.find((candidate) => candidate.candidate_username === "Player Three");
   assert.ok(thirdCandidate);
   assert.equal(thirdCandidate.can_import, false, "Disabled public profiles must not be advertised as importable.");
   assert.equal(thirdCandidate.public_handle, null, "Disabled public profile handles must remain private.");
@@ -166,9 +181,10 @@ async function main() {
   thirdCandidate = queue.candidates.find((candidate) => candidate.public_handle === "player-three");
   assert.ok(thirdCandidate);
   assert.equal(thirdCandidate.matched_username, "DZN Player", "Hidden display names must use the public redaction label.");
-  const rejected = await decideCommunityMemberCandidate(env, owner, "server", thirdCandidate.id, "reject", "Not yet verified by the owner.");
-  assert.equal(rejected.status, 200);
-  assert.equal(seed("SELECT status FROM server_community_member_candidates WHERE id = ?").get(thirdCandidate.id)?.status, "rejected");
+  const retriedImport = await decideCommunityMemberCandidate(env, owner, "server", thirdCandidate.id, "import", null);
+  assert.equal(retriedImport.status, 200);
+  assert.match(retriedImport.message, /imported privately/i);
+  assert.equal(seed("SELECT status FROM server_community_member_candidates WHERE id = ?").get(thirdCandidate.id)?.status, "imported");
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_source_audit").get()?.count, 8);
 
   db.sqlite.close();
