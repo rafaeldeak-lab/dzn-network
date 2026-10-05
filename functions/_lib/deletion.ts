@@ -242,8 +242,22 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
             THEN NULL
             ELSE candidate_username
           END,
-          matched_user_id = CASE WHEN matched_user_id = ? THEN NULL ELSE matched_user_id END,
+          status = CASE
+            WHEN status = 'pending'
+             AND candidate_discord_id = (SELECT discord_id FROM users WHERE id = ?)
+            THEN 'no_match'
+            ELSE status
+          END,
+          matched_user_id = CASE
+            WHEN matched_user_id = ?
+              OR (status = 'pending' AND candidate_discord_id = (SELECT discord_id FROM users WHERE id = ?))
+            THEN NULL
+            ELSE matched_user_id
+          END,
           reason = CASE
+            WHEN status = 'pending'
+             AND candidate_discord_id = (SELECT discord_id FROM users WHERE id = ?)
+            THEN 'Player account deleted'
             WHEN matched_user_id = ?
              AND candidate_discord_id = (SELECT discord_id FROM users WHERE id = ?)
             THEN 'Player account deleted'
@@ -251,7 +265,7 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
           END,
           updated_at = CURRENT_TIMESTAMP
       WHERE matched_user_id = ?
-         OR candidate_discord_id = (SELECT discord_id FROM users WHERE id = ?)`).bind(userId, userId, userId, userId, userId, userId, userId, userId));
+         OR candidate_discord_id = (SELECT discord_id FROM users WHERE id = ?)`).bind(userId, userId, userId, userId, userId, userId, userId, userId, userId, userId, userId));
     statements.push(db.prepare(`UPDATE server_community_member_candidates
       SET created_by_user_id = CASE WHEN created_by_user_id = ? THEN NULL ELSE created_by_user_id END,
           reviewed_by_user_id = CASE WHEN reviewed_by_user_id = ? THEN NULL ELSE reviewed_by_user_id END,

@@ -99,7 +99,7 @@ async function main() {
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(deletion, /candidate_discord_id = CASE[\s\S]*THEN NULL/, "Account deletion must erase retained source identifiers owned by the deleting account.");
   assert.match(deletion, /candidate_discord_id = \(SELECT discord_id FROM users WHERE id = \?\)/, "Account deletion must scrub sources currently owned by the deleting Discord account.");
-  assert.match(deletion, /matched_user_id = CASE WHEN matched_user_id = \? THEN NULL ELSE matched_user_id END/, "Source erasure must preserve a different account's decided identity.");
+  assert.match(deletion, /status = CASE[\s\S]*status = 'pending'[\s\S]*THEN 'no_match'[\s\S]*matched_user_id = CASE[\s\S]*matched_user_id = \?[\s\S]*OR \(status = 'pending'/, "Pending source-owner deletion must finalize the row while decided history keeps unrelated identities.");
   assert.match(deletion, /created_by_user_id = CASE[\s\S]*reviewed_by_user_id = CASE/, "Retained Store accounts must be unlinked from candidate creator and reviewer fields.");
   assert.match(deletion, /UPDATE server_community_member_source_audit[\s\S]*member_user_id[\s\S]*actor_user_id/, "Retained Store accounts must be unlinked from both source-audit identity columns.");
   assert.match(deletion, /UPDATE server_community_member_audit[\s\S]*member_user_id[\s\S]*actor_user_id/, "Retained Store accounts must be unlinked from both member-audit identity columns.");
@@ -477,6 +477,7 @@ async function main() {
 
   const oldIdentitySource = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000022", username: "Player Twenty Two", roleLabel: "Member" });
   assert.equal(oldIdentitySource.candidate_status, "pending");
+  const oldIdentityCandidate = seed("SELECT id FROM server_community_member_candidates WHERE linked_server_id = 'server' AND candidate_discord_id = '10000000000000022' AND status = 'pending'").get();
   seed("UPDATE users SET discord_id = '10000000000000922' WHERE id = 'player-twenty-two'").run();
   seed("UPDATE users SET discord_id = '10000000000000022' WHERE id = 'player-twenty-three'").run();
   const newIdentitySource = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000922", username: "Player Twenty Two", roleLabel: "Member" });
@@ -486,6 +487,14 @@ async function main() {
   queue = await listCommunityMemberSourceQueue(env, owner, "server");
   assert.ok(queue.candidates.some((candidate) => candidate.public_handle === "player-twenty-three"), "The old source must resolve to its current Discord owner.");
   assert.ok(queue.candidates.some((candidate) => candidate.public_handle === "player-twenty-two"), "The player's new source must remain independently reviewable.");
+  assert.equal(await eraseOrRetainAccountUser(db as unknown as D1Database, "player-twenty-three"), 1);
+  const deletedCurrentSource = seed("SELECT status, candidate_discord_id, candidate_username, matched_user_id, reason FROM server_community_member_candidates WHERE id = ?").get(oldIdentityCandidate?.id);
+  assert.equal(deletedCurrentSource?.status, "no_match", "Deleting a pending source's current owner must finalize the orphaned row.");
+  assert.equal(deletedCurrentSource?.candidate_discord_id, null);
+  assert.equal(deletedCurrentSource?.candidate_username, null);
+  assert.equal(deletedCurrentSource?.matched_user_id, null);
+  assert.equal(deletedCurrentSource?.reason, "Player account deleted");
+  assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_candidates WHERE linked_server_id = 'server' AND candidate_discord_id = '10000000000000922' AND status = 'pending'").get()?.count, 1, "Deleting the reassigned old source owner must preserve the original player's new pending source.");
 
   const concurrentMemberSource = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000024", username: "Player Twenty Four", roleLabel: "Member" });
   assert.equal(concurrentMemberSource.candidate_status, "pending");
