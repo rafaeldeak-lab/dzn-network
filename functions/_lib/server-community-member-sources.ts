@@ -1,5 +1,6 @@
 import { requireDb } from "./db";
 import { isDznAdminDiscordId } from "./admin";
+import { isDznPulseEnabled } from "./feature-flags";
 import type { Env, SessionUser } from "./types";
 
 const CURRENT_WRITE_ACCESS = `(
@@ -302,6 +303,14 @@ export async function createCommunityMemberCandidate(
     return noMatchSaved?.status === "no_match"
       ? { ok: true as const, status: 201, candidate_status: "no_match" as const, message: deletedReason }
       : { ok: false as const, status: 409, error: "SOURCE_STATE_CHANGED", message: "The account source state changed while it was being queued. Refresh and try again." };
+  }
+  if (saved.status === "pending") {
+    await notifyOwnerOfImportableCandidate(env, linkedServerId, candidateId).catch((error) => {
+      console.warn("DZN community candidate owner notification skipped", {
+        candidate_id: candidateId,
+        error: error instanceof Error ? error.message : "unknown",
+      });
+    });
   }
   return { ok: true as const, status: 201, candidate_status: saved.status, message: saved.reason ?? "Candidate source recorded." };
 }
@@ -666,6 +675,42 @@ function conditionalDecisionAuditStatement(db: D1Database, input: { linkedServer
 function currentWriteAccessBindings(env: Env, actor: SessionUser, linkedServerId: string): [number, string, string, string, string] {
   const globalAccess = isDznAdminDiscordId(env, actor.discord_id) || env.MOCK_AUTH === "1" || env.MOCK_AUTH === "true";
   return [globalAccess ? 1 : 0, actor.id, actor.discord_id, linkedServerId, actor.id];
+}
+
+async function notifyOwnerOfImportableCandidate(env: Env, linkedServerId: string, candidateId: string) {
+  if (!isDznPulseEnabled(env)) return null;
+  const now = new Date().toISOString();
+  return requireDb(env).prepare(
+    `INSERT OR IGNORE INTO user_notifications (
+       id, user_id, server_id, type, title, body, action_url, priority,
+       dedupe_key, metadata, created_at, expires_at
+     )
+     SELECT ?, servers.user_id, servers.id, 'community_member_candidate_importable',
+            'Community member ready to review',
+            substr(COALESCE(NULLIF(users.username, ''), 'DZN player'), 1, 64) ||
+              ' has a unique eligible DZN profile and is ready for your private import decision.',
+            ?, 58, ?, ?, ?, ?
+       FROM server_community_member_candidates candidates
+       JOIN linked_servers servers ON servers.id = candidates.linked_server_id
+       JOIN users ON users.discord_id = candidates.candidate_discord_id
+       JOIN player_public_profiles profiles ON profiles.user_id = users.id AND profiles.status = 'active'
+       JOIN player_profile_privacy_preferences privacy ON privacy.user_id = users.id AND privacy.public_profile_enabled = 1
+       LEFT JOIN server_community_members members
+              ON members.linked_server_id = candidates.linked_server_id AND members.user_id = users.id
+      WHERE candidates.id = ? AND candidates.linked_server_id = ? AND candidates.status = 'pending'
+        AND lower(COALESCE(servers.status, 'pending')) NOT IN ('deleted', 'merged')
+        AND (servers.merged_into_server_id IS NULL OR servers.merged_into_server_id = '')
+        AND members.id IS NULL`,
+  ).bind(
+    crypto.randomUUID(),
+    `/dashboard/community?serverId=${encodeURIComponent(linkedServerId)}`,
+    `community-member-importable:${candidateId}`,
+    JSON.stringify({ candidate_id: candidateId, presentation_only: true }),
+    now,
+    new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+    candidateId,
+    linkedServerId,
+  ).run();
 }
 
 function toCandidatePayload(row: CandidateRow) {

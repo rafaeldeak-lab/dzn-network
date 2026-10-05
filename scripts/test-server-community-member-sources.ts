@@ -123,6 +123,13 @@ async function main() {
     CREATE TABLE linked_servers (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', merged_into_server_id TEXT);
     CREATE TABLE player_public_profiles (user_id TEXT PRIMARY KEY, handle TEXT NOT NULL UNIQUE, status TEXT NOT NULL);
     CREATE TABLE player_profile_privacy_preferences (user_id TEXT PRIMARY KEY, public_profile_enabled INTEGER NOT NULL, show_display_name INTEGER NOT NULL);
+    CREATE TABLE user_notifications (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, server_id TEXT, campaign_id TEXT, event_id TEXT,
+      type TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, image_url TEXT, action_url TEXT,
+      priority INTEGER NOT NULL DEFAULT 0, dedupe_key TEXT NOT NULL, metadata TEXT, read_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, expires_at TEXT,
+      UNIQUE(user_id, dedupe_key)
+    );
     CREATE TABLE server_community_members (
       id TEXT PRIMARY KEY, linked_server_id TEXT NOT NULL, user_id TEXT NOT NULL, role_label TEXT,
       display_order INTEGER NOT NULL DEFAULT 0, public_member_enabled INTEGER NOT NULL DEFAULT 0,
@@ -207,7 +214,7 @@ async function main() {
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-twenty-five");
   seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-twenty-six");
 
-  const env = { DB: db as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "10000000000000999" } as Env;
+  const env = { DB: db as unknown as D1Database, DZN_ADMIN_DISCORD_IDS: "10000000000000999", DZN_PULSE_ENABLED: "true" } as Env;
   const owner: SessionUser = { id: "owner", discord_id: "10000000000000001", username: "Owner", avatar: null };
   const admin: SessionUser = { id: "admin", discord_id: "10000000000000999", username: "Admin", avatar: null };
 
@@ -220,10 +227,17 @@ async function main() {
   assert.equal("matched_user_id" in queue.candidates[0], false, "Internal user IDs must not leave the private helper.");
   assert.equal(queue.candidates[0].candidate_discord_id_masked, "1000...0002");
   assert.equal(queue.candidates[0].can_import, true);
+  const ownerAlert = seed("SELECT user_id, server_id, type, action_url, metadata FROM user_notifications WHERE dedupe_key = ?").get(`community-member-importable:${queue.candidates[0].id}`);
+  assert.equal(ownerAlert?.user_id, "owner", "An importable candidate must alert the current server owner.");
+  assert.equal(ownerAlert?.server_id, "server", "The alert must remain server-scoped.");
+  assert.equal(ownerAlert?.type, "community_member_candidate_importable");
+  assert.equal(ownerAlert?.action_url, "/dashboard/community?serverId=server");
+  assert.deepEqual(JSON.parse(String(ownerAlert?.metadata)), { candidate_id: queue.candidates[0].id, presentation_only: true });
   const repeated = await createCommunityMemberCandidate(env, owner, "server", { discordId: "10000000000000002", username: "Player", roleLabel: "Builder" });
   assert.equal(repeated.status, 200);
   assert.equal(repeated.candidate_status, "pending");
   assert.equal(seed("SELECT COUNT(*) AS count FROM server_community_member_candidates WHERE status = 'pending'").get()?.count, 1, "Repeated checks must reuse one pending candidate.");
+  assert.equal(seed("SELECT COUNT(*) AS count FROM user_notifications WHERE type = 'community_member_candidate_importable'").get()?.count, 1, "Repeated checks must not duplicate the owner alert.");
   const numericId = await createCommunityMemberCandidate(env, owner, "server", { discordId: 10000000000000002, username: "Rounded", roleLabel: null });
   assert.equal(numericId.status, 400, "Numeric Discord snowflakes must be rejected before JavaScript precision can alter them.");
 
