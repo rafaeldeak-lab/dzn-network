@@ -28,7 +28,16 @@ export function DznCommsLauncher() {
   if (pathname.startsWith("/community")) return null;
 
   return (
-    <details ref={disclosureRef} className="group fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 flex max-w-[calc(100vw-2rem)] flex-col-reverse items-end gap-2 md:right-auto md:left-[max(1rem,env(safe-area-inset-left))] md:items-start">
+    <details
+      ref={disclosureRef}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeDisclosure();
+        }
+      }}
+      className="group fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 flex max-w-[calc(100vw-2rem)] flex-col-reverse items-end gap-2 md:right-auto md:left-[max(1rem,env(safe-area-inset-left))] md:items-start"
+    >
       <summary
         aria-label="Chat and Help"
         title="Chat and Help"
