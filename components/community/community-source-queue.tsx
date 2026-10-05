@@ -14,6 +14,7 @@ type Candidate = {
   reason: string | null;
   has_existing_member: boolean;
   can_import: boolean;
+  readiness: { state: "ready" | "blocked" | "no_match" | "complete"; label: string; detail: string };
   updated_at: string;
 };
 
@@ -34,6 +35,7 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
   const [role, setRole] = useState("");
   const [filter, setFilter] = useState("");
   const [candidateScope, setCandidateScope] = useState<"all" | "pending" | "complete">("pending");
+  const [readinessFilter, setReadinessFilter] = useState<"all" | Candidate["readiness"]["state"]>("all");
   const [candidateLimit, setCandidateLimit] = useState(8);
   const [auditQuery, setAuditQuery] = useState("");
   const [auditAction, setAuditAction] = useState("all");
@@ -87,8 +89,9 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
   const query = normalizeSearchText(filter);
   const filteredCandidates = candidates.filter((candidate) => {
     const matchesScope = candidateScope === "all" || (candidateScope === "pending" ? candidate.status === "pending" : candidate.status !== "pending");
-    const matchesQuery = !query || [candidate.candidate_username, candidate.matched_username, candidate.public_handle, candidate.candidate_discord_id_masked, candidate.status, candidate.role_label].some((value) => normalizeSearchText(value).includes(query));
-    return matchesScope && matchesQuery;
+    const matchesReadiness = readinessFilter === "all" || candidate.readiness.state === readinessFilter;
+    const matchesQuery = !query || [candidate.candidate_username, candidate.matched_username, candidate.public_handle, candidate.candidate_discord_id_masked, candidate.status, candidate.role_label, candidate.readiness.label, candidate.readiness.detail].some((value) => normalizeSearchText(value).includes(query));
+    return matchesScope && matchesReadiness && matchesQuery;
   });
   const visibleCandidates = filteredCandidates.slice(0, candidateLimit);
   const normalizedAuditQuery = normalizeSearchText(auditQuery);
@@ -152,12 +155,13 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
       {message ? <p className="mt-3 text-sm font-semibold text-cyan-100">{message}</p> : null}
 
       <div className="mt-5 border-t border-white/10 pt-4">
-        <div className="grid gap-3 lg:grid-cols-[auto_1fr] lg:items-center">
+        <div className="grid gap-3 lg:grid-cols-[auto_190px_1fr] lg:items-end">
           <div className="grid grid-cols-3 rounded-md border border-white/10 bg-black/20 p-1" aria-label="Candidate status filter">
             <ScopeButton active={candidateScope === "pending"} label="Pending" count={pendingCount} onClick={() => { setCandidateScope("pending"); setCandidateLimit(8); setSelectedCandidateIds([]); }} />
             <ScopeButton active={candidateScope === "complete"} label="Complete" count={completeCount} onClick={() => { setCandidateScope("complete"); setCandidateLimit(8); setSelectedCandidateIds([]); }} />
             <ScopeButton active={candidateScope === "all"} label="All" count={candidates.length} onClick={() => { setCandidateScope("all"); setCandidateLimit(8); setSelectedCandidateIds([]); }} />
           </div>
+          <label className="text-[10px] font-black uppercase text-zinc-500">Readiness<select value={readinessFilter} onChange={(event) => { setReadinessFilter(event.target.value as typeof readinessFilter); setCandidateLimit(8); setSelectedCandidateIds([]); }} className="mt-1 min-h-10 w-full rounded-md border border-white/10 bg-[#0a1220] px-3 text-xs font-bold text-zinc-200 outline-none focus:border-cyan-300/50"><option value="all">All readiness</option><option value="ready">Ready</option><option value="blocked">Needs profile</option><option value="no_match">No match</option><option value="complete">Complete</option></select></label>
           <label className="flex min-h-11 min-w-0 items-center gap-2 rounded-md border border-white/10 bg-black/20 px-3 focus-within:border-cyan-300/50">
             <Search size={16} className="shrink-0 text-zinc-500" />
             <span className="sr-only">Search candidates</span>
@@ -175,6 +179,7 @@ export function CommunitySourceQueue({ serverId, onImported }: { serverId: strin
               <span className={`rounded px-2 py-1 text-[10px] font-black uppercase ${candidate.status === "pending" ? "bg-amber-300/10 text-amber-200" : candidate.status === "imported" ? "bg-emerald-300/10 text-emerald-200" : "bg-zinc-300/10 text-zinc-400"}`}>{candidate.status.replace("_", " ")}</span>
             </div>
             {candidate.reason ? <p className="mt-2 text-xs font-semibold text-zinc-400">{candidate.reason}</p> : null}
+            <div className={`mt-3 rounded border px-3 py-2 ${candidate.readiness.state === "ready" ? "border-emerald-300/20 bg-emerald-300/5" : candidate.readiness.state === "blocked" || candidate.readiness.state === "no_match" ? "border-amber-300/20 bg-amber-300/5" : "border-white/10 bg-white/[0.03]"}`}><p className="text-[10px] font-black uppercase text-zinc-200">{candidate.readiness.label}</p><p className="mt-1 text-xs font-semibold leading-5 text-zinc-400">{candidate.readiness.detail}</p></div>
             {candidate.status === "pending" ? <div className="mt-3 flex flex-wrap gap-2 border-t border-white/10 pt-3"><button type="button" disabled={busy !== null || !candidate.can_import} onClick={() => void decide(candidate, "import")} className="inline-flex min-h-9 items-center gap-2 rounded border border-emerald-300/25 px-3 text-xs font-black uppercase text-emerald-200 disabled:opacity-40"><Check size={14} /> {candidate.has_existing_member ? "Reconcile existing" : "Import privately"}</button><button type="button" disabled={busy !== null} onClick={() => void decide(candidate, "reject")} className="inline-flex min-h-9 items-center gap-2 rounded border border-red-300/20 px-3 text-xs font-black uppercase text-red-200 disabled:opacity-40"><ShieldX size={14} /> Reject</button></div> : null}
           </article>
         ))}

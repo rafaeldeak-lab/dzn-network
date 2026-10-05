@@ -714,6 +714,13 @@ async function notifyOwnerOfImportableCandidate(env: Env, linkedServerId: string
 }
 
 function toCandidatePayload(row: CandidateRow) {
+  const hasExistingMember = Boolean(row.existing_member_id);
+  const canImport = row.status === "pending"
+    && (hasExistingMember || (
+      Boolean(row.matched_user_id && row.public_handle)
+      && row.public_profile_status === "active"
+      && row.public_profile_enabled === 1
+    ));
   return {
     id: row.id,
     candidate_discord_id_masked: maskDiscordId(row.candidate_discord_id),
@@ -725,14 +732,26 @@ function toCandidatePayload(row: CandidateRow) {
     updated_at: row.updated_at,
     matched_username: row.matched_username,
     public_handle: row.public_handle,
-    has_existing_member: Boolean(row.existing_member_id),
-    can_import: row.status === "pending"
-      && (Boolean(row.existing_member_id) || (
-        Boolean(row.matched_user_id && row.public_handle)
-        && row.public_profile_status === "active"
-        && row.public_profile_enabled === 1
-      )),
+    has_existing_member: hasExistingMember,
+    can_import: canImport,
+    readiness: candidateReadiness(row, canImport, hasExistingMember),
   };
+}
+
+function candidateReadiness(row: CandidateRow, canImport: boolean, hasExistingMember: boolean) {
+  if (row.status === "pending" && hasExistingMember) {
+    return { state: "ready" as const, label: "Ready to reconcile", detail: "This player is already in the private directory. Review will preserve their existing visibility choice." };
+  }
+  if (row.status === "pending" && canImport) {
+    return { state: "ready" as const, label: "Ready to import", detail: "A unique eligible DZN profile is matched. Import stays private until the player approves visibility." };
+  }
+  if (row.status === "pending") {
+    return { state: "blocked" as const, label: "Profile eligibility needed", detail: "The matched account needs an active public profile and enabled profile visibility before import." };
+  }
+  if (row.status === "no_match") {
+    return { state: "no_match" as const, label: "No account match", detail: "No current DZN account owns the submitted Discord identity." };
+  }
+  return { state: "complete" as const, label: row.status.replace("_", " "), detail: "This source check is complete and remains available in decision history." };
 }
 
 function cleanDiscordId(value: unknown) {

@@ -104,6 +104,8 @@ async function main() {
   assert.match(component, /filteredCandidates\.slice\(0, candidateLimit\)/, "The candidate queue must render a bounded initial result set.");
   assert.match(component, /filteredAudit\.slice\(0, auditLimit\)/, "Decision history must render a bounded initial result set.");
   assert.match(component, /Search name, handle, role or status/, "Candidate search must cover the owner-facing identity and workflow fields.");
+  assert.match(component, /All readiness[\s\S]*Needs profile[\s\S]*No match[\s\S]*Complete/, "Candidate review must expose compact readiness filters.");
+  assert.match(component, /candidate\.readiness\.label[\s\S]*candidate\.readiness\.detail/, "Each candidate row must explain its current readiness state.");
   assert.match(component, /Search decision history/, "Decision history must remain searchable.");
   assert.match(component, /normalizeSearchText[\s\S]*replaceAll\("_", " "\)/, "Search must match status and action labels exactly as owners see them.");
   assert.match(component, /All actions[\s\S]*All results/, "Decision history must support action and result filters.");
@@ -227,6 +229,11 @@ async function main() {
   assert.equal("matched_user_id" in queue.candidates[0], false, "Internal user IDs must not leave the private helper.");
   assert.equal(queue.candidates[0].candidate_discord_id_masked, "1000...0002");
   assert.equal(queue.candidates[0].can_import, true);
+  assert.deepEqual(queue.candidates[0].readiness, {
+    state: "ready",
+    label: "Ready to import",
+    detail: "A unique eligible DZN profile is matched. Import stays private until the player approves visibility.",
+  });
   const ownerAlert = seed("SELECT user_id, server_id, type, action_url, metadata FROM user_notifications WHERE dedupe_key = ?").get(`community-member-importable:${queue.candidates[0].id}`);
   assert.equal(ownerAlert?.user_id, "owner", "An importable candidate must alert the current server owner.");
   assert.equal(ownerAlert?.server_id, "server", "The alert must remain server-scoped.");
