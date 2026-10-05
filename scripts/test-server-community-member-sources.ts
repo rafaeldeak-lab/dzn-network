@@ -60,6 +60,8 @@ async function main() {
   assert.match(api, /requireServerOwnerOrDznAdmin/, "The queue must remain server-owner or platform-admin scoped.");
   assert.match(api, /sameOrigin\(request\)/, "Candidate writes must reject cross-origin requests.");
   assert.match(helper, /public_member_enabled, source[\s\S]*0, 'owner_public_handle'/, "Imports must create a private directory invitation.");
+  assert.match(helper, /imported\.imported_member_id !== memberId/, "Only the request that created the exact member may report import success.");
+  assert.match(helper, /imported_member_id = \?/, "Import audit writes must be fenced to the request's exact member ID.");
   assert.match(component, /player still decides/i, "The UI must explain the separate player consent boundary.");
   assert.match(deletion, /candidate_discord_id = NULL/, "Account deletion must erase retained source identifiers.");
 
@@ -69,7 +71,7 @@ async function main() {
     CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT NOT NULL UNIQUE, username TEXT, avatar TEXT);
     CREATE TABLE linked_servers (id TEXT PRIMARY KEY, user_id TEXT NOT NULL);
     CREATE TABLE player_public_profiles (user_id TEXT PRIMARY KEY, handle TEXT NOT NULL UNIQUE, status TEXT NOT NULL);
-    CREATE TABLE player_profile_privacy_preferences (user_id TEXT PRIMARY KEY, public_profile_enabled INTEGER NOT NULL);
+    CREATE TABLE player_profile_privacy_preferences (user_id TEXT PRIMARY KEY, public_profile_enabled INTEGER NOT NULL, show_display_name INTEGER NOT NULL);
     CREATE TABLE server_community_members (
       id TEXT PRIMARY KEY, linked_server_id TEXT NOT NULL, user_id TEXT NOT NULL, role_label TEXT,
       display_order INTEGER NOT NULL DEFAULT 0, public_member_enabled INTEGER NOT NULL DEFAULT 0,
@@ -93,9 +95,9 @@ async function main() {
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player", "player-one");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-two", "player-two");
   seed("INSERT INTO player_public_profiles (user_id, handle, status) VALUES (?, ?, 'active')").run("player-three", "player-three");
-  seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled) VALUES (?, 1)").run("player");
-  seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled) VALUES (?, 1)").run("player-two");
-  seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled) VALUES (?, 1)").run("player-three");
+  seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player");
+  seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-two");
+  seed("INSERT INTO player_profile_privacy_preferences (user_id, public_profile_enabled, show_display_name) VALUES (?, 1, 1)").run("player-three");
 
   const env = { DB: db as unknown as D1Database } as Env;
   const owner: SessionUser = { id: "owner", discord_id: "10000000000000001", username: "Owner", avatar: null };
@@ -143,10 +145,16 @@ async function main() {
   assert.equal(third.candidate_status, "pending");
   seed("UPDATE player_profile_privacy_preferences SET public_profile_enabled = 0 WHERE user_id = 'player-three'").run();
   queue = await listCommunityMemberSourceQueue(env, "server");
-  const thirdCandidate = queue.candidates.find((candidate) => candidate.public_handle === "player-three");
+  let thirdCandidate = queue.candidates.find((candidate) => candidate.candidate_username === "Player Three");
   assert.ok(thirdCandidate);
   assert.equal(thirdCandidate.can_import, false, "Disabled public profiles must not be advertised as importable.");
-  seed("UPDATE player_profile_privacy_preferences SET public_profile_enabled = 1 WHERE user_id = 'player-three'").run();
+  assert.equal(thirdCandidate.public_handle, null, "Disabled public profile handles must remain private.");
+  assert.equal(thirdCandidate.matched_username, null, "Disabled profile usernames must remain private.");
+  seed("UPDATE player_profile_privacy_preferences SET public_profile_enabled = 1, show_display_name = 0 WHERE user_id = 'player-three'").run();
+  queue = await listCommunityMemberSourceQueue(env, "server");
+  thirdCandidate = queue.candidates.find((candidate) => candidate.public_handle === "player-three");
+  assert.ok(thirdCandidate);
+  assert.equal(thirdCandidate.matched_username, "DZN Player", "Hidden display names must use the public redaction label.");
   const rejected = await decideCommunityMemberCandidate(env, owner, "server", thirdCandidate.id, "reject", "Not yet verified by the owner.");
   assert.equal(rejected.status, 200);
   assert.equal(seed("SELECT status FROM server_community_member_candidates WHERE id = ?").get(thirdCandidate.id)?.status, "rejected");
