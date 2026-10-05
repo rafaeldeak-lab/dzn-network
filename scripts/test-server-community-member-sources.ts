@@ -84,6 +84,8 @@ async function main() {
   assert.match(helper, /function exportSafeRef/, "Audit exports must replace internal identifiers with opaque refs.");
   assert.match(helper, /function csvCell[\s\S]*formulaSafe/, "Audit exports must neutralize spreadsheet formula cells.");
   assert.match(helper, /function escapeSqlLike/, "Private audit search must safely escape SQL LIKE wildcards.");
+  assert.match(helper, /function normalizeExportSearch/, "Private audit search must use the same readable action labels as the owner interface.");
+  assert.ok(helper.includes("replace(/\\b[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\\b/gi"), "Private audit exports must redact UUID identifiers from decision reasons.");
   assert.match(api, /sameOrigin\(request\)/, "Candidate writes must reject cross-origin requests.");
   assert.match(api, /Array\.isArray\(body\.value\.ids\)[\s\S]*decideCommunityMemberCandidates/, "The private route must dispatch explicit selected-row batches through the bounded bulk helper.");
   assert.match(helper, /public_member_enabled, source[\s\S]*0, 'owner_public_handle'/, "Imports must create a private directory invitation.");
@@ -614,6 +616,12 @@ async function main() {
   assert.equal(defaultLimitExport.limit, 160, "Omitting a limit must use the normal bounded export cap.");
   const filteredExport = await exportCommunityMemberSourceAudit(env, owner, "server", { query: "not-a-real-audit-query" });
   assert.equal(filteredExport.rowCount, 0, "Audit export search must match the current decision-history search semantics.");
+  const normalizedActionExport = await exportCommunityMemberSourceAudit(env, owner, "server", { query: "candidate rejected" });
+  assert.ok(normalizedActionExport.rowCount > 0, "Audit export search must match the readable action label used by the owner interface.");
+  seed("UPDATE server_community_member_source_audit SET reason = ? WHERE candidate_id = ?").run("UUID marker 550e8400-e29b-41d4-a716-abcdefabcdef", bulkIds[0]);
+  const uuidExport = await exportCommunityMemberSourceAudit(env, owner, "server", { query: "uuid marker" });
+  assert.doesNotMatch(uuidExport.body, /550e8400-e29b-41d4-a716-abcdefabcdef/, "Audit exports must redact UUID values from free-text reasons.");
+  assert.match(uuidExport.body, /\[identifier\]/, "Audit exports must mark redacted UUID values clearly.");
 
   db.beforeNextBatch = () => {
     seed("UPDATE linked_servers SET user_id = 'player-eleven' WHERE id = 'server-race'").run();

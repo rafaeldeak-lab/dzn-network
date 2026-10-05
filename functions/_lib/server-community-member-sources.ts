@@ -121,7 +121,7 @@ export async function exportCommunityMemberSourceAudit(
   const access = currentWriteAccessBindings(env, actor, linkedServerId);
   const action = normalizeExportFilter(input.action, COMMUNITY_SOURCE_EXPORT_ACTIONS);
   const result = normalizeExportFilter(input.result, COMMUNITY_SOURCE_EXPORT_RESULTS);
-  const query = cleanText(input.query, 96)?.toLowerCase() ?? "";
+  const query = normalizeExportSearch(input.query);
   const requestedLimitText = typeof input.limit === "string" ? input.limit.trim() : input.limit;
   const requestedLimit = requestedLimitText === "" || requestedLimitText == null ? null : Number(requestedLimitText);
   const limit = requestedLimit !== null && Number.isFinite(requestedLimit)
@@ -138,7 +138,7 @@ export async function exportCommunityMemberSourceAudit(
     bindings.push(result);
   }
   if (query) {
-    conditions.push("(LOWER(COALESCE(action, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(result_status, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(reason, '')) LIKE ? ESCAPE '\\')");
+    conditions.push("(LOWER(REPLACE(COALESCE(action, ''), '_', ' ')) LIKE ? ESCAPE '\\' OR LOWER(REPLACE(COALESCE(result_status, ''), '_', ' ')) LIKE ? ESCAPE '\\' OR LOWER(REPLACE(COALESCE(reason, ''), '_', ' ')) LIKE ? ESCAPE '\\')");
     const search = `%${escapeSqlLike(query)}%`;
     bindings.push(search, search, search);
   }
@@ -834,6 +834,10 @@ function escapeSqlLike(value: string) {
   return value.replace(/[\\%_]/g, "\\$&");
 }
 
+function normalizeExportSearch(value: unknown) {
+  return cleanText(value, 96)?.toLowerCase().replaceAll("_", " ") ?? "";
+}
+
 function toExportSafeAuditRow(row: Record<string, unknown>) {
   return {
     auditRef: exportSafeRef(row.id) ?? "audit",
@@ -876,6 +880,7 @@ function csvCell(value: unknown) {
 function exportSafeText(value: unknown, maxLength: number) {
   const text = cleanText(value, maxLength);
   return text?.replace(/\b\d{5,32}\b/g, "[identifier]")
+    .replace(/\b[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\b/gi, "[identifier]")
     .replace(/\b(?:admin|owner|player|user|usr)[_-][a-z0-9][a-z0-9_-]*\b/gi, "[identifier]") ?? null;
 }
 
