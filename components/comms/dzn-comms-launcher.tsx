@@ -76,20 +76,6 @@ export function DznCommsLauncher() {
 
           <div className="grid gap-2 p-3">
             <Link
-              href="/community#global-chat"
-              className="group flex min-h-14 items-center gap-3 rounded-md border border-cyan-300/25 bg-cyan-300/8 px-3 py-2 transition hover:border-cyan-200/55 hover:bg-cyan-300/12"
-            >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-cyan-300/25 bg-cyan-300/10 text-cyan-100">
-                <MessageCircle className="h-5 w-5" aria-hidden="true" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-black uppercase text-white">Global Chat</span>
-                <span className="mt-0.5 block text-xs font-bold text-emerald-200">Open Global Chat</span>
-              </span>
-              <ChevronRight className="h-4 w-4 text-cyan-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
-            </Link>
-
-            <Link
               href="/community#dzn-assist"
               className="group flex min-h-14 items-center gap-3 rounded-md border border-violet-300/20 bg-violet-300/6 px-3 py-2 transition hover:border-violet-200/45 hover:bg-violet-300/10"
             >
@@ -101,6 +87,20 @@ export function DznCommsLauncher() {
                 <span className="mt-0.5 block text-xs font-bold text-emerald-200">Guided help live</span>
               </span>
               <ChevronRight className="h-4 w-4 text-violet-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
+            </Link>
+
+            <Link
+              href="/community#global-chat"
+              className="group flex min-h-14 items-center gap-3 rounded-md border border-cyan-300/25 bg-cyan-300/8 px-3 py-2 transition hover:border-cyan-200/55 hover:bg-cyan-300/12"
+            >
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-cyan-300/25 bg-cyan-300/10 text-cyan-100">
+                <MessageCircle className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-black uppercase text-white">Global Chat</span>
+                <span className="mt-0.5 block text-xs font-bold text-cyan-100">Open Global Chat</span>
+              </span>
+              <ChevronRight className="h-4 w-4 text-cyan-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
             </Link>
           </div>
         </section>
