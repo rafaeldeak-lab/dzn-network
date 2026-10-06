@@ -64,7 +64,7 @@
       "original_branch": "codex/reviews-moderation-dashboard-20260825",
       "original_base": "codex/reviews-foundation-20260825",
       "status": "partial",
-      "disposition": "Current source provides a platform-owner-only moderation queue, per-item authorization and an audit trail. The legacy server-owner moderation scope remains unimplemented and requires a separate current-model authorization and privacy design."
+      "disposition": "Current source provides a platform-owner-only moderation queue, a single platform-owner authorization gate and an audit trail. The legacy server-owner scope and per-review linked-server authorization remain unimplemented and require a separate current-model authorization and privacy design."
     },
     {
       "number": 56,
@@ -73,7 +73,7 @@
       "original_branch": "codex/review-notifications-polish-20260825",
       "original_base": "codex/reviews-moderation-dashboard-20260825",
       "status": "port_required",
-      "disposition": "Current source has bounded atomic bulk decisions with per-item authorization and stale-version protection. It deliberately applies no changes when any item conflicts, so the legacy partial-result handling remains unimplemented."
+      "disposition": "Current source has bounded atomic bulk decisions with a platform-owner gate and stale-version protection. It deliberately applies no changes when any item conflicts, and it does not authorize individual linked servers, so partial-result handling and per-review authorization remain unimplemented."
     },
     {
       "number": 57,

@@ -25,10 +25,11 @@ accessible on every state. No rules, rewards, migration or payment settings chan
 
 On October 7, the current review moderation implementation was rechecked against
 #54-#57. The focused suites prove authenticated reporting, duplicate-report
-protection, thresholded platform-owner alerts, per-item authorization, auditable
-single and atomic bulk decisions, and current-user-only alert read state. They do
-not replace review replies, server-owner moderation scope, partial-result batch
-handling, or review-notification retention evidence. Those entries remain open in
+protection, thresholded platform-owner alerts, a platform-owner authorization gate,
+auditable single and atomic bulk decisions, and current-user-only alert read state.
+They do not replace review replies, server-owner scope, per-review linked-server
+authorization, partial-result batch handling, or review-notification retention
+evidence. Those entries remain open in
 the historical GitHub stack; no old branch should be merged.
 
 ## Active Work
