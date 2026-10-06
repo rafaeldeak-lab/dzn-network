@@ -16,6 +16,8 @@ assert.match(source, /expectedValue === "NONE"/);
 assert.match(source, /expectedValue !== undefined/);
 assert.match(source, /Duplicate migration prefixes/);
 assert.match(source, /databaseName = "dzn_network_db"/);
+assert.match(source, /"--config",\s*"wrangler\.toml"/);
+assert.match(source, /"--env",\s*"production"/);
 
 for (const forbidden of [
   /migrations\s+apply/i,
