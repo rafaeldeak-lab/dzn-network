@@ -259,6 +259,13 @@ const playerActionCards: PlayerActionCard[] = [
     tone: "amber",
   },
   {
+    href: "/games",
+    title: "Games Hub",
+    description: "Play verified DZN challenges and review your website-only progression.",
+    icon: <Gamepad2 aria-hidden="true" className="h-5 w-5" />,
+    tone: "violet",
+  },
+  {
     href: "/player/profile",
     title: "Profile Entry",
     description: "Open your personal profile, private stat summary, and earned progression entry points.",
@@ -611,7 +618,7 @@ export function PlayerHome({ mode }: { mode: PlayerHomeMode }) {
 
         {mode === "home" ? (
           <>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
               {playerActionCards.map((card) => (
                 <Link
                   key={card.href}
