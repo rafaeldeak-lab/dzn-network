@@ -5,7 +5,9 @@
 Use `DZN_RELEASE_BACKLOG_2026-09-13.md` and its complete 73-row JSON manifest for
 the current per-request disposition. Forty-three verified replacements are closed;
 30 older requirements remain unresolved, matching the 30 open legacy PRs. The original
-branches are preserved. PRs #97-#108 and #110-#117 were closed only after their
+branches are preserved. PRs #54-#57 have current-source proof for review reporting,
+moderation, bulk decisions and isolated alert reads, but stay in progress until their
+public reconciliation comments and closures are completed. PRs #97-#108 and #110-#117 were closed only after their
 catalog, orders, checkout, webhook, fulfilment, purchases, Supporter Card and
 reaction requirements were matched to current-main replacements and focused tests.
 PR #82 and PRs #86-#90 are also superseded by the current public-profile visual
