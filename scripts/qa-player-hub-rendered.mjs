@@ -41,6 +41,7 @@ const scenarios = {
       "Public network",
       "These suggestions are private to your Player Hub and stay presentation-only.",
       "My Profile",
+      "Games Hub",
       "My Server Stats",
       "421m",
       "Not available yet",
@@ -61,8 +62,8 @@ const scenarios = {
     hub: richHubPayload(),
     privacy: profilePrivacyPayload(),
     mustContain: [
-      "Personal Player Profile",
-      "My Profile",
+      "Private Player Profile",
+      "Privacy & Sharing",
       "Profile Privacy Preferences",
       "Public profile",
       "Gameplay summary",
@@ -140,7 +141,7 @@ const scenarios = {
 const captures = [
   { scenario: "rich", viewport: "desktop", width: 1440, height: 1180 },
   { scenario: "rich", viewport: "mobile", width: 390, height: 1280, mobile: true },
-  { scenario: "profilePrivacy", viewport: "desktop", width: 1440, height: 1380, path: "/player/profile" },
+  { scenario: "profilePrivacy", viewport: "desktop", width: 1440, height: 1380, path: "/player/profile#profile-settings" },
   { scenario: "empty", viewport: "desktop", width: 1440, height: 1050 },
   { scenario: "unavailable", viewport: "desktop", width: 1440, height: 900 },
   { scenario: "storageFallback", viewport: "desktop", width: 1440, height: 1050 },
@@ -197,7 +198,11 @@ async function main() {
         mobile: Boolean(capture.mobile),
       });
 
-      await page.send("Page.navigate", { url: `${BASE_URL}${capture.path ?? "/player"}?qa=${capture.scenario}-${capture.viewport}` });
+      const [capturePath, captureHash] = (capture.path ?? "/player").split("#", 2);
+      const captureUrl = new URL(BASE_URL + capturePath);
+      captureUrl.searchParams.set("qa", capture.scenario + "-" + capture.viewport);
+      captureUrl.hash = captureHash ?? "";
+      await page.send("Page.navigate", { url: captureUrl.toString() });
       await waitForText(page, scenario.mustContain[0]);
       await waitForText(page, scenario.mustContain.at(-1));
 

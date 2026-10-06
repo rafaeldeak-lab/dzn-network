@@ -141,6 +141,9 @@ export function PlayerProfilePrivacySettings({ onSaved }: { onSaved?: () => void
             <p className="mt-1 max-w-3xl text-sm font-semibold leading-6 text-slate-300">
               Choose which approved sections can appear on your public DZN profile link. Profile attribution across other DZN surfaces remains blocked until its own approval slice.
             </p>
+            <p className="mt-2 max-w-3xl text-xs font-semibold leading-5 text-slate-400">
+              Generated profile handles are presentation-only and never bypass the visibility choices saved here.
+            </p>
           </div>
         </div>
         <span className={`inline-flex w-fit items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-black uppercase ${publicStatus.tone}`}>

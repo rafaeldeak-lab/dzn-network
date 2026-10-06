@@ -39,6 +39,10 @@ assert.match(playerHome, /event\.relevance\.reasons/, "Player Hub UI must render
 assert.match(playerHome, /presentation-only/, "Player Hub UI must explain event suggestions remain presentation-only.");
 assert.match(playerHome, /My Profile/, "Player Hub UI must show private profile summaries.");
 assert.match(playerHome, /My Server Stats/, "Player Hub UI must show current-user statistics.");
+assert.match(playerHome, /href: "\/games"/, "Player Hub UI must link authenticated players to the Games Hub.");
+assert.match(playerHome, /title: "Games Hub"/, "Player Hub UI must provide a named Games Hub action.");
+assert.match(playerHome, /website-only progression/, "Games Hub navigation must keep progression separate from competitive systems.");
+assert.match(playerHome, /xl:grid-cols-5/, "Player Hub action cards must retain a stable wide-screen layout with the Games Hub action.");
 assert.match(playerHome, /future_earned_runtime/, "Player Hub UI must keep XP/challenge/calling-card runtime disconnected.");
 assert.match(playerHome, /My profile actions/, "Player Hub UI must show direct profile actions.");
 assert.match(playerHome, /Owner Setup Stays Gated/, "Player Hub UI must keep the owner setup boundary visible.");
