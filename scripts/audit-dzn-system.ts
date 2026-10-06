@@ -336,7 +336,8 @@ function auditAdmSyncWiring() {
   checkIncludes("functions/_lib/adm-sync.ts", "delayed_after_restart", "Delayed-after-restart state exists");
   checkIncludes("functions/_lib/adm-sync.ts", "detectAdmRestartFromFiles", "ADM filename restart detection helper exists");
   checkIncludes("functions/_lib/automation.ts", "getDueAdmAutomationServers", "Scheduled ADM sync selects all due connected servers");
-  checkIncludes("functions/_lib/automation.ts", "lower(server_subscriptions.status) IN ('active', 'trialing')", "ADM automation filters active/trialing subscriptions");
+  checkIncludes("functions/_lib/automation.ts", "automationBillingEligibilitySql(\"automation_entitlements\")", "ADM automation uses the centralized billing eligibility guard");
+  checkIncludes("functions/_lib/server-showcase-access.ts", "lower(COALESCE(${alias}.status, 'inactive')) IN ('active', 'trialing')", "ADM automation keeps active/trialing subscriptions eligible");
   checkIncludes("functions/_lib/automation.ts", "currently_syncing_adm", "ADM automation lock is enforced");
   checkIncludes("functions/_lib/adm-sync.ts", "queueDiscordPostUpdatesForGuild", "ADM data changes queue Discord post updates");
   checkIncludes("functions/_lib/adm-sync.ts", "importReadableAdmLinesIntoDatabase", "ADM fixture import uses database write path");
