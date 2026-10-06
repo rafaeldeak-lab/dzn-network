@@ -23,12 +23,13 @@ The board release passed 23 rendered checks and independent review. It removes t
 header pause button, adds DZN field-board styling, and keeps a Display setting
 accessible on every state. No rules, rewards, migration or payment settings changed.
 
-On October 6, the current review moderation implementation was rechecked against
+On October 7, the current review moderation implementation was rechecked against
 #54-#57. The focused suites prove authenticated reporting, duplicate-report
-protection, thresholded private owner alerts, owner-scoped moderation, auditable
-single and bulk decisions, partial-result handling, and current-user-only alert
-read state. Those entries remain open in the historical GitHub stack until their
-public closure comments are posted; no old branch should be merged.
+protection, thresholded platform-owner alerts, per-item authorization, auditable
+single and atomic bulk decisions, and current-user-only alert read state. They do
+not replace review replies, server-owner moderation scope, partial-result batch
+handling, or review-notification retention evidence. Those entries remain open in
+the historical GitHub stack; no old branch should be merged.
 
 ## Active Work
 
@@ -68,7 +69,7 @@ revocation cannot consume the old cadence.
 | --- | --- | --- |
 | #50-#51 | Reconcile old owner-access rules and Player Hub dependencies | Preserve Free player access, current per-server capabilities and exact-server complimentary grants |
 | #53 | Pricing comparison artwork | Do not alter current prices or checkout behavior |
-| #54-#57 | Current-model review moderation verified; complete historical PR reconciliation | Server-owner scope, per-item authorization, audit and current-user read state; do not merge old branches |
+| #54-#57 | Retain the review moderation requests as open | Current source has platform-owner reporting/moderation/read-state foundations; replies, server-owner scope, partial batch handling and retention evidence still require current-model work; do not merge old branches |
 | #58-#62 | Genuine gameplay challenges, XP, calling cards and award audit | Separate from website-game XP; verified source and identity required |
 | #65-#68 | Missing profile discovery/attribution controls, CTF and event provenance | Explicit public opt-in; no name-only account linking |
 | #69-#81 | Public community directory, trusted member imports, audit and private exports | Private Discord guild matching is not a public member directory; no retained export activation |

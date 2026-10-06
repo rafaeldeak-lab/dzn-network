@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-10-06",
+  "as_of": "2026-10-07",
   "compared_main": "da66845626b7d42d19d74ae2cebd02f0a9160421",
   "ui_release": "ee43f3f1f445af92ffd423409441b42d9e7b257d",
   "original_count": 73,
@@ -54,8 +54,8 @@
       "original_head": "ed3bbe24034e00d902559ce9a0de45067f60761c",
       "original_branch": "codex/reviews-foundation-20260825",
       "original_base": "codex/pricing-visual-upgrade-20260825",
-      "status": "in_progress",
-      "disposition": "Current source now covers authenticated report submission, duplicate-report protection, thresholded moderation state and a private owner alert. Focused current-model tests pass; public legacy-PR reconciliation remains pending."
+      "status": "port_required",
+      "disposition": "Current source covers authenticated report submission, duplicate-report protection and thresholded platform-owner alerts, but server-owner replies and their author/owner visibility contract remain absent. Preserve the historical requirement for a separate current-model implementation."
     },
     {
       "number": 55,
@@ -63,8 +63,8 @@
       "original_head": "69562a55fd4bdb4e10a39411bd7d992cbf157585",
       "original_branch": "codex/reviews-moderation-dashboard-20260825",
       "original_base": "codex/reviews-foundation-20260825",
-      "status": "in_progress",
-      "disposition": "Current source now provides a platform-owner moderation queue, per-item authorization and an audit trail. Focused current-model tests pass; public legacy-PR reconciliation remains pending."
+      "status": "partial",
+      "disposition": "Current source provides a platform-owner-only moderation queue, per-item authorization and an audit trail. The legacy server-owner moderation scope remains unimplemented and requires a separate current-model authorization and privacy design."
     },
     {
       "number": 56,
@@ -72,8 +72,8 @@
       "original_head": "8d168f694868788f09fbe20e2aba4cef19ef15bd",
       "original_branch": "codex/review-notifications-polish-20260825",
       "original_base": "codex/reviews-moderation-dashboard-20260825",
-      "status": "in_progress",
-      "disposition": "Current source now provides bounded bulk decisions with per-item authorization, version conflict protection and partial-result handling. Focused current-model tests pass; public legacy-PR reconciliation remains pending."
+      "status": "port_required",
+      "disposition": "Current source has bounded atomic bulk decisions with per-item authorization and stale-version protection. It deliberately applies no changes when any item conflicts, so the legacy partial-result handling remains unimplemented."
     },
     {
       "number": 57,
@@ -81,8 +81,8 @@
       "original_head": "0714d2eccbb84a39e725fb478b7c2db7a55b2223",
       "original_branch": "codex/review-notification-read-state-20260825",
       "original_base": "codex/review-notifications-polish-20260825",
-      "status": "in_progress",
-      "disposition": "Current source now provides current-user-only review alert reads that leave general notifications untouched. Focused current-model tests pass; public legacy-PR reconciliation remains pending."
+      "status": "partial",
+      "disposition": "Current source provides current-user-only review alert reads that leave general notifications untouched. Review-notification retention behavior still needs dedicated current-model evidence before the legacy request can close."
     },
     {
       "number": 58,
