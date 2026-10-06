@@ -205,7 +205,7 @@ async function handleAdmHealth({ request, env }: Parameters<PagesFunction>[0]) {
      LEFT JOIN adm_worker_selection_state worker_selection ON worker_selection.linked_server_id = linked_servers.id
      WHERE linked_servers.nitrado_service_id IS NOT NULL
        AND linked_servers.nitrado_service_id <> ''
-       AND lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'archived', 'inactive', 'suspended')
+       AND lower(COALESCE(linked_servers.status, 'pending')) = 'live'
        AND ${lifecycleStatusSql} NOT IN ('archived_hidden', 'legacy_offline', 'final_sync_complete')
        AND (linked_servers.merged_into_server_id IS NULL OR linked_servers.merged_into_server_id = '')
      ORDER BY linked_servers.created_at DESC

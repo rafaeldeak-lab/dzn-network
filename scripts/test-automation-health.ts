@@ -133,7 +133,7 @@ assert.equal(automationSource.includes("processed_count"), true);
 assert.equal(automationSource.includes("buildAutomationCronHealth"), true);
 assert.equal(automationSource.includes("cron_secret_mismatch"), true);
 assert.equal(automationSource.includes("recoverStuckSyncLocksForServer"), true);
-assert.equal(admHealthSource.includes("lower(COALESCE(linked_servers.status, 'pending')) NOT IN ('deleted', 'merged', 'archived', 'inactive', 'suspended')"), true, "Archived or inactive linked servers should not hard-fail ADM health.");
+assert.equal(admHealthSource.includes("lower(COALESCE(linked_servers.status, 'pending')) = 'live'"), true, "Only live linked servers should enter active ADM health monitoring.");
 assert.equal(admHealthSource.includes("linked_servers.merged_into_server_id IS NULL"), true, "Merged linked servers should not hard-fail ADM health.");
 assert.equal(verifyAdmLiveSource.includes("last_status_check_at"), true, "verify:adm-live must read metadata attempt evidence separately from numeric success timestamps.");
 assert.equal(verifyAdmLiveSource.includes("last_successful_status_check_at"), true, "verify:adm-live must distinguish latest successful numeric metadata from attempts.");
