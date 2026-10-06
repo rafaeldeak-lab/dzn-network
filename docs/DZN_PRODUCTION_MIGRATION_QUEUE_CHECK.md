@@ -6,17 +6,19 @@ The command is intentionally guarded:
 
 ```powershell
 $env:DZN_CONFIRM_PRODUCTION_READ_ONLY = "RUN_READ_ONLY_PRODUCTION_MIGRATION_QUEUE_CHECK"
-$env:DZN_EXPECTED_PENDING_MIGRATIONS = "0085_games_hub_trivia.sql,0086_games_hub_word_chain.sql,0087_games_hub_hide_seek.sql,0088_store_manual_review_audit.sql,0089_dzn_comms_presence.sql"
+$env:DZN_EXPECTED_PENDING_MIGRATIONS = "0085_games_hub_trivia.sql,0086_games_hub_word_chain.sql,0087_games_hub_hide_seek.sql,0088_store_manual_review_audit.sql,0089_dzn_comms_presence.sql,0090_server_community_member_sources.sql"
 npm run check:production-migration-queue
 ```
 
 The optional expected queue makes the check fail when production or the repository has moved. Set it to the literal `NONE` to assert that no migrations are pending; this non-empty sentinel works on Windows PowerShell versions that remove environment variables assigned an empty string. The check also fails when the production ledger contains a migration absent from the current checkout. The checker cannot apply migrations, execute SQL files, edit the ledger, create a recovery bookmark, change Cloudflare configuration, deploy, or enable feature switches.
 
-The last successful read-only check on 4 October 2026, before `0089` was added to this source branch, found this production queue in order:
+The last successful read-only check on 6 October 2026 found this production queue in order:
 
 1. `0085_games_hub_trivia.sql`
 2. `0086_games_hub_word_chain.sql`
 3. `0087_games_hub_hide_seek.sql`
 4. `0088_store_manual_review_audit.sql`
+5. `0089_dzn_comms_presence.sql`
+6. `0090_server_community_member_sources.sql`
 
-All four ledger rows and all schema objects owned by those migrations were absent. `PRAGMA foreign_key_check` returned zero rows before any activation operation. Source migration `0089_dzn_comms_presence.sql` was added afterward and is expected to follow those four if production is otherwise unchanged, but a subsequent read-only refresh failed with Cloudflare authorization error `7403`; therefore the five-item queue has not been reconfirmed live. Each migration still requires its own recovery bookmark, isolated application, ledger/schema/index/constraint/foreign-key verification, zero-row baseline, private flag activation, and authenticated live proof. Do not use the repository's broad `db:migrate:remote` command while more than one migration is pending.
+All six ledger rows and all schema objects owned by those migrations were absent. `PRAGMA foreign_key_check` returned zero rows before any activation operation. Each migration still requires its own recovery bookmark, isolated application, ledger/schema/index/constraint/foreign-key verification, zero-row baseline, private flag activation, and authenticated live proof. Do not use the repository's broad `db:migrate:remote` command while more than one migration is pending.
