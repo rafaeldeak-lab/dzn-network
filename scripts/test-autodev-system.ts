@@ -161,13 +161,6 @@ assert.equal(admWatch.includes("isStuckImportJob"), true);
 assert.equal(admWatch.toLowerCase().includes("stripe"), false);
 assert.equal(admWatch.toLowerCase().includes("billing"), false);
 
-const admHealthSource = read("functions/api/autodev/adm-health.ts");
-assert.equal(
-  admHealthSource.includes("lower(COALESCE(linked_servers.status, 'pending')) = 'live'"),
-  true,
-  "ADM health must exclude pending onboarding records from active-service monitoring.",
-);
-
 const proposeFix = read("scripts/autodev/propose-fix.ts");
 assert.equal(proposeFix.includes("AUTODEV_ENABLE_PROPOSE_FIX"), true);
 assert.equal(proposeFix.includes("disabled by default"), true);

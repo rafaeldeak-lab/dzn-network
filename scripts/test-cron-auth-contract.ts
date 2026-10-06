@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 
 import { isCronSecretAuthorized, requireCronSecret } from "../functions/_lib/cron-auth";
 import { onRequestPost as admHealthPost } from "../functions/api/autodev/adm-health";
@@ -8,6 +9,18 @@ import { onRequestPost as nitradoFileReadPost } from "../functions/api/debug/nit
 import { handleAdmSyncRun } from "../functions/api/sync/adm/run";
 import { onRequestPost as retryUnreadablePost } from "../functions/api/sync/adm/retry-unreadable";
 import type { Env, PagesContext } from "../functions/_lib/types";
+
+type SqliteRow = Record<string, unknown>;
+type Sqlite = {
+  exec(sql: string): void;
+  close(): void;
+  prepare(sql: string): {
+    run(...args: unknown[]): { changes: number };
+    get(...args: unknown[]): SqliteRow | undefined;
+    all(...args: unknown[]): SqliteRow[];
+  };
+};
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: new (path: string) => Sqlite };
 
 const dznEnv = { DZN_CRON_SECRET: "unit-test-secret" } as Env;
 const syncEnv = { SYNC_CRON_SECRET: "unit-test-secret" } as Env;
@@ -180,6 +193,94 @@ async function runProtectedEndpointShortCircuitTests() {
     body: "{}",
   }), env));
   assert.equal(admRunResponse.status, 401, "/api/sync/adm/run should return 401 before touching DB/Nitrado modules");
+
+  await testAdmHealthExcludesPendingServers();
+}
+
+class AdmHealthFixtureD1 {
+  readonly sqlite = new DatabaseSync(":memory:");
+
+  constructor() {
+    this.sqlite.exec(`
+      CREATE TABLE linked_servers (
+        id TEXT PRIMARY KEY, display_name TEXT, hostname TEXT, server_name TEXT,
+        nitrado_service_name TEXT, nitrado_service_id TEXT, current_players INTEGER,
+        max_players INTEGER, player_count_last_checked_at TEXT, metadata_last_checked_at TEXT,
+        lifecycle_status TEXT, lifecycle_reason TEXT, owner_action_required INTEGER,
+        owner_action_reason TEXT, status TEXT, listing_visibility TEXT, merged_into_server_id TEXT,
+        guild_id TEXT, created_at TEXT
+      );
+      CREATE TABLE adm_sync_state (
+        linked_server_id TEXT, latest_adm_file TEXT, last_processed_file TEXT,
+        last_sync_status TEXT, last_sync_message TEXT, last_sync_at TEXT
+      );
+      CREATE TABLE server_sync_state (guild_id TEXT, next_retry_after TEXT, last_skip_reason TEXT);
+      CREATE TABLE adm_worker_selection_state (
+        linked_server_id TEXT, last_worker_selected_at TEXT, next_worker_due_at TEXT,
+        selected_count INTEGER, last_selection_reason TEXT
+      );
+      CREATE TABLE adm_worker_heartbeat (
+        worker_name TEXT, last_started_at TEXT, last_finished_at TEXT, last_status TEXT,
+        last_error_code TEXT, last_error_message TEXT, last_selected_service_id TEXT,
+        last_selected_server_id TEXT, last_action TEXT, last_recoverable INTEGER,
+        run_count INTEGER, updated_at TEXT
+      );
+      CREATE TABLE adm_sync_file_state (
+        linked_server_id TEXT, adm_file TEXT, status TEXT, line_count INTEGER,
+        latest_known_line_count INTEGER, imported_line_count INTEGER, cursor_line INTEGER,
+        last_read_at TEXT, last_growth_at TEXT, retry_count INTEGER, next_retry_at TEXT,
+        last_http_status INTEGER, last_error TEXT, last_endpoint_kind TEXT, last_method TEXT,
+        updated_at TEXT, ignored_at TEXT, file_timestamp TEXT, last_checked_at TEXT, first_seen_at TEXT
+      );
+      CREATE TABLE adm_import_jobs (
+        server_id TEXT, filename TEXT, source TEXT, status TEXT, current_line INTEGER,
+        total_lines INTEGER, chunks_processed INTEGER, total_chunks INTEGER, parsed_kills INTEGER,
+        written_kills INTEGER, duplicate_skips INTEGER, joins INTEGER, disconnects INTEGER,
+        playerlist_snapshots INTEGER, updated_at TEXT, completed_at TEXT, created_at TEXT
+      );
+      CREATE TABLE nitrado_file_read_attempts (
+        server_id TEXT, service_id TEXT, file_name TEXT, status TEXT, http_status INTEGER,
+        error_code TEXT, created_at TEXT
+      );
+      CREATE TABLE sync_runs (linked_server_id TEXT, finished_at TEXT, started_at TEXT, created_at TEXT, status TEXT);
+      CREATE TABLE kill_events (linked_server_id TEXT);
+      CREATE TABLE player_events (linked_server_id TEXT);
+      CREATE TABLE adm_live_source_state (
+        service_id TEXT, source_name TEXT, last_tested_at TEXT, last_status TEXT,
+        last_http_status INTEGER, last_error_code TEXT, works INTEGER, preferred INTEGER,
+        next_test_at TEXT, updated_at TEXT
+      );
+      INSERT INTO linked_servers (id, display_name, nitrado_service_id, status, listing_visibility, lifecycle_status, guild_id, created_at)
+      VALUES
+        ('live-server', 'Live fixture', 'live-service', 'live', 'public', 'active_live', 'live-guild', '2026-10-06T12:00:00.000Z'),
+        ('pending-server', 'Pending fixture', 'pending-service', 'pending', 'public', 'active_live', 'pending-guild', '2026-10-06T12:00:00.000Z');
+      INSERT INTO adm_worker_heartbeat (worker_name, last_started_at, last_finished_at, last_status, last_recoverable, run_count, updated_at)
+      VALUES ('dzn-adm-sync-worker', '2026-10-06T12:00:00.000Z', '2026-10-06T12:00:01.000Z', 'healthy', 0, 1, '2026-10-06T12:00:01.000Z');
+    `);
+  }
+
+  prepare(sql: string) {
+    const statement = (values: unknown[] = []) => ({
+      bind: (...args: unknown[]) => statement(args),
+      first: async () => this.sqlite.prepare(sql).get(...values) ?? null,
+      all: async () => ({ success: true, results: this.sqlite.prepare(sql).all(...values) }),
+      run: async () => ({ success: true, meta: this.sqlite.prepare(sql).run(...values) }),
+    });
+    return statement();
+  }
+}
+
+async function testAdmHealthExcludesPendingServers() {
+  const db = new AdmHealthFixtureD1();
+  const response = await admHealthPost(makeContext(new Request("https://dzn.test/api/autodev/adm-health", {
+    method: "POST",
+    headers: { "x-dzn-cron-secret": "unit-test-secret" },
+  }), { DB: db as unknown as D1Database, DZN_CRON_SECRET: "unit-test-secret" } as Env));
+  assert.equal(response.status, 200, "ADM health must respond for an authenticated fixture request.");
+  const payload = await response.json() as { summary: { servicesChecked: number }; services: Array<{ serviceId: string }> };
+  assert.equal(payload.summary.servicesChecked, 1, "ADM health must count only live linked servers.");
+  assert.deepEqual(payload.services.map((service) => service.serviceId), ["live-service"], "Pending onboarding records must not enter active ADM health monitoring.");
+  db.sqlite.close();
 }
 
 function makeContext(request: Request, testEnv: Env): PagesContext {
