@@ -154,7 +154,8 @@ function auditNoWipeAndUnreadableHandling() {
 function auditDueServerSelection() {
   checkIncludes("functions/_lib/automation.ts", "getDueAdmDiscoveryAutomationServers", "Due ADM discovery selector exists");
   checkIncludes("functions/_lib/automation.ts", "getDueAdmAutomationServers", "Due ADM server selector exists");
-  checkIncludes("functions/_lib/automation.ts", "lower(server_subscriptions.status) IN ('active', 'trialing')", "Only active/trialing subscriptions are due");
+  checkIncludes("functions/_lib/automation.ts", "automationBillingEligibilitySql(\"automation_entitlements\")", "Due ADM selection uses the centralized billing eligibility guard");
+  checkIncludes("functions/_lib/server-showcase-access.ts", "lower(COALESCE(${alias}.status, 'inactive')) IN ('active', 'trialing')", "Active/trialing subscriptions remain eligible for ADM work");
   checkIncludes("functions/_lib/automation.ts", "next_adm_pull_due_at", "ADM due-state controls checks");
   checkIncludes("functions/_lib/automation.ts", "next_adm_discovery_due_at", "ADM discovery due-state controls checks");
   checkIncludes("functions/_lib/automation.ts", "currently_syncing_adm", "Already-syncing servers are skipped");
