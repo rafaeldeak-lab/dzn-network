@@ -937,6 +937,17 @@ async function main() {
   assert.equal(retryHeartbeatResult.results[0]?.file_result?.public_cache_updated, true);
   assert.equal(retryHeartbeatDb.serverPublicCache.has(guildId), true);
 
+  await createAdmImportJobForServer(makeEnv(retryHeartbeatDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-01-00.ADM",
+    admText: "AdminLog started on 2026-05-31 at 20:01:00\\n20:01:01 | Server heartbeat",
+    source: "scheduled_nitrado",
+    chunkSize: 25,
+  });
+  const recoveredHeartbeatResult = await processPendingAdmImportJobs(makeEnv(retryHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(recoveredHeartbeatResult.completedJobs, 1);
+  assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, false);
+
   const buildFixtureName = "DayZServer_PS4_x64_2026-05-31_20-01-53.ADM";
   const buildFixtureLines = [
     "AdminLog started on 2026-05-31 at 20:01:53",
