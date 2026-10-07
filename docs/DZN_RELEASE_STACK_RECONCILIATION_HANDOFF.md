@@ -3,8 +3,8 @@
 ## Latest Reconciliation: 2026-10-07
 
 Use `DZN_RELEASE_BACKLOG_2026-09-13.md` and its complete 73-row JSON manifest for
-the current per-request disposition. Forty-three verified replacements are closed;
-30 older requirements remain unresolved, matching the 30 open legacy PRs. The original
+the current per-request disposition. Forty-four verified replacements are closed;
+29 older requirements remain unresolved, matching the 29 open legacy PRs. The original
 branches are preserved. PRs #54-#57 retain bounded current-source foundations for
 review reporting, a platform-owner-only moderation gate, atomic bulk decisions and
 isolated alert reads. They remain open because replies, server-owner scope, per-review

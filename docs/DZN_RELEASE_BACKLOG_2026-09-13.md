@@ -7,17 +7,17 @@ individual dispositions are recorded in `dzn-legacy-request-dispositions-2026-09
 This supersedes the open-count wording in the September 12 snapshot, which is
 retained as historical evidence. A disposition is not implementation or live proof.
 
-Forty-three requests were verified against current source and closed as superseded:
-#52, #63, #64, #82-#94 and #96-#122. Each has an individual GitHub comment with
+Forty-four requests were verified against current source and closed as superseded:
+#52-#53, #63, #64, #82-#94 and #96-#122. Each has an individual GitHub comment with
 replacement releases and evidence. Their original branches and history remain.
-The remaining 30 older requirements have not all been implemented and correspond to
-the 30 open legacy PRs on GitHub. No blind old-stack merge or migration was performed.
+The remaining 29 older requirements have not all been implemented and correspond to
+the 29 open legacy PRs on GitHub. No blind old-stack merge or migration was performed.
 Each open description begins with a current, request-specific
 reconciliation note linking replacement work and this record. Every original
 description is retained below it, and every original head was checked before the
-update. The 43 verified closures plus 30 open requests account for all 73.
+update. The 44 verified closures plus 29 open requests account for all 73.
 
-Current source comparison: `da66845626b7d42d19d74ae2cebd02f0a9160421`.
+Current source comparison: `0f150387742a6f4f22e12c4a3d66f89e2b8e0aa8`.
 Board UI release: PR #185, merge `ee43f3f1f445af92ffd423409441b42d9e7b257d`.
 The board release passed 23 rendered checks and independent review. It removes the
 header pause button, adds DZN field-board styling, and keeps a Display setting
@@ -69,7 +69,6 @@ revocation cannot consume the old cadence.
 | Requests | Remaining work | Important boundary |
 | --- | --- | --- |
 | #50-#51 | Reconcile old owner-access rules and Player Hub dependencies | Preserve Free player access, current per-server capabilities and exact-server complimentary grants |
-| #53 | Pricing comparison artwork | Do not alter current prices or checkout behavior |
 | #54-#57 | Retain the review moderation requests as open | Current source has platform-owner reporting/moderation/read-state foundations; replies, server-owner scope, partial batch handling and retention evidence still require current-model work; do not merge old branches |
 | #58-#62 | Genuine gameplay challenges, XP, calling cards and award audit | Separate from website-game XP; verified source and identity required |
 | #65-#68 | Missing profile discovery/attribution controls, CTF and event provenance | Explicit public opt-in; no name-only account linking |
