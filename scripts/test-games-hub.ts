@@ -50,7 +50,10 @@ async function run() {
     const base = unstable_readConfig({ config: "wrangler.toml" });
     const production = unstable_readConfig({ config: "wrangler.toml", env: "production" });
     const preview = unstable_readConfig({ config: "wrangler.toml", env: "preview" });
-    assert.deepEqual({ ...production.vars }, { DZN_GAMES_HUB_ENABLED: "true" });
+    assert.deepEqual({ ...production.vars }, {
+      DZN_GAMES_HUB_ENABLED: "true",
+      DZN_GAMES_TRIVIA_ENABLED: "true",
+    });
     assert.deepEqual({ ...preview.vars }, {});
     assert.deepEqual({ ...base.vars }, {});
     assert.deepEqual(production.d1_databases, base.d1_databases);
