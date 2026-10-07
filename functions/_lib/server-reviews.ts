@@ -56,7 +56,7 @@ export type PublicOwnerReply = {
 };
 
 export function isServerReviewOwnerRepliesEnabled(env: Env) {
-  return String((env as Record<string, unknown>).DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED ?? "").trim().toLowerCase() === "true";
+  return env.DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED?.trim().toLowerCase() === "true";
 }
 
 export async function ensureServerReviewsSchema(env: Env) {
