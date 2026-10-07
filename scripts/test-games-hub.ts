@@ -53,6 +53,7 @@ async function run() {
     assert.deepEqual({ ...production.vars }, {
       DZN_GAMES_HUB_ENABLED: "true",
       DZN_GAMES_TRIVIA_ENABLED: "true",
+      DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED: "true",
     });
     assert.deepEqual({ ...preview.vars }, {});
     assert.deepEqual({ ...base.vars }, {});
