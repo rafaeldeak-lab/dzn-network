@@ -4223,11 +4223,11 @@ async function finalizeAdmImportJob(
   // Scheduled files that add no gameplay/stat signal do not change public data.
   // Skipping their cache write prevents a timeout from downgrading an otherwise
   // successful lightweight heartbeat import to a warning state.
-  const shouldRefreshPublicCache = Boolean(server.guild_id) && (!isScheduledNitradoImport || statAffectingWrites > 0);
-  if (shouldRefreshPublicCache) {
+  const publicCacheGuildId = server.guild_id;
+  if (publicCacheGuildId && (!isScheduledNitradoImport || statAffectingWrites > 0)) {
     try {
       await withManualAdmPhaseTimeout(upsertServerPublicCache(env, {
-        guildId: server.guild_id,
+        guildId: publicCacheGuildId,
         planKey: server.plan_key,
         publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
         lastAdmUpdateAt: now,
