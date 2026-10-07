@@ -4220,7 +4220,11 @@ async function finalizeAdmImportJob(
     }
   }
 
-  if (server.guild_id) {
+  // Scheduled files that add no gameplay/stat signal do not change public data.
+  // Skipping their cache write prevents a timeout from downgrading an otherwise
+  // successful lightweight heartbeat import to a warning state.
+  const shouldRefreshPublicCache = Boolean(server.guild_id) && (!isScheduledNitradoImport || statAffectingWrites > 0);
+  if (shouldRefreshPublicCache) {
     try {
       await withManualAdmPhaseTimeout(upsertServerPublicCache(env, {
         guildId: server.guild_id,

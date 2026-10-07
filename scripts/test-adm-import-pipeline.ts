@@ -902,6 +902,19 @@ async function main() {
   assert.equal(scheduledJobDb.admSyncState.get(linkedServerId)?.cursor_recovery_reason, "scheduled_chunked_import");
   assert.equal(JSON.parse(String(scheduledJobDb.syncRuns.at(-1)?.message ?? "{}")).type, "scheduled_adm_import");
 
+  const heartbeatScheduledDb = new MemoryD1();
+  await createAdmImportJobForServer(makeEnv(heartbeatScheduledDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-00-00.ADM",
+    admText: "AdminLog started on 2026-05-31 at 20:00:00\n20:00:01 | Server heartbeat",
+    source: "scheduled_nitrado",
+    chunkSize: 25,
+  });
+  const heartbeatResult = await processPendingAdmImportJobs(makeEnv(heartbeatScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(heartbeatResult.completedJobs, 1);
+  assert.equal(heartbeatResult.results[0]?.file_result?.public_cache_updated, false);
+  assert.equal(heartbeatScheduledDb.serverPublicCache.has(guildId), false);
+
   const buildFixtureName = "DayZServer_PS4_x64_2026-05-31_20-01-53.ADM";
   const buildFixtureLines = [
     "AdminLog started on 2026-05-31 at 20:01:53",
