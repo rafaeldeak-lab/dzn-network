@@ -47,6 +47,25 @@ const scenarios = {
       "DZN-SUP",
     ],
   },
+  publishedFallback: {
+    apiStatus: 200,
+    apiPayload: publishedFallbackProfilePayload(),
+    readyText: "Rafael DZN",
+    mustContain: [
+      "Public Safe Profile",
+      "Rafael DZN",
+      "Discord connected",
+      "Account connected",
+      "Gameplay Summary",
+    ],
+    mustNotContain: [
+      "discord-1",
+      "user-1",
+      "player_id",
+      "raw_evidence",
+      "checkout.session",
+    ],
+  },
   identityHidden: {
     apiStatus: 200,
     apiPayload: hiddenIdentityProfilePayload(),
@@ -128,6 +147,8 @@ const captures = [
   { scenario: "published", viewport: "desktop", width: 1440, height: 1100, path: "/players/preview" },
   { scenario: "published", viewport: "mobile", width: 390, height: 1280, mobile: true, path: "/players/preview" },
   { scenario: "published", viewport: "narrow", width: 320, height: 1280, mobile: true, path: "/players/preview" },
+  { scenario: "publishedFallback", viewport: "desktop", width: 1440, height: 1100, path: "/players/preview" },
+  { scenario: "publishedFallback", viewport: "mobile", width: 390, height: 1280, mobile: true, path: "/players/preview" },
   { scenario: "identityHidden", viewport: "desktop", width: 1440, height: 1100, path: "/players/preview" },
   { scenario: "hidden", viewport: "desktop", width: 1440, height: 900, path: "/players/preview" },
   { scenario: "unavailable", viewport: "desktop", width: 1440, height: 900, path: "/players/preview" },
@@ -441,6 +462,14 @@ function hiddenIdentityProfilePayload() {
       ...payload.privacy,
       visible_sections: payload.privacy.visible_sections.filter((section) => section !== "display_name"),
     },
+  };
+}
+
+function publishedFallbackProfilePayload() {
+  const payload = publishedProfilePayload();
+  return {
+    ...payload,
+    discord_profile: { ...payload.discord_profile, avatar_url: null },
   };
 }
 

@@ -152,7 +152,7 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
             {data.discord_profile.visible && data.discord_profile.connected ? (
               <div className="flex items-center gap-3">
                 <div className="relative h-12 w-12 shrink-0">
-                  <DiscordAvatar displayName={data.display_name} initial={initial} url={data.discord_profile.avatar_url} discordVisible />
+                  <DiscordAvatar displayName={data.display_name} initial={initial} url={data.discord_profile.avatar_url} discordVisible size="compact" />
                   <span className="absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-[#071120] bg-emerald-400" aria-label="Discord connected" />
                 </div>
                 <div className="min-w-0"><p className="truncate font-black text-white">{data.display_name}</p><p className="mt-1 inline-flex items-center gap-2 text-xs font-bold text-emerald-200"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Account connected</p></div>
@@ -201,10 +201,10 @@ function PublicShareAction({ displayName }: { displayName: string }) {
   );
 }
 
-function DiscordAvatar({ displayName, initial, url, discordVisible }: { displayName: string; initial: string; url: string | null; discordVisible: boolean }) {
+function DiscordAvatar({ displayName, initial, url, discordVisible, size = "hero" }: { displayName: string; initial: string; url: string | null; discordVisible: boolean; size?: "hero" | "compact" }) {
   const [failed, setFailed] = useState(false);
   return (
-    <div role="img" aria-label={discordVisible ? `${displayName} Discord avatar` : `${displayName} profile image`} className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-full border-4 border-[#071120] bg-[#071120] text-4xl font-black text-cyan-100 sm:text-5xl">
+    <div role="img" aria-label={discordVisible ? `${displayName} Discord avatar` : `${displayName} profile image`} className={`relative flex h-full w-full items-center justify-center overflow-hidden rounded-full border-4 border-[#071120] bg-[#071120] font-black text-cyan-100 ${size === "compact" ? "text-lg sm:text-lg" : "text-4xl sm:text-5xl"}`}>
       <span aria-hidden="true">{initial}</span>
       {url && !failed ? (
         <Image
