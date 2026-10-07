@@ -47,16 +47,31 @@ for (const row of dispositions.requests) {
   assert.ok(row.original_branch && row.disposition.length >= 20);
   assert.ok(["closed_superseded", "port_required", "partial", "design_reconcile", "in_progress"].includes(row.status));
 }
+const reviewReconciliationExpectations = new Map([
+  [54, { status: "port_required", evidence: /replies/ }],
+  [55, { status: "partial", evidence: /server-owner scope and per-review linked-server authorization/ }],
+  [56, { status: "port_required", evidence: /partial-result handling/ }],
+  [57, { status: "partial", evidence: /retention behavior/ }],
+]);
+for (const [number, expected] of reviewReconciliationExpectations) {
+  const row = dispositions.requests.find((candidate) => candidate.number === number);
+  assert.equal(row?.status, expected.status, `Review reconciliation #${number} must preserve its remaining implementation gap.`);
+  assert.match(row?.disposition ?? "", expected.evidence);
+}
 const currentBacklog = read("docs/DZN_RELEASE_BACKLOG_2026-09-13.md");
 assert.match(currentBacklog, /remaining 30 older requirements have not all been implemented/);
 assert.match(currentBacklog, /#52, #63, #64, #82-#94 and #96-#122/);
 assert.match(currentBacklog, /#95 \| Real Comms presence/);
+assert.match(currentBacklog, /They do\s+not replace review replies, server-owner scope, per-review linked-server\s+authorization, partial-result batch/);
+assert.doesNotMatch(currentBacklog, /per-item authorization/, "The current platform-owner gate is not per-review linked-server authorization.");
 assert.doesNotMatch(currentBacklog, /#118-#119 \| Login-only public history and tie-safe pagination/);
 assert.doesNotMatch(currentBacklog, /#96 \| Earned-spin and reward-wheel policy remains deferred/);
 assert.doesNotMatch(currentBacklog, /#109 \| Platform-owner Store order reconciliation/);
 assert.match(handoff, /Forty-three verified replacements are closed/);
 assert.match(handoff, /30 older requirements remain unresolved/);
+assert.match(handoff, /## Latest Reconciliation: 2026-10-07/);
 assert.match(handoff, /Closed PRs #118-#119 are superseded/);
+assert.match(handoff, /PRs #54-#57 retain bounded current-source foundations/);
 for (const subject of ["NukeTown", "FED & FERAL", "Nitrado", "Discord", "Customer billing", "Spin/reward", "DZN Games Hub"]) {
   assert.ok(currentBacklog.includes(subject), `Retain wider user priority: ${subject}`);
 }

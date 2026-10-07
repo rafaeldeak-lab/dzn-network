@@ -17,11 +17,20 @@ reconciliation note linking replacement work and this record. Every original
 description is retained below it, and every original head was checked before the
 update. The 43 verified closures plus 30 open requests account for all 73.
 
-Current source comparison: `da206314957f63a8cc31dc2a60c25f92f2d36bba`.
+Current source comparison: `da66845626b7d42d19d74ae2cebd02f0a9160421`.
 Board UI release: PR #185, merge `ee43f3f1f445af92ffd423409441b42d9e7b257d`.
 The board release passed 23 rendered checks and independent review. It removes the
 header pause button, adds DZN field-board styling, and keeps a Display setting
 accessible on every state. No rules, rewards, migration or payment settings changed.
+
+On October 7, the current review moderation implementation was rechecked against
+#54-#57. The focused suites prove authenticated reporting, duplicate-report
+protection, thresholded platform-owner alerts, a platform-owner authorization gate,
+auditable single and atomic bulk decisions, and current-user-only alert read state.
+They do not replace review replies, server-owner scope, per-review linked-server
+authorization, partial-result batch handling, or review-notification retention
+evidence. Those entries remain open in
+the historical GitHub stack; no old branch should be merged.
 
 ## Active Work
 
@@ -61,7 +70,7 @@ revocation cannot consume the old cadence.
 | --- | --- | --- |
 | #50-#51 | Reconcile old owner-access rules and Player Hub dependencies | Preserve Free player access, current per-server capabilities and exact-server complimentary grants |
 | #53 | Pricing comparison artwork | Do not alter current prices or checkout behavior |
-| #54-#57 | Review reports/replies, moderation queue, bulk actions, notification state | Server-owner scope, per-item authorization, audit and current-user read state |
+| #54-#57 | Retain the review moderation requests as open | Current source has platform-owner reporting/moderation/read-state foundations; replies, server-owner scope, partial batch handling and retention evidence still require current-model work; do not merge old branches |
 | #58-#62 | Genuine gameplay challenges, XP, calling cards and award audit | Separate from website-game XP; verified source and identity required |
 | #65-#68 | Missing profile discovery/attribution controls, CTF and event provenance | Explicit public opt-in; no name-only account linking |
 | #69-#81 | Public community directory, trusted member imports, audit and private exports | Private Discord guild matching is not a public member directory; no retained export activation |

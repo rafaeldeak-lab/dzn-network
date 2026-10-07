@@ -1,11 +1,15 @@
 # DZN Release Stack Reconciliation Handoff
 
-## Latest Reconciliation: 2026-10-04
+## Latest Reconciliation: 2026-10-07
 
 Use `DZN_RELEASE_BACKLOG_2026-09-13.md` and its complete 73-row JSON manifest for
 the current per-request disposition. Forty-three verified replacements are closed;
 30 older requirements remain unresolved, matching the 30 open legacy PRs. The original
-branches are preserved. PRs #97-#108 and #110-#117 were closed only after their
+branches are preserved. PRs #54-#57 retain bounded current-source foundations for
+review reporting, a platform-owner-only moderation gate, atomic bulk decisions and
+isolated alert reads. They remain open because replies, server-owner scope, per-review
+linked-server authorization, partial-result batches and review-notification retention
+evidence are not yet implemented. PRs #97-#108 and #110-#117 were closed only after their
 catalog, orders, checkout, webhook, fulfilment, purchases, Supporter Card and
 reaction requirements were matched to current-main replacements and focused tests.
 PR #82 and PRs #86-#90 are also superseded by the current public-profile visual
