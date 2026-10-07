@@ -150,7 +150,13 @@ function PublishedProfile({ data }: { data: PublicPlayerProfilePayload }) {
         <aside className="space-y-4">
           <ProfileBand icon={<ShieldCheck aria-hidden="true" className="h-5 w-5" />} title="Connected Discord" visible={data.discord_profile.visible && data.discord_profile.connected}>
             {data.discord_profile.visible && data.discord_profile.connected ? (
-              <div className="flex items-center gap-3"><div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-indigo-300/35 bg-indigo-400/15 text-lg font-black text-indigo-100">{initial}</div><div className="min-w-0"><p className="truncate font-black text-white">{data.display_name}</p><p className="mt-1 inline-flex items-center gap-2 text-xs font-bold text-emerald-200"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Account connected</p></div></div>
+              <div className="flex items-center gap-3">
+                <div className="relative h-12 w-12 shrink-0">
+                  <DiscordAvatar displayName={data.display_name} initial={initial} url={data.discord_profile.avatar_url} discordVisible />
+                  <span className="absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-[#071120] bg-emerald-400" aria-label="Discord connected" />
+                </div>
+                <div className="min-w-0"><p className="truncate font-black text-white">{data.display_name}</p><p className="mt-1 inline-flex items-center gap-2 text-xs font-bold text-emerald-200"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Account connected</p></div>
+              </div>
             ) : <HiddenCopy />}
           </ProfileBand>
           <ProfileBand icon={<EyeOff aria-hidden="true" className="h-5 w-5" />} title="Published Sections" visible>
