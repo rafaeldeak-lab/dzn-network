@@ -915,6 +915,28 @@ async function main() {
   assert.equal(heartbeatResult.results[0]?.file_result?.public_cache_updated, false);
   assert.equal(heartbeatScheduledDb.serverPublicCache.has(guildId), false);
 
+  const retryHeartbeatDb = new MemoryD1();
+  retryHeartbeatDb.admImportJobs.set("previous-cache-failure", {
+    id: "previous-cache-failure",
+    server_id: linkedServerId,
+    source: "scheduled_nitrado",
+    status: "completed_with_warnings",
+    public_cache_updated: 0,
+    warnings_json: '["previous.ADM: Public cache update failed after ADM rows were written. timed out"]',
+    completed_at: "2026-05-31T19:59:00.000Z",
+  });
+  await createAdmImportJobForServer(makeEnv(retryHeartbeatDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-00-30.ADM",
+    admText: "AdminLog started on 2026-05-31 at 20:00:30\\n20:00:31 | Server heartbeat",
+    source: "scheduled_nitrado",
+    chunkSize: 25,
+  });
+  const retryHeartbeatResult = await processPendingAdmImportJobs(makeEnv(retryHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(retryHeartbeatResult.completedJobs, 1);
+  assert.equal(retryHeartbeatResult.results[0]?.file_result?.public_cache_updated, true);
+  assert.equal(retryHeartbeatDb.serverPublicCache.has(guildId), true);
+
   const buildFixtureName = "DayZServer_PS4_x64_2026-05-31_20-01-53.ADM";
   const buildFixtureLines = [
     "AdminLog started on 2026-05-31 at 20:01:53",
@@ -2136,6 +2158,17 @@ class MemoryStatement {
       return ({ eligible: selected?.guild_id === guildId && isEligible(selected) && eligibleCount === 1 ? 1 : 0 } as T);
     }
     if (q.includes("from adm_import_jobs")) {
+      if (q.includes("id != ?") && q.includes("completed_at is not null")) {
+        const rows = Array.from(this.db.admImportJobs.values())
+          .filter((row) =>
+            row.server_id === this.values[0]
+            && row.id !== this.values[1]
+            && row.source === this.values[2]
+            && row.completed_at,
+          )
+          .sort((a, b) => String(b.completed_at).localeCompare(String(a.completed_at)));
+        return (rows[0] ?? null) as T | null;
+      }
       if (q.includes("where server_id = ? and filename = ?")) {
         const rows = Array.from(this.db.admImportJobs.values())
           .filter((row) => row.server_id === this.values[0] && row.filename === this.values[1])

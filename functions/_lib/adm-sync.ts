@@ -4216,6 +4216,23 @@ async function finalizeAdmImportJob(
     + Number(row.disconnects ?? 0)
     + Number(row.deaths ?? 0)
     + Number(buildEventForFile?.found ?? 0);
+  const previousScheduledCacheResult = isScheduledNitradoImport && derivedDataWrites === 0
+    ? await db
+      .prepare(
+        `SELECT public_cache_updated, warnings_json
+         FROM adm_import_jobs
+         WHERE server_id = ?
+           AND id != ?
+           AND source = ?
+           AND completed_at IS NOT NULL
+         ORDER BY completed_at DESC
+         LIMIT 1`,
+      )
+      .bind(row.server_id, row.id, SCHEDULED_ADM_IMPORT_SOURCE)
+      .first<{ public_cache_updated: number; warnings_json: string | null }>()
+    : null;
+  const retryPreviousScheduledCacheFailure = Number(previousScheduledCacheResult?.public_cache_updated ?? 1) === 0
+    && String(previousScheduledCacheResult?.warnings_json ?? "").includes("Public cache update failed");
   const shouldRefreshDerivedOutputs = !isScheduledNitradoImport || derivedDataWrites > 0;
 
   if (shouldRefreshDerivedOutputs) {
@@ -4231,7 +4248,7 @@ async function finalizeAdmImportJob(
   // Skipping their cache write prevents a timeout from downgrading an otherwise
   // successful lightweight heartbeat import to a warning state.
   const publicCacheGuildId = server.guild_id;
-  if (publicCacheGuildId && (!isScheduledNitradoImport || derivedDataWrites > 0)) {
+  if (publicCacheGuildId && (!isScheduledNitradoImport || derivedDataWrites > 0 || retryPreviousScheduledCacheFailure)) {
     try {
       await withManualAdmPhaseTimeout(upsertServerPublicCache(env, {
         guildId: publicCacheGuildId,
