@@ -412,6 +412,7 @@ type PublicReview = {
   created_at: string;
   updated_at: string;
   moderation_version?: number;
+  owner_reply_version?: number;
   public_profile_handle?: string | null;
   public_profile_href?: string | null;
   owner_reply?: {
@@ -2508,7 +2509,7 @@ function ReviewsPanel({ server }: { server: PublicServer }) {
             <div className="grid gap-3">
               {data.reviews.slice(0, 5).map((review) => (
                 <ReviewCard
-                  key={review.id}
+                key={`${review.id}:${review.owner_reply_version ?? 0}`}
                   review={review}
                   serverId={server.linked_server_id}
                   canReply={Boolean(data.viewer?.can_reply)}
@@ -2535,10 +2536,6 @@ function ReviewCard({ review, serverId, canReply, onReported }: {
   const [replyBody, setReplyBody] = useState(review.owner_reply?.body ?? "");
   const [replyState, setReplyState] = useState<"idle" | "saving" | "removing">("idle");
   const [replyError, setReplyError] = useState("");
-
-  useEffect(() => {
-    setReplyBody(review.owner_reply?.body ?? "");
-  }, [review.owner_reply?.body]);
 
   async function reportReview() {
     setReporting(true);
@@ -2572,7 +2569,7 @@ function ReviewCard({ review, serverId, canReply, onReported }: {
         cache: "no-store",
         credentials: "include",
         headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ body: replyBody, reviewVersion: review.moderation_version }),
+        body: JSON.stringify({ body: replyBody, reviewVersion: review.moderation_version, ownerReplyVersion: review.owner_reply_version }),
       });
       const payload = await response.json().catch(() => ({})) as { message?: string };
       if (!response.ok) throw new Error(payload.message ?? "Could not save the server response.");
@@ -2593,7 +2590,8 @@ function ReviewCard({ review, serverId, canReply, onReported }: {
         method: "DELETE",
         cache: "no-store",
         credentials: "include",
-        headers: { accept: "application/json" },
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ reviewVersion: review.moderation_version, ownerReplyVersion: review.owner_reply_version }),
       });
       const payload = await response.json().catch(() => ({})) as { message?: string };
       if (!response.ok) throw new Error(payload.message ?? "Could not remove the server response.");

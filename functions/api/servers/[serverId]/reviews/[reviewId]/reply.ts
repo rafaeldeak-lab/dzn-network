@@ -5,7 +5,7 @@ import { validateOwnerReplyInput } from "../../../../../_lib/review-moderation";
 import { isServerReviewOwnerRepliesEnabled } from "../../../../../_lib/server-reviews";
 import type { Env, PagesFunction, SessionUser } from "../../../../../_lib/types";
 
-type ReplyBody = { body?: unknown; reviewVersion?: unknown };
+type ReplyBody = { body?: unknown; reviewVersion?: unknown; ownerReplyVersion?: unknown };
 
 // Replies are validated as 1,000 JavaScript characters. JSON bodies may be
 // substantially larger in UTF-8, so leave enough headroom for valid multibyte text.
@@ -29,7 +29,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   if (!user) return json({ ok: false, message: "Log in to manage this server's review responses." }, { status: 401 });
 
   return request.method === "DELETE"
-    ? removeReply(env, user, linkedServerId, reviewId)
+    ? removeReply(env, request, user, linkedServerId, reviewId)
     : upsertReply(env, request, user, linkedServerId, reviewId);
 };
 
@@ -39,7 +39,10 @@ async function upsertReply(env: Env, request: Request, user: SessionUser, linked
   const validated = validateOwnerReplyInput(body.value);
   if (!validated.ok) return json({ ok: false, message: validated.error }, { status: 400 });
   const reviewVersion = Number(body.value.reviewVersion);
-  if (!Number.isSafeInteger(reviewVersion) || reviewVersion < 0) return json({ ok: false, message: "Refresh before responding to this review." }, { status: 409 });
+  const ownerReplyVersion = Number(body.value.ownerReplyVersion);
+  if (!Number.isSafeInteger(reviewVersion) || reviewVersion < 0 || !Number.isSafeInteger(ownerReplyVersion) || ownerReplyVersion < 0) {
+    return json({ ok: false, message: "Refresh before responding to this review." }, { status: 409 });
+  }
 
   const existing = await findReview(env, linkedServerId, reviewId);
   if (!existing) return json({ ok: false, message: "Review not found." }, { status: 404 });
@@ -54,7 +57,7 @@ async function upsertReply(env: Env, request: Request, user: SessionUser, linked
               owner_reply_created_at = COALESCE(owner_reply_created_at, ?), owner_reply_updated_at = ?,
               owner_reply_version = ?, owner_reply_last_decision_id = ?
         WHERE id = ? AND linked_server_id = ? AND status = 'approved' AND owner_reply_version = ? AND moderation_version = ?`,
-    ).bind(validated.value.body, user.id, user.username, now, now, nextVersion, decisionId, reviewId, linkedServerId, existing.owner_reply_version, reviewVersion),
+    ).bind(validated.value.body, user.id, user.username, now, now, nextVersion, decisionId, reviewId, linkedServerId, ownerReplyVersion, reviewVersion),
     requireDb(env).prepare(
       `INSERT INTO server_review_owner_reply_audit (
          id, review_id, linked_server_id, actor_user_id, actor_discord_id, actor_name,
@@ -73,7 +76,14 @@ async function upsertReply(env: Env, request: Request, user: SessionUser, linked
   return json({ ok: true, reviewId, ownerReplyUpdatedAt: now, ownerReplyVersion: nextVersion });
 }
 
-async function removeReply(env: Env, user: SessionUser, linkedServerId: string, reviewId: string) {
+async function removeReply(env: Env, request: Request, user: SessionUser, linkedServerId: string, reviewId: string) {
+  const body = await readBoundedJson<ReplyBody>(request, BODY_LIMIT_BYTES);
+  if (!body.ok) return json({ ok: false, message: body.message }, { status: body.status });
+  const reviewVersion = Number(body.value.reviewVersion);
+  const ownerReplyVersion = Number(body.value.ownerReplyVersion);
+  if (!Number.isSafeInteger(reviewVersion) || reviewVersion < 0 || !Number.isSafeInteger(ownerReplyVersion) || ownerReplyVersion < 0) {
+    return json({ ok: false, message: "Refresh before removing this review response." }, { status: 409 });
+  }
   const existing = await findReview(env, linkedServerId, reviewId);
   if (!existing) return json({ ok: false, message: "Review not found." }, { status: 404 });
   if (!existing.owner_reply_body) return json({ ok: false, message: "This review has no server response to remove." }, { status: 409 });
@@ -88,8 +98,8 @@ async function removeReply(env: Env, user: SessionUser, linkedServerId: string, 
               owner_reply_created_at = NULL, owner_reply_updated_at = NULL, owner_reply_version = ?,
               owner_reply_last_decision_id = ?
         WHERE id = ? AND linked_server_id = ? AND status = 'approved'
-          AND owner_reply_body IS NOT NULL AND owner_reply_version = ?`,
-    ).bind(nextVersion, decisionId, reviewId, linkedServerId, existing.owner_reply_version),
+          AND owner_reply_body IS NOT NULL AND owner_reply_version = ? AND moderation_version = ?`,
+    ).bind(nextVersion, decisionId, reviewId, linkedServerId, ownerReplyVersion, reviewVersion),
     requireDb(env).prepare(
       `INSERT INTO server_review_owner_reply_audit (
          id, review_id, linked_server_id, actor_user_id, actor_discord_id, actor_name,
