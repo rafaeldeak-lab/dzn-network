@@ -5,7 +5,7 @@ import { validateOwnerReplyInput } from "../../../../../_lib/review-moderation";
 import { isServerReviewOwnerRepliesEnabled } from "../../../../../_lib/server-reviews";
 import type { Env, PagesFunction, SessionUser } from "../../../../../_lib/types";
 
-type ReplyBody = { body?: unknown };
+type ReplyBody = { body?: unknown; reviewVersion?: unknown };
 
 // Replies are validated as 1,000 JavaScript characters. JSON bodies may be
 // substantially larger in UTF-8, so leave enough headroom for valid multibyte text.
@@ -38,6 +38,8 @@ async function upsertReply(env: Env, request: Request, user: SessionUser, linked
   if (!body.ok) return json({ ok: false, message: body.message }, { status: body.status });
   const validated = validateOwnerReplyInput(body.value);
   if (!validated.ok) return json({ ok: false, message: validated.error }, { status: 400 });
+  const reviewVersion = Number(body.value.reviewVersion);
+  if (!Number.isSafeInteger(reviewVersion) || reviewVersion < 0) return json({ ok: false, message: "Refresh before responding to this review." }, { status: 409 });
 
   const existing = await findReview(env, linkedServerId, reviewId);
   if (!existing) return json({ ok: false, message: "Review not found." }, { status: 404 });
@@ -51,8 +53,8 @@ async function upsertReply(env: Env, request: Request, user: SessionUser, linked
           SET owner_reply_body = ?, owner_reply_author_user_id = ?, owner_reply_author_name = ?,
               owner_reply_created_at = COALESCE(owner_reply_created_at, ?), owner_reply_updated_at = ?,
               owner_reply_version = ?, owner_reply_last_decision_id = ?
-        WHERE id = ? AND linked_server_id = ? AND status = 'approved' AND owner_reply_version = ?`,
-    ).bind(validated.value.body, user.id, user.username, now, now, nextVersion, decisionId, reviewId, linkedServerId, existing.owner_reply_version),
+        WHERE id = ? AND linked_server_id = ? AND status = 'approved' AND owner_reply_version = ? AND moderation_version = ?`,
+    ).bind(validated.value.body, user.id, user.username, now, now, nextVersion, decisionId, reviewId, linkedServerId, existing.owner_reply_version, reviewVersion),
     requireDb(env).prepare(
       `INSERT INTO server_review_owner_reply_audit (
          id, review_id, linked_server_id, actor_user_id, actor_discord_id, actor_name,
@@ -108,11 +110,11 @@ async function removeReply(env: Env, user: SessionUser, linkedServerId: string, 
 
 async function findReview(env: Env, linkedServerId: string, reviewId: string) {
   return requireDb(env).prepare(
-    `SELECT id, owner_reply_body, owner_reply_version
+    `SELECT id, owner_reply_body, owner_reply_version, moderation_version
        FROM server_reviews
       WHERE id = ? AND linked_server_id = ? AND status = 'approved'
       LIMIT 1`,
-  ).bind(reviewId, linkedServerId).first<{ id: string; owner_reply_body: string | null; owner_reply_version: number }>();
+  ).bind(reviewId, linkedServerId).first<{ id: string; owner_reply_body: string | null; owner_reply_version: number; moderation_version: number }>();
 }
 
 function sameOrigin(request: Request) {

@@ -411,6 +411,7 @@ type PublicReview = {
   body: string;
   created_at: string;
   updated_at: string;
+  moderation_version?: number;
   public_profile_handle?: string | null;
   public_profile_href?: string | null;
   owner_reply?: {
@@ -2571,7 +2572,7 @@ function ReviewCard({ review, serverId, canReply, onReported }: {
         cache: "no-store",
         credentials: "include",
         headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ body: replyBody }),
+        body: JSON.stringify({ body: replyBody, reviewVersion: review.moderation_version }),
       });
       const payload = await response.json().catch(() => ({})) as { message?: string };
       if (!response.ok) throw new Error(payload.message ?? "Could not save the server response.");

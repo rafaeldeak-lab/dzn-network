@@ -2,7 +2,7 @@ import { ensureMockUser, getSessionUser, requireDb } from "../../../_lib/db";
 import { json, methodNotAllowed, readJson } from "../../../_lib/http";
 import { isMockAuth } from "../../../_lib/mock";
 import { validateReviewInput } from "../../../_lib/review-moderation";
-import { ensureServerReviewsSchema, getApprovedReviewSummary, getExistingActiveReview, isServerReviewOwnerRepliesEnabled } from "../../../_lib/server-reviews";
+import { ensureServerReviewsSchema, getApprovedReviewSummary, getExistingActiveReview } from "../../../_lib/server-reviews";
 import type { Env, PagesFunction, SessionUser } from "../../../_lib/types";
 
 type ReviewBody = {
@@ -52,18 +52,6 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
   const avatarUrl = discordAvatarUrl(user);
   if (existing) {
     const editId = crypto.randomUUID();
-    // A reply addresses a specific review revision. Clear it within the same
-    // successful edit transaction so it cannot be displayed beside new content.
-    const clearOwnerReply = isServerReviewOwnerRepliesEnabled(env)
-      ? `,
-          owner_reply_body = NULL,
-          owner_reply_author_user_id = NULL,
-          owner_reply_author_name = NULL,
-          owner_reply_created_at = NULL,
-          owner_reply_updated_at = NULL,
-          owner_reply_version = owner_reply_version + 1,
-          owner_reply_last_decision_id = NULL`
-      : "";
     const results = await db.batch([
       db.prepare(
         `UPDATE server_reviews SET
@@ -78,7 +66,7 @@ export const onRequest: PagesFunction = async ({ request, env, params }) => {
           updated_at = ?,
           last_edited_at = ?,
           moderation_version = moderation_version + 1,
-          moderation_decision_id = ?${clearOwnerReply}
+          moderation_decision_id = ?
          WHERE id = ?
            AND linked_server_id = ?
            AND reviewer_discord_id = ?

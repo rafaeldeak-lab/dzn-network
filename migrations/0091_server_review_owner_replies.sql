@@ -29,3 +29,19 @@ CREATE INDEX IF NOT EXISTS idx_server_review_owner_reply_audit_review
 
 CREATE INDEX IF NOT EXISTS idx_server_review_owner_reply_audit_server
   ON server_review_owner_reply_audit(linked_server_id, created_at DESC);
+
+CREATE TRIGGER IF NOT EXISTS trg_server_reviews_invalidate_owner_reply_on_edit
+AFTER UPDATE OF rating, title, body ON server_reviews
+FOR EACH ROW
+WHEN OLD.rating IS NOT NEW.rating OR OLD.title IS NOT NEW.title OR OLD.body IS NOT NEW.body
+BEGIN
+  UPDATE server_reviews
+     SET owner_reply_body = NULL,
+         owner_reply_author_user_id = NULL,
+         owner_reply_author_name = NULL,
+         owner_reply_created_at = NULL,
+         owner_reply_updated_at = NULL,
+         owner_reply_version = owner_reply_version + 1,
+         owner_reply_last_decision_id = NULL
+   WHERE id = NEW.id AND owner_reply_body IS NOT NULL;
+END;

@@ -23,6 +23,7 @@ export type ServerReviewRow = {
   owner_reply_version: number;
   created_at: string;
   updated_at: string;
+  moderation_version: number;
   last_edited_at: string | null;
 };
 
@@ -169,6 +170,7 @@ export function buildPublicReviewSummary(
         body: row.body,
         created_at: row.created_at,
         updated_at: row.updated_at,
+        moderation_version: row.moderation_version,
         public_profile_handle: publicProfile?.handle ?? null,
         public_profile_href: publicProfile?.href ?? null,
         owner_reply: publicOwnerReply(row),

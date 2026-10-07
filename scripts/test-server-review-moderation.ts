@@ -407,7 +407,7 @@ async function runExecutableModerationTransactions() {
 
   const ownerReplyPath = "/api/servers/server-12345678/reviews/review-12345678/reply";
   const disabledReply = await manageOwnerReply(context(
-    authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "POST", { body: "Thanks for the detailed review and constructive feedback." }),
+    authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "POST", { body: "Thanks for the detailed review and constructive feedback.", reviewVersion: 0 }),
     { serverId: "server-12345678", reviewId: "review-12345678" },
     { ...env, DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED: "false" },
   ));
@@ -423,7 +423,7 @@ async function runExecutableModerationTransactions() {
   ));
   assert.equal(nonOwnerReply.status, 403);
   const ownerReply = await manageOwnerReply(context(
-    authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "POST", { body: "Thanks for the detailed review and constructive feedback." }),
+    authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "POST", { body: "Thanks for the detailed review and constructive feedback.", reviewVersion: 0 }),
     { serverId: "server-12345678", reviewId: "review-12345678" },
   ));
   assert.equal(ownerReply.status, 200);
@@ -437,24 +437,32 @@ async function runExecutableModerationTransactions() {
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM server_review_owner_reply_audit WHERE review_id = 'review-12345678'").get()?.count, 1);
   const multibyteReply = await manageOwnerReply(context(
     authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "POST", {
-      body: Array.from({ length: 1_000 }, (_, index) => String.fromCodePoint(0x3041 + (index % 80))).join(""),
+      body: Array.from({ length: 1_000 }, (_, index) => String.fromCodePoint(0x3041 + (index % 80))).join(""), reviewVersion: 0,
     }),
     { serverId: "server-12345678", reviewId: "review-12345678" },
   ));
   assert.equal(multibyteReply.status, 200, "A valid 1,000-character UTF-8 reply must not be rejected by the transport size limit.");
   const adminReply = await manageOwnerReply(context(
-    authenticatedSameOriginRequest(ownerReplyPath, "admin-token", "POST", { body: "The DZN team has reviewed this feedback and shared it with the server staff." }),
+    authenticatedSameOriginRequest(ownerReplyPath, "admin-token", "POST", { body: "The DZN team has reviewed this feedback and shared it with the server staff.", reviewVersion: 0 }),
     { serverId: "server-12345678", reviewId: "review-12345678" },
     { ...env, DZN_ADMIN_DISCORD_IDS: "admin-discord" },
   ));
   assert.equal(adminReply.status, 200);
+  sqlite.prepare("UPDATE server_reviews SET moderation_version = 1 WHERE id = 'review-12345678'").run();
+  const obsoleteRevisionReply = await manageOwnerReply(context(
+    authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "POST", { body: "This response was drafted against an older review revision.", reviewVersion: 0 }),
+    { serverId: "server-12345678", reviewId: "review-12345678" },
+  ));
+  assert.equal(obsoleteRevisionReply.status, 409, "A response composed against an earlier review revision must be rejected.");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM server_review_owner_reply_audit WHERE review_id = 'review-12345678'").get()?.count, 3);
+  sqlite.prepare("UPDATE server_reviews SET moderation_version = 0 WHERE id = 'review-12345678'").run();
   beforeNextBatch = () => {
     sqlite.prepare(
       "UPDATE server_reviews SET owner_reply_version = 4, owner_reply_last_decision_id = 'competing-decision' WHERE id = 'review-12345678'",
     ).run();
   };
   const staleReply = await manageOwnerReply(context(
-    authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "POST", { body: "This stale response must not create an audit record." }),
+    authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "POST", { body: "This stale response must not create an audit record.", reviewVersion: 0 }),
     { serverId: "server-12345678", reviewId: "review-12345678" },
   ));
   assert.equal(staleReply.status, 409);
