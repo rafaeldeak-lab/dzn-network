@@ -1,14 +1,14 @@
 {
   "as_of": "2026-10-07",
-  "compared_main": "da66845626b7d42d19d74ae2cebd02f0a9160421",
+  "compared_main": "0f150387742a6f4f22e12c4a3d66f89e2b8e0aa8",
   "ui_release": "ee43f3f1f445af92ffd423409441b42d9e7b257d",
   "original_count": 73,
-  "closed_superseded": 43,
-  "open_legacy": 30,
+  "closed_superseded": 44,
+  "open_legacy": 29,
   "notes": [
     "A disposition is not a claim of implementation or production activation.",
     "Closed requests have per-request GitHub comments and preserved branches. Open original branches remain unchanged.",
-    "open_legacy counts unresolved requirements and currently matches the 30 open legacy PRs on GitHub.",
+    "open_legacy counts unresolved requirements and currently matches the 29 open legacy PRs on GitHub.",
     "Historical migration numbers collide with current releases; port unique behavior instead of merging old trees."
   ],
   "requests": [
@@ -45,8 +45,8 @@
       "original_head": "7146b6f3879e63b270d353325a64bcd97095e16b",
       "original_branch": "codex/pricing-visual-upgrade-20260825",
       "original_base": "codex/player-saved-servers-20260825",
-      "status": "port_required",
-      "disposition": "Pricing artwork/comparison presentation is absent from the newer implementation. Preserve current prices, checkout copy and entitlements."
+      "status": "closed_superseded",
+      "disposition": "#194: responsive pricing redesign with plan-contract-backed comparison, checkout safety gating and billing-plan regression coverage. The original artwork is superseded; current prices, checkout copy and entitlements remain authoritative."
     },
     {
       "number": 54,
