@@ -4204,16 +4204,18 @@ async function finalizeAdmImportJob(
     : isOwnerSuppliedRecoveryImport
       ? OWNER_SUPPLIED_ADM_RECOVERY_SOURCE
       : "manual_chunked_import";
-  const buildEventsForFile = await db
-    .prepare("SELECT COUNT(*) AS count FROM build_events WHERE linked_server_id = ? AND source_adm_file = ?")
-    .bind(row.server_id, row.filename)
-    .first<{ count: number }>();
+  // This composite lookup uses the canonical build-event source identity rather
+  // than counting every historical build for the linked server.
+  const buildEventForFile = await db
+    .prepare("SELECT 1 AS found FROM build_events WHERE nitrado_service_id = ? AND source_adm_file = ? LIMIT 1")
+    .bind(server.nitrado_service_id ?? row.source_service_id ?? "", row.filename)
+    .first<{ found: number }>();
   const derivedDataWrites = Number(row.written_kills ?? 0)
     + Number(row.player_events ?? 0)
     + Number(row.joins ?? 0)
     + Number(row.disconnects ?? 0)
     + Number(row.deaths ?? 0)
-    + Number(buildEventsForFile?.count ?? 0);
+    + Number(buildEventForFile?.found ?? 0);
   const shouldRefreshDerivedOutputs = !isScheduledNitradoImport || derivedDataWrites > 0;
 
   if (shouldRefreshDerivedOutputs) {
