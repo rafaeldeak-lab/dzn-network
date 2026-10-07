@@ -411,8 +411,16 @@ type PublicReview = {
   body: string;
   created_at: string;
   updated_at: string;
+  moderation_version?: number;
+  owner_reply_version?: number;
   public_profile_handle?: string | null;
   public_profile_href?: string | null;
+  owner_reply?: {
+    body: string;
+    author_name: string | null;
+    created_at: string;
+    updated_at: string;
+  } | null;
   is_own_review?: boolean;
 };
 
@@ -427,6 +435,7 @@ type ReviewsResponse = {
   viewer?: {
     authenticated: boolean;
     can_review: boolean;
+    can_reply?: boolean;
     reason: "login_required" | "owner" | "cooldown" | "server_not_found" | null;
     cooldown_until: string | null;
     existing_review_id: string | null;
@@ -2499,7 +2508,13 @@ function ReviewsPanel({ server }: { server: PublicServer }) {
           {!reviewsLocked && !loading && data?.reviews.length ? (
             <div className="grid gap-3">
               {data.reviews.slice(0, 5).map((review) => (
-                <ReviewCard key={review.id} review={review} onReported={() => loadReviews()} />
+                <ReviewCard
+                key={`${review.id}:${review.owner_reply_version ?? 0}`}
+                  review={review}
+                  serverId={server.linked_server_id}
+                  canReply={Boolean(data.viewer?.can_reply)}
+                  onReported={() => loadReviews()}
+                />
               ))}
             </div>
           ) : null}
@@ -2509,9 +2524,18 @@ function ReviewsPanel({ server }: { server: PublicServer }) {
   );
 }
 
-function ReviewCard({ review, onReported }: { review: PublicReview; onReported: () => void }) {
+function ReviewCard({ review, serverId, canReply, onReported }: {
+  review: PublicReview;
+  serverId: string;
+  canReply: boolean;
+  onReported: () => void;
+}) {
   const [reporting, setReporting] = useState(false);
   const [reported, setReported] = useState(false);
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [replyBody, setReplyBody] = useState(review.owner_reply?.body ?? "");
+  const [replyState, setReplyState] = useState<"idle" | "saving" | "removing">("idle");
+  const [replyError, setReplyError] = useState("");
 
   async function reportReview() {
     setReporting(true);
@@ -2529,6 +2553,55 @@ function ReviewCard({ review, onReported }: { review: PublicReview; onReported: 
       }
     } finally {
       setReporting(false);
+    }
+  }
+
+  async function saveReply() {
+    setReplyError("");
+    if (replyBody.trim().length < 10) {
+      setReplyError("Server response must be at least 10 characters.");
+      return;
+    }
+    setReplyState("saving");
+    try {
+      const response = await fetch(`/api/servers/${encodeURIComponent(serverId)}/reviews/${encodeURIComponent(review.id)}/reply`, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ body: replyBody, reviewVersion: review.moderation_version, ownerReplyVersion: review.owner_reply_version }),
+      });
+      const payload = await response.json().catch(() => ({})) as { message?: string };
+      if (!response.ok) throw new Error(payload.message ?? "Could not save the server response.");
+      setReplyOpen(false);
+      onReported();
+    } catch (error) {
+      setReplyError(error instanceof Error ? error.message : "Could not save the server response.");
+    } finally {
+      setReplyState("idle");
+    }
+  }
+
+  async function removeReply() {
+    setReplyError("");
+    setReplyState("removing");
+    try {
+      const response = await fetch(`/api/servers/${encodeURIComponent(serverId)}/reviews/${encodeURIComponent(review.id)}/reply`, {
+        method: "DELETE",
+        cache: "no-store",
+        credentials: "include",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ reviewVersion: review.moderation_version, ownerReplyVersion: review.owner_reply_version }),
+      });
+      const payload = await response.json().catch(() => ({})) as { message?: string };
+      if (!response.ok) throw new Error(payload.message ?? "Could not remove the server response.");
+      setReplyBody("");
+      setReplyOpen(false);
+      onReported();
+    } catch (error) {
+      setReplyError(error instanceof Error ? error.message : "Could not remove the server response.");
+    } finally {
+      setReplyState("idle");
     }
   }
 
@@ -2556,6 +2629,40 @@ function ReviewCard({ review, onReported }: { review: PublicReview; onReported: 
       </div>
       {review.title ? <h3 className="mt-3 break-words text-sm font-black text-white">{review.title}</h3> : null}
       <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-300">{review.body}</p>
+      {review.owner_reply ? (
+        <section className="mt-4 border-l-2 border-cyan-300/60 bg-cyan-300/[0.06] px-3 py-3" aria-label="Server response">
+          <div className="flex items-center justify-between gap-3">
+            <p className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.14em] text-cyan-100"><MessageSquare className="h-3.5 w-3.5" /> Server response</p>
+            <span className="text-[10px] font-bold text-zinc-500">{formatRelativeTime(review.owner_reply.updated_at)}</span>
+          </div>
+          <p className="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-200">{review.owner_reply.body}</p>
+          {review.owner_reply.author_name ? <p className="mt-2 text-[10px] font-bold uppercase text-zinc-500">Posted by {review.owner_reply.author_name}</p> : null}
+        </section>
+      ) : null}
+      {canReply ? (
+        <div className="mt-4 border-t border-white/10 pt-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" onClick={() => { setReplyError(""); setReplyOpen((value) => !value); }} className="text-[10px] font-black uppercase text-cyan-200 transition hover:text-cyan-50">
+              {review.owner_reply ? "Edit server response" : "Respond as server team"}
+            </button>
+            {review.owner_reply ? <button type="button" disabled={replyState !== "idle"} onClick={() => void removeReply()} className="text-[10px] font-black uppercase text-zinc-500 transition hover:text-rose-200 disabled:opacity-50">{replyState === "removing" ? "Removing..." : "Remove response"}</button> : null}
+          </div>
+          {replyOpen ? (
+            <div className="mt-3 rounded-lg border border-cyan-300/20 bg-black/25 p-3">
+              <label className="block">
+                <span className="flex items-center justify-between text-[10px] font-black uppercase text-zinc-500"><span>Public server response</span><span>{replyBody.length} / 1000</span></span>
+                <textarea value={replyBody} maxLength={1000} rows={4} onChange={(event) => setReplyBody(event.target.value)} placeholder="Respond constructively to this review." className="mt-2 w-full resize-y rounded-lg border border-white/10 bg-black/30 px-3 py-2.5 text-sm font-semibold leading-6 text-white outline-none focus:border-cyan-300/45" />
+              </label>
+              {replyError ? <p className="mt-2 text-xs font-bold text-rose-200">{replyError}</p> : null}
+              <div className="mt-3 flex flex-wrap justify-end gap-2">
+                <button type="button" disabled={replyState !== "idle"} onClick={() => setReplyOpen(false)} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-200 disabled:opacity-50">Cancel</button>
+                <button type="button" disabled={replyState !== "idle" || replyBody.trim().length < 10} onClick={() => void saveReply()} className="rounded-lg border border-cyan-300/40 bg-cyan-300/10 px-3 py-2 text-[10px] font-black uppercase text-cyan-50 disabled:opacity-50">{replyState === "saving" ? "Saving..." : "Publish response"}</button>
+              </div>
+            </div>
+          ) : null}
+          {!replyOpen && replyError ? <p className="mt-2 text-xs font-bold text-rose-200">{replyError}</p> : null}
+        </div>
+      ) : null}
       {!review.is_own_review ? (
         <button type="button" disabled={reporting || reported} onClick={reportReview} className="mt-3 text-[10px] font-black uppercase text-zinc-500 transition hover:text-orange-200 disabled:opacity-50">
           {reported ? "Reported" : reporting ? "Reporting..." : "Report"}

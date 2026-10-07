@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   REVIEW_COOLDOWN_HOURS,
   moderateReviewText,
   reviewCooldownUntil,
+  validateOwnerReplyInput,
   validatePublicListingInput,
   validateReviewInput,
 } from "../functions/_lib/review-moderation";
@@ -47,6 +49,15 @@ assert.equal(validateReviewInput({ rating: 5, body: "<script>alert(1)</script> C
 assert.equal(validateReviewInput({ rating: 5, body: "AAAAAAA this is repeated character spam and should not be accepted." }).ok, false);
 assert.equal(validateReviewInput({ rating: 5, body: "CHECK THIS CHECK THIS CHECK THIS CHECK THIS CHECK THIS CHECK THIS" }).ok, false);
 assert.equal(moderateReviewText(null, "This review has unsafe sexual abuse wording and should be rejected.").ok, false);
+assert.equal(validateOwnerReplyInput({ body: "Thanks for the review. We have shared this feedback with the staff team." }).ok, true);
+assert.equal(validateOwnerReplyInput({ body: "Too short" }).ok, false);
+assert.equal(validateOwnerReplyInput({ body: "<script>alert(1)</script> This cannot be saved as a server response." }).ok, false);
+
+const reviewReplyRuntime = readFileSync("functions/_lib/server-reviews.ts", "utf8");
+assert.match(reviewReplyRuntime, /DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED/);
+assert.match(reviewReplyRuntime, /NULL AS owner_reply_body/);
+const publicReviewRoute = readFileSync("functions/api/public/server-reviews.ts", "utf8");
+assert.match(publicReviewRoute, /can_reply: isServerReviewOwnerRepliesEnabled/);
 
 const now = new Date("2026-05-16T12:00:00.000Z");
 const recentUpdate = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
@@ -60,10 +71,18 @@ const rows: ServerReviewRow[] = [
   reviewRow({ id: "nuketown-approved", linkedServerId: "nuketown", reviewerDiscordId: "333", status: "approved", rating: 4 }),
 ];
 
+rows[0].owner_reply_body = "Thanks for the detailed review. We are glad you enjoyed the events.";
+rows[0].owner_reply_author_name = "Pandora Staff";
+rows[0].owner_reply_created_at = "2026-05-16T11:00:00.000Z";
+rows[0].owner_reply_updated_at = "2026-05-16T11:30:00.000Z";
+rows[0].owner_reply_version = 1;
+
 const pandoraSummary = buildPublicReviewSummary(rows.filter((row) => row.linked_server_id === "pandora"), "111");
 assert.equal(pandoraSummary.review_count, 1);
 assert.equal(pandoraSummary.average_rating, 5);
 assert.equal(pandoraSummary.reviews[0].is_own_review, true);
+assert.equal(pandoraSummary.reviews[0].owner_reply?.author_name, "Pandora Staff");
+assert.equal(pandoraSummary.reviews[0].owner_reply?.body.includes("detailed review"), true);
 assert.equal(JSON.stringify(pandoraSummary).includes("reviewer_discord_id"), false);
 assert.equal(pandoraSummary.reviews.some((review) => review.id === "nuketown-approved"), false);
 
@@ -123,6 +142,11 @@ function reviewRow(options: {
     moderation_reason: null,
     report_count: 0,
     moderation_version: 0,
+    owner_reply_body: null,
+    owner_reply_author_name: null,
+    owner_reply_created_at: null,
+    owner_reply_updated_at: null,
+    owner_reply_version: 0,
     created_at: "2026-05-16T10:00:00.000Z",
     updated_at: options.updatedAt ?? "2026-05-16T10:00:00.000Z",
     last_edited_at: null,

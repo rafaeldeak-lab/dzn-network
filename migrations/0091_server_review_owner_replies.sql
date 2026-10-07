@@ -1,0 +1,47 @@
+-- Server-owner responses to public reviews. This migration is additive and must
+-- be activated through its own production migration and schema-verification run.
+
+ALTER TABLE server_reviews ADD COLUMN owner_reply_body TEXT;
+ALTER TABLE server_reviews ADD COLUMN owner_reply_author_user_id TEXT;
+ALTER TABLE server_reviews ADD COLUMN owner_reply_author_name TEXT;
+ALTER TABLE server_reviews ADD COLUMN owner_reply_created_at TEXT;
+ALTER TABLE server_reviews ADD COLUMN owner_reply_updated_at TEXT;
+ALTER TABLE server_reviews ADD COLUMN owner_reply_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE server_reviews ADD COLUMN owner_reply_last_decision_id TEXT;
+
+CREATE TABLE IF NOT EXISTS server_review_owner_reply_audit (
+  id TEXT PRIMARY KEY,
+  review_id TEXT NOT NULL,
+  linked_server_id TEXT NOT NULL,
+  actor_user_id TEXT NOT NULL,
+  actor_discord_id TEXT NOT NULL,
+  actor_name TEXT,
+  action TEXT NOT NULL CHECK (action IN ('upsert', 'remove')),
+  previous_version INTEGER NOT NULL,
+  next_version INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(review_id) REFERENCES server_reviews(id) ON DELETE CASCADE,
+  FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_server_review_owner_reply_audit_review
+  ON server_review_owner_reply_audit(review_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_server_review_owner_reply_audit_server
+  ON server_review_owner_reply_audit(linked_server_id, created_at DESC);
+
+CREATE TRIGGER IF NOT EXISTS trg_server_reviews_invalidate_owner_reply_on_edit
+AFTER UPDATE OF rating, title, body ON server_reviews
+FOR EACH ROW
+WHEN OLD.rating IS NOT NEW.rating OR OLD.title IS NOT NEW.title OR OLD.body IS NOT NEW.body
+BEGIN
+  UPDATE server_reviews
+     SET owner_reply_body = NULL,
+         owner_reply_author_user_id = NULL,
+         owner_reply_author_name = NULL,
+         owner_reply_created_at = NULL,
+         owner_reply_updated_at = NULL,
+         owner_reply_version = owner_reply_version + 1,
+         owner_reply_last_decision_id = NULL
+   WHERE id = NEW.id AND owner_reply_body IS NOT NULL;
+END;

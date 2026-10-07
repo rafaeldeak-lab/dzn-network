@@ -1,7 +1,8 @@
 import { requireDb } from "../../_lib/db";
+import { isDznAdminDiscordId } from "../../_lib/admin";
 import { json, methodNotAllowed } from "../../_lib/http";
 import { getOptionalDiscordUser } from "../../_lib/public-auth";
-import { getApprovedReviewSummary, getExistingActiveReview, viewerReviewState } from "../../_lib/server-reviews";
+import { getApprovedReviewSummary, getExistingActiveReview, isServerReviewOwnerRepliesEnabled, viewerReviewState } from "../../_lib/server-reviews";
 import type { Env, PagesFunction } from "../../_lib/types";
 
 export const onRequest: PagesFunction = async ({ request, env }) => {
@@ -18,7 +19,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
       review_count: 0,
       rating_breakdown: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
       reviews: [],
-      viewer: { authenticated: false, can_review: false, reason: "server_not_found", cooldown_until: null, existing_review_id: null },
+      viewer: { authenticated: false, can_review: false, can_reply: false, reason: "server_not_found", cooldown_until: null, existing_review_id: null },
     });
   }
 
@@ -27,7 +28,12 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   const summary = await getApprovedReviewSummary(env, server.id, viewer);
   return json({
     ...applyServerReviewsAccess(summary, Boolean(viewer)),
-    viewer: viewerReviewState({ viewer, serverOwnerUserId: server.user_id, existingReview }),
+    viewer: {
+      ...viewerReviewState({ viewer, serverOwnerUserId: server.user_id, existingReview }),
+      can_reply: isServerReviewOwnerRepliesEnabled(env) && Boolean(
+        viewer && (viewer.id === server.user_id || isDznAdminDiscordId(env, viewer.discord_id)),
+      ),
+    },
   });
 };
 
