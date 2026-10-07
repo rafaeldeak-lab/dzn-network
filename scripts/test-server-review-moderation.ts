@@ -19,6 +19,7 @@ import {
 import { onRequestPost as bulkModerateReviews } from "../functions/api/owner/reviews/bulk";
 import { onRequest as reportReview } from "../functions/api/public/server-reviews/[reviewId]/report";
 import { onRequest as saveReview } from "../functions/api/servers/[serverId]/reviews";
+import { onRequest as manageOwnerReply } from "../functions/api/servers/[serverId]/reviews/[reviewId]/reply";
 
 type Row = Record<string, unknown>;
 type Sqlite = {
@@ -165,6 +166,21 @@ assert.match(
 assert.match(migration, /WHERE resolution_status IS NULL/);
 assert.match(migration, /CHECK \(action IN \('approve', 'hide'\)\)/);
 
+const ownerReplyMigration = readFileSync("migrations/0091_server_review_owner_replies.sql", "utf8");
+assert.match(ownerReplyMigration, /ALTER TABLE server_reviews ADD COLUMN owner_reply_body TEXT/);
+assert.match(ownerReplyMigration, /owner_reply_version INTEGER NOT NULL DEFAULT 0/);
+assert.match(ownerReplyMigration, /server_review_owner_reply_audit/);
+assert.match(ownerReplyMigration, /CHECK \(action IN \('upsert', 'remove'\)\)/);
+
+const ownerReplyRoute = readFileSync(
+  "functions/api/servers/[serverId]/reviews/[reviewId]/reply.ts",
+  "utf8",
+);
+assert.match(ownerReplyRoute, /requireServerOwnerOrDznAdmin/);
+assert.match(ownerReplyRoute, /readBoundedJson/);
+assert.match(ownerReplyRoute, /sameOrigin/);
+assert.match(ownerReplyRoute, /owner_reply_version/);
+
 const route = readFileSync("functions/api/owner/reviews/moderate.ts", "utf8");
 assert.match(route, /requirePlatformOwner/);
 assert.match(route, /countUnreadReviewNotifications/);
@@ -260,6 +276,7 @@ async function runExecutableModerationTransactions() {
   sqlite.exec("CREATE TABLE competitive_events (id TEXT PRIMARY KEY)");
   sqlite.exec(readFileSync("migrations/0052_dzn_pulse.sql", "utf8"));
   sqlite.exec(migration);
+  sqlite.exec(ownerReplyMigration);
 
   const prepare = (sql: string, bindings: unknown[] = []) => {
     const execute = () => {
@@ -310,11 +327,13 @@ async function runExecutableModerationTransactions() {
     SESSION_SECRET: sessionSecret,
     DZN_PULSE_ENABLED: "true",
     DZN_PLATFORM_OWNER_DISCORD_IDS: "111111111111111111",
+    DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED: "true",
   } as unknown as Env;
   const old = "2026-01-01T00:00:00.000Z";
   sqlite.exec(`
   INSERT INTO users (id, discord_id, username, avatar) VALUES
     ('owner-user', '111111111111111111', 'DZN Owner', NULL),
+    ('admin-user', 'admin-discord', 'DZN Admin', NULL),
     ('reviewer-user', 'reviewer-discord', 'Reviewer', NULL),
     ('reporter-user', 'reporter-discord', 'Reporter', NULL),
     ('reporter-two', 'reporter-two-discord', 'Reporter Two', NULL),
@@ -334,6 +353,7 @@ async function runExecutableModerationTransactions() {
 `);
   for (const [id, token] of [
     ["owner-user", "owner-token"],
+    ["admin-user", "admin-token"],
     ["reviewer-user", "reviewer-token"],
     ["reporter-user", "reporter-token"],
     ["reporter-two", "reporter-two-token"],
@@ -349,10 +369,11 @@ async function runExecutableModerationTransactions() {
   function context(
     request: Request,
     params: Record<string, string>,
+    contextEnv: Env = env,
   ): PagesContext {
     return {
       request,
-      env,
+      env: contextEnv,
       params,
       waitUntil: () => undefined,
       next: async () => new Response(null),
@@ -369,6 +390,69 @@ async function runExecutableModerationTransactions() {
       body: JSON.stringify(body),
     });
   }
+
+  function authenticatedSameOriginRequest(path: string, token: string, method: "POST" | "DELETE", body?: unknown, origin = "https://dzn.test") {
+    return new Request(`https://dzn.test${path}`, {
+      method,
+      headers: {
+        cookie: `dzn_session=${token}`,
+        origin,
+        "sec-fetch-site": origin === "https://dzn.test" ? "same-origin" : "cross-site",
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  }
+
+  const ownerReplyPath = "/api/servers/server-12345678/reviews/review-12345678/reply";
+  const disabledReply = await manageOwnerReply(context(
+    authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "POST", { body: "Thanks for the detailed review and constructive feedback." }),
+    { serverId: "server-12345678", reviewId: "review-12345678" },
+    { ...env, DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED: "false" },
+  ));
+  assert.equal(disabledReply.status, 404);
+  const crossOriginReply = await manageOwnerReply(context(
+    authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "POST", { body: "Thanks for the detailed review and constructive feedback." }, "https://attacker.test"),
+    { serverId: "server-12345678", reviewId: "review-12345678" },
+  ));
+  assert.equal(crossOriginReply.status, 403);
+  const nonOwnerReply = await manageOwnerReply(context(
+    authenticatedSameOriginRequest(ownerReplyPath, "reviewer-token", "POST", { body: "Thanks for the detailed review and constructive feedback." }),
+    { serverId: "server-12345678", reviewId: "review-12345678" },
+  ));
+  assert.equal(nonOwnerReply.status, 403);
+  const ownerReply = await manageOwnerReply(context(
+    authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "POST", { body: "Thanks for the detailed review and constructive feedback." }),
+    { serverId: "server-12345678", reviewId: "review-12345678" },
+  ));
+  assert.equal(ownerReply.status, 200);
+  assert.deepEqual({ ...sqlite.prepare(
+    "SELECT owner_reply_body, owner_reply_author_user_id, owner_reply_version FROM server_reviews WHERE id = 'review-12345678'",
+  ).get() }, {
+    owner_reply_body: "Thanks for the detailed review and constructive feedback.",
+    owner_reply_author_user_id: "owner-user",
+    owner_reply_version: 1,
+  });
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM server_review_owner_reply_audit WHERE review_id = 'review-12345678'").get()?.count, 1);
+  const adminReply = await manageOwnerReply(context(
+    authenticatedSameOriginRequest(ownerReplyPath, "admin-token", "POST", { body: "The DZN team has reviewed this feedback and shared it with the server staff." }),
+    { serverId: "server-12345678", reviewId: "review-12345678" },
+    { ...env, DZN_ADMIN_DISCORD_IDS: "admin-discord" },
+  ));
+  assert.equal(adminReply.status, 200);
+  const removedReply = await manageOwnerReply(context(
+    authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "DELETE"),
+    { serverId: "server-12345678", reviewId: "review-12345678" },
+  ));
+  assert.equal(removedReply.status, 200);
+  assert.deepEqual({ ...sqlite.prepare(
+    "SELECT owner_reply_body, owner_reply_author_user_id, owner_reply_version FROM server_reviews WHERE id = 'review-12345678'",
+  ).get() }, {
+    owner_reply_body: null,
+    owner_reply_author_user_id: null,
+    owner_reply_version: 3,
+  });
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM server_review_owner_reply_audit WHERE review_id = 'review-12345678'").get()?.count, 3);
 
   const firstReportResponse = await reportReview(
     context(

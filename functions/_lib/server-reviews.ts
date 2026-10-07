@@ -16,6 +16,11 @@ export type ServerReviewRow = {
   moderation_reason: string | null;
   report_count: number;
   moderation_version: number;
+  owner_reply_body: string | null;
+  owner_reply_author_name: string | null;
+  owner_reply_created_at: string | null;
+  owner_reply_updated_at: string | null;
+  owner_reply_version: number;
   created_at: string;
   updated_at: string;
   last_edited_at: string | null;
@@ -39,8 +44,20 @@ export type PublicReview = {
   updated_at: string;
   public_profile_handle: string | null;
   public_profile_href: string | null;
+  owner_reply: PublicOwnerReply | null;
   is_own_review?: boolean;
 };
+
+export type PublicOwnerReply = {
+  body: string;
+  author_name: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export function isServerReviewOwnerRepliesEnabled(env: Env) {
+  return String((env as Record<string, unknown>).DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED ?? "").trim().toLowerCase() === "true";
+}
 
 export async function ensureServerReviewsSchema(env: Env) {
   const db = requireDb(env);
@@ -101,10 +118,13 @@ export async function ensureServerReviewsSchema(env: Env) {
 export async function getApprovedReviewSummary(env: Env, linkedServerId: string, viewer?: SessionUser | null): Promise<PublicReviewSummary> {
   await ensureServerReviewsSchema(env);
   const db = requireDb(env);
+  const ownerReplyColumns = selectOwnerReplyColumns(env);
   const result = await db
     .prepare(
       `SELECT id, linked_server_id, reviewer_discord_id, reviewer_name, reviewer_avatar_url, rating,
-              title, body, status, moderation_reason, report_count, moderation_version, created_at, updated_at, last_edited_at
+              title, body, status, moderation_reason, report_count, moderation_version,
+              ${ownerReplyColumns},
+              created_at, updated_at, last_edited_at
        FROM server_reviews
        WHERE linked_server_id = ?
          AND status = 'approved'
@@ -151,6 +171,7 @@ export function buildPublicReviewSummary(
         updated_at: row.updated_at,
         public_profile_handle: publicProfile?.handle ?? null,
         public_profile_href: publicProfile?.href ?? null,
+        owner_reply: publicOwnerReply(row),
         is_own_review: Boolean(viewerDiscordId && row.reviewer_discord_id === viewerDiscordId),
       };
     }),
@@ -160,10 +181,13 @@ export function buildPublicReviewSummary(
 export async function getExistingActiveReview(env: Env, linkedServerId: string, reviewerDiscordId: string) {
   await ensureServerReviewsSchema(env);
   const db = requireDb(env);
+  const ownerReplyColumns = selectOwnerReplyColumns(env);
   return db
     .prepare(
       `SELECT id, linked_server_id, reviewer_discord_id, reviewer_name, reviewer_avatar_url, rating,
-              title, body, status, moderation_reason, report_count, moderation_version, created_at, updated_at, last_edited_at
+              title, body, status, moderation_reason, report_count, moderation_version,
+              ${ownerReplyColumns},
+              created_at, updated_at, last_edited_at
        FROM server_reviews
        WHERE linked_server_id = ?
          AND reviewer_discord_id = ?
@@ -172,6 +196,23 @@ export async function getExistingActiveReview(env: Env, linkedServerId: string, 
     )
     .bind(linkedServerId, reviewerDiscordId)
     .first<ServerReviewRow>();
+}
+
+function selectOwnerReplyColumns(env: Env) {
+  if (isServerReviewOwnerRepliesEnabled(env)) {
+    return "owner_reply_body, owner_reply_author_name, owner_reply_created_at, owner_reply_updated_at, owner_reply_version";
+  }
+  return "NULL AS owner_reply_body, NULL AS owner_reply_author_name, NULL AS owner_reply_created_at, NULL AS owner_reply_updated_at, 0 AS owner_reply_version";
+}
+
+function publicOwnerReply(row: ServerReviewRow): PublicOwnerReply | null {
+  if (!row.owner_reply_body || !row.owner_reply_created_at || !row.owner_reply_updated_at) return null;
+  return {
+    body: row.owner_reply_body,
+    author_name: row.owner_reply_author_name,
+    created_at: row.owner_reply_created_at,
+    updated_at: row.owner_reply_updated_at,
+  };
 }
 
 export function viewerReviewState(options: {
