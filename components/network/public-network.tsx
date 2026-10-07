@@ -2662,6 +2662,7 @@ function ReviewCard({ review, serverId, canReply, onReported }: {
               </div>
             </div>
           ) : null}
+          {!replyOpen && replyError ? <p className="mt-2 text-xs font-bold text-rose-200">{replyError}</p> : null}
         </div>
       ) : null}
       {!review.is_own_review ? (
