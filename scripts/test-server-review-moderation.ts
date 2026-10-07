@@ -667,6 +667,16 @@ async function runExecutableModerationTransactions() {
       "UPDATE server_reviews SET updated_at = ?, last_edited_at = ? WHERE id = ?",
     )
     .run(old, old, "review-12345678");
+  sqlite.prepare(
+    `UPDATE server_reviews
+        SET owner_reply_body = 'Response to the original review.',
+            owner_reply_author_user_id = 'owner-user',
+            owner_reply_author_name = 'Owner',
+            owner_reply_created_at = ?,
+            owner_reply_updated_at = ?,
+            owner_reply_version = owner_reply_version + 1
+      WHERE id = ?`,
+  ).run(old, old, "review-12345678");
   const editResponse = await saveReview(
     context(
       authenticatedPost(
@@ -712,6 +722,19 @@ async function runExecutableModerationTransactions() {
       )
       .get("review-12345678")?.count,
     1,
+  );
+  assert.deepEqual(
+    {
+      ...sqlite.prepare(
+        "SELECT owner_reply_body, owner_reply_author_user_id, owner_reply_author_name FROM server_reviews WHERE id = ?",
+      ).get("review-12345678"),
+    },
+    {
+      owner_reply_body: null,
+      owner_reply_author_user_id: null,
+      owner_reply_author_name: null,
+    },
+    "Editing a review must invalidate an owner response written for the earlier content.",
   );
 
   sqlite.exec(`
