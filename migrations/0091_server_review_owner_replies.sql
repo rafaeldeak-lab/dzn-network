@@ -7,6 +7,7 @@ ALTER TABLE server_reviews ADD COLUMN owner_reply_author_name TEXT;
 ALTER TABLE server_reviews ADD COLUMN owner_reply_created_at TEXT;
 ALTER TABLE server_reviews ADD COLUMN owner_reply_updated_at TEXT;
 ALTER TABLE server_reviews ADD COLUMN owner_reply_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE server_reviews ADD COLUMN owner_reply_last_decision_id TEXT;
 
 CREATE TABLE IF NOT EXISTS server_review_owner_reply_audit (
   id TEXT PRIMARY KEY,

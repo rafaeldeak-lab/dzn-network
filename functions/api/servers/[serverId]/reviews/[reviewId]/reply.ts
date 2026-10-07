@@ -48,9 +48,9 @@ async function upsertReply(env: Env, request: Request, user: SessionUser, linked
       `UPDATE server_reviews
           SET owner_reply_body = ?, owner_reply_author_user_id = ?, owner_reply_author_name = ?,
               owner_reply_created_at = COALESCE(owner_reply_created_at, ?), owner_reply_updated_at = ?,
-              owner_reply_version = ?
+              owner_reply_version = ?, owner_reply_last_decision_id = ?
         WHERE id = ? AND linked_server_id = ? AND status = 'approved' AND owner_reply_version = ?`,
-    ).bind(validated.value.body, user.id, user.username, now, now, nextVersion, reviewId, linkedServerId, existing.owner_reply_version),
+    ).bind(validated.value.body, user.id, user.username, now, now, nextVersion, decisionId, reviewId, linkedServerId, existing.owner_reply_version),
     requireDb(env).prepare(
       `INSERT INTO server_review_owner_reply_audit (
          id, review_id, linked_server_id, actor_user_id, actor_discord_id, actor_name,
@@ -58,9 +58,9 @@ async function upsertReply(env: Env, request: Request, user: SessionUser, linked
        ) SELECT ?, ?, ?, ?, ?, ?, 'upsert', ?, ?, ?
          WHERE EXISTS (
            SELECT 1 FROM server_reviews
-            WHERE id = ? AND linked_server_id = ? AND owner_reply_version = ?
+            WHERE id = ? AND linked_server_id = ? AND owner_reply_last_decision_id = ?
          )`,
-    ).bind(decisionId, reviewId, linkedServerId, user.id, user.discord_id, user.username, existing.owner_reply_version, nextVersion, now, reviewId, linkedServerId, nextVersion),
+    ).bind(decisionId, reviewId, linkedServerId, user.id, user.discord_id, user.username, existing.owner_reply_version, nextVersion, now, reviewId, linkedServerId, decisionId),
   ]);
 
   if (Number(results[0]?.meta?.changes ?? 0) !== 1) {
@@ -81,10 +81,11 @@ async function removeReply(env: Env, user: SessionUser, linkedServerId: string, 
     requireDb(env).prepare(
       `UPDATE server_reviews
           SET owner_reply_body = NULL, owner_reply_author_user_id = NULL, owner_reply_author_name = NULL,
-              owner_reply_created_at = NULL, owner_reply_updated_at = NULL, owner_reply_version = ?
+              owner_reply_created_at = NULL, owner_reply_updated_at = NULL, owner_reply_version = ?,
+              owner_reply_last_decision_id = ?
         WHERE id = ? AND linked_server_id = ? AND status = 'approved'
           AND owner_reply_body IS NOT NULL AND owner_reply_version = ?`,
-    ).bind(nextVersion, reviewId, linkedServerId, existing.owner_reply_version),
+    ).bind(nextVersion, decisionId, reviewId, linkedServerId, existing.owner_reply_version),
     requireDb(env).prepare(
       `INSERT INTO server_review_owner_reply_audit (
          id, review_id, linked_server_id, actor_user_id, actor_discord_id, actor_name,
@@ -92,9 +93,9 @@ async function removeReply(env: Env, user: SessionUser, linkedServerId: string, 
        ) SELECT ?, ?, ?, ?, ?, ?, 'remove', ?, ?, ?
          WHERE EXISTS (
            SELECT 1 FROM server_reviews
-            WHERE id = ? AND linked_server_id = ? AND owner_reply_version = ?
+            WHERE id = ? AND linked_server_id = ? AND owner_reply_last_decision_id = ?
          )`,
-    ).bind(decisionId, reviewId, linkedServerId, user.id, user.discord_id, user.username, existing.owner_reply_version, nextVersion, now, reviewId, linkedServerId, nextVersion),
+    ).bind(decisionId, reviewId, linkedServerId, user.id, user.discord_id, user.username, existing.owner_reply_version, nextVersion, now, reviewId, linkedServerId, decisionId),
   ]);
 
   if (Number(results[0]?.meta?.changes ?? 0) !== 1) {

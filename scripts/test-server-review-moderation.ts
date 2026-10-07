@@ -169,6 +169,7 @@ assert.match(migration, /CHECK \(action IN \('approve', 'hide'\)\)/);
 const ownerReplyMigration = readFileSync("migrations/0091_server_review_owner_replies.sql", "utf8");
 assert.match(ownerReplyMigration, /ALTER TABLE server_reviews ADD COLUMN owner_reply_body TEXT/);
 assert.match(ownerReplyMigration, /owner_reply_version INTEGER NOT NULL DEFAULT 0/);
+assert.match(ownerReplyMigration, /owner_reply_last_decision_id TEXT/);
 assert.match(ownerReplyMigration, /server_review_owner_reply_audit/);
 assert.match(ownerReplyMigration, /CHECK \(action IN \('upsert', 'remove'\)\)/);
 
@@ -440,6 +441,21 @@ async function runExecutableModerationTransactions() {
     { ...env, DZN_ADMIN_DISCORD_IDS: "admin-discord" },
   ));
   assert.equal(adminReply.status, 200);
+  beforeNextBatch = () => {
+    sqlite.prepare(
+      "UPDATE server_reviews SET owner_reply_version = 3, owner_reply_last_decision_id = 'competing-decision' WHERE id = 'review-12345678'",
+    ).run();
+  };
+  const staleReply = await manageOwnerReply(context(
+    authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "POST", { body: "This stale response must not create an audit record." }),
+    { serverId: "server-12345678", reviewId: "review-12345678" },
+  ));
+  assert.equal(staleReply.status, 409);
+  assert.equal(
+    sqlite.prepare("SELECT COUNT(*) AS count FROM server_review_owner_reply_audit WHERE review_id = 'review-12345678'").get()?.count,
+    2,
+    "A stale response must not create an audit row for another request's change.",
+  );
   const removedReply = await manageOwnerReply(context(
     authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "DELETE"),
     { serverId: "server-12345678", reviewId: "review-12345678" },
@@ -450,7 +466,7 @@ async function runExecutableModerationTransactions() {
   ).get() }, {
     owner_reply_body: null,
     owner_reply_author_user_id: null,
-    owner_reply_version: 3,
+    owner_reply_version: 4,
   });
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM server_review_owner_reply_audit WHERE review_id = 'review-12345678'").get()?.count, 3);
 

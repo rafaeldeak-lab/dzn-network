@@ -14,7 +14,7 @@ This guide applies only after the source release containing migration `0091_serv
 1. Record the approved recovery bookmark and current migration ledger. Do not combine this with another migration, feature flag, secret, billing, or entitlement operation.
 2. Apply only `0091_server_review_owner_replies.sql`.
 3. Verify the migration ledger records `0091_server_review_owner_replies.sql` exactly once.
-4. Verify `server_reviews` contains the six added columns: `owner_reply_body`, `owner_reply_author_user_id`, `owner_reply_author_name`, `owner_reply_created_at`, `owner_reply_updated_at`, and `owner_reply_version`.
+4. Verify `server_reviews` contains the seven added columns: `owner_reply_body`, `owner_reply_author_user_id`, `owner_reply_author_name`, `owner_reply_created_at`, `owner_reply_updated_at`, `owner_reply_version`, and `owner_reply_last_decision_id`.
 5. Verify `server_review_owner_reply_audit` exists with the declared `upsert` and `remove` action constraint, both foreign keys, and the review/server indexes.
 6. Verify the existing review data remains unchanged. Before the first manual test, all existing response-body values must be `NULL`, all response versions must be `0`, and the new audit table must contain zero rows.
 7. Set only `DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED=true`. Do not enable unrelated review, Store, Comms, notification, billing, or player-link flags as part of this operation.
