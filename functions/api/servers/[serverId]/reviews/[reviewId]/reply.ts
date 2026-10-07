@@ -7,7 +7,9 @@ import type { Env, PagesFunction, SessionUser } from "../../../../../_lib/types"
 
 type ReplyBody = { body?: unknown };
 
-const BODY_LIMIT_BYTES = 2_048;
+// Replies are validated as 1,000 JavaScript characters. JSON bodies may be
+// substantially larger in UTF-8, so leave enough headroom for valid multibyte text.
+const BODY_LIMIT_BYTES = 8_192;
 
 export const onRequest: PagesFunction = async ({ request, env, params }) => {
   if (request.method !== "POST" && request.method !== "DELETE") return methodNotAllowed();

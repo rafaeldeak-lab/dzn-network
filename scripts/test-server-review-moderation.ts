@@ -435,6 +435,13 @@ async function runExecutableModerationTransactions() {
     owner_reply_version: 1,
   });
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM server_review_owner_reply_audit WHERE review_id = 'review-12345678'").get()?.count, 1);
+  const multibyteReply = await manageOwnerReply(context(
+    authenticatedSameOriginRequest(ownerReplyPath, "owner-token", "POST", {
+      body: Array.from({ length: 1_000 }, (_, index) => String.fromCodePoint(0x3041 + (index % 80))).join(""),
+    }),
+    { serverId: "server-12345678", reviewId: "review-12345678" },
+  ));
+  assert.equal(multibyteReply.status, 200, "A valid 1,000-character UTF-8 reply must not be rejected by the transport size limit.");
   const adminReply = await manageOwnerReply(context(
     authenticatedSameOriginRequest(ownerReplyPath, "admin-token", "POST", { body: "The DZN team has reviewed this feedback and shared it with the server staff." }),
     { serverId: "server-12345678", reviewId: "review-12345678" },
@@ -443,7 +450,7 @@ async function runExecutableModerationTransactions() {
   assert.equal(adminReply.status, 200);
   beforeNextBatch = () => {
     sqlite.prepare(
-      "UPDATE server_reviews SET owner_reply_version = 3, owner_reply_last_decision_id = 'competing-decision' WHERE id = 'review-12345678'",
+      "UPDATE server_reviews SET owner_reply_version = 4, owner_reply_last_decision_id = 'competing-decision' WHERE id = 'review-12345678'",
     ).run();
   };
   const staleReply = await manageOwnerReply(context(
@@ -453,7 +460,7 @@ async function runExecutableModerationTransactions() {
   assert.equal(staleReply.status, 409);
   assert.equal(
     sqlite.prepare("SELECT COUNT(*) AS count FROM server_review_owner_reply_audit WHERE review_id = 'review-12345678'").get()?.count,
-    2,
+    3,
     "A stale response must not create an audit row for another request's change.",
   );
   const removedReply = await manageOwnerReply(context(
@@ -466,9 +473,9 @@ async function runExecutableModerationTransactions() {
   ).get() }, {
     owner_reply_body: null,
     owner_reply_author_user_id: null,
-    owner_reply_version: 4,
+    owner_reply_version: 5,
   });
-  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM server_review_owner_reply_audit WHERE review_id = 'review-12345678'").get()?.count, 3);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM server_review_owner_reply_audit WHERE review_id = 'review-12345678'").get()?.count, 4);
 
   const firstReportResponse = await reportReview(
     context(
