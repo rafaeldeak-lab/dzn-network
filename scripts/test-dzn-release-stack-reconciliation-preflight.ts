@@ -69,6 +69,7 @@ assert.doesNotMatch(currentBacklog, /#96 \| Earned-spin and reward-wheel policy 
 assert.doesNotMatch(currentBacklog, /#109 \| Platform-owner Store order reconciliation/);
 assert.match(handoff, /Forty-three verified replacements are closed/);
 assert.match(handoff, /30 older requirements remain unresolved/);
+assert.match(handoff, /## Latest Reconciliation: 2026-10-07/);
 assert.match(handoff, /Closed PRs #118-#119 are superseded/);
 assert.match(handoff, /PRs #54-#57 retain bounded current-source foundations/);
 for (const subject of ["NukeTown", "FED & FERAL", "Nitrado", "Discord", "Customer billing", "Spin/reward", "DZN Games Hub"]) {

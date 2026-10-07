@@ -1,6 +1,6 @@
 # DZN Release Stack Reconciliation Handoff
 
-## Latest Reconciliation: 2026-10-04
+## Latest Reconciliation: 2026-10-07
 
 Use `DZN_RELEASE_BACKLOG_2026-09-13.md` and its complete 73-row JSON manifest for
 the current per-request disposition. Forty-three verified replacements are closed;
