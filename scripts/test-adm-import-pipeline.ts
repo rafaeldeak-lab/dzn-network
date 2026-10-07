@@ -953,6 +953,8 @@ async function main() {
     buildScheduledLoops += 1;
   }
   assert.equal(buildScheduledPending.completedJobs, 1);
+  assert.equal(buildScheduledPending.results[0]?.file_result?.public_cache_updated, true);
+  assert.equal(buildScheduledDb.serverPublicCache.has(guildId), true);
   assert.equal(buildScheduledDb.buildEvents.length, 12);
   assert.deepEqual(countBy(buildScheduledDb.buildEvents, "event_type"), {
     placed: 5,
@@ -2263,7 +2265,7 @@ class MemoryStatement {
     if (q.includes("count(*) as count from player_events") && q.includes("event_type = 'player_connected'")) return ({ count: this.db.playerEvents.filter((row) => row.linked_server_id === this.values[0] && row.event_type === "player_connected").length } as T);
     if (q.includes("count(*) as count from player_events") && q.includes("event_type = 'player_disconnected'")) return ({ count: this.db.playerEvents.filter((row) => row.linked_server_id === this.values[0] && row.event_type === "player_disconnected").length } as T);
     if (q.includes("count(*) as count from player_events")) return ({ count: this.db.playerEvents.filter((row) => row.linked_server_id === this.values[0]).length } as T);
-    if (q.includes("count(*) as count from build_events")) return ({ count: this.db.buildEvents.filter((row) => row.linked_server_id === this.values[0]).length } as T);
+    if (q.includes("count(*) as count from build_events")) return ({ count: this.db.buildEvents.filter((row) => row.linked_server_id === this.values[0] && (!q.includes("source_adm_file") || row.source_adm_file === this.values[1])).length } as T);
     if (q.includes("count(*) as count from kill_events") && q.includes("victim_name is not null")) return ({ count: this.db.killEvents.filter((row) => row.linked_server_id === this.values[0] && row.victim_name).length } as T);
     if (q.includes("count(*) as count from kill_events")) return ({ count: this.db.killEvents.filter((row) => row.linked_server_id === this.values[0]).length } as T);
     if (q.includes("max(coalesce(distance")) return ({ distance: maxNumber(this.db.killEvents.filter((row) => row.linked_server_id === this.values[0]).map((row) => Number(row.distance ?? 0))) } as T);

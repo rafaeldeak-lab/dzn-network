@@ -4204,12 +4204,17 @@ async function finalizeAdmImportJob(
     : isOwnerSuppliedRecoveryImport
       ? OWNER_SUPPLIED_ADM_RECOVERY_SOURCE
       : "manual_chunked_import";
-  const statAffectingWrites = Number(row.written_kills ?? 0)
+  const buildEventsForFile = await db
+    .prepare("SELECT COUNT(*) AS count FROM build_events WHERE linked_server_id = ? AND source_adm_file = ?")
+    .bind(row.server_id, row.filename)
+    .first<{ count: number }>();
+  const derivedDataWrites = Number(row.written_kills ?? 0)
     + Number(row.player_events ?? 0)
     + Number(row.joins ?? 0)
     + Number(row.disconnects ?? 0)
-    + Number(row.deaths ?? 0);
-  const shouldRefreshDerivedOutputs = !isScheduledNitradoImport || statAffectingWrites > 0;
+    + Number(row.deaths ?? 0)
+    + Number(buildEventsForFile?.count ?? 0);
+  const shouldRefreshDerivedOutputs = !isScheduledNitradoImport || derivedDataWrites > 0;
 
   if (shouldRefreshDerivedOutputs) {
     try {
@@ -4224,7 +4229,7 @@ async function finalizeAdmImportJob(
   // Skipping their cache write prevents a timeout from downgrading an otherwise
   // successful lightweight heartbeat import to a warning state.
   const publicCacheGuildId = server.guild_id;
-  if (publicCacheGuildId && (!isScheduledNitradoImport || statAffectingWrites > 0)) {
+  if (publicCacheGuildId && (!isScheduledNitradoImport || derivedDataWrites > 0)) {
     try {
       await withManualAdmPhaseTimeout(upsertServerPublicCache(env, {
         guildId: publicCacheGuildId,
@@ -4239,7 +4244,7 @@ async function finalizeAdmImportJob(
       warnings.push(`${row.filename}: Public cache update failed after ADM rows were written. ${safeSyncErrorMessage(error)}`);
     }
   }
-  if (statAffectingWrites > 0) {
+  if (derivedDataWrites > 0) {
     await withManualAdmPhaseTimeout(
       patchHomeStatsAdmStatsFromCanonicalEvents(env),
       "home stats ADM snapshot refresh",
