@@ -5,6 +5,7 @@ export type OwnerDiscordAccessStatus = "pending" | "approved" | "rejected" | "re
 type AccessRequestInput = { linkedServerId?: unknown; note?: unknown };
 type AccessDecisionInput = { requestId?: unknown; action?: unknown; reason?: unknown; decisionNonce?: unknown };
 const OWNER_ACCESS_PAGE_SIZE = 50;
+const OWNER_ACCESS_AUDIT_PAGE_SIZE = 20;
 
 export function isOwnerDiscordAccessEnabled(env: Env) {
   return env.DZN_OWNER_DISCORD_ACCESS_ENABLED?.trim().toLowerCase() === "true";
@@ -87,12 +88,14 @@ export async function createOwnerDiscordAccessRequest(env: Env, request: Request
   return { ok: true as const, duplicate: false, request: safeApplicantRequest({ id: requestId, linked_server_id: linkedServerId, linked_server_id_snapshot: linkedServerId, server_name: server.server_name, request_note: note, status: "pending", decision_reason: null, reviewed_at: null, created_at: now, updated_at: now }) };
 }
 
-export async function listOwnerDiscordAccessRequests(env: Env, filters: { status?: unknown; query?: unknown; cursor?: unknown } = {}) {
+export async function listOwnerDiscordAccessRequests(env: Env, filters: { status?: unknown; query?: unknown; cursor?: unknown; auditCursor?: unknown } = {}) {
   if (!(await hasAccessSchema(env))) return unavailable();
   const status = statusFilter(filters.status);
   const query = clean(filters.query, 80);
   const cursor = decodeOwnerAccessCursor(typeof filters.cursor === "string" ? filters.cursor : null);
+  const auditCursor = decodeOwnerAccessAuditCursor(typeof filters.auditCursor === "string" ? filters.auditCursor : null);
   if (filters.cursor !== undefined && filters.cursor !== null && !cursor) return { ok: false as const, status: 400, message: "The owner-access cursor is invalid." };
+  if (filters.auditCursor !== undefined && filters.auditCursor !== null && !auditCursor) return { ok: false as const, status: 400, message: "The owner-access audit cursor is invalid." };
   const where = ["1 = 1"];
   const values: unknown[] = [];
   const statusOrder = "CASE r.status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 WHEN 'rejected' THEN 2 ELSE 3 END";
@@ -114,16 +117,23 @@ export async function listOwnerDiscordAccessRequests(env: Env, filters: { status
     LIMIT ?`).bind(...values, OWNER_ACCESS_PAGE_SIZE + 1).all<Record<string, unknown>>();
   const audit = await requireDb(env).prepare(`SELECT a.id, a.request_id, a.action, a.previous_status, a.next_status, a.reason, a.actor_username, a.created_at, r.server_name
     FROM dzn_owner_discord_access_audit a JOIN dzn_owner_discord_access_requests r ON r.id = a.request_id
-    ORDER BY a.created_at DESC, a.id DESC LIMIT 100`).all<Record<string, unknown>>();
+    WHERE (? IS NULL OR julianday(a.created_at) < julianday(?) OR (julianday(a.created_at) = julianday(?) AND a.id < ?))
+    ORDER BY a.created_at DESC, a.id DESC
+    LIMIT ?`).bind(auditCursor?.createdAt ?? null, auditCursor?.createdAt ?? null, auditCursor?.createdAt ?? null, auditCursor?.id ?? null, OWNER_ACCESS_AUDIT_PAGE_SIZE + 1).all<Record<string, unknown>>();
   const pageRows = (rows.results ?? []).slice(0, OWNER_ACCESS_PAGE_SIZE);
+  const auditRows = (audit.results ?? []).slice(0, OWNER_ACCESS_AUDIT_PAGE_SIZE);
   const nextCursor = (rows.results ?? []).length > OWNER_ACCESS_PAGE_SIZE && pageRows.at(-1)
     ? encodeOwnerAccessCursor(pageRows.at(-1)!)
+    : null;
+  const nextAuditCursor = (audit.results ?? []).length > OWNER_ACCESS_AUDIT_PAGE_SIZE && auditRows.at(-1)
+    ? encodeOwnerAccessAuditCursor(auditRows.at(-1)!)
     : null;
   return {
     ok: true as const,
     requests: pageRows.map(safeOwnerRequest),
-    audit: (audit.results ?? []).map(safeAudit),
+    audit: auditRows.map(safeAudit),
     page: { limit: OWNER_ACCESS_PAGE_SIZE, has_more: nextCursor !== null, next_cursor: nextCursor },
+    auditPage: { limit: OWNER_ACCESS_AUDIT_PAGE_SIZE, has_more: nextAuditCursor !== null, next_cursor: nextAuditCursor },
     discordAccessConfigured: false,
     delivery: "No invitation or role change is sent from this queue until the separate central Discord configuration is complete.",
   };
@@ -218,6 +228,20 @@ function decodeOwnerAccessCursor(value: string | null) {
     const requestId = id(parsed.id, 100);
     const statusOrder = Number.isInteger(parsed.o) && parsed.o !== undefined && parsed.o >= 0 && parsed.o <= 3 ? parsed.o : null;
     return updatedAt && requestId && statusOrder !== null ? { statusOrder, updatedAt, id: requestId } : null;
+  } catch { return null; }
+}
+function encodeOwnerAccessAuditCursor(row: Record<string, unknown>) {
+  const createdAt = canonicalTimestamp(row.created_at);
+  const auditId = id(row.id, 100);
+  return createdAt && auditId ? base64UrlEncode(JSON.stringify({ v: 1, t: createdAt, id: auditId })) : null;
+}
+function decodeOwnerAccessAuditCursor(value: string | null) {
+  if (!value || !/^[A-Za-z0-9_-]{8,1024}$/.test(value)) return null;
+  try {
+    const parsed = JSON.parse(base64UrlDecode(value)) as Partial<{ v: number; t: string; id: string }>;
+    const createdAt = parsed.v === 1 ? canonicalTimestamp(parsed.t) : null;
+    const auditId = id(parsed.id, 100);
+    return createdAt && auditId ? { createdAt, id: auditId } : null;
   } catch { return null; }
 }
 function canonicalTimestamp(value: unknown) { if (typeof value !== "string" || value.length > 40) return null; const parsed = Date.parse(value); return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null; }

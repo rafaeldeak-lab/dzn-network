@@ -33,7 +33,9 @@ async function run() {
   assert.match(accessSource, /WHERE changes\(\) = 1/, "Decision audits must be written only when the immediately preceding status update succeeds.");
   assert.match(accessSource, /result\[1\]\?\.meta\?\.changes/, "A decision must fail closed if its audit row was not written.");
   assert.match(accessSource, /OWNER_ACCESS_PAGE_SIZE/, "The owner-access queue must use a bounded page size.");
+  assert.match(accessSource, /OWNER_ACCESS_AUDIT_PAGE_SIZE/, "The owner-access audit must use its own bounded page size.");
   assert.match(accessSource, /encodeOwnerAccessCursor/, "The owner-access queue must expose stable continuation cursors.");
+  assert.match(accessSource, /encodeOwnerAccessAuditCursor/, "The owner-access audit must expose a stable independent continuation cursor.");
   assert.match(accessSource, /COALESCE\(status, 'pending'\)\) = 'live'/, "Owner approval must require a live server.");
   assert.match(accessSource, /COALESCE\(lifecycle_status, 'active_live'\)\) = 'active_live'/, "Owner approval must reject a server with a known unhealthy lifecycle state.");
   assert.match(accessSource, /latest_check\.token_valid = 1/, "Owner approval must require current onboarding verification evidence.");
@@ -196,6 +198,32 @@ async function run() {
     const invalidCursor = await listOwnerDiscordAccessRequests(env, { cursor: "invalid" });
     assert.equal(invalidCursor.ok, false);
     if (!invalidCursor.ok) assert.equal(invalidCursor.status, 400);
+
+    for (let index = 0; index < 21; index += 1) {
+      const id = `audit-page-${String(index).padStart(3, "0")}`;
+      const createdAt = new Date(Date.UTC(2026, 8, 2, 0, index, 0)).toISOString();
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_audit (
+        id, request_id, actor_user_id, actor_discord_id, actor_username, action, previous_status, next_status, reason, created_at
+      ) VALUES (?, ?, ?, ?, ?, 'requested', NULL, 'pending', 'Independent audit pagination coverage.', ?)`)
+        .bind(id, createdPayload.request.id, owner.id, owner.discord_id, owner.username, createdAt).run();
+    }
+    const firstAuditPage = await listOwnerDiscordAccessRequests(env, { status: "rejected" });
+    assert.equal(firstAuditPage.ok, true);
+    if (firstAuditPage.ok) {
+      assert.equal(firstAuditPage.audit.length, 20, "The owner-access audit must return a bounded first page.");
+      assert.equal(firstAuditPage.auditPage.has_more, true);
+      assert.equal(typeof firstAuditPage.auditPage.next_cursor, "string");
+      const secondAuditPage = await listOwnerDiscordAccessRequests(env, { status: "rejected", auditCursor: firstAuditPage.auditPage.next_cursor });
+      assert.equal(secondAuditPage.ok, true);
+      if (secondAuditPage.ok) {
+        assert.equal(secondAuditPage.audit.length > 0, true, "The independent audit cursor must expose older decisions.");
+        const ids = [...firstAuditPage.audit, ...secondAuditPage.audit].map((entry) => entry.id);
+        assert.equal(new Set(ids).size, ids.length, "Audit pagination must not duplicate decisions.");
+      }
+    }
+    const invalidAuditCursor = await listOwnerDiscordAccessRequests(env, { auditCursor: "invalid" });
+    assert.equal(invalidAuditCursor.ok, false);
+    if (!invalidAuditCursor.ok) assert.equal(invalidAuditCursor.status, 400);
 
     await db.prepare("DELETE FROM onboarding_checks WHERE linked_server_id = 'server_owned'").run();
     await db.prepare("DELETE FROM nitrado_connections WHERE linked_server_id = 'server_owned'").run();

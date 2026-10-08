@@ -46,6 +46,7 @@ type Payload = {
   audit?: Audit[];
   delivery?: string;
   page?: { has_more?: boolean; next_cursor?: string | null };
+  auditPage?: { has_more?: boolean; next_cursor?: string | null };
   message?: string;
 };
 
@@ -62,8 +63,10 @@ export function OwnerDiscordAccessPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [nextAuditCursor, setNextAuditCursor] = useState<string | null>(null);
+  const [loadingMoreAudit, setLoadingMoreAudit] = useState(false);
   const requestController = useRef<AbortController | null>(null);
-  const load = useCallback(async (cursor?: string | null, append = false) => {
+  const load = useCallback(async (options: { cursor?: string | null; appendRequests?: boolean; auditCursor?: string | null; appendAudit?: boolean } = {}) => {
     requestController.current?.abort();
     const controller = new AbortController();
     requestController.current = controller;
@@ -72,7 +75,8 @@ export function OwnerDiscordAccessPage() {
       const params = new URLSearchParams();
       if (status !== "all") params.set("status", status);
       if (appliedSearch) params.set("q", appliedSearch);
-      if (cursor) params.set("cursor", cursor);
+      if (options.cursor) params.set("cursor", options.cursor);
+      if (options.auditCursor) params.set("audit_cursor", options.auditCursor);
       const response = await fetch(
         `/api/owner/discord/owner-access-requests?${params}`,
         { credentials: "include", cache: "no-store", signal: controller.signal },
@@ -87,8 +91,16 @@ export function OwnerDiscordAccessPage() {
         throw new Error(
           next?.message ?? "Owner Discord requests are unavailable.",
         );
-      setPayload((current) => append ? { ...next, requests: [...(current?.requests ?? []), ...(next.requests ?? [])] } : next);
-      setNextCursor(next.page?.next_cursor ?? null);
+      setPayload((current) => {
+        if (!current || (!options.appendRequests && !options.appendAudit)) return next;
+        return {
+          ...next,
+          requests: options.appendRequests ? [...current.requests ?? [], ...next.requests ?? []] : current.requests,
+          audit: options.appendAudit ? [...current.audit ?? [], ...next.audit ?? []] : current.audit,
+        };
+      });
+      if (options.appendRequests || !options.appendAudit) setNextCursor(next.page?.next_cursor ?? null);
+      if (options.appendAudit || !options.appendRequests) setNextAuditCursor(next.auditPage?.next_cursor ?? null);
       setState("ready");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
@@ -387,7 +399,7 @@ export function OwnerDiscordAccessPage() {
                     disabled={loadingMore}
                     onClick={() => {
                       setLoadingMore(true);
-                      void load(nextCursor, true).finally(() => setLoadingMore(false));
+                      void load({ cursor: nextCursor, appendRequests: true }).finally(() => setLoadingMore(false));
                     }}
                     className="min-h-10 rounded-md border border-cyan-300/25 bg-cyan-300/[0.08] px-3 text-xs font-black text-cyan-100 disabled:opacity-50"
                   >
@@ -399,7 +411,7 @@ export function OwnerDiscordAccessPage() {
                 <h2 className="font-black">Recent decisions</h2>
                 <div className="mt-4 grid gap-3">
                   {audit.length ? (
-                    audit.slice(0, 20).map((entry) => (
+                    audit.map((entry) => (
                       <article
                         key={entry.id}
                         className="border-b border-white/10 pb-3 text-xs"
@@ -428,6 +440,19 @@ export function OwnerDiscordAccessPage() {
                     </p>
                   )}
                 </div>
+                {nextAuditCursor ? (
+                  <button
+                    type="button"
+                    disabled={loadingMoreAudit}
+                    onClick={() => {
+                      setLoadingMoreAudit(true);
+                      void load({ auditCursor: nextAuditCursor, appendAudit: true }).finally(() => setLoadingMoreAudit(false));
+                    }}
+                    className="mt-4 min-h-10 w-full rounded-md border border-cyan-300/25 bg-cyan-300/[0.08] px-3 text-xs font-black text-cyan-100 disabled:opacity-50"
+                  >
+                    {loadingMoreAudit ? "Loading older decisions" : "Load older decisions"}
+                  </button>
+                ) : null}
               </aside>
             </section>
           </>

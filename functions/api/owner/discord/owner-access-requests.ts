@@ -11,7 +11,7 @@ export const onRequest: PagesFunction = async ({ env, request }) => {
   if (!auth.ok) return withHeaders(auth.response, headers);
   if (request.method === "GET") {
     const url = new URL(request.url);
-    const result = await listOwnerDiscordAccessRequests(env, { status: url.searchParams.get("status"), query: url.searchParams.get("q"), cursor: url.searchParams.get("cursor") });
+    const result = await listOwnerDiscordAccessRequests(env, { status: url.searchParams.get("status"), query: url.searchParams.get("q"), cursor: url.searchParams.get("cursor"), auditCursor: url.searchParams.get("audit_cursor") });
     return json(result, { status: result.ok ? 200 : result.status, headers });
   }
   if (request.method === "POST") {
