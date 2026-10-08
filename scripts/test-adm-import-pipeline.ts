@@ -1222,6 +1222,16 @@ async function main() {
   scheduledTailRow.chunks_processed = 1;
   scheduledTailRow.adm_text = scheduledTailLines.slice(0, 2).join("\n");
   scheduledTailRow.result_json = JSON.stringify({ build_events_stored: 4 });
+  scheduledTailRow.written_kills = 2;
+  scheduledTailRow.player_events = 3;
+  scheduledTailRow.joins = 4;
+  scheduledTailRow.disconnects = 5;
+  scheduledTailRow.deaths = 6;
+  scheduledTailRow.raw_events = 7;
+  scheduledTailRow.failed_writes = 1;
+  scheduledTailRow.warnings_json = '["previous tail warning"]';
+  scheduledTailRow.public_cache_updated = 1;
+  scheduledTailRow.discord_jobs_queued = 2;
   scheduledTailRow.completed_at = "2026-05-20T12:00:00.000Z";
   const scheduledTailGrowth = await createScheduledAdmImportJobForServer(
     { ...makeEnv(scheduledTailDb), MOCK_NITRADO: "true" },
@@ -1234,7 +1244,18 @@ async function main() {
   assert.equal(scheduledTailGrowth.job?.job_id, scheduledTailFirst.job?.job_id);
   assert.equal(scheduledTailGrowth.job?.current_line, 2);
   assert.equal(scheduledTailGrowth.job?.total_lines, scheduledTailLines.length);
-  assert.equal(scheduledTailDb.admImportJobs.get(String(scheduledTailFirst.job?.job_id))?.result_json, null);
+  const reopenedScheduledTail = scheduledTailDb.admImportJobs.get(String(scheduledTailFirst.job?.job_id));
+  assert.equal(reopenedScheduledTail?.result_json, null);
+  assert.equal(reopenedScheduledTail?.written_kills, 0);
+  assert.equal(reopenedScheduledTail?.player_events, 0);
+  assert.equal(reopenedScheduledTail?.joins, 0);
+  assert.equal(reopenedScheduledTail?.disconnects, 0);
+  assert.equal(reopenedScheduledTail?.deaths, 0);
+  assert.equal(reopenedScheduledTail?.raw_events, 0);
+  assert.equal(reopenedScheduledTail?.failed_writes, 0);
+  assert.equal(reopenedScheduledTail?.warnings_json, "[]");
+  assert.equal(reopenedScheduledTail?.public_cache_updated, 0);
+  assert.equal(reopenedScheduledTail?.discord_jobs_queued, 0);
   assert.equal(scheduledTailDb.admImportJobs.size, 1);
 
   const scheduledDuplicateDb = new MemoryD1();
@@ -2104,6 +2125,26 @@ class MemoryStatement {
       row.total_chunks = Number(this.values[5] ?? row.total_chunks);
       row.chunks_processed = Number(this.values[6] ?? row.chunks_processed);
       if (q.includes("result_json = null")) row.result_json = null;
+      if (q.includes("written_kills = 0")) {
+        row.raw_kill_lines_found = 0;
+        row.parsed_kills = 0;
+        row.written_kills = 0;
+        row.duplicate_skips = 0;
+        row.joins = 0;
+        row.disconnects = 0;
+        row.playerlist_snapshots = 0;
+        row.deaths = 0;
+        row.suicides = 0;
+        row.uncredited_deaths = 0;
+        row.hit_lines = 0;
+        row.raw_events = 0;
+        row.player_events = 0;
+        row.failed_writes = 0;
+        row.warnings_json = "[]";
+        row.public_cache_updated = 0;
+        row.discord_jobs_queued = 0;
+        row.last_chunk_index = null;
+      }
       row.completed_at = null;
       row.error_message = null;
       row.failed_chunk_index = null;

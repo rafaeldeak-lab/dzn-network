@@ -4226,7 +4226,8 @@ async function finalizeAdmImportJob(
   const previousScheduledMaintenanceResult = isScheduledNitradoImport && derivedDataWrites === 0
     ? await db
       .prepare(
-        `SELECT public_cache_updated, warnings_json
+        `SELECT public_cache_updated, warnings_json,
+                written_kills, player_events, joins, disconnects, deaths, result_json
          FROM adm_import_jobs
          WHERE server_id = ?
            AND id != ?
@@ -4236,12 +4237,20 @@ async function finalizeAdmImportJob(
          LIMIT 1`,
       )
       .bind(row.server_id, row.id, SCHEDULED_ADM_IMPORT_SOURCE)
-      .first<{ public_cache_updated: number; warnings_json: string | null }>()
+      .first<Pick<AdmImportJobRow, "public_cache_updated" | "warnings_json" | "written_kills" | "player_events" | "joins" | "disconnects" | "deaths" | "result_json">>()
     : null;
   const previousScheduledWarnings = String(previousScheduledMaintenanceResult?.warnings_json ?? "");
   const retryPreviousScheduledCacheFailure = Number(previousScheduledMaintenanceResult?.public_cache_updated ?? 1) === 0
     && previousScheduledWarnings.includes("Public cache update failed");
   const retryPreviousScheduledStatsFailure = previousScheduledWarnings.includes("Stats rebuild failed");
+  const previousScheduledDerivedWrites = previousScheduledMaintenanceResult
+    ? Number(previousScheduledMaintenanceResult.written_kills ?? 0)
+      + Number(previousScheduledMaintenanceResult.player_events ?? 0)
+      + Number(previousScheduledMaintenanceResult.joins ?? 0)
+      + Number(previousScheduledMaintenanceResult.disconnects ?? 0)
+      + Number(previousScheduledMaintenanceResult.deaths ?? 0)
+      + getAdmImportJobBuildEventsStored(previousScheduledMaintenanceResult)
+    : 0;
   const existingPublicCache = isScheduledNitradoImport && derivedDataWrites === 0 && server.guild_id
     ? await db
       .prepare("SELECT updated_at, last_adm_update_at FROM server_public_cache WHERE guild_id = ? LIMIT 1")
@@ -4271,7 +4280,7 @@ async function finalizeAdmImportJob(
         guildId: publicCacheGuildId,
         planKey: server.plan_key,
         publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
-        lastAdmUpdateAt: derivedDataWrites > 0 || retryPreviousScheduledCacheFailure
+        lastAdmUpdateAt: derivedDataWrites > 0 || (retryPreviousScheduledCacheFailure && previousScheduledDerivedWrites > 0)
           ? now
           : existingPublicCache?.last_adm_update_at ?? null,
       // Scheduled jobs already require the canonical cache schema before reaching
@@ -4864,9 +4873,27 @@ async function updateScheduledAdmImportJobTailText(
         chunk_size = ?,
         total_chunks = ?,
         chunks_processed = ?,
+        raw_kill_lines_found = 0,
+        parsed_kills = 0,
+        written_kills = 0,
+        duplicate_skips = 0,
+        joins = 0,
+        disconnects = 0,
+        playerlist_snapshots = 0,
+        deaths = 0,
+        suicides = 0,
+        uncredited_deaths = 0,
+        hit_lines = 0,
+        raw_events = 0,
+        player_events = 0,
         result_json = NULL,
+        failed_writes = 0,
+        warnings_json = '[]',
+        public_cache_updated = 0,
+        discord_jobs_queued = 0,
         completed_at = NULL,
         error_message = NULL,
+        last_chunk_index = NULL,
         failed_chunk_index = NULL,
         updated_at = ?
        WHERE id = ? AND server_id = ?`,
