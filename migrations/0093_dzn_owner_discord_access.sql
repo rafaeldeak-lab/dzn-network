@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS dzn_owner_discord_access_requests (
   requester_user_id TEXT NOT NULL,
   requester_discord_id TEXT NOT NULL,
   requester_username TEXT,
-  linked_server_id TEXT NOT NULL,
+  linked_server_id TEXT,
   server_name TEXT NOT NULL,
   request_note TEXT,
   status TEXT NOT NULL DEFAULT 'pending'
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS dzn_owner_discord_access_requests (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY(requester_user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id) ON DELETE CASCADE,
+  FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id) ON DELETE SET NULL,
   FOREIGN KEY(reviewed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 

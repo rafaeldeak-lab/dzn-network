@@ -17,6 +17,8 @@ async function run() {
   assert.match(migration, /dzn_owner_discord_access_requests/);
   assert.match(migration, /idx_dzn_owner_discord_access_one_pending/);
   assert.match(migration, /dzn_owner_discord_access_audit/);
+  assert.match(migration, /linked_server_id TEXT,/);
+  assert.match(migration, /FOREIGN KEY\(linked_server_id\) REFERENCES linked_servers\(id\) ON DELETE SET NULL/);
   assert.doesNotMatch(migration, /discord\.com|DISCORD_BOT_TOKEN|CREATE\s+INVITE/i);
   const accessSource = readFileSync("functions/_lib/owner-discord-access.ts", "utf8");
   assert.match(accessSource, /DZN_OWNER_DISCORD_ACCESS_ENABLED/);
@@ -25,6 +27,8 @@ async function run() {
   assert.match(accessSource, /status IN \('pending', 'approved'\)/);
   assert.match(accessSource, /No Discord invite, message, or role change/);
   assert.doesNotMatch(accessSource, /DISCORD_BOT_TOKEN|fetch\s*\(/);
+  assert.match(accessSource, /WHERE changes\(\) = 1/, "Decision audits must be written only when the immediately preceding status update succeeds.");
+  assert.match(accessSource, /result\[1\]\?\.meta\?\.changes/, "A decision must fail closed if its audit row was not written.");
   const envExample = readFileSync(".env.example", "utf8");
   assert.match(envExample, /^DZN_OWNER_DISCORD_ACCESS_ENABLED=false$/m);
   assert.match(envExample, /^NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED=false$/m);
@@ -79,6 +83,19 @@ async function run() {
     assert.equal(replay.ok, true); if (replay.ok) assert.equal(replay.duplicate, true);
     const conflicting = await decideOwnerDiscordAccessRequest(env, owner, { requestId: createdPayload.request.id, action: "rejected", reason: "Conflicting decision should be refused.", decisionNonce: "decision_three" });
     assert.equal(conflicting.ok, false); if (!conflicting.ok) assert.equal(conflicting.status, 409);
+
+    const concurrentRequest = await createOwnerDiscordAccessRequest(env, request("POST", { linkedServerId: "server_other" }, await createSession(env, outsider.id).then((session) => session.token), "https://dzn.test"), { linkedServerId: "server_other" });
+    assert.equal(concurrentRequest.ok, true);
+    if (concurrentRequest.ok) {
+      const concurrentInput = { requestId: concurrentRequest.request.id, action: "approved" as const, reason: "Concurrent review audit must remain singular.", decisionNonce: "decision_concurrent" };
+      const concurrentResults = await Promise.all([
+        decideOwnerDiscordAccessRequest(env, owner, concurrentInput),
+        decideOwnerDiscordAccessRequest(env, owner, concurrentInput),
+      ]);
+      assert.equal(concurrentResults.some((result) => result.ok && !result.duplicate), true, "One concurrent decision must apply.");
+      const concurrentAudit = await db.prepare("SELECT COUNT(*) AS count FROM dzn_owner_discord_access_audit WHERE request_id = ? AND action = 'approved'").bind(concurrentRequest.request.id).first<{ count: number }>();
+      assert.equal(Number(concurrentAudit?.count ?? 0), 1, "Concurrent decision retries must write exactly one approval audit entry.");
+    }
     const revoked = await decideOwnerDiscordAccessRequest(env, owner, { requestId: createdPayload.request.id, action: "revoked", reason: "The linked server is no longer verified.", decisionNonce: "decision_four" });
     assert.equal(revoked.ok, true); if (revoked.ok) assert.equal(revoked.status, "revoked");
     const replacement = await createOwnerDiscordAccessRequest(env, request("POST", { linkedServerId: "server_owned" }, applicantSession.token, "https://dzn.test"), { linkedServerId: "server_owned" });
@@ -89,7 +106,17 @@ async function run() {
       assert.equal(staleApproval.ok, false); if (!staleApproval.ok) assert.equal(staleApproval.status, 409);
     }
     const audit = await listOwnerDiscordAccessRequests(env);
-    assert.equal(audit.ok, true); if (audit.ok) assert.deepEqual(audit.audit.map((entry) => entry.action).sort(), ["approved", "requested", "requested", "revoked"]);
+    assert.equal(audit.ok, true); if (audit.ok) assert.deepEqual(audit.audit.map((entry) => entry.action).sort(), ["approved", "approved", "requested", "requested", "requested", "revoked"]);
+
+    await db.prepare("DELETE FROM linked_servers WHERE id = 'server_owned'").run();
+    const preservedRequest = await db.prepare("SELECT linked_server_id, server_name FROM dzn_owner_discord_access_requests WHERE id = ?").bind(createdPayload.request.id).first<{ linked_server_id: string | null; server_name: string }>();
+    assert.equal(preservedRequest?.linked_server_id, null, "Server deletion must preserve the owner-access request as a tombstone.");
+    assert.equal(preservedRequest?.server_name, "Verified Owner Server", "The audit trail must retain the original server name after deletion.");
+    const preservedAudit = await db.prepare("SELECT COUNT(*) AS count FROM dzn_owner_discord_access_audit WHERE request_id = ?").bind(createdPayload.request.id).first<{ count: number }>();
+    assert.equal(Number(preservedAudit?.count ?? 0) > 0, true, "Server deletion must not erase owner-access decision audit history.");
+    const retainedAuditList = await listOwnerDiscordAccessRequests(env);
+    assert.equal(retainedAuditList.ok, true);
+    if (retainedAuditList.ok) assert.equal(retainedAuditList.audit.some((entry) => entry.requestId === createdPayload.request.id), true, "The owner console must continue to list a preserved audit after server deletion.");
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Owner Discord access queue checks passed.");
   } finally { await mf.dispose(); }

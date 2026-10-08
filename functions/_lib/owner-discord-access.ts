@@ -146,10 +146,10 @@ export async function decideOwnerDiscordAccessRequest(env: Env, actor: SessionUs
     db.prepare(`INSERT INTO dzn_owner_discord_access_audit (
       id, request_id, actor_user_id, actor_discord_id, actor_username, action, previous_status, next_status, reason, created_at
     ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-      WHERE EXISTS (SELECT 1 FROM dzn_owner_discord_access_requests WHERE id = ? AND decision_nonce = ?)`)
-      .bind(crypto.randomUUID(), requestId, actor.id, actor.discord_id, clean(actor.username, 100), action, current.status, action, reason, now, requestId, decisionNonce),
+      WHERE changes() = 1`)
+      .bind(crypto.randomUUID(), requestId, actor.id, actor.discord_id, clean(actor.username, 100), action, current.status, action, reason, now),
   ]);
-  if (Number(result[0]?.meta?.changes ?? 0) !== 1) return { ok: false as const, status: 409, message: "This request changed while you were reviewing it. Refresh and try again." };
+  if (Number(result[0]?.meta?.changes ?? 0) !== 1 || Number(result[1]?.meta?.changes ?? 0) !== 1) return { ok: false as const, status: 409, message: "This request changed while you were reviewing it. Refresh and try again." };
   return { ok: true as const, duplicate: false, status: action, delivery: "The decision is recorded. No Discord invite, message, or role change has been sent because central Discord access delivery is not configured yet." };
 }
 
