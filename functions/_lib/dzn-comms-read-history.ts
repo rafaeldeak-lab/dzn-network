@@ -2,7 +2,7 @@ import { getSessionUser, requireDb } from "./db";
 import { json, methodNotAllowed } from "./http";
 import { noStoreForErrorHeaders, privateNoStoreHeaders } from "./performance";
 import { readDznCommsReactionFlags, readDznCommsReactionSummaries } from "./dzn-comms-reactions";
-import { readDznCommsPrivateGroupFlags } from "./dzn-comms-live";
+import { readDznCommsOwnerArchiveFlags, readDznCommsPrivateGroupFlags } from "./dzn-comms-live";
 import type { Env, SessionUser } from "./types";
 
 type DznCommsChannelRow = {
@@ -30,6 +30,7 @@ type DznCommsAvailableChannelRow = {
 
 type DznCommsMessageRow = {
   id: string;
+  author_user_id: string | null;
   author_display_name: string | null;
   author_role_label: string | null;
   body: string | null;
@@ -160,7 +161,7 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
     : new Map<string, DznCommsReactionSummary>();
   const messages = pageRows
     .filter((row) => !isExpired(row.expires_at) && normalizeVisibilityState(row.visibility_state) !== "expired")
-    .map((row) => publicSafeMessage(row, reactionSummaries.get(row.id)))
+    .map((row) => publicSafeMessage(row, reactionSummaries.get(row.id), user?.id ?? null, readDznCommsOwnerArchiveFlags(env, request).enabled))
     .reverse();
   const finalMembership = channel.visibility === "private_group"
     ? await readMembership(db, channel.id, user!.id)
@@ -201,6 +202,7 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
         reactions_write_enabled: reactionFlags.writeEnabled,
         report_actions_enabled: channel.visibility === "private_group" ? privateGroupFlags.enabled : flags.writeFeaturesEnabled,
         moderation_mutations_enabled: channel.visibility === "private_group" ? privateGroupFlags.enabled : flags.writeFeaturesEnabled,
+        self_delete_enabled: readDznCommsOwnerArchiveFlags(env, request).enabled,
         ai_assist_runtime_enabled: false,
         durable_objects_or_websockets_enabled: false,
         analytics_or_tracking_enabled: false,
@@ -408,7 +410,7 @@ async function readMessages(
 ): Promise<DznCommsMessageRow[]> {
   const result = await db
     .prepare(
-      `SELECT id, author_display_name, author_role_label, body, visibility_state, created_at, edited_at, expires_at
+      `SELECT id, author_user_id, author_display_name, author_role_label, body, visibility_state, created_at, edited_at, expires_at
        FROM dzn_comms_messages AS messages
        WHERE messages.channel_id = ?
          AND julianday(created_at) IS NOT NULL
@@ -444,7 +446,7 @@ async function readMessages(
   return result.results ?? [];
 }
 
-function publicSafeMessage(row: DznCommsMessageRow, reactions?: DznCommsReactionSummary) {
+function publicSafeMessage(row: DznCommsMessageRow, reactions: DznCommsReactionSummary | undefined, currentUserId: string | null, selfDeleteEnabled: boolean) {
   const visibilityState = normalizeVisibilityState(row.visibility_state);
   const visible = visibilityState === "visible";
 
@@ -458,6 +460,7 @@ function publicSafeMessage(row: DznCommsMessageRow, reactions?: DznCommsReaction
     edited_at: cleanNullableText(row.edited_at, 40),
     public_safe: true,
     read_only: true,
+    can_delete: visible && selfDeleteEnabled && currentUserId !== null && row.author_user_id === currentUserId,
     ...(visible && reactions ? { reactions } : {}),
   };
 }

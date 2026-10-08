@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 import { hmacSha256 } from "../functions/_lib/crypto";
-import { handleDznCommsModeration, handleDznCommsReport, handleDznCommsSend, runDznCommsRetention } from "../functions/_lib/dzn-comms-live";
+import { handleDznCommsModeration, handleDznCommsOwnerArchive, handleDznCommsReport, handleDznCommsSelfDelete, handleDznCommsSend, runDznCommsRetention } from "../functions/_lib/dzn-comms-live";
 import type { Env } from "../functions/_lib/types";
 
 type Row = Record<string, unknown>;
@@ -38,7 +38,8 @@ async function fixture() {
   sqlite.exec(readFileSync("migrations/0065_dzn_comms_read_history.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0071_dzn_comms_live_moderation.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0072_dzn_comms_private_rate_ledgers.sql", "utf8"));
-  const requiredTables = ["dzn_comms_channels", "dzn_comms_messages", "dzn_comms_send_receipts", "dzn_comms_reports", "dzn_comms_moderation_audit"];
+  sqlite.exec(readFileSync("migrations/0092_dzn_comms_owner_message_archive.sql", "utf8"));
+  const requiredTables = ["dzn_comms_channels", "dzn_comms_messages", "dzn_comms_send_receipts", "dzn_comms_reports", "dzn_comms_moderation_audit", "dzn_comms_owner_message_archive", "dzn_comms_owner_message_archive_events"];
   const installedTables = new Set(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => String(row.name)));
   assert.deepEqual(requiredTables.filter((table) => !installedTables.has(table)), [], "Both Comms migrations must install the required tables.");
   assert.equal(sqlite.prepare("PRAGMA foreign_key_check").all().length, 0, "Comms migrations must preserve foreign-key integrity.");
@@ -100,6 +101,8 @@ async function fixture() {
     DZN_COMMS_PRIVATE_GROUPS_ENABLED: "true",
     DZN_COMMS_OWNER_MODERATION_ENABLED: "true",
     DZN_COMMS_OWNER_MODERATION_SCOPE: "local_test",
+    DZN_COMMS_OWNER_ARCHIVE_ENABLED: "true",
+    DZN_COMMS_OWNER_ARCHIVE_SCOPE: "local_test",
     DZN_PLATFORM_OWNER_DISCORD_IDS: "999",
   } as unknown as Env;
   return {
@@ -123,6 +126,12 @@ function getRequest(path: string, token: string | null) {
   const headers = new Headers();
   if (token) headers.set("cookie", `dzn_session=${token}`);
   return new Request(`http://127.0.0.1${path}`, { headers });
+}
+
+function deleteRequest(path: string, token: string | null, origin = "http://127.0.0.1") {
+  const headers = new Headers({ origin, "content-type": "application/json" });
+  if (token) headers.set("cookie", `dzn_session=${token}`);
+  return new Request(`http://127.0.0.1${path}`, { method: "DELETE", headers, body: "{}" });
 }
 
 async function payload(response: Response) {
@@ -543,6 +552,41 @@ async function testRetentionRuntime() {
   } finally { f.close(); }
 }
 
+async function testOwnerArchiveAndSelfDeleteRuntime() {
+  const f = await fixture();
+  try {
+    const sent = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+      channelSlug: "global-chat", clientRequestId: "archive-delete-request-01", body: "Keep this for the safety archive",
+    }), f.env);
+    assert.equal(sent.status, 201);
+    const messageId = (await payload(sent)).message_id!;
+    assert.equal(f.count("dzn_comms_owner_message_archive"), 1, "An enabled archive must capture an accepted message before it can be deleted.");
+    assert.equal(f.sqlite.prepare("SELECT original_body FROM dzn_comms_owner_message_archive WHERE message_id = ?").get(messageId)?.original_body, "Keep this for the safety archive");
+    assert.equal(f.sqlite.prepare("SELECT author_user_id FROM dzn_comms_messages WHERE id = ?").get(messageId)?.author_user_id, "player");
+    assert.equal((await handleDznCommsSelfDelete(deleteRequest(`/api/comms/messages/${messageId}`, "other-token"), f.env, messageId)).status, 404, "Another member cannot delete a message they do not own.");
+    const deleted = await handleDznCommsSelfDelete(deleteRequest(`/api/comms/messages/${messageId}`, "player-token"), f.env, messageId);
+    assert.equal(deleted.status, 200, await deleted.text());
+    const publicRow = f.sqlite.prepare("SELECT body,author_user_id,visibility_state FROM dzn_comms_messages WHERE id = ?").get(messageId) as Row;
+    assert.equal(publicRow.body, "Message deleted.");
+    assert.equal(publicRow.author_user_id, null);
+    assert.equal(publicRow.visibility_state, "deleted");
+    const archivedRow = f.sqlite.prepare("SELECT original_body,deletion_kind,deleted_by_user_id FROM dzn_comms_owner_message_archive WHERE message_id = ?").get(messageId) as Row;
+    assert.equal(archivedRow.original_body, "Keep this for the safety archive");
+    assert.equal(archivedRow.deletion_kind, "self_deleted");
+    assert.equal(archivedRow.deleted_by_user_id, "player");
+    assert.equal(f.count("dzn_comms_owner_message_archive_events"), 2, "The archive must record both send and self-delete events.");
+    assert.equal((await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=deleted&query=safety", "other-token"), f.env)).status, 403, "Only a platform owner can search archived messages.");
+    const archiveResponse = await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=deleted&query=safety", "owner-token"), f.env);
+    assert.equal(archiveResponse.status, 200);
+    const archive = await archiveResponse.json() as { rows?: Array<{ message_id: string; original_body: string; sent_at: string; deleted_at: string }> };
+    assert.deepEqual(archive.rows, [{ message_id: messageId, channel_slug: "global-chat", author_display_name: "Player", author_role_label: "Member", original_body: "Keep this for the safety archive", sent_at: archive.rows?.[0]?.sent_at, deleted_at: archive.rows?.[0]?.deleted_at, deletion_kind: "self_deleted", deleted_by_name: "Player" }]);
+    f.sqlite.prepare("UPDATE dzn_comms_owner_message_archive SET retained_until = '2026-01-01T00:00:00.000Z' WHERE message_id = ?").run(messageId);
+    const retention = await runDznCommsRetention(f.env.DB, new Date("2026-09-24T12:00:00.000Z"));
+    assert.equal(retention.ownerArchiveRowsDeleted, 1, "The retention runner must remove expired original message archives.");
+    assert.equal(f.count("dzn_comms_owner_message_archive"), 0);
+  } finally { f.close(); }
+}
+
 function testPrivateLedgerMigrationRuntime() {
   const sqlite = new DatabaseSync(":memory:");
   try {
@@ -635,6 +679,7 @@ async function main() {
   await testPrivateGroupSendRuntime();
   await testReportAndModerationRuntime();
   await testRetentionRuntime();
+  await testOwnerArchiveAndSelfDeleteRuntime();
   console.log("Live Comms handlers: auth, origin, idempotency, conflict, quota, rollback, report and moderation behavior passed.");
 }
 

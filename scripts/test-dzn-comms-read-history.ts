@@ -650,10 +650,10 @@ class FakeD1PreparedStatement {
       };
       const sqlite = new DatabaseSync(":memory:");
       try {
-        sqlite.exec(`CREATE TABLE dzn_comms_messages (id TEXT, channel_id TEXT, author_display_name TEXT, author_role_label TEXT, body TEXT, visibility_state TEXT, created_at TEXT, edited_at TEXT, expires_at TEXT);
+        sqlite.exec(`CREATE TABLE dzn_comms_messages (id TEXT, channel_id TEXT, author_user_id TEXT, author_display_name TEXT, author_role_label TEXT, body TEXT, visibility_state TEXT, created_at TEXT, edited_at TEXT, expires_at TEXT);
           CREATE TABLE dzn_comms_private_group_members (channel_id TEXT, user_id TEXT, role TEXT, membership_state TEXT);`);
-        const insert = sqlite.prepare("INSERT INTO dzn_comms_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        for (const row of this.db.messages) insert.run(row.id, row.channel_id, row.author_display_name, row.author_role_label, row.body, row.visibility_state, row.created_at, row.edited_at, row.expires_at);
+        const insert = sqlite.prepare("INSERT INTO dzn_comms_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        for (const row of this.db.messages) insert.run(row.id, row.channel_id, null, row.author_display_name, row.author_role_label, row.body, row.visibility_state, row.created_at, row.edited_at, row.expires_at);
         const insertMember = sqlite.prepare("INSERT INTO dzn_comms_private_group_members VALUES (?, ?, ?, ?)");
         for (const [key, member] of this.db.privateGroupMembers) {
           const separator = key.indexOf(":");

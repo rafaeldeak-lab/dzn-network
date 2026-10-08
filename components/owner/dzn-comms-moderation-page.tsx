@@ -36,6 +36,20 @@ type Payload = {
 
 type Action = "hide" | "restore" | "delete" | "resolve_report" | "dismiss_report";
 
+type ArchiveItem = {
+  message_id: string;
+  channel_slug: string;
+  author_display_name: string;
+  author_role_label: string;
+  original_body: string;
+  sent_at: string | null;
+  deleted_at: string | null;
+  deletion_kind: string | null;
+  deleted_by_name: string | null;
+};
+
+type ArchivePayload = { ok: boolean; retention_days?: number; rows?: ArchiveItem[] };
+
 export function DznCommsModerationPage() {
   const [state, setState] = useState<"loading" | "ready" | "disabled" | "blocked" | "error">("loading");
   const [reports, setReports] = useState<ReportItem[]>([]);
@@ -45,6 +59,25 @@ export function DznCommsModerationPage() {
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState<Action | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [archive, setArchive] = useState<ArchiveItem[]>([]);
+  const [archiveAvailable, setArchiveAvailable] = useState(false);
+  const [archiveQuery, setArchiveQuery] = useState("");
+  const [archiveFilter, setArchiveFilter] = useState<"all" | "active" | "deleted">("all");
+
+  const loadArchive = useCallback(async (filter: "all" | "active" | "deleted", query: string) => {
+    const response = await fetch(`/api/owner/comms/archive?filter=${filter}&query=${encodeURIComponent(query)}`, { cache: "no-store", credentials: "include" });
+    if (response.ok) {
+      const payload = await response.json().catch(() => null) as ArchivePayload | null;
+      if (payload?.ok) {
+        setArchive(payload.rows ?? []);
+        setArchiveAvailable(true);
+        setRetentionDays(payload.retention_days ?? 30);
+      }
+    } else if (response.status === 404) {
+      setArchiveAvailable(false);
+      setArchive([]);
+    }
+  }, []);
 
   const load = useCallback(async (clearNotice = true) => {
     setState("loading");
@@ -59,21 +92,27 @@ export function DznCommsModerationPage() {
       setAudit(payload.audit ?? []);
       setRetentionDays(payload.retention?.message_days ?? 30);
       setSelectedId((current) => (payload.reports ?? []).some((item) => item.message_id === current) ? current : payload.reports?.[0]?.message_id ?? null);
+      await loadArchive("all", "");
       setState("ready");
     } catch {
       setState("error");
     }
-  }, []);
+  }, [loadArchive]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
   }, [load]);
+  useEffect(() => {
+    if (state !== "ready") return;
+    const timer = window.setTimeout(() => void loadArchive(archiveFilter, archiveQuery), 250);
+    return () => window.clearTimeout(timer);
+  }, [archiveFilter, archiveQuery, loadArchive, state]);
   const selected = useMemo(() => reports.find((item) => item.message_id === selectedId) ?? null, [reports, selectedId]);
 
   async function moderate(action: Action) {
     if (!selected || reason.trim().length < 3) { setNotice("Add a clear moderation reason first."); return; }
-    if (action === "delete" && !window.confirm("Permanently erase this message body and author link?")) return;
+    if (action === "delete" && !window.confirm("Remove this message from public chat? Its original content stays in the private 30-day safety archive.")) return;
     setBusy(action); setNotice(null);
     try {
       const response = await fetch("/api/owner/comms/moderate", {
@@ -106,7 +145,7 @@ export function DznCommsModerationPage() {
           </div>
         </header>
 
-        {state !== "ready" ? <StatePanel state={state} /> : (
+        {state !== "ready" ? <StatePanel state={state} /> : (<>
           <div className="mt-4 grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)_360px]">
             <section className="min-w-0 rounded-lg border border-white/10 bg-black/35 p-3">
               <div className="flex items-center gap-2"><MessageSquareWarning className="text-amber-300" size={18} /><h2 className="font-black">Report queue</h2></div>
@@ -121,7 +160,12 @@ export function DznCommsModerationPage() {
 
             <section className="min-w-0 rounded-lg border border-white/10 bg-black/35 p-3"><div className="flex items-center gap-2"><ShieldCheck className="text-emerald-300" size={18} /><h2 className="font-black">Recent decisions</h2></div><div className="mt-3 grid max-h-[66vh] gap-2 overflow-auto pr-1">{audit.length === 0 ? <p className="rounded-md border border-dashed border-white/10 p-4 text-sm text-zinc-500">No moderation decisions recorded yet.</p> : audit.map((item) => <article key={item.id} className="rounded-md border border-white/10 bg-white/[0.03] p-3"><div className="flex items-center justify-between gap-2"><strong className="text-xs uppercase text-violet-200">{item.action.replaceAll("_", " ")}</strong><span className="text-[10px] text-zinc-500">{formatDate(item.created_at)}</span></div><p className="mt-2 break-words text-xs leading-5 text-zinc-300">{item.reason_code}</p><p className="mt-2 text-[10px] text-zinc-500">By {item.actor_name ?? "DZN owner"}</p></article>)}</div></section>
           </div>
-        )}
+          {archiveAvailable ? <section className="mt-4 min-w-0 rounded-lg border border-violet-300/20 bg-black/35 p-4">
+            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center"><div><p className="text-[10px] font-black uppercase tracking-[0.18em] text-violet-200">Private platform-owner record</p><h2 className="mt-1 text-xl font-black">30-day message archive</h2><p className="mt-1 text-xs text-zinc-400">Original message text and deletion details are retained for safety review, then removed automatically.</p></div><span className="rounded-md border border-violet-300/25 bg-violet-300/10 px-3 py-2 text-xs font-black text-violet-100">{archive.length} matching</span></div>
+            <div className="mt-4 grid gap-2 md:grid-cols-[minmax(0,1fr)_180px]"><input value={archiveQuery} onChange={(event) => setArchiveQuery(event.target.value)} maxLength={80} placeholder="Search author or message text" aria-label="Search message archive" className="w-full rounded-md border border-white/15 bg-[#070b13] px-3 py-3 text-sm text-white outline-none focus:border-violet-300/60" /><select value={archiveFilter} onChange={(event) => setArchiveFilter(event.target.value as "all" | "active" | "deleted")} aria-label="Archive filter" className="rounded-md border border-white/15 bg-[#070b13] px-3 py-3 text-sm text-white outline-none focus:border-violet-300/60"><option value="all">All messages</option><option value="active">Still visible</option><option value="deleted">Deleted</option></select></div>
+            <div className="mt-3 grid max-h-[42vh] gap-2 overflow-auto pr-1">{archive.length === 0 ? <p className="rounded-md border border-dashed border-white/10 p-4 text-sm text-zinc-500">No archived messages match this search.</p> : archive.map((item) => <article key={item.message_id} className="rounded-md border border-white/10 bg-white/[0.03] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><strong className="text-sm text-white">{item.author_display_name}</strong><span className="ml-2 text-[10px] font-black uppercase text-cyan-200">{item.author_role_label}</span></div><span className={`rounded px-2 py-1 text-[10px] font-black uppercase ${item.deleted_at ? "bg-amber-300/10 text-amber-200" : "bg-emerald-300/10 text-emerald-200"}`}>{item.deleted_at ? "Deleted" : "Visible"}</span></div><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-200">{item.original_body}</p><p className="mt-2 text-[10px] text-zinc-500">#{item.channel_slug} · Sent {formatDate(item.sent_at)}{item.deleted_at ? ` · ${item.deletion_kind?.replaceAll("_", " ") ?? "deleted"} ${formatDate(item.deleted_at)}${item.deleted_by_name ? ` by ${item.deleted_by_name}` : ""}` : ""}</p></article>)}</div>
+          </section> : null}
+        </>)}
       </div>
     </main>
   );

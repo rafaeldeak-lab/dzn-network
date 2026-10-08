@@ -22,10 +22,13 @@ test("live Comms implementation remains default-off and migration-gated", () => 
   assert.match(cloudflareEnv, /DZN_COMMS_PRIVATE_GROUPS_ENABLED\?: string/);
   assert.match(env, /^NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED=false$/m);
   assert.match(env, /^DZN_COMMS_OWNER_MODERATION_ENABLED=false$/m);
+  assert.match(env, /^DZN_COMMS_OWNER_ARCHIVE_ENABLED=false$/m);
+  assert.match(cloudflareEnv, /DZN_COMMS_OWNER_ARCHIVE_ENABLED\?: string/);
   assert.match(env, /^DZN_COMMS_RETENTION_ENABLED=false$/m);
   assert.ok(existsSync(new URL("functions/api/comms/messages.ts", root)));
   assert.ok(existsSync(new URL("functions/api/comms/reports.ts", root)));
   assert.ok(existsSync(new URL("functions/api/owner/comms/moderate.ts", root)));
+  assert.ok(existsSync(new URL("functions/api/owner/comms/archive.ts", root)));
   assert.ok(existsSync(new URL("functions/owner/comms.ts", root)), "The owner Comms page must have a platform-owner page guard.");
   assert.ok(existsSync(new URL("scripts/test-dzn-comms-live-runtime.ts", root)));
   assert.match(migration, /Production application remains a separate release operation/);

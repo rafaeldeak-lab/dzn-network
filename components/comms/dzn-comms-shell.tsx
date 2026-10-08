@@ -10,6 +10,7 @@ import {
   MessageCircle,
   Send,
   ShieldCheck,
+  Trash2,
   Users,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -19,6 +20,7 @@ import { DznLivePresenceCounter } from "./dzn-live-presence-counter";
 import { CommsMessageTime } from "./comms-message-time";
 import {
   addCommsReaction,
+  deleteCommsMessage,
   loadCommsHistory,
   removeCommsReaction,
   reportCommsMessage,
@@ -76,6 +78,7 @@ const staticPayload: CommsHistoryPayload = {
       edited_at: null,
       public_safe: true,
       read_only: true,
+      can_delete: false,
     },
     {
       id: "static-2",
@@ -87,6 +90,7 @@ const staticPayload: CommsHistoryPayload = {
       edited_at: null,
       public_safe: true,
       read_only: true,
+      can_delete: false,
     },
     {
       id: "static-3",
@@ -98,6 +102,7 @@ const staticPayload: CommsHistoryPayload = {
       edited_at: null,
       public_safe: true,
       read_only: true,
+      can_delete: false,
     },
   ],
   page: { next_cursor: null, has_more: false, limit: 30 },
@@ -109,6 +114,7 @@ const staticPayload: CommsHistoryPayload = {
     reactions_write_enabled: false,
     report_actions_enabled: false,
     moderation_mutations_enabled: false,
+    self_delete_enabled: false,
     ai_assist_runtime_enabled: false,
     durable_objects_or_websockets_enabled: false,
     analytics_or_tracking_enabled: false,
@@ -409,6 +415,15 @@ export function DznCommsShell() {
                     reactionWriteEnabled={reactionWritesEnabled}
                     reactionLoginRequired={reactionLoginRequired}
                     onReactionChange={handleReaction}
+                    onMessageDeleted={(messageId) => setHistory((current) => ({
+                      ...current,
+                      payload: {
+                        ...current.payload,
+                        messages: current.payload.messages.map((item) => item.id === messageId
+                          ? { ...item, author_display_name: "DZN Safety", author_role_label: "System", body: "Message deleted.", visibility_state: "deleted", can_delete: false, reactions: undefined }
+                          : item),
+                      },
+                    }))}
                   />
                 ))}
               </div>
@@ -466,13 +481,14 @@ export function DznCommsShell() {
   );
 }
 
-function MessageRow({ message, reportEnabled, reactionUiEnabled, reactionWriteEnabled, reactionLoginRequired, onReactionChange }: {
+function MessageRow({ message, reportEnabled, reactionUiEnabled, reactionWriteEnabled, reactionLoginRequired, onReactionChange, onMessageDeleted }: {
   message: CommsHistoryMessage;
   reportEnabled: boolean;
   reactionUiEnabled: boolean;
   reactionWriteEnabled: boolean;
   reactionLoginRequired: boolean;
   onReactionChange: (messageId: string, reactionKey: CommsReactionKey, remove: boolean) => Promise<void>;
+  onMessageDeleted: (messageId: string) => void;
 }) {
   const muted = message.visibility_state !== "visible";
   const [reportState, setReportState] = useState<"idle" | "sending" | "sent" | "error">("idle");
@@ -500,6 +516,16 @@ function MessageRow({ message, reportEnabled, reactionUiEnabled, reactionWriteEn
     }
   }
 
+  async function deleteMessage() {
+    if (!message.can_delete || !window.confirm("Delete this message? It will disappear from chat but remain in the 30-day platform-owner safety archive.")) return;
+    try {
+      await deleteCommsMessage(message.id);
+      onMessageDeleted(message.id);
+    } catch {
+      setReportState("error");
+    }
+  }
+
   return (
     <article className={`rounded-lg border p-4 ${muted ? "border-amber-300/18 bg-amber-300/6" : "border-white/10 bg-black/22"}`}>
       <div className="flex items-start gap-3">
@@ -513,6 +539,7 @@ function MessageRow({ message, reportEnabled, reactionUiEnabled, reactionWriteEn
               {message.author_role_label}
             </span>
             <CommsMessageTime value={message.created_at} />
+            {message.can_delete ? <button type="button" onClick={() => void deleteMessage()} className="ml-auto inline-grid h-7 w-7 place-items-center rounded-md border border-white/10 text-zinc-400 hover:border-red-300/40 hover:text-red-100" title="Delete your message" aria-label="Delete your message"><Trash2 className="h-3.5 w-3.5" aria-hidden="true" /></button> : null}
           </div>
           <p className={`mt-2 text-sm font-semibold leading-6 [overflow-wrap:anywhere] ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
           {reactionUiEnabled && message.reactions && !muted ? (
