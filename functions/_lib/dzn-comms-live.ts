@@ -242,7 +242,7 @@ export async function handleDznCommsSelfDelete(request: Request, env: Env, messa
     db.prepare(`UPDATE dzn_comms_owner_message_archive
       SET deleted_at = CURRENT_TIMESTAMP, deleted_by_user_id = ?, deletion_kind = 'self_deleted'
       WHERE message_id = ? AND deleted_at IS NULL`).bind(user.id, messageId),
-    archiveEventStatement(db, messageId, "self_deleted", user.id),
+    archiveEventAfterTransitionStatement(db, messageId, "self_deleted", user.id),
     db.prepare(`UPDATE dzn_comms_send_receipts
       SET message_id = NULL, send_rate_key = NULL, send_minute_bucket = NULL, send_slot = NULL
       WHERE message_id = ?`).bind(messageId),
@@ -428,7 +428,7 @@ function archiveSnapshotStatement(db: D1Database, messageId: string) {
     SELECT id, channel_id, author_user_id, author_display_name, author_role_label, body, created_at,
       COALESCE(NULLIF(expires_at, ''), datetime(created_at, '+30 days'))
     FROM dzn_comms_messages
-    WHERE id = ? AND visibility_state != 'expired' AND body NOT IN ('Message deleted.', 'Message expired.')`).bind(messageId);
+    WHERE id = ? AND visibility_state NOT IN ('deleted', 'expired')`).bind(messageId);
 }
 
 function archiveEventStatement(db: D1Database, messageId: string, action: "sent" | "self_deleted" | "moderator_deleted", actorUserId: string | null) {
@@ -437,7 +437,7 @@ function archiveEventStatement(db: D1Database, messageId: string, action: "sent"
     .bind(crypto.randomUUID(), messageId, action, actorUserId, messageId);
 }
 
-function archiveEventAfterTransitionStatement(db: D1Database, messageId: string, action: "moderator_deleted", actorUserId: string) {
+function archiveEventAfterTransitionStatement(db: D1Database, messageId: string, action: "self_deleted" | "moderator_deleted", actorUserId: string) {
   return db.prepare(`INSERT INTO dzn_comms_owner_message_archive_events (id, message_id, action, actor_user_id)
     SELECT ?, ?, ?, ? WHERE changes() = 1`)
     .bind(crypto.randomUUID(), messageId, action, actorUserId);

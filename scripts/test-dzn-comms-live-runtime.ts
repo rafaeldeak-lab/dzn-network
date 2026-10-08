@@ -578,6 +578,25 @@ async function testOwnerArchiveAndSelfDeleteRuntime() {
     assert.equal(archivedRow.deletion_kind, "self_deleted");
     assert.equal(archivedRow.deleted_by_user_id, "player");
     assert.equal(f.count("dzn_comms_owner_message_archive_events"), 2, "The archive must record both send and self-delete events.");
+    f.sqlite.exec("DELETE FROM dzn_comms_send_slots; DELETE FROM dzn_comms_attempt_slots;");
+    const literalSent = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+      channelSlug: "global-chat", clientRequestId: "archive-literal-placeholder-01", body: "Message deleted.",
+    }), f.env);
+    assert.equal(literalSent.status, 201);
+    const literalMessageId = (await payload(literalSent)).message_id!;
+    assert.equal(f.sqlite.prepare("SELECT original_body FROM dzn_comms_owner_message_archive WHERE message_id = ?").get(literalMessageId)?.original_body, "Message deleted.", "Visible messages that match a system placeholder still need their original body archived.");
+    f.sqlite.exec("DELETE FROM dzn_comms_send_slots; DELETE FROM dzn_comms_attempt_slots;");
+    const racingSent = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+      channelSlug: "global-chat", clientRequestId: "archive-racing-delete-01", body: "Concurrent self-delete safety check",
+    }), f.env);
+    assert.equal(racingSent.status, 201);
+    const racingMessageId = (await payload(racingSent)).message_id!;
+    const racingDeletes = await Promise.all([
+      handleDznCommsSelfDelete(deleteRequest(`/api/comms/messages/${racingMessageId}`, "player-token"), f.env, racingMessageId),
+      handleDznCommsSelfDelete(deleteRequest(`/api/comms/messages/${racingMessageId}`, "player-token"), f.env, racingMessageId),
+    ]);
+    assert.equal(racingDeletes.filter((response) => response.status === 200).length, 1, "Only one concurrent self-delete can succeed.");
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_owner_message_archive_events WHERE message_id = ? AND action = 'self_deleted'").get(racingMessageId)?.count, 1, "A failed concurrent self-delete must not record a false archive event.");
     f.sqlite.prepare(`INSERT INTO dzn_comms_messages
       (id,channel_id,author_user_id,author_display_name,author_role_label,body,visibility_state)
       VALUES ('moderator-retry-message','dzn-global-chat','other','Other','Member','Keep this deletion attribution','visible')`).run();
@@ -597,13 +616,13 @@ async function testOwnerArchiveAndSelfDeleteRuntime() {
     assert.deepEqual(f.sqlite.prepare("SELECT deleted_at,deleted_by_user_id,deletion_kind FROM dzn_comms_owner_message_archive WHERE message_id = 'moderator-retry-message'").get(), originalDeletion, "A stale retry must not overwrite the original deletion attribution.");
     assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_owner_message_archive_events WHERE message_id = 'moderator-retry-message' AND action = 'moderator_deleted'").get()?.count, originalDeletionEventCount, "A stale retry must not add a false deletion event.");
     assert.equal((await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=deleted&query=safety", "other-token"), f.env)).status, 403, "Only a platform owner can search archived messages.");
-    const archiveResponse = await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=deleted&query=safety", "owner-token"), f.env);
+    const archiveResponse = await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=deleted&query=safety%20archive", "owner-token"), f.env);
     assert.equal(archiveResponse.status, 200);
     const archive = await archiveResponse.json() as { rows?: Array<{ message_id: string; original_body: string; sent_at: string; deleted_at: string }> };
     assert.deepEqual(archive.rows, [{ message_id: messageId, channel_slug: "global-chat", author_display_name: "Player", author_role_label: "Member", original_body: "Keep this for the safety archive", sent_at: archive.rows?.[0]?.sent_at, deleted_at: archive.rows?.[0]?.deleted_at, deletion_kind: "self_deleted", deleted_by_name: "Player" }]);
     f.sqlite.prepare("UPDATE dzn_comms_owner_message_archive SET retained_until = '2026-01-01T00:00:00.000Z'").run();
     const retention = await runDznCommsRetention(f.env.DB, new Date("2026-09-24T12:00:00.000Z"));
-    assert.equal(retention.ownerArchiveRowsDeleted, 2, "The retention runner must remove expired original message archives.");
+    assert.equal(retention.ownerArchiveRowsDeleted, 4, "The retention runner must remove expired original message archives.");
     assert.equal(f.count("dzn_comms_owner_message_archive"), 0);
   } finally { f.close(); }
 }
