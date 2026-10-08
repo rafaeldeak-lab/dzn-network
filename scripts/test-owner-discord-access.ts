@@ -62,8 +62,8 @@ async function run() {
     assert.equal((await ownerRoute(context(env, request("GET", undefined, applicantSession.token)))).status, 403);
     const queue = await ownerRoute(context(env, request("GET", undefined, ownerSession.token)));
     assert.equal(queue.status, 200);
-    const queuePayload = await queue.json() as { requests: Array<{ id: string; requester: { discordId?: string } }> };
-    assert.equal(queuePayload.requests.length, 1); assert.equal(queuePayload.requests[0]?.requester.discordId, applicant.discord_id);
+    const queuePayload = await queue.json() as { requests: Array<{ id: string; linkedServerId?: string; requester: { discordId?: string } }> };
+    assert.equal(queuePayload.requests.length, 1); assert.equal(queuePayload.requests[0]?.linkedServerId, "server_owned"); assert.equal(queuePayload.requests[0]?.requester.discordId, applicant.discord_id);
     assert.equal((await ownerRoute(context(env, request("POST", { requestId: createdPayload.request.id, action: "approved", reason: "Exact linked server ownership checked.", decisionNonce: "decision_one" }, ownerSession.token)))).status, 403);
     const approved = await ownerRoute(context(env, request("POST", { requestId: createdPayload.request.id, action: "approved", reason: "Exact linked server ownership checked.", decisionNonce: "decision_one" }, ownerSession.token, "https://dzn.test")));
     assert.equal(approved.status, 200);
