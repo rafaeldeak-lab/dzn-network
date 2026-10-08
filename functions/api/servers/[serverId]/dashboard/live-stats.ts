@@ -103,13 +103,13 @@ async function readLightweightRank(db: D1Database, guildId: string | null) {
   try {
     const row = await db
       .prepare(
-        `SELECT network_rank, last_adm_update_at, updated_at
+        `SELECT network_rank, network_rank_updated_at, updated_at
          FROM server_public_cache
          WHERE guild_id = ?
          LIMIT 1`,
       )
       .bind(guildId)
-      .first<{ network_rank: number | null; last_adm_update_at: string | null; updated_at: string | null }>();
+      .first<{ network_rank: number | null; network_rank_updated_at: string | null; updated_at: string | null }>();
 
     const rank = Number(row?.network_rank ?? 0);
     if (!Number.isFinite(rank) || rank <= 0) return unavailableRank();
@@ -117,11 +117,34 @@ async function readLightweightRank(db: D1Database, guildId: string | null) {
     return {
       rank,
       source: "leaderboard_snapshot" as const,
-      generatedAt: row?.last_adm_update_at ?? row?.updated_at ?? null,
+      generatedAt: row?.network_rank_updated_at ?? row?.updated_at ?? null,
       stale: false,
     };
-  } catch {
-    return unavailableRank();
+  } catch (error) {
+    if (!/no such column: network_rank_updated_at/i.test(error instanceof Error ? error.message : String(error))) {
+      return unavailableRank();
+    }
+    try {
+      const legacyRow = await db
+        .prepare(
+          `SELECT network_rank, updated_at
+           FROM server_public_cache
+           WHERE guild_id = ?
+           LIMIT 1`,
+        )
+        .bind(guildId)
+        .first<{ network_rank: number | null; updated_at: string | null }>();
+      const rank = Number(legacyRow?.network_rank ?? 0);
+      if (!Number.isFinite(rank) || rank <= 0) return unavailableRank();
+      return {
+        rank,
+        source: "leaderboard_snapshot" as const,
+        generatedAt: legacyRow?.updated_at ?? null,
+        stale: false,
+      };
+    } catch {
+      return unavailableRank();
+    }
   }
 }
 

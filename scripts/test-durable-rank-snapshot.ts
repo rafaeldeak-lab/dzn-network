@@ -5,6 +5,7 @@ const liveStatsRoute = readFileSync("functions/api/servers/[serverId]/dashboard/
 const publicServersRoute = readFileSync("functions/api/public/servers.ts", "utf8").replace(/\r\n/g, "\n");
 const automationSource = readFileSync("functions/_lib/automation.ts", "utf8").replace(/\r\n/g, "\n");
 const migrationSource = readFileSync("migrations/0015_automation_pipeline.sql", "utf8").replace(/\r\n/g, "\n");
+const rankTimestampMigration = readFileSync("migrations/0092_server_public_cache_rank_timestamp.sql", "utf8").replace(/\r\n/g, "\n");
 
 function sliceBetween(source: string, startMarker: string, endMarker: string) {
   const start = source.indexOf(startMarker);
@@ -46,6 +47,12 @@ assert.equal(
   "Automation/public cache refresh path must persist rank snapshots.",
 );
 assert.equal(
+  rankTimestampMigration.includes("network_rank_updated_at TEXT") &&
+    rankTimestampMigration.includes("idx_server_public_cache_network_rank_updated_at"),
+  true,
+  "Rank snapshots must record their own refresh timestamp through an isolated migration.",
+);
+assert.equal(
   automationSource.includes("readNetworkRankSnapshot") &&
     automationSource.includes("input.lastAdmUpdateAt") &&
     automationSource.includes("input.networkRank !== undefined"),
@@ -72,6 +79,12 @@ assert.equal(
   liveRankReader.includes("WHERE guild_id = ?"),
   true,
   "Dashboard live-stats rank lookup must be bounded to the selected guild.",
+);
+assert.equal(
+  liveRankReader.includes("network_rank_updated_at") &&
+    liveRankReader.includes("no such column: network_rank_updated_at"),
+  true,
+  "Rank reads must prefer the rank-specific timestamp while retaining a pre-migration compatibility path.",
 );
 assert.equal(
   liveStatsRoute.includes("rank: null"),
