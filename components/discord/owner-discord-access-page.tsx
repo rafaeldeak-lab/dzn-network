@@ -15,8 +15,8 @@ export function OwnerDiscordAccessPage() {
   const [note, setNote] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const load = useCallback(async () => {
-    setState("loading"); setNotice(null);
+  const load = useCallback(async (clearNotice = true) => {
+    setState("loading"); if (clearNotice) setNotice(null);
     try {
       const response = await fetch("/api/discord/owner-access", { credentials: "include", cache: "no-store" });
       const payload = await response.json().catch(() => null) as Payload | null;
@@ -36,7 +36,7 @@ export function OwnerDiscordAccessPage() {
       const response = await fetch("/api/discord/owner-access", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ linkedServerId: serverId, note }) });
       const payload = await response.json().catch(() => null) as { ok?: boolean; duplicate?: boolean; message?: string } | null;
       if (!response.ok || !payload?.ok) throw new Error(payload?.message ?? "The request could not be saved.");
-      setNote(""); setNotice(payload.duplicate ? "This server already has a request waiting for review." : "Your server-owner access request is now waiting for review."); await load();
+      setNote(""); await load(false); setNotice(payload.duplicate ? "This server already has a request waiting for review." : "Your server-owner access request is now waiting for review.");
     } catch (error) { setNotice(error instanceof Error ? error.message : "The request could not be saved."); }
     finally { setSubmitting(false); }
   }

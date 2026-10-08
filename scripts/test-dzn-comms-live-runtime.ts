@@ -578,14 +578,30 @@ async function testOwnerArchiveAndSelfDeleteRuntime() {
     assert.equal(archivedRow.deletion_kind, "self_deleted");
     assert.equal(archivedRow.deleted_by_user_id, "player");
     assert.equal(f.count("dzn_comms_owner_message_archive_events"), 2, "The archive must record both send and self-delete events.");
+    f.sqlite.prepare(`INSERT INTO dzn_comms_messages
+      (id,channel_id,author_user_id,author_display_name,author_role_label,body,visibility_state)
+      VALUES ('moderator-retry-message','dzn-global-chat','other','Other','Member','Keep this deletion attribution','visible')`).run();
+    f.sqlite.prepare(`INSERT INTO dzn_comms_owner_message_archive
+      (message_id,channel_id,author_user_id,author_display_name,author_role_label,original_body,sent_at,retained_until)
+      VALUES ('moderator-retry-message','dzn-global-chat','other','Other','Member','Keep this deletion attribution',CURRENT_TIMESTAMP,datetime('now','+30 days'))`).run();
+    const moderatorDelete = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {
+      messageId: "moderator-retry-message", action: "delete", reason: "personal information",
+    }), f.env);
+    assert.equal(moderatorDelete.status, 200, await moderatorDelete.text());
+    const originalDeletion = f.sqlite.prepare("SELECT deleted_at,deleted_by_user_id,deletion_kind FROM dzn_comms_owner_message_archive WHERE message_id = 'moderator-retry-message'").get() as Row;
+    const moderatorRetry = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {
+      messageId: "moderator-retry-message", action: "delete", reason: "retry should not overwrite attribution",
+    }), f.env);
+    assert.equal(moderatorRetry.status, 409);
+    assert.deepEqual(f.sqlite.prepare("SELECT deleted_at,deleted_by_user_id,deletion_kind FROM dzn_comms_owner_message_archive WHERE message_id = 'moderator-retry-message'").get(), originalDeletion, "A stale retry must not overwrite the original deletion attribution.");
     assert.equal((await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=deleted&query=safety", "other-token"), f.env)).status, 403, "Only a platform owner can search archived messages.");
     const archiveResponse = await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=deleted&query=safety", "owner-token"), f.env);
     assert.equal(archiveResponse.status, 200);
     const archive = await archiveResponse.json() as { rows?: Array<{ message_id: string; original_body: string; sent_at: string; deleted_at: string }> };
     assert.deepEqual(archive.rows, [{ message_id: messageId, channel_slug: "global-chat", author_display_name: "Player", author_role_label: "Member", original_body: "Keep this for the safety archive", sent_at: archive.rows?.[0]?.sent_at, deleted_at: archive.rows?.[0]?.deleted_at, deletion_kind: "self_deleted", deleted_by_name: "Player" }]);
-    f.sqlite.prepare("UPDATE dzn_comms_owner_message_archive SET retained_until = '2026-01-01T00:00:00.000Z' WHERE message_id = ?").run(messageId);
+    f.sqlite.prepare("UPDATE dzn_comms_owner_message_archive SET retained_until = '2026-01-01T00:00:00.000Z'").run();
     const retention = await runDznCommsRetention(f.env.DB, new Date("2026-09-24T12:00:00.000Z"));
-    assert.equal(retention.ownerArchiveRowsDeleted, 1, "The retention runner must remove expired original message archives.");
+    assert.equal(retention.ownerArchiveRowsDeleted, 2, "The retention runner must remove expired original message archives.");
     assert.equal(f.count("dzn_comms_owner_message_archive"), 0);
   } finally { f.close(); }
 }
@@ -602,6 +618,8 @@ async function testOwnerArchiveRequiresRetention() {
     const messageId = (await payload(sent)).message_id!;
     assert.equal((await handleDznCommsSelfDelete(deleteRequest(`/api/comms/messages/${messageId}`, "player-token"), f.env, messageId)).status, 404);
     assert.equal((await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive", "owner-token"), f.env)).status, 404);
+    const queue = await handleDznCommsModeration(getRequest("/api/owner/comms/moderate", "owner-token"), f.env);
+    assert.equal((await queue.json() as { archive_available?: boolean }).archive_available, false, "The moderation UI must not promise archive retention when it is unavailable.");
   } finally {
     f.close();
   }

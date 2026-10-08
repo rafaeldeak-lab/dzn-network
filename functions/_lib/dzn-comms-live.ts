@@ -291,7 +291,8 @@ export async function handleDznCommsModeration(request: Request, env: Env) {
       SET deleted_at = CASE WHEN ? = 'deleted' THEN CURRENT_TIMESTAMP ELSE deleted_at END,
           deleted_by_user_id = CASE WHEN ? = 'deleted' THEN ? ELSE deleted_by_user_id END,
           deletion_kind = CASE WHEN ? = 'deleted' THEN 'moderator_deleted' ELSE deletion_kind END
-      WHERE message_id = ?`).bind(state, state, auth.user.id, state, messageId));
+      WHERE message_id = ?
+        AND (? != 'deleted' OR deleted_at IS NULL)`).bind(state, state, auth.user.id, state, messageId, state));
     if (state === "deleted") statements.push(archiveEventStatement(db, messageId, "moderator_deleted", auth.user.id));
   }
   if (state === "deleted") {
@@ -367,6 +368,7 @@ export async function handleDznCommsModerationQueue(request: Request, env: Env) 
     private: true,
     reports: reports.results ?? [],
     audit: audit.results ?? [],
+    archive_available: readDznCommsOwnerArchiveFlags(env, request).enabled,
     retention: { message_days: MESSAGE_RETENTION_DAYS, deleted_body_erasure: true },
   }, { headers: privateNoStoreHeaders() });
 }

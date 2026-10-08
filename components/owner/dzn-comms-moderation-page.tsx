@@ -30,6 +30,7 @@ type Payload = {
   source?: string;
   reports?: ReportItem[];
   audit?: AuditItem[];
+  archive_available?: boolean;
   retention?: { message_days: number; deleted_body_erasure: boolean };
   message?: string;
 };
@@ -90,6 +91,7 @@ export function DznCommsModerationPage() {
       if (!response.ok || !payload?.ok) throw new Error(payload?.message ?? "Moderation queue unavailable.");
       setReports(payload.reports ?? []);
       setAudit(payload.audit ?? []);
+      setArchiveAvailable(payload.archive_available === true);
       setRetentionDays(payload.retention?.message_days ?? 30);
       setSelectedId((current) => (payload.reports ?? []).some((item) => item.message_id === current) ? current : payload.reports?.[0]?.message_id ?? null);
       await loadArchive("all", "");
@@ -112,7 +114,10 @@ export function DznCommsModerationPage() {
 
   async function moderate(action: Action) {
     if (!selected || reason.trim().length < 3) { setNotice("Add a clear moderation reason first."); return; }
-    if (action === "delete" && !window.confirm("Remove this message from public chat? Its original content stays in the private 30-day safety archive.")) return;
+    const deletePrompt = archiveAvailable
+      ? "Remove this message from public chat? Its original content stays in the private 30-day safety archive."
+      : "Remove this message from public chat? This permanently erases its author and body because the private archive is not active.";
+    if (action === "delete" && !window.confirm(deletePrompt)) return;
     setBusy(action); setNotice(null);
     try {
       const response = await fetch("/api/owner/comms/moderate", {

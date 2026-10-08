@@ -21,6 +21,8 @@ async function run() {
   const accessSource = readFileSync("functions/_lib/owner-discord-access.ts", "utf8");
   assert.match(accessSource, /DZN_OWNER_DISCORD_ACCESS_ENABLED/);
   assert.match(accessSource, /linked_servers[\s\S]*user_id = \?/);
+  assert.match(accessSource, /isActiveRequestConflict/);
+  assert.match(accessSource, /status IN \('pending', 'approved'\)/);
   assert.match(accessSource, /No Discord invite, message, or role change/);
   assert.doesNotMatch(accessSource, /DISCORD_BOT_TOKEN|fetch\s*\(/);
   assert.match(readFileSync(".env.example", "utf8"), /^DZN_OWNER_DISCORD_ACCESS_ENABLED=false$/m);
