@@ -907,6 +907,15 @@ async function main() {
     false,
     "Scheduled cache finalisation must not run the full automation schema compatibility routine inside its bounded phase.",
   );
+  const scheduledDiscordQueueStart = scheduledJobDb.executedQueries.findIndex((query, index) =>
+    index > scheduledCacheWrite && (query.startsWith("update automation_jobs set") || query.includes("insert or ignore into automation_jobs")),
+  );
+  assert.ok(scheduledDiscordQueueStart > scheduledCacheWrite);
+  assert.equal(
+    scheduledJobDb.executedQueries.slice(scheduledCacheWrite, scheduledDiscordQueueStart).some((query) => query.includes("create table if not exists automation_jobs")),
+    false,
+    "Scheduled Discord queueing must not run the full automation schema compatibility routine inside its bounded phase.",
+  );
   assert.equal(scheduledJobDb.automationJobs.length > 0, true);
   assert.equal(scheduledJobDb.admSyncState.get(linkedServerId)?.last_processed_file, largeFixtureName);
   assert.equal(scheduledJobDb.admSyncState.get(linkedServerId)?.cursor_recovery_reason, "scheduled_chunked_import");

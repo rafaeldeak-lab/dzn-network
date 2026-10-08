@@ -4304,7 +4304,12 @@ async function finalizeAdmImportJob(
         "build_feed_embed",
         "admin_alerts_embed",
         "admin_logs_embed",
-      ], "manual-adm-import", { linkedServerId: server.id }), "Discord post queue");
+      ], "manual-adm-import", {
+        linkedServerId: server.id,
+        // The scheduled finaliser has already established its durable import
+        // state. Keep schema compatibility work outside its timed follow-up.
+        skipSchemaEnsure: isScheduledNitradoImport,
+      }), "Discord post queue");
       discordQueueStatus = discordQueuesCreated > 0 ? "queued" : "skipped";
     } catch (error) {
       discordQueueStatus = "failed";
