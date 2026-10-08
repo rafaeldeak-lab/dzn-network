@@ -2,7 +2,7 @@
 
 import { AlertTriangle, ArrowLeft, CheckCircle2, Eye, EyeOff, Home, MessageSquareWarning, RefreshCw, ShieldCheck, Trash2, XCircle } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 type ReportItem = {
   message_id: string;
@@ -68,22 +68,31 @@ export function DznCommsModerationPage() {
   const [archiveFilter, setArchiveFilter] = useState<"all" | "visible" | "hidden" | "deleted">("all");
   const [archiveNextCursor, setArchiveNextCursor] = useState<string | null>(null);
   const [archiveLoadingMore, setArchiveLoadingMore] = useState(false);
+  const archiveAbortController = useRef<AbortController | null>(null);
 
   const loadArchive = useCallback(async (filter: "all" | "visible" | "hidden" | "deleted", query: string, cursor?: string | null, append = false) => {
+    archiveAbortController.current?.abort();
+    const controller = new AbortController();
+    archiveAbortController.current = controller;
     const cursorParam = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
-    const response = await fetch(`/api/owner/comms/archive?filter=${filter}&query=${encodeURIComponent(query)}${cursorParam}`, { cache: "no-store", credentials: "include" });
-    if (response.ok) {
-      const payload = await response.json().catch(() => null) as ArchivePayload | null;
-      if (payload?.ok) {
-        setArchive((current) => append ? [...current, ...(payload.rows ?? [])] : payload.rows ?? []);
-        setArchiveNextCursor(payload.page?.next_cursor ?? null);
-        setArchiveAvailable(true);
-        setRetentionDays(payload.retention_days ?? 30);
+    try {
+      const response = await fetch(`/api/owner/comms/archive?filter=${filter}&query=${encodeURIComponent(query)}${cursorParam}`, { cache: "no-store", credentials: "include", signal: controller.signal });
+      if (archiveAbortController.current !== controller) return;
+      if (response.ok) {
+        const payload = await response.json().catch(() => null) as ArchivePayload | null;
+        if (payload?.ok) {
+          setArchive((current) => append ? [...current, ...(payload.rows ?? [])] : payload.rows ?? []);
+          setArchiveNextCursor(payload.page?.next_cursor ?? null);
+          setArchiveAvailable(true);
+          setRetentionDays(payload.retention_days ?? 30);
+        }
+      } else if (response.status === 404) {
+        setArchiveAvailable(false);
+        setArchive([]);
+        setArchiveNextCursor(null);
       }
-    } else if (response.status === 404) {
-      setArchiveAvailable(false);
-      setArchive([]);
-      setArchiveNextCursor(null);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) throw error;
     }
   }, []);
 

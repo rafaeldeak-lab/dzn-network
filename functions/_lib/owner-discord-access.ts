@@ -156,8 +156,15 @@ export async function decideOwnerDiscordAccessRequest(env: Env, actor: SessionUs
                      SELECT 1 FROM linked_servers
                       WHERE id = dzn_owner_discord_access_requests.linked_server_id
                         AND user_id = dzn_owner_discord_access_requests.requester_user_id
-                        AND lower(COALESCE(status, 'pending')) NOT IN ('deleted', 'merged')
+                        AND lower(COALESCE(status, 'pending')) = 'live'
                         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
+                        AND EXISTS (
+                          SELECT 1 FROM onboarding_checks
+                           WHERE onboarding_checks.linked_server_id = linked_servers.id
+                             AND onboarding_checks.token_valid = 1
+                             AND onboarding_checks.service_access = 1
+                             AND onboarding_checks.dayz_service_detected = 1
+                        )
                    ))`)
       .bind(action, reason, decisionNonce, actor.id, actor.discord_id, clean(actor.username, 100), now, now, requestId, current.status, action),
     db.prepare(`INSERT INTO dzn_owner_discord_access_audit (

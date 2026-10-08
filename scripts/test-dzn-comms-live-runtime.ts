@@ -705,6 +705,13 @@ async function testOwnerArchiveRequiresRetention() {
   }
 }
 
+function testOwnerArchiveUiRejectsStaleSearches() {
+  const source = readFileSync("components/owner/dzn-comms-moderation-page.tsx", "utf8");
+  assert.match(source, /new AbortController\(\)/, "A new archive request must cancel the superseded request.");
+  assert.match(source, /archiveAbortController\.current\?\.abort\(\)/, "Archive filter changes must abort an in-flight older search.");
+  assert.match(source, /archiveAbortController\.current !== controller/, "Only the latest archive response may update the owner workspace.");
+}
+
 function testPrivateLedgerMigrationRuntime() {
   const sqlite = new DatabaseSync(":memory:");
   try {
@@ -800,6 +807,7 @@ async function main() {
   await testOwnerArchiveAndSelfDeleteRuntime();
   await testOwnerArchivePagination();
   await testOwnerArchiveRequiresRetention();
+  testOwnerArchiveUiRejectsStaleSearches();
   console.log("Live Comms handlers: auth, origin, idempotency, conflict, quota, rollback, report and moderation behavior passed.");
 }
 

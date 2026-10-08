@@ -32,6 +32,8 @@ async function run() {
   assert.match(accessSource, /result\[1\]\?\.meta\?\.changes/, "A decision must fail closed if its audit row was not written.");
   assert.match(accessSource, /OWNER_ACCESS_PAGE_SIZE/, "The owner-access queue must use a bounded page size.");
   assert.match(accessSource, /encodeOwnerAccessCursor/, "The owner-access queue must expose stable continuation cursors.");
+  assert.match(accessSource, /COALESCE\(status, 'pending'\)\) = 'live'/, "Owner approval must require a live server.");
+  assert.match(accessSource, /onboarding_checks\.token_valid = 1/, "Owner approval must require current onboarding verification evidence.");
   const envExample = readFileSync(".env.example", "utf8");
   assert.match(envExample, /^DZN_OWNER_DISCORD_ACCESS_ENABLED=false$/m);
   assert.match(envExample, /^NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED=false$/m);
@@ -51,11 +53,16 @@ async function run() {
     await db.exec("PRAGMA foreign_keys = ON;");
     await db.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT NOT NULL UNIQUE, username TEXT, avatar TEXT);
       CREATE TABLE sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, session_token_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, created_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
-      CREATE TABLE linked_servers (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, guild_id TEXT NOT NULL, server_name TEXT NOT NULL, display_name TEXT, hostname TEXT, public_slug TEXT, status TEXT, lifecycle_status TEXT, merged_into_server_id TEXT, created_at TEXT, updated_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id));`);
+      CREATE TABLE linked_servers (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, guild_id TEXT NOT NULL, server_name TEXT NOT NULL, display_name TEXT, hostname TEXT, public_slug TEXT, status TEXT, lifecycle_status TEXT, merged_into_server_id TEXT, created_at TEXT, updated_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
+      CREATE TABLE onboarding_checks (id TEXT PRIMARY KEY, linked_server_id TEXT NOT NULL, token_valid INTEGER DEFAULT 0, service_access INTEGER DEFAULT 0, dayz_service_detected INTEGER DEFAULT 0, FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id));`);
     for (const statement of splitSql(readFileSync("migrations/0093_dzn_owner_discord_access.sql", "utf8").replace(/^--.*$/gm, ""))) await db.prepare(statement).run();
     for (const user of [owner, applicant, outsider]) await db.prepare("INSERT INTO users (id, discord_id, username, avatar) VALUES (?, ?, ?, ?)").bind(user.id, user.discord_id, user.username, user.avatar).run();
-    await db.prepare("INSERT INTO linked_servers (id, user_id, guild_id, server_name, status, created_at, updated_at) VALUES ('server_owned', ?, 'guild_owned', 'Verified Owner Server', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(applicant.id).run();
-    await db.prepare("INSERT INTO linked_servers (id, user_id, guild_id, server_name, status, created_at, updated_at) VALUES ('server_other', ?, 'guild_other', 'Other Server', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(outsider.id).run();
+    await db.prepare("INSERT INTO linked_servers (id, user_id, guild_id, server_name, status, lifecycle_status, created_at, updated_at) VALUES ('server_owned', ?, 'guild_owned', 'Verified Owner Server', 'live', 'active_live', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(applicant.id).run();
+    await db.prepare("INSERT INTO linked_servers (id, user_id, guild_id, server_name, status, lifecycle_status, created_at, updated_at) VALUES ('server_other', ?, 'guild_other', 'Other Server', 'live', 'active_live', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(outsider.id).run();
+    await db.prepare("INSERT INTO linked_servers (id, user_id, guild_id, server_name, status, lifecycle_status, created_at, updated_at) VALUES ('server_unverified', ?, 'guild_unverified', 'Unverified Draft', 'pending', 'active_live', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(applicant.id).run();
+    for (const serverId of ["server_owned", "server_other"]) {
+      await db.prepare("INSERT INTO onboarding_checks (id, linked_server_id, token_valid, service_access, dayz_service_detected) VALUES (?, ?, 1, 1, 1)").bind(`check-${serverId}`, serverId).run();
+    }
     const env = { DB: db as unknown as D1Database, SESSION_SECRET: "owner-discord-access-test", DZN_OWNER_DISCORD_ACCESS_ENABLED: "true", DZN_PLATFORM_OWNER_DISCORD_IDS: owner.discord_id } as Env;
     const applicantSession = await createSession(env, applicant.id);
     const ownerSession = await createSession(env, owner.id);
@@ -108,6 +115,14 @@ async function run() {
       const staleApproval = await decideOwnerDiscordAccessRequest(env, owner, { requestId: replacement.request.id, action: "approved", reason: "Current ownership checked before approval.", decisionNonce: "decision_five" });
       assert.equal(staleApproval.ok, false); if (!staleApproval.ok) assert.equal(staleApproval.status, 409);
     }
+    await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+      id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot,
+      server_name, status, created_at, updated_at
+    ) VALUES ('unverified-request', ?, ?, ?, 'server_unverified', 'server_unverified', 'Unverified Draft', 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+      .bind(applicant.id, applicant.discord_id, applicant.username).run();
+    const unverifiedApproval = await decideOwnerDiscordAccessRequest(env, owner, { requestId: "unverified-request", action: "approved", reason: "This server has not completed verification.", decisionNonce: "decision_unverified" });
+    assert.equal(unverifiedApproval.ok, false, "A saved but unverified server must not be approved for owner Discord access.");
+    if (!unverifiedApproval.ok) assert.equal(unverifiedApproval.status, 409);
     const audit = await listOwnerDiscordAccessRequests(env);
     assert.equal(audit.ok, true); if (audit.ok) assert.deepEqual(audit.audit.map((entry) => entry.action).sort(), ["approved", "approved", "requested", "requested", "requested", "revoked"]);
 
@@ -145,6 +160,7 @@ async function run() {
     assert.equal(invalidCursor.ok, false);
     if (!invalidCursor.ok) assert.equal(invalidCursor.status, 400);
 
+    await db.prepare("DELETE FROM onboarding_checks WHERE linked_server_id = 'server_owned'").run();
     await db.prepare("DELETE FROM linked_servers WHERE id = 'server_owned'").run();
     const preservedRequest = await db.prepare("SELECT linked_server_id, linked_server_id_snapshot, server_name FROM dzn_owner_discord_access_requests WHERE id = ?").bind(createdPayload.request.id).first<{ linked_server_id: string | null; linked_server_id_snapshot: string; server_name: string }>();
     assert.equal(preservedRequest?.linked_server_id, null, "Server deletion must preserve the owner-access request as a tombstone.");
