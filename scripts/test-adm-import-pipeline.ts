@@ -965,7 +965,7 @@ async function main() {
   });
   const recoveredHeartbeatResult = await processPendingAdmImportJobs(makeEnv(retryHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
   assert.equal(recoveredHeartbeatResult.completedJobs, 1);
-  assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, false);
+  assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, true, "A cache row without a rank timestamp must refresh once to establish durable rank freshness.");
 
   const retryStatsHeartbeatDb = new MemoryD1();
   retryStatsHeartbeatDb.admImportJobs.set("previous-stats-failure", {
@@ -1063,7 +1063,11 @@ async function main() {
   completedBuildJob.result_json = null;
   const idleBuildTail = await processPendingAdmImportJobs(makeEnv(buildScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
   assert.equal(idleBuildTail.completedJobs, 1);
-  assert.equal(idleBuildTail.results[0]?.file_result?.public_cache_updated, false);
+  assert.equal(
+    idleBuildTail.results[0]?.file_result?.public_cache_updated,
+    true,
+    "A quiet grown tail initializes the dedicated rank timestamp once.",
+  );
   assert.equal(buildScheduledDb.buildEvents.length, 12);
   assert.deepEqual(countBy(buildScheduledDb.buildEvents, "event_type"), {
     placed: 5,
@@ -1257,6 +1261,43 @@ async function main() {
   assert.equal(reopenedScheduledTail?.public_cache_updated, 0);
   assert.equal(reopenedScheduledTail?.discord_jobs_queued, 0);
   assert.equal(scheduledTailDb.admImportJobs.size, 1);
+
+  const activeTailDb = new MemoryD1();
+  const activeTailFirst = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(activeTailDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  const activeTailRow = activeTailDb.admImportJobs.get(String(activeTailFirst.job?.job_id));
+  assert.ok(activeTailRow);
+  const activeTailLines = String(activeTailRow.adm_text ?? "").split(/\r?\n/).filter(Boolean);
+  activeTailRow.status = "queued";
+  activeTailRow.current_line = 2;
+  activeTailRow.total_lines = 2;
+  activeTailRow.chunk_size = 2;
+  activeTailRow.total_chunks = 1;
+  activeTailRow.chunks_processed = 1;
+  activeTailRow.adm_text = activeTailLines.slice(0, 2).join("\n");
+  activeTailRow.written_kills = 2;
+  activeTailRow.player_events = 3;
+  activeTailRow.joins = 4;
+  activeTailRow.disconnects = 5;
+  activeTailRow.deaths = 6;
+  activeTailRow.raw_events = 7;
+  activeTailRow.warnings_json = '["active tail warning"]';
+  const activeTailGrowth = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(activeTailDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  assert.equal(activeTailGrowth.job?.job_id, activeTailFirst.job?.job_id);
+  const extendedActiveTail = activeTailDb.admImportJobs.get(String(activeTailFirst.job?.job_id));
+  assert.equal(extendedActiveTail?.written_kills, 2, "An active tail extension must preserve already imported kills.");
+  assert.equal(extendedActiveTail?.player_events, 3, "An active tail extension must preserve already imported player events.");
+  assert.equal(extendedActiveTail?.raw_events, 7, "An active tail extension must preserve already parsed events.");
+  assert.equal(extendedActiveTail?.warnings_json, '["active tail warning"]', "An active tail extension must preserve prior warning evidence.");
 
   const scheduledDuplicateDb = new MemoryD1();
   const mockAdmName = "DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM";

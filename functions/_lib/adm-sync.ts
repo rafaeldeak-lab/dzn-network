@@ -4251,15 +4251,31 @@ async function finalizeAdmImportJob(
       + Number(previousScheduledMaintenanceResult.deaths ?? 0)
       + getAdmImportJobBuildEventsStored(previousScheduledMaintenanceResult)
     : 0;
-  const existingPublicCache = isScheduledNitradoImport && derivedDataWrites === 0 && server.guild_id
-    ? await db
-      .prepare("SELECT updated_at, last_adm_update_at, network_rank_updated_at FROM server_public_cache WHERE guild_id = ? LIMIT 1")
-      .bind(server.guild_id)
-      .first<{ updated_at: string | null; last_adm_update_at: string | null; network_rank_updated_at: string | null }>()
-    : null;
-  const existingRankSnapshotAt = existingPublicCache?.network_rank_updated_at ?? existingPublicCache?.updated_at ?? null;
-  const refreshScheduledNetworkRank = Boolean(existingRankSnapshotAt)
-    && isIsoOlderThan(existingRankSnapshotAt, SCHEDULED_IDLE_NETWORK_RANK_REFRESH_MS);
+  let existingPublicCache: { updated_at: string | null; last_adm_update_at: string | null; network_rank_updated_at?: string | null } | null = null;
+  let hasDedicatedRankTimestamp = false;
+  if (isScheduledNitradoImport && derivedDataWrites === 0 && server.guild_id) {
+    try {
+      existingPublicCache = await db
+        .prepare("SELECT updated_at, last_adm_update_at, network_rank_updated_at FROM server_public_cache WHERE guild_id = ? LIMIT 1")
+        .bind(server.guild_id)
+        .first<{ updated_at: string | null; last_adm_update_at: string | null; network_rank_updated_at: string | null }>();
+      hasDedicatedRankTimestamp = true;
+    } catch (error) {
+      if (!/no such column: network_rank_updated_at/i.test(error instanceof Error ? error.message : String(error))) throw error;
+      existingPublicCache = await db
+        .prepare("SELECT updated_at, last_adm_update_at FROM server_public_cache WHERE guild_id = ? LIMIT 1")
+        .bind(server.guild_id)
+        .first<{ updated_at: string | null; last_adm_update_at: string | null }>();
+    }
+  }
+  const existingRankSnapshotAt = hasDedicatedRankTimestamp
+    ? existingPublicCache?.network_rank_updated_at ?? null
+    : existingPublicCache?.updated_at ?? null;
+  const refreshScheduledNetworkRank = Boolean(existingPublicCache) && (
+    hasDedicatedRankTimestamp
+      ? !existingRankSnapshotAt || isIsoOlderThan(existingRankSnapshotAt, SCHEDULED_IDLE_NETWORK_RANK_REFRESH_MS)
+      : Boolean(existingRankSnapshotAt) && isIsoOlderThan(existingRankSnapshotAt, SCHEDULED_IDLE_NETWORK_RANK_REFRESH_MS)
+  );
   const shouldRefreshDerivedOutputs = !isScheduledNitradoImport || derivedDataWrites > 0 || retryPreviousScheduledStatsFailure;
 
   if (shouldRefreshDerivedOutputs) {
@@ -4637,6 +4653,7 @@ async function createOrExtendScheduledAdmTailJobForReadableFile(
         chunkSize: input.chunkSize,
         currentLine: clampCursorLine(Number(existingJob.current_line ?? 0), lines.length),
         status: "queued",
+        resetCounters: false,
       });
       const updated = await getAdmImportJob(env, input.scope.linkedServerId, existingJob.id);
       const progress = updated ? toAdmImportJobProgress(updated) : toAdmImportJobProgress(existingJob);
@@ -4768,6 +4785,7 @@ async function createOrExtendScheduledAdmTailJobForReadableFile(
       chunkSize: input.chunkSize,
       currentLine: importedLineCount,
       status: "queued",
+      resetCounters: true,
     });
     const updated = await getAdmImportJob(env, input.scope.linkedServerId, existingJob.id);
     const progress = updated ? toAdmImportJobProgress(updated) : toAdmImportJobProgress(existingJob);
@@ -4810,6 +4828,7 @@ async function createOrExtendScheduledAdmTailJobForReadableFile(
       chunkSize: input.chunkSize,
       currentLine: importedLineCount,
       status: "queued",
+      resetCounters: false,
     });
     row = await getAdmImportJob(env, input.scope.linkedServerId, created.job_id);
   }
@@ -4855,6 +4874,7 @@ async function updateScheduledAdmImportJobTailText(
     chunkSize: number;
     currentLine: number;
     status: "queued";
+    resetCounters: boolean;
   },
 ) {
   const totalLines = values.lines.length;
@@ -4874,6 +4894,7 @@ async function updateScheduledAdmImportJobTailText(
         chunk_size = ?,
         total_chunks = ?,
         chunks_processed = ?,
+        ${values.resetCounters ? `
         raw_kill_lines_found = 0,
         parsed_kills = 0,
         written_kills = 0,
@@ -4896,6 +4917,7 @@ async function updateScheduledAdmImportJobTailText(
         error_message = NULL,
         last_chunk_index = NULL,
         failed_chunk_index = NULL,
+        ` : ""}
         updated_at = ?
        WHERE id = ? AND server_id = ?`,
     )

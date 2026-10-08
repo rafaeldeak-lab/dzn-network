@@ -55,9 +55,10 @@ assert.equal(
 );
 assert.equal(
   admSyncSource.includes("network_rank_updated_at FROM server_public_cache") &&
-    admSyncSource.includes("existingPublicCache?.network_rank_updated_at ?? existingPublicCache?.updated_at"),
+    admSyncSource.includes("no such column: network_rank_updated_at") &&
+    admSyncSource.includes("!existingRankSnapshotAt || isIsoOlderThan(existingRankSnapshotAt"),
   true,
-  "Quiet scheduled imports must refresh rankings from the rank-specific timestamp, not unrelated cache writes.",
+  "Quiet scheduled imports must tolerate the pending migration and initialize a missing rank timestamp without relying on mutable cache freshness.",
 );
 assert.equal(
   automationSource.includes("readNetworkRankSnapshot") &&
