@@ -948,6 +948,25 @@ async function main() {
   assert.equal(recoveredHeartbeatResult.completedJobs, 1);
   assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, false);
 
+  const rankRefreshHeartbeatDb = new MemoryD1();
+  rankRefreshHeartbeatDb.serverPublicCache.set(guildId, {
+    guild_id: guildId,
+    plan_key: "partner",
+    public_server_name: "Fixture Server",
+    last_adm_update_at: "2026-05-31T18:00:00.000Z",
+    updated_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+  });
+  await createAdmImportJobForServer(makeEnv(rankRefreshHeartbeatDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-02-00.ADM",
+    admText: "AdminLog started on 2026-05-31 at 20:02:00\\n20:02:01 | Server heartbeat",
+    source: "scheduled_nitrado",
+    chunkSize: 25,
+  });
+  const rankRefreshHeartbeatResult = await processPendingAdmImportJobs(makeEnv(rankRefreshHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(rankRefreshHeartbeatResult.completedJobs, 1);
+  assert.equal(rankRefreshHeartbeatResult.results[0]?.file_result?.public_cache_updated, true);
+
   const buildFixtureName = "DayZServer_PS4_x64_2026-05-31_20-01-53.ADM";
   const buildFixtureLines = [
     "AdminLog started on 2026-05-31 at 20:01:53",
@@ -2138,6 +2157,7 @@ class MemoryStatement {
         public_server_name: this.values[3],
         last_status_update_at: this.values[12],
         last_adm_update_at: this.values[13],
+        updated_at: this.values[14],
       });
       return changed(1);
     }
@@ -2194,6 +2214,9 @@ class MemoryStatement {
       }
       const row = this.db.admImportJobs.get(String(this.values[0]));
       return (row && row.server_id === this.values[1] ? row : null) as T | null;
+    }
+    if (q.includes("from server_public_cache") && q.includes("where guild_id = ?")) {
+      return (this.db.serverPublicCache.get(String(this.values[0])) ?? null) as T | null;
     }
     if (q.includes("from adm_build_reparse_state state")) {
       const parserVersion = String(this.values[0] ?? "");

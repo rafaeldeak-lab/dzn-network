@@ -2695,6 +2695,7 @@ const MANUAL_ADM_UPLOAD_CHUNK_SIZE = 10;
 const SCHEDULED_ADM_IMPORT_CHUNK_SIZE = 50;
 const SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 1;
 const SCHEDULED_ADM_IMPORT_SOURCE = "scheduled_nitrado";
+const SCHEDULED_IDLE_NETWORK_RANK_REFRESH_MS = 60 * 60 * 1000;
 export const OWNER_SUPPLIED_ADM_RECOVERY_SOURCE = "owner_supplied_adm_recovery";
 const NOFTP_LIVE_SOURCE_NAME = "gameserver_details_log_files_noftp_download";
 const SCHEDULED_ADM_IMPORT_STALE_MS = 2 * 60 * 1000;
@@ -4216,7 +4217,7 @@ async function finalizeAdmImportJob(
     + Number(row.disconnects ?? 0)
     + Number(row.deaths ?? 0)
     + Number(buildEventForFile?.found ?? 0);
-  const previousScheduledCacheResult = isScheduledNitradoImport && derivedDataWrites === 0
+  const previousScheduledMaintenanceResult = isScheduledNitradoImport && derivedDataWrites === 0
     ? await db
       .prepare(
         `SELECT public_cache_updated, warnings_json
@@ -4231,9 +4232,19 @@ async function finalizeAdmImportJob(
       .bind(row.server_id, row.id, SCHEDULED_ADM_IMPORT_SOURCE)
       .first<{ public_cache_updated: number; warnings_json: string | null }>()
     : null;
-  const retryPreviousScheduledCacheFailure = Number(previousScheduledCacheResult?.public_cache_updated ?? 1) === 0
-    && String(previousScheduledCacheResult?.warnings_json ?? "").includes("Public cache update failed");
-  const shouldRefreshDerivedOutputs = !isScheduledNitradoImport || derivedDataWrites > 0;
+  const previousScheduledWarnings = String(previousScheduledMaintenanceResult?.warnings_json ?? "");
+  const retryPreviousScheduledCacheFailure = Number(previousScheduledMaintenanceResult?.public_cache_updated ?? 1) === 0
+    && previousScheduledWarnings.includes("Public cache update failed");
+  const retryPreviousScheduledStatsFailure = previousScheduledWarnings.includes("Stats rebuild failed");
+  const existingPublicCache = isScheduledNitradoImport && derivedDataWrites === 0 && server.guild_id
+    ? await db
+      .prepare("SELECT updated_at, last_adm_update_at FROM server_public_cache WHERE guild_id = ? LIMIT 1")
+      .bind(server.guild_id)
+      .first<{ updated_at: string | null; last_adm_update_at: string | null }>()
+    : null;
+  const refreshScheduledNetworkRank = Boolean(existingPublicCache?.updated_at)
+    && isIsoOlderThan(existingPublicCache?.updated_at, SCHEDULED_IDLE_NETWORK_RANK_REFRESH_MS);
+  const shouldRefreshDerivedOutputs = !isScheduledNitradoImport || derivedDataWrites > 0 || retryPreviousScheduledStatsFailure;
 
   if (shouldRefreshDerivedOutputs) {
     try {
@@ -4244,17 +4255,19 @@ async function finalizeAdmImportJob(
     }
   }
 
-  // Scheduled files that add no gameplay/stat signal do not change public data.
-  // Skipping their cache write prevents a timeout from downgrading an otherwise
-  // successful lightweight heartbeat import to a warning state.
+  // Scheduled files with no gameplay/stat signal skip the expensive public cache
+  // write, except when recovering a failed refresh or periodically recalculating
+  // a quiet server's cross-network rank.
   const publicCacheGuildId = server.guild_id;
-  if (publicCacheGuildId && (!isScheduledNitradoImport || derivedDataWrites > 0 || retryPreviousScheduledCacheFailure)) {
+  if (publicCacheGuildId && (!isScheduledNitradoImport || derivedDataWrites > 0 || retryPreviousScheduledCacheFailure || refreshScheduledNetworkRank)) {
     try {
       await withManualAdmPhaseTimeout(upsertServerPublicCache(env, {
         guildId: publicCacheGuildId,
         planKey: server.plan_key,
         publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
-        lastAdmUpdateAt: now,
+        lastAdmUpdateAt: derivedDataWrites > 0 || retryPreviousScheduledCacheFailure
+          ? now
+          : existingPublicCache?.last_adm_update_at ?? null,
       }), "public cache update");
       publicCacheUpdated = true;
       cacheRefreshStatus = "updated";
