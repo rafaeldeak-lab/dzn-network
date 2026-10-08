@@ -4,7 +4,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { applyLeaderboardsAccess, applyServerLeaderboardAccess } from "../functions/_lib/public-leaderboards";
 import { applyHomeStatsAccess, buildPublicBuildEventLeaderboardRows } from "../functions/api/public/home-stats";
 import { applyServerReviewsAccess } from "../functions/api/public/server-reviews";
-import { applyPublicServerAccess, publicListingStatus } from "../functions/api/public/servers";
+import { applyPublicServerAccess, publicListingStatus, resolvePublicStatsActive } from "../functions/api/public/servers";
 
 const baseServer = {
   linked_server_id: "pandora",
@@ -167,6 +167,9 @@ assert.equal(JSON.stringify(previewServer).includes("reviewer_discord_id"), fals
 assert.equal(publicListingStatus("pending", false), "Setup pending");
 assert.equal(publicListingStatus("live", false), "Active");
 assert.equal(publicListingStatus("pending", true), "Historical");
+assert.equal(resolvePublicStatsActive(false, false, "Active"), true, "Fresh ADM evidence must keep the public sync boolean active when a cached rank snapshot is stale.");
+assert.equal(resolvePublicStatsActive(false, false, "Pending"), false, "A pending server must not be promoted by a negative rank snapshot.");
+assert.equal(resolvePublicStatsActive(true, true, "Active"), false, "Historical server records must remain inactive regardless of cached rank or ADM state.");
 const pendingSetupPreview = applyPublicServerAccess({
   ...baseServer,
   status: "pending",
