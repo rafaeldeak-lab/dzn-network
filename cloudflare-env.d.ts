@@ -27,6 +27,7 @@ interface CloudflareEnv {
   DZN_STORE_ENABLED?: string;
   DZN_STORE_ADMIN_ENABLED?: string;
   DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED?: string;
+  DZN_OWNER_DISCORD_ACCESS_ENABLED?: string;
   ASSETS?: {
     fetch(input: Request | string, init?: RequestInit): Promise<Response>;
   };
