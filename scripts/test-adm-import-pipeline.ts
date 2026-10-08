@@ -897,10 +897,116 @@ async function main() {
   assert.equal(scheduledJobDb.killEvents.length, 216);
   assert.equal(scheduledJobDb.serverStats.get(linkedServerId)?.total_kills, 216);
   assert.equal(scheduledJobDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
+  const scheduledFinalisationStart = scheduledJobDb.executedQueries.lastIndexOf("update adm_import_jobs set status = 'rebuilding', updated_at = ? where id = ? and server_id = ?");
+  const scheduledCacheWrite = scheduledJobDb.executedQueries.findIndex((query, index) =>
+    index > scheduledFinalisationStart && query.includes("insert into server_public_cache"),
+  );
+  assert.ok(scheduledFinalisationStart >= 0 && scheduledCacheWrite > scheduledFinalisationStart);
+  assert.equal(
+    scheduledJobDb.executedQueries.slice(scheduledFinalisationStart, scheduledCacheWrite).some((query) => query.includes("create table if not exists server_public_cache")),
+    false,
+    "Scheduled cache finalisation must not run the full automation schema compatibility routine inside its bounded phase.",
+  );
+  const scheduledDiscordQueueStart = scheduledJobDb.executedQueries.findIndex((query, index) =>
+    index > scheduledCacheWrite && (query.startsWith("update automation_jobs set") || query.includes("insert or ignore into automation_jobs")),
+  );
+  assert.ok(scheduledDiscordQueueStart > scheduledCacheWrite);
+  assert.equal(
+    scheduledJobDb.executedQueries.slice(scheduledCacheWrite, scheduledDiscordQueueStart).some((query) => query.includes("create table if not exists automation_jobs")),
+    false,
+    "Scheduled Discord queueing must not run the full automation schema compatibility routine inside its bounded phase.",
+  );
   assert.equal(scheduledJobDb.automationJobs.length > 0, true);
   assert.equal(scheduledJobDb.admSyncState.get(linkedServerId)?.last_processed_file, largeFixtureName);
   assert.equal(scheduledJobDb.admSyncState.get(linkedServerId)?.cursor_recovery_reason, "scheduled_chunked_import");
   assert.equal(JSON.parse(String(scheduledJobDb.syncRuns.at(-1)?.message ?? "{}")).type, "scheduled_adm_import");
+
+  const heartbeatScheduledDb = new MemoryD1();
+  await createAdmImportJobForServer(makeEnv(heartbeatScheduledDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-00-00.ADM",
+    admText: "AdminLog started on 2026-05-31 at 20:00:00\n20:00:01 | Server heartbeat",
+    source: "scheduled_nitrado",
+    chunkSize: 25,
+  });
+  const heartbeatResult = await processPendingAdmImportJobs(makeEnv(heartbeatScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(heartbeatResult.completedJobs, 1);
+  assert.equal(heartbeatResult.results[0]?.file_result?.public_cache_updated, false);
+  assert.equal(heartbeatScheduledDb.serverPublicCache.has(guildId), false);
+
+  const retryHeartbeatDb = new MemoryD1();
+  retryHeartbeatDb.admImportJobs.set("previous-cache-failure", {
+    id: "previous-cache-failure",
+    server_id: linkedServerId,
+    source: "scheduled_nitrado",
+    status: "completed_with_warnings",
+    public_cache_updated: 0,
+    warnings_json: '["previous.ADM: Public cache update failed after ADM rows were written. timed out"]',
+    completed_at: "2026-05-31T19:59:00.000Z",
+  });
+  await createAdmImportJobForServer(makeEnv(retryHeartbeatDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-00-30.ADM",
+    admText: "AdminLog started on 2026-05-31 at 20:00:30\\n20:00:31 | Server heartbeat",
+    source: "scheduled_nitrado",
+    chunkSize: 25,
+  });
+  const retryHeartbeatResult = await processPendingAdmImportJobs(makeEnv(retryHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(retryHeartbeatResult.completedJobs, 1);
+  assert.equal(retryHeartbeatResult.results[0]?.file_result?.public_cache_updated, true);
+  assert.equal(retryHeartbeatDb.serverPublicCache.has(guildId), true);
+
+  await createAdmImportJobForServer(makeEnv(retryHeartbeatDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-01-00.ADM",
+    admText: "AdminLog started on 2026-05-31 at 20:01:00\\n20:01:01 | Server heartbeat",
+    source: "scheduled_nitrado",
+    chunkSize: 25,
+  });
+  const recoveredHeartbeatResult = await processPendingAdmImportJobs(makeEnv(retryHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(recoveredHeartbeatResult.completedJobs, 1);
+  assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, false);
+
+  const retryStatsHeartbeatDb = new MemoryD1();
+  retryStatsHeartbeatDb.admImportJobs.set("previous-stats-failure", {
+    id: "previous-stats-failure",
+    server_id: linkedServerId,
+    source: "scheduled_nitrado",
+    status: "completed_with_warnings",
+    public_cache_updated: 1,
+    warnings_json: '["previous.ADM: Stats rebuild failed after ADM rows were written. timed out"]',
+    completed_at: "2026-05-31T19:59:00.000Z",
+  });
+  await createAdmImportJobForServer(makeEnv(retryStatsHeartbeatDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-00-45.ADM",
+    admText: "AdminLog started on 2026-05-31 at 20:00:45\\n20:00:46 | Server heartbeat",
+    source: "scheduled_nitrado",
+    chunkSize: 25,
+  });
+  const retryStatsHeartbeatResult = await processPendingAdmImportJobs(makeEnv(retryStatsHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(retryStatsHeartbeatResult.completedJobs, 1);
+  assert.equal(retryStatsHeartbeatResult.results[0]?.file_result?.public_cache_updated, true);
+  assert.equal(retryStatsHeartbeatDb.serverPublicCache.has(guildId), true);
+
+  const rankRefreshHeartbeatDb = new MemoryD1();
+  rankRefreshHeartbeatDb.serverPublicCache.set(guildId, {
+    guild_id: guildId,
+    plan_key: "partner",
+    public_server_name: "Fixture Server",
+    last_adm_update_at: "2026-05-31T18:00:00.000Z",
+    updated_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+  });
+  await createAdmImportJobForServer(makeEnv(rankRefreshHeartbeatDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-02-00.ADM",
+    admText: "AdminLog started on 2026-05-31 at 20:02:00\\n20:02:01 | Server heartbeat",
+    source: "scheduled_nitrado",
+    chunkSize: 25,
+  });
+  const rankRefreshHeartbeatResult = await processPendingAdmImportJobs(makeEnv(rankRefreshHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(rankRefreshHeartbeatResult.completedJobs, 1);
+  assert.equal(rankRefreshHeartbeatResult.results[0]?.file_result?.public_cache_updated, true);
 
   const buildFixtureName = "DayZServer_PS4_x64_2026-05-31_20-01-53.ADM";
   const buildFixtureLines = [
@@ -934,12 +1040,30 @@ async function main() {
     chunkSize: 4,
   });
   let buildScheduledPending = await processPendingAdmImportJobs(makeEnv(buildScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  const buildJobAfterFirstChunk = Array.from(buildScheduledDb.admImportJobs.values())[0];
+  assert.equal(JSON.parse(String(buildJobAfterFirstChunk?.result_json ?? "{}")).build_events_stored, 3);
   let buildScheduledLoops = 0;
   while (buildScheduledPending.completedJobs === 0 && buildScheduledLoops < 20) {
     buildScheduledPending = await processPendingAdmImportJobs(makeEnv(buildScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
     buildScheduledLoops += 1;
   }
   assert.equal(buildScheduledPending.completedJobs, 1);
+  assert.equal(buildScheduledPending.results[0]?.file_result?.public_cache_updated, true);
+  assert.equal(buildScheduledDb.serverPublicCache.has(guildId), true);
+  const completedBuildJob = buildScheduledDb.admImportJobs.get(String(buildScheduledPending.results[0]?.job_id));
+  assert.ok(completedBuildJob);
+  // A grown ADM reuses its job row; the next tail must not inherit build writes
+  // recorded by the already processed portion of that same file.
+  completedBuildJob.status = "queued";
+  completedBuildJob.current_line = buildFixtureLines.length;
+  completedBuildJob.total_lines = buildFixtureLines.length + 2;
+  completedBuildJob.chunks_processed = Math.ceil(buildFixtureLines.length / 4);
+  completedBuildJob.total_chunks = Math.ceil((buildFixtureLines.length + 2) / 4);
+  completedBuildJob.adm_text = [...buildFixtureLines, "AdminLog started on 2026-05-31 at 20:02:12", "20:02:13 | Server heartbeat"].join("\\n");
+  completedBuildJob.result_json = null;
+  const idleBuildTail = await processPendingAdmImportJobs(makeEnv(buildScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(idleBuildTail.completedJobs, 1);
+  assert.equal(idleBuildTail.results[0]?.file_result?.public_cache_updated, false);
   assert.equal(buildScheduledDb.buildEvents.length, 12);
   assert.deepEqual(countBy(buildScheduledDb.buildEvents, "event_type"), {
     placed: 5,
@@ -1097,6 +1221,7 @@ async function main() {
   scheduledTailRow.total_chunks = 1;
   scheduledTailRow.chunks_processed = 1;
   scheduledTailRow.adm_text = scheduledTailLines.slice(0, 2).join("\n");
+  scheduledTailRow.result_json = JSON.stringify({ build_events_stored: 4 });
   scheduledTailRow.completed_at = "2026-05-20T12:00:00.000Z";
   const scheduledTailGrowth = await createScheduledAdmImportJobForServer(
     { ...makeEnv(scheduledTailDb), MOCK_NITRADO: "true" },
@@ -1109,6 +1234,7 @@ async function main() {
   assert.equal(scheduledTailGrowth.job?.job_id, scheduledTailFirst.job?.job_id);
   assert.equal(scheduledTailGrowth.job?.current_line, 2);
   assert.equal(scheduledTailGrowth.job?.total_lines, scheduledTailLines.length);
+  assert.equal(scheduledTailDb.admImportJobs.get(String(scheduledTailFirst.job?.job_id))?.result_json, null);
   assert.equal(scheduledTailDb.admImportJobs.size, 1);
 
   const scheduledDuplicateDb = new MemoryD1();
@@ -1550,6 +1676,7 @@ class MemoryD1 {
   failAutomationJobInsert: boolean;
   killInsertAttempts = 0;
   schemaQueries: string[] = [];
+  executedQueries: string[] = [];
 
   constructor(options: { failKillInsertAfter?: number | null; failAutomationJobInsert?: boolean } = {}) {
     this.failKillInsertAfter = options.failKillInsertAfter ?? null;
@@ -1573,6 +1700,7 @@ class MemoryStatement {
 
   async run(): Promise<RunResult> {
     const q = normalizeSql(this.query);
+    this.db.executedQueries.push(q);
     if (isSchemaQuery(q)) {
       this.db.schemaQueries.push(q);
       return changed(0);
@@ -1975,6 +2103,7 @@ class MemoryStatement {
       row.chunk_size = Number(this.values[4] ?? row.chunk_size);
       row.total_chunks = Number(this.values[5] ?? row.total_chunks);
       row.chunks_processed = Number(this.values[6] ?? row.chunks_processed);
+      if (q.includes("result_json = null")) row.result_json = null;
       row.completed_at = null;
       row.error_message = null;
       row.failed_chunk_index = null;
@@ -2010,7 +2139,8 @@ class MemoryStatement {
     if (q.includes("update adm_import_jobs set") && q.includes("parsed_kills = parsed_kills +")) {
       const chunkProtocol = q.includes("raw_kill_lines_found = raw_kill_lines_found +");
       const hasStatusParam = q.includes("status = ?");
-      const rowIdIndex = chunkProtocol ? (hasStatusParam ? 20 : 19) : 18;
+      const storesBuildEventCount = q.includes("json_set(") && q.includes("build_events_stored");
+      const rowIdIndex = chunkProtocol ? (hasStatusParam ? 20 : 19) + (storesBuildEventCount ? 1 : 0) : 18;
       const row = this.db.admImportJobs.get(String(this.values[rowIdIndex]));
       if (!row) return changed(0);
       row.status = hasStatusParam ? this.values[0] : (chunkProtocol ? "queued" : this.values[0]);
@@ -2035,9 +2165,14 @@ class MemoryStatement {
       row.hit_lines = Number(row.hit_lines ?? 0) + Number(this.values[offset + 9] ?? 0);
       row.raw_events = Number(row.raw_events ?? 0) + Number(this.values[offset + 10] ?? 0);
       row.player_events = Number(row.player_events ?? 0) + Number(this.values[offset + 11] ?? 0);
-      row.failed_writes = Number(row.failed_writes ?? 0) + Number(this.values[offset + 12] ?? 0);
-      row.warnings_json = this.values[offset + 13];
-      row.updated_at = this.values[offset + 14];
+      const buildEventOffset = storesBuildEventCount ? 1 : 0;
+      if (storesBuildEventCount) {
+        const current = Number(JSON.parse(String(row.result_json ?? "{}")).build_events_stored ?? 0);
+        row.result_json = JSON.stringify({ build_events_stored: current + Number(this.values[offset + 12] ?? 0) });
+      }
+      row.failed_writes = Number(row.failed_writes ?? 0) + Number(this.values[offset + 12 + buildEventOffset] ?? 0);
+      row.warnings_json = this.values[offset + 13 + buildEventOffset];
+      row.updated_at = this.values[offset + 14 + buildEventOffset];
       return changed(1);
     }
     if (q.includes("update adm_import_jobs set") && q.includes("current_line = total_lines") && q.includes("result_json = ?")) {
@@ -2090,6 +2225,7 @@ class MemoryStatement {
         public_server_name: this.values[3],
         last_status_update_at: this.values[12],
         last_adm_update_at: this.values[13],
+        updated_at: this.values[14],
       });
       return changed(1);
     }
@@ -2121,6 +2257,17 @@ class MemoryStatement {
       return ({ eligible: selected?.guild_id === guildId && isEligible(selected) && eligibleCount === 1 ? 1 : 0 } as T);
     }
     if (q.includes("from adm_import_jobs")) {
+      if (q.includes("id != ?") && q.includes("completed_at is not null")) {
+        const rows = Array.from(this.db.admImportJobs.values())
+          .filter((row) =>
+            row.server_id === this.values[0]
+            && row.id !== this.values[1]
+            && row.source === this.values[2]
+            && row.completed_at,
+          )
+          .sort((a, b) => String(b.completed_at).localeCompare(String(a.completed_at)));
+        return (rows[0] ?? null) as T | null;
+      }
       if (q.includes("where server_id = ? and filename = ?")) {
         const rows = Array.from(this.db.admImportJobs.values())
           .filter((row) => row.server_id === this.values[0] && row.filename === this.values[1])
@@ -2135,6 +2282,9 @@ class MemoryStatement {
       }
       const row = this.db.admImportJobs.get(String(this.values[0]));
       return (row && row.server_id === this.values[1] ? row : null) as T | null;
+    }
+    if (q.includes("from server_public_cache") && q.includes("where guild_id = ?")) {
+      return (this.db.serverPublicCache.get(String(this.values[0])) ?? null) as T | null;
     }
     if (q.includes("from adm_build_reparse_state state")) {
       const parserVersion = String(this.values[0] ?? "");
@@ -2250,7 +2400,13 @@ class MemoryStatement {
     if (q.includes("count(*) as count from player_events") && q.includes("event_type = 'player_connected'")) return ({ count: this.db.playerEvents.filter((row) => row.linked_server_id === this.values[0] && row.event_type === "player_connected").length } as T);
     if (q.includes("count(*) as count from player_events") && q.includes("event_type = 'player_disconnected'")) return ({ count: this.db.playerEvents.filter((row) => row.linked_server_id === this.values[0] && row.event_type === "player_disconnected").length } as T);
     if (q.includes("count(*) as count from player_events")) return ({ count: this.db.playerEvents.filter((row) => row.linked_server_id === this.values[0]).length } as T);
-    if (q.includes("count(*) as count from build_events")) return ({ count: this.db.buildEvents.filter((row) => row.linked_server_id === this.values[0]).length } as T);
+    if (q.includes("select 1 as found from build_events")) {
+      const found = this.db.buildEvents.some((row) =>
+        row.nitrado_service_id === this.values[0] && row.source_adm_file === this.values[1],
+      );
+      return (found ? { found: 1 } : null) as T;
+    }
+    if (q.includes("count(*) as count from build_events")) return ({ count: this.db.buildEvents.filter((row) => row.linked_server_id === this.values[0] && (!q.includes("source_adm_file") || row.source_adm_file === this.values[1])).length } as T);
     if (q.includes("count(*) as count from kill_events") && q.includes("victim_name is not null")) return ({ count: this.db.killEvents.filter((row) => row.linked_server_id === this.values[0] && row.victim_name).length } as T);
     if (q.includes("count(*) as count from kill_events")) return ({ count: this.db.killEvents.filter((row) => row.linked_server_id === this.values[0]).length } as T);
     if (q.includes("max(coalesce(distance")) return ({ distance: maxNumber(this.db.killEvents.filter((row) => row.linked_server_id === this.values[0]).map((row) => Number(row.distance ?? 0))) } as T);

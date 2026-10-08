@@ -1581,9 +1581,9 @@ export async function queueDiscordPostUpdatesForGuild(
   planKey: PlanKey,
   postTypes: AutoPostType[],
   reason: string,
-  options: { linkedServerId?: string } = {},
+  options: { linkedServerId?: string; skipSchemaEnsure?: boolean } = {},
 ) {
-  await ensureAutomationSchema(env);
+  if (options.skipSchemaEnsure !== true) await ensureAutomationSchema(env);
   let effectivePlanKey = planKey;
   if (options.linkedServerId) {
     const context = await getDiscordPublishingContextForLinkedServer(env, options.linkedServerId, { skipSchemaEnsure: true });

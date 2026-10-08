@@ -2695,6 +2695,7 @@ const MANUAL_ADM_UPLOAD_CHUNK_SIZE = 10;
 const SCHEDULED_ADM_IMPORT_CHUNK_SIZE = 50;
 const SCHEDULED_ADM_IMPORT_CHUNKS_PER_TICK = 1;
 const SCHEDULED_ADM_IMPORT_SOURCE = "scheduled_nitrado";
+const SCHEDULED_IDLE_NETWORK_RANK_REFRESH_MS = 60 * 60 * 1000;
 export const OWNER_SUPPLIED_ADM_RECOVERY_SOURCE = "owner_supplied_adm_recovery";
 const NOFTP_LIVE_SOURCE_NAME = "gameserver_details_log_files_noftp_download";
 const SCHEDULED_ADM_IMPORT_STALE_MS = 2 * 60 * 1000;
@@ -3007,6 +3008,11 @@ export async function processAdmImportJobLineChunk(
           hit_lines = hit_lines + ?,
           raw_events = raw_events + ?,
           player_events = player_events + ?,
+          result_json = json_set(
+            COALESCE(NULLIF(result_json, ''), '{}'),
+            '$.build_events_stored',
+            COALESCE(json_extract(NULLIF(result_json, ''), '$.build_events_stored'), 0) + ?
+          ),
           failed_writes = failed_writes + ?,
           warnings_json = ?,
           updated_at = ?
@@ -3029,6 +3035,7 @@ export async function processAdmImportJobLineChunk(
         chunkResult.hitLines,
         chunkResult.rawEventsStored,
         chunkResult.playerEventsStored,
+        chunkResult.buildEventsStored,
         chunkResult.failedWrites,
         JSON.stringify(warnings),
         new Date().toISOString(),
@@ -3983,6 +3990,11 @@ export async function processNextAdmImportJobChunk(
           hit_lines = hit_lines + ?,
           raw_events = raw_events + ?,
           player_events = player_events + ?,
+          result_json = json_set(
+            COALESCE(NULLIF(result_json, ''), '{}'),
+            '$.build_events_stored',
+            COALESCE(json_extract(NULLIF(result_json, ''), '$.build_events_stored'), 0) + ?
+          ),
           failed_writes = failed_writes + ?,
           warnings_json = ?,
           updated_at = ?
@@ -4006,6 +4018,7 @@ export async function processNextAdmImportJobChunk(
         chunkResult.hitLines,
         chunkResult.rawEventsStored,
         chunkResult.playerEventsStored,
+        chunkResult.buildEventsStored,
         chunkResult.failedWrites,
         JSON.stringify(warnings),
         new Date().toISOString(),
@@ -4204,12 +4217,40 @@ async function finalizeAdmImportJob(
     : isOwnerSuppliedRecoveryImport
       ? OWNER_SUPPLIED_ADM_RECOVERY_SOURCE
       : "manual_chunked_import";
-  const statAffectingWrites = Number(row.written_kills ?? 0)
+  const derivedDataWrites = Number(row.written_kills ?? 0)
     + Number(row.player_events ?? 0)
     + Number(row.joins ?? 0)
     + Number(row.disconnects ?? 0)
-    + Number(row.deaths ?? 0);
-  const shouldRefreshDerivedOutputs = !isScheduledNitradoImport || statAffectingWrites > 0;
+    + Number(row.deaths ?? 0)
+    + getAdmImportJobBuildEventsStored(row);
+  const previousScheduledMaintenanceResult = isScheduledNitradoImport && derivedDataWrites === 0
+    ? await db
+      .prepare(
+        `SELECT public_cache_updated, warnings_json
+         FROM adm_import_jobs
+         WHERE server_id = ?
+           AND id != ?
+           AND source = ?
+           AND completed_at IS NOT NULL
+         ORDER BY completed_at DESC
+         LIMIT 1`,
+      )
+      .bind(row.server_id, row.id, SCHEDULED_ADM_IMPORT_SOURCE)
+      .first<{ public_cache_updated: number; warnings_json: string | null }>()
+    : null;
+  const previousScheduledWarnings = String(previousScheduledMaintenanceResult?.warnings_json ?? "");
+  const retryPreviousScheduledCacheFailure = Number(previousScheduledMaintenanceResult?.public_cache_updated ?? 1) === 0
+    && previousScheduledWarnings.includes("Public cache update failed");
+  const retryPreviousScheduledStatsFailure = previousScheduledWarnings.includes("Stats rebuild failed");
+  const existingPublicCache = isScheduledNitradoImport && derivedDataWrites === 0 && server.guild_id
+    ? await db
+      .prepare("SELECT updated_at, last_adm_update_at FROM server_public_cache WHERE guild_id = ? LIMIT 1")
+      .bind(server.guild_id)
+      .first<{ updated_at: string | null; last_adm_update_at: string | null }>()
+    : null;
+  const refreshScheduledNetworkRank = Boolean(existingPublicCache?.updated_at)
+    && isIsoOlderThan(existingPublicCache?.updated_at, SCHEDULED_IDLE_NETWORK_RANK_REFRESH_MS);
+  const shouldRefreshDerivedOutputs = !isScheduledNitradoImport || derivedDataWrites > 0 || retryPreviousScheduledStatsFailure;
 
   if (shouldRefreshDerivedOutputs) {
     try {
@@ -4220,14 +4261,23 @@ async function finalizeAdmImportJob(
     }
   }
 
-  if (server.guild_id) {
+  // Scheduled files with no gameplay/stat signal skip the expensive public cache
+  // write, except when recovering a failed refresh or periodically recalculating
+  // a quiet server's cross-network rank.
+  const publicCacheGuildId = server.guild_id;
+  if (publicCacheGuildId && (!isScheduledNitradoImport || derivedDataWrites > 0 || retryPreviousScheduledCacheFailure || retryPreviousScheduledStatsFailure || refreshScheduledNetworkRank)) {
     try {
       await withManualAdmPhaseTimeout(upsertServerPublicCache(env, {
-        guildId: server.guild_id,
+        guildId: publicCacheGuildId,
         planKey: server.plan_key,
         publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
-        lastAdmUpdateAt: now,
-      }), "public cache update");
+        lastAdmUpdateAt: derivedDataWrites > 0 || retryPreviousScheduledCacheFailure
+          ? now
+          : existingPublicCache?.last_adm_update_at ?? null,
+      // Scheduled jobs already require the canonical cache schema before reaching
+      // finalisation. Avoid replaying the full compatibility DDL routine inside
+      // this bounded post-import phase; manual imports retain that safeguard.
+      }, { skipSchemaEnsure: isScheduledNitradoImport }), "public cache update");
       publicCacheUpdated = true;
       cacheRefreshStatus = "updated";
     } catch (error) {
@@ -4235,7 +4285,7 @@ async function finalizeAdmImportJob(
       warnings.push(`${row.filename}: Public cache update failed after ADM rows were written. ${safeSyncErrorMessage(error)}`);
     }
   }
-  if (statAffectingWrites > 0) {
+  if (derivedDataWrites > 0) {
     await withManualAdmPhaseTimeout(
       patchHomeStatsAdmStatsFromCanonicalEvents(env),
       "home stats ADM snapshot refresh",
@@ -4260,7 +4310,12 @@ async function finalizeAdmImportJob(
         "build_feed_embed",
         "admin_alerts_embed",
         "admin_logs_embed",
-      ], "manual-adm-import", { linkedServerId: server.id }), "Discord post queue");
+      ], "manual-adm-import", {
+        linkedServerId: server.id,
+        // The scheduled finaliser has already established its durable import
+        // state. Keep schema compatibility work outside its timed follow-up.
+        skipSchemaEnsure: isScheduledNitradoImport,
+      }), "Discord post queue");
       discordQueueStatus = discordQueuesCreated > 0 ? "queued" : "skipped";
     } catch (error) {
       discordQueueStatus = "failed";
@@ -4809,6 +4864,7 @@ async function updateScheduledAdmImportJobTailText(
         chunk_size = ?,
         total_chunks = ?,
         chunks_processed = ?,
+        result_json = NULL,
         completed_at = NULL,
         error_message = NULL,
         failed_chunk_index = NULL,
@@ -5428,6 +5484,17 @@ function parseJobWarnings(row: Pick<AdmImportJobRow, "warnings_json">) {
     return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
   } catch {
     return [];
+  }
+}
+
+function getAdmImportJobBuildEventsStored(row: Pick<AdmImportJobRow, "result_json">) {
+  if (!row.result_json) return 0;
+  try {
+    const parsed = JSON.parse(row.result_json) as { build_events_stored?: unknown };
+    const count = Number(parsed?.build_events_stored ?? 0);
+    return Number.isFinite(count) ? Math.max(0, count) : 0;
+  } catch {
+    return 0;
   }
 }
 
