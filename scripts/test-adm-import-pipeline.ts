@@ -967,6 +967,28 @@ async function main() {
   assert.equal(recoveredHeartbeatResult.completedJobs, 1);
   assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, false);
 
+  const retryStatsHeartbeatDb = new MemoryD1();
+  retryStatsHeartbeatDb.admImportJobs.set("previous-stats-failure", {
+    id: "previous-stats-failure",
+    server_id: linkedServerId,
+    source: "scheduled_nitrado",
+    status: "completed_with_warnings",
+    public_cache_updated: 1,
+    warnings_json: '["previous.ADM: Stats rebuild failed after ADM rows were written. timed out"]',
+    completed_at: "2026-05-31T19:59:00.000Z",
+  });
+  await createAdmImportJobForServer(makeEnv(retryStatsHeartbeatDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-00-45.ADM",
+    admText: "AdminLog started on 2026-05-31 at 20:00:45\\n20:00:46 | Server heartbeat",
+    source: "scheduled_nitrado",
+    chunkSize: 25,
+  });
+  const retryStatsHeartbeatResult = await processPendingAdmImportJobs(makeEnv(retryStatsHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(retryStatsHeartbeatResult.completedJobs, 1);
+  assert.equal(retryStatsHeartbeatResult.results[0]?.file_result?.public_cache_updated, true);
+  assert.equal(retryStatsHeartbeatDb.serverPublicCache.has(guildId), true);
+
   const rankRefreshHeartbeatDb = new MemoryD1();
   rankRefreshHeartbeatDb.serverPublicCache.set(guildId, {
     guild_id: guildId,
@@ -1018,6 +1040,8 @@ async function main() {
     chunkSize: 4,
   });
   let buildScheduledPending = await processPendingAdmImportJobs(makeEnv(buildScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  const buildJobAfterFirstChunk = Array.from(buildScheduledDb.admImportJobs.values())[0];
+  assert.equal(JSON.parse(String(buildJobAfterFirstChunk?.result_json ?? "{}")).build_events_stored, 3);
   let buildScheduledLoops = 0;
   while (buildScheduledPending.completedJobs === 0 && buildScheduledLoops < 20) {
     buildScheduledPending = await processPendingAdmImportJobs(makeEnv(buildScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
@@ -1026,6 +1050,20 @@ async function main() {
   assert.equal(buildScheduledPending.completedJobs, 1);
   assert.equal(buildScheduledPending.results[0]?.file_result?.public_cache_updated, true);
   assert.equal(buildScheduledDb.serverPublicCache.has(guildId), true);
+  const completedBuildJob = buildScheduledDb.admImportJobs.get(String(buildScheduledPending.results[0]?.job_id));
+  assert.ok(completedBuildJob);
+  // A grown ADM reuses its job row; the next tail must not inherit build writes
+  // recorded by the already processed portion of that same file.
+  completedBuildJob.status = "queued";
+  completedBuildJob.current_line = buildFixtureLines.length;
+  completedBuildJob.total_lines = buildFixtureLines.length + 2;
+  completedBuildJob.chunks_processed = Math.ceil(buildFixtureLines.length / 4);
+  completedBuildJob.total_chunks = Math.ceil((buildFixtureLines.length + 2) / 4);
+  completedBuildJob.adm_text = [...buildFixtureLines, "AdminLog started on 2026-05-31 at 20:02:12", "20:02:13 | Server heartbeat"].join("\\n");
+  completedBuildJob.result_json = null;
+  const idleBuildTail = await processPendingAdmImportJobs(makeEnv(buildScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(idleBuildTail.completedJobs, 1);
+  assert.equal(idleBuildTail.results[0]?.file_result?.public_cache_updated, false);
   assert.equal(buildScheduledDb.buildEvents.length, 12);
   assert.deepEqual(countBy(buildScheduledDb.buildEvents, "event_type"), {
     placed: 5,
@@ -1183,6 +1221,7 @@ async function main() {
   scheduledTailRow.total_chunks = 1;
   scheduledTailRow.chunks_processed = 1;
   scheduledTailRow.adm_text = scheduledTailLines.slice(0, 2).join("\n");
+  scheduledTailRow.result_json = JSON.stringify({ build_events_stored: 4 });
   scheduledTailRow.completed_at = "2026-05-20T12:00:00.000Z";
   const scheduledTailGrowth = await createScheduledAdmImportJobForServer(
     { ...makeEnv(scheduledTailDb), MOCK_NITRADO: "true" },
@@ -1195,6 +1234,7 @@ async function main() {
   assert.equal(scheduledTailGrowth.job?.job_id, scheduledTailFirst.job?.job_id);
   assert.equal(scheduledTailGrowth.job?.current_line, 2);
   assert.equal(scheduledTailGrowth.job?.total_lines, scheduledTailLines.length);
+  assert.equal(scheduledTailDb.admImportJobs.get(String(scheduledTailFirst.job?.job_id))?.result_json, null);
   assert.equal(scheduledTailDb.admImportJobs.size, 1);
 
   const scheduledDuplicateDb = new MemoryD1();
@@ -2063,6 +2103,7 @@ class MemoryStatement {
       row.chunk_size = Number(this.values[4] ?? row.chunk_size);
       row.total_chunks = Number(this.values[5] ?? row.total_chunks);
       row.chunks_processed = Number(this.values[6] ?? row.chunks_processed);
+      if (q.includes("result_json = null")) row.result_json = null;
       row.completed_at = null;
       row.error_message = null;
       row.failed_chunk_index = null;
@@ -2098,7 +2139,8 @@ class MemoryStatement {
     if (q.includes("update adm_import_jobs set") && q.includes("parsed_kills = parsed_kills +")) {
       const chunkProtocol = q.includes("raw_kill_lines_found = raw_kill_lines_found +");
       const hasStatusParam = q.includes("status = ?");
-      const rowIdIndex = chunkProtocol ? (hasStatusParam ? 20 : 19) : 18;
+      const storesBuildEventCount = q.includes("json_set(") && q.includes("build_events_stored");
+      const rowIdIndex = chunkProtocol ? (hasStatusParam ? 20 : 19) + (storesBuildEventCount ? 1 : 0) : 18;
       const row = this.db.admImportJobs.get(String(this.values[rowIdIndex]));
       if (!row) return changed(0);
       row.status = hasStatusParam ? this.values[0] : (chunkProtocol ? "queued" : this.values[0]);
@@ -2123,9 +2165,14 @@ class MemoryStatement {
       row.hit_lines = Number(row.hit_lines ?? 0) + Number(this.values[offset + 9] ?? 0);
       row.raw_events = Number(row.raw_events ?? 0) + Number(this.values[offset + 10] ?? 0);
       row.player_events = Number(row.player_events ?? 0) + Number(this.values[offset + 11] ?? 0);
-      row.failed_writes = Number(row.failed_writes ?? 0) + Number(this.values[offset + 12] ?? 0);
-      row.warnings_json = this.values[offset + 13];
-      row.updated_at = this.values[offset + 14];
+      const buildEventOffset = storesBuildEventCount ? 1 : 0;
+      if (storesBuildEventCount) {
+        const current = Number(JSON.parse(String(row.result_json ?? "{}")).build_events_stored ?? 0);
+        row.result_json = JSON.stringify({ build_events_stored: current + Number(this.values[offset + 12] ?? 0) });
+      }
+      row.failed_writes = Number(row.failed_writes ?? 0) + Number(this.values[offset + 12 + buildEventOffset] ?? 0);
+      row.warnings_json = this.values[offset + 13 + buildEventOffset];
+      row.updated_at = this.values[offset + 14 + buildEventOffset];
       return changed(1);
     }
     if (q.includes("update adm_import_jobs set") && q.includes("current_line = total_lines") && q.includes("result_json = ?")) {

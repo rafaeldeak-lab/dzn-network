@@ -3008,6 +3008,11 @@ export async function processAdmImportJobLineChunk(
           hit_lines = hit_lines + ?,
           raw_events = raw_events + ?,
           player_events = player_events + ?,
+          result_json = json_set(
+            COALESCE(NULLIF(result_json, ''), '{}'),
+            '$.build_events_stored',
+            COALESCE(json_extract(NULLIF(result_json, ''), '$.build_events_stored'), 0) + ?
+          ),
           failed_writes = failed_writes + ?,
           warnings_json = ?,
           updated_at = ?
@@ -3030,6 +3035,7 @@ export async function processAdmImportJobLineChunk(
         chunkResult.hitLines,
         chunkResult.rawEventsStored,
         chunkResult.playerEventsStored,
+        chunkResult.buildEventsStored,
         chunkResult.failedWrites,
         JSON.stringify(warnings),
         new Date().toISOString(),
@@ -3984,6 +3990,11 @@ export async function processNextAdmImportJobChunk(
           hit_lines = hit_lines + ?,
           raw_events = raw_events + ?,
           player_events = player_events + ?,
+          result_json = json_set(
+            COALESCE(NULLIF(result_json, ''), '{}'),
+            '$.build_events_stored',
+            COALESCE(json_extract(NULLIF(result_json, ''), '$.build_events_stored'), 0) + ?
+          ),
           failed_writes = failed_writes + ?,
           warnings_json = ?,
           updated_at = ?
@@ -4007,6 +4018,7 @@ export async function processNextAdmImportJobChunk(
         chunkResult.hitLines,
         chunkResult.rawEventsStored,
         chunkResult.playerEventsStored,
+        chunkResult.buildEventsStored,
         chunkResult.failedWrites,
         JSON.stringify(warnings),
         new Date().toISOString(),
@@ -4205,18 +4217,12 @@ async function finalizeAdmImportJob(
     : isOwnerSuppliedRecoveryImport
       ? OWNER_SUPPLIED_ADM_RECOVERY_SOURCE
       : "manual_chunked_import";
-  // This composite lookup uses the canonical build-event source identity rather
-  // than counting every historical build for the linked server.
-  const buildEventForFile = await db
-    .prepare("SELECT 1 AS found FROM build_events WHERE nitrado_service_id = ? AND source_adm_file = ? LIMIT 1")
-    .bind(server.nitrado_service_id ?? row.source_service_id ?? "", row.filename)
-    .first<{ found: number }>();
   const derivedDataWrites = Number(row.written_kills ?? 0)
     + Number(row.player_events ?? 0)
     + Number(row.joins ?? 0)
     + Number(row.disconnects ?? 0)
     + Number(row.deaths ?? 0)
-    + Number(buildEventForFile?.found ?? 0);
+    + getAdmImportJobBuildEventsStored(row);
   const previousScheduledMaintenanceResult = isScheduledNitradoImport && derivedDataWrites === 0
     ? await db
       .prepare(
@@ -4259,7 +4265,7 @@ async function finalizeAdmImportJob(
   // write, except when recovering a failed refresh or periodically recalculating
   // a quiet server's cross-network rank.
   const publicCacheGuildId = server.guild_id;
-  if (publicCacheGuildId && (!isScheduledNitradoImport || derivedDataWrites > 0 || retryPreviousScheduledCacheFailure || refreshScheduledNetworkRank)) {
+  if (publicCacheGuildId && (!isScheduledNitradoImport || derivedDataWrites > 0 || retryPreviousScheduledCacheFailure || retryPreviousScheduledStatsFailure || refreshScheduledNetworkRank)) {
     try {
       await withManualAdmPhaseTimeout(upsertServerPublicCache(env, {
         guildId: publicCacheGuildId,
@@ -4858,6 +4864,7 @@ async function updateScheduledAdmImportJobTailText(
         chunk_size = ?,
         total_chunks = ?,
         chunks_processed = ?,
+        result_json = NULL,
         completed_at = NULL,
         error_message = NULL,
         failed_chunk_index = NULL,
@@ -5477,6 +5484,17 @@ function parseJobWarnings(row: Pick<AdmImportJobRow, "warnings_json">) {
     return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
   } catch {
     return [];
+  }
+}
+
+function getAdmImportJobBuildEventsStored(row: Pick<AdmImportJobRow, "result_json">) {
+  if (!row.result_json) return 0;
+  try {
+    const parsed = JSON.parse(row.result_json) as { build_events_stored?: unknown };
+    const count = Number(parsed?.build_events_stored ?? 0);
+    return Number.isFinite(count) ? Math.max(0, count) : 0;
+  } catch {
+    return 0;
   }
 }
 
