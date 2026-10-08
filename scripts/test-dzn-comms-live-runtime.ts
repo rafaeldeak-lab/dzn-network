@@ -618,11 +618,24 @@ async function testOwnerArchiveAndSelfDeleteRuntime() {
     assert.equal((await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=deleted&query=safety", "other-token"), f.env)).status, 403, "Only a platform owner can search archived messages.");
     const archiveResponse = await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=deleted&query=safety%20archive", "owner-token"), f.env);
     assert.equal(archiveResponse.status, 200);
-    const archive = await archiveResponse.json() as { rows?: Array<{ message_id: string; original_body: string; sent_at: string; deleted_at: string }> };
-    assert.deepEqual(archive.rows, [{ message_id: messageId, channel_slug: "global-chat", author_display_name: "Player", author_role_label: "Member", original_body: "Keep this for the safety archive", sent_at: archive.rows?.[0]?.sent_at, deleted_at: archive.rows?.[0]?.deleted_at, deletion_kind: "self_deleted", deleted_by_name: "Player" }]);
+    const archive = await archiveResponse.json() as { rows?: Array<{ message_id: string; original_body: string; sent_at: string; deleted_at: string; current_visibility_state: string }> };
+    assert.deepEqual(archive.rows, [{ message_id: messageId, channel_slug: "global-chat", author_display_name: "Player", author_role_label: "Member", original_body: "Keep this for the safety archive", sent_at: archive.rows?.[0]?.sent_at, deleted_at: archive.rows?.[0]?.deleted_at, deletion_kind: "self_deleted", deleted_by_name: "Player", current_visibility_state: "deleted" }]);
+    f.sqlite.prepare(`INSERT INTO dzn_comms_messages
+      (id,channel_id,author_user_id,author_display_name,author_role_label,body,visibility_state)
+      VALUES ('hidden-archive-message','dzn-global-chat','other','Other','Member','Hidden archive evidence','hidden')`).run();
+    f.sqlite.prepare(`INSERT INTO dzn_comms_owner_message_archive
+      (message_id,channel_id,author_user_id,author_display_name,author_role_label,original_body,sent_at,retained_until)
+      VALUES ('hidden-archive-message','dzn-global-chat','other','Other','Member','Hidden archive evidence',CURRENT_TIMESTAMP,datetime('now','+30 days'))`).run();
+    const hiddenArchiveResponse = await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=hidden&query=hidden%20archive", "owner-token"), f.env);
+    assert.equal(hiddenArchiveResponse.status, 200);
+    const hiddenArchive = await hiddenArchiveResponse.json() as { rows?: Array<{ message_id: string; sent_at: string; current_visibility_state: string }> };
+    assert.deepEqual(hiddenArchive.rows, [{ message_id: "hidden-archive-message", channel_slug: "global-chat", author_display_name: "Other", author_role_label: "Member", original_body: "Hidden archive evidence", sent_at: hiddenArchive.rows?.[0]?.sent_at, deleted_at: null, deletion_kind: null, deleted_by_name: null, current_visibility_state: "hidden" }]);
+    const visibleArchiveResponse = await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=visible&query=hidden%20archive", "owner-token"), f.env);
+    assert.equal(visibleArchiveResponse.status, 200);
+    assert.deepEqual((await visibleArchiveResponse.json() as { rows?: unknown[] }).rows, [], "Hidden content must not appear under the visible archive filter.");
     f.sqlite.prepare("UPDATE dzn_comms_owner_message_archive SET retained_until = '2026-01-01T00:00:00.000Z'").run();
     const retention = await runDznCommsRetention(f.env.DB, new Date("2026-09-24T12:00:00.000Z"));
-    assert.equal(retention.ownerArchiveRowsDeleted, 4, "The retention runner must remove expired original message archives.");
+    assert.equal(retention.ownerArchiveRowsDeleted, 5, "The retention runner must remove expired original message archives.");
     assert.equal(f.count("dzn_comms_owner_message_archive"), 0);
   } finally { f.close(); }
 }

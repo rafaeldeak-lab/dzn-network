@@ -316,22 +316,25 @@ export async function handleDznCommsOwnerArchive(request: Request, env: Env) {
   const url = new URL(request.url);
   const query = clean(url.searchParams.get("query"), 80).toLowerCase();
   const filter = clean(url.searchParams.get("filter"), 16);
-  if (filter && filter !== "all" && filter !== "active" && filter !== "deleted") {
+  const effectiveFilter = filter === "active" ? "visible" : filter || "all";
+  if (effectiveFilter !== "all" && effectiveFilter !== "visible" && effectiveFilter !== "hidden" && effectiveFilter !== "deleted") {
     return error(400, "INVALID_ARCHIVE_FILTER", "Choose a valid archive filter.");
   }
   const pattern = query ? `%${escapeLike(query)}%` : "%";
   const db = requireDb(env);
   const result = await db.prepare(`SELECT archive.message_id, channels.slug AS channel_slug,
       archive.author_display_name, archive.author_role_label, archive.original_body, archive.sent_at,
-      archive.deleted_at, archive.deletion_kind, users.username AS deleted_by_name
+      archive.deleted_at, archive.deletion_kind, users.username AS deleted_by_name,
+      COALESCE(messages.visibility_state, CASE WHEN archive.deleted_at IS NOT NULL THEN 'deleted' ELSE 'unavailable' END) AS current_visibility_state
     FROM dzn_comms_owner_message_archive AS archive
     JOIN dzn_comms_channels AS channels ON channels.id = archive.channel_id
+    LEFT JOIN dzn_comms_messages AS messages ON messages.id = archive.message_id
     LEFT JOIN users ON users.id = archive.deleted_by_user_id
     WHERE julianday(archive.retained_until) > julianday('now')
-      AND (? = 'all' OR (? = 'active' AND archive.deleted_at IS NULL) OR (? = 'deleted' AND archive.deleted_at IS NOT NULL))
+      AND (? = 'all' OR COALESCE(messages.visibility_state, CASE WHEN archive.deleted_at IS NOT NULL THEN 'deleted' ELSE 'unavailable' END) = ?)
       AND (lower(archive.author_display_name) LIKE ? ESCAPE '\\' OR lower(archive.original_body) LIKE ? ESCAPE '\\')
     ORDER BY julianday(archive.sent_at) DESC, archive.message_id DESC
-    LIMIT 100`).bind(filter || "all", filter || "all", filter || "all", pattern, pattern).all<Record<string, unknown>>();
+    LIMIT 100`).bind(effectiveFilter, effectiveFilter, pattern, pattern).all<Record<string, unknown>>();
   return json({ ok: true, private: true, retention_days: MESSAGE_RETENTION_DAYS, rows: result.results ?? [] }, { headers: privateNoStoreHeaders() });
 }
 

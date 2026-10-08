@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS dzn_owner_discord_access_requests (
   requester_discord_id TEXT NOT NULL,
   requester_username TEXT,
   linked_server_id TEXT,
+  linked_server_id_snapshot TEXT NOT NULL,
   server_name TEXT NOT NULL,
   request_note TEXT,
   status TEXT NOT NULL DEFAULT 'pending'
