@@ -25,7 +25,10 @@ export function OwnerDiscordAccessPage() {
       setData(payload); setServerId((current) => current || payload.servers?.[0]?.id || ""); setState("ready");
     } catch (error) { setNotice(error instanceof Error ? error.message : "Owner Discord access is unavailable."); setState("error"); }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [load]);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!serverId || submitting) return;
     setSubmitting(true); setNotice(null);

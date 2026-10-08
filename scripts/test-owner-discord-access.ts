@@ -44,7 +44,6 @@ async function run() {
     const env = { DB: db as unknown as D1Database, SESSION_SECRET: "owner-discord-access-test", DZN_OWNER_DISCORD_ACCESS_ENABLED: "true", DZN_PLATFORM_OWNER_DISCORD_IDS: owner.discord_id } as Env;
     const applicantSession = await createSession(env, applicant.id);
     const ownerSession = await createSession(env, owner.id);
-    const outsiderSession = await createSession(env, outsider.id);
 
     assert.equal((await applicantRoute(context(env, request("GET")))).status, 401);
     assert.equal((await applicantRoute(context({ ...env, DZN_OWNER_DISCORD_ACCESS_ENABLED: "false" }, request("GET", undefined, applicantSession.token)))).status, 404);
