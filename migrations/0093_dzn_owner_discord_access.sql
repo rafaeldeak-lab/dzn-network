@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS dzn_owner_discord_access_requests (
   id TEXT PRIMARY KEY,
   requester_user_id TEXT,
-  requester_discord_id TEXT NOT NULL,
+  requester_discord_id TEXT,
   requester_username TEXT,
   linked_server_id TEXT,
   linked_server_id_snapshot TEXT NOT NULL,

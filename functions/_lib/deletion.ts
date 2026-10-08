@@ -284,6 +284,18 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
           actor_user_id = CASE WHEN actor_user_id = ? THEN NULL ELSE actor_user_id END
       WHERE member_user_id = ? OR actor_user_id = ?`).bind(userId, userId, userId, userId));
   }
+  if (await tableExists(db, "dzn_owner_discord_access_requests")) {
+    statements.push(db.prepare(`UPDATE dzn_owner_discord_access_requests
+      SET requester_discord_id = NULL,
+          requester_username = NULL
+      WHERE requester_user_id = ?`).bind(userId));
+  }
+  if (await tableExists(db, "dzn_owner_discord_access_audit")) {
+    statements.push(db.prepare(`UPDATE dzn_owner_discord_access_audit
+      SET actor_discord_id = NULL,
+          actor_username = NULL
+      WHERE actor_user_id = ?`).bind(userId));
+  }
 
   if (await tableExists(db, "dzn_word_chain_rounds")) {
     statements.push(db.prepare(`UPDATE dzn_word_chain_rounds

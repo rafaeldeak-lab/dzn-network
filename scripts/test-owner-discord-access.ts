@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { Miniflare } from "miniflare";
 
 import { createSession } from "../functions/_lib/db";
+import { deleteOwnedAccountData } from "../functions/_lib/deletion";
 import { createOwnerDiscordAccessRequest, decideOwnerDiscordAccessRequest, listOwnerDiscordAccessRequests } from "../functions/_lib/owner-discord-access";
 import { onRequest as applicantRoute } from "../functions/api/discord/owner-access";
 import { onRequest as ownerRoute } from "../functions/api/owner/discord/owner-access-requests";
@@ -67,6 +68,7 @@ async function run() {
     await db.exec("PRAGMA foreign_keys = ON;");
     await db.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT NOT NULL UNIQUE, username TEXT, avatar TEXT);
       CREATE TABLE sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, session_token_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, created_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
+      CREATE TABLE discord_guilds (id TEXT PRIMARY KEY, owner_user_id TEXT, FOREIGN KEY(owner_user_id) REFERENCES users(id));
       CREATE TABLE linked_servers (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, guild_id TEXT NOT NULL, server_name TEXT NOT NULL, display_name TEXT, hostname TEXT, public_slug TEXT, status TEXT, lifecycle_status TEXT, merged_into_server_id TEXT, created_at TEXT, updated_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
       CREATE TABLE nitrado_connections (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, linked_server_id TEXT NOT NULL, created_at TEXT, updated_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id));
       CREATE TABLE onboarding_checks (id TEXT PRIMARY KEY, linked_server_id TEXT NOT NULL, token_valid INTEGER DEFAULT 0, service_access INTEGER DEFAULT 0, dayz_service_detected INTEGER DEFAULT 0, last_tested_at TEXT, FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id));`);
@@ -243,12 +245,15 @@ async function run() {
     await db.prepare("DELETE FROM onboarding_checks WHERE linked_server_id IN ('server_unverified', 'server_lifecycle_stale', 'server_connection_changed')").run();
     await db.prepare("DELETE FROM nitrado_connections WHERE linked_server_id IN ('server_lifecycle_stale', 'server_connection_changed')").run();
     await db.prepare("DELETE FROM linked_servers WHERE id IN ('server_unverified', 'server_lifecycle_stale', 'server_connection_changed')").run();
-    await db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(applicant.id).run();
-    await db.prepare("DELETE FROM users WHERE id = ?").bind(applicant.id).run();
-    const accountDeletedRequest = await db.prepare("SELECT requester_user_id, requester_discord_id, requester_username FROM dzn_owner_discord_access_requests WHERE id = ?").bind(createdPayload.request.id).first<{ requester_user_id: string | null; requester_discord_id: string; requester_username: string }>();
+    assert.equal((await deleteOwnedAccountData(env, applicant.id)).ok, true);
+    const accountDeletedRequest = await db.prepare("SELECT requester_user_id, requester_discord_id, requester_username FROM dzn_owner_discord_access_requests WHERE id = ?").bind(createdPayload.request.id).first<{ requester_user_id: string | null; requester_discord_id: string | null; requester_username: string | null }>();
     assert.equal(accountDeletedRequest?.requester_user_id, null, "Applicant account deletion must retain the decision record without its user foreign key.");
-    assert.equal(accountDeletedRequest?.requester_discord_id, applicant.discord_id, "Applicant account deletion must retain the Discord identity snapshot.");
-    assert.equal(accountDeletedRequest?.requester_username, applicant.username, "Applicant account deletion must retain the username snapshot.");
+    assert.equal(accountDeletedRequest?.requester_discord_id, null, "Applicant account deletion must remove the Discord identity snapshot.");
+    assert.equal(accountDeletedRequest?.requester_username, null, "Applicant account deletion must remove the username snapshot.");
+    const accountDeletedAuditIdentity = await db.prepare("SELECT actor_user_id, actor_discord_id, actor_username FROM dzn_owner_discord_access_audit WHERE request_id = ? AND action = 'requested' LIMIT 1").bind(createdPayload.request.id).first<{ actor_user_id: string | null; actor_discord_id: string | null; actor_username: string | null }>();
+    assert.equal(accountDeletedAuditIdentity?.actor_user_id, null, "Applicant account deletion must detach the request audit actor.");
+    assert.equal(accountDeletedAuditIdentity?.actor_discord_id, null, "Applicant account deletion must remove Discord identity from the request audit.");
+    assert.equal(accountDeletedAuditIdentity?.actor_username, null, "Applicant account deletion must remove the username from the request audit.");
     const accountDeletedAudit = await db.prepare("SELECT COUNT(*) AS count FROM dzn_owner_discord_access_audit WHERE request_id = ?").bind(createdPayload.request.id).first<{ count: number }>();
     assert.equal(Number(accountDeletedAudit?.count ?? 0) > 0, true, "Applicant account deletion must preserve private owner-access decision audits.");
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
