@@ -162,6 +162,7 @@ assert.equal(previewServer.recent_events.length, 0);
 assert.equal(previewServer.top_players?.length, 0);
 assert.equal(previewServer.pvp_leaderboard?.length, 0);
 assert.equal(previewServer.network_status?.public_listing, "Active");
+assert.equal(previewServer.stats_sync_active, true, "Signed-out previews retain truthful aggregate sync availability while locking detailed stats.");
 assert.equal(JSON.stringify(previewServer).includes("reviewer_discord_id"), false);
 
 assert.equal(publicListingStatus("pending", false), "Setup pending");
@@ -211,6 +212,7 @@ const historicalPreviewServer = applyPublicServerAccess({
 }, false);
 assert.equal(historicalPreviewServer.network_status?.public_listing, "Historical");
 assert.equal(historicalPreviewServer.lifecycle?.owner_action, null);
+assert.equal(historicalPreviewServer.stats_sync_active, false, "Historical server records must not present active sync availability.");
 
 const fullServer = applyPublicServerAccess(baseServer, true);
 assert.equal(fullServer.is_locked, false);

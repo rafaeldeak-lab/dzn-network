@@ -1788,7 +1788,8 @@ export function applyPublicServerAccess(server: SafePublicServer, viewerLoggedIn
     public_website_url: null,
     public_rules: null,
     score_breakdown: null,
-    stats_sync_active: false,
+    // Sync availability is aggregate server status, not private player data.
+    stats_sync_active: !historicalLifecycle && server.stats_sync_active,
     recent_events: [],
     top_players: [],
     pvp_leaderboard: [],
