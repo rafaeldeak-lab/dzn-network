@@ -4253,12 +4253,13 @@ async function finalizeAdmImportJob(
     : 0;
   const existingPublicCache = isScheduledNitradoImport && derivedDataWrites === 0 && server.guild_id
     ? await db
-      .prepare("SELECT updated_at, last_adm_update_at FROM server_public_cache WHERE guild_id = ? LIMIT 1")
+      .prepare("SELECT updated_at, last_adm_update_at, network_rank_updated_at FROM server_public_cache WHERE guild_id = ? LIMIT 1")
       .bind(server.guild_id)
-      .first<{ updated_at: string | null; last_adm_update_at: string | null }>()
+      .first<{ updated_at: string | null; last_adm_update_at: string | null; network_rank_updated_at: string | null }>()
     : null;
-  const refreshScheduledNetworkRank = Boolean(existingPublicCache?.updated_at)
-    && isIsoOlderThan(existingPublicCache?.updated_at, SCHEDULED_IDLE_NETWORK_RANK_REFRESH_MS);
+  const existingRankSnapshotAt = existingPublicCache?.network_rank_updated_at ?? existingPublicCache?.updated_at ?? null;
+  const refreshScheduledNetworkRank = Boolean(existingRankSnapshotAt)
+    && isIsoOlderThan(existingRankSnapshotAt, SCHEDULED_IDLE_NETWORK_RANK_REFRESH_MS);
   const shouldRefreshDerivedOutputs = !isScheduledNitradoImport || derivedDataWrites > 0 || retryPreviousScheduledStatsFailure;
 
   if (shouldRefreshDerivedOutputs) {

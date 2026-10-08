@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 const liveStatsRoute = readFileSync("functions/api/servers/[serverId]/dashboard/live-stats.ts", "utf8").replace(/\r\n/g, "\n");
 const publicServersRoute = readFileSync("functions/api/public/servers.ts", "utf8").replace(/\r\n/g, "\n");
 const automationSource = readFileSync("functions/_lib/automation.ts", "utf8").replace(/\r\n/g, "\n");
+const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8").replace(/\r\n/g, "\n");
 const migrationSource = readFileSync("migrations/0015_automation_pipeline.sql", "utf8").replace(/\r\n/g, "\n");
 const rankTimestampMigration = readFileSync("migrations/0092_server_public_cache_rank_timestamp.sql", "utf8").replace(/\r\n/g, "\n");
 
@@ -51,6 +52,12 @@ assert.equal(
     rankTimestampMigration.includes("idx_server_public_cache_network_rank_updated_at"),
   true,
   "Rank snapshots must record their own refresh timestamp through an isolated migration.",
+);
+assert.equal(
+  admSyncSource.includes("network_rank_updated_at FROM server_public_cache") &&
+    admSyncSource.includes("existingPublicCache?.network_rank_updated_at ?? existingPublicCache?.updated_at"),
+  true,
+  "Quiet scheduled imports must refresh rankings from the rank-specific timestamp, not unrelated cache writes.",
 );
 assert.equal(
   automationSource.includes("readNetworkRankSnapshot") &&
