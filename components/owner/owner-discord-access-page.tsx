@@ -10,7 +10,7 @@ import {
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Status = "pending" | "approved" | "rejected" | "revoked";
 type RequestItem = {
@@ -62,7 +62,11 @@ export function OwnerDiscordAccessPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const requestController = useRef<AbortController | null>(null);
   const load = useCallback(async (cursor?: string | null, append = false) => {
+    requestController.current?.abort();
+    const controller = new AbortController();
+    requestController.current = controller;
     setState("loading");
     try {
       const params = new URLSearchParams();
@@ -71,9 +75,10 @@ export function OwnerDiscordAccessPage() {
       if (cursor) params.set("cursor", cursor);
       const response = await fetch(
         `/api/owner/discord/owner-access-requests?${params}`,
-        { credentials: "include", cache: "no-store" },
+        { credentials: "include", cache: "no-store", signal: controller.signal },
       );
       const next = (await response.json().catch(() => null)) as Payload | null;
+      if (requestController.current !== controller) return;
       if (response.status === 401 || response.status === 403) {
         setState("blocked");
         return;
@@ -86,6 +91,8 @@ export function OwnerDiscordAccessPage() {
       setNextCursor(next.page?.next_cursor ?? null);
       setState("ready");
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (requestController.current !== controller) return;
       setNotice(
         error instanceof Error
           ? error.message
@@ -98,7 +105,10 @@ export function OwnerDiscordAccessPage() {
     const timeout = window.setTimeout(() => {
       void load();
     }, 0);
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+      requestController.current?.abort();
+    };
   }, [load]);
   const requests = payload?.requests ?? [];
   const audit = payload?.audit ?? [];

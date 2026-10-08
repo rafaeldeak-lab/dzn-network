@@ -157,13 +157,27 @@ export async function decideOwnerDiscordAccessRequest(env: Env, actor: SessionUs
                       WHERE id = dzn_owner_discord_access_requests.linked_server_id
                         AND user_id = dzn_owner_discord_access_requests.requester_user_id
                         AND lower(COALESCE(status, 'pending')) = 'live'
+                        AND lower(COALESCE(lifecycle_status, 'active_live')) = 'active_live'
                         AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
                         AND EXISTS (
-                          SELECT 1 FROM onboarding_checks
-                           WHERE onboarding_checks.linked_server_id = linked_servers.id
-                             AND onboarding_checks.token_valid = 1
-                             AND onboarding_checks.service_access = 1
-                             AND onboarding_checks.dayz_service_detected = 1
+                          SELECT 1 FROM onboarding_checks AS latest_check
+                           WHERE latest_check.id = (
+                             SELECT current_check.id
+                               FROM onboarding_checks AS current_check
+                              WHERE current_check.linked_server_id = linked_servers.id
+                                AND current_check.last_tested_at IS NOT NULL
+                                AND datetime(current_check.last_tested_at) >= datetime((
+                                  SELECT MAX(COALESCE(current_connection.updated_at, current_connection.created_at))
+                                    FROM nitrado_connections AS current_connection
+                                   WHERE current_connection.linked_server_id = linked_servers.id
+                                     AND current_connection.user_id = linked_servers.user_id
+                                ))
+                              ORDER BY current_check.last_tested_at DESC, current_check.id DESC
+                              LIMIT 1
+                           )
+                             AND latest_check.token_valid = 1
+                             AND latest_check.service_access = 1
+                             AND latest_check.dayz_service_detected = 1
                         )
                    ))`)
       .bind(action, reason, decisionNonce, actor.id, actor.discord_id, clean(actor.username, 100), now, now, requestId, current.status, action),

@@ -19,6 +19,8 @@ async function run() {
   assert.match(migration, /dzn_owner_discord_access_audit/);
   assert.match(migration, /linked_server_id TEXT,/);
   assert.match(migration, /linked_server_id_snapshot TEXT NOT NULL/);
+  assert.match(migration, /requester_user_id TEXT,/);
+  assert.match(migration, /FOREIGN KEY\(requester_user_id\) REFERENCES users\(id\) ON DELETE SET NULL/);
   assert.match(migration, /FOREIGN KEY\(linked_server_id\) REFERENCES linked_servers\(id\) ON DELETE SET NULL/);
   assert.doesNotMatch(migration, /discord\.com|DISCORD_BOT_TOKEN|CREATE\s+INVITE/i);
   const accessSource = readFileSync("functions/_lib/owner-discord-access.ts", "utf8");
@@ -33,7 +35,10 @@ async function run() {
   assert.match(accessSource, /OWNER_ACCESS_PAGE_SIZE/, "The owner-access queue must use a bounded page size.");
   assert.match(accessSource, /encodeOwnerAccessCursor/, "The owner-access queue must expose stable continuation cursors.");
   assert.match(accessSource, /COALESCE\(status, 'pending'\)\) = 'live'/, "Owner approval must require a live server.");
-  assert.match(accessSource, /onboarding_checks\.token_valid = 1/, "Owner approval must require current onboarding verification evidence.");
+  assert.match(accessSource, /COALESCE\(lifecycle_status, 'active_live'\)\) = 'active_live'/, "Owner approval must reject a server with a known unhealthy lifecycle state.");
+  assert.match(accessSource, /latest_check\.token_valid = 1/, "Owner approval must require current onboarding verification evidence.");
+  assert.match(accessSource, /datetime\(current_check\.last_tested_at\) >= datetime\(/, "Owner approval must require a check made after the current Nitrado connection was saved.");
+  assert.match(accessSource, /FROM nitrado_connections AS current_connection/, "Owner approval must bind verification to the current Nitrado connection.");
   const envExample = readFileSync(".env.example", "utf8");
   assert.match(envExample, /^DZN_OWNER_DISCORD_ACCESS_ENABLED=false$/m);
   assert.match(envExample, /^NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED=false$/m);
@@ -46,6 +51,10 @@ async function run() {
   const ownerAccessPage = readFileSync("app/discord-owner-access/page.tsx", "utf8");
   assert.match(ownerAccessPage, /process\.env\.DZN_OWNER_DISCORD_ACCESS_ENABLED !== "true"\) notFound\(\)/, "The destination route must remain unavailable until the server feature is enabled.");
   assert.match(ownerAccessPage, /OwnerDiscordAccessPage/, "The protected route must render the owner access page only after activation.");
+  const ownerQueuePage = readFileSync("components/owner/owner-discord-access-page.tsx", "utf8");
+  assert.match(ownerQueuePage, /requestController\.current\?\.abort\(\)/, "The owner queue must cancel superseded reads.");
+  assert.match(ownerQueuePage, /signal: controller\.signal/, "The owner queue must bind reads to the active request controller.");
+  assert.match(ownerQueuePage, /requestController\.current !== controller/, "The owner queue must discard stale response state.");
 
   const mf = new Miniflare({ modules: true, script: "export default { fetch() { return new Response('ok'); } }", compatibilityDate: "2026-05-08", d1Databases: ["DB"], d1Persist: false });
   try {
@@ -54,14 +63,16 @@ async function run() {
     await db.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT NOT NULL UNIQUE, username TEXT, avatar TEXT);
       CREATE TABLE sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, session_token_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, created_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
       CREATE TABLE linked_servers (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, guild_id TEXT NOT NULL, server_name TEXT NOT NULL, display_name TEXT, hostname TEXT, public_slug TEXT, status TEXT, lifecycle_status TEXT, merged_into_server_id TEXT, created_at TEXT, updated_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
-      CREATE TABLE onboarding_checks (id TEXT PRIMARY KEY, linked_server_id TEXT NOT NULL, token_valid INTEGER DEFAULT 0, service_access INTEGER DEFAULT 0, dayz_service_detected INTEGER DEFAULT 0, FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id));`);
+      CREATE TABLE nitrado_connections (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, linked_server_id TEXT NOT NULL, created_at TEXT, updated_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id));
+      CREATE TABLE onboarding_checks (id TEXT PRIMARY KEY, linked_server_id TEXT NOT NULL, token_valid INTEGER DEFAULT 0, service_access INTEGER DEFAULT 0, dayz_service_detected INTEGER DEFAULT 0, last_tested_at TEXT, FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id));`);
     for (const statement of splitSql(readFileSync("migrations/0093_dzn_owner_discord_access.sql", "utf8").replace(/^--.*$/gm, ""))) await db.prepare(statement).run();
     for (const user of [owner, applicant, outsider]) await db.prepare("INSERT INTO users (id, discord_id, username, avatar) VALUES (?, ?, ?, ?)").bind(user.id, user.discord_id, user.username, user.avatar).run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, guild_id, server_name, status, lifecycle_status, created_at, updated_at) VALUES ('server_owned', ?, 'guild_owned', 'Verified Owner Server', 'live', 'active_live', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(applicant.id).run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, guild_id, server_name, status, lifecycle_status, created_at, updated_at) VALUES ('server_other', ?, 'guild_other', 'Other Server', 'live', 'active_live', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(outsider.id).run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, guild_id, server_name, status, lifecycle_status, created_at, updated_at) VALUES ('server_unverified', ?, 'guild_unverified', 'Unverified Draft', 'pending', 'active_live', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(applicant.id).run();
     for (const serverId of ["server_owned", "server_other"]) {
-      await db.prepare("INSERT INTO onboarding_checks (id, linked_server_id, token_valid, service_access, dayz_service_detected) VALUES (?, ?, 1, 1, 1)").bind(`check-${serverId}`, serverId).run();
+      await db.prepare("INSERT INTO nitrado_connections (id, user_id, linked_server_id, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(`connection-${serverId}`, serverId === "server_owned" ? applicant.id : outsider.id, serverId).run();
+      await db.prepare("INSERT INTO onboarding_checks (id, linked_server_id, token_valid, service_access, dayz_service_detected, last_tested_at) VALUES (?, ?, 1, 1, 1, CURRENT_TIMESTAMP)").bind(`check-${serverId}`, serverId).run();
     }
     const env = { DB: db as unknown as D1Database, SESSION_SECRET: "owner-discord-access-test", DZN_OWNER_DISCORD_ACCESS_ENABLED: "true", DZN_PLATFORM_OWNER_DISCORD_IDS: owner.discord_id } as Env;
     const applicantSession = await createSession(env, applicant.id);
@@ -123,6 +134,29 @@ async function run() {
     const unverifiedApproval = await decideOwnerDiscordAccessRequest(env, owner, { requestId: "unverified-request", action: "approved", reason: "This server has not completed verification.", decisionNonce: "decision_unverified" });
     assert.equal(unverifiedApproval.ok, false, "A saved but unverified server must not be approved for owner Discord access.");
     if (!unverifiedApproval.ok) assert.equal(unverifiedApproval.status, 409);
+    await db.prepare("INSERT INTO linked_servers (id, user_id, guild_id, server_name, status, lifecycle_status, created_at, updated_at) VALUES ('server_lifecycle_stale', ?, 'guild_lifecycle_stale', 'Known bad token', 'live', 'token_needs_resave', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(applicant.id).run();
+    await db.prepare("INSERT INTO nitrado_connections (id, user_id, linked_server_id, created_at, updated_at) VALUES ('connection-lifecycle-stale', ?, 'server_lifecycle_stale', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(applicant.id).run();
+    await db.prepare("INSERT INTO onboarding_checks (id, linked_server_id, token_valid, service_access, dayz_service_detected, last_tested_at) VALUES ('check-lifecycle-stale', 'server_lifecycle_stale', 1, 1, 1, CURRENT_TIMESTAMP)").run();
+    await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+      id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot,
+      server_name, status, created_at, updated_at
+    ) VALUES ('lifecycle-stale-request', ?, ?, ?, 'server_lifecycle_stale', 'server_lifecycle_stale', 'Known bad token', 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+      .bind(applicant.id, applicant.discord_id, applicant.username).run();
+    const lifecycleStaleApproval = await decideOwnerDiscordAccessRequest(env, owner, { requestId: "lifecycle-stale-request", action: "approved", reason: "Known invalid token must block owner access.", decisionNonce: "decision_lifecycle_stale" });
+    assert.equal(lifecycleStaleApproval.ok, false, "A server flagged for token re-save must not be approved for owner Discord access.");
+    if (!lifecycleStaleApproval.ok) assert.equal(lifecycleStaleApproval.status, 409);
+    await db.prepare("INSERT INTO linked_servers (id, user_id, guild_id, server_name, status, lifecycle_status, created_at, updated_at) VALUES ('server_connection_changed', ?, 'guild_connection_changed', 'Connection changed', 'live', 'active_live', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(applicant.id).run();
+    await db.prepare("INSERT INTO nitrado_connections (id, user_id, linked_server_id, created_at, updated_at) VALUES ('connection-before-change', ?, 'server_connection_changed', datetime('now', '-2 minutes'), datetime('now', '-2 minutes'))").bind(applicant.id).run();
+    await db.prepare("INSERT INTO onboarding_checks (id, linked_server_id, token_valid, service_access, dayz_service_detected, last_tested_at) VALUES ('check-before-change', 'server_connection_changed', 1, 1, 1, datetime('now', '-1 minute'))").run();
+    await db.prepare("UPDATE nitrado_connections SET updated_at = CURRENT_TIMESTAMP WHERE id = 'connection-before-change'").run();
+    await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+      id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot,
+      server_name, status, created_at, updated_at
+    ) VALUES ('connection-stale-request', ?, ?, ?, 'server_connection_changed', 'server_connection_changed', 'Connection changed', 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+      .bind(applicant.id, applicant.discord_id, applicant.username).run();
+    const connectionStaleApproval = await decideOwnerDiscordAccessRequest(env, owner, { requestId: "connection-stale-request", action: "approved", reason: "Changed connection requires a fresh verification check.", decisionNonce: "decision_connection_stale" });
+    assert.equal(connectionStaleApproval.ok, false, "Changing the Nitrado connection must invalidate older owner-access proof.");
+    if (!connectionStaleApproval.ok) assert.equal(connectionStaleApproval.status, 409);
     const audit = await listOwnerDiscordAccessRequests(env);
     assert.equal(audit.ok, true); if (audit.ok) assert.deepEqual(audit.audit.map((entry) => entry.action).sort(), ["approved", "approved", "requested", "requested", "requested", "revoked"]);
 
@@ -161,6 +195,7 @@ async function run() {
     if (!invalidCursor.ok) assert.equal(invalidCursor.status, 400);
 
     await db.prepare("DELETE FROM onboarding_checks WHERE linked_server_id = 'server_owned'").run();
+    await db.prepare("DELETE FROM nitrado_connections WHERE linked_server_id = 'server_owned'").run();
     await db.prepare("DELETE FROM linked_servers WHERE id = 'server_owned'").run();
     const preservedRequest = await db.prepare("SELECT linked_server_id, linked_server_id_snapshot, server_name FROM dzn_owner_discord_access_requests WHERE id = ?").bind(createdPayload.request.id).first<{ linked_server_id: string | null; linked_server_id_snapshot: string; server_name: string }>();
     assert.equal(preservedRequest?.linked_server_id, null, "Server deletion must preserve the owner-access request as a tombstone.");
@@ -174,6 +209,17 @@ async function run() {
       assert.equal(retainedAuditList.audit.some((entry) => entry.requestId === createdPayload.request.id), true, "The owner console must continue to list a preserved audit after server deletion.");
       assert.equal(retainedAuditList.requests.find((entry) => entry.id === createdPayload.request.id)?.linkedServerId, "server_owned", "The owner console must show the immutable server ID after deletion.");
     }
+    await db.prepare("DELETE FROM onboarding_checks WHERE linked_server_id IN ('server_unverified', 'server_lifecycle_stale', 'server_connection_changed')").run();
+    await db.prepare("DELETE FROM nitrado_connections WHERE linked_server_id IN ('server_lifecycle_stale', 'server_connection_changed')").run();
+    await db.prepare("DELETE FROM linked_servers WHERE id IN ('server_unverified', 'server_lifecycle_stale', 'server_connection_changed')").run();
+    await db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(applicant.id).run();
+    await db.prepare("DELETE FROM users WHERE id = ?").bind(applicant.id).run();
+    const accountDeletedRequest = await db.prepare("SELECT requester_user_id, requester_discord_id, requester_username FROM dzn_owner_discord_access_requests WHERE id = ?").bind(createdPayload.request.id).first<{ requester_user_id: string | null; requester_discord_id: string; requester_username: string }>();
+    assert.equal(accountDeletedRequest?.requester_user_id, null, "Applicant account deletion must retain the decision record without its user foreign key.");
+    assert.equal(accountDeletedRequest?.requester_discord_id, applicant.discord_id, "Applicant account deletion must retain the Discord identity snapshot.");
+    assert.equal(accountDeletedRequest?.requester_username, applicant.username, "Applicant account deletion must retain the username snapshot.");
+    const accountDeletedAudit = await db.prepare("SELECT COUNT(*) AS count FROM dzn_owner_discord_access_audit WHERE request_id = ?").bind(createdPayload.request.id).first<{ count: number }>();
+    assert.equal(Number(accountDeletedAudit?.count ?? 0) > 0, true, "Applicant account deletion must preserve private owner-access decision audits.");
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Owner Discord access queue checks passed.");
   } finally { await mf.dispose(); }
