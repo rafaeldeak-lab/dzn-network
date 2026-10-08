@@ -4239,10 +4239,15 @@ async function finalizeAdmImportJob(
       .bind(row.server_id, row.id, SCHEDULED_ADM_IMPORT_SOURCE)
       .first<Pick<AdmImportJobRow, "public_cache_updated" | "warnings_json" | "written_kills" | "player_events" | "joins" | "disconnects" | "deaths" | "result_json">>()
     : null;
+  const currentScheduledMaintenanceRetry = isScheduledNitradoImport && derivedDataWrites === 0
+    ? getScheduledMaintenanceRetry(row)
+    : null;
   const previousScheduledWarnings = String(previousScheduledMaintenanceResult?.warnings_json ?? "");
-  const retryPreviousScheduledCacheFailure = Number(previousScheduledMaintenanceResult?.public_cache_updated ?? 1) === 0
-    && previousScheduledWarnings.includes("Public cache update failed");
-  const retryPreviousScheduledStatsFailure = previousScheduledWarnings.includes("Stats rebuild failed");
+  const retryPreviousScheduledCacheFailure = Boolean(currentScheduledMaintenanceRetry?.cache)
+    || (Number(previousScheduledMaintenanceResult?.public_cache_updated ?? 1) === 0
+      && previousScheduledWarnings.includes("Public cache update failed"));
+  const retryPreviousScheduledStatsFailure = Boolean(currentScheduledMaintenanceRetry?.stats)
+    || previousScheduledWarnings.includes("Stats rebuild failed");
   const previousScheduledDerivedWrites = previousScheduledMaintenanceResult
     ? Number(previousScheduledMaintenanceResult.written_kills ?? 0)
       + Number(previousScheduledMaintenanceResult.player_events ?? 0)
@@ -4297,7 +4302,9 @@ async function finalizeAdmImportJob(
         guildId: publicCacheGuildId,
         planKey: server.plan_key,
         publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
-        lastAdmUpdateAt: derivedDataWrites > 0 || (retryPreviousScheduledCacheFailure && previousScheduledDerivedWrites > 0)
+        lastAdmUpdateAt: derivedDataWrites > 0 || (retryPreviousScheduledCacheFailure && (
+          previousScheduledDerivedWrites > 0 || currentScheduledMaintenanceRetry?.hadDerivedWrites
+        ))
           ? now
           : existingPublicCache?.last_adm_update_at ?? null,
       // Scheduled jobs already require the canonical cache schema before reaching
@@ -4884,6 +4891,10 @@ async function updateScheduledAdmImportJobTailText(
   const chunksProcessed = currentLine >= totalLines && totalLines > 0
     ? totalChunks
     : Math.max(0, Math.ceil(currentLine / chunkSize));
+  const scheduledMaintenanceRetry = values.resetCounters ? getScheduledMaintenanceRetry(row) : null;
+  const resetResultJson = scheduledMaintenanceRetry && (scheduledMaintenanceRetry.cache || scheduledMaintenanceRetry.stats)
+    ? `json_object('scheduled_maintenance_retry', json_object('cache', ${scheduledMaintenanceRetry.cache ? 1 : 0}, 'stats', ${scheduledMaintenanceRetry.stats ? 1 : 0}, 'had_derived_writes', ${scheduledMaintenanceRetry.hadDerivedWrites ? 1 : 0}))`
+    : "NULL";
   await requireDb(env)
     .prepare(
       `UPDATE adm_import_jobs SET
@@ -4908,7 +4919,7 @@ async function updateScheduledAdmImportJobTailText(
         hit_lines = 0,
         raw_events = 0,
         player_events = 0,
-        result_json = NULL,
+        result_json = ${resetResultJson},
         failed_writes = 0,
         warnings_json = '[]',
         public_cache_updated = 0,
@@ -5546,6 +5557,30 @@ function getAdmImportJobBuildEventsStored(row: Pick<AdmImportJobRow, "result_jso
   } catch {
     return 0;
   }
+}
+
+function getScheduledMaintenanceRetry(row: Pick<AdmImportJobRow, "public_cache_updated" | "warnings_json" | "written_kills" | "player_events" | "joins" | "disconnects" | "deaths" | "result_json">) {
+  const warnings = String(row.warnings_json ?? "");
+  let savedRetry: { cache?: unknown; stats?: unknown; had_derived_writes?: unknown } | null = null;
+  try {
+    const parsed = JSON.parse(String(row.result_json ?? "{}")) as {
+      scheduled_maintenance_retry?: { cache?: unknown; stats?: unknown; had_derived_writes?: unknown };
+    };
+    savedRetry = parsed.scheduled_maintenance_retry ?? null;
+  } catch {
+    // An invalid legacy result payload cannot supply retry evidence.
+  }
+  const derivedWrites = Number(row.written_kills ?? 0)
+    + Number(row.player_events ?? 0)
+    + Number(row.joins ?? 0)
+    + Number(row.disconnects ?? 0)
+    + Number(row.deaths ?? 0)
+    + getAdmImportJobBuildEventsStored(row);
+  return {
+    cache: Boolean(savedRetry?.cache) || (Number(row.public_cache_updated ?? 1) === 0 && warnings.includes("Public cache update failed")),
+    stats: Boolean(savedRetry?.stats) || warnings.includes("Stats rebuild failed"),
+    hadDerivedWrites: Boolean(savedRetry?.had_derived_writes) || derivedWrites > 0,
+  };
 }
 
 function toAdmImportJobProgress(row: AdmImportJobRow): AdmImportJobProgressResult {

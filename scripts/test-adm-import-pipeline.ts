@@ -1233,8 +1233,8 @@ async function main() {
   scheduledTailRow.deaths = 6;
   scheduledTailRow.raw_events = 7;
   scheduledTailRow.failed_writes = 1;
-  scheduledTailRow.warnings_json = '["previous tail warning"]';
-  scheduledTailRow.public_cache_updated = 1;
+  scheduledTailRow.warnings_json = '["previous tail warning", "fixture.ADM: Public cache update failed after ADM rows were written. timed out"]';
+  scheduledTailRow.public_cache_updated = 0;
   scheduledTailRow.discord_jobs_queued = 2;
   scheduledTailRow.completed_at = "2026-05-20T12:00:00.000Z";
   const scheduledTailGrowth = await createScheduledAdmImportJobForServer(
@@ -1249,7 +1249,9 @@ async function main() {
   assert.equal(scheduledTailGrowth.job?.current_line, 2);
   assert.equal(scheduledTailGrowth.job?.total_lines, scheduledTailLines.length);
   const reopenedScheduledTail = scheduledTailDb.admImportJobs.get(String(scheduledTailFirst.job?.job_id));
-  assert.equal(reopenedScheduledTail?.result_json, null);
+  assert.deepEqual(JSON.parse(String(reopenedScheduledTail?.result_json)), {
+    scheduled_maintenance_retry: { cache: 1, stats: 0, had_derived_writes: 1 },
+  });
   assert.equal(reopenedScheduledTail?.written_kills, 0);
   assert.equal(reopenedScheduledTail?.player_events, 0);
   assert.equal(reopenedScheduledTail?.joins, 0);
@@ -1260,6 +1262,18 @@ async function main() {
   assert.equal(reopenedScheduledTail?.warnings_json, "[]");
   assert.equal(reopenedScheduledTail?.public_cache_updated, 0);
   assert.equal(reopenedScheduledTail?.discord_jobs_queued, 0);
+  // A heartbeat-only appended tail must still retry the earlier failed cache
+  // refresh for persisted events in the completed portion of this same file.
+  reopenedScheduledTail!.adm_text = "AdminLog started on 2026-05-20 at 12:00:00\n12:00:01 | Server heartbeat\n12:00:02 | Server heartbeat";
+  reopenedScheduledTail!.total_lines = 3;
+  reopenedScheduledTail!.current_line = 2;
+  reopenedScheduledTail!.chunk_size = 2;
+  reopenedScheduledTail!.total_chunks = 2;
+  reopenedScheduledTail!.chunks_processed = 1;
+  const quietTailRecovery = await processPendingAdmImportJobs(makeEnv(scheduledTailDb), { maxJobs: 1, maxChunksPerJob: 2 });
+  assert.equal(quietTailRecovery.completedJobs, 1);
+  assert.equal(quietTailRecovery.results[0]?.file_result?.public_cache_updated, true, "A quiet appended tail must retry the same job's failed public-cache refresh.");
+  assert.equal(scheduledTailDb.serverPublicCache.has(guildId), true);
   assert.equal(scheduledTailDb.admImportJobs.size, 1);
 
   const activeTailDb = new MemoryD1();
@@ -2166,6 +2180,15 @@ class MemoryStatement {
       row.total_chunks = Number(this.values[5] ?? row.total_chunks);
       row.chunks_processed = Number(this.values[6] ?? row.chunks_processed);
       if (q.includes("result_json = null")) row.result_json = null;
+      if (q.includes("scheduled_maintenance_retry")) {
+        row.result_json = JSON.stringify({
+          scheduled_maintenance_retry: {
+            cache: q.includes("'cache', 1") ? 1 : 0,
+            stats: q.includes("'stats', 1") ? 1 : 0,
+            had_derived_writes: q.includes("'had_derived_writes', 1") ? 1 : 0,
+          },
+        });
+      }
       if (q.includes("written_kills = 0")) {
         row.raw_kill_lines_found = 0;
         row.parsed_kills = 0;
@@ -2249,8 +2272,9 @@ class MemoryStatement {
       row.player_events = Number(row.player_events ?? 0) + Number(this.values[offset + 11] ?? 0);
       const buildEventOffset = storesBuildEventCount ? 1 : 0;
       if (storesBuildEventCount) {
-        const current = Number(JSON.parse(String(row.result_json ?? "{}")).build_events_stored ?? 0);
-        row.result_json = JSON.stringify({ build_events_stored: current + Number(this.values[offset + 12] ?? 0) });
+        const existingResult = JSON.parse(String(row.result_json ?? "{}")) as Record<string, unknown>;
+        const current = Number(existingResult.build_events_stored ?? 0);
+        row.result_json = JSON.stringify({ ...existingResult, build_events_stored: current + Number(this.values[offset + 12] ?? 0) });
       }
       row.failed_writes = Number(row.failed_writes ?? 0) + Number(this.values[offset + 12 + buildEventOffset] ?? 0);
       row.warnings_json = this.values[offset + 13 + buildEventOffset];

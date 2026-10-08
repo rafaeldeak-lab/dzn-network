@@ -1520,7 +1520,7 @@ export async function upsertServerPublicCache(env: Env, input: {
     ).run();
   } catch (error) {
     // Existing production schema remains usable until the isolated migration is verified.
-    if (!/no such column: network_rank_updated_at/i.test(error instanceof Error ? error.message : String(error))) throw error;
+    if (!isMissingNetworkRankTimestampColumn(error)) throw error;
     await db
       .prepare(
         `INSERT INTO server_public_cache (
@@ -1562,6 +1562,11 @@ export async function upsertServerPublicCache(env: Env, input: {
       )
       .run();
   }
+}
+
+function isMissingNetworkRankTimestampColumn(error: unknown) {
+  return /(?:no such column: network_rank_updated_at|server_public_cache has no column named network_rank_updated_at)/i
+    .test(error instanceof Error ? error.message : String(error));
 }
 
 async function readNetworkRankSnapshot(env: Env, guildId: string) {

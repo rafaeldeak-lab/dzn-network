@@ -48,6 +48,11 @@ assert.equal(
   "Automation/public cache refresh path must persist rank snapshots.",
 );
 assert.equal(
+  automationSource.includes("server_public_cache has no column named network_rank_updated_at"),
+  true,
+  "Public cache upserts must tolerate SQLite's INSERT-specific missing-column wording before migration 0092 is applied.",
+);
+assert.equal(
   rankTimestampMigration.includes("network_rank_updated_at TEXT") &&
     rankTimestampMigration.includes("idx_server_public_cache_network_rank_updated_at"),
   true,
