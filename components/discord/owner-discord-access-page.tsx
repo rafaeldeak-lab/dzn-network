@@ -22,7 +22,10 @@ export function OwnerDiscordAccessPage() {
       const payload = await response.json().catch(() => null) as Payload | null;
       if (response.status === 401) { setState("blocked"); return; }
       if (!response.ok || !payload?.ok) throw new Error(payload?.message ?? "Owner Discord access is unavailable.");
-      setData(payload); setServerId((current) => current || payload.servers?.[0]?.id || ""); setState("ready");
+      const servers = payload.servers ?? [];
+      setData(payload);
+      setServerId((current) => servers.some((server) => server.id === current) ? current : servers[0]?.id ?? "");
+      setState("ready");
     } catch (error) { setNotice(error instanceof Error ? error.message : "Owner Discord access is unavailable."); setState("error"); }
   }, []);
   useEffect(() => {

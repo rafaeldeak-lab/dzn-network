@@ -282,11 +282,12 @@ export async function handleDznCommsModeration(request: Request, env: Env) {
   }
   const archiveEnabled = readDznCommsOwnerArchiveFlags(env, request).enabled;
   const statements: D1PreparedStatement[] = [];
+  const auditId = crypto.randomUUID();
   if (state && archiveEnabled) statements.push(archiveSnapshotStatement(db, messageId));
   if (state === "deleted") statements.push(db.prepare("UPDATE dzn_comms_messages SET body = 'Message deleted.', author_user_id = NULL, author_display_name = 'DZN Safety', author_role_label = 'System', visibility_state = 'deleted', edited_at = CURRENT_TIMESTAMP WHERE id = ? AND visibility_state != 'deleted'").bind(messageId));
   else if (state) statements.push(db.prepare("UPDATE dzn_comms_messages SET visibility_state = ?, edited_at = CURRENT_TIMESTAMP WHERE id = ? AND visibility_state != 'deleted' AND visibility_state != ?").bind(state, messageId, state));
   if (action === "resolve_report" || action === "dismiss_report") statements.push(db.prepare("UPDATE dzn_comms_reports SET status = ?, resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = ? WHERE message_id = ? AND status = 'open'").bind(action === "resolve_report" ? "resolved" : "dismissed", auth.user.id, messageId));
-  statements.push(db.prepare("INSERT INTO dzn_comms_moderation_audit (id, message_id, actor_user_id, action, reason_code) SELECT ?, ?, ?, ?, ? WHERE changes() > 0").bind(crypto.randomUUID(), messageId, auth.user.id, action, reason));
+  statements.push(db.prepare("INSERT INTO dzn_comms_moderation_audit (id, message_id, actor_user_id, action, reason_code) SELECT ?, ?, ?, ?, ? WHERE changes() > 0").bind(auditId, messageId, auth.user.id, action, reason));
   if (state && archiveEnabled) {
     statements.push(db.prepare(`UPDATE dzn_comms_owner_message_archive
       SET deleted_at = CASE WHEN ? = 'deleted' THEN CURRENT_TIMESTAMP ELSE deleted_at END,
@@ -297,8 +298,16 @@ export async function handleDznCommsModeration(request: Request, env: Env) {
     if (state === "deleted") statements.push(archiveEventAfterTransitionStatement(db, messageId, "moderator_deleted", auth.user.id));
   }
   if (state === "deleted") {
-    statements.push(db.prepare("UPDATE dzn_comms_reports SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = ? WHERE message_id = ? AND status = 'open'").bind(auth.user.id, messageId));
-    statements.push(db.prepare("UPDATE dzn_comms_send_receipts SET message_id = NULL, send_rate_key = NULL, send_minute_bucket = NULL, send_slot = NULL WHERE message_id = ?").bind(messageId));
+    statements.push(db.prepare(`UPDATE dzn_comms_reports
+      SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = ?
+      WHERE message_id = ? AND status = 'open'
+        AND EXISTS (SELECT 1 FROM dzn_comms_moderation_audit WHERE id = ?)`)
+      .bind(auth.user.id, messageId, auditId));
+    statements.push(db.prepare(`UPDATE dzn_comms_send_receipts
+      SET message_id = NULL, send_rate_key = NULL, send_minute_bucket = NULL, send_slot = NULL
+      WHERE message_id = ?
+        AND EXISTS (SELECT 1 FROM dzn_comms_moderation_audit WHERE id = ?)`)
+      .bind(messageId, auditId));
   }
   const results = await db.batch(statements);
   const mutationIndex = state && archiveEnabled ? 1 : 0;

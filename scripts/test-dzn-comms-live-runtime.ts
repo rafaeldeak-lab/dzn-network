@@ -586,6 +586,12 @@ async function testOwnerArchiveAndSelfDeleteRuntime() {
     assert.equal(reportedDeletion?.author_display_name, "Player", "An open report must retain the archived author after its author self-deletes the public message.");
     assert.equal(reportedDeletion?.body, "Keep this for the safety archive", "An open report must retain the private original after its author self-deletes the public message.");
     assert.equal(reportedDeletion?.body_source, "archive", "The moderation queue must mark a restored private original clearly.");
+    const staleModeratorDelete = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {
+      messageId, action: "delete", reason: "stale moderator retry",
+    }), f.env);
+    assert.equal(staleModeratorDelete.status, 409, "A moderator delete must fail after a member already self-deleted the message.");
+    assert.equal(f.sqlite.prepare("SELECT status FROM dzn_comms_reports WHERE message_id = ?").get(messageId)?.status, "open", "A failed moderator delete must not silently resolve the open report.");
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_moderation_audit WHERE message_id = ? AND action = 'delete'").get(messageId)?.count, 0, "A failed moderator delete must not write a moderation audit row.");
     f.sqlite.exec("DELETE FROM dzn_comms_send_slots; DELETE FROM dzn_comms_attempt_slots;");
     const literalSent = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
       channelSlug: "global-chat", clientRequestId: "archive-literal-placeholder-01", body: "Message deleted.",

@@ -51,6 +51,9 @@ async function run() {
   const ownerAccessPage = readFileSync("app/discord-owner-access/page.tsx", "utf8");
   assert.match(ownerAccessPage, /process\.env\.DZN_OWNER_DISCORD_ACCESS_ENABLED !== "true"\) notFound\(\)/, "The destination route must remain unavailable until the server feature is enabled.");
   assert.match(ownerAccessPage, /OwnerDiscordAccessPage/, "The protected route must render the owner access page only after activation.");
+  const applicantAccessPage = readFileSync("components/discord/owner-discord-access-page.tsx", "utf8");
+  assert.match(applicantAccessPage, /servers\.some\(\(server\) => server\.id === current\)/, "A refreshed owner request form must keep a selection only while the server remains eligible.");
+  assert.match(applicantAccessPage, /servers\[0\]\?\.id \?\? ""/, "A refreshed owner request form must select the first current eligible server or clear the field.");
   const ownerQueuePage = readFileSync("components/owner/owner-discord-access-page.tsx", "utf8");
   assert.match(ownerQueuePage, /requestController\.current\?\.abort\(\)/, "The owner queue must cancel superseded reads.");
   assert.match(ownerQueuePage, /signal: controller\.signal/, "The owner queue must bind reads to the active request controller.");
