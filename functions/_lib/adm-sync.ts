@@ -4268,7 +4268,10 @@ async function finalizeAdmImportJob(
         lastAdmUpdateAt: derivedDataWrites > 0 || retryPreviousScheduledCacheFailure
           ? now
           : existingPublicCache?.last_adm_update_at ?? null,
-      }), "public cache update");
+      // Scheduled jobs already require the canonical cache schema before reaching
+      // finalisation. Avoid replaying the full compatibility DDL routine inside
+      // this bounded post-import phase; manual imports retain that safeguard.
+      }, { skipSchemaEnsure: isScheduledNitradoImport }), "public cache update");
       publicCacheUpdated = true;
       cacheRefreshStatus = "updated";
     } catch (error) {

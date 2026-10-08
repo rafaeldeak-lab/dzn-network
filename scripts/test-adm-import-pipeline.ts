@@ -897,6 +897,16 @@ async function main() {
   assert.equal(scheduledJobDb.killEvents.length, 216);
   assert.equal(scheduledJobDb.serverStats.get(linkedServerId)?.total_kills, 216);
   assert.equal(scheduledJobDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
+  const scheduledFinalisationStart = scheduledJobDb.executedQueries.lastIndexOf("update adm_import_jobs set status = 'rebuilding', updated_at = ? where id = ? and server_id = ?");
+  const scheduledCacheWrite = scheduledJobDb.executedQueries.findIndex((query, index) =>
+    index > scheduledFinalisationStart && query.includes("insert into server_public_cache"),
+  );
+  assert.ok(scheduledFinalisationStart >= 0 && scheduledCacheWrite > scheduledFinalisationStart);
+  assert.equal(
+    scheduledJobDb.executedQueries.slice(scheduledFinalisationStart, scheduledCacheWrite).some((query) => query.includes("create table if not exists server_public_cache")),
+    false,
+    "Scheduled cache finalisation must not run the full automation schema compatibility routine inside its bounded phase.",
+  );
   assert.equal(scheduledJobDb.automationJobs.length > 0, true);
   assert.equal(scheduledJobDb.admSyncState.get(linkedServerId)?.last_processed_file, largeFixtureName);
   assert.equal(scheduledJobDb.admSyncState.get(linkedServerId)?.cursor_recovery_reason, "scheduled_chunked_import");
@@ -1617,6 +1627,7 @@ class MemoryD1 {
   failAutomationJobInsert: boolean;
   killInsertAttempts = 0;
   schemaQueries: string[] = [];
+  executedQueries: string[] = [];
 
   constructor(options: { failKillInsertAfter?: number | null; failAutomationJobInsert?: boolean } = {}) {
     this.failKillInsertAfter = options.failKillInsertAfter ?? null;
@@ -1640,6 +1651,7 @@ class MemoryStatement {
 
   async run(): Promise<RunResult> {
     const q = normalizeSql(this.query);
+    this.db.executedQueries.push(q);
     if (isSchemaQuery(q)) {
       this.db.schemaQueries.push(q);
       return changed(0);
