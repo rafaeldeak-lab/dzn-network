@@ -589,11 +589,13 @@ async function testOwnerArchiveAndSelfDeleteRuntime() {
     }), f.env);
     assert.equal(moderatorDelete.status, 200, await moderatorDelete.text());
     const originalDeletion = f.sqlite.prepare("SELECT deleted_at,deleted_by_user_id,deletion_kind FROM dzn_comms_owner_message_archive WHERE message_id = 'moderator-retry-message'").get() as Row;
+    const originalDeletionEventCount = f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_owner_message_archive_events WHERE message_id = 'moderator-retry-message' AND action = 'moderator_deleted'").get()?.count;
     const moderatorRetry = await handleDznCommsModeration(request("/api/owner/comms/moderate", "owner-token", {
       messageId: "moderator-retry-message", action: "delete", reason: "retry should not overwrite attribution",
     }), f.env);
     assert.equal(moderatorRetry.status, 409);
     assert.deepEqual(f.sqlite.prepare("SELECT deleted_at,deleted_by_user_id,deletion_kind FROM dzn_comms_owner_message_archive WHERE message_id = 'moderator-retry-message'").get(), originalDeletion, "A stale retry must not overwrite the original deletion attribution.");
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_owner_message_archive_events WHERE message_id = 'moderator-retry-message' AND action = 'moderator_deleted'").get()?.count, originalDeletionEventCount, "A stale retry must not add a false deletion event.");
     assert.equal((await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=deleted&query=safety", "other-token"), f.env)).status, 403, "Only a platform owner can search archived messages.");
     const archiveResponse = await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=deleted&query=safety", "owner-token"), f.env);
     assert.equal(archiveResponse.status, 200);

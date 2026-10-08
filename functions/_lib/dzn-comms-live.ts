@@ -293,7 +293,7 @@ export async function handleDznCommsModeration(request: Request, env: Env) {
           deletion_kind = CASE WHEN ? = 'deleted' THEN 'moderator_deleted' ELSE deletion_kind END
       WHERE message_id = ?
         AND (? != 'deleted' OR deleted_at IS NULL)`).bind(state, state, auth.user.id, state, messageId, state));
-    if (state === "deleted") statements.push(archiveEventStatement(db, messageId, "moderator_deleted", auth.user.id));
+    if (state === "deleted") statements.push(archiveEventAfterTransitionStatement(db, messageId, "moderator_deleted", auth.user.id));
   }
   if (state === "deleted") {
     statements.push(db.prepare("UPDATE dzn_comms_reports SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = ? WHERE message_id = ? AND status = 'open'").bind(auth.user.id, messageId));
@@ -435,6 +435,12 @@ function archiveEventStatement(db: D1Database, messageId: string, action: "sent"
   return db.prepare(`INSERT INTO dzn_comms_owner_message_archive_events (id, message_id, action, actor_user_id)
     SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM dzn_comms_owner_message_archive WHERE message_id = ?)`)
     .bind(crypto.randomUUID(), messageId, action, actorUserId, messageId);
+}
+
+function archiveEventAfterTransitionStatement(db: D1Database, messageId: string, action: "moderator_deleted", actorUserId: string) {
+  return db.prepare(`INSERT INTO dzn_comms_owner_message_archive_events (id, message_id, action, actor_user_id)
+    SELECT ?, ?, ?, ? WHERE changes() = 1`)
+    .bind(crypto.randomUUID(), messageId, action, actorUserId);
 }
 
 function escapeLike(value: string) {
