@@ -43,6 +43,7 @@ async function fixture() {
   const installedTables = new Set(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => String(row.name)));
   assert.deepEqual(requiredTables.filter((table) => !installedTables.has(table)), [], "Both Comms migrations must install the required tables.");
   assert.equal(sqlite.prepare("PRAGMA foreign_key_check").all().length, 0, "Comms migrations must preserve foreign-key integrity.");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_owner_message_archive").get()?.count, 0, "The owner archive migration must begin with a zero-row baseline.");
   for (const [id, token] of [["player", "player-token"], ["other", "other-token"], ["owner", "owner-token"]]) {
     sqlite.prepare("INSERT INTO sessions (id,user_id,session_token_hash,expires_at) VALUES (?,?,?,datetime('now','+1 day'))")
       .run(`session-${id}`, id, await hmacSha256(token, secret));
@@ -103,6 +104,8 @@ async function fixture() {
     DZN_COMMS_OWNER_MODERATION_SCOPE: "local_test",
     DZN_COMMS_OWNER_ARCHIVE_ENABLED: "true",
     DZN_COMMS_OWNER_ARCHIVE_SCOPE: "local_test",
+    DZN_COMMS_RETENTION_ENABLED: "true",
+    DZN_COMMS_RETENTION_SCOPE: "local_test",
     DZN_PLATFORM_OWNER_DISCORD_IDS: "999",
   } as unknown as Env;
   return {
@@ -587,6 +590,23 @@ async function testOwnerArchiveAndSelfDeleteRuntime() {
   } finally { f.close(); }
 }
 
+async function testOwnerArchiveRequiresRetention() {
+  const f = await fixture();
+  try {
+    f.env.DZN_COMMS_RETENTION_ENABLED = "false";
+    const sent = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+      channelSlug: "global-chat", clientRequestId: "archive-without-retention-01", body: "Visible without archive retention",
+    }), f.env);
+    assert.equal(sent.status, 201);
+    assert.equal(f.count("dzn_comms_owner_message_archive"), 0, "The owner archive must not retain message bodies while its retention safeguard is disabled.");
+    const messageId = (await payload(sent)).message_id!;
+    assert.equal((await handleDznCommsSelfDelete(deleteRequest(`/api/comms/messages/${messageId}`, "player-token"), f.env, messageId)).status, 404);
+    assert.equal((await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive", "owner-token"), f.env)).status, 404);
+  } finally {
+    f.close();
+  }
+}
+
 function testPrivateLedgerMigrationRuntime() {
   const sqlite = new DatabaseSync(":memory:");
   try {
@@ -680,6 +700,7 @@ async function main() {
   await testReportAndModerationRuntime();
   await testRetentionRuntime();
   await testOwnerArchiveAndSelfDeleteRuntime();
+  await testOwnerArchiveRequiresRetention();
   console.log("Live Comms handlers: auth, origin, idempotency, conflict, quota, rollback, report and moderation behavior passed.");
 }
 

@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element -- Discord avatar URLs are user-specific and rendered at a fixed small size. */
 
 import { CheckCircle2, CircleAlert, RefreshCw, Search, ShieldCheck, XCircle } from "lucide-react";
 import Link from "next/link";

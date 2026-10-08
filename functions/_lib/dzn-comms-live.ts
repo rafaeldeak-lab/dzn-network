@@ -43,7 +43,9 @@ export function readDznCommsRetentionFlags(env: Env, request?: Request) {
 }
 
 export function readDznCommsOwnerArchiveFlags(env: Env, request?: Request) {
-  return readScopedFlag(env.DZN_COMMS_OWNER_ARCHIVE_ENABLED, env.DZN_COMMS_OWNER_ARCHIVE_SCOPE, request);
+  const archive = readScopedFlag(env.DZN_COMMS_OWNER_ARCHIVE_ENABLED, env.DZN_COMMS_OWNER_ARCHIVE_SCOPE, request);
+  const retention = readDznCommsRetentionFlags(env, request);
+  return { ...archive, enabled: archive.enabled && retention.enabled, retentionReady: retention.enabled };
 }
 
 export function readDznCommsPrivateGroupFlags(env: Env, request?: Request) {

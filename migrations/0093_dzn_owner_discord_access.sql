@@ -25,9 +25,9 @@ CREATE TABLE IF NOT EXISTS dzn_owner_discord_access_requests (
   FOREIGN KEY(reviewed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_dzn_owner_discord_access_one_pending
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dzn_owner_discord_access_one_pending_or_approved
   ON dzn_owner_discord_access_requests(requester_user_id, linked_server_id)
-  WHERE status = 'pending';
+  WHERE status IN ('pending', 'approved');
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dzn_owner_discord_access_decision_nonce
   ON dzn_owner_discord_access_requests(decision_nonce)
   WHERE decision_nonce IS NOT NULL;

@@ -36,12 +36,5 @@ CREATE INDEX IF NOT EXISTS idx_dzn_comms_owner_message_archive_author
 CREATE INDEX IF NOT EXISTS idx_dzn_comms_owner_message_archive_events_message
   ON dzn_comms_owner_message_archive_events(message_id, created_at DESC);
 
--- Recover only messages whose original content is still present. Sanitised
--- deleted/expired rows cannot truthfully be reconstructed.
-INSERT OR IGNORE INTO dzn_comms_owner_message_archive
-  (message_id, channel_id, author_user_id, author_display_name, author_role_label, original_body, sent_at, retained_until)
-SELECT id, channel_id, author_user_id, author_display_name, author_role_label, body, created_at,
-  COALESCE(NULLIF(expires_at, ''), datetime(created_at, '+30 days'))
-FROM dzn_comms_messages
-WHERE visibility_state IN ('visible', 'hidden', 'quarantined')
-  AND body NOT IN ('Message deleted.', 'Message expired.');
+-- Deliberately no historical backfill: applying this migration has a zero-row
+-- baseline. The archive starts only when the retention-gated feature is enabled.

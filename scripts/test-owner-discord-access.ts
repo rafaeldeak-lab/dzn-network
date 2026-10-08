@@ -65,14 +65,23 @@ async function run() {
     assert.equal((await ownerRoute(context(env, request("POST", { requestId: createdPayload.request.id, action: "approved", reason: "Exact linked server ownership checked.", decisionNonce: "decision_one" }, ownerSession.token)))).status, 403);
     const approved = await ownerRoute(context(env, request("POST", { requestId: createdPayload.request.id, action: "approved", reason: "Exact linked server ownership checked.", decisionNonce: "decision_one" }, ownerSession.token, "https://dzn.test")));
     assert.equal(approved.status, 200);
+    const activeDuplicate = await createOwnerDiscordAccessRequest(env, request("POST", { linkedServerId: "server_owned" }, applicantSession.token, "https://dzn.test"), { linkedServerId: "server_owned" });
+    assert.equal(activeDuplicate.ok, true); if (activeDuplicate.ok) assert.equal(activeDuplicate.duplicate, true);
     const replay = await decideOwnerDiscordAccessRequest(env, owner, { requestId: createdPayload.request.id, action: "approved", reason: "Exact linked server ownership checked.", decisionNonce: "decision_two" });
     assert.equal(replay.ok, true); if (replay.ok) assert.equal(replay.duplicate, true);
     const conflicting = await decideOwnerDiscordAccessRequest(env, owner, { requestId: createdPayload.request.id, action: "rejected", reason: "Conflicting decision should be refused.", decisionNonce: "decision_three" });
     assert.equal(conflicting.ok, false); if (!conflicting.ok) assert.equal(conflicting.status, 409);
     const revoked = await decideOwnerDiscordAccessRequest(env, owner, { requestId: createdPayload.request.id, action: "revoked", reason: "The linked server is no longer verified.", decisionNonce: "decision_four" });
     assert.equal(revoked.ok, true); if (revoked.ok) assert.equal(revoked.status, "revoked");
+    const replacement = await createOwnerDiscordAccessRequest(env, request("POST", { linkedServerId: "server_owned" }, applicantSession.token, "https://dzn.test"), { linkedServerId: "server_owned" });
+    assert.equal(replacement.ok, true); if (replacement.ok) assert.equal(replacement.duplicate, false);
+    if (replacement.ok) {
+      await db.prepare("UPDATE linked_servers SET user_id = ?, status = 'merged' WHERE id = 'server_owned'").bind(outsider.id).run();
+      const staleApproval = await decideOwnerDiscordAccessRequest(env, owner, { requestId: replacement.request.id, action: "approved", reason: "Current ownership checked before approval.", decisionNonce: "decision_five" });
+      assert.equal(staleApproval.ok, false); if (!staleApproval.ok) assert.equal(staleApproval.status, 409);
+    }
     const audit = await listOwnerDiscordAccessRequests(env);
-    assert.equal(audit.ok, true); if (audit.ok) assert.deepEqual(audit.audit.map((entry) => entry.action).sort(), ["approved", "requested", "revoked"]);
+    assert.equal(audit.ok, true); if (audit.ok) assert.deepEqual(audit.audit.map((entry) => entry.action).sort(), ["approved", "requested", "requested", "revoked"]);
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Owner Discord access queue checks passed.");
   } finally { await mf.dispose(); }

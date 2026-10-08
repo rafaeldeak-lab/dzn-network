@@ -57,7 +57,7 @@ export async function createOwnerDiscordAccessRequest(env: Env, request: Request
   if (!server) return { ok: false as const, status: 403, message: "That server is not available for your owner-access request." };
   const existing = await db.prepare(`SELECT id, linked_server_id, server_name, request_note, status, decision_reason, reviewed_at, created_at, updated_at
                                        FROM dzn_owner_discord_access_requests
-                                      WHERE requester_user_id = ? AND linked_server_id = ? AND status = 'pending'
+                                      WHERE requester_user_id = ? AND linked_server_id = ? AND status IN ('pending', 'approved')
                                       LIMIT 1`).bind(user.id, linkedServerId).first<Record<string, unknown>>();
   if (existing) return { ok: true as const, duplicate: true, request: safeApplicantRequest(existing) };
 
@@ -112,7 +112,10 @@ export async function decideOwnerDiscordAccessRequest(env: Env, actor: SessionUs
   if (!requestId || !action || !decisionNonce) return { ok: false as const, status: 400, message: "Refresh the request and enter a decision." };
   if (!reason || reason.length < 5) return { ok: false as const, status: 400, message: "Record a clear decision reason of at least five characters." };
   const db = requireDb(env);
-  const current = await db.prepare(`SELECT id, status FROM dzn_owner_discord_access_requests WHERE id = ? LIMIT 1`).bind(requestId).first<{ id: string; status: OwnerDiscordAccessStatus }>();
+  const current = await db.prepare(`SELECT id, status, requester_user_id, linked_server_id
+                                      FROM dzn_owner_discord_access_requests
+                                     WHERE id = ?
+                                     LIMIT 1`).bind(requestId).first<{ id: string; status: OwnerDiscordAccessStatus; requester_user_id: string; linked_server_id: string }>();
   if (!current) return { ok: false as const, status: 404, message: "The owner-access request was not found." };
   if (current.status === action) return { ok: true as const, duplicate: true, status: action };
   if ((action === "approved" || action === "rejected") && current.status !== "pending") return { ok: false as const, status: 409, message: "This request is no longer waiting for a decision." };
@@ -121,8 +124,15 @@ export async function decideOwnerDiscordAccessRequest(env: Env, actor: SessionUs
   const result = await db.batch([
     db.prepare(`UPDATE dzn_owner_discord_access_requests
                    SET status = ?, decision_reason = ?, decision_nonce = ?, reviewed_by_user_id = ?, reviewed_by_discord_id = ?, reviewed_by_username = ?, reviewed_at = ?, updated_at = ?
-                 WHERE id = ? AND status = ?`)
-      .bind(action, reason, decisionNonce, actor.id, actor.discord_id, clean(actor.username, 100), now, now, requestId, current.status),
+                 WHERE id = ? AND status = ?
+                   AND (? != 'approved' OR EXISTS (
+                     SELECT 1 FROM linked_servers
+                      WHERE id = dzn_owner_discord_access_requests.linked_server_id
+                        AND user_id = dzn_owner_discord_access_requests.requester_user_id
+                        AND lower(COALESCE(status, 'pending')) NOT IN ('deleted', 'merged')
+                        AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
+                   ))`)
+      .bind(action, reason, decisionNonce, actor.id, actor.discord_id, clean(actor.username, 100), now, now, requestId, current.status, action),
     db.prepare(`INSERT INTO dzn_owner_discord_access_audit (
       id, request_id, actor_user_id, actor_discord_id, actor_username, action, previous_status, next_status, reason, created_at
     ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
