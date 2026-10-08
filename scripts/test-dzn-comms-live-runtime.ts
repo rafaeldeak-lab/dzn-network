@@ -582,7 +582,8 @@ async function testOwnerArchiveAndSelfDeleteRuntime() {
     assert.equal(f.count("dzn_comms_owner_message_archive_events"), 2, "The archive must record both send and self-delete events.");
     const reportedDeletionQueue = await handleDznCommsModeration(getRequest("/api/owner/comms/moderate", "owner-token"), f.env);
     assert.equal(reportedDeletionQueue.status, 200);
-    const reportedDeletion = (await reportedDeletionQueue.json() as { reports?: Array<{ message_id: string; body: string; body_source: string }> }).reports?.find((item) => item.message_id === messageId);
+    const reportedDeletion = (await reportedDeletionQueue.json() as { reports?: Array<{ message_id: string; author_display_name: string; body: string; body_source: string }> }).reports?.find((item) => item.message_id === messageId);
+    assert.equal(reportedDeletion?.author_display_name, "Player", "An open report must retain the archived author after its author self-deletes the public message.");
     assert.equal(reportedDeletion?.body, "Keep this for the safety archive", "An open report must retain the private original after its author self-deletes the public message.");
     assert.equal(reportedDeletion?.body_source, "archive", "The moderation queue must mark a restored private original clearly.");
     f.sqlite.exec("DELETE FROM dzn_comms_send_slots; DELETE FROM dzn_comms_attempt_slots;");

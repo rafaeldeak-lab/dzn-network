@@ -45,6 +45,7 @@ type Payload = {
   requests?: RequestItem[];
   audit?: Audit[];
   delivery?: string;
+  page?: { has_more?: boolean; next_cursor?: string | null };
   message?: string;
 };
 
@@ -59,12 +60,15 @@ export function OwnerDiscordAccessPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [reasonById, setReasonById] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
-  const load = useCallback(async () => {
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const load = useCallback(async (cursor?: string | null, append = false) => {
     setState("loading");
     try {
       const params = new URLSearchParams();
       if (status !== "all") params.set("status", status);
       if (appliedSearch) params.set("q", appliedSearch);
+      if (cursor) params.set("cursor", cursor);
       const response = await fetch(
         `/api/owner/discord/owner-access-requests?${params}`,
         { credentials: "include", cache: "no-store" },
@@ -78,7 +82,8 @@ export function OwnerDiscordAccessPage() {
         throw new Error(
           next?.message ?? "Owner Discord requests are unavailable.",
         );
-      setPayload(next);
+      setPayload((current) => append ? { ...next, requests: [...(current?.requests ?? []), ...(next.requests ?? [])] } : next);
+      setNextCursor(next.page?.next_cursor ?? null);
       setState("ready");
     } catch (error) {
       setNotice(
@@ -366,6 +371,19 @@ export function OwnerDiscordAccessPage() {
                     No matching owner-access requests.
                   </p>
                 )}
+                {nextCursor ? (
+                  <button
+                    type="button"
+                    disabled={loadingMore}
+                    onClick={() => {
+                      setLoadingMore(true);
+                      void load(nextCursor, true).finally(() => setLoadingMore(false));
+                    }}
+                    className="min-h-10 rounded-md border border-cyan-300/25 bg-cyan-300/[0.08] px-3 text-xs font-black text-cyan-100 disabled:opacity-50"
+                  >
+                    {loadingMore ? "Loading older requests" : "Load older requests"}
+                  </button>
+                ) : null}
               </div>
               <aside className="rounded-lg border border-white/10 bg-white/[0.025] p-4">
                 <h2 className="font-black">Recent decisions</h2>

@@ -30,6 +30,8 @@ async function run() {
   assert.doesNotMatch(accessSource, /DISCORD_BOT_TOKEN|fetch\s*\(/);
   assert.match(accessSource, /WHERE changes\(\) = 1/, "Decision audits must be written only when the immediately preceding status update succeeds.");
   assert.match(accessSource, /result\[1\]\?\.meta\?\.changes/, "A decision must fail closed if its audit row was not written.");
+  assert.match(accessSource, /OWNER_ACCESS_PAGE_SIZE/, "The owner-access queue must use a bounded page size.");
+  assert.match(accessSource, /encodeOwnerAccessCursor/, "The owner-access queue must expose stable continuation cursors.");
   const envExample = readFileSync(".env.example", "utf8");
   assert.match(envExample, /^DZN_OWNER_DISCORD_ACCESS_ENABLED=false$/m);
   assert.match(envExample, /^NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED=false$/m);
@@ -109,6 +111,40 @@ async function run() {
     const audit = await listOwnerDiscordAccessRequests(env);
     assert.equal(audit.ok, true); if (audit.ok) assert.deepEqual(audit.audit.map((entry) => entry.action).sort(), ["approved", "approved", "requested", "requested", "requested", "revoked"]);
 
+    for (let index = 0; index < 101; index += 1) {
+      const id = `queue-page-${String(index).padStart(3, "0")}`;
+      const updatedAt = new Date(Date.UTC(2026, 8, 1, 0, index, 0)).toISOString();
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+        id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot,
+        server_name, request_note, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'server_owned', 'server_owned', 'Verified Owner Server', 'Pagination coverage', 'rejected', ?, ?)`)
+        .bind(id, applicant.id, applicant.discord_id, applicant.username, updatedAt, updatedAt).run();
+    }
+    const firstRejectedPage = await listOwnerDiscordAccessRequests(env, { status: "rejected" });
+    assert.equal(firstRejectedPage.ok, true);
+    if (firstRejectedPage.ok) {
+      assert.equal(firstRejectedPage.requests.length, 50, "The owner-access queue must return a bounded first page.");
+      assert.equal(firstRejectedPage.page.has_more, true);
+      assert.equal(typeof firstRejectedPage.page.next_cursor, "string");
+      const secondRejectedPage = await listOwnerDiscordAccessRequests(env, { status: "rejected", cursor: firstRejectedPage.page.next_cursor });
+      assert.equal(secondRejectedPage.ok, true);
+      if (secondRejectedPage.ok) {
+        assert.equal(secondRejectedPage.requests.length, 50, "The owner-access cursor must return the next stable page.");
+        assert.equal(secondRejectedPage.page.has_more, true);
+        const thirdRejectedPage = await listOwnerDiscordAccessRequests(env, { status: "rejected", cursor: secondRejectedPage.page.next_cursor });
+        assert.equal(thirdRejectedPage.ok, true);
+        if (thirdRejectedPage.ok) {
+          assert.equal(thirdRejectedPage.requests.length, 1, "The final owner-access page must expose records beyond the initial 100.");
+          assert.equal(thirdRejectedPage.page.has_more, false);
+          const ids = [...firstRejectedPage.requests, ...secondRejectedPage.requests, ...thirdRejectedPage.requests].map((entry) => entry.id);
+          assert.equal(new Set(ids).size, 101, "Owner-access pagination must not duplicate or omit requests.");
+        }
+      }
+    }
+    const invalidCursor = await listOwnerDiscordAccessRequests(env, { cursor: "invalid" });
+    assert.equal(invalidCursor.ok, false);
+    if (!invalidCursor.ok) assert.equal(invalidCursor.status, 400);
+
     await db.prepare("DELETE FROM linked_servers WHERE id = 'server_owned'").run();
     const preservedRequest = await db.prepare("SELECT linked_server_id, linked_server_id_snapshot, server_name FROM dzn_owner_discord_access_requests WHERE id = ?").bind(createdPayload.request.id).first<{ linked_server_id: string | null; linked_server_id_snapshot: string; server_name: string }>();
     assert.equal(preservedRequest?.linked_server_id, null, "Server deletion must preserve the owner-access request as a tombstone.");
@@ -116,7 +152,7 @@ async function run() {
     assert.equal(preservedRequest?.server_name, "Verified Owner Server", "The audit trail must retain the original server name after deletion.");
     const preservedAudit = await db.prepare("SELECT COUNT(*) AS count FROM dzn_owner_discord_access_audit WHERE request_id = ?").bind(createdPayload.request.id).first<{ count: number }>();
     assert.equal(Number(preservedAudit?.count ?? 0) > 0, true, "Server deletion must not erase owner-access decision audit history.");
-    const retainedAuditList = await listOwnerDiscordAccessRequests(env);
+    const retainedAuditList = await listOwnerDiscordAccessRequests(env, { status: "revoked" });
     assert.equal(retainedAuditList.ok, true);
     if (retainedAuditList.ok) {
       assert.equal(retainedAuditList.audit.some((entry) => entry.requestId === createdPayload.request.id), true, "The owner console must continue to list a preserved audit after server deletion.");

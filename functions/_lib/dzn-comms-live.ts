@@ -374,7 +374,8 @@ export async function handleDznCommsModerationQueue(request: Request, env: Env) 
   const privateGroupsEnabled = readDznCommsPrivateGroupFlags(env, request).enabled ? 1 : 0;
   const archiveEnabled = readDznCommsOwnerArchiveFlags(env, request).enabled;
   const reportQuery = archiveEnabled
-    ? `SELECT messages.id AS message_id, messages.author_display_name,
+    ? `SELECT messages.id AS message_id,
+        CASE WHEN messages.visibility_state = 'deleted' THEN COALESCE(archive.author_display_name, messages.author_display_name) ELSE messages.author_display_name END AS author_display_name,
         CASE WHEN messages.visibility_state = 'deleted' THEN COALESCE(archive.original_body, messages.body) ELSE messages.body END AS body,
         CASE WHEN messages.visibility_state = 'deleted' AND archive.message_id IS NOT NULL THEN 'archive' ELSE 'public' END AS body_source,
         messages.visibility_state, messages.created_at, messages.expires_at,
