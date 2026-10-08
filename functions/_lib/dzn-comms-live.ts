@@ -11,6 +11,7 @@ const SENDS_PER_MINUTE = 20;
 const ATTEMPTS_PER_MINUTE = 30;
 const REPORTS_PER_MINUTE = 10;
 const MESSAGE_RETENTION_DAYS = 30;
+const OWNER_ARCHIVE_PAGE_SIZE = 50;
 const RATE_SLOT_RETENTION_DAYS = 2;
 const reportReasons = new Set(["harassment", "hate", "threat", "spam", "personal_information", "other"]);
 const moderationActions = new Set(["hide", "restore", "delete", "resolve_report", "dismiss_report"]);
@@ -320,6 +321,10 @@ export async function handleDznCommsOwnerArchive(request: Request, env: Env) {
   if (effectiveFilter !== "all" && effectiveFilter !== "visible" && effectiveFilter !== "hidden" && effectiveFilter !== "deleted") {
     return error(400, "INVALID_ARCHIVE_FILTER", "Choose a valid archive filter.");
   }
+  const cursor = decodeOwnerArchiveCursor(url.searchParams.get("cursor"));
+  if (url.searchParams.has("cursor") && !cursor) {
+    return error(400, "INVALID_ARCHIVE_CURSOR", "The archive cursor is invalid.");
+  }
   const pattern = query ? `%${escapeLike(query)}%` : "%";
   const db = requireDb(env);
   const result = await db.prepare(`SELECT archive.message_id, channels.slug AS channel_slug,
@@ -333,9 +338,32 @@ export async function handleDznCommsOwnerArchive(request: Request, env: Env) {
     WHERE julianday(archive.retained_until) > julianday('now')
       AND (? = 'all' OR COALESCE(messages.visibility_state, CASE WHEN archive.deleted_at IS NOT NULL THEN 'deleted' ELSE 'unavailable' END) = ?)
       AND (lower(archive.author_display_name) LIKE ? ESCAPE '\\' OR lower(archive.original_body) LIKE ? ESCAPE '\\')
+      AND (? IS NULL OR julianday(archive.sent_at) < julianday(?)
+        OR (julianday(archive.sent_at) = julianday(?) AND archive.message_id < ?))
     ORDER BY julianday(archive.sent_at) DESC, archive.message_id DESC
-    LIMIT 100`).bind(effectiveFilter, effectiveFilter, pattern, pattern).all<Record<string, unknown>>();
-  return json({ ok: true, private: true, retention_days: MESSAGE_RETENTION_DAYS, rows: result.results ?? [] }, { headers: privateNoStoreHeaders() });
+    LIMIT ?`).bind(
+      effectiveFilter,
+      effectiveFilter,
+      pattern,
+      pattern,
+      cursor?.sentAt ?? null,
+      cursor?.sentAt ?? null,
+      cursor?.sentAt ?? null,
+      cursor?.messageId ?? null,
+      OWNER_ARCHIVE_PAGE_SIZE + 1,
+    ).all<Record<string, unknown>>();
+  const rows = (result.results ?? []).slice(0, OWNER_ARCHIVE_PAGE_SIZE);
+  const lastRow = rows.at(-1);
+  const nextCursor = (result.results ?? []).length > OWNER_ARCHIVE_PAGE_SIZE && lastRow
+    ? encodeOwnerArchiveCursor(lastRow)
+    : null;
+  return json({
+    ok: true,
+    private: true,
+    retention_days: MESSAGE_RETENTION_DAYS,
+    rows,
+    page: { limit: OWNER_ARCHIVE_PAGE_SIZE, has_more: nextCursor !== null, next_cursor: nextCursor },
+  }, { headers: privateNoStoreHeaders() });
 }
 
 export async function handleDznCommsModerationQueue(request: Request, env: Env) {
@@ -344,9 +372,26 @@ export async function handleDznCommsModerationQueue(request: Request, env: Env) 
   if (!auth.ok) return auth.response;
   const db = requireDb(env);
   const privateGroupsEnabled = readDznCommsPrivateGroupFlags(env, request).enabled ? 1 : 0;
-  const [reports, audit] = await Promise.all([
-    db.prepare(`SELECT messages.id AS message_id, messages.author_display_name, messages.body,
+  const archiveEnabled = readDznCommsOwnerArchiveFlags(env, request).enabled;
+  const reportQuery = archiveEnabled
+    ? `SELECT messages.id AS message_id, messages.author_display_name,
+        CASE WHEN messages.visibility_state = 'deleted' THEN COALESCE(archive.original_body, messages.body) ELSE messages.body END AS body,
+        CASE WHEN messages.visibility_state = 'deleted' AND archive.message_id IS NOT NULL THEN 'archive' ELSE 'public' END AS body_source,
         messages.visibility_state, messages.created_at, messages.expires_at,
+        COUNT(reports.id) AS report_count, MIN(reports.created_at) AS first_reported_at,
+        GROUP_CONCAT(DISTINCT reports.reason_code) AS reasons
+      FROM dzn_comms_reports AS reports
+      JOIN dzn_comms_messages AS messages ON messages.id = reports.message_id
+      JOIN dzn_comms_channels AS channels ON channels.id = messages.channel_id
+      LEFT JOIN dzn_comms_owner_message_archive AS archive ON archive.message_id = messages.id
+      WHERE reports.status = 'open'
+        AND ((channels.slug = 'global-chat' AND channels.kind = 'public' AND channels.visibility = 'public')
+          OR (? = 1 AND channels.kind = 'private_group' AND channels.visibility = 'private_group'))
+      GROUP BY messages.id
+      ORDER BY MIN(reports.created_at) ASC
+      LIMIT 100`
+    : `SELECT messages.id AS message_id, messages.author_display_name, messages.body,
+        'public' AS body_source, messages.visibility_state, messages.created_at, messages.expires_at,
         COUNT(reports.id) AS report_count, MIN(reports.created_at) AS first_reported_at,
         GROUP_CONCAT(DISTINCT reports.reason_code) AS reasons
       FROM dzn_comms_reports AS reports
@@ -357,7 +402,9 @@ export async function handleDznCommsModerationQueue(request: Request, env: Env) 
           OR (? = 1 AND channels.kind = 'private_group' AND channels.visibility = 'private_group'))
       GROUP BY messages.id
       ORDER BY MIN(reports.created_at) ASC
-      LIMIT 100`).bind(privateGroupsEnabled).all<Record<string, unknown>>(),
+      LIMIT 100`;
+  const [reports, audit] = await Promise.all([
+    db.prepare(reportQuery).bind(privateGroupsEnabled).all<Record<string, unknown>>(),
     db.prepare(`SELECT audit.id, audit.message_id, audit.action, audit.reason_code, audit.created_at,
         users.username AS actor_name
       FROM dzn_comms_moderation_audit AS audit
@@ -371,7 +418,7 @@ export async function handleDznCommsModerationQueue(request: Request, env: Env) 
     private: true,
     reports: reports.results ?? [],
     audit: audit.results ?? [],
-    archive_available: readDznCommsOwnerArchiveFlags(env, request).enabled,
+    archive_available: archiveEnabled,
     retention: { message_days: MESSAGE_RETENTION_DAYS, deleted_body_erasure: true },
   }, { headers: privateNoStoreHeaders() });
 }
@@ -495,6 +542,48 @@ async function readReceipt(db: D1Database, actorReceiptKey: string, channel: Sen
       ))
     LIMIT 1`).bind(actorReceiptKey, channel.id, requestId, channel.kind, userId)
     .first<{ body_hash: string; decision: string; response_status: number; reason_code: string | null; message_id: string | null }>();
+}
+
+function encodeOwnerArchiveCursor(row: Record<string, unknown>) {
+  const sentAt = canonicalOwnerArchiveTimestamp(row.sent_at);
+  const messageId = cleanArchiveMessageId(row.message_id);
+  if (!sentAt || !messageId) return null;
+  return base64UrlEncode(JSON.stringify({ v: 1, t: sentAt, id: messageId }));
+}
+
+function decodeOwnerArchiveCursor(value: string | null) {
+  if (!value || !/^[A-Za-z0-9_-]{8,1024}$/.test(value)) return null;
+  try {
+    const parsed = JSON.parse(base64UrlDecode(value)) as Partial<{ v: number; t: string; id: string }>;
+    const sentAt = parsed.v === 1 ? canonicalOwnerArchiveTimestamp(parsed.t) : null;
+    const messageId = cleanArchiveMessageId(parsed.id);
+    return sentAt && messageId ? { sentAt, messageId } : null;
+  } catch {
+    return null;
+  }
+}
+
+function canonicalOwnerArchiveTimestamp(value: unknown) {
+  if (typeof value !== "string" || value.length > 40) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
+function cleanArchiveMessageId(value: unknown) {
+  return typeof value === "string" && [...value].length >= 1 && [...value].length <= 120 ? value : null;
+}
+
+function base64UrlEncode(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlDecode(value: string) {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const binary = atob(padded);
+  return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(binary, (character) => character.charCodeAt(0)));
 }
 
 async function readSendChannel(db: D1Database, slug: string) {

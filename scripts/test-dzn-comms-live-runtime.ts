@@ -566,6 +566,8 @@ async function testOwnerArchiveAndSelfDeleteRuntime() {
     assert.equal(f.count("dzn_comms_owner_message_archive"), 1, "An enabled archive must capture an accepted message before it can be deleted.");
     assert.equal(f.sqlite.prepare("SELECT original_body FROM dzn_comms_owner_message_archive WHERE message_id = ?").get(messageId)?.original_body, "Keep this for the safety archive");
     assert.equal(f.sqlite.prepare("SELECT author_user_id FROM dzn_comms_messages WHERE id = ?").get(messageId)?.author_user_id, "player");
+    const reported = await handleDznCommsReport(request("/api/comms/reports", "other-token", { messageId, reason: "other" }), f.env);
+    assert.equal(reported.status, 202, "A member can report a message before its author self-deletes it.");
     assert.equal((await handleDznCommsSelfDelete(deleteRequest(`/api/comms/messages/${messageId}`, "other-token"), f.env, messageId)).status, 404, "Another member cannot delete a message they do not own.");
     const deleted = await handleDznCommsSelfDelete(deleteRequest(`/api/comms/messages/${messageId}`, "player-token"), f.env, messageId);
     assert.equal(deleted.status, 200, await deleted.text());
@@ -578,6 +580,11 @@ async function testOwnerArchiveAndSelfDeleteRuntime() {
     assert.equal(archivedRow.deletion_kind, "self_deleted");
     assert.equal(archivedRow.deleted_by_user_id, "player");
     assert.equal(f.count("dzn_comms_owner_message_archive_events"), 2, "The archive must record both send and self-delete events.");
+    const reportedDeletionQueue = await handleDznCommsModeration(getRequest("/api/owner/comms/moderate", "owner-token"), f.env);
+    assert.equal(reportedDeletionQueue.status, 200);
+    const reportedDeletion = (await reportedDeletionQueue.json() as { reports?: Array<{ message_id: string; body: string; body_source: string }> }).reports?.find((item) => item.message_id === messageId);
+    assert.equal(reportedDeletion?.body, "Keep this for the safety archive", "An open report must retain the private original after its author self-deletes the public message.");
+    assert.equal(reportedDeletion?.body_source, "archive", "The moderation queue must mark a restored private original clearly.");
     f.sqlite.exec("DELETE FROM dzn_comms_send_slots; DELETE FROM dzn_comms_attempt_slots;");
     const literalSent = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
       channelSlug: "global-chat", clientRequestId: "archive-literal-placeholder-01", body: "Message deleted.",
@@ -637,6 +644,44 @@ async function testOwnerArchiveAndSelfDeleteRuntime() {
     const retention = await runDznCommsRetention(f.env.DB, new Date("2026-09-24T12:00:00.000Z"));
     assert.equal(retention.ownerArchiveRowsDeleted, 5, "The retention runner must remove expired original message archives.");
     assert.equal(f.count("dzn_comms_owner_message_archive"), 0);
+  } finally { f.close(); }
+}
+
+async function testOwnerArchivePagination() {
+  const f = await fixture();
+  try {
+    const insertMessage = f.sqlite.prepare(`INSERT INTO dzn_comms_messages
+      (id,channel_id,author_user_id,author_display_name,author_role_label,body,visibility_state,created_at)
+      VALUES (?,?,?,?,?,?,?,?)`);
+    const insertArchive = f.sqlite.prepare(`INSERT INTO dzn_comms_owner_message_archive
+      (message_id,channel_id,author_user_id,author_display_name,author_role_label,original_body,sent_at,retained_until)
+      VALUES (?,?,?,?,?,?,?,?)`);
+    for (let index = 0; index < 101; index += 1) {
+      const id = `archive-page-${String(index).padStart(3, "0")}`;
+      const sentAt = new Date(Date.UTC(2026, 8, 1, 0, index, 0)).toISOString();
+      insertMessage.run(id, "dzn-global-chat", "player", "Player", "Member", `Archive page ${index}`, "visible", sentAt);
+      insertArchive.run(id, "dzn-global-chat", "player", "Player", "Member", `Archive page ${index}`, sentAt, "2099-01-01T00:00:00.000Z");
+    }
+    const firstResponse = await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=visible&query=archive%20page", "owner-token"), f.env);
+    assert.equal(firstResponse.status, 200);
+    const first = await firstResponse.json() as { rows?: Array<{ message_id: string }>; page?: { has_more?: boolean; next_cursor?: string | null } };
+    assert.equal(first.rows?.length, 50, "The archive must return a bounded first page.");
+    assert.equal(first.page?.has_more, true);
+    assert.equal(typeof first.page?.next_cursor, "string");
+    const secondResponse = await handleDznCommsOwnerArchive(getRequest(`/api/owner/comms/archive?filter=visible&query=archive%20page&cursor=${encodeURIComponent(first.page?.next_cursor ?? "")}`, "owner-token"), f.env);
+    assert.equal(secondResponse.status, 200);
+    const second = await secondResponse.json() as { rows?: Array<{ message_id: string }>; page?: { has_more?: boolean; next_cursor?: string | null } };
+    assert.equal(second.rows?.length, 50, "The continuation cursor must return the next stable page.");
+    assert.equal(second.page?.has_more, true);
+    const thirdResponse = await handleDznCommsOwnerArchive(getRequest(`/api/owner/comms/archive?filter=visible&query=archive%20page&cursor=${encodeURIComponent(second.page?.next_cursor ?? "")}`, "owner-token"), f.env);
+    assert.equal(thirdResponse.status, 200);
+    const third = await thirdResponse.json() as { rows?: Array<{ message_id: string }>; page?: { has_more?: boolean; next_cursor?: string | null } };
+    assert.equal(third.rows?.length, 1, "The final archive page must expose retained records beyond the initial 100.");
+    assert.equal(third.page?.has_more, false);
+    assert.equal(third.page?.next_cursor, null);
+    const returnedIds = [...(first.rows ?? []), ...(second.rows ?? []), ...(third.rows ?? [])].map((row) => row.message_id);
+    assert.equal(new Set(returnedIds).size, 101, "Archive cursor pages must not duplicate or omit matching records.");
+    assert.equal((await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?cursor=not-a-valid-cursor", "owner-token"), f.env)).status, 400, "Malformed archive cursors must be rejected.");
   } finally { f.close(); }
 }
 
@@ -752,6 +797,7 @@ async function main() {
   await testReportAndModerationRuntime();
   await testRetentionRuntime();
   await testOwnerArchiveAndSelfDeleteRuntime();
+  await testOwnerArchivePagination();
   await testOwnerArchiveRequiresRetention();
   console.log("Live Comms handlers: auth, origin, idempotency, conflict, quota, rollback, report and moderation behavior passed.");
 }
