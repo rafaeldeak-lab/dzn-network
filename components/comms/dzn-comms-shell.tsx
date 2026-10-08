@@ -203,6 +203,7 @@ export function DznCommsShell() {
   const statusLabel = useMemo(() => statusCopy(history.status), [history.status]);
   const sendingEnabled = liveUiEnabled && payload.feature_flags.sending_enabled;
   const reportActionsEnabled = liveUiEnabled && payload.feature_flags.report_actions_enabled;
+  const selfDeleteUiEnabled = liveUiEnabled && payload.feature_flags.self_delete_enabled;
   const reactionUiEnabled = liveUiEnabled && reactionUiFlagEnabled && payload.feature_flags.reactions_enabled;
   const reactionWritesAvailable = reactionUiEnabled && payload.feature_flags.reactions_write_enabled;
 
@@ -411,6 +412,7 @@ export function DznCommsShell() {
                     key={message.id}
                     message={message}
                     reportEnabled={reportActionsEnabled}
+                    deleteEnabled={selfDeleteUiEnabled}
                     reactionUiEnabled={reactionUiEnabled}
                     reactionWriteEnabled={reactionWritesEnabled}
                     reactionLoginRequired={reactionLoginRequired}
@@ -481,9 +483,10 @@ export function DznCommsShell() {
   );
 }
 
-function MessageRow({ message, reportEnabled, reactionUiEnabled, reactionWriteEnabled, reactionLoginRequired, onReactionChange, onMessageDeleted }: {
+function MessageRow({ message, reportEnabled, deleteEnabled, reactionUiEnabled, reactionWriteEnabled, reactionLoginRequired, onReactionChange, onMessageDeleted }: {
   message: CommsHistoryMessage;
   reportEnabled: boolean;
+  deleteEnabled: boolean;
   reactionUiEnabled: boolean;
   reactionWriteEnabled: boolean;
   reactionLoginRequired: boolean;
@@ -491,6 +494,7 @@ function MessageRow({ message, reportEnabled, reactionUiEnabled, reactionWriteEn
   onMessageDeleted: (messageId: string) => void;
 }) {
   const muted = message.visibility_state !== "visible";
+  const canDelete = deleteEnabled && message.can_delete;
   const [reportState, setReportState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [deleteState, setDeleteState] = useState<"idle" | "deleting" | "error">("idle");
   const [reactionState, setReactionState] = useState<{ key: CommsReactionKey | null; status: "idle" | "sending" | "saved" | "error" }>({ key: null, status: "idle" });
@@ -518,7 +522,7 @@ function MessageRow({ message, reportEnabled, reactionUiEnabled, reactionWriteEn
   }
 
   async function deleteMessage() {
-    if (!message.can_delete || deleteState === "deleting" || !window.confirm("Delete this message? It will disappear from chat but remain in the 30-day platform-owner safety archive.")) return;
+    if (!canDelete || deleteState === "deleting" || !window.confirm("Delete this message? It will disappear from chat but remain in the 30-day platform-owner safety archive.")) return;
     setDeleteState("deleting");
     try {
       await deleteCommsMessage(message.id);
@@ -541,7 +545,7 @@ function MessageRow({ message, reportEnabled, reactionUiEnabled, reactionWriteEn
               {message.author_role_label}
             </span>
             <CommsMessageTime value={message.created_at} />
-            {message.can_delete ? <button type="button" disabled={deleteState === "deleting"} onClick={() => void deleteMessage()} className="ml-auto inline-grid h-7 w-7 place-items-center rounded-md border border-white/10 text-zinc-400 hover:border-red-300/40 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60" title="Delete your message" aria-label="Delete your message"><Trash2 className="h-3.5 w-3.5" aria-hidden="true" /></button> : null}
+            {canDelete ? <button type="button" disabled={deleteState === "deleting"} onClick={() => void deleteMessage()} className="ml-auto inline-grid h-7 w-7 place-items-center rounded-md border border-white/10 text-zinc-400 hover:border-red-300/40 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60" title="Delete your message" aria-label="Delete your message"><Trash2 className="h-3.5 w-3.5" aria-hidden="true" /></button> : null}
           </div>
           <p className={`mt-2 text-sm font-semibold leading-6 [overflow-wrap:anywhere] ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
           {deleteState === "error" ? <p role="alert" className="mt-2 text-xs font-bold text-amber-200">Message could not be deleted. Try again.</p> : null}
