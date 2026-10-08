@@ -25,12 +25,18 @@ async function run() {
   assert.match(accessSource, /status IN \('pending', 'approved'\)/);
   assert.match(accessSource, /No Discord invite, message, or role change/);
   assert.doesNotMatch(accessSource, /DISCORD_BOT_TOKEN|fetch\s*\(/);
-  assert.match(readFileSync(".env.example", "utf8"), /^DZN_OWNER_DISCORD_ACCESS_ENABLED=false$/m);
+  const envExample = readFileSync(".env.example", "utf8");
+  assert.match(envExample, /^DZN_OWNER_DISCORD_ACCESS_ENABLED=false$/m);
+  assert.match(envExample, /^NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED=false$/m);
   assert.match(readFileSync("cloudflare-env.d.ts", "utf8"), /DZN_OWNER_DISCORD_ACCESS_ENABLED\?: string/);
   const wrangler = readFileSync("wrangler.toml", "utf8");
   assert.doesNotMatch(wrangler, /^DZN_OWNER_DISCORD_ACCESS_ENABLED = "true"$/m);
-  assert.match(readFileSync("components/onboarding/dashboard.tsx", "utf8"), /href="\/discord-owner-access"/);
-  assert.match(readFileSync("app/discord-owner-access/page.tsx", "utf8"), /OwnerDiscordAccessPage/);
+  const dashboard = readFileSync("components/onboarding/dashboard.tsx", "utf8");
+  assert.match(dashboard, /NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED/, "The dashboard link must require an explicit public activation flag.");
+  assert.match(dashboard, /ownerDiscordAccessUiEnabled \? <Link href="\/discord-owner-access"/, "The dashboard must not expose owner Discord navigation while the feature is inactive.");
+  const ownerAccessPage = readFileSync("app/discord-owner-access/page.tsx", "utf8");
+  assert.match(ownerAccessPage, /process\.env\.DZN_OWNER_DISCORD_ACCESS_ENABLED !== "true"\) notFound\(\)/, "The destination route must remain unavailable until the server feature is enabled.");
+  assert.match(ownerAccessPage, /OwnerDiscordAccessPage/, "The protected route must render the owner access page only after activation.");
 
   const mf = new Miniflare({ modules: true, script: "export default { fetch() { return new Response('ok'); } }", compatibilityDate: "2026-05-08", d1Databases: ["DB"], d1Persist: false });
   try {

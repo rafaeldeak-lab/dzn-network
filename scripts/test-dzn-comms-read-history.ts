@@ -75,6 +75,8 @@ assert.match(helper, /julianday\(created_at\) = julianday\(\?\) AND id < \?/, "P
 assert.match(helper, /encodeHistoryCursor\(lastRow\)/, "The API must issue an opaque cursor from the last row in the page.");
 assert.match(helper, /Use either before or cursor, not both/, "Legacy and opaque cursors must not be combined.");
 assert.match(helper, /sending_enabled: channel\.visibility === "private_group" \? privateGroupFlags\.enabled : flags\.writeFeaturesEnabled/, "Route payload must derive sending state from the protected channel-specific server flag.");
+assert.match(helper, /const selfDeleteEnabled = flags\.writeFeaturesEnabled && readDznCommsOwnerArchiveFlags\(env, request\)\.enabled/, "Self-delete must require both the live mutation runtime and the private archive safeguard.");
+assert.match(helper, /self_delete_enabled: selfDeleteEnabled/, "History feature flags must report the same availability used for delete controls.");
 assert.match(helper, /reactions_enabled: reactionFlags\.readEnabled/, "Route payload must derive reaction reads from their separate server flag.");
 assert.match(helper, /reactions_write_enabled: reactionFlags\.writeEnabled/, "Route payload must derive reaction writes from their separate server flag.");
 assert.match(helper, /ai_assist_runtime_enabled: false/, "Route payload must report AI support runtime disabled.");
@@ -279,6 +281,7 @@ async function testRuntimeContracts() {
   assert.equal(publicPayload.read_only, true);
   assert.equal(publicPayload.presentation_only, true);
   assert.equal(publicPayload.feature_flags.sending_enabled, false);
+  assert.equal(publicPayload.feature_flags.self_delete_enabled, false, "Local/test read history must not expose self-delete before the live mutation runtime is active.");
   assert.equal(publicPayload.feature_flags.reactions_enabled, false);
   assert.equal(publicPayload.feature_flags.report_actions_enabled, false);
   assert.equal(publicPayload.feature_flags.moderation_mutations_enabled, false);
@@ -508,6 +511,7 @@ type CommsPayload = {
   };
   feature_flags: {
     sending_enabled: boolean;
+    self_delete_enabled: boolean;
     reactions_enabled: boolean;
     report_actions_enabled: boolean;
     moderation_mutations_enabled: boolean;

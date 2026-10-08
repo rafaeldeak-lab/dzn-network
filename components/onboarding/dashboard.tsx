@@ -941,6 +941,7 @@ function ServerDashboard({
     }
   }, [server.tags_json]);
   const showInternalSyncSupportTools = process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_DZN_SUPPORT_MODE === "true";
+  const ownerDiscordAccessUiEnabled = process.env.NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED === "true";
 
   const refreshDiscordChannels = useCallback(async (options: { live?: boolean } = {}) => {
     if (discordVerificationInFlightRef.current) return null;
@@ -3597,7 +3598,7 @@ function ServerDashboard({
           <p className="mt-2 text-xs leading-5 text-zinc-500">Everything you need to manage your server.</p>
           <Link href="/setup#review-test" className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-violet-500 px-3 py-2 text-[10px] font-black uppercase text-white">View Setup Guide</Link>
           <a href={DZN_PUBLIC_DISCORD_INVITE_URL} target="_blank" rel="noreferrer" className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-zinc-100">Support Discord</a>
-          <Link href="/discord-owner-access" className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.07] px-3 py-2 text-[10px] font-black uppercase text-cyan-100">Request owner Discord access</Link>
+          {ownerDiscordAccessUiEnabled ? <Link href="/discord-owner-access" className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.07] px-3 py-2 text-[10px] font-black uppercase text-cyan-100">Request owner Discord access</Link> : null}
         </div>
       </aside>
       <div className="min-w-0">

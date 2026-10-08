@@ -159,9 +159,10 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
   const reactionSummaries = reactionFlags.readEnabled
     ? await readDznCommsReactionSummaries(db, pageRows.map((row) => row.id), user?.id ?? null)
     : new Map<string, DznCommsReactionSummary>();
+  const selfDeleteEnabled = flags.writeFeaturesEnabled && readDznCommsOwnerArchiveFlags(env, request).enabled;
   const messages = pageRows
     .filter((row) => !isExpired(row.expires_at) && normalizeVisibilityState(row.visibility_state) !== "expired")
-    .map((row) => publicSafeMessage(row, reactionSummaries.get(row.id), user?.id ?? null, readDznCommsOwnerArchiveFlags(env, request).enabled))
+    .map((row) => publicSafeMessage(row, reactionSummaries.get(row.id), user?.id ?? null, selfDeleteEnabled))
     .reverse();
   const finalMembership = channel.visibility === "private_group"
     ? await readMembership(db, channel.id, user!.id)
@@ -202,7 +203,7 @@ export async function handleDznCommsMessageHistoryRequest(request: Request, env:
         reactions_write_enabled: reactionFlags.writeEnabled,
         report_actions_enabled: channel.visibility === "private_group" ? privateGroupFlags.enabled : flags.writeFeaturesEnabled,
         moderation_mutations_enabled: channel.visibility === "private_group" ? privateGroupFlags.enabled : flags.writeFeaturesEnabled,
-        self_delete_enabled: readDznCommsOwnerArchiveFlags(env, request).enabled,
+        self_delete_enabled: selfDeleteEnabled,
         ai_assist_runtime_enabled: false,
         durable_objects_or_websockets_enabled: false,
         analytics_or_tracking_enabled: false,
