@@ -143,8 +143,15 @@ async function run() {
       CREATE TABLE linked_servers (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, guild_id TEXT NOT NULL, discord_guild_id TEXT, server_name TEXT NOT NULL, display_name TEXT, hostname TEXT, public_slug TEXT, status TEXT, lifecycle_status TEXT, merged_into_server_id TEXT, created_at TEXT, updated_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
       CREATE TABLE nitrado_connections (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, linked_server_id TEXT NOT NULL, created_at TEXT, updated_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id));
       CREATE TABLE onboarding_checks (id TEXT PRIMARY KEY, linked_server_id TEXT NOT NULL, token_valid INTEGER DEFAULT 0, service_access INTEGER DEFAULT 0, dayz_service_detected INTEGER DEFAULT 0, last_tested_at TEXT, FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id));`);
-    for (const statement of splitSql(readFileSync("migrations/0093_dzn_owner_discord_access.sql", "utf8").replace(/^--.*$/gm, ""))) await db.prepare(statement).run();
+    for (const migrationPath of [
+      "migrations/0065_dzn_comms_read_history.sql",
+      "migrations/0092_dzn_comms_owner_message_archive.sql",
+      "migrations/0093_dzn_owner_discord_access.sql",
+    ]) {
+      for (const statement of splitSql(readFileSync(migrationPath, "utf8").replace(/^--.*$/gm, ""))) await db.prepare(statement).run();
+    }
     for (const user of [owner, applicant, outsider]) await db.prepare("INSERT INTO users (id, discord_id, username, avatar) VALUES (?, ?, ?, ?)").bind(user.id, user.discord_id, user.username, user.avatar).run();
+    await db.prepare("INSERT INTO dzn_comms_channels (id, slug, kind, name, visibility) VALUES ('global', 'global-chat', 'public', 'Global Chat', 'public')").run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, guild_id, server_name, status, lifecycle_status, created_at, updated_at) VALUES ('server_owned', ?, 'guild_owned', 'Verified Owner Server', 'live', 'active_live', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(applicant.id).run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, guild_id, server_name, status, lifecycle_status, created_at, updated_at) VALUES ('server_other', ?, 'guild_other', 'Other Server', 'live', 'active_live', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(outsider.id).run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, guild_id, server_name, status, lifecycle_status, created_at, updated_at) VALUES ('server_unverified', ?, 'guild_unverified', 'Unverified Draft', 'pending', 'active_live', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)").bind(applicant.id).run();
@@ -330,6 +337,10 @@ async function run() {
     await db.prepare("DELETE FROM onboarding_checks WHERE linked_server_id IN ('server_unverified', 'server_lifecycle_stale', 'server_connection_changed')").run();
     await db.prepare("DELETE FROM nitrado_connections WHERE linked_server_id IN ('server_lifecycle_stale', 'server_connection_changed')").run();
     await db.prepare("DELETE FROM linked_servers WHERE id IN ('server_unverified', 'server_lifecycle_stale', 'server_connection_changed')").run();
+    await db.prepare(`INSERT INTO dzn_comms_owner_message_archive
+      (message_id, channel_id, author_user_id, author_display_name, author_role_label, original_body, sent_at, retained_until)
+      VALUES ('account-deletion-archive', 'global', ?, ?, 'Member', 'Safety archive content remains for the retention window.', CURRENT_TIMESTAMP, datetime('now', '+30 days'))`)
+      .bind(applicant.id, applicant.username).run();
     assert.equal((await deleteOwnedAccountData(env, applicant.id)).ok, true);
     const accountDeletedRequest = await db.prepare("SELECT requester_user_id, requester_discord_id, requester_username FROM dzn_owner_discord_access_requests WHERE id = ?").bind(createdPayload.request.id).first<{ requester_user_id: string | null; requester_discord_id: string | null; requester_username: string | null }>();
     assert.equal(accountDeletedRequest?.requester_user_id, null, "Applicant account deletion must retain the decision record without its user foreign key.");
@@ -341,6 +352,11 @@ async function run() {
     assert.equal(accountDeletedAuditIdentity?.actor_username, null, "Applicant account deletion must remove the username from the request audit.");
     const accountDeletedAudit = await db.prepare("SELECT COUNT(*) AS count FROM dzn_owner_discord_access_audit WHERE request_id = ?").bind(createdPayload.request.id).first<{ count: number }>();
     assert.equal(Number(accountDeletedAudit?.count ?? 0) > 0, true, "Applicant account deletion must preserve private owner-access decision audits.");
+    const accountDeletedArchive = await db.prepare("SELECT author_user_id, author_display_name, author_role_label, original_body FROM dzn_comms_owner_message_archive WHERE message_id = 'account-deletion-archive'").first<{ author_user_id: string | null; author_display_name: string; author_role_label: string; original_body: string }>();
+    assert.equal(accountDeletedArchive?.author_user_id, null, "Account deletion must detach a retained Comms archive row from the closed account.");
+    assert.equal(accountDeletedArchive?.author_display_name, "Deleted DZN member", "Account deletion must anonymize the retained Comms archive author display name.");
+    assert.equal(accountDeletedArchive?.author_role_label, "Deleted account", "Account deletion must anonymize the retained Comms archive author role.");
+    assert.equal(accountDeletedArchive?.original_body, "Safety archive content remains for the retention window.", "Account deletion must preserve the private safety record until its retention window expires.");
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Owner Discord access queue checks passed.");
   } finally { sqlite.close(); }
