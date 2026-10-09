@@ -716,6 +716,8 @@ function testOwnerArchiveUiRejectsStaleSearches() {
   assert.match(source, /new AbortController\(\)/, "A new archive request must cancel the superseded request.");
   assert.match(source, /archiveAbortController\.current\?\.abort\(\)/, "Archive filter changes must abort an in-flight older search.");
   assert.match(source, /archiveAbortController\.current !== controller/, "Only the latest archive response may update the owner workspace.");
+  assert.match(source, /if \(!append\) \{\s*setArchive\(\[\]\);\s*setArchiveNextCursor\(null\);\s*setArchiveError\(null\);\s*\}/, "A new filter or search must clear the prior archive page and cursor while it refreshes.");
+  assert.match(source, /setArchiveError\("The message archive could not be refreshed\. Try again\."\)/, "A failed latest archive request must be shown to the owner instead of becoming an unhandled rejection.");
 }
 
 function testPrivateLedgerMigrationRuntime() {
