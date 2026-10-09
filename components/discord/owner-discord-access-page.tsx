@@ -34,7 +34,7 @@ export function OwnerDiscordAccessPage() {
       if (!response.ok || !payload?.ok) throw new Error(payload?.message ?? "Owner Discord access is unavailable.");
       const servers = payload.servers ?? [];
       setData((current) => append && current ? { ...payload, requests: [...(current.requests ?? []), ...(payload.requests ?? [])] } : payload);
-      if (!append) setServerId((current) => servers.some((server) => server.id === current) ? current : servers[0]?.id ?? "");
+      setServerId((current) => servers.some((server) => server.id === current) ? current : servers[0]?.id ?? "");
       setNextCursor(payload.page?.next_cursor ?? null);
       setState("ready");
     } catch (error) {

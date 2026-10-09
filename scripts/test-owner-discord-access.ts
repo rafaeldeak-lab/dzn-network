@@ -115,6 +115,7 @@ async function run() {
   const applicantAccessPage = readFileSync("components/discord/owner-discord-access-page.tsx", "utf8");
   assert.match(applicantAccessPage, /servers\.some\(\(server\) => server\.id === current\)/, "A refreshed owner request form must keep a selection only while the server remains eligible.");
   assert.match(applicantAccessPage, /servers\[0\]\?\.id \?\? ""/, "A refreshed owner request form must select the first current eligible server or clear the field.");
+  assert.doesNotMatch(applicantAccessPage, /if \(!append\) setServerId/, "Paginated history loads must revalidate a selected server against the latest eligible server list.");
   assert.match(applicantAccessPage, /requestController\.current\?\.abort\(\)/, "Applicant history refreshes must cancel superseded reads.");
   assert.match(applicantAccessPage, /requestController\.current !== controller/, "Applicant history must discard stale response state.");
   assert.match(applicantAccessPage, /Load older requests/, "Applicants must be able to continue through older request decisions.");
