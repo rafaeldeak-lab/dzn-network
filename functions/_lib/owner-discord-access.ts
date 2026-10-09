@@ -6,15 +6,20 @@ type AccessRequestInput = { linkedServerId?: unknown; note?: unknown };
 type AccessDecisionInput = { requestId?: unknown; action?: unknown; reason?: unknown; decisionNonce?: unknown };
 const OWNER_ACCESS_PAGE_SIZE = 50;
 const OWNER_ACCESS_AUDIT_PAGE_SIZE = 20;
+const APPLICANT_OWNER_ACCESS_PAGE_SIZE = 20;
 
 export function isOwnerDiscordAccessEnabled(env: Env) {
   return env.DZN_OWNER_DISCORD_ACCESS_ENABLED?.trim().toLowerCase() === "true";
 }
 
-export async function getOwnerDiscordAccessApplicant(env: Env, request: Request) {
+export async function getOwnerDiscordAccessApplicant(env: Env, request: Request, filters: { cursor?: unknown } = {}) {
   const user = await getSessionUser(env, request);
   if (!user) return { ok: false as const, status: 401, message: "Log in with Discord to request DZN server-owner access." };
   if (!(await hasAccessSchema(env))) return unavailable();
+  const cursor = decodeApplicantOwnerAccessCursor(typeof filters.cursor === "string" ? filters.cursor : null);
+  if (filters.cursor !== undefined && filters.cursor !== null && !cursor) {
+    return { ok: false as const, status: 400, message: "The owner-access history cursor is invalid." };
+  }
   const db = requireDb(env);
   const [servers, requests] = await Promise.all([
     db.prepare(`SELECT id, COALESCE(NULLIF(display_name, ''), NULLIF(hostname, ''), NULLIF(server_name, ''), 'DZN server') AS server_name,
@@ -28,14 +33,31 @@ export async function getOwnerDiscordAccessApplicant(env: Env, request: Request)
     db.prepare(`SELECT id, linked_server_id, linked_server_id_snapshot, server_name, request_note, status, decision_reason, reviewed_at, created_at, updated_at
                   FROM dzn_owner_discord_access_requests
                  WHERE requester_user_id = ?
+                   AND (? IS NULL OR julianday(updated_at) < julianday(?) OR (julianday(updated_at) = julianday(?) AND id < ?))
                  ORDER BY updated_at DESC, id DESC
-                 LIMIT 50`).bind(user.id).all<Record<string, unknown>>(),
+                 LIMIT ?`).bind(
+      user.id,
+      cursor?.updatedAt ?? null,
+      cursor?.updatedAt ?? null,
+      cursor?.updatedAt ?? null,
+      cursor?.id ?? null,
+      APPLICANT_OWNER_ACCESS_PAGE_SIZE + 1,
+    ).all<Record<string, unknown>>(),
   ]);
+  const requestRows = (requests.results ?? []).slice(0, APPLICANT_OWNER_ACCESS_PAGE_SIZE);
+  const nextCursor = (requests.results ?? []).length > APPLICANT_OWNER_ACCESS_PAGE_SIZE && requestRows.at(-1)
+    ? encodeApplicantOwnerAccessCursor(requestRows.at(-1)!)
+    : null;
   return {
     ok: true as const,
     user: { username: clean(user.username, 80) ?? "DZN member" },
     servers: (servers.results ?? []).map((row) => safeServer(row)),
-    requests: (requests.results ?? []).map((row) => safeApplicantRequest(row)),
+    requests: requestRows.map((row) => safeApplicantRequest(row)),
+    page: {
+      limit: APPLICANT_OWNER_ACCESS_PAGE_SIZE,
+      has_more: nextCursor !== null,
+      next_cursor: nextCursor,
+    },
     discordAccessConfigured: false,
     delivery: "Approval is recorded here. A private Discord invite is issued only after the central server integration passes its separate permission check.",
   };
@@ -242,6 +264,20 @@ function decodeOwnerAccessAuditCursor(value: string | null) {
     const createdAt = parsed.v === 1 ? canonicalTimestamp(parsed.t) : null;
     const auditId = id(parsed.id, 100);
     return createdAt && auditId ? { createdAt, id: auditId } : null;
+  } catch { return null; }
+}
+function encodeApplicantOwnerAccessCursor(row: Record<string, unknown>) {
+  const updatedAt = canonicalTimestamp(row.updated_at);
+  const requestId = id(row.id, 100);
+  return updatedAt && requestId ? base64UrlEncode(JSON.stringify({ v: 1, t: updatedAt, id: requestId })) : null;
+}
+function decodeApplicantOwnerAccessCursor(value: string | null) {
+  if (!value || !/^[A-Za-z0-9_-]{8,1024}$/.test(value)) return null;
+  try {
+    const parsed = JSON.parse(base64UrlDecode(value)) as Partial<{ v: number; t: string; id: string }>;
+    const updatedAt = parsed.v === 1 ? canonicalTimestamp(parsed.t) : null;
+    const requestId = id(parsed.id, 100);
+    return updatedAt && requestId ? { updatedAt, id: requestId } : null;
   } catch { return null; }
 }
 function canonicalTimestamp(value: unknown) { if (typeof value !== "string" || value.length > 40) return null; const parsed = Date.parse(value); return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null; }

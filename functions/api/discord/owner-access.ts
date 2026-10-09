@@ -7,7 +7,9 @@ export const onRequest: PagesFunction = async ({ env, request }) => {
   const headers = privateNoStoreHeaders();
   if (!isOwnerDiscordAccessEnabled(env)) return json({ ok: false, message: "DZN owner Discord access is not enabled on this environment." }, { status: 404, headers });
   if (request.method === "GET") {
-    const result = await getOwnerDiscordAccessApplicant(env, request);
+    const result = await getOwnerDiscordAccessApplicant(env, request, {
+      cursor: new URL(request.url).searchParams.get("cursor"),
+    });
     return json(result, { status: result.ok ? 200 : result.status, headers });
   }
   if (request.method === "POST") {

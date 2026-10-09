@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 
 import { createSession } from "../functions/_lib/db";
 import { deleteOwnedAccountData } from "../functions/_lib/deletion";
-import { createOwnerDiscordAccessRequest, decideOwnerDiscordAccessRequest, listOwnerDiscordAccessRequests } from "../functions/_lib/owner-discord-access";
+import { createOwnerDiscordAccessRequest, decideOwnerDiscordAccessRequest, getOwnerDiscordAccessApplicant, listOwnerDiscordAccessRequests } from "../functions/_lib/owner-discord-access";
 import { onRequest as applicantRoute } from "../functions/api/discord/owner-access";
 import { onRequest as ownerRoute } from "../functions/api/owner/discord/owner-access-requests";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
@@ -87,8 +87,10 @@ async function run() {
   assert.match(accessSource, /result\[1\]\?\.meta\?\.changes/, "A decision must fail closed if its audit row was not written.");
   assert.match(accessSource, /OWNER_ACCESS_PAGE_SIZE/, "The owner-access queue must use a bounded page size.");
   assert.match(accessSource, /OWNER_ACCESS_AUDIT_PAGE_SIZE/, "The owner-access audit must use its own bounded page size.");
+  assert.match(accessSource, /APPLICANT_OWNER_ACCESS_PAGE_SIZE/, "Applicant request history must use a bounded page size.");
   assert.match(accessSource, /encodeOwnerAccessCursor/, "The owner-access queue must expose stable continuation cursors.");
   assert.match(accessSource, /encodeOwnerAccessAuditCursor/, "The owner-access audit must expose a stable independent continuation cursor.");
+  assert.match(accessSource, /encodeApplicantOwnerAccessCursor/, "Applicant request history must expose a stable continuation cursor.");
   assert.match(accessSource, /COALESCE\(status, 'pending'\)\) = 'live'/, "Owner approval must require a live server.");
   assert.match(accessSource, /COALESCE\(lifecycle_status, 'active_live'\)\) = 'active_live'/, "Owner approval must reject a server with a known unhealthy lifecycle state.");
   assert.match(accessSource, /latest_check\.token_valid = 1/, "Owner approval must require current onboarding verification evidence.");
@@ -109,6 +111,9 @@ async function run() {
   const applicantAccessPage = readFileSync("components/discord/owner-discord-access-page.tsx", "utf8");
   assert.match(applicantAccessPage, /servers\.some\(\(server\) => server\.id === current\)/, "A refreshed owner request form must keep a selection only while the server remains eligible.");
   assert.match(applicantAccessPage, /servers\[0\]\?\.id \?\? ""/, "A refreshed owner request form must select the first current eligible server or clear the field.");
+  assert.match(applicantAccessPage, /requestController\.current\?\.abort\(\)/, "Applicant history refreshes must cancel superseded reads.");
+  assert.match(applicantAccessPage, /requestController\.current !== controller/, "Applicant history must discard stale response state.");
+  assert.match(applicantAccessPage, /Load older requests/, "Applicants must be able to continue through older request decisions.");
   const ownerQueuePage = readFileSync("components/owner/owner-discord-access-page.tsx", "utf8");
   assert.match(ownerQueuePage, /requestController\.current\?\.abort\(\)/, "The owner queue must cancel superseded reads.");
   assert.match(ownerQueuePage, /signal: controller\.signal/, "The owner queue must bind reads to the active request controller.");
@@ -249,6 +254,20 @@ async function run() {
         }
       }
     }
+    const applicantPages: string[] = [];
+    let applicantCursor: string | null = null;
+    do {
+      const applicantHistory = await getOwnerDiscordAccessApplicant(env, request("GET", undefined, applicantSession.token), { cursor: applicantCursor });
+      assert.equal(applicantHistory.ok, true);
+      if (!applicantHistory.ok) break;
+      assert.equal(applicantHistory.requests.length <= 20, true, "Applicant history must remain bounded.");
+      applicantPages.push(...applicantHistory.requests.map((entry) => entry.id));
+      applicantCursor = applicantHistory.page.next_cursor;
+    } while (applicantCursor);
+    assert.equal(applicantPages.length > 100, true, "Applicant history pagination must reach decisions beyond the first page.");
+    assert.equal(new Set(applicantPages).size, applicantPages.length, "Applicant history pagination must not duplicate decisions.");
+    const invalidApplicantCursor = await applicantRoute(context(env, request("GET", undefined, applicantSession.token, undefined, "?cursor=invalid")));
+    assert.equal(invalidApplicantCursor.status, 400);
     const invalidCursor = await listOwnerDiscordAccessRequests(env, { cursor: "invalid" });
     assert.equal(invalidCursor.ok, false);
     if (!invalidCursor.ok) assert.equal(invalidCursor.status, 400);
@@ -313,7 +332,7 @@ async function run() {
   } finally { sqlite.close(); }
 }
 
-function request(method: "GET" | "POST", body?: unknown, token?: string, origin?: string) { const headers = new Headers(); if (token) headers.set("cookie", `dzn_session=${token}`); if (origin) headers.set("origin", origin); if (body !== undefined) headers.set("content-type", "application/json"); return new Request("https://dzn.test/api/test", { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }); }
+function request(method: "GET" | "POST", body?: unknown, token?: string, origin?: string, search = "") { const headers = new Headers(); if (token) headers.set("cookie", `dzn_session=${token}`); if (origin) headers.set("origin", origin); if (body !== undefined) headers.set("content-type", "application/json"); return new Request(`https://dzn.test/api/test${search}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }); }
 function context(env: Env, request: Request): PagesContext { return { env, request, params: {}, data: {}, waitUntil() {}, next: async () => new Response(null, { status: 204 }) }; }
 function splitSql(sql: string) { const statements: string[] = []; let buffer = ""; for (const line of sql.split(/\r?\n/)) { if (!buffer && !line.trim()) continue; buffer += `${line}\n`; if (/;\s*$/.test(line)) { statements.push(buffer.trim().replace(/;\s*$/, "")); buffer = ""; } } if (buffer.trim()) statements.push(buffer.trim()); return statements; }
 void run();
