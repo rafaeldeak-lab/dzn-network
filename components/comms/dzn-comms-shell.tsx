@@ -406,7 +406,12 @@ export function DznCommsShell() {
                 <p className="text-sm font-bold leading-6 text-cyan-50">{history.message}</p>
               </div>
 
-              <div className="mt-4 space-y-3">
+              <div
+                role="log"
+                aria-live="polite"
+                aria-relevant="additions text"
+                className="mt-4 max-h-[58svh] space-y-3 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable] lg:max-h-[42rem]"
+              >
                 {payload.messages.map((message) => (
                   <MessageRow
                     key={message.id}

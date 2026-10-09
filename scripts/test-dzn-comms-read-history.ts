@@ -106,6 +106,7 @@ assert.match(historyClient, /credentials: "include"/, "The client should preserv
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED/, "The live composer must remain behind an explicit public UI flag.");
 assert.match(shell, /selfDeleteUiEnabled = liveUiEnabled && payload\.feature_flags\.self_delete_enabled/, "Self-delete controls must require both the public live UI release and the server archive safeguard.");
 assert.match(shell, /const canDelete = deleteEnabled && message\.can_delete/, "Message rows must not expose or invoke self-delete outside the public live UI release.");
+assert.match(shell, /role="log"[\s\S]*max-h-\[58svh\][\s\S]*overflow-y-auto[\s\S]*overscroll-contain/, "The message rail must scroll internally so long chat history does not continuously expand the Community page.");
 assert.doesNotMatch(shell, /\b(?:sendBeacon|analytics|localStorage|sessionStorage|WebSocket|EventSource|DurableObject|OPENAI_API_KEY|AI_GATEWAY|stripe|checkout|DZN_LIVE_CHECKOUT_ENABLED)\b/i, "The /community shell must not track, call AI, or touch checkout.");
 assert.match(platformSpec, /DZN Comms\/support remains the next queued product area/i, "Master spec must keep DZN Comms in the queued product area.");
 assert.match(packageJson, /"test:dzn-comms-read-history": "tsx scripts\/test-dzn-comms-read-history\.ts && npm run test:dzn-comms-history-client"/, "Dedicated Comms read-history and client tests must be registered.");
