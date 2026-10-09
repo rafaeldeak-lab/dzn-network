@@ -106,12 +106,14 @@ async function run() {
   assert.match(dashboard, /NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED/, "The dashboard link must require an explicit public activation flag.");
   assert.match(dashboard, /ownerDiscordAccessUiEnabled \? <Link href="\/discord-owner-access"/, "The dashboard must not expose owner Discord navigation while the feature is inactive.");
   const ownerAccessPage = readFileSync("app/discord-owner-access/page.tsx", "utf8");
-  assert.match(ownerAccessPage, /process\.env\.DZN_OWNER_DISCORD_ACCESS_ENABLED !== "true"\) notFound\(\)/, "The destination route must remain unavailable until the server feature is enabled.");
-  assert.match(ownerAccessPage, /OwnerDiscordAccessPage/, "The protected route must render the owner access page only after activation.");
+  assert.doesNotMatch(ownerAccessPage, /process\.env\.DZN_OWNER_DISCORD_ACCESS_ENABLED|notFound\(/, "Static-exported applicant access routes must not be gated by a build-time feature flag.");
+  assert.match(ownerAccessPage, /return <OwnerDiscordAccessPage \/>/, "The static applicant route must render the owner access page, whose API enforces the runtime feature gate.");
   const ownerConsoleRoute = readFileSync("app/owner/page.tsx", "utf8");
-  assert.match(ownerConsoleRoute, /ownerDiscordAccessEnabled=\{process\.env\.DZN_OWNER_DISCORD_ACCESS_ENABLED === "true"\}/, "The owner console must receive the private server activation state.");
+  assert.doesNotMatch(ownerConsoleRoute, /DZN_OWNER_DISCORD_ACCESS_ENABLED/, "The static owner console must not derive navigation from a build-time feature flag.");
+  assert.match(ownerConsoleRoute, /return <OwnerConsole \/>/, "The static owner console must retain the runtime-gated owner-access entry point.");
   const ownerConsoleAccessRoute = readFileSync("app/owner/discord-access/page.tsx", "utf8");
-  assert.match(ownerConsoleAccessRoute, /process\.env\.DZN_OWNER_DISCORD_ACCESS_ENABLED !== "true"\) notFound\(\)/, "The private owner route must be unavailable until the server feature is enabled.");
+  assert.doesNotMatch(ownerConsoleAccessRoute, /process\.env\.DZN_OWNER_DISCORD_ACCESS_ENABLED|notFound\(/, "Static-exported owner access routes must not be gated by a build-time feature flag.");
+  assert.match(ownerConsoleAccessRoute, /return <OwnerDiscordAccessPage \/>/, "The static owner route must render the owner access page, whose API enforces the runtime feature gate.");
   const applicantAccessPage = readFileSync("components/discord/owner-discord-access-page.tsx", "utf8");
   assert.match(applicantAccessPage, /servers\.some\(\(server\) => server\.id === current\)/, "A refreshed owner request form must keep a selection only while the server remains eligible.");
   assert.match(applicantAccessPage, /servers\[0\]\?\.id \?\? ""/, "A refreshed owner request form must select the first current eligible server or clear the field.");
@@ -124,7 +126,8 @@ async function run() {
   assert.match(ownerQueuePage, /signal: controller\.signal/, "The owner queue must bind reads to the active request controller.");
   assert.match(ownerQueuePage, /requestController\.current !== controller/, "The owner queue must discard stale response state.");
   const ownerConsole = readFileSync("components/owner/owner-console.tsx", "utf8");
-  assert.match(ownerConsole, /ownerDiscordAccessEnabled \? <Link href="\/owner\/discord-access"/, "The owner console must hide the owner-access link until the private feature is enabled.");
+  assert.doesNotMatch(ownerConsole, /ownerDiscordAccessEnabled/, "The owner console must not compile a runtime feature flag into static output.");
+  assert.match(ownerConsole, /<Link href="\/owner\/discord-access"/, "The owner console must retain the static route entry point while the API enforces the runtime feature gate.");
 
   const sqlite = new DatabaseSync(":memory:");
   const db = localD1(sqlite);
