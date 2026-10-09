@@ -675,6 +675,8 @@ async function testOwnerArchiveAndSelfDeleteRuntime() {
     const archivedRowsBeforeRetention = f.count("dzn_comms_owner_message_archive");
     f.sqlite.prepare("UPDATE dzn_comms_owner_message_archive SET retained_until = '2026-01-01T00:00:00.000Z'").run();
     const retention = await runDznCommsRetention(f.env.DB, new Date("2026-09-24T12:00:00.000Z"));
+    assert.equal(retention.ownerArchiveReportsResolved, 1, "Retention must resolve an open report before deleting its retained original.");
+    assert.equal(f.sqlite.prepare("SELECT status FROM dzn_comms_reports WHERE message_id = ?").get(messageId)?.status, "resolved", "An expired self-deleted message must not leave an unevaluable open report behind.");
     assert.equal(retention.ownerArchiveRowsDeleted, archivedRowsBeforeRetention, "The retention runner must remove every expired original message archive.");
     assert.equal(f.count("dzn_comms_owner_message_archive"), 0);
   } finally { f.close(); }
@@ -744,6 +746,8 @@ function testOwnerArchiveUiRejectsStaleSearches() {
   assert.match(source, /archiveAbortController\.current !== controller/, "Only the latest archive response may update the owner workspace.");
   assert.match(source, /if \(!append\) \{\s*setArchive\(\[\]\);\s*setArchiveNextCursor\(null\);\s*setArchiveError\(null\);\s*\}/, "A new filter or search must clear the prior archive page and cursor while it refreshes.");
   assert.match(source, /setArchiveError\("The message archive could not be refreshed\. Try again\."\)/, "A failed latest archive request must be shown to the owner instead of becoming an unhandled rejection.");
+  assert.match(source, /response\.status === 401 \|\| response\.status === 403/, "Unauthorized archive responses must be shown explicitly instead of looking like an empty search.");
+  assert.match(source, /archive\.length === 0 \? \(archiveError \? null : <p/, "An archive refresh failure must not render as a false no-results state.");
 }
 
 function testPrivateLedgerMigrationRuntime() {

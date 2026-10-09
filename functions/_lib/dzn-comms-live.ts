@@ -466,6 +466,12 @@ export async function runDznCommsRetention(db: D1Database, now = new Date()) {
     statements.push(db.prepare("DELETE FROM dzn_comms_reaction_rate_slots WHERE julianday(created_at) <= julianday(?)").bind(slotCutoff));
   }
   if (ownerArchiveTable) {
+    statements.push(db.prepare(`UPDATE dzn_comms_reports
+      SET status = 'resolved', resolved_at = ?, resolved_by_user_id = NULL
+      WHERE status = 'open' AND message_id IN (
+        SELECT message_id FROM dzn_comms_owner_message_archive
+        WHERE julianday(retained_until) <= julianday(?)
+      )`).bind(timestamp, timestamp));
     statements.push(db.prepare("DELETE FROM dzn_comms_owner_message_archive WHERE julianday(retained_until) <= julianday(?)").bind(timestamp));
   }
   const results = await db.batch(statements);
@@ -480,6 +486,7 @@ export async function runDznCommsRetention(db: D1Database, now = new Date()) {
     reactionRateSlotsDeleted: reactionTables.has("dzn_comms_reaction_rate_slots")
       ? changes[reactionTables.has("dzn_comms_reaction_mutations") ? 8 : 7] ?? 0
       : 0,
+    ownerArchiveReportsResolved: ownerArchiveTable ? changes.at(-2) ?? 0 : 0,
     ownerArchiveRowsDeleted: ownerArchiveTable ? changes.at(-1) ?? 0 : 0,
   };
 }

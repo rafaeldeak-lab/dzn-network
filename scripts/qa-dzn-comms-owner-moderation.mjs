@@ -1,7 +1,9 @@
 import { chromium } from "playwright";
 import { mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
-const output = "docs/qa/dzn-comms-owner-moderation-20260924";
+const output = path.resolve(process.env.DZN_COMMS_OWNER_MODERATION_QA_OUTPUT ?? path.join(tmpdir(), "dzn-comms-owner-moderation-qa"));
 const baseUrl = process.env.DZN_QA_BASE_URL ?? "http://127.0.0.1:3120";
 await mkdir(`${output}/screenshots`, { recursive: true });
 
@@ -20,6 +22,7 @@ const payload = {
     reasons: "harassment,spam",
   }],
   audit: [{ id: "audit-qa-1", message_id: "older-message", action: "hide", reason_code: "Safety review", created_at: "2026-09-24 09:00:00", actor_name: "DZN Owner" }],
+  archive_available: true,
   retention: { message_days: 30, deleted_body_erasure: true },
 };
 
@@ -32,8 +35,11 @@ for (const [name, width, height] of [["desktop", 1440, 1000], ["tablet", 900, 10
     if (route.request().method() === "POST") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, code: "MODERATION_RECORDED" }) });
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payload) });
   });
+  await page.route("**/api/owner/comms/archive**", async (route) => route.fulfill({ status: 429, contentType: "application/json", body: JSON.stringify({ ok: false, message: "Archive service is busy." }) }));
   await page.goto(`${baseUrl}/owner/comms`, { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.getByRole("heading", { name: "Global Chat moderation" }).waitFor({ timeout: 30_000 });
+  await page.getByRole("alert").filter({ hasText: "The message archive could not be refreshed. Try again." }).waitFor({ timeout: 30_000 });
+  if (await page.getByText("No archived messages match this search.").count()) throw new Error(`${name} moderation QA rendered a false archive no-results state.`);
   const result = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, title: document.title }));
   if (result.overflow !== 0 || errors.length) throw new Error(`${name} moderation QA failed: ${JSON.stringify({ result, errors })}`);
   await page.screenshot({ path: `${output}/screenshots/${name}.png`, fullPage: true });
