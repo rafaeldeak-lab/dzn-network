@@ -16,6 +16,7 @@ export type CommsHistoryMessage = {
   edited_at: string | null;
   public_safe: true;
   read_only: true;
+  can_delete: boolean;
   reactions?: CommsReactionSummary;
 };
 
@@ -50,6 +51,7 @@ export type CommsHistoryPayload = {
     reactions_write_enabled: boolean;
     report_actions_enabled: boolean;
     moderation_mutations_enabled: boolean;
+    self_delete_enabled: boolean;
   } & Record<(typeof disabledFeatures)[number], false>;
   fairness_boundary: string[];
 };
@@ -155,7 +157,7 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
     || flags.route_enabled !== true || typeof flags.private_groups_enabled !== "boolean"
     || typeof flags.sending_enabled !== "boolean" || typeof flags.report_actions_enabled !== "boolean"
     || typeof flags.reactions_enabled !== "boolean" || typeof flags.reactions_write_enabled !== "boolean"
-    || typeof flags.moderation_mutations_enabled !== "boolean"
+    || typeof flags.moderation_mutations_enabled !== "boolean" || typeof flags.self_delete_enabled !== "boolean"
     || (flags.reactions_write_enabled === true && flags.reactions_enabled !== true)
     || flags.report_actions_enabled !== flags.sending_enabled
     || flags.moderation_mutations_enabled !== flags.sending_enabled
@@ -177,7 +179,7 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
   const ids = new Set<string>();
   const messages = input.messages.map((value): CommsHistoryMessage => {
     const row = record(value), id = text(row.id, 120);
-    if (ids.has(id) || row.public_safe !== true || row.read_only !== true) throw unavailable();
+    if (ids.has(id) || row.public_safe !== true || row.read_only !== true || typeof row.can_delete !== "boolean") throw unavailable();
     ids.add(id);
     const state = row.visibility_state;
     if (state !== "visible" && state !== "hidden" && state !== "deleted" && state !== "quarantined") throw unavailable();
@@ -190,6 +192,7 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
     if (reactions === undefined && row.reactions !== undefined) throw unavailable();
     return {
       id, visibility_state: state, public_safe: true as const, read_only: true as const,
+      can_delete: state === "visible" && row.can_delete === true,
       author_display_name: state === "visible" ? name : "DZN Safety",
       author_role_label: state === "visible" ? role : "System",
       body: state === "visible" ? body : placeholder,
@@ -210,6 +213,7 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
       route_enabled: true, sending_enabled: flags.sending_enabled, private_groups_enabled: flags.private_groups_enabled,
       reactions_enabled: flags.reactions_enabled, reactions_write_enabled: flags.reactions_write_enabled,
       report_actions_enabled: flags.report_actions_enabled, moderation_mutations_enabled: flags.moderation_mutations_enabled,
+      self_delete_enabled: flags.self_delete_enabled,
       ai_assist_runtime_enabled: false, durable_objects_or_websockets_enabled: false, analytics_or_tracking_enabled: false,
     },
     fairness_boundary: boundary,
@@ -303,6 +307,10 @@ export async function sendCommsMessage(channel: string, body: string, clientRequ
 
 export async function reportCommsMessage(messageId: string, reason = "other") {
   await postCommsMutation("/api/comms/reports", { messageId, reason }, "Report could not be sent.");
+}
+
+export async function deleteCommsMessage(messageId: string) {
+  await requestCommsMutation("DELETE", `/api/comms/messages/${encodeURIComponent(messageId)}`, {}, "Message could not be deleted.");
 }
 
 export async function addCommsReaction(messageId: string, reactionKey: CommsReactionKey, clientMutationId: string) {

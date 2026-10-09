@@ -75,6 +75,8 @@ assert.match(helper, /julianday\(created_at\) = julianday\(\?\) AND id < \?/, "P
 assert.match(helper, /encodeHistoryCursor\(lastRow\)/, "The API must issue an opaque cursor from the last row in the page.");
 assert.match(helper, /Use either before or cursor, not both/, "Legacy and opaque cursors must not be combined.");
 assert.match(helper, /sending_enabled: channel\.visibility === "private_group" \? privateGroupFlags\.enabled : flags\.writeFeaturesEnabled/, "Route payload must derive sending state from the protected channel-specific server flag.");
+assert.match(helper, /const selfDeleteEnabled = flags\.writeFeaturesEnabled && readDznCommsOwnerArchiveFlags\(env, request\)\.enabled/, "Self-delete must require both the live mutation runtime and the private archive safeguard.");
+assert.match(helper, /self_delete_enabled: selfDeleteEnabled/, "History feature flags must report the same availability used for delete controls.");
 assert.match(helper, /reactions_enabled: reactionFlags\.readEnabled/, "Route payload must derive reaction reads from their separate server flag.");
 assert.match(helper, /reactions_write_enabled: reactionFlags\.writeEnabled/, "Route payload must derive reaction writes from their separate server flag.");
 assert.match(helper, /ai_assist_runtime_enabled: false/, "Route payload must report AI support runtime disabled.");
@@ -102,6 +104,9 @@ assert.match(shell, /reactionAttemptRef\.current\.delete\(addAttemptKey\)[\s\S]*
 assert.match(historyClient, /`\/api\/comms\/message-history\?channel=\$\{encodeURIComponent\(selectedChannel\)\}&limit=30`/, "The client should fetch only the selected read-only history route.");
 assert.match(historyClient, /credentials: "include"/, "The client should preserve current-user cookies for read checks.");
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED/, "The live composer must remain behind an explicit public UI flag.");
+assert.match(shell, /selfDeleteUiEnabled = liveUiEnabled && payload\.feature_flags\.self_delete_enabled/, "Self-delete controls must require both the public live UI release and the server archive safeguard.");
+assert.match(shell, /const canDelete = deleteEnabled && message\.can_delete/, "Message rows must not expose or invoke self-delete outside the public live UI release.");
+assert.match(shell, /role="log"[\s\S]*max-h-\[58svh\][\s\S]*overflow-y-auto[\s\S]*overscroll-contain/, "The message rail must scroll internally so long chat history does not continuously expand the Community page.");
 assert.doesNotMatch(shell, /\b(?:sendBeacon|analytics|localStorage|sessionStorage|WebSocket|EventSource|DurableObject|OPENAI_API_KEY|AI_GATEWAY|stripe|checkout|DZN_LIVE_CHECKOUT_ENABLED)\b/i, "The /community shell must not track, call AI, or touch checkout.");
 assert.match(platformSpec, /DZN Comms\/support remains the next queued product area/i, "Master spec must keep DZN Comms in the queued product area.");
 assert.match(packageJson, /"test:dzn-comms-read-history": "tsx scripts\/test-dzn-comms-read-history\.ts && npm run test:dzn-comms-history-client"/, "Dedicated Comms read-history and client tests must be registered.");
@@ -279,6 +284,7 @@ async function testRuntimeContracts() {
   assert.equal(publicPayload.read_only, true);
   assert.equal(publicPayload.presentation_only, true);
   assert.equal(publicPayload.feature_flags.sending_enabled, false);
+  assert.equal(publicPayload.feature_flags.self_delete_enabled, false, "Local/test read history must not expose self-delete before the live mutation runtime is active.");
   assert.equal(publicPayload.feature_flags.reactions_enabled, false);
   assert.equal(publicPayload.feature_flags.report_actions_enabled, false);
   assert.equal(publicPayload.feature_flags.moderation_mutations_enabled, false);
@@ -508,6 +514,7 @@ type CommsPayload = {
   };
   feature_flags: {
     sending_enabled: boolean;
+    self_delete_enabled: boolean;
     reactions_enabled: boolean;
     report_actions_enabled: boolean;
     moderation_mutations_enabled: boolean;
@@ -650,10 +657,10 @@ class FakeD1PreparedStatement {
       };
       const sqlite = new DatabaseSync(":memory:");
       try {
-        sqlite.exec(`CREATE TABLE dzn_comms_messages (id TEXT, channel_id TEXT, author_display_name TEXT, author_role_label TEXT, body TEXT, visibility_state TEXT, created_at TEXT, edited_at TEXT, expires_at TEXT);
+        sqlite.exec(`CREATE TABLE dzn_comms_messages (id TEXT, channel_id TEXT, author_user_id TEXT, author_display_name TEXT, author_role_label TEXT, body TEXT, visibility_state TEXT, created_at TEXT, edited_at TEXT, expires_at TEXT);
           CREATE TABLE dzn_comms_private_group_members (channel_id TEXT, user_id TEXT, role TEXT, membership_state TEXT);`);
-        const insert = sqlite.prepare("INSERT INTO dzn_comms_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        for (const row of this.db.messages) insert.run(row.id, row.channel_id, row.author_display_name, row.author_role_label, row.body, row.visibility_state, row.created_at, row.edited_at, row.expires_at);
+        const insert = sqlite.prepare("INSERT INTO dzn_comms_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        for (const row of this.db.messages) insert.run(row.id, row.channel_id, null, row.author_display_name, row.author_role_label, row.body, row.visibility_state, row.created_at, row.edited_at, row.expires_at);
         const insertMember = sqlite.prepare("INSERT INTO dzn_comms_private_group_members VALUES (?, ?, ?, ?)");
         for (const [key, member] of this.db.privateGroupMembers) {
           const separator = key.indexOf(":");

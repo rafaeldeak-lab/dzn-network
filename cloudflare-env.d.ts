@@ -27,6 +27,7 @@ interface CloudflareEnv {
   DZN_STORE_ENABLED?: string;
   DZN_STORE_ADMIN_ENABLED?: string;
   DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED?: string;
+  DZN_OWNER_DISCORD_ACCESS_ENABLED?: string;
   ASSETS?: {
     fetch(input: Request | string, init?: RequestInit): Promise<Response>;
   };
@@ -51,6 +52,8 @@ interface CloudflareEnv {
   DZN_COMMS_PRIVATE_GROUPS_ENABLED?: string;
   DZN_COMMS_OWNER_MODERATION_ENABLED?: string;
   DZN_COMMS_OWNER_MODERATION_SCOPE?: string;
+  DZN_COMMS_OWNER_ARCHIVE_ENABLED?: string;
+  DZN_COMMS_OWNER_ARCHIVE_SCOPE?: string;
   DZN_COMMS_RETENTION_ENABLED?: string;
   DZN_COMMS_RETENTION_SCOPE?: string;
   DZN_COMMS_REACTIONS_READ_ENABLED?: string;
