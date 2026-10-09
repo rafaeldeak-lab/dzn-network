@@ -66,7 +66,7 @@ const applicant: SessionUser = { id: "server_owner", discord_id: "11111111111111
 const outsider: SessionUser = { id: "outsider", discord_id: "222222222222222222", username: "Outsider", avatar: null };
 
 async function run() {
-  const migration = readFileSync("migrations/0093_dzn_owner_discord_access.sql", "utf8");
+  const migration = readFileSync("migrations/0094_dzn_owner_discord_access.sql", "utf8");
   assert.match(migration, /dzn_owner_discord_access_requests/);
   assert.match(migration, /idx_dzn_owner_discord_access_one_pending/);
   assert.match(migration, /dzn_owner_discord_access_audit/);
@@ -145,8 +145,8 @@ async function run() {
       CREATE TABLE onboarding_checks (id TEXT PRIMARY KEY, linked_server_id TEXT NOT NULL, token_valid INTEGER DEFAULT 0, service_access INTEGER DEFAULT 0, dayz_service_detected INTEGER DEFAULT 0, last_tested_at TEXT, FOREIGN KEY(linked_server_id) REFERENCES linked_servers(id));`);
     for (const migrationPath of [
       "migrations/0065_dzn_comms_read_history.sql",
-      "migrations/0092_dzn_comms_owner_message_archive.sql",
-      "migrations/0093_dzn_owner_discord_access.sql",
+      "migrations/0093_dzn_comms_owner_message_archive.sql",
+      "migrations/0094_dzn_owner_discord_access.sql",
     ]) {
       for (const statement of splitSql(readFileSync(migrationPath, "utf8").replace(/^--.*$/gm, ""))) await db.prepare(statement).run();
     }

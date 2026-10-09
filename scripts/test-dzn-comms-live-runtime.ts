@@ -38,7 +38,7 @@ async function fixture() {
   sqlite.exec(readFileSync("migrations/0065_dzn_comms_read_history.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0071_dzn_comms_live_moderation.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0072_dzn_comms_private_rate_ledgers.sql", "utf8"));
-  sqlite.exec(readFileSync("migrations/0092_dzn_comms_owner_message_archive.sql", "utf8"));
+  sqlite.exec(readFileSync("migrations/0093_dzn_comms_owner_message_archive.sql", "utf8"));
   const requiredTables = ["dzn_comms_channels", "dzn_comms_messages", "dzn_comms_send_receipts", "dzn_comms_reports", "dzn_comms_moderation_audit", "dzn_comms_owner_message_archive", "dzn_comms_owner_message_archive_events"];
   const installedTables = new Set(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => String(row.name)));
   assert.deepEqual(requiredTables.filter((table) => !installedTables.has(table)), [], "Both Comms migrations must install the required tables.");
