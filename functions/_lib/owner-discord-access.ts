@@ -1,4 +1,6 @@
 import { getSessionUser, requireDb } from "./db";
+import { getOwnerDiscordDeliverySummaries, isOwnerDiscordDeliveryEnabled, ownerDiscordDeliveryMessage } from "./owner-discord-delivery";
+import type { OwnerDiscordDeliveryAttempt } from "./owner-discord-delivery";
 import type { Env, SessionUser } from "./types";
 
 export type OwnerDiscordAccessStatus = "pending" | "approved" | "rejected" | "revoked";
@@ -48,18 +50,19 @@ export async function getOwnerDiscordAccessApplicant(env: Env, request: Request,
   const nextCursor = (requests.results ?? []).length > APPLICANT_OWNER_ACCESS_PAGE_SIZE && requestRows.at(-1)
     ? encodeApplicantOwnerAccessCursor(requestRows.at(-1)!)
     : null;
+  const deliveryByRequest = await getOwnerDiscordDeliverySummaries(env, requestRows.map((row) => String(row.id ?? "")));
   return {
     ok: true as const,
     user: { username: clean(user.username, 80) ?? "DZN member" },
     servers: (servers.results ?? []).map((row) => safeServer(row)),
-    requests: requestRows.map((row) => safeApplicantRequest(row)),
+    requests: requestRows.map((row) => safeApplicantRequest(row, deliveryByRequest.get(String(row.id ?? "")))),
     page: {
       limit: APPLICANT_OWNER_ACCESS_PAGE_SIZE,
       has_more: nextCursor !== null,
       next_cursor: nextCursor,
     },
-    discordAccessConfigured: false,
-    delivery: "Approval is recorded here. A private Discord invite is issued only after the central server integration passes its separate permission check.",
+    discordAccessConfigured: isOwnerDiscordDeliveryEnabled(env),
+    delivery: ownerDiscordDeliveryMessage(env),
   };
 }
 
@@ -150,14 +153,17 @@ export async function listOwnerDiscordAccessRequests(env: Env, filters: { status
   const nextAuditCursor = (audit.results ?? []).length > OWNER_ACCESS_AUDIT_PAGE_SIZE && auditRows.at(-1)
     ? encodeOwnerAccessAuditCursor(auditRows.at(-1)!)
     : null;
+  const deliveryByRequest = await getOwnerDiscordDeliverySummaries(env, pageRows.map((row) => String(row.id ?? "")));
   return {
     ok: true as const,
-    requests: pageRows.map(safeOwnerRequest),
+    requests: pageRows.map((row) => safeOwnerRequest(row, deliveryByRequest.get(String(row.id ?? "")))),
     audit: auditRows.map(safeAudit),
     page: { limit: OWNER_ACCESS_PAGE_SIZE, has_more: nextCursor !== null, next_cursor: nextCursor },
     auditPage: { limit: OWNER_ACCESS_AUDIT_PAGE_SIZE, has_more: nextAuditCursor !== null, next_cursor: nextAuditCursor },
-    discordAccessConfigured: false,
-    delivery: "No invitation or role change is sent from this queue until the separate central Discord configuration is complete.",
+    discordAccessConfigured: isOwnerDiscordDeliveryEnabled(env),
+    delivery: isOwnerDiscordDeliveryEnabled(env)
+      ? ownerDiscordDeliveryMessage(env)
+      : "No Discord invite, message, or role change is sent from this queue until the separate central Discord configuration is complete.",
   };
 }
 
@@ -285,7 +291,7 @@ function ownerAccessStatusOrder(value: unknown) { const status = statusFilter(va
 function base64UrlEncode(value: string) { const bytes = new TextEncoder().encode(value); let binary = ""; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, ""); }
 function base64UrlDecode(value: string) { const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "="); return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(padded), (character) => character.charCodeAt(0))); }
 function safeServer(row: Record<string, unknown>) { return { id: String(row.id ?? ""), name: clean(row.server_name, 160) ?? "DZN server", slug: clean(row.public_slug, 120), status: clean(row.status, 60), lifecycleStatus: clean(row.lifecycle_status, 60) }; }
-function safeApplicantRequest(row: Record<string, unknown>) { return { id: String(row.id ?? ""), linkedServerId: String(row.linked_server_id ?? row.linked_server_id_snapshot ?? ""), serverName: clean(row.server_name, 160) ?? "DZN server", note: clean(row.request_note, 400), status: statusFilter(row.status) ?? "pending", decisionReason: clean(row.decision_reason, 400), reviewedAt: clean(row.reviewed_at, 80), createdAt: clean(row.created_at, 80), updatedAt: clean(row.updated_at, 80) }; }
-function safeOwnerRequest(row: Record<string, unknown>) { return { ...safeApplicantRequest(row), requester: { username: clean(row.requester_username, 100) ?? "Discord member", discordId: clean(row.requester_discord_id, 32), avatarUrl: avatarUrl(clean(row.requester_discord_id, 32), clean(row.requester_avatar, 128)) }, reviewedBy: clean(row.reviewed_by_username, 100) }; }
+function safeApplicantRequest(row: Record<string, unknown>, delivery?: OwnerDiscordDeliveryAttempt) { return { id: String(row.id ?? ""), linkedServerId: String(row.linked_server_id ?? row.linked_server_id_snapshot ?? ""), serverName: clean(row.server_name, 160) ?? "DZN server", note: clean(row.request_note, 400), status: statusFilter(row.status) ?? "pending", decisionReason: clean(row.decision_reason, 400), reviewedAt: clean(row.reviewed_at, 80), createdAt: clean(row.created_at, 80), updatedAt: clean(row.updated_at, 80), delivery: delivery ?? null }; }
+function safeOwnerRequest(row: Record<string, unknown>, delivery?: OwnerDiscordDeliveryAttempt) { return { ...safeApplicantRequest(row, delivery), requester: { username: clean(row.requester_username, 100) ?? "Discord member", discordId: clean(row.requester_discord_id, 32), avatarUrl: avatarUrl(clean(row.requester_discord_id, 32), clean(row.requester_avatar, 128)) }, reviewedBy: clean(row.reviewed_by_username, 100) }; }
 function safeAudit(row: Record<string, unknown>) { return { id: String(row.id ?? ""), requestId: String(row.request_id ?? ""), serverName: clean(row.server_name, 160) ?? "DZN server", action: clean(row.action, 40), previousStatus: statusFilter(row.previous_status), nextStatus: statusFilter(row.next_status) ?? "pending", reason: clean(row.reason, 400), actorUsername: clean(row.actor_username, 100), createdAt: clean(row.created_at, 80) }; }
 function avatarUrl(discordId: string | null, avatar: string | null) { return discordId && avatar ? `https://cdn.discordapp.com/avatars/${encodeURIComponent(discordId)}/${encodeURIComponent(avatar)}.webp?size=128` : null; }
