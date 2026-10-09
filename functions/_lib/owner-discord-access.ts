@@ -1,5 +1,5 @@
 import { getSessionUser, requireDb } from "./db";
-import { getOwnerDiscordDeliverySummaries, isOwnerDiscordDeliveryEnabled, ownerDiscordDeliveryMessage } from "./owner-discord-delivery";
+import { getOwnerDiscordDeliverySummaries, isOwnerDiscordDeliveryEnabled, ownerDiscordDeliveryMessage, releaseOwnerDiscordRoleMutationLease, reserveOwnerDiscordRoleRevocationLease } from "./owner-discord-delivery";
 import type { OwnerDiscordDeliveryAttempt } from "./owner-discord-delivery";
 import type { Env, SessionUser } from "./types";
 
@@ -177,16 +177,24 @@ export async function decideOwnerDiscordAccessRequest(env: Env, actor: SessionUs
   if (!requestId || !action || !decisionNonce) return { ok: false as const, status: 400, message: "Refresh the request and enter a decision." };
   if (!reason || reason.length < 5) return { ok: false as const, status: 400, message: "Record a clear decision reason of at least five characters." };
   const db = requireDb(env);
-  const current = await db.prepare(`SELECT id, status, requester_user_id, linked_server_id
+  const current = await db.prepare(`SELECT id, status, requester_user_id, requester_discord_id, linked_server_id
                                       FROM dzn_owner_discord_access_requests
-                                     WHERE id = ?
-                                     LIMIT 1`).bind(requestId).first<{ id: string; status: OwnerDiscordAccessStatus; requester_user_id: string; linked_server_id: string }>();
+                                      WHERE id = ?
+                                      LIMIT 1`).bind(requestId).first<{ id: string; status: OwnerDiscordAccessStatus; requester_user_id: string | null; requester_discord_id: string | null; linked_server_id: string | null }>();
   if (!current) return { ok: false as const, status: 404, message: "The owner-access request was not found." };
   if (current.status === action) return { ok: true as const, duplicate: true, status: action };
   if ((action === "approved" || action === "rejected") && current.status !== "pending") return { ok: false as const, status: 409, message: "This request is no longer waiting for a decision." };
   if (action === "revoked" && current.status !== "approved") return { ok: false as const, status: 409, message: "Only an approved request can be revoked." };
+  const requesterDiscordId = typeof current.requester_discord_id === "string" && /^\d{12,24}$/.test(current.requester_discord_id) ? current.requester_discord_id : null;
+  const revocationReservation = action === "revoked" && requesterDiscordId
+    ? await reserveOwnerDiscordRoleRevocationLease(env, requestId, requesterDiscordId)
+    : null;
+  if (revocationReservation?.available && !revocationReservation.lease) {
+    return { ok: false as const, status: 409, message: "A Discord owner-role delivery is still completing. Retry this revocation shortly." };
+  }
   const now = new Date().toISOString();
-  const result = await db.batch([
+  try {
+    const result = await db.batch([
     db.prepare(`UPDATE dzn_owner_discord_access_requests
                    SET status = ?, decision_reason = ?, decision_nonce = ?, reviewed_by_user_id = ?, reviewed_by_discord_id = ?, reviewed_by_username = ?, reviewed_at = ?, updated_at = ?
                  WHERE id = ? AND status = ?
@@ -224,9 +232,12 @@ export async function decideOwnerDiscordAccessRequest(env: Env, actor: SessionUs
     ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE changes() = 1`)
       .bind(crypto.randomUUID(), requestId, actor.id, actor.discord_id, clean(actor.username, 100), action, current.status, action, reason, now),
-  ]);
-  if (Number(result[0]?.meta?.changes ?? 0) !== 1 || Number(result[1]?.meta?.changes ?? 0) !== 1) return { ok: false as const, status: 409, message: "This request changed while you were reviewing it. Refresh and try again." };
-  return { ok: true as const, duplicate: false, status: action, delivery: "The decision is recorded. No Discord invite, message, or role change has been sent because central Discord access delivery is not configured yet." };
+    ]);
+    if (Number(result[0]?.meta?.changes ?? 0) !== 1 || Number(result[1]?.meta?.changes ?? 0) !== 1) return { ok: false as const, status: 409, message: "This request changed while you were reviewing it. Refresh and try again." };
+    return { ok: true as const, duplicate: false, status: action, delivery: "The decision is recorded. No Discord invite, message, or role change has been sent because central Discord access delivery is not configured yet." };
+  } finally {
+    await releaseOwnerDiscordRoleMutationLease(env, revocationReservation?.lease ?? null);
+  }
 }
 
 async function hasAccessSchema(env: Env) {

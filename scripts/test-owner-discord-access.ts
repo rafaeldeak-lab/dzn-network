@@ -372,6 +372,16 @@ async function run() {
     assert.equal(accountDeletedArchive?.author_display_name, "Deleted DZN member", "Account deletion must anonymize the retained Comms archive author display name.");
     assert.equal(accountDeletedArchive?.author_role_label, "Deleted account", "Account deletion must anonymize the retained Comms archive author role.");
     assert.equal(accountDeletedArchive?.original_body, "Safety archive content remains for the retention window.", "Account deletion must preserve the private safety record until its retention window expires.");
+    await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
+      id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, created_at, completed_at
+    ) VALUES ('owner-actor-only-delivery', ?, ?, ?, ?, ?, 'invite', 'succeeded', 1, 'owner-actor-only-delivery-nonce', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+      .bind(createdPayload.request.id, outsider.id, outsider.discord_id, owner.id, owner.discord_id).run();
+    assert.equal((await deleteOwnedAccountData(env, owner.id)).ok, true, "Deleting a platform-owner account must retain unrelated requester identity in delivery history.");
+    const actorOnlyDelivery = await db.prepare("SELECT requester_user_id, requester_discord_id, actor_user_id, actor_discord_id FROM dzn_owner_discord_access_delivery_attempts WHERE id = 'owner-actor-only-delivery'").first<{ requester_user_id: string | null; requester_discord_id: string | null; actor_user_id: string | null; actor_discord_id: string | null }>();
+    assert.equal(actorOnlyDelivery?.requester_user_id, outsider.id, "Deleting only the delivery actor must not detach the unrelated requester.");
+    assert.equal(actorOnlyDelivery?.requester_discord_id, outsider.discord_id, "Deleting only the delivery actor must preserve the unrelated requester Discord identity.");
+    assert.equal(actorOnlyDelivery?.actor_user_id, null, "Deleting the delivery actor must detach only that actor foreign key.");
+    assert.equal(actorOnlyDelivery?.actor_discord_id, null, "Deleting the delivery actor must remove only that actor Discord identity.");
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Owner Discord access queue checks passed.");
   } finally { sqlite.close(); }

@@ -7,11 +7,25 @@ type StoredOperation = DeliveryOperation | "diagnostic";
 type DeliveryStatus = "started" | "succeeded" | "not_joined" | "retryable_failure" | "failed" | "not_configured";
 type DiscordFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-type DeliveryConfiguration = {
+type RoleDeliveryConfiguration = {
   botToken: string;
   guildId: string;
-  inviteChannelId: string;
   verifiedOwnerRoleId: string;
+};
+
+type DeliveryConfiguration = RoleDeliveryConfiguration & {
+  inviteChannelId: string;
+};
+
+type AttemptConfiguration = RoleDeliveryConfiguration & {
+  inviteChannelId?: string | null;
+};
+
+type RoleMutationOperation = "role_grant" | "role_revoke" | "revocation_decision" | "account_deletion";
+
+type RoleMutationLease = {
+  discordId: string;
+  leaseId: string;
 };
 
 type AccessRequestRow = {
@@ -80,6 +94,7 @@ const DISCORD_API_ROOT = "https://discord.com/api/v10";
 const INVITE_MAX_AGE_SECONDS = 15 * 60;
 const INVITE_RATE_WINDOW_MS = 15 * 60 * 1000;
 const INVITE_RATE_LIMIT = 3;
+const ROLE_MUTATION_LEASE_MS = 60 * 1000;
 const DISCORD_PERMISSION_ONE = BigInt(1);
 const DISCORD_CREATE_INSTANT_INVITE = DISCORD_PERMISSION_ONE << BigInt(0);
 const DISCORD_ADMINISTRATOR = DISCORD_PERMISSION_ONE << BigInt(3);
@@ -87,7 +102,7 @@ const DISCORD_VIEW_CHANNEL = DISCORD_PERMISSION_ONE << BigInt(10);
 const DISCORD_MANAGE_ROLES = DISCORD_PERMISSION_ONE << BigInt(28);
 
 export function isOwnerDiscordDeliveryEnabled(env: Env) {
-  return truthy(env.DZN_OWNER_DISCORD_ACCESS_ENABLED) && truthy(env.DZN_OWNER_DISCORD_DELIVERY_ENABLED) && Boolean(readDeliveryConfiguration(env));
+  return deliveryFlagsEnabled(env) && Boolean(readInviteDeliveryConfiguration(env));
 }
 
 export function ownerDiscordDeliveryMessage(env: Env) {
@@ -97,7 +112,7 @@ export function ownerDiscordDeliveryMessage(env: Env) {
   if (!truthy(env.DZN_OWNER_DISCORD_DELIVERY_ENABLED)) {
     return "Approval is recorded here. Private Discord delivery remains off until central-server diagnostics pass.";
   }
-  if (!readDeliveryConfiguration(env)) {
+  if (!readInviteDeliveryConfiguration(env)) {
     return "Private Discord delivery is enabled but its central-server configuration is incomplete.";
   }
   return "Approved owners can request a one-use private invite, then finish access after joining DZN Discord.";
@@ -128,10 +143,10 @@ export async function getOwnerDiscordDeliverySummaries(env: Env, requestIds: str
 
 export async function getOwnerDiscordDeliveryDiagnostic(env: Env, fetcher: DiscordFetch = fetch): Promise<DeliveryDiagnostic> {
   const checkedAt = new Date().toISOString();
-  if (!truthy(env.DZN_OWNER_DISCORD_ACCESS_ENABLED) || !truthy(env.DZN_OWNER_DISCORD_DELIVERY_ENABLED)) {
+  if (!deliveryFlagsEnabled(env)) {
     return diagnostic("disabled", "Private Discord delivery is disabled.", checkedAt, false);
   }
-  const configuration = readDeliveryConfiguration(env);
+  const configuration = readInviteDeliveryConfiguration(env);
   if (!configuration) {
     return diagnostic("not_configured", "Private Discord delivery needs the central guild, invite channel, Verified Server Owner role, and bot token configured privately.", checkedAt, false, {
       botTokenConfigured: Boolean(normalizeBotToken(env.DISCORD_BOT_TOKEN)),
@@ -158,7 +173,7 @@ export async function issueOwnerDiscordAccessInvite(env: Env, request: Request, 
   if (!access) return problem(404, "That owner-access request is not available to this Discord account.");
   if (access.status !== "approved") return problem(409, "Only an approved owner-access request can receive a private Discord invite.");
   if (access.requester_discord_id !== user.discord_id) return problem(403, "Use the same Discord account that made this owner-access request.");
-  const configuration = readDeliveryConfiguration(env);
+  const configuration = readInviteDeliveryConfiguration(env);
   if (!configuration) return problem(503, "Private Discord delivery is not configured yet.");
   const attempt = await startInviteAttempt(env, access, configuration, user);
   if (!attempt) return problem(429, "Too many private invites were requested recently. Wait before requesting another one.");
@@ -201,11 +216,18 @@ export async function claimOwnerDiscordAccessRole(env: Env, request: Request, ra
   if (access.status !== "approved") return problem(409, "Only an approved owner-access request can receive the Discord owner role.");
   if (access.requester_discord_id !== user.discord_id) return problem(403, "Use the same Discord account that made this owner-access request.");
 
-  const configuration = readDeliveryConfiguration(env);
+  const configuration = readRoleDeliveryConfiguration(env);
   if (!configuration) return problem(503, "Private Discord delivery is not configured yet.");
+  const lease = await acquireRoleMutationLease(env, {
+    requestId: access.id,
+    discordId: user.discord_id,
+    operation: "role_grant",
+    requiredStatus: "approved",
+  });
+  if (!lease) return problem(409, "This owner-access request is changing. Refresh the page before finishing Discord access.");
   const attempt = await startAttempt(env, access, "role_grant", configuration, user);
   try {
-    const preflight = await checkDiscordDeliveryConfiguration(configuration, fetcher);
+    const preflight = await checkDiscordRoleConfiguration(configuration, fetcher);
     if (!preflight.ok) return finishProblem(env, attempt, preflightToDeliveryStatus(preflight.status), preflight.message, preflight.httpStatus ?? null, preflight.status);
     const membership = await discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(user.discord_id)}`);
     if (membership.response.status === 404) {
@@ -217,15 +239,27 @@ export async function claimOwnerDiscordAccessRole(env: Env, request: Request, ra
     const membershipPayload = recordValue(membership.payload);
     const roleIds = new Set<string>(Array.isArray(membershipPayload?.roles) ? membershipPayload.roles.map((value) => String(value)) : []);
     if (!roleIds.has(configuration.verifiedOwnerRoleId)) {
+      if (!(await requestIsStillApprovedForApplicant(env, access.id, user))) {
+        return finishProblem(env, attempt, "failed", "The owner-access decision changed before the Discord role could be assigned.", null, "request_changed");
+      }
       const assigned = await discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(user.discord_id)}/roles/${encodeURIComponent(configuration.verifiedOwnerRoleId)}`, { method: "PUT" });
       if (!assigned.response.ok) {
         return finishProblem(env, attempt, deliveryStatusForHttp(assigned.response.status), "DZN could not assign the Verified Server Owner role. You can retry this step.", assigned.response.status, errorCodeForHttp(assigned.response.status));
+      }
+      if (!(await requestIsStillApprovedForApplicant(env, access.id, user))) {
+        const removed = await discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(user.discord_id)}/roles/${encodeURIComponent(configuration.verifiedOwnerRoleId)}`, { method: "DELETE" });
+        if (!removed.response.ok && removed.response.status !== 404) {
+          return finishProblem(env, attempt, "retryable_failure", "The owner-access decision changed while Discord role delivery was completing. DZN could not confirm role removal; retry the revocation.", removed.response.status, errorCodeForHttp(removed.response.status));
+        }
+        return finishProblem(env, attempt, "failed", "The owner-access decision changed before role delivery completed, so the role was removed.", removed.response.status, "request_changed");
       }
     }
     const completed = await finishAttempt(env, attempt, "succeeded", null, null, 204);
     return { ok: true, status: 200, message: "Verified Server Owner access is active in DZN Discord.", attempt: completed };
   } catch (error) {
     return finishProblem(env, attempt, "retryable_failure", "DZN could not reach Discord while finishing owner access. You can retry this step.", null, classifyThrownDiscordError(error));
+  } finally {
+    await releaseRoleMutationLease(env, lease);
   }
 }
 
@@ -241,12 +275,23 @@ export async function revokeOwnerDiscordAccessRole(env: Env, actor: SessionUser,
   const discordId = discordIdValue(access.requester_discord_id);
   if (!discordId) return problem(409, "This historical request no longer has a Discord identity to revoke.");
 
-  const configuration = readDeliveryConfiguration(env);
+  const configuration = readRoleDeliveryConfiguration(env);
   if (!configuration) return problem(503, "Private Discord delivery is not configured yet.");
+  const lease = await acquireRoleMutationLease(env, {
+    requestId: access.id,
+    discordId,
+    operation: "role_revoke",
+    requiredStatus: "revoked",
+  });
+  if (!lease) return problem(409, "An owner-role delivery is still finishing. Retry the role removal shortly.");
   const attempt = await startAttempt(env, access, "role_revoke", configuration, actor);
   try {
-    const preflight = await checkDiscordDeliveryConfiguration(configuration, fetcher);
+    const preflight = await checkDiscordRoleConfiguration(configuration, fetcher);
     if (!preflight.ok) return finishProblem(env, attempt, preflightToDeliveryStatus(preflight.status), preflight.message, preflight.httpStatus ?? null, preflight.status);
+    if (await hasAnotherApprovedRequestForDiscord(env, discordId, access.id)) {
+      const completed = await finishAttempt(env, attempt, "succeeded", "other_approved_request", "Another verified owner request for this Discord account remains approved, so the role stays in place.", null);
+      return { ok: true, status: 200, message: "Another verified owner request for this Discord account remains approved, so the Verified Server Owner role stays in place.", attempt: completed };
+    }
     const membership = await discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(discordId)}`);
     if (membership.response.status === 404) {
       const completed = await finishAttempt(env, attempt, "succeeded", "member_not_joined", "No DZN Discord membership remained to change.", 404);
@@ -267,6 +312,96 @@ export async function revokeOwnerDiscordAccessRole(env: Env, actor: SessionUser,
     return { ok: true, status: 200, message: "Verified Server Owner access was removed. The Discord membership itself was left unchanged.", attempt: completed };
   } catch (error) {
     return finishProblem(env, attempt, "retryable_failure", "DZN could not reach Discord while revoking the owner role. You can retry this step.", null, classifyThrownDiscordError(error));
+  } finally {
+    await releaseRoleMutationLease(env, lease);
+  }
+}
+
+export async function revokeOwnerDiscordRoleForAccountDeletion(env: Env, userId: string, fetcher: DiscordFetch = fetch) {
+  const db = requireDb(env);
+  if (!(await tableExists(env, "dzn_owner_discord_access_delivery_attempts"))) return { ok: true as const };
+
+  const grants = await db.prepare(`SELECT delivery.request_id, delivery.guild_id, delivery.role_id,
+      request.id, request.status, request.requester_user_id, request.requester_discord_id
+    FROM dzn_owner_discord_access_delivery_attempts AS delivery
+    JOIN dzn_owner_discord_access_requests AS request ON request.id = delivery.request_id
+    WHERE delivery.requester_user_id = ?
+      AND delivery.operation = 'role_grant'
+      AND delivery.status = 'succeeded'
+    ORDER BY delivery.completed_at DESC, delivery.created_at DESC, delivery.id DESC`)
+    .bind(userId)
+    .all<AccessRequestRow & { guild_id: string | null; role_id: string | null }>();
+  const successfulGrants = grants.results ?? [];
+  if (successfulGrants.length === 0) return { ok: true as const };
+  if (!(await hasDeliverySchema(env))) {
+    return { ok: false as const, status: 503 as const, message: "DZN cannot safely close this account while its recorded Discord owner role cleanup ledger is incomplete." };
+  }
+
+  const account = await db.prepare("SELECT id, discord_id, username, avatar FROM users WHERE id = ? LIMIT 1")
+    .bind(userId)
+    .first<SessionUser>();
+  const discordId = discordIdValue(account?.discord_id);
+  if (!account || !discordId) {
+    return { ok: false as const, status: 409 as const, message: "DZN cannot safely close this account because its recorded Discord owner role identity is unavailable." };
+  }
+  const configuration = readRoleDeliveryConfiguration(env, false);
+  if (!configuration) {
+    return { ok: false as const, status: 503 as const, message: "DZN cannot safely close this account until the Discord owner-role configuration is available to remove the recorded role." };
+  }
+  if (successfulGrants.some((grant) => grant.guild_id !== configuration.guildId || grant.role_id !== configuration.verifiedOwnerRoleId)) {
+    return { ok: false as const, status: 503 as const, message: "DZN cannot safely close this account because a recorded Discord owner role does not match the active DZN role configuration." };
+  }
+
+  const access = successfulGrants[0];
+  const lease = await acquireRoleMutationLease(env, {
+    requestId: access.id,
+    discordId,
+    operation: "account_deletion",
+  });
+  if (!lease) return { ok: false as const, status: 409 as const, message: "DZN is still changing this account's Discord owner role. Retry account closure shortly." };
+
+  const actor: SessionUser = {
+    id: account.id,
+    discord_id: discordId,
+    username: typeof account.username === "string" ? account.username : "Deleted DZN account",
+    avatar: typeof account.avatar === "string" ? account.avatar : null,
+  };
+  const attempt = await startAttempt(env, access, "role_revoke", configuration, actor);
+  try {
+    const preflight = await checkDiscordRoleConfiguration(configuration, fetcher);
+    if (!preflight.ok) {
+      await finishAttempt(env, attempt, preflightToDeliveryStatus(preflight.status), preflight.status, preflight.message, preflight.httpStatus ?? null);
+      return { ok: false as const, status: 503 as const, message: "DZN could not verify the Discord owner-role configuration needed before this account can be closed." };
+    }
+    if (await hasAnotherApprovedRequestForDiscord(env, discordId, access.id, userId)) {
+      await finishAttempt(env, attempt, "succeeded", "other_approved_request", "Another verified owner request for this Discord account remains approved, so the role stays in place.", null);
+      return { ok: true as const };
+    }
+    const membership = await discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(discordId)}`);
+    if (membership.response.status === 404) {
+      await finishAttempt(env, attempt, "succeeded", "member_not_joined", "No DZN Discord membership remained to change before account closure.", 404);
+      return { ok: true as const };
+    }
+    if (!membership.response.ok) {
+      await finishAttempt(env, attempt, deliveryStatusForHttp(membership.response.status), errorCodeForHttp(membership.response.status), "DZN could not verify the Discord member before account closure.", membership.response.status);
+      return { ok: false as const, status: 503 as const, message: "DZN could not verify the Discord owner role needed before this account can be closed." };
+    }
+    const membershipPayload = recordValue(membership.payload);
+    const roleIds = new Set<string>(Array.isArray(membershipPayload?.roles) ? membershipPayload.roles.map((value) => String(value)) : []);
+    if (roleIds.has(configuration.verifiedOwnerRoleId)) {
+      const removed = await discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(discordId)}/roles/${encodeURIComponent(configuration.verifiedOwnerRoleId)}`, { method: "DELETE" });
+      if (!removed.response.ok && removed.response.status !== 404) {
+        await finishAttempt(env, attempt, deliveryStatusForHttp(removed.response.status), errorCodeForHttp(removed.response.status), "DZN could not remove the Discord owner role before account closure.", removed.response.status);
+        return { ok: false as const, status: 503 as const, message: "DZN could not remove the Discord owner role, so this account has not been closed." };
+      }
+    }
+    await finishAttempt(env, attempt, "succeeded", null, null, 204);
+    return { ok: true as const };
+  } catch (error) {
+    await finishAttempt(env, attempt, "retryable_failure", classifyThrownDiscordError(error), "DZN could not reach Discord while removing the owner role before account closure.", null);
+    return { ok: false as const, status: 503 as const, message: "DZN could not confirm Discord owner-role removal, so this account has not been closed." };
+  } finally {
+    await releaseRoleMutationLease(env, lease);
   }
 }
 
@@ -276,7 +411,7 @@ async function readApplicantAccessRequest(env: Env, requestId: string, user: Ses
     WHERE id = ? AND requester_user_id = ? LIMIT 1`).bind(requestId, user.id).first<AccessRequestRow>();
 }
 
-async function startAttempt(env: Env, access: AccessRequestRow, operation: DeliveryOperation, configuration: DeliveryConfiguration, actor: SessionUser) {
+async function startAttempt(env: Env, access: AccessRequestRow, operation: DeliveryOperation, configuration: AttemptConfiguration, actor: SessionUser) {
   const db = requireDb(env);
   const previous = await db.prepare(`SELECT COALESCE(MAX(attempt_number), 0) AS attempt_number
     FROM dzn_owner_discord_access_delivery_attempts WHERE request_id = ? AND operation = ?`).bind(access.id, operation).first<{ attempt_number: number | string }>();
@@ -294,7 +429,7 @@ async function startAttempt(env: Env, access: AccessRequestRow, operation: Deliv
     attemptNumber,
     nonce: crypto.randomUUID(),
     guildId: configuration.guildId,
-    inviteChannelId: configuration.inviteChannelId,
+    inviteChannelId: configuration.inviteChannelId ?? null,
     roleId: configuration.verifiedOwnerRoleId,
     createdAt,
   };
@@ -383,16 +518,44 @@ async function finishProblem(env: Env, attempt: Awaited<ReturnType<typeof startA
   return { ok: false, status: status === "not_joined" ? 409 : status === "retryable_failure" ? 503 : 409, message, attempt: completed };
 }
 
-function readDeliveryConfiguration(env: Env): DeliveryConfiguration | null {
-  if (!truthy(env.DZN_OWNER_DISCORD_ACCESS_ENABLED) || !truthy(env.DZN_OWNER_DISCORD_DELIVERY_ENABLED)) return null;
+function readRoleDeliveryConfiguration(env: Env, requireEnabled = true): RoleDeliveryConfiguration | null {
+  if (requireEnabled && !deliveryFlagsEnabled(env)) return null;
   const botToken = normalizeBotToken(env.DISCORD_BOT_TOKEN);
   const guildId = discordIdValue(env.DZN_OWNER_DISCORD_GUILD_ID);
-  const inviteChannelId = discordIdValue(env.DZN_OWNER_DISCORD_INVITE_CHANNEL_ID);
   const verifiedOwnerRoleId = discordIdValue(env.DZN_OWNER_DISCORD_VERIFIED_OWNER_ROLE_ID);
-  return botToken && guildId && inviteChannelId && verifiedOwnerRoleId ? { botToken, guildId, inviteChannelId, verifiedOwnerRoleId } : null;
+  return botToken && guildId && verifiedOwnerRoleId ? { botToken, guildId, verifiedOwnerRoleId } : null;
 }
 
-async function checkDiscordDeliveryConfiguration(configuration: DeliveryConfiguration, fetcher: DiscordFetch) {
+function readInviteDeliveryConfiguration(env: Env): DeliveryConfiguration | null {
+  const roleConfiguration = readRoleDeliveryConfiguration(env);
+  const inviteChannelId = discordIdValue(env.DZN_OWNER_DISCORD_INVITE_CHANNEL_ID);
+  return roleConfiguration && inviteChannelId ? { ...roleConfiguration, inviteChannelId } : null;
+}
+
+function deliveryFlagsEnabled(env: Env) {
+  return truthy(env.DZN_OWNER_DISCORD_ACCESS_ENABLED) && truthy(env.DZN_OWNER_DISCORD_DELIVERY_ENABLED);
+}
+
+type RoleDeliveryPreflight =
+  | {
+    ok: true;
+    status: "ready";
+    message: string;
+    httpStatus: null;
+    checks: DeliveryDiagnostic["checks"];
+    botId: string;
+    botRoleIds: Set<string>;
+    basePermissions: bigint;
+  }
+  | {
+    ok: false;
+    status: DeliveryDiagnostic["status"];
+    message: string;
+    httpStatus: number | null;
+    checks: DeliveryDiagnostic["checks"];
+  };
+
+async function checkDiscordRoleConfiguration(configuration: RoleDeliveryConfiguration, fetcher: DiscordFetch): Promise<RoleDeliveryPreflight> {
   const failedChecks = (status: DeliveryDiagnostic["status"], message: string, httpStatus: number | null = null) => ({
     ok: false as const,
     status,
@@ -406,20 +569,14 @@ async function checkDiscordDeliveryConfiguration(configuration: DeliveryConfigur
     const botId = discordIdValue(identityPayload?.id);
     if (!identity.response.ok || !botId) return failedChecks(identity.response.status === 401 ? "not_connected" : "discord_error", "DZN could not authenticate the configured Discord bot.", identity.response.status);
 
-    const [membership, rolesResponse, channelResponse] = await Promise.all([
+    const [membership, rolesResponse] = await Promise.all([
       discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(botId)}`),
       discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/roles`),
-      discordRequest(fetcher, configuration, `/channels/${encodeURIComponent(configuration.inviteChannelId)}`),
     ]);
     if (!membership.response.ok) return failedChecks(membership.response.status === 404 ? "not_connected" : "discord_error", "DZN Bot is not available in the configured DZN Discord server.", membership.response.status);
     if (!rolesResponse.response.ok || !Array.isArray(rolesResponse.payload)) return failedChecks("discord_error", "DZN could not read the central Discord role configuration.", rolesResponse.response.status);
-    if (!channelResponse.response.ok) return failedChecks(channelResponse.response.status === 403 ? "permission_missing" : "discord_error", "DZN could not read the private invite channel.", channelResponse.response.status);
 
     const roles = rolesResponse.payload as DiscordRole[];
-    const channel = channelResponse.payload as DiscordChannel;
-    if (String(channel.guild_id ?? "") !== configuration.guildId || ![0, 5].includes(Number(channel.type))) {
-      return failedChecks("not_configured", "The configured private invite channel does not belong to the central DZN Discord server.");
-    }
     const targetRole = roles.find((role) => String(role.id ?? "") === configuration.verifiedOwnerRoleId);
     const membershipPayload = recordValue(membership.payload);
     const botRoleIds = new Set<string>(Array.isArray(membershipPayload?.roles) ? membershipPayload.roles.map((value) => String(value)) : []);
@@ -427,18 +584,15 @@ async function checkDiscordDeliveryConfiguration(configuration: DeliveryConfigur
     const botHighestPosition = Math.max(0, ...[...botRoleIds].map((roleId) => Number(roleById.get(roleId)?.position ?? 0)));
     const targetRolePosition = Number(targetRole?.position ?? -1);
     const basePermissions = getBotGuildPermissions(roles, botRoleIds, configuration.guildId);
-    const channelPermissions = evaluateChannelPermissions(basePermissions, channel, configuration.guildId, botRoleIds, botId);
     const hasAdministrator = hasPermission(basePermissions, DISCORD_ADMINISTRATOR);
     const canManageRoles = hasAdministrator || hasPermission(basePermissions, DISCORD_MANAGE_ROLES);
-    const canViewInviteChannel = hasAdministrator || hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL);
-    const canCreateInvite = hasAdministrator || hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE);
     const checks = {
       botTokenConfigured: true,
       botIdentity: true,
       botGuildMembership: true,
-      inviteChannel: true,
-      canViewInviteChannel,
-      canCreateInvite,
+      inviteChannel: false,
+      canViewInviteChannel: false,
+      canCreateInvite: false,
       canManageRoles,
       targetRole: Boolean(targetRole),
       targetRoleBelowBot: Boolean(targetRole && targetRolePosition < botHighestPosition),
@@ -447,14 +601,45 @@ async function checkDiscordDeliveryConfiguration(configuration: DeliveryConfigur
     if (!targetRole) return { ok: false as const, status: "not_configured" as const, message: "The configured Verified Server Owner role was not found in the central DZN Discord server.", httpStatus: null, checks };
     if (String(targetRole.id ?? "") === configuration.guildId || targetRole.managed === true) return { ok: false as const, status: "not_configured" as const, message: "The configured Verified Server Owner role must be a normal, assignable role in the central DZN Discord server.", httpStatus: null, checks };
     if (!checks.targetRoleBelowBot) return { ok: false as const, status: "role_hierarchy" as const, message: "DZN Bot must remain above the Verified Server Owner role before owner delivery can run.", httpStatus: null, checks };
-    if (!canManageRoles || !canViewInviteChannel || !canCreateInvite) return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs View Channel and Create Invite on the private invite channel, plus Manage Roles for the Verified Server Owner role.", httpStatus: null, checks };
-    return { ok: true as const, status: "ready" as const, message: "DZN owner Discord delivery is ready for controlled requests.", httpStatus: null, checks };
+    if (!canManageRoles) return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs Manage Roles for the Verified Server Owner role.", httpStatus: null, checks };
+    return { ok: true as const, status: "ready" as const, message: "DZN Bot can manage the Verified Server Owner role.", httpStatus: null, checks, botId, botRoleIds, basePermissions };
   } catch (error) {
     return failedChecks("discord_error", "DZN could not reach Discord for the central-server diagnostic.", null);
   }
 }
 
-async function discordRequest(fetcher: DiscordFetch, configuration: DeliveryConfiguration, path: string, init: RequestInit = {}) {
+async function checkDiscordDeliveryConfiguration(configuration: DeliveryConfiguration, fetcher: DiscordFetch) {
+  const rolePreflight = await checkDiscordRoleConfiguration(configuration, fetcher);
+  if (!rolePreflight.ok) return rolePreflight;
+  try {
+    const channelResponse = await discordRequest(fetcher, configuration, `/channels/${encodeURIComponent(configuration.inviteChannelId)}`);
+    if (!channelResponse.response.ok) {
+      return {
+        ok: false as const,
+        status: channelResponse.response.status === 403 ? "permission_missing" as const : "discord_error" as const,
+        message: "DZN could not read the private invite channel.",
+        httpStatus: channelResponse.response.status,
+        checks: rolePreflight.checks,
+      };
+    }
+    const channel = channelResponse.payload as DiscordChannel;
+    if (String(channel.guild_id ?? "") !== configuration.guildId || ![0, 5].includes(Number(channel.type))) {
+      return { ok: false as const, status: "not_configured" as const, message: "The configured private invite channel does not belong to the central DZN Discord server.", httpStatus: null, checks: rolePreflight.checks };
+    }
+    const channelPermissions = evaluateChannelPermissions(rolePreflight.basePermissions, channel, configuration.guildId, rolePreflight.botRoleIds, rolePreflight.botId);
+    const canViewInviteChannel = rolePreflight.checks.botHasAdministrator || hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL);
+    const canCreateInvite = rolePreflight.checks.botHasAdministrator || hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE);
+    const checks = { ...rolePreflight.checks, inviteChannel: true, canViewInviteChannel, canCreateInvite };
+    if (!canViewInviteChannel || !canCreateInvite) {
+      return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs View Channel and Create Invite on the private invite channel.", httpStatus: null, checks };
+    }
+    return { ok: true as const, status: "ready" as const, message: "DZN owner Discord delivery is ready for controlled requests.", httpStatus: null, checks };
+  } catch (error) {
+    return { ok: false as const, status: "discord_error" as const, message: "DZN could not reach Discord for the private-invite diagnostic.", httpStatus: null, checks: rolePreflight.checks };
+  }
+}
+
+async function discordRequest(fetcher: DiscordFetch, configuration: RoleDeliveryConfiguration, path: string, init: RequestInit = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
   try {
@@ -506,8 +691,98 @@ function hasPermission(permissions: bigint, permission: bigint) {
 }
 
 async function hasDeliverySchema(env: Env) {
-  const rows = await requireDb(env).prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('dzn_owner_discord_access_requests', 'dzn_owner_discord_access_delivery_attempts')").all<{ name: string }>();
-  return new Set((rows.results ?? []).map((row) => row.name)).size === 2;
+  const rows = await requireDb(env).prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('dzn_owner_discord_access_requests', 'dzn_owner_discord_access_delivery_attempts', 'dzn_owner_discord_access_role_mutations')").all<{ name: string }>();
+  return new Set((rows.results ?? []).map((row) => row.name)).size === 3;
+}
+
+export type OwnerDiscordRoleMutationLease = RoleMutationLease;
+
+export async function reserveOwnerDiscordRoleRevocationLease(env: Env, requestId: string, discordId: string) {
+  if (!(await hasRoleMutationSchema(env))) return { available: false as const, lease: null };
+  return {
+    available: true as const,
+    lease: await acquireRoleMutationLease(env, {
+      requestId,
+      discordId,
+      operation: "revocation_decision",
+      requiredStatus: "approved",
+    }),
+  };
+}
+
+export async function releaseOwnerDiscordRoleMutationLease(env: Env, lease: OwnerDiscordRoleMutationLease | null) {
+  if (lease) await releaseRoleMutationLease(env, lease);
+}
+
+async function acquireRoleMutationLease(env: Env, input: {
+  requestId: string;
+  discordId: string;
+  operation: RoleMutationOperation;
+  requiredStatus?: AccessRequestRow["status"];
+}): Promise<RoleMutationLease | null> {
+  if (!(await hasRoleMutationSchema(env))) return null;
+  const leaseId = crypto.randomUUID();
+  const acquiredAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + ROLE_MUTATION_LEASE_MS).toISOString();
+  const result = await requireDb(env).prepare(`INSERT INTO dzn_owner_discord_access_role_mutations (
+    discord_id, request_id, lease_id, operation, expires_at, acquired_at
+  )
+  SELECT ?, ?, ?, ?, ?, ?
+   WHERE EXISTS (
+     SELECT 1
+       FROM dzn_owner_discord_access_requests
+      WHERE id = ?
+        AND requester_discord_id = ?
+        AND (? IS NULL OR status = ?)
+   )
+  ON CONFLICT(discord_id) DO UPDATE SET
+    request_id = excluded.request_id,
+    lease_id = excluded.lease_id,
+    operation = excluded.operation,
+    expires_at = excluded.expires_at,
+    acquired_at = excluded.acquired_at
+  WHERE dzn_owner_discord_access_role_mutations.expires_at <= excluded.acquired_at`)
+    .bind(input.discordId, input.requestId, leaseId, input.operation, expiresAt, acquiredAt, input.requestId, input.discordId, input.requiredStatus ?? null, input.requiredStatus ?? null)
+    .run();
+  return Number(result.meta.changes ?? 0) === 1 ? { discordId: input.discordId, leaseId } : null;
+}
+
+async function releaseRoleMutationLease(env: Env, lease: RoleMutationLease) {
+  await requireDb(env).prepare(`DELETE FROM dzn_owner_discord_access_role_mutations
+    WHERE discord_id = ? AND lease_id = ?`).bind(lease.discordId, lease.leaseId).run();
+}
+
+async function hasRoleMutationSchema(env: Env) {
+  return tableExists(env, "dzn_owner_discord_access_role_mutations");
+}
+
+async function tableExists(env: Env, tableName: string) {
+  const row = await requireDb(env).prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
+    .bind(tableName)
+    .first<{ name: string }>();
+  return Boolean(row);
+}
+
+async function requestIsStillApprovedForApplicant(env: Env, requestId: string, user: SessionUser) {
+  const row = await requireDb(env).prepare(`SELECT 1 AS found
+    FROM dzn_owner_discord_access_requests
+    WHERE id = ?
+      AND requester_user_id = ?
+      AND requester_discord_id = ?
+      AND status = 'approved'
+    LIMIT 1`).bind(requestId, user.id, user.discord_id).first<{ found: number }>();
+  return Boolean(row);
+}
+
+async function hasAnotherApprovedRequestForDiscord(env: Env, discordId: string, requestId: string, excludeRequesterUserId?: string) {
+  const row = await requireDb(env).prepare(`SELECT 1 AS found
+    FROM dzn_owner_discord_access_requests
+    WHERE requester_discord_id = ?
+      AND status = 'approved'
+      AND id <> ?
+      AND (? IS NULL OR requester_user_id IS NULL OR requester_user_id <> ?)
+    LIMIT 1`).bind(discordId, requestId, excludeRequesterUserId ?? null, excludeRequesterUserId ?? null).first<{ found: number }>();
+  return Boolean(row);
 }
 
 function extractRequestId(value: unknown) {
