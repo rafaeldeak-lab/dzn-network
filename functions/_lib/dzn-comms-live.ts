@@ -234,6 +234,7 @@ export async function handleDznCommsSelfDelete(request: Request, env: Env, messa
   if (!target || (target.kind === "private_group" && (!readDznCommsPrivateGroupFlags(env, request).enabled || !await hasActivePrivateGroupMembership(db, target.channel_id, user.id)))) {
     return error(404, "MESSAGE_NOT_FOUND", "That message is unavailable.");
   }
+  // Keep private archive deletion metadata tied to this request's visible-to-deleted transition.
   const results = await db.batch([
     archiveSnapshotStatement(db, messageId),
     db.prepare(`UPDATE dzn_comms_messages
@@ -242,7 +243,8 @@ export async function handleDznCommsSelfDelete(request: Request, env: Env, messa
       WHERE id = ? AND author_user_id = ? AND visibility_state = 'visible'`).bind(messageId, user.id),
     db.prepare(`UPDATE dzn_comms_owner_message_archive
       SET deleted_at = CURRENT_TIMESTAMP, deleted_by_user_id = ?, deletion_kind = 'self_deleted'
-      WHERE message_id = ? AND deleted_at IS NULL`).bind(user.id, messageId),
+      WHERE message_id = ? AND deleted_at IS NULL
+        AND changes() = 1`).bind(user.id, messageId),
     archiveEventAfterTransitionStatement(db, messageId, "self_deleted", user.id),
     db.prepare(`UPDATE dzn_comms_send_receipts
       SET message_id = NULL, send_rate_key = NULL, send_minute_bucket = NULL, send_slot = NULL

@@ -611,6 +611,31 @@ async function testOwnerArchiveAndSelfDeleteRuntime() {
     ]);
     assert.equal(racingDeletes.filter((response) => response.status === 200).length, 1, "Only one concurrent self-delete can succeed.");
     assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_owner_message_archive_events WHERE message_id = ? AND action = 'self_deleted'").get(racingMessageId)?.count, 1, "A failed concurrent self-delete must not record a false archive event.");
+    for (const transition of ["hidden", "expired"] as const) {
+      f.sqlite.exec("DELETE FROM dzn_comms_send_slots; DELETE FROM dzn_comms_attempt_slots;");
+      const transitionedSent = await handleDznCommsSend(request("/api/comms/messages", "player-token", {
+        channelSlug: "global-chat", clientRequestId: `archive-${transition}-race-01`, body: `${transition} race safety check`,
+      }), f.env);
+      assert.equal(transitionedSent.status, 201);
+      const transitionedMessageId = (await payload(transitionedSent)).message_id!;
+      f.beforeBatch(() => {
+        if (transition === "hidden") {
+          f.sqlite.prepare("UPDATE dzn_comms_messages SET visibility_state = 'hidden' WHERE id = ?").run(transitionedMessageId);
+          return;
+        }
+        f.sqlite.prepare(`UPDATE dzn_comms_messages
+          SET body = 'Message expired.', author_user_id = NULL, author_display_name = 'DZN Safety',
+              author_role_label = 'System', visibility_state = 'expired'
+          WHERE id = ?`).run(transitionedMessageId);
+      });
+      const transitionedDelete = await handleDznCommsSelfDelete(deleteRequest(`/api/comms/messages/${transitionedMessageId}`, "player-token"), f.env, transitionedMessageId);
+      assert.equal(transitionedDelete.status, 409, `A ${transition} transition that wins the race must reject self-delete.`);
+      const archiveTransition = f.sqlite.prepare("SELECT deleted_at,deleted_by_user_id,deletion_kind FROM dzn_comms_owner_message_archive WHERE message_id = ?").get(transitionedMessageId) as Row;
+      assert.equal(archiveTransition.deleted_at, null, `A ${transition} transition must not record a deletion time.`);
+      assert.equal(archiveTransition.deleted_by_user_id, null, `A ${transition} transition must not record a false deleter.`);
+      assert.equal(archiveTransition.deletion_kind, null, `A ${transition} transition must not create a false self-delete archive record.`);
+      assert.equal(f.sqlite.prepare("SELECT COUNT(*) AS count FROM dzn_comms_owner_message_archive_events WHERE message_id = ? AND action = 'self_deleted'").get(transitionedMessageId)?.count, 0, `A ${transition} transition must not create a self-delete archive event.`);
+    }
     f.sqlite.prepare(`INSERT INTO dzn_comms_messages
       (id,channel_id,author_user_id,author_display_name,author_role_label,body,visibility_state)
       VALUES ('moderator-retry-message','dzn-global-chat','other','Other','Member','Keep this deletion attribution','visible')`).run();
@@ -647,9 +672,10 @@ async function testOwnerArchiveAndSelfDeleteRuntime() {
     const visibleArchiveResponse = await handleDznCommsOwnerArchive(getRequest("/api/owner/comms/archive?filter=visible&query=hidden%20archive", "owner-token"), f.env);
     assert.equal(visibleArchiveResponse.status, 200);
     assert.deepEqual((await visibleArchiveResponse.json() as { rows?: unknown[] }).rows, [], "Hidden content must not appear under the visible archive filter.");
+    const archivedRowsBeforeRetention = f.count("dzn_comms_owner_message_archive");
     f.sqlite.prepare("UPDATE dzn_comms_owner_message_archive SET retained_until = '2026-01-01T00:00:00.000Z'").run();
     const retention = await runDznCommsRetention(f.env.DB, new Date("2026-09-24T12:00:00.000Z"));
-    assert.equal(retention.ownerArchiveRowsDeleted, 5, "The retention runner must remove expired original message archives.");
+    assert.equal(retention.ownerArchiveRowsDeleted, archivedRowsBeforeRetention, "The retention runner must remove every expired original message archive.");
     assert.equal(f.count("dzn_comms_owner_message_archive"), 0);
   } finally { f.close(); }
 }
