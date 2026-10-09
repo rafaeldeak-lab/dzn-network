@@ -965,7 +965,7 @@ async function main() {
   });
   const recoveredHeartbeatResult = await processPendingAdmImportJobs(makeEnv(retryHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
   assert.equal(recoveredHeartbeatResult.completedJobs, 1);
-  assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, false);
+  assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, true, "A cache row without a rank timestamp must refresh once to establish durable rank freshness.");
 
   const retryStatsHeartbeatDb = new MemoryD1();
   retryStatsHeartbeatDb.admImportJobs.set("previous-stats-failure", {
@@ -1063,7 +1063,11 @@ async function main() {
   completedBuildJob.result_json = null;
   const idleBuildTail = await processPendingAdmImportJobs(makeEnv(buildScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
   assert.equal(idleBuildTail.completedJobs, 1);
-  assert.equal(idleBuildTail.results[0]?.file_result?.public_cache_updated, false);
+  assert.equal(
+    idleBuildTail.results[0]?.file_result?.public_cache_updated,
+    true,
+    "A quiet grown tail initializes the dedicated rank timestamp once.",
+  );
   assert.equal(buildScheduledDb.buildEvents.length, 12);
   assert.deepEqual(countBy(buildScheduledDb.buildEvents, "event_type"), {
     placed: 5,
@@ -1222,6 +1226,16 @@ async function main() {
   scheduledTailRow.chunks_processed = 1;
   scheduledTailRow.adm_text = scheduledTailLines.slice(0, 2).join("\n");
   scheduledTailRow.result_json = JSON.stringify({ build_events_stored: 4 });
+  scheduledTailRow.written_kills = 2;
+  scheduledTailRow.player_events = 3;
+  scheduledTailRow.joins = 4;
+  scheduledTailRow.disconnects = 5;
+  scheduledTailRow.deaths = 6;
+  scheduledTailRow.raw_events = 7;
+  scheduledTailRow.failed_writes = 1;
+  scheduledTailRow.warnings_json = '["previous tail warning", "fixture.ADM: Public cache update failed after ADM rows were written. timed out"]';
+  scheduledTailRow.public_cache_updated = 0;
+  scheduledTailRow.discord_jobs_queued = 2;
   scheduledTailRow.completed_at = "2026-05-20T12:00:00.000Z";
   const scheduledTailGrowth = await createScheduledAdmImportJobForServer(
     { ...makeEnv(scheduledTailDb), MOCK_NITRADO: "true" },
@@ -1234,8 +1248,70 @@ async function main() {
   assert.equal(scheduledTailGrowth.job?.job_id, scheduledTailFirst.job?.job_id);
   assert.equal(scheduledTailGrowth.job?.current_line, 2);
   assert.equal(scheduledTailGrowth.job?.total_lines, scheduledTailLines.length);
-  assert.equal(scheduledTailDb.admImportJobs.get(String(scheduledTailFirst.job?.job_id))?.result_json, null);
+  const reopenedScheduledTail = scheduledTailDb.admImportJobs.get(String(scheduledTailFirst.job?.job_id));
+  assert.deepEqual(JSON.parse(String(reopenedScheduledTail?.result_json)), {
+    scheduled_maintenance_retry: { cache: 1, stats: 0, had_derived_writes: 1 },
+  });
+  assert.equal(reopenedScheduledTail?.written_kills, 0);
+  assert.equal(reopenedScheduledTail?.player_events, 0);
+  assert.equal(reopenedScheduledTail?.joins, 0);
+  assert.equal(reopenedScheduledTail?.disconnects, 0);
+  assert.equal(reopenedScheduledTail?.deaths, 0);
+  assert.equal(reopenedScheduledTail?.raw_events, 0);
+  assert.equal(reopenedScheduledTail?.failed_writes, 0);
+  assert.equal(reopenedScheduledTail?.warnings_json, "[]");
+  assert.equal(reopenedScheduledTail?.public_cache_updated, 0);
+  assert.equal(reopenedScheduledTail?.discord_jobs_queued, 0);
+  // A heartbeat-only appended tail must still retry the earlier failed cache
+  // refresh for persisted events in the completed portion of this same file.
+  reopenedScheduledTail!.adm_text = "AdminLog started on 2026-05-20 at 12:00:00\n12:00:01 | Server heartbeat\n12:00:02 | Server heartbeat";
+  reopenedScheduledTail!.total_lines = 3;
+  reopenedScheduledTail!.current_line = 2;
+  reopenedScheduledTail!.chunk_size = 2;
+  reopenedScheduledTail!.total_chunks = 2;
+  reopenedScheduledTail!.chunks_processed = 1;
+  const quietTailRecovery = await processPendingAdmImportJobs(makeEnv(scheduledTailDb), { maxJobs: 1, maxChunksPerJob: 2 });
+  assert.equal(quietTailRecovery.completedJobs, 1);
+  assert.equal(quietTailRecovery.results[0]?.file_result?.public_cache_updated, true, "A quiet appended tail must retry the same job's failed public-cache refresh.");
+  assert.equal(scheduledTailDb.serverPublicCache.has(guildId), true);
   assert.equal(scheduledTailDb.admImportJobs.size, 1);
+
+  const activeTailDb = new MemoryD1();
+  const activeTailFirst = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(activeTailDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  const activeTailRow = activeTailDb.admImportJobs.get(String(activeTailFirst.job?.job_id));
+  assert.ok(activeTailRow);
+  const activeTailLines = String(activeTailRow.adm_text ?? "").split(/\r?\n/).filter(Boolean);
+  activeTailRow.status = "queued";
+  activeTailRow.current_line = 2;
+  activeTailRow.total_lines = 2;
+  activeTailRow.chunk_size = 2;
+  activeTailRow.total_chunks = 1;
+  activeTailRow.chunks_processed = 1;
+  activeTailRow.adm_text = activeTailLines.slice(0, 2).join("\n");
+  activeTailRow.written_kills = 2;
+  activeTailRow.player_events = 3;
+  activeTailRow.joins = 4;
+  activeTailRow.disconnects = 5;
+  activeTailRow.deaths = 6;
+  activeTailRow.raw_events = 7;
+  activeTailRow.warnings_json = '["active tail warning"]';
+  const activeTailGrowth = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(activeTailDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  assert.equal(activeTailGrowth.job?.job_id, activeTailFirst.job?.job_id);
+  const extendedActiveTail = activeTailDb.admImportJobs.get(String(activeTailFirst.job?.job_id));
+  assert.equal(extendedActiveTail?.written_kills, 2, "An active tail extension must preserve already imported kills.");
+  assert.equal(extendedActiveTail?.player_events, 3, "An active tail extension must preserve already imported player events.");
+  assert.equal(extendedActiveTail?.raw_events, 7, "An active tail extension must preserve already parsed events.");
+  assert.equal(extendedActiveTail?.warnings_json, '["active tail warning"]', "An active tail extension must preserve prior warning evidence.");
 
   const scheduledDuplicateDb = new MemoryD1();
   const mockAdmName = "DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM";
@@ -2104,6 +2180,35 @@ class MemoryStatement {
       row.total_chunks = Number(this.values[5] ?? row.total_chunks);
       row.chunks_processed = Number(this.values[6] ?? row.chunks_processed);
       if (q.includes("result_json = null")) row.result_json = null;
+      if (q.includes("scheduled_maintenance_retry")) {
+        row.result_json = JSON.stringify({
+          scheduled_maintenance_retry: {
+            cache: q.includes("'cache', 1") ? 1 : 0,
+            stats: q.includes("'stats', 1") ? 1 : 0,
+            had_derived_writes: q.includes("'had_derived_writes', 1") ? 1 : 0,
+          },
+        });
+      }
+      if (q.includes("written_kills = 0")) {
+        row.raw_kill_lines_found = 0;
+        row.parsed_kills = 0;
+        row.written_kills = 0;
+        row.duplicate_skips = 0;
+        row.joins = 0;
+        row.disconnects = 0;
+        row.playerlist_snapshots = 0;
+        row.deaths = 0;
+        row.suicides = 0;
+        row.uncredited_deaths = 0;
+        row.hit_lines = 0;
+        row.raw_events = 0;
+        row.player_events = 0;
+        row.failed_writes = 0;
+        row.warnings_json = "[]";
+        row.public_cache_updated = 0;
+        row.discord_jobs_queued = 0;
+        row.last_chunk_index = null;
+      }
       row.completed_at = null;
       row.error_message = null;
       row.failed_chunk_index = null;
@@ -2167,8 +2272,9 @@ class MemoryStatement {
       row.player_events = Number(row.player_events ?? 0) + Number(this.values[offset + 11] ?? 0);
       const buildEventOffset = storesBuildEventCount ? 1 : 0;
       if (storesBuildEventCount) {
-        const current = Number(JSON.parse(String(row.result_json ?? "{}")).build_events_stored ?? 0);
-        row.result_json = JSON.stringify({ build_events_stored: current + Number(this.values[offset + 12] ?? 0) });
+        const existingResult = JSON.parse(String(row.result_json ?? "{}")) as Record<string, unknown>;
+        const current = Number(existingResult.build_events_stored ?? 0);
+        row.result_json = JSON.stringify({ ...existingResult, build_events_stored: current + Number(this.values[offset + 12] ?? 0) });
       }
       row.failed_writes = Number(row.failed_writes ?? 0) + Number(this.values[offset + 12 + buildEventOffset] ?? 0);
       row.warnings_json = this.values[offset + 13 + buildEventOffset];

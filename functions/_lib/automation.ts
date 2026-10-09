@@ -1471,13 +1471,36 @@ export async function upsertServerPublicCache(env: Env, input: {
     : input.lastAdmUpdateAt
       ? await readNetworkRankSnapshot(env, input.guildId).catch(() => null)
       : null;
-  await requireDb(env)
-    .prepare(
+  const rankSnapshotUpdatedAt = networkRank !== null && (input.networkRank !== undefined || input.lastAdmUpdateAt)
+    ? now
+    : null;
+  const db = requireDb(env);
+  const bindCacheWrite = (statement: D1PreparedStatement) => statement.bind(
+    crypto.randomUUID(),
+    input.guildId,
+    input.planKey,
+    input.publicServerName ?? null,
+    input.currentPlayers ?? null,
+    input.maxPlayers ?? null,
+    input.serverOnline === true || input.serverOnline === 1 ? 1 : input.serverOnline === false || input.serverOnline === 0 ? 0 : null,
+    input.serverStatus ?? null,
+    input.leaderboardSnapshotJson ?? null,
+    input.eventSnapshotJson ?? null,
+    networkRank,
+    input.partnerFeatured ? 1 : 0,
+    input.lastStatusUpdateAt ?? null,
+    input.lastAdmUpdateAt ?? null,
+    rankSnapshotUpdatedAt,
+    now,
+  );
+  try {
+    await bindCacheWrite(
+      db.prepare(
       `INSERT INTO server_public_cache (
         id, guild_id, plan_key, public_server_name, current_player_count, max_player_count,
         server_online, server_status, leaderboard_snapshot_json, event_snapshot_json, network_rank,
-        partner_featured, last_status_update_at, last_adm_update_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        partner_featured, last_status_update_at, last_adm_update_at, network_rank_updated_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(guild_id) DO UPDATE SET
         plan_key = excluded.plan_key,
         public_server_name = COALESCE(excluded.public_server_name, server_public_cache.public_server_name),
@@ -1491,26 +1514,59 @@ export async function upsertServerPublicCache(env: Env, input: {
         partner_featured = excluded.partner_featured,
         last_status_update_at = COALESCE(excluded.last_status_update_at, server_public_cache.last_status_update_at),
         last_adm_update_at = COALESCE(excluded.last_adm_update_at, server_public_cache.last_adm_update_at),
+        network_rank_updated_at = COALESCE(excluded.network_rank_updated_at, server_public_cache.network_rank_updated_at),
         updated_at = excluded.updated_at`,
-    )
-    .bind(
-      crypto.randomUUID(),
-      input.guildId,
-      input.planKey,
-      input.publicServerName ?? null,
-      input.currentPlayers ?? null,
-      input.maxPlayers ?? null,
-      input.serverOnline === true || input.serverOnline === 1 ? 1 : input.serverOnline === false || input.serverOnline === 0 ? 0 : null,
-      input.serverStatus ?? null,
-      input.leaderboardSnapshotJson ?? null,
-      input.eventSnapshotJson ?? null,
-      networkRank,
-      input.partnerFeatured ? 1 : 0,
-      input.lastStatusUpdateAt ?? null,
-      input.lastAdmUpdateAt ?? null,
-      now,
-    )
-    .run();
+      ),
+    ).run();
+  } catch (error) {
+    // Existing production schema remains usable until the isolated migration is verified.
+    if (!isMissingNetworkRankTimestampColumn(error)) throw error;
+    await db
+      .prepare(
+        `INSERT INTO server_public_cache (
+          id, guild_id, plan_key, public_server_name, current_player_count, max_player_count,
+          server_online, server_status, leaderboard_snapshot_json, event_snapshot_json, network_rank,
+          partner_featured, last_status_update_at, last_adm_update_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(guild_id) DO UPDATE SET
+          plan_key = excluded.plan_key,
+          public_server_name = COALESCE(excluded.public_server_name, server_public_cache.public_server_name),
+          current_player_count = COALESCE(excluded.current_player_count, server_public_cache.current_player_count),
+          max_player_count = COALESCE(excluded.max_player_count, server_public_cache.max_player_count),
+          server_online = COALESCE(excluded.server_online, server_public_cache.server_online),
+          server_status = COALESCE(excluded.server_status, server_public_cache.server_status),
+          leaderboard_snapshot_json = COALESCE(excluded.leaderboard_snapshot_json, server_public_cache.leaderboard_snapshot_json),
+          event_snapshot_json = COALESCE(excluded.event_snapshot_json, server_public_cache.event_snapshot_json),
+          network_rank = COALESCE(excluded.network_rank, server_public_cache.network_rank),
+          partner_featured = excluded.partner_featured,
+          last_status_update_at = COALESCE(excluded.last_status_update_at, server_public_cache.last_status_update_at),
+          last_adm_update_at = COALESCE(excluded.last_adm_update_at, server_public_cache.last_adm_update_at),
+          updated_at = excluded.updated_at`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        input.guildId,
+        input.planKey,
+        input.publicServerName ?? null,
+        input.currentPlayers ?? null,
+        input.maxPlayers ?? null,
+        input.serverOnline === true || input.serverOnline === 1 ? 1 : input.serverOnline === false || input.serverOnline === 0 ? 0 : null,
+        input.serverStatus ?? null,
+        input.leaderboardSnapshotJson ?? null,
+        input.eventSnapshotJson ?? null,
+        networkRank,
+        input.partnerFeatured ? 1 : 0,
+        input.lastStatusUpdateAt ?? null,
+        input.lastAdmUpdateAt ?? null,
+        now,
+      )
+      .run();
+  }
+}
+
+function isMissingNetworkRankTimestampColumn(error: unknown) {
+  return /(?:no such column: network_rank_updated_at|server_public_cache has no column named network_rank_updated_at)/i
+    .test(error instanceof Error ? error.message : String(error));
 }
 
 async function readNetworkRankSnapshot(env: Env, guildId: string) {

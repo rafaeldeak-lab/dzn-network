@@ -4226,7 +4226,8 @@ async function finalizeAdmImportJob(
   const previousScheduledMaintenanceResult = isScheduledNitradoImport && derivedDataWrites === 0
     ? await db
       .prepare(
-        `SELECT public_cache_updated, warnings_json
+        `SELECT public_cache_updated, warnings_json,
+                written_kills, player_events, joins, disconnects, deaths, result_json
          FROM adm_import_jobs
          WHERE server_id = ?
            AND id != ?
@@ -4236,20 +4237,50 @@ async function finalizeAdmImportJob(
          LIMIT 1`,
       )
       .bind(row.server_id, row.id, SCHEDULED_ADM_IMPORT_SOURCE)
-      .first<{ public_cache_updated: number; warnings_json: string | null }>()
+      .first<Pick<AdmImportJobRow, "public_cache_updated" | "warnings_json" | "written_kills" | "player_events" | "joins" | "disconnects" | "deaths" | "result_json">>()
+    : null;
+  const currentScheduledMaintenanceRetry = isScheduledNitradoImport && derivedDataWrites === 0
+    ? getScheduledMaintenanceRetry(row)
     : null;
   const previousScheduledWarnings = String(previousScheduledMaintenanceResult?.warnings_json ?? "");
-  const retryPreviousScheduledCacheFailure = Number(previousScheduledMaintenanceResult?.public_cache_updated ?? 1) === 0
-    && previousScheduledWarnings.includes("Public cache update failed");
-  const retryPreviousScheduledStatsFailure = previousScheduledWarnings.includes("Stats rebuild failed");
-  const existingPublicCache = isScheduledNitradoImport && derivedDataWrites === 0 && server.guild_id
-    ? await db
-      .prepare("SELECT updated_at, last_adm_update_at FROM server_public_cache WHERE guild_id = ? LIMIT 1")
-      .bind(server.guild_id)
-      .first<{ updated_at: string | null; last_adm_update_at: string | null }>()
-    : null;
-  const refreshScheduledNetworkRank = Boolean(existingPublicCache?.updated_at)
-    && isIsoOlderThan(existingPublicCache?.updated_at, SCHEDULED_IDLE_NETWORK_RANK_REFRESH_MS);
+  const retryPreviousScheduledCacheFailure = Boolean(currentScheduledMaintenanceRetry?.cache)
+    || (Number(previousScheduledMaintenanceResult?.public_cache_updated ?? 1) === 0
+      && previousScheduledWarnings.includes("Public cache update failed"));
+  const retryPreviousScheduledStatsFailure = Boolean(currentScheduledMaintenanceRetry?.stats)
+    || previousScheduledWarnings.includes("Stats rebuild failed");
+  const previousScheduledDerivedWrites = previousScheduledMaintenanceResult
+    ? Number(previousScheduledMaintenanceResult.written_kills ?? 0)
+      + Number(previousScheduledMaintenanceResult.player_events ?? 0)
+      + Number(previousScheduledMaintenanceResult.joins ?? 0)
+      + Number(previousScheduledMaintenanceResult.disconnects ?? 0)
+      + Number(previousScheduledMaintenanceResult.deaths ?? 0)
+      + getAdmImportJobBuildEventsStored(previousScheduledMaintenanceResult)
+    : 0;
+  let existingPublicCache: { updated_at: string | null; last_adm_update_at: string | null; network_rank_updated_at?: string | null } | null = null;
+  let hasDedicatedRankTimestamp = false;
+  if (isScheduledNitradoImport && derivedDataWrites === 0 && server.guild_id) {
+    try {
+      existingPublicCache = await db
+        .prepare("SELECT updated_at, last_adm_update_at, network_rank_updated_at FROM server_public_cache WHERE guild_id = ? LIMIT 1")
+        .bind(server.guild_id)
+        .first<{ updated_at: string | null; last_adm_update_at: string | null; network_rank_updated_at: string | null }>();
+      hasDedicatedRankTimestamp = true;
+    } catch (error) {
+      if (!/no such column: network_rank_updated_at/i.test(error instanceof Error ? error.message : String(error))) throw error;
+      existingPublicCache = await db
+        .prepare("SELECT updated_at, last_adm_update_at FROM server_public_cache WHERE guild_id = ? LIMIT 1")
+        .bind(server.guild_id)
+        .first<{ updated_at: string | null; last_adm_update_at: string | null }>();
+    }
+  }
+  const existingRankSnapshotAt = hasDedicatedRankTimestamp
+    ? existingPublicCache?.network_rank_updated_at ?? null
+    : existingPublicCache?.updated_at ?? null;
+  const refreshScheduledNetworkRank = Boolean(existingPublicCache) && (
+    hasDedicatedRankTimestamp
+      ? !existingRankSnapshotAt || isIsoOlderThan(existingRankSnapshotAt, SCHEDULED_IDLE_NETWORK_RANK_REFRESH_MS)
+      : Boolean(existingRankSnapshotAt) && isIsoOlderThan(existingRankSnapshotAt, SCHEDULED_IDLE_NETWORK_RANK_REFRESH_MS)
+  );
   const shouldRefreshDerivedOutputs = !isScheduledNitradoImport || derivedDataWrites > 0 || retryPreviousScheduledStatsFailure;
 
   if (shouldRefreshDerivedOutputs) {
@@ -4271,7 +4302,9 @@ async function finalizeAdmImportJob(
         guildId: publicCacheGuildId,
         planKey: server.plan_key,
         publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
-        lastAdmUpdateAt: derivedDataWrites > 0 || retryPreviousScheduledCacheFailure
+        lastAdmUpdateAt: derivedDataWrites > 0 || (retryPreviousScheduledCacheFailure && (
+          previousScheduledDerivedWrites > 0 || currentScheduledMaintenanceRetry?.hadDerivedWrites
+        ))
           ? now
           : existingPublicCache?.last_adm_update_at ?? null,
       // Scheduled jobs already require the canonical cache schema before reaching
@@ -4627,6 +4660,7 @@ async function createOrExtendScheduledAdmTailJobForReadableFile(
         chunkSize: input.chunkSize,
         currentLine: clampCursorLine(Number(existingJob.current_line ?? 0), lines.length),
         status: "queued",
+        resetCounters: false,
       });
       const updated = await getAdmImportJob(env, input.scope.linkedServerId, existingJob.id);
       const progress = updated ? toAdmImportJobProgress(updated) : toAdmImportJobProgress(existingJob);
@@ -4758,6 +4792,7 @@ async function createOrExtendScheduledAdmTailJobForReadableFile(
       chunkSize: input.chunkSize,
       currentLine: importedLineCount,
       status: "queued",
+      resetCounters: true,
     });
     const updated = await getAdmImportJob(env, input.scope.linkedServerId, existingJob.id);
     const progress = updated ? toAdmImportJobProgress(updated) : toAdmImportJobProgress(existingJob);
@@ -4800,6 +4835,7 @@ async function createOrExtendScheduledAdmTailJobForReadableFile(
       chunkSize: input.chunkSize,
       currentLine: importedLineCount,
       status: "queued",
+      resetCounters: false,
     });
     row = await getAdmImportJob(env, input.scope.linkedServerId, created.job_id);
   }
@@ -4845,6 +4881,7 @@ async function updateScheduledAdmImportJobTailText(
     chunkSize: number;
     currentLine: number;
     status: "queued";
+    resetCounters: boolean;
   },
 ) {
   const totalLines = values.lines.length;
@@ -4854,6 +4891,10 @@ async function updateScheduledAdmImportJobTailText(
   const chunksProcessed = currentLine >= totalLines && totalLines > 0
     ? totalChunks
     : Math.max(0, Math.ceil(currentLine / chunkSize));
+  const scheduledMaintenanceRetry = values.resetCounters ? getScheduledMaintenanceRetry(row) : null;
+  const resetResultJson = scheduledMaintenanceRetry && (scheduledMaintenanceRetry.cache || scheduledMaintenanceRetry.stats)
+    ? `json_object('scheduled_maintenance_retry', json_object('cache', ${scheduledMaintenanceRetry.cache ? 1 : 0}, 'stats', ${scheduledMaintenanceRetry.stats ? 1 : 0}, 'had_derived_writes', ${scheduledMaintenanceRetry.hadDerivedWrites ? 1 : 0}))`
+    : "NULL";
   await requireDb(env)
     .prepare(
       `UPDATE adm_import_jobs SET
@@ -4864,10 +4905,30 @@ async function updateScheduledAdmImportJobTailText(
         chunk_size = ?,
         total_chunks = ?,
         chunks_processed = ?,
-        result_json = NULL,
+        ${values.resetCounters ? `
+        raw_kill_lines_found = 0,
+        parsed_kills = 0,
+        written_kills = 0,
+        duplicate_skips = 0,
+        joins = 0,
+        disconnects = 0,
+        playerlist_snapshots = 0,
+        deaths = 0,
+        suicides = 0,
+        uncredited_deaths = 0,
+        hit_lines = 0,
+        raw_events = 0,
+        player_events = 0,
+        result_json = ${resetResultJson},
+        failed_writes = 0,
+        warnings_json = '[]',
+        public_cache_updated = 0,
+        discord_jobs_queued = 0,
         completed_at = NULL,
         error_message = NULL,
+        last_chunk_index = NULL,
         failed_chunk_index = NULL,
+        ` : ""}
         updated_at = ?
        WHERE id = ? AND server_id = ?`,
     )
@@ -5496,6 +5557,30 @@ function getAdmImportJobBuildEventsStored(row: Pick<AdmImportJobRow, "result_jso
   } catch {
     return 0;
   }
+}
+
+function getScheduledMaintenanceRetry(row: Pick<AdmImportJobRow, "public_cache_updated" | "warnings_json" | "written_kills" | "player_events" | "joins" | "disconnects" | "deaths" | "result_json">) {
+  const warnings = String(row.warnings_json ?? "");
+  let savedRetry: { cache?: unknown; stats?: unknown; had_derived_writes?: unknown } | null = null;
+  try {
+    const parsed = JSON.parse(String(row.result_json ?? "{}")) as {
+      scheduled_maintenance_retry?: { cache?: unknown; stats?: unknown; had_derived_writes?: unknown };
+    };
+    savedRetry = parsed.scheduled_maintenance_retry ?? null;
+  } catch {
+    // An invalid legacy result payload cannot supply retry evidence.
+  }
+  const derivedWrites = Number(row.written_kills ?? 0)
+    + Number(row.player_events ?? 0)
+    + Number(row.joins ?? 0)
+    + Number(row.disconnects ?? 0)
+    + Number(row.deaths ?? 0)
+    + getAdmImportJobBuildEventsStored(row);
+  return {
+    cache: Boolean(savedRetry?.cache) || (Number(row.public_cache_updated ?? 1) === 0 && warnings.includes("Public cache update failed")),
+    stats: Boolean(savedRetry?.stats) || warnings.includes("Stats rebuild failed"),
+    hadDerivedWrites: Boolean(savedRetry?.had_derived_writes) || derivedWrites > 0,
+  };
 }
 
 function toAdmImportJobProgress(row: AdmImportJobRow): AdmImportJobProgressResult {
