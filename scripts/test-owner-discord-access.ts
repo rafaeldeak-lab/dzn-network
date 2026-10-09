@@ -108,6 +108,10 @@ async function run() {
   const ownerAccessPage = readFileSync("app/discord-owner-access/page.tsx", "utf8");
   assert.match(ownerAccessPage, /process\.env\.DZN_OWNER_DISCORD_ACCESS_ENABLED !== "true"\) notFound\(\)/, "The destination route must remain unavailable until the server feature is enabled.");
   assert.match(ownerAccessPage, /OwnerDiscordAccessPage/, "The protected route must render the owner access page only after activation.");
+  const ownerConsoleRoute = readFileSync("app/owner/page.tsx", "utf8");
+  assert.match(ownerConsoleRoute, /ownerDiscordAccessEnabled=\{process\.env\.DZN_OWNER_DISCORD_ACCESS_ENABLED === "true"\}/, "The owner console must receive the private server activation state.");
+  const ownerConsoleAccessRoute = readFileSync("app/owner/discord-access/page.tsx", "utf8");
+  assert.match(ownerConsoleAccessRoute, /process\.env\.DZN_OWNER_DISCORD_ACCESS_ENABLED !== "true"\) notFound\(\)/, "The private owner route must be unavailable until the server feature is enabled.");
   const applicantAccessPage = readFileSync("components/discord/owner-discord-access-page.tsx", "utf8");
   assert.match(applicantAccessPage, /servers\.some\(\(server\) => server\.id === current\)/, "A refreshed owner request form must keep a selection only while the server remains eligible.");
   assert.match(applicantAccessPage, /servers\[0\]\?\.id \?\? ""/, "A refreshed owner request form must select the first current eligible server or clear the field.");
@@ -118,6 +122,8 @@ async function run() {
   assert.match(ownerQueuePage, /requestController\.current\?\.abort\(\)/, "The owner queue must cancel superseded reads.");
   assert.match(ownerQueuePage, /signal: controller\.signal/, "The owner queue must bind reads to the active request controller.");
   assert.match(ownerQueuePage, /requestController\.current !== controller/, "The owner queue must discard stale response state.");
+  const ownerConsole = readFileSync("components/owner/owner-console.tsx", "utf8");
+  assert.match(ownerConsole, /ownerDiscordAccessEnabled \? <Link href="\/owner\/discord-access"/, "The owner console must hide the owner-access link until the private feature is enabled.");
 
   const sqlite = new DatabaseSync(":memory:");
   const db = localD1(sqlite);

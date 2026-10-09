@@ -382,7 +382,7 @@ const NAV_ITEMS = [
 
 type NavItem = typeof NAV_ITEMS[number];
 
-export function OwnerConsole() {
+export function OwnerConsole({ ownerDiscordAccessEnabled = false }: { ownerDiscordAccessEnabled?: boolean }) {
   const [activeView, setActiveView] = useState<NavItem>("Overview");
   const [overview, setOverview] = useState<OwnerOverview | null>(null);
   const [servers, setServers] = useState<OwnerServer[]>([]);
@@ -521,16 +521,16 @@ export function OwnerConsole() {
   }, [overview]);
 
   if (activeView === "Player Requests") {
-    return <OwnerShell activeView={activeView} setActiveView={setActiveView}><PlayerRequestSupportPanel /></OwnerShell>;
+    return <OwnerShell activeView={activeView} setActiveView={setActiveView} ownerDiscordAccessEnabled={ownerDiscordAccessEnabled}><PlayerRequestSupportPanel /></OwnerShell>;
   }
 
   if (status === "loading") {
-    return <OwnerShell activeView={activeView} setActiveView={setActiveView}><LoadingPanel /></OwnerShell>;
+    return <OwnerShell activeView={activeView} setActiveView={setActiveView} ownerDiscordAccessEnabled={ownerDiscordAccessEnabled}><LoadingPanel /></OwnerShell>;
   }
 
   if (status === "unauthorized" || status === "forbidden") {
     return (
-      <OwnerShell activeView={activeView} setActiveView={setActiveView}>
+      <OwnerShell activeView={activeView} setActiveView={setActiveView} ownerDiscordAccessEnabled={ownerDiscordAccessEnabled}>
         <section className="rounded-lg border border-red-400/20 bg-red-950/20 p-8 shadow-[0_0_40px_rgba(239,68,68,0.12)]">
           <p className="text-xs font-black uppercase tracking-[0.24em] text-red-200">Owner access required</p>
           <h1 className="mt-3 text-3xl font-black text-white">{status === "unauthorized" ? "Sign in required" : "403 - platform owner only"}</h1>
@@ -548,11 +548,11 @@ export function OwnerConsole() {
   }
 
   if (status === "error") {
-    return <OwnerShell activeView={activeView} setActiveView={setActiveView}><ErrorPanel message={error ?? "Unknown owner console error."} /></OwnerShell>;
+    return <OwnerShell activeView={activeView} setActiveView={setActiveView} ownerDiscordAccessEnabled={ownerDiscordAccessEnabled}><ErrorPanel message={error ?? "Unknown owner console error."} /></OwnerShell>;
   }
 
   return (
-    <OwnerShell activeView={activeView} setActiveView={setActiveView}>
+    <OwnerShell activeView={activeView} setActiveView={setActiveView} ownerDiscordAccessEnabled={ownerDiscordAccessEnabled}>
       {activeView === "Overview" && overview ? <OverviewPanel overview={overview} lifecycleCounts={lifecycleCounts} /> : null}
       {activeView === "Servers" ? <ServersPanel servers={servers} /> : null}
       {activeView === "Lifecycle" ? <LifecyclePanel lifecycleCounts={lifecycleCounts} /> : null}
@@ -565,9 +565,10 @@ export function OwnerConsole() {
   );
 }
 
-function OwnerShell({ activeView, setActiveView, children }: {
+function OwnerShell({ activeView, setActiveView, ownerDiscordAccessEnabled, children }: {
   activeView: NavItem;
   setActiveView: (view: NavItem) => void;
+  ownerDiscordAccessEnabled: boolean;
   children: ReactNode;
 }) {
   useEffect(() => {
@@ -625,9 +626,9 @@ function OwnerShell({ activeView, setActiveView, children }: {
             <Link href="/owner/comms" className="block rounded-lg border border-violet-300/20 bg-violet-300/[0.06] px-3 py-2 text-sm font-bold text-violet-100 hover:border-violet-300/40 hover:text-white">
               Moderate Global Chat
             </Link>
-            <Link href="/owner/discord-access" className="block rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-2 text-sm font-bold text-cyan-100 hover:border-cyan-300/40 hover:text-white">
+            {ownerDiscordAccessEnabled ? <Link href="/owner/discord-access" className="block rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-2 text-sm font-bold text-cyan-100 hover:border-cyan-300/40 hover:text-white">
               Review Discord Owner Access
-            </Link>
+            </Link> : null}
             <Link href="/owner/reviews" className="block rounded-lg border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-sm font-bold text-amber-100 hover:border-amber-300/40 hover:text-white">
               Moderate Server Reviews
             </Link>
