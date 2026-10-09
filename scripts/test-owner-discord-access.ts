@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { Miniflare } from "miniflare";
+import { createRequire } from "node:module";
 
 import { createSession } from "../functions/_lib/db";
 import { deleteOwnedAccountData } from "../functions/_lib/deletion";
@@ -8,6 +8,58 @@ import { createOwnerDiscordAccessRequest, decideOwnerDiscordAccessRequest, listO
 import { onRequest as applicantRoute } from "../functions/api/discord/owner-access";
 import { onRequest as ownerRoute } from "../functions/api/owner/discord/owner-access-requests";
 import type { Env, PagesContext, SessionUser } from "../functions/_lib/types";
+
+type Sqlite = {
+  exec(sql: string): void;
+  close(): void;
+  prepare(sql: string): {
+    all(...values: unknown[]): Record<string, unknown>[];
+    get(...values: unknown[]): Record<string, unknown> | undefined;
+    run(...values: unknown[]): { changes: number | bigint };
+  };
+};
+
+type LocalStatement = {
+  bind(...values: unknown[]): LocalStatement;
+  first<T>(): Promise<T | null>;
+  all<T>(): Promise<{ results: T[]; success: boolean; meta: { changes: number } }>;
+  run(): Promise<{ results: never[]; success: boolean; meta: { changes: number } }>;
+  execute(): { results: Record<string, unknown>[]; success: boolean; meta: { changes: number } };
+};
+
+const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as { DatabaseSync: new (path: string) => Sqlite };
+
+function localD1(sqlite: Sqlite) {
+  const prepare = (sql: string, bindings: unknown[] = []): LocalStatement => {
+    const execute = () => {
+      if (/^\s*(SELECT|PRAGMA)/i.test(sql)) return { results: sqlite.prepare(sql).all(...bindings), success: true, meta: { changes: 0 } };
+      const result = sqlite.prepare(sql).run(...bindings);
+      return { results: [], success: true, meta: { changes: Number(result.changes) } };
+    };
+    return {
+      bind: (...values) => prepare(sql, values),
+      first: async <T>() => (sqlite.prepare(sql).get(...bindings) as T | undefined) ?? null,
+      all: async <T>() => execute() as { results: T[]; success: boolean; meta: { changes: number } },
+      run: async () => execute() as { results: never[]; success: boolean; meta: { changes: number } },
+      execute,
+    };
+  };
+  return {
+    prepare,
+    batch: async (statements: LocalStatement[]) => {
+      sqlite.exec("BEGIN IMMEDIATE");
+      try {
+        const results = statements.map((statement) => statement.execute());
+        sqlite.exec("COMMIT");
+        return results;
+      } catch (error) {
+        sqlite.exec("ROLLBACK");
+        throw error;
+      }
+    },
+    exec: async (sql: string) => { sqlite.exec(sql); return { count: 0, duration: 0 }; },
+  } as unknown as D1Database;
+}
 
 const owner: SessionUser = { id: "platform_owner", discord_id: "831243159785701398", username: "DZN Owner", avatar: null };
 const applicant: SessionUser = { id: "server_owner", discord_id: "111111111111111111", username: "Server Owner", avatar: "owneravatar" };
@@ -62,9 +114,9 @@ async function run() {
   assert.match(ownerQueuePage, /signal: controller\.signal/, "The owner queue must bind reads to the active request controller.");
   assert.match(ownerQueuePage, /requestController\.current !== controller/, "The owner queue must discard stale response state.");
 
-  const mf = new Miniflare({ modules: true, script: "export default { fetch() { return new Response('ok'); } }", compatibilityDate: "2026-05-08", d1Databases: ["DB"], d1Persist: false });
+  const sqlite = new DatabaseSync(":memory:");
+  const db = localD1(sqlite);
   try {
-    const db = await mf.getD1Database("DB");
     await db.exec("PRAGMA foreign_keys = ON;");
     await db.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, discord_id TEXT NOT NULL UNIQUE, username TEXT, avatar TEXT);
       CREATE TABLE sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, session_token_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, created_at TEXT, FOREIGN KEY(user_id) REFERENCES users(id));
@@ -258,7 +310,7 @@ async function run() {
     assert.equal(Number(accountDeletedAudit?.count ?? 0) > 0, true, "Applicant account deletion must preserve private owner-access decision audits.");
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Owner Discord access queue checks passed.");
-  } finally { await mf.dispose(); }
+  } finally { sqlite.close(); }
 }
 
 function request(method: "GET" | "POST", body?: unknown, token?: string, origin?: string) { const headers = new Headers(); if (token) headers.set("cookie", `dzn_session=${token}`); if (origin) headers.set("origin", origin); if (body !== undefined) headers.set("content-type", "application/json"); return new Request("https://dzn.test/api/test", { method, headers, body: body === undefined ? undefined : JSON.stringify(body) }); }
