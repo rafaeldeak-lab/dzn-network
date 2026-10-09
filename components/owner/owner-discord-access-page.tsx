@@ -66,6 +66,20 @@ export function OwnerDiscordAccessPage() {
   const [nextAuditCursor, setNextAuditCursor] = useState<string | null>(null);
   const [loadingMoreAudit, setLoadingMoreAudit] = useState(false);
   const requestController = useRef<AbortController | null>(null);
+  const filterRevision = useRef(0);
+
+  function setQueueStatus(nextStatus: Status | "all") {
+    if (nextStatus === status) return;
+    filterRevision.current += 1;
+    setStatus(nextStatus);
+  }
+
+  function applyQueueSearch(nextSearch: string) {
+    if (nextSearch === appliedSearch) return;
+    filterRevision.current += 1;
+    setAppliedSearch(nextSearch);
+  }
+
   const load = useCallback(async (options: { cursor?: string | null; appendRequests?: boolean; auditCursor?: string | null; appendAudit?: boolean } = {}) => {
     requestController.current?.abort();
     const controller = new AbortController();
@@ -133,6 +147,7 @@ export function OwnerDiscordAccessPage() {
       setNotice("Enter a clear decision reason first.");
       return;
     }
+    const decisionFilterRevision = filterRevision.current;
     setBusyId(request.id);
     setNotice(null);
     try {
@@ -159,7 +174,7 @@ export function OwnerDiscordAccessPage() {
           ? "Approval recorded. Discord delivery is still deliberately unconfigured."
           : `${action[0].toUpperCase()}${action.slice(1)} decision recorded.`,
       );
-      await load();
+      if (filterRevision.current === decisionFilterRevision) await load();
     } catch (error) {
       setNotice(
         error instanceof Error
@@ -238,7 +253,7 @@ export function OwnerDiscordAccessPage() {
                   <button
                     key={item}
                     type="button"
-                    onClick={() => setStatus(item)}
+                    onClick={() => setQueueStatus(item)}
                     className={`rounded-md border px-3 py-2 text-xs font-black uppercase ${status === item ? "border-cyan-300/35 bg-cyan-300/10 text-cyan-100" : "border-white/10 text-zinc-400"}`}
                   >
                     {item}
@@ -248,7 +263,7 @@ export function OwnerDiscordAccessPage() {
               <form
                 onSubmit={(event) => {
                   event.preventDefault();
-                  setAppliedSearch(search.trim());
+                  applyQueueSearch(search.trim());
                 }}
                 className="flex min-w-0 flex-1 gap-2 md:justify-end"
               >

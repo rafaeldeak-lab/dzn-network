@@ -125,6 +125,10 @@ async function run() {
   assert.match(ownerQueuePage, /requestController\.current\?\.abort\(\)/, "The owner queue must cancel superseded reads.");
   assert.match(ownerQueuePage, /signal: controller\.signal/, "The owner queue must bind reads to the active request controller.");
   assert.match(ownerQueuePage, /requestController\.current !== controller/, "The owner queue must discard stale response state.");
+  assert.match(ownerQueuePage, /const decisionFilterRevision = filterRevision\.current/, "A queue decision must snapshot the active filter revision before posting.");
+  assert.match(ownerQueuePage, /filterRevision\.current === decisionFilterRevision\) await load\(\)/, "A completed decision must not reload a queue after its filters have changed.");
+  assert.match(ownerQueuePage, /filterRevision\.current \+= 1;\s*setStatus\(nextStatus\)/, "Changing the status filter must invalidate an in-flight decision refresh.");
+  assert.match(ownerQueuePage, /filterRevision\.current \+= 1;\s*setAppliedSearch\(nextSearch\)/, "Changing the search filter must invalidate an in-flight decision refresh.");
   const ownerConsole = readFileSync("components/owner/owner-console.tsx", "utf8");
   assert.doesNotMatch(ownerConsole, /ownerDiscordAccessEnabled/, "The owner console must not compile a runtime feature flag into static output.");
   assert.match(ownerConsole, /<Link href="\/owner\/discord-access"/, "The owner console must retain the static route entry point while the API enforces the runtime feature gate.");
