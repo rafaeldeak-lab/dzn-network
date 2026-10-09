@@ -129,6 +129,21 @@ async function run() {
     for (const migrationPath of ["migrations/0094_dzn_owner_discord_access.sql", "migrations/0095_dzn_owner_discord_delivery.sql"]) {
       for (const statement of splitSql(readFileSync(migrationPath, "utf8").replace(/^--.*$/gm, ""))) await db.prepare(statement).run();
     }
+    const deliveryBaseline = await db.prepare("SELECT COUNT(*) AS count FROM dzn_owner_discord_access_delivery_attempts").first<{ count: number | string }>();
+    assert.equal(Number(deliveryBaseline?.count ?? 0), 0, "The additive delivery ledger must begin empty.");
+    const deliveryIndexes = new Set(((await db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'dzn_owner_discord_access_delivery_attempts'").all<{ name: string }>()).results ?? []).map((row) => row.name));
+    for (const index of [
+      "idx_dzn_owner_discord_delivery_nonce",
+      "idx_dzn_owner_discord_delivery_request",
+      "idx_dzn_owner_discord_delivery_request_operation",
+      "idx_dzn_owner_discord_delivery_requester",
+      "idx_dzn_owner_discord_delivery_actor",
+      "idx_dzn_owner_discord_delivery_status",
+    ]) assert.equal(deliveryIndexes.has(index), true, `The delivery ledger must create ${index}.`);
+    const deliveryForeignKeys = (await db.prepare("PRAGMA foreign_key_list(dzn_owner_discord_access_delivery_attempts)").all<{ table: string; from: string; on_delete: string }>()).results ?? [];
+    assert.equal(deliveryForeignKeys.some((key) => key.table === "dzn_owner_discord_access_requests" && key.from === "request_id" && key.on_delete === "CASCADE"), true, "Delivery records must be tied to their reviewed request.");
+    assert.equal(deliveryForeignKeys.some((key) => key.table === "users" && key.from === "requester_user_id" && key.on_delete === "SET NULL"), true, "Delivery requester records must be privacy-deletable.");
+    assert.equal(deliveryForeignKeys.some((key) => key.table === "users" && key.from === "actor_user_id" && key.on_delete === "SET NULL"), true, "Delivery actor records must be privacy-deletable.");
     for (const user of [owner, applicant, outsider]) await db.prepare("INSERT INTO users (id, discord_id, username, avatar) VALUES (?, ?, ?, ?)").bind(user.id, user.discord_id, user.username, user.avatar).run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_owner', ?, 'Verified owner server')").bind(applicant.id).run();
     await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
@@ -197,6 +212,10 @@ async function run() {
       assert.equal(administratorDiagnostic.ok, true, "The diagnostic must still safely report the current live Administrator grant while the bot is being reduced.");
       assert.equal(administratorDiagnostic.checks.botHasAdministrator, true, "The owner console must expose that the bot still has Administrator.");
       activeBotPermissions = botPermissions;
+
+      const everyoneRoleDiagnostic = await getOwnerDiscordDeliveryDiagnostic({ ...env, DZN_OWNER_DISCORD_VERIFIED_OWNER_ROLE_ID: guildId }, discordFetch);
+      assert.equal(everyoneRoleDiagnostic.ok, false, "The central guild's @everyone role must never be accepted as the owner role.");
+      assert.equal(everyoneRoleDiagnostic.status, "not_configured");
 
       assert.equal((await applicantDeliveryRoute(context(env, request("POST", { action: "invite", requestId: "approved_request" }, applicantSession.token)))).status, 403, "Cross-origin invite requests must be refused.");
       assert.equal((await applicantDeliveryRoute(context(env, request("POST", { action: "invite", requestId: "other_request" }, outsiderSession.token, "https://dzn.test")))).status, 200, "A different approved owner may only access their own request.");
