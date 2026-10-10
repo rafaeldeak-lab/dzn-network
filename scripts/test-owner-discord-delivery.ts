@@ -13,6 +13,7 @@ import {
   renewOwnerDiscordLinkedServerDeletionLease,
   reserveOwnerDiscordAccountDeletionLease,
   reserveOwnerDiscordLinkedServerDeletionLease,
+  reserveOwnerDiscordRoleRevocationLease,
   revokeOwnerDiscordAccessRole,
 } from "../functions/_lib/owner-discord-delivery";
 import { deleteOwnedAccountData, deleteOwnedLinkedServerData } from "../functions/_lib/deletion";
@@ -558,11 +559,35 @@ async function run() {
       await db.prepare("UPDATE dzn_owner_discord_access_requests SET status = 'revoked' WHERE id = 'same_discord_approved_request'").run();
       inviteChannelAvailable = false;
       const channelCheckCountBeforeRoleOnlyRevoke = calls.filter((call) => call.path === `/api/v10/channels/${inviteChannelId}`).length;
-      const roleOnlyRevoke = await revokeOwnerDiscordAccessRole(env, owner, { requestId: "same_discord_approved_request" }, discordFetch);
-      assert.equal(roleOnlyRevoke.ok, true, "Role revocation must work even if the private invite channel is unavailable.");
+      const roleOnlyRevoke = await revokeOwnerDiscordAccessRole({ ...env, DZN_OWNER_DISCORD_DELIVERY_ENABLED: "false" }, owner, { requestId: "same_discord_approved_request" }, discordFetch);
+      assert.equal(roleOnlyRevoke.ok, true, "Role revocation must work even when new Discord delivery is disabled and the private invite channel is unavailable.");
       assert.equal(applicantHasRole, false, "Role-only revocation must remove the configured owner role.");
       assert.equal(calls.filter((call) => call.path === `/api/v10/channels/${inviteChannelId}`).length, channelCheckCountBeforeRoleOnlyRevoke, "Role revocation must not depend on reading the private invite channel.");
       inviteChannelAvailable = true;
+
+      await seedEligibleServer("server_approval_lease", outsider.id, "Approval lease server");
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+        id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
+      ) VALUES ('approval_lease_request', ?, ?, ?, 'server_approval_lease', 'server_approval_lease', 'Approval lease server', 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(outsider.id, outsider.discord_id, outsider.username).run();
+      const heldRevocationLease = await reserveOwnerDiscordRoleRevocationLease(env, "other_request", outsider.discord_id);
+      assert.notEqual(heldRevocationLease.lease, null, "An in-progress role cleanup must reserve the Discord identity before the decision changes.");
+      const blockedApproval = await decideOwnerDiscordAccessRequest(env, owner, {
+        requestId: "approval_lease_request",
+        action: "approved",
+        reason: "Approval must wait for current Discord role cleanup.",
+        decisionNonce: "approval-lease-blocked",
+      });
+      assert.equal(blockedApproval.ok, false, "Approval must not race a role revocation that is still deciding whether to remove the shared Discord role.");
+      if (!blockedApproval.ok) assert.equal(blockedApproval.status, 409);
+      assert.equal((await db.prepare("SELECT status FROM dzn_owner_discord_access_requests WHERE id = 'approval_lease_request'").first<{ status: string }>())?.status, "pending", "A blocked approval must not publish a new owner-access decision.");
+      await releaseOwnerDiscordRoleMutationLease(env, heldRevocationLease.lease);
+      const completedApproval = await decideOwnerDiscordAccessRequest(env, owner, {
+        requestId: "approval_lease_request",
+        action: "approved",
+        reason: "Discord cleanup has completed and this server remains verified.",
+        decisionNonce: "approval-lease-complete",
+      });
+      assert.equal(completedApproval.ok, true, "Approval may proceed after the concurrent Discord role cleanup lease releases.");
 
       await seedEligibleServer("server_delete_role", applicant.id, "Server removal role cleanup");
       await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
@@ -653,13 +678,17 @@ async function run() {
         id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, created_at, completed_at
       ) VALUES ('server-delete-keep-role-grant', 'server_delete_keep_request', ?, ?, ?, ?, 'role_grant', 'succeeded', 1, 'server-delete-keep-role-grant-nonce', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
         .bind(applicant.id, applicant.discord_id, owner.id, owner.discord_id, guildId, verifiedOwnerRoleId).run();
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
+        id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, created_at, completed_at
+      ) VALUES ('server-delete-keep-other-role-grant', 'server_delete_keep_other_request', ?, ?, ?, ?, 'role_grant', 'succeeded', 1, 'server-delete-keep-other-role-grant-nonce', ?, ?, '2099-02-01T00:00:00.000Z', '2099-02-01T00:00:01.000Z')`)
+        .bind(applicant.id, applicant.discord_id, owner.id, owner.discord_id, guildId, verifiedOwnerRoleId).run();
       applicantHasRole = true;
       const roleDeletesBeforeOtherServer = calls.filter((call) => call.path.endsWith(`/members/${applicant.discord_id}/roles/${verifiedOwnerRoleId}`) && call.method === "DELETE").length;
       const retainedServerRole = await deleteOwnedLinkedServerData(env, applicant.id, "server_delete_keep");
       assert.equal(retainedServerRole.ok, true, "A server may be removed while another currently verified server still qualifies the same Discord owner.");
       assert.equal(applicantHasRole, true, "Another qualifying verified server must preserve the shared Verified Server Owner role.");
       assert.equal(calls.filter((call) => call.path.endsWith(`/members/${applicant.discord_id}/roles/${verifiedOwnerRoleId}`) && call.method === "DELETE").length, roleDeletesBeforeOtherServer, "DZN must not send a role-delete request while another qualifying server remains.");
-      const retainedServerRoleLedger = await db.prepare("SELECT status, error_code FROM dzn_owner_discord_access_delivery_attempts WHERE request_id = 'server_delete_keep_request' AND operation = 'role_revoke' ORDER BY created_at DESC LIMIT 1").first<{ status: string; error_code: string | null }>();
+      const retainedServerRoleLedger = await db.prepare("SELECT status, error_code FROM dzn_owner_discord_access_delivery_attempts WHERE request_id = 'server_delete_keep_other_request' AND operation = 'role_revoke' ORDER BY created_at DESC LIMIT 1").first<{ status: string; error_code: string | null }>();
       assert.equal(retainedServerRoleLedger?.status, "succeeded");
       assert.equal(retainedServerRoleLedger?.error_code, "other_approved_request", "The audit must explain why the shared owner role remained active.");
       const finalServerRole = await deleteOwnedLinkedServerData(env, applicant.id, "server_delete_keep_other");
@@ -667,7 +696,7 @@ async function run() {
       assert.equal(applicantHasRole, false, "The Verified Server Owner role must be removed after the last qualifying server is gone.");
       assert.equal(calls.filter((call) => call.path.endsWith(`/members/${applicant.discord_id}/roles/${verifiedOwnerRoleId}`) && call.method === "DELETE").length, roleDeletesBeforeOtherServer + 1, "The final server deletion must send exactly one Discord role-delete request.");
       assert.equal(await db.prepare("SELECT id FROM linked_servers WHERE id = 'server_delete_keep_other'").first(), null, "The final qualifying server may be removed after shared-role cleanup succeeds.");
-      const finalServerRoleLedger = await db.prepare("SELECT status, error_code FROM dzn_owner_discord_access_delivery_attempts WHERE request_id = 'server_delete_keep_request' AND operation = 'role_revoke' ORDER BY attempt_number DESC, created_at DESC, id DESC LIMIT 1").first<{ status: string; error_code: string | null }>();
+      const finalServerRoleLedger = await db.prepare("SELECT status, error_code FROM dzn_owner_discord_access_delivery_attempts WHERE request_id = 'server_delete_keep_other_request' AND operation = 'role_revoke' ORDER BY attempt_number DESC, created_at DESC, id DESC LIMIT 1").first<{ status: string; error_code: string | null }>();
       assert.equal(finalServerRoleLedger?.status, "succeeded");
       assert.equal(finalServerRoleLedger?.error_code, null, "The final cleanup must replace the prior retained-role audit outcome with a confirmed removal.");
 

@@ -309,7 +309,9 @@ export async function revokeOwnerDiscordAccessRole(env: Env, actor: SessionUser,
   const discordId = discordIdValue(access.requester_discord_id);
   if (!discordId) return problem(409, "This historical request no longer has a Discord identity to revoke.");
 
-  const configuration = readRoleDeliveryConfiguration(env);
+  // New invite/role issuance can be disabled without stranding an already-granted
+  // owner role. Revocation still requires the configured bot identity and role.
+  const configuration = readRoleDeliveryConfiguration(env, false);
   if (!configuration) return problem(503, "Private Discord delivery is not configured yet.");
   const lease = await acquireRoleMutationLease(env, {
     requestId: access.id,
@@ -530,7 +532,8 @@ async function reconcileOwnerDiscordRoleForDeletion(
       return { ok: false as const, status: 503 as const, message: `DZN could not verify the Discord owner-role configuration needed before ${action}.` };
     }
     if (!(await renewHeldLease())) return stopForLostHeldLease();
-    if (await hasAnotherApprovedRequestForDiscord(env, discordId, access.id, options.excludeRequesterUserId, options.linkedServerId)) {
+    const excludedRequestId = options.scope === "linked_server" ? null : access.id;
+    if (await hasAnotherApprovedRequestForDiscord(env, discordId, excludedRequestId, options.excludeRequesterUserId, options.linkedServerId)) {
       if (!(await renewHeldLease())) return stopForLostHeldLease();
       await finishAttempt(env, attempt, "succeeded", "other_approved_request", "Another verified owner request for this Discord account remains approved, so the role stays in place.", null);
       return { ok: true as const };
@@ -865,17 +868,26 @@ async function hasDeliverySchema(env: Env) {
 
 export type OwnerDiscordRoleMutationLease = RoleMutationLease;
 
-export async function reserveOwnerDiscordRoleRevocationLease(env: Env, requestId: string, discordId: string) {
+export async function reserveOwnerDiscordRoleDecisionLease(
+  env: Env,
+  requestId: string,
+  discordId: string,
+  action: "approved" | "revoked",
+) {
   if (!(await hasRoleMutationSchema(env))) return { available: false as const, lease: null };
   return {
     available: true as const,
     lease: await acquireRoleMutationLease(env, {
       requestId,
       discordId,
-      operation: "revocation_decision",
-      requiredStatus: "approved",
+      operation: action === "approved" ? "role_grant" : "revocation_decision",
+      requiredStatus: action === "approved" ? "pending" : "approved",
     }),
   };
+}
+
+export async function reserveOwnerDiscordRoleRevocationLease(env: Env, requestId: string, discordId: string) {
+  return reserveOwnerDiscordRoleDecisionLease(env, requestId, discordId, "revoked");
 }
 
 export async function releaseOwnerDiscordRoleMutationLease(env: Env, lease: OwnerDiscordRoleMutationLease | null) {
@@ -983,7 +995,7 @@ async function requestIsStillApprovedForApplicant(env: Env, requestId: string, u
 async function hasAnotherApprovedRequestForDiscord(
   env: Env,
   discordId: string,
-  requestId: string,
+  requestId: string | null,
   excludeRequesterUserId?: string,
   excludeLinkedServerId?: string,
 ) {
@@ -991,7 +1003,7 @@ async function hasAnotherApprovedRequestForDiscord(
     FROM dzn_owner_discord_access_requests
     WHERE requester_discord_id = ?
       AND status = 'approved'
-      AND id <> ?
+       AND (? IS NULL OR id <> ?)
       AND (? IS NULL OR requester_user_id IS NULL OR requester_user_id <> ?)
       AND (? IS NULL OR linked_server_id <> ?)
       AND EXISTS (
@@ -1025,6 +1037,7 @@ async function hasAnotherApprovedRequestForDiscord(
       )
     LIMIT 1`).bind(
       discordId,
+      requestId,
       requestId,
       excludeRequesterUserId ?? null,
       excludeRequesterUserId ?? null,
