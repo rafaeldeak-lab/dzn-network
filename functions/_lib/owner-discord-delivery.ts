@@ -96,6 +96,8 @@ const INVITE_MAX_AGE_SECONDS = 15 * 60;
 const INVITE_RATE_WINDOW_MS = 15 * 60 * 1000;
 const INVITE_RATE_LIMIT = 3;
 const ROLE_MUTATION_LEASE_MS = 60 * 1000;
+const ACCOUNT_DELETION_LEASE_MS = 5 * 60 * 1000;
+const LINKED_SERVER_DELETION_LEASE_MS = 5 * 60 * 1000;
 const DISCORD_PERMISSION_ONE = BigInt(1);
 const DISCORD_CREATE_INSTANT_INVITE = DISCORD_PERMISSION_ONE << BigInt(0);
 const DISCORD_ADMINISTRATOR = DISCORD_PERMISSION_ONE << BigInt(3);
@@ -350,14 +352,29 @@ export async function revokeOwnerDiscordAccessRole(env: Env, actor: SessionUser,
 }
 
 export async function reserveOwnerDiscordAccountDeletionLease(env: Env, userId: string) {
+  return reserveOwnerDiscordDeletionLease(env, userId, "account_deletion", undefined, ACCOUNT_DELETION_LEASE_MS);
+}
+
+export async function reserveOwnerDiscordLinkedServerDeletionLease(env: Env, userId: string, linkedServerId: string) {
+  return reserveOwnerDiscordDeletionLease(env, userId, "role_revoke", linkedServerId, LINKED_SERVER_DELETION_LEASE_MS);
+}
+
+async function reserveOwnerDiscordDeletionLease(
+  env: Env,
+  userId: string,
+  operation: "account_deletion" | "role_revoke",
+  linkedServerId?: string,
+  leaseDurationMs?: number,
+) {
   if (!(await hasRoleMutationSchema(env))) return { required: false as const, lease: null };
   const context = await requireDb(env).prepare(`SELECT request.id, request.requester_discord_id
     FROM dzn_owner_discord_access_requests AS request
     JOIN users AS account ON account.id = request.requester_user_id
     WHERE request.requester_user_id = ?
       AND request.requester_discord_id = account.discord_id
+      AND (? IS NULL OR request.linked_server_id = ?)
     ORDER BY request.updated_at DESC, request.id DESC
-    LIMIT 1`).bind(userId).first<{ id: string; requester_discord_id: string | null }>();
+    LIMIT 1`).bind(userId, linkedServerId ?? null, linkedServerId ?? null).first<{ id: string; requester_discord_id: string | null }>();
   const discordId = discordIdValue(context?.requester_discord_id);
   if (!context || !discordId) return { required: false as const, lease: null };
   return {
@@ -365,13 +382,72 @@ export async function reserveOwnerDiscordAccountDeletionLease(env: Env, userId: 
     lease: await acquireRoleMutationLease(env, {
       requestId: context.id,
       discordId,
-      operation: "account_deletion",
+      operation,
+      leaseDurationMs,
     }),
   };
 }
 
+export async function renewOwnerDiscordAccountDeletionLease(env: Env, lease: OwnerDiscordRoleMutationLease | null) {
+  if (!lease) return true;
+  return renewRoleMutationLease(env, lease, ACCOUNT_DELETION_LEASE_MS);
+}
+
+export async function renewOwnerDiscordLinkedServerDeletionLease(env: Env, lease: OwnerDiscordRoleMutationLease | null) {
+  if (!lease) return true;
+  return renewRoleMutationLease(env, lease, LINKED_SERVER_DELETION_LEASE_MS);
+}
+
 export async function revokeOwnerDiscordRoleForAccountDeletion(env: Env, userId: string, fetcher: DiscordFetch = fetch, heldLease: OwnerDiscordRoleMutationLease | null = null) {
+  return reconcileOwnerDiscordRoleForDeletion(env, userId, fetcher, {
+    scope: "account",
+    operation: "account_deletion",
+    excludeRequesterUserId: userId,
+    heldLease,
+  });
+}
+
+export async function revokeOwnerDiscordRoleForLinkedServerDeletion(
+  env: Env,
+  userId: string,
+  linkedServerId: string,
+  fetcher: DiscordFetch = fetch,
+  heldLease: OwnerDiscordRoleMutationLease | null = null,
+) {
+  return reconcileOwnerDiscordRoleForDeletion(env, userId, fetcher, {
+    scope: "linked_server",
+    operation: "role_revoke",
+    linkedServerId,
+    heldLease,
+  });
+}
+
+type OwnerDiscordRoleDeletionOptions = {
+  scope: "account" | "linked_server";
+  operation: "account_deletion" | "role_revoke";
+  linkedServerId?: string;
+  excludeRequesterUserId?: string;
+  heldLease: OwnerDiscordRoleMutationLease | null;
+};
+
+async function reconcileOwnerDiscordRoleForDeletion(
+  env: Env,
+  userId: string,
+  fetcher: DiscordFetch,
+  options: OwnerDiscordRoleDeletionOptions,
+) {
   const db = requireDb(env);
+  const subject = options.scope === "account" ? "account" : "server";
+  const action = options.scope === "account" ? "account closure" : "server removal";
+  const heldLeaseDurationMs = options.operation === "account_deletion"
+    ? ACCOUNT_DELETION_LEASE_MS
+    : LINKED_SERVER_DELETION_LEASE_MS;
+  const renewHeldLease = async () => !options.heldLease || renewRoleMutationLease(env, options.heldLease, heldLeaseDurationMs);
+  const lostHeldLease = () => ({
+    ok: false as const,
+    status: 409 as const,
+    message: `DZN could not keep this ${subject}'s Discord owner-role cleanup reservation. Retry ${action} shortly.`,
+  });
   if (!(await tableExists(env, "dzn_owner_discord_access_delivery_attempts"))) return { ok: true as const };
 
   const grants = await db.prepare(`SELECT delivery.request_id, delivery.guild_id, delivery.role_id,
@@ -402,7 +478,7 @@ export async function revokeOwnerDiscordRoleForAccountDeletion(env: Env, userId:
   const reconcilableGrants = grants.results ?? [];
   if (reconcilableGrants.length === 0) return { ok: true as const };
   if (!(await hasDeliverySchema(env))) {
-    return { ok: false as const, status: 503 as const, message: "DZN cannot safely close this account while its recorded Discord owner role cleanup ledger is incomplete." };
+    return { ok: false as const, status: 503 as const, message: `DZN cannot safely complete this ${action} while its recorded Discord owner-role cleanup ledger is incomplete.` };
   }
 
   const account = await db.prepare("SELECT id, discord_id, username, avatar FROM users WHERE id = ? LIMIT 1")
@@ -410,68 +486,81 @@ export async function revokeOwnerDiscordRoleForAccountDeletion(env: Env, userId:
     .first<SessionUser>();
   const discordId = discordIdValue(account?.discord_id);
   if (!account || !discordId) {
-    return { ok: false as const, status: 409 as const, message: "DZN cannot safely close this account because its recorded Discord owner role identity is unavailable." };
+    return { ok: false as const, status: 409 as const, message: `DZN cannot safely complete this ${action} because its recorded Discord owner-role identity is unavailable.` };
   }
   const configuration = readRoleDeliveryConfiguration(env, false);
   if (!configuration) {
-    return { ok: false as const, status: 503 as const, message: "DZN cannot safely close this account until the Discord owner-role configuration is available to remove the recorded role." };
+    return { ok: false as const, status: 503 as const, message: `DZN cannot safely complete this ${action} until the Discord owner-role configuration is available.` };
   }
   if (reconcilableGrants.some((grant) => grant.guild_id !== configuration.guildId || grant.role_id !== configuration.verifiedOwnerRoleId)) {
-    return { ok: false as const, status: 503 as const, message: "DZN cannot safely close this account because a recorded Discord owner role does not match the active DZN role configuration." };
+    return { ok: false as const, status: 503 as const, message: `DZN cannot safely complete this ${action} because a recorded Discord owner role does not match the active DZN role configuration.` };
   }
 
   // A timed-out or interrupted role grant can still have reached Discord. Reconcile
-  // every externally ambiguous grant before removing the only Discord identity.
+  // every externally ambiguous grant before removing the qualifying server or identity.
   const access = reconcilableGrants[0];
-  const lease = heldLease ?? await acquireRoleMutationLease(env, {
+  const lease = options.heldLease ?? await acquireRoleMutationLease(env, {
     requestId: access.id,
     discordId,
-    operation: "account_deletion",
+    operation: options.operation,
   });
-  if (!lease) return { ok: false as const, status: 409 as const, message: "DZN is still changing this account's Discord owner role. Retry account closure shortly." };
+  if (!lease) return { ok: false as const, status: 409 as const, message: `DZN is still changing this ${subject}'s Discord owner role. Retry ${action} shortly.` };
 
   const actor: SessionUser = {
     id: account.id,
     discord_id: discordId,
-    username: typeof account.username === "string" ? account.username : "Deleted DZN account",
+    username: typeof account.username === "string" ? account.username : options.scope === "account" ? "Deleted DZN account" : "DZN server owner",
     avatar: typeof account.avatar === "string" ? account.avatar : null,
   };
+  if (!(await renewHeldLease())) return lostHeldLease();
   const attempt = await startAttempt(env, access, "role_revoke", configuration, actor);
+  const stopForLostHeldLease = async () => {
+    try {
+      await finishAttempt(env, attempt, "retryable_failure", "role_revoke_lease_lost", `DZN could not keep the Discord owner-role cleanup reservation before ${action}.`, null);
+    } catch {
+      // The caller still refuses destructive cleanup when the lease no longer belongs to it.
+    }
+    return lostHeldLease();
+  };
   try {
+    if (!(await renewHeldLease())) return stopForLostHeldLease();
     const preflight = await checkDiscordRoleConfiguration(configuration, fetcher);
     if (!preflight.ok) {
       await finishAttempt(env, attempt, preflightToDeliveryStatus(preflight.status), preflight.status, preflight.message, preflight.httpStatus ?? null);
-      return { ok: false as const, status: 503 as const, message: "DZN could not verify the Discord owner-role configuration needed before this account can be closed." };
+      return { ok: false as const, status: 503 as const, message: `DZN could not verify the Discord owner-role configuration needed before ${action}.` };
     }
-    if (await hasAnotherApprovedRequestForDiscord(env, discordId, access.id, userId)) {
+    if (!(await renewHeldLease())) return stopForLostHeldLease();
+    if (await hasAnotherApprovedRequestForDiscord(env, discordId, access.id, options.excludeRequesterUserId, options.linkedServerId)) {
+      if (!(await renewHeldLease())) return stopForLostHeldLease();
       await finishAttempt(env, attempt, "succeeded", "other_approved_request", "Another verified owner request for this Discord account remains approved, so the role stays in place.", null);
       return { ok: true as const };
     }
     const membership = await discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(discordId)}`);
     if (membership.response.status === 404) {
-      await finishAttempt(env, attempt, "succeeded", "member_not_joined", "No DZN Discord membership remained to change before account closure.", 404);
+      await finishAttempt(env, attempt, "succeeded", "member_not_joined", `No DZN Discord membership remained to change before ${action}.`, 404);
       return { ok: true as const };
     }
     if (!membership.response.ok) {
-      await finishAttempt(env, attempt, deliveryStatusForHttp(membership.response.status), errorCodeForHttp(membership.response.status), "DZN could not verify the Discord member before account closure.", membership.response.status);
-      return { ok: false as const, status: 503 as const, message: "DZN could not verify the Discord owner role needed before this account can be closed." };
+      await finishAttempt(env, attempt, deliveryStatusForHttp(membership.response.status), errorCodeForHttp(membership.response.status), `DZN could not verify the Discord member before ${action}.`, membership.response.status);
+      return { ok: false as const, status: 503 as const, message: `DZN could not verify the Discord owner role needed before ${action}.` };
     }
     const membershipPayload = recordValue(membership.payload);
     const roleIds = new Set<string>(Array.isArray(membershipPayload?.roles) ? membershipPayload.roles.map((value) => String(value)) : []);
     if (roleIds.has(configuration.verifiedOwnerRoleId)) {
+      if (!(await renewHeldLease())) return stopForLostHeldLease();
       const removed = await discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(discordId)}/roles/${encodeURIComponent(configuration.verifiedOwnerRoleId)}`, { method: "DELETE" });
       if (!removed.response.ok && removed.response.status !== 404) {
-        await finishAttempt(env, attempt, deliveryStatusForHttp(removed.response.status), errorCodeForHttp(removed.response.status), "DZN could not remove the Discord owner role before account closure.", removed.response.status);
-        return { ok: false as const, status: 503 as const, message: "DZN could not remove the Discord owner role, so this account has not been closed." };
+        await finishAttempt(env, attempt, deliveryStatusForHttp(removed.response.status), errorCodeForHttp(removed.response.status), `DZN could not remove the Discord owner role before ${action}.`, removed.response.status);
+        return { ok: false as const, status: 503 as const, message: `DZN could not remove the Discord owner role, so ${action} has not completed.` };
       }
     }
     await finishAttempt(env, attempt, "succeeded", null, null, 204);
     return { ok: true as const };
   } catch (error) {
-    await finishAttempt(env, attempt, "retryable_failure", classifyThrownDiscordError(error), "DZN could not reach Discord while removing the owner role before account closure.", null);
-    return { ok: false as const, status: 503 as const, message: "DZN could not confirm Discord owner-role removal, so this account has not been closed." };
+    await finishAttempt(env, attempt, "retryable_failure", classifyThrownDiscordError(error), `DZN could not reach Discord while removing the owner role before ${action}.`, null);
+    return { ok: false as const, status: 503 as const, message: `DZN could not confirm Discord owner-role removal, so ${action} has not completed.` };
   } finally {
-    if (!heldLease) await releaseRoleMutationLease(env, lease);
+    if (!options.heldLease) await releaseRoleMutationLease(env, lease);
   }
 }
 
@@ -798,11 +887,12 @@ async function acquireRoleMutationLease(env: Env, input: {
   discordId: string;
   operation: RoleMutationOperation;
   requiredStatus?: AccessRequestRow["status"];
+  leaseDurationMs?: number;
 }): Promise<RoleMutationLease | null> {
   if (!(await hasRoleMutationSchema(env))) return null;
   const leaseId = crypto.randomUUID();
   const acquiredAt = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + ROLE_MUTATION_LEASE_MS).toISOString();
+  const expiresAt = new Date(Date.now() + (input.leaseDurationMs ?? ROLE_MUTATION_LEASE_MS)).toISOString();
   const result = await requireDb(env).prepare(`INSERT INTO dzn_owner_discord_access_role_mutations (
     discord_id, request_id, lease_id, operation, expires_at, acquired_at
   )
@@ -824,6 +914,14 @@ async function acquireRoleMutationLease(env: Env, input: {
     .bind(input.discordId, input.requestId, leaseId, input.operation, expiresAt, acquiredAt, input.requestId, input.discordId, input.requiredStatus ?? null, input.requiredStatus ?? null)
     .run();
   return Number(result.meta.changes ?? 0) === 1 ? { discordId: input.discordId, leaseId } : null;
+}
+
+async function renewRoleMutationLease(env: Env, lease: RoleMutationLease, leaseDurationMs: number) {
+  const expiresAt = new Date(Date.now() + leaseDurationMs).toISOString();
+  const result = await requireDb(env).prepare(`UPDATE dzn_owner_discord_access_role_mutations
+    SET expires_at = ?
+    WHERE discord_id = ? AND lease_id = ?`).bind(expiresAt, lease.discordId, lease.leaseId).run();
+  return Number(result.meta.changes ?? 0) === 1;
 }
 
 async function releaseRoleMutationLease(env: Env, lease: RoleMutationLease) {
@@ -882,13 +980,20 @@ async function requestIsStillApprovedForApplicant(env: Env, requestId: string, u
   return Boolean(row);
 }
 
-async function hasAnotherApprovedRequestForDiscord(env: Env, discordId: string, requestId: string, excludeRequesterUserId?: string) {
+async function hasAnotherApprovedRequestForDiscord(
+  env: Env,
+  discordId: string,
+  requestId: string,
+  excludeRequesterUserId?: string,
+  excludeLinkedServerId?: string,
+) {
   const row = await requireDb(env).prepare(`SELECT 1 AS found
     FROM dzn_owner_discord_access_requests
     WHERE requester_discord_id = ?
       AND status = 'approved'
       AND id <> ?
       AND (? IS NULL OR requester_user_id IS NULL OR requester_user_id <> ?)
+      AND (? IS NULL OR linked_server_id <> ?)
       AND EXISTS (
         SELECT 1
         FROM linked_servers
@@ -918,7 +1023,14 @@ async function hasAnotherApprovedRequestForDiscord(env: Env, discordId: string, 
                AND latest_check.dayz_service_detected = 1
           )
       )
-    LIMIT 1`).bind(discordId, requestId, excludeRequesterUserId ?? null, excludeRequesterUserId ?? null).first<{ found: number }>();
+    LIMIT 1`).bind(
+      discordId,
+      requestId,
+      excludeRequesterUserId ?? null,
+      excludeRequesterUserId ?? null,
+      excludeLinkedServerId ?? null,
+      excludeLinkedServerId ?? null,
+    ).first<{ found: number }>();
   return Boolean(row);
 }
 

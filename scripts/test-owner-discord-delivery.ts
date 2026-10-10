@@ -3,8 +3,19 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 import { createSession } from "../functions/_lib/db";
-import { claimOwnerDiscordAccessRole, getOwnerDiscordDeliveryDiagnostic, getOwnerDiscordDeliverySummaries, issueOwnerDiscordAccessInvite, revokeOwnerDiscordAccessRole } from "../functions/_lib/owner-discord-delivery";
-import { deleteOwnedAccountData } from "../functions/_lib/deletion";
+import {
+  claimOwnerDiscordAccessRole,
+  getOwnerDiscordDeliveryDiagnostic,
+  getOwnerDiscordDeliverySummaries,
+  issueOwnerDiscordAccessInvite,
+  releaseOwnerDiscordRoleMutationLease,
+  renewOwnerDiscordAccountDeletionLease,
+  renewOwnerDiscordLinkedServerDeletionLease,
+  reserveOwnerDiscordAccountDeletionLease,
+  reserveOwnerDiscordLinkedServerDeletionLease,
+  revokeOwnerDiscordAccessRole,
+} from "../functions/_lib/owner-discord-delivery";
+import { deleteOwnedAccountData, deleteOwnedLinkedServerData } from "../functions/_lib/deletion";
 import { decideOwnerDiscordAccessRequest } from "../functions/_lib/owner-discord-access";
 import { onRequest as applicantDeliveryRoute } from "../functions/api/discord/owner-access-delivery";
 import { onRequest as ownerDeliveryRoute } from "../functions/api/owner/discord/owner-access-delivery";
@@ -43,6 +54,7 @@ const resolvedOwner: SessionUser = { id: "resolved_closure_owner", discord_id: "
 const retainedRoleOwner: SessionUser = { id: "retained_role_closure_owner", discord_id: "900000000000000012", username: "Retained Role Closure Owner", avatar: null };
 const preflightFailedOwner: SessionUser = { id: "preflight_failed_owner", discord_id: "900000000000000013", username: "Preflight Failed Owner", avatar: null };
 const inFlightInviteOwner: SessionUser = { id: "in_flight_invite_owner", discord_id: "900000000000000014", username: "In-flight Invite Owner", avatar: null };
+const leaseRaceOwner: SessionUser = { id: "lease_race_owner", discord_id: "900000000000000016", username: "Lease Race Owner", avatar: null };
 const botPermissions = ((BigInt(1) << BigInt(28)) | (BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(0))).toString();
 
 function localD1(sqlite: Sqlite) {
@@ -110,7 +122,16 @@ async function run() {
   assert.match(helper, /members\/\$\{encodeURIComponent\(user\.discord_id\)\}\/roles/);
   assert.match(helper, /method: "DELETE"/);
   assert.match(helper, /Verified Server Owner role removed/);
+  assert.match(helper, /ACCOUNT_DELETION_LEASE_MS/);
+  assert.match(helper, /LINKED_SERVER_DELETION_LEASE_MS/);
+  assert.match(helper, /renewRoleMutationLease/);
+  assert.match(helper, /role_revoke_lease_lost/);
   assert.doesNotMatch(helper, /invite_code|stored invite|INSERT[\s\S]{0,300}code/i, "The delivery ledger must never store a reusable invite code.");
+  const deletionHelper = readFileSync("functions/_lib/deletion.ts", "utf8");
+  assert.match(deletionHelper, /revokeOwnerDiscordRoleForLinkedServerDeletion/);
+  assert.match(deletionHelper, /renewOwnerDiscordAccountDeletionLease/);
+  assert.match(deletionHelper, /renewOwnerDiscordLinkedServerDeletionLease/);
+  assert.match(deletionHelper, /accountDeletionDiscordRoleLease/);
   const envExample = readFileSync(".env.example", "utf8");
   assert.match(envExample, /^DZN_OWNER_DISCORD_DELIVERY_ENABLED=false$/m);
   assert.match(envExample, /^DZN_OWNER_DISCORD_GUILD_ID=$/m);
@@ -165,7 +186,7 @@ async function run() {
     ]) assert.equal(roleMutationIndexes.has(index), true, `The role-mutation lease table must create ${index}.`);
     const roleMutationForeignKeys = (await db.prepare("PRAGMA foreign_key_list(dzn_owner_discord_access_role_mutations)").all<{ table: string; from: string; on_delete: string }>()).results ?? [];
     assert.equal(roleMutationForeignKeys.some((key) => key.table === "dzn_owner_discord_access_requests" && key.from === "request_id" && key.on_delete === "CASCADE"), true, "Role mutation leases must be tied to a reviewed request.");
-    for (const user of [owner, applicant, outsider, deletingOwner, blockedOwner, resolvedOwner, retainedRoleOwner, preflightFailedOwner, inFlightInviteOwner]) await db.prepare("INSERT INTO users (id, discord_id, username, avatar) VALUES (?, ?, ?, ?)").bind(user.id, user.discord_id, user.username, user.avatar).run();
+    for (const user of [owner, applicant, outsider, deletingOwner, blockedOwner, resolvedOwner, retainedRoleOwner, preflightFailedOwner, inFlightInviteOwner, leaseRaceOwner]) await db.prepare("INSERT INTO users (id, discord_id, username, avatar) VALUES (?, ?, ?, ?)").bind(user.id, user.discord_id, user.username, user.avatar).run();
     const seedEligibleServer = async (id: string, userId: string, serverName: string) => {
       await db.prepare("INSERT INTO linked_servers (id, user_id, server_name, status, lifecycle_status) VALUES (?, ?, ?, 'live', 'active_live')").bind(id, userId, serverName).run();
       await db.prepare("INSERT INTO nitrado_connections (id, user_id, linked_server_id, created_at, updated_at) VALUES (?, ?, ?, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')").bind(`connection-${id}`, userId, id).run();
@@ -179,6 +200,7 @@ async function run() {
     await seedEligibleServer("server_retained_role_closure_owner", retainedRoleOwner.id, "Retained role closing owner server");
     await seedEligibleServer("server_preflight_failed_owner", preflightFailedOwner.id, "Preflight failed owner server");
     await seedEligibleServer("server_in_flight_invite", inFlightInviteOwner.id, "In-flight invite owner server");
+    await seedEligibleServer("server_lease_race_owner", leaseRaceOwner.id, "Lease race owner server");
     await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
       id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
     ) VALUES ('approved_request', ?, ?, ?, 'server_owner', 'server_owner', 'Verified owner server', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(applicant.id, applicant.discord_id, applicant.username).run();
@@ -203,6 +225,9 @@ async function run() {
     await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
       id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
     ) VALUES ('in_flight_invite_request', ?, ?, ?, 'server_in_flight_invite', 'server_in_flight_invite', 'In-flight invite owner server', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(inFlightInviteOwner.id, inFlightInviteOwner.discord_id, inFlightInviteOwner.username).run();
+    await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+      id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
+    ) VALUES ('lease_race_request', ?, ?, ?, 'server_lease_race_owner', 'server_lease_race_owner', 'Lease race owner server', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(leaseRaceOwner.id, leaseRaceOwner.discord_id, leaseRaceOwner.username).run();
 
     const env = {
       DB: db,
@@ -226,6 +251,9 @@ async function run() {
     let roleRemovalSawAccount = false;
     let blockedOwnerHasRole = true;
     let blockedOwnerRoleRemovalAttempted = false;
+    let leaseRaceOwnerHasRole = true;
+    let stealLeaseRaceOwnerDuringPreflight = false;
+    let leaseRaceOwnerRoleDeleteCalls = 0;
     const failBlockedOwnerRemoval = true;
     let inviteChannelAvailable = true;
     let pendingApplicantRoleGrant: { started: () => void; wait: Promise<void> } | null = null;
@@ -239,6 +267,12 @@ async function run() {
       calls.push({ path: url.pathname, method });
       if (url.pathname === "/api/v10/users/@me") {
         if (failBotIdentityPreflight) throw new Error("Simulated Discord preflight outage");
+        if (stealLeaseRaceOwnerDuringPreflight) {
+          stealLeaseRaceOwnerDuringPreflight = false;
+          await db.prepare(`UPDATE dzn_owner_discord_access_role_mutations
+            SET lease_id = 'stolen-lease', expires_at = '2099-01-01T00:00:00.000Z'
+            WHERE discord_id = ?`).bind(leaseRaceOwner.discord_id).run();
+        }
         return Response.json({ id: botUserId });
       }
       if (url.pathname === `/api/v10/guilds/${guildId}/members/${botUserId}`) return Response.json({ roles: [botRoleId] });
@@ -291,6 +325,14 @@ async function run() {
         blockedOwnerRoleRemovalAttempted = true;
         if (failBlockedOwnerRemoval) return new Response(null, { status: 500 });
         blockedOwnerHasRole = false;
+        return new Response(null, { status: 204 });
+      }
+      if (url.pathname === `/api/v10/guilds/${guildId}/members/${leaseRaceOwner.discord_id}`) {
+        return Response.json({ roles: leaseRaceOwnerHasRole ? [verifiedOwnerRoleId] : [] });
+      }
+      if (url.pathname === `/api/v10/guilds/${guildId}/members/${leaseRaceOwner.discord_id}/roles/${verifiedOwnerRoleId}` && method === "DELETE") {
+        leaseRaceOwnerRoleDeleteCalls += 1;
+        leaseRaceOwnerHasRole = false;
         return new Response(null, { status: 204 });
       }
       return new Response(JSON.stringify({ message: "Unexpected mock Discord request" }), { status: 500, headers: { "content-type": "application/json" } });
@@ -522,6 +564,113 @@ async function run() {
       assert.equal(calls.filter((call) => call.path === `/api/v10/channels/${inviteChannelId}`).length, channelCheckCountBeforeRoleOnlyRevoke, "Role revocation must not depend on reading the private invite channel.");
       inviteChannelAvailable = true;
 
+      await seedEligibleServer("server_delete_role", applicant.id, "Server removal role cleanup");
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+        id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
+      ) VALUES ('server_delete_role_request', ?, ?, ?, 'server_delete_role', 'server_delete_role', 'Server removal role cleanup', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(applicant.id, applicant.discord_id, applicant.username).run();
+      const accountDeletionLease = await reserveOwnerDiscordAccountDeletionLease(env, applicant.id);
+      assert.equal(accountDeletionLease.required, true, "An owner-access account must reserve its Discord identity before account cleanup.");
+      assert.notEqual(accountDeletionLease.lease, null, "The account-deletion reservation must acquire the Discord identity lease.");
+      if (accountDeletionLease.lease) {
+        const initialLease = await db.prepare("SELECT expires_at FROM dzn_owner_discord_access_role_mutations WHERE lease_id = ?").bind(accountDeletionLease.lease.leaseId).first<{ expires_at: string }>();
+        assert.ok(Date.parse(initialLease?.expires_at ?? "") - Date.now() > 4 * 60 * 1000, "Account deletion must begin with a longer-lived owner-role reservation.");
+        await db.prepare("UPDATE dzn_owner_discord_access_role_mutations SET expires_at = '2000-01-01T00:00:00.000Z' WHERE lease_id = ?").bind(accountDeletionLease.lease.leaseId).run();
+        assert.equal(await renewOwnerDiscordAccountDeletionLease(env, accountDeletionLease.lease), true, "Account cleanup must renew its held Discord identity lease before destructive work continues.");
+        const renewedLease = await db.prepare("SELECT expires_at FROM dzn_owner_discord_access_role_mutations WHERE lease_id = ?").bind(accountDeletionLease.lease.leaseId).first<{ expires_at: string }>();
+        assert.ok(Date.parse(renewedLease?.expires_at ?? "") - Date.now() > 4 * 60 * 1000, "A renewed account-deletion reservation must remain valid for the cleanup window.");
+      }
+      await releaseOwnerDiscordRoleMutationLease(env, accountDeletionLease.lease);
+
+      await seedEligibleServer("server_account_lease_child", applicant.id, "Account lease child cleanup");
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+        id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
+      ) VALUES ('account_lease_child_request', ?, ?, ?, 'server_account_lease_child', 'server_account_lease_child', 'Account lease child cleanup', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(applicant.id, applicant.discord_id, applicant.username).run();
+      const accountChildLease = await reserveOwnerDiscordAccountDeletionLease(env, applicant.id);
+      assert.notEqual(accountChildLease.lease, null, "Account child cleanup must inherit an owned Discord role-mutation reservation.");
+      if (accountChildLease.lease) {
+        await db.prepare("UPDATE dzn_owner_discord_access_role_mutations SET expires_at = '2000-01-01T00:00:00.000Z' WHERE lease_id = ?").bind(accountChildLease.lease.leaseId).run();
+        const accountChildDeletion = await deleteOwnedLinkedServerData(env, applicant.id, "server_account_lease_child", {
+          skipOwnerDiscordRoleCleanup: true,
+          accountDeletionDiscordRoleLease: accountChildLease.lease,
+        });
+        assert.equal(accountChildDeletion.ok, true, "Nested account cleanup must renew the inherited Discord reservation before destructive server work.");
+        const inheritedLease = await db.prepare("SELECT lease_id, expires_at FROM dzn_owner_discord_access_role_mutations WHERE discord_id = ? LIMIT 1").bind(applicant.discord_id).first<{ lease_id: string; expires_at: string }>();
+        assert.equal(inheritedLease?.lease_id, accountChildLease.lease.leaseId, "Nested server cleanup must not release the account-level Discord reservation.");
+        assert.ok(Date.parse(inheritedLease?.expires_at ?? "") - Date.now() > 4 * 60 * 1000, "Nested server cleanup must renew the inherited account reservation through destructive phases.");
+      }
+      await releaseOwnerDiscordRoleMutationLease(env, accountChildLease.lease);
+
+      const linkedServerDeletionLease = await reserveOwnerDiscordLinkedServerDeletionLease(env, applicant.id, "server_delete_role");
+      assert.equal(linkedServerDeletionLease.required, true, "Deleting a verified server must reserve its Discord identity before cleanup.");
+      assert.notEqual(linkedServerDeletionLease.lease, null, "The linked-server deletion reservation must acquire the Discord identity lease.");
+      if (linkedServerDeletionLease.lease) {
+        const initialLease = await db.prepare("SELECT expires_at FROM dzn_owner_discord_access_role_mutations WHERE lease_id = ?").bind(linkedServerDeletionLease.lease.leaseId).first<{ expires_at: string }>();
+        assert.ok(Date.parse(initialLease?.expires_at ?? "") - Date.now() > 4 * 60 * 1000, "Linked-server deletion must begin with a longer-lived owner-role reservation.");
+        await db.prepare("UPDATE dzn_owner_discord_access_role_mutations SET expires_at = '2000-01-01T00:00:00.000Z' WHERE lease_id = ?").bind(linkedServerDeletionLease.lease.leaseId).run();
+        assert.equal(await renewOwnerDiscordLinkedServerDeletionLease(env, linkedServerDeletionLease.lease), true, "Linked-server cleanup must renew its held Discord identity lease before destructive work continues.");
+        const renewedLease = await db.prepare("SELECT expires_at FROM dzn_owner_discord_access_role_mutations WHERE lease_id = ?").bind(linkedServerDeletionLease.lease.leaseId).first<{ expires_at: string }>();
+        assert.ok(Date.parse(renewedLease?.expires_at ?? "") - Date.now() > 4 * 60 * 1000, "A renewed linked-server reservation must remain valid for the cleanup window.");
+      }
+      await releaseOwnerDiscordRoleMutationLease(env, linkedServerDeletionLease.lease);
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
+        id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, created_at, completed_at
+      ) VALUES ('server-delete-role-grant', 'server_delete_role_request', ?, ?, ?, ?, 'role_grant', 'succeeded', 1, 'server-delete-role-grant-nonce', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+        .bind(applicant.id, applicant.discord_id, owner.id, owner.discord_id, guildId, verifiedOwnerRoleId).run();
+      applicantHasRole = true;
+      const directServerDeletion = await deleteOwnedLinkedServerData(env, applicant.id, "server_delete_role");
+      assert.equal(directServerDeletion.ok, true, "Deleting the last verified server must remove the corresponding Discord owner role first.");
+      assert.equal(applicantHasRole, false, "Removing the final qualifying server must not leave the Verified Server Owner role active.");
+      assert.equal(await db.prepare("SELECT id FROM linked_servers WHERE id = 'server_delete_role'").first(), null, "The server may be removed after Discord owner-role cleanup succeeds.");
+      const directServerDeletionLedger = await db.prepare("SELECT status, actor_user_id FROM dzn_owner_discord_access_delivery_attempts WHERE request_id = 'server_delete_role_request' AND operation = 'role_revoke' ORDER BY created_at DESC LIMIT 1").first<{ status: string; actor_user_id: string | null }>();
+      assert.equal(directServerDeletionLedger?.status, "succeeded", "Server deletion must record the role-removal result in the protected delivery ledger.");
+      assert.equal(directServerDeletionLedger?.actor_user_id, applicant.id, "A server owner deleting their own server must remain attributable in the role-removal audit.");
+
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
+        id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, created_at, completed_at
+      ) VALUES ('lease-race-role-grant', 'lease_race_request', ?, ?, ?, ?, 'role_grant', 'succeeded', 1, 'lease-race-role-grant-nonce', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+        .bind(leaseRaceOwner.id, leaseRaceOwner.discord_id, owner.id, owner.discord_id, guildId, verifiedOwnerRoleId).run();
+      stealLeaseRaceOwnerDuringPreflight = true;
+      const lostLeaseServerDeletion = await deleteOwnedLinkedServerData(env, leaseRaceOwner.id, "server_lease_race_owner");
+      assert.equal(lostLeaseServerDeletion.ok, false, "Server deletion must stop when its Discord owner-role reservation is lost during the preflight.");
+      if (!lostLeaseServerDeletion.ok) assert.equal(lostLeaseServerDeletion.status, 409);
+      assert.equal(leaseRaceOwnerHasRole, true, "A lost reservation must not remove an owner role after another operation has reclaimed it.");
+      assert.equal(leaseRaceOwnerRoleDeleteCalls, 0, "A lost reservation must stop before the Discord role-delete request.");
+      assert.notEqual(await db.prepare("SELECT id FROM linked_servers WHERE id = 'server_lease_race_owner'").first(), null, "A lost reservation must preserve the linked server for a safe retry.");
+      const lostLeaseLedger = await db.prepare("SELECT status, error_code FROM dzn_owner_discord_access_delivery_attempts WHERE request_id = 'lease_race_request' AND operation = 'role_revoke' ORDER BY created_at DESC LIMIT 1").first<{ status: string; error_code: string | null }>();
+      assert.equal(lostLeaseLedger?.status, "retryable_failure", "The protected audit must record a reservation-loss retry state.");
+      assert.equal(lostLeaseLedger?.error_code, "role_revoke_lease_lost");
+      await db.prepare("DELETE FROM dzn_owner_discord_access_role_mutations WHERE discord_id = ?").bind(leaseRaceOwner.discord_id).run();
+
+      await seedEligibleServer("server_delete_keep", applicant.id, "Deleted verified server");
+      await seedEligibleServer("server_delete_keep_other", applicant.id, "Remaining verified server");
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+        id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
+      ) VALUES ('server_delete_keep_request', ?, ?, ?, 'server_delete_keep', 'server_delete_keep', 'Deleted verified server', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(applicant.id, applicant.discord_id, applicant.username).run();
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+        id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
+      ) VALUES ('server_delete_keep_other_request', ?, ?, ?, 'server_delete_keep_other', 'server_delete_keep_other', 'Remaining verified server', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(applicant.id, applicant.discord_id, applicant.username).run();
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
+        id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, created_at, completed_at
+      ) VALUES ('server-delete-keep-role-grant', 'server_delete_keep_request', ?, ?, ?, ?, 'role_grant', 'succeeded', 1, 'server-delete-keep-role-grant-nonce', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+        .bind(applicant.id, applicant.discord_id, owner.id, owner.discord_id, guildId, verifiedOwnerRoleId).run();
+      applicantHasRole = true;
+      const roleDeletesBeforeOtherServer = calls.filter((call) => call.path.endsWith(`/members/${applicant.discord_id}/roles/${verifiedOwnerRoleId}`) && call.method === "DELETE").length;
+      const retainedServerRole = await deleteOwnedLinkedServerData(env, applicant.id, "server_delete_keep");
+      assert.equal(retainedServerRole.ok, true, "A server may be removed while another currently verified server still qualifies the same Discord owner.");
+      assert.equal(applicantHasRole, true, "Another qualifying verified server must preserve the shared Verified Server Owner role.");
+      assert.equal(calls.filter((call) => call.path.endsWith(`/members/${applicant.discord_id}/roles/${verifiedOwnerRoleId}`) && call.method === "DELETE").length, roleDeletesBeforeOtherServer, "DZN must not send a role-delete request while another qualifying server remains.");
+      const retainedServerRoleLedger = await db.prepare("SELECT status, error_code FROM dzn_owner_discord_access_delivery_attempts WHERE request_id = 'server_delete_keep_request' AND operation = 'role_revoke' ORDER BY created_at DESC LIMIT 1").first<{ status: string; error_code: string | null }>();
+      assert.equal(retainedServerRoleLedger?.status, "succeeded");
+      assert.equal(retainedServerRoleLedger?.error_code, "other_approved_request", "The audit must explain why the shared owner role remained active.");
+      const finalServerRole = await deleteOwnedLinkedServerData(env, applicant.id, "server_delete_keep_other");
+      assert.equal(finalServerRole.ok, true, "Deleting the final qualifying server must reconcile a role grant recorded for an earlier deleted server.");
+      assert.equal(applicantHasRole, false, "The Verified Server Owner role must be removed after the last qualifying server is gone.");
+      assert.equal(calls.filter((call) => call.path.endsWith(`/members/${applicant.discord_id}/roles/${verifiedOwnerRoleId}`) && call.method === "DELETE").length, roleDeletesBeforeOtherServer + 1, "The final server deletion must send exactly one Discord role-delete request.");
+      assert.equal(await db.prepare("SELECT id FROM linked_servers WHERE id = 'server_delete_keep_other'").first(), null, "The final qualifying server may be removed after shared-role cleanup succeeds.");
+      const finalServerRoleLedger = await db.prepare("SELECT status, error_code FROM dzn_owner_discord_access_delivery_attempts WHERE request_id = 'server_delete_keep_request' AND operation = 'role_revoke' ORDER BY attempt_number DESC, created_at DESC, id DESC LIMIT 1").first<{ status: string; error_code: string | null }>();
+      assert.equal(finalServerRoleLedger?.status, "succeeded");
+      assert.equal(finalServerRoleLedger?.error_code, null, "The final cleanup must replace the prior retained-role audit outcome with a confirmed removal.");
+
       await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
         id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, error_code, created_at, completed_at
       ) VALUES ('account-closure-role-grant', 'account_closure_request', ?, ?, ?, ?, 'role_grant', 'started', 1, 'account-closure-role-grant-nonce', ?, ?, 'role_grant_may_have_reached', CURRENT_TIMESTAMP, NULL)`)
@@ -567,6 +716,10 @@ async function run() {
       assert.equal(blockedOwnerRoleRemovalAttempted, true, "Account closure must reconcile a retryable role grant rather than assuming that Discord rejected it.");
       assert.equal(blockedOwnerHasRole, true, "A failed account closure must not leave the cleanup path pretending the role was removed.");
       assert.notEqual(await db.prepare("SELECT id FROM users WHERE id = ? LIMIT 1").bind(blockedOwner.id).first(), null, "A failed owner-role removal must preserve the account for a safe retry.");
+      const blockedServerDeletion = await deleteOwnedLinkedServerData(env, blockedOwner.id, "server_blocked_closure_owner");
+      assert.equal(blockedServerDeletion.ok, false, "Server deletion must stop when DZN cannot confirm Discord owner-role removal.");
+      if (!blockedServerDeletion.ok) assert.equal(blockedServerDeletion.status, 503);
+      assert.notEqual(await db.prepare("SELECT id FROM linked_servers WHERE id = 'server_blocked_closure_owner'").first(), null, "A failed Discord role removal must preserve the linked server for a safe retry.");
 
       for (let index = 0; index < 3; index += 1) {
         await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
