@@ -41,6 +41,7 @@ const deletingOwner: SessionUser = { id: "closing_owner", discord_id: "900000000
 const blockedOwner: SessionUser = { id: "blocked_closure_owner", discord_id: "900000000000000010", username: "Blocked Closure Owner", avatar: null };
 const resolvedOwner: SessionUser = { id: "resolved_closure_owner", discord_id: "900000000000000011", username: "Resolved Closure Owner", avatar: null };
 const retainedRoleOwner: SessionUser = { id: "retained_role_closure_owner", discord_id: "900000000000000012", username: "Retained Role Closure Owner", avatar: null };
+const preflightFailedOwner: SessionUser = { id: "preflight_failed_owner", discord_id: "900000000000000013", username: "Preflight Failed Owner", avatar: null };
 const botPermissions = ((BigInt(1) << BigInt(28)) | (BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(0))).toString();
 
 function localD1(sqlite: Sqlite) {
@@ -97,6 +98,7 @@ async function run() {
   const migration = readFileSync("migrations/0095_dzn_owner_discord_delivery.sql", "utf8");
   assert.match(migration, /dzn_owner_discord_access_delivery_attempts/);
   assert.match(migration, /operation IN \('diagnostic', 'invite', 'role_grant', 'role_revoke'\)/);
+  assert.match(migration, /operation IN \('invite_issue', 'role_grant', 'role_revoke', 'revocation_decision', 'account_deletion'\)/);
   assert.match(migration, /idx_dzn_owner_discord_delivery_nonce/);
   assert.match(migration, /FOREIGN KEY\(request_id\) REFERENCES dzn_owner_discord_access_requests/);
   assert.doesNotMatch(migration, /discord\.com|DISCORD_BOT_TOKEN|CREATE\s+INVITE/i);
@@ -162,12 +164,13 @@ async function run() {
     ]) assert.equal(roleMutationIndexes.has(index), true, `The role-mutation lease table must create ${index}.`);
     const roleMutationForeignKeys = (await db.prepare("PRAGMA foreign_key_list(dzn_owner_discord_access_role_mutations)").all<{ table: string; from: string; on_delete: string }>()).results ?? [];
     assert.equal(roleMutationForeignKeys.some((key) => key.table === "dzn_owner_discord_access_requests" && key.from === "request_id" && key.on_delete === "CASCADE"), true, "Role mutation leases must be tied to a reviewed request.");
-    for (const user of [owner, applicant, outsider, deletingOwner, blockedOwner, resolvedOwner, retainedRoleOwner]) await db.prepare("INSERT INTO users (id, discord_id, username, avatar) VALUES (?, ?, ?, ?)").bind(user.id, user.discord_id, user.username, user.avatar).run();
+    for (const user of [owner, applicant, outsider, deletingOwner, blockedOwner, resolvedOwner, retainedRoleOwner, preflightFailedOwner]) await db.prepare("INSERT INTO users (id, discord_id, username, avatar) VALUES (?, ?, ?, ?)").bind(user.id, user.discord_id, user.username, user.avatar).run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_owner', ?, 'Verified owner server')").bind(applicant.id).run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_closing_owner', ?, 'Closing owner server')").bind(deletingOwner.id).run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_blocked_closure_owner', ?, 'Blocked closing owner server')").bind(blockedOwner.id).run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_resolved_closure_owner', ?, 'Resolved closing owner server')").bind(resolvedOwner.id).run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_retained_role_closure_owner', ?, 'Retained role closing owner server')").bind(retainedRoleOwner.id).run();
+    await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_preflight_failed_owner', ?, 'Preflight failed owner server')").bind(preflightFailedOwner.id).run();
     await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
       id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
     ) VALUES ('approved_request', ?, ?, ?, 'server_owner', 'server_owner', 'Verified owner server', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(applicant.id, applicant.discord_id, applicant.username).run();
@@ -186,6 +189,9 @@ async function run() {
     await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
       id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
     ) VALUES ('retained_role_account_closure_request', ?, ?, ?, 'server_retained_role_closure_owner', 'server_retained_role_closure_owner', 'Retained role closing owner server', 'revoked', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(retainedRoleOwner.id, retainedRoleOwner.discord_id, retainedRoleOwner.username).run();
+    await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+      id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
+    ) VALUES ('preflight_failed_account_closure_request', ?, ?, ?, 'server_preflight_failed_owner', 'server_preflight_failed_owner', 'Preflight failed owner server', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(preflightFailedOwner.id, preflightFailedOwner.discord_id, preflightFailedOwner.username).run();
 
     const env = {
       DB: db,
@@ -201,6 +207,7 @@ async function run() {
     const ownerSession = await createSession(env, owner.id);
     const applicantSession = await createSession(env, applicant.id);
     const outsiderSession = await createSession(env, outsider.id);
+    const preflightFailedOwnerSession = await createSession(env, preflightFailedOwner.id);
     let applicantJoined = false;
     let applicantHasRole = false;
     let deletingOwnerHasRole = true;
@@ -210,13 +217,18 @@ async function run() {
     const failBlockedOwnerRemoval = true;
     let inviteChannelAvailable = true;
     let pendingApplicantRoleGrant: { started: () => void; wait: Promise<void> } | null = null;
+    let pendingInvitePreflight: { started: () => void; wait: Promise<void> } | null = null;
+    let failBotIdentityPreflight = false;
     let activeBotPermissions = botPermissions;
     const calls: Array<{ path: string; method: string }> = [];
     const discordFetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = new URL(String(input));
       const method = init.method ?? "GET";
       calls.push({ path: url.pathname, method });
-      if (url.pathname === "/api/v10/users/@me") return Response.json({ id: botUserId });
+      if (url.pathname === "/api/v10/users/@me") {
+        if (failBotIdentityPreflight) throw new Error("Simulated Discord preflight outage");
+        return Response.json({ id: botUserId });
+      }
       if (url.pathname === `/api/v10/guilds/${guildId}/members/${botUserId}`) return Response.json({ roles: [botRoleId] });
       if (url.pathname === `/api/v10/guilds/${guildId}/roles`) return Response.json([
         { id: guildId, position: 0, permissions: "0" },
@@ -224,6 +236,12 @@ async function run() {
         { id: botRoleId, position: 10, permissions: activeBotPermissions },
       ]);
       if (url.pathname === `/api/v10/channels/${inviteChannelId}`) {
+        if (pendingInvitePreflight) {
+          const gate = pendingInvitePreflight;
+          pendingInvitePreflight = null;
+          gate.started();
+          await gate.wait;
+        }
         return inviteChannelAvailable
           ? Response.json({ id: inviteChannelId, guild_id: guildId, type: 0, permission_overwrites: [] })
           : new Response(null, { status: 404 });
@@ -335,6 +353,73 @@ async function run() {
       assert.equal(summaries.get("approved_request")?.status, "succeeded");
       assert.equal(/owner-private-join/.test(JSON.stringify([...summaries.values()])), false, "Applicant and owner delivery summaries must not expose a reusable invite code.");
 
+      failBotIdentityPreflight = true;
+      const preflightFailure = await claimOwnerDiscordAccessRole(env, request("POST", { requestId: "preflight_failed_account_closure_request" }, preflightFailedOwnerSession.token, "https://dzn.test"), { requestId: "preflight_failed_account_closure_request" }, discordFetch);
+      failBotIdentityPreflight = false;
+      assert.equal(preflightFailure.ok, false, "A Discord preflight outage must stop before any role mutation.");
+      assert.equal(preflightFailure.status, 503);
+      const preflightFailureLedger = await db.prepare("SELECT status, error_code FROM dzn_owner_discord_access_delivery_attempts WHERE request_id = 'preflight_failed_account_closure_request' AND operation = 'role_grant' ORDER BY created_at DESC LIMIT 1").first<{ status: string; error_code: string | null }>();
+      assert.equal(preflightFailureLedger?.status, "retryable_failure");
+      assert.equal(preflightFailureLedger?.error_code, "discord_error", "Preflight failures must not be recorded as an ambiguous role mutation.");
+      const preflightClosureMemberCalls = calls.filter((call) => call.path.includes(`/members/${preflightFailedOwner.discord_id}`)).length;
+      const preflightClosure = await deleteOwnedAccountData({
+        ...env,
+        DZN_OWNER_DISCORD_GUILD_ID: "900000000000000014",
+        DZN_OWNER_DISCORD_VERIFIED_OWNER_ROLE_ID: "900000000000000015",
+      }, preflightFailedOwner.id);
+      assert.equal(preflightClosure.ok, true, "A failed preflight must not block account closure after Discord configuration changes.");
+      assert.equal(calls.filter((call) => call.path.includes(`/members/${preflightFailedOwner.discord_id}`)).length, preflightClosureMemberCalls, "Account closure must not call Discord for a role grant that never reached the mutation boundary.");
+      assert.equal(await db.prepare("SELECT id FROM users WHERE id = ? LIMIT 1").bind(preflightFailedOwner.id).first(), null, "A preflight-only failure must not leave account deletion blocked.");
+
+      await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_invite_lease', ?, 'Invite lease server')").bind(outsider.id).run();
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+        id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
+      ) VALUES ('invite_lease_request', ?, ?, ?, 'server_invite_lease', 'server_invite_lease', 'Invite lease server', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(outsider.id, outsider.discord_id, outsider.username).run();
+      let invitePreflightStarted: (() => void) | null = null;
+      const invitePreflightStartedPromise = new Promise<void>((resolve) => { invitePreflightStarted = resolve; });
+      let releaseInvitePreflight: () => void = () => { throw new Error("The gated invite preflight was not initialised."); };
+      const invitePreflightReleasePromise = new Promise<void>((resolve) => { releaseInvitePreflight = resolve; });
+      pendingInvitePreflight = { started: () => invitePreflightStarted?.(), wait: invitePreflightReleasePromise };
+      const inFlightInvite = issueOwnerDiscordAccessInvite(env, request("POST", { requestId: "invite_lease_request" }, outsiderSession.token, "https://dzn.test"), { requestId: "invite_lease_request" }, discordFetch);
+      await invitePreflightStartedPromise;
+      const blockedInviteRevocation = await decideOwnerDiscordAccessRequest(env, owner, {
+        requestId: "invite_lease_request",
+        action: "revoked",
+        reason: "Private invite issuance must finish before access is revoked.",
+        decisionNonce: "invite-lease-revocation-blocked",
+      });
+      assert.equal(blockedInviteRevocation.ok, false, "A revocation must not race an in-flight private invite issuance.");
+      if (!blockedInviteRevocation.ok) assert.equal(blockedInviteRevocation.status, 409);
+      releaseInvitePreflight();
+      const completedInvite = await inFlightInvite;
+      assert.equal(completedInvite.ok, true, "The existing invite may complete before the serialized revocation is recorded.");
+      const completedInviteRevocation = await decideOwnerDiscordAccessRequest(env, owner, {
+        requestId: "invite_lease_request",
+        action: "revoked",
+        reason: "Private invite access is no longer required.",
+        decisionNonce: "invite-lease-revocation-complete",
+      });
+      assert.equal(completedInviteRevocation.ok, true, "The invitation lease must release before a later revocation can be recorded.");
+
+      await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_invite_recheck', ?, 'Invite recheck server')").bind(outsider.id).run();
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+        id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
+      ) VALUES ('invite_recheck_request', ?, ?, ?, 'server_invite_recheck', 'server_invite_recheck', 'Invite recheck server', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(outsider.id, outsider.discord_id, outsider.username).run();
+      let inviteRecheckStarted: (() => void) | null = null;
+      const inviteRecheckStartedPromise = new Promise<void>((resolve) => { inviteRecheckStarted = resolve; });
+      let releaseInviteRecheck: () => void = () => { throw new Error("The gated invite recheck was not initialised."); };
+      const inviteRecheckReleasePromise = new Promise<void>((resolve) => { releaseInviteRecheck = resolve; });
+      const invitePostsBeforeRecheck = calls.filter((call) => call.path === `/api/v10/channels/${inviteChannelId}/invites` && call.method === "POST").length;
+      pendingInvitePreflight = { started: () => inviteRecheckStarted?.(), wait: inviteRecheckReleasePromise };
+      const inFlightRecheckedInvite = issueOwnerDiscordAccessInvite(env, request("POST", { requestId: "invite_recheck_request" }, outsiderSession.token, "https://dzn.test"), { requestId: "invite_recheck_request" }, discordFetch);
+      await inviteRecheckStartedPromise;
+      await db.prepare("UPDATE dzn_owner_discord_access_requests SET status = 'revoked' WHERE id = 'invite_recheck_request'").run();
+      releaseInviteRecheck();
+      const rejectedRecheckedInvite = await inFlightRecheckedInvite;
+      assert.equal(rejectedRecheckedInvite.ok, false, "A final approval check must stop invite creation after a concurrent decision change.");
+      assert.equal(rejectedRecheckedInvite.status, 409);
+      assert.equal(calls.filter((call) => call.path === `/api/v10/channels/${inviteChannelId}/invites` && call.method === "POST").length, invitePostsBeforeRecheck, "A revoked request must not create a private Discord invite after preflight.");
+
       await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_race', ?, 'Role mutation race server')").bind(applicant.id).run();
       await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
         id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
@@ -392,8 +477,8 @@ async function run() {
       inviteChannelAvailable = true;
 
       await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
-        id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, created_at, completed_at
-      ) VALUES ('account-closure-role-grant', 'account_closure_request', ?, ?, ?, ?, 'role_grant', 'started', 1, 'account-closure-role-grant-nonce', ?, ?, CURRENT_TIMESTAMP, NULL)`)
+        id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, error_code, created_at, completed_at
+      ) VALUES ('account-closure-role-grant', 'account_closure_request', ?, ?, ?, ?, 'role_grant', 'started', 1, 'account-closure-role-grant-nonce', ?, ?, 'role_grant_may_have_reached', CURRENT_TIMESTAMP, NULL)`)
         .bind(deletingOwner.id, deletingOwner.discord_id, owner.id, owner.discord_id, guildId, verifiedOwnerRoleId).run();
       const closureResult = await deleteOwnedAccountData(env, deletingOwner.id);
       assert.equal(closureResult.ok, true, "Account closure must reconcile an in-progress role grant before anonymising the account.");
@@ -427,8 +512,8 @@ async function run() {
       assert.notEqual(await db.prepare("SELECT id FROM users WHERE id = ? LIMIT 1").bind(retainedRoleOwner.id).first(), null, "Account closure must preserve an account while a recorded Discord role may still be active.");
 
       await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
-        id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, created_at, completed_at
-      ) VALUES ('blocked-account-closure-role-grant', 'blocked_account_closure_request', ?, ?, ?, ?, 'role_grant', 'retryable_failure', 1, 'blocked-account-closure-role-grant-nonce', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+        id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, error_code, created_at, completed_at
+      ) VALUES ('blocked-account-closure-role-grant', 'blocked_account_closure_request', ?, ?, ?, ?, 'role_grant', 'retryable_failure', 1, 'blocked-account-closure-role-grant-nonce', ?, ?, 'role_grant_may_have_reached', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
         .bind(blockedOwner.id, blockedOwner.discord_id, owner.id, owner.discord_id, guildId, verifiedOwnerRoleId).run();
       const blockedClosure = await deleteOwnedAccountData(env, blockedOwner.id);
       assert.equal(blockedClosure.ok, false, "Account closure must stop when Discord owner-role removal fails.");

@@ -39,14 +39,14 @@ CREATE INDEX IF NOT EXISTS idx_dzn_owner_discord_delivery_actor
 CREATE INDEX IF NOT EXISTS idx_dzn_owner_discord_delivery_status
   ON dzn_owner_discord_access_delivery_attempts(status, created_at DESC);
 
--- A short lease serializes external role grants, revocations, and account
--- closure cleanup for a single Discord identity. The lease never stores a
--- token, invite code, or Discord role membership state.
+-- A short lease serializes one-use invite issuance, external role grants,
+-- revocations, and account-closure cleanup for a single Discord identity. The
+-- lease never stores a token, invite code, or Discord role membership state.
 CREATE TABLE IF NOT EXISTS dzn_owner_discord_access_role_mutations (
   discord_id TEXT PRIMARY KEY,
   request_id TEXT NOT NULL,
   lease_id TEXT NOT NULL UNIQUE,
-  operation TEXT NOT NULL CHECK (operation IN ('role_grant', 'role_revoke', 'revocation_decision', 'account_deletion')),
+  operation TEXT NOT NULL CHECK (operation IN ('invite_issue', 'role_grant', 'role_revoke', 'revocation_decision', 'account_deletion')),
   expires_at TEXT NOT NULL,
   acquired_at TEXT NOT NULL,
   FOREIGN KEY(request_id) REFERENCES dzn_owner_discord_access_requests(id) ON DELETE CASCADE

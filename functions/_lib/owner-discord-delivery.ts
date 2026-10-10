@@ -21,7 +21,7 @@ type AttemptConfiguration = RoleDeliveryConfiguration & {
   inviteChannelId?: string | null;
 };
 
-type RoleMutationOperation = "role_grant" | "role_revoke" | "revocation_decision" | "account_deletion";
+type RoleMutationOperation = "invite_issue" | "role_grant" | "role_revoke" | "revocation_decision" | "account_deletion";
 
 type RoleMutationLease = {
   discordId: string;
@@ -175,11 +175,22 @@ export async function issueOwnerDiscordAccessInvite(env: Env, request: Request, 
   if (access.requester_discord_id !== user.discord_id) return problem(403, "Use the same Discord account that made this owner-access request.");
   const configuration = readInviteDeliveryConfiguration(env);
   if (!configuration) return problem(503, "Private Discord delivery is not configured yet.");
-  const attempt = await startInviteAttempt(env, access, configuration, user);
-  if (!attempt) return problem(429, "Too many private invites were requested recently. Wait before requesting another one.");
+  const lease = await acquireRoleMutationLease(env, {
+    requestId: access.id,
+    discordId: user.discord_id,
+    operation: "invite_issue",
+    requiredStatus: "approved",
+  });
+  if (!lease) return problem(409, "This owner-access request is changing. Refresh the page before requesting a private Discord invite.");
+  let attempt: Awaited<ReturnType<typeof startInviteAttempt>> = null;
   try {
+    attempt = await startInviteAttempt(env, access, configuration, user);
+    if (!attempt) return problem(429, "Too many private invites were requested recently. Wait before requesting another one.");
     const preflight = await checkDiscordDeliveryConfiguration(configuration, fetcher);
     if (!preflight.ok) return finishProblem(env, attempt, preflightToDeliveryStatus(preflight.status), preflight.message, preflight.httpStatus ?? null, preflight.status);
+    if (!(await requestIsStillApprovedForApplicant(env, access.id, user))) {
+      return finishProblem(env, attempt, "failed", "The owner-access decision changed before DZN could issue a private Discord invite.", null, "request_changed");
+    }
     const response = await discordRequest(fetcher, configuration, `/channels/${encodeURIComponent(configuration.inviteChannelId)}/invites`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -200,7 +211,10 @@ export async function issueOwnerDiscordAccessInvite(env: Env, request: Request, 
       attempt: completed,
     };
   } catch (error) {
+    if (!attempt) return problem(503, "DZN could not safely prepare a private Discord invite. You can retry this step.");
     return finishProblem(env, attempt, "retryable_failure", "DZN could not reach Discord to issue the private invite. You can retry this step.", null, classifyThrownDiscordError(error));
+  } finally {
+    await releaseRoleMutationLease(env, lease);
   }
 }
 
@@ -226,6 +240,7 @@ export async function claimOwnerDiscordAccessRole(env: Env, request: Request, ra
   });
   if (!lease) return problem(409, "This owner-access request is changing. Refresh the page before finishing Discord access.");
   const attempt = await startAttempt(env, access, "role_grant", configuration, user);
+  let roleGrantMayHaveReachedDiscord = false;
   try {
     const preflight = await checkDiscordRoleConfiguration(configuration, fetcher);
     if (!preflight.ok) return finishProblem(env, attempt, preflightToDeliveryStatus(preflight.status), preflight.message, preflight.httpStatus ?? null, preflight.status);
@@ -242,14 +257,22 @@ export async function claimOwnerDiscordAccessRole(env: Env, request: Request, ra
       if (!(await requestIsStillApprovedForApplicant(env, access.id, user))) {
         return finishProblem(env, attempt, "failed", "The owner-access decision changed before the Discord role could be assigned.", null, "request_changed");
       }
+      if (!(await markRoleGrantMayHaveReachedDiscord(env, attempt))) {
+        return finishProblem(env, attempt, "retryable_failure", "DZN could not safely record the Discord role assignment before sending it. You can retry this step.", null, "role_grant_ledger");
+      }
+      roleGrantMayHaveReachedDiscord = true;
+      if (!(await requestIsStillApprovedForApplicant(env, access.id, user))) {
+        return finishProblem(env, attempt, "failed", "The owner-access decision changed before the Discord role could be assigned.", null, "request_changed");
+      }
       const assigned = await discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(user.discord_id)}/roles/${encodeURIComponent(configuration.verifiedOwnerRoleId)}`, { method: "PUT" });
       if (!assigned.response.ok) {
-        return finishProblem(env, attempt, deliveryStatusForHttp(assigned.response.status), "DZN could not assign the Verified Server Owner role. You can retry this step.", assigned.response.status, errorCodeForHttp(assigned.response.status));
+        const status = deliveryStatusForHttp(assigned.response.status);
+        return finishProblem(env, attempt, status, "DZN could not assign the Verified Server Owner role. You can retry this step.", assigned.response.status, status === "retryable_failure" ? "role_grant_may_have_reached" : errorCodeForHttp(assigned.response.status));
       }
       if (!(await requestIsStillApprovedForApplicant(env, access.id, user))) {
         const removed = await discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(user.discord_id)}/roles/${encodeURIComponent(configuration.verifiedOwnerRoleId)}`, { method: "DELETE" });
         if (!removed.response.ok && removed.response.status !== 404) {
-          return finishProblem(env, attempt, "retryable_failure", "The owner-access decision changed while Discord role delivery was completing. DZN could not confirm role removal; retry the revocation.", removed.response.status, errorCodeForHttp(removed.response.status));
+          return finishProblem(env, attempt, "retryable_failure", "The owner-access decision changed while Discord role delivery was completing. DZN could not confirm role removal; retry the revocation.", removed.response.status, "role_grant_may_have_reached");
         }
         return finishProblem(env, attempt, "failed", "The owner-access decision changed before role delivery completed, so the role was removed.", removed.response.status, "request_changed");
       }
@@ -257,7 +280,7 @@ export async function claimOwnerDiscordAccessRole(env: Env, request: Request, ra
     const completed = await finishAttempt(env, attempt, "succeeded", null, null, 204);
     return { ok: true, status: 200, message: "Verified Server Owner access is active in DZN Discord.", attempt: completed };
   } catch (error) {
-    return finishProblem(env, attempt, "retryable_failure", "DZN could not reach Discord while finishing owner access. You can retry this step.", null, classifyThrownDiscordError(error));
+    return finishProblem(env, attempt, "retryable_failure", "DZN could not reach Discord while finishing owner access. You can retry this step.", null, roleGrantMayHaveReachedDiscord ? "role_grant_may_have_reached" : classifyThrownDiscordError(error));
   } finally {
     await releaseRoleMutationLease(env, lease);
   }
@@ -327,7 +350,13 @@ export async function revokeOwnerDiscordRoleForAccountDeletion(env: Env, userId:
     JOIN dzn_owner_discord_access_requests AS request ON request.id = delivery.request_id
     WHERE delivery.requester_user_id = ?
       AND delivery.operation = 'role_grant'
-      AND delivery.status IN ('started', 'succeeded', 'retryable_failure')
+      AND (
+        delivery.status = 'succeeded'
+        OR (
+          delivery.status IN ('started', 'retryable_failure')
+          AND delivery.error_code = 'role_grant_may_have_reached'
+        )
+      )
       AND NOT EXISTS (
         SELECT 1
         FROM dzn_owner_discord_access_delivery_attempts AS revocation
@@ -522,6 +551,15 @@ async function finishAttempt(env: Env, attempt: Awaited<ReturnType<typeof startA
     completedAt,
     message: deliveryMessage(attempt.operation, status, errorMessage),
   } satisfies OwnerDiscordDeliveryAttempt;
+}
+
+// Mark the ledger just before the external role mutation. A crash after this
+// point is reconciled before account deletion; preflight failures are not.
+async function markRoleGrantMayHaveReachedDiscord(env: Env, attempt: Awaited<ReturnType<typeof startAttempt>>) {
+  const result = await requireDb(env).prepare(`UPDATE dzn_owner_discord_access_delivery_attempts
+    SET error_code = 'role_grant_may_have_reached', error_message = 'Discord role assignment may be in progress.'
+    WHERE id = ? AND operation = 'role_grant' AND status = 'started'`).bind(attempt.id).run();
+  return Number(result.meta.changes ?? 0) === 1;
 }
 
 async function finishProblem(env: Env, attempt: Awaited<ReturnType<typeof startAttempt>>, status: DeliveryStatus, message: string, httpStatus: number | null, errorCode: string): Promise<OwnerDiscordDeliveryResult> {
