@@ -145,6 +145,21 @@ export function OwnerDiscordAccessPage() {
   }, [load]);
   const requests = payload?.requests ?? [];
   const audit = payload?.audit ?? [];
+  async function removeDeliveryRole(requestId: string) {
+    const response = await fetch("/api/owner/discord/owner-access-delivery", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId, action: "revoke_role" }),
+    });
+    const next = await response.json().catch(() => null) as {
+      ok?: boolean;
+      message?: string;
+    } | null;
+    if (!response.ok || !next?.ok)
+      throw new Error(next?.message ?? "DZN could not remove the Discord owner role.");
+    return next.message ?? "Verified Server Owner role removed.";
+  }
   async function decide(
     request: RequestItem,
     action: "approved" | "rejected" | "revoked",
@@ -152,6 +167,10 @@ export function OwnerDiscordAccessPage() {
     const reason = (reasonById[request.id] ?? "").trim();
     if (reason.length < 5) {
       setNotice("Enter a clear decision reason first.");
+      return;
+    }
+    if (action === "revoked" && deliveryBusyId) {
+      setNotice("Wait for the current Discord role cleanup to finish first.");
       return;
     }
     const decisionFilterRevision = filterRevision.current;
@@ -176,11 +195,35 @@ export function OwnerDiscordAccessPage() {
       if (!response.ok || !next?.ok)
         throw new Error(next?.message ?? "The decision could not be saved.");
       setReasonById((current) => ({ ...current, [request.id]: "" }));
-      setNotice(
-        action === "approved"
-          ? "Approval recorded. The owner can continue only after central Discord delivery is ready."
-          : `${action[0].toUpperCase()}${action.slice(1)} decision recorded.`,
-      );
+      if (action === "revoked") {
+        if (!payload?.discordAccessConfigured) {
+          setNotice(
+            "Access revoked. Discord role cleanup cannot be verified until central delivery is configured.",
+          );
+          setQueueStatus("revoked");
+          return;
+        }
+        setDeliveryBusyId(request.id);
+        try {
+          const deliveryMessage = await removeDeliveryRole(request.id);
+          setNotice(`Access revoked. ${deliveryMessage}`);
+        } catch (error) {
+          const message = error instanceof Error
+            ? error.message
+            : "DZN could not remove the Discord owner role.";
+          setNotice(`Access revoked, but Discord role cleanup needs retry: ${message}`);
+          setQueueStatus("revoked");
+          return;
+        } finally {
+          setDeliveryBusyId(null);
+        }
+      } else {
+        setNotice(
+          action === "approved"
+            ? "Approval recorded. The owner can continue only after central Discord delivery is ready."
+            : `${action[0].toUpperCase()}${action.slice(1)} decision recorded.`,
+        );
+      }
       if (filterRevision.current === decisionFilterRevision) await load();
     } catch (error) {
       setNotice(
@@ -208,15 +251,7 @@ export function OwnerDiscordAccessPage() {
     if (deliveryBusyId) return;
     setDeliveryBusyId(requestId); setNotice(null);
     try {
-      const response = await fetch("/api/owner/discord/owner-access-delivery", {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ requestId, action: "revoke_role" }),
-      });
-      const next = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
-      if (!response.ok || !next?.ok) throw new Error(next?.message ?? "DZN could not remove the Discord owner role.");
-      setNotice(next.message ?? "Verified Server Owner role removed.");
+      setNotice(await removeDeliveryRole(requestId));
       await load();
     } catch (error) { setNotice(error instanceof Error ? error.message : "DZN could not remove the Discord owner role."); }
     finally { setDeliveryBusyId(null); }
@@ -439,7 +474,15 @@ export function OwnerDiscordAccessPage() {
                           </div>
                         </div>
                       ) : null}
-                      {request.status === "revoked" && payload?.discordAccessConfigured ? <div className="mt-4"><button type="button" disabled={deliveryBusyId === request.id} onClick={() => void revokeDelivery(request.id)} className="inline-flex items-center gap-2 rounded-md border border-amber-300/30 bg-amber-300/[0.08] px-3 py-2 text-xs font-black text-amber-100 disabled:opacity-50"><CircleAlert size={14} />{deliveryBusyId === request.id ? "Removing Discord role..." : "Remove Discord owner role"}</button></div> : null}
+                      {request.status === "revoked" ? (
+                        <div className="mt-4">
+                          {payload?.discordAccessConfigured ? (
+                            <button type="button" disabled={deliveryBusyId === request.id} onClick={() => void revokeDelivery(request.id)} className="inline-flex items-center gap-2 rounded-md border border-amber-300/30 bg-amber-300/[0.08] px-3 py-2 text-xs font-black text-amber-100 disabled:opacity-50"><CircleAlert size={14} />{deliveryBusyId === request.id ? "Removing Discord role..." : "Remove Discord owner role"}</button>
+                          ) : (
+                            <p className="text-xs font-bold text-amber-100">Discord role cleanup cannot be verified until central delivery is configured.</p>
+                          )}
+                        </div>
+                      ) : null}
                     </article>
                   ))
                 ) : (

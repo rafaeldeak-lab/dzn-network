@@ -328,6 +328,15 @@ export async function revokeOwnerDiscordRoleForAccountDeletion(env: Env, userId:
     WHERE delivery.requester_user_id = ?
       AND delivery.operation = 'role_grant'
       AND delivery.status IN ('started', 'succeeded', 'retryable_failure')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM dzn_owner_discord_access_delivery_attempts AS revocation
+        WHERE revocation.request_id = delivery.request_id
+          AND revocation.operation = 'role_revoke'
+          AND revocation.status = 'succeeded'
+          AND revocation.completed_at IS NOT NULL
+          AND (revocation.error_code IS NULL OR revocation.error_code = 'member_not_joined')
+      )
     ORDER BY delivery.completed_at DESC, delivery.created_at DESC, delivery.id DESC`)
     .bind(userId)
     .all<AccessRequestRow & { guild_id: string | null; role_id: string | null }>();

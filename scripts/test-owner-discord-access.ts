@@ -134,6 +134,10 @@ async function run() {
   assert.match(ownerQueuePage, /filterRevision\.current === decisionFilterRevision\) await load\(\)/, "A completed decision must not reload a queue after its filters have changed.");
   assert.match(ownerQueuePage, /filterRevision\.current \+= 1;\s*setStatus\(nextStatus\)/, "Changing the status filter must invalidate an in-flight decision refresh.");
   assert.match(ownerQueuePage, /filterRevision\.current \+= 1;\s*setAppliedSearch\(nextSearch\)/, "Changing the search filter must invalidate an in-flight decision refresh.");
+  assert.match(ownerQueuePage, /const deliveryMessage = await removeDeliveryRole\(request\.id\)/, "A successful revocation must remove the Discord owner role before the filtered queue refresh can hide the request.");
+  assert.match(ownerQueuePage, /Access revoked, but Discord role cleanup needs retry/, "A failed role removal must be reported as incomplete rather than as a completed revocation.");
+  assert.match(ownerQueuePage, /setQueueStatus\("revoked"\)/, "A failed or unavailable role cleanup must leave the request reachable in the revoked queue.");
+  assert.match(ownerQueuePage, /Discord role cleanup cannot be verified until central delivery is configured/, "Revoked requests must retain an explicit pending-cleanup state while delivery is unavailable.");
   const ownerConsole = readFileSync("components/owner/owner-console.tsx", "utf8");
   assert.doesNotMatch(ownerConsole, /ownerDiscordAccessEnabled/, "The owner console must not compile a runtime feature flag into static output.");
   assert.match(ownerConsole, /<Link href="\/owner\/discord-access"/, "The owner console must retain the static route entry point while the API enforces the runtime feature gate.");

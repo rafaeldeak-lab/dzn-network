@@ -39,6 +39,8 @@ const applicant: SessionUser = { id: "server_owner", discord_id: "90000000000000
 const outsider: SessionUser = { id: "outsider", discord_id: "900000000000000008", username: "Outsider", avatar: null };
 const deletingOwner: SessionUser = { id: "closing_owner", discord_id: "900000000000000009", username: "Closing Owner", avatar: null };
 const blockedOwner: SessionUser = { id: "blocked_closure_owner", discord_id: "900000000000000010", username: "Blocked Closure Owner", avatar: null };
+const resolvedOwner: SessionUser = { id: "resolved_closure_owner", discord_id: "900000000000000011", username: "Resolved Closure Owner", avatar: null };
+const retainedRoleOwner: SessionUser = { id: "retained_role_closure_owner", discord_id: "900000000000000012", username: "Retained Role Closure Owner", avatar: null };
 const botPermissions = ((BigInt(1) << BigInt(28)) | (BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(0))).toString();
 
 function localD1(sqlite: Sqlite) {
@@ -160,10 +162,12 @@ async function run() {
     ]) assert.equal(roleMutationIndexes.has(index), true, `The role-mutation lease table must create ${index}.`);
     const roleMutationForeignKeys = (await db.prepare("PRAGMA foreign_key_list(dzn_owner_discord_access_role_mutations)").all<{ table: string; from: string; on_delete: string }>()).results ?? [];
     assert.equal(roleMutationForeignKeys.some((key) => key.table === "dzn_owner_discord_access_requests" && key.from === "request_id" && key.on_delete === "CASCADE"), true, "Role mutation leases must be tied to a reviewed request.");
-    for (const user of [owner, applicant, outsider, deletingOwner, blockedOwner]) await db.prepare("INSERT INTO users (id, discord_id, username, avatar) VALUES (?, ?, ?, ?)").bind(user.id, user.discord_id, user.username, user.avatar).run();
+    for (const user of [owner, applicant, outsider, deletingOwner, blockedOwner, resolvedOwner, retainedRoleOwner]) await db.prepare("INSERT INTO users (id, discord_id, username, avatar) VALUES (?, ?, ?, ?)").bind(user.id, user.discord_id, user.username, user.avatar).run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_owner', ?, 'Verified owner server')").bind(applicant.id).run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_closing_owner', ?, 'Closing owner server')").bind(deletingOwner.id).run();
     await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_blocked_closure_owner', ?, 'Blocked closing owner server')").bind(blockedOwner.id).run();
+    await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_resolved_closure_owner', ?, 'Resolved closing owner server')").bind(resolvedOwner.id).run();
+    await db.prepare("INSERT INTO linked_servers (id, user_id, server_name) VALUES ('server_retained_role_closure_owner', ?, 'Retained role closing owner server')").bind(retainedRoleOwner.id).run();
     await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
       id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
     ) VALUES ('approved_request', ?, ?, ?, 'server_owner', 'server_owner', 'Verified owner server', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(applicant.id, applicant.discord_id, applicant.username).run();
@@ -176,6 +180,12 @@ async function run() {
     await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
       id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
     ) VALUES ('blocked_account_closure_request', ?, ?, ?, 'server_blocked_closure_owner', 'server_blocked_closure_owner', 'Blocked closing owner server', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(blockedOwner.id, blockedOwner.discord_id, blockedOwner.username).run();
+    await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+      id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
+    ) VALUES ('resolved_account_closure_request', ?, ?, ?, 'server_resolved_closure_owner', 'server_resolved_closure_owner', 'Resolved closing owner server', 'revoked', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(resolvedOwner.id, resolvedOwner.discord_id, resolvedOwner.username).run();
+    await db.prepare(`INSERT INTO dzn_owner_discord_access_requests (
+      id, requester_user_id, requester_discord_id, requester_username, linked_server_id, linked_server_id_snapshot, server_name, status, created_at, updated_at
+    ) VALUES ('retained_role_account_closure_request', ?, ?, ?, 'server_retained_role_closure_owner', 'server_retained_role_closure_owner', 'Retained role closing owner server', 'revoked', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).bind(retainedRoleOwner.id, retainedRoleOwner.discord_id, retainedRoleOwner.username).run();
 
     const env = {
       DB: db,
@@ -390,6 +400,31 @@ async function run() {
       assert.equal(deletingOwnerHasRole, false, "Account closure must remove a role that may have been granted before its delivery record completed.");
       assert.equal(roleRemovalSawAccount, true, "Discord owner-role reconciliation must happen before the account identity is deleted.");
       assert.equal(await db.prepare("SELECT id FROM users WHERE id = ? LIMIT 1").bind(deletingOwner.id).first(), null, "Account closure may anonymise only after uncertain role delivery has been reconciled.");
+
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
+        id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, created_at, completed_at
+      ) VALUES ('resolved-account-closure-role-grant', 'resolved_account_closure_request', ?, ?, ?, ?, 'role_grant', 'succeeded', 1, 'resolved-account-closure-role-grant-nonce', 'retired-guild', 'retired-role', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:01.000Z')`)
+        .bind(resolvedOwner.id, resolvedOwner.discord_id, owner.id, owner.discord_id).run();
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
+        id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, created_at, completed_at
+      ) VALUES ('resolved-account-closure-role-revoke', 'resolved_account_closure_request', ?, ?, ?, ?, 'role_revoke', 'succeeded', 1, 'resolved-account-closure-role-revoke-nonce', 'retired-guild', 'retired-role', '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:01.000Z')`)
+        .bind(resolvedOwner.id, resolvedOwner.discord_id, owner.id, owner.discord_id).run();
+      const resolvedClosure = await deleteOwnedAccountData(env, resolvedOwner.id);
+      assert.equal(resolvedClosure.ok, true, "A confirmed historical role removal must not block account closure after Discord role configuration changes.");
+      assert.equal(await db.prepare("SELECT id FROM users WHERE id = ? LIMIT 1").bind(resolvedOwner.id).first(), null, "Account closure must ignore grants that a confirmed role removal has already resolved.");
+
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
+        id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, created_at, completed_at
+      ) VALUES ('retained-role-account-closure-grant', 'retained_role_account_closure_request', ?, ?, ?, ?, 'role_grant', 'succeeded', 1, 'retained-role-account-closure-grant-nonce', 'retired-guild', 'retired-role', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:01.000Z')`)
+        .bind(retainedRoleOwner.id, retainedRoleOwner.discord_id, owner.id, owner.discord_id).run();
+      await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
+        id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, error_code, created_at, completed_at
+      ) VALUES ('retained-role-account-closure-role-revoke', 'retained_role_account_closure_request', ?, ?, ?, ?, 'role_revoke', 'succeeded', 1, 'retained-role-account-closure-role-revoke-nonce', 'retired-guild', 'retired-role', 'other_approved_request', '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:01.000Z')`)
+        .bind(retainedRoleOwner.id, retainedRoleOwner.discord_id, owner.id, owner.discord_id).run();
+      const retainedRoleClosure = await deleteOwnedAccountData(env, retainedRoleOwner.id);
+      assert.equal(retainedRoleClosure.ok, false, "A retained role outcome must not be mistaken for a confirmed Discord role removal.");
+      if (!retainedRoleClosure.ok) assert.equal(retainedRoleClosure.status, 503);
+      assert.notEqual(await db.prepare("SELECT id FROM users WHERE id = ? LIMIT 1").bind(retainedRoleOwner.id).first(), null, "Account closure must preserve an account while a recorded Discord role may still be active.");
 
       await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
         id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, created_at, completed_at
