@@ -1,5 +1,9 @@
 import { requireDb } from "./db";
-import { revokeOwnerDiscordRoleForAccountDeletion } from "./owner-discord-delivery";
+import {
+  releaseOwnerDiscordRoleMutationLease,
+  reserveOwnerDiscordAccountDeletionLease,
+  revokeOwnerDiscordRoleForAccountDeletion,
+} from "./owner-discord-delivery";
 import type { Env } from "./types";
 
 export const OWNER_DELETE_FORBIDDEN_MESSAGE = "Only the original server owner who linked this server to DZN can permanently delete it.";
@@ -129,49 +133,57 @@ export async function deleteOwnedLinkedServerData(env: Env, userId: string, link
 
 export async function deleteOwnedAccountData(env: Env, userId: string) {
   const db = requireDb(env);
-  const discordRoleCleanup = await revokeOwnerDiscordRoleForAccountDeletion(env, userId);
-  if (!discordRoleCleanup.ok) return discordRoleCleanup;
-  const deleted = emptyDeletionCounts();
-  const servers = await db
-    .prepare("SELECT id FROM linked_servers WHERE user_id = ?")
-    .bind(userId)
-    .all<{ id: string }>();
-
-  for (const server of servers.results ?? []) {
-    const result = await deleteOwnedLinkedServerData(env, userId, server.id);
-    if (result.ok) mergeDeletionCounts(deleted, result.deleted);
+  const discordRoleReservation = await reserveOwnerDiscordAccountDeletionLease(env, userId);
+  if (discordRoleReservation.required && !discordRoleReservation.lease) {
+    return { ok: false as const, status: 409 as const, message: "DZN is still issuing or changing this account's Discord owner access. Retry account closure shortly." };
   }
+  try {
+    const discordRoleCleanup = await revokeOwnerDiscordRoleForAccountDeletion(env, userId, fetch, discordRoleReservation.lease);
+    if (!discordRoleCleanup.ok) return discordRoleCleanup;
+    const deleted = emptyDeletionCounts();
+    const servers = await db
+      .prepare("SELECT id FROM linked_servers WHERE user_id = ?")
+      .bind(userId)
+      .all<{ id: string }>();
 
-  deleted.nitradoConnections += await deleteRows(db, "DELETE FROM nitrado_connections WHERE user_id = ?", [userId]);
-  if (await tableExists(db, "discord_oauth_tokens")) {
-    await deleteRows(db, "DELETE FROM discord_oauth_tokens WHERE user_id = ?", [userId]);
-  }
-  deleted.sessions += await deleteRows(db, "DELETE FROM sessions WHERE user_id = ?", [userId]);
-  deleted.discordGuilds += await deleteRows(
-    db,
-    `DELETE FROM discord_guilds
-     WHERE owner_user_id = ?
-       AND NOT EXISTS (
-         SELECT 1 FROM linked_servers WHERE linked_servers.discord_guild_id = discord_guilds.id
-       )`,
-    [userId],
-  );
-  if (await tableExists(db, "user_notifications")) {
-    if (await tableExists(db, "player_game_identity_claims")) {
-      await deleteRows(db,
-        `DELETE FROM user_notifications
-         WHERE type = 'player_link_review_requested'
-           AND json_extract(metadata, '$.claim_id') IN (
-             SELECT id FROM player_game_identity_claims WHERE user_id = ?
-           )`,
-        [userId],
-      );
+    for (const server of servers.results ?? []) {
+      const result = await deleteOwnedLinkedServerData(env, userId, server.id);
+      if (result.ok) mergeDeletionCounts(deleted, result.deleted);
     }
-    await deleteRows(db, "DELETE FROM user_notifications WHERE user_id = ?", [userId]);
-  }
-  deleted.users += await eraseOrRetainAccountUser(db, userId);
 
-  return { ok: true as const, deleted };
+    deleted.nitradoConnections += await deleteRows(db, "DELETE FROM nitrado_connections WHERE user_id = ?", [userId]);
+    if (await tableExists(db, "discord_oauth_tokens")) {
+      await deleteRows(db, "DELETE FROM discord_oauth_tokens WHERE user_id = ?", [userId]);
+    }
+    deleted.sessions += await deleteRows(db, "DELETE FROM sessions WHERE user_id = ?", [userId]);
+    deleted.discordGuilds += await deleteRows(
+      db,
+      `DELETE FROM discord_guilds
+       WHERE owner_user_id = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM linked_servers WHERE linked_servers.discord_guild_id = discord_guilds.id
+         )`,
+      [userId],
+    );
+    if (await tableExists(db, "user_notifications")) {
+      if (await tableExists(db, "player_game_identity_claims")) {
+        await deleteRows(db,
+          `DELETE FROM user_notifications
+           WHERE type = 'player_link_review_requested'
+             AND json_extract(metadata, '$.claim_id') IN (
+               SELECT id FROM player_game_identity_claims WHERE user_id = ?
+             )`,
+          [userId],
+        );
+      }
+      await deleteRows(db, "DELETE FROM user_notifications WHERE user_id = ?", [userId]);
+    }
+    deleted.users += await eraseOrRetainAccountUser(db, userId);
+
+    return { ok: true as const, deleted };
+  } finally {
+    await releaseOwnerDiscordRoleMutationLease(env, discordRoleReservation.lease);
+  }
 }
 
 export async function eraseOrRetainAccountUser(db: D1Database, userId: string) {

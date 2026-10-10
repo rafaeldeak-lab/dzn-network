@@ -33,6 +33,7 @@ type AccessRequestRow = {
   status: "pending" | "approved" | "rejected" | "revoked";
   requester_user_id: string | null;
   requester_discord_id: string | null;
+  linked_server_id: string | null;
 };
 
 type DiscordRole = {
@@ -184,6 +185,9 @@ export async function issueOwnerDiscordAccessInvite(env: Env, request: Request, 
   if (!lease) return problem(409, "This owner-access request is changing. Refresh the page before requesting a private Discord invite.");
   let attempt: Awaited<ReturnType<typeof startInviteAttempt>> = null;
   try {
+    if (!(await requestIsStillApprovedForApplicant(env, access.id, user))) {
+      return problem(409, "This owner-access request no longer has a currently verified live server. Refresh the page before requesting a private Discord invite.");
+    }
     attempt = await startInviteAttempt(env, access, configuration, user);
     if (!attempt) return problem(429, "Too many private invites were requested recently. Wait before requesting another one.");
     const preflight = await checkDiscordDeliveryConfiguration(configuration, fetcher);
@@ -239,9 +243,13 @@ export async function claimOwnerDiscordAccessRole(env: Env, request: Request, ra
     requiredStatus: "approved",
   });
   if (!lease) return problem(409, "This owner-access request is changing. Refresh the page before finishing Discord access.");
-  const attempt = await startAttempt(env, access, "role_grant", configuration, user);
+  let attempt: Awaited<ReturnType<typeof startAttempt>> | null = null;
   let roleGrantMayHaveReachedDiscord = false;
   try {
+    if (!(await requestIsStillApprovedForApplicant(env, access.id, user))) {
+      return problem(409, "This owner-access request no longer has a currently verified live server. Refresh the page before finishing Discord access.");
+    }
+    attempt = await startAttempt(env, access, "role_grant", configuration, user);
     const preflight = await checkDiscordRoleConfiguration(configuration, fetcher);
     if (!preflight.ok) return finishProblem(env, attempt, preflightToDeliveryStatus(preflight.status), preflight.message, preflight.httpStatus ?? null, preflight.status);
     const membership = await discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(user.discord_id)}`);
@@ -280,6 +288,7 @@ export async function claimOwnerDiscordAccessRole(env: Env, request: Request, ra
     const completed = await finishAttempt(env, attempt, "succeeded", null, null, 204);
     return { ok: true, status: 200, message: "Verified Server Owner access is active in DZN Discord.", attempt: completed };
   } catch (error) {
+    if (!attempt) return problem(503, "DZN could not safely prepare Discord owner-role access. You can retry this step.");
     return finishProblem(env, attempt, "retryable_failure", "DZN could not reach Discord while finishing owner access. You can retry this step.", null, roleGrantMayHaveReachedDiscord ? "role_grant_may_have_reached" : classifyThrownDiscordError(error));
   } finally {
     await releaseRoleMutationLease(env, lease);
@@ -291,7 +300,7 @@ export async function revokeOwnerDiscordAccessRole(env: Env, actor: SessionUser,
   const requestId = extractRequestId(rawInput);
   if (!requestId) return problem(400, "Choose the revoked owner-access request first.");
   if (!(await hasDeliverySchema(env))) return problem(503, "Private Discord delivery is not available on this environment yet.");
-  const access = await requireDb(env).prepare(`SELECT id, status, requester_user_id, requester_discord_id
+  const access = await requireDb(env).prepare(`SELECT id, status, requester_user_id, requester_discord_id, linked_server_id
     FROM dzn_owner_discord_access_requests WHERE id = ? LIMIT 1`).bind(requestId).first<AccessRequestRow>();
   if (!access) return problem(404, "That owner-access request was not found.");
   if (access.status !== "revoked") return problem(409, "Record the revocation in the owner-access queue before removing the Discord role.");
@@ -340,12 +349,33 @@ export async function revokeOwnerDiscordAccessRole(env: Env, actor: SessionUser,
   }
 }
 
-export async function revokeOwnerDiscordRoleForAccountDeletion(env: Env, userId: string, fetcher: DiscordFetch = fetch) {
+export async function reserveOwnerDiscordAccountDeletionLease(env: Env, userId: string) {
+  if (!(await hasRoleMutationSchema(env))) return { required: false as const, lease: null };
+  const context = await requireDb(env).prepare(`SELECT request.id, request.requester_discord_id
+    FROM dzn_owner_discord_access_requests AS request
+    JOIN users AS account ON account.id = request.requester_user_id
+    WHERE request.requester_user_id = ?
+      AND request.requester_discord_id = account.discord_id
+    ORDER BY request.updated_at DESC, request.id DESC
+    LIMIT 1`).bind(userId).first<{ id: string; requester_discord_id: string | null }>();
+  const discordId = discordIdValue(context?.requester_discord_id);
+  if (!context || !discordId) return { required: false as const, lease: null };
+  return {
+    required: true as const,
+    lease: await acquireRoleMutationLease(env, {
+      requestId: context.id,
+      discordId,
+      operation: "account_deletion",
+    }),
+  };
+}
+
+export async function revokeOwnerDiscordRoleForAccountDeletion(env: Env, userId: string, fetcher: DiscordFetch = fetch, heldLease: OwnerDiscordRoleMutationLease | null = null) {
   const db = requireDb(env);
   if (!(await tableExists(env, "dzn_owner_discord_access_delivery_attempts"))) return { ok: true as const };
 
   const grants = await db.prepare(`SELECT delivery.request_id, delivery.guild_id, delivery.role_id,
-      request.id, request.status, request.requester_user_id, request.requester_discord_id
+      request.id, request.status, request.requester_user_id, request.requester_discord_id, request.linked_server_id
     FROM dzn_owner_discord_access_delivery_attempts AS delivery
     JOIN dzn_owner_discord_access_requests AS request ON request.id = delivery.request_id
     WHERE delivery.requester_user_id = ?
@@ -393,7 +423,7 @@ export async function revokeOwnerDiscordRoleForAccountDeletion(env: Env, userId:
   // A timed-out or interrupted role grant can still have reached Discord. Reconcile
   // every externally ambiguous grant before removing the only Discord identity.
   const access = reconcilableGrants[0];
-  const lease = await acquireRoleMutationLease(env, {
+  const lease = heldLease ?? await acquireRoleMutationLease(env, {
     requestId: access.id,
     discordId,
     operation: "account_deletion",
@@ -441,12 +471,12 @@ export async function revokeOwnerDiscordRoleForAccountDeletion(env: Env, userId:
     await finishAttempt(env, attempt, "retryable_failure", classifyThrownDiscordError(error), "DZN could not reach Discord while removing the owner role before account closure.", null);
     return { ok: false as const, status: 503 as const, message: "DZN could not confirm Discord owner-role removal, so this account has not been closed." };
   } finally {
-    await releaseRoleMutationLease(env, lease);
+    if (!heldLease) await releaseRoleMutationLease(env, lease);
   }
 }
 
 async function readApplicantAccessRequest(env: Env, requestId: string, user: SessionUser) {
-  return requireDb(env).prepare(`SELECT id, status, requester_user_id, requester_discord_id
+  return requireDb(env).prepare(`SELECT id, status, requester_user_id, requester_discord_id, linked_server_id
     FROM dzn_owner_discord_access_requests
     WHERE id = ? AND requester_user_id = ? LIMIT 1`).bind(requestId, user.id).first<AccessRequestRow>();
 }
@@ -819,6 +849,35 @@ async function requestIsStillApprovedForApplicant(env: Env, requestId: string, u
       AND requester_user_id = ?
       AND requester_discord_id = ?
       AND status = 'approved'
+      AND EXISTS (
+        SELECT 1
+        FROM linked_servers
+        WHERE id = dzn_owner_discord_access_requests.linked_server_id
+          AND user_id = dzn_owner_discord_access_requests.requester_user_id
+          AND lower(COALESCE(status, 'pending')) = 'live'
+          AND lower(COALESCE(lifecycle_status, 'active_live')) = 'active_live'
+          AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
+          AND EXISTS (
+            SELECT 1 FROM onboarding_checks AS latest_check
+             WHERE latest_check.id = (
+               SELECT current_check.id
+               FROM onboarding_checks AS current_check
+               WHERE current_check.linked_server_id = linked_servers.id
+                 AND current_check.last_tested_at IS NOT NULL
+                 AND datetime(current_check.last_tested_at) >= datetime((
+                   SELECT MAX(COALESCE(current_connection.updated_at, current_connection.created_at))
+                   FROM nitrado_connections AS current_connection
+                   WHERE current_connection.linked_server_id = linked_servers.id
+                     AND current_connection.user_id = linked_servers.user_id
+                 ))
+               ORDER BY current_check.last_tested_at DESC, current_check.id DESC
+               LIMIT 1
+             )
+               AND latest_check.token_valid = 1
+               AND latest_check.service_access = 1
+               AND latest_check.dayz_service_detected = 1
+          )
+      )
     LIMIT 1`).bind(requestId, user.id, user.discord_id).first<{ found: number }>();
   return Boolean(row);
 }
@@ -830,6 +889,35 @@ async function hasAnotherApprovedRequestForDiscord(env: Env, discordId: string, 
       AND status = 'approved'
       AND id <> ?
       AND (? IS NULL OR requester_user_id IS NULL OR requester_user_id <> ?)
+      AND EXISTS (
+        SELECT 1
+        FROM linked_servers
+        WHERE id = dzn_owner_discord_access_requests.linked_server_id
+          AND user_id = dzn_owner_discord_access_requests.requester_user_id
+          AND lower(COALESCE(status, 'pending')) = 'live'
+          AND lower(COALESCE(lifecycle_status, 'active_live')) = 'active_live'
+          AND (merged_into_server_id IS NULL OR merged_into_server_id = '')
+          AND EXISTS (
+            SELECT 1 FROM onboarding_checks AS latest_check
+             WHERE latest_check.id = (
+               SELECT current_check.id
+               FROM onboarding_checks AS current_check
+               WHERE current_check.linked_server_id = linked_servers.id
+                 AND current_check.last_tested_at IS NOT NULL
+                 AND datetime(current_check.last_tested_at) >= datetime((
+                   SELECT MAX(COALESCE(current_connection.updated_at, current_connection.created_at))
+                   FROM nitrado_connections AS current_connection
+                   WHERE current_connection.linked_server_id = linked_servers.id
+                     AND current_connection.user_id = linked_servers.user_id
+                 ))
+               ORDER BY current_check.last_tested_at DESC, current_check.id DESC
+               LIMIT 1
+             )
+               AND latest_check.token_valid = 1
+               AND latest_check.service_access = 1
+               AND latest_check.dayz_service_detected = 1
+          )
+      )
     LIMIT 1`).bind(discordId, requestId, excludeRequesterUserId ?? null, excludeRequesterUserId ?? null).first<{ found: number }>();
   return Boolean(row);
 }
