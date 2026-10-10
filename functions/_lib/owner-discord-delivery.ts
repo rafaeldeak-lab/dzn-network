@@ -327,12 +327,12 @@ export async function revokeOwnerDiscordRoleForAccountDeletion(env: Env, userId:
     JOIN dzn_owner_discord_access_requests AS request ON request.id = delivery.request_id
     WHERE delivery.requester_user_id = ?
       AND delivery.operation = 'role_grant'
-      AND delivery.status = 'succeeded'
+      AND delivery.status IN ('started', 'succeeded', 'retryable_failure')
     ORDER BY delivery.completed_at DESC, delivery.created_at DESC, delivery.id DESC`)
     .bind(userId)
     .all<AccessRequestRow & { guild_id: string | null; role_id: string | null }>();
-  const successfulGrants = grants.results ?? [];
-  if (successfulGrants.length === 0) return { ok: true as const };
+  const reconcilableGrants = grants.results ?? [];
+  if (reconcilableGrants.length === 0) return { ok: true as const };
   if (!(await hasDeliverySchema(env))) {
     return { ok: false as const, status: 503 as const, message: "DZN cannot safely close this account while its recorded Discord owner role cleanup ledger is incomplete." };
   }
@@ -348,11 +348,13 @@ export async function revokeOwnerDiscordRoleForAccountDeletion(env: Env, userId:
   if (!configuration) {
     return { ok: false as const, status: 503 as const, message: "DZN cannot safely close this account until the Discord owner-role configuration is available to remove the recorded role." };
   }
-  if (successfulGrants.some((grant) => grant.guild_id !== configuration.guildId || grant.role_id !== configuration.verifiedOwnerRoleId)) {
+  if (reconcilableGrants.some((grant) => grant.guild_id !== configuration.guildId || grant.role_id !== configuration.verifiedOwnerRoleId)) {
     return { ok: false as const, status: 503 as const, message: "DZN cannot safely close this account because a recorded Discord owner role does not match the active DZN role configuration." };
   }
 
-  const access = successfulGrants[0];
+  // A timed-out or interrupted role grant can still have reached Discord. Reconcile
+  // every externally ambiguous grant before removing the only Discord identity.
+  const access = reconcilableGrants[0];
   const lease = await acquireRoleMutationLease(env, {
     requestId: access.id,
     discordId,

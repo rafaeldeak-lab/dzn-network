@@ -196,6 +196,7 @@ async function run() {
     let deletingOwnerHasRole = true;
     let roleRemovalSawAccount = false;
     let blockedOwnerHasRole = true;
+    let blockedOwnerRoleRemovalAttempted = false;
     const failBlockedOwnerRemoval = true;
     let inviteChannelAvailable = true;
     let pendingApplicantRoleGrant: { started: () => void; wait: Promise<void> } | null = null;
@@ -247,6 +248,7 @@ async function run() {
         return Response.json({ roles: blockedOwnerHasRole ? [verifiedOwnerRoleId] : [] });
       }
       if (url.pathname === `/api/v10/guilds/${guildId}/members/${blockedOwner.discord_id}/roles/${verifiedOwnerRoleId}` && method === "DELETE") {
+        blockedOwnerRoleRemovalAttempted = true;
         if (failBlockedOwnerRemoval) return new Response(null, { status: 500 });
         blockedOwnerHasRole = false;
         return new Response(null, { status: 204 });
@@ -381,21 +383,22 @@ async function run() {
 
       await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
         id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, created_at, completed_at
-      ) VALUES ('account-closure-role-grant', 'account_closure_request', ?, ?, ?, ?, 'role_grant', 'succeeded', 1, 'account-closure-role-grant-nonce', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+      ) VALUES ('account-closure-role-grant', 'account_closure_request', ?, ?, ?, ?, 'role_grant', 'started', 1, 'account-closure-role-grant-nonce', ?, ?, CURRENT_TIMESTAMP, NULL)`)
         .bind(deletingOwner.id, deletingOwner.discord_id, owner.id, owner.discord_id, guildId, verifiedOwnerRoleId).run();
       const closureResult = await deleteOwnedAccountData(env, deletingOwner.id);
-      assert.equal(closureResult.ok, true, "Account closure must remove a recorded owner role before anonymising the account.");
-      assert.equal(deletingOwnerHasRole, false, "Account closure must remove the configured Discord owner role.");
-      assert.equal(roleRemovalSawAccount, true, "Discord owner-role removal must happen before the account identity is deleted.");
-      assert.equal(await db.prepare("SELECT id FROM users WHERE id = ? LIMIT 1").bind(deletingOwner.id).first(), null, "Account closure may anonymise only after role removal succeeds.");
+      assert.equal(closureResult.ok, true, "Account closure must reconcile an in-progress role grant before anonymising the account.");
+      assert.equal(deletingOwnerHasRole, false, "Account closure must remove a role that may have been granted before its delivery record completed.");
+      assert.equal(roleRemovalSawAccount, true, "Discord owner-role reconciliation must happen before the account identity is deleted.");
+      assert.equal(await db.prepare("SELECT id FROM users WHERE id = ? LIMIT 1").bind(deletingOwner.id).first(), null, "Account closure may anonymise only after uncertain role delivery has been reconciled.");
 
       await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
         id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, created_at, completed_at
-      ) VALUES ('blocked-account-closure-role-grant', 'blocked_account_closure_request', ?, ?, ?, ?, 'role_grant', 'succeeded', 1, 'blocked-account-closure-role-grant-nonce', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+      ) VALUES ('blocked-account-closure-role-grant', 'blocked_account_closure_request', ?, ?, ?, ?, 'role_grant', 'retryable_failure', 1, 'blocked-account-closure-role-grant-nonce', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
         .bind(blockedOwner.id, blockedOwner.discord_id, owner.id, owner.discord_id, guildId, verifiedOwnerRoleId).run();
       const blockedClosure = await deleteOwnedAccountData(env, blockedOwner.id);
       assert.equal(blockedClosure.ok, false, "Account closure must stop when Discord owner-role removal fails.");
       if (!blockedClosure.ok) assert.equal(blockedClosure.status, 503);
+      assert.equal(blockedOwnerRoleRemovalAttempted, true, "Account closure must reconcile a retryable role grant rather than assuming that Discord rejected it.");
       assert.equal(blockedOwnerHasRole, true, "A failed account closure must not leave the cleanup path pretending the role was removed.");
       assert.notEqual(await db.prepare("SELECT id FROM users WHERE id = ? LIMIT 1").bind(blockedOwner.id).first(), null, "A failed owner-role removal must preserve the account for a safe retry.");
 
