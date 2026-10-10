@@ -13,6 +13,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Status = "pending" | "approved" | "rejected" | "revoked";
+type Delivery = { operation: "invite" | "role_grant" | "role_revoke" | "diagnostic"; status: "started" | "succeeded" | "not_joined" | "retryable_failure" | "failed" | "not_configured"; message: string; createdAt: string; completedAt: string | null };
+type DeliveryDiagnostic = { ok: boolean; status: string; message: string; checkedAt: string; checks: { botIdentity: boolean; botGuildMembership: boolean; inviteChannel: boolean; canViewInviteChannel: boolean; canCreateInvite: boolean; canManageRoles: boolean; targetRole: boolean; targetRoleBelowBot: boolean; botHasAdministrator: boolean } };
 type RequestItem = {
   id: string;
   linkedServerId: string;
@@ -28,6 +30,7 @@ type RequestItem = {
     avatarUrl: string | null;
   };
   reviewedBy: string | null;
+  delivery?: Delivery | null;
 };
 type Audit = {
   id: string;
@@ -45,6 +48,7 @@ type Payload = {
   requests?: RequestItem[];
   audit?: Audit[];
   delivery?: string;
+  discordAccessConfigured?: boolean;
   page?: { has_more?: boolean; next_cursor?: string | null };
   auditPage?: { has_more?: boolean; next_cursor?: string | null };
   message?: string;
@@ -65,6 +69,9 @@ export function OwnerDiscordAccessPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextAuditCursor, setNextAuditCursor] = useState<string | null>(null);
   const [loadingMoreAudit, setLoadingMoreAudit] = useState(false);
+  const [deliveryBusyId, setDeliveryBusyId] = useState<string | null>(null);
+  const [deliveryDiagnostic, setDeliveryDiagnostic] = useState<DeliveryDiagnostic | null>(null);
+  const [checkingDelivery, setCheckingDelivery] = useState(false);
   const requestController = useRef<AbortController | null>(null);
   const filterRevision = useRef(0);
 
@@ -171,7 +178,7 @@ export function OwnerDiscordAccessPage() {
       setReasonById((current) => ({ ...current, [request.id]: "" }));
       setNotice(
         action === "approved"
-          ? "Approval recorded. Discord delivery is still deliberately unconfigured."
+          ? "Approval recorded. The owner can continue only after central Discord delivery is ready."
           : `${action[0].toUpperCase()}${action.slice(1)} decision recorded.`,
       );
       if (filterRevision.current === decisionFilterRevision) await load();
@@ -184,6 +191,35 @@ export function OwnerDiscordAccessPage() {
     } finally {
       setBusyId(null);
     }
+  }
+  async function checkDelivery() {
+    if (checkingDelivery) return;
+    setCheckingDelivery(true); setNotice(null);
+    try {
+      const response = await fetch("/api/owner/discord/owner-access-delivery", { credentials: "include", cache: "no-store" });
+      const next = await response.json().catch(() => null) as DeliveryDiagnostic | null;
+      if (!response.ok || !next) throw new Error("The central Discord delivery check is unavailable.");
+      setDeliveryDiagnostic(next);
+      setNotice(next.message);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "The central Discord delivery check is unavailable."); }
+    finally { setCheckingDelivery(false); }
+  }
+  async function revokeDelivery(requestId: string) {
+    if (deliveryBusyId) return;
+    setDeliveryBusyId(requestId); setNotice(null);
+    try {
+      const response = await fetch("/api/owner/discord/owner-access-delivery", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ requestId, action: "revoke_role" }),
+      });
+      const next = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null;
+      if (!response.ok || !next?.ok) throw new Error(next?.message ?? "DZN could not remove the Discord owner role.");
+      setNotice(next.message ?? "Verified Server Owner role removed.");
+      await load();
+    } catch (error) { setNotice(error instanceof Error ? error.message : "DZN could not remove the Discord owner role."); }
+    finally { setDeliveryBusyId(null); }
   }
   return (
     <main className="min-h-screen bg-[#02050b] px-3 py-4 text-zinc-100 sm:px-5 lg:px-8">
@@ -244,6 +280,7 @@ export function OwnerDiscordAccessPage() {
               <p className="mt-2 text-sm leading-6 text-zinc-400">
                 {payload?.delivery}
               </p>
+              <div className="mt-3 flex flex-wrap items-center gap-3"><button type="button" onClick={() => void checkDelivery()} disabled={checkingDelivery} className="min-h-10 rounded-md border border-cyan-300/25 bg-cyan-300/[0.08] px-3 text-xs font-black text-cyan-100 disabled:opacity-50">{checkingDelivery ? "Checking central Discord..." : "Check central Discord delivery"}</button>{deliveryDiagnostic ? <span className={`text-xs font-black ${deliveryDiagnostic.ok ? "text-emerald-200" : "text-amber-100"}`}>{deliveryDiagnostic.status.replace(/_/g, " ")} - checked {formatTime(deliveryDiagnostic.checkedAt)}</span> : null}{deliveryDiagnostic?.checks.botHasAdministrator ? <span className="text-xs font-bold text-amber-100">Bot still has Administrator; reduce it after the controlled delivery proof.</span> : null}</div>
             </section>
             <section className="mt-5 flex flex-col gap-3 rounded-lg border border-white/10 bg-white/[0.025] p-4 md:flex-row">
               <div className="flex flex-wrap gap-2">
@@ -346,6 +383,7 @@ export function OwnerDiscordAccessPage() {
                           Latest decision: {request.decisionReason}
                         </p>
                       ) : null}
+                      {request.delivery ? <p className="mt-2 rounded-md border border-violet-300/15 bg-violet-300/[0.05] p-2 text-xs leading-5 text-violet-100">Discord delivery: {request.delivery.message}</p> : null}
                       {request.status === "pending" ||
                       request.status === "approved" ? (
                         <div className="mt-4 grid gap-2">
@@ -401,6 +439,7 @@ export function OwnerDiscordAccessPage() {
                           </div>
                         </div>
                       ) : null}
+                      {request.status === "revoked" && payload?.discordAccessConfigured ? <div className="mt-4"><button type="button" disabled={deliveryBusyId === request.id} onClick={() => void revokeDelivery(request.id)} className="inline-flex items-center gap-2 rounded-md border border-amber-300/30 bg-amber-300/[0.08] px-3 py-2 text-xs font-black text-amber-100 disabled:opacity-50"><CircleAlert size={14} />{deliveryBusyId === request.id ? "Removing Discord role..." : "Remove Discord owner role"}</button></div> : null}
                     </article>
                   ))
                 ) : (

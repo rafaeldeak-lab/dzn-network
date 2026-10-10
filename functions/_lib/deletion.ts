@@ -1,4 +1,5 @@
 import { requireDb } from "./db";
+import { revokeOwnerDiscordRoleForAccountDeletion } from "./owner-discord-delivery";
 import type { Env } from "./types";
 
 export const OWNER_DELETE_FORBIDDEN_MESSAGE = "Only the original server owner who linked this server to DZN can permanently delete it.";
@@ -128,6 +129,8 @@ export async function deleteOwnedLinkedServerData(env: Env, userId: string, link
 
 export async function deleteOwnedAccountData(env: Env, userId: string) {
   const db = requireDb(env);
+  const discordRoleCleanup = await revokeOwnerDiscordRoleForAccountDeletion(env, userId);
+  if (!discordRoleCleanup.ok) return discordRoleCleanup;
   const deleted = emptyDeletionCounts();
   const servers = await db
     .prepare("SELECT id FROM linked_servers WHERE user_id = ?")
@@ -296,6 +299,19 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
       SET requester_discord_id = NULL,
           requester_username = NULL
       WHERE requester_user_id = ?`).bind(userId));
+  }
+  if (await tableExists(db, "dzn_owner_discord_access_delivery_attempts")) {
+    statements.push(db.prepare(`UPDATE dzn_owner_discord_access_delivery_attempts
+      SET requester_discord_id = CASE
+            WHEN requester_user_id = ? THEN NULL
+            ELSE requester_discord_id
+          END,
+          actor_discord_id = CASE WHEN actor_user_id = ? THEN NULL ELSE actor_discord_id END
+      WHERE requester_user_id = ?
+         OR actor_user_id = ?
+         OR request_id IN (
+           SELECT id FROM dzn_owner_discord_access_requests WHERE requester_user_id = ?
+          )`).bind(userId, userId, userId, userId, userId));
   }
   if (await tableExists(db, "dzn_owner_discord_access_audit")) {
     statements.push(db.prepare(`UPDATE dzn_owner_discord_access_audit

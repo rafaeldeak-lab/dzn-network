@@ -25,6 +25,7 @@ export const onRequest: PagesFunction = async ({ request, env }) => {
   }
 
   const result = await deleteOwnedAccountData(env, user.id);
+  if (!result.ok) return json({ ok: false, error: result.message }, { status: result.status });
   return json(
     {
       ok: true,

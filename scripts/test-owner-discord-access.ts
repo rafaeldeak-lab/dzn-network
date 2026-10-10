@@ -76,6 +76,9 @@ async function run() {
   assert.match(migration, /FOREIGN KEY\(requester_user_id\) REFERENCES users\(id\) ON DELETE SET NULL/);
   assert.match(migration, /FOREIGN KEY\(linked_server_id\) REFERENCES linked_servers\(id\) ON DELETE SET NULL/);
   assert.doesNotMatch(migration, /discord\.com|DISCORD_BOT_TOKEN|CREATE\s+INVITE/i);
+  const deliveryMigration = readFileSync("migrations/0095_dzn_owner_discord_delivery.sql", "utf8");
+  assert.match(deliveryMigration, /dzn_owner_discord_access_delivery_attempts/);
+  assert.match(deliveryMigration, /FOREIGN KEY\(request_id\) REFERENCES dzn_owner_discord_access_requests/);
   const accessSource = readFileSync("functions/_lib/owner-discord-access.ts", "utf8");
   assert.match(accessSource, /DZN_OWNER_DISCORD_ACCESS_ENABLED/);
   assert.match(accessSource, /linked_servers[\s\S]*user_id = \?/);
@@ -99,7 +102,9 @@ async function run() {
   const envExample = readFileSync(".env.example", "utf8");
   assert.match(envExample, /^DZN_OWNER_DISCORD_ACCESS_ENABLED=false$/m);
   assert.match(envExample, /^NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED=false$/m);
+  assert.match(envExample, /^DZN_OWNER_DISCORD_DELIVERY_ENABLED=false$/m);
   assert.match(readFileSync("cloudflare-env.d.ts", "utf8"), /DZN_OWNER_DISCORD_ACCESS_ENABLED\?: string/);
+  assert.match(readFileSync("cloudflare-env.d.ts", "utf8"), /DZN_OWNER_DISCORD_DELIVERY_ENABLED\?: string/);
   const wrangler = readFileSync("wrangler.toml", "utf8");
   assert.doesNotMatch(wrangler, /^DZN_OWNER_DISCORD_ACCESS_ENABLED = "true"$/m);
   const dashboard = readFileSync("components/onboarding/dashboard.tsx", "utf8");
@@ -147,6 +152,7 @@ async function run() {
       "migrations/0065_dzn_comms_read_history.sql",
       "migrations/0093_dzn_comms_owner_message_archive.sql",
       "migrations/0094_dzn_owner_discord_access.sql",
+      "migrations/0095_dzn_owner_discord_delivery.sql",
     ]) {
       for (const statement of splitSql(readFileSync(migrationPath, "utf8").replace(/^--.*$/gm, ""))) await db.prepare(statement).run();
     }
@@ -341,6 +347,10 @@ async function run() {
       (message_id, channel_id, author_user_id, author_display_name, author_role_label, original_body, sent_at, retained_until)
       VALUES ('account-deletion-archive', 'global', ?, ?, 'Member', 'Safety archive content remains for the retention window.', CURRENT_TIMESTAMP, datetime('now', '+30 days'))`)
       .bind(applicant.id, applicant.username).run();
+    await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
+      id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, created_at, completed_at
+    ) VALUES ('account-deletion-owner-delivery', ?, ?, ?, ?, ?, 'invite', 'succeeded', 1, 'account-deletion-delivery-nonce', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+      .bind(createdPayload.request.id, applicant.id, applicant.discord_id, applicant.id, applicant.discord_id).run();
     assert.equal((await deleteOwnedAccountData(env, applicant.id)).ok, true);
     const accountDeletedRequest = await db.prepare("SELECT requester_user_id, requester_discord_id, requester_username FROM dzn_owner_discord_access_requests WHERE id = ?").bind(createdPayload.request.id).first<{ requester_user_id: string | null; requester_discord_id: string | null; requester_username: string | null }>();
     assert.equal(accountDeletedRequest?.requester_user_id, null, "Applicant account deletion must retain the decision record without its user foreign key.");
@@ -352,11 +362,26 @@ async function run() {
     assert.equal(accountDeletedAuditIdentity?.actor_username, null, "Applicant account deletion must remove the username from the request audit.");
     const accountDeletedAudit = await db.prepare("SELECT COUNT(*) AS count FROM dzn_owner_discord_access_audit WHERE request_id = ?").bind(createdPayload.request.id).first<{ count: number }>();
     assert.equal(Number(accountDeletedAudit?.count ?? 0) > 0, true, "Applicant account deletion must preserve private owner-access decision audits.");
+    const accountDeletedDelivery = await db.prepare("SELECT requester_user_id, requester_discord_id, actor_user_id, actor_discord_id FROM dzn_owner_discord_access_delivery_attempts WHERE id = 'account-deletion-owner-delivery'").first<{ requester_user_id: string | null; requester_discord_id: string | null; actor_user_id: string | null; actor_discord_id: string | null }>();
+    assert.equal(accountDeletedDelivery?.requester_user_id, null, "Account deletion must detach a retained owner-delivery attempt from the closed account.");
+    assert.equal(accountDeletedDelivery?.requester_discord_id, null, "Account deletion must remove the Discord identity from a retained owner-delivery attempt.");
+    assert.equal(accountDeletedDelivery?.actor_user_id, null, "Account deletion must detach the actor foreign key from a retained owner-delivery attempt.");
+    assert.equal(accountDeletedDelivery?.actor_discord_id, null, "Account deletion must remove the actor Discord identity from a retained owner-delivery attempt.");
     const accountDeletedArchive = await db.prepare("SELECT author_user_id, author_display_name, author_role_label, original_body FROM dzn_comms_owner_message_archive WHERE message_id = 'account-deletion-archive'").first<{ author_user_id: string | null; author_display_name: string; author_role_label: string; original_body: string }>();
     assert.equal(accountDeletedArchive?.author_user_id, null, "Account deletion must detach a retained Comms archive row from the closed account.");
     assert.equal(accountDeletedArchive?.author_display_name, "Deleted DZN member", "Account deletion must anonymize the retained Comms archive author display name.");
     assert.equal(accountDeletedArchive?.author_role_label, "Deleted account", "Account deletion must anonymize the retained Comms archive author role.");
     assert.equal(accountDeletedArchive?.original_body, "Safety archive content remains for the retention window.", "Account deletion must preserve the private safety record until its retention window expires.");
+    await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
+      id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, created_at, completed_at
+    ) VALUES ('owner-actor-only-delivery', ?, ?, ?, ?, ?, 'invite', 'succeeded', 1, 'owner-actor-only-delivery-nonce', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+      .bind(createdPayload.request.id, outsider.id, outsider.discord_id, owner.id, owner.discord_id).run();
+    assert.equal((await deleteOwnedAccountData(env, owner.id)).ok, true, "Deleting a platform-owner account must retain unrelated requester identity in delivery history.");
+    const actorOnlyDelivery = await db.prepare("SELECT requester_user_id, requester_discord_id, actor_user_id, actor_discord_id FROM dzn_owner_discord_access_delivery_attempts WHERE id = 'owner-actor-only-delivery'").first<{ requester_user_id: string | null; requester_discord_id: string | null; actor_user_id: string | null; actor_discord_id: string | null }>();
+    assert.equal(actorOnlyDelivery?.requester_user_id, outsider.id, "Deleting only the delivery actor must not detach the unrelated requester.");
+    assert.equal(actorOnlyDelivery?.requester_discord_id, outsider.discord_id, "Deleting only the delivery actor must preserve the unrelated requester Discord identity.");
+    assert.equal(actorOnlyDelivery?.actor_user_id, null, "Deleting the delivery actor must detach only that actor foreign key.");
+    assert.equal(actorOnlyDelivery?.actor_discord_id, null, "Deleting the delivery actor must remove only that actor Discord identity.");
     assert.deepEqual((await db.prepare("PRAGMA foreign_key_check").all()).results, []);
     console.log("Owner Discord access queue checks passed.");
   } finally { sqlite.close(); }

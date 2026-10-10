@@ -25,13 +25,14 @@ const numberedMigrations = readdirSync("migrations")
 const prefixes = numberedMigrations.map((name) => name.slice(0, 4));
 assert.equal(new Set(prefixes).size, prefixes.length, "Local migrations must never reuse a production prefix.");
 assert.deepEqual(
-  numberedMigrations.filter((name) => /^009[0-4]_/.test(name)),
+  numberedMigrations.filter((name) => /^009[0-5]_/.test(name)),
   [
     "0090_server_community_member_sources.sql",
     "0091_server_review_owner_replies.sql",
     "0092_server_public_cache_rank_timestamp.sql",
     "0093_dzn_comms_owner_message_archive.sql",
     "0094_dzn_owner_discord_access.sql",
+    "0095_dzn_owner_discord_delivery.sql",
   ],
   "The source queue must retain the production 0092 history and allocate later additive migrations after it.",
 );
