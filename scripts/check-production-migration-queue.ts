@@ -23,15 +23,14 @@ if (duplicatePrefixes.length > 0) {
   throw new Error(`Duplicate migration prefixes: ${duplicatePrefixes.map(([prefix, names]) => `${prefix} (${names.join(", ")})`).join("; ")}`);
 }
 
+// This check targets the named canonical database directly. Supplying a Pages
+// environment makes Wrangler resolve an environment binding, which is not a
+// supported path for this read-only D1 ledger query.
 const result = spawnSync(process.execPath, [
   "node_modules/wrangler/bin/wrangler.js",
   "d1",
   "execute",
   databaseName,
-  "--config",
-  "wrangler.toml",
-  "--env",
-  "production",
   "--remote",
   "--json",
   "--command",

@@ -16,8 +16,8 @@ assert.match(source, /expectedValue === "NONE"/);
 assert.match(source, /expectedValue !== undefined/);
 assert.match(source, /Duplicate migration prefixes/);
 assert.match(source, /databaseName = "dzn_network_db"/);
-assert.match(source, /"--config",\s*"wrangler\.toml"/);
-assert.match(source, /"--env",\s*"production"/);
+assert.match(source, /"d1",\s*"execute",\s*databaseName,\s*"--remote"/);
+assert.doesNotMatch(source, /"--config"|"--env"/, "The checker must query the canonical D1 database directly, not a Pages environment binding.");
 
 const numberedMigrations = readdirSync("migrations")
   .filter((name) => /^\d{4}_.+\.sql$/.test(name))
