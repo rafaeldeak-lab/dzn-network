@@ -1,4 +1,14 @@
 import { requireDb } from "./db";
+import {
+  releaseOwnerDiscordRoleMutationLease,
+  reserveOwnerDiscordAccountDeletionLease,
+  reserveOwnerDiscordLinkedServerDeletionLease,
+  renewOwnerDiscordAccountDeletionLease,
+  renewOwnerDiscordLinkedServerDeletionLease,
+  revokeOwnerDiscordRoleForAccountDeletion,
+  revokeOwnerDiscordRoleForLinkedServerDeletion,
+} from "./owner-discord-delivery";
+import type { OwnerDiscordRoleMutationLease } from "./owner-discord-delivery";
 import type { Env } from "./types";
 
 export const OWNER_DELETE_FORBIDDEN_MESSAGE = "Only the original server owner who linked this server to DZN can permanently delete it.";
@@ -30,6 +40,11 @@ type LinkedServerForDeletion = {
   user_id: string;
   server_name: string;
   public_slug: string | null;
+};
+
+type LinkedServerDeletionOptions = {
+  skipOwnerDiscordRoleCleanup?: boolean;
+  accountDeletionDiscordRoleLease?: OwnerDiscordRoleMutationLease | null;
 };
 
 export function emptyDeletionCounts(): DeletionCounts {
@@ -74,7 +89,12 @@ export async function getLinkedServerForDeletion(env: Env, linkedServerId: strin
     .first<LinkedServerForDeletion>();
 }
 
-export async function deleteOwnedLinkedServerData(env: Env, userId: string, linkedServerId: string) {
+export async function deleteOwnedLinkedServerData(
+  env: Env,
+  userId: string,
+  linkedServerId: string,
+  options: LinkedServerDeletionOptions = {},
+) {
   const db = requireDb(env);
   const server = await getLinkedServerForDeletion(env, linkedServerId);
   if (!server) {
@@ -84,91 +104,170 @@ export async function deleteOwnedLinkedServerData(env: Env, userId: string, link
     return { ok: false as const, status: 403, error: OWNER_DELETE_FORBIDDEN_MESSAGE };
   }
 
-  const deleted = emptyDeletionCounts();
-  deleted.serverSlugAliases += await deleteOptionalLinkedServerRows(db, "server_slug_aliases", linkedServerId);
-  deleted.serverMetadataVersions += await deleteOptionalLinkedServerRows(db, "server_metadata_versions", linkedServerId);
-  deleted.syncRuns += await deleteLinkedServerRows(db, "sync_runs", linkedServerId);
-  deleted.admSyncState += await deleteLinkedServerRows(db, "adm_sync_state", linkedServerId);
-  deleted.admRawEvents += await deleteLinkedServerRows(db, "adm_raw_events", linkedServerId);
-  deleted.playerEvents += await deleteLinkedServerRows(db, "player_events", linkedServerId);
-  deleted.killEvents += await deleteLinkedServerRows(db, "kill_events", linkedServerId);
-  if (await tableExists(db, "user_notifications") && await tableExists(db, "player_game_identity_claims")) {
-    await deleteRows(db,
-      `DELETE FROM user_notifications
-       WHERE type = 'player_link_review_requested'
-         AND json_extract(metadata, '$.claim_id') IN (
-           SELECT id FROM player_game_identity_claims WHERE linked_server_id = ?
-         )`,
-      [linkedServerId],
-    );
+  const heldAccountDeletionLease = options.accountDeletionDiscordRoleLease ?? null;
+  const discordRoleReservation = heldAccountDeletionLease
+    ? { required: true as const, lease: heldAccountDeletionLease }
+    : options.skipOwnerDiscordRoleCleanup
+      ? { required: false as const, lease: null }
+      : await reserveOwnerDiscordLinkedServerDeletionLease(env, userId, linkedServerId);
+  if (discordRoleReservation.required && !discordRoleReservation.lease) {
+    return { ok: false as const, status: 409, error: "DZN is still issuing or changing this server owner's Discord access. Retry server removal shortly." };
   }
-  deleted.playerProfiles += await deleteLinkedServerRows(db, "player_profiles", linkedServerId);
-  deleted.serverStats += await deleteLinkedServerRows(db, "server_stats", linkedServerId);
-  deleted.admRawEvents += await deleteOptionalLinkedServerRows(db, "adm_raw_lines", linkedServerId);
-  deleted.onboardingChecks += await deleteLinkedServerRows(db, "onboarding_checks", linkedServerId);
-  deleted.serverLogConfig += await deleteLinkedServerRows(db, "server_log_config", linkedServerId);
-  deleted.nitradoConnections += await deleteLinkedServerRows(db, "nitrado_connections", linkedServerId, "user_id = ?", [userId]);
+  const renewDiscordRoleReservation = async () => heldAccountDeletionLease
+    ? renewOwnerDiscordAccountDeletionLease(env, heldAccountDeletionLease)
+    : renewOwnerDiscordLinkedServerDeletionLease(env, discordRoleReservation.lease);
+  const expiredDiscordRoleReservation = () => ({
+    ok: false as const,
+    status: 409 as const,
+    error: "DZN could not keep this server's Discord owner-access cleanup reservation. No further server data was removed; retry server removal shortly.",
+  });
 
-  const linkedResult = await db
-    .prepare("DELETE FROM linked_servers WHERE id = ? AND user_id = ?")
-    .bind(linkedServerId, userId)
-    .run();
-  deleted.linkedServers += changes(linkedResult);
+  try {
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    if (!options.skipOwnerDiscordRoleCleanup) {
+      const discordRoleCleanup = await revokeOwnerDiscordRoleForLinkedServerDeletion(env, userId, linkedServerId, fetch, discordRoleReservation.lease);
+      if (!discordRoleCleanup.ok) {
+        return { ok: false as const, status: discordRoleCleanup.status, error: discordRoleCleanup.message };
+      }
+    }
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
 
-  return {
-    ok: true as const,
-    deleted,
-    server: {
-      id: server.id,
-      server_name: server.server_name,
-      public_slug: server.public_slug,
-    },
-  };
-}
-
-export async function deleteOwnedAccountData(env: Env, userId: string) {
-  const db = requireDb(env);
-  const deleted = emptyDeletionCounts();
-  const servers = await db
-    .prepare("SELECT id FROM linked_servers WHERE user_id = ?")
-    .bind(userId)
-    .all<{ id: string }>();
-
-  for (const server of servers.results ?? []) {
-    const result = await deleteOwnedLinkedServerData(env, userId, server.id);
-    if (result.ok) mergeDeletionCounts(deleted, result.deleted);
-  }
-
-  deleted.nitradoConnections += await deleteRows(db, "DELETE FROM nitrado_connections WHERE user_id = ?", [userId]);
-  if (await tableExists(db, "discord_oauth_tokens")) {
-    await deleteRows(db, "DELETE FROM discord_oauth_tokens WHERE user_id = ?", [userId]);
-  }
-  deleted.sessions += await deleteRows(db, "DELETE FROM sessions WHERE user_id = ?", [userId]);
-  deleted.discordGuilds += await deleteRows(
-    db,
-    `DELETE FROM discord_guilds
-     WHERE owner_user_id = ?
-       AND NOT EXISTS (
-         SELECT 1 FROM linked_servers WHERE linked_servers.discord_guild_id = discord_guilds.id
-       )`,
-    [userId],
-  );
-  if (await tableExists(db, "user_notifications")) {
-    if (await tableExists(db, "player_game_identity_claims")) {
+    const deleted = emptyDeletionCounts();
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.serverSlugAliases += await deleteOptionalLinkedServerRows(db, "server_slug_aliases", linkedServerId);
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.serverMetadataVersions += await deleteOptionalLinkedServerRows(db, "server_metadata_versions", linkedServerId);
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.syncRuns += await deleteLinkedServerRows(db, "sync_runs", linkedServerId);
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.admSyncState += await deleteLinkedServerRows(db, "adm_sync_state", linkedServerId);
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.admRawEvents += await deleteLinkedServerRows(db, "adm_raw_events", linkedServerId);
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.playerEvents += await deleteLinkedServerRows(db, "player_events", linkedServerId);
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.killEvents += await deleteLinkedServerRows(db, "kill_events", linkedServerId);
+    if (await tableExists(db, "user_notifications") && await tableExists(db, "player_game_identity_claims")) {
+      if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
       await deleteRows(db,
         `DELETE FROM user_notifications
          WHERE type = 'player_link_review_requested'
            AND json_extract(metadata, '$.claim_id') IN (
-             SELECT id FROM player_game_identity_claims WHERE user_id = ?
+             SELECT id FROM player_game_identity_claims WHERE linked_server_id = ?
            )`,
-        [userId],
+        [linkedServerId],
       );
     }
-    await deleteRows(db, "DELETE FROM user_notifications WHERE user_id = ?", [userId]);
-  }
-  deleted.users += await eraseOrRetainAccountUser(db, userId);
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.playerProfiles += await deleteLinkedServerRows(db, "player_profiles", linkedServerId);
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.serverStats += await deleteLinkedServerRows(db, "server_stats", linkedServerId);
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.admRawEvents += await deleteOptionalLinkedServerRows(db, "adm_raw_lines", linkedServerId);
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.onboardingChecks += await deleteLinkedServerRows(db, "onboarding_checks", linkedServerId);
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.serverLogConfig += await deleteLinkedServerRows(db, "server_log_config", linkedServerId);
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.nitradoConnections += await deleteLinkedServerRows(db, "nitrado_connections", linkedServerId, "user_id = ?", [userId]);
 
-  return { ok: true as const, deleted };
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    const linkedResult = await db
+      .prepare("DELETE FROM linked_servers WHERE id = ? AND user_id = ?")
+      .bind(linkedServerId, userId)
+      .run();
+    deleted.linkedServers += changes(linkedResult);
+
+    return {
+      ok: true as const,
+      deleted,
+      server: {
+        id: server.id,
+        server_name: server.server_name,
+        public_slug: server.public_slug,
+      },
+    };
+  } finally {
+    if (!heldAccountDeletionLease) await releaseOwnerDiscordRoleMutationLease(env, discordRoleReservation.lease);
+  }
+}
+
+export async function deleteOwnedAccountData(env: Env, userId: string) {
+  const db = requireDb(env);
+  const discordRoleReservation = await reserveOwnerDiscordAccountDeletionLease(env, userId);
+  if (discordRoleReservation.required && !discordRoleReservation.lease) {
+    return { ok: false as const, status: 409 as const, message: "DZN is still issuing or changing this account's Discord owner access. Retry account closure shortly." };
+  }
+  const renewDiscordRoleReservation = async () => {
+    if (await renewOwnerDiscordAccountDeletionLease(env, discordRoleReservation.lease)) return true;
+    return false;
+  };
+  const expiredDiscordRoleReservation = () => ({
+    ok: false as const,
+    status: 409 as const,
+    message: "DZN could not keep this account's Discord owner-access cleanup reservation. No further account data was removed; retry account closure shortly.",
+  });
+  try {
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    const discordRoleCleanup = await revokeOwnerDiscordRoleForAccountDeletion(env, userId, fetch, discordRoleReservation.lease);
+    if (!discordRoleCleanup.ok) return discordRoleCleanup;
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    const deleted = emptyDeletionCounts();
+    const servers = await db
+      .prepare("SELECT id FROM linked_servers WHERE user_id = ?")
+      .bind(userId)
+      .all<{ id: string }>();
+
+    for (const server of servers.results ?? []) {
+      if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+      const result = await deleteOwnedLinkedServerData(env, userId, server.id, {
+        skipOwnerDiscordRoleCleanup: true,
+        accountDeletionDiscordRoleLease: discordRoleReservation.lease,
+      });
+      if (!result.ok) return { ok: false as const, status: result.status, message: result.error };
+      mergeDeletionCounts(deleted, result.deleted);
+      if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    }
+
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.nitradoConnections += await deleteRows(db, "DELETE FROM nitrado_connections WHERE user_id = ?", [userId]);
+    if (await tableExists(db, "discord_oauth_tokens")) {
+      if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+      await deleteRows(db, "DELETE FROM discord_oauth_tokens WHERE user_id = ?", [userId]);
+    }
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.sessions += await deleteRows(db, "DELETE FROM sessions WHERE user_id = ?", [userId]);
+    deleted.discordGuilds += await deleteRows(
+      db,
+      `DELETE FROM discord_guilds
+       WHERE owner_user_id = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM linked_servers WHERE linked_servers.discord_guild_id = discord_guilds.id
+         )`,
+      [userId],
+    );
+    if (await tableExists(db, "user_notifications")) {
+      if (await tableExists(db, "player_game_identity_claims")) {
+        if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+        await deleteRows(db,
+          `DELETE FROM user_notifications
+           WHERE type = 'player_link_review_requested'
+             AND json_extract(metadata, '$.claim_id') IN (
+               SELECT id FROM player_game_identity_claims WHERE user_id = ?
+             )`,
+          [userId],
+        );
+      }
+      if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+      await deleteRows(db, "DELETE FROM user_notifications WHERE user_id = ?", [userId]);
+    }
+    if (!(await renewDiscordRoleReservation())) return expiredDiscordRoleReservation();
+    deleted.users += await eraseOrRetainAccountUser(db, userId);
+
+    return { ok: true as const, deleted };
+  } finally {
+    await releaseOwnerDiscordRoleMutationLease(env, discordRoleReservation.lease);
+  }
 }
 
 export async function eraseOrRetainAccountUser(db: D1Database, userId: string) {
@@ -296,6 +395,19 @@ async function directUserCleanupStatements(db: D1Database, userId: string) {
       SET requester_discord_id = NULL,
           requester_username = NULL
       WHERE requester_user_id = ?`).bind(userId));
+  }
+  if (await tableExists(db, "dzn_owner_discord_access_delivery_attempts")) {
+    statements.push(db.prepare(`UPDATE dzn_owner_discord_access_delivery_attempts
+      SET requester_discord_id = CASE
+            WHEN requester_user_id = ? THEN NULL
+            ELSE requester_discord_id
+          END,
+          actor_discord_id = CASE WHEN actor_user_id = ? THEN NULL ELSE actor_discord_id END
+      WHERE requester_user_id = ?
+         OR actor_user_id = ?
+         OR request_id IN (
+           SELECT id FROM dzn_owner_discord_access_requests WHERE requester_user_id = ?
+          )`).bind(userId, userId, userId, userId, userId));
   }
   if (await tableExists(db, "dzn_owner_discord_access_audit")) {
     statements.push(db.prepare(`UPDATE dzn_owner_discord_access_audit
