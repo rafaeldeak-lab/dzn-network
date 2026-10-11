@@ -59,6 +59,7 @@ class MemoryD1 {
     private readonly userId = "owner-user",
     private readonly failRank = false,
     private readonly legacyRankSchema = false,
+    private readonly rankTimestamp: string | null = "2026-06-24T06:52:00.000Z",
   ) {}
 
   prepare(sql: string) {
@@ -103,7 +104,7 @@ class MemoryD1 {
       const rank = rankFixtures().find((row) => `${row.id}-guild` === String(bindings[0]))?.rank ?? null;
       return {
         network_rank: rank,
-        network_rank_updated_at: "2026-06-24T06:52:00.000Z",
+        network_rank_updated_at: this.rankTimestamp,
         updated_at: "2026-06-24T06:51:00.000Z",
       };
     }
@@ -289,6 +290,13 @@ async function main() {
   assert.equal(legacySchemaBody.stats?.rank, rankFixtures().find((row) => row.id === "nuketown")?.rank ?? null);
   assert.equal(legacySchemaBody.rank_generated_at, "2026-06-24T06:51:00.000Z");
   assert.equal(legacySchemaBody.rank_stale, false);
+
+  const uninitializedRankResponse = await onRequestGet(makeContext("nuketown", new MemoryD1("owner-user", false, false, null)));
+  assert.equal(uninitializedRankResponse.status, 200, "A migrated cache row without a rank timestamp must still return its stored rank.");
+  const uninitializedRankBody = await readJson(uninitializedRankResponse);
+  assert.equal(uninitializedRankBody.stats?.rank, rankFixtures().find((row) => row.id === "nuketown")?.rank ?? null);
+  assert.equal(uninitializedRankBody.rank_generated_at, null);
+  assert.equal(uninitializedRankBody.rank_stale, true);
 
   console.log("Dashboard live-stats endpoint tests passed.");
 }

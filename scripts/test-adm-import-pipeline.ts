@@ -1007,6 +1007,11 @@ async function main() {
   const rankRefreshHeartbeatResult = await processPendingAdmImportJobs(makeEnv(rankRefreshHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
   assert.equal(rankRefreshHeartbeatResult.completedJobs, 1);
   assert.equal(rankRefreshHeartbeatResult.results[0]?.file_result?.public_cache_updated, true);
+  assert.equal(
+    typeof rankRefreshHeartbeatDb.serverPublicCache.get(guildId)?.network_rank_updated_at,
+    "string",
+    "A completed rank refresh must stamp its dedicated freshness time even when the server has no current rank.",
+  );
 
   const buildFixtureName = "DayZServer_PS4_x64_2026-05-31_20-01-53.ADM";
   const buildFixtureLines = [
@@ -1065,9 +1070,10 @@ async function main() {
   assert.equal(idleBuildTail.completedJobs, 1);
   assert.equal(
     idleBuildTail.results[0]?.file_result?.public_cache_updated,
-    true,
-    "A quiet grown tail initializes the dedicated rank timestamp once.",
+    false,
+    "A quiet grown tail must skip another cache write when the preceding import already completed its rank refresh.",
   );
+  assert.equal(typeof buildScheduledDb.serverPublicCache.get(guildId)?.network_rank_updated_at, "string");
   assert.equal(buildScheduledDb.buildEvents.length, 12);
   assert.deepEqual(countBy(buildScheduledDb.buildEvents, "event_type"), {
     placed: 5,
@@ -1270,9 +1276,26 @@ async function main() {
   reopenedScheduledTail!.chunk_size = 2;
   reopenedScheduledTail!.total_chunks = 2;
   reopenedScheduledTail!.chunks_processed = 1;
+  scheduledTailDb.failPublicCacheWritesRemaining = 1;
+  const repeatedQuietTailFailure = await processPendingAdmImportJobs(makeEnv(scheduledTailDb), { maxJobs: 1, maxChunksPerJob: 2 });
+  assert.equal(repeatedQuietTailFailure.completedJobs, 1);
+  assert.equal(repeatedQuietTailFailure.results[0]?.file_result?.public_cache_updated, false);
+  const afterRepeatedQuietTailFailure = scheduledTailDb.admImportJobs.get(String(scheduledTailFirst.job?.job_id));
+  assert.deepEqual(
+    JSON.parse(String(afterRepeatedQuietTailFailure?.result_json)).scheduled_maintenance_retry,
+    { cache: true, stats: false, had_derived_writes: true },
+    "A failed retry must preserve the earlier write provenance for the next appended tail.",
+  );
+  afterRepeatedQuietTailFailure!.status = "queued";
+  afterRepeatedQuietTailFailure!.adm_text = "AdminLog started on 2026-05-20 at 12:00:00\n12:00:01 | Server heartbeat\n12:00:02 | Server heartbeat\n12:00:03 | Server heartbeat";
+  afterRepeatedQuietTailFailure!.total_lines = 4;
+  afterRepeatedQuietTailFailure!.current_line = 3;
+  afterRepeatedQuietTailFailure!.chunk_size = 2;
+  afterRepeatedQuietTailFailure!.total_chunks = 2;
+  afterRepeatedQuietTailFailure!.chunks_processed = 2;
   const quietTailRecovery = await processPendingAdmImportJobs(makeEnv(scheduledTailDb), { maxJobs: 1, maxChunksPerJob: 2 });
   assert.equal(quietTailRecovery.completedJobs, 1);
-  assert.equal(quietTailRecovery.results[0]?.file_result?.public_cache_updated, true, "A quiet appended tail must retry the same job's failed public-cache refresh.");
+  assert.equal(quietTailRecovery.results[0]?.file_result?.public_cache_updated, true, "A later quiet appended tail must recover the same job's repeatedly failed public-cache refresh.");
   assert.equal(scheduledTailDb.serverPublicCache.has(guildId), true);
   assert.equal(scheduledTailDb.admImportJobs.size, 1);
 
@@ -1750,13 +1773,15 @@ class MemoryD1 {
   }]]);
   failKillInsertAfter: number | null;
   failAutomationJobInsert: boolean;
+  failPublicCacheWritesRemaining: number;
   killInsertAttempts = 0;
   schemaQueries: string[] = [];
   executedQueries: string[] = [];
 
-  constructor(options: { failKillInsertAfter?: number | null; failAutomationJobInsert?: boolean } = {}) {
+  constructor(options: { failKillInsertAfter?: number | null; failAutomationJobInsert?: boolean; failPublicCacheWrites?: number } = {}) {
     this.failKillInsertAfter = options.failKillInsertAfter ?? null;
     this.failAutomationJobInsert = options.failAutomationJobInsert ?? false;
+    this.failPublicCacheWritesRemaining = options.failPublicCacheWrites ?? 0;
   }
 
   prepare(query: string) {
@@ -2325,13 +2350,24 @@ class MemoryStatement {
       return changed(1);
     }
     if (q.includes("insert into server_public_cache")) {
-      this.db.serverPublicCache.set(String(this.values[1]), {
+      if (this.db.failPublicCacheWritesRemaining > 0) {
+        this.db.failPublicCacheWritesRemaining -= 1;
+        throw new Error("simulated server_public_cache write failure");
+      }
+      const guildId = String(this.values[1]);
+      const existing = this.db.serverPublicCache.get(guildId);
+      const hasRankTimestamp = q.includes("network_rank_updated_at");
+      this.db.serverPublicCache.set(guildId, {
         guild_id: this.values[1],
         plan_key: this.values[2],
         public_server_name: this.values[3],
+        network_rank: this.values[10] ?? existing?.network_rank ?? null,
         last_status_update_at: this.values[12],
-        last_adm_update_at: this.values[13],
-        updated_at: this.values[14],
+        last_adm_update_at: this.values[13] ?? existing?.last_adm_update_at ?? null,
+        network_rank_updated_at: hasRankTimestamp
+          ? this.values[14] ?? existing?.network_rank_updated_at ?? null
+          : existing?.network_rank_updated_at ?? null,
+        updated_at: this.values[hasRankTimestamp ? 15 : 14],
       });
       return changed(1);
     }

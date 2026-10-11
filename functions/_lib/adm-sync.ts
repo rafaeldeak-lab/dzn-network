@@ -4503,6 +4503,18 @@ async function finalizeAdmImportJob(
     import_report_id: row.id,
     imported_at: now,
   };
+  const maintenanceRetry = isScheduledNitradoImport
+    ? {
+      cache: cacheRefreshStatus === "failed",
+      stats: warnings.some((warning) => warning.includes("Stats rebuild failed")),
+      had_derived_writes: derivedDataWrites > 0
+        || currentScheduledMaintenanceRetry?.hadDerivedWrites === true
+        || previousScheduledDerivedWrites > 0,
+    }
+    : null;
+  const storedFileResult = maintenanceRetry && (maintenanceRetry.cache || maintenanceRetry.stats)
+    ? { ...fileResult, scheduled_maintenance_retry: maintenanceRetry }
+    : fileResult;
 
   await db
     .prepare(
@@ -4519,7 +4531,7 @@ async function finalizeAdmImportJob(
         updated_at = ?
       WHERE id = ? AND server_id = ?`,
     )
-    .bind(finalStatus, chunkStats.totalChunks, chunkStats.totalChunks, publicCacheUpdated ? 1 : 0, discordQueuesCreated, JSON.stringify(warnings), JSON.stringify(fileResult), now, now, row.id, row.server_id)
+    .bind(finalStatus, chunkStats.totalChunks, chunkStats.totalChunks, publicCacheUpdated ? 1 : 0, discordQueuesCreated, JSON.stringify(warnings), JSON.stringify(storedFileResult), now, now, row.id, row.server_id)
     .run();
 
   const syncRunMessage = buildAdmImportSyncRunMessage({
@@ -4559,7 +4571,7 @@ async function finalizeAdmImportJob(
   }
 
   const completed = await getAdmImportJob(env, row.server_id, row.id);
-  return toAdmImportJobProgress(completed ?? { ...row, status: finalStatus, result_json: JSON.stringify(fileResult), completed_at: now });
+  return toAdmImportJobProgress(completed ?? { ...row, status: finalStatus, result_json: JSON.stringify(storedFileResult), completed_at: now });
 }
 
 async function getAdmImportJob(env: Env, linkedServerId: string, jobId: string) {

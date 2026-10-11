@@ -117,8 +117,8 @@ async function readLightweightRank(db: D1Database, guildId: string | null) {
     return {
       rank,
       source: "leaderboard_snapshot" as const,
-      generatedAt: row?.network_rank_updated_at ?? row?.updated_at ?? null,
-      stale: false,
+      generatedAt: row?.network_rank_updated_at ?? null,
+      stale: !row?.network_rank_updated_at,
     };
   } catch (error) {
     if (!/no such column: network_rank_updated_at/i.test(error instanceof Error ? error.message : String(error))) {
