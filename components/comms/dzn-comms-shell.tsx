@@ -341,7 +341,7 @@ export function DznCommsShell() {
       can_delete: false,
       reactions: undefined,
     };
-    historyRequestGenerationRef.current += 1;
+    if (selectedChannelRef.current === deletedChannelSlug) historyRequestGenerationRef.current += 1;
     const previousTimeout = deletionNoticeTimeoutsRef.current.get(messageId);
     if (previousTimeout !== undefined) window.clearTimeout(previousTimeout);
 
