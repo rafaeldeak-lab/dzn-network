@@ -15,6 +15,34 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type Status = "pending" | "approved" | "rejected" | "revoked";
 type Delivery = { operation: "invite" | "role_grant" | "role_revoke" | "diagnostic"; status: "started" | "succeeded" | "not_joined" | "retryable_failure" | "failed" | "not_configured"; message: string; createdAt: string; completedAt: string | null };
 type DeliveryDiagnostic = { ok: boolean; status: string; message: string; checkedAt: string; checks: { botIdentity: boolean; botGuildMembership: boolean; inviteChannel: boolean; canViewInviteChannel: boolean; canCreateInvite: boolean; canManageRoles: boolean; targetRole: boolean; targetRoleBelowBot: boolean; botHasAdministrator: boolean } };
+type DeliveryDiscovery = {
+  ok: boolean;
+  status: "not_configured" | "not_connected" | "discord_error" | "candidates_incomplete" | "ready_to_configure";
+  message: string;
+  checkedAt: string;
+  checks: {
+    botTokenConfigured: boolean;
+    botIdentity: boolean;
+    botGuildMembership: boolean;
+    canManageRoles: boolean;
+    botHasAdministrator: boolean;
+    verifiedOwnerRoleCandidates: number;
+    privateInviteChannelCandidates: number;
+  };
+  verifiedOwnerRoleCandidates: Array<{ id: string; name: string; assignable: boolean }>;
+  privateInviteChannelCandidates: Array<{
+    id: string;
+    name: string;
+    categoryName: string | null;
+    canView: boolean;
+    canCreateInvite: boolean;
+    privateToEveryone: boolean;
+  }>;
+};
+
+// The public DZN community guild is inspected read-only by this owner-only panel.
+const DZN_CENTRAL_DISCORD_GUILD_ID = "1504922257481531402";
+
 type RequestItem = {
   id: string;
   linkedServerId: string;
@@ -72,6 +100,8 @@ export function OwnerDiscordAccessPage() {
   const [deliveryBusyId, setDeliveryBusyId] = useState<string | null>(null);
   const [deliveryDiagnostic, setDeliveryDiagnostic] = useState<DeliveryDiagnostic | null>(null);
   const [checkingDelivery, setCheckingDelivery] = useState(false);
+  const [deliveryDiscovery, setDeliveryDiscovery] = useState<DeliveryDiscovery | null>(null);
+  const [discoveringDelivery, setDiscoveringDelivery] = useState(false);
   const requestController = useRef<AbortController | null>(null);
   const filterRevision = useRef(0);
 
@@ -247,6 +277,24 @@ export function OwnerDiscordAccessPage() {
     } catch (error) { setNotice(error instanceof Error ? error.message : "The central Discord delivery check is unavailable."); }
     finally { setCheckingDelivery(false); }
   }
+  async function discoverDeliveryCandidates() {
+    if (discoveringDelivery) return;
+    setDiscoveringDelivery(true); setNotice(null);
+    try {
+      const response = await fetch(
+        `/api/owner/discord/owner-access-delivery-candidates?guild_id=${DZN_CENTRAL_DISCORD_GUILD_ID}`,
+        { credentials: "include", cache: "no-store" },
+      );
+      const next = await response.json().catch(() => null) as DeliveryDiscovery | null;
+      if (!response.ok || !next) throw new Error("The central Discord candidate check is unavailable.");
+      setDeliveryDiscovery(next);
+      setNotice(next.message);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The central Discord candidate check is unavailable.");
+    } finally {
+      setDiscoveringDelivery(false);
+    }
+  }
   async function revokeDelivery(requestId: string) {
     if (deliveryBusyId) return;
     setDeliveryBusyId(requestId); setNotice(null);
@@ -316,6 +364,75 @@ export function OwnerDiscordAccessPage() {
                 {payload?.delivery}
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-3"><button type="button" onClick={() => void checkDelivery()} disabled={checkingDelivery} className="min-h-10 rounded-md border border-cyan-300/25 bg-cyan-300/[0.08] px-3 text-xs font-black text-cyan-100 disabled:opacity-50">{checkingDelivery ? "Checking central Discord..." : "Check central Discord delivery"}</button>{deliveryDiagnostic ? <span className={`text-xs font-black ${deliveryDiagnostic.ok ? "text-emerald-200" : "text-amber-100"}`}>{deliveryDiagnostic.status.replace(/_/g, " ")} - checked {formatTime(deliveryDiagnostic.checkedAt)}</span> : null}{deliveryDiagnostic?.checks.botHasAdministrator ? <span className="text-xs font-bold text-amber-100">Bot still has Administrator; reduce it after the controlled delivery proof.</span> : null}</div>
+            </section>
+            <section className="mt-3 rounded-lg border border-white/10 bg-white/[0.025] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-black text-zinc-100">Central Discord setup</p>
+                  <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-400">
+                    Read-only discovery for the DZN community server. It finds only a safe zero-permission owner role and a private invite channel; it does not invite, assign, message, or change Discord access.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void discoverDeliveryCandidates()}
+                  disabled={discoveringDelivery}
+                  className="min-h-10 rounded-md border border-cyan-300/25 bg-cyan-300/[0.08] px-3 text-xs font-black text-cyan-100 disabled:opacity-50"
+                >
+                  {discoveringDelivery ? "Finding safe candidates..." : "Find safe DZN candidates"}
+                </button>
+              </div>
+              {deliveryDiscovery ? (
+                <div className="mt-4 border-t border-white/10 pt-4">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className={`text-xs font-black ${deliveryDiscovery.ok ? "text-emerald-200" : "text-amber-100"}`}>
+                      {deliveryDiscovery.status.replace(/_/g, " ")} - checked {formatTime(deliveryDiscovery.checkedAt)}
+                    </span>
+                    {deliveryDiscovery.checks.botHasAdministrator ? (
+                      <span className="text-xs font-bold text-amber-100">
+                        Bot still has Administrator; reduce it only after the controlled delivery proof.
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-zinc-300">{deliveryDiscovery.message}</p>
+                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                    <div className="border-t border-white/10 pt-3 lg:border-t-0 lg:border-r lg:border-white/10 lg:pr-4 lg:pt-0">
+                      <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Verified Server Owner role</p>
+                      {deliveryDiscovery.verifiedOwnerRoleCandidates.length ? (
+                        <ul className="mt-3 space-y-2">
+                          {deliveryDiscovery.verifiedOwnerRoleCandidates.map((role) => (
+                            <li key={role.id} className="flex flex-wrap items-center justify-between gap-2 text-sm text-zinc-200">
+                              <span className="font-bold">{role.name}</span>
+                              <span className="font-mono text-xs text-zinc-500">{role.id}</span>
+                              <span className={role.assignable ? "text-xs font-black text-emerald-200" : "text-xs font-black text-amber-100"}>
+                                {role.assignable ? "Assignable" : "Not assignable"}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-3 text-sm text-zinc-500">No safe role candidate was found.</p>
+                      )}
+                    </div>
+                    <div className="border-t border-white/10 pt-3 lg:border-t-0 lg:pl-0 lg:pt-0">
+                      <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Private invite channel</p>
+                      {deliveryDiscovery.privateInviteChannelCandidates.length ? (
+                        <ul className="mt-3 space-y-2">
+                          {deliveryDiscovery.privateInviteChannelCandidates.map((channel) => (
+                            <li key={channel.id} className="flex flex-wrap items-center justify-between gap-2 text-sm text-zinc-200">
+                              <span className="font-bold">{channel.categoryName ? `${channel.categoryName} / ` : ""}#{channel.name}</span>
+                              <span className="font-mono text-xs text-zinc-500">{channel.id}</span>
+                              <span className="text-xs font-black text-emerald-200">Private and invite-ready</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-3 text-sm text-zinc-500">No private invite channel is ready yet.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </section>
             <section className="mt-5 flex flex-col gap-3 rounded-lg border border-white/10 bg-white/[0.025] p-4 md:flex-row">
               <div className="flex flex-wrap gap-2">

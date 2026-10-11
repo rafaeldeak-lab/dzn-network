@@ -138,6 +138,10 @@ async function run() {
   assert.match(ownerQueuePage, /Access revoked, but Discord role cleanup needs retry/, "A failed role removal must be reported as incomplete rather than as a completed revocation.");
   assert.match(ownerQueuePage, /setQueueStatus\("revoked"\)/, "A failed or unavailable role cleanup must leave the request reachable in the revoked queue.");
   assert.match(ownerQueuePage, /Discord role cleanup cannot be verified until central delivery is configured/, "Revoked requests must retain an explicit pending-cleanup state while delivery is unavailable.");
+  assert.match(ownerQueuePage, /DZN_CENTRAL_DISCORD_GUILD_ID = "1504922257481531402"/, "The owner console must use the known DZN community guild for its read-only candidate check.");
+  assert.match(ownerQueuePage, /owner-access-delivery-candidates\?guild_id=\$\{DZN_CENTRAL_DISCORD_GUILD_ID\}/, "The owner console must expose the existing read-only candidate discovery route.");
+  assert.match(ownerQueuePage, /Read-only discovery for the DZN community server/, "The owner console must make clear that candidate discovery cannot change Discord access.");
+  assert.match(ownerQueuePage, /Find safe DZN candidates/, "The owner console must provide a platform-owner action to inspect only safe central Discord candidates.");
   const ownerConsole = readFileSync("components/owner/owner-console.tsx", "utf8");
   assert.doesNotMatch(ownerConsole, /ownerDiscordAccessEnabled/, "The owner console must not compile a runtime feature flag into static output.");
   assert.match(ownerConsole, /<Link href="\/owner\/discord-access"/, "The owner console must retain the static route entry point while the API enforces the runtime feature gate.");
