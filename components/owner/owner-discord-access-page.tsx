@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type Status = "pending" | "approved" | "rejected" | "revoked";
 type Delivery = { operation: "invite" | "role_grant" | "role_revoke" | "diagnostic"; status: "started" | "succeeded" | "not_joined" | "retryable_failure" | "failed" | "not_configured"; message: string; createdAt: string; completedAt: string | null };
 type DeliveryDiagnostic = { ok: boolean; status: string; message: string; checkedAt: string; checks: { botIdentity: boolean; botGuildMembership: boolean; inviteChannel: boolean; canViewInviteChannel: boolean; canCreateInvite: boolean; canManageRoles: boolean; targetRole: boolean; targetRoleBelowBot: boolean; botHasAdministrator: boolean } };
+type RejectedOwnerRoleReason = "invalid_role_id" | "server_default_role" | "managed_role" | "invalid_permissions" | "guild_permissions";
 type DeliveryDiscovery = {
   ok: boolean;
   status: "not_configured" | "not_connected" | "discord_error" | "candidates_incomplete" | "ready_to_configure";
@@ -30,6 +31,7 @@ type DeliveryDiscovery = {
     privateInviteChannelCandidates: number;
   };
   verifiedOwnerRoleCandidates: Array<{ id: string; name: string; assignable: boolean }>;
+  rejectedVerifiedOwnerRoles: Array<{ id: string; name: string; reason: RejectedOwnerRoleReason }>;
   privateInviteChannelCandidates: Array<{
     id: string;
     name: string;
@@ -416,6 +418,20 @@ export function OwnerDiscordAccessPage() {
                       ) : (
                         <p className="mt-3 text-sm text-zinc-500">No safe role candidate was found.</p>
                       )}
+                      {deliveryDiscovery.rejectedVerifiedOwnerRoles.length ? (
+                        <div className="mt-4 rounded-md border border-amber-300/25 bg-amber-300/[0.06] p-3">
+                          <p className="text-xs font-black uppercase tracking-[0.14em] text-amber-100">Needs adjustment</p>
+                          <ul className="mt-2 space-y-3">
+                            {deliveryDiscovery.rejectedVerifiedOwnerRoles.map((role) => (
+                              <li key={`${role.id}:${role.reason}`} className="text-sm text-zinc-200">
+                                <p className="font-bold">{role.name}</p>
+                                {role.id ? <p className="mt-1 font-mono text-xs text-zinc-500">{role.id}</p> : null}
+                                <p className="mt-1 leading-5 text-amber-100">{ownerRoleAdjustment(role.reason)}</p>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
                     </div>
                     <div className="border-t border-white/10 pt-3 lg:border-t-0 lg:pl-0 lg:pt-0">
                       <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Private invite channel</p>
@@ -698,4 +714,19 @@ function formatTime(value: string | null) {
   return time && Number.isFinite(time.getTime())
     ? time.toLocaleString()
     : "recently";
+}
+
+function ownerRoleAdjustment(reason: RejectedOwnerRoleReason) {
+  switch (reason) {
+    case "guild_permissions":
+      return "Has guild-wide permissions. Remove every role permission; private channel overwrites provide access.";
+    case "managed_role":
+      return "Managed by an integration. Use a normal server role instead.";
+    case "server_default_role":
+      return "This is the server default role and cannot be assigned.";
+    case "invalid_permissions":
+      return "Discord did not return verifiable permissions. Use a normal zero-permission role.";
+    case "invalid_role_id":
+      return "Discord did not return a usable role ID. Create or select a normal server role.";
+  }
 }

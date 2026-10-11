@@ -1,5 +1,8 @@
 import type { Env } from "./types";
-import { isSafeOwnerDiscordAccessRole } from "./owner-discord-role-safety";
+import {
+  getOwnerDiscordAccessRoleRejection,
+  type OwnerDiscordAccessRoleRejection,
+} from "./owner-discord-role-safety";
 
 type DiscordFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -45,6 +48,11 @@ export type OwnerDiscordDeliveryDiscovery = {
     id: string;
     name: string;
     assignable: boolean;
+  }>;
+  rejectedVerifiedOwnerRoles: Array<{
+    id: string;
+    name: string;
+    reason: OwnerDiscordAccessRoleRejection;
   }>;
   privateInviteChannelCandidates: Array<{
     id: string;
@@ -120,8 +128,10 @@ export async function discoverOwnerDiscordDeliveryCandidates(
     const everyoneBasePermissions = parseBits(roleById.get(guildId)?.permissions);
     const botHasAdministrator = hasPermission(basePermissions, DISCORD_ADMINISTRATOR);
     const canManageRoles = botHasAdministrator || hasPermission(basePermissions, DISCORD_MANAGE_ROLES);
-    const verifiedOwnerRoleCandidates = roles
-      .filter((role) => normalizeRoleName(role.name) === "verified server owner" && isSafeOwnerDiscordAccessRole(role, guildId))
+    const namedVerifiedOwnerRoles = roles
+      .filter((role) => normalizeRoleName(role.name) === "verified server owner");
+    const verifiedOwnerRoleCandidates = namedVerifiedOwnerRoles
+      .filter((role) => getOwnerDiscordAccessRoleRejection(role, guildId) === null)
       .map((role) => ({
         id: String(role.id ?? ""),
         name: String(role.name ?? "Verified Server Owner"),
@@ -133,6 +143,17 @@ export async function discoverOwnerDiscordDeliveryCandidates(
         ),
       }))
       .filter((role) => discordIdValue(role.id));
+    const rejectedVerifiedOwnerRoles = namedVerifiedOwnerRoles
+      .map((role) => {
+        const reason = getOwnerDiscordAccessRoleRejection(role, guildId);
+        if (!reason) return null;
+        return {
+          id: String(role.id ?? "").trim(),
+          name: String(role.name ?? "Verified Server Owner"),
+          reason,
+        };
+      })
+      .filter((role): role is NonNullable<typeof role> => role !== null);
     const channelById = new Map(channels.map((channel) => [String(channel.id ?? ""), channel]));
     const privateInviteChannelCandidates = channels
       .filter((channel) => [0, 5].includes(Number(channel.type)))
@@ -167,9 +188,12 @@ export async function discoverOwnerDiscordDeliveryCandidates(
     };
     const hasAssignableRole = verifiedOwnerRoleCandidates.some((role) => role.assignable);
     if (!canManageRoles || !hasAssignableRole || privateInviteChannelCandidates.length === 0) {
-      return discovery("candidates_incomplete", "DZN found the central server, but it still needs an assignable Verified Server Owner role, a private invite channel, and role-management access before configuration can be completed.", checkedAt, guildId, checks, verifiedOwnerRoleCandidates, privateInviteChannelCandidates);
+      const roleMessage = rejectedVerifiedOwnerRoles.length
+        ? "The named Verified Server Owner role is excluded until it is a normal zero-permission Discord role; private channel overwrites provide its access."
+        : "DZN found the central server, but it still needs an assignable Verified Server Owner role, a private invite channel, and role-management access before configuration can be completed.";
+      return discovery("candidates_incomplete", roleMessage, checkedAt, guildId, checks, verifiedOwnerRoleCandidates, rejectedVerifiedOwnerRoles, privateInviteChannelCandidates);
     }
-    return discovery("ready_to_configure", "DZN found safe central-server candidates. No Discord invite, role, message, permission, or membership change was made.", checkedAt, guildId, checks, verifiedOwnerRoleCandidates, privateInviteChannelCandidates);
+    return discovery("ready_to_configure", "DZN found safe central-server candidates. No Discord invite, role, message, permission, or membership change was made.", checkedAt, guildId, checks, verifiedOwnerRoleCandidates, rejectedVerifiedOwnerRoles, privateInviteChannelCandidates);
   } catch {
     return discovery("discord_error", "DZN could not reach Discord for the read-only central-server discovery.", checkedAt, guildId, {
       botTokenConfigured: true,
@@ -184,6 +208,7 @@ function discovery(
   guildId: string | null,
   checks: Partial<OwnerDiscordDeliveryDiscovery["checks"]>,
   verifiedOwnerRoleCandidates: OwnerDiscordDeliveryDiscovery["verifiedOwnerRoleCandidates"] = [],
+  rejectedVerifiedOwnerRoles: OwnerDiscordDeliveryDiscovery["rejectedVerifiedOwnerRoles"] = [],
   privateInviteChannelCandidates: OwnerDiscordDeliveryDiscovery["privateInviteChannelCandidates"] = [],
 ): OwnerDiscordDeliveryDiscovery {
   return {
@@ -203,6 +228,7 @@ function discovery(
       ...checks,
     },
     verifiedOwnerRoleCandidates,
+    rejectedVerifiedOwnerRoles,
     privateInviteChannelCandidates,
   };
 }
