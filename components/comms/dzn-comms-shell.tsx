@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { DznAssist } from "./dzn-assist";
 import { DznLivePresenceCounter } from "./dzn-live-presence-counter";
 import { CommsMessageTime } from "./comms-message-time";
+import { mergeDeletionNotices, type DeletionNotice } from "./deletion-notices";
 import {
   addCommsReaction,
   deleteCommsMessage,
@@ -131,7 +132,7 @@ export function DznCommsShell() {
   const selectedChannelRef = useRef("global-chat");
   const historyRequestGenerationRef = useRef(0);
   const deletionNoticeTimeoutsRef = useRef(new Map<string, number>());
-  const [deletionNoticeIds, setDeletionNoticeIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [deletionNotices, setDeletionNotices] = useState<ReadonlyMap<string, DeletionNotice>>(() => new Map());
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [composerMessage, setComposerMessage] = useState("");
@@ -209,8 +210,8 @@ export function DznCommsShell() {
 
   const payload = history.payload;
   const visibleMessages = useMemo(
-    () => payload.messages.filter((message) => message.visibility_state !== "deleted" || deletionNoticeIds.has(message.id)),
-    [deletionNoticeIds, payload.messages],
+    () => mergeDeletionNotices(payload.messages, deletionNotices, payload.channel.slug),
+    [deletionNotices, payload.channel.slug, payload.messages],
   );
   const statusLabel = useMemo(() => statusCopy(history.status), [history.status]);
   const sendingEnabled = liveUiEnabled && payload.feature_flags.sending_enabled;
@@ -330,13 +331,24 @@ export function DznCommsShell() {
 
   function handleMessageDeleted(messageId: string) {
     const deletedChannelSlug = selectedChannelRef.current;
+    const deletedMessage = visibleMessages.find((item) => item.id === messageId);
+    if (!deletedMessage) return;
+    const notice: CommsHistoryMessage = {
+      ...deletedMessage,
+      author_display_name: "DZN Safety",
+      author_role_label: "System",
+      body: "Message deleted.",
+      visibility_state: "deleted",
+      can_delete: false,
+      reactions: undefined,
+    };
     historyRequestGenerationRef.current += 1;
     const previousTimeout = deletionNoticeTimeoutsRef.current.get(messageId);
     if (previousTimeout !== undefined) window.clearTimeout(previousTimeout);
 
-    setDeletionNoticeIds((current) => {
-      const next = new Set(current);
-      next.add(messageId);
+    setDeletionNotices((current) => {
+      const next = new Map(current);
+      next.set(messageId, { channelSlug: deletedChannelSlug, message: notice });
       return next;
     });
     setHistory((current) => ({
@@ -344,16 +356,16 @@ export function DznCommsShell() {
       payload: {
         ...current.payload,
         messages: current.payload.messages.map((item) => item.id === messageId
-          ? { ...item, author_display_name: "DZN Safety", author_role_label: "System", body: "Message deleted.", visibility_state: "deleted", can_delete: false, reactions: undefined }
+          ? notice
           : item),
       },
     }));
 
     const timeout = window.setTimeout(() => {
       deletionNoticeTimeoutsRef.current.delete(messageId);
-      setDeletionNoticeIds((current) => {
+      setDeletionNotices((current) => {
         if (!current.has(messageId)) return current;
-        const next = new Set(current);
+        const next = new Map(current);
         next.delete(messageId);
         return next;
       });
