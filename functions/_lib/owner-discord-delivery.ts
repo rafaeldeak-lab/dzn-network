@@ -774,7 +774,7 @@ async function checkDiscordRoleConfiguration(configuration: RoleDeliveryConfigur
     if (!checks.targetRoleBelowBot) return { ok: false as const, status: "role_hierarchy" as const, message: "DZN Bot must remain above the Verified Server Owner role before owner delivery can run.", httpStatus: null, checks };
     if (!canManageRoles) return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs Manage Roles for the Verified Server Owner role.", httpStatus: null, checks };
     return { ok: true as const, status: "ready" as const, message: "DZN Bot can manage the Verified Server Owner role.", httpStatus: null, checks, botId, botRoleIds, basePermissions };
-  } catch (error) {
+  } catch {
     return failedChecks("discord_error", "DZN could not reach Discord for the central-server diagnostic.", null);
   }
 }
@@ -805,7 +805,7 @@ async function checkDiscordDeliveryConfiguration(configuration: DeliveryConfigur
       return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs View Channel and Create Invite on the private invite channel.", httpStatus: null, checks };
     }
     return { ok: true as const, status: "ready" as const, message: "DZN owner Discord delivery is ready for controlled requests.", httpStatus: null, checks };
-  } catch (error) {
+  } catch {
     return { ok: false as const, status: "discord_error" as const, message: "DZN could not reach Discord for the private-invite diagnostic.", httpStatus: null, checks: rolePreflight.checks };
   }
 }
