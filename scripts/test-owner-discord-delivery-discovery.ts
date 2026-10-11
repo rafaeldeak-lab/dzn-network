@@ -12,6 +12,7 @@ const verifiedOwnerRoleId = "900000000000000004";
 const categoryId = "900000000000000005";
 const privateInviteChannelId = "900000000000000006";
 const publicChannelId = "900000000000000007";
+const unsyncedChannelId = "900000000000000008";
 const permissions = ((BigInt(1) << BigInt(28)) | (BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(0))).toString();
 const viewChannel = (BigInt(1) << BigInt(10)).toString();
 
@@ -54,7 +55,17 @@ async function run() {
     if (url.pathname === `/api/v10/guilds/${guildId}/channels`) {
       return Response.json([
         { id: categoryId, type: 4, name: "Verified owners", permission_overwrites: [{ id: guildId, type: 0, deny: viewChannel, allow: "0" }] },
-        { id: privateInviteChannelId, type: 0, name: "owner-invites", parent_id: categoryId, permission_overwrites: [] },
+        {
+          id: privateInviteChannelId,
+          type: 0,
+          name: "owner-invites",
+          parent_id: categoryId,
+          permission_overwrites: [
+            { id: guildId, type: 0, deny: viewChannel, allow: "0" },
+            { id: botRoleId, type: 0, deny: "0", allow: permissions },
+          ],
+        },
+        { id: unsyncedChannelId, type: 0, name: "unsynced-public", parent_id: categoryId, permission_overwrites: [] },
         { id: publicChannelId, type: 0, name: "general", permission_overwrites: [] },
       ]);
     }
@@ -75,6 +86,7 @@ async function run() {
     canCreateInvite: true,
     privateToEveryone: true,
   }]);
+  assert.equal(result.privateInviteChannelCandidates.some((channel) => channel.id === unsyncedChannelId), false, "A child channel without its own @everyone deny must not inherit privacy from a category.");
   assert.equal(calls.every((call) => call.method === "GET"), true, "Discovery must never send a Discord mutation request.");
   assert.equal(JSON.stringify(result).includes(env.DISCORD_BOT_TOKEN ?? ""), false, "Discovery must not expose the private bot token.");
 

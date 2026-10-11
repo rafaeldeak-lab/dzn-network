@@ -136,7 +136,9 @@ export async function discoverOwnerDiscordDeliveryCandidates(
       .filter((channel) => [0, 5].includes(Number(channel.type)))
       .map((channel) => {
         const category = channel.parent_id ? channelById.get(String(channel.parent_id)) ?? null : null;
-        const privateToEveryone = everyoneIsDeniedView(channel, guildId) || (!hasEveryoneOverwrite(channel, guildId) && Boolean(category && everyoneIsDeniedView(category, guildId)));
+        // Channel permission sync is not exposed by the Discord API. Require the
+        // child channel's own @everyone deny rather than inferring it from a category.
+        const privateToEveryone = everyoneIsDeniedView(channel, guildId);
         const channelPermissions = evaluateChannelPermissions(basePermissions, channel, guildId, botRoleIds, botId);
         const canView = botHasAdministrator || hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL);
         const canCreateInvite = botHasAdministrator || hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE);
@@ -237,10 +239,6 @@ function evaluateChannelPermissions(base: bigint, channel: DiscordChannel, guild
   }
   value = (value & ~roleDeny) | roleAllow;
   return applyOverwrite(value, overwrites.find((overwrite) => String(overwrite.type) === "1" && String(overwrite.id) === botId));
-}
-
-function hasEveryoneOverwrite(channel: DiscordChannel, guildId: string) {
-  return (channel.permission_overwrites ?? []).some((overwrite) => String(overwrite.type) === "0" && String(overwrite.id) === guildId);
 }
 
 function everyoneIsDeniedView(channel: DiscordChannel, guildId: string) {
