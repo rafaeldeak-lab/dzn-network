@@ -279,7 +279,9 @@ export function OwnerDiscordAccessPage() {
   }
   async function discoverDeliveryCandidates() {
     if (discoveringDelivery) return;
-    setDiscoveringDelivery(true); setNotice(null);
+    setDiscoveringDelivery(true);
+    setDeliveryDiscovery(null);
+    setNotice(null);
     try {
       const response = await fetch(
         `/api/owner/discord/owner-access-delivery-candidates?guild_id=${DZN_CENTRAL_DISCORD_GUILD_ID}`,
@@ -290,6 +292,7 @@ export function OwnerDiscordAccessPage() {
       setDeliveryDiscovery(next);
       setNotice(next.message);
     } catch (error) {
+      setDeliveryDiscovery(null);
       setNotice(error instanceof Error ? error.message : "The central Discord candidate check is unavailable.");
     } finally {
       setDiscoveringDelivery(false);
