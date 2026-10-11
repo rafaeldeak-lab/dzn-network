@@ -955,6 +955,11 @@ async function main() {
   assert.equal(retryHeartbeatResult.completedJobs, 1);
   assert.equal(retryHeartbeatResult.results[0]?.file_result?.public_cache_updated, true);
   assert.equal(retryHeartbeatDb.serverPublicCache.has(guildId), true);
+  assert.equal(
+    typeof retryHeartbeatDb.serverPublicCache.get(guildId)?.network_rank_updated_at,
+    "string",
+    "The corrective cache write must establish rank freshness even without an ADM timestamp.",
+  );
 
   await createAdmImportJobForServer(makeEnv(retryHeartbeatDb), {
     linkedServerId,
@@ -965,7 +970,7 @@ async function main() {
   });
   const recoveredHeartbeatResult = await processPendingAdmImportJobs(makeEnv(retryHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
   assert.equal(recoveredHeartbeatResult.completedJobs, 1);
-  assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, true, "A cache row without a rank timestamp must refresh once to establish durable rank freshness.");
+  assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, false, "A cache row whose corrective write already established rank freshness must not refresh again on the next heartbeat.");
 
   const retryStatsHeartbeatDb = new MemoryD1();
   retryStatsHeartbeatDb.admImportJobs.set("previous-stats-failure", {
@@ -994,7 +999,7 @@ async function main() {
     guild_id: guildId,
     plan_key: "partner",
     public_server_name: "Fixture Server",
-    last_adm_update_at: "2026-05-31T18:00:00.000Z",
+    last_adm_update_at: null,
     updated_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
   });
   await createAdmImportJobForServer(makeEnv(rankRefreshHeartbeatDb), {
@@ -1010,7 +1015,22 @@ async function main() {
   assert.equal(
     typeof rankRefreshHeartbeatDb.serverPublicCache.get(guildId)?.network_rank_updated_at,
     "string",
-    "A completed rank refresh must stamp its dedicated freshness time even when the server has no current rank.",
+    "A completed rank refresh must stamp its dedicated freshness time even when the server has neither an ADM timestamp nor a current rank.",
+  );
+
+  await createAdmImportJobForServer(makeEnv(rankRefreshHeartbeatDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-02-30.ADM",
+    admText: "AdminLog started on 2026-05-31 at 20:02:30\\n20:02:31 | Server heartbeat",
+    source: "scheduled_nitrado",
+    chunkSize: 25,
+  });
+  const settledRankRefreshHeartbeat = await processPendingAdmImportJobs(makeEnv(rankRefreshHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(settledRankRefreshHeartbeat.completedJobs, 1);
+  assert.equal(
+    settledRankRefreshHeartbeat.results[0]?.file_result?.public_cache_updated,
+    false,
+    "A completed null-rank refresh without an ADM timestamp must not repeat on every scheduled heartbeat.",
   );
 
   const buildFixtureName = "DayZServer_PS4_x64_2026-05-31_20-01-53.ADM";

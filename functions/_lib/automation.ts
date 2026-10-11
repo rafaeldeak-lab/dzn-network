@@ -1468,7 +1468,7 @@ export async function upsertServerPublicCache(env: Env, input: {
   const now = new Date().toISOString();
   let networkRank = input.networkRank ?? null;
   let rankSnapshotRefreshCompleted = input.networkRank !== undefined;
-  if (input.networkRank === undefined && input.lastAdmUpdateAt) {
+  if (input.networkRank === undefined) {
     try {
       networkRank = await readNetworkRankSnapshot(env, input.guildId);
       rankSnapshotRefreshCompleted = true;
