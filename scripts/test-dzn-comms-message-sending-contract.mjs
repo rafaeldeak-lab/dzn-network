@@ -130,7 +130,7 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /setDeletedMessageIds\(\(current\) => \{[\s\S]*next\.add\(messageId\);/, "A completed delete must suppress any late stale history row without canceling a newer channel load.");
   assert.doesNotMatch(shell, /selectedChannelRef\.current === deletedChannelSlug\) historyRequestGenerationRef\.current \+= 1/, "A completed delete must not invalidate a newer same-channel history request.");
   assert.match(deletionNotices, /function insertNoticeChronologically\(messages: CommsHistoryMessage\[\], notice: CommsHistoryMessage\)/, "A polling refresh must restore an active deletion notice to its original chronological position.");
-  assert.match(deletionNotices, /message\.created_at !== null && message\.created_at > noticeCreatedAt/, "Chronological reinsertion must handle nullable history timestamps safely.");
+  assert.match(deletionNotices, /message\.created_at === noticeCreatedAt && message\.id > notice\.id/, "Chronological reinsertion must use the history ID tie-breaker for equal timestamps.");
   assert.match(shell, /window\.setTimeout\([\s\S]*DELETED_MESSAGE_NOTICE_MS/, "A self-deletion placeholder must be removed after the bounded notice window.");
   assert.match(shell, /messages: current\.payload\.messages\.filter\(\(item\) => item\.id !== messageId\)/, "The expired deletion placeholder must be removed from local chat state.");
   assert.match(shell, /Message sent\. Chat history will refresh shortly\./);

@@ -11,7 +11,10 @@ function insertNoticeChronologically(messages: CommsHistoryMessage[], notice: Co
     messages.push(notice);
     return;
   }
-  const insertAt = messages.findIndex((message) => message.created_at !== null && message.created_at > noticeCreatedAt);
+  const insertAt = messages.findIndex((message) => message.created_at !== null && (
+    message.created_at > noticeCreatedAt
+    || (message.created_at === noticeCreatedAt && message.id > notice.id)
+  ));
   if (insertAt === -1) messages.push(notice);
   else messages.splice(insertAt, 0, notice);
 }

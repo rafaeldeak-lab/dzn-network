@@ -88,3 +88,15 @@ test("inserts a refreshed deletion notice into its original chronological positi
     [before, notice.message, after],
   );
 });
+
+test("uses the history ID tie-breaker for notices sharing a timestamp", () => {
+  const createdAt = "2026-10-11T10:01:00.000Z";
+  const notice = deletedNotice("b", createdAt);
+  const before = message("a", "Still visible before", "visible", createdAt);
+  const after = message("c", "Still visible after", "visible", createdAt);
+
+  assert.deepEqual(
+    mergeDeletionNotices([before, after], new Map([["b", notice]]), new Set(), "global-chat"),
+    [before, notice.message, after],
+  );
+});
