@@ -4249,6 +4249,10 @@ async function finalizeAdmImportJob(
       && previousScheduledWarnings.includes("Public cache update failed"));
   const retryPreviousScheduledStatsFailure = Boolean(currentScheduledMaintenanceRetry?.stats)
     || previousScheduledWarnings.includes("Stats rebuild failed");
+  const retryPreviousScheduledHomeStatsFailure = Boolean(currentScheduledMaintenanceRetry?.homeStats)
+    || previousScheduledWarnings.includes("Home stats ADM snapshot refresh failed");
+  const retryPreviousScheduledDiscordFailure = Boolean(currentScheduledMaintenanceRetry?.discord)
+    || previousScheduledWarnings.includes("Discord auto-post queueing failed");
   const previousScheduledDerivedWrites = previousScheduledMaintenanceResult
     ? Number(previousScheduledMaintenanceResult.written_kills ?? 0)
       + Number(previousScheduledMaintenanceResult.player_events ?? 0)
@@ -4324,7 +4328,10 @@ async function finalizeAdmImportJob(
       warnings.push(`${row.filename}: Public cache update failed after ADM rows were written. ${safeSyncErrorMessage(error)}`);
     }
   }
-  if (derivedDataWrites > 0) {
+  const shouldRefreshHomeStats = derivedDataWrites > 0 || (
+    retryPreviousScheduledHomeStatsFailure && hasRetryableScheduledAdmWrites
+  );
+  if (shouldRefreshHomeStats) {
     await withManualAdmPhaseTimeout(
       patchHomeStatsAdmStatsFromCanonicalEvents(env),
       "home stats ADM snapshot refresh",
@@ -4334,7 +4341,13 @@ async function finalizeAdmImportJob(
     });
   }
 
-  if (server.guild_id && (Number(row.written_kills ?? 0) > 0 || Number(row.player_events ?? 0) > 0 || (!isScheduledNitradoImport && Number(row.raw_events ?? 0) > 0))) {
+  const hasCurrentDiscordSignal = Number(row.written_kills ?? 0) > 0
+    || Number(row.player_events ?? 0) > 0
+    || (!isScheduledNitradoImport && Number(row.raw_events ?? 0) > 0);
+  const shouldQueueDiscordPosts = hasCurrentDiscordSignal || (
+    retryPreviousScheduledDiscordFailure && hasRetryableScheduledAdmWrites
+  );
+  if (server.guild_id && shouldQueueDiscordPosts) {
     try {
       discordQueuesCreated = await withManualAdmPhaseTimeout(queueDiscordPostUpdatesForGuild(env, server.guild_id, server.plan_key, [
         "leaderboard_embed",
@@ -4513,12 +4526,19 @@ async function finalizeAdmImportJob(
     ? {
       cache: cacheRefreshStatus === "failed",
       stats: warnings.some((warning) => warning.includes("Stats rebuild failed")),
+      home_stats: warnings.some((warning) => warning.includes("Home stats ADM snapshot refresh failed")),
+      discord: warnings.some((warning) => warning.includes("Discord auto-post queueing failed")),
       had_derived_writes: derivedDataWrites > 0
         || currentScheduledMaintenanceRetry?.hadDerivedWrites === true
         || previousScheduledDerivedWrites > 0,
     }
     : null;
-  const storedFileResult = maintenanceRetry && (maintenanceRetry.cache || maintenanceRetry.stats)
+  const storedFileResult = maintenanceRetry && (
+    maintenanceRetry.cache
+    || maintenanceRetry.stats
+    || maintenanceRetry.home_stats
+    || maintenanceRetry.discord
+  )
     ? { ...fileResult, scheduled_maintenance_retry: maintenanceRetry }
     : fileResult;
 
@@ -4910,8 +4930,13 @@ async function updateScheduledAdmImportJobTailText(
     ? totalChunks
     : Math.max(0, Math.ceil(currentLine / chunkSize));
   const scheduledMaintenanceRetry = values.resetCounters ? getScheduledMaintenanceRetry(row) : null;
-  const resetResultJson = scheduledMaintenanceRetry && (scheduledMaintenanceRetry.cache || scheduledMaintenanceRetry.stats)
-    ? `json_object('scheduled_maintenance_retry', json_object('cache', ${scheduledMaintenanceRetry.cache ? 1 : 0}, 'stats', ${scheduledMaintenanceRetry.stats ? 1 : 0}, 'had_derived_writes', ${scheduledMaintenanceRetry.hadDerivedWrites ? 1 : 0}))`
+  const resetResultJson = scheduledMaintenanceRetry && (
+    scheduledMaintenanceRetry.cache
+    || scheduledMaintenanceRetry.stats
+    || scheduledMaintenanceRetry.homeStats
+    || scheduledMaintenanceRetry.discord
+  )
+    ? `json_object('scheduled_maintenance_retry', json_object('cache', ${scheduledMaintenanceRetry.cache ? 1 : 0}, 'stats', ${scheduledMaintenanceRetry.stats ? 1 : 0}, 'home_stats', ${scheduledMaintenanceRetry.homeStats ? 1 : 0}, 'discord', ${scheduledMaintenanceRetry.discord ? 1 : 0}, 'had_derived_writes', ${scheduledMaintenanceRetry.hadDerivedWrites ? 1 : 0}))`
     : "NULL";
   await requireDb(env)
     .prepare(
@@ -5579,10 +5604,22 @@ function getAdmImportJobBuildEventsStored(row: Pick<AdmImportJobRow, "result_jso
 
 function getScheduledMaintenanceRetry(row: Pick<AdmImportJobRow, "public_cache_updated" | "warnings_json" | "written_kills" | "player_events" | "joins" | "disconnects" | "deaths" | "result_json">) {
   const warnings = String(row.warnings_json ?? "");
-  let savedRetry: { cache?: unknown; stats?: unknown; had_derived_writes?: unknown } | null = null;
+  let savedRetry: {
+    cache?: unknown;
+    stats?: unknown;
+    home_stats?: unknown;
+    discord?: unknown;
+    had_derived_writes?: unknown;
+  } | null = null;
   try {
     const parsed = JSON.parse(String(row.result_json ?? "{}")) as {
-      scheduled_maintenance_retry?: { cache?: unknown; stats?: unknown; had_derived_writes?: unknown };
+      scheduled_maintenance_retry?: {
+        cache?: unknown;
+        stats?: unknown;
+        home_stats?: unknown;
+        discord?: unknown;
+        had_derived_writes?: unknown;
+      };
     };
     savedRetry = parsed.scheduled_maintenance_retry ?? null;
   } catch {
@@ -5597,6 +5634,8 @@ function getScheduledMaintenanceRetry(row: Pick<AdmImportJobRow, "public_cache_u
   return {
     cache: Boolean(savedRetry?.cache) || (Number(row.public_cache_updated ?? 1) === 0 && warnings.includes("Public cache update failed")),
     stats: Boolean(savedRetry?.stats) || warnings.includes("Stats rebuild failed"),
+    homeStats: Boolean(savedRetry?.home_stats) || warnings.includes("Home stats ADM snapshot refresh failed"),
+    discord: Boolean(savedRetry?.discord) || warnings.includes("Discord auto-post queueing failed"),
     hadDerivedWrites: Boolean(savedRetry?.had_derived_writes) || derivedWrites > 0,
   };
 }

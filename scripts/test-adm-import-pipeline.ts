@@ -1267,6 +1267,12 @@ async function main() {
   assert.equal(repeatedScheduledCreate.job?.chunks_processed, 0);
 
   const scheduledTailDb = new MemoryD1();
+  scheduledTailDb.publicApiSnapshots.set("home-stats:preview", {
+    snapshot_key: "home-stats:preview",
+    access_level: "preview",
+    payload_json: JSON.stringify({ data: {}, totals: {}, network_pulse: {} }),
+    generated_at: "2026-05-20T11:00:00.000Z",
+  });
   const scheduledTailFirst = await createScheduledAdmImportJobForServer(
     { ...makeEnv(scheduledTailDb), MOCK_NITRADO: "true" },
     "fixture-user",
@@ -1291,7 +1297,12 @@ async function main() {
   scheduledTailRow.deaths = 6;
   scheduledTailRow.raw_events = 7;
   scheduledTailRow.failed_writes = 1;
-  scheduledTailRow.warnings_json = '["previous tail warning", "fixture.ADM: Public cache update failed after ADM rows were written. timed out"]';
+  scheduledTailRow.warnings_json = JSON.stringify([
+    "previous tail warning",
+    "fixture.ADM: Public cache update failed after ADM rows were written. timed out",
+    "fixture.ADM: Home stats ADM snapshot refresh failed after ADM rows were written. timed out",
+    "fixture.ADM: Discord auto-post queueing failed after ADM rows were written. timed out",
+  ]);
   scheduledTailRow.public_cache_updated = 0;
   scheduledTailRow.discord_jobs_queued = 2;
   scheduledTailRow.completed_at = "2026-05-20T12:00:00.000Z";
@@ -1308,7 +1319,7 @@ async function main() {
   assert.equal(scheduledTailGrowth.job?.total_lines, scheduledTailLines.length);
   const reopenedScheduledTail = scheduledTailDb.admImportJobs.get(String(scheduledTailFirst.job?.job_id));
   assert.deepEqual(JSON.parse(String(reopenedScheduledTail?.result_json)), {
-    scheduled_maintenance_retry: { cache: 1, stats: 0, had_derived_writes: 1 },
+    scheduled_maintenance_retry: { cache: 1, stats: 0, home_stats: 1, discord: 1, had_derived_writes: 1 },
   });
   assert.equal(reopenedScheduledTail?.written_kills, 0);
   assert.equal(reopenedScheduledTail?.player_events, 0);
@@ -1332,10 +1343,20 @@ async function main() {
   const repeatedQuietTailFailure = await processPendingAdmImportJobs(makeEnv(scheduledTailDb), { maxJobs: 1, maxChunksPerJob: 2 });
   assert.equal(repeatedQuietTailFailure.completedJobs, 1);
   assert.equal(repeatedQuietTailFailure.results[0]?.file_result?.public_cache_updated, false);
+  assert.equal(
+    JSON.parse(String(scheduledTailDb.publicApiSnapshots.get("home-stats:preview")?.payload_json)).admStatsFreshness?.source,
+    "canonical-adm-events",
+    "A heartbeat-only scheduled tail must retry a prior home-stats snapshot failure when earlier ADM writes exist.",
+  );
+  assert.equal(
+    scheduledTailDb.automationJobs.length > 0,
+    true,
+    "A heartbeat-only scheduled tail must retry a prior Discord queue failure when earlier ADM writes exist.",
+  );
   const afterRepeatedQuietTailFailure = scheduledTailDb.admImportJobs.get(String(scheduledTailFirst.job?.job_id));
   assert.deepEqual(
     JSON.parse(String(afterRepeatedQuietTailFailure?.result_json)).scheduled_maintenance_retry,
-    { cache: true, stats: false, had_derived_writes: true },
+    { cache: true, stats: false, home_stats: false, discord: false, had_derived_writes: true },
     "A failed retry must preserve the earlier write provenance for the next appended tail.",
   );
   afterRepeatedQuietTailFailure!.status = "queued";
@@ -1807,6 +1828,7 @@ class MemoryD1 {
   admSyncFileState = new Map<string, MemoryRow>();
   admLiveSourceState = new Map<string, MemoryRow>();
   serverPublicCache = new Map<string, MemoryRow>();
+  publicApiSnapshots = new Map<string, MemoryRow>();
   automationJobs: MemoryRow[] = [];
   admImportJobs = new Map<string, MemoryRow>();
   linkedServers = new Map<string, MemoryRow>([[linkedServerId, {
@@ -1857,6 +1879,15 @@ class MemoryStatement {
     if (isSchemaQuery(q)) {
       this.db.schemaQueries.push(q);
       return changed(0);
+    }
+    if (q.includes("insert into public_api_snapshots")) {
+      this.db.publicApiSnapshots.set(String(this.values[0]), {
+        snapshot_key: this.values[0],
+        access_level: this.values[1],
+        payload_json: this.values[2],
+        generated_at: this.values[3],
+      });
+      return changed(1);
     }
     if (q.startsWith("update adm_raw_events") || q.startsWith("update player_events") || q.startsWith("update kill_events") || q.startsWith("update player_profiles") || q.startsWith("update server_stats") || q.startsWith("update adm_sync_state") || q.startsWith("update sync_runs")) return changed(0);
     if (q.includes("insert into adm_build_reparse_state")) {
@@ -2262,6 +2293,8 @@ class MemoryStatement {
           scheduled_maintenance_retry: {
             cache: q.includes("'cache', 1") ? 1 : 0,
             stats: q.includes("'stats', 1") ? 1 : 0,
+            home_stats: q.includes("'home_stats', 1") ? 1 : 0,
+            discord: q.includes("'discord', 1") ? 1 : 0,
             had_derived_writes: q.includes("'had_derived_writes', 1") ? 1 : 0,
           },
         });
@@ -2444,6 +2477,9 @@ class MemoryStatement {
 
   async first<T>(): Promise<T | null> {
     const q = normalizeSql(this.query);
+    if (q.includes("from public_api_snapshots") && q.includes("where snapshot_key = ?")) {
+      return (this.db.publicApiSnapshots.get(String(this.values[0])) ?? null) as T | null;
+    }
     if (q.includes("select case when") && q.includes("as eligible") && q.includes("selected_server")) {
       const selected = this.db.linkedServers.get(String(this.values[0]));
       const guildId = String(this.values[1]);
