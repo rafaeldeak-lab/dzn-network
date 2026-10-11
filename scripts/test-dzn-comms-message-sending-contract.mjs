@@ -152,5 +152,7 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(runtime, /DELETE FROM dzn_comms_send_receipts[^\n]+julianday\(expires_at\) <= julianday\('now'\)/, "An exact expired receipt must be replaceable atomically.");
   assert.match(runtime, /host === "\[::1\]"/, "Local activation must accept WHATWG bracketed IPv6 loopback hosts.");
   assert.match(shell, /current\.status === "ready"[\s\S]*last received messages/, "A failed poll after a successful load must preserve real history.");
+  assert.match(shell, /const CAPABILITY_PROBE_RETRY_LIMIT = 3/, "A failed initial capability probe must retry without relying on a browser reload.");
+  assert.match(shell, /poller === undefined && capabilityProbeRetries < CAPABILITY_PROBE_RETRY_LIMIT[\s\S]*window\.setTimeout\(\(\) => void refresh\(\), CAPABILITY_PROBE_RETRY_DELAY_MS\)/, "Capability retries must remain bounded and must not turn public read-only history into a permanent polling loop.");
   assert.doesNotMatch(runtime + shell + client, /STRIPE_SECRET|DZN_LIVE_CHECKOUT_ENABLED|NITRADO_TOKEN|DISCORD_BOT_TOKEN|WebSocket|DurableObject|OPENAI_API_KEY/);
 });

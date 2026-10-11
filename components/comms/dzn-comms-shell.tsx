@@ -47,6 +47,8 @@ const privateGroupsUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_PRIVATE_GROUPS_
 const productionRuntimeProbeEnabled = process.env.NODE_ENV === "production";
 const historyProbeEnabled = historyUiEnabled || liveUiEnabled || productionRuntimeProbeEnabled;
 const DELETED_MESSAGE_NOTICE_MS = 2_000;
+const CAPABILITY_PROBE_RETRY_DELAY_MS = 5_000;
+const CAPABILITY_PROBE_RETRY_LIMIT = 3;
 
 const staticPayload: CommsHistoryPayload = {
   ok: true,
@@ -157,6 +159,9 @@ export function DznCommsShell() {
     if (!historyProbeEnabled) return;
 
     const controller = new AbortController();
+    let poller: number | undefined;
+    let retryTimer: number | undefined;
+    let capabilityProbeRetries = 0;
     const refresh = () => {
       const requestGeneration = ++historyRequestGenerationRef.current;
       return loadCommsHistory(controller.signal, { channelSlug: selectedChannel })
@@ -196,16 +201,21 @@ export function DznCommsShell() {
               payload: staticPayload,
               message: "Message history could not be reached, so DZN is showing the static read-only fallback.",
             });
+        if (poller === undefined && capabilityProbeRetries < CAPABILITY_PROBE_RETRY_LIMIT) {
+          capabilityProbeRetries += 1;
+          retryTimer = window.setTimeout(() => void refresh(), CAPABILITY_PROBE_RETRY_DELAY_MS);
+        }
       });
     };
     void refresh();
-    const poller = liveHistoryRuntimeEnabled || selectedChannel !== "global-chat"
-      ? window.setInterval(() => void refresh(), 5_000)
-      : undefined;
+    if (liveHistoryRuntimeEnabled || selectedChannel !== "global-chat") {
+      poller = window.setInterval(() => void refresh(), 5_000);
+    }
 
     return () => {
       controller.abort();
       if (poller !== undefined) window.clearInterval(poller);
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
   }, [selectedChannel, liveHistoryRuntimeEnabled]);
 
