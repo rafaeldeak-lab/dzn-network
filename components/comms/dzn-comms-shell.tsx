@@ -329,8 +329,7 @@ export function DznCommsShell() {
     }
   }
 
-  function handleMessageDeleted(messageId: string) {
-    const deletedChannelSlug = selectedChannelRef.current;
+  function handleMessageDeleted(messageId: string, deletedChannelSlug: string) {
     const deletedMessage = visibleMessages.find((item) => item.id === messageId);
     if (!deletedMessage) return;
     const notice: CommsHistoryMessage = {
@@ -489,7 +488,7 @@ export function DznCommsShell() {
                     reactionWriteEnabled={reactionWritesEnabled}
                     reactionLoginRequired={reactionLoginRequired}
                     onReactionChange={handleReaction}
-                    onMessageDeleted={handleMessageDeleted}
+                    onMessageDeleted={(messageId) => handleMessageDeleted(messageId, payload.channel.slug)}
                   />
                 ))}
               </div>

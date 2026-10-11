@@ -123,6 +123,8 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /const DELETED_MESSAGE_NOTICE_MS = 2_000/, "A self-deletion notice must stay brief and deterministic.");
   assert.match(shell, /const \[deletionNotices, setDeletionNotices\] = useState<ReadonlyMap<string, DeletionNotice>>\(\(\) => new Map\(\)\)/, "A temporary deletion notice must remain independent of polling payloads.");
   assert.match(shell, /mergeDeletionNotices\(payload\.messages, deletionNotices, payload\.channel\.slug\)/, "Rendered history must merge active notices into the latest channel payload.");
+  assert.match(shell, /function handleMessageDeleted\(messageId: string, deletedChannelSlug: string\)/, "A completed delete must retain the channel that originally rendered the action.");
+  assert.match(shell, /onMessageDeleted=\{\(messageId\) => handleMessageDeleted\(messageId, payload\.channel\.slug\)\}/, "A completed delete must not read the mutable selected channel after its request resolves.");
   assert.match(shell, /window\.setTimeout\([\s\S]*DELETED_MESSAGE_NOTICE_MS/, "A self-deletion placeholder must be removed after the bounded notice window.");
   assert.match(shell, /messages: current\.payload\.messages\.filter\(\(item\) => item\.id !== messageId\)/, "The expired deletion placeholder must be removed from local chat state.");
   assert.match(shell, /Message sent\. Chat history will refresh shortly\./);
