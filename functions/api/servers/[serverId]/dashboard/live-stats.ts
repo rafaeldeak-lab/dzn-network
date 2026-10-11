@@ -8,6 +8,7 @@ import type { PagesFunction } from "../../../../_lib/types";
 const NO_STORE_HEADERS = {
   "cache-control": "private, no-store, no-cache, must-revalidate",
 };
+const NETWORK_RANK_STALE_AFTER_MS = 60 * 60 * 1000;
 
 export const onRequestGet: PagesFunction = async ({ request, env, params }) => {
   try {
@@ -118,7 +119,7 @@ async function readLightweightRank(db: D1Database, guildId: string | null) {
       rank,
       source: "leaderboard_snapshot" as const,
       generatedAt: row?.network_rank_updated_at ?? null,
-      stale: !row?.network_rank_updated_at,
+      stale: isNetworkRankSnapshotStale(row?.network_rank_updated_at),
     };
   } catch (error) {
     if (!/no such column: network_rank_updated_at/i.test(error instanceof Error ? error.message : String(error))) {
@@ -146,6 +147,11 @@ async function readLightweightRank(db: D1Database, guildId: string | null) {
       return unavailableRank();
     }
   }
+}
+
+function isNetworkRankSnapshotStale(value: string | null | undefined) {
+  const timestamp = Date.parse(String(value ?? ""));
+  return !Number.isFinite(timestamp) || Date.now() - timestamp > NETWORK_RANK_STALE_AFTER_MS;
 }
 
 function unavailableRank() {

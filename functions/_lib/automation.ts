@@ -1470,13 +1470,8 @@ export async function upsertServerPublicCache(env: Env, input: {
   let networkRank = input.networkRank ?? null;
   let rankSnapshotRefreshCompleted = input.networkRank !== undefined;
   if (input.networkRank === undefined && input.refreshNetworkRank === true) {
-    try {
-      networkRank = await readNetworkRankSnapshot(env, input.guildId);
-      rankSnapshotRefreshCompleted = true;
-    } catch {
-      // Keep a failed rank lookup retryable instead of stamping it as refreshed.
-      networkRank = null;
-    }
+    networkRank = await readNetworkRankSnapshot(env, input.guildId);
+    rankSnapshotRefreshCompleted = true;
   }
   const rankSnapshotUpdatedAt = rankSnapshotRefreshCompleted ? now : null;
   const db = requireDb(env);

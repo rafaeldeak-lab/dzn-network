@@ -974,6 +974,43 @@ async function main() {
   assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, true, "A cache row without a rank timestamp must refresh once to establish durable rank freshness.");
   assert.equal(typeof retryHeartbeatDb.serverPublicCache.get(guildId)?.network_rank_updated_at, "string");
 
+  const rankLookupRetryDb = new MemoryD1({ failNetworkRankSnapshotReads: 1 });
+  await createAdmImportJobForServer(makeEnv(rankLookupRetryDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-01-30.ADM",
+    admText: fixtureLines.join("\n"),
+    source: "scheduled_nitrado",
+    chunkSize: Math.max(50, fixtureLines.length + 1),
+  });
+  const failedRankLookup = await processPendingAdmImportJobs(makeEnv(rankLookupRetryDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(failedRankLookup.completedJobs, 1);
+  assert.equal(
+    failedRankLookup.results[0]?.file_result?.public_cache_updated,
+    false,
+    "A failed rank lookup must leave the scheduled cache phase retryable instead of reporting it as refreshed.",
+  );
+  const failedRankLookupJob = [...rankLookupRetryDb.admImportJobs.values()].find((job) => job.filename === "DayZServer_PS4_x64_2026-05-31_20-01-30.ADM");
+  const failedRankRetry = JSON.parse(String(failedRankLookupJob?.result_json ?? "{}")) as {
+    scheduled_maintenance_retry?: { cache?: boolean };
+  };
+  assert.equal(failedRankRetry.scheduled_maintenance_retry?.cache, true);
+
+  await createAdmImportJobForServer(makeEnv(rankLookupRetryDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-02-00.ADM",
+    admText: "AdminLog started on 2026-05-31 at 20:02:00\n20:02:01 | Server heartbeat",
+    source: "scheduled_nitrado",
+    chunkSize: 25,
+  });
+  const recoveredRankLookup = await processPendingAdmImportJobs(makeEnv(rankLookupRetryDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(recoveredRankLookup.completedJobs, 1);
+  assert.equal(
+    recoveredRankLookup.results[0]?.file_result?.public_cache_updated,
+    true,
+    "A quiet scheduled follow-up must retry a failed rank lookup after ADM rows were stored.",
+  );
+  assert.equal(typeof rankLookupRetryDb.serverPublicCache.get(guildId)?.network_rank_updated_at, "string");
+
   const retryStatsHeartbeatDb = new MemoryD1();
   retryStatsHeartbeatDb.admImportJobs.set("previous-stats-failure", {
     id: "previous-stats-failure",
@@ -1931,14 +1968,21 @@ class MemoryD1 {
   failKillInsertAfter: number | null;
   failAutomationJobInsert: boolean;
   failPublicCacheWritesRemaining: number;
+  failNetworkRankSnapshotReadsRemaining: number;
   killInsertAttempts = 0;
   schemaQueries: string[] = [];
   executedQueries: string[] = [];
 
-  constructor(options: { failKillInsertAfter?: number | null; failAutomationJobInsert?: boolean; failPublicCacheWrites?: number } = {}) {
+  constructor(options: {
+    failKillInsertAfter?: number | null;
+    failAutomationJobInsert?: boolean;
+    failPublicCacheWrites?: number;
+    failNetworkRankSnapshotReads?: number;
+  } = {}) {
     this.failKillInsertAfter = options.failKillInsertAfter ?? null;
     this.failAutomationJobInsert = options.failAutomationJobInsert ?? false;
     this.failPublicCacheWritesRemaining = options.failPublicCacheWrites ?? 0;
+    this.failNetworkRankSnapshotReadsRemaining = options.failNetworkRankSnapshotReads ?? 0;
   }
 
   prepare(query: string) {
@@ -2764,6 +2808,13 @@ class MemoryStatement {
   async all<T>(): Promise<{ results: T[] }> {
     const q = normalizeSql(this.query);
     if (q.startsWith("pragma table_info")) return { results: [] };
+    if (q.includes("from linked_servers") && q.includes("left join server_stats") && q.includes("where lower(linked_servers.status) = 'live'")) {
+      if (this.db.failNetworkRankSnapshotReadsRemaining > 0) {
+        this.db.failNetworkRankSnapshotReadsRemaining -= 1;
+        throw new Error("simulated network rank snapshot failure");
+      }
+      return { results: [] };
+    }
     if (q.includes("select linked_servers.guild_id, server_subscriptions.plan_key") && q.includes("where linked_servers.id = ?")) {
       const row = this.db.linkedServers.get(String(this.values[0]));
       return { results: row ? [{
