@@ -56,8 +56,6 @@ async function run() {
       DZN_GAMES_WORD_CHAIN_ENABLED: "true",
       DZN_GAMES_HIDE_SEEK_ENABLED: "true",
       DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED: "true",
-      NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED: "true",
-      NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED: "true",
     });
     assert.deepEqual({ ...preview.vars }, {});
     assert.deepEqual({ ...base.vars }, {});
