@@ -210,6 +210,7 @@ export async function rebuildPublicCacheForServer(env: Env, linkedServerId: stri
       stringValue(linked.metadata_last_checked_at),
       before.timestamps.status_last_checked_at,
     ]),
+    refreshNetworkRank: true,
     lastAdmUpdateAt: latestTimestamp([
       before.timestamps.adm_last_processed_at,
       stringValue(before.source_tables.server_stats?.updated_at),

@@ -42,7 +42,7 @@ function run() {
   includes("functions/_lib/server-metadata.ts", "upsertServerPublicCache", "Metadata sync should update server_public_cache.");
   includes("functions/_lib/server-metadata.ts", "lastStatusUpdateAt", "Metadata sync should write status freshness into server_public_cache.");
   includes("functions/_lib/adm-sync.ts", "publicCacheUpdated = true", "ADM import should report public cache refresh.");
-  includes("functions/_lib/adm-sync.ts", "if (server.guild_id) {", "Scheduled ADM completion should refresh public cache even when no kill rows were written.");
+  includes("functions/_lib/adm-sync.ts", "if (publicCacheGuildId &&", "Scheduled ADM completion should refresh public cache even when no kill rows were written.");
   includes("functions/_lib/adm-sync.ts", "lastAdmUpdateAt", "ADM import should update public cache ADM freshness.");
   includes("functions/_lib/adm-sync.ts", "queueDiscordPostUpdatesForGuild", "ADM data changes should queue Discord/public automation follow-up work.");
 

@@ -2308,6 +2308,7 @@ export async function importReadableAdmLinesIntoDatabase(
           guildId: input.guildId,
           planKey: input.planKey,
           publicServerName: input.publicServerName,
+          refreshNetworkRank: true,
           lastAdmUpdateAt: now,
         }), "public cache update");
         publicCacheUpdated = true;
@@ -4296,9 +4297,12 @@ async function finalizeAdmImportJob(
   // write, except when recovering a failed refresh or periodically recalculating
   // a quiet server's cross-network rank.
   const publicCacheGuildId = server.guild_id;
-  const cacheRefreshHasAdmWrites = derivedDataWrites > 0 || (retryPreviousScheduledCacheFailure && (
-    previousScheduledDerivedWrites > 0 || currentScheduledMaintenanceRetry?.hadDerivedWrites
-  ));
+  const hasRetryableScheduledAdmWrites = previousScheduledDerivedWrites > 0
+    || currentScheduledMaintenanceRetry?.hadDerivedWrites === true;
+  const cacheRefreshHasAdmWrites = derivedDataWrites > 0 || (
+    (retryPreviousScheduledCacheFailure || retryPreviousScheduledStatsFailure)
+    && hasRetryableScheduledAdmWrites
+  );
   if (publicCacheGuildId && (!isScheduledNitradoImport || derivedDataWrites > 0 || retryPreviousScheduledCacheFailure || retryPreviousScheduledStatsFailure || refreshScheduledNetworkRank)) {
     try {
       await withManualAdmPhaseTimeout(upsertServerPublicCache(env, {
@@ -9495,6 +9499,7 @@ async function refreshAdmBuildReparsePublicCache(env: Env, linkedServerId: strin
     guildId: server.guild_id,
     planKey: normalizePlanKey(server.plan_key),
     publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
+    refreshNetworkRank: true,
     lastAdmUpdateAt: new Date().toISOString(),
   });
   return true;

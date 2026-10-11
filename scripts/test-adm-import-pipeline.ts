@@ -361,6 +361,11 @@ async function main() {
   assert.equal(successResult.report.publicCacheUpdated, true);
   assert.equal(successResult.report.discordQueuesCreated > 0, true);
   assert.equal(successDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
+  assert.equal(
+    typeof successDb.serverPublicCache.get(guildId)?.network_rank_updated_at,
+    "string",
+    "Manual ADM imports with public-cache writes must refresh the durable rank snapshot.",
+  );
   assert.equal(successDb.automationJobs.length > 0, true);
 
   const latestDb = new MemoryD1();
@@ -976,8 +981,17 @@ async function main() {
     source: "scheduled_nitrado",
     status: "completed_with_warnings",
     public_cache_updated: 1,
+    written_kills: 1,
     warnings_json: '["previous.ADM: Stats rebuild failed after ADM rows were written. timed out"]',
     completed_at: "2026-05-31T19:59:00.000Z",
+  });
+  retryStatsHeartbeatDb.serverPublicCache.set(guildId, {
+    guild_id: guildId,
+    plan_key: "partner",
+    public_server_name: "Fixture Server",
+    network_rank: 42,
+    network_rank_updated_at: new Date(Date.now() - 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
   });
   await createAdmImportJobForServer(makeEnv(retryStatsHeartbeatDb), {
     linkedServerId,
@@ -990,6 +1004,16 @@ async function main() {
   assert.equal(retryStatsHeartbeatResult.completedJobs, 1);
   assert.equal(retryStatsHeartbeatResult.results[0]?.file_result?.public_cache_updated, true);
   assert.equal(retryStatsHeartbeatDb.serverPublicCache.has(guildId), true);
+  assert.equal(
+    retryStatsHeartbeatDb.serverPublicCache.get(guildId)?.network_rank ?? null,
+    null,
+    "A write-bearing stats-recovery retry must refresh and clear a stale rank instead of inheriting it for another hour.",
+  );
+  assert.equal(
+    typeof retryStatsHeartbeatDb.serverPublicCache.get(guildId)?.network_rank_updated_at,
+    "string",
+    "A write-bearing stats-recovery retry must record fresh rank evidence.",
+  );
 
   const rankRefreshHeartbeatDb = new MemoryD1();
   rankRefreshHeartbeatDb.serverPublicCache.set(guildId, {
@@ -1189,6 +1213,11 @@ async function main() {
   assert.equal(buildReparseDb.serverBuildStats.get(linkedServerId)?.storage_items_placed, 5);
   assert.equal(buildReparseDb.serverBuildStats.get(linkedServerId)?.build_score, 35);
   assert.equal(buildReparseDb.serverPublicCache.has(guildId), true);
+  assert.equal(
+    typeof buildReparseDb.serverPublicCache.get(guildId)?.network_rank_updated_at,
+    "string",
+    "Build-event reparsing must refresh the durable rank snapshot after it updates canonical stats.",
+  );
   const duplicateReparse = await processRecentAdmBuildReparse(makeEnv(buildReparseDb), { maxFiles: 1, maxRawLines: 50 });
   assert.equal(duplicateReparse.buildEventsAdded, 0);
   assert.equal(buildReparseDb.buildEvents.length, 9);

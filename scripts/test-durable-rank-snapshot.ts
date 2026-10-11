@@ -5,6 +5,7 @@ const liveStatsRoute = readFileSync("functions/api/servers/[serverId]/dashboard/
 const publicServersRoute = readFileSync("functions/api/public/servers.ts", "utf8").replace(/\r\n/g, "\n");
 const automationSource = readFileSync("functions/_lib/automation.ts", "utf8").replace(/\r\n/g, "\n");
 const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8").replace(/\r\n/g, "\n");
+const publicCacheSource = readFileSync("functions/_lib/public-cache.ts", "utf8").replace(/\r\n/g, "\n");
 const migrationSource = readFileSync("migrations/0015_automation_pipeline.sql", "utf8").replace(/\r\n/g, "\n");
 const rankTimestampMigration = readFileSync("migrations/0092_server_public_cache_rank_timestamp.sql", "utf8").replace(/\r\n/g, "\n");
 
@@ -30,6 +31,11 @@ const publicProfileRanking = sliceBetween(
   publicServersRoute,
   "function lightweightRankingFromPublicRow",
   "async function queryPublicServersPreview",
+);
+const manualPublicCacheRebuild = sliceBetween(
+  publicCacheSource,
+  "export async function rebuildPublicCacheForServer",
+  "async function readPublicCacheRows",
 );
 
 assert.equal(
@@ -77,6 +83,18 @@ assert.equal(
   automationSource.includes("WHEN excluded.network_rank_updated_at IS NOT NULL THEN excluded.network_rank"),
   true,
   "A completed null-rank refresh must clear an obsolete cached placement rather than preserve it as fresh.",
+);
+assert.equal(
+  admSyncSource.includes("refreshNetworkRank: true") &&
+    admSyncSource.includes("hasRetryableScheduledAdmWrites") &&
+    admSyncSource.includes("retryPreviousScheduledStatsFailure"),
+  true,
+  "Manual ADM writes and write-bearing scheduled stats recoveries must explicitly refresh rank snapshots.",
+);
+assert.equal(
+  manualPublicCacheRebuild.includes("refreshNetworkRank: true"),
+  true,
+  "The protected public-cache rebuild must preserve its ADM-backed rank refresh.",
 );
 
 assert.equal(
