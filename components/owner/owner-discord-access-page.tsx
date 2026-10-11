@@ -106,6 +106,8 @@ export function OwnerDiscordAccessPage() {
   const [discoveringDelivery, setDiscoveringDelivery] = useState(false);
   const requestController = useRef<AbortController | null>(null);
   const filterRevision = useRef(0);
+  const hasAssignableVerifiedOwnerRole = deliveryDiscovery?.verifiedOwnerRoleCandidates.some((role) => role.assignable) ?? false;
+  const hasPermissionedVerifiedOwnerRole = deliveryDiscovery?.rejectedVerifiedOwnerRoles.some((role) => role.reason === "guild_permissions") ?? false;
 
   function setQueueStatus(nextStatus: Status | "all") {
     if (nextStatus === status) return;
@@ -400,7 +402,7 @@ export function OwnerDiscordAccessPage() {
                     ) : null}
                   </div>
                   <p className="mt-2 text-sm leading-6 text-zinc-300">{deliveryDiscovery.message}</p>
-                  {deliveryDiscovery.rejectedVerifiedOwnerRoles.some((role) => role.reason === "guild_permissions") ? (
+                  {hasPermissionedVerifiedOwnerRole && !hasAssignableVerifiedOwnerRole ? (
                     <p className="mt-3 rounded-md border border-amber-300/25 bg-amber-300/[0.06] p-3 text-sm font-bold leading-6 text-amber-100">
                       Delivery remains blocked because the existing Verified Server Owner role has global Discord permissions. It must have no role-level permissions; restricted owner-channel overwrites provide the access instead.
                     </p>

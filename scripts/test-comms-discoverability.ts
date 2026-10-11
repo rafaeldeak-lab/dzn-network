@@ -47,7 +47,7 @@ assert.equal(commsSource.includes(': "Preview only"'), true, "Global Chat must i
 assert.equal(commsSource.includes("Available now"), false, "Global Chat must not claim unconditional availability.");
 assert.equal(commsSource.includes("<DznAssist />"), true, "The Comms page must render the working DZN Assist experience.");
 assert.equal(commsSource.includes("NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED"), true, "Comms must use the explicit public owner-access flag before exposing an owner Discord entry point.");
-assert.equal(commsSource.includes('href="/discord-owner-access"'), true, "Comms must provide a direct, feature-gated owner Discord access entry point.");
+assert.equal(commsSource.includes('href="/login?returnTo=%2Fdiscord-owner-access"'), true, "Comms must send anonymous server owners through sign-in before opening the feature-gated request route.");
 assert.equal(assistSource.includes('id="dzn-assist"'), true, "DZN Assist must keep its direct-link target on the functional panel.");
 assert.equal(assistSource.includes('window.location.hash !== "#dzn-assist"'), true, "DZN Assist must restore direct-anchor position after hydration.");
 assert.equal(assistSource.includes('scrollIntoView({ block: "start" })'), true, "DZN Assist must move the direct-linked panel into view after hydration.");

@@ -419,7 +419,7 @@ export function DznCommsShell() {
             <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">DZN Assist</span><span className="block text-xs font-bold text-emerald-200">Guided help live</span></span>
             <ChevronRight className="h-4 w-4 text-violet-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
           </a>
-          {ownerDiscordAccessUiEnabled ? <a href="/discord-owner-access" className="group flex min-h-14 items-center gap-3 rounded-md border border-amber-300/20 bg-amber-300/5 px-3 py-2 transition hover:border-amber-200/45">
+          {ownerDiscordAccessUiEnabled ? <a href="/login?returnTo=%2Fdiscord-owner-access" className="group flex min-h-14 items-center gap-3 rounded-md border border-amber-300/20 bg-amber-300/5 px-3 py-2 transition hover:border-amber-200/45">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-amber-300/25 bg-amber-300/10 text-amber-100"><ShieldCheck className="h-5 w-5" aria-hidden="true" /></span>
             <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">Server owners</span><span className="block text-xs font-bold text-amber-100">Request private access</span></span>
             <ChevronRight className="h-4 w-4 text-amber-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
