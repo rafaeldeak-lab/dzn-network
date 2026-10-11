@@ -1372,6 +1372,89 @@ async function main() {
   assert.equal(scheduledTailDb.serverPublicCache.has(guildId), true);
   assert.equal(scheduledTailDb.admImportJobs.size, 1);
 
+  const buildOnlyRetryDb = new MemoryD1();
+  buildOnlyRetryDb.publicApiSnapshots.set("home-stats:preview", {
+    snapshot_key: "home-stats:preview",
+    access_level: "preview",
+    payload_json: JSON.stringify({ data: {}, totals: {}, network_pulse: {} }),
+    generated_at: "2026-05-20T11:00:00.000Z",
+  });
+  const buildOnlyRetrySeed = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(buildOnlyRetryDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  const previousBuildOnlyRetry = buildOnlyRetryDb.admImportJobs.get(String(buildOnlyRetrySeed.job?.job_id));
+  assert.ok(previousBuildOnlyRetry);
+  previousBuildOnlyRetry.status = "completed_with_warnings";
+  previousBuildOnlyRetry.current_line = Number(previousBuildOnlyRetry.total_lines);
+  previousBuildOnlyRetry.chunks_processed = Number(previousBuildOnlyRetry.total_chunks);
+  previousBuildOnlyRetry.written_kills = 0;
+  previousBuildOnlyRetry.player_events = 0;
+  previousBuildOnlyRetry.joins = 0;
+  previousBuildOnlyRetry.disconnects = 0;
+  previousBuildOnlyRetry.deaths = 0;
+  previousBuildOnlyRetry.raw_events = 0;
+  previousBuildOnlyRetry.public_cache_updated = 0;
+  previousBuildOnlyRetry.discord_jobs_queued = 0;
+  previousBuildOnlyRetry.warnings_json = JSON.stringify([
+    "fixture.ADM: Public cache update failed after ADM rows were written. timed out",
+    "fixture.ADM: Stats rebuild failed after ADM rows were written. timed out",
+    "fixture.ADM: Home stats ADM snapshot refresh failed after ADM rows were written. timed out",
+    "fixture.ADM: Discord auto-post queueing failed after ADM rows were written. timed out",
+  ]);
+  previousBuildOnlyRetry.result_json = JSON.stringify({
+    scheduled_maintenance_retry: {
+      cache: true,
+      stats: true,
+      home_stats: true,
+      discord: true,
+      had_derived_writes: true,
+    },
+  });
+  previousBuildOnlyRetry.completed_at = "2026-05-20T12:00:00.000Z";
+  previousBuildOnlyRetry.updated_at = "2026-05-20T12:00:00.000Z";
+  const quietBuildOnlyRecovery = {
+    ...previousBuildOnlyRetry,
+    id: "fixture-build-only-follow-up",
+    status: "queued",
+    adm_text: "AdminLog started on 2026-05-20 at 12:00:00\n12:00:01 | Server heartbeat\n12:00:02 | Server heartbeat",
+    total_lines: 3,
+    current_line: 2,
+    chunk_size: 2,
+    total_chunks: 2,
+    chunks_processed: 1,
+    warnings_json: "[]",
+    result_json: null,
+    completed_at: null,
+    created_at: "2026-05-20T12:01:00.000Z",
+    updated_at: "2026-05-20T12:01:00.000Z",
+  };
+  buildOnlyRetryDb.admImportJobs.set(String(quietBuildOnlyRecovery.id), quietBuildOnlyRecovery);
+  const buildOnlyRecovery = await processPendingAdmImportJobs(makeEnv(buildOnlyRetryDb), { maxJobs: 1, maxChunksPerJob: 2 });
+  assert.equal(buildOnlyRecovery.completedJobs, 1);
+  assert.equal(
+    buildOnlyRecovery.results[0]?.file_result?.public_cache_updated,
+    true,
+    "A new quiet scheduled job must recover cache maintenance from prior build-only write provenance.",
+  );
+  assert.equal(
+    buildOnlyRetryDb.serverStats.has(linkedServerId),
+    true,
+    "A new quiet scheduled job must rebuild stats from prior build-only write provenance.",
+  );
+  assert.equal(
+    JSON.parse(String(buildOnlyRetryDb.publicApiSnapshots.get("home-stats:preview")?.payload_json)).admStatsFreshness?.source,
+    "canonical-adm-events",
+    "A new quiet scheduled job must recover home stats from prior build-only write provenance.",
+  );
+  assert.equal(
+    buildOnlyRetryDb.automationJobs.length > 0,
+    true,
+    "A new quiet scheduled job must recover Discord queueing from prior build-only write provenance.",
+  );
+
   const activeTailDb = new MemoryD1();
   const activeTailFirst = await createScheduledAdmImportJobForServer(
     { ...makeEnv(activeTailDb), MOCK_NITRADO: "true" },

@@ -4243,15 +4243,22 @@ async function finalizeAdmImportJob(
   const currentScheduledMaintenanceRetry = isScheduledNitradoImport && derivedDataWrites === 0
     ? getScheduledMaintenanceRetry(row)
     : null;
+  const previousScheduledMaintenanceRetry = previousScheduledMaintenanceResult
+    ? getScheduledMaintenanceRetry(previousScheduledMaintenanceResult)
+    : null;
   const previousScheduledWarnings = String(previousScheduledMaintenanceResult?.warnings_json ?? "");
   const retryPreviousScheduledCacheFailure = Boolean(currentScheduledMaintenanceRetry?.cache)
+    || Boolean(previousScheduledMaintenanceRetry?.cache)
     || (Number(previousScheduledMaintenanceResult?.public_cache_updated ?? 1) === 0
       && previousScheduledWarnings.includes("Public cache update failed"));
   const retryPreviousScheduledStatsFailure = Boolean(currentScheduledMaintenanceRetry?.stats)
+    || Boolean(previousScheduledMaintenanceRetry?.stats)
     || previousScheduledWarnings.includes("Stats rebuild failed");
   const retryPreviousScheduledHomeStatsFailure = Boolean(currentScheduledMaintenanceRetry?.homeStats)
+    || Boolean(previousScheduledMaintenanceRetry?.homeStats)
     || previousScheduledWarnings.includes("Home stats ADM snapshot refresh failed");
   const retryPreviousScheduledDiscordFailure = Boolean(currentScheduledMaintenanceRetry?.discord)
+    || Boolean(previousScheduledMaintenanceRetry?.discord)
     || previousScheduledWarnings.includes("Discord auto-post queueing failed");
   const previousScheduledDerivedWrites = previousScheduledMaintenanceResult
     ? Number(previousScheduledMaintenanceResult.written_kills ?? 0)
@@ -4302,6 +4309,7 @@ async function finalizeAdmImportJob(
   // a quiet server's cross-network rank.
   const publicCacheGuildId = server.guild_id;
   const hasRetryableScheduledAdmWrites = previousScheduledDerivedWrites > 0
+    || previousScheduledMaintenanceRetry?.hadDerivedWrites === true
     || currentScheduledMaintenanceRetry?.hadDerivedWrites === true;
   const cacheRefreshHasAdmWrites = derivedDataWrites > 0 || (
     (retryPreviousScheduledCacheFailure || retryPreviousScheduledStatsFailure)
