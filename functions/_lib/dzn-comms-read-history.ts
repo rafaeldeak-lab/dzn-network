@@ -418,7 +418,7 @@ async function readMessages(
          AND id IS NOT NULL AND length(id) BETWEEN 1 AND 120
          AND (? IS NULL OR julianday(created_at) < julianday(?) OR (julianday(created_at) = julianday(?) AND id < ?))
          AND (? IS NULL OR julianday(created_at) < julianday(?))
-         AND visibility_state != 'expired'
+         AND visibility_state NOT IN ('deleted', 'expired')
          AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
          AND (? IS NULL OR EXISTS (
            SELECT 1
