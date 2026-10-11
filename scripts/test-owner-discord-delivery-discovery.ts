@@ -9,12 +9,15 @@ const guildId = "900000000000000001";
 const botId = "900000000000000002";
 const botRoleId = "900000000000000003";
 const verifiedOwnerRoleId = "900000000000000004";
+const administratorVerifiedOwnerRoleId = "900000000000000009";
 const categoryId = "900000000000000005";
 const privateInviteChannelId = "900000000000000006";
 const publicChannelId = "900000000000000007";
 const unsyncedChannelId = "900000000000000008";
+const privateGuildChannelId = "900000000000000010";
 const permissions = ((BigInt(1) << BigInt(28)) | (BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(0))).toString();
 const viewChannel = (BigInt(1) << BigInt(10)).toString();
+const administrator = (BigInt(1) << BigInt(3)).toString();
 
 async function run() {
   const helper = readFileSync("functions/_lib/owner-discord-delivery-discovery.ts", "utf8");
@@ -47,8 +50,9 @@ async function run() {
     if (url.pathname === `/api/v10/guilds/${guildId}/members/${botId}`) return Response.json({ roles: [botRoleId] });
     if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
       return Response.json([
-        { id: guildId, name: "@everyone", position: 0, permissions: "0" },
+        { id: guildId, name: "@everyone", position: 0, permissions: viewChannel },
         { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: "0", managed: false },
+        { id: administratorVerifiedOwnerRoleId, name: "Verified Server Owner", position: 6, permissions: administrator, managed: false },
         { id: botRoleId, name: "DZN Bot", position: 10, permissions, managed: true },
       ]);
     }
@@ -89,6 +93,49 @@ async function run() {
   assert.equal(result.privateInviteChannelCandidates.some((channel) => channel.id === unsyncedChannelId), false, "A child channel without its own @everyone deny must not inherit privacy from a category.");
   assert.equal(calls.every((call) => call.method === "GET"), true, "Discovery must never send a Discord mutation request.");
   assert.equal(JSON.stringify(result).includes(env.DISCORD_BOT_TOKEN ?? ""), false, "Discovery must not expose the private bot token.");
+
+  const administratorRoleOnly = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
+      return Response.json([
+        { id: guildId, name: "@everyone", position: 0, permissions: viewChannel },
+        { id: administratorVerifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: administrator, managed: false },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions, managed: true },
+      ]);
+    }
+    return discordFetch(input, init);
+  });
+  assert.equal(administratorRoleOnly.status, "candidates_incomplete", "A Verified Server Owner role with Administrator must never be configurable.");
+  assert.equal(administratorRoleOnly.verifiedOwnerRoleCandidates.length, 0, "Administrator roles must not be returned as owner-role candidates.");
+
+  const privateGuildResult = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
+      return Response.json([
+        { id: guildId, name: "@everyone", position: 0, permissions: "0" },
+        { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: "0", managed: false },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions, managed: true },
+      ]);
+    }
+    if (url.pathname === `/api/v10/guilds/${guildId}/channels`) {
+      return Response.json([{
+        id: privateGuildChannelId,
+        type: 0,
+        name: "private-invites",
+        permission_overwrites: [],
+      }]);
+    }
+    return discordFetch(input, init);
+  });
+  assert.equal(privateGuildResult.status, "ready_to_configure", "A channel hidden by the guild's base @everyone permissions must be a valid private candidate.");
+  assert.deepEqual(privateGuildResult.privateInviteChannelCandidates, [{
+    id: privateGuildChannelId,
+    name: "private-invites",
+    categoryName: null,
+    canView: true,
+    canCreateInvite: true,
+    privateToEveryone: true,
+  }]);
 
   const missingGuild = await discoverOwnerDiscordDeliveryCandidates(env, "invalid", discordFetch);
   assert.equal(missingGuild.status, "not_configured");

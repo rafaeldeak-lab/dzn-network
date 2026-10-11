@@ -116,10 +116,11 @@ export async function discoverOwnerDiscordDeliveryCandidates(
     const roleById = new Map(roles.map((role) => [String(role.id ?? ""), role]));
     const botHighestPosition = Math.max(0, ...[...botRoleIds].map((roleId) => Number(roleById.get(roleId)?.position ?? 0)));
     const basePermissions = getBotGuildPermissions(roles, botRoleIds, guildId);
+    const everyoneBasePermissions = parseBits(roleById.get(guildId)?.permissions);
     const botHasAdministrator = hasPermission(basePermissions, DISCORD_ADMINISTRATOR);
     const canManageRoles = botHasAdministrator || hasPermission(basePermissions, DISCORD_MANAGE_ROLES);
     const verifiedOwnerRoleCandidates = roles
-      .filter((role) => normalizeRoleName(role.name) === "verified server owner")
+      .filter((role) => normalizeRoleName(role.name) === "verified server owner" && !hasPermission(parseBits(role.permissions), DISCORD_ADMINISTRATOR))
       .map((role) => ({
         id: String(role.id ?? ""),
         name: String(role.name ?? "Verified Server Owner"),
@@ -136,9 +137,10 @@ export async function discoverOwnerDiscordDeliveryCandidates(
       .filter((channel) => [0, 5].includes(Number(channel.type)))
       .map((channel) => {
         const category = channel.parent_id ? channelById.get(String(channel.parent_id)) ?? null : null;
-        // Channel permission sync is not exposed by the Discord API. Require the
-        // child channel's own @everyone deny rather than inferring it from a category.
-        const privateToEveryone = everyoneIsDeniedView(channel, guildId);
+        // Evaluate the @everyone role's effective channel visibility. This fails
+        // closed for public channels while supporting private guilds without an
+        // explicit channel overwrite.
+        const privateToEveryone = everyoneIsDeniedView(everyoneBasePermissions, channel, guildId);
         const channelPermissions = evaluateChannelPermissions(basePermissions, channel, guildId, botRoleIds, botId);
         const canView = botHasAdministrator || hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL);
         const canCreateInvite = botHasAdministrator || hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE);
@@ -241,9 +243,11 @@ function evaluateChannelPermissions(base: bigint, channel: DiscordChannel, guild
   return applyOverwrite(value, overwrites.find((overwrite) => String(overwrite.type) === "1" && String(overwrite.id) === botId));
 }
 
-function everyoneIsDeniedView(channel: DiscordChannel, guildId: string) {
+function everyoneIsDeniedView(basePermissions: bigint, channel: DiscordChannel, guildId: string) {
+  if (hasPermission(basePermissions, DISCORD_ADMINISTRATOR)) return false;
   const overwrite = (channel.permission_overwrites ?? []).find((candidate) => String(candidate.type) === "0" && String(candidate.id) === guildId);
-  return Boolean(overwrite && hasPermission(parseBits(overwrite.deny), DISCORD_VIEW_CHANNEL));
+  const effectivePermissions = applyOverwrite(basePermissions, overwrite);
+  return !hasPermission(effectivePermissions, DISCORD_VIEW_CHANNEL);
 }
 
 function applyOverwrite(permissions: bigint, overwrite: DiscordPermissionOverwrite | undefined) {
