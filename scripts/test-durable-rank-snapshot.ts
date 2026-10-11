@@ -4,7 +4,10 @@ import { readFileSync } from "node:fs";
 const liveStatsRoute = readFileSync("functions/api/servers/[serverId]/dashboard/live-stats.ts", "utf8").replace(/\r\n/g, "\n");
 const publicServersRoute = readFileSync("functions/api/public/servers.ts", "utf8").replace(/\r\n/g, "\n");
 const automationSource = readFileSync("functions/_lib/automation.ts", "utf8").replace(/\r\n/g, "\n");
+const admSyncSource = readFileSync("functions/_lib/adm-sync.ts", "utf8").replace(/\r\n/g, "\n");
+const publicCacheSource = readFileSync("functions/_lib/public-cache.ts", "utf8").replace(/\r\n/g, "\n");
 const migrationSource = readFileSync("migrations/0015_automation_pipeline.sql", "utf8").replace(/\r\n/g, "\n");
+const rankTimestampMigration = readFileSync("migrations/0092_server_public_cache_rank_timestamp.sql", "utf8").replace(/\r\n/g, "\n");
 
 function sliceBetween(source: string, startMarker: string, endMarker: string) {
   const start = source.indexOf(startMarker);
@@ -29,6 +32,11 @@ const publicProfileRanking = sliceBetween(
   "function lightweightRankingFromPublicRow",
   "async function queryPublicServersPreview",
 );
+const manualPublicCacheRebuild = sliceBetween(
+  publicCacheSource,
+  "export async function rebuildPublicCacheForServer",
+  "async function readPublicCacheRows",
+);
 
 assert.equal(
   migrationSource.includes("network_rank INTEGER"),
@@ -46,11 +54,47 @@ assert.equal(
   "Automation/public cache refresh path must persist rank snapshots.",
 );
 assert.equal(
+  automationSource.includes("server_public_cache has no column named network_rank_updated_at"),
+  true,
+  "Public cache upserts must tolerate SQLite's INSERT-specific missing-column wording before migration 0092 is applied.",
+);
+assert.equal(
+  rankTimestampMigration.includes("network_rank_updated_at TEXT") &&
+    rankTimestampMigration.includes("idx_server_public_cache_network_rank_updated_at"),
+  true,
+  "Rank snapshots must record their own refresh timestamp through an isolated migration.",
+);
+assert.equal(
+  admSyncSource.includes("network_rank_updated_at FROM server_public_cache") &&
+    admSyncSource.includes("no such column: network_rank_updated_at") &&
+    admSyncSource.includes("!existingRankSnapshotAt || isIsoOlderThan(existingRankSnapshotAt"),
+  true,
+  "Quiet scheduled imports must tolerate the pending migration and initialize a missing rank timestamp without relying on mutable cache freshness.",
+);
+assert.equal(
   automationSource.includes("readNetworkRankSnapshot") &&
-    automationSource.includes("input.lastAdmUpdateAt") &&
+    automationSource.includes("refreshNetworkRank?: boolean") &&
+    automationSource.includes("input.refreshNetworkRank === true") &&
     automationSource.includes("input.networkRank !== undefined"),
   true,
-  "ADM/public cache freshness updates must refresh durable rank snapshots unless an explicit rank is supplied.",
+  "ADM/public cache freshness updates must refresh durable rank snapshots only when the scheduled rank-refresh path explicitly requests them.",
+);
+assert.equal(
+  automationSource.includes("WHEN excluded.network_rank_updated_at IS NOT NULL THEN excluded.network_rank"),
+  true,
+  "A completed null-rank refresh must clear an obsolete cached placement rather than preserve it as fresh.",
+);
+assert.equal(
+  admSyncSource.includes("refreshNetworkRank: true") &&
+    admSyncSource.includes("hasRetryableScheduledAdmWrites") &&
+    admSyncSource.includes("retryPreviousScheduledStatsFailure"),
+  true,
+  "Manual ADM writes and write-bearing scheduled stats recoveries must explicitly refresh rank snapshots.",
+);
+assert.equal(
+  manualPublicCacheRebuild.includes("refreshNetworkRank: true"),
+  true,
+  "The protected public-cache rebuild must preserve its ADM-backed rank refresh.",
 );
 
 assert.equal(
@@ -72,6 +116,12 @@ assert.equal(
   liveRankReader.includes("WHERE guild_id = ?"),
   true,
   "Dashboard live-stats rank lookup must be bounded to the selected guild.",
+);
+assert.equal(
+  liveRankReader.includes("network_rank_updated_at") &&
+    liveRankReader.includes("no such column: network_rank_updated_at"),
+  true,
+  "Rank reads must prefer the rank-specific timestamp while retaining a pre-migration compatibility path.",
 );
 assert.equal(
   liveStatsRoute.includes("rank: null"),

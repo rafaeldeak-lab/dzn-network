@@ -1044,7 +1044,7 @@ async function toSafePublicServer(
   });
   const lifecycleDisplay = getPublicServerLifecycleDisplay(lifecycleStatus, row.status);
   const historicalLifecycle = isPublicHistoricalServerLifecycle(lifecycleStatus);
-  const publicStatsActive = !historicalLifecycle && (ranking?.stats_sync_active ?? statsSync === "Active");
+  const publicStatsActive = resolvePublicStatsActive(historicalLifecycle, ranking?.stats_sync_active, statsSync);
   const publicIsOnline = !historicalLifecycle && Number(row.is_online) === 1;
   const publicCurrentPlayers = historicalLifecycle ? null : row.current_players;
   const reputation = buildServerReputationSummary({
@@ -1534,6 +1534,15 @@ function historicalVisibilityExplanation(lifecycleLabel: string): VisibilityExpl
   };
 }
 
+export function resolvePublicStatsActive(
+  historicalLifecycle: boolean,
+  rankingActive: boolean | null | undefined,
+  statsSync: "Active" | "Pending" | "Not Started",
+) {
+  // Current ADM evidence is more trustworthy than a stale negative ranking snapshot.
+  return !historicalLifecycle && (Boolean(rankingActive) || statsSync === "Active");
+}
+
 function buildPublicBadgeCollection(input: {
   row: PublicServerRow;
   stats: {
@@ -1779,7 +1788,8 @@ export function applyPublicServerAccess(server: SafePublicServer, viewerLoggedIn
     public_website_url: null,
     public_rules: null,
     score_breakdown: null,
-    stats_sync_active: false,
+    // Sync availability is aggregate server status, not private player data.
+    stats_sync_active: !historicalLifecycle && server.stats_sync_active,
     recent_events: [],
     top_players: [],
     pvp_leaderboard: [],

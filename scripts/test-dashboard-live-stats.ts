@@ -53,11 +53,15 @@ const fixtures: Record<string, ServerFixture> = {
     latestPlayerAt: null,
   },
 };
+const FRESH_RANK_TIMESTAMP = new Date().toISOString();
+const STALE_RANK_TIMESTAMP = new Date(Date.now() - (2 * 60 * 60 * 1000)).toISOString();
 
 class MemoryD1 {
   constructor(
     private readonly userId = "owner-user",
     private readonly failRank = false,
+    private readonly legacyRankSchema = false,
+    private readonly rankTimestamp: string | null = FRESH_RANK_TIMESTAMP,
   ) {}
 
   prepare(sql: string) {
@@ -96,10 +100,13 @@ class MemoryD1 {
 
     if (normalized.includes("FROM server_public_cache")) {
       if (this.failRank) throw new Error("rank snapshot unavailable");
+      if (this.legacyRankSchema && normalized.includes("network_rank_updated_at")) {
+        throw new Error("no such column: network_rank_updated_at");
+      }
       const rank = rankFixtures().find((row) => `${row.id}-guild` === String(bindings[0]))?.rank ?? null;
       return {
         network_rank: rank,
-        last_adm_update_at: "2026-06-24T06:50:00.000Z",
+        network_rank_updated_at: this.rankTimestamp,
         updated_at: "2026-06-24T06:51:00.000Z",
       };
     }
@@ -253,7 +260,7 @@ async function main() {
     assert.equal(body.server_id, serverId);
     assert.equal(body.source, "canonical-adm-events");
     assert.equal(body.rank_source, "leaderboard_snapshot");
-    assert.equal(body.rank_generated_at, "2026-06-24T06:50:00.000Z");
+    assert.equal(body.rank_generated_at, FRESH_RANK_TIMESTAMP);
     assert.equal(body.rank_stale, false);
     assert.equal(typeof body.generated_at, "string");
     assert.equal(body.latest_event_at, [expected.latestKillAt, expected.latestPlayerAt].filter(Boolean).sort().at(-1) ?? null);
@@ -278,6 +285,27 @@ async function main() {
   assert.equal(rankFailureBody.rank_source, "unavailable");
   assert.equal(rankFailureBody.rank_generated_at, null);
   assert.equal(rankFailureBody.rank_stale, true);
+
+  const legacySchemaResponse = await onRequestGet(makeContext("nuketown", new MemoryD1("owner-user", false, true)));
+  assert.equal(legacySchemaResponse.status, 200, "A pre-migration cache schema must still return the stored rank.");
+  const legacySchemaBody = await readJson(legacySchemaResponse);
+  assert.equal(legacySchemaBody.stats?.rank, rankFixtures().find((row) => row.id === "nuketown")?.rank ?? null);
+  assert.equal(legacySchemaBody.rank_generated_at, "2026-06-24T06:51:00.000Z");
+  assert.equal(legacySchemaBody.rank_stale, false);
+
+  const uninitializedRankResponse = await onRequestGet(makeContext("nuketown", new MemoryD1("owner-user", false, false, null)));
+  assert.equal(uninitializedRankResponse.status, 200, "A migrated cache row without a rank timestamp must still return its stored rank.");
+  const uninitializedRankBody = await readJson(uninitializedRankResponse);
+  assert.equal(uninitializedRankBody.stats?.rank, rankFixtures().find((row) => row.id === "nuketown")?.rank ?? null);
+  assert.equal(uninitializedRankBody.rank_generated_at, null);
+  assert.equal(uninitializedRankBody.rank_stale, true);
+
+  const staleRankResponse = await onRequestGet(makeContext("nuketown", new MemoryD1("owner-user", false, false, STALE_RANK_TIMESTAMP)));
+  assert.equal(staleRankResponse.status, 200, "An older durable rank snapshot must not fail canonical live stats.");
+  const staleRankBody = await readJson(staleRankResponse);
+  assert.equal(staleRankBody.stats?.rank, rankFixtures().find((row) => row.id === "nuketown")?.rank ?? null);
+  assert.equal(staleRankBody.rank_generated_at, STALE_RANK_TIMESTAMP);
+  assert.equal(staleRankBody.rank_stale, true, "An older durable rank snapshot must be reported as stale.");
 
   console.log("Dashboard live-stats endpoint tests passed.");
 }

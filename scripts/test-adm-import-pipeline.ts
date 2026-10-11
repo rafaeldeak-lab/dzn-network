@@ -361,6 +361,11 @@ async function main() {
   assert.equal(successResult.report.publicCacheUpdated, true);
   assert.equal(successResult.report.discordQueuesCreated > 0, true);
   assert.equal(successDb.serverPublicCache.get(guildId)?.last_adm_update_at !== null, true);
+  assert.equal(
+    typeof successDb.serverPublicCache.get(guildId)?.network_rank_updated_at,
+    "string",
+    "Manual ADM imports with public-cache writes must refresh the durable rank snapshot.",
+  );
   assert.equal(successDb.automationJobs.length > 0, true);
 
   const latestDb = new MemoryD1();
@@ -955,6 +960,7 @@ async function main() {
   assert.equal(retryHeartbeatResult.completedJobs, 1);
   assert.equal(retryHeartbeatResult.results[0]?.file_result?.public_cache_updated, true);
   assert.equal(retryHeartbeatDb.serverPublicCache.has(guildId), true);
+  assert.equal(retryHeartbeatDb.serverPublicCache.get(guildId)?.network_rank_updated_at ?? null, null);
 
   await createAdmImportJobForServer(makeEnv(retryHeartbeatDb), {
     linkedServerId,
@@ -965,7 +971,45 @@ async function main() {
   });
   const recoveredHeartbeatResult = await processPendingAdmImportJobs(makeEnv(retryHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
   assert.equal(recoveredHeartbeatResult.completedJobs, 1);
-  assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, false);
+  assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, true, "A cache row without a rank timestamp must refresh once to establish durable rank freshness.");
+  assert.equal(typeof retryHeartbeatDb.serverPublicCache.get(guildId)?.network_rank_updated_at, "string");
+
+  const rankLookupRetryDb = new MemoryD1({ failNetworkRankSnapshotReads: 1 });
+  await createAdmImportJobForServer(makeEnv(rankLookupRetryDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-01-30.ADM",
+    admText: fixtureLines.join("\n"),
+    source: "scheduled_nitrado",
+    chunkSize: Math.max(50, fixtureLines.length + 1),
+  });
+  const failedRankLookup = await processPendingAdmImportJobs(makeEnv(rankLookupRetryDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(failedRankLookup.completedJobs, 1);
+  assert.equal(
+    failedRankLookup.results[0]?.file_result?.public_cache_updated,
+    false,
+    "A failed rank lookup must leave the scheduled cache phase retryable instead of reporting it as refreshed.",
+  );
+  const failedRankLookupJob = [...rankLookupRetryDb.admImportJobs.values()].find((job) => job.filename === "DayZServer_PS4_x64_2026-05-31_20-01-30.ADM");
+  const failedRankRetry = JSON.parse(String(failedRankLookupJob?.result_json ?? "{}")) as {
+    scheduled_maintenance_retry?: { cache?: boolean };
+  };
+  assert.equal(failedRankRetry.scheduled_maintenance_retry?.cache, true);
+
+  await createAdmImportJobForServer(makeEnv(rankLookupRetryDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-02-00.ADM",
+    admText: "AdminLog started on 2026-05-31 at 20:02:00\n20:02:01 | Server heartbeat",
+    source: "scheduled_nitrado",
+    chunkSize: 25,
+  });
+  const recoveredRankLookup = await processPendingAdmImportJobs(makeEnv(rankLookupRetryDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(recoveredRankLookup.completedJobs, 1);
+  assert.equal(
+    recoveredRankLookup.results[0]?.file_result?.public_cache_updated,
+    true,
+    "A quiet scheduled follow-up must retry a failed rank lookup after ADM rows were stored.",
+  );
+  assert.equal(typeof rankLookupRetryDb.serverPublicCache.get(guildId)?.network_rank_updated_at, "string");
 
   const retryStatsHeartbeatDb = new MemoryD1();
   retryStatsHeartbeatDb.admImportJobs.set("previous-stats-failure", {
@@ -974,8 +1018,17 @@ async function main() {
     source: "scheduled_nitrado",
     status: "completed_with_warnings",
     public_cache_updated: 1,
+    written_kills: 1,
     warnings_json: '["previous.ADM: Stats rebuild failed after ADM rows were written. timed out"]',
     completed_at: "2026-05-31T19:59:00.000Z",
+  });
+  retryStatsHeartbeatDb.serverPublicCache.set(guildId, {
+    guild_id: guildId,
+    plan_key: "partner",
+    public_server_name: "Fixture Server",
+    network_rank: 42,
+    network_rank_updated_at: new Date(Date.now() - 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
   });
   await createAdmImportJobForServer(makeEnv(retryStatsHeartbeatDb), {
     linkedServerId,
@@ -988,13 +1041,24 @@ async function main() {
   assert.equal(retryStatsHeartbeatResult.completedJobs, 1);
   assert.equal(retryStatsHeartbeatResult.results[0]?.file_result?.public_cache_updated, true);
   assert.equal(retryStatsHeartbeatDb.serverPublicCache.has(guildId), true);
+  assert.equal(
+    retryStatsHeartbeatDb.serverPublicCache.get(guildId)?.network_rank ?? null,
+    null,
+    "A write-bearing stats-recovery retry must refresh and clear a stale rank instead of inheriting it for another hour.",
+  );
+  assert.equal(
+    typeof retryStatsHeartbeatDb.serverPublicCache.get(guildId)?.network_rank_updated_at,
+    "string",
+    "A write-bearing stats-recovery retry must record fresh rank evidence.",
+  );
 
   const rankRefreshHeartbeatDb = new MemoryD1();
   rankRefreshHeartbeatDb.serverPublicCache.set(guildId, {
     guild_id: guildId,
     plan_key: "partner",
     public_server_name: "Fixture Server",
-    last_adm_update_at: "2026-05-31T18:00:00.000Z",
+    network_rank: 42,
+    last_adm_update_at: null,
     updated_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
   });
   await createAdmImportJobForServer(makeEnv(rankRefreshHeartbeatDb), {
@@ -1007,6 +1071,31 @@ async function main() {
   const rankRefreshHeartbeatResult = await processPendingAdmImportJobs(makeEnv(rankRefreshHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
   assert.equal(rankRefreshHeartbeatResult.completedJobs, 1);
   assert.equal(rankRefreshHeartbeatResult.results[0]?.file_result?.public_cache_updated, true);
+  assert.equal(
+    typeof rankRefreshHeartbeatDb.serverPublicCache.get(guildId)?.network_rank_updated_at,
+    "string",
+    "A completed rank refresh must stamp its dedicated freshness time even when the server has neither an ADM timestamp nor a current rank.",
+  );
+  assert.equal(
+    rankRefreshHeartbeatDb.serverPublicCache.get(guildId)?.network_rank ?? null,
+    null,
+    "A completed null-rank refresh must clear a stale prior placement instead of presenting it as fresh.",
+  );
+
+  await createAdmImportJobForServer(makeEnv(rankRefreshHeartbeatDb), {
+    linkedServerId,
+    filename: "DayZServer_PS4_x64_2026-05-31_20-02-30.ADM",
+    admText: "AdminLog started on 2026-05-31 at 20:02:30\\n20:02:31 | Server heartbeat",
+    source: "scheduled_nitrado",
+    chunkSize: 25,
+  });
+  const settledRankRefreshHeartbeat = await processPendingAdmImportJobs(makeEnv(rankRefreshHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
+  assert.equal(settledRankRefreshHeartbeat.completedJobs, 1);
+  assert.equal(
+    settledRankRefreshHeartbeat.results[0]?.file_result?.public_cache_updated,
+    false,
+    "A completed null-rank refresh without an ADM timestamp must not repeat on every scheduled heartbeat.",
+  );
 
   const buildFixtureName = "DayZServer_PS4_x64_2026-05-31_20-01-53.ADM";
   const buildFixtureLines = [
@@ -1063,7 +1152,12 @@ async function main() {
   completedBuildJob.result_json = null;
   const idleBuildTail = await processPendingAdmImportJobs(makeEnv(buildScheduledDb), { maxJobs: 1, maxChunksPerJob: 1 });
   assert.equal(idleBuildTail.completedJobs, 1);
-  assert.equal(idleBuildTail.results[0]?.file_result?.public_cache_updated, false);
+  assert.equal(
+    idleBuildTail.results[0]?.file_result?.public_cache_updated,
+    false,
+    "A quiet grown tail must skip another cache write when the preceding import already completed its rank refresh.",
+  );
+  assert.equal(typeof buildScheduledDb.serverPublicCache.get(guildId)?.network_rank_updated_at, "string");
   assert.equal(buildScheduledDb.buildEvents.length, 12);
   assert.deepEqual(countBy(buildScheduledDb.buildEvents, "event_type"), {
     placed: 5,
@@ -1156,6 +1250,11 @@ async function main() {
   assert.equal(buildReparseDb.serverBuildStats.get(linkedServerId)?.storage_items_placed, 5);
   assert.equal(buildReparseDb.serverBuildStats.get(linkedServerId)?.build_score, 35);
   assert.equal(buildReparseDb.serverPublicCache.has(guildId), true);
+  assert.equal(
+    typeof buildReparseDb.serverPublicCache.get(guildId)?.network_rank_updated_at,
+    "string",
+    "Build-event reparsing must refresh the durable rank snapshot after it updates canonical stats.",
+  );
   const duplicateReparse = await processRecentAdmBuildReparse(makeEnv(buildReparseDb), { maxFiles: 1, maxRawLines: 50 });
   assert.equal(duplicateReparse.buildEventsAdded, 0);
   assert.equal(buildReparseDb.buildEvents.length, 9);
@@ -1205,6 +1304,12 @@ async function main() {
   assert.equal(repeatedScheduledCreate.job?.chunks_processed, 0);
 
   const scheduledTailDb = new MemoryD1();
+  scheduledTailDb.publicApiSnapshots.set("home-stats:preview", {
+    snapshot_key: "home-stats:preview",
+    access_level: "preview",
+    payload_json: JSON.stringify({ data: {}, totals: {}, network_pulse: {} }),
+    generated_at: "2026-05-20T11:00:00.000Z",
+  });
   const scheduledTailFirst = await createScheduledAdmImportJobForServer(
     { ...makeEnv(scheduledTailDb), MOCK_NITRADO: "true" },
     "fixture-user",
@@ -1222,6 +1327,21 @@ async function main() {
   scheduledTailRow.chunks_processed = 1;
   scheduledTailRow.adm_text = scheduledTailLines.slice(0, 2).join("\n");
   scheduledTailRow.result_json = JSON.stringify({ build_events_stored: 4 });
+  scheduledTailRow.written_kills = 2;
+  scheduledTailRow.player_events = 3;
+  scheduledTailRow.joins = 4;
+  scheduledTailRow.disconnects = 5;
+  scheduledTailRow.deaths = 6;
+  scheduledTailRow.raw_events = 7;
+  scheduledTailRow.failed_writes = 1;
+  scheduledTailRow.warnings_json = JSON.stringify([
+    "previous tail warning",
+    "fixture.ADM: Public cache update failed after ADM rows were written. timed out",
+    "fixture.ADM: Home stats ADM snapshot refresh failed after ADM rows were written. timed out",
+    "fixture.ADM: Discord auto-post queueing failed after ADM rows were written. timed out",
+  ]);
+  scheduledTailRow.public_cache_updated = 0;
+  scheduledTailRow.discord_jobs_queued = 2;
   scheduledTailRow.completed_at = "2026-05-20T12:00:00.000Z";
   const scheduledTailGrowth = await createScheduledAdmImportJobForServer(
     { ...makeEnv(scheduledTailDb), MOCK_NITRADO: "true" },
@@ -1234,8 +1354,180 @@ async function main() {
   assert.equal(scheduledTailGrowth.job?.job_id, scheduledTailFirst.job?.job_id);
   assert.equal(scheduledTailGrowth.job?.current_line, 2);
   assert.equal(scheduledTailGrowth.job?.total_lines, scheduledTailLines.length);
-  assert.equal(scheduledTailDb.admImportJobs.get(String(scheduledTailFirst.job?.job_id))?.result_json, null);
+  const reopenedScheduledTail = scheduledTailDb.admImportJobs.get(String(scheduledTailFirst.job?.job_id));
+  assert.deepEqual(JSON.parse(String(reopenedScheduledTail?.result_json)), {
+    scheduled_maintenance_retry: { cache: 1, stats: 0, home_stats: 1, discord: 1, had_derived_writes: 1 },
+  });
+  assert.equal(reopenedScheduledTail?.written_kills, 0);
+  assert.equal(reopenedScheduledTail?.player_events, 0);
+  assert.equal(reopenedScheduledTail?.joins, 0);
+  assert.equal(reopenedScheduledTail?.disconnects, 0);
+  assert.equal(reopenedScheduledTail?.deaths, 0);
+  assert.equal(reopenedScheduledTail?.raw_events, 0);
+  assert.equal(reopenedScheduledTail?.failed_writes, 0);
+  assert.equal(reopenedScheduledTail?.warnings_json, "[]");
+  assert.equal(reopenedScheduledTail?.public_cache_updated, 0);
+  assert.equal(reopenedScheduledTail?.discord_jobs_queued, 0);
+  // A heartbeat-only appended tail must still retry the earlier failed cache
+  // refresh for persisted events in the completed portion of this same file.
+  reopenedScheduledTail!.adm_text = "AdminLog started on 2026-05-20 at 12:00:00\n12:00:01 | Server heartbeat\n12:00:02 | Server heartbeat";
+  reopenedScheduledTail!.total_lines = 3;
+  reopenedScheduledTail!.current_line = 2;
+  reopenedScheduledTail!.chunk_size = 2;
+  reopenedScheduledTail!.total_chunks = 2;
+  reopenedScheduledTail!.chunks_processed = 1;
+  scheduledTailDb.failPublicCacheWritesRemaining = 1;
+  const repeatedQuietTailFailure = await processPendingAdmImportJobs(makeEnv(scheduledTailDb), { maxJobs: 1, maxChunksPerJob: 2 });
+  assert.equal(repeatedQuietTailFailure.completedJobs, 1);
+  assert.equal(repeatedQuietTailFailure.results[0]?.file_result?.public_cache_updated, false);
+  assert.equal(
+    JSON.parse(String(scheduledTailDb.publicApiSnapshots.get("home-stats:preview")?.payload_json)).admStatsFreshness?.source,
+    "canonical-adm-events",
+    "A heartbeat-only scheduled tail must retry a prior home-stats snapshot failure when earlier ADM writes exist.",
+  );
+  assert.equal(
+    scheduledTailDb.automationJobs.length > 0,
+    true,
+    "A heartbeat-only scheduled tail must retry a prior Discord queue failure when earlier ADM writes exist.",
+  );
+  const afterRepeatedQuietTailFailure = scheduledTailDb.admImportJobs.get(String(scheduledTailFirst.job?.job_id));
+  assert.deepEqual(
+    JSON.parse(String(afterRepeatedQuietTailFailure?.result_json)).scheduled_maintenance_retry,
+    { cache: true, stats: false, home_stats: false, discord: false, had_derived_writes: true },
+    "A failed retry must preserve the earlier write provenance for the next appended tail.",
+  );
+  afterRepeatedQuietTailFailure!.status = "queued";
+  afterRepeatedQuietTailFailure!.adm_text = "AdminLog started on 2026-05-20 at 12:00:00\n12:00:01 | Server heartbeat\n12:00:02 | Server heartbeat\n12:00:03 | Server heartbeat";
+  afterRepeatedQuietTailFailure!.total_lines = 4;
+  afterRepeatedQuietTailFailure!.current_line = 3;
+  afterRepeatedQuietTailFailure!.chunk_size = 2;
+  afterRepeatedQuietTailFailure!.total_chunks = 2;
+  afterRepeatedQuietTailFailure!.chunks_processed = 2;
+  const quietTailRecovery = await processPendingAdmImportJobs(makeEnv(scheduledTailDb), { maxJobs: 1, maxChunksPerJob: 2 });
+  assert.equal(quietTailRecovery.completedJobs, 1);
+  assert.equal(quietTailRecovery.results[0]?.file_result?.public_cache_updated, true, "A later quiet appended tail must recover the same job's repeatedly failed public-cache refresh.");
+  assert.equal(scheduledTailDb.serverPublicCache.has(guildId), true);
   assert.equal(scheduledTailDb.admImportJobs.size, 1);
+
+  const buildOnlyRetryDb = new MemoryD1();
+  buildOnlyRetryDb.publicApiSnapshots.set("home-stats:preview", {
+    snapshot_key: "home-stats:preview",
+    access_level: "preview",
+    payload_json: JSON.stringify({ data: {}, totals: {}, network_pulse: {} }),
+    generated_at: "2026-05-20T11:00:00.000Z",
+  });
+  const buildOnlyRetrySeed = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(buildOnlyRetryDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  const previousBuildOnlyRetry = buildOnlyRetryDb.admImportJobs.get(String(buildOnlyRetrySeed.job?.job_id));
+  assert.ok(previousBuildOnlyRetry);
+  previousBuildOnlyRetry.status = "completed_with_warnings";
+  previousBuildOnlyRetry.current_line = Number(previousBuildOnlyRetry.total_lines);
+  previousBuildOnlyRetry.chunks_processed = Number(previousBuildOnlyRetry.total_chunks);
+  previousBuildOnlyRetry.written_kills = 0;
+  previousBuildOnlyRetry.player_events = 0;
+  previousBuildOnlyRetry.joins = 0;
+  previousBuildOnlyRetry.disconnects = 0;
+  previousBuildOnlyRetry.deaths = 0;
+  previousBuildOnlyRetry.raw_events = 0;
+  previousBuildOnlyRetry.public_cache_updated = 0;
+  previousBuildOnlyRetry.discord_jobs_queued = 0;
+  previousBuildOnlyRetry.warnings_json = JSON.stringify([
+    "fixture.ADM: Public cache update failed after ADM rows were written. timed out",
+    "fixture.ADM: Stats rebuild failed after ADM rows were written. timed out",
+    "fixture.ADM: Home stats ADM snapshot refresh failed after ADM rows were written. timed out",
+    "fixture.ADM: Discord auto-post queueing failed after ADM rows were written. timed out",
+  ]);
+  previousBuildOnlyRetry.result_json = JSON.stringify({
+    scheduled_maintenance_retry: {
+      cache: true,
+      stats: true,
+      home_stats: true,
+      discord: true,
+      had_derived_writes: true,
+    },
+  });
+  previousBuildOnlyRetry.completed_at = "2026-05-20T12:00:00.000Z";
+  previousBuildOnlyRetry.updated_at = "2026-05-20T12:00:00.000Z";
+  const quietBuildOnlyRecovery = {
+    ...previousBuildOnlyRetry,
+    id: "fixture-build-only-follow-up",
+    status: "queued",
+    adm_text: "AdminLog started on 2026-05-20 at 12:00:00\n12:00:01 | Server heartbeat\n12:00:02 | Server heartbeat",
+    total_lines: 3,
+    current_line: 2,
+    chunk_size: 2,
+    total_chunks: 2,
+    chunks_processed: 1,
+    warnings_json: "[]",
+    result_json: null,
+    completed_at: null,
+    created_at: "2026-05-20T12:01:00.000Z",
+    updated_at: "2026-05-20T12:01:00.000Z",
+  };
+  buildOnlyRetryDb.admImportJobs.set(String(quietBuildOnlyRecovery.id), quietBuildOnlyRecovery);
+  const buildOnlyRecovery = await processPendingAdmImportJobs(makeEnv(buildOnlyRetryDb), { maxJobs: 1, maxChunksPerJob: 2 });
+  assert.equal(buildOnlyRecovery.completedJobs, 1);
+  assert.equal(
+    buildOnlyRecovery.results[0]?.file_result?.public_cache_updated,
+    true,
+    "A new quiet scheduled job must recover cache maintenance from prior build-only write provenance.",
+  );
+  assert.equal(
+    buildOnlyRetryDb.serverStats.has(linkedServerId),
+    true,
+    "A new quiet scheduled job must rebuild stats from prior build-only write provenance.",
+  );
+  assert.equal(
+    JSON.parse(String(buildOnlyRetryDb.publicApiSnapshots.get("home-stats:preview")?.payload_json)).admStatsFreshness?.source,
+    "canonical-adm-events",
+    "A new quiet scheduled job must recover home stats from prior build-only write provenance.",
+  );
+  assert.equal(
+    buildOnlyRetryDb.automationJobs.length > 0,
+    true,
+    "A new quiet scheduled job must recover Discord queueing from prior build-only write provenance.",
+  );
+
+  const activeTailDb = new MemoryD1();
+  const activeTailFirst = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(activeTailDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  const activeTailRow = activeTailDb.admImportJobs.get(String(activeTailFirst.job?.job_id));
+  assert.ok(activeTailRow);
+  const activeTailLines = String(activeTailRow.adm_text ?? "").split(/\r?\n/).filter(Boolean);
+  activeTailRow.status = "queued";
+  activeTailRow.current_line = 2;
+  activeTailRow.total_lines = 2;
+  activeTailRow.chunk_size = 2;
+  activeTailRow.total_chunks = 1;
+  activeTailRow.chunks_processed = 1;
+  activeTailRow.adm_text = activeTailLines.slice(0, 2).join("\n");
+  activeTailRow.written_kills = 2;
+  activeTailRow.player_events = 3;
+  activeTailRow.joins = 4;
+  activeTailRow.disconnects = 5;
+  activeTailRow.deaths = 6;
+  activeTailRow.raw_events = 7;
+  activeTailRow.warnings_json = '["active tail warning"]';
+  const activeTailGrowth = await createScheduledAdmImportJobForServer(
+    { ...makeEnv(activeTailDb), MOCK_NITRADO: "true" },
+    "fixture-user",
+    linkedServerId,
+    { processImmediately: false },
+  );
+  assert.equal(activeTailGrowth.job?.job_id, activeTailFirst.job?.job_id);
+  const extendedActiveTail = activeTailDb.admImportJobs.get(String(activeTailFirst.job?.job_id));
+  assert.equal(extendedActiveTail?.written_kills, 2, "An active tail extension must preserve already imported kills.");
+  assert.equal(extendedActiveTail?.player_events, 3, "An active tail extension must preserve already imported player events.");
+  assert.equal(extendedActiveTail?.raw_events, 7, "An active tail extension must preserve already parsed events.");
+  assert.equal(extendedActiveTail?.warnings_json, '["active tail warning"]', "An active tail extension must preserve prior warning evidence.");
 
   const scheduledDuplicateDb = new MemoryD1();
   const mockAdmName = "DAYZSERVER_PS4_X64_2026-05-14_11-29-09.ADM";
@@ -1656,6 +1948,7 @@ class MemoryD1 {
   admSyncFileState = new Map<string, MemoryRow>();
   admLiveSourceState = new Map<string, MemoryRow>();
   serverPublicCache = new Map<string, MemoryRow>();
+  publicApiSnapshots = new Map<string, MemoryRow>();
   automationJobs: MemoryRow[] = [];
   admImportJobs = new Map<string, MemoryRow>();
   linkedServers = new Map<string, MemoryRow>([[linkedServerId, {
@@ -1674,13 +1967,22 @@ class MemoryD1 {
   }]]);
   failKillInsertAfter: number | null;
   failAutomationJobInsert: boolean;
+  failPublicCacheWritesRemaining: number;
+  failNetworkRankSnapshotReadsRemaining: number;
   killInsertAttempts = 0;
   schemaQueries: string[] = [];
   executedQueries: string[] = [];
 
-  constructor(options: { failKillInsertAfter?: number | null; failAutomationJobInsert?: boolean } = {}) {
+  constructor(options: {
+    failKillInsertAfter?: number | null;
+    failAutomationJobInsert?: boolean;
+    failPublicCacheWrites?: number;
+    failNetworkRankSnapshotReads?: number;
+  } = {}) {
     this.failKillInsertAfter = options.failKillInsertAfter ?? null;
     this.failAutomationJobInsert = options.failAutomationJobInsert ?? false;
+    this.failPublicCacheWritesRemaining = options.failPublicCacheWrites ?? 0;
+    this.failNetworkRankSnapshotReadsRemaining = options.failNetworkRankSnapshotReads ?? 0;
   }
 
   prepare(query: string) {
@@ -1704,6 +2006,15 @@ class MemoryStatement {
     if (isSchemaQuery(q)) {
       this.db.schemaQueries.push(q);
       return changed(0);
+    }
+    if (q.includes("insert into public_api_snapshots")) {
+      this.db.publicApiSnapshots.set(String(this.values[0]), {
+        snapshot_key: this.values[0],
+        access_level: this.values[1],
+        payload_json: this.values[2],
+        generated_at: this.values[3],
+      });
+      return changed(1);
     }
     if (q.startsWith("update adm_raw_events") || q.startsWith("update player_events") || q.startsWith("update kill_events") || q.startsWith("update player_profiles") || q.startsWith("update server_stats") || q.startsWith("update adm_sync_state") || q.startsWith("update sync_runs")) return changed(0);
     if (q.includes("insert into adm_build_reparse_state")) {
@@ -2104,6 +2415,37 @@ class MemoryStatement {
       row.total_chunks = Number(this.values[5] ?? row.total_chunks);
       row.chunks_processed = Number(this.values[6] ?? row.chunks_processed);
       if (q.includes("result_json = null")) row.result_json = null;
+      if (q.includes("scheduled_maintenance_retry")) {
+        row.result_json = JSON.stringify({
+          scheduled_maintenance_retry: {
+            cache: q.includes("'cache', 1") ? 1 : 0,
+            stats: q.includes("'stats', 1") ? 1 : 0,
+            home_stats: q.includes("'home_stats', 1") ? 1 : 0,
+            discord: q.includes("'discord', 1") ? 1 : 0,
+            had_derived_writes: q.includes("'had_derived_writes', 1") ? 1 : 0,
+          },
+        });
+      }
+      if (q.includes("written_kills = 0")) {
+        row.raw_kill_lines_found = 0;
+        row.parsed_kills = 0;
+        row.written_kills = 0;
+        row.duplicate_skips = 0;
+        row.joins = 0;
+        row.disconnects = 0;
+        row.playerlist_snapshots = 0;
+        row.deaths = 0;
+        row.suicides = 0;
+        row.uncredited_deaths = 0;
+        row.hit_lines = 0;
+        row.raw_events = 0;
+        row.player_events = 0;
+        row.failed_writes = 0;
+        row.warnings_json = "[]";
+        row.public_cache_updated = 0;
+        row.discord_jobs_queued = 0;
+        row.last_chunk_index = null;
+      }
       row.completed_at = null;
       row.error_message = null;
       row.failed_chunk_index = null;
@@ -2167,8 +2509,9 @@ class MemoryStatement {
       row.player_events = Number(row.player_events ?? 0) + Number(this.values[offset + 11] ?? 0);
       const buildEventOffset = storesBuildEventCount ? 1 : 0;
       if (storesBuildEventCount) {
-        const current = Number(JSON.parse(String(row.result_json ?? "{}")).build_events_stored ?? 0);
-        row.result_json = JSON.stringify({ build_events_stored: current + Number(this.values[offset + 12] ?? 0) });
+        const existingResult = JSON.parse(String(row.result_json ?? "{}")) as Record<string, unknown>;
+        const current = Number(existingResult.build_events_stored ?? 0);
+        row.result_json = JSON.stringify({ ...existingResult, build_events_stored: current + Number(this.values[offset + 12] ?? 0) });
       }
       row.failed_writes = Number(row.failed_writes ?? 0) + Number(this.values[offset + 12 + buildEventOffset] ?? 0);
       row.warnings_json = this.values[offset + 13 + buildEventOffset];
@@ -2219,13 +2562,29 @@ class MemoryStatement {
       return changed(1);
     }
     if (q.includes("insert into server_public_cache")) {
-      this.db.serverPublicCache.set(String(this.values[1]), {
+      if (this.db.failPublicCacheWritesRemaining > 0) {
+        this.db.failPublicCacheWritesRemaining -= 1;
+        throw new Error("simulated server_public_cache write failure");
+      }
+      const guildId = String(this.values[1]);
+      const existing = this.db.serverPublicCache.get(guildId);
+      const hasRankTimestamp = q.includes("network_rank_updated_at");
+      const rankRefreshCompleted = hasRankTimestamp
+        ? this.values[14] !== null
+        : Number(this.values[15] ?? 0) === 1;
+      this.db.serverPublicCache.set(guildId, {
         guild_id: this.values[1],
         plan_key: this.values[2],
         public_server_name: this.values[3],
+        network_rank: rankRefreshCompleted
+          ? this.values[10] ?? null
+          : this.values[10] ?? existing?.network_rank ?? null,
         last_status_update_at: this.values[12],
-        last_adm_update_at: this.values[13],
-        updated_at: this.values[14],
+        last_adm_update_at: this.values[13] ?? existing?.last_adm_update_at ?? null,
+        network_rank_updated_at: hasRankTimestamp
+          ? this.values[14] ?? existing?.network_rank_updated_at ?? null
+          : existing?.network_rank_updated_at ?? null,
+        updated_at: this.values[hasRankTimestamp ? 15 : 14],
       });
       return changed(1);
     }
@@ -2245,6 +2604,9 @@ class MemoryStatement {
 
   async first<T>(): Promise<T | null> {
     const q = normalizeSql(this.query);
+    if (q.includes("from public_api_snapshots") && q.includes("where snapshot_key = ?")) {
+      return (this.db.publicApiSnapshots.get(String(this.values[0])) ?? null) as T | null;
+    }
     if (q.includes("select case when") && q.includes("as eligible") && q.includes("selected_server")) {
       const selected = this.db.linkedServers.get(String(this.values[0]));
       const guildId = String(this.values[1]);
@@ -2446,6 +2808,13 @@ class MemoryStatement {
   async all<T>(): Promise<{ results: T[] }> {
     const q = normalizeSql(this.query);
     if (q.startsWith("pragma table_info")) return { results: [] };
+    if (q.includes("from linked_servers") && q.includes("left join server_stats") && q.includes("where lower(linked_servers.status) = 'live'")) {
+      if (this.db.failNetworkRankSnapshotReadsRemaining > 0) {
+        this.db.failNetworkRankSnapshotReadsRemaining -= 1;
+        throw new Error("simulated network rank snapshot failure");
+      }
+      return { results: [] };
+    }
     if (q.includes("select linked_servers.guild_id, server_subscriptions.plan_key") && q.includes("where linked_servers.id = ?")) {
       const row = this.db.linkedServers.get(String(this.values[0]));
       return { results: row ? [{
