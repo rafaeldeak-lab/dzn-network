@@ -9,9 +9,18 @@ export type OwnerDiscordRoleSafetyInput = {
  * itself must not grant guild-wide Discord permissions.
  */
 export function isSafeOwnerDiscordAccessRole(role: OwnerDiscordRoleSafetyInput | null | undefined, guildId: string) {
-  const roleId = discordIdValue(role?.id);
   const permissions = permissionBits(role?.permissions);
-  return Boolean(roleId && roleId !== guildId && role?.managed !== true && permissions === BigInt(0));
+  return isRemovableOwnerDiscordAccessRole(role, guildId) && permissions === BigInt(0);
+}
+
+/**
+ * Cleanup must be able to remove an already-issued role if it later gains
+ * guild-wide permissions. Grants remain restricted to the zero-permission
+ * role above; removals only require a normal role that the bot can manage.
+ */
+export function isRemovableOwnerDiscordAccessRole(role: OwnerDiscordRoleSafetyInput | null | undefined, guildId: string) {
+  const roleId = discordIdValue(role?.id);
+  return Boolean(roleId && roleId !== guildId && role?.managed !== true);
 }
 
 function discordIdValue(value: unknown) {

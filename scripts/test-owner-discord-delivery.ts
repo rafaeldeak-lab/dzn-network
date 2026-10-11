@@ -408,10 +408,12 @@ async function run() {
       assert.equal(outsiderRevoke.ok, false);
       assert.equal(outsiderRevoke.status, 403, "The delivery helper must still reject a non-owner if another route calls it incorrectly.");
       await db.prepare("UPDATE dzn_owner_discord_access_requests SET status = 'revoked' WHERE id = 'approved_request'").run();
+      activeVerifiedOwnerRolePermissions = (BigInt(1) << BigInt(28)).toString();
       const revokeResponse = await ownerDeliveryRoute(context(env, request("POST", { action: "revoke_role", requestId: "approved_request" }, ownerSession.token, "https://dzn.test")));
       assert.equal(revokeResponse.status, 200);
       assert.equal(applicantHasRole, false);
       assert.equal(calls.some((call) => call.path.endsWith(`/members/${applicant.discord_id}/roles/${verifiedOwnerRoleId}`) && call.method === "DELETE"), true, "Revocation must only remove the configured Verified Server Owner role.");
+      activeVerifiedOwnerRolePermissions = "0";
       const revokeActor = await db.prepare("SELECT actor_user_id, actor_discord_id FROM dzn_owner_discord_access_delivery_attempts WHERE request_id = 'approved_request' AND operation = 'role_revoke' ORDER BY created_at DESC LIMIT 1").first<{ actor_user_id: string; actor_discord_id: string }>();
       assert.equal(revokeActor?.actor_user_id, owner.id, "The delivery ledger must identify the platform owner that removed a role.");
       assert.equal(revokeActor?.actor_discord_id, owner.discord_id, "The delivery ledger must retain the platform owner identity for the role-removal audit.");
@@ -752,6 +754,7 @@ async function run() {
         id, request_id, requester_user_id, requester_discord_id, actor_user_id, actor_discord_id, operation, status, attempt_number, delivery_nonce, guild_id, role_id, error_code, created_at, completed_at
       ) VALUES ('blocked-account-closure-role-grant', 'blocked_account_closure_request', ?, ?, ?, ?, 'role_grant', 'retryable_failure', 1, 'blocked-account-closure-role-grant-nonce', ?, ?, 'role_grant_may_have_reached', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
         .bind(blockedOwner.id, blockedOwner.discord_id, owner.id, owner.discord_id, guildId, verifiedOwnerRoleId).run();
+      activeVerifiedOwnerRolePermissions = (BigInt(1) << BigInt(28)).toString();
       const blockedClosure = await deleteOwnedAccountData(env, blockedOwner.id);
       assert.equal(blockedClosure.ok, false, "Account closure must stop when Discord owner-role removal fails.");
       if (!blockedClosure.ok) assert.equal(blockedClosure.status, 503);
@@ -762,6 +765,8 @@ async function run() {
       assert.equal(blockedServerDeletion.ok, false, "Server deletion must stop when DZN cannot confirm Discord owner-role removal.");
       if (!blockedServerDeletion.ok) assert.equal(blockedServerDeletion.status, 503);
       assert.notEqual(await db.prepare("SELECT id FROM linked_servers WHERE id = 'server_blocked_closure_owner'").first(), null, "A failed Discord role removal must preserve the linked server for a safe retry.");
+      assert.equal(blockedOwnerRoleRemovalAttempted, true, "Cleanup must still attempt to remove a previously granted role after its permissions become unsafe.");
+      activeVerifiedOwnerRolePermissions = "0";
 
       for (let index = 0; index < 3; index += 1) {
         await db.prepare(`INSERT INTO dzn_owner_discord_access_delivery_attempts (
