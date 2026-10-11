@@ -8,6 +8,7 @@ export type DeletionNotice = {
 export function mergeDeletionNotices(
   messages: readonly CommsHistoryMessage[],
   deletionNotices: ReadonlyMap<string, DeletionNotice>,
+  deletedMessageIds: ReadonlySet<string>,
   channelSlug: string,
 ): CommsHistoryMessage[] {
   const channelNotices = new Map<string, CommsHistoryMessage>();
@@ -24,7 +25,7 @@ export function mergeDeletionNotices(
       merged.push(notice);
       continue;
     }
-    if (message.visibility_state !== "deleted") merged.push(message);
+    if (!deletedMessageIds.has(message.id) && message.visibility_state !== "deleted") merged.push(message);
   }
 
   for (const [messageId, notice] of channelNotices) {

@@ -133,6 +133,7 @@ export function DznCommsShell() {
   const historyRequestGenerationRef = useRef(0);
   const deletionNoticeTimeoutsRef = useRef(new Map<string, number>());
   const [deletionNotices, setDeletionNotices] = useState<ReadonlyMap<string, DeletionNotice>>(() => new Map());
+  const [deletedMessageIds, setDeletedMessageIds] = useState<ReadonlySet<string>>(() => new Set());
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [composerMessage, setComposerMessage] = useState("");
@@ -210,8 +211,8 @@ export function DznCommsShell() {
 
   const payload = history.payload;
   const visibleMessages = useMemo(
-    () => mergeDeletionNotices(payload.messages, deletionNotices, payload.channel.slug),
-    [deletionNotices, payload.channel.slug, payload.messages],
+    () => mergeDeletionNotices(payload.messages, deletionNotices, deletedMessageIds, payload.channel.slug),
+    [deletedMessageIds, deletionNotices, payload.channel.slug, payload.messages],
   );
   const statusLabel = useMemo(() => statusCopy(history.status), [history.status]);
   const sendingEnabled = liveUiEnabled && payload.feature_flags.sending_enabled;
@@ -341,7 +342,12 @@ export function DznCommsShell() {
       can_delete: false,
       reactions: undefined,
     };
-    if (selectedChannelRef.current === deletedChannelSlug) historyRequestGenerationRef.current += 1;
+    setDeletedMessageIds((current) => {
+      if (current.has(messageId)) return current;
+      const next = new Set(current);
+      next.add(messageId);
+      return next;
+    });
     const previousTimeout = deletionNoticeTimeoutsRef.current.get(messageId);
     if (previousTimeout !== undefined) window.clearTimeout(previousTimeout);
 

@@ -35,7 +35,7 @@ test("keeps a temporary deletion notice after a polling response omits the delet
   const notice = deletedNotice("deleted-message");
 
   assert.deepEqual(
-    mergeDeletionNotices([], new Map([["deleted-message", notice]]), "global-chat"),
+    mergeDeletionNotices([], new Map([["deleted-message", notice]]), new Set(), "global-chat"),
     [notice.message],
   );
 });
@@ -44,7 +44,7 @@ test("replaces an in-flight stale payload row with the sanitized deletion notice
   const notice = deletedNotice("deleted-message");
 
   assert.deepEqual(
-    mergeDeletionNotices([message("deleted-message", "Original private message")], new Map([["deleted-message", notice]]), "global-chat"),
+    mergeDeletionNotices([message("deleted-message", "Original private message")], new Map([["deleted-message", notice]]), new Set(), "global-chat"),
     [notice.message],
   );
 });
@@ -54,9 +54,21 @@ test("removes deleted rows without an active local notice and never leaks notice
   const deleted = message("deleted-message", "Message deleted.", "deleted");
   const visible = message("visible-message", "Still visible");
 
-  assert.deepEqual(mergeDeletionNotices([deleted, visible], new Map(), "global-chat"), [visible]);
+  assert.deepEqual(mergeDeletionNotices([deleted, visible], new Map(), new Set(), "global-chat"), [visible]);
   assert.deepEqual(
-    mergeDeletionNotices([], new Map([["deleted-message", notice]]), "private-owners"),
+    mergeDeletionNotices([], new Map([["deleted-message", notice]]), new Set(), "private-owners"),
+    [],
+  );
+});
+
+test("suppresses a stale deleted row after the temporary notice has expired", () => {
+  assert.deepEqual(
+    mergeDeletionNotices(
+      [message("deleted-message", "Original private message")],
+      new Map(),
+      new Set(["deleted-message"]),
+      "global-chat",
+    ),
     [],
   );
 });
