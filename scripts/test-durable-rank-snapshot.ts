@@ -67,10 +67,16 @@ assert.equal(
 );
 assert.equal(
   automationSource.includes("readNetworkRankSnapshot") &&
-    automationSource.includes("input.lastAdmUpdateAt") &&
+    automationSource.includes("refreshNetworkRank?: boolean") &&
+    automationSource.includes("input.refreshNetworkRank === true") &&
     automationSource.includes("input.networkRank !== undefined"),
   true,
-  "ADM/public cache freshness updates must refresh durable rank snapshots unless an explicit rank is supplied.",
+  "ADM/public cache freshness updates must refresh durable rank snapshots only when the scheduled rank-refresh path explicitly requests them.",
+);
+assert.equal(
+  automationSource.includes("WHEN excluded.network_rank_updated_at IS NOT NULL THEN excluded.network_rank"),
+  true,
+  "A completed null-rank refresh must clear an obsolete cached placement rather than preserve it as fresh.",
 );
 
 assert.equal(

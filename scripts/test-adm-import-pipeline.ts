@@ -955,11 +955,7 @@ async function main() {
   assert.equal(retryHeartbeatResult.completedJobs, 1);
   assert.equal(retryHeartbeatResult.results[0]?.file_result?.public_cache_updated, true);
   assert.equal(retryHeartbeatDb.serverPublicCache.has(guildId), true);
-  assert.equal(
-    typeof retryHeartbeatDb.serverPublicCache.get(guildId)?.network_rank_updated_at,
-    "string",
-    "The corrective cache write must establish rank freshness even without an ADM timestamp.",
-  );
+  assert.equal(retryHeartbeatDb.serverPublicCache.get(guildId)?.network_rank_updated_at ?? null, null);
 
   await createAdmImportJobForServer(makeEnv(retryHeartbeatDb), {
     linkedServerId,
@@ -970,7 +966,8 @@ async function main() {
   });
   const recoveredHeartbeatResult = await processPendingAdmImportJobs(makeEnv(retryHeartbeatDb), { maxJobs: 1, maxChunksPerJob: 1 });
   assert.equal(recoveredHeartbeatResult.completedJobs, 1);
-  assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, false, "A cache row whose corrective write already established rank freshness must not refresh again on the next heartbeat.");
+  assert.equal(recoveredHeartbeatResult.results[0]?.file_result?.public_cache_updated, true, "A cache row without a rank timestamp must refresh once to establish durable rank freshness.");
+  assert.equal(typeof retryHeartbeatDb.serverPublicCache.get(guildId)?.network_rank_updated_at, "string");
 
   const retryStatsHeartbeatDb = new MemoryD1();
   retryStatsHeartbeatDb.admImportJobs.set("previous-stats-failure", {
@@ -999,6 +996,7 @@ async function main() {
     guild_id: guildId,
     plan_key: "partner",
     public_server_name: "Fixture Server",
+    network_rank: 42,
     last_adm_update_at: null,
     updated_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
   });
@@ -1016,6 +1014,11 @@ async function main() {
     typeof rankRefreshHeartbeatDb.serverPublicCache.get(guildId)?.network_rank_updated_at,
     "string",
     "A completed rank refresh must stamp its dedicated freshness time even when the server has neither an ADM timestamp nor a current rank.",
+  );
+  assert.equal(
+    rankRefreshHeartbeatDb.serverPublicCache.get(guildId)?.network_rank ?? null,
+    null,
+    "A completed null-rank refresh must clear a stale prior placement instead of presenting it as fresh.",
   );
 
   await createAdmImportJobForServer(makeEnv(rankRefreshHeartbeatDb), {
@@ -2377,11 +2380,16 @@ class MemoryStatement {
       const guildId = String(this.values[1]);
       const existing = this.db.serverPublicCache.get(guildId);
       const hasRankTimestamp = q.includes("network_rank_updated_at");
+      const rankRefreshCompleted = hasRankTimestamp
+        ? this.values[14] !== null
+        : Number(this.values[15] ?? 0) === 1;
       this.db.serverPublicCache.set(guildId, {
         guild_id: this.values[1],
         plan_key: this.values[2],
         public_server_name: this.values[3],
-        network_rank: this.values[10] ?? existing?.network_rank ?? null,
+        network_rank: rankRefreshCompleted
+          ? this.values[10] ?? null
+          : this.values[10] ?? existing?.network_rank ?? null,
         last_status_update_at: this.values[12],
         last_adm_update_at: this.values[13] ?? existing?.last_adm_update_at ?? null,
         network_rank_updated_at: hasRankTimestamp

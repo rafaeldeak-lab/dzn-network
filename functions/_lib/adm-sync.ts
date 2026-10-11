@@ -4296,15 +4296,17 @@ async function finalizeAdmImportJob(
   // write, except when recovering a failed refresh or periodically recalculating
   // a quiet server's cross-network rank.
   const publicCacheGuildId = server.guild_id;
+  const cacheRefreshHasAdmWrites = derivedDataWrites > 0 || (retryPreviousScheduledCacheFailure && (
+    previousScheduledDerivedWrites > 0 || currentScheduledMaintenanceRetry?.hadDerivedWrites
+  ));
   if (publicCacheGuildId && (!isScheduledNitradoImport || derivedDataWrites > 0 || retryPreviousScheduledCacheFailure || retryPreviousScheduledStatsFailure || refreshScheduledNetworkRank)) {
     try {
       await withManualAdmPhaseTimeout(upsertServerPublicCache(env, {
         guildId: publicCacheGuildId,
         planKey: server.plan_key,
         publicServerName: firstString(server.display_name, server.hostname, server.server_name, server.nitrado_service_name),
-        lastAdmUpdateAt: derivedDataWrites > 0 || (retryPreviousScheduledCacheFailure && (
-          previousScheduledDerivedWrites > 0 || currentScheduledMaintenanceRetry?.hadDerivedWrites
-        ))
+        refreshNetworkRank: !isScheduledNitradoImport || cacheRefreshHasAdmWrites || refreshScheduledNetworkRank,
+        lastAdmUpdateAt: cacheRefreshHasAdmWrites
           ? now
           : existingPublicCache?.last_adm_update_at ?? null,
       // Scheduled jobs already require the canonical cache schema before reaching

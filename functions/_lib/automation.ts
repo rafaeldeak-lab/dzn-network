@@ -1458,6 +1458,7 @@ export async function upsertServerPublicCache(env: Env, input: {
   leaderboardSnapshotJson?: string | null;
   eventSnapshotJson?: string | null;
   networkRank?: number | null;
+  refreshNetworkRank?: boolean;
   partnerFeatured?: boolean;
   lastStatusUpdateAt?: string | null;
   lastAdmUpdateAt?: string | null;
@@ -1468,7 +1469,7 @@ export async function upsertServerPublicCache(env: Env, input: {
   const now = new Date().toISOString();
   let networkRank = input.networkRank ?? null;
   let rankSnapshotRefreshCompleted = input.networkRank !== undefined;
-  if (input.networkRank === undefined) {
+  if (input.networkRank === undefined && input.refreshNetworkRank === true) {
     try {
       networkRank = await readNetworkRankSnapshot(env, input.guildId);
       rankSnapshotRefreshCompleted = true;
@@ -1514,7 +1515,10 @@ export async function upsertServerPublicCache(env: Env, input: {
         server_status = COALESCE(excluded.server_status, server_public_cache.server_status),
         leaderboard_snapshot_json = COALESCE(excluded.leaderboard_snapshot_json, server_public_cache.leaderboard_snapshot_json),
         event_snapshot_json = COALESCE(excluded.event_snapshot_json, server_public_cache.event_snapshot_json),
-        network_rank = COALESCE(excluded.network_rank, server_public_cache.network_rank),
+        network_rank = CASE
+          WHEN excluded.network_rank_updated_at IS NOT NULL THEN excluded.network_rank
+          ELSE COALESCE(excluded.network_rank, server_public_cache.network_rank)
+        END,
         partner_featured = excluded.partner_featured,
         last_status_update_at = COALESCE(excluded.last_status_update_at, server_public_cache.last_status_update_at),
         last_adm_update_at = COALESCE(excluded.last_adm_update_at, server_public_cache.last_adm_update_at),
@@ -1541,7 +1545,10 @@ export async function upsertServerPublicCache(env: Env, input: {
           server_status = COALESCE(excluded.server_status, server_public_cache.server_status),
           leaderboard_snapshot_json = COALESCE(excluded.leaderboard_snapshot_json, server_public_cache.leaderboard_snapshot_json),
           event_snapshot_json = COALESCE(excluded.event_snapshot_json, server_public_cache.event_snapshot_json),
-          network_rank = COALESCE(excluded.network_rank, server_public_cache.network_rank),
+          network_rank = CASE
+            WHEN ? = 1 THEN excluded.network_rank
+            ELSE COALESCE(excluded.network_rank, server_public_cache.network_rank)
+          END,
           partner_featured = excluded.partner_featured,
           last_status_update_at = COALESCE(excluded.last_status_update_at, server_public_cache.last_status_update_at),
           last_adm_update_at = COALESCE(excluded.last_adm_update_at, server_public_cache.last_adm_update_at),
@@ -1563,6 +1570,7 @@ export async function upsertServerPublicCache(env: Env, input: {
         input.lastStatusUpdateAt ?? null,
         input.lastAdmUpdateAt ?? null,
         now,
+        rankSnapshotRefreshCompleted ? 1 : 0,
       )
       .run();
   }
