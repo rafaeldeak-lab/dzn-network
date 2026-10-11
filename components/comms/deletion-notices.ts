@@ -7,7 +7,7 @@ export type DeletionNotice = {
 
 function historyTimestamp(value: string | null) {
   if (value === null) return null;
-  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)
+  const normalized = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)
     ? `${value.replace(" ", "T")}Z`
     : value;
   const parsed = Date.parse(normalized);

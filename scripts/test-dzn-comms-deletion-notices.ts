@@ -89,6 +89,17 @@ test("inserts a refreshed deletion notice into its original chronological positi
   );
 });
 
+test("treats offset-less ISO history timestamps as UTC", () => {
+  const notice = deletedNotice("deleted-message", "2026-10-11T10:01:00");
+  const before = message("before", "Still visible before", "visible", "2026-10-11 10:00:00");
+  const after = message("after", "Still visible after", "visible", "2026-10-11 10:02:00");
+
+  assert.deepEqual(
+    mergeDeletionNotices([before, after], new Map([["deleted-message", notice]]), new Set(), "global-chat"),
+    [before, notice.message, after],
+  );
+});
+
 test("uses the history ID tie-breaker for notices sharing a timestamp", () => {
   const createdAt = "2026-10-11T10:01:00.000Z";
   const notice = deletedNotice("b", createdAt);
