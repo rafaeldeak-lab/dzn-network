@@ -1,4 +1,5 @@
 import type { Env } from "./types";
+import { isSafeOwnerDiscordAccessRole } from "./owner-discord-role-safety";
 
 type DiscordFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -120,7 +121,7 @@ export async function discoverOwnerDiscordDeliveryCandidates(
     const botHasAdministrator = hasPermission(basePermissions, DISCORD_ADMINISTRATOR);
     const canManageRoles = botHasAdministrator || hasPermission(basePermissions, DISCORD_MANAGE_ROLES);
     const verifiedOwnerRoleCandidates = roles
-      .filter((role) => normalizeRoleName(role.name) === "verified server owner" && !hasPermission(parseBits(role.permissions), DISCORD_ADMINISTRATOR))
+      .filter((role) => normalizeRoleName(role.name) === "verified server owner" && isSafeOwnerDiscordAccessRole(role, guildId))
       .map((role) => ({
         id: String(role.id ?? ""),
         name: String(role.name ?? "Verified Server Owner"),

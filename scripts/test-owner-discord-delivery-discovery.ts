@@ -10,6 +10,10 @@ const botId = "900000000000000002";
 const botRoleId = "900000000000000003";
 const verifiedOwnerRoleId = "900000000000000004";
 const administratorVerifiedOwnerRoleId = "900000000000000009";
+const manageRolesVerifiedOwnerRoleId = "900000000000000011";
+const viewChannelVerifiedOwnerRoleId = "900000000000000012";
+const malformedVerifiedOwnerRoleId = "900000000000000013";
+const missingPermissionVerifiedOwnerRoleId = "900000000000000014";
 const categoryId = "900000000000000005";
 const privateInviteChannelId = "900000000000000006";
 const publicChannelId = "900000000000000007";
@@ -18,6 +22,7 @@ const privateGuildChannelId = "900000000000000010";
 const permissions = ((BigInt(1) << BigInt(28)) | (BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(0))).toString();
 const viewChannel = (BigInt(1) << BigInt(10)).toString();
 const administrator = (BigInt(1) << BigInt(3)).toString();
+const manageRoles = (BigInt(1) << BigInt(28)).toString();
 
 async function run() {
   const helper = readFileSync("functions/_lib/owner-discord-delivery-discovery.ts", "utf8");
@@ -51,8 +56,12 @@ async function run() {
     if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
       return Response.json([
         { id: guildId, name: "@everyone", position: 0, permissions: viewChannel },
-        { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: "0", managed: false },
+        { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: 0, managed: false },
         { id: administratorVerifiedOwnerRoleId, name: "Verified Server Owner", position: 6, permissions: administrator, managed: false },
+        { id: manageRolesVerifiedOwnerRoleId, name: "Verified Server Owner", position: 7, permissions: manageRoles, managed: false },
+        { id: viewChannelVerifiedOwnerRoleId, name: "Verified Server Owner", position: 8, permissions: viewChannel, managed: false },
+        { id: malformedVerifiedOwnerRoleId, name: "Verified Server Owner", position: 8, permissions: "not-a-number", managed: false },
+        { id: missingPermissionVerifiedOwnerRoleId, name: "Verified Server Owner", position: 8, managed: false },
         { id: botRoleId, name: "DZN Bot", position: 10, permissions, managed: true },
       ]);
     }
@@ -82,6 +91,7 @@ async function run() {
   assert.equal(result.checks.botHasAdministrator, false);
   assert.equal(result.checks.canManageRoles, true);
   assert.deepEqual(result.verifiedOwnerRoleCandidates, [{ id: verifiedOwnerRoleId, name: "Verified Server Owner", assignable: true }]);
+  assert.equal(result.verifiedOwnerRoleCandidates.every((role) => role.id === verifiedOwnerRoleId), true, "Only a valid zero-permission owner role may be returned as a candidate.");
   assert.deepEqual(result.privateInviteChannelCandidates, [{
     id: privateInviteChannelId,
     name: "owner-invites",
@@ -107,6 +117,20 @@ async function run() {
   });
   assert.equal(administratorRoleOnly.status, "candidates_incomplete", "A Verified Server Owner role with Administrator must never be configurable.");
   assert.equal(administratorRoleOnly.verifiedOwnerRoleCandidates.length, 0, "Administrator roles must not be returned as owner-role candidates.");
+
+  const manageRolesRoleOnly = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
+      return Response.json([
+        { id: guildId, name: "@everyone", position: 0, permissions: viewChannel },
+        { id: manageRolesVerifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: manageRoles, managed: false },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions, managed: true },
+      ]);
+    }
+    return discordFetch(input, init);
+  });
+  assert.equal(manageRolesRoleOnly.status, "candidates_incomplete", "A Verified Server Owner role with Manage Roles must never be configurable.");
+  assert.equal(manageRolesRoleOnly.verifiedOwnerRoleCandidates.length, 0, "Roles with guild-wide permissions must not be returned as owner-role candidates.");
 
   const privateGuildResult = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
     const url = new URL(String(input));

@@ -1,5 +1,6 @@
 import { getSessionUser, requireDb } from "./db";
 import { isPlatformOwnerDiscordId } from "./platform-owner";
+import { isSafeOwnerDiscordAccessRole } from "./owner-discord-role-safety";
 import type { Env, SessionUser } from "./types";
 
 type DeliveryOperation = "invite" | "role_grant" | "role_revoke";
@@ -770,7 +771,7 @@ async function checkDiscordRoleConfiguration(configuration: RoleDeliveryConfigur
       botHasAdministrator: hasAdministrator,
     };
     if (!targetRole) return { ok: false as const, status: "not_configured" as const, message: "The configured Verified Server Owner role was not found in the central DZN Discord server.", httpStatus: null, checks };
-    if (String(targetRole.id ?? "") === configuration.guildId || targetRole.managed === true) return { ok: false as const, status: "not_configured" as const, message: "The configured Verified Server Owner role must be a normal, assignable role in the central DZN Discord server.", httpStatus: null, checks };
+    if (!isSafeOwnerDiscordAccessRole(targetRole, configuration.guildId)) return { ok: false as const, status: "not_configured" as const, message: "The configured Verified Server Owner role must be a normal, assignable role with no guild-wide permissions. Grant owner access through private channel overwrites instead.", httpStatus: null, checks };
     if (!checks.targetRoleBelowBot) return { ok: false as const, status: "role_hierarchy" as const, message: "DZN Bot must remain above the Verified Server Owner role before owner delivery can run.", httpStatus: null, checks };
     if (!canManageRoles) return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs Manage Roles for the Verified Server Owner role.", httpStatus: null, checks };
     return { ok: true as const, status: "ready" as const, message: "DZN Bot can manage the Verified Server Owner role.", httpStatus: null, checks, botId, botRoleIds, basePermissions };
