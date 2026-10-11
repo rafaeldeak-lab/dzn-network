@@ -136,12 +136,12 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /messages: current\.payload\.messages\.filter\(\(item\) => item\.id !== messageId\)/, "The expired deletion placeholder must be removed from local chat state.");
   assert.match(shell, /Message sent\. Chat history will refresh shortly\./);
   assert.match(shell, /reportCommsMessage\(message\.id\)/);
-  assert.match(shell, /reportActionsEnabled = liveUiEnabled && payload\.feature_flags\.report_actions_enabled/, "Report controls must stay behind the matching live UI gate.");
-  assert.match(shell, /sendingEnabled = liveUiEnabled && payload\.feature_flags\.sending_enabled/, "Composer controls must stay behind the matching live UI gate.");
-  assert.match(shell, /liveUiEnabled && payload\.feature_flags\.sending_enabled \? `\$\{payload\.channel\.name\} is live/, "Read-only history must not claim chat is live before the matching UI release gate.");
+  assert.match(shell, /reportActionsEnabled = historyReady && payload\.feature_flags\.report_actions_enabled/, "Report controls must require the verified server capability response.");
+  assert.match(shell, /sendingEnabled = historyReady && payload\.feature_flags\.sending_enabled/, "Composer controls must require the verified server capability response.");
+  assert.match(shell, /message: payload\.feature_flags\.sending_enabled \? `\$\{payload\.channel\.name\} is live/, "Read-only history must not claim chat is live before the server enables sending.");
   assert.match(shell, /Report received\./);
   assert.match(shell, /Report failed\. Try again\./);
-  assert.match(shell, /liveUiEnabled \? "Live" : "History"/, "Production history must not be labelled Local/Test.");
+  assert.match(shell, /statusCopy\(history\.status, sendingEnabled\)/, "The live status label must use the verified server capability response.");
   assert.match(client, /"\/api\/comms\/messages"/);
   assert.match(client, /"\/api\/comms\/reports"/);
   assert.match(client, /setTimeout\(\(\) => controller\.abort\(\), COMMS_HISTORY_TIMEOUT_MS\)/, "Send and report mutations must have a bounded abort timeout.");
@@ -152,5 +152,7 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(runtime, /DELETE FROM dzn_comms_send_receipts[^\n]+julianday\(expires_at\) <= julianday\('now'\)/, "An exact expired receipt must be replaceable atomically.");
   assert.match(runtime, /host === "\[::1\]"/, "Local activation must accept WHATWG bracketed IPv6 loopback hosts.");
   assert.match(shell, /current\.status === "ready"[\s\S]*last received messages/, "A failed poll after a successful load must preserve real history.");
+  assert.match(shell, /const CAPABILITY_PROBE_RETRY_LIMIT = 3/, "A failed initial capability probe must retry without relying on a browser reload.");
+  assert.match(shell, /poller === undefined && capabilityProbeRetries < CAPABILITY_PROBE_RETRY_LIMIT[\s\S]*window\.setTimeout\(\(\) => void refresh\(\), CAPABILITY_PROBE_RETRY_DELAY_MS\)/, "Capability retries must remain bounded and must not turn public read-only history into a permanent polling loop.");
   assert.doesNotMatch(runtime + shell + client, /STRIPE_SECRET|DZN_LIVE_CHECKOUT_ENABLED|NITRADO_TOKEN|DISCORD_BOT_TOKEN|WebSocket|DurableObject|OPENAI_API_KEY/);
 });

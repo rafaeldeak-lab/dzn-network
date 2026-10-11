@@ -42,7 +42,13 @@ const liveUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED === "tru
 const reactionUiFlagEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED === "true";
 const presenceUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED === "true";
 const privateGroupsUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_PRIVATE_GROUPS_UI_ENABLED === "true";
+// A deployed client learns its available Comms controls from the same-origin
+// history response. Local development remains explicitly default-off.
+const productionRuntimeProbeEnabled = process.env.NODE_ENV === "production";
+const historyProbeEnabled = historyUiEnabled || liveUiEnabled || productionRuntimeProbeEnabled;
 const DELETED_MESSAGE_NOTICE_MS = 2_000;
+const CAPABILITY_PROBE_RETRY_DELAY_MS = 5_000;
+const CAPABILITY_PROBE_RETRY_LIMIT = 3;
 
 const staticPayload: CommsHistoryPayload = {
   ok: true,
@@ -141,17 +147,21 @@ export function DznCommsShell() {
   const sendAttemptRef = useRef<{ channelSlug: string; draft: string; requestId: string } | null>(null);
   const reactionAttemptRef = useRef(new Map<string, string>());
   const [history, setHistory] = useState<CommsHistoryState>(() => ({
-    status: historyUiEnabled || liveUiEnabled ? "loading" : "static",
+    status: historyProbeEnabled ? "loading" : "static",
     payload: staticPayload,
-    message: historyUiEnabled || liveUiEnabled
-      ? "Connecting to DZN Global Chat."
+    message: historyProbeEnabled
+      ? "Checking whether DZN Global Chat is available."
       : "Static fallback is active. Message history is disabled by default.",
   }));
+  const liveHistoryRuntimeEnabled = history.status === "ready" && history.payload.feature_flags.sending_enabled;
 
   useEffect(() => {
-    if (!historyUiEnabled && !liveUiEnabled) return;
+    if (!historyProbeEnabled) return;
 
     const controller = new AbortController();
+    let poller: number | undefined;
+    let retryTimer: number | undefined;
+    let capabilityProbeRetries = 0;
     const refresh = () => {
       const requestGeneration = ++historyRequestGenerationRef.current;
       return loadCommsHistory(controller.signal, { channelSlug: selectedChannel })
@@ -165,7 +175,7 @@ export function DznCommsShell() {
         setHistory({
           status: "ready",
           payload,
-          message: liveUiEnabled && payload.feature_flags.sending_enabled ? `${payload.channel.name} is live. Keep it respectful and report abuse.` : "Message history is available. Sending is not enabled yet.",
+          message: payload.feature_flags.sending_enabled ? `${payload.channel.name} is live. Keep it respectful and report abuse.` : "Message history is available. Sending is not enabled yet.",
         });
       })
       .catch(() => {
@@ -191,18 +201,23 @@ export function DznCommsShell() {
               payload: staticPayload,
               message: "Message history could not be reached, so DZN is showing the static read-only fallback.",
             });
+        if (poller === undefined && capabilityProbeRetries < CAPABILITY_PROBE_RETRY_LIMIT) {
+          capabilityProbeRetries += 1;
+          retryTimer = window.setTimeout(() => void refresh(), CAPABILITY_PROBE_RETRY_DELAY_MS);
+        }
       });
     };
     void refresh();
-    const poller = liveUiEnabled || selectedChannel !== "global-chat"
-      ? window.setInterval(() => void refresh(), 5_000)
-      : undefined;
+    if (liveHistoryRuntimeEnabled || selectedChannel !== "global-chat") {
+      poller = window.setInterval(() => void refresh(), 5_000);
+    }
 
     return () => {
       controller.abort();
       if (poller !== undefined) window.clearInterval(poller);
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
-  }, [selectedChannel]);
+  }, [selectedChannel, liveHistoryRuntimeEnabled]);
 
   useEffect(() => () => {
     for (const timeout of deletionNoticeTimeoutsRef.current.values()) window.clearTimeout(timeout);
@@ -214,11 +229,12 @@ export function DznCommsShell() {
     () => mergeDeletionNotices(payload.messages, deletionNotices, deletedMessageIds, payload.channel.slug),
     [deletedMessageIds, deletionNotices, payload.channel.slug, payload.messages],
   );
-  const statusLabel = useMemo(() => statusCopy(history.status), [history.status]);
-  const sendingEnabled = liveUiEnabled && payload.feature_flags.sending_enabled;
-  const reportActionsEnabled = liveUiEnabled && payload.feature_flags.report_actions_enabled;
-  const selfDeleteUiEnabled = liveUiEnabled && payload.feature_flags.self_delete_enabled;
-  const reactionUiEnabled = liveUiEnabled && reactionUiFlagEnabled && payload.feature_flags.reactions_enabled;
+  const historyReady = history.status === "ready";
+  const sendingEnabled = historyReady && payload.feature_flags.sending_enabled;
+  const reportActionsEnabled = historyReady && payload.feature_flags.report_actions_enabled;
+  const selfDeleteUiEnabled = historyReady && payload.feature_flags.self_delete_enabled;
+  const reactionUiEnabled = historyReady && reactionUiFlagEnabled && payload.feature_flags.reactions_enabled;
+  const statusLabel = useMemo(() => statusCopy(history.status, sendingEnabled), [history.status, sendingEnabled]);
   const reactionWritesAvailable = reactionUiEnabled && payload.feature_flags.reactions_write_enabled;
 
   useEffect(() => {
@@ -722,8 +738,8 @@ function StatusPill({ label, value, tone }: { label: string; value: string; tone
   );
 }
 
-function statusCopy(status: CommsHistoryState["status"]) {
-  if (status === "ready") return liveUiEnabled ? "Live" : "History";
+function statusCopy(status: CommsHistoryState["status"], sendingEnabled: boolean) {
+  if (status === "ready") return sendingEnabled ? "Live" : "History";
   if (status === "loading") return "Checking";
   if (status === "fallback") return "Fallback";
   return "Static";
