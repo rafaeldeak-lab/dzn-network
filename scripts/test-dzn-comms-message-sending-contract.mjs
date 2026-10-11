@@ -9,6 +9,7 @@ const privacyMigration = read("migrations/0072_dzn_comms_private_rate_ledgers.sq
 const migration = `${baseMigration}\n${privacyMigration}`;
 const runtime = read("functions/_lib/dzn-comms-live.ts");
 const shell = read("components/comms/dzn-comms-shell.tsx");
+const deletionNotices = read("components/comms/deletion-notices.ts");
 const client = read("components/comms/comms-history-client.ts");
 const env = read(".env.example");
 const cloudflareEnv = read("cloudflare-env.d.ts");
@@ -128,6 +129,8 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /onMessageDeleted=\{\(messageId\) => handleMessageDeleted\(messageId, payload\.channel\.slug\)\}/, "A completed delete must not read the mutable selected channel after its request resolves.");
   assert.match(shell, /setDeletedMessageIds\(\(current\) => \{[\s\S]*next\.add\(messageId\);/, "A completed delete must suppress any late stale history row without canceling a newer channel load.");
   assert.doesNotMatch(shell, /selectedChannelRef\.current === deletedChannelSlug\) historyRequestGenerationRef\.current \+= 1/, "A completed delete must not invalidate a newer same-channel history request.");
+  assert.match(deletionNotices, /function insertNoticeChronologically\(messages: CommsHistoryMessage\[\], notice: CommsHistoryMessage\)/, "A polling refresh must restore an active deletion notice to its original chronological position.");
+  assert.match(deletionNotices, /message\.created_at !== null && message\.created_at > noticeCreatedAt/, "Chronological reinsertion must handle nullable history timestamps safely.");
   assert.match(shell, /window\.setTimeout\([\s\S]*DELETED_MESSAGE_NOTICE_MS/, "A self-deletion placeholder must be removed after the bounded notice window.");
   assert.match(shell, /messages: current\.payload\.messages\.filter\(\(item\) => item\.id !== messageId\)/, "The expired deletion placeholder must be removed from local chat state.");
   assert.match(shell, /Message sent\. Chat history will refresh shortly\./);

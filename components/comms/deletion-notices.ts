@@ -5,6 +5,17 @@ export type DeletionNotice = {
   message: CommsHistoryMessage;
 };
 
+function insertNoticeChronologically(messages: CommsHistoryMessage[], notice: CommsHistoryMessage) {
+  const noticeCreatedAt = notice.created_at;
+  if (noticeCreatedAt === null) {
+    messages.push(notice);
+    return;
+  }
+  const insertAt = messages.findIndex((message) => message.created_at !== null && message.created_at > noticeCreatedAt);
+  if (insertAt === -1) messages.push(notice);
+  else messages.splice(insertAt, 0, notice);
+}
+
 export function mergeDeletionNotices(
   messages: readonly CommsHistoryMessage[],
   deletionNotices: ReadonlyMap<string, DeletionNotice>,
@@ -29,7 +40,7 @@ export function mergeDeletionNotices(
   }
 
   for (const [messageId, notice] of channelNotices) {
-    if (!payloadMessageIds.has(messageId)) merged.push(notice);
+    if (!payloadMessageIds.has(messageId)) insertNoticeChronologically(merged, notice);
   }
 
   return merged;

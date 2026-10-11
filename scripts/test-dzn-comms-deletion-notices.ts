@@ -4,14 +4,19 @@ import test from "node:test";
 import { mergeDeletionNotices, type DeletionNotice } from "../components/comms/deletion-notices";
 import type { CommsHistoryMessage } from "../components/comms/comms-history-client";
 
-function message(id: string, body: string, visibilityState: CommsHistoryMessage["visibility_state"] = "visible"): CommsHistoryMessage {
+function message(
+  id: string,
+  body: string,
+  visibilityState: CommsHistoryMessage["visibility_state"] = "visible",
+  createdAt = "2026-10-11T10:00:00.000Z",
+): CommsHistoryMessage {
   return {
     id,
     author_display_name: "Player One",
     author_role_label: "Member",
     body,
     visibility_state: visibilityState,
-    created_at: "2026-10-11T10:00:00.000Z",
+    created_at: createdAt,
     edited_at: null,
     public_safe: true,
     read_only: true,
@@ -19,11 +24,11 @@ function message(id: string, body: string, visibilityState: CommsHistoryMessage[
   };
 }
 
-function deletedNotice(id: string): DeletionNotice {
+function deletedNotice(id: string, createdAt?: string): DeletionNotice {
   return {
     channelSlug: "global-chat",
     message: {
-      ...message(id, "Message deleted.", "deleted"),
+      ...message(id, "Message deleted.", "deleted", createdAt),
       author_display_name: "DZN Safety",
       author_role_label: "System",
       can_delete: false,
@@ -70,5 +75,16 @@ test("suppresses a stale deleted row after the temporary notice has expired", ()
       "global-chat",
     ),
     [],
+  );
+});
+
+test("inserts a refreshed deletion notice into its original chronological position", () => {
+  const notice = deletedNotice("deleted-message", "2026-10-11T10:01:00.000Z");
+  const before = message("before", "Still visible before", "visible", "2026-10-11T10:00:00.000Z");
+  const after = message("after", "Still visible after", "visible", "2026-10-11T10:02:00.000Z");
+
+  assert.deepEqual(
+    mergeDeletionNotices([before, after], new Map([["deleted-message", notice]]), new Set(), "global-chat"),
+    [before, notice.message, after],
   );
 });
