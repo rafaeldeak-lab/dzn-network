@@ -290,12 +290,12 @@ async function testRuntimeContracts() {
   assert.equal(publicPayload.feature_flags.moderation_mutations_enabled, false);
   assert.equal(publicPayload.feature_flags.ai_assist_runtime_enabled, false);
   assert.equal(publicPayload.feature_flags.analytics_or_tracking_enabled, false);
-  assert.equal(publicPayload.messages.length, 4, "Expired and future-cursor-excluded rows must not be returned.");
+  assert.equal(publicPayload.messages.length, 3, "Deleted, expired and future-cursor-excluded rows must not be returned.");
   assert.equal(publicPayload.messages[0].id, "visible-1", "Messages should be returned oldest-to-newest for UI rendering.");
   assert.equal(publicPayload.messages.some((message) => message.id === "expired-1"), false, "Expired state rows must not appear.");
+  assert.equal(publicPayload.messages.some((message) => message.id === "deleted-1"), false, "Deleted rows must not remain in public chat history.");
   assert.equal(publicPayload.messages.some((message) => message.id === "later-1"), false, "Rows after the before cursor must not appear.");
   assert.equal(publicPayload.messages.find((message) => message.id === "hidden-1")?.body, "Message hidden by DZN Safety.");
-  assert.equal(publicPayload.messages.find((message) => message.id === "deleted-1")?.author_display_name, "DZN Safety");
   assert.equal(publicPayload.messages.find((message) => message.id === "quarantined-1")?.body.includes("unavailable"), true);
   const publicJson = JSON.stringify(publicPayload);
   for (const forbidden of ["author_user_id", "member-user", "other-user", "discord_id", "checkout_session", "ranking_score", "xp_award", "server_war", "ctf_tournament"]) {

@@ -9,6 +9,7 @@ const privacyMigration = read("migrations/0072_dzn_comms_private_rate_ledgers.sq
 const migration = `${baseMigration}\n${privacyMigration}`;
 const runtime = read("functions/_lib/dzn-comms-live.ts");
 const shell = read("components/comms/dzn-comms-shell.tsx");
+const deletionNotices = read("components/comms/deletion-notices.ts");
 const client = read("components/comms/comms-history-client.ts");
 const env = read(".env.example");
 const cloudflareEnv = read("cloudflare-env.d.ts");
@@ -120,6 +121,19 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.ok((shell.match(/historyRequestGenerationRef\.current === requestGeneration/g) ?? []).length >= 3, "All successful history refresh paths must reject older same-channel responses.");
   assert.match(shell, /historyRequestGenerationRef\.current !== requestGeneration[\s\S]*selectedChannelRef\.current !== selectedChannel/, "Polling failures must not replace state after a newer same-channel request.");
   assert.match(shell, /historyRequestGenerationRef\.current \+= 1;[\s\S]*selectedChannelRef\.current = channel\.slug/, "Changing channels must invalidate in-flight history reads immediately.");
+  assert.match(shell, /const DELETED_MESSAGE_NOTICE_MS = 2_000/, "A self-deletion notice must stay brief and deterministic.");
+  assert.match(shell, /const \[deletionNotices, setDeletionNotices\] = useState<ReadonlyMap<string, DeletionNotice>>\(\(\) => new Map\(\)\)/, "A temporary deletion notice must remain independent of polling payloads.");
+  assert.match(shell, /const \[deletedMessageIds, setDeletedMessageIds\] = useState<ReadonlySet<string>>\(\(\) => new Set\(\)\)/, "A successful deletion must leave an ID-only local tombstone for late history responses.");
+  assert.match(shell, /mergeDeletionNotices\(payload\.messages, deletionNotices, deletedMessageIds, payload\.channel\.slug\)/, "Rendered history must merge active notices and suppress deleted IDs in the latest channel payload.");
+  assert.match(shell, /function handleMessageDeleted\(messageId: string, deletedChannelSlug: string\)/, "A completed delete must retain the channel that originally rendered the action.");
+  assert.match(shell, /onMessageDeleted=\{\(messageId\) => handleMessageDeleted\(messageId, payload\.channel\.slug\)\}/, "A completed delete must not read the mutable selected channel after its request resolves.");
+  assert.match(shell, /setDeletedMessageIds\(\(current\) => \{[\s\S]*next\.add\(messageId\);/, "A completed delete must suppress any late stale history row without canceling a newer channel load.");
+  assert.doesNotMatch(shell, /selectedChannelRef\.current === deletedChannelSlug\) historyRequestGenerationRef\.current \+= 1/, "A completed delete must not invalidate a newer same-channel history request.");
+  assert.match(deletionNotices, /function insertNoticeChronologically\(messages: CommsHistoryMessage\[\], notice: CommsHistoryMessage\)/, "A polling refresh must restore an active deletion notice to its original chronological position.");
+  assert.match(deletionNotices, /function historyTimestamp\(value: string \| null\)/, "Chronological reinsertion must normalize the database timestamp formats used by history.");
+  assert.match(deletionNotices, /messageTimestamp === noticeTimestamp && message\.id > notice\.id/, "Chronological reinsertion must use the history ID tie-breaker for equal timestamps.");
+  assert.match(shell, /window\.setTimeout\([\s\S]*DELETED_MESSAGE_NOTICE_MS/, "A self-deletion placeholder must be removed after the bounded notice window.");
+  assert.match(shell, /messages: current\.payload\.messages\.filter\(\(item\) => item\.id !== messageId\)/, "The expired deletion placeholder must be removed from local chat state.");
   assert.match(shell, /Message sent\. Chat history will refresh shortly\./);
   assert.match(shell, /reportCommsMessage\(message\.id\)/);
   assert.match(shell, /reportActionsEnabled = liveUiEnabled && payload\.feature_flags\.report_actions_enabled/, "Report controls must stay behind the matching live UI gate.");
