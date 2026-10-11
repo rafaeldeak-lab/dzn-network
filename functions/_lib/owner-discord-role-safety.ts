@@ -4,13 +4,39 @@ export type OwnerDiscordRoleSafetyInput = {
   permissions?: string | number;
 };
 
+export type OwnerDiscordAccessRoleRejection =
+  | "invalid_role_id"
+  | "server_default_role"
+  | "managed_role"
+  | "invalid_permissions"
+  | "guild_permissions";
+
 /**
  * Verified owner access is granted by private channel overwrites. The role
  * itself must not grant guild-wide Discord permissions.
  */
 export function isSafeOwnerDiscordAccessRole(role: OwnerDiscordRoleSafetyInput | null | undefined, guildId: string) {
+  return getOwnerDiscordAccessRoleRejection(role, guildId) === null;
+}
+
+/**
+ * Returns a deliberately small, operator-safe reason for rejecting a named
+ * role. Raw permission bitfields stay private and never become configuration
+ * candidates when Discord returns incomplete data.
+ */
+export function getOwnerDiscordAccessRoleRejection(
+  role: OwnerDiscordRoleSafetyInput | null | undefined,
+  guildId: string,
+): OwnerDiscordAccessRoleRejection | null {
+  const roleId = discordIdValue(role?.id);
+  if (!roleId) return "invalid_role_id";
+  if (roleId === guildId) return "server_default_role";
+  if (role?.managed === true) return "managed_role";
+
   const permissions = permissionBits(role?.permissions);
-  return isRemovableOwnerDiscordAccessRole(role, guildId) && permissions === BigInt(0);
+  if (permissions === null) return "invalid_permissions";
+  if (permissions !== BigInt(0)) return "guild_permissions";
+  return null;
 }
 
 /**

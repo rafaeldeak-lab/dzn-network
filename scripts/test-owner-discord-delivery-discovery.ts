@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { discoverOwnerDiscordDeliveryCandidates } from "../functions/_lib/owner-discord-delivery-discovery";
+import { getOwnerDiscordAccessRoleRejection } from "../functions/_lib/owner-discord-role-safety";
 import { onRequestGet as candidateRoute } from "../functions/api/owner/discord/owner-access-delivery-candidates";
 import type { Env } from "../functions/_lib/types";
 
@@ -47,6 +48,16 @@ async function run() {
   const env = {
     DISCORD_BOT_TOKEN: "bot-token-with-at-least-twenty-characters",
   } as Env;
+  assert.equal(
+    getOwnerDiscordAccessRoleRejection({ id: verifiedOwnerRoleId, permissions: "0", managed: true }, guildId),
+    "managed_role",
+    "Managed roles must not become owner-access candidates even when they have no permissions.",
+  );
+  assert.equal(
+    getOwnerDiscordAccessRoleRejection({ id: guildId, permissions: "0", managed: false }, guildId),
+    "server_default_role",
+    "The @everyone role must never become an owner-access candidate.",
+  );
   const calls: Array<{ path: string; method: string }> = [];
   const discordFetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = new URL(String(input));
@@ -92,6 +103,13 @@ async function run() {
   assert.equal(result.checks.canManageRoles, true);
   assert.deepEqual(result.verifiedOwnerRoleCandidates, [{ id: verifiedOwnerRoleId, name: "Verified Server Owner", assignable: true }]);
   assert.equal(result.verifiedOwnerRoleCandidates.every((role) => role.id === verifiedOwnerRoleId), true, "Only a valid zero-permission owner role may be returned as a candidate.");
+  assert.deepEqual(result.rejectedVerifiedOwnerRoles, [
+    { id: administratorVerifiedOwnerRoleId, name: "Verified Server Owner", reason: "guild_permissions" },
+    { id: manageRolesVerifiedOwnerRoleId, name: "Verified Server Owner", reason: "guild_permissions" },
+    { id: viewChannelVerifiedOwnerRoleId, name: "Verified Server Owner", reason: "guild_permissions" },
+    { id: malformedVerifiedOwnerRoleId, name: "Verified Server Owner", reason: "invalid_permissions" },
+    { id: missingPermissionVerifiedOwnerRoleId, name: "Verified Server Owner", reason: "invalid_permissions" },
+  ], "Named owner roles must explain their rejection without becoming configuration candidates.");
   assert.deepEqual(result.privateInviteChannelCandidates, [{
     id: privateInviteChannelId,
     name: "owner-invites",
@@ -117,6 +135,11 @@ async function run() {
   });
   assert.equal(administratorRoleOnly.status, "candidates_incomplete", "A Verified Server Owner role with Administrator must never be configurable.");
   assert.equal(administratorRoleOnly.verifiedOwnerRoleCandidates.length, 0, "Administrator roles must not be returned as owner-role candidates.");
+  assert.deepEqual(administratorRoleOnly.rejectedVerifiedOwnerRoles, [{
+    id: administratorVerifiedOwnerRoleId,
+    name: "Verified Server Owner",
+    reason: "guild_permissions",
+  }]);
 
   const manageRolesRoleOnly = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
     const url = new URL(String(input));
@@ -131,6 +154,26 @@ async function run() {
   });
   assert.equal(manageRolesRoleOnly.status, "candidates_incomplete", "A Verified Server Owner role with Manage Roles must never be configurable.");
   assert.equal(manageRolesRoleOnly.verifiedOwnerRoleCandidates.length, 0, "Roles with guild-wide permissions must not be returned as owner-role candidates.");
+  assert.deepEqual(manageRolesRoleOnly.rejectedVerifiedOwnerRoles, [{
+    id: manageRolesVerifiedOwnerRoleId,
+    name: "Verified Server Owner",
+    reason: "guild_permissions",
+  }]);
+
+  const mixedBlockers = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
+      return Response.json([
+        { id: guildId, name: "@everyone", position: 0, permissions: viewChannel },
+        { id: administratorVerifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: administrator, managed: false },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: viewChannel, managed: true },
+      ]);
+    }
+    return discordFetch(input, init);
+  });
+  assert.equal(mixedBlockers.checks.canManageRoles, false, "The fixture must prove the bot role-management blocker.");
+  assert.match(mixedBlockers.message, /normal zero-permission Discord role/, "The message must retain the role-safety guidance.");
+  assert.match(mixedBlockers.message, /role-management access/, "The message must retain every independent prerequisite.");
 
   const privateGuildResult = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
     const url = new URL(String(input));
