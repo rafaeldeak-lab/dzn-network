@@ -5,16 +5,28 @@ export type DeletionNotice = {
   message: CommsHistoryMessage;
 };
 
+function historyTimestamp(value: string | null) {
+  if (value === null) return null;
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)
+    ? `${value.replace(" ", "T")}Z`
+    : value;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function insertNoticeChronologically(messages: CommsHistoryMessage[], notice: CommsHistoryMessage) {
-  const noticeCreatedAt = notice.created_at;
-  if (noticeCreatedAt === null) {
+  const noticeTimestamp = historyTimestamp(notice.created_at);
+  if (noticeTimestamp === null) {
     messages.push(notice);
     return;
   }
-  const insertAt = messages.findIndex((message) => message.created_at !== null && (
-    message.created_at > noticeCreatedAt
-    || (message.created_at === noticeCreatedAt && message.id > notice.id)
-  ));
+  const insertAt = messages.findIndex((message) => {
+    const messageTimestamp = historyTimestamp(message.created_at);
+    return messageTimestamp !== null && (
+      messageTimestamp > noticeTimestamp
+      || (messageTimestamp === noticeTimestamp && message.id > notice.id)
+    );
+  });
   if (insertAt === -1) messages.push(notice);
   else messages.splice(insertAt, 0, notice);
 }

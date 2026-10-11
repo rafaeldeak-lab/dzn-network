@@ -80,8 +80,8 @@ test("suppresses a stale deleted row after the temporary notice has expired", ()
 
 test("inserts a refreshed deletion notice into its original chronological position", () => {
   const notice = deletedNotice("deleted-message", "2026-10-11T10:01:00.000Z");
-  const before = message("before", "Still visible before", "visible", "2026-10-11T10:00:00.000Z");
-  const after = message("after", "Still visible after", "visible", "2026-10-11T10:02:00.000Z");
+  const before = message("before", "Still visible before", "visible", "2026-10-11 10:00:00");
+  const after = message("after", "Still visible after", "visible", "2026-10-11 10:02:00");
 
   assert.deepEqual(
     mergeDeletionNotices([before, after], new Map([["deleted-message", notice]]), new Set(), "global-chat"),
