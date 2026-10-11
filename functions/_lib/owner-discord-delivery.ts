@@ -1,5 +1,6 @@
 import { getSessionUser, requireDb } from "./db";
 import { isPlatformOwnerDiscordId } from "./platform-owner";
+import { isRemovableOwnerDiscordAccessRole, isSafeOwnerDiscordAccessRole } from "./owner-discord-role-safety";
 import type { Env, SessionUser } from "./types";
 
 type DeliveryOperation = "invite" | "role_grant" | "role_revoke";
@@ -322,7 +323,7 @@ export async function revokeOwnerDiscordAccessRole(env: Env, actor: SessionUser,
   if (!lease) return problem(409, "An owner-role delivery is still finishing. Retry the role removal shortly.");
   const attempt = await startAttempt(env, access, "role_revoke", configuration, actor);
   try {
-    const preflight = await checkDiscordRoleConfiguration(configuration, fetcher);
+    const preflight = await checkDiscordRoleConfiguration(configuration, fetcher, "cleanup");
     if (!preflight.ok) return finishProblem(env, attempt, preflightToDeliveryStatus(preflight.status), preflight.message, preflight.httpStatus ?? null, preflight.status);
     if (await hasAnotherApprovedRequestForDiscord(env, discordId, access.id)) {
       const completed = await finishAttempt(env, attempt, "succeeded", "other_approved_request", "Another verified owner request for this Discord account remains approved, so the role stays in place.", null);
@@ -526,7 +527,7 @@ async function reconcileOwnerDiscordRoleForDeletion(
   };
   try {
     if (!(await renewHeldLease())) return stopForLostHeldLease();
-    const preflight = await checkDiscordRoleConfiguration(configuration, fetcher);
+    const preflight = await checkDiscordRoleConfiguration(configuration, fetcher, "cleanup");
     if (!preflight.ok) {
       await finishAttempt(env, attempt, preflightToDeliveryStatus(preflight.status), preflight.status, preflight.message, preflight.httpStatus ?? null);
       return { ok: false as const, status: 503 as const, message: `DZN could not verify the Discord owner-role configuration needed before ${action}.` };
@@ -726,7 +727,11 @@ type RoleDeliveryPreflight =
     checks: DeliveryDiagnostic["checks"];
   };
 
-async function checkDiscordRoleConfiguration(configuration: RoleDeliveryConfiguration, fetcher: DiscordFetch): Promise<RoleDeliveryPreflight> {
+async function checkDiscordRoleConfiguration(
+  configuration: RoleDeliveryConfiguration,
+  fetcher: DiscordFetch,
+  purpose: "delivery" | "cleanup" = "delivery",
+): Promise<RoleDeliveryPreflight> {
   const failedChecks = (status: DeliveryDiagnostic["status"], message: string, httpStatus: number | null = null) => ({
     ok: false as const,
     status,
@@ -770,11 +775,22 @@ async function checkDiscordRoleConfiguration(configuration: RoleDeliveryConfigur
       botHasAdministrator: hasAdministrator,
     };
     if (!targetRole) return { ok: false as const, status: "not_configured" as const, message: "The configured Verified Server Owner role was not found in the central DZN Discord server.", httpStatus: null, checks };
-    if (String(targetRole.id ?? "") === configuration.guildId || targetRole.managed === true) return { ok: false as const, status: "not_configured" as const, message: "The configured Verified Server Owner role must be a normal, assignable role in the central DZN Discord server.", httpStatus: null, checks };
+    const roleIsAllowed = purpose === "cleanup"
+      ? isRemovableOwnerDiscordAccessRole(targetRole, configuration.guildId)
+      : isSafeOwnerDiscordAccessRole(targetRole, configuration.guildId);
+    if (!roleIsAllowed) return {
+      ok: false as const,
+      status: "not_configured" as const,
+      message: purpose === "cleanup"
+        ? "The configured Verified Server Owner role must remain a normal, assignable role before DZN can remove it."
+        : "The configured Verified Server Owner role must be a normal, assignable role with no guild-wide permissions. Grant owner access through private channel overwrites instead.",
+      httpStatus: null,
+      checks,
+    };
     if (!checks.targetRoleBelowBot) return { ok: false as const, status: "role_hierarchy" as const, message: "DZN Bot must remain above the Verified Server Owner role before owner delivery can run.", httpStatus: null, checks };
     if (!canManageRoles) return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs Manage Roles for the Verified Server Owner role.", httpStatus: null, checks };
     return { ok: true as const, status: "ready" as const, message: "DZN Bot can manage the Verified Server Owner role.", httpStatus: null, checks, botId, botRoleIds, basePermissions };
-  } catch (error) {
+  } catch {
     return failedChecks("discord_error", "DZN could not reach Discord for the central-server diagnostic.", null);
   }
 }
@@ -805,7 +821,7 @@ async function checkDiscordDeliveryConfiguration(configuration: DeliveryConfigur
       return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs View Channel and Create Invite on the private invite channel.", httpStatus: null, checks };
     }
     return { ok: true as const, status: "ready" as const, message: "DZN owner Discord delivery is ready for controlled requests.", httpStatus: null, checks };
-  } catch (error) {
+  } catch {
     return { ok: false as const, status: "discord_error" as const, message: "DZN could not reach Discord for the private-invite diagnostic.", httpStatus: null, checks: rolePreflight.checks };
   }
 }
