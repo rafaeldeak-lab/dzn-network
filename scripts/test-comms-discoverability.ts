@@ -17,6 +17,9 @@ assert.equal(headerSource.includes('if (pathname.startsWith("/community")) retur
 
 assert.equal(launcherSource.includes('href="/community#global-chat"'), true, "The global launcher must open Global Chat directly.");
 assert.equal(launcherSource.includes('href="/community#dzn-assist"'), true, "The global launcher must expose the DZN Assist status location.");
+assert.equal(launcherSource.includes("NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED"), true, "The global launcher must expose owner Discord access only after the explicit public activation flag is enabled.");
+assert.equal(launcherSource.includes('href="/login?returnTo=%2Fdiscord-owner-access"'), true, "The global launcher must provide a sign-in-safe route to the owner Discord request flow.");
+assert.equal(launcherSource.includes("Server owner access"), true, "The global launcher must name the owner-only request path clearly.");
 assert.equal(launcherSource.includes("Guided help live"), true, "The launcher must identify the available guided-help experience.");
 assert.equal(launcherSource.includes('pathname.startsWith("/community")'), true, "The floating launcher must not cover the Comms page itself.");
 assert.equal(launcherSource.includes("<details"), true, "The launcher must use a native disclosure so it works before client hydration completes.");
@@ -43,6 +46,8 @@ assert.equal(commsSource.includes('? "Checking access"'), true, "Global Chat mus
 assert.equal(commsSource.includes(': "Preview only"'), true, "Global Chat must identify the static preview state.");
 assert.equal(commsSource.includes("Available now"), false, "Global Chat must not claim unconditional availability.");
 assert.equal(commsSource.includes("<DznAssist />"), true, "The Comms page must render the working DZN Assist experience.");
+assert.equal(commsSource.includes("NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED"), true, "Comms must use the explicit public owner-access flag before exposing an owner Discord entry point.");
+assert.equal(commsSource.includes('href="/login?returnTo=%2Fdiscord-owner-access"'), true, "Comms must send anonymous server owners through sign-in before opening the feature-gated request route.");
 assert.equal(assistSource.includes('id="dzn-assist"'), true, "DZN Assist must keep its direct-link target on the functional panel.");
 assert.equal(assistSource.includes('window.location.hash !== "#dzn-assist"'), true, "DZN Assist must restore direct-anchor position after hydration.");
 assert.equal(assistSource.includes('scrollIntoView({ block: "start" })'), true, "DZN Assist must move the direct-linked panel into view after hydration.");
@@ -51,7 +56,10 @@ assert.equal(assistSource.includes("Your search stays in this browser."), true, 
 assert.equal(assistSource.includes('normalizedQuery.split(/\\s+/).every((term) => searchableGuide.includes(term))'), true, "DZN Assist must match every search term across the guide's combined searchable fields.");
 assert.equal(assistSource.includes("DZN_SUPPORT_EMAIL_HREF"), true, "DZN Assist must provide a private human-support route.");
 assert.equal(assistSource.includes("DZN_PUBLIC_DISCORD_INVITE_URL"), true, "DZN Assist must provide the public DZN Discord route.");
+assert.equal(assistSource.includes("ownerDiscordAccessUiEnabled"), true, "DZN Assist must keep the owner-access guide and action behind the explicit public owner-access flag.");
+assert.equal(assistSource.includes('href="/login?returnTo=%2Fdiscord-owner-access"'), true, "DZN Assist must send a server owner through Discord sign-in before opening the private request flow.");
 assert.equal(assistGuidesSource.includes('href: "/setup"'), true, "DZN Assist must guide owners to resumable server setup.");
+assert.equal(assistGuidesSource.includes('id: "server-owner-discord-access"'), true, "DZN Assist must include specific server-owner Discord guidance.");
 assert.equal(assistGuidesSource.includes('href: "/login?returnTo=%2Fplayer%2Fprofile%23game-account"'), true, "DZN Assist must preserve the game-account anchor across Discord sign-in.");
 assert.equal(assistGuidesSource.includes('href: "/login?returnTo=%2Fdashboard", label: "Manage billing"'), true, "DZN Assist must route cancellation and payment-recovery help to account billing controls.");
 assert.equal(publicAccessPolicy.includes("The browser-local DZN Assist guide may remain public"), true, "The public access policy must permit the released local-only guide.");

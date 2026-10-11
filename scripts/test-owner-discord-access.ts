@@ -142,6 +142,8 @@ async function run() {
   assert.match(ownerQueuePage, /owner-access-delivery-candidates\?guild_id=\$\{DZN_CENTRAL_DISCORD_GUILD_ID\}/, "The owner console must expose the existing read-only candidate discovery route.");
   assert.match(ownerQueuePage, /Read-only discovery for the DZN community server/, "The owner console must make clear that candidate discovery cannot change Discord access.");
   assert.match(ownerQueuePage, /Find safe DZN candidates/, "The owner console must provide a platform-owner action to inspect only safe central Discord candidates.");
+  assert.match(ownerQueuePage, /must have no role-level permissions/, "The owner console must explain that a discovered owner role with global permissions cannot be used for delivery.");
+  assert.match(ownerQueuePage, /hasPermissionedVerifiedOwnerRole && !hasAssignableVerifiedOwnerRole/, "A rejected legacy role must not make delivery look blocked when an assignable zero-permission candidate exists.");
   const ownerConsole = readFileSync("components/owner/owner-console.tsx", "utf8");
   assert.doesNotMatch(ownerConsole, /ownerDiscordAccessEnabled/, "The owner console must not compile a runtime feature flag into static output.");
   assert.match(ownerConsole, /<Link href="\/owner\/discord-access"/, "The owner console must retain the static route entry point while the API enforces the runtime feature gate.");

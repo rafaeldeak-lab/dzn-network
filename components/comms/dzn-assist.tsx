@@ -10,11 +10,14 @@ import { DZN_SUPPORT_EMAIL, DZN_SUPPORT_EMAIL_HREF } from "@/lib/support";
 
 type AssistCategory = (typeof DZN_ASSIST_CATEGORIES)[number];
 
+const ownerDiscordAccessUiEnabled = process.env.NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED === "true";
+
 export function DznAssist() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<AssistCategory>("All");
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const guides = useMemo(() => DZN_ASSIST_GUIDES.filter((guide) => {
+    if (guide.id === "server-owner-discord-access" && !ownerDiscordAccessUiEnabled) return false;
     if (category !== "All" && guide.category !== category) return false;
     if (!normalizedQuery) return true;
     const searchableGuide = [guide.title, guide.summary, guide.category, ...guide.keywords]
@@ -84,6 +87,7 @@ export function DznAssist() {
             <p className="mt-2 text-xs font-semibold leading-5 text-zinc-300">Use a private support channel for account-specific help. Never post credentials or payment details in Global Chat.</p>
             <div className="mt-3 grid gap-2"><a href={DZN_SUPPORT_EMAIL_HREF} className="flex min-h-10 items-center justify-between rounded-md border border-white/10 px-3 text-xs font-black text-zinc-100 hover:border-cyan-300/35">Email support <span className="sr-only">at {DZN_SUPPORT_EMAIL}</span><ChevronRight className="h-4 w-4" aria-hidden="true" /></a><a href={DZN_PUBLIC_DISCORD_INVITE_URL} className="flex min-h-10 items-center justify-between rounded-md border border-white/10 px-3 text-xs font-black text-zinc-100 hover:border-cyan-300/35">DZN Discord <ChevronRight className="h-4 w-4" aria-hidden="true" /></a></div>
           </div>
+          {ownerDiscordAccessUiEnabled ? <div className="rounded-md border border-cyan-300/20 bg-cyan-300/7 p-4"><div className="flex items-center gap-2 text-sm font-black uppercase text-white"><ShieldCheck className="h-5 w-5 text-cyan-200" aria-hidden="true" /> Server owner?</div><p className="mt-2 text-xs font-semibold leading-5 text-zinc-300">Already linked an active DZN server? Request the restricted owner Discord area here. Approval stays manual and is checked against that exact server.</p><Link href="/login?returnTo=%2Fdiscord-owner-access" className="mt-3 flex min-h-10 items-center justify-between rounded-md border border-cyan-300/25 bg-cyan-300/8 px-3 text-xs font-black text-cyan-100 hover:border-cyan-200/55 hover:text-white">Request owner access <ChevronRight className="h-4 w-4" aria-hidden="true" /></Link></div> : null}
         </aside>
       </div>
     </section>

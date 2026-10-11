@@ -35,6 +35,14 @@ export const DZN_ASSIST_GUIDES: DznAssistGuide[] = [
     links: [{ href: "/setup", label: "Open server setup" }, { href: "/dashboard", label: "Open dashboard" }],
   },
   {
+    id: "server-owner-discord-access",
+    category: "Servers",
+    title: "Request server-owner Discord access",
+    summary: "Use an active DZN server linked to your Discord account to request access to the restricted owner area. DZN reviews the exact server before any private Discord invite is created.",
+    keywords: ["access", "discord", "invite", "owner", "private", "role", "server owner", "verified"],
+    links: [{ href: "/login?returnTo=%2Fdiscord-owner-access", label: "Request owner access" }, { href: "/dashboard", label: "Open dashboard" }],
+  },
+  {
     id: "server-data",
     category: "Servers",
     title: "Check missing or old server data",
