@@ -42,6 +42,7 @@ const liveUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED === "tru
 const reactionUiFlagEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_REACTIONS_UI_ENABLED === "true";
 const presenceUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_PUBLIC_ONLINE_COUNTER_ENABLED === "true";
 const privateGroupsUiEnabled = process.env.NEXT_PUBLIC_DZN_COMMS_PRIVATE_GROUPS_UI_ENABLED === "true";
+const ownerDiscordAccessUiEnabled = process.env.NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED === "true";
 // A deployed client learns its available Comms controls from the same-origin
 // history response. Local development remains explicitly default-off.
 const productionRuntimeProbeEnabled = process.env.NODE_ENV === "production";
@@ -407,7 +408,7 @@ export function DznCommsShell() {
   return (
     <main className="min-h-screen overflow-hidden bg-[#03050d] pb-24 pt-4 text-zinc-100 sm:pt-6">
       <section className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 sm:px-6 lg:px-8">
-        <nav aria-label="DZN communication tools" className="grid gap-2 rounded-lg border border-white/10 bg-[#060a15]/95 p-2 sm:grid-cols-2">
+        <nav aria-label="DZN communication tools" className={`grid gap-2 rounded-lg border border-white/10 bg-[#060a15]/95 p-2 ${ownerDiscordAccessUiEnabled ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2"}`}>
           <a href="#global-chat" className="group flex min-h-14 items-center gap-3 rounded-md border border-cyan-300/35 bg-cyan-300/10 px-3 py-2">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-cyan-300/30 bg-cyan-300/10 text-cyan-100"><MessageCircle className="h-5 w-5" aria-hidden="true" /></span>
             <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">DZN Comms</span><span className="block text-xs font-bold text-emerald-200">{selectedChannelAccessLabel}</span></span>
@@ -418,6 +419,11 @@ export function DznCommsShell() {
             <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">DZN Assist</span><span className="block text-xs font-bold text-emerald-200">Guided help live</span></span>
             <ChevronRight className="h-4 w-4 text-violet-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
           </a>
+          {ownerDiscordAccessUiEnabled ? <a href="/discord-owner-access" className="group flex min-h-14 items-center gap-3 rounded-md border border-amber-300/20 bg-amber-300/5 px-3 py-2 transition hover:border-amber-200/45">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-amber-300/25 bg-amber-300/10 text-amber-100"><ShieldCheck className="h-5 w-5" aria-hidden="true" /></span>
+            <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">Server owners</span><span className="block text-xs font-bold text-amber-100">Request private access</span></span>
+            <ChevronRight className="h-4 w-4 text-amber-200 transition group-hover:translate-x-0.5" aria-hidden="true" />
+          </a> : null}
         </nav>
 
         <div id="global-chat" className="scroll-mt-6 overflow-hidden rounded-lg border border-cyan-400/20 bg-[radial-gradient(circle_at_18%_10%,rgba(34,211,238,0.18),transparent_28%),radial-gradient(circle_at_88%_0%,rgba(168,85,247,0.16),transparent_30%),rgba(5,9,22,0.88)] shadow-[0_26px_80px_rgba(0,0,0,0.42)]">

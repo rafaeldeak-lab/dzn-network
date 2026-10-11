@@ -400,6 +400,11 @@ export function OwnerDiscordAccessPage() {
                     ) : null}
                   </div>
                   <p className="mt-2 text-sm leading-6 text-zinc-300">{deliveryDiscovery.message}</p>
+                  {deliveryDiscovery.rejectedVerifiedOwnerRoles.some((role) => role.reason === "guild_permissions") ? (
+                    <p className="mt-3 rounded-md border border-amber-300/25 bg-amber-300/[0.06] p-3 text-sm font-bold leading-6 text-amber-100">
+                      Delivery remains blocked because the existing Verified Server Owner role has global Discord permissions. It must have no role-level permissions; restricted owner-channel overwrites provide the access instead.
+                    </p>
+                  ) : null}
                   <div className="mt-4 grid gap-4 lg:grid-cols-2">
                     <div className="border-t border-white/10 pt-3 lg:border-t-0 lg:border-r lg:border-white/10 lg:pr-4 lg:pt-0">
                       <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Verified Server Owner role</p>
