@@ -17,6 +17,9 @@ assert.equal(headerSource.includes('if (pathname.startsWith("/community")) retur
 
 assert.equal(launcherSource.includes('href="/community#global-chat"'), true, "The global launcher must open Global Chat directly.");
 assert.equal(launcherSource.includes('href="/community#dzn-assist"'), true, "The global launcher must expose the DZN Assist status location.");
+assert.equal(launcherSource.includes("NEXT_PUBLIC_DZN_OWNER_DISCORD_ACCESS_UI_ENABLED"), true, "The global launcher must expose owner Discord access only after the explicit public activation flag is enabled.");
+assert.equal(launcherSource.includes('href="/login?returnTo=%2Fdiscord-owner-access"'), true, "The global launcher must provide a sign-in-safe route to the owner Discord request flow.");
+assert.equal(launcherSource.includes("Server owner access"), true, "The global launcher must name the owner-only request path clearly.");
 assert.equal(launcherSource.includes("Guided help live"), true, "The launcher must identify the available guided-help experience.");
 assert.equal(launcherSource.includes('pathname.startsWith("/community")'), true, "The floating launcher must not cover the Comms page itself.");
 assert.equal(launcherSource.includes("<details"), true, "The launcher must use a native disclosure so it works before client hydration completes.");
