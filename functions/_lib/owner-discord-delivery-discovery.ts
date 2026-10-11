@@ -188,10 +188,15 @@ export async function discoverOwnerDiscordDeliveryCandidates(
     };
     const hasAssignableRole = verifiedOwnerRoleCandidates.some((role) => role.assignable);
     if (!canManageRoles || !hasAssignableRole || privateInviteChannelCandidates.length === 0) {
+      const missingRequirements = [
+        !hasAssignableRole ? "an assignable Verified Server Owner role" : null,
+        privateInviteChannelCandidates.length === 0 ? "a private invite channel" : null,
+        !canManageRoles ? "role-management access" : null,
+      ].filter((value): value is string => Boolean(value));
       const roleMessage = rejectedVerifiedOwnerRoles.length
-        ? "The named Verified Server Owner role is excluded until it is a normal zero-permission Discord role; private channel overwrites provide its access."
-        : "DZN found the central server, but it still needs an assignable Verified Server Owner role, a private invite channel, and role-management access before configuration can be completed.";
-      return discovery("candidates_incomplete", roleMessage, checkedAt, guildId, checks, verifiedOwnerRoleCandidates, rejectedVerifiedOwnerRoles, privateInviteChannelCandidates);
+        ? "The named Verified Server Owner role is excluded until it is a normal zero-permission Discord role; private channel overwrites provide its access. "
+        : "";
+      return discovery("candidates_incomplete", `${roleMessage}DZN found the central server, but it still needs ${humanList(missingRequirements)} before configuration can be completed.`, checkedAt, guildId, checks, verifiedOwnerRoleCandidates, rejectedVerifiedOwnerRoles, privateInviteChannelCandidates);
     }
     return discovery("ready_to_configure", "DZN found safe central-server candidates. No Discord invite, role, message, permission, or membership change was made.", checkedAt, guildId, checks, verifiedOwnerRoleCandidates, rejectedVerifiedOwnerRoles, privateInviteChannelCandidates);
   } catch {
@@ -293,6 +298,12 @@ function parseBits(value: unknown) {
 
 function normalizeRoleName(value: unknown) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ").toLowerCase() : "";
+}
+
+function humanList(values: string[]) {
+  if (values.length < 2) return values[0] ?? "additional configuration";
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
 }
 
 function safeChannelName(value: unknown) {

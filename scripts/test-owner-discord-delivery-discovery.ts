@@ -160,6 +160,21 @@ async function run() {
     reason: "guild_permissions",
   }]);
 
+  const mixedBlockers = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
+      return Response.json([
+        { id: guildId, name: "@everyone", position: 0, permissions: viewChannel },
+        { id: administratorVerifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: administrator, managed: false },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: viewChannel, managed: true },
+      ]);
+    }
+    return discordFetch(input, init);
+  });
+  assert.equal(mixedBlockers.checks.canManageRoles, false, "The fixture must prove the bot role-management blocker.");
+  assert.match(mixedBlockers.message, /normal zero-permission Discord role/, "The message must retain the role-safety guidance.");
+  assert.match(mixedBlockers.message, /role-management access/, "The message must retain every independent prerequisite.");
+
   const privateGuildResult = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
     const url = new URL(String(input));
     if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
