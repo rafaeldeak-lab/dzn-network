@@ -9,6 +9,8 @@ import { createGameBoard, gameView, moveGame, type GameRow } from "../functions/
 import { GAME_MODES, HUB_EQUIPMENT, hubEquipmentUnlocked, type GameMode, type HubPayload } from "../lib/games-hub";
 import { gamesFixture } from "./lib/games-hub-local";
 
+const gamesHubSource = readFileSync("components/games/games-hub.tsx", "utf8");
+
 type Fixture = Awaited<ReturnType<typeof gamesFixture>>;
 let passed = 0;
 async function test(name: string, action: (fixture: Fixture) => Promise<void>, migrate = true) {
@@ -39,6 +41,9 @@ function seedParts(f: Fixture, count = 12) {
 }
 
 async function run() {
+  assert.match(gamesHubSource, /href="\/community"/, "Games Hub must retain a direct route to DZN Community chat and help.");
+  assert.match(gamesHubSource, /MessageCircle/, "The Games Hub Community route must remain visually identifiable.");
+  assert.match(gamesHubSource, /aria-label=\{item\.label\} title=\{item\.label\}/, "Compact Games Hub tabs must keep an accessible text name when their label is hidden on the narrowest phones.");
   await test("equipment collection unlocks only at verified XP and assembly thresholds", async () => {
     assert.deepEqual(HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, { xp: 0, assemblies: 0 })).map(item => item.id), []);
     assert.deepEqual(HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, { xp: 299, assemblies: 2 })).map(item => item.id),
