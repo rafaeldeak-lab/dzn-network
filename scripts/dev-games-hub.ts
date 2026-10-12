@@ -5,6 +5,7 @@ import { handleGamesHub } from "../functions/_lib/games-hub";
 import { handleGamesTrivia } from "../functions/_lib/games-trivia";
 import { handleGamesWordChain } from "../functions/_lib/games-word-chain";
 import { handleGamesHideSeek } from "../functions/_lib/games-hide-seek";
+import { handleGamesRelayRush } from "../functions/_lib/games-relay-rush";
 import { gamesFixture } from "./lib/games-hub-local";
 
 // Loopback-only, disposable synthetic account. Never use production bindings or credentials.
@@ -13,9 +14,11 @@ async function main() {
   fixture.db.sqlite.exec(await readFile("migrations/0085_games_hub_trivia.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0086_games_hub_word_chain.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0087_games_hub_hide_seek.sql", "utf8"));
+  fixture.db.sqlite.exec(await readFile("migrations/0096_games_hub_relay_rush.sql", "utf8"));
   fixture.env.DZN_GAMES_TRIVIA_ENABLED = "true";
   fixture.env.DZN_GAMES_WORD_CHAIN_ENABLED = "true";
   fixture.env.DZN_GAMES_HIDE_SEEK_ENABLED = "true";
+  fixture.env.DZN_GAMES_RELAY_RUSH_ENABLED = "true";
   const root = resolve("out");
   await stat(resolve(root, "games.html"));
   const mime: Record<string, string> = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json",
@@ -28,12 +31,13 @@ async function main() {
       if (url.pathname === "/__local-login") {
         res.writeHead(303, { "Set-Cookie": `${fixture.cookie}; Path=/; HttpOnly; SameSite=Strict`, Location: "/games", "Cache-Control": "no-store" }); res.end(); return;
       }
-      if (["/api/games/hub", "/api/games/trivia", "/api/games/word-chain", "/api/games/hide-seek"].includes(url.pathname)) {
+      if (["/api/games/hub", "/api/games/trivia", "/api/games/word-chain", "/api/games/hide-seek", "/api/games/relay-rush"].includes(url.pathname)) {
         const chunks: Buffer[] = []; let bytes = 0;
         for await (const chunk of req) { bytes += chunk.length; if (bytes > 4096) { res.writeHead(413); res.end(); return; } chunks.push(chunk); }
         const handler = url.pathname.endsWith("/trivia") ? handleGamesTrivia
           : url.pathname.endsWith("/word-chain") ? handleGamesWordChain
-            : url.pathname.endsWith("/hide-seek") ? handleGamesHideSeek : handleGamesHub;
+            : url.pathname.endsWith("/hide-seek") ? handleGamesHideSeek
+              : url.pathname.endsWith("/relay-rush") ? handleGamesRelayRush : handleGamesHub;
         const response = await handler(new Request(url, { method: req.method, headers: {
           cookie: req.headers.cookie ?? "", origin: req.headers.origin ?? "", "content-type": req.headers["content-type"] ?? "",
         }, body: req.method === "POST" ? Buffer.concat(chunks) : undefined }), fixture.env);

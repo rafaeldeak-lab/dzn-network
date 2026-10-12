@@ -169,6 +169,7 @@ try {
   await chassis.getByAltText("DZN Network", { exact: true }).evaluate(image => image.decode());
   assert.equal(await chassis.getByText("FIELD OPERATIONS", { exact: true }).count(), 1);
   const hiddenCell = page.locator('button[data-state="hidden"]').first();
+  await hiddenCell.scrollIntoViewIfNeeded();
   const dimensions = await hiddenCell.boundingBox();
   await hiddenCell.hover(); await hiddenCell.focus();
   assert.deepEqual(await hiddenCell.boundingBox(), dimensions);

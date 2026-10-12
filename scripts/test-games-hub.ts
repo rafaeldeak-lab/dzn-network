@@ -55,6 +55,7 @@ async function run() {
       DZN_GAMES_TRIVIA_ENABLED: "true",
       DZN_GAMES_WORD_CHAIN_ENABLED: "true",
       DZN_GAMES_HIDE_SEEK_ENABLED: "true",
+      DZN_GAMES_RELAY_RUSH_ENABLED: "false",
       DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED: "true",
     });
     assert.deepEqual({ ...preview.vars }, {});

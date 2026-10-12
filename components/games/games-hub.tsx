@@ -12,16 +12,20 @@ import { GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, HUB_EQUIPMENT, WORKSHOP_
 import { TRIVIA_DIFFICULTIES, type TriviaDifficulty, type TriviaPayload } from "@/lib/games-trivia";
 import { WORD_CHAIN_REWARD, type WordChainPayload } from "@/lib/games-word-chain";
 import { HIDE_SEEK_REWARD, type HideSeekPayload } from "@/lib/games-hide-seek";
+import { RELAY_RUSH_LANES, RELAY_RUSH_REWARD, type RelayRushLane, type RelayRushPayload } from "@/lib/games-relay-rush";
 import styles from "./games-hub.module.css";
 
 type View = "play" | "workshop" | "insignia" | "activity";
 type BoardView = "field" | "grid";
-type PlayGame = "minefield" | "trivia" | "word-chain" | "hide-seek";
+type PlayGame = "minefield" | "trivia" | "word-chain" | "hide-seek" | "relay-rush";
 const Minefield3D = dynamic(() => import("./minefield-3d").then(module => module.Minefield3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
 const modes = Object.keys(GAME_MODES) as GameMode[];
 function clock(value: number) { const seconds = Math.max(0, Math.floor(value / 1000)); return `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`; }
+const RELAY_RUSH_LANE_META: Record<RelayRushLane, { label: string; key: string }> = {
+  left: { label: "Left", key: "A" }, centre: { label: "Centre", key: "S" }, right: { label: "Right", key: "D" },
+};
 
 export function GamesHub() {
   const [payload, setPayload] = useState<HubPayload | null>(null);
@@ -162,6 +166,7 @@ export function GamesHub() {
             <button aria-pressed={playGame === "trivia"} onClick={() => setPlayGame("trivia")}><BookOpen size={17} /><span><strong>DZN Trivia</strong><small>Survival knowledge</small></span></button>
             <button aria-pressed={playGame === "word-chain"} onClick={() => setPlayGame("word-chain")}><Radio size={17} /><span><strong>Word Chain</strong><small>Shared daily relay</small></span></button>
             <button aria-pressed={playGame === "hide-seek"} onClick={() => setPlayGame("hide-seek")}><Search size={17} /><span><strong>Signal Hunt</strong><small>Find concealed beacons</small></span></button>
+            <button aria-pressed={playGame === "relay-rush"} onClick={() => setPlayGame("relay-rush")}><Zap size={17} /><span><strong>Relay Rush</strong><small>Timed signal run</small></span></button>
           </div>}
           {view === "play" && playGame === "minefield" && <section aria-labelledby="mines-title">
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">Minesweeper</h2></div><button className={styles.iconButton} title="Game rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
@@ -187,6 +192,7 @@ export function GamesHub() {
           {view === "play" && playGame === "trivia" && <TriviaPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && playGame === "word-chain" && <WordChainPanel onProgress={() => void refresh()} />}
           {view === "play" && playGame === "hide-seek" && <HideSeekPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && playGame === "relay-rush" && <RelayRushPanel now={now} onProgress={() => void refresh()} />}
 
           {view === "workshop" && <section>
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>COLLECTION / PROJECT {(Math.floor((summary?.assemblies ?? 0) / 3) + 1).toString().padStart(2, "0")}</span><h2>Field relay workshop</h2></div><Hammer size={24} /></div>
@@ -207,7 +213,7 @@ export function GamesHub() {
           </section>}
 
           {view === "activity" && <section><div className={styles.sectionTitle}><div><span className={styles.eyebrow}>YOUR / REWARD HISTORY</span><h2>Recent activity</h2></div><Clock3 size={24} /></div>
-            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; const hideSeek = entry.kind === "hide-seek"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : hideSeek ? <Search size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : hideSeek ? "Signal Hunt cleared" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
+            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; const hideSeek = entry.kind === "hide-seek"; const relayRush = entry.kind === "relay-rush"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : hideSeek ? <Search size={20} /> : relayRush ? <Zap size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : hideSeek ? "Signal Hunt cleared" : relayRush ? "Relay Rush completed" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
           </section>}
         </div>
 
@@ -433,6 +439,94 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
               : <><Radio size={20} /><div><strong>Signals concealed</strong><span>Inspect the scene closely. Every find is checked by DZN.</span></div></>}
       </div>
     </> : <div className={styles.triviaReady}><Search size={34} /><h3>Search the outpost.</h3><p>Find four concealed DZN signals. Mouse, touch and keyboard targets are supported.</p><div className={styles.rewardPills}><span>+{HIDE_SEEK_REWARD.xp} XP</span><span>+{HIDE_SEEK_REWARD.parts} parts</span></div></div>}
+  </section>;
+}
+
+function RelayRushPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+  const [payload, setPayload] = useState<RelayRushPayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const generation = useRef(0);
+
+  const load = useCallback(async () => {
+    const sequence = ++generation.current;
+    try {
+      const response = await fetch("/api/games/relay-rush", { credentials: "include", cache: "no-store" });
+      const result = await response.json() as RelayRushPayload & { error?: string };
+      if (!response.ok) throw new Error(result.error || "DZN Relay Rush is unavailable.");
+      if (sequence === generation.current) { setPayload(result); setError(""); }
+    } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Relay Rush is unavailable."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, []);
+
+  useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
+
+  const mutate = useCallback(async (body: Record<string, unknown>) => {
+    if (busy) return;
+    const sequence = ++generation.current; setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/games/relay-rush", { method: "POST", credentials: "include", cache: "no-store",
+        headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as RelayRushPayload & { error?: string };
+      if (!response.ok) { setError(result.error || "That signal pulse could not be recorded."); if (response.status === 409) void load(); return; }
+      if (sequence !== generation.current) return;
+      setPayload(result); onProgress();
+    } catch { if (sequence === generation.current) setError("That signal pulse could not be recorded. Refresh before retrying."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [busy, load, onProgress]);
+
+  const game = payload?.game;
+  const clockNow = Math.max(now, payload?.serverTime ?? 0);
+  const available = Boolean(payload) && !error;
+  const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
+  const targetOpen = Boolean(active && game?.nextAt && clockNow >= game.nextAt);
+  const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5000);
+  const submitPulse = useCallback((lane: RelayRushLane) => {
+    if (!game || !active || !targetOpen || busy) return;
+    void mutate({ action: "pulse", gameId: game.id, version: game.version, lane });
+  }, [active, busy, game, mutate, targetOpen]);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+      const source = event.target;
+      if (source instanceof Element && source.closest("input, textarea, select, [contenteditable=true]")) return;
+      const key = event.key.toLowerCase();
+      const lane = key === "a" || event.key === "ArrowLeft" ? "left" : key === "s" || event.key === "ArrowDown" ? "centre" : key === "d" || event.key === "ArrowRight" ? "right" : null;
+      if (!lane || !active || !targetOpen || busy) return;
+      event.preventDefault(); submitPulse(lane);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [active, busy, submitPulse, targetOpen]);
+
+  return <section aria-labelledby="relay-rush-title" className={styles.relayRushPanel}>
+    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>05 / SIGNAL ENDURANCE</span><h2 id="relay-rush-title">DZN Relay Rush</h2></div><Zap size={24} /></div>
+    {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Relay Rush" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
+    <div className={styles.relayRushTools}>
+      <div><strong>{game ? `${game.pulsesCleared} / ${game.totalPulses} pulses` : "Twelve signal pulses"}</strong><span>{game ? `${game.maxMisses - game.misses} signal errors remaining` : "Read the live lane, then answer on time."}</span></div>
+      <button className={styles.primary} disabled={busy || !available || active || restartCoolingDown}
+        title={restartCoolingDown && !active ? "New run available five seconds after the last start" : undefined}
+        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Run in progress" : game ? "New run" : "Start run"}</button>
+    </div>
+    {game ? <>
+      <div className={styles.relayRushMeta}><span><Zap size={14} />{game.pulsesCleared} / {game.totalPulses}</span><span><Target size={14} />{game.misses} misses</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.relayRushStage} data-ready={targetOpen} data-status={game.status} aria-live="polite">
+        <div className={styles.relayRushReadout}><span>{active ? targetOpen ? "INCOMING PULSE" : "SYNCING RELAY" : game.status === "won" ? "RUN COMPLETE" : "RUN CLOSED"}</span><strong>{active ? targetOpen ? "Choose the lit lane" : "Stand by for the next signal" : game.status === "won" ? "Signal restored" : game.status === "failed" ? "Signal lost" : "Window expired"}</strong></div>
+        <div className={styles.relayRushLanes} role="group" aria-label="Relay Rush signal lanes">
+          {RELAY_RUSH_LANES.map(lane => { const meta = RELAY_RUSH_LANE_META[lane]; const lit = targetOpen && game.nextLane === lane; return <button type="button" key={lane} className={styles.relayRushLane}
+            data-lane={lane} data-target={lit} disabled={busy || !active || !targetOpen} onClick={() => submitPulse(lane)}
+            aria-label={`${meta.label} signal lane (${meta.key})${lit ? ", live" : ""}`}><span>{meta.key}</span><strong>{meta.label}</strong><small>{lit ? "Pulse live" : active ? "Await signal" : "Stand down"}</small></button>; })}
+        </div>
+        <p className={styles.relayRushHint}>Keyboard: A / S / D or arrow keys. The server verifies pulse order and timing.</p>
+      </div>
+      <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
+        {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Relay restored</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${RELAY_RUSH_REWARD.xp} XP and +${RELAY_RUSH_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice run complete. Today's reward was already recorded." : "Run complete."}</span></div></>
+          : game.status === "failed" ? <><Target size={22} /><div><strong>Signal lost</strong><span>Three missed pulses ended the run. Existing Hub progress is unchanged.</span></div></>
+            : !active ? <><Clock3 size={22} /><div><strong>Run expired</strong><span>Start a new signal run when ready.</span></div></>
+              : <><Radio size={20} /><div><strong>{targetOpen ? "Pulse live" : "Relay synchronising"}</strong><span>{targetOpen ? "Choose the highlighted lane before the next pulse." : "The next lane appears when the DZN relay opens it."}</span></div></>}
+      </div>
+    </> : !busy && !error && <div className={styles.relayRushReady}><Radio size={34} /><h3>Keep the relay alive.</h3><p>Read twelve DZN-controlled signal pulses. The route, timing and reward are verified server-side.</p><div className={styles.rewardPills}><span>12 pulses</span><span>+{RELAY_RUSH_REWARD.xp} XP</span><span>+{RELAY_RUSH_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 
