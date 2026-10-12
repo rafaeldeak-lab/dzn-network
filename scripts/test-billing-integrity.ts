@@ -371,6 +371,7 @@ function assertFreshAndUpgradeMigrationApplication() {
   const fresh = new SqliteD1Database();
   applyMigrationFiles(fresh, migrations);
   assertBillingIntegritySchema(fresh);
+  assertFreshLinkedServerMetadataSchema(fresh);
   fresh.sqlite.close();
 
   const upgrade = new SqliteD1Database();
@@ -418,6 +419,19 @@ function assertBillingIntegritySchema(db: SqliteD1Database) {
     "idx_linked_servers_active_service_id",
   ]) {
     assert.equal(indexes.has(index), true, `Expected integrity index ${index}.`);
+  }
+}
+
+function assertFreshLinkedServerMetadataSchema(db: SqliteD1Database) {
+  const linkedServerColumns = new Set(
+    db.sqlite.prepare("PRAGMA table_info(linked_servers)").all().map((row) => String(row.name)),
+  );
+  for (const column of ["merged_into_server_id", "merged_at"]) {
+    assert.equal(
+      linkedServerColumns.has(column),
+      true,
+      `Fresh linked_servers schema must include ${column} before dependent migrations run.`,
+    );
   }
 }
 

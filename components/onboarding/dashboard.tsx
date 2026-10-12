@@ -5739,55 +5739,81 @@ function billingPlanCheckoutState(plan: BillingPlanSummary, readiness: BillingRe
 
 function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessResponse | null }) {
   if (!readiness) return null;
-  const failedChecks = readiness.readinessChecks?.filter((check) => !check.ok) ?? [];
+  const actionableFailedChecks = readiness.readinessChecks?.filter((check) => !check.ok && check.severity !== "info") ?? [];
+  const informationalChecks = readiness.readinessChecks?.filter((check) => !check.ok && check.severity === "info") ?? [];
   const missingRequiredVars = readiness.missingRequiredVars ?? [];
   const missingLiveRequiredVars = readiness.missingLiveRequiredVars ?? [];
   const liveCheckoutPaused = readiness.checkoutSafetyMode === "live_checkout_paused";
-  const shouldShow = missingRequiredVars.length > 0 || missingLiveRequiredVars.length > 0 || failedChecks.length > 0 || readiness.liveConfigurationReady === false || liveCheckoutPaused;
-  if (!shouldShow) return null;
+  const shouldShowWarning = missingRequiredVars.length > 0 || missingLiveRequiredVars.length > 0 || actionableFailedChecks.length > 0 || readiness.liveConfigurationReady === false || liveCheckoutPaused;
+  if (!shouldShowWarning && informationalChecks.length === 0) return null;
   const legacyCopy = readiness.legacyVarsDetected?.length
     ? ` Legacy vars detected: ${readiness.legacyVarsDetected.join(", ")}.`
     : "";
   const publicFallbackCopy = readiness.publicFallbackPriceVarsDetected?.length
     ? ` Public fallback aliases detected: ${readiness.publicFallbackPriceVarsDetected.join(", ")}.`
     : "";
+  const renderReadinessMetadata = (tone: "warning" | "note") => (
+    <p className={tone === "warning" ? "mt-1 text-[11px] leading-5 text-amber-100/80" : "mt-1 text-[11px] leading-5 text-cyan-50/80"}>
+      Mode hint: {formatStripeModeHint(readiness.modeHint)}.{legacyCopy}{publicFallbackCopy} Secret values and Price IDs are never shown here.
+      {readiness.humanApprovalRequiredForLiveBilling ? " Live Stripe changes still require explicit human approval." : ""}
+    </p>
+  );
   return (
-    <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3">
-      <div className="flex items-start gap-2">
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-100" />
-        <div>
-          <p className="text-xs font-black uppercase text-amber-100">Admin billing readiness warning</p>
-          {missingRequiredVars.length ? (
-            <p className="mt-1 text-xs font-bold leading-5 text-amber-50">
-              Checkout is missing required Stripe configuration: {missingRequiredVars.join(", ")}.
-            </p>
-          ) : null}
-          {missingLiveRequiredVars.length ? (
-            <p className="mt-1 text-xs font-bold leading-5 text-amber-50">
-              Live billing is not ready yet. Required live setup still needs: {missingLiveRequiredVars.join(", ")}.
-            </p>
-          ) : null}
-          {liveCheckoutPaused ? (
-            <p className="mt-1 text-xs font-bold leading-5 text-amber-50">
-              Live checkout is paused for sandbox verification. DZN_LIVE_CHECKOUT_ENABLED must stay unset until a separate approved go-live step.
-            </p>
-          ) : null}
-          {failedChecks.length ? (
-            <div className="mt-2 grid gap-1">
-              {failedChecks.slice(0, 4).map((check) => (
-                <p key={check.key} className="text-[11px] leading-5 text-amber-100/85">
-                  <span className="font-black uppercase text-amber-100">{check.label}:</span> {check.detail}
+    <>
+      {shouldShowWarning ? (
+        <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 p-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-100" />
+            <div>
+              <p className="text-xs font-black uppercase text-amber-100">Admin billing readiness warning</p>
+              {missingRequiredVars.length ? (
+                <p className="mt-1 text-xs font-bold leading-5 text-amber-50">
+                  Checkout is missing required Stripe configuration: {missingRequiredVars.join(", ")}.
                 </p>
-              ))}
+              ) : null}
+              {missingLiveRequiredVars.length ? (
+                <p className="mt-1 text-xs font-bold leading-5 text-amber-50">
+                  Live billing is not ready yet. Required live setup still needs: {missingLiveRequiredVars.join(", ")}.
+                </p>
+              ) : null}
+              {liveCheckoutPaused ? (
+                <p className="mt-1 text-xs font-bold leading-5 text-amber-50">
+                  Live checkout is paused for sandbox verification. DZN_LIVE_CHECKOUT_ENABLED must stay unset until a separate approved go-live step.
+                </p>
+              ) : null}
+              {actionableFailedChecks.length ? (
+                <div className="mt-2 grid gap-1">
+                  {actionableFailedChecks.slice(0, 4).map((check) => (
+                    <p key={check.key} className="text-[11px] leading-5 text-amber-100/85">
+                      <span className="font-black uppercase text-amber-100">{check.label}:</span> {check.detail}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+              {renderReadinessMetadata("warning")}
             </div>
-          ) : null}
-          <p className="mt-1 text-[11px] leading-5 text-amber-100/80">
-            Mode hint: {formatStripeModeHint(readiness.modeHint)}.{legacyCopy}{publicFallbackCopy} Secret values and Price IDs are never shown here.
-            {readiness.humanApprovalRequiredForLiveBilling ? " Live Stripe changes still require explicit human approval." : ""}
-          </p>
+          </div>
         </div>
-      </div>
-    </div>
+      ) : null}
+      {informationalChecks.length ? (
+        <div className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-400/10 p-3">
+          <div className="flex items-start gap-2">
+            <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-cyan-200" />
+            <div>
+              <p className="text-xs font-black uppercase text-cyan-100">Billing readiness note</p>
+              <div className="mt-1 grid gap-1">
+                {informationalChecks.slice(0, 4).map((check) => (
+                  <p key={check.key} className="text-[11px] leading-5 text-cyan-50/85">
+                    <span className="font-black uppercase text-cyan-100">{check.label}:</span> {check.detail}
+                  </p>
+                ))}
+              </div>
+              {renderReadinessMetadata("note")}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 

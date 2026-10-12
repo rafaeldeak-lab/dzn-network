@@ -51,7 +51,6 @@ async function fixture() {
   const db = new LocalD1();
   db.sqlite.exec(readFileSync("migrations/0001_initial_schema.sql", "utf8"));
   db.sqlite.exec(`
-    ALTER TABLE linked_servers ADD COLUMN merged_into_server_id TEXT;
     ALTER TABLE linked_servers ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'active_live';
     ALTER TABLE linked_servers ADD COLUMN lifecycle_reason TEXT;
     ALTER TABLE linked_servers ADD COLUMN lifecycle_updated_at TEXT;
