@@ -68,9 +68,13 @@ function nextPulseAt(row: RelayRushRow) {
   );
 }
 
+function pulseDeadline(row: RelayRushRow) {
+  return nextPulseAt(row) + RELAY_RUSH_PULSE_INTERVAL_MS;
+}
+
 function gameView(row: RelayRushRow, now: number): RelayRushGame {
   const route = parseRoute(row.route_json);
-  const status = row.status === "playing" && now >= row.started_at + RELAY_RUSH_TTL_MS ? "expired" : row.status;
+  const status = row.status === "playing" && (now >= row.started_at + RELAY_RUSH_TTL_MS || now >= pulseDeadline(row)) ? "expired" : row.status;
   const active = status === "playing";
   return {
     id: row.id,
@@ -139,9 +143,11 @@ export async function handleGamesRelayRush(request: Request, env: Env): Promise<
       if (row.status !== "playing" || row.version !== body.version || row.current_index >= RELAY_RUSH_TOTAL_PULSES || now >= row.started_at + RELAY_RUSH_TTL_MS) {
         return reply({ error: "This run changed or ended. Refresh to continue." }, 409);
       }
-      if (now < nextPulseAt(row) || now < row.updated_at + RELAY_RUSH_MIN_ACTION_INTERVAL_MS) {
+      const opensAt = nextPulseAt(row);
+      if (now < opensAt || now < row.updated_at + RELAY_RUSH_MIN_ACTION_INTERVAL_MS) {
         return reply({ error: "Wait for the next signal pulse." }, 429);
       }
+      if (now >= pulseDeadline(row)) return reply({ error: "The signal window closed. Refresh to start a new run." }, 409);
       const route = parseRoute(row.route_json);
       const correct = route[row.current_index] === body.lane;
       const currentIndex = row.current_index + 1;

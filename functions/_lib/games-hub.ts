@@ -2,7 +2,7 @@ import { getSessionUser, requireDb } from "./db";
 import { json, methodNotAllowed, readBoundedJson } from "./http";
 import type { Env, SessionUser } from "./types";
 import { createGameBoard, gameView, GAME_TTL, moveGame, type GameRow } from "./games-hub-engine";
-import { GAME_MODES, WORKSHOP_PART_COST, type GameMode, type HubPayload } from "../../lib/games-hub";
+import { DEFAULT_HUB_GAME_AVAILABILITY, GAME_MODES, WORKSHOP_PART_COST, type GameMode, type HubGameAvailability, type HubPayload } from "../../lib/games-hub";
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie" };
 const reply = (body: unknown, status = 200) => json(body, { status, headers });
@@ -15,21 +15,43 @@ async function readGame(db: D1Database, userId: string) {
   return db.prepare("SELECT * FROM dzn_game_sessions WHERE user_id = ?").bind(userId).first<GameRow>();
 }
 
-async function availableRewardLedgers(db: D1Database) {
+async function availableGameSchemas(db: D1Database) {
   const rows = await db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'
-    AND name IN ('dzn_trivia_reward_ledger', 'dzn_word_chain_reward_ledger', 'dzn_hide_seek_reward_ledger', 'dzn_relay_rush_reward_ledger', 'dzn_cipher_grid_reward_ledger', 'dzn_echo_array_reward_ledger', 'dzn_outpost_run_reward_ledger', 'dzn_signal_shift_reward_ledger', 'dzn_circuit_forge_reward_ledger')`).all<{ name: string }>();
+    AND name IN ('dzn_trivia_sessions', 'dzn_trivia_reward_ledger', 'dzn_word_chain_rounds', 'dzn_word_chain_entries', 'dzn_word_chain_reward_ledger',
+      'dzn_hide_seek_sessions', 'dzn_hide_seek_reward_ledger', 'dzn_relay_rush_sessions', 'dzn_relay_rush_reward_ledger',
+      'dzn_cipher_grid_sessions', 'dzn_cipher_grid_reward_ledger', 'dzn_echo_array_sessions', 'dzn_echo_array_reward_ledger',
+      'dzn_outpost_run_sessions', 'dzn_outpost_run_reward_ledger', 'dzn_signal_shift_sessions', 'dzn_signal_shift_reward_ledger',
+      'dzn_circuit_forge_sessions', 'dzn_circuit_forge_reward_ledger')`).all<{ name: string }>();
   const names = new Set((rows.results ?? []).map(row => row.name));
-  return { trivia: names.has("dzn_trivia_reward_ledger"), wordChain: names.has("dzn_word_chain_reward_ledger"),
-    hideSeek: names.has("dzn_hide_seek_reward_ledger"), relayRush: names.has("dzn_relay_rush_reward_ledger"),
-    cipherGrid: names.has("dzn_cipher_grid_reward_ledger"), echoArray: names.has("dzn_echo_array_reward_ledger"),
-    outpostRun: names.has("dzn_outpost_run_reward_ledger"), signalShift: names.has("dzn_signal_shift_reward_ledger"),
-    circuitForge: names.has("dzn_circuit_forge_reward_ledger") };
+  const complete = (...tables: string[]) => tables.every(table => names.has(table));
+  return { trivia: complete("dzn_trivia_sessions", "dzn_trivia_reward_ledger"), wordChain: complete("dzn_word_chain_rounds", "dzn_word_chain_entries", "dzn_word_chain_reward_ledger"),
+    hideSeek: complete("dzn_hide_seek_sessions", "dzn_hide_seek_reward_ledger"), relayRush: complete("dzn_relay_rush_sessions", "dzn_relay_rush_reward_ledger"),
+    cipherGrid: complete("dzn_cipher_grid_sessions", "dzn_cipher_grid_reward_ledger"), echoArray: complete("dzn_echo_array_sessions", "dzn_echo_array_reward_ledger"),
+    outpostRun: complete("dzn_outpost_run_sessions", "dzn_outpost_run_reward_ledger"), signalShift: complete("dzn_signal_shift_sessions", "dzn_signal_shift_reward_ledger"),
+    circuitForge: complete("dzn_circuit_forge_sessions", "dzn_circuit_forge_reward_ledger") };
 }
 
 type ExtraLedgers = { trivia: boolean; wordChain: boolean; hideSeek: boolean; relayRush: boolean; cipherGrid: boolean; echoArray: boolean; outpostRun: boolean; signalShift: boolean; circuitForge: boolean };
 
+function enabledGames(env: Env, schemas: ExtraLedgers): HubGameAvailability {
+  const hubEnabled = env.DZN_GAMES_HUB_ENABLED === "true";
+  return {
+    minefield: hubEnabled,
+    trivia: hubEnabled && schemas.trivia && env.DZN_GAMES_TRIVIA_ENABLED === "true",
+    "word-chain": hubEnabled && schemas.wordChain && env.DZN_GAMES_WORD_CHAIN_ENABLED === "true",
+    "hide-seek": hubEnabled && schemas.hideSeek && env.DZN_GAMES_HIDE_SEEK_ENABLED === "true",
+    "relay-rush": hubEnabled && schemas.relayRush && env.DZN_GAMES_RELAY_RUSH_ENABLED === "true",
+    "cipher-grid": hubEnabled && schemas.cipherGrid && env.DZN_GAMES_CIPHER_GRID_ENABLED === "true",
+    "echo-array": hubEnabled && schemas.echoArray && env.DZN_GAMES_ECHO_ARRAY_ENABLED === "true",
+    "outpost-run": hubEnabled && schemas.outpostRun && env.DZN_GAMES_OUTPOST_RUN_ENABLED === "true",
+    "signal-shift": hubEnabled && schemas.signalShift && env.DZN_GAMES_SIGNAL_SHIFT_ENABLED === "true",
+    "circuit-forge": hubEnabled && schemas.circuitForge && env.DZN_GAMES_CIRCUIT_FORGE_ENABLED === "true",
+  };
+}
+
 export async function readHub(db: D1Database, user: SessionUser, now: number,
-  extraLedgers: ExtraLedgers = { trivia: false, wordChain: false, hideSeek: false, relayRush: false, cipherGrid: false, echoArray: false, outpostRun: false, signalShift: false, circuitForge: false }): Promise<HubPayload> {
+  extraLedgers: ExtraLedgers = { trivia: false, wordChain: false, hideSeek: false, relayRush: false, cipherGrid: false, echoArray: false, outpostRun: false, signalShift: false, circuitForge: false },
+  availableGames: HubGameAvailability = DEFAULT_HUB_GAME_AVAILABILITY): Promise<HubPayload> {
   const dayStart = Math.floor(now / DAY) * DAY;
   const rollingWeekStart = now - 7 * DAY;
   const totals = await db.prepare(`SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(parts), 0) AS parts,
@@ -227,7 +249,7 @@ export async function readHub(db: D1Database, user: SessionUser, now: number,
     assemblies: totals?.assemblies ?? 0, streak, today: (today.results ?? []).map(item => item.kind),
     challenges: { ...challengeTotals, streak, weeklyExpiresAt: oldestActiveWeeklyReward === null ? null : oldestActiveWeeklyReward + 7 * DAY },
     resetAt: (Math.floor(now / DAY) + 1) * DAY, history: combinedHistory },
-    game: row ? gameView(row, now) : null };
+    game: row ? gameView(row, now) : null, availableGames };
 }
 
 export async function handleGamesHub(request: Request, env: Env): Promise<Response> {
@@ -241,8 +263,9 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
     if (env.DZN_GAMES_HUB_ENABLED !== "true") return reply({ error: "The Games Hub is not open on this environment yet." }, 503);
     const db = requireDb(env);
     const now = Date.now();
-    const extraLedgers = await availableRewardLedgers(db);
-    if (request.method === "GET") return reply(await readHub(db, user, now, extraLedgers));
+    const extraLedgers = await availableGameSchemas(db);
+    const availableGames = enabledGames(env, extraLedgers);
+    if (request.method === "GET") return reply(await readHub(db, user, now, extraLedgers, availableGames));
     const parsed = await readBoundedJson<Record<string, unknown>>(request, 2048);
     if (!parsed.ok) return reply({ error: "Invalid game request." }, parsed.status);
     const body = parsed.value;
@@ -320,7 +343,7 @@ export async function handleGamesHub(request: Request, env: Env): Promise<Respon
         if (!alreadyDone) return reply({ error: "More parts are needed for this assembly." }, 409);
       }
     } else return reply({ error: "Unknown game action." }, 400);
-    return reply(await readHub(db, user, now, extraLedgers));
+    return reply(await readHub(db, user, now, extraLedgers, availableGames));
   } catch {
     // Never return SQL, stored board state or session diagnostics to the browser.
     return reply({ error: "Games Hub is temporarily unavailable. Your saved progress has not been reset." }, 503);

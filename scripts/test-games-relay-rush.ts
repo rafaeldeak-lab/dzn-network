@@ -6,7 +6,7 @@ import { eraseOrRetainAccountUser } from "../functions/_lib/deletion";
 import { handleGamesHub } from "../functions/_lib/games-hub";
 import { handleGamesRelayRush } from "../functions/_lib/games-relay-rush";
 import type { Env } from "../functions/_lib/types";
-import { RELAY_RUSH_LANES, RELAY_RUSH_REWARD, type RelayRushPayload } from "../lib/games-relay-rush";
+import { RELAY_RUSH_LANES, RELAY_RUSH_PULSE_INTERVAL_MS, RELAY_RUSH_REWARD, RELAY_RUSH_START_DELAY_MS, type RelayRushPayload } from "../lib/games-relay-rush";
 import { gamesFixture } from "./lib/games-hub-local";
 
 type Fixture = Awaited<ReturnType<typeof relayRushFixture>>;
@@ -34,7 +34,10 @@ async function payload(response: Response) {
 }
 async function start(fixture: Fixture) { return payload(await call(fixture, { action: "start" })); }
 function readyForPulse(fixture: Fixture) {
-  fixture.db.sqlite.exec("UPDATE dzn_relay_rush_sessions SET started_at = started_at - 5000, updated_at = updated_at - 5000");
+  const row = fixture.db.sqlite.prepare("SELECT current_index FROM dzn_relay_rush_sessions").get();
+  const now = Date.now();
+  fixture.db.sqlite.prepare("UPDATE dzn_relay_rush_sessions SET started_at = ?, updated_at = ?")
+    .run(now - RELAY_RUSH_START_DELAY_MS - Number(row?.current_index ?? 0) * RELAY_RUSH_PULSE_INTERVAL_MS, now - RELAY_RUSH_PULSE_INTERVAL_MS);
 }
 function pulse(state: RelayRushPayload, lane = state.game?.nextLane) {
   assert.ok(state.game && lane);
@@ -93,9 +96,20 @@ async function run() {
     readyForPulse(fixture);
     state = await payload(await call(fixture, pulse(state)));
     assert.equal((await call(fixture, pulse(state))).status, 429);
-    fixture.db.sqlite.exec("UPDATE dzn_relay_rush_sessions SET updated_at = updated_at - 1000");
+    readyForPulse(fixture);
     state = await payload(await call(fixture, pulse(state)));
     assert.equal(state.game?.pulsesCleared, 2);
+  });
+  await test("a pulse after its server-owned window is rejected and cannot earn a reward", async fixture => {
+    const state = await start(fixture);
+    const now = Date.now();
+    fixture.db.sqlite.prepare("UPDATE dzn_relay_rush_sessions SET started_at = ?, updated_at = ?")
+      .run(now - RELAY_RUSH_START_DELAY_MS - RELAY_RUSH_PULSE_INTERVAL_MS - 100, now - 2 * RELAY_RUSH_PULSE_INTERVAL_MS - 100);
+    assert.equal((await call(fixture, pulse(state))).status, 409);
+    const refreshed = await payload(await call(fixture));
+    assert.equal(refreshed.game?.status, "expired");
+    assert.equal(refreshed.game?.pulsesCleared, 0);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_relay_rush_reward_ledger").get()?.count, 0);
   });
   await test("twelve valid server-timed pulses award one bounded daily reward", async fixture => {
     const won = await finishRun(fixture, await start(fixture));

@@ -45,6 +45,8 @@ async function run() {
   assert.match(gamesHubSource, /MessageCircle/, "The Games Hub Community route must remain visually identifiable.");
   assert.match(gamesHubSource, /Signal Shift/, "Games Hub must retain the server-verified Signal Shift route.");
   assert.match(gamesHubSource, /Circuit Forge/, "Games Hub must retain the server-verified Circuit Forge route.");
+  assert.match(gamesHubSource, /availableGames\[playGame\]/, "Games Hub must reset a stale selection when the server disables a mode.");
+  assert.match(gamesHubSource, /availableGames\["relay-rush"\]/, "Games Hub must not render Relay Rush until the server reports it available.");
   assert.match(gamesHubSource, /aria-label=\{item\.label\} title=\{item\.label\}/, "Compact Games Hub tabs must keep an accessible text name when their label is hidden on the narrowest phones.");
   await test("equipment collection unlocks only at verified XP and assembly thresholds", async () => {
     assert.deepEqual(HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, { xp: 0, assemblies: 0 })).map(item => item.id), []);
@@ -87,6 +89,22 @@ async function run() {
     assert.equal((await call(f)).status, 503);
     assert.equal((await call(f, { action: "start", mode: "recon" })).status, 503);
     assert.equal(f.db.sqlite.prepare("SELECT COUNT(*) n FROM dzn_game_sessions").get()?.n, 0);
+  });
+  await test("server reports only modes with both an enabled flag and a complete schema", async f => {
+    const initial = await payload(await call(f));
+    assert.deepEqual(initial.availableGames, {
+      minefield: true, trivia: false, "word-chain": false, "hide-seek": false, "relay-rush": false,
+      "cipher-grid": false, "echo-array": false, "outpost-run": false, "signal-shift": false, "circuit-forge": false,
+    });
+    f.env.DZN_GAMES_RELAY_RUSH_ENABLED = "true";
+    assert.equal((await payload(await call(f))).availableGames["relay-rush"], false);
+    f.db.sqlite.exec(readFileSync("migrations/0096_games_hub_relay_rush.sql", "utf8"));
+    assert.equal((await payload(await call(f))).availableGames["relay-rush"], true);
+    f.env.DZN_GAMES_TRIVIA_ENABLED = "true";
+    f.db.sqlite.exec(readFileSync("migrations/0085_games_hub_trivia.sql", "utf8"));
+    const enabled = await payload(await call(f));
+    assert.equal(enabled.availableGames.trivia, true);
+    assert.equal(enabled.availableGames["circuit-forge"], false);
   });
   await test("unapplied migration returns a sanitized unavailable state", async f => {
     const response = await call(f); assert.equal(response.status, 503);
