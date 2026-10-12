@@ -17,11 +17,12 @@ import { CIPHER_GRID_MAX_ATTEMPTS, CIPHER_GRID_REWARD, CIPHER_GRID_WORD_LENGTH, 
 import { ECHO_ARRAY_CUE_INTERVAL_MS, ECHO_ARRAY_CUE_LEAD_MS, ECHO_ARRAY_REWARD, type EchoArrayNode, type EchoArrayPayload } from "@/lib/games-echo-array";
 import { OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_REWARD, type OutpostRunDirection, type OutpostRunPayload } from "@/lib/games-outpost-run";
 import { SIGNAL_SHIFT_REWARD, type SignalShiftPayload } from "@/lib/games-signal-shift";
+import { CIRCUIT_FORGE_REWARD, type CircuitForgePayload } from "@/lib/games-circuit-forge";
 import styles from "./games-hub.module.css";
 
 type View = "play" | "workshop" | "insignia" | "activity";
 type BoardView = "field" | "grid";
-type PlayGame = "minefield" | "trivia" | "word-chain" | "hide-seek" | "relay-rush" | "cipher-grid" | "echo-array" | "outpost-run" | "signal-shift";
+type PlayGame = "minefield" | "trivia" | "word-chain" | "hide-seek" | "relay-rush" | "cipher-grid" | "echo-array" | "outpost-run" | "signal-shift" | "circuit-forge";
 const Minefield3D = dynamic(() => import("./minefield-3d").then(module => module.Minefield3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
@@ -184,6 +185,7 @@ export function GamesHub() {
             <button aria-pressed={playGame === "echo-array"} onClick={() => setPlayGame("echo-array")}><Microchip size={17} /><span><strong>Echo Array</strong><small>Memory signal run</small></span></button>
             <button aria-pressed={playGame === "outpost-run"} onClick={() => setPlayGame("outpost-run")}><Map size={17} /><span><strong>Outpost Run</strong><small>Fog-grid extraction</small></span></button>
             <button aria-pressed={playGame === "signal-shift"} onClick={() => setPlayGame("signal-shift")}><Target size={17} /><span><strong>Signal Shift</strong><small>Tactical grid routing</small></span></button>
+            <button aria-pressed={playGame === "circuit-forge"} onClick={() => setPlayGame("circuit-forge")}><Settings2 size={17} /><span><strong>Circuit Forge</strong><small>Power-grid rebuild</small></span></button>
           </div>}
           {view === "play" && playGame === "minefield" && <section aria-labelledby="mines-title">
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">Minesweeper</h2></div><button className={styles.iconButton} title="Game rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
@@ -214,6 +216,7 @@ export function GamesHub() {
           {view === "play" && playGame === "echo-array" && <EchoArrayPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && playGame === "outpost-run" && <OutpostRunPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && playGame === "signal-shift" && <SignalShiftPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && playGame === "circuit-forge" && <CircuitForgePanel now={now} onProgress={() => void refresh()} />}
 
           {view === "workshop" && <section>
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>COLLECTION / PROJECT {(Math.floor((summary?.assemblies ?? 0) / 3) + 1).toString().padStart(2, "0")}</span><h2>Field relay workshop</h2></div><Hammer size={24} /></div>
@@ -234,7 +237,7 @@ export function GamesHub() {
           </section>}
 
           {view === "activity" && <section><div className={styles.sectionTitle}><div><span className={styles.eyebrow}>YOUR / REWARD HISTORY</span><h2>Recent activity</h2></div><Clock3 size={24} /></div>
-            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; const hideSeek = entry.kind === "hide-seek"; const relayRush = entry.kind === "relay-rush"; const cipherGrid = entry.kind === "cipher-grid"; const echoArray = entry.kind === "echo-array"; const outpostRun = entry.kind === "outpost-run"; const signalShift = entry.kind === "signal-shift"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : hideSeek ? <Search size={20} /> : relayRush ? <Zap size={20} /> : cipherGrid ? <KeyRound size={20} /> : echoArray ? <Microchip size={20} /> : outpostRun ? <Map size={20} /> : signalShift ? <Target size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : hideSeek ? "Signal Hunt cleared" : relayRush ? "Relay Rush completed" : cipherGrid ? "Cipher Grid decoded" : echoArray ? "Echo Array synchronised" : outpostRun ? "Outpost Run extracted" : signalShift ? "Signal Shift routed" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
+            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; const hideSeek = entry.kind === "hide-seek"; const relayRush = entry.kind === "relay-rush"; const cipherGrid = entry.kind === "cipher-grid"; const echoArray = entry.kind === "echo-array"; const outpostRun = entry.kind === "outpost-run"; const signalShift = entry.kind === "signal-shift"; const circuitForge = entry.kind === "circuit-forge"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : hideSeek ? <Search size={20} /> : relayRush ? <Zap size={20} /> : cipherGrid ? <KeyRound size={20} /> : echoArray ? <Microchip size={20} /> : outpostRun ? <Map size={20} /> : signalShift ? <Target size={20} /> : circuitForge ? <Settings2 size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : hideSeek ? "Signal Hunt cleared" : relayRush ? "Relay Rush completed" : cipherGrid ? "Cipher Grid decoded" : echoArray ? "Echo Array synchronised" : outpostRun ? "Outpost Run extracted" : signalShift ? "Signal Shift routed" : circuitForge ? "Circuit Forge restored" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
           </section>}
         </div>
 
@@ -845,6 +848,90 @@ function SignalShiftPanel({ now, onProgress }: { now: number; onProgress: () => 
               : <><Radio size={20} /><div><strong>Routing active</strong><span>Choose one highlighted neighbouring sector at a time. The server validates every shift.</span></div></>}
       </div>
     </> : !busy && !error && <div className={styles.signalShiftReady}><Target size={34} /><h3>Bring the relay matrix online.</h3><p>Shift sectors through a live four-by-four grid until every route is back in sequence. Only verified server wins award progression.</p><div className={styles.rewardPills}><span>72 shifts</span><span>+{SIGNAL_SHIFT_REWARD.xp} XP</span><span>+{SIGNAL_SHIFT_REWARD.parts} parts</span></div></div>}
+  </section>;
+}
+
+function CircuitForgePanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+  const [payload, setPayload] = useState<CircuitForgePayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const generation = useRef(0);
+
+  const load = useCallback(async () => {
+    const sequence = ++generation.current;
+    try {
+      const response = await fetch("/api/games/circuit-forge", { credentials: "include", cache: "no-store" });
+      const result = await response.json() as CircuitForgePayload & { error?: string };
+      if (!response.ok) throw new Error(result.error || "DZN Circuit Forge is unavailable.");
+      if (sequence === generation.current) { setPayload(result); setError(""); }
+    } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Circuit Forge is unavailable."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, []);
+
+  useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
+
+  const mutate = useCallback(async (body: Record<string, unknown>) => {
+    if (busy) return;
+    const sequence = ++generation.current; setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/games/circuit-forge", { method: "POST", credentials: "include", cache: "no-store",
+        headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as CircuitForgePayload & { error?: string };
+      if (!response.ok) { setError(result.error || "That Circuit Forge rotation could not be recorded."); if (response.status === 409) void load(); return; }
+      if (sequence !== generation.current) return;
+      setPayload(result); onProgress();
+    } catch { if (sequence === generation.current) setError("That Circuit Forge rotation could not be recorded. Refresh before retrying."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [busy, load, onProgress]);
+
+  const game = payload?.game;
+  const clockNow = Math.max(now, payload?.serverTime ?? 0);
+  const available = Boolean(payload) && !error;
+  const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
+  const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5_000);
+  const rotate = useCallback((index: number) => {
+    if (!game || !active || busy || game.tiles[index]?.core) return;
+    void mutate({ action: "rotate", gameId: game.id, version: game.version, index });
+  }, [active, busy, game, mutate]);
+
+  return <section aria-labelledby="circuit-forge-title" className={styles.circuitForgePanel}>
+    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>10 / RELAY WORKSHOP</span><h2 id="circuit-forge-title">DZN Circuit Forge</h2></div><Settings2 size={24} /></div>
+    {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Circuit Forge" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
+    <div className={styles.circuitForgeTools}>
+      <div><strong>{game ? `${game.rotations} / ${game.maxRotations} relay rotations` : "Five-by-five power-grid rebuild"}</strong><span>{game ? `${game.poweredCount} / ${game.tiles.length} relays connected to the core.` : "The verified DZN server owns every relay state, win, reward, and daily cap."}</span></div>
+      <button className={styles.primary} disabled={busy || !available || active || restartCoolingDown}
+        title={restartCoolingDown && !active ? "New Circuit Forge board available five seconds after the last start" : undefined}
+        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Grid online" : game ? "New grid" : "Start rebuild"}</button>
+    </div>
+    {game ? <>
+      <div className={styles.circuitForgeMeta}><span><Settings2 size={14} />{game.poweredCount} / {game.tiles.length} powered</span><span><Target size={14} />{game.rotations} / {game.maxRotations} rotations</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.circuitForgeStage} data-status={game.status}>
+        <div className={styles.circuitForgeReadout} aria-live="polite"><span>{active ? "POWER GRID / LIVE" : game.status === "won" ? "POWER GRID / STABLE" : "POWER GRID / CLOSED"}</span><strong>{active ? "Reconnect every relay to the command core" : game.status === "won" ? "All relays are online" : game.status === "failed" ? "Rotation limit reached" : "Power window expired"}</strong></div>
+        <div className={styles.circuitForgeGrid} role="grid" aria-label="Circuit Forge power grid">
+          {game.tiles.map((tile, index) => {
+            const rotatable = active && !tile.core;
+            return <button type="button" key={index} role="gridcell" className={styles.circuitForgeTile}
+              data-core={tile.core} data-powered={tile.powered} data-rotatable={rotatable} disabled={!rotatable || busy}
+              title={tile.core ? "Command core" : "Rotate relay clockwise"}
+              aria-label={tile.core ? `Command core, ${tile.powered ? "powered" : "offline"}` : `Relay ${String(index + 1).padStart(2, "0")}, ${tile.powered ? "powered" : "offline"}, rotate clockwise`}
+              onClick={() => rotate(index)}>
+              {tile.mask & 1 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireNorth}`} aria-hidden="true" /> : null}
+              {tile.mask & 2 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireEast}`} aria-hidden="true" /> : null}
+              {tile.mask & 4 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireSouth}`} aria-hidden="true" /> : null}
+              {tile.mask & 8 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireWest}`} aria-hidden="true" /> : null}
+              <span className={styles.circuitForgeNode}>{tile.core ? "CORE" : String(index + 1).padStart(2, "0")}</span>
+            </button>;
+          })}
+        </div>
+        <p className={styles.circuitForgeHint}>Tap a relay to turn it clockwise. Finish with every cable joined and every relay powered from the core.</p>
+      </div>
+      <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
+        {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Relay network restored</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${CIRCUIT_FORGE_REWARD.xp} XP and +${CIRCUIT_FORGE_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice rebuild complete. Today's reward was already recorded." : "Circuit Forge complete."}</span></div></>
+          : game.status === "failed" ? <><Settings2 size={22} /><div><strong>Rotation limit reached</strong><span>The grid did not stabilise. Existing Hub progress is unchanged.</span></div></>
+            : !active ? <><Clock3 size={22} /><div><strong>Power window expired</strong><span>Start another grid when you are ready.</span></div></>
+              : <><Radio size={20} /><div><strong>Power restoration active</strong><span>Rotate a relay clockwise. The server validates every network change.</span></div></>}
+      </div>
+    </> : !busy && !error && <div className={styles.circuitForgeReady}><Settings2 size={34} /><h3>Rebuild the perimeter relay grid.</h3><p>Rotate the field conduits until every DZN relay has a clean route back to command. Only verified server restorations award progression.</p><div className={styles.rewardPills}><span>25 relays</span><span>+{CIRCUIT_FORGE_REWARD.xp} XP</span><span>+{CIRCUIT_FORGE_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 
