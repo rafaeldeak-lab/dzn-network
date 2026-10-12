@@ -66,6 +66,19 @@ test("removes deleted rows without an active local notice and never leaks notice
   );
 });
 
+test("suppresses legacy visible DZN Safety deletion rows from a refreshed history", () => {
+  const legacy = {
+    ...message("legacy-delete", "Message deleted."),
+    author_display_name: "DZN Safety",
+    author_role_label: "System",
+  };
+
+  assert.deepEqual(
+    mergeDeletionNotices([legacy, message("visible-message", "Still visible")], new Map(), new Set(), "global-chat"),
+    [message("visible-message", "Still visible")],
+  );
+});
+
 test("suppresses a stale deleted row after the temporary notice has expired", () => {
   assert.deepEqual(
     mergeDeletionNotices(

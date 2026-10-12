@@ -15,6 +15,9 @@ const OWNER_ARCHIVE_PAGE_SIZE = 50;
 const RATE_SLOT_RETENTION_DAYS = 2;
 const reportReasons = new Set(["harassment", "hate", "threat", "spam", "personal_information", "other"]);
 const moderationActions = new Set(["hide", "restore", "delete", "resolve_report", "dismiss_report"]);
+// Keep the automatic language check deliberately narrow. Severe abuse remains a
+// timeout case below; ordinary profanity is rejected without retaining its text.
+const profanityPattern = /\b(?:arsehole|bastard|bitch|bullshit|cunt|dickhead|fuck(?:er|ing|ed|s)?|motherfucker|prick|shit(?:ty|head)?|wanker)\b/i;
 
 type SendInput = { channelSlug?: unknown; clientRequestId?: unknown; body?: unknown };
 type ReportInput = { messageId?: unknown; reason?: unknown };
@@ -71,6 +74,9 @@ export function moderateDznCommsBody(value: unknown) {
   }
   if (/\b(?:kill yourself|kys|doxx?|swat(?:ting)?|rape threat)\b/i.test(compact)) {
     return { decision: "timeout" as const, code: "SAFETY_TIMEOUT", body: "" };
+  }
+  if (profanityPattern.test(compact)) {
+    return { decision: "block" as const, code: "LANGUAGE_FILTERED", body: "" };
   }
   return { decision: "allow" as const, code: "MESSAGE_ALLOWED", body };
 }
