@@ -125,6 +125,7 @@ export function GamesHub() {
   const summary = payload?.summary;
   const game = payload?.game ?? null;
   const availableGames = payload?.availableGames ?? DEFAULT_HUB_GAME_AVAILABILITY;
+  const selectedPlayGame = availableGames[playGame] ? playGame : "minefield";
   const active = game?.status === "playing" && (!now || now < game.expiresAt);
   const newBoardCoolingDown = Boolean(game && (now || game.startedAt) < game.startedAt + 5000);
   const xp = summary?.xp ?? 0;
@@ -143,10 +144,6 @@ export function GamesHub() {
   ] : [];
   const equipmentProgress = { xp, assemblies: summary?.assemblies ?? 0 };
   const equipmentCollected = HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, equipmentProgress)).length;
-
-  useEffect(() => {
-    if (!availableGames[playGame]) setPlayGame("minefield");
-  }, [availableGames, playGame]);
 
   function start() {
     setReplace(false); setTool("reveal");
@@ -181,18 +178,18 @@ export function GamesHub() {
       <div className={styles.layout}>
         <div className={styles.mainColumn}>
           {view === "play" && <div className={styles.gamePicker} role="group" aria-label="Choose a game">
-            {availableGames.minefield && <button aria-pressed={playGame === "minefield"} onClick={() => setPlayGame("minefield")}><Target size={17} /><span><strong>Minefield</strong><small>3D tactical sweep</small></span></button>}
-            {availableGames.trivia && <button aria-pressed={playGame === "trivia"} onClick={() => setPlayGame("trivia")}><BookOpen size={17} /><span><strong>DZN Trivia</strong><small>Survival knowledge</small></span></button>}
-            {availableGames["word-chain"] && <button aria-pressed={playGame === "word-chain"} onClick={() => setPlayGame("word-chain")}><Radio size={17} /><span><strong>Word Chain</strong><small>Shared daily relay</small></span></button>}
-            {availableGames["hide-seek"] && <button aria-pressed={playGame === "hide-seek"} onClick={() => setPlayGame("hide-seek")}><Search size={17} /><span><strong>Signal Hunt</strong><small>Find concealed beacons</small></span></button>}
-            {availableGames["relay-rush"] && <button aria-pressed={playGame === "relay-rush"} onClick={() => setPlayGame("relay-rush")}><Zap size={17} /><span><strong>Relay Rush</strong><small>Timed signal run</small></span></button>}
-            {availableGames["cipher-grid"] && <button aria-pressed={playGame === "cipher-grid"} onClick={() => setPlayGame("cipher-grid")}><KeyRound size={17} /><span><strong>Cipher Grid</strong><small>Field-code puzzle</small></span></button>}
-            {availableGames["echo-array"] && <button aria-pressed={playGame === "echo-array"} onClick={() => setPlayGame("echo-array")}><Microchip size={17} /><span><strong>Echo Array</strong><small>Memory signal run</small></span></button>}
-            {availableGames["outpost-run"] && <button aria-pressed={playGame === "outpost-run"} onClick={() => setPlayGame("outpost-run")}><Map size={17} /><span><strong>Outpost Run</strong><small>Fog-grid extraction</small></span></button>}
-            {availableGames["signal-shift"] && <button aria-pressed={playGame === "signal-shift"} onClick={() => setPlayGame("signal-shift")}><Target size={17} /><span><strong>Signal Shift</strong><small>Tactical grid routing</small></span></button>}
-            {availableGames["circuit-forge"] && <button aria-pressed={playGame === "circuit-forge"} onClick={() => setPlayGame("circuit-forge")}><Settings2 size={17} /><span><strong>Circuit Forge</strong><small>Power-grid rebuild</small></span></button>}
+            {availableGames.minefield && <button aria-pressed={selectedPlayGame === "minefield"} onClick={() => setPlayGame("minefield")}><Target size={17} /><span><strong>Minefield</strong><small>3D tactical sweep</small></span></button>}
+            {availableGames.trivia && <button aria-pressed={selectedPlayGame === "trivia"} onClick={() => setPlayGame("trivia")}><BookOpen size={17} /><span><strong>DZN Trivia</strong><small>Survival knowledge</small></span></button>}
+            {availableGames["word-chain"] && <button aria-pressed={selectedPlayGame === "word-chain"} onClick={() => setPlayGame("word-chain")}><Radio size={17} /><span><strong>Word Chain</strong><small>Shared daily relay</small></span></button>}
+            {availableGames["hide-seek"] && <button aria-pressed={selectedPlayGame === "hide-seek"} onClick={() => setPlayGame("hide-seek")}><Search size={17} /><span><strong>Signal Hunt</strong><small>Find concealed beacons</small></span></button>}
+            {availableGames["relay-rush"] && <button aria-pressed={selectedPlayGame === "relay-rush"} onClick={() => setPlayGame("relay-rush")}><Zap size={17} /><span><strong>Relay Rush</strong><small>Timed signal run</small></span></button>}
+            {availableGames["cipher-grid"] && <button aria-pressed={selectedPlayGame === "cipher-grid"} onClick={() => setPlayGame("cipher-grid")}><KeyRound size={17} /><span><strong>Cipher Grid</strong><small>Field-code puzzle</small></span></button>}
+            {availableGames["echo-array"] && <button aria-pressed={selectedPlayGame === "echo-array"} onClick={() => setPlayGame("echo-array")}><Microchip size={17} /><span><strong>Echo Array</strong><small>Memory signal run</small></span></button>}
+            {availableGames["outpost-run"] && <button aria-pressed={selectedPlayGame === "outpost-run"} onClick={() => setPlayGame("outpost-run")}><Map size={17} /><span><strong>Outpost Run</strong><small>Fog-grid extraction</small></span></button>}
+            {availableGames["signal-shift"] && <button aria-pressed={selectedPlayGame === "signal-shift"} onClick={() => setPlayGame("signal-shift")}><Target size={17} /><span><strong>Signal Shift</strong><small>Tactical grid routing</small></span></button>}
+            {availableGames["circuit-forge"] && <button aria-pressed={selectedPlayGame === "circuit-forge"} onClick={() => setPlayGame("circuit-forge")}><Settings2 size={17} /><span><strong>Circuit Forge</strong><small>Power-grid rebuild</small></span></button>}
           </div>}
-          {view === "play" && availableGames.minefield && playGame === "minefield" && <section aria-labelledby="mines-title">
+          {view === "play" && availableGames.minefield && selectedPlayGame === "minefield" && <section aria-labelledby="mines-title">
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">Minesweeper</h2></div><button className={styles.iconButton} title="Game rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
             <div className={styles.gameTools}>
               <label>Difficulty<select aria-label="Difficulty" value={mode} disabled={busy} onChange={event => setMode(event.target.value as GameMode)}>{modes.map(key => <option value={key} key={key}>{GAME_MODES[key].label} / {GAME_MODES[key].size} x {GAME_MODES[key].size}</option>)}</select></label>
@@ -213,15 +210,15 @@ export function GamesHub() {
               </div>
             </> : <div className={styles.readyBoard}><Image className={styles.scannerArt} src="/images/games/dzn-field-scanner.webp" alt="DZN field scanner, survey flags and equipment bag" width={960} height={640} loading="eager" /><h3>{GAME_MODES[mode].label} standing by</h3><div className={styles.rewardPills}><span>{GAME_MODES[mode].mines} mines</span><span>+{GAME_MODES[mode].xp} XP</span><span>+{GAME_MODES[mode].parts} parts</span></div></div>}
           </section>}
-          {view === "play" && availableGames.trivia && playGame === "trivia" && <TriviaPanel now={now} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["word-chain"] && playGame === "word-chain" && <WordChainPanel onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["hide-seek"] && playGame === "hide-seek" && <HideSeekPanel now={now} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["relay-rush"] && playGame === "relay-rush" && <RelayRushPanel now={now} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["cipher-grid"] && playGame === "cipher-grid" && <CipherGridPanel now={now} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["echo-array"] && playGame === "echo-array" && <EchoArrayPanel now={now} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["outpost-run"] && playGame === "outpost-run" && <OutpostRunPanel now={now} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["signal-shift"] && playGame === "signal-shift" && <SignalShiftPanel now={now} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["circuit-forge"] && playGame === "circuit-forge" && <CircuitForgePanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames.trivia && selectedPlayGame === "trivia" && <TriviaPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["word-chain"] && selectedPlayGame === "word-chain" && <WordChainPanel onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["hide-seek"] && selectedPlayGame === "hide-seek" && <HideSeekPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["relay-rush"] && selectedPlayGame === "relay-rush" && <RelayRushPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["cipher-grid"] && selectedPlayGame === "cipher-grid" && <CipherGridPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["echo-array"] && selectedPlayGame === "echo-array" && <EchoArrayPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["outpost-run"] && selectedPlayGame === "outpost-run" && <OutpostRunPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["signal-shift"] && selectedPlayGame === "signal-shift" && <SignalShiftPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["circuit-forge"] && selectedPlayGame === "circuit-forge" && <CircuitForgePanel now={now} onProgress={() => void refresh()} />}
 
           {view === "workshop" && <section>
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>COLLECTION / PROJECT {(Math.floor((summary?.assemblies ?? 0) / 3) + 1).toString().padStart(2, "0")}</span><h2>Field relay workshop</h2></div><Hammer size={24} /></div>
