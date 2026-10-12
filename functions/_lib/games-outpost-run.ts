@@ -23,7 +23,7 @@ const isId = (value: unknown): value is string => typeof value === "string" && /
 const isDirection = (value: unknown): value is OutpostRunDirection => typeof value === "string" && (OUTPOST_RUN_DIRECTIONS as readonly string[]).includes(value);
 
 type Coordinate = { row: number; column: number };
-type OutpostLayout = { target: Coordinate; hazards: Coordinate[] };
+type OutpostLayout = { target: Coordinate; hazards: Coordinate[]; scanHint?: string };
 type OutpostRunRow = {
   user_id: string;
   id: string;
@@ -46,6 +46,7 @@ const layouts: readonly OutpostLayout[] = [
   { target: { row: 0, column: 0 }, hazards: [{ row: 1, column: 1 }, { row: 0, column: 2 }, { row: 2, column: 1 }] },
   { target: { row: 4, column: 4 }, hazards: [{ row: 3, column: 3 }, { row: 4, column: 2 }, { row: 2, column: 3 }] },
 ];
+const scanHints = new Set(["north", "south", "east", "west", "north-east", "north-west", "south-east", "south-west", "relay acquired"]);
 
 function sameCoordinate(left: Coordinate, right: Coordinate) {
   return left.row === right.row && left.column === right.column;
@@ -57,10 +58,15 @@ function isCoordinate(value: unknown): value is Coordinate {
     && (value as Coordinate).column >= 0 && (value as Coordinate).column < OUTPOST_RUN_GRID_SIZE;
 }
 
+function isScanHint(value: unknown): value is string {
+  return typeof value === "string" && scanHints.has(value);
+}
+
 function parseLayout(value: string): OutpostLayout {
   const parsed = JSON.parse(value) as unknown;
   if (!parsed || typeof parsed !== "object" || !isCoordinate((parsed as OutpostLayout).target) || !Array.isArray((parsed as OutpostLayout).hazards)
-    || (parsed as OutpostLayout).hazards.length !== 3 || (parsed as OutpostLayout).hazards.some(hazard => !isCoordinate(hazard))) {
+    || (parsed as OutpostLayout).hazards.length !== 3 || (parsed as OutpostLayout).hazards.some(hazard => !isCoordinate(hazard))
+    || ((parsed as OutpostLayout).scanHint !== undefined && !isScanHint((parsed as OutpostLayout).scanHint))) {
     throw new Error("Invalid stored Outpost Run layout");
   }
   const layout = parsed as OutpostLayout;
@@ -134,7 +140,7 @@ function gameView(row: OutpostRunRow, now: number): OutpostRunGame {
     maxEnergy: OUTPOST_RUN_MAX_ENERGY,
     moves: row.moves,
     maxMoves: OUTPOST_RUN_MAX_MOVES,
-    scanHint: row.scanned ? scanHint(position, layout.target) : null,
+    scanHint: row.scanned ? layout.scanHint ?? null : null,
     scanAvailable: status === "playing" && row.scanned === 0,
     visibleCells: visibleCells(layout, visited),
     startedAt: row.started_at,
@@ -196,16 +202,17 @@ export async function handleGamesOutpostRun(request: Request, env: Env): Promise
       }
       if (now < row.updated_at + OUTPOST_RUN_MIN_MOVE_INTERVAL_MS) return reply({ error: "Take a moment before the next field command." }, 429);
       const layout = parseLayout(row.layout_json);
+      const position = { row: row.position_row, column: row.position_column };
       if (body.action === "scan") {
         if (row.scanned) return reply({ error: "The portable scanner has already been used on this run." }, 409);
-        const result = await db.prepare(`UPDATE dzn_outpost_run_sessions SET scanned = 1, version = version + 1, updated_at = ?
+        const scannedLayout = { ...layout, scanHint: scanHint(position, layout.target) };
+        const result = await db.prepare(`UPDATE dzn_outpost_run_sessions SET layout_json = ?, scanned = 1, version = version + 1, updated_at = ?
           WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing' AND started_at > ?`)
-          .bind(now, user.id, row.id, row.version, now - OUTPOST_RUN_TTL_MS).run();
+          .bind(JSON.stringify(scannedLayout), now, user.id, row.id, row.version, now - OUTPOST_RUN_TTL_MS).run();
         if (!result.meta.changes) return reply({ error: "Another command reached this run first. Refresh to continue." }, 409);
       } else {
-        const current = { row: row.position_row, column: row.position_column };
         const direction = body.direction as OutpostRunDirection;
-        const next = moveCoordinate(current, direction);
+        const next = moveCoordinate(position, direction);
         if (!isCoordinate(next)) return reply({ error: "That route leaves the field grid." }, 400);
         const visited = parseVisited(row.visited_json);
         const terrainHazard = layout.hazards.some(hazard => sameCoordinate(hazard, next));

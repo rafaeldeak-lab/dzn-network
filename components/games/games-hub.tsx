@@ -12,10 +12,10 @@ import { DEFAULT_HUB_GAME_AVAILABILITY, GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TA
 import { TRIVIA_DIFFICULTIES, type TriviaDifficulty, type TriviaPayload } from "@/lib/games-trivia";
 import { WORD_CHAIN_REWARD, type WordChainPayload } from "@/lib/games-word-chain";
 import { HIDE_SEEK_REWARD, type HideSeekPayload } from "@/lib/games-hide-seek";
-import { RELAY_RUSH_LANES, RELAY_RUSH_REWARD, type RelayRushLane, type RelayRushPayload } from "@/lib/games-relay-rush";
+import { RELAY_RUSH_LANES, RELAY_RUSH_PULSE_INTERVAL_MS, RELAY_RUSH_REWARD, type RelayRushLane, type RelayRushPayload } from "@/lib/games-relay-rush";
 import { CIPHER_GRID_MAX_ATTEMPTS, CIPHER_GRID_REWARD, CIPHER_GRID_WORD_LENGTH, type CipherGridMark, type CipherGridPayload } from "@/lib/games-cipher-grid";
 import { ECHO_ARRAY_CUE_INTERVAL_MS, ECHO_ARRAY_CUE_LEAD_MS, ECHO_ARRAY_REWARD, type EchoArrayNode, type EchoArrayPayload } from "@/lib/games-echo-array";
-import { OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_REWARD, type OutpostRunDirection, type OutpostRunPayload } from "@/lib/games-outpost-run";
+import { OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_MIN_MOVE_INTERVAL_MS, OUTPOST_RUN_REWARD, type OutpostRunDirection, type OutpostRunPayload } from "@/lib/games-outpost-run";
 import { SIGNAL_SHIFT_REWARD, type SignalShiftPayload } from "@/lib/games-signal-shift";
 import { CIRCUIT_FORGE_REWARD, type CircuitForgePayload } from "@/lib/games-circuit-forge";
 import styles from "./games-hub.module.css";
@@ -33,6 +33,8 @@ const RELAY_RUSH_LANE_META: Record<RelayRushLane, { label: string; key: string }
 };
 const CIPHER_GRID_KEYS = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
 const CIPHER_GRID_MARK_PRIORITY: Record<CipherGridMark, number> = { absent: 0, present: 1, correct: 2 };
+const RELAY_RUSH_INPUT_GUARD_MS = 120;
+const OUTPOST_RUN_COOLDOWN_MS = OUTPOST_RUN_MIN_MOVE_INTERVAL_MS + 40;
 const ECHO_ARRAY_NODE_META: Record<EchoArrayNode, { label: string; key: string }> = {
   north: { label: "North array", key: "1" }, east: { label: "East array", key: "2" }, south: { label: "South array", key: "3" }, west: { label: "West array", key: "4" },
 };
@@ -473,6 +475,14 @@ function RelayRushPanel({ now, onProgress }: { now: number; onProgress: () => vo
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const generation = useRef(0);
+  const serverClock = useRef({ time: 0, measuredAt: 0 });
+  const [relayNow, setRelayNow] = useState(0);
+
+  const receivePayload = useCallback((result: RelayRushPayload) => {
+    serverClock.current = { time: result.serverTime, measuredAt: performance.now() };
+    setRelayNow(result.serverTime);
+    setPayload(result);
+  }, []);
 
   const load = useCallback(async () => {
     const sequence = ++generation.current;
@@ -480,10 +490,10 @@ function RelayRushPanel({ now, onProgress }: { now: number; onProgress: () => vo
       const response = await fetch("/api/games/relay-rush", { credentials: "include", cache: "no-store" });
       const result = await response.json() as RelayRushPayload & { error?: string };
       if (!response.ok) throw new Error(result.error || "DZN Relay Rush is unavailable.");
-      if (sequence === generation.current) { setPayload(result); setError(""); }
+      if (sequence === generation.current) { receivePayload(result); setError(""); }
     } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Relay Rush is unavailable."); }
     finally { if (sequence === generation.current) setBusy(false); }
-  }, []);
+  }, [receivePayload]);
 
   useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
 
@@ -496,16 +506,25 @@ function RelayRushPanel({ now, onProgress }: { now: number; onProgress: () => vo
       const result = await response.json() as RelayRushPayload & { error?: string };
       if (!response.ok) { setError(result.error || "That signal pulse could not be recorded."); if (response.status === 409) void load(); return; }
       if (sequence !== generation.current) return;
-      setPayload(result); onProgress();
+      receivePayload(result); onProgress();
     } catch { if (sequence === generation.current) setError("That signal pulse could not be recorded. Refresh before retrying."); }
     finally { if (sequence === generation.current) setBusy(false); }
-  }, [busy, load, onProgress]);
+  }, [busy, load, onProgress, receivePayload]);
+
+  useEffect(() => {
+    if (!payload?.game) return;
+    const timer = window.setInterval(() => {
+      const clock = serverClock.current;
+      setRelayNow(clock.time + performance.now() - clock.measuredAt);
+    }, 50);
+    return () => window.clearInterval(timer);
+  }, [payload?.game, payload?.serverTime]);
 
   const game = payload?.game;
-  const clockNow = Math.max(now, payload?.serverTime ?? 0);
+  const clockNow = Math.max(now, relayNow, payload?.serverTime ?? 0);
   const available = Boolean(payload) && !error;
   const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
-  const targetOpen = Boolean(active && game?.nextAt && clockNow >= game.nextAt);
+  const targetOpen = Boolean(active && game?.nextAt && clockNow >= game.nextAt && clockNow < game.nextAt + RELAY_RUSH_PULSE_INTERVAL_MS - RELAY_RUSH_INPUT_GUARD_MS);
   const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5000);
   const submitPulse = useCallback((lane: RelayRushLane) => {
     if (!game || !active || !targetOpen || busy) return;
@@ -674,7 +693,18 @@ function OutpostRunPanel({ now, onProgress }: { now: number; onProgress: () => v
   const [payload, setPayload] = useState<OutpostRunPayload | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [cooldown, setCooldown] = useState(false);
   const generation = useRef(0);
+  const cooldownTimer = useRef<number | null>(null);
+
+  const startCooldown = useCallback((message: string) => {
+    if (cooldownTimer.current !== null) window.clearTimeout(cooldownTimer.current);
+    setNotice(message); setCooldown(true);
+    cooldownTimer.current = window.setTimeout(() => { cooldownTimer.current = null; setNotice(""); setCooldown(false); }, OUTPOST_RUN_COOLDOWN_MS);
+  }, []);
+
+  useEffect(() => () => { if (cooldownTimer.current !== null) window.clearTimeout(cooldownTimer.current); }, []);
 
   const load = useCallback(async () => {
     const sequence = ++generation.current;
@@ -682,7 +712,7 @@ function OutpostRunPanel({ now, onProgress }: { now: number; onProgress: () => v
       const response = await fetch("/api/games/outpost-run", { credentials: "include", cache: "no-store" });
       const result = await response.json() as OutpostRunPayload & { error?: string };
       if (!response.ok) throw new Error(result.error || "DZN Outpost Run is unavailable.");
-      if (sequence === generation.current) { setPayload(result); setError(""); }
+      if (sequence === generation.current) { setPayload(result); setError(""); setNotice(""); setCooldown(false); }
     } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Outpost Run is unavailable."); }
     finally { if (sequence === generation.current) setBusy(false); }
   }, []);
@@ -690,18 +720,21 @@ function OutpostRunPanel({ now, onProgress }: { now: number; onProgress: () => v
   useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
 
   const mutate = useCallback(async (body: Record<string, unknown>) => {
-    if (busy) return;
+    if (busy || cooldown) return;
     const sequence = ++generation.current; setBusy(true); setError("");
     try {
       const response = await fetch("/api/games/outpost-run", { method: "POST", credentials: "include", cache: "no-store",
         headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = await response.json() as OutpostRunPayload & { error?: string };
-      if (!response.ok) { setError(result.error || "That field command could not be recorded."); if (response.status === 409) void load(); return; }
+      if (!response.ok) {
+        if (response.status === 429) { startCooldown(result.error || "Take a moment before the next field command."); return; }
+        setError(result.error || "That field command could not be recorded."); if (response.status === 409) void load(); return;
+      }
       if (sequence !== generation.current) return;
-      setPayload(result); onProgress();
+      setPayload(result); setNotice(""); onProgress();
     } catch { if (sequence === generation.current) setError("That field command could not be recorded. Refresh before retrying."); }
     finally { if (sequence === generation.current) setBusy(false); }
-  }, [busy, load, onProgress]);
+  }, [busy, cooldown, load, onProgress, startCooldown]);
 
   const game = payload?.game;
   const clockNow = Math.max(now, payload?.serverTime ?? 0);
@@ -710,11 +743,11 @@ function OutpostRunPanel({ now, onProgress }: { now: number; onProgress: () => v
   const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5_000);
   const revealed = new globalThis.Map((game?.visibleCells ?? []).map(cell => [`${cell.row}:${cell.column}`, cell.kind]));
   const sendMove = useCallback((direction: OutpostRunDirection) => {
-    if (!game || !active || busy) return;
+    if (!game || !active || busy || cooldown) return;
     void mutate({ action: "move", gameId: game.id, version: game.version, direction });
-  }, [active, busy, game, mutate]);
+  }, [active, busy, cooldown, game, mutate]);
   const moveDisabled = (direction: OutpostRunDirection) => {
-    if (!game || !active || busy) return true;
+    if (!game || !active || busy || cooldown) return true;
     if (direction === "north") return game.row === 0;
     if (direction === "east") return game.column === game.gridSize - 1;
     if (direction === "south") return game.row === game.gridSize - 1;
@@ -723,10 +756,10 @@ function OutpostRunPanel({ now, onProgress }: { now: number; onProgress: () => v
 
   return <section aria-labelledby="outpost-run-title" className={styles.outpostRunPanel}>
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>08 / FIELD EXTRACTION</span><h2 id="outpost-run-title">DZN Outpost Run</h2></div><Map size={24} /></div>
-    {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Outpost Run" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
+    {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Outpost Run" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
     <div className={styles.outpostRunTools}>
       <div><strong>{game ? `Field grid ${game.moves} / ${game.maxMoves}` : "Fog-grid field extraction"}</strong><span>{game ? `${game.energy} stamina cells remaining` : "Reach the emergency relay before your field pack runs dry."}</span></div>
-      <button className={styles.primary} disabled={busy || !available || active || restartCoolingDown}
+      <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
         title={restartCoolingDown && !active ? "New outpost run available five seconds after the last start" : undefined}
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Run in progress" : game ? "New run" : "Start run"}</button>
     </div>
@@ -748,7 +781,7 @@ function OutpostRunPanel({ now, onProgress }: { now: number; onProgress: () => v
           })}
         </div>
         <div className={styles.outpostRunCommand}>
-          <button className={styles.outpostRunScan} disabled={busy || !active || !game.scanAvailable}
+          <button className={styles.outpostRunScan} disabled={busy || cooldown || !active || !game.scanAvailable}
             onClick={() => void mutate({ action: "scan", gameId: game.id, version: game.version })}><Search size={16} />{game.scanHint ? `Scanner: ${game.scanHint.replace("-", " / ")}` : "Use field scanner"}</button>
           <div className={styles.outpostRunControls} aria-label="Outpost movement controls">
             {OUTPOST_RUN_DIRECTIONS.map(direction => { const meta = OUTPOST_RUN_DIRECTION_META[direction]; const DirectionIcon = meta.icon; return <button key={direction} type="button"

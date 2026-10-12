@@ -47,6 +47,9 @@ async function run() {
   assert.match(gamesHubSource, /Circuit Forge/, "Games Hub must retain the server-verified Circuit Forge route.");
   assert.match(gamesHubSource, /const selectedPlayGame = availableGames\[playGame\] \? playGame : "minefield"/, "Games Hub must safely fall back when the server disables the currently selected mode.");
   assert.match(gamesHubSource, /availableGames\["relay-rush"\]/, "Games Hub must not render Relay Rush until the server reports it available.");
+  assert.match(gamesHubSource, /clockNow < game\.nextAt \+ RELAY_RUSH_PULSE_INTERVAL_MS - RELAY_RUSH_INPUT_GUARD_MS/, "Relay Rush must stop accepting visible input before the server pulse window closes.");
+  assert.match(gamesHubSource, /setInterval\(\(\) => \{\s+const clock = serverClock\.current;\s+setRelayNow\(/, "Relay Rush must render from a sub-second server-aligned clock.");
+  assert.match(gamesHubSource, /response\.status === 429\) \{ startCooldown/, "Outpost Run must preserve a live run during its brief command cooldown.");
   assert.match(gamesHubSource, /aria-label=\{item\.label\} title=\{item\.label\}/, "Compact Games Hub tabs must keep an accessible text name when their label is hidden on the narrowest phones.");
   await test("equipment collection unlocks only at verified XP and assembly thresholds", async () => {
     assert.deepEqual(HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, { xp: 0, assemblies: 0 })).map(item => item.id), []);

@@ -111,7 +111,12 @@ async function run() {
     assert.equal(state.game?.scanHint, null);
     settle(fixture);
     state = await payload(await call(fixture, command(state, "scan")));
-    assert.match(state.game?.scanHint ?? "", /north|south|east|west/);
+    const hint = state.game?.scanHint;
+    assert.match(hint ?? "", /north|south|east|west/);
+    settle(fixture);
+    state = await payload(await call(fixture, command(state, "move", "north")));
+    assert.equal(state.game?.scanHint, hint);
+    assert.equal(state.game?.scanAvailable, false);
     assert.equal((await call(fixture)).headers.get("cache-control"), "private, no-store");
     assert.equal((await call(fixture)).headers.get("vary"), "Cookie");
   });
