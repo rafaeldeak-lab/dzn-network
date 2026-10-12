@@ -1,0 +1,224 @@
+name: DZN Single Migration Production Rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      approved_commit:
+        description: Exact main commit containing the approved migration source
+        required: true
+      migration_name:
+        description: One approved additive migration to apply
+        required: true
+        type: choice
+        options:
+          - 0096_games_hub_relay_rush.sql
+          - 0097_games_hub_cipher_grid.sql
+          - 0098_games_hub_echo_array.sql
+          - 0099_games_hub_outpost_run.sql
+          - 0100_games_hub_signal_shift.sql
+          - 0101_games_hub_circuit_forge.sql
+          - 0102_games_hub_ranger_range.sql
+      confirm_production_migration:
+        description: Must equal APPLY_EXACTLY_ONE_DZN_MIGRATION
+        required: true
+
+concurrency:
+  group: dzn-single-migration-production-rollout
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  rollout:
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    env:
+      PRODUCTION_D1_DATABASE_NAME: dzn_network_db
+      PRODUCTION_D1_DATABASE_ID: 37515c66-2787-49e4-8568-a461517e975e
+      MIGRATION_STAGE: .dzn-single-migration-stage
+      CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - name: Checkout exact main source
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Validate production rollout boundary
+        run: |
+          set -euo pipefail
+
+          if [ "${{ inputs.confirm_production_migration }}" != "APPLY_EXACTLY_ONE_DZN_MIGRATION" ]; then
+            echo "::error::confirm_production_migration must equal APPLY_EXACTLY_ONE_DZN_MIGRATION."
+            exit 1
+          fi
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "::error::This workflow may only run from main."
+            exit 1
+          fi
+          APPROVED_COMMIT="${{ inputs.approved_commit }}"
+          if ! [[ "${APPROVED_COMMIT}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::approved_commit must be the exact 40-character main SHA."
+            exit 1
+          fi
+          ROLLOUT_COMMIT="$(git rev-parse HEAD)"
+          if [ "${ROLLOUT_COMMIT}" != "${APPROVED_COMMIT}" ]; then
+            echo "::error::main HEAD ${ROLLOUT_COMMIT} does not match approved_commit ${APPROVED_COMMIT}."
+            exit 1
+          fi
+          case "${{ inputs.migration_name }}" in
+            0096_games_hub_relay_rush.sql|0097_games_hub_cipher_grid.sql|0098_games_hub_echo_array.sql|0099_games_hub_outpost_run.sql|0100_games_hub_signal_shift.sql|0101_games_hub_circuit_forge.sql|0102_games_hub_ranger_range.sql) ;;
+            *)
+              echo "::error::migration_name is not an approved single-migration target."
+              exit 1
+              ;;
+          esac
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ] || ! [[ "${CLOUDFLARE_ACCOUNT_ID}" =~ ^[a-fA-F0-9]{32}$ ]]; then
+            echo "::error::A valid CLOUDFLARE_ACCOUNT_ID is required."
+            exit 1
+          fi
+
+          ROLLOUT_TOKEN="${CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN:-}"
+          if [ -z "${ROLLOUT_TOKEN}" ]; then
+            echo "::error::CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN is required for this D1-only operation."
+            exit 1
+          fi
+          echo "::add-mask::${ROLLOUT_TOKEN}"
+          printf "CLOUDFLARE_API_TOKEN=%s\n" "${ROLLOUT_TOKEN}" >> "$GITHUB_ENV"
+          printf "ROLLOUT_COMMIT=%s\n" "${ROLLOUT_COMMIT}" >> "$GITHUB_ENV"
+          printf "MIGRATION_NAME=%s\n" "${{ inputs.migration_name }}" >> "$GITHUB_ENV"
+
+          {
+            echo "## DZN Single Migration Production Rollout"
+            echo "- Commit: ${ROLLOUT_COMMIT}"
+            echo "- Migration: ${{ inputs.migration_name }}"
+            echo "- Production D1: ${PRODUCTION_D1_DATABASE_NAME}"
+            echo "- Website deployment: not run"
+            echo "- Feature flags: unchanged"
+            echo "- Discord: not contacted"
+            echo "- Payments: not contacted"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install source dependencies
+        run: npm ci
+
+      - name: Validate migration controller and source queue
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run test:production-migration-queue
+          npm run test:single-migration-production-rollout
+          npm run test:games-hub
+          git diff --check
+
+      - name: Build an isolated migration stage
+        run: |
+          set -euo pipefail
+          npx tsx scripts/dzn-single-migration-production-rollout.ts prepare \
+            --migration "${MIGRATION_NAME}" \
+            --stage-dir "${MIGRATION_STAGE}"
+          test -s "${MIGRATION_STAGE}/migration-plan.json"
+          test -s "${MIGRATION_STAGE}/wrangler.toml"
+
+      - name: Confirm production D1 identity
+        run: |
+          set -euo pipefail
+          D1_LIST="$(npx wrangler d1 list --json)"
+          D1_LIST="${D1_LIST}" node <<'NODE'
+          const databases = JSON.parse(process.env.D1_LIST || "[]");
+          const target = databases.find((entry) => entry.name === process.env.PRODUCTION_D1_DATABASE_NAME);
+          if (!target || target.uuid !== process.env.PRODUCTION_D1_DATABASE_ID) {
+            throw new Error("Production D1 identity did not match dzn_network_db.");
+          }
+          console.log(`Production D1 verified: ${target.name} (${target.uuid}).`);
+          NODE
+
+      - name: Record D1 recovery bookmark
+        run: |
+          set -euo pipefail
+          BOOKMARK_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          npx wrangler d1 time-travel info "${PRODUCTION_D1_DATABASE_NAME}" \
+            --timestamp "${BOOKMARK_TIMESTAMP}" \
+            --json > "${MIGRATION_STAGE}/time-travel-before.json"
+          MIGRATION_STAGE="${MIGRATION_STAGE}" node <<'NODE'
+          const fs = require("node:fs");
+          const path = `${process.env.MIGRATION_STAGE}/time-travel-before.json`;
+          const payload = JSON.parse(fs.readFileSync(path, "utf8"));
+          const entry = Array.isArray(payload) ? payload[0] : payload;
+          const bookmark = entry?.bookmark ?? entry?.result?.bookmark ?? entry?.bookmarks?.[0]?.bookmark;
+          if (!bookmark) throw new Error("Cloudflare did not return a D1 Time Travel bookmark.");
+          fs.appendFileSync(process.env.GITHUB_ENV, `D1_BACKUP_BOOKMARK=${bookmark}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- D1 recovery bookmark: ${bookmark}\n`);
+          console.log("Production D1 recovery bookmark recorded.");
+          NODE
+
+      - name: Verify ledger and empty target baseline
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "SELECT name FROM d1_migrations ORDER BY id;" > "${MIGRATION_STAGE}/ledger-before.json"
+          npx tsx scripts/dzn-single-migration-production-rollout.ts verify-ledger \
+            --migration "${MIGRATION_NAME}" \
+            --ledger "${MIGRATION_STAGE}/ledger-before.json" \
+            --phase before
+
+          OBJECT_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-objects-query --migration "${MIGRATION_NAME}")"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "${OBJECT_QUERY}" > "${MIGRATION_STAGE}/objects-before.json"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "PRAGMA foreign_key_check;" > "${MIGRATION_STAGE}/foreign-key-check-before.json"
+          npx tsx scripts/dzn-single-migration-production-rollout.ts verify-baseline \
+            --migration "${MIGRATION_NAME}" \
+            --objects "${MIGRATION_STAGE}/objects-before.json" \
+            --foreign-key-check "${MIGRATION_STAGE}/foreign-key-check-before.json"
+
+      - name: Apply exactly one staged migration
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations apply "${PRODUCTION_D1_DATABASE_NAME}" \
+            --remote \
+            --config "${MIGRATION_STAGE}/wrangler.toml"
+
+      - name: Verify ledger, schema, indexes, constraints, foreign keys, and zero rows
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "SELECT name FROM d1_migrations ORDER BY id;" > "${MIGRATION_STAGE}/ledger-after.json"
+          npx tsx scripts/dzn-single-migration-production-rollout.ts verify-ledger \
+            --migration "${MIGRATION_NAME}" \
+            --ledger "${MIGRATION_STAGE}/ledger-after.json" \
+            --phase after
+
+          OBJECT_QUERY="$(npx tsx scripts/dzn-single-migration-production-rollout.ts print-objects-query --migration "${MIGRATION_NAME}")"
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "${OBJECT_QUERY}" > "${MIGRATION_STAGE}/objects-after.json"
+          while IFS= read -r TABLE_NAME; do
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "PRAGMA table_info(${TABLE_NAME});" > "${MIGRATION_STAGE}/table-info-${TABLE_NAME}.json"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "PRAGMA foreign_key_list(${TABLE_NAME});" > "${MIGRATION_STAGE}/foreign-keys-${TABLE_NAME}.json"
+            npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+              --command "SELECT COUNT(*) AS row_count FROM ${TABLE_NAME};" > "${MIGRATION_STAGE}/row-count-${TABLE_NAME}.json"
+          done < <(npx tsx scripts/dzn-single-migration-production-rollout.ts print-target-tables --migration "${MIGRATION_NAME}")
+          npx wrangler d1 execute "${PRODUCTION_D1_DATABASE_NAME}" --remote --json \
+            --command "PRAGMA foreign_key_check;" > "${MIGRATION_STAGE}/foreign-key-check-after.json"
+          npx tsx scripts/dzn-single-migration-production-rollout.ts verify-schema \
+            --stage-dir "${MIGRATION_STAGE}" \
+            --objects "${MIGRATION_STAGE}/objects-after.json" \
+            --foreign-key-check "${MIGRATION_STAGE}/foreign-key-check-after.json"
+
+          {
+            echo "- Ledger/schema verification: passed"
+            echo "- Feature activation: intentionally not performed"
+            echo "- Website deployment: intentionally not performed"
+            echo "- Discord, billing, and Nitrado actions: intentionally not performed"
+          } >> "$GITHUB_STEP_SUMMARY"
