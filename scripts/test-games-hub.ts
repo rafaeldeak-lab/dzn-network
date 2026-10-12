@@ -45,6 +45,7 @@ async function run() {
   assert.match(gamesHubSource, /MessageCircle/, "The Games Hub Community route must remain visually identifiable.");
   assert.match(gamesHubSource, /Signal Shift/, "Games Hub must retain the server-verified Signal Shift route.");
   assert.match(gamesHubSource, /Circuit Forge/, "Games Hub must retain the server-verified Circuit Forge route.");
+  assert.match(gamesHubSource, /Ranger Range/, "Games Hub must retain the server-verified Ranger Range route.");
   assert.match(gamesHubSource, /const selectedPlayGame = availableGames\[playGame\] \? playGame : "minefield"/, "Games Hub must safely fall back when the server disables the currently selected mode.");
   assert.match(gamesHubSource, /availableGames\["relay-rush"\]/, "Games Hub must not render Relay Rush until the server reports it available.");
   assert.match(gamesHubSource, /clockNow < game\.nextAt \+ RELAY_RUSH_PULSE_INTERVAL_MS - RELAY_RUSH_INPUT_GUARD_MS/, "Relay Rush must stop accepting visible input before the server pulse window closes.");
@@ -78,6 +79,7 @@ async function run() {
       DZN_GAMES_OUTPOST_RUN_ENABLED: "false",
       DZN_GAMES_SIGNAL_SHIFT_ENABLED: "false",
       DZN_GAMES_CIRCUIT_FORGE_ENABLED: "false",
+      DZN_GAMES_RANGER_RANGE_ENABLED: "false",
       DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED: "true",
     });
     assert.deepEqual({ ...preview.vars }, {});
@@ -102,7 +104,7 @@ async function run() {
     const initial = await payload(await call(f));
     assert.deepEqual(initial.availableGames, {
       minefield: true, trivia: false, "word-chain": false, "hide-seek": false, "relay-rush": false,
-      "cipher-grid": false, "echo-array": false, "outpost-run": false, "signal-shift": false, "circuit-forge": false,
+      "cipher-grid": false, "echo-array": false, "outpost-run": false, "signal-shift": false, "circuit-forge": false, "ranger-range": false,
     });
     f.env.DZN_GAMES_RELAY_RUSH_ENABLED = "true";
     assert.equal((await payload(await call(f))).availableGames["relay-rush"], false);

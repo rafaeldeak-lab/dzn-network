@@ -1,0 +1,199 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { handleGamesHub } from "../functions/_lib/games-hub";
+import { handleGamesRangerRange } from "../functions/_lib/games-ranger-range";
+import type { Env } from "../functions/_lib/types";
+import {
+  RANGER_RANGE_MAX_MISSES,
+  RANGER_RANGE_MIN_REACTION_MS,
+  RANGER_RANGE_REWARD,
+  RANGER_RANGE_TTL_MS,
+  type RangerRangePayload,
+  type RangerRangeTarget,
+} from "../lib/games-ranger-range";
+import { gamesFixture } from "./lib/games-hub-local";
+
+type Fixture = Awaited<ReturnType<typeof rangerRangeFixture>>;
+let passed = 0;
+
+async function rangerRangeFixture(migrate = true) {
+  const fixture = await gamesFixture();
+  if (migrate) fixture.db.sqlite.exec(readFileSync("migrations/0102_games_hub_ranger_range.sql", "utf8"));
+  (fixture.env as Env).DZN_GAMES_RANGER_RANGE_ENABLED = "true";
+  return fixture;
+}
+
+async function test(name: string, action: (fixture: Fixture) => Promise<void>, migrate = true) {
+  const fixture = await rangerRangeFixture(migrate);
+  try { await action(fixture); passed++; console.log(`PASS ${name}`); } finally { fixture.db.sqlite.close(); }
+}
+
+function call(fixture: Fixture, body?: unknown, options: { cookie?: string; origin?: string; method?: string } = {}) {
+  const method = options.method ?? (body === undefined ? "GET" : "POST");
+  return handleGamesRangerRange(new Request("https://local.test/api/games/ranger-range", { method, headers: {
+    cookie: options.cookie ?? fixture.cookie, origin: options.origin ?? "https://local.test", "content-type": "application/json",
+  }, body: method === "GET" ? undefined : JSON.stringify(body) }), fixture.env);
+}
+
+async function payload(response: Response) {
+  assert.equal(response.status, 200, await response.clone().text());
+  return response.json() as Promise<RangerRangePayload>;
+}
+
+async function start(fixture: Fixture) {
+  return payload(await call(fixture, { action: "start" }));
+}
+
+function openTarget(fixture: Fixture) {
+  const past = Date.now() - Math.max(RANGER_RANGE_MIN_REACTION_MS + 80, 600);
+  fixture.db.sqlite.prepare("UPDATE dzn_ranger_range_sessions SET target_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+    .run(past, past);
+}
+
+async function visibleTarget(fixture: Fixture) {
+  const state = await payload(await call(fixture));
+  assert.ok(state.game?.target, "Expected a live range target.");
+  return state;
+}
+
+function fire(state: RangerRangePayload, target: RangerRangeTarget) {
+  assert.ok(state.game);
+  return { action: "fire", gameId: state.game.id, version: state.game.version, target };
+}
+
+function wrongTarget(target: RangerRangeTarget): RangerRangeTarget {
+  return target === "ridge" ? "ruins" : "ridge";
+}
+
+async function completeRun(fixture: Fixture, initial?: RangerRangePayload) {
+  let current = initial ?? await start(fixture);
+  while (current.game?.status === "playing") {
+    openTarget(fixture);
+    current = await visibleTarget(fixture);
+    const target = current.game?.target;
+    assert.ok(target);
+    current = await payload(await call(fixture, fire(current, target)));
+  }
+  return current;
+}
+
+async function run() {
+  await test("authentication, origin, method, feature switches and invalid shapes fail closed", async fixture => {
+    assert.equal((await call(fixture, undefined, { cookie: "" })).status, 401);
+    assert.equal((await call(fixture, { action: "start" }, { origin: "https://foreign.test" })).status, 403);
+    assert.equal((await call(fixture, undefined, { method: "DELETE" })).status, 405);
+    fixture.env.DZN_GAMES_RANGER_RANGE_ENABLED = "false";
+    assert.equal((await call(fixture)).status, 404);
+    fixture.env.DZN_GAMES_RANGER_RANGE_ENABLED = "true";
+    for (const body of [null, [], { action: "start", reward: 160 }, { action: "fire" }, { action: "fire", gameId: "x", version: 0, target: "ridge" }]) {
+      assert.equal((await call(fixture, body)).status, 400);
+    }
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_ranger_range_sessions").get()?.count, 0);
+  });
+
+  await test("missing schema returns a sanitized unavailable response", async fixture => {
+    const response = await call(fixture);
+    assert.equal(response.status, 503);
+    assert.doesNotMatch(await response.text(), /sqlite|select |table|dzn_ranger_range/i);
+  }, false);
+
+  await test("the target remains hidden until its server-issued window opens", async fixture => {
+    const started = await start(fixture);
+    assert.equal(started.game?.target, null);
+    assert.ok((started.game?.targetStartsAt ?? 0) > started.serverTime);
+    assert.equal(JSON.stringify(started).includes("target_sequence_json"), false);
+    openTarget(fixture);
+    const visible = await visibleTarget(fixture);
+    assert.ok(visible.game?.target);
+    assert.match((await call(fixture)).headers.get("cache-control")!, /private, no-store/);
+    assert.equal((await call(fixture)).headers.get("vary"), "Cookie");
+  });
+
+  await test("the server rejects pre-emptive shots and rapid repeat actions without ending a live run", async fixture => {
+    await start(fixture);
+    const tooEarly = Date.now() - Math.max(1, RANGER_RANGE_MIN_REACTION_MS - 30);
+    fixture.db.sqlite.prepare("UPDATE dzn_ranger_range_sessions SET target_started_at = ?, updated_at = ? WHERE user_id = 'local-player'")
+      .run(tooEarly, tooEarly - 500);
+    const early = await visibleTarget(fixture);
+    assert.equal((await call(fixture, fire(early, early.game!.target!))).status, 429);
+    openTarget(fixture);
+    const live = await visibleTarget(fixture);
+    fixture.db.sqlite.prepare("UPDATE dzn_ranger_range_sessions SET updated_at = ? WHERE user_id = 'local-player'").run(Date.now());
+    assert.equal((await call(fixture, fire(live, live.game!.target!))).status, 429);
+    assert.equal((await visibleTarget(fixture)).game?.status, "playing");
+  });
+
+  await test("the exact server-owned target sequence completes and grants one bounded daily reward", async fixture => {
+    let state = await completeRun(fixture);
+    assert.equal(state.game?.status, "won");
+    assert.equal(state.rewardGranted, true);
+    assert.equal(state.rewardedToday, true);
+    const reward = fixture.db.sqlite.prepare("SELECT xp, parts FROM dzn_ranger_range_reward_ledger").get();
+    assert.equal(reward?.xp, RANGER_RANGE_REWARD.xp);
+    assert.equal(reward?.parts, RANGER_RANGE_REWARD.parts);
+    fixture.db.sqlite.exec("UPDATE dzn_ranger_range_sessions SET started_at = started_at - 6000");
+    state = await completeRun(fixture);
+    assert.equal(state.game?.status, "won");
+    assert.equal(state.rewardGranted, false);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_ranger_range_reward_ledger").get()?.count, 1);
+  });
+
+  await test("wrong targets use bounded misses and cannot mint a reward", async fixture => {
+    let state = await start(fixture);
+    for (let miss = 0; miss < RANGER_RANGE_MAX_MISSES; miss++) {
+      openTarget(fixture);
+      state = await visibleTarget(fixture);
+      state = await payload(await call(fixture, fire(state, wrongTarget(state.game!.target!))));
+    }
+    assert.equal(state.game?.status, "failed");
+    assert.equal(state.game?.misses, RANGER_RANGE_MAX_MISSES);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_ranger_range_reward_ledger").get()?.count, 0);
+  });
+
+  await test("another player cannot read, advance, replay, or overwrite a private range", async fixture => {
+    await start(fixture);
+    openTarget(fixture);
+    const own = await visibleTarget(fixture);
+    assert.equal((await call(fixture, fire(own, own.game!.target!), { cookie: fixture.otherCookie })).status, 404);
+    assert.equal((await payload(await call(fixture, undefined, { cookie: fixture.otherCookie }))).game, null);
+    fixture.db.sqlite.prepare("UPDATE dzn_ranger_range_sessions SET started_at = ?, target_started_at = ? WHERE user_id = 'local-player'")
+      .run(Date.now() - RANGER_RANGE_TTL_MS, Date.now() - 1_000);
+    assert.equal((await call(fixture, fire(own, own.game!.target!))).status, 409);
+  });
+
+  await test("a stale final arrow cannot write a reward after its version changes", async fixture => {
+    let state = await start(fixture);
+    while ((state.game?.shotsCleared ?? 0) < (state.game?.totalShots ?? 0) - 1) {
+      openTarget(fixture);
+      state = await visibleTarget(fixture);
+      state = await payload(await call(fixture, fire(state, state.game!.target!)));
+    }
+    openTarget(fixture);
+    state = await visibleTarget(fixture);
+    fixture.db.beforeBatch = () => {
+      fixture.db.beforeBatch = null;
+      fixture.db.sqlite.exec("UPDATE dzn_ranger_range_sessions SET version = version + 1 WHERE user_id = 'local-player'");
+    };
+    assert.equal((await call(fixture, fire(state, state.game!.target!))).status, 409);
+    assert.equal(fixture.db.sqlite.prepare("SELECT COUNT(*) count FROM dzn_ranger_range_reward_ledger").get()?.count, 0);
+  });
+
+  await test("the Hub includes verified Ranger Range rewards only after the schema and flag are both present", async fixture => {
+    fixture.env.DZN_GAMES_RANGER_RANGE_ENABLED = "false";
+    const hidden = await handleGamesHub(new Request("https://local.test/api/games/hub", { headers: { cookie: fixture.cookie } }), fixture.env);
+    assert.equal((await hidden.json() as { availableGames: { "ranger-range": boolean } }).availableGames["ranger-range"], false);
+    fixture.env.DZN_GAMES_RANGER_RANGE_ENABLED = "true";
+    const won = await completeRun(fixture);
+    assert.equal(won.rewardGranted, true);
+    const hub = await handleGamesHub(new Request("https://local.test/api/games/hub", { headers: { cookie: fixture.cookie } }), fixture.env);
+    const data = await hub.json() as { availableGames: { "ranger-range": boolean }; summary: { xp: number; parts: number; history: { kind: string }[] } };
+    assert.equal(data.availableGames["ranger-range"], true);
+    assert.equal(data.summary.xp, RANGER_RANGE_REWARD.xp);
+    assert.equal(data.summary.parts, RANGER_RANGE_REWARD.parts);
+    assert.ok(data.summary.history.some(entry => entry.kind === "ranger-range"));
+  });
+
+  console.log(`Ranger Range tests passed: ${passed}`);
+}
+
+void run();

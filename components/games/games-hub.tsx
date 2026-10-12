@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Award, BookOpen, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, KeyRound, LoaderCircle,
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Award, BookOpen, Check, CircleHelp, Clock3, Crosshair, Flag, Flame, Gamepad2, Hammer, KeyRound, LoaderCircle,
   LogIn, Map, MessageCircle, Microchip, MousePointer2, Play, Radio, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
 import { DEFAULT_HUB_GAME_AVAILABILITY, GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, HUB_EQUIPMENT, WORKSHOP_PART_COST, WORKSHOP_STAGES,
@@ -18,6 +18,7 @@ import { ECHO_ARRAY_CUE_INTERVAL_MS, ECHO_ARRAY_CUE_LEAD_MS, ECHO_ARRAY_MIN_INPU
 import { OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_MIN_MOVE_INTERVAL_MS, OUTPOST_RUN_REWARD, type OutpostRunDirection, type OutpostRunPayload } from "@/lib/games-outpost-run";
 import { SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS, SIGNAL_SHIFT_REWARD, type SignalShiftPayload } from "@/lib/games-signal-shift";
 import { CIRCUIT_FORGE_MIN_ROTATION_INTERVAL_MS, CIRCUIT_FORGE_REWARD, type CircuitForgePayload } from "@/lib/games-circuit-forge";
+import { RANGER_RANGE_MIN_ACTION_INTERVAL_MS, RANGER_RANGE_REWARD, RANGER_RANGE_TARGETS, type RangerRangePayload, type RangerRangeTarget } from "@/lib/games-ranger-range";
 import styles from "./games-hub.module.css";
 
 type View = "play" | "workshop" | "insignia" | "activity";
@@ -38,12 +39,21 @@ const OUTPOST_RUN_COOLDOWN_MS = OUTPOST_RUN_MIN_MOVE_INTERVAL_MS + 40;
 const ECHO_ARRAY_COOLDOWN_MS = ECHO_ARRAY_MIN_INPUT_INTERVAL_MS + 40;
 const SIGNAL_SHIFT_COOLDOWN_MS = SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS + 40;
 const CIRCUIT_FORGE_COOLDOWN_MS = CIRCUIT_FORGE_MIN_ROTATION_INTERVAL_MS + 40;
+const RANGER_RANGE_COOLDOWN_MS = RANGER_RANGE_MIN_ACTION_INTERVAL_MS + 50;
 const ECHO_ARRAY_NODE_META: Record<EchoArrayNode, { label: string; key: string }> = {
   north: { label: "North array", key: "1" }, east: { label: "East array", key: "2" }, south: { label: "South array", key: "3" }, west: { label: "West array", key: "4" },
 };
 const ECHO_ARRAY_NODE_ORDER: EchoArrayNode[] = ["north", "east", "south", "west"];
 const OUTPOST_RUN_DIRECTION_META: Record<OutpostRunDirection, { label: string; icon: typeof ArrowUp }> = {
   north: { label: "Move north", icon: ArrowUp }, east: { label: "Move east", icon: ArrowRight }, south: { label: "Move south", icon: ArrowDown }, west: { label: "Move west", icon: ArrowLeft },
+};
+const RANGER_RANGE_TARGET_META: Record<RangerRangeTarget, { label: string; key: string; detail: string }> = {
+  ridge: { label: "Ridge", key: "1", detail: "High ridge plate" },
+  ruins: { label: "Ruins", key: "2", detail: "Ruined wall plate" },
+  road: { label: "Road", key: "3", detail: "Roadside plate" },
+  treeline: { label: "Treeline", key: "4", detail: "Treeline plate" },
+  tower: { label: "Tower", key: "5", detail: "Watchtower plate" },
+  ravine: { label: "Ravine", key: "6", detail: "Ravine plate" },
 };
 
 function useTransientActionCooldown(duration: number) {
@@ -223,6 +233,7 @@ export function GamesHub() {
             {availableGames["outpost-run"] && <button aria-pressed={selectedPlayGame === "outpost-run"} onClick={() => setPlayGame("outpost-run")}><Map size={17} /><span><strong>Outpost Run</strong><small>Fog-grid extraction</small></span></button>}
             {availableGames["signal-shift"] && <button aria-pressed={selectedPlayGame === "signal-shift"} onClick={() => setPlayGame("signal-shift")}><Target size={17} /><span><strong>Signal Shift</strong><small>Tactical grid routing</small></span></button>}
             {availableGames["circuit-forge"] && <button aria-pressed={selectedPlayGame === "circuit-forge"} onClick={() => setPlayGame("circuit-forge")}><Settings2 size={17} /><span><strong>Circuit Forge</strong><small>Power-grid rebuild</small></span></button>}
+            {availableGames["ranger-range"] && <button aria-pressed={selectedPlayGame === "ranger-range"} onClick={() => setPlayGame("ranger-range")}><Crosshair size={17} /><span><strong>Ranger Range</strong><small>Bow target drill</small></span></button>}
           </div>}
           {view === "play" && availableGames.minefield && selectedPlayGame === "minefield" && <section aria-labelledby="mines-title">
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">Minesweeper</h2></div><button className={styles.iconButton} title="Game rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
@@ -254,6 +265,7 @@ export function GamesHub() {
           {view === "play" && availableGames["outpost-run"] && selectedPlayGame === "outpost-run" && <OutpostRunPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["signal-shift"] && selectedPlayGame === "signal-shift" && <SignalShiftPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["circuit-forge"] && selectedPlayGame === "circuit-forge" && <CircuitForgePanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["ranger-range"] && selectedPlayGame === "ranger-range" && <RangerRangePanel now={now} onProgress={() => void refresh()} />}
 
           {view === "workshop" && <section>
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>COLLECTION / PROJECT {(Math.floor((summary?.assemblies ?? 0) / 3) + 1).toString().padStart(2, "0")}</span><h2>Field relay workshop</h2></div><Hammer size={24} /></div>
@@ -274,7 +286,7 @@ export function GamesHub() {
           </section>}
 
           {view === "activity" && <section><div className={styles.sectionTitle}><div><span className={styles.eyebrow}>YOUR / REWARD HISTORY</span><h2>Recent activity</h2></div><Clock3 size={24} /></div>
-            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; const hideSeek = entry.kind === "hide-seek"; const relayRush = entry.kind === "relay-rush"; const cipherGrid = entry.kind === "cipher-grid"; const echoArray = entry.kind === "echo-array"; const outpostRun = entry.kind === "outpost-run"; const signalShift = entry.kind === "signal-shift"; const circuitForge = entry.kind === "circuit-forge"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : hideSeek ? <Search size={20} /> : relayRush ? <Zap size={20} /> : cipherGrid ? <KeyRound size={20} /> : echoArray ? <Microchip size={20} /> : outpostRun ? <Map size={20} /> : signalShift ? <Target size={20} /> : circuitForge ? <Settings2 size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : hideSeek ? "Signal Hunt cleared" : relayRush ? "Relay Rush completed" : cipherGrid ? "Cipher Grid decoded" : echoArray ? "Echo Array synchronised" : outpostRun ? "Outpost Run extracted" : signalShift ? "Signal Shift routed" : circuitForge ? "Circuit Forge restored" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
+            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; const hideSeek = entry.kind === "hide-seek"; const relayRush = entry.kind === "relay-rush"; const cipherGrid = entry.kind === "cipher-grid"; const echoArray = entry.kind === "echo-array"; const outpostRun = entry.kind === "outpost-run"; const signalShift = entry.kind === "signal-shift"; const circuitForge = entry.kind === "circuit-forge"; const rangerRange = entry.kind === "ranger-range"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : hideSeek ? <Search size={20} /> : relayRush ? <Zap size={20} /> : cipherGrid ? <KeyRound size={20} /> : echoArray ? <Microchip size={20} /> : outpostRun ? <Map size={20} /> : signalShift ? <Target size={20} /> : circuitForge ? <Settings2 size={20} /> : rangerRange ? <Crosshair size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : hideSeek ? "Signal Hunt cleared" : relayRush ? "Relay Rush completed" : cipherGrid ? "Cipher Grid decoded" : echoArray ? "Echo Array synchronised" : outpostRun ? "Outpost Run extracted" : signalShift ? "Signal Shift routed" : circuitForge ? "Circuit Forge restored" : rangerRange ? "Ranger Range cleared" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
           </section>}
         </div>
 
@@ -1029,6 +1041,133 @@ function CircuitForgePanel({ now, onProgress }: { now: number; onProgress: () =>
               : <><Radio size={20} /><div><strong>Power restoration active</strong><span>Rotate a relay clockwise. The server validates every network change.</span></div></>}
       </div>
     </> : !busy && !error && <div className={styles.circuitForgeReady}><Settings2 size={34} /><h3>Rebuild the perimeter relay grid.</h3><p>Rotate the field conduits until every DZN relay has a clean route back to command. Only verified server restorations award progression.</p><div className={styles.rewardPills}><span>25 relays</span><span>+{CIRCUIT_FORGE_REWARD.xp} XP</span><span>+{CIRCUIT_FORGE_REWARD.parts} parts</span></div></div>}
+  </section>;
+}
+
+function RangerRangePanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+  const [payload, setPayload] = useState<RangerRangePayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const generation = useRef(0);
+  const serverClock = useRef({ time: 0, measuredAt: 0 });
+  const [rangeNow, setRangeNow] = useState(0);
+  const { notice, cooldown, clearCooldown, startCooldown } = useTransientActionCooldown(RANGER_RANGE_COOLDOWN_MS);
+
+  const receivePayload = useCallback((result: RangerRangePayload) => {
+    serverClock.current = { time: result.serverTime, measuredAt: performance.now() };
+    setRangeNow(result.serverTime);
+    setPayload(result);
+  }, []);
+
+  const load = useCallback(async () => {
+    const sequence = ++generation.current;
+    try {
+      const response = await fetch("/api/games/ranger-range", { credentials: "include", cache: "no-store" });
+      const result = await response.json() as RangerRangePayload & { error?: string };
+      if (!response.ok) throw new Error(result.error || "DZN Ranger Range is unavailable.");
+      if (sequence === generation.current) { receivePayload(result); clearCooldown(); setError(""); }
+    } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Ranger Range is unavailable."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [clearCooldown, receivePayload]);
+
+  useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
+
+  const mutate = useCallback(async (body: Record<string, unknown>) => {
+    if (busy || cooldown) return;
+    const sequence = ++generation.current; setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/games/ranger-range", { method: "POST", credentials: "include", cache: "no-store",
+        headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as RangerRangePayload & { error?: string };
+      if (!response.ok) {
+        if (response.status === 429) { startCooldown(result.error || "Nock one arrow at a time."); return; }
+        setError(result.error || "That arrow could not be recorded."); if (response.status === 409) void load(); return;
+      }
+      if (sequence !== generation.current) return;
+      receivePayload(result); clearCooldown(); onProgress();
+    } catch { if (sequence === generation.current) setError("That arrow could not be recorded. Refresh before retrying."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [busy, clearCooldown, cooldown, load, onProgress, receivePayload, startCooldown]);
+
+  useEffect(() => {
+    if (!payload?.game) return;
+    const timer = window.setInterval(() => {
+      const clock = serverClock.current;
+      setRangeNow(clock.time + performance.now() - clock.measuredAt);
+    }, 50);
+    return () => window.clearInterval(timer);
+  }, [payload?.game, payload?.serverTime]);
+
+  const game = payload?.game;
+  const clockNow = Math.max(now, rangeNow, payload?.serverTime ?? 0);
+  const available = Boolean(payload) && !error;
+  const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow && game.targetEndsAt > clockNow);
+  const targetOpen = Boolean(active && game?.target && clockNow >= game.targetStartsAt && clockNow < game.targetEndsAt);
+  const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5_000);
+  const fire = useCallback((target: RangerRangeTarget) => {
+    if (!game || !active || !targetOpen || busy || cooldown) return;
+    void mutate({ action: "fire", gameId: game.id, version: game.version, target });
+  }, [active, busy, cooldown, game, mutate, targetOpen]);
+
+  useEffect(() => {
+    if (!game || game.status !== "playing") return;
+    // The server withholds the next plate until its window begins. Refresh at that edge
+    // while it is still hidden, then refresh again only after the visible window closes.
+    const nextRefreshAt = game.target ? game.targetEndsAt + 45 : game.targetStartsAt + 45;
+    const clock = serverClock.current;
+    const serverNow = clock.time + performance.now() - clock.measuredAt;
+    const timer = window.setTimeout(() => void load(), Math.max(45, nextRefreshAt - serverNow));
+    return () => window.clearTimeout(timer);
+  }, [game, load]);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+      const source = event.target;
+      if (source instanceof Element && source.closest("input, textarea, select, [contenteditable=true]")) return;
+      const index = Number.parseInt(event.key, 10) - 1;
+      const target = Number.isInteger(index) ? RANGER_RANGE_TARGETS[index] : null;
+      if (!target || !targetOpen || busy || cooldown) return;
+      event.preventDefault(); fire(target);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [busy, cooldown, fire, targetOpen]);
+
+  return <section aria-labelledby="ranger-range-title" className={styles.rangerRangePanel}>
+    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>11 / RANGER DRILL</span><h2 id="ranger-range-title">DZN Ranger Range</h2></div><Crosshair size={24} /></div>
+    {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Ranger Range" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
+    <div className={styles.rangerRangeTools}>
+      <div><strong>{game ? `${game.shotsCleared} / ${game.totalShots} plates cleared` : "Eight moving range plates"}</strong><span>{game ? `${game.maxMisses - game.misses} misses remaining` : "Use the bow range to read and release onto the live target."}</span></div>
+      <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
+        title={restartCoolingDown && !active ? "New range run available five seconds after the last start" : undefined}
+        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Range in progress" : game ? "New range" : "Start range"}</button>
+    </div>
+    {game ? <>
+      <div className={styles.rangerRangeMeta}><span><Crosshair size={14} />{game.shotsCleared} / {game.totalShots}</span><span><Target size={14} />{game.misses} misses</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.rangerRangeStage} data-status={game.status} data-live={targetOpen}>
+        <div className={styles.rangerRangeReadout} aria-live="polite"><span>{active ? targetOpen ? "TARGET / LIVE" : "BOW / NOCKED" : game.status === "won" ? "RANGE / CLEAR" : "RANGE / CLOSED"}</span><strong>{active ? targetOpen ? "Release on the lit plate" : "Hold while the next target crosses the range" : game.status === "won" ? "Perfect range clear" : game.status === "failed" ? "Range run lost" : "Target window expired"}</strong></div>
+        <div className={styles.rangerRangeField} role="group" aria-label="Ranger Range targets">
+          <div className={styles.rangerRangeBow} aria-hidden="true"><span /><i /><b /></div>
+          {RANGER_RANGE_TARGETS.map(target => {
+            const meta = RANGER_RANGE_TARGET_META[target];
+            const live = targetOpen && game.target === target;
+            return <button type="button" key={target} className={styles.rangerRangeTarget}
+              data-target={target} data-live={live} disabled={!active || !targetOpen || busy || cooldown}
+              aria-label={`${meta.detail} (${meta.key})${live ? ", live target" : ""}`} onClick={() => fire(target)}>
+              <span className={styles.rangerRangeBullseye} aria-hidden="true"><i /><b /></span><strong>{meta.label}</strong><small>{live ? "Release arrow" : "Range marker"}</small><kbd>{meta.key}</kbd>
+            </button>;
+          })}
+        </div>
+        <p className={styles.rangerRangeHint}>Keyboard: 1 through 6. Each target, timing window, verified hit, miss, and daily reward is set by the DZN server.</p>
+      </div>
+      <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
+        {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Range cleared</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${RANGER_RANGE_REWARD.xp} XP and +${RANGER_RANGE_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice range complete. Today's reward was already recorded." : "Ranger Range complete."}</span></div></>
+          : game.status === "failed" ? <><Target size={22} /><div><strong>Arrows spent</strong><span>Two missed plates ended the run. Existing Hub progress is unchanged.</span></div></>
+            : !active ? <><Clock3 size={22} /><div><strong>Range expired</strong><span>Start another range run when you are ready.</span></div></>
+              : <><Radio size={20} /><div><strong>{targetOpen ? "Plate live" : "Bow nocked"}</strong><span>{targetOpen ? "Release on the highlighted plate before it clears the range." : "The DZN range is preparing the next server-verified target."}</span></div></>}
+      </div>
+    </> : !busy && !error && <div className={styles.rangerRangeReady}><Crosshair size={34} /><h3>Set the bow range.</h3><p>Track eight moving DZN range plates and release only when the live target appears. The server verifies every arrow before it can award progression.</p><div className={styles.rewardPills}><span>8 plates</span><span>+{RANGER_RANGE_REWARD.xp} XP</span><span>+{RANGER_RANGE_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 
