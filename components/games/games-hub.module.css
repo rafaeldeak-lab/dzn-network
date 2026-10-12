@@ -283,6 +283,41 @@
 .relayRushReady { min-height: 270px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 35px 20px; border-block: 1px solid #303738; color: var(--muted); text-align: center; }
 .relayRushReady svg { color: var(--cyan); }
 .relayRushReady p { max-width: 490px; }
+.cipherGridTools { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 0; border-block: 1px solid #303738; }
+.cipherGridTools > div { display: grid; gap: 4px; }
+.cipherGridTools strong { font-size: 13px; }
+.cipherGridTools span { color: var(--muted); font-size: 11px; }
+.cipherGridMeta { display: flex; gap: 18px; padding: 14px 0; color: var(--muted); font-size: 11px; }
+.cipherGridMeta span { display: inline-flex; align-items: center; gap: 5px; }
+.cipherGridMeta span:last-child { margin-left: auto; }
+.cipherGridStage { display: grid; gap: 18px; padding: 22px; border: 1px solid #465759; border-radius: 6px; background: #0c1213; }
+.cipherGridReadout { display: grid; gap: 5px; text-align: center; }
+.cipherGridReadout > span { color: var(--muted); font: 10px var(--font-geist-mono), monospace; font-weight: 800; }
+.cipherGridReadout > strong { color: #eef6f5; font-size: clamp(18px, 3vw, 26px); }
+.cipherGridBoard { display: grid; gap: 7px; width: min(100%, 390px); margin: 0 auto; }
+.cipherGridRow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
+.cipherGridTile { display: grid; place-items: center; aspect-ratio: 1; min-width: 0; border: 1px solid #3f5051; border-radius: 4px; color: #e7f0ef; background: #111b1c; font: 700 20px var(--font-geist-mono), monospace; line-height: 1; }
+.cipherGridTile[data-entry=true] { border-color: #6d898a; background: #172526; }
+.cipherGridTile[data-mark=correct] { border-color: #5ee4d4; color: #dffefa; background: #16433e; }
+.cipherGridTile[data-mark=present] { border-color: #e8bf61; color: #fff5d8; background: #4a3a1b; }
+.cipherGridTile[data-mark=absent] { border-color: #394548; color: #8a999b; background: #182022; }
+.cipherGridEntry { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; width: min(100%, 520px); margin: 0 auto; }
+.cipherGridEntry label { color: var(--muted); font-size: 11px; font-weight: 800; white-space: nowrap; }
+.cipherGridEntry input { min-width: 0; min-height: 42px; padding: 0 12px; border: 1px solid #415658; border-radius: 5px; color: #eef6f5; background: #10191a; font: 700 14px var(--font-geist-mono), monospace; letter-spacing: .12em; text-align: center; text-transform: uppercase; }
+.cipherGridEntry input:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }
+.cipherGridEntry input:disabled { color: #7f8d90; }
+.cipherGridKeyboard { display: grid; gap: 6px; width: min(100%, 510px); margin: 0 auto; padding: 9px; border-top: 1px solid #303738; }
+.cipherGridKeyboard > div { display: flex; justify-content: center; gap: 5px; }
+.cipherGridKey { display: grid; place-items: center; width: clamp(26px, 7.5vw, 39px); height: 38px; min-width: 0; padding: 0; border: 1px solid #415658; border-radius: 4px; color: #d9e7e5; background: #182526; font: 700 12px var(--font-geist-mono), monospace; }
+.cipherGridKey:not(:disabled):hover, .cipherGridKey:not(:disabled):focus-visible { border-color: #82f2e1; color: #e5fffb; background: #1d3a38; outline: 2px solid #ffffff; outline-offset: 2px; }
+.cipherGridKey[data-mark=correct] { border-color: #4ed1c0; color: #dffefa; background: #16433e; }
+.cipherGridKey[data-mark=present] { border-color: #d7ac51; color: #fff5d8; background: #4a3a1b; }
+.cipherGridKey[data-mark=absent] { border-color: #394548; color: #7f8d90; background: #182022; }
+.cipherGridWideKey { width: auto; min-width: 128px; grid-auto-flow: column; gap: 7px; padding-inline: 12px; }
+.cipherGridHint { margin: 0; color: var(--muted); font-size: 11px !important; line-height: 1.6; text-align: center; }
+.cipherGridReady { min-height: 270px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 35px 20px; border-block: 1px solid #303738; color: var(--muted); text-align: center; }
+.cipherGridReady svg { color: var(--cyan); }
+.cipherGridReady p { max-width: 490px; }
 .empty svg { margin: 0 auto 20px; }
 .gate { display: flex; align-items: center; gap: 32px; min-height: 420px; padding: 45px 0; }
 .gateArt .insignia { width: 260px; }
@@ -305,8 +340,9 @@
 @keyframes relay-pulse { 0% { transform: translateX(0); } 100% { transform: translateX(100vw); } }
 @media (max-width: 1000px) { .layout { grid-template-columns: minmax(0, 1fr) 260px; gap: 24px; } .sidebar { padding-left: 20px; } .topline { gap: 0; } .balances { padding: 13px 0; } .tabs { gap: 18px; } .badges { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .hub { padding: 22px 18px 100px; } .hub h1 { font-size: 29px; } .heading { gap: 16px; } .identity { width: 100%; } .identity .smallInsignia { width: 46px; } .identity > div { flex: 1; max-width: none; } .topline { margin-bottom: 24px; } .tabs { width: 100%; justify-content: space-between; gap: 8px; } .tabs a { font-size: 12px; gap: 5px; } .balances { width: 100%; justify-content: flex-end; border-top: 1px solid #293234; } .layout { display: flex; flex-direction: column; gap: 30px; } .mainColumn, .sidebar { width: 100%; } .sidebar { padding: 25px 0 0; border-left: 0; border-top: 1px solid #303738; } .gameTools { gap: 10px; } .gameTools label { min-width: 135px; } .gameTools .primary { flex: 1; } .gameTools > .primary { font-size: 12px; padding: 10px; } .gameTools > label { flex-basis: 100%; } .gameTools > .primary, .toolSwitch { margin-top: 0; } .boardStatus { gap: 14px; font-size: 11px; } .boardViewSwitch { width: 100%; } .boardViewSwitch button { flex: 1; min-width: 0; padding-inline: 8px; } .hub :global(.dzn-minefield-3d) { aspect-ratio: 4 / 5; min-height: 410px; max-height: 560px; } .boardScroll { padding-inline: 2px; } .board { gap: 2px; padding: 5px; } .cell { font-size: 12px; } .cell svg { width: 13px; height: 13px; } .gate { flex-direction: column; align-items: flex-start; gap: 0; padding: 10px 0 45px; } .gateArt .insignia { width: 150px; } .gate h2 { font-size: 23px; } .projectTeaser { max-width: 420px; } .badges { gap: 12px; } .badges h3 { font-size: 13px; } .badgeState { font-size: 9px; } .equipmentRack { grid-template-columns: 1fr; } .equipmentRack article:last-child { grid-column: auto; } .readyBoard { min-height: 300px; } .relayRushStage { min-height: 330px; aspect-ratio: auto; } }
-@media (max-width: 760px) { .gamePicker { grid-template-columns: 1fr; } }
-@media (max-width: 560px) { .triviaChoices, .chainFeed ol { grid-template-columns: 1fr; } .triviaQuestion h3 { font-size: 18px; } .chainForm > div, .hideSeekTools, .relayRushTools { align-items: stretch; flex-direction: column; } .hideSeekTarget { width: 32px; height: 32px; } .relayRushStage { min-height: 320px; padding: 16px 12px; } .relayRushLanes { gap: 7px; } .relayRushLane { min-height: 126px; padding-inline: 4px; } .relayRushLane strong { font-size: 12px; } .relayRushMeta { gap: 10px; } }
+@media (max-width: 760px) { .gamePicker { grid-template-columns: repeat(2, minmax(0, 1fr)); } .gamePicker button { gap: 8px; padding-inline: 10px; } .gamePicker strong { font-size: 12px; } .gamePicker small { font-size: 10px; } }
+@media (max-width: 360px) { .gamePicker { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .triviaChoices, .chainFeed ol { grid-template-columns: 1fr; } .triviaQuestion h3 { font-size: 18px; } .chainForm > div, .hideSeekTools, .relayRushTools, .cipherGridTools { align-items: stretch; flex-direction: column; } .hideSeekTarget { width: 32px; height: 32px; } .relayRushStage { min-height: 320px; padding: 16px 12px; } .relayRushLanes { gap: 7px; } .relayRushLane { min-height: 126px; padding-inline: 4px; } .relayRushLane strong { font-size: 12px; } .relayRushMeta, .cipherGridMeta { gap: 10px; } .cipherGridStage { padding: 16px 10px; } .cipherGridBoard { gap: 5px; } .cipherGridRow { gap: 5px; } .cipherGridEntry { grid-template-columns: 1fr; } .cipherGridEntry label { text-align: center; } .cipherGridEntry .primary { justify-content: center; } .cipherGridKey { height: 35px; } .cipherGridWideKey { min-width: 118px; } }
 @media (max-width: 760px) { .environment { height: 600px; } .environmentFrame { width: 960px; left: 55%; top: 0; transform: translateX(-55%); } .heading { min-height: 190px; align-content: center; } .navActions { gap: 8px; } .navActions a { font-size: 11px; gap: 5px; } .hubNav .homeButton { width: 140px; height: 54px; } }
 @media (max-width: 760px) { .boardChassis { padding-inline: 5px; } .board { padding: 3px; } }
 @media (prefers-reduced-motion: reduce) { .spinner, .environment [data-animated], .relayRushStage[data-ready=true]::after { animation: none; } .weatherWindow, .radioSweep, .beacon, .workLight { display: none; } }

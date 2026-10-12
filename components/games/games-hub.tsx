@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ArrowRight, Award, BookOpen, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, LoaderCircle,
+import { ArrowRight, Award, BookOpen, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, KeyRound, LoaderCircle,
   LogIn, Microchip, MousePointer2, Play, Radio, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
 import { GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, HUB_EQUIPMENT, WORKSHOP_PART_COST, WORKSHOP_STAGES,
@@ -13,11 +13,12 @@ import { TRIVIA_DIFFICULTIES, type TriviaDifficulty, type TriviaPayload } from "
 import { WORD_CHAIN_REWARD, type WordChainPayload } from "@/lib/games-word-chain";
 import { HIDE_SEEK_REWARD, type HideSeekPayload } from "@/lib/games-hide-seek";
 import { RELAY_RUSH_LANES, RELAY_RUSH_REWARD, type RelayRushLane, type RelayRushPayload } from "@/lib/games-relay-rush";
+import { CIPHER_GRID_MAX_ATTEMPTS, CIPHER_GRID_REWARD, CIPHER_GRID_WORD_LENGTH, type CipherGridMark, type CipherGridPayload } from "@/lib/games-cipher-grid";
 import styles from "./games-hub.module.css";
 
 type View = "play" | "workshop" | "insignia" | "activity";
 type BoardView = "field" | "grid";
-type PlayGame = "minefield" | "trivia" | "word-chain" | "hide-seek" | "relay-rush";
+type PlayGame = "minefield" | "trivia" | "word-chain" | "hide-seek" | "relay-rush" | "cipher-grid";
 const Minefield3D = dynamic(() => import("./minefield-3d").then(module => module.Minefield3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
@@ -26,6 +27,8 @@ function clock(value: number) { const seconds = Math.max(0, Math.floor(value / 1
 const RELAY_RUSH_LANE_META: Record<RelayRushLane, { label: string; key: string }> = {
   left: { label: "Left", key: "A" }, centre: { label: "Centre", key: "S" }, right: { label: "Right", key: "D" },
 };
+const CIPHER_GRID_KEYS = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
+const CIPHER_GRID_MARK_PRIORITY: Record<CipherGridMark, number> = { absent: 0, present: 1, correct: 2 };
 
 export function GamesHub() {
   const [payload, setPayload] = useState<HubPayload | null>(null);
@@ -167,6 +170,7 @@ export function GamesHub() {
             <button aria-pressed={playGame === "word-chain"} onClick={() => setPlayGame("word-chain")}><Radio size={17} /><span><strong>Word Chain</strong><small>Shared daily relay</small></span></button>
             <button aria-pressed={playGame === "hide-seek"} onClick={() => setPlayGame("hide-seek")}><Search size={17} /><span><strong>Signal Hunt</strong><small>Find concealed beacons</small></span></button>
             <button aria-pressed={playGame === "relay-rush"} onClick={() => setPlayGame("relay-rush")}><Zap size={17} /><span><strong>Relay Rush</strong><small>Timed signal run</small></span></button>
+            <button aria-pressed={playGame === "cipher-grid"} onClick={() => setPlayGame("cipher-grid")}><KeyRound size={17} /><span><strong>Cipher Grid</strong><small>Field-code puzzle</small></span></button>
           </div>}
           {view === "play" && playGame === "minefield" && <section aria-labelledby="mines-title">
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">Minesweeper</h2></div><button className={styles.iconButton} title="Game rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
@@ -193,6 +197,7 @@ export function GamesHub() {
           {view === "play" && playGame === "word-chain" && <WordChainPanel onProgress={() => void refresh()} />}
           {view === "play" && playGame === "hide-seek" && <HideSeekPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && playGame === "relay-rush" && <RelayRushPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && playGame === "cipher-grid" && <CipherGridPanel now={now} onProgress={() => void refresh()} />}
 
           {view === "workshop" && <section>
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>COLLECTION / PROJECT {(Math.floor((summary?.assemblies ?? 0) / 3) + 1).toString().padStart(2, "0")}</span><h2>Field relay workshop</h2></div><Hammer size={24} /></div>
@@ -213,7 +218,7 @@ export function GamesHub() {
           </section>}
 
           {view === "activity" && <section><div className={styles.sectionTitle}><div><span className={styles.eyebrow}>YOUR / REWARD HISTORY</span><h2>Recent activity</h2></div><Clock3 size={24} /></div>
-            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; const hideSeek = entry.kind === "hide-seek"; const relayRush = entry.kind === "relay-rush"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : hideSeek ? <Search size={20} /> : relayRush ? <Zap size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : hideSeek ? "Signal Hunt cleared" : relayRush ? "Relay Rush completed" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
+            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; const hideSeek = entry.kind === "hide-seek"; const relayRush = entry.kind === "relay-rush"; const cipherGrid = entry.kind === "cipher-grid"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : hideSeek ? <Search size={20} /> : relayRush ? <Zap size={20} /> : cipherGrid ? <KeyRound size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : hideSeek ? "Signal Hunt cleared" : relayRush ? "Relay Rush completed" : cipherGrid ? "Cipher Grid decoded" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
           </section>}
         </div>
 
@@ -527,6 +532,110 @@ function RelayRushPanel({ now, onProgress }: { now: number; onProgress: () => vo
               : <><Radio size={20} /><div><strong>{targetOpen ? "Pulse live" : "Relay synchronising"}</strong><span>{targetOpen ? "Choose the highlighted lane before the next pulse." : "The next lane appears when the DZN relay opens it."}</span></div></>}
       </div>
     </> : !busy && !error && <div className={styles.relayRushReady}><Radio size={34} /><h3>Keep the relay alive.</h3><p>Read twelve DZN-controlled signal pulses. The route, timing and reward are verified server-side.</p><div className={styles.rewardPills}><span>12 pulses</span><span>+{RELAY_RUSH_REWARD.xp} XP</span><span>+{RELAY_RUSH_REWARD.parts} parts</span></div></div>}
+  </section>;
+}
+
+function cipherGridKeyMark(payload: CipherGridPayload | null, letter: string) {
+  let strongest: CipherGridMark | undefined;
+  for (const attempt of payload?.game?.attempts ?? []) {
+    for (let index = 0; index < attempt.guess.length; index++) {
+      if (attempt.guess[index] !== letter) continue;
+      const mark = attempt.marks[index];
+      if (!strongest || CIPHER_GRID_MARK_PRIORITY[mark] > CIPHER_GRID_MARK_PRIORITY[strongest]) strongest = mark;
+    }
+  }
+  return strongest;
+}
+
+function CipherGridPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+  const [payload, setPayload] = useState<CipherGridPayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const [entry, setEntry] = useState("");
+  const generation = useRef(0);
+
+  const load = useCallback(async () => {
+    const sequence = ++generation.current;
+    try {
+      const response = await fetch("/api/games/cipher-grid", { credentials: "include", cache: "no-store" });
+      const result = await response.json() as CipherGridPayload & { error?: string };
+      if (!response.ok) throw new Error(result.error || "DZN Cipher Grid is unavailable.");
+      if (sequence === generation.current) { setPayload(result); setError(""); }
+    } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Cipher Grid is unavailable."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, []);
+
+  useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
+
+  const mutate = useCallback(async (body: Record<string, unknown>) => {
+    if (busy) return;
+    const sequence = ++generation.current; setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/games/cipher-grid", { method: "POST", credentials: "include", cache: "no-store",
+        headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as CipherGridPayload & { error?: string };
+      if (!response.ok) { setError(result.error || "That field-word guess could not be recorded."); if (response.status === 409) void load(); return; }
+      if (sequence !== generation.current) return;
+      setEntry(""); setPayload(result); onProgress();
+    } catch { if (sequence === generation.current) setError("That field-word guess could not be recorded. Refresh before retrying."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [busy, load, onProgress]);
+
+  const game = payload?.game;
+  const clockNow = Math.max(now, payload?.serverTime ?? 0);
+  const available = Boolean(payload) && !error;
+  const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
+  const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5000);
+  const normalize = (value: string) => setEntry(value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, CIPHER_GRID_WORD_LENGTH));
+  const submit = useCallback(() => {
+    if (!game || !active || busy || entry.length !== CIPHER_GRID_WORD_LENGTH) return;
+    void mutate({ action: "guess", gameId: game.id, version: game.version, guess: entry });
+  }, [active, busy, entry, game, mutate]);
+
+  return <section aria-labelledby="cipher-grid-title" className={styles.cipherGridPanel}>
+    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>06 / FIELD CRYPTOGRAPHY</span><h2 id="cipher-grid-title">DZN Cipher Grid</h2></div><KeyRound size={24} /></div>
+    {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Cipher Grid" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
+    <div className={styles.cipherGridTools}>
+      <div><strong>{game ? `${game.attempts.length} / ${game.maxAttempts} attempts` : "Six field-word attempts"}</strong><span>{game ? "Decode the five-letter DZN field word." : "The answer and reward are verified by the DZN server."}</span></div>
+      <button className={styles.primary} disabled={busy || !available || active || restartCoolingDown}
+        title={restartCoolingDown && !active ? "New decode available five seconds after the last start" : undefined}
+        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Decode in progress" : game ? "New decode" : "Start decode"}</button>
+    </div>
+    {game ? <>
+      <div className={styles.cipherGridMeta}><span><KeyRound size={14} />{game.attempts.length} / {game.maxAttempts}</span><span><Target size={14} />{game.answerLength} letters</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <form className={styles.cipherGridStage} aria-label="Cipher Grid field-word puzzle" onSubmit={event => { event.preventDefault(); submit(); }}>
+        <div className={styles.cipherGridReadout} aria-live="polite"><span>{active ? "LIVE FIELD CIPHER" : game.status === "won" ? "CIPHER RESOLVED" : "CIPHER CLOSED"}</span><strong>{active ? "Build a five-letter field word" : game.status === "won" ? "Signal decoded" : game.status === "failed" ? "No attempts remain" : "Decode window expired"}</strong></div>
+        <div className={styles.cipherGridBoard} role="grid" aria-label="Cipher Grid attempts">
+          {Array.from({ length: CIPHER_GRID_MAX_ATTEMPTS }, (_, rowIndex) => {
+            const attempt = game.attempts[rowIndex];
+            const draft = active && rowIndex === game.attempts.length ? entry : "";
+            return <div key={rowIndex} className={styles.cipherGridRow} role="row">{Array.from({ length: CIPHER_GRID_WORD_LENGTH }, (_, columnIndex) => {
+              const letter = attempt?.guess[columnIndex] ?? draft[columnIndex] ?? "";
+              const mark = attempt?.marks[columnIndex];
+              return <span key={columnIndex} className={styles.cipherGridTile} role="gridcell" data-mark={mark} data-entry={Boolean(letter)} aria-label={`Attempt ${rowIndex + 1}, letter ${columnIndex + 1}${letter ? `: ${letter}` : ": blank"}`}>{letter}</span>;
+            })}</div>;
+          })}
+        </div>
+        <div className={styles.cipherGridEntry}>
+          <label htmlFor="cipher-grid-entry">Field word</label>
+          <input id="cipher-grid-entry" value={entry} disabled={busy || !active} onChange={event => normalize(event.target.value)}
+            autoCapitalize="characters" autoComplete="off" autoCorrect="off" inputMode="text" maxLength={CIPHER_GRID_WORD_LENGTH} placeholder="TYPE 5 LETTERS" />
+          <button type="submit" className={styles.primary} disabled={busy || !active || entry.length !== CIPHER_GRID_WORD_LENGTH}><KeyRound size={17} />Submit</button>
+        </div>
+        <div className={styles.cipherGridKeyboard} role="group" aria-label="Cipher Grid keyboard">
+          {CIPHER_GRID_KEYS.map(row => <div key={row}>{Array.from(row).map(letter => <button type="button" key={letter} className={styles.cipherGridKey}
+            data-mark={cipherGridKeyMark(payload, letter)} disabled={busy || !active || entry.length >= CIPHER_GRID_WORD_LENGTH} onClick={() => normalize(`${entry}${letter}`)}>{letter}</button>)}</div>)}
+          <div><button type="button" className={`${styles.cipherGridKey} ${styles.cipherGridWideKey}`} disabled={busy || !active || !entry} onClick={() => setEntry(value => value.slice(0, -1))}><X size={16} /><span>Backspace</span></button></div>
+        </div>
+        <p className={styles.cipherGridHint}>Teal means the right letter in the right slot. Amber means the letter belongs elsewhere. The server keeps the answer private.</p>
+      </form>
+      <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
+        {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Cipher resolved</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${CIPHER_GRID_REWARD.xp} XP and +${CIPHER_GRID_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice decode complete. Today's reward was already recorded." : "Decode complete."}</span></div></>
+          : game.status === "failed" ? <><Target size={22} /><div><strong>Signal lost</strong><span>Six guesses ended the decode. Existing Hub progress is unchanged.</span></div></>
+            : !active ? <><Clock3 size={22} /><div><strong>Decode expired</strong><span>Start a new field cipher when ready.</span></div></>
+              : <><Radio size={20} /><div><strong>Decode in progress</strong><span>Use the marks to narrow the DZN field word before the window closes.</span></div></>}
+      </div>
+    </> : !busy && !error && <div className={styles.cipherGridReady}><KeyRound size={34} /><h3>Decode the field signal.</h3><p>Find a five-letter DZN field word in six attempts. Only the verified server can award progression.</p><div className={styles.rewardPills}><span>6 attempts</span><span>+{CIPHER_GRID_REWARD.xp} XP</span><span>+{CIPHER_GRID_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 
