@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import {
   AlertTriangle,
   Bot,
@@ -638,9 +639,7 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionUiEnabled, 
   return (
     <article className={`py-4 ${muted ? "bg-amber-300/[0.035]" : ""}`}>
       <div className="flex items-start gap-3">
-        <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full border text-sm font-black ${muted ? "border-amber-200/25 bg-amber-300/10 text-amber-100" : "border-cyan-300/20 bg-cyan-300/10 text-cyan-100"}`}>
-          {initials(message.author_display_name)}
-        </span>
+        <MessageAvatar message={message} muted={muted} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-black text-white [overflow-wrap:anywhere]">{message.author_display_name}</h3>
@@ -697,6 +696,17 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionUiEnabled, 
         </div>
       </div>
     </article>
+  );
+}
+
+function MessageAvatar({ message, muted }: { message: CommsHistoryMessage; muted: boolean }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const avatarUrl = !muted && !imageFailed ? message.author_avatar_url : null;
+
+  return (
+    <span className={`grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border text-sm font-black ${muted ? "border-amber-200/25 bg-amber-300/10 text-amber-100" : "border-cyan-300/20 bg-cyan-300/10 text-cyan-100"}`}>
+      {avatarUrl ? <Image src={avatarUrl} alt="" width={40} height={40} unoptimized className="h-full w-full object-cover" onError={() => setImageFailed(true)} /> : initials(message.author_display_name)}
+    </span>
   );
 }
 

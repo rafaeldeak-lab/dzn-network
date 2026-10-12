@@ -33,6 +33,8 @@ type DznCommsMessageRow = {
   author_user_id: string | null;
   author_display_name: string | null;
   author_role_label: string | null;
+  author_discord_id: string | null;
+  author_avatar: string | null;
   body: string | null;
   visibility_state: "visible" | "hidden" | "deleted" | "quarantined" | "expired" | null;
   created_at: string | null;
@@ -411,15 +413,18 @@ async function readMessages(
 ): Promise<DznCommsMessageRow[]> {
   const result = await db
     .prepare(
-      `SELECT id, author_user_id, author_display_name, author_role_label, body, visibility_state, created_at, edited_at, expires_at
+      `SELECT messages.id, messages.author_user_id, messages.author_display_name, messages.author_role_label,
+        users.discord_id AS author_discord_id, users.avatar AS author_avatar,
+        messages.body, messages.visibility_state, messages.created_at, messages.edited_at, messages.expires_at
        FROM dzn_comms_messages AS messages
+       LEFT JOIN users ON users.id = messages.author_user_id
        WHERE messages.channel_id = ?
-         AND julianday(created_at) IS NOT NULL
-         AND id IS NOT NULL AND length(id) BETWEEN 1 AND 120
-         AND (? IS NULL OR julianday(created_at) < julianday(?) OR (julianday(created_at) = julianday(?) AND id < ?))
-         AND (? IS NULL OR julianday(created_at) < julianday(?))
-         AND visibility_state NOT IN ('deleted', 'expired')
-         AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
+         AND julianday(messages.created_at) IS NOT NULL
+         AND messages.id IS NOT NULL AND length(messages.id) BETWEEN 1 AND 120
+         AND (? IS NULL OR julianday(messages.created_at) < julianday(?) OR (julianday(messages.created_at) = julianday(?) AND messages.id < ?))
+         AND (? IS NULL OR julianday(messages.created_at) < julianday(?))
+         AND messages.visibility_state NOT IN ('deleted', 'expired')
+         AND (messages.expires_at IS NULL OR messages.expires_at = '' OR julianday(messages.expires_at) > julianday('now'))
          AND (? IS NULL OR EXISTS (
            SELECT 1
            FROM dzn_comms_private_group_members AS membership
@@ -427,7 +432,7 @@ async function readMessages(
              AND membership.user_id = ?
              AND membership.membership_state = 'active'
          ))
-       ORDER BY julianday(created_at) DESC, id DESC
+       ORDER BY julianday(messages.created_at) DESC, messages.id DESC
        LIMIT ?`,
     )
     .bind(
@@ -455,6 +460,7 @@ function publicSafeMessage(row: DznCommsMessageRow, reactions: DznCommsReactionS
     id: cleanText(row.id, 120),
     author_display_name: visible ? cleanText(row.author_display_name, 60) || "DZN Player" : "DZN Safety",
     author_role_label: visible ? cleanText(row.author_role_label, 24) || "Member" : "System",
+    author_avatar_url: visible ? discordAvatarUrl(row.author_discord_id, row.author_avatar) : null,
     body: visible ? cleanText(row.body, 2000) : placeholderForState(visibilityState),
     visibility_state: visibilityState,
     created_at: cleanNullableText(row.created_at, 40),
@@ -464,6 +470,11 @@ function publicSafeMessage(row: DznCommsMessageRow, reactions: DznCommsReactionS
     can_delete: visible && selfDeleteEnabled && currentUserId !== null && row.author_user_id === currentUserId,
     ...(visible && reactions ? { reactions } : {}),
   };
+}
+
+function discordAvatarUrl(discordId: string | null, avatar: string | null) {
+  if (!discordId || !avatar || !/^\d{5,25}$/.test(discordId) || !/^[A-Za-z0-9_]{1,128}$/.test(avatar)) return null;
+  return `https://cdn.discordapp.com/avatars/${encodeURIComponent(discordId)}/${encodeURIComponent(avatar)}.webp?size=128`;
 }
 
 function placeholderForState(state: DznCommsMessageRow["visibility_state"]) {

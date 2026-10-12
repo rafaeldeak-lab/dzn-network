@@ -23,6 +23,21 @@ test("accepts the current Global Chat projection and strips unknown properties a
   assert.equal("author_id" in parsed.messages[0], false); assert.equal("raw_body" in parsed.messages[0], false);
 });
 
+test("projects only a valid Discord avatar for a visible message", () => {
+  const input = commsHistoryFixture();
+  Object.assign(input.messages[0], { author_avatar_url: "https://cdn.discordapp.com/avatars/123456789012345678/avatar_hash.webp?size=128" });
+  const parsed = parseCommsHistory(input);
+  assert.equal(parsed.messages[0].author_avatar_url, "https://cdn.discordapp.com/avatars/123456789012345678/avatar_hash.webp?size=128");
+
+  const hidden = commsHistoryFixture();
+  Object.assign(hidden.messages[0], { visibility_state: "hidden", author_avatar_url: "https://cdn.discordapp.com/avatars/123456789012345678/avatar_hash.webp" });
+  assert.equal(parseCommsHistory(hidden).messages[0].author_avatar_url, undefined);
+
+  const untrusted = commsHistoryFixture();
+  Object.assign(untrusted.messages[0], { author_avatar_url: "https://example.test/avatar.webp" });
+  assert.equal(parseCommsHistory(untrusted).messages[0].author_avatar_url, undefined);
+});
+
 test("accepts only a membership-scoped private group projection", async () => {
   const input = mutableFixture();
   Object.assign(input.channel, { slug: "pandora-squad", kind: "private_group", name: "Pandora Squad", visibility: "private_group" });

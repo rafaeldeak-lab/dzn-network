@@ -10,6 +10,7 @@ export type CommsHistoryMessage = {
   id: string;
   author_display_name: string;
   author_role_label: string;
+  author_avatar_url?: string | null;
   body: string;
   visibility_state: "visible" | "hidden" | "deleted" | "quarantined" | "expired";
   created_at: string | null;
@@ -190,11 +191,13 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
       ? reactionSummary(row.reactions)
       : undefined;
     if (reactions === undefined && row.reactions !== undefined) throw unavailable();
+    const authorAvatarUrl = state === "visible" ? discordAvatarUrl(row.author_avatar_url) : null;
     return {
       id, visibility_state: state, public_safe: true as const, read_only: true as const,
       can_delete: state === "visible" && row.can_delete === true,
       author_display_name: state === "visible" ? name : "DZN Safety",
       author_role_label: state === "visible" ? role : "System",
+      ...(authorAvatarUrl ? { author_avatar_url: authorAvatarUrl } : {}),
       body: state === "visible" ? body : placeholder,
       created_at: timestamp(row.created_at), edited_at: timestamp(row.edited_at),
       ...(reactions ? { reactions } : {}),
@@ -218,6 +221,18 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
     },
     fairness_boundary: boundary,
   };
+}
+
+function discordAvatarUrl(value: unknown) {
+  if (typeof value !== "string" || value.length > 300) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "cdn.discordapp.com" && /^\/avatars\/\d{5,25}\/[A-Za-z0-9_]{1,128}\.webp$/.test(url.pathname)
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 async function readResponse(response: Response, signal: AbortSignal): Promise<CommsHistoryPayload> {

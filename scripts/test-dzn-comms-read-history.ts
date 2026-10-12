@@ -58,8 +58,8 @@ assert.deepEqual(helperWriteTargets, [], "DZN Comms read-history helper must con
 const helperSqlTargets = [...helper.matchAll(/\b(?:FROM|JOIN)\s+([a-z_]+)/gi)].map((match) => match[1]).sort();
 assert.deepEqual(
   [...new Set(helperSqlTargets)],
-  ["dzn_comms_channels", "dzn_comms_messages", "dzn_comms_private_group_members"],
-  "DZN Comms read-history helper may only read Comms read-model tables directly.",
+  ["dzn_comms_channels", "dzn_comms_messages", "dzn_comms_private_group_members", "users"],
+  "DZN Comms read-history helper may only read Comms data and the linked Discord-avatar projection.",
 );
 assert.match(helper, /request\.method !== "GET"/, "DZN Comms message history route must be GET-only.");
 assert.match(helper, /DZN_COMMS_MESSAGE_HISTORY_READ_ENABLED/, "Route must require an explicit server-side flag.");
@@ -71,7 +71,7 @@ assert.match(helper, /readDznCommsPrivateGroupFlags/, "Private group reads and d
 assert.match(helper, /LIMIT 20/, "Private group discovery must remain bounded.");
 assert.match(helper, /channel\.visibility === "support_private"\) return unavailableChannel\(\)/, "Private support history must remain indistinguishably unavailable in this slice.");
 assert.match(helper, /membership\.channel_id = messages\.channel_id[\s\S]*membership\.user_id = \?[\s\S]*membership\.membership_state = 'active'/, "The private message query must recheck active membership in the same SQL statement.");
-assert.match(helper, /julianday\(created_at\) = julianday\(\?\) AND id < \?/, "Pagination must break equal-timestamp ties with message ID.");
+assert.match(helper, /julianday\(messages\.created_at\) = julianday\(\?\) AND messages\.id < \?/, "Pagination must break equal-timestamp ties with message ID.");
 assert.match(helper, /encodeHistoryCursor\(lastRow\)/, "The API must issue an opaque cursor from the last row in the page.");
 assert.match(helper, /Use either before or cursor, not both/, "Legacy and opaque cursors must not be combined.");
 assert.match(helper, /sending_enabled: channel\.visibility === "private_group" \? privateGroupFlags\.enabled : flags\.writeFeaturesEnabled/, "Route payload must derive sending state from the protected channel-specific server flag.");
@@ -112,7 +112,7 @@ assert.match(historyClient, /credentials: "include"/, "The client should preserv
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_LIVE_UI_ENABLED/, "The live composer must retain an explicit public UI switch for development and controlled previews.");
 assert.match(shell, /selfDeleteUiEnabled = historyReady && payload\.feature_flags\.self_delete_enabled/, "Self-delete controls must require the verified server archive safeguard.");
 assert.match(shell, /const canDelete = deleteEnabled && message\.can_delete/, "Message rows must not expose or invoke self-delete outside the server-confirmed capability state.");
-assert.match(shell, /role="log"[\s\S]*max-h-\[58svh\][\s\S]*overflow-y-auto[\s\S]*overscroll-contain/, "The message rail must scroll internally so long chat history does not continuously expand the Community page.");
+assert.match(shell, /role="log"[\s\S]*max-h-\[52svh\][\s\S]*overflow-y-auto[\s\S]*overscroll-contain/, "The message rail must scroll internally so long chat history does not continuously expand the Community page.");
 assert.doesNotMatch(shell, /\b(?:sendBeacon|analytics|localStorage|sessionStorage|WebSocket|EventSource|DurableObject|OPENAI_API_KEY|AI_GATEWAY|stripe|checkout|DZN_LIVE_CHECKOUT_ENABLED)\b/i, "The /community shell must not track, call AI, or touch checkout.");
 assert.match(platformSpec, /DZN Comms\/support remains the next queued product area/i, "Master spec must keep DZN Comms in the queued product area.");
 assert.match(packageJson, /"test:dzn-comms-read-history": "tsx scripts\/test-dzn-comms-read-history\.ts && npm run test:dzn-comms-history-client"/, "Dedicated Comms read-history and client tests must be registered.");
@@ -664,6 +664,7 @@ class FakeD1PreparedStatement {
       const sqlite = new DatabaseSync(":memory:");
       try {
         sqlite.exec(`CREATE TABLE dzn_comms_messages (id TEXT, channel_id TEXT, author_user_id TEXT, author_display_name TEXT, author_role_label TEXT, body TEXT, visibility_state TEXT, created_at TEXT, edited_at TEXT, expires_at TEXT);
+          CREATE TABLE users (id TEXT, discord_id TEXT, username TEXT, avatar TEXT);
           CREATE TABLE dzn_comms_private_group_members (channel_id TEXT, user_id TEXT, role TEXT, membership_state TEXT);`);
         const insert = sqlite.prepare("INSERT INTO dzn_comms_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         for (const row of this.db.messages) insert.run(row.id, row.channel_id, null, row.author_display_name, row.author_role_label, row.body, row.visibility_state, row.created_at, row.edited_at, row.expires_at);
