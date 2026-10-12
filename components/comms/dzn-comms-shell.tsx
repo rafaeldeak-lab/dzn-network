@@ -365,14 +365,12 @@ export function DznCommsShell() {
       next.add(messageId);
       return next;
     });
-    const previousTimeout = deletionNoticeTimeoutsRef.current.get(messageId);
-    if (previousTimeout !== undefined) window.clearTimeout(previousTimeout);
+    // A newer deletion replaces any earlier placeholder, while the tombstones
+    // continue to hide every deleted row from the public chat.
+    for (const timeout of deletionNoticeTimeoutsRef.current.values()) window.clearTimeout(timeout);
+    deletionNoticeTimeoutsRef.current.clear();
 
-    setDeletionNotices((current) => {
-      const next = new Map(current);
-      next.set(messageId, { channelSlug: deletedChannelSlug, message: notice });
-      return next;
-    });
+    setDeletionNotices(new Map([[messageId, { channelSlug: deletedChannelSlug, message: notice }]]));
     setHistory((current) => ({
       ...current,
       payload: {
@@ -385,19 +383,14 @@ export function DznCommsShell() {
 
     const timeout = window.setTimeout(() => {
       deletionNoticeTimeoutsRef.current.delete(messageId);
-      setDeletionNotices((current) => {
-        if (!current.has(messageId)) return current;
-        const next = new Map(current);
-        next.delete(messageId);
-        return next;
-      });
+      setDeletionNotices((current) => current.has(messageId) ? new Map() : current);
       setHistory((current) => {
         if (current.payload.channel.slug !== deletedChannelSlug) return current;
         return {
           ...current,
           payload: {
             ...current.payload,
-            messages: current.payload.messages.filter((item) => item.id !== messageId),
+            messages: current.payload.messages.filter((item) => item.visibility_state !== "deleted"),
           },
         };
       });

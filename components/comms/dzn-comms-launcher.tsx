@@ -43,11 +43,11 @@ export function DznCommsLauncher() {
       <summary
         aria-label="Chat and Help"
         title="Chat and Help"
-        className="group flex h-12 min-w-12 list-none items-center justify-center gap-2 rounded-md border border-cyan-200/55 bg-[#07111f]/98 px-0 text-cyan-100 shadow-[0_0_0_3px_rgba(2,6,23,0.9),0_10px_28px_rgba(0,0,0,0.42),0_0_24px_rgba(34,211,238,0.24)] backdrop-blur-xl transition hover:border-white hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 sm:px-3 [&::-webkit-details-marker]:hidden"
+        className="group flex h-12 min-w-[8.5rem] list-none items-center justify-center gap-2 rounded-md border border-cyan-200/55 bg-[#07111f]/98 px-3 text-cyan-100 shadow-[0_0_0_3px_rgba(2,6,23,0.9),0_10px_28px_rgba(0,0,0,0.42),0_0_24px_rgba(34,211,238,0.24)] backdrop-blur-xl transition hover:border-white hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200 [&::-webkit-details-marker]:hidden"
       >
         <MessagesSquare className="h-5 w-5 group-open:hidden" aria-hidden="true" />
         <X className="hidden h-5 w-5 group-open:block" aria-hidden="true" />
-        <span className="sr-only text-left leading-none sm:not-sr-only">
+        <span className="text-left leading-none">
           <span className="block text-[0.7rem] font-black uppercase text-white">Chat &amp; Help</span>
           <span className="mt-1 block text-[0.62rem] font-bold uppercase text-cyan-200">Chat &amp; help</span>
         </span>
