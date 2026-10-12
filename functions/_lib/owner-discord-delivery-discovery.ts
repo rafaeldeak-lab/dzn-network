@@ -73,6 +73,7 @@ const DISCORD_VIEW_CHANNEL = DISCORD_PERMISSION_ONE << BigInt(10);
 const DISCORD_MANAGE_ROLES = DISCORD_PERMISSION_ONE << BigInt(28);
 const DISCORD_OWNER_DELIVERY_ASSIGNED_GUILD_PERMISSION_ALLOWLIST = DISCORD_MANAGE_ROLES;
 const DISCORD_OWNER_DELIVERY_EFFECTIVE_GUILD_PERMISSION_ALLOWLIST = DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
+const DISCORD_OWNER_DELIVERY_CHANNEL_PERMISSION_ALLOWLIST = DISCORD_CREATE_INSTANT_INVITE | DISCORD_VIEW_CHANNEL;
 
 /**
  * Finds only the identifiers needed for the owner-access delivery diagnostic.
@@ -172,6 +173,7 @@ export async function discoverOwnerDiscordDeliveryCandidates(
         const channelScopedPermissions = getBotChannelOverwritePermissions(channel, botRoleIds, botId);
         const canView = hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL) && hasPermission(channelScopedPermissions, DISCORD_VIEW_CHANNEL);
         const canCreateInvite = hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE) && hasPermission(channelScopedPermissions, DISCORD_CREATE_INSTANT_INVITE);
+        if (!privateToEveryone || !canView || !canCreateInvite || hasUnexpectedOwnerDeliveryChannelPermissions(channelScopedPermissions)) return null;
         return {
           id: String(channel.id ?? ""),
           name: safeChannelName(channel.name),
@@ -181,7 +183,7 @@ export async function discoverOwnerDiscordDeliveryCandidates(
           privateToEveryone,
         };
       })
-      .filter((channel) => Boolean(discordIdValue(channel.id)) && channel.privateToEveryone && channel.canView && channel.canCreateInvite)
+      .filter((channel): channel is NonNullable<typeof channel> => channel !== null && Boolean(discordIdValue(channel.id)))
       .sort((left, right) => left.name.localeCompare(right.name));
     const checks = {
       botTokenConfigured: true,
@@ -282,6 +284,10 @@ function hasUnexpectedOwnerDeliveryGuildPermissions(assignedPermissions: bigint,
     (assignedPermissions & ~DISCORD_OWNER_DELIVERY_ASSIGNED_GUILD_PERMISSION_ALLOWLIST) !== BigInt(0) ||
     (effectivePermissions & ~DISCORD_OWNER_DELIVERY_EFFECTIVE_GUILD_PERMISSION_ALLOWLIST) !== BigInt(0)
   );
+}
+
+function hasUnexpectedOwnerDeliveryChannelPermissions(permissions: bigint) {
+  return (permissions & ~DISCORD_OWNER_DELIVERY_CHANNEL_PERMISSION_ALLOWLIST) !== BigInt(0);
 }
 
 function evaluateChannelPermissions(base: bigint, channel: DiscordChannel, guildId: string, botRoleIds: Set<string>, botId: string) {

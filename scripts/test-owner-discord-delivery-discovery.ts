@@ -304,6 +304,36 @@ async function run() {
   assert.equal(unscopedPrivateGuildResult.status, "candidates_incomplete", "A private channel still needs the explicit bot-channel overwrite.");
   assert.equal(unscopedPrivateGuildResult.privateInviteChannelCandidates.length, 0);
 
+  const unsafeChannelOverwrites = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/api/v10/guilds/${guildId}/channels`) {
+      return Response.json([
+        {
+          id: privateInviteChannelId,
+          type: 0,
+          name: "unsafe-role-overwrite",
+          permission_overwrites: [
+            { id: guildId, type: 0, deny: viewChannel, allow: "0" },
+            { id: botRoleId, type: 0, deny: "0", allow: (BigInt(privateInviteChannelPermissions) | BigInt(manageChannels)).toString() },
+          ],
+        },
+        {
+          id: privateGuildChannelId,
+          type: 0,
+          name: "unsafe-member-overwrite",
+          permission_overwrites: [
+            { id: guildId, type: 0, deny: viewChannel, allow: "0" },
+            { id: botRoleId, type: 0, deny: "0", allow: privateInviteChannelPermissions },
+            { id: botId, type: 1, deny: "0", allow: manageChannels },
+          ],
+        },
+      ]);
+    }
+    return discordFetch(input, init);
+  });
+  assert.equal(unsafeChannelOverwrites.status, "candidates_incomplete", "Discovery must not offer private invite channels whose bot overwrites grant extra permissions.");
+  assert.equal(unsafeChannelOverwrites.privateInviteChannelCandidates.length, 0, "Both unsafe role and member overwrites must be excluded from configuration candidates.");
+
   const missingGuild = await discoverOwnerDiscordDeliveryCandidates(env, "invalid", discordFetch);
   assert.equal(missingGuild.status, "not_configured");
   assert.equal(missingGuild.checks.botIdentity, false);

@@ -268,6 +268,8 @@ async function run() {
     let activeEveryonePermissions = "0";
     let activeVerifiedOwnerRolePermissions = "0";
     let channelScopedPermissionsGranted = true;
+    let channelRoleOverwritePermissions = privateInviteChannelPermissions;
+    let channelMemberOverwrite: { allow: string; deny: string } | null = null;
     const calls: Array<{ path: string; method: string }> = [];
     const discordFetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = new URL(String(input));
@@ -304,7 +306,8 @@ async function run() {
             permission_overwrites: channelScopedPermissionsGranted
               ? [
                 { id: guildId, type: 0, deny: viewChannel.toString(), allow: "0" },
-                { id: botRoleId, type: 0, deny: "0", allow: privateInviteChannelPermissions },
+                { id: botRoleId, type: 0, deny: "0", allow: channelRoleOverwritePermissions },
+                ...(channelMemberOverwrite ? [{ id: botUserId, type: 1, deny: channelMemberOverwrite.deny, allow: channelMemberOverwrite.allow }] : []),
               ]
               : [],
           })
@@ -374,6 +377,19 @@ async function run() {
       assert.equal(missingChannelOverwriteDiagnostic.checks.canCreateInvite, false);
       assert.match(missingChannelOverwriteDiagnostic.message, /explicit private-channel overwrite/, "The diagnostic must explain the channel-scoped requirement.");
       channelScopedPermissionsGranted = true;
+
+      channelRoleOverwritePermissions = (BigInt(privateInviteChannelPermissions) | manageChannels).toString();
+      const unsafeRoleOverwriteDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
+      assert.equal(unsafeRoleOverwriteDiagnostic.ok, false, "An extra permission in the bot role's private-channel overwrite must block owner delivery.");
+      assert.equal(unsafeRoleOverwriteDiagnostic.checks.botHasUnexpectedInviteChannelPermissions, true);
+      assert.match(unsafeRoleOverwriteDiagnostic.message, /private-channel overwrite must grant only View Channel and Create Invite/, "The diagnostic must explain the private-channel permission allowlist.");
+      channelRoleOverwritePermissions = privateInviteChannelPermissions;
+
+      channelMemberOverwrite = { allow: manageChannels.toString(), deny: "0" };
+      const unsafeMemberOverwriteDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
+      assert.equal(unsafeMemberOverwriteDiagnostic.ok, false, "An extra permission in the bot member's private-channel overwrite must block owner delivery.");
+      assert.equal(unsafeMemberOverwriteDiagnostic.checks.botHasUnexpectedInviteChannelPermissions, true);
+      channelMemberOverwrite = null;
 
       activeBotPermissions = administrator.toString();
       const administratorDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
