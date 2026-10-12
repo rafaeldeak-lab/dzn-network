@@ -4,8 +4,8 @@ import Link from "next/link";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ArrowRight, Award, BookOpen, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, KeyRound, LoaderCircle,
-  LogIn, Microchip, MousePointer2, Play, Radio, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Award, BookOpen, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, KeyRound, LoaderCircle,
+  LogIn, Map, Microchip, MousePointer2, Play, Radio, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
 import { GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, HUB_EQUIPMENT, WORKSHOP_PART_COST, WORKSHOP_STAGES,
   hubEquipmentUnlocked, type GameMode, type GameView, type HubEquipment, type HubPayload } from "@/lib/games-hub";
@@ -15,11 +15,12 @@ import { HIDE_SEEK_REWARD, type HideSeekPayload } from "@/lib/games-hide-seek";
 import { RELAY_RUSH_LANES, RELAY_RUSH_REWARD, type RelayRushLane, type RelayRushPayload } from "@/lib/games-relay-rush";
 import { CIPHER_GRID_MAX_ATTEMPTS, CIPHER_GRID_REWARD, CIPHER_GRID_WORD_LENGTH, type CipherGridMark, type CipherGridPayload } from "@/lib/games-cipher-grid";
 import { ECHO_ARRAY_CUE_INTERVAL_MS, ECHO_ARRAY_CUE_LEAD_MS, ECHO_ARRAY_REWARD, type EchoArrayNode, type EchoArrayPayload } from "@/lib/games-echo-array";
+import { OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_REWARD, type OutpostRunDirection, type OutpostRunPayload } from "@/lib/games-outpost-run";
 import styles from "./games-hub.module.css";
 
 type View = "play" | "workshop" | "insignia" | "activity";
 type BoardView = "field" | "grid";
-type PlayGame = "minefield" | "trivia" | "word-chain" | "hide-seek" | "relay-rush" | "cipher-grid" | "echo-array";
+type PlayGame = "minefield" | "trivia" | "word-chain" | "hide-seek" | "relay-rush" | "cipher-grid" | "echo-array" | "outpost-run";
 const Minefield3D = dynamic(() => import("./minefield-3d").then(module => module.Minefield3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
@@ -34,6 +35,9 @@ const ECHO_ARRAY_NODE_META: Record<EchoArrayNode, { label: string; key: string }
   north: { label: "North array", key: "1" }, east: { label: "East array", key: "2" }, south: { label: "South array", key: "3" }, west: { label: "West array", key: "4" },
 };
 const ECHO_ARRAY_NODE_ORDER: EchoArrayNode[] = ["north", "east", "south", "west"];
+const OUTPOST_RUN_DIRECTION_META: Record<OutpostRunDirection, { label: string; icon: typeof ArrowUp }> = {
+  north: { label: "Move north", icon: ArrowUp }, east: { label: "Move east", icon: ArrowRight }, south: { label: "Move south", icon: ArrowDown }, west: { label: "Move west", icon: ArrowLeft },
+};
 
 export function GamesHub() {
   const [payload, setPayload] = useState<HubPayload | null>(null);
@@ -177,6 +181,7 @@ export function GamesHub() {
             <button aria-pressed={playGame === "relay-rush"} onClick={() => setPlayGame("relay-rush")}><Zap size={17} /><span><strong>Relay Rush</strong><small>Timed signal run</small></span></button>
             <button aria-pressed={playGame === "cipher-grid"} onClick={() => setPlayGame("cipher-grid")}><KeyRound size={17} /><span><strong>Cipher Grid</strong><small>Field-code puzzle</small></span></button>
             <button aria-pressed={playGame === "echo-array"} onClick={() => setPlayGame("echo-array")}><Microchip size={17} /><span><strong>Echo Array</strong><small>Memory signal run</small></span></button>
+            <button aria-pressed={playGame === "outpost-run"} onClick={() => setPlayGame("outpost-run")}><Map size={17} /><span><strong>Outpost Run</strong><small>Fog-grid extraction</small></span></button>
           </div>}
           {view === "play" && playGame === "minefield" && <section aria-labelledby="mines-title">
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">Minesweeper</h2></div><button className={styles.iconButton} title="Game rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
@@ -205,6 +210,7 @@ export function GamesHub() {
           {view === "play" && playGame === "relay-rush" && <RelayRushPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && playGame === "cipher-grid" && <CipherGridPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && playGame === "echo-array" && <EchoArrayPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && playGame === "outpost-run" && <OutpostRunPanel now={now} onProgress={() => void refresh()} />}
 
           {view === "workshop" && <section>
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>COLLECTION / PROJECT {(Math.floor((summary?.assemblies ?? 0) / 3) + 1).toString().padStart(2, "0")}</span><h2>Field relay workshop</h2></div><Hammer size={24} /></div>
@@ -225,7 +231,7 @@ export function GamesHub() {
           </section>}
 
           {view === "activity" && <section><div className={styles.sectionTitle}><div><span className={styles.eyebrow}>YOUR / REWARD HISTORY</span><h2>Recent activity</h2></div><Clock3 size={24} /></div>
-            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; const hideSeek = entry.kind === "hide-seek"; const relayRush = entry.kind === "relay-rush"; const cipherGrid = entry.kind === "cipher-grid"; const echoArray = entry.kind === "echo-array"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : hideSeek ? <Search size={20} /> : relayRush ? <Zap size={20} /> : cipherGrid ? <KeyRound size={20} /> : echoArray ? <Microchip size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : hideSeek ? "Signal Hunt cleared" : relayRush ? "Relay Rush completed" : cipherGrid ? "Cipher Grid decoded" : echoArray ? "Echo Array synchronised" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
+            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; const hideSeek = entry.kind === "hide-seek"; const relayRush = entry.kind === "relay-rush"; const cipherGrid = entry.kind === "cipher-grid"; const echoArray = entry.kind === "echo-array"; const outpostRun = entry.kind === "outpost-run"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : hideSeek ? <Search size={20} /> : relayRush ? <Zap size={20} /> : cipherGrid ? <KeyRound size={20} /> : echoArray ? <Microchip size={20} /> : outpostRun ? <Map size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : hideSeek ? "Signal Hunt cleared" : relayRush ? "Relay Rush completed" : cipherGrid ? "Cipher Grid decoded" : echoArray ? "Echo Array synchronised" : outpostRun ? "Outpost Run extracted" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
           </section>}
         </div>
 
@@ -653,6 +659,103 @@ function EchoArrayPanel({ now, onProgress }: { now: number; onProgress: () => vo
               : <><Radio size={20} /><div><strong>{revealing ? "Pattern live" : "Input open"}</strong><span>{revealing ? "Watch each illuminated node before the array unlocks." : "Replay the full pattern in its original order."}</span></div></>}
       </div>
     </> : !busy && !error && <div className={styles.echoArrayReady}><Microchip size={34} /><h3>Hold the tactical pattern.</h3><p>Replay three escalating field-signal arrays from memory. Progression is recorded only when the DZN server verifies the complete run.</p><div className={styles.rewardPills}><span>3 stages</span><span>+{ECHO_ARRAY_REWARD.xp} XP</span><span>+{ECHO_ARRAY_REWARD.parts} parts</span></div></div>}
+  </section>;
+}
+
+function OutpostRunPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+  const [payload, setPayload] = useState<OutpostRunPayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const generation = useRef(0);
+
+  const load = useCallback(async () => {
+    const sequence = ++generation.current;
+    try {
+      const response = await fetch("/api/games/outpost-run", { credentials: "include", cache: "no-store" });
+      const result = await response.json() as OutpostRunPayload & { error?: string };
+      if (!response.ok) throw new Error(result.error || "DZN Outpost Run is unavailable.");
+      if (sequence === generation.current) { setPayload(result); setError(""); }
+    } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Outpost Run is unavailable."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, []);
+
+  useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
+
+  const mutate = useCallback(async (body: Record<string, unknown>) => {
+    if (busy) return;
+    const sequence = ++generation.current; setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/games/outpost-run", { method: "POST", credentials: "include", cache: "no-store",
+        headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as OutpostRunPayload & { error?: string };
+      if (!response.ok) { setError(result.error || "That field command could not be recorded."); if (response.status === 409) void load(); return; }
+      if (sequence !== generation.current) return;
+      setPayload(result); onProgress();
+    } catch { if (sequence === generation.current) setError("That field command could not be recorded. Refresh before retrying."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [busy, load, onProgress]);
+
+  const game = payload?.game;
+  const clockNow = Math.max(now, payload?.serverTime ?? 0);
+  const available = Boolean(payload) && !error;
+  const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
+  const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5_000);
+  const revealed = new globalThis.Map((game?.visibleCells ?? []).map(cell => [`${cell.row}:${cell.column}`, cell.kind]));
+  const sendMove = useCallback((direction: OutpostRunDirection) => {
+    if (!game || !active || busy) return;
+    void mutate({ action: "move", gameId: game.id, version: game.version, direction });
+  }, [active, busy, game, mutate]);
+  const moveDisabled = (direction: OutpostRunDirection) => {
+    if (!game || !active || busy) return true;
+    if (direction === "north") return game.row === 0;
+    if (direction === "east") return game.column === game.gridSize - 1;
+    if (direction === "south") return game.row === game.gridSize - 1;
+    return game.column === 0;
+  };
+
+  return <section aria-labelledby="outpost-run-title" className={styles.outpostRunPanel}>
+    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>08 / FIELD EXTRACTION</span><h2 id="outpost-run-title">DZN Outpost Run</h2></div><Map size={24} /></div>
+    {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Outpost Run" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
+    <div className={styles.outpostRunTools}>
+      <div><strong>{game ? `Field grid ${game.moves} / ${game.maxMoves}` : "Fog-grid field extraction"}</strong><span>{game ? `${game.energy} stamina cells remaining` : "Reach the emergency relay before your field pack runs dry."}</span></div>
+      <button className={styles.primary} disabled={busy || !available || active || restartCoolingDown}
+        title={restartCoolingDown && !active ? "New outpost run available five seconds after the last start" : undefined}
+        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Run in progress" : game ? "New run" : "Start run"}</button>
+    </div>
+    {game ? <>
+      <div className={styles.outpostRunMeta}><span><ShieldCheck size={14} />{game.energy} / {game.maxEnergy} stamina</span><span><Map size={14} />{game.moves} / {game.maxMoves} field moves</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.outpostRunStage} data-status={game.status}>
+        <div className={styles.outpostRunReadout}><span>{active ? "FIELD SIGNAL / UNVERIFIED" : game.status === "won" ? "RELAY / SECURED" : "FIELD SIGNAL / CLOSED"}</span><strong>{active ? "Trace the emergency relay" : game.status === "won" ? "Extraction route completed" : game.status === "failed" ? "Field pack exhausted" : "Signal window expired"}</strong></div>
+        <div className={styles.outpostRunGrid} role="grid" aria-label="Outpost Run fog grid">
+          {Array.from({ length: game.gridSize * game.gridSize }, (_, index) => {
+            const row = Math.floor(index / game.gridSize); const column = index % game.gridSize;
+            const terrain = revealed.get(`${row}:${column}`);
+            const player = game.row === row && game.column === column;
+            const label = player ? "You" : terrain === "relay" ? "Emergency relay" : terrain === "hazard" ? "Hazard" : terrain === "start" ? "Field entry" : terrain === "clear" ? "Surveyed ground" : "Unknown terrain";
+            return <div key={`${row}:${column}`} role="gridcell" aria-label={`${label}, row ${row + 1}, column ${column + 1}`}
+              className={styles.outpostRunCell} data-terrain={terrain ?? "unknown"} data-player={player}>
+              {terrain === "relay" ? <Radio size={18} /> : terrain === "hazard" ? <Zap size={18} /> : terrain === "start" ? <Flag size={18} /> : terrain === "clear" ? <Check size={16} /> : <span>?</span>}
+              {player && <ShieldCheck className={styles.outpostRunPlayer} size={19} />}
+            </div>;
+          })}
+        </div>
+        <div className={styles.outpostRunCommand}>
+          <button className={styles.outpostRunScan} disabled={busy || !active || !game.scanAvailable}
+            onClick={() => void mutate({ action: "scan", gameId: game.id, version: game.version })}><Search size={16} />{game.scanHint ? `Scanner: ${game.scanHint.replace("-", " / ")}` : "Use field scanner"}</button>
+          <div className={styles.outpostRunControls} aria-label="Outpost movement controls">
+            {OUTPOST_RUN_DIRECTIONS.map(direction => { const meta = OUTPOST_RUN_DIRECTION_META[direction]; const DirectionIcon = meta.icon; return <button key={direction} type="button"
+              className={styles.outpostRunMove} data-direction={direction} disabled={moveDisabled(direction)} onClick={() => sendMove(direction)} title={meta.label} aria-label={meta.label}><DirectionIcon size={18} /></button>; })}
+          </div>
+        </div>
+        <p className={styles.outpostRunHint}>Only ground you enter becomes visible. Hazards drain one stamina cell; the scanner gives one coarse relay direction.</p>
+      </div>
+      <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
+        {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Relay secured</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${OUTPOST_RUN_REWARD.xp} XP and +${OUTPOST_RUN_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice run complete. Today's reward was already recorded." : "Outpost Run complete."}</span></div></>
+          : game.status === "failed" ? <><Target size={22} /><div><strong>Field pack exhausted</strong><span>Hazards or a lost route ended the extraction. Existing Hub progress is unchanged.</span></div></>
+            : !active ? <><Clock3 size={22} /><div><strong>Signal expired</strong><span>Start a new field run when you are ready.</span></div></>
+              : <><Radio size={20} /><div><strong>Extraction active</strong><span>{game.scanHint ? `Scanner points ${game.scanHint.replace("-", " and ")}.` : "Use the scanner once, then move through the fog grid."}</span></div></>}
+      </div>
+    </> : !busy && !error && <div className={styles.outpostRunReady}><Map size={34} /><h3>Hold the route through the unknown.</h3><p>Move through a live five-by-five field grid, manage stamina around hazards, and extract the emergency relay before the signal closes.</p><div className={styles.rewardPills}><span>Fog grid</span><span>+{OUTPOST_RUN_REWARD.xp} XP</span><span>+{OUTPOST_RUN_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 

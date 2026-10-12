@@ -1,0 +1,237 @@
+import { getSessionUser, requireDb } from "./db";
+import { json, methodNotAllowed, readBoundedJson } from "./http";
+import type { Env, SessionUser } from "./types";
+import {
+  OUTPOST_RUN_DIRECTIONS,
+  OUTPOST_RUN_GRID_SIZE,
+  OUTPOST_RUN_MAX_ENERGY,
+  OUTPOST_RUN_MAX_MOVES,
+  OUTPOST_RUN_MIN_MOVE_INTERVAL_MS,
+  OUTPOST_RUN_REWARD,
+  OUTPOST_RUN_START_COOLDOWN_MS,
+  OUTPOST_RUN_TTL_MS,
+  type OutpostRunCell,
+  type OutpostRunDirection,
+  type OutpostRunGame,
+  type OutpostRunPayload,
+} from "../../lib/games-outpost-run";
+
+const headers = { "Cache-Control": "private, no-store", Vary: "Cookie" };
+const reply = (body: unknown, status = 200) => json(body, { status, headers });
+const dayKey = (now: number) => new Date(now).toISOString().slice(0, 10);
+const isId = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9-]{36}$/i.test(value);
+const isDirection = (value: unknown): value is OutpostRunDirection => typeof value === "string" && (OUTPOST_RUN_DIRECTIONS as readonly string[]).includes(value);
+
+type Coordinate = { row: number; column: number };
+type OutpostLayout = { target: Coordinate; hazards: Coordinate[] };
+type OutpostRunRow = {
+  user_id: string;
+  id: string;
+  layout_json: string;
+  visited_json: string;
+  position_row: number;
+  position_column: number;
+  energy: number;
+  moves: number;
+  scanned: number;
+  status: "playing" | "won" | "failed";
+  version: number;
+  started_at: number;
+  updated_at: number;
+};
+
+const layouts: readonly OutpostLayout[] = [
+  { target: { row: 0, column: 4 }, hazards: [{ row: 1, column: 2 }, { row: 0, column: 2 }, { row: 2, column: 4 }] },
+  { target: { row: 4, column: 0 }, hazards: [{ row: 3, column: 2 }, { row: 4, column: 2 }, { row: 2, column: 0 }] },
+  { target: { row: 0, column: 0 }, hazards: [{ row: 1, column: 1 }, { row: 0, column: 2 }, { row: 2, column: 1 }] },
+  { target: { row: 4, column: 4 }, hazards: [{ row: 3, column: 3 }, { row: 4, column: 2 }, { row: 2, column: 3 }] },
+];
+
+function sameCoordinate(left: Coordinate, right: Coordinate) {
+  return left.row === right.row && left.column === right.column;
+}
+
+function isCoordinate(value: unknown): value is Coordinate {
+  return Boolean(value) && typeof value === "object" && Number.isInteger((value as Coordinate).row) && Number.isInteger((value as Coordinate).column)
+    && (value as Coordinate).row >= 0 && (value as Coordinate).row < OUTPOST_RUN_GRID_SIZE
+    && (value as Coordinate).column >= 0 && (value as Coordinate).column < OUTPOST_RUN_GRID_SIZE;
+}
+
+function parseLayout(value: string): OutpostLayout {
+  const parsed = JSON.parse(value) as unknown;
+  if (!parsed || typeof parsed !== "object" || !isCoordinate((parsed as OutpostLayout).target) || !Array.isArray((parsed as OutpostLayout).hazards)
+    || (parsed as OutpostLayout).hazards.length !== 3 || (parsed as OutpostLayout).hazards.some(hazard => !isCoordinate(hazard))) {
+    throw new Error("Invalid stored Outpost Run layout");
+  }
+  const layout = parsed as OutpostLayout;
+  const start = { row: 2, column: 2 };
+  if (sameCoordinate(layout.target, start) || layout.hazards.some(hazard => sameCoordinate(hazard, start) || sameCoordinate(hazard, layout.target))) {
+    throw new Error("Invalid stored Outpost Run layout");
+  }
+  return layout;
+}
+
+function parseVisited(value: string): Coordinate[] {
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > OUTPOST_RUN_MAX_MOVES + 1 || parsed.some(cell => !isCoordinate(cell))) {
+    throw new Error("Invalid stored Outpost Run visibility");
+  }
+  const visited = parsed as Coordinate[];
+  if (!sameCoordinate(visited[0], { row: 2, column: 2 })) throw new Error("Invalid stored Outpost Run visibility");
+  return visited;
+}
+
+function chooseLayout() {
+  const bytes = new Uint32Array(1);
+  const limit = Math.floor(0x1_0000_0000 / layouts.length) * layouts.length;
+  do { crypto.getRandomValues(bytes); } while (bytes[0] >= limit);
+  return layouts[bytes[0] % layouts.length];
+}
+
+function moveCoordinate(position: Coordinate, direction: OutpostRunDirection): Coordinate {
+  if (direction === "north") return { row: position.row - 1, column: position.column };
+  if (direction === "east") return { row: position.row, column: position.column + 1 };
+  if (direction === "south") return { row: position.row + 1, column: position.column };
+  return { row: position.row, column: position.column - 1 };
+}
+
+function scanHint(position: Coordinate, target: Coordinate) {
+  const vertical = target.row < position.row ? "north" : target.row > position.row ? "south" : "";
+  const horizontal = target.column < position.column ? "west" : target.column > position.column ? "east" : "";
+  return [vertical, horizontal].filter(Boolean).join("-") || "relay acquired";
+}
+
+function visibleCells(layout: OutpostLayout, visited: Coordinate[]): OutpostRunCell[] {
+  const seen = new Set<string>();
+  return visited.filter(cell => {
+    const key = `${cell.row}:${cell.column}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map(cell => ({ ...cell, kind: sameCoordinate(cell, { row: 2, column: 2 }) ? "start"
+    : sameCoordinate(cell, layout.target) ? "relay"
+      : layout.hazards.some(hazard => sameCoordinate(cell, hazard)) ? "hazard" : "clear" }));
+}
+
+function gameView(row: OutpostRunRow, now: number): OutpostRunGame {
+  const layout = parseLayout(row.layout_json);
+  const visited = parseVisited(row.visited_json);
+  if (!Number.isInteger(row.position_row) || !Number.isInteger(row.position_column) || row.position_row < 0 || row.position_row >= OUTPOST_RUN_GRID_SIZE
+    || row.position_column < 0 || row.position_column >= OUTPOST_RUN_GRID_SIZE || !Number.isInteger(row.energy) || row.energy < 0 || row.energy > OUTPOST_RUN_MAX_ENERGY
+    || !Number.isInteger(row.moves) || row.moves < 0 || row.moves > OUTPOST_RUN_MAX_MOVES || !Number.isInteger(row.scanned) || ![0, 1].includes(row.scanned)) {
+    throw new Error("Invalid stored Outpost Run state");
+  }
+  const status = row.status === "playing" && now >= row.started_at + OUTPOST_RUN_TTL_MS ? "expired" : row.status;
+  const position = { row: row.position_row, column: row.position_column };
+  return {
+    id: row.id,
+    version: row.version,
+    status,
+    gridSize: OUTPOST_RUN_GRID_SIZE,
+    row: position.row,
+    column: position.column,
+    energy: row.energy,
+    maxEnergy: OUTPOST_RUN_MAX_ENERGY,
+    moves: row.moves,
+    maxMoves: OUTPOST_RUN_MAX_MOVES,
+    scanHint: row.scanned ? scanHint(position, layout.target) : null,
+    scanAvailable: status === "playing" && row.scanned === 0,
+    visibleCells: visibleCells(layout, visited),
+    startedAt: row.started_at,
+    expiresAt: row.started_at + OUTPOST_RUN_TTL_MS,
+  };
+}
+
+async function readOutpostRun(db: D1Database, user: SessionUser, now: number, rewardGranted = false): Promise<OutpostRunPayload> {
+  const game = await db.prepare("SELECT * FROM dzn_outpost_run_sessions WHERE user_id = ?").bind(user.id).first<OutpostRunRow>();
+  const reward = await db.prepare("SELECT 1 AS rewarded FROM dzn_outpost_run_reward_ledger WHERE user_id = ? AND reward_key = ?")
+    .bind(user.id, dayKey(now)).first<{ rewarded: number }>();
+  return { serverTime: now, rewardedToday: reward?.rewarded === 1, rewardGranted, game: game ? gameView(game, now) : null };
+}
+
+export async function handleGamesOutpostRun(request: Request, env: Env): Promise<Response> {
+  if (!["GET", "POST"].includes(request.method)) return methodNotAllowed();
+  if (request.method === "POST" && request.headers.get("origin") !== new URL(request.url).origin) {
+    return reply({ error: "This request must come from DZN Network." }, 403);
+  }
+  try {
+    const user = await getSessionUser(env, request);
+    if (!user) return reply({ error: "Sign in with Discord to enter DZN Outpost Run." }, 401);
+    if (env.DZN_GAMES_HUB_ENABLED !== "true" || env.DZN_GAMES_OUTPOST_RUN_ENABLED !== "true") {
+      return reply({ error: "DZN Outpost Run is not open yet." }, 404);
+    }
+    const db = requireDb(env);
+    const now = Date.now();
+    if (request.method === "GET") return reply(await readOutpostRun(db, user, now));
+
+    const parsed = await readBoundedJson<Record<string, unknown>>(request, 1024);
+    if (!parsed.ok) return reply({ error: "Invalid Outpost Run request." }, parsed.status);
+    const body = parsed.value;
+    if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.action !== "string") {
+      return reply({ error: "Invalid Outpost Run request." }, 400);
+    }
+
+    let rewardGranted = false;
+    if (body.action === "start") {
+      if (Object.keys(body).length !== 1) return reply({ error: "Invalid Outpost Run request." }, 400);
+      const layout = chooseLayout();
+      const result = await db.prepare(`INSERT INTO dzn_outpost_run_sessions
+        (user_id, id, layout_json, visited_json, position_row, position_column, energy, moves, scanned, status, version, started_at, updated_at)
+        VALUES (?, ?, ?, ?, 2, 2, ?, 0, 0, 'playing', 0, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET id = excluded.id, layout_json = excluded.layout_json, visited_json = excluded.visited_json,
+        position_row = 2, position_column = 2, energy = excluded.energy, moves = 0, scanned = 0, status = 'playing', version = 0,
+        started_at = excluded.started_at, updated_at = excluded.updated_at
+        WHERE dzn_outpost_run_sessions.started_at <= ?`)
+        .bind(user.id, crypto.randomUUID(), JSON.stringify(layout), JSON.stringify([{ row: 2, column: 2 }]), OUTPOST_RUN_MAX_ENERGY, now, now, now - OUTPOST_RUN_START_COOLDOWN_MS).run();
+      if (!result.meta.changes) return reply({ error: "Wait a few seconds before starting another outpost run." }, 429);
+    } else if (body.action === "scan" || body.action === "move") {
+      const expectedKeys = body.action === "scan" ? ["action", "gameId", "version"] : ["action", "gameId", "version", "direction"];
+      const keys = Object.keys(body);
+      if (keys.length !== expectedKeys.length || keys.some(key => !expectedKeys.includes(key)) || !isId(body.gameId) || !Number.isInteger(body.version)
+        || (body.action === "move" && !isDirection(body.direction))) return reply({ error: "Choose a valid Outpost Run command." }, 400);
+      const row = await db.prepare("SELECT * FROM dzn_outpost_run_sessions WHERE user_id = ?").bind(user.id).first<OutpostRunRow>();
+      if (!row || row.id !== body.gameId) return reply({ error: "This outpost run is not available." }, 404);
+      if (row.status !== "playing" || row.version !== body.version || row.moves >= OUTPOST_RUN_MAX_MOVES || now >= row.started_at + OUTPOST_RUN_TTL_MS) {
+        return reply({ error: "This outpost run changed or ended. Refresh to continue." }, 409);
+      }
+      if (now < row.updated_at + OUTPOST_RUN_MIN_MOVE_INTERVAL_MS) return reply({ error: "Take a moment before the next field command." }, 429);
+      const layout = parseLayout(row.layout_json);
+      if (body.action === "scan") {
+        if (row.scanned) return reply({ error: "The portable scanner has already been used on this run." }, 409);
+        const result = await db.prepare(`UPDATE dzn_outpost_run_sessions SET scanned = 1, version = version + 1, updated_at = ?
+          WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing' AND started_at > ?`)
+          .bind(now, user.id, row.id, row.version, now - OUTPOST_RUN_TTL_MS).run();
+        if (!result.meta.changes) return reply({ error: "Another command reached this run first. Refresh to continue." }, 409);
+      } else {
+        const current = { row: row.position_row, column: row.position_column };
+        const direction = body.direction as OutpostRunDirection;
+        const next = moveCoordinate(current, direction);
+        if (!isCoordinate(next)) return reply({ error: "That route leaves the field grid." }, 400);
+        const visited = parseVisited(row.visited_json);
+        const terrainHazard = layout.hazards.some(hazard => sameCoordinate(hazard, next));
+        const energy = row.energy - (terrainHazard ? 1 : 0);
+        const moves = row.moves + 1;
+        const reachedRelay = sameCoordinate(layout.target, next);
+        const status: OutpostRunRow["status"] = reachedRelay ? "won" : energy <= 0 || moves >= OUTPOST_RUN_MAX_MOVES ? "failed" : "playing";
+        const update = db.prepare(`UPDATE dzn_outpost_run_sessions
+          SET visited_json = ?, position_row = ?, position_column = ?, energy = ?, moves = ?, status = ?, version = version + 1, updated_at = ?
+          WHERE user_id = ? AND id = ? AND version = ? AND status = 'playing' AND started_at > ?`)
+          .bind(JSON.stringify([...visited, next]), next.row, next.column, energy, moves, status, now, user.id, row.id, row.version, now - OUTPOST_RUN_TTL_MS);
+        const statements = [update];
+        if (status === "won") {
+          statements.push(db.prepare(`INSERT INTO dzn_outpost_run_reward_ledger
+            (id, user_id, reward_key, game_id, xp, parts, created_at)
+            SELECT ?, ?, ?, ?, ?, ?, ? WHERE changes() = 1
+            ON CONFLICT(user_id, reward_key) DO NOTHING`)
+            .bind(crypto.randomUUID(), user.id, dayKey(now), row.id, OUTPOST_RUN_REWARD.xp, OUTPOST_RUN_REWARD.parts, now));
+        }
+        const result = await db.batch(statements);
+        if (!result[0].meta.changes) return reply({ error: "Another command reached this run first. Refresh to continue." }, 409);
+        rewardGranted = status === "won" && Boolean(result[1]?.meta.changes);
+      }
+    } else return reply({ error: "Unknown Outpost Run action." }, 400);
+    return reply(await readOutpostRun(db, user, now, rewardGranted));
+  } catch {
+    return reply({ error: "DZN Outpost Run is temporarily unavailable. Your Hub progress is unchanged." }, 503);
+  }
+}

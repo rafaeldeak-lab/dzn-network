@@ -313,6 +313,42 @@
 .echoArrayReady { min-height: 270px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 35px 20px; border-block: 1px solid #303738; color: var(--muted); text-align: center; }
 .echoArrayReady svg { color: var(--cyan); }
 .echoArrayReady p { max-width: 490px; }
+.outpostRunTools { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 0; border-block: 1px solid #303738; }
+.outpostRunTools > div { display: grid; gap: 4px; }
+.outpostRunTools strong { font-size: 13px; }
+.outpostRunTools span { color: var(--muted); font-size: 11px; }
+.outpostRunMeta { display: flex; gap: 18px; padding: 14px 0; color: var(--muted); font-size: 11px; }
+.outpostRunMeta span { display: inline-flex; align-items: center; gap: 5px; }
+.outpostRunMeta span:last-child { margin-left: auto; }
+.outpostRunStage { position: relative; isolation: isolate; display: grid; gap: 12px; overflow: hidden; padding: 22px; border: 1px solid #465759; border-radius: 6px; background: #0c1213; }
+.outpostRunStage::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background-image: radial-gradient(circle at 50% 0, #5475862e, transparent 45%), repeating-linear-gradient(0deg, transparent 0 40px, #5ebeb30d 41px 42px), repeating-linear-gradient(90deg, transparent 0 40px, #5ebeb308 41px 42px); }
+.outpostRunReadout { display: grid; gap: 5px; text-align: center; }
+.outpostRunReadout > span { color: var(--muted); font: 10px var(--font-geist-mono), monospace; font-weight: 800; }
+.outpostRunReadout > strong { color: #eef6f5; font-size: clamp(18px, 3vw, 26px); }
+.outpostRunGrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; width: min(100%, 390px); aspect-ratio: 1; margin: 0 auto; padding: 5px; border: 1px solid #466566; border-radius: 5px; background: #071011; }
+.outpostRunCell { position: relative; display: grid; place-items: center; min-width: 0; min-height: 0; border: 1px solid #2e4142; border-radius: 3px; color: #60787a; background: #111d1e; }
+.outpostRunCell > span { font: 12px var(--font-geist-mono), monospace; font-weight: 800; }
+.outpostRunCell[data-terrain=clear] { color: #8db6b7; background: #173033; }
+.outpostRunCell[data-terrain=start] { color: #dfd579; background: #38351b; }
+.outpostRunCell[data-terrain=hazard] { color: #ffad68; background: #422619; border-color: #83522f; }
+.outpostRunCell[data-terrain=relay] { color: #79f5df; background: #143c38; border-color: #55cdbb; }
+.outpostRunCell[data-player=true] { border-color: #f0f6f4; box-shadow: inset 0 0 0 1px #f0f6f4a3, 0 0 16px #4de5d848; }
+.outpostRunPlayer { position: absolute; color: #ffffff; filter: drop-shadow(0 1px 5px #000); }
+.outpostRunCommand { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; }
+.outpostRunScan { min-width: 0; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 9px 12px; border: 1px solid #3e7776; border-radius: 5px; color: #bdf8ef; background: #113130; font-size: 11px; font-weight: 800; }
+.outpostRunScan:not(:disabled):hover, .outpostRunScan:not(:disabled):focus-visible { border-color: #87fff0; background: #18423f; outline: 2px solid #ffffff; outline-offset: 2px; }
+.outpostRunControls { display: grid; grid-template-columns: repeat(3, 40px); grid-template-areas: ". north ." "west south east"; gap: 5px; }
+.outpostRunMove { display: grid; place-items: center; width: 40px; height: 36px; border: 1px solid #3f5657; border-radius: 4px; color: #d5e2e2; background: #172122; }
+.outpostRunMove[data-direction=north] { grid-area: north; }
+.outpostRunMove[data-direction=east] { grid-area: east; }
+.outpostRunMove[data-direction=south] { grid-area: south; }
+.outpostRunMove[data-direction=west] { grid-area: west; }
+.outpostRunMove:not(:disabled):hover, .outpostRunMove:not(:disabled):focus-visible { border-color: #80f0df; color: #eafffb; background: #28504c; outline: 2px solid #ffffff; outline-offset: 2px; }
+.outpostRunMove:disabled, .outpostRunScan:disabled { cursor: not-allowed; opacity: .52; }
+.outpostRunHint { margin: 0; color: var(--muted); font-size: 11px !important; text-align: center; }
+.outpostRunReady { min-height: 270px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 35px 20px; border-block: 1px solid #303738; color: var(--muted); text-align: center; }
+.outpostRunReady svg { color: var(--cyan); }
+.outpostRunReady p { max-width: 490px; }
 .cipherGridTools { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 0; border-block: 1px solid #303738; }
 .cipherGridTools > div { display: grid; gap: 4px; }
 .cipherGridTools strong { font-size: 13px; }
@@ -372,7 +408,7 @@
 @media (max-width: 760px) { .hub { padding: 22px 18px 100px; } .hub h1 { font-size: 29px; } .heading { gap: 16px; } .identity { width: 100%; } .identity .smallInsignia { width: 46px; } .identity > div { flex: 1; max-width: none; } .topline { margin-bottom: 24px; } .tabs { width: 100%; justify-content: space-between; gap: 8px; } .tabs a { font-size: 12px; gap: 5px; } .balances { width: 100%; justify-content: flex-end; border-top: 1px solid #293234; } .layout { display: flex; flex-direction: column; gap: 30px; } .mainColumn, .sidebar { width: 100%; } .sidebar { padding: 25px 0 0; border-left: 0; border-top: 1px solid #303738; } .gameTools { gap: 10px; } .gameTools label { min-width: 135px; } .gameTools .primary { flex: 1; } .gameTools > .primary { font-size: 12px; padding: 10px; } .gameTools > label { flex-basis: 100%; } .gameTools > .primary, .toolSwitch { margin-top: 0; } .boardStatus { gap: 14px; font-size: 11px; } .boardViewSwitch { width: 100%; } .boardViewSwitch button { flex: 1; min-width: 0; padding-inline: 8px; } .hub :global(.dzn-minefield-3d) { aspect-ratio: 4 / 5; min-height: 410px; max-height: 560px; } .boardScroll { padding-inline: 2px; } .board { gap: 2px; padding: 5px; } .cell { font-size: 12px; } .cell svg { width: 13px; height: 13px; } .gate { flex-direction: column; align-items: flex-start; gap: 0; padding: 10px 0 45px; } .gateArt .insignia { width: 150px; } .gate h2 { font-size: 23px; } .projectTeaser { max-width: 420px; } .badges { gap: 12px; } .badges h3 { font-size: 13px; } .badgeState { font-size: 9px; } .equipmentRack { grid-template-columns: 1fr; } .equipmentRack article:last-child { grid-column: auto; } .readyBoard { min-height: 300px; } .relayRushStage { min-height: 330px; aspect-ratio: auto; } }
 @media (max-width: 760px) { .gamePicker { grid-template-columns: repeat(2, minmax(0, 1fr)); } .gamePicker button { gap: 8px; padding-inline: 10px; } .gamePicker strong { font-size: 12px; } .gamePicker small { font-size: 10px; } }
 @media (max-width: 360px) { .gamePicker { grid-template-columns: 1fr; } }
-@media (max-width: 560px) { .triviaChoices, .chainFeed ol { grid-template-columns: 1fr; } .triviaQuestion h3 { font-size: 18px; } .chainForm > div, .hideSeekTools, .relayRushTools, .echoArrayTools, .cipherGridTools { align-items: stretch; flex-direction: column; } .hideSeekTarget { width: 32px; height: 32px; } .relayRushStage, .echoArrayStage { min-height: 320px; padding: 16px 12px; } .relayRushLanes { gap: 7px; } .relayRushLane { min-height: 126px; padding-inline: 4px; } .relayRushLane strong { font-size: 12px; } .echoArrayNodes { gap: 8px; padding: 18px 0; } .echoArrayNode { min-height: 106px; } .echoArrayNode strong { font-size: 12px; } .relayRushMeta, .echoArrayMeta, .cipherGridMeta { gap: 10px; } .cipherGridStage { padding: 16px 10px; } .cipherGridBoard { gap: 5px; } .cipherGridRow { gap: 5px; } .cipherGridEntry { grid-template-columns: 1fr; } .cipherGridEntry label { text-align: center; } .cipherGridEntry .primary { justify-content: center; } .cipherGridKey { height: 35px; } .cipherGridWideKey { min-width: 118px; } }
+@media (max-width: 560px) { .triviaChoices, .chainFeed ol { grid-template-columns: 1fr; } .triviaQuestion h3 { font-size: 18px; } .chainForm > div, .hideSeekTools, .relayRushTools, .echoArrayTools, .outpostRunTools, .cipherGridTools { align-items: stretch; flex-direction: column; } .hideSeekTarget { width: 32px; height: 32px; } .relayRushStage, .echoArrayStage { min-height: 320px; padding: 16px 12px; } .outpostRunStage { padding: 16px 12px; } .relayRushLanes { gap: 7px; } .relayRushLane { min-height: 126px; padding-inline: 4px; } .relayRushLane strong { font-size: 12px; } .echoArrayNodes { gap: 8px; padding: 18px 0; } .echoArrayNode { min-height: 106px; } .echoArrayNode strong { font-size: 12px; } .outpostRunMeta { gap: 10px; } .outpostRunCommand { grid-template-columns: 1fr; } .outpostRunControls { justify-content: center; } .relayRushMeta, .echoArrayMeta, .cipherGridMeta { gap: 10px; } .cipherGridStage { padding: 16px 10px; } .cipherGridBoard { gap: 5px; } .cipherGridRow { gap: 5px; } .cipherGridEntry { grid-template-columns: 1fr; } .cipherGridEntry label { text-align: center; } .cipherGridEntry .primary { justify-content: center; } .cipherGridKey { height: 35px; } .cipherGridWideKey { min-width: 118px; } }
 @media (max-width: 760px) { .environment { height: 600px; } .environmentFrame { width: 960px; left: 55%; top: 0; transform: translateX(-55%); } .heading { min-height: 190px; align-content: center; } .navActions { gap: 8px; } .navActions a { font-size: 11px; gap: 5px; } .hubNav .homeButton { width: 140px; height: 54px; } }
 @media (max-width: 760px) { .boardChassis { padding-inline: 5px; } .board { padding: 3px; } }
 @media (prefers-reduced-motion: reduce) { .spinner, .environment [data-animated], .relayRushStage[data-ready=true]::after { animation: none; } .weatherWindow, .radioSweep, .beacon, .workLight { display: none; } }
