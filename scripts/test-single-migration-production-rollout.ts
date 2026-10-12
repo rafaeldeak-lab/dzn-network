@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const workflow = readFileSync(".github/workflows/dzn-single-migration-production-rollout.yml", "utf8");
 const controller = readFileSync("scripts/dzn-single-migration-production-rollout.ts", "utf8");
@@ -103,5 +105,58 @@ assert.match(controller, /Expected Wrangler JSON array/);
 assert.doesNotMatch(controller, /migrations apply/i);
 assert.doesNotMatch(controller, /CLOUDFLARE_API_TOKEN/);
 assert.doesNotMatch(controller, /wrangler\s+d1/i);
+
+const migrationNames = readdirSync("migrations")
+  .filter((name) => /^\d{4}_.+\.sql$/.test(name))
+  .sort((left, right) => left.localeCompare(right));
+const relayRushIndex = migrationNames.indexOf("0096_games_hub_relay_rush.sql");
+assert.ok(relayRushIndex > 0, "Relay Rush must have an established predecessor.");
+
+function verifyLedger(names: string[]) {
+  const directory = mkdtempSync(join(process.cwd(), ".dzn-migration-ledger-test-"));
+  const ledgerPath = join(directory, "ledger.json");
+  writeFileSync(ledgerPath, JSON.stringify([{ results: names.map((name) => ({ name })) }]), "utf8");
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "node_modules/tsx/dist/cli.mjs",
+        "scripts/dzn-single-migration-production-rollout.ts",
+        "verify-ledger",
+        "--migration",
+        "0096_games_hub_relay_rush.sql",
+        "--ledger",
+        ledgerPath,
+        "--phase",
+        "before",
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.error, undefined, `Could not run the ledger verifier: ${result.error?.message ?? "unknown error"}`);
+    return { status: result.status, output: `${result.stdout ?? ""}${result.stderr ?? ""}` };
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+}
+
+const expectedBeforeRelayRush = migrationNames.slice(0, relayRushIndex);
+const historicalLedgerOrder = expectedBeforeRelayRush.filter((name) => name !== "0065_dzn_comms_read_history.sql");
+historicalLedgerOrder.splice(
+  historicalLedgerOrder.indexOf("0076_public_profile_discord_identity_consent.sql") + 1,
+  0,
+  "0065_dzn_comms_read_history.sql",
+);
+
+const reorderedLedger = verifyLedger(historicalLedgerOrder);
+assert.equal(reorderedLedger.status, 0, reorderedLedger.output);
+assert.match(reorderedLedger.output, /ledger before verification passed/);
+
+const missingLedger = verifyLedger(historicalLedgerOrder.filter((name) => name !== "0095_dzn_owner_discord_delivery.sql"));
+assert.notEqual(missingLedger.status, 0, "The verifier must reject a missing predecessor migration.");
+assert.match(missingLedger.output, /Missing names: 0095_dzn_owner_discord_delivery\.sql/);
+
+const unexpectedLedger = verifyLedger([...historicalLedgerOrder, "9999_unexpected.sql"]);
+assert.notEqual(unexpectedLedger.status, 0, "The verifier must reject an unexpected migration name.");
+assert.match(unexpectedLedger.output, /Unexpected names: 9999_unexpected\.sql/);
 
 console.log("Single-migration production rollout safety tests passed.");

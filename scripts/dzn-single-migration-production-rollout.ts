@@ -310,8 +310,16 @@ function verifyLedger(migrationName: string, ledgerPath: string, phase: string) 
   const applied = readRows(ledgerPath).map((row) => String(row.name ?? "")).filter(Boolean);
   if (new Set(applied).size !== applied.length) throw new Error("Production migration ledger contains duplicate names.");
   const expected = migrations.slice(0, phase === "before" ? targetIndex : targetIndex + 1);
-  if (JSON.stringify(applied) !== JSON.stringify(expected)) {
-    throw new Error(`Production ledger mismatch before ${migrationName} ${phase} verification. Expected ${JSON.stringify(expected)}, received ${JSON.stringify(applied)}.`);
+  const appliedNames = new Set(applied);
+  const expectedNames = new Set(expected);
+  const missing = expected.filter((name) => !appliedNames.has(name));
+  const unexpected = applied.filter((name) => !expectedNames.has(name));
+  if (missing.length > 0 || unexpected.length > 0) {
+    throw new Error(
+      `Production ledger membership mismatch for ${migrationName} ${phase} verification. ` +
+        `Missing names: ${missing.join(", ") || "(none)"}. ` +
+        `Unexpected names: ${unexpected.join(", ") || "(none)"}.`,
+    );
   }
   console.log(`Production migration ledger ${phase} verification passed for ${migrationName}.`);
 }
