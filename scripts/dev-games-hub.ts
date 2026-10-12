@@ -9,6 +9,7 @@ import { handleGamesRelayRush } from "../functions/_lib/games-relay-rush";
 import { handleGamesCipherGrid } from "../functions/_lib/games-cipher-grid";
 import { handleGamesEchoArray } from "../functions/_lib/games-echo-array";
 import { handleGamesOutpostRun } from "../functions/_lib/games-outpost-run";
+import { handleGamesSignalShift } from "../functions/_lib/games-signal-shift";
 import { gamesFixture } from "./lib/games-hub-local";
 
 // Loopback-only, disposable synthetic account. Never use production bindings or credentials.
@@ -21,6 +22,7 @@ async function main() {
   fixture.db.sqlite.exec(await readFile("migrations/0097_games_hub_cipher_grid.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0098_games_hub_echo_array.sql", "utf8"));
   fixture.db.sqlite.exec(await readFile("migrations/0099_games_hub_outpost_run.sql", "utf8"));
+  fixture.db.sqlite.exec(await readFile("migrations/0100_games_hub_signal_shift.sql", "utf8"));
   fixture.env.DZN_GAMES_TRIVIA_ENABLED = "true";
   fixture.env.DZN_GAMES_WORD_CHAIN_ENABLED = "true";
   fixture.env.DZN_GAMES_HIDE_SEEK_ENABLED = "true";
@@ -28,6 +30,7 @@ async function main() {
   fixture.env.DZN_GAMES_CIPHER_GRID_ENABLED = "true";
   fixture.env.DZN_GAMES_ECHO_ARRAY_ENABLED = "true";
   fixture.env.DZN_GAMES_OUTPOST_RUN_ENABLED = "true";
+  fixture.env.DZN_GAMES_SIGNAL_SHIFT_ENABLED = "true";
   const root = resolve("out");
   await stat(resolve(root, "games.html"));
   const mime: Record<string, string> = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json",
@@ -40,7 +43,7 @@ async function main() {
       if (url.pathname === "/__local-login") {
         res.writeHead(303, { "Set-Cookie": `${fixture.cookie}; Path=/; HttpOnly; SameSite=Strict`, Location: "/games", "Cache-Control": "no-store" }); res.end(); return;
       }
-      if (["/api/games/hub", "/api/games/trivia", "/api/games/word-chain", "/api/games/hide-seek", "/api/games/relay-rush", "/api/games/cipher-grid", "/api/games/echo-array", "/api/games/outpost-run"].includes(url.pathname)) {
+      if (["/api/games/hub", "/api/games/trivia", "/api/games/word-chain", "/api/games/hide-seek", "/api/games/relay-rush", "/api/games/cipher-grid", "/api/games/echo-array", "/api/games/outpost-run", "/api/games/signal-shift"].includes(url.pathname)) {
         const chunks: Buffer[] = []; let bytes = 0;
         for await (const chunk of req) { bytes += chunk.length; if (bytes > 4096) { res.writeHead(413); res.end(); return; } chunks.push(chunk); }
         const handler = url.pathname.endsWith("/trivia") ? handleGamesTrivia
@@ -49,7 +52,8 @@ async function main() {
               : url.pathname.endsWith("/relay-rush") ? handleGamesRelayRush
                 : url.pathname.endsWith("/cipher-grid") ? handleGamesCipherGrid
                   : url.pathname.endsWith("/echo-array") ? handleGamesEchoArray : handleGamesHub;
-        const responseHandler = url.pathname.endsWith("/outpost-run") ? handleGamesOutpostRun : handler;
+        const responseHandler = url.pathname.endsWith("/outpost-run") ? handleGamesOutpostRun
+          : url.pathname.endsWith("/signal-shift") ? handleGamesSignalShift : handler;
         const response = await responseHandler(new Request(url, { method: req.method, headers: {
           cookie: req.headers.cookie ?? "", origin: req.headers.origin ?? "", "content-type": req.headers["content-type"] ?? "",
         }, body: req.method === "POST" ? Buffer.concat(chunks) : undefined }), fixture.env);

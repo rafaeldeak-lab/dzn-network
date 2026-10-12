@@ -43,6 +43,7 @@ function seedParts(f: Fixture, count = 12) {
 async function run() {
   assert.match(gamesHubSource, /href="\/community"/, "Games Hub must retain a direct route to DZN Community chat and help.");
   assert.match(gamesHubSource, /MessageCircle/, "The Games Hub Community route must remain visually identifiable.");
+  assert.match(gamesHubSource, /Signal Shift/, "Games Hub must retain the server-verified Signal Shift route.");
   assert.match(gamesHubSource, /aria-label=\{item\.label\} title=\{item\.label\}/, "Compact Games Hub tabs must keep an accessible text name when their label is hidden on the narrowest phones.");
   await test("equipment collection unlocks only at verified XP and assembly thresholds", async () => {
     assert.deepEqual(HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, { xp: 0, assemblies: 0 })).map(item => item.id), []);
@@ -64,6 +65,7 @@ async function run() {
       DZN_GAMES_CIPHER_GRID_ENABLED: "false",
       DZN_GAMES_ECHO_ARRAY_ENABLED: "false",
       DZN_GAMES_OUTPOST_RUN_ENABLED: "false",
+      DZN_GAMES_SIGNAL_SHIFT_ENABLED: "false",
       DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED: "true",
     });
     assert.deepEqual({ ...preview.vars }, {});
