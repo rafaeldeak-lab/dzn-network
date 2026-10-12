@@ -270,9 +270,6 @@ async function runExecutableModerationTransactions() {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("PRAGMA foreign_keys = ON");
   sqlite.exec(readFileSync("migrations/0001_initial_schema.sql", "utf8"));
-  sqlite.exec(
-    "ALTER TABLE linked_servers ADD COLUMN merged_into_server_id TEXT",
-  );
   sqlite.exec(readFileSync("migrations/0010_server_reviews.sql", "utf8"));
   sqlite.exec("CREATE TABLE competitive_events (id TEXT PRIMARY KEY)");
   sqlite.exec(readFileSync("migrations/0052_dzn_pulse.sql", "utf8"));

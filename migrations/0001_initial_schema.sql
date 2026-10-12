@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS linked_servers (
   region TEXT,
   status TEXT DEFAULT 'pending',
   public_slug TEXT UNIQUE,
+  merged_into_server_id TEXT,
+  merged_at TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(user_id) REFERENCES users(id)

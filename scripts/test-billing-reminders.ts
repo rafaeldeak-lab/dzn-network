@@ -17,7 +17,6 @@ async function fixture() {
   const { db, env } = createCheckoutFixture();
   db.sqlite.exec(readFileSync("migrations/0001_initial_schema.sql", "utf8"));
   db.sqlite.exec(`
-    ALTER TABLE linked_servers ADD COLUMN merged_into_server_id TEXT;
     ALTER TABLE linked_servers ADD COLUMN display_name TEXT;
     ALTER TABLE linked_servers ADD COLUMN hostname TEXT;
     CREATE TABLE competitive_events (id TEXT PRIMARY KEY, name TEXT);
