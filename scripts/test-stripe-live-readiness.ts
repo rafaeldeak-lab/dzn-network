@@ -199,9 +199,15 @@ for (const snippet of [
   "Live checkout is paused for sandbox verification.",
   "Secret values and Price IDs are never shown here.",
   "Live Stripe changes still require explicit human approval.",
+  "Billing readiness note",
 ]) {
   assert.equal(dashboardSource.includes(snippet), true, `Dashboard readiness warning should include: ${snippet}`);
 }
+assert.match(
+  dashboardSource,
+  /const actionableFailedChecks = readiness\.readinessChecks\?\.filter\(\(check\) => !check\.ok && check\.severity !== "info"\) \?\? \[\];/,
+  "Informational readiness notes must not be rendered as checkout warnings.",
+);
 
 const configCheckSource = readFileSync("scripts/check-billing-config.ts", "utf8");
 for (const snippet of [
