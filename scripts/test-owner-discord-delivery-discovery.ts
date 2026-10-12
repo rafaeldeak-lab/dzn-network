@@ -122,6 +122,23 @@ async function run() {
   assert.equal(calls.every((call) => call.method === "GET"), true, "Discovery must never send a Discord mutation request.");
   assert.equal(JSON.stringify(result).includes(env.DISCORD_BOT_TOKEN ?? ""), false, "Discovery must not expose the private bot token.");
 
+  const administratorBot = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
+      return Response.json([
+        { id: guildId, name: "@everyone", position: 0, permissions: viewChannel },
+        { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: "0", managed: false },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: administrator, managed: true },
+      ]);
+    }
+    return discordFetch(input, init);
+  });
+  assert.equal(administratorBot.ok, false, "Discovery must not report the central Discord as ready while the bot has Administrator.");
+  assert.equal(administratorBot.status, "candidates_incomplete");
+  assert.equal(administratorBot.checks.botHasAdministrator, true);
+  assert.equal(administratorBot.checks.canManageRoles, false, "Administrator must not stand in for the explicit Manage Roles permission.");
+  assert.match(administratorBot.message, /removal of the Administrator permission/, "Discovery must require the broad permission to be removed before configuration.");
+
   const administratorRoleOnly = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
     const url = new URL(String(input));
     if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
@@ -173,7 +190,7 @@ async function run() {
   });
   assert.equal(mixedBlockers.checks.canManageRoles, false, "The fixture must prove the bot role-management blocker.");
   assert.match(mixedBlockers.message, /normal zero-permission Discord role/, "The message must retain the role-safety guidance.");
-  assert.match(mixedBlockers.message, /role-management access/, "The message must retain every independent prerequisite.");
+  assert.match(mixedBlockers.message, /explicit Manage Roles permission/, "The message must retain every independent prerequisite.");
 
   const privateGuildResult = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
     const url = new URL(String(input));

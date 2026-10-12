@@ -127,7 +127,7 @@ export async function discoverOwnerDiscordDeliveryCandidates(
     const basePermissions = getBotGuildPermissions(roles, botRoleIds, guildId);
     const everyoneBasePermissions = parseBits(roleById.get(guildId)?.permissions);
     const botHasAdministrator = hasPermission(basePermissions, DISCORD_ADMINISTRATOR);
-    const canManageRoles = botHasAdministrator || hasPermission(basePermissions, DISCORD_MANAGE_ROLES);
+    const canManageRoles = hasPermission(basePermissions, DISCORD_MANAGE_ROLES);
     const namedVerifiedOwnerRoles = roles
       .filter((role) => normalizeRoleName(role.name) === "verified server owner");
     const verifiedOwnerRoleCandidates = namedVerifiedOwnerRoles
@@ -187,11 +187,12 @@ export async function discoverOwnerDiscordDeliveryCandidates(
       privateInviteChannelCandidates: privateInviteChannelCandidates.length,
     };
     const hasAssignableRole = verifiedOwnerRoleCandidates.some((role) => role.assignable);
-    if (!canManageRoles || !hasAssignableRole || privateInviteChannelCandidates.length === 0) {
+    if (botHasAdministrator || !canManageRoles || !hasAssignableRole || privateInviteChannelCandidates.length === 0) {
       const missingRequirements = [
         !hasAssignableRole ? "an assignable Verified Server Owner role" : null,
         privateInviteChannelCandidates.length === 0 ? "a private invite channel" : null,
-        !canManageRoles ? "role-management access" : null,
+        botHasAdministrator ? "removal of the Administrator permission" : null,
+        !canManageRoles ? "the explicit Manage Roles permission" : null,
       ].filter((value): value is string => Boolean(value));
       const roleMessage = rejectedVerifiedOwnerRoles.length
         ? "The named Verified Server Owner role is excluded until it is a normal zero-permission Discord role; private channel overwrites provide its access. "

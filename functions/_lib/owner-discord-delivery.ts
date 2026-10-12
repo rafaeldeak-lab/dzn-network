@@ -788,6 +788,15 @@ async function checkDiscordRoleConfiguration(
       checks,
     };
     if (!checks.targetRoleBelowBot) return { ok: false as const, status: "role_hierarchy" as const, message: "DZN Bot must remain above the Verified Server Owner role before owner delivery can run.", httpStatus: null, checks };
+    if (hasAdministrator && purpose === "delivery") {
+      return {
+        ok: false as const,
+        status: "permission_missing" as const,
+        message: "DZN Bot has Administrator. Remove Administrator and grant only Manage Roles plus View Channel and Create Instant Invite on the private invite channel before owner delivery can run.",
+        httpStatus: null,
+        checks,
+      };
+    }
     if (!canManageRoles) return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs Manage Roles for the Verified Server Owner role.", httpStatus: null, checks };
     return { ok: true as const, status: "ready" as const, message: "DZN Bot can manage the Verified Server Owner role.", httpStatus: null, checks, botId, botRoleIds, basePermissions };
   } catch {

@@ -351,8 +351,10 @@ async function run() {
 
       activeBotPermissions = (BigInt(1) << BigInt(3)).toString();
       const administratorDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
-      assert.equal(administratorDiagnostic.ok, true, "The diagnostic must still safely report the current live Administrator grant while the bot is being reduced.");
+      assert.equal(administratorDiagnostic.ok, false, "Administrator must block invite and role-grant delivery.");
+      assert.equal(administratorDiagnostic.status, "permission_missing");
       assert.equal(administratorDiagnostic.checks.botHasAdministrator, true, "The owner console must expose that the bot still has Administrator.");
+      assert.match(administratorDiagnostic.message, /Remove Administrator/, "The diagnostic must require least-privilege bot permissions before delivery.");
       activeBotPermissions = botPermissions;
 
       const everyoneRoleDiagnostic = await getOwnerDiscordDeliveryDiagnostic({ ...env, DZN_OWNER_DISCORD_VERIFIED_OWNER_ROLE_ID: guildId }, discordFetch);

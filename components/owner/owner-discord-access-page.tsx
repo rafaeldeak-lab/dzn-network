@@ -370,7 +370,7 @@ export function OwnerDiscordAccessPage() {
               <p className="mt-2 text-sm leading-6 text-zinc-400">
                 {payload?.delivery}
               </p>
-              <div className="mt-3 flex flex-wrap items-center gap-3"><button type="button" onClick={() => void checkDelivery()} disabled={checkingDelivery} className="min-h-10 rounded-md border border-cyan-300/25 bg-cyan-300/[0.08] px-3 text-xs font-black text-cyan-100 disabled:opacity-50">{checkingDelivery ? "Checking central Discord..." : "Check central Discord delivery"}</button>{deliveryDiagnostic ? <span className={`text-xs font-black ${deliveryDiagnostic.ok ? "text-emerald-200" : "text-amber-100"}`}>{deliveryDiagnostic.status.replace(/_/g, " ")} - checked {formatTime(deliveryDiagnostic.checkedAt)}</span> : null}{deliveryDiagnostic?.checks.botHasAdministrator ? <span className="text-xs font-bold text-amber-100">Bot still has Administrator; reduce it after the controlled delivery proof.</span> : null}</div>
+              <div className="mt-3 flex flex-wrap items-center gap-3"><button type="button" onClick={() => void checkDelivery()} disabled={checkingDelivery} className="min-h-10 rounded-md border border-cyan-300/25 bg-cyan-300/[0.08] px-3 text-xs font-black text-cyan-100 disabled:opacity-50">{checkingDelivery ? "Checking central Discord..." : "Check central Discord delivery"}</button>{deliveryDiagnostic ? <span className={`text-xs font-black ${deliveryDiagnostic.ok ? "text-emerald-200" : "text-amber-100"}`}>{deliveryDiagnostic.status.replace(/_/g, " ")} - checked {formatTime(deliveryDiagnostic.checkedAt)}</span> : null}{deliveryDiagnostic?.checks.botHasAdministrator ? <span className="text-xs font-bold text-amber-100">Bot has Administrator. Remove it before owner delivery can be enabled.</span> : null}</div>
             </section>
             <section className="mt-3 rounded-lg border border-white/10 bg-white/[0.025] p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -397,7 +397,7 @@ export function OwnerDiscordAccessPage() {
                     </span>
                     {deliveryDiscovery.checks.botHasAdministrator ? (
                       <span className="text-xs font-bold text-amber-100">
-                        Bot still has Administrator; reduce it only after the controlled delivery proof.
+                        Bot has Administrator. Remove it before owner delivery can be enabled.
                       </span>
                     ) : null}
                   </div>
