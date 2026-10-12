@@ -470,6 +470,15 @@ async function run() {
       assert.equal(applicantHasRole, false, "Unsafe configured role permissions must stop before Discord role assignment.");
       assert.equal(calls.some((call) => call.path.endsWith(`/members/${applicant.discord_id}/roles/${verifiedOwnerRoleId}`) && call.method === "PUT"), false, "DZN must not call Discord role assignment for an unsafe configured role.");
       activeVerifiedOwnerRolePermissions = "0";
+
+      channelEveryoneOverwritePermissions = manageChannels.toString();
+      const unsafeChannelClaim = await claimOwnerDiscordAccessRole(env, request("POST", { requestId: "approved_request" }, applicantSession.token, "https://dzn.test"), { requestId: "approved_request" }, discordFetch);
+      assert.equal(unsafeChannelClaim.ok, false, "An unsafe private invite channel must block direct owner-role delivery.");
+      assert.equal(unsafeChannelClaim.status, 409, "Unsafe channel permissions must prevent any role assignment.");
+      assert.equal(applicantHasRole, false, "The direct owner-role path must not assign the role when the channel preflight fails.");
+      assert.equal(calls.some((call) => call.path.endsWith(`/members/${applicant.discord_id}/roles/${verifiedOwnerRoleId}`) && call.method === "PUT"), false, "DZN must not call Discord role assignment when the private invite channel is overprivileged.");
+      channelEveryoneOverwritePermissions = "0";
+
       const roleResponse = await applicantDeliveryRoute(context(env, request("POST", { action: "claim", requestId: "approved_request" }, applicantSession.token, "https://dzn.test")));
       assert.equal(roleResponse.status, 200);
       assert.equal(applicantHasRole, true);

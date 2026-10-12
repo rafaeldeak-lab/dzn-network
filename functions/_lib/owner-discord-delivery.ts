@@ -242,7 +242,7 @@ export async function claimOwnerDiscordAccessRole(env: Env, request: Request, ra
   if (access.status !== "approved") return problem(409, "Only an approved owner-access request can receive the Discord owner role.");
   if (access.requester_discord_id !== user.discord_id) return problem(403, "Use the same Discord account that made this owner-access request.");
 
-  const configuration = readRoleDeliveryConfiguration(env);
+  const configuration = readInviteDeliveryConfiguration(env);
   if (!configuration) return problem(503, "Private Discord delivery is not configured yet.");
   const lease = await acquireRoleMutationLease(env, {
     requestId: access.id,
@@ -258,7 +258,7 @@ export async function claimOwnerDiscordAccessRole(env: Env, request: Request, ra
       return problem(409, "This owner-access request no longer has a currently verified live server. Refresh the page before finishing Discord access.");
     }
     attempt = await startAttempt(env, access, "role_grant", configuration, user);
-    const preflight = await checkDiscordRoleConfiguration(configuration, fetcher);
+    const preflight = await checkDiscordDeliveryConfiguration(configuration, fetcher);
     if (!preflight.ok) return finishProblem(env, attempt, preflightToDeliveryStatus(preflight.status), preflight.message, preflight.httpStatus ?? null, preflight.status);
     const membership = await discordRequest(fetcher, configuration, `/guilds/${encodeURIComponent(configuration.guildId)}/members/${encodeURIComponent(user.discord_id)}`);
     if (membership.response.status === 404) {
