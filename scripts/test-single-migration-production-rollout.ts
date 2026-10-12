@@ -30,6 +30,22 @@ assert.match(workflow, /contents: read/);
 assert.doesNotMatch(workflow, /contents: write/);
 assert.doesNotMatch(workflow, /actions: write/);
 assert.doesNotMatch(workflow, /id-token: write/);
+assert.doesNotMatch(
+  workflow,
+  /^      (?:CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN|CLOUDFLARE_API_TOKEN):/m,
+  "The production D1 token must never be available to the whole job.",
+);
+const scopedToken = "CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_SERVER_LIFECYCLE_PRODUCTION_TOKEN }}";
+assert.equal(
+  workflow.split(scopedToken).length - 1,
+  5,
+  "The production D1 token must be scoped to the five Wrangler-only steps.",
+);
+assert.ok(
+  workflow.indexOf(scopedToken) > workflow.indexOf("- name: Install source dependencies"),
+  "Dependency installation must run before any step receives the production D1 token.",
+);
+assert.doesNotMatch(workflow, /printf "CLOUDFLARE_API_TOKEN=/);
 assert.deepEqual(
   workflow
     .split(/\r?\n/)
