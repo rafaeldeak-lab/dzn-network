@@ -71,7 +71,8 @@ const DISCORD_CREATE_INSTANT_INVITE = DISCORD_PERMISSION_ONE << BigInt(0);
 const DISCORD_ADMINISTRATOR = DISCORD_PERMISSION_ONE << BigInt(3);
 const DISCORD_VIEW_CHANNEL = DISCORD_PERMISSION_ONE << BigInt(10);
 const DISCORD_MANAGE_ROLES = DISCORD_PERMISSION_ONE << BigInt(28);
-const DISCORD_OWNER_DELIVERY_GUILD_PERMISSION_ALLOWLIST = DISCORD_CREATE_INSTANT_INVITE | DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
+const DISCORD_OWNER_DELIVERY_ASSIGNED_GUILD_PERMISSION_ALLOWLIST = DISCORD_MANAGE_ROLES;
+const DISCORD_OWNER_DELIVERY_EFFECTIVE_GUILD_PERMISSION_ALLOWLIST = DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
 
 /**
  * Finds only the identifiers needed for the owner-access delivery diagnostic.
@@ -129,8 +130,8 @@ export async function discoverOwnerDiscordDeliveryCandidates(
     const basePermissions = getBotGuildPermissions(roles, botRoleIds, guildId);
     const botAssignedPermissions = getBotAssignedGuildPermissions(roles, botRoleIds, guildId);
     const everyoneBasePermissions = parseBits(roleById.get(guildId)?.permissions);
-    const botHasAdministrator = hasPermission(botAssignedPermissions, DISCORD_ADMINISTRATOR);
-    const botHasUnexpectedGuildPermissions = hasUnexpectedOwnerDeliveryGuildPermissions(botAssignedPermissions);
+    const botHasAdministrator = hasPermission(basePermissions, DISCORD_ADMINISTRATOR);
+    const botHasUnexpectedGuildPermissions = hasUnexpectedOwnerDeliveryGuildPermissions(botAssignedPermissions, basePermissions);
     const canManageRoles = hasPermission(botAssignedPermissions, DISCORD_MANAGE_ROLES);
     const namedVerifiedOwnerRoles = roles
       .filter((role) => normalizeRoleName(role.name) === "verified server owner");
@@ -168,8 +169,9 @@ export async function discoverOwnerDiscordDeliveryCandidates(
         // explicit channel overwrite.
         const privateToEveryone = everyoneIsDeniedView(everyoneBasePermissions, channel, guildId);
         const channelPermissions = evaluateChannelPermissions(basePermissions, channel, guildId, botRoleIds, botId);
-        const canView = hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL);
-        const canCreateInvite = hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE);
+        const channelScopedPermissions = getBotChannelOverwritePermissions(channel, botRoleIds, botId);
+        const canView = hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL) && hasPermission(channelScopedPermissions, DISCORD_VIEW_CHANNEL);
+        const canCreateInvite = hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE) && hasPermission(channelScopedPermissions, DISCORD_CREATE_INSTANT_INVITE);
         return {
           id: String(channel.id ?? ""),
           name: safeChannelName(channel.name),
@@ -275,8 +277,11 @@ function getBotAssignedGuildPermissions(roles: DiscordRole[], botRoleIds: Set<st
   }, BigInt(0));
 }
 
-function hasUnexpectedOwnerDeliveryGuildPermissions(permissions: bigint) {
-  return (permissions & ~DISCORD_OWNER_DELIVERY_GUILD_PERMISSION_ALLOWLIST) !== BigInt(0);
+function hasUnexpectedOwnerDeliveryGuildPermissions(assignedPermissions: bigint, effectivePermissions: bigint) {
+  return (
+    (assignedPermissions & ~DISCORD_OWNER_DELIVERY_ASSIGNED_GUILD_PERMISSION_ALLOWLIST) !== BigInt(0) ||
+    (effectivePermissions & ~DISCORD_OWNER_DELIVERY_EFFECTIVE_GUILD_PERMISSION_ALLOWLIST) !== BigInt(0)
+  );
 }
 
 function evaluateChannelPermissions(base: bigint, channel: DiscordChannel, guildId: string, botRoleIds: Set<string>, botId: string) {
@@ -292,6 +297,18 @@ function evaluateChannelPermissions(base: bigint, channel: DiscordChannel, guild
   }
   value = (value & ~roleDeny) | roleAllow;
   return applyOverwrite(value, overwrites.find((overwrite) => String(overwrite.type) === "1" && String(overwrite.id) === botId));
+}
+
+function getBotChannelOverwritePermissions(channel: DiscordChannel, botRoleIds: Set<string>, botId: string) {
+  const overwrites = Array.isArray(channel.permission_overwrites) ? channel.permission_overwrites : [];
+  let roleAllow = BigInt(0);
+  for (const overwrite of overwrites) {
+    if (String(overwrite.type) !== "0" || !botRoleIds.has(String(overwrite.id))) continue;
+    roleAllow |= parseBits(overwrite.allow);
+  }
+  // Discord combines all bot-role overwrites before its member-specific overwrite;
+  // a role allow wins over a role deny, so only explicit role allows grant access.
+  return applyOverwrite(roleAllow, overwrites.find((overwrite) => String(overwrite.type) === "1" && String(overwrite.id) === botId));
 }
 
 function everyoneIsDeniedView(basePermissions: bigint, channel: DiscordChannel, guildId: string) {

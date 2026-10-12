@@ -20,7 +20,8 @@ const privateInviteChannelId = "900000000000000006";
 const publicChannelId = "900000000000000007";
 const unsyncedChannelId = "900000000000000008";
 const privateGuildChannelId = "900000000000000010";
-const permissions = ((BigInt(1) << BigInt(28)) | (BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(0))).toString();
+const botPermissions = (BigInt(1) << BigInt(28)).toString();
+const privateInviteChannelPermissions = ((BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(0))).toString();
 const viewChannel = (BigInt(1) << BigInt(10)).toString();
 const administrator = (BigInt(1) << BigInt(3)).toString();
 const manageRoles = (BigInt(1) << BigInt(28)).toString();
@@ -74,7 +75,7 @@ async function run() {
         { id: viewChannelVerifiedOwnerRoleId, name: "Verified Server Owner", position: 8, permissions: viewChannel, managed: false },
         { id: malformedVerifiedOwnerRoleId, name: "Verified Server Owner", position: 8, permissions: "not-a-number", managed: false },
         { id: missingPermissionVerifiedOwnerRoleId, name: "Verified Server Owner", position: 8, managed: false },
-        { id: botRoleId, name: "DZN Bot", position: 10, permissions, managed: true },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: botPermissions, managed: true },
       ]);
     }
     if (url.pathname === `/api/v10/guilds/${guildId}/channels`) {
@@ -87,7 +88,7 @@ async function run() {
           parent_id: categoryId,
           permission_overwrites: [
             { id: guildId, type: 0, deny: viewChannel, allow: "0" },
-            { id: botRoleId, type: 0, deny: "0", allow: permissions },
+            { id: botRoleId, type: 0, deny: "0", allow: privateInviteChannelPermissions },
           ],
         },
         { id: unsyncedChannelId, type: 0, name: "unsynced-public", parent_id: categoryId, permission_overwrites: [] },
@@ -101,6 +102,7 @@ async function run() {
   assert.equal(result.ok, true);
   assert.equal(result.status, "ready_to_configure");
   assert.equal(result.checks.botHasAdministrator, false);
+  assert.equal(result.checks.botHasUnexpectedGuildPermissions, false);
   assert.equal(result.checks.canManageRoles, true);
   assert.deepEqual(result.verifiedOwnerRoleCandidates, [{ id: verifiedOwnerRoleId, name: "Verified Server Owner", assignable: true }]);
   assert.equal(result.verifiedOwnerRoleCandidates.every((role) => role.id === verifiedOwnerRoleId), true, "Only a valid zero-permission owner role may be returned as a candidate.");
@@ -146,7 +148,7 @@ async function run() {
       return Response.json([
         { id: guildId, name: "@everyone", position: 0, permissions: viewChannel },
         { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: "0", managed: false },
-        { id: botRoleId, name: "DZN Bot", position: 10, permissions: (BigInt(permissions) | BigInt(manageChannels)).toString(), managed: true },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: (BigInt(botPermissions) | BigInt(manageChannels)).toString(), managed: true },
       ]);
     }
     return discordFetch(input, init);
@@ -156,13 +158,55 @@ async function run() {
   assert.equal(extraPermissionBot.checks.botHasUnexpectedGuildPermissions, true);
   assert.match(extraPermissionBot.message, /owner-delivery allowlist/, "Discovery must explain that extra bot guild permissions must be removed.");
 
+  const guildScopedChannelPermissionBot = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
+      return Response.json([
+        { id: guildId, name: "@everyone", position: 0, permissions: viewChannel },
+        { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: "0", managed: false },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: (BigInt(botPermissions) | BigInt(viewChannel)).toString(), managed: true },
+      ]);
+    }
+    return discordFetch(input, init);
+  });
+  assert.equal(guildScopedChannelPermissionBot.ok, false, "View Channel must not be accepted through a bot's guild role.");
+  assert.equal(guildScopedChannelPermissionBot.checks.botHasUnexpectedGuildPermissions, true);
+
+  const inheritedAdministratorBot = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
+      return Response.json([
+        { id: guildId, name: "@everyone", position: 0, permissions: administrator },
+        { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: "0", managed: false },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: botPermissions, managed: true },
+      ]);
+    }
+    return discordFetch(input, init);
+  });
+  assert.equal(inheritedAdministratorBot.ok, false, "Inherited @everyone Administrator must block discovery.");
+  assert.equal(inheritedAdministratorBot.checks.botHasAdministrator, true);
+
+  const inheritedExtraPermissionBot = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
+      return Response.json([
+        { id: guildId, name: "@everyone", position: 0, permissions: manageChannels },
+        { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: "0", managed: false },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: botPermissions, managed: true },
+      ]);
+    }
+    return discordFetch(input, init);
+  });
+  assert.equal(inheritedExtraPermissionBot.ok, false, "Inherited @everyone management permissions must block discovery.");
+  assert.equal(inheritedExtraPermissionBot.checks.botHasUnexpectedGuildPermissions, true);
+
   const administratorRoleOnly = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
     const url = new URL(String(input));
     if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
       return Response.json([
         { id: guildId, name: "@everyone", position: 0, permissions: viewChannel },
         { id: administratorVerifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: administrator, managed: false },
-        { id: botRoleId, name: "DZN Bot", position: 10, permissions, managed: true },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: botPermissions, managed: true },
       ]);
     }
     return discordFetch(input, init);
@@ -181,7 +225,7 @@ async function run() {
       return Response.json([
         { id: guildId, name: "@everyone", position: 0, permissions: viewChannel },
         { id: manageRolesVerifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: manageRoles, managed: false },
-        { id: botRoleId, name: "DZN Bot", position: 10, permissions, managed: true },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: botPermissions, managed: true },
       ]);
     }
     return discordFetch(input, init);
@@ -215,7 +259,7 @@ async function run() {
       return Response.json([
         { id: guildId, name: "@everyone", position: 0, permissions: "0" },
         { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: "0", managed: false },
-        { id: botRoleId, name: "DZN Bot", position: 10, permissions, managed: true },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: botPermissions, managed: true },
       ]);
     }
     if (url.pathname === `/api/v10/guilds/${guildId}/channels`) {
@@ -223,7 +267,7 @@ async function run() {
         id: privateGuildChannelId,
         type: 0,
         name: "private-invites",
-        permission_overwrites: [],
+        permission_overwrites: [{ id: botRoleId, type: 0, deny: "0", allow: privateInviteChannelPermissions }],
       }]);
     }
     return discordFetch(input, init);
@@ -237,6 +281,28 @@ async function run() {
     canCreateInvite: true,
     privateToEveryone: true,
   }]);
+
+  const unscopedPrivateGuildResult = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
+      return Response.json([
+        { id: guildId, name: "@everyone", position: 0, permissions: "0" },
+        { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: "0", managed: false },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: botPermissions, managed: true },
+      ]);
+    }
+    if (url.pathname === `/api/v10/guilds/${guildId}/channels`) {
+      return Response.json([{
+        id: privateGuildChannelId,
+        type: 0,
+        name: "private-invites",
+        permission_overwrites: [],
+      }]);
+    }
+    return discordFetch(input, init);
+  });
+  assert.equal(unscopedPrivateGuildResult.status, "candidates_incomplete", "A private channel still needs the explicit bot-channel overwrite.");
+  assert.equal(unscopedPrivateGuildResult.privateInviteChannelCandidates.length, 0);
 
   const missingGuild = await discoverOwnerDiscordDeliveryCandidates(env, "invalid", discordFetch);
   assert.equal(missingGuild.status, "not_configured");
