@@ -30,6 +30,18 @@ assert.match(workflow, /contents: read/);
 assert.doesNotMatch(workflow, /contents: write/);
 assert.doesNotMatch(workflow, /actions: write/);
 assert.doesNotMatch(workflow, /id-token: write/);
+assert.deepEqual(
+  workflow
+    .split(/\r?\n/)
+    .filter((line) => line.includes("${{ inputs."))
+    .map((line) => line.trim()),
+  [
+    "ROLLOUT_CONFIRMATION_INPUT: ${{ inputs.confirm_production_migration }}",
+    "APPROVED_COMMIT_INPUT: ${{ inputs.approved_commit }}",
+    "MIGRATION_NAME_INPUT: ${{ inputs.migration_name }}",
+  ],
+  "Workflow dispatch values must be carried through environment variables, never interpolated into shell source.",
+);
 assert.doesNotMatch(workflow, /CLOUDFLARE_API_TOKEN_FALLBACK/);
 assert.match(workflow, /d1 time-travel info/);
 assert.match(workflow, /verify-ledger/);
