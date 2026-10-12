@@ -41,6 +41,7 @@ export type OwnerDiscordDeliveryDiscovery = {
     botGuildMembership: boolean;
     canManageRoles: boolean;
     botHasAdministrator: boolean;
+    botHasUnexpectedGuildPermissions: boolean;
     verifiedOwnerRoleCandidates: number;
     privateInviteChannelCandidates: number;
   };
@@ -70,6 +71,7 @@ const DISCORD_CREATE_INSTANT_INVITE = DISCORD_PERMISSION_ONE << BigInt(0);
 const DISCORD_ADMINISTRATOR = DISCORD_PERMISSION_ONE << BigInt(3);
 const DISCORD_VIEW_CHANNEL = DISCORD_PERMISSION_ONE << BigInt(10);
 const DISCORD_MANAGE_ROLES = DISCORD_PERMISSION_ONE << BigInt(28);
+const DISCORD_OWNER_DELIVERY_GUILD_PERMISSION_ALLOWLIST = DISCORD_CREATE_INSTANT_INVITE | DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
 
 /**
  * Finds only the identifiers needed for the owner-access delivery diagnostic.
@@ -125,9 +127,11 @@ export async function discoverOwnerDiscordDeliveryCandidates(
     const roleById = new Map(roles.map((role) => [String(role.id ?? ""), role]));
     const botHighestPosition = Math.max(0, ...[...botRoleIds].map((roleId) => Number(roleById.get(roleId)?.position ?? 0)));
     const basePermissions = getBotGuildPermissions(roles, botRoleIds, guildId);
+    const botAssignedPermissions = getBotAssignedGuildPermissions(roles, botRoleIds, guildId);
     const everyoneBasePermissions = parseBits(roleById.get(guildId)?.permissions);
-    const botHasAdministrator = hasPermission(basePermissions, DISCORD_ADMINISTRATOR);
-    const canManageRoles = hasPermission(basePermissions, DISCORD_MANAGE_ROLES);
+    const botHasAdministrator = hasPermission(botAssignedPermissions, DISCORD_ADMINISTRATOR);
+    const botHasUnexpectedGuildPermissions = hasUnexpectedOwnerDeliveryGuildPermissions(botAssignedPermissions);
+    const canManageRoles = hasPermission(botAssignedPermissions, DISCORD_MANAGE_ROLES);
     const namedVerifiedOwnerRoles = roles
       .filter((role) => normalizeRoleName(role.name) === "verified server owner");
     const verifiedOwnerRoleCandidates = namedVerifiedOwnerRoles
@@ -164,8 +168,8 @@ export async function discoverOwnerDiscordDeliveryCandidates(
         // explicit channel overwrite.
         const privateToEveryone = everyoneIsDeniedView(everyoneBasePermissions, channel, guildId);
         const channelPermissions = evaluateChannelPermissions(basePermissions, channel, guildId, botRoleIds, botId);
-        const canView = botHasAdministrator || hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL);
-        const canCreateInvite = botHasAdministrator || hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE);
+        const canView = hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL);
+        const canCreateInvite = hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE);
         return {
           id: String(channel.id ?? ""),
           name: safeChannelName(channel.name),
@@ -183,15 +187,17 @@ export async function discoverOwnerDiscordDeliveryCandidates(
       botGuildMembership: true,
       canManageRoles,
       botHasAdministrator,
+      botHasUnexpectedGuildPermissions,
       verifiedOwnerRoleCandidates: verifiedOwnerRoleCandidates.length,
       privateInviteChannelCandidates: privateInviteChannelCandidates.length,
     };
     const hasAssignableRole = verifiedOwnerRoleCandidates.some((role) => role.assignable);
-    if (botHasAdministrator || !canManageRoles || !hasAssignableRole || privateInviteChannelCandidates.length === 0) {
+    if (botHasAdministrator || botHasUnexpectedGuildPermissions || !canManageRoles || !hasAssignableRole || privateInviteChannelCandidates.length === 0) {
       const missingRequirements = [
         !hasAssignableRole ? "an assignable Verified Server Owner role" : null,
         privateInviteChannelCandidates.length === 0 ? "a private invite channel" : null,
         botHasAdministrator ? "removal of the Administrator permission" : null,
+        !botHasAdministrator && botHasUnexpectedGuildPermissions ? "removal of guild permissions outside the owner-delivery allowlist" : null,
         !canManageRoles ? "the explicit Manage Roles permission" : null,
       ].filter((value): value is string => Boolean(value));
       const roleMessage = rejectedVerifiedOwnerRoles.length
@@ -229,6 +235,7 @@ function discovery(
       botGuildMembership: false,
       canManageRoles: false,
       botHasAdministrator: false,
+      botHasUnexpectedGuildPermissions: false,
       verifiedOwnerRoleCandidates: verifiedOwnerRoleCandidates.length,
       privateInviteChannelCandidates: privateInviteChannelCandidates.length,
       ...checks,
@@ -259,6 +266,17 @@ function getBotGuildPermissions(roles: DiscordRole[], botRoleIds: Set<string>, g
     const roleId = String(role.id ?? "");
     return roleId === guildId || botRoleIds.has(roleId) ? permissions | parseBits(role.permissions) : permissions;
   }, BigInt(0));
+}
+
+function getBotAssignedGuildPermissions(roles: DiscordRole[], botRoleIds: Set<string>, guildId: string) {
+  return roles.reduce((permissions, role) => {
+    const roleId = String(role.id ?? "");
+    return roleId !== guildId && botRoleIds.has(roleId) ? permissions | parseBits(role.permissions) : permissions;
+  }, BigInt(0));
+}
+
+function hasUnexpectedOwnerDeliveryGuildPermissions(permissions: bigint) {
+  return (permissions & ~DISCORD_OWNER_DELIVERY_GUILD_PERMISSION_ALLOWLIST) !== BigInt(0);
 }
 
 function evaluateChannelPermissions(base: bigint, channel: DiscordChannel, guildId: string, botRoleIds: Set<string>, botId: string) {

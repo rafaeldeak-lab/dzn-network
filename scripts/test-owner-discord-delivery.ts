@@ -57,6 +57,7 @@ const preflightFailedOwner: SessionUser = { id: "preflight_failed_owner", discor
 const inFlightInviteOwner: SessionUser = { id: "in_flight_invite_owner", discord_id: "900000000000000014", username: "In-flight Invite Owner", avatar: null };
 const leaseRaceOwner: SessionUser = { id: "lease_race_owner", discord_id: "900000000000000016", username: "Lease Race Owner", avatar: null };
 const botPermissions = ((BigInt(1) << BigInt(28)) | (BigInt(1) << BigInt(10)) | (BigInt(1) << BigInt(0))).toString();
+const manageChannels = BigInt(1) << BigInt(4);
 
 function localD1(sqlite: Sqlite) {
   const prepare = (sql: string, bindings: unknown[] = []): LocalStatement => {
@@ -348,6 +349,7 @@ async function run() {
       assert.equal(diagnostic.checks.targetRoleBelowBot, true);
       assert.equal(diagnostic.checks.canCreateInvite, true);
       assert.equal(diagnostic.checks.botHasAdministrator, false, "The delivery workflow must work with least-privilege role permissions rather than Administrator.");
+      assert.equal(diagnostic.checks.botHasUnexpectedGuildPermissions, false, "The least-privilege fixture must contain only the owner-delivery allowlist.");
 
       activeBotPermissions = (BigInt(1) << BigInt(3)).toString();
       const administratorDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
@@ -355,6 +357,14 @@ async function run() {
       assert.equal(administratorDiagnostic.status, "permission_missing");
       assert.equal(administratorDiagnostic.checks.botHasAdministrator, true, "The owner console must expose that the bot still has Administrator.");
       assert.match(administratorDiagnostic.message, /Remove Administrator/, "The diagnostic must require least-privilege bot permissions before delivery.");
+      activeBotPermissions = botPermissions;
+
+      activeBotPermissions = (BigInt(botPermissions) | manageChannels).toString();
+      const extraPermissionDiagnostic = await getOwnerDiscordDeliveryDiagnostic(env, discordFetch);
+      assert.equal(extraPermissionDiagnostic.ok, false, "Extra bot guild permissions must block new owner delivery.");
+      assert.equal(extraPermissionDiagnostic.status, "permission_missing");
+      assert.equal(extraPermissionDiagnostic.checks.botHasUnexpectedGuildPermissions, true, "The owner console must expose extra bot guild permissions.");
+      assert.match(extraPermissionDiagnostic.message, /outside the owner-delivery allowlist/, "The diagnostic must explain why extra bot guild permissions are blocked.");
       activeBotPermissions = botPermissions;
 
       const everyoneRoleDiagnostic = await getOwnerDiscordDeliveryDiagnostic({ ...env, DZN_OWNER_DISCORD_VERIFIED_OWNER_ROLE_ID: guildId }, discordFetch);
@@ -410,12 +420,14 @@ async function run() {
       assert.equal(outsiderRevoke.ok, false);
       assert.equal(outsiderRevoke.status, 403, "The delivery helper must still reject a non-owner if another route calls it incorrectly.");
       await db.prepare("UPDATE dzn_owner_discord_access_requests SET status = 'revoked' WHERE id = 'approved_request'").run();
+      activeBotPermissions = (BigInt(botPermissions) | manageChannels).toString();
       activeVerifiedOwnerRolePermissions = (BigInt(1) << BigInt(28)).toString();
       const revokeResponse = await ownerDeliveryRoute(context(env, request("POST", { action: "revoke_role", requestId: "approved_request" }, ownerSession.token, "https://dzn.test")));
       assert.equal(revokeResponse.status, 200);
       assert.equal(applicantHasRole, false);
       assert.equal(calls.some((call) => call.path.endsWith(`/members/${applicant.discord_id}/roles/${verifiedOwnerRoleId}`) && call.method === "DELETE"), true, "Revocation must only remove the configured Verified Server Owner role.");
       activeVerifiedOwnerRolePermissions = "0";
+      activeBotPermissions = botPermissions;
       const revokeActor = await db.prepare("SELECT actor_user_id, actor_discord_id FROM dzn_owner_discord_access_delivery_attempts WHERE request_id = 'approved_request' AND operation = 'role_revoke' ORDER BY created_at DESC LIMIT 1").first<{ actor_user_id: string; actor_discord_id: string }>();
       assert.equal(revokeActor?.actor_user_id, owner.id, "The delivery ledger must identify the platform owner that removed a role.");
       assert.equal(revokeActor?.actor_discord_id, owner.discord_id, "The delivery ledger must retain the platform owner identity for the role-removal audit.");

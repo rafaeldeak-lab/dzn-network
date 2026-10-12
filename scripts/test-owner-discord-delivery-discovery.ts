@@ -24,6 +24,7 @@ const permissions = ((BigInt(1) << BigInt(28)) | (BigInt(1) << BigInt(10)) | (Bi
 const viewChannel = (BigInt(1) << BigInt(10)).toString();
 const administrator = (BigInt(1) << BigInt(3)).toString();
 const manageRoles = (BigInt(1) << BigInt(28)).toString();
+const manageChannels = (BigInt(1) << BigInt(4)).toString();
 
 async function run() {
   const helper = readFileSync("functions/_lib/owner-discord-delivery-discovery.ts", "utf8");
@@ -138,6 +139,22 @@ async function run() {
   assert.equal(administratorBot.checks.botHasAdministrator, true);
   assert.equal(administratorBot.checks.canManageRoles, false, "Administrator must not stand in for the explicit Manage Roles permission.");
   assert.match(administratorBot.message, /removal of the Administrator permission/, "Discovery must require the broad permission to be removed before configuration.");
+
+  const extraPermissionBot = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === `/api/v10/guilds/${guildId}/roles`) {
+      return Response.json([
+        { id: guildId, name: "@everyone", position: 0, permissions: viewChannel },
+        { id: verifiedOwnerRoleId, name: "Verified Server Owner", position: 5, permissions: "0", managed: false },
+        { id: botRoleId, name: "DZN Bot", position: 10, permissions: (BigInt(permissions) | BigInt(manageChannels)).toString(), managed: true },
+      ]);
+    }
+    return discordFetch(input, init);
+  });
+  assert.equal(extraPermissionBot.ok, false, "Discovery must not report the central Discord as ready while the bot retains extra guild permissions.");
+  assert.equal(extraPermissionBot.status, "candidates_incomplete");
+  assert.equal(extraPermissionBot.checks.botHasUnexpectedGuildPermissions, true);
+  assert.match(extraPermissionBot.message, /owner-delivery allowlist/, "Discovery must explain that extra bot guild permissions must be removed.");
 
   const administratorRoleOnly = await discoverOwnerDiscordDeliveryCandidates(env, guildId, async (input, init) => {
     const url = new URL(String(input));
