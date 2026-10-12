@@ -1,0 +1,54 @@
+# DZN Cipher Grid Release
+
+## Scope
+
+Cipher Grid is an original five-letter field-word deduction game in the DZN Games Hub. It adds:
+
+- A touch, keyboard, and desktop-friendly puzzle surface.
+- Server-owned private answers, attempts, completion decisions, and daily reward accounting.
+- One bounded daily reward of 100 XP and 4 Workshop parts per Discord-authenticated player.
+- Hub history, challenges, streaks, and Workshop totals that retain earned Cipher Grid rewards even while play is disabled.
+- Private session and reward tables that are removed with an account deletion.
+
+## Security and fairness
+
+- The answer is stored only in D1 and is never included in an API response, browser payload, error, or rendered markup.
+- Every write requires a current authenticated Discord session, same-origin POST, a bounded JSON body, an exact request shape, a current optimistic version, and an unexpired player-owned session.
+- Duplicate letters use two-pass server scoring, so a guess cannot claim more copies of a letter than the private answer contains.
+- The completion update and daily reward insertion are one atomic D1 batch. A stale or failed completion cannot mint a reward.
+- The daily ledger has unique user/day and game-session constraints. The browser never supplies XP, parts, the answer, or a reward key.
+- This game is noncompetitive: it does not alter standings, ranking, eligibility, scoring formulas, server ownership, billing, or Discord membership.
+
+## Source release boundary
+
+This source release deliberately leaves the production flag below disabled:
+
+```text
+DZN_GAMES_CIPHER_GRID_ENABLED=false
+```
+
+It also does not apply a D1 migration, alter any Discord role or invite, change payments, or start a deployment.
+
+## Controlled production operation
+
+Run this independently of unrelated releases, and only after any approved `0096` Relay Rush rollout is complete:
+
+1. Capture a private recovery bookmark for the target D1 database.
+2. Apply only `0097_games_hub_cipher_grid.sql`.
+3. Verify the migration ledger contains exactly `0097_games_hub_cipher_grid.sql` as the applied Cipher Grid migration.
+4. Verify both new tables, the reward-history index, `CHECK` constraints, foreign keys, and zero-row baseline.
+5. Leave `DZN_GAMES_CIPHER_GRID_ENABLED=false` if any verification fails.
+6. Enable only `DZN_GAMES_CIPHER_GRID_ENABLED=true` after the schema passes. The existing Games Hub flag must already be enabled.
+7. Run one authenticated, disposable manual puzzle through start, incorrect guess, correct completion, Hub reward history, and Workshop accounting.
+8. Confirm no answer appears in browser network payloads, page source, logs, or error responses.
+
+## Local verification
+
+```text
+npm run test:games-cipher-grid
+npm run test:games-cipher-grid-production-activation
+npm run test:games-hub
+npm run qa:games-cipher-grid
+npm run lint -- --max-warnings=0
+npm run build
+```

@@ -4,24 +4,77 @@ import Link from "next/link";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ArrowRight, Award, BookOpen, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, LoaderCircle,
-  LogIn, Microchip, MousePointer2, Play, Radio, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Award, BookOpen, Check, CircleHelp, Clock3, Flag, Flame, Gamepad2, Hammer, KeyRound, LoaderCircle,
+  LogIn, Map, MessageCircle, Microchip, MousePointer2, Play, Radio, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Target, X, Zap } from "lucide-react";
 import { SiteHeaderAuthState, SiteHomeLink } from "@/components/site-header";
-import { GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, HUB_EQUIPMENT, WORKSHOP_PART_COST, WORKSHOP_STAGES,
-  hubEquipmentUnlocked, type GameMode, type GameView, type HubEquipment, type HubPayload } from "@/lib/games-hub";
+import { DEFAULT_HUB_GAME_AVAILABILITY, GAME_MODES, HUB_BADGES, HUB_CHALLENGE_TARGETS, HUB_EQUIPMENT, WORKSHOP_PART_COST, WORKSHOP_STAGES,
+  hubEquipmentUnlocked, type GameMode, type GameView, type HubEquipment, type HubGameId, type HubPayload } from "@/lib/games-hub";
 import { TRIVIA_DIFFICULTIES, type TriviaDifficulty, type TriviaPayload } from "@/lib/games-trivia";
 import { WORD_CHAIN_REWARD, type WordChainPayload } from "@/lib/games-word-chain";
 import { HIDE_SEEK_REWARD, type HideSeekPayload } from "@/lib/games-hide-seek";
+import { RELAY_RUSH_LANES, RELAY_RUSH_PULSE_INTERVAL_MS, RELAY_RUSH_REWARD, type RelayRushLane, type RelayRushPayload } from "@/lib/games-relay-rush";
+import { CIPHER_GRID_MAX_ATTEMPTS, CIPHER_GRID_REWARD, CIPHER_GRID_WORD_LENGTH, type CipherGridMark, type CipherGridPayload } from "@/lib/games-cipher-grid";
+import { ECHO_ARRAY_CUE_INTERVAL_MS, ECHO_ARRAY_CUE_LEAD_MS, ECHO_ARRAY_MIN_INPUT_INTERVAL_MS, ECHO_ARRAY_REWARD, type EchoArrayNode, type EchoArrayPayload } from "@/lib/games-echo-array";
+import { OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_MIN_MOVE_INTERVAL_MS, OUTPOST_RUN_REWARD, type OutpostRunDirection, type OutpostRunPayload } from "@/lib/games-outpost-run";
+import { SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS, SIGNAL_SHIFT_REWARD, type SignalShiftPayload } from "@/lib/games-signal-shift";
+import { CIRCUIT_FORGE_MIN_ROTATION_INTERVAL_MS, CIRCUIT_FORGE_REWARD, type CircuitForgePayload } from "@/lib/games-circuit-forge";
 import styles from "./games-hub.module.css";
 
 type View = "play" | "workshop" | "insignia" | "activity";
 type BoardView = "field" | "grid";
-type PlayGame = "minefield" | "trivia" | "word-chain" | "hide-seek";
+type PlayGame = HubGameId;
 const Minefield3D = dynamic(() => import("./minefield-3d").then(module => module.Minefield3D), { ssr: false });
 const views = [{ id: "play", label: "Play", icon: Gamepad2 }, { id: "workshop", label: "Workshop", icon: Hammer },
   { id: "insignia", label: "Insignia", icon: Award }, { id: "activity", label: "Activity", icon: Clock3 }] as const;
 const modes = Object.keys(GAME_MODES) as GameMode[];
 function clock(value: number) { const seconds = Math.max(0, Math.floor(value / 1000)); return `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`; }
+const RELAY_RUSH_LANE_META: Record<RelayRushLane, { label: string; key: string }> = {
+  left: { label: "Left", key: "A" }, centre: { label: "Centre", key: "S" }, right: { label: "Right", key: "D" },
+};
+const CIPHER_GRID_KEYS = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
+const CIPHER_GRID_MARK_PRIORITY: Record<CipherGridMark, number> = { absent: 0, present: 1, correct: 2 };
+const RELAY_RUSH_INPUT_GUARD_MS = 120;
+const OUTPOST_RUN_COOLDOWN_MS = OUTPOST_RUN_MIN_MOVE_INTERVAL_MS + 40;
+const ECHO_ARRAY_COOLDOWN_MS = ECHO_ARRAY_MIN_INPUT_INTERVAL_MS + 40;
+const SIGNAL_SHIFT_COOLDOWN_MS = SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS + 40;
+const CIRCUIT_FORGE_COOLDOWN_MS = CIRCUIT_FORGE_MIN_ROTATION_INTERVAL_MS + 40;
+const ECHO_ARRAY_NODE_META: Record<EchoArrayNode, { label: string; key: string }> = {
+  north: { label: "North array", key: "1" }, east: { label: "East array", key: "2" }, south: { label: "South array", key: "3" }, west: { label: "West array", key: "4" },
+};
+const ECHO_ARRAY_NODE_ORDER: EchoArrayNode[] = ["north", "east", "south", "west"];
+const OUTPOST_RUN_DIRECTION_META: Record<OutpostRunDirection, { label: string; icon: typeof ArrowUp }> = {
+  north: { label: "Move north", icon: ArrowUp }, east: { label: "Move east", icon: ArrowRight }, south: { label: "Move south", icon: ArrowDown }, west: { label: "Move west", icon: ArrowLeft },
+};
+
+function useTransientActionCooldown(duration: number) {
+  const [notice, setNotice] = useState("");
+  const [cooldown, setCooldown] = useState(false);
+  const cooldownTimer = useRef<number | null>(null);
+
+  const clearCooldown = useCallback(() => {
+    if (cooldownTimer.current !== null) window.clearTimeout(cooldownTimer.current);
+    cooldownTimer.current = null;
+    setNotice("");
+    setCooldown(false);
+  }, []);
+
+  const startCooldown = useCallback((message: string) => {
+    if (cooldownTimer.current !== null) window.clearTimeout(cooldownTimer.current);
+    setNotice(message);
+    setCooldown(true);
+    cooldownTimer.current = window.setTimeout(() => {
+      cooldownTimer.current = null;
+      setNotice("");
+      setCooldown(false);
+    }, duration);
+  }, [duration]);
+
+  useEffect(() => () => {
+    if (cooldownTimer.current !== null) window.clearTimeout(cooldownTimer.current);
+  }, []);
+
+  return { notice, cooldown, clearCooldown, startCooldown };
+}
 
 export function GamesHub() {
   const [payload, setPayload] = useState<HubPayload | null>(null);
@@ -106,6 +159,8 @@ export function GamesHub() {
 
   const summary = payload?.summary;
   const game = payload?.game ?? null;
+  const availableGames = payload?.availableGames ?? DEFAULT_HUB_GAME_AVAILABILITY;
+  const selectedPlayGame = availableGames[playGame] ? playGame : "minefield";
   const active = game?.status === "playing" && (!now || now < game.expiresAt);
   const newBoardCoolingDown = Boolean(game && (now || game.startedAt) < game.startedAt + 5000);
   const xp = summary?.xp ?? 0;
@@ -136,13 +191,13 @@ export function GamesHub() {
     <OutpostBackground />
     <div className={styles.hubContent}>
     <SiteHeaderAuthState authenticated={phase === "ready"} checkingAccount={phase === "loading"} returnTo="/games" />
-    <nav className={styles.hubNav} aria-label="DZN Network"><SiteHomeLink className={styles.homeButton} /><div className={styles.navActions}><Link href="/player" prefetch={false}>Player Hub<ArrowRight size={16} /></Link></div></nav>
+    <nav className={styles.hubNav} aria-label="DZN Network"><SiteHomeLink className={styles.homeButton} /><div className={styles.navActions}><Link href="/community" prefetch={false}><MessageCircle size={16} />Community</Link><Link href="/player" prefetch={false}>Player Hub<ArrowRight size={16} /></Link></div></nav>
     <div className={styles.heading}>
       <div><span className={styles.eyebrow}>DZN / PLAYER ARCADE</span><h1>DZN Games Hub<span className={styles.dot}>.</span></h1></div>
       {summary && <div className={styles.identity}>{xp >= HUB_BADGES[0].xp ? <Insignia position={rank.position} small /> : <span className={styles.recruit}><Gamepad2 size={24} /></span>}<div><strong>{summary.username}</strong><span>{xp >= HUB_BADGES[0].xp ? rank.name : "New recruit"}</span></div><span className={styles.level}>LV {1 + Math.floor(xp / 150)}</span></div>}
     </div>
     <div className={styles.topline}>
-      <nav aria-label="Games Hub" className={styles.tabs}>{views.map(item => <a href={`#${item.id}`} key={item.id} aria-current={view === item.id ? "page" : undefined}
+      <nav aria-label="Games Hub" className={styles.tabs}>{views.map(item => <a href={`#${item.id}`} key={item.id} aria-label={item.label} title={item.label} aria-current={view === item.id ? "page" : undefined}
         onClick={() => setView(item.id)}><item.icon size={17} /><span>{item.label}</span></a>)}</nav>
       {summary && <div className={styles.balances}><span title="Website XP"><Zap size={15} />{xp.toLocaleString()} <small>XP</small></span><span title="Earned workshop parts"><Microchip size={15} />{summary.parts} <small>PARTS</small></span></div>}
     </div>
@@ -158,12 +213,18 @@ export function GamesHub() {
       <div className={styles.layout}>
         <div className={styles.mainColumn}>
           {view === "play" && <div className={styles.gamePicker} role="group" aria-label="Choose a game">
-            <button aria-pressed={playGame === "minefield"} onClick={() => setPlayGame("minefield")}><Target size={17} /><span><strong>Minefield</strong><small>3D tactical sweep</small></span></button>
-            <button aria-pressed={playGame === "trivia"} onClick={() => setPlayGame("trivia")}><BookOpen size={17} /><span><strong>DZN Trivia</strong><small>Survival knowledge</small></span></button>
-            <button aria-pressed={playGame === "word-chain"} onClick={() => setPlayGame("word-chain")}><Radio size={17} /><span><strong>Word Chain</strong><small>Shared daily relay</small></span></button>
-            <button aria-pressed={playGame === "hide-seek"} onClick={() => setPlayGame("hide-seek")}><Search size={17} /><span><strong>Signal Hunt</strong><small>Find concealed beacons</small></span></button>
+            {availableGames.minefield && <button aria-pressed={selectedPlayGame === "minefield"} onClick={() => setPlayGame("minefield")}><Target size={17} /><span><strong>Minefield</strong><small>3D tactical sweep</small></span></button>}
+            {availableGames.trivia && <button aria-pressed={selectedPlayGame === "trivia"} onClick={() => setPlayGame("trivia")}><BookOpen size={17} /><span><strong>DZN Trivia</strong><small>Survival knowledge</small></span></button>}
+            {availableGames["word-chain"] && <button aria-pressed={selectedPlayGame === "word-chain"} onClick={() => setPlayGame("word-chain")}><Radio size={17} /><span><strong>Word Chain</strong><small>Shared daily relay</small></span></button>}
+            {availableGames["hide-seek"] && <button aria-pressed={selectedPlayGame === "hide-seek"} onClick={() => setPlayGame("hide-seek")}><Search size={17} /><span><strong>Signal Hunt</strong><small>Find concealed beacons</small></span></button>}
+            {availableGames["relay-rush"] && <button aria-pressed={selectedPlayGame === "relay-rush"} onClick={() => setPlayGame("relay-rush")}><Zap size={17} /><span><strong>Relay Rush</strong><small>Timed signal run</small></span></button>}
+            {availableGames["cipher-grid"] && <button aria-pressed={selectedPlayGame === "cipher-grid"} onClick={() => setPlayGame("cipher-grid")}><KeyRound size={17} /><span><strong>Cipher Grid</strong><small>Field-code puzzle</small></span></button>}
+            {availableGames["echo-array"] && <button aria-pressed={selectedPlayGame === "echo-array"} onClick={() => setPlayGame("echo-array")}><Microchip size={17} /><span><strong>Echo Array</strong><small>Memory signal run</small></span></button>}
+            {availableGames["outpost-run"] && <button aria-pressed={selectedPlayGame === "outpost-run"} onClick={() => setPlayGame("outpost-run")}><Map size={17} /><span><strong>Outpost Run</strong><small>Fog-grid extraction</small></span></button>}
+            {availableGames["signal-shift"] && <button aria-pressed={selectedPlayGame === "signal-shift"} onClick={() => setPlayGame("signal-shift")}><Target size={17} /><span><strong>Signal Shift</strong><small>Tactical grid routing</small></span></button>}
+            {availableGames["circuit-forge"] && <button aria-pressed={selectedPlayGame === "circuit-forge"} onClick={() => setPlayGame("circuit-forge")}><Settings2 size={17} /><span><strong>Circuit Forge</strong><small>Power-grid rebuild</small></span></button>}
           </div>}
-          {view === "play" && playGame === "minefield" && <section aria-labelledby="mines-title">
+          {view === "play" && availableGames.minefield && selectedPlayGame === "minefield" && <section aria-labelledby="mines-title">
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>01 / FIELD OPERATIONS</span><h2 id="mines-title">Minesweeper</h2></div><button className={styles.iconButton} title="Game rules" onClick={() => setHelp(true)}><CircleHelp size={20} /></button></div>
             <div className={styles.gameTools}>
               <label>Difficulty<select aria-label="Difficulty" value={mode} disabled={busy} onChange={event => setMode(event.target.value as GameMode)}>{modes.map(key => <option value={key} key={key}>{GAME_MODES[key].label} / {GAME_MODES[key].size} x {GAME_MODES[key].size}</option>)}</select></label>
@@ -184,9 +245,15 @@ export function GamesHub() {
               </div>
             </> : <div className={styles.readyBoard}><Image className={styles.scannerArt} src="/images/games/dzn-field-scanner.webp" alt="DZN field scanner, survey flags and equipment bag" width={960} height={640} loading="eager" /><h3>{GAME_MODES[mode].label} standing by</h3><div className={styles.rewardPills}><span>{GAME_MODES[mode].mines} mines</span><span>+{GAME_MODES[mode].xp} XP</span><span>+{GAME_MODES[mode].parts} parts</span></div></div>}
           </section>}
-          {view === "play" && playGame === "trivia" && <TriviaPanel now={now} onProgress={() => void refresh()} />}
-          {view === "play" && playGame === "word-chain" && <WordChainPanel onProgress={() => void refresh()} />}
-          {view === "play" && playGame === "hide-seek" && <HideSeekPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames.trivia && selectedPlayGame === "trivia" && <TriviaPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["word-chain"] && selectedPlayGame === "word-chain" && <WordChainPanel onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["hide-seek"] && selectedPlayGame === "hide-seek" && <HideSeekPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["relay-rush"] && selectedPlayGame === "relay-rush" && <RelayRushPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["cipher-grid"] && selectedPlayGame === "cipher-grid" && <CipherGridPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["echo-array"] && selectedPlayGame === "echo-array" && <EchoArrayPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["outpost-run"] && selectedPlayGame === "outpost-run" && <OutpostRunPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["signal-shift"] && selectedPlayGame === "signal-shift" && <SignalShiftPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["circuit-forge"] && selectedPlayGame === "circuit-forge" && <CircuitForgePanel now={now} onProgress={() => void refresh()} />}
 
           {view === "workshop" && <section>
             <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>COLLECTION / PROJECT {(Math.floor((summary?.assemblies ?? 0) / 3) + 1).toString().padStart(2, "0")}</span><h2>Field relay workshop</h2></div><Hammer size={24} /></div>
@@ -207,7 +274,7 @@ export function GamesHub() {
           </section>}
 
           {view === "activity" && <section><div className={styles.sectionTitle}><div><span className={styles.eyebrow}>YOUR / REWARD HISTORY</span><h2>Recent activity</h2></div><Clock3 size={24} /></div>
-            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; const hideSeek = entry.kind === "hide-seek"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : hideSeek ? <Search size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : hideSeek ? "Signal Hunt cleared" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
+            {summary?.history.length ? <ul className={styles.history}>{summary.history.map((entry, index) => { const triviaDifficulty = entry.kind.startsWith("trivia:") ? entry.kind.slice(7) as TriviaDifficulty : null; const wordChain = entry.kind === "word-chain"; const hideSeek = entry.kind === "hide-seek"; const relayRush = entry.kind === "relay-rush"; const cipherGrid = entry.kind === "cipher-grid"; const echoArray = entry.kind === "echo-array"; const outpostRun = entry.kind === "outpost-run"; const signalShift = entry.kind === "signal-shift"; const circuitForge = entry.kind === "circuit-forge"; return <li key={`${entry.created_at}:${index}`}><span className={styles.historyIcon}>{entry.kind === "workshop" ? <Hammer size={20} /> : triviaDifficulty ? <BookOpen size={20} /> : wordChain ? <Radio size={20} /> : hideSeek ? <Search size={20} /> : relayRush ? <Zap size={20} /> : cipherGrid ? <KeyRound size={20} /> : echoArray ? <Microchip size={20} /> : outpostRun ? <Map size={20} /> : signalShift ? <Target size={20} /> : circuitForge ? <Settings2 size={20} /> : <ShieldCheck size={20} />}</span><div><strong>{entry.kind === "workshop" ? "Workshop assembly" : triviaDifficulty ? `${TRIVIA_DIFFICULTIES[triviaDifficulty].label} trivia passed` : wordChain ? "Word Chain relay" : hideSeek ? "Signal Hunt cleared" : relayRush ? "Relay Rush completed" : cipherGrid ? "Cipher Grid decoded" : echoArray ? "Echo Array synchronised" : outpostRun ? "Outpost Run extracted" : signalShift ? "Signal Shift routed" : circuitForge ? "Circuit Forge restored" : `${GAME_MODES[entry.kind as GameMode].label} secured`}</strong><time dateTime={new Date(entry.created_at).toISOString()}>{new Date(entry.created_at).toLocaleString("en-GB")}</time></div><span>{entry.xp ? `+${entry.xp} XP` : ""}<small>{entry.parts > 0 ? "+" : ""}{entry.parts} parts</small></span></li>; })}</ul> : <div className={styles.empty}><Clock3 size={30} /><h3>No rewards recorded yet</h3></div>}
           </section>}
         </div>
 
@@ -433,6 +500,639 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
               : <><Radio size={20} /><div><strong>Signals concealed</strong><span>Inspect the scene closely. Every find is checked by DZN.</span></div></>}
       </div>
     </> : <div className={styles.triviaReady}><Search size={34} /><h3>Search the outpost.</h3><p>Find four concealed DZN signals. Mouse, touch and keyboard targets are supported.</p><div className={styles.rewardPills}><span>+{HIDE_SEEK_REWARD.xp} XP</span><span>+{HIDE_SEEK_REWARD.parts} parts</span></div></div>}
+  </section>;
+}
+
+function RelayRushPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+  const [payload, setPayload] = useState<RelayRushPayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const generation = useRef(0);
+  const serverClock = useRef({ time: 0, measuredAt: 0 });
+  const [relayNow, setRelayNow] = useState(0);
+
+  const receivePayload = useCallback((result: RelayRushPayload) => {
+    serverClock.current = { time: result.serverTime, measuredAt: performance.now() };
+    setRelayNow(result.serverTime);
+    setPayload(result);
+  }, []);
+
+  const load = useCallback(async () => {
+    const sequence = ++generation.current;
+    try {
+      const response = await fetch("/api/games/relay-rush", { credentials: "include", cache: "no-store" });
+      const result = await response.json() as RelayRushPayload & { error?: string };
+      if (!response.ok) throw new Error(result.error || "DZN Relay Rush is unavailable.");
+      if (sequence === generation.current) { receivePayload(result); setError(""); }
+    } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Relay Rush is unavailable."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [receivePayload]);
+
+  useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
+
+  const mutate = useCallback(async (body: Record<string, unknown>) => {
+    if (busy) return;
+    const sequence = ++generation.current; setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/games/relay-rush", { method: "POST", credentials: "include", cache: "no-store",
+        headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as RelayRushPayload & { error?: string };
+      if (!response.ok) { setError(result.error || "That signal pulse could not be recorded."); if (response.status === 409) void load(); return; }
+      if (sequence !== generation.current) return;
+      receivePayload(result); onProgress();
+    } catch { if (sequence === generation.current) setError("That signal pulse could not be recorded. Refresh before retrying."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [busy, load, onProgress, receivePayload]);
+
+  useEffect(() => {
+    if (!payload?.game) return;
+    const timer = window.setInterval(() => {
+      const clock = serverClock.current;
+      setRelayNow(clock.time + performance.now() - clock.measuredAt);
+    }, 50);
+    return () => window.clearInterval(timer);
+  }, [payload?.game, payload?.serverTime]);
+
+  const game = payload?.game;
+  const clockNow = Math.max(now, relayNow, payload?.serverTime ?? 0);
+  const available = Boolean(payload) && !error;
+  const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow &&
+    (!game.nextAt || clockNow < game.nextAt + RELAY_RUSH_PULSE_INTERVAL_MS));
+  const targetOpen = Boolean(active && game?.nextAt && clockNow >= game.nextAt && clockNow < game.nextAt + RELAY_RUSH_PULSE_INTERVAL_MS - RELAY_RUSH_INPUT_GUARD_MS);
+  const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5000);
+  const submitPulse = useCallback((lane: RelayRushLane) => {
+    if (!game || !active || !targetOpen || busy) return;
+    void mutate({ action: "pulse", gameId: game.id, version: game.version, lane });
+  }, [active, busy, game, mutate, targetOpen]);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+      const source = event.target;
+      if (source instanceof Element && source.closest("input, textarea, select, [contenteditable=true]")) return;
+      const key = event.key.toLowerCase();
+      const lane = key === "a" || event.key === "ArrowLeft" ? "left" : key === "s" || event.key === "ArrowDown" ? "centre" : key === "d" || event.key === "ArrowRight" ? "right" : null;
+      if (!lane || !active || !targetOpen || busy) return;
+      event.preventDefault(); submitPulse(lane);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [active, busy, submitPulse, targetOpen]);
+
+  return <section aria-labelledby="relay-rush-title" className={styles.relayRushPanel}>
+    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>05 / SIGNAL ENDURANCE</span><h2 id="relay-rush-title">DZN Relay Rush</h2></div><Zap size={24} /></div>
+    {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Relay Rush" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
+    <div className={styles.relayRushTools}>
+      <div><strong>{game ? `${game.pulsesCleared} / ${game.totalPulses} pulses` : "Twelve signal pulses"}</strong><span>{game ? `${game.maxMisses - game.misses} signal errors remaining` : "Read the live lane, then answer on time."}</span></div>
+      <button className={styles.primary} disabled={busy || !available || active || restartCoolingDown}
+        title={restartCoolingDown && !active ? "New run available five seconds after the last start" : undefined}
+        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Run in progress" : game ? "New run" : "Start run"}</button>
+    </div>
+    {game ? <>
+      <div className={styles.relayRushMeta}><span><Zap size={14} />{game.pulsesCleared} / {game.totalPulses}</span><span><Target size={14} />{game.misses} misses</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.relayRushStage} data-ready={targetOpen} data-status={game.status} aria-live="polite">
+        <div className={styles.relayRushReadout}><span>{active ? targetOpen ? "INCOMING PULSE" : "SYNCING RELAY" : game.status === "won" ? "RUN COMPLETE" : "RUN CLOSED"}</span><strong>{active ? targetOpen ? "Choose the lit lane" : "Stand by for the next signal" : game.status === "won" ? "Signal restored" : game.status === "failed" ? "Signal lost" : "Window expired"}</strong></div>
+        <div className={styles.relayRushLanes} role="group" aria-label="Relay Rush signal lanes">
+          {RELAY_RUSH_LANES.map(lane => { const meta = RELAY_RUSH_LANE_META[lane]; const lit = targetOpen && game.nextLane === lane; return <button type="button" key={lane} className={styles.relayRushLane}
+            data-lane={lane} data-target={lit} disabled={busy || !active || !targetOpen} onClick={() => submitPulse(lane)}
+            aria-label={`${meta.label} signal lane (${meta.key})${lit ? ", live" : ""}`}><span>{meta.key}</span><strong>{meta.label}</strong><small>{lit ? "Pulse live" : active ? "Await signal" : "Stand down"}</small></button>; })}
+        </div>
+        <p className={styles.relayRushHint}>Keyboard: A / S / D or arrow keys. The server verifies pulse order and timing.</p>
+      </div>
+      <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
+        {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Relay restored</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${RELAY_RUSH_REWARD.xp} XP and +${RELAY_RUSH_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice run complete. Today's reward was already recorded." : "Run complete."}</span></div></>
+          : game.status === "failed" ? <><Target size={22} /><div><strong>Signal lost</strong><span>Three missed pulses ended the run. Existing Hub progress is unchanged.</span></div></>
+            : !active ? <><Clock3 size={22} /><div><strong>Run expired</strong><span>Start a new signal run when ready.</span></div></>
+              : <><Radio size={20} /><div><strong>{targetOpen ? "Pulse live" : "Relay synchronising"}</strong><span>{targetOpen ? "Choose the highlighted lane before the next pulse." : "The next lane appears when the DZN relay opens it."}</span></div></>}
+      </div>
+    </> : !busy && !error && <div className={styles.relayRushReady}><Radio size={34} /><h3>Keep the relay alive.</h3><p>Read twelve DZN-controlled signal pulses. The route, timing and reward are verified server-side.</p><div className={styles.rewardPills}><span>12 pulses</span><span>+{RELAY_RUSH_REWARD.xp} XP</span><span>+{RELAY_RUSH_REWARD.parts} parts</span></div></div>}
+  </section>;
+}
+
+function EchoArrayPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+  const [payload, setPayload] = useState<EchoArrayPayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const [litNode, setLitNode] = useState<EchoArrayNode | null>(null);
+  const generation = useRef(0);
+  const serverClock = useRef({ time: 0, measuredAt: 0 });
+  const [echoNow, setEchoNow] = useState(0);
+  const { notice, cooldown, clearCooldown, startCooldown } = useTransientActionCooldown(ECHO_ARRAY_COOLDOWN_MS);
+
+  const receivePayload = useCallback((result: EchoArrayPayload) => {
+    serverClock.current = { time: result.serverTime, measuredAt: performance.now() };
+    setEchoNow(result.serverTime);
+    setPayload(result);
+  }, []);
+
+  const load = useCallback(async () => {
+    const sequence = ++generation.current;
+    try {
+      const response = await fetch("/api/games/echo-array", { credentials: "include", cache: "no-store" });
+      const result = await response.json() as EchoArrayPayload & { error?: string };
+      if (!response.ok) throw new Error(result.error || "DZN Echo Array is unavailable.");
+      if (sequence === generation.current) { receivePayload(result); clearCooldown(); setError(""); }
+    } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Echo Array is unavailable."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [clearCooldown, receivePayload]);
+
+  useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
+
+  const mutate = useCallback(async (body: Record<string, unknown>) => {
+    if (busy || cooldown) return;
+    const sequence = ++generation.current; setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/games/echo-array", { method: "POST", credentials: "include", cache: "no-store",
+        headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as EchoArrayPayload & { error?: string };
+      if (!response.ok) {
+        if (response.status === 429) { startCooldown(result.error || "Take a moment before selecting the next node."); return; }
+        setError(result.error || "That echo input could not be recorded."); if (response.status === 409) void load(); return;
+      }
+      if (sequence !== generation.current) return;
+      receivePayload(result); clearCooldown(); onProgress();
+    } catch { if (sequence === generation.current) setError("That echo input could not be recorded. Refresh before retrying."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [busy, clearCooldown, cooldown, load, onProgress, receivePayload, startCooldown]);
+
+  useEffect(() => {
+    if (!payload?.game) return;
+    const timer = window.setInterval(() => {
+      const clock = serverClock.current;
+      setEchoNow(clock.time + performance.now() - clock.measuredAt);
+    }, 50);
+    return () => window.clearInterval(timer);
+  }, [payload?.game, payload?.serverTime]);
+
+  const game = payload?.game;
+  const clockNow = Math.max(now, echoNow, payload?.serverTime ?? 0);
+  const available = Boolean(payload) && !error;
+  const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
+  const revealing = Boolean(active && game && clockNow < game.cueEndsAt);
+  const inputOpen = active && !revealing;
+  const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5000);
+  const submitNode = useCallback((node: EchoArrayNode) => {
+    if (!game || !inputOpen || busy || cooldown) return;
+    void mutate({ action: "tap", gameId: game.id, version: game.version, node });
+  }, [busy, cooldown, game, inputOpen, mutate]);
+
+  useEffect(() => {
+    const cue = game?.cue;
+    const cueStartedAt = game?.cueStartedAt;
+    if (!cue || cueStartedAt === undefined || !revealing) {
+      const clear = window.setTimeout(() => setLitNode(null), 0);
+      return () => window.clearTimeout(clear);
+    }
+    const update = () => {
+      const serverNow = Math.max(now, serverClock.current.time + performance.now() - serverClock.current.measuredAt);
+      const index = Math.floor((serverNow - cueStartedAt - ECHO_ARRAY_CUE_LEAD_MS) / ECHO_ARRAY_CUE_INTERVAL_MS);
+      setLitNode(index >= 0 && index < cue.length ? cue[index] : null);
+    };
+    update();
+    const timer = window.setInterval(update, 60);
+    return () => window.clearInterval(timer);
+  }, [game?.cue, game?.cueStartedAt, now, revealing]);
+
+  useEffect(() => {
+    if (!game || !revealing) return;
+    const timer = window.setTimeout(() => void load(), Math.max(80, game.cueEndsAt - clockNow + 80));
+    return () => window.clearTimeout(timer);
+  }, [clockNow, game, load, revealing]);
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+      const source = event.target;
+      if (source instanceof Element && source.closest("input, textarea, select, [contenteditable=true]")) return;
+      const node = event.key === "1" || event.key === "ArrowUp" ? "north" : event.key === "2" || event.key === "ArrowRight" ? "east"
+        : event.key === "3" || event.key === "ArrowDown" ? "south" : event.key === "4" || event.key === "ArrowLeft" ? "west" : null;
+      if (!node || !inputOpen || busy || cooldown) return;
+      event.preventDefault(); submitNode(node);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [busy, cooldown, inputOpen, submitNode]);
+
+  return <section aria-labelledby="echo-array-title" className={styles.echoArrayPanel}>
+    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>07 / MEMORY RELAY</span><h2 id="echo-array-title">DZN Echo Array</h2></div><Microchip size={24} /></div>
+    {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Echo Array" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
+    <div className={styles.echoArrayTools}>
+      <div><strong>{game ? `Stage ${game.stage} / ${game.totalStages}` : "Three escalating signal echoes"}</strong><span>{game ? `${game.maxErrors - game.errors} calibration retries remaining` : "Watch the pattern, then replay it from memory."}</span></div>
+      <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
+        title={restartCoolingDown && !active ? "New echo available five seconds after the last start" : undefined}
+        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Echo in progress" : game ? "New echo" : "Start echo"}</button>
+    </div>
+    {game ? <>
+      <div className={styles.echoArrayMeta}><span><Microchip size={14} />Stage {game.stage} / {game.totalStages}</span><span><Target size={14} />{game.inputIndex} / {game.sequenceLength} nodes</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.echoArrayStage} data-revealing={revealing} data-status={game.status} aria-live="polite">
+        <div className={styles.echoArrayReadout}><span>{active ? revealing ? "WATCH THE ARRAY" : "REPLAY THE ARRAY" : game.status === "won" ? "ARRAY SYNCHRONISED" : "ARRAY CLOSED"}</span><strong>{active ? revealing ? "Commit the pulse pattern" : "Repeat the stored signal" : game.status === "won" ? "Network echo restored" : game.status === "failed" ? "Signal memory lost" : "Signal window expired"}</strong></div>
+        <div className={styles.echoArrayNodes} role="group" aria-label="Echo Array signal nodes">
+          {ECHO_ARRAY_NODE_ORDER.map(node => { const meta = ECHO_ARRAY_NODE_META[node]; const lit = revealing && litNode === node; return <button type="button" key={node} className={styles.echoArrayNode}
+            data-node={node} data-lit={lit} disabled={busy || cooldown || !inputOpen} onClick={() => submitNode(node)}
+            aria-label={`${meta.label} (${meta.key})${lit ? ", signal live" : ""}`}><span>{meta.key}</span><strong>{meta.label.replace(" array", "")}</strong><small>{lit ? "Pulse live" : revealing ? "Observe" : inputOpen ? "Select" : "Stand down"}</small></button>; })}
+        </div>
+        <p className={styles.echoArrayHint}>Keyboard: 1 to 4 or the arrow keys. The server records every stage, retry and reward.</p>
+      </div>
+      <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
+        {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Echo synchronised</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${ECHO_ARRAY_REWARD.xp} XP and +${ECHO_ARRAY_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice echo complete. Today's reward was already recorded." : "Echo complete."}</span></div></>
+          : game.status === "failed" ? <><Target size={22} /><div><strong>Signal memory lost</strong><span>Two calibration errors ended the run. Existing Hub progress is unchanged.</span></div></>
+            : !active ? <><Clock3 size={22} /><div><strong>Echo expired</strong><span>Start a new array when you are ready.</span></div></>
+              : <><Radio size={20} /><div><strong>{revealing ? "Pattern live" : "Input open"}</strong><span>{revealing ? "Watch each illuminated node before the array unlocks." : "Replay the full pattern in its original order."}</span></div></>}
+      </div>
+    </> : !busy && !error && <div className={styles.echoArrayReady}><Microchip size={34} /><h3>Hold the tactical pattern.</h3><p>Replay three escalating field-signal arrays from memory. Progression is recorded only when the DZN server verifies the complete run.</p><div className={styles.rewardPills}><span>3 stages</span><span>+{ECHO_ARRAY_REWARD.xp} XP</span><span>+{ECHO_ARRAY_REWARD.parts} parts</span></div></div>}
+  </section>;
+}
+
+function OutpostRunPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+  const [payload, setPayload] = useState<OutpostRunPayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [cooldown, setCooldown] = useState(false);
+  const generation = useRef(0);
+  const cooldownTimer = useRef<number | null>(null);
+
+  const startCooldown = useCallback((message: string) => {
+    if (cooldownTimer.current !== null) window.clearTimeout(cooldownTimer.current);
+    setNotice(message); setCooldown(true);
+    cooldownTimer.current = window.setTimeout(() => { cooldownTimer.current = null; setNotice(""); setCooldown(false); }, OUTPOST_RUN_COOLDOWN_MS);
+  }, []);
+
+  useEffect(() => () => { if (cooldownTimer.current !== null) window.clearTimeout(cooldownTimer.current); }, []);
+
+  const load = useCallback(async () => {
+    const sequence = ++generation.current;
+    try {
+      const response = await fetch("/api/games/outpost-run", { credentials: "include", cache: "no-store" });
+      const result = await response.json() as OutpostRunPayload & { error?: string };
+      if (!response.ok) throw new Error(result.error || "DZN Outpost Run is unavailable.");
+      if (sequence === generation.current) { setPayload(result); setError(""); setNotice(""); setCooldown(false); }
+    } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Outpost Run is unavailable."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, []);
+
+  useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
+
+  const mutate = useCallback(async (body: Record<string, unknown>) => {
+    if (busy || cooldown) return;
+    const sequence = ++generation.current; setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/games/outpost-run", { method: "POST", credentials: "include", cache: "no-store",
+        headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as OutpostRunPayload & { error?: string };
+      if (!response.ok) {
+        if (response.status === 429) { startCooldown(result.error || "Take a moment before the next field command."); return; }
+        setError(result.error || "That field command could not be recorded."); if (response.status === 409) void load(); return;
+      }
+      if (sequence !== generation.current) return;
+      setPayload(result); setNotice(""); onProgress();
+    } catch { if (sequence === generation.current) setError("That field command could not be recorded. Refresh before retrying."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [busy, cooldown, load, onProgress, startCooldown]);
+
+  const game = payload?.game;
+  const clockNow = Math.max(now, payload?.serverTime ?? 0);
+  const available = Boolean(payload) && !error;
+  const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
+  const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5_000);
+  const revealed = new globalThis.Map((game?.visibleCells ?? []).map(cell => [`${cell.row}:${cell.column}`, cell.kind]));
+  const sendMove = useCallback((direction: OutpostRunDirection) => {
+    if (!game || !active || busy || cooldown) return;
+    void mutate({ action: "move", gameId: game.id, version: game.version, direction });
+  }, [active, busy, cooldown, game, mutate]);
+  const moveDisabled = (direction: OutpostRunDirection) => {
+    if (!game || !active || busy || cooldown) return true;
+    if (direction === "north") return game.row === 0;
+    if (direction === "east") return game.column === game.gridSize - 1;
+    if (direction === "south") return game.row === game.gridSize - 1;
+    return game.column === 0;
+  };
+
+  return <section aria-labelledby="outpost-run-title" className={styles.outpostRunPanel}>
+    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>08 / FIELD EXTRACTION</span><h2 id="outpost-run-title">DZN Outpost Run</h2></div><Map size={24} /></div>
+    {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Outpost Run" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
+    <div className={styles.outpostRunTools}>
+      <div><strong>{game ? `Field grid ${game.moves} / ${game.maxMoves}` : "Fog-grid field extraction"}</strong><span>{game ? `${game.energy} stamina cells remaining` : "Reach the emergency relay before your field pack runs dry."}</span></div>
+      <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
+        title={restartCoolingDown && !active ? "New outpost run available five seconds after the last start" : undefined}
+        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Run in progress" : game ? "New run" : "Start run"}</button>
+    </div>
+    {game ? <>
+      <div className={styles.outpostRunMeta}><span><ShieldCheck size={14} />{game.energy} / {game.maxEnergy} stamina</span><span><Map size={14} />{game.moves} / {game.maxMoves} field moves</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.outpostRunStage} data-status={game.status}>
+        <div className={styles.outpostRunReadout}><span>{active ? "FIELD SIGNAL / UNVERIFIED" : game.status === "won" ? "RELAY / SECURED" : "FIELD SIGNAL / CLOSED"}</span><strong>{active ? "Trace the emergency relay" : game.status === "won" ? "Extraction route completed" : game.status === "failed" ? "Field pack exhausted" : "Signal window expired"}</strong></div>
+        <div className={styles.outpostRunGrid} role="grid" aria-label="Outpost Run fog grid">
+          {Array.from({ length: game.gridSize * game.gridSize }, (_, index) => {
+            const row = Math.floor(index / game.gridSize); const column = index % game.gridSize;
+            const terrain = revealed.get(`${row}:${column}`);
+            const player = game.row === row && game.column === column;
+            const label = player ? "You" : terrain === "relay" ? "Emergency relay" : terrain === "hazard" ? "Hazard" : terrain === "start" ? "Field entry" : terrain === "clear" ? "Surveyed ground" : "Unknown terrain";
+            return <div key={`${row}:${column}`} role="gridcell" aria-label={`${label}, row ${row + 1}, column ${column + 1}`}
+              className={styles.outpostRunCell} data-terrain={terrain ?? "unknown"} data-player={player}>
+              {terrain === "relay" ? <Radio size={18} /> : terrain === "hazard" ? <Zap size={18} /> : terrain === "start" ? <Flag size={18} /> : terrain === "clear" ? <Check size={16} /> : <span>?</span>}
+              {player && <ShieldCheck className={styles.outpostRunPlayer} size={19} />}
+            </div>;
+          })}
+        </div>
+        <div className={styles.outpostRunCommand}>
+          <button className={styles.outpostRunScan} disabled={busy || cooldown || !active || !game.scanAvailable}
+            onClick={() => void mutate({ action: "scan", gameId: game.id, version: game.version })}><Search size={16} />{game.scanHint ? `Scanner: ${game.scanHint.replace("-", " / ")}` : "Use field scanner"}</button>
+          <div className={styles.outpostRunControls} aria-label="Outpost movement controls">
+            {OUTPOST_RUN_DIRECTIONS.map(direction => { const meta = OUTPOST_RUN_DIRECTION_META[direction]; const DirectionIcon = meta.icon; return <button key={direction} type="button"
+              className={styles.outpostRunMove} data-direction={direction} disabled={moveDisabled(direction)} onClick={() => sendMove(direction)} title={meta.label} aria-label={meta.label}><DirectionIcon size={18} /></button>; })}
+          </div>
+        </div>
+        <p className={styles.outpostRunHint}>Only ground you enter becomes visible. Hazards drain one stamina cell; the scanner gives one coarse relay direction.</p>
+      </div>
+      <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
+        {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Relay secured</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${OUTPOST_RUN_REWARD.xp} XP and +${OUTPOST_RUN_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice run complete. Today's reward was already recorded." : "Outpost Run complete."}</span></div></>
+          : game.status === "failed" ? <><Target size={22} /><div><strong>Field pack exhausted</strong><span>Hazards or a lost route ended the extraction. Existing Hub progress is unchanged.</span></div></>
+            : !active ? <><Clock3 size={22} /><div><strong>Signal expired</strong><span>Start a new field run when you are ready.</span></div></>
+              : <><Radio size={20} /><div><strong>Extraction active</strong><span>{game.scanHint ? `Scanner points ${game.scanHint.replace("-", " and ")}.` : "Use the scanner once, then move through the fog grid."}</span></div></>}
+      </div>
+    </> : !busy && !error && <div className={styles.outpostRunReady}><Map size={34} /><h3>Hold the route through the unknown.</h3><p>Move through a live five-by-five field grid, manage stamina around hazards, and extract the emergency relay before the signal closes.</p><div className={styles.rewardPills}><span>Fog grid</span><span>+{OUTPOST_RUN_REWARD.xp} XP</span><span>+{OUTPOST_RUN_REWARD.parts} parts</span></div></div>}
+  </section>;
+}
+
+function SignalShiftPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+  const [payload, setPayload] = useState<SignalShiftPayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const generation = useRef(0);
+  const { notice, cooldown, clearCooldown, startCooldown } = useTransientActionCooldown(SIGNAL_SHIFT_COOLDOWN_MS);
+
+  const load = useCallback(async () => {
+    const sequence = ++generation.current;
+    try {
+      const response = await fetch("/api/games/signal-shift", { credentials: "include", cache: "no-store" });
+      const result = await response.json() as SignalShiftPayload & { error?: string };
+      if (!response.ok) throw new Error(result.error || "DZN Signal Shift is unavailable.");
+      if (sequence === generation.current) { setPayload(result); clearCooldown(); setError(""); }
+    } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Signal Shift is unavailable."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [clearCooldown]);
+
+  useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
+
+  const mutate = useCallback(async (body: Record<string, unknown>) => {
+    if (busy || cooldown) return;
+    const sequence = ++generation.current; setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/games/signal-shift", { method: "POST", credentials: "include", cache: "no-store",
+        headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as SignalShiftPayload & { error?: string };
+      if (!response.ok) {
+        if (response.status === 429) { startCooldown(result.error || "Route one sector at a time."); return; }
+        setError(result.error || "That Signal Shift command could not be recorded."); if (response.status === 409) void load(); return;
+      }
+      if (sequence !== generation.current) return;
+      setPayload(result); clearCooldown(); onProgress();
+    } catch { if (sequence === generation.current) setError("That Signal Shift command could not be recorded. Refresh before retrying."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [busy, clearCooldown, cooldown, load, onProgress, startCooldown]);
+
+  const game = payload?.game;
+  const clockNow = Math.max(now, payload?.serverTime ?? 0);
+  const available = Boolean(payload) && !error;
+  const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
+  const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5_000);
+  const blank = game?.tiles.indexOf(0) ?? -1;
+  const isAdjacent = (index: number) => {
+    if (!game || blank < 0) return false;
+    const row = Math.floor(index / game.gridSize); const column = index % game.gridSize;
+    const blankRow = Math.floor(blank / game.gridSize); const blankColumn = blank % game.gridSize;
+    return Math.abs(row - blankRow) + Math.abs(column - blankColumn) === 1;
+  };
+  const move = useCallback((tile: number) => {
+    if (!game || !active || busy || cooldown) return;
+    void mutate({ action: "move", gameId: game.id, version: game.version, tile });
+  }, [active, busy, cooldown, game, mutate]);
+
+  return <section aria-labelledby="signal-shift-title" className={styles.signalShiftPanel}>
+    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>09 / TACTICAL ROUTING</span><h2 id="signal-shift-title">DZN Signal Shift</h2></div><Target size={24} /></div>
+    {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Signal Shift" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
+    <div className={styles.signalShiftTools}>
+      <div><strong>{game ? `${game.moves} / ${game.maxMoves} sector shifts` : "Four-by-four tactical routing"}</strong><span>{game ? "Move sectors into the open relay slot to rebuild the signal line." : "The verified DZN server owns the route, move count, reward, and daily cap."}</span></div>
+      <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
+        title={restartCoolingDown && !active ? "New Signal Shift board available five seconds after the last start" : undefined}
+        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Route in progress" : game ? "New route" : "Start routing"}</button>
+    </div>
+    {game ? <>
+      <div className={styles.signalShiftMeta}><span><Target size={14} />{game.moves} / {game.maxMoves} shifts</span><span><Microchip size={14} />{game.gridSize} x {game.gridSize} relay grid</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.signalShiftStage} data-status={game.status}>
+        <div className={styles.signalShiftReadout} aria-live="polite"><span>{active ? "RELAY MATRIX / LIVE" : game.status === "won" ? "RELAY MATRIX / STABLE" : "RELAY MATRIX / CLOSED"}</span><strong>{active ? "Route each sector into sequence" : game.status === "won" ? "Signal line restored" : game.status === "failed" ? "Shift limit reached" : "Signal window expired"}</strong></div>
+        <div className={styles.signalShiftGrid} role="grid" aria-label="Signal Shift tactical grid">
+          {game.tiles.map((tile, index) => {
+            const movable = active && tile !== 0 && isAdjacent(index);
+            const row = Math.floor(index / game.gridSize) + 1;
+            const column = index % game.gridSize + 1;
+            return <button type="button" key={`${tile}:${index}`} role="gridcell" className={styles.signalShiftTile}
+              data-blank={tile === 0} data-adjacent={movable} disabled={!movable || busy || cooldown}
+              aria-label={tile === 0 ? `Open relay slot, row ${row}, column ${column}` : `Sector ${tile}, row ${row}, column ${column}${movable ? ", available to shift" : ""}`}
+              onClick={() => move(tile)}>{tile === 0 ? <span>CORE</span> : <><small>SECTOR</small><strong>{String(tile).padStart(2, "0")}</strong></>}</button>;
+          })}
+        </div>
+        <p className={styles.signalShiftHint}>Only sectors beside the open relay slot can move. Put sectors 01 through 15 in order, with the core slot at the end.</p>
+      </div>
+      <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
+        {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Signal line restored</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${SIGNAL_SHIFT_REWARD.xp} XP and +${SIGNAL_SHIFT_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice route complete. Today's reward was already recorded." : "Signal Shift complete."}</span></div></>
+          : game.status === "failed" ? <><Target size={22} /><div><strong>Route limit reached</strong><span>The relay line did not stabilise in time. Existing Hub progress is unchanged.</span></div></>
+            : !active ? <><Clock3 size={22} /><div><strong>Signal expired</strong><span>Start another route when you are ready.</span></div></>
+              : <><Radio size={20} /><div><strong>Routing active</strong><span>Choose one highlighted neighbouring sector at a time. The server validates every shift.</span></div></>}
+      </div>
+    </> : !busy && !error && <div className={styles.signalShiftReady}><Target size={34} /><h3>Bring the relay matrix online.</h3><p>Shift sectors through a live four-by-four grid until every route is back in sequence. Only verified server wins award progression.</p><div className={styles.rewardPills}><span>72 shifts</span><span>+{SIGNAL_SHIFT_REWARD.xp} XP</span><span>+{SIGNAL_SHIFT_REWARD.parts} parts</span></div></div>}
+  </section>;
+}
+
+function CircuitForgePanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+  const [payload, setPayload] = useState<CircuitForgePayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const generation = useRef(0);
+  const { notice, cooldown, clearCooldown, startCooldown } = useTransientActionCooldown(CIRCUIT_FORGE_COOLDOWN_MS);
+
+  const load = useCallback(async () => {
+    const sequence = ++generation.current;
+    try {
+      const response = await fetch("/api/games/circuit-forge", { credentials: "include", cache: "no-store" });
+      const result = await response.json() as CircuitForgePayload & { error?: string };
+      if (!response.ok) throw new Error(result.error || "DZN Circuit Forge is unavailable.");
+      if (sequence === generation.current) { setPayload(result); clearCooldown(); setError(""); }
+    } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Circuit Forge is unavailable."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [clearCooldown]);
+
+  useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
+
+  const mutate = useCallback(async (body: Record<string, unknown>) => {
+    if (busy || cooldown) return;
+    const sequence = ++generation.current; setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/games/circuit-forge", { method: "POST", credentials: "include", cache: "no-store",
+        headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as CircuitForgePayload & { error?: string };
+      if (!response.ok) {
+        if (response.status === 429) { startCooldown(result.error || "Rotate one relay at a time."); return; }
+        setError(result.error || "That Circuit Forge rotation could not be recorded."); if (response.status === 409) void load(); return;
+      }
+      if (sequence !== generation.current) return;
+      setPayload(result); clearCooldown(); onProgress();
+    } catch { if (sequence === generation.current) setError("That Circuit Forge rotation could not be recorded. Refresh before retrying."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [busy, clearCooldown, cooldown, load, onProgress, startCooldown]);
+
+  const game = payload?.game;
+  const clockNow = Math.max(now, payload?.serverTime ?? 0);
+  const available = Boolean(payload) && !error;
+  const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
+  const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5_000);
+  const rotate = useCallback((index: number) => {
+    if (!game || !active || busy || cooldown || game.tiles[index]?.core) return;
+    void mutate({ action: "rotate", gameId: game.id, version: game.version, index });
+  }, [active, busy, cooldown, game, mutate]);
+
+  return <section aria-labelledby="circuit-forge-title" className={styles.circuitForgePanel}>
+    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>10 / RELAY WORKSHOP</span><h2 id="circuit-forge-title">DZN Circuit Forge</h2></div><Settings2 size={24} /></div>
+    {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Circuit Forge" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
+    <div className={styles.circuitForgeTools}>
+      <div><strong>{game ? `${game.rotations} / ${game.maxRotations} relay rotations` : "Five-by-five power-grid rebuild"}</strong><span>{game ? `${game.poweredCount} / ${game.tiles.length} relays connected to the core.` : "The verified DZN server owns every relay state, win, reward, and daily cap."}</span></div>
+      <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
+        title={restartCoolingDown && !active ? "New Circuit Forge board available five seconds after the last start" : undefined}
+        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Grid online" : game ? "New grid" : "Start rebuild"}</button>
+    </div>
+    {game ? <>
+      <div className={styles.circuitForgeMeta}><span><Settings2 size={14} />{game.poweredCount} / {game.tiles.length} powered</span><span><Target size={14} />{game.rotations} / {game.maxRotations} rotations</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <div className={styles.circuitForgeStage} data-status={game.status}>
+        <div className={styles.circuitForgeReadout} aria-live="polite"><span>{active ? "POWER GRID / LIVE" : game.status === "won" ? "POWER GRID / STABLE" : "POWER GRID / CLOSED"}</span><strong>{active ? "Reconnect every relay to the command core" : game.status === "won" ? "All relays are online" : game.status === "failed" ? "Rotation limit reached" : "Power window expired"}</strong></div>
+        <div className={styles.circuitForgeGrid} role="grid" aria-label="Circuit Forge power grid">
+          {game.tiles.map((tile, index) => {
+            const rotatable = active && !tile.core;
+            return <button type="button" key={index} role="gridcell" className={styles.circuitForgeTile}
+              data-core={tile.core} data-powered={tile.powered} data-rotatable={rotatable} disabled={!rotatable || busy || cooldown}
+              title={tile.core ? "Command core" : "Rotate relay clockwise"}
+              aria-label={tile.core ? `Command core, ${tile.powered ? "powered" : "offline"}` : `Relay ${String(index + 1).padStart(2, "0")}, ${tile.powered ? "powered" : "offline"}, rotate clockwise`}
+              onClick={() => rotate(index)}>
+              {tile.mask & 1 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireNorth}`} aria-hidden="true" /> : null}
+              {tile.mask & 2 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireEast}`} aria-hidden="true" /> : null}
+              {tile.mask & 4 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireSouth}`} aria-hidden="true" /> : null}
+              {tile.mask & 8 ? <span className={`${styles.circuitForgeWire} ${styles.circuitForgeWireWest}`} aria-hidden="true" /> : null}
+              <span className={styles.circuitForgeNode}>{tile.core ? "CORE" : String(index + 1).padStart(2, "0")}</span>
+            </button>;
+          })}
+        </div>
+        <p className={styles.circuitForgeHint}>Tap a relay to turn it clockwise. Finish with every cable joined and every relay powered from the core.</p>
+      </div>
+      <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
+        {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Relay network restored</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${CIRCUIT_FORGE_REWARD.xp} XP and +${CIRCUIT_FORGE_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice rebuild complete. Today's reward was already recorded." : "Circuit Forge complete."}</span></div></>
+          : game.status === "failed" ? <><Settings2 size={22} /><div><strong>Rotation limit reached</strong><span>The grid did not stabilise. Existing Hub progress is unchanged.</span></div></>
+            : !active ? <><Clock3 size={22} /><div><strong>Power window expired</strong><span>Start another grid when you are ready.</span></div></>
+              : <><Radio size={20} /><div><strong>Power restoration active</strong><span>Rotate a relay clockwise. The server validates every network change.</span></div></>}
+      </div>
+    </> : !busy && !error && <div className={styles.circuitForgeReady}><Settings2 size={34} /><h3>Rebuild the perimeter relay grid.</h3><p>Rotate the field conduits until every DZN relay has a clean route back to command. Only verified server restorations award progression.</p><div className={styles.rewardPills}><span>25 relays</span><span>+{CIRCUIT_FORGE_REWARD.xp} XP</span><span>+{CIRCUIT_FORGE_REWARD.parts} parts</span></div></div>}
+  </section>;
+}
+
+function cipherGridKeyMark(payload: CipherGridPayload | null, letter: string) {
+  let strongest: CipherGridMark | undefined;
+  for (const attempt of payload?.game?.attempts ?? []) {
+    for (let index = 0; index < attempt.guess.length; index++) {
+      if (attempt.guess[index] !== letter) continue;
+      const mark = attempt.marks[index];
+      if (!strongest || CIPHER_GRID_MARK_PRIORITY[mark] > CIPHER_GRID_MARK_PRIORITY[strongest]) strongest = mark;
+    }
+  }
+  return strongest;
+}
+
+function CipherGridPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+  const [payload, setPayload] = useState<CipherGridPayload | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const [entry, setEntry] = useState("");
+  const generation = useRef(0);
+
+  const load = useCallback(async () => {
+    const sequence = ++generation.current;
+    try {
+      const response = await fetch("/api/games/cipher-grid", { credentials: "include", cache: "no-store" });
+      const result = await response.json() as CipherGridPayload & { error?: string };
+      if (!response.ok) throw new Error(result.error || "DZN Cipher Grid is unavailable.");
+      if (sequence === generation.current) { setPayload(result); setError(""); }
+    } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Cipher Grid is unavailable."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, []);
+
+  useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
+
+  const mutate = useCallback(async (body: Record<string, unknown>) => {
+    if (busy) return;
+    const sequence = ++generation.current; setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/games/cipher-grid", { method: "POST", credentials: "include", cache: "no-store",
+        headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const result = await response.json() as CipherGridPayload & { error?: string };
+      if (!response.ok) { setError(result.error || "That field-word guess could not be recorded."); if (response.status === 409) void load(); return; }
+      if (sequence !== generation.current) return;
+      setEntry(""); setPayload(result); onProgress();
+    } catch { if (sequence === generation.current) setError("That field-word guess could not be recorded. Refresh before retrying."); }
+    finally { if (sequence === generation.current) setBusy(false); }
+  }, [busy, load, onProgress]);
+
+  const game = payload?.game;
+  const clockNow = Math.max(now, payload?.serverTime ?? 0);
+  const available = Boolean(payload) && !error;
+  const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
+  const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5000);
+  const normalize = (value: string) => setEntry(value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, CIPHER_GRID_WORD_LENGTH));
+  const submit = useCallback(() => {
+    if (!game || !active || busy || entry.length !== CIPHER_GRID_WORD_LENGTH) return;
+    void mutate({ action: "guess", gameId: game.id, version: game.version, guess: entry });
+  }, [active, busy, entry, game, mutate]);
+
+  return <section aria-labelledby="cipher-grid-title" className={styles.cipherGridPanel}>
+    <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>06 / FIELD CRYPTOGRAPHY</span><h2 id="cipher-grid-title">DZN Cipher Grid</h2></div><KeyRound size={24} /></div>
+    {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Cipher Grid" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
+    <div className={styles.cipherGridTools}>
+      <div><strong>{game ? `${game.attempts.length} / ${game.maxAttempts} attempts` : "Six field-word attempts"}</strong><span>{game ? "Decode the five-letter DZN field word." : "The answer and reward are verified by the DZN server."}</span></div>
+      <button className={styles.primary} disabled={busy || !available || active || restartCoolingDown}
+        title={restartCoolingDown && !active ? "New decode available five seconds after the last start" : undefined}
+        onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Decode in progress" : game ? "New decode" : "Start decode"}</button>
+    </div>
+    {game ? <>
+      <div className={styles.cipherGridMeta}><span><KeyRound size={14} />{game.attempts.length} / {game.maxAttempts}</span><span><Target size={14} />{game.answerLength} letters</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
+      <form className={styles.cipherGridStage} aria-label="Cipher Grid field-word puzzle" onSubmit={event => { event.preventDefault(); submit(); }}>
+        <div className={styles.cipherGridReadout} aria-live="polite"><span>{active ? "LIVE FIELD CIPHER" : game.status === "won" ? "CIPHER RESOLVED" : "CIPHER CLOSED"}</span><strong>{active ? "Build a five-letter field word" : game.status === "won" ? "Signal decoded" : game.status === "failed" ? "No attempts remain" : "Decode window expired"}</strong></div>
+        <div className={styles.cipherGridBoard} role="grid" aria-label="Cipher Grid attempts">
+          {Array.from({ length: CIPHER_GRID_MAX_ATTEMPTS }, (_, rowIndex) => {
+            const attempt = game.attempts[rowIndex];
+            const draft = active && rowIndex === game.attempts.length ? entry : "";
+            return <div key={rowIndex} className={styles.cipherGridRow} role="row">{Array.from({ length: CIPHER_GRID_WORD_LENGTH }, (_, columnIndex) => {
+              const letter = attempt?.guess[columnIndex] ?? draft[columnIndex] ?? "";
+              const mark = attempt?.marks[columnIndex];
+              return <span key={columnIndex} className={styles.cipherGridTile} role="gridcell" data-mark={mark} data-entry={Boolean(letter)} aria-label={`Attempt ${rowIndex + 1}, letter ${columnIndex + 1}${letter ? `: ${letter}` : ": blank"}`}>{letter}</span>;
+            })}</div>;
+          })}
+        </div>
+        <div className={styles.cipherGridEntry}>
+          <label htmlFor="cipher-grid-entry">Field word</label>
+          <input id="cipher-grid-entry" value={entry} disabled={busy || !active} onChange={event => normalize(event.target.value)}
+            autoCapitalize="characters" autoComplete="off" autoCorrect="off" inputMode="text" maxLength={CIPHER_GRID_WORD_LENGTH} placeholder="TYPE 5 LETTERS" />
+          <button type="submit" className={styles.primary} disabled={busy || !active || entry.length !== CIPHER_GRID_WORD_LENGTH}><KeyRound size={17} />Submit</button>
+        </div>
+        <div className={styles.cipherGridKeyboard} role="group" aria-label="Cipher Grid keyboard">
+          {CIPHER_GRID_KEYS.map(row => <div key={row}>{Array.from(row).map(letter => <button type="button" key={letter} className={styles.cipherGridKey}
+            data-mark={cipherGridKeyMark(payload, letter)} disabled={busy || !active || entry.length >= CIPHER_GRID_WORD_LENGTH} onClick={() => normalize(`${entry}${letter}`)}>{letter}</button>)}</div>)}
+          <div><button type="button" className={`${styles.cipherGridKey} ${styles.cipherGridWideKey}`} disabled={busy || !active || !entry} onClick={() => setEntry(value => value.slice(0, -1))}><X size={16} /><span>Backspace</span></button></div>
+        </div>
+        <p className={styles.cipherGridHint}>Teal means the right letter in the right slot. Amber means the letter belongs elsewhere. The server keeps the answer private.</p>
+      </form>
+      <div className={`${styles.result} ${game.status === "won" ? styles.won : ""}`} role="status">
+        {game.status === "won" ? <><ShieldCheck size={22} /><div><strong>Cipher resolved</strong><span>{payload?.rewardGranted ? `Daily reward recorded: +${CIPHER_GRID_REWARD.xp} XP and +${CIPHER_GRID_REWARD.parts} parts.` : payload?.rewardedToday ? "Practice decode complete. Today's reward was already recorded." : "Decode complete."}</span></div></>
+          : game.status === "failed" ? <><Target size={22} /><div><strong>Signal lost</strong><span>Six guesses ended the decode. Existing Hub progress is unchanged.</span></div></>
+            : !active ? <><Clock3 size={22} /><div><strong>Decode expired</strong><span>Start a new field cipher when ready.</span></div></>
+              : <><Radio size={20} /><div><strong>Decode in progress</strong><span>Use the marks to narrow the DZN field word before the window closes.</span></div></>}
+      </div>
+    </> : !busy && !error && <div className={styles.cipherGridReady}><KeyRound size={34} /><h3>Decode the field signal.</h3><p>Find a five-letter DZN field word in six attempts. Only the verified server can award progression.</p><div className={styles.rewardPills}><span>6 attempts</span><span>+{CIPHER_GRID_REWARD.xp} XP</span><span>+{CIPHER_GRID_REWARD.parts} parts</span></div></div>}
   </section>;
 }
 

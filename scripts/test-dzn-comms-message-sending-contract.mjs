@@ -123,6 +123,7 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(shell, /historyRequestGenerationRef\.current \+= 1;[\s\S]*selectedChannelRef\.current = channel\.slug/, "Changing channels must invalidate in-flight history reads immediately.");
   assert.match(shell, /const DELETED_MESSAGE_NOTICE_MS = 2_000/, "A self-deletion notice must stay brief and deterministic.");
   assert.match(shell, /const \[deletionNotices, setDeletionNotices\] = useState<ReadonlyMap<string, DeletionNotice>>\(\(\) => new Map\(\)\)/, "A temporary deletion notice must remain independent of polling payloads.");
+  assert.match(shell, /A newer deletion replaces any earlier placeholder,[\s\S]*deletionNoticeTimeoutsRef\.current\.clear\(\)/, "Repeated deletes must collapse to one brief public placeholder instead of stacking rows.");
   assert.match(shell, /const \[deletedMessageIds, setDeletedMessageIds\] = useState<ReadonlySet<string>>\(\(\) => new Set\(\)\)/, "A successful deletion must leave an ID-only local tombstone for late history responses.");
   assert.match(shell, /mergeDeletionNotices\(payload\.messages, deletionNotices, deletedMessageIds, payload\.channel\.slug\)/, "Rendered history must merge active notices and suppress deleted IDs in the latest channel payload.");
   assert.match(shell, /function handleMessageDeleted\(messageId: string, deletedChannelSlug: string\)/, "A completed delete must retain the channel that originally rendered the action.");
@@ -133,7 +134,7 @@ test("browser UI polls history, posts through protected routes and stays isolate
   assert.match(deletionNotices, /function historyTimestamp\(value: string \| null\)/, "Chronological reinsertion must normalize the database timestamp formats used by history.");
   assert.match(deletionNotices, /messageTimestamp === noticeTimestamp && message\.id > notice\.id/, "Chronological reinsertion must use the history ID tie-breaker for equal timestamps.");
   assert.match(shell, /window\.setTimeout\([\s\S]*DELETED_MESSAGE_NOTICE_MS/, "A self-deletion placeholder must be removed after the bounded notice window.");
-  assert.match(shell, /messages: current\.payload\.messages\.filter\(\(item\) => item\.id !== messageId\)/, "The expired deletion placeholder must be removed from local chat state.");
+  assert.match(shell, /messages: current\.payload\.messages\.filter\(\(item\) => item\.visibility_state !== "deleted"\)/, "The expired deletion placeholders must be removed from local chat state.");
   assert.match(shell, /Message sent\. Chat history will refresh shortly\./);
   assert.match(shell, /reportCommsMessage\(message\.id\)/);
   assert.match(shell, /reportActionsEnabled = historyReady && payload\.feature_flags\.report_actions_enabled/, "Report controls must require the verified server capability response.");

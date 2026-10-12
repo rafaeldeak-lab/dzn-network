@@ -22,6 +22,7 @@ assert.equal(launcherSource.includes('href="/login?returnTo=%2Fdiscord-owner-acc
 assert.equal(launcherSource.includes("Server owner access"), true, "The global launcher must name the owner-only request path clearly.");
 assert.equal(launcherSource.includes("Guided help live"), true, "The launcher must identify the available guided-help experience.");
 assert.equal(launcherSource.includes('pathname.startsWith("/community")'), true, "The floating launcher must not cover the Comms page itself.");
+assert.equal(launcherSource.includes('pathname.startsWith("/games")'), true, "Games Hub must compact the floating launcher because its own navigation already labels the Community route.");
 assert.equal(launcherSource.includes("<details"), true, "The launcher must use a native disclosure so it works before client hydration completes.");
 assert.equal(launcherSource.includes('aria-label="Chat and Help"'), true, "The launcher disclosure must have an explicit accessible name.");
 assert.equal(launcherSource.includes('disclosureRef.current?.removeAttribute("open")'), true, "The launcher must close when client-side navigation changes the route.");

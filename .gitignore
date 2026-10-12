@@ -80,6 +80,8 @@ web_modules/
 # Next.js build output
 .next
 out
+output/
+artifacts/
 .wrangler/
 .autodev/reports/
 tmp/dzn-pulse-*.patch

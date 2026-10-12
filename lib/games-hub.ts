@@ -4,6 +4,21 @@ export const GAME_MODES = {
   survival: { label: "Survival", size: 20, mines: 80, xp: 150, parts: 3 },
 } as const;
 export type GameMode = keyof typeof GAME_MODES;
+export const HUB_GAME_IDS = ["minefield", "trivia", "word-chain", "hide-seek", "relay-rush", "cipher-grid", "echo-array", "outpost-run", "signal-shift", "circuit-forge"] as const;
+export type HubGameId = (typeof HUB_GAME_IDS)[number];
+export type HubGameAvailability = Record<HubGameId, boolean>;
+export const DEFAULT_HUB_GAME_AVAILABILITY: HubGameAvailability = {
+  minefield: true,
+  trivia: false,
+  "word-chain": false,
+  "hide-seek": false,
+  "relay-rush": false,
+  "cipher-grid": false,
+  "echo-array": false,
+  "outpost-run": false,
+  "signal-shift": false,
+  "circuit-forge": false,
+};
 export type GameCell = "hidden" | "flag" | "mine" | number;
 export type GameView = {
   id: string; mode: GameMode; version: number;
@@ -38,4 +53,4 @@ export type HubSummary = {
   challenges: { dailyRewards: number; weeklyXp: number; streak: number; weeklyExpiresAt: number | null };
   history: { kind: string; xp: number; parts: number; created_at: number }[];
 };
-export type HubPayload = { serverTime: number; summary: HubSummary; game: GameView | null };
+export type HubPayload = { serverTime: number; summary: HubSummary; game: GameView | null; availableGames: HubGameAvailability };

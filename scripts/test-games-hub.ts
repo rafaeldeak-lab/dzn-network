@@ -9,6 +9,8 @@ import { createGameBoard, gameView, moveGame, type GameRow } from "../functions/
 import { GAME_MODES, HUB_EQUIPMENT, hubEquipmentUnlocked, type GameMode, type HubPayload } from "../lib/games-hub";
 import { gamesFixture } from "./lib/games-hub-local";
 
+const gamesHubSource = readFileSync("components/games/games-hub.tsx", "utf8");
+
 type Fixture = Awaited<ReturnType<typeof gamesFixture>>;
 let passed = 0;
 async function test(name: string, action: (fixture: Fixture) => Promise<void>, migrate = true) {
@@ -39,6 +41,21 @@ function seedParts(f: Fixture, count = 12) {
 }
 
 async function run() {
+  assert.match(gamesHubSource, /href="\/community"/, "Games Hub must retain a direct route to DZN Community chat and help.");
+  assert.match(gamesHubSource, /MessageCircle/, "The Games Hub Community route must remain visually identifiable.");
+  assert.match(gamesHubSource, /Signal Shift/, "Games Hub must retain the server-verified Signal Shift route.");
+  assert.match(gamesHubSource, /Circuit Forge/, "Games Hub must retain the server-verified Circuit Forge route.");
+  assert.match(gamesHubSource, /const selectedPlayGame = availableGames\[playGame\] \? playGame : "minefield"/, "Games Hub must safely fall back when the server disables the currently selected mode.");
+  assert.match(gamesHubSource, /availableGames\["relay-rush"\]/, "Games Hub must not render Relay Rush until the server reports it available.");
+  assert.match(gamesHubSource, /clockNow < game\.nextAt \+ RELAY_RUSH_PULSE_INTERVAL_MS - RELAY_RUSH_INPUT_GUARD_MS/, "Relay Rush must stop accepting visible input before the server pulse window closes.");
+  assert.match(gamesHubSource, /game\.nextAt \+ RELAY_RUSH_PULSE_INTERVAL_MS\)\);/, "Relay Rush must end the client run when its server pulse deadline passes.");
+  assert.match(gamesHubSource, /setInterval\(\(\) => \{\s+const clock = serverClock\.current;\s+setRelayNow\(/, "Relay Rush must render from a sub-second server-aligned clock.");
+  assert.match(gamesHubSource, /response\.status === 429\) \{ startCooldown/, "Outpost Run must preserve a live run during its brief command cooldown.");
+  assert.match(gamesHubSource, /useTransientActionCooldown\(ECHO_ARRAY_COOLDOWN_MS\)/, "Echo Array must preserve active puzzles through a transient rate limit.");
+  assert.match(gamesHubSource, /useTransientActionCooldown\(SIGNAL_SHIFT_COOLDOWN_MS\)/, "Signal Shift must preserve active puzzles through a transient rate limit.");
+  assert.match(gamesHubSource, /useTransientActionCooldown\(CIRCUIT_FORGE_COOLDOWN_MS\)/, "Circuit Forge must preserve active puzzles through a transient rate limit.");
+  assert.match(gamesHubSource, /Math\.max\(now, serverClock\.current\.time \+ performance\.now\(\) - serverClock\.current\.measuredAt\)/, "Echo Array cues must render from the synchronized current server clock.");
+  assert.match(gamesHubSource, /aria-label=\{item\.label\} title=\{item\.label\}/, "Compact Games Hub tabs must keep an accessible text name when their label is hidden on the narrowest phones.");
   await test("equipment collection unlocks only at verified XP and assembly thresholds", async () => {
     assert.deepEqual(HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, { xp: 0, assemblies: 0 })).map(item => item.id), []);
     assert.deepEqual(HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, { xp: 299, assemblies: 2 })).map(item => item.id),
@@ -55,6 +72,12 @@ async function run() {
       DZN_GAMES_TRIVIA_ENABLED: "true",
       DZN_GAMES_WORD_CHAIN_ENABLED: "true",
       DZN_GAMES_HIDE_SEEK_ENABLED: "true",
+      DZN_GAMES_RELAY_RUSH_ENABLED: "false",
+      DZN_GAMES_CIPHER_GRID_ENABLED: "false",
+      DZN_GAMES_ECHO_ARRAY_ENABLED: "false",
+      DZN_GAMES_OUTPOST_RUN_ENABLED: "false",
+      DZN_GAMES_SIGNAL_SHIFT_ENABLED: "false",
+      DZN_GAMES_CIRCUIT_FORGE_ENABLED: "false",
       DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED: "true",
     });
     assert.deepEqual({ ...preview.vars }, {});
@@ -74,6 +97,22 @@ async function run() {
     assert.equal((await call(f)).status, 503);
     assert.equal((await call(f, { action: "start", mode: "recon" })).status, 503);
     assert.equal(f.db.sqlite.prepare("SELECT COUNT(*) n FROM dzn_game_sessions").get()?.n, 0);
+  });
+  await test("server reports only modes with both an enabled flag and a complete schema", async f => {
+    const initial = await payload(await call(f));
+    assert.deepEqual(initial.availableGames, {
+      minefield: true, trivia: false, "word-chain": false, "hide-seek": false, "relay-rush": false,
+      "cipher-grid": false, "echo-array": false, "outpost-run": false, "signal-shift": false, "circuit-forge": false,
+    });
+    f.env.DZN_GAMES_RELAY_RUSH_ENABLED = "true";
+    assert.equal((await payload(await call(f))).availableGames["relay-rush"], false);
+    f.db.sqlite.exec(readFileSync("migrations/0096_games_hub_relay_rush.sql", "utf8"));
+    assert.equal((await payload(await call(f))).availableGames["relay-rush"], true);
+    f.env.DZN_GAMES_TRIVIA_ENABLED = "true";
+    f.db.sqlite.exec(readFileSync("migrations/0085_games_hub_trivia.sql", "utf8"));
+    const enabled = await payload(await call(f));
+    assert.equal(enabled.availableGames.trivia, true);
+    assert.equal(enabled.availableGames["circuit-forge"], false);
   });
   await test("unapplied migration returns a sanitized unavailable state", async f => {
     const response = await call(f); assert.equal(response.status, 503);
