@@ -327,12 +327,21 @@ async function run() {
             { id: botId, type: 1, deny: "0", allow: manageChannels },
           ],
         },
+        {
+          id: unsyncedChannelId,
+          type: 0,
+          name: "unsafe-everyone-overwrite",
+          permission_overwrites: [
+            { id: guildId, type: 0, deny: viewChannel, allow: manageChannels },
+            { id: botRoleId, type: 0, deny: "0", allow: privateInviteChannelPermissions },
+          ],
+        },
       ]);
     }
     return discordFetch(input, init);
   });
   assert.equal(unsafeChannelOverwrites.status, "candidates_incomplete", "Discovery must not offer private invite channels whose bot overwrites grant extra permissions.");
-  assert.equal(unsafeChannelOverwrites.privateInviteChannelCandidates.length, 0, "Both unsafe role and member overwrites must be excluded from configuration candidates.");
+  assert.equal(unsafeChannelOverwrites.privateInviteChannelCandidates.length, 0, "Unsafe role, member, and @everyone overwrites must be excluded from configuration candidates.");
 
   const missingGuild = await discoverOwnerDiscordDeliveryCandidates(env, "invalid", discordFetch);
   assert.equal(missingGuild.status, "not_configured");

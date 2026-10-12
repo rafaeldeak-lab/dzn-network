@@ -108,7 +108,7 @@ const DISCORD_VIEW_CHANNEL = DISCORD_PERMISSION_ONE << BigInt(10);
 const DISCORD_MANAGE_ROLES = DISCORD_PERMISSION_ONE << BigInt(28);
 const DISCORD_OWNER_DELIVERY_ASSIGNED_GUILD_PERMISSION_ALLOWLIST = DISCORD_MANAGE_ROLES;
 const DISCORD_OWNER_DELIVERY_EFFECTIVE_GUILD_PERMISSION_ALLOWLIST = DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
-const DISCORD_OWNER_DELIVERY_CHANNEL_PERMISSION_ALLOWLIST = DISCORD_CREATE_INSTANT_INVITE | DISCORD_VIEW_CHANNEL;
+const DISCORD_OWNER_DELIVERY_EFFECTIVE_CHANNEL_PERMISSION_ALLOWLIST = DISCORD_CREATE_INSTANT_INVITE | DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
 
 export function isOwnerDiscordDeliveryEnabled(env: Env) {
   return deliveryFlagsEnabled(env) && Boolean(readInviteDeliveryConfiguration(env));
@@ -844,10 +844,10 @@ async function checkDiscordDeliveryConfiguration(configuration: DeliveryConfigur
     const channelScopedPermissions = getBotChannelOverwritePermissions(channel, rolePreflight.botRoleIds, rolePreflight.botId);
     const canViewInviteChannel = hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL) && hasPermission(channelScopedPermissions, DISCORD_VIEW_CHANNEL);
     const canCreateInvite = hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE) && hasPermission(channelScopedPermissions, DISCORD_CREATE_INSTANT_INVITE);
-    const hasUnexpectedInviteChannelPermissions = hasUnexpectedOwnerDeliveryChannelPermissions(channelScopedPermissions);
+    const hasUnexpectedInviteChannelPermissions = hasUnexpectedOwnerDeliveryChannelPermissions(channelPermissions);
     const checks = { ...rolePreflight.checks, inviteChannel: true, canViewInviteChannel, canCreateInvite, botHasUnexpectedInviteChannelPermissions: hasUnexpectedInviteChannelPermissions };
     if (hasUnexpectedInviteChannelPermissions) {
-      return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot's private-channel overwrite must grant only View Channel and Create Invite. Remove every other channel permission before owner delivery can run.", httpStatus: null, checks };
+      return { ok: false as const, status: "permission_missing" as const, message: "The configured private invite channel grants DZN Bot permissions outside the owner-delivery allowlist. Keep only View Channel, Create Invite, and the required Manage Roles permission before owner delivery can run.", httpStatus: null, checks };
     }
     if (!canViewInviteChannel || !canCreateInvite) {
       return { ok: false as const, status: "permission_missing" as const, message: "DZN Bot needs an explicit private-channel overwrite granting View Channel and Create Invite.", httpStatus: null, checks };
@@ -894,7 +894,7 @@ function hasUnexpectedOwnerDeliveryGuildPermissions(assignedPermissions: bigint,
 }
 
 function hasUnexpectedOwnerDeliveryChannelPermissions(permissions: bigint) {
-  return (permissions & ~DISCORD_OWNER_DELIVERY_CHANNEL_PERMISSION_ALLOWLIST) !== BigInt(0);
+  return (permissions & ~DISCORD_OWNER_DELIVERY_EFFECTIVE_CHANNEL_PERMISSION_ALLOWLIST) !== BigInt(0);
 }
 
 function evaluateChannelPermissions(base: bigint, channel: DiscordChannel, guildId: string, botRoleIds: Set<string>, botId: string) {

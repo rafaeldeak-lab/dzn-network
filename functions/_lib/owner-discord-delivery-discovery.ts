@@ -73,7 +73,7 @@ const DISCORD_VIEW_CHANNEL = DISCORD_PERMISSION_ONE << BigInt(10);
 const DISCORD_MANAGE_ROLES = DISCORD_PERMISSION_ONE << BigInt(28);
 const DISCORD_OWNER_DELIVERY_ASSIGNED_GUILD_PERMISSION_ALLOWLIST = DISCORD_MANAGE_ROLES;
 const DISCORD_OWNER_DELIVERY_EFFECTIVE_GUILD_PERMISSION_ALLOWLIST = DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
-const DISCORD_OWNER_DELIVERY_CHANNEL_PERMISSION_ALLOWLIST = DISCORD_CREATE_INSTANT_INVITE | DISCORD_VIEW_CHANNEL;
+const DISCORD_OWNER_DELIVERY_EFFECTIVE_CHANNEL_PERMISSION_ALLOWLIST = DISCORD_CREATE_INSTANT_INVITE | DISCORD_VIEW_CHANNEL | DISCORD_MANAGE_ROLES;
 
 /**
  * Finds only the identifiers needed for the owner-access delivery diagnostic.
@@ -173,7 +173,7 @@ export async function discoverOwnerDiscordDeliveryCandidates(
         const channelScopedPermissions = getBotChannelOverwritePermissions(channel, botRoleIds, botId);
         const canView = hasPermission(channelPermissions, DISCORD_VIEW_CHANNEL) && hasPermission(channelScopedPermissions, DISCORD_VIEW_CHANNEL);
         const canCreateInvite = hasPermission(channelPermissions, DISCORD_CREATE_INSTANT_INVITE) && hasPermission(channelScopedPermissions, DISCORD_CREATE_INSTANT_INVITE);
-        if (!privateToEveryone || !canView || !canCreateInvite || hasUnexpectedOwnerDeliveryChannelPermissions(channelScopedPermissions)) return null;
+        if (!privateToEveryone || !canView || !canCreateInvite || hasUnexpectedOwnerDeliveryChannelPermissions(channelPermissions)) return null;
         return {
           id: String(channel.id ?? ""),
           name: safeChannelName(channel.name),
@@ -287,7 +287,7 @@ function hasUnexpectedOwnerDeliveryGuildPermissions(assignedPermissions: bigint,
 }
 
 function hasUnexpectedOwnerDeliveryChannelPermissions(permissions: bigint) {
-  return (permissions & ~DISCORD_OWNER_DELIVERY_CHANNEL_PERMISSION_ALLOWLIST) !== BigInt(0);
+  return (permissions & ~DISCORD_OWNER_DELIVERY_EFFECTIVE_CHANNEL_PERMISSION_ALLOWLIST) !== BigInt(0);
 }
 
 function evaluateChannelPermissions(base: bigint, channel: DiscordChannel, guildId: string, botRoleIds: Set<string>, botId: string) {
