@@ -14,10 +14,10 @@ import { WORD_CHAIN_REWARD, type WordChainPayload } from "@/lib/games-word-chain
 import { HIDE_SEEK_REWARD, type HideSeekPayload } from "@/lib/games-hide-seek";
 import { RELAY_RUSH_LANES, RELAY_RUSH_PULSE_INTERVAL_MS, RELAY_RUSH_REWARD, type RelayRushLane, type RelayRushPayload } from "@/lib/games-relay-rush";
 import { CIPHER_GRID_MAX_ATTEMPTS, CIPHER_GRID_REWARD, CIPHER_GRID_WORD_LENGTH, type CipherGridMark, type CipherGridPayload } from "@/lib/games-cipher-grid";
-import { ECHO_ARRAY_CUE_INTERVAL_MS, ECHO_ARRAY_CUE_LEAD_MS, ECHO_ARRAY_REWARD, type EchoArrayNode, type EchoArrayPayload } from "@/lib/games-echo-array";
+import { ECHO_ARRAY_CUE_INTERVAL_MS, ECHO_ARRAY_CUE_LEAD_MS, ECHO_ARRAY_MIN_INPUT_INTERVAL_MS, ECHO_ARRAY_REWARD, type EchoArrayNode, type EchoArrayPayload } from "@/lib/games-echo-array";
 import { OUTPOST_RUN_DIRECTIONS, OUTPOST_RUN_MIN_MOVE_INTERVAL_MS, OUTPOST_RUN_REWARD, type OutpostRunDirection, type OutpostRunPayload } from "@/lib/games-outpost-run";
-import { SIGNAL_SHIFT_REWARD, type SignalShiftPayload } from "@/lib/games-signal-shift";
-import { CIRCUIT_FORGE_REWARD, type CircuitForgePayload } from "@/lib/games-circuit-forge";
+import { SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS, SIGNAL_SHIFT_REWARD, type SignalShiftPayload } from "@/lib/games-signal-shift";
+import { CIRCUIT_FORGE_MIN_ROTATION_INTERVAL_MS, CIRCUIT_FORGE_REWARD, type CircuitForgePayload } from "@/lib/games-circuit-forge";
 import styles from "./games-hub.module.css";
 
 type View = "play" | "workshop" | "insignia" | "activity";
@@ -35,6 +35,9 @@ const CIPHER_GRID_KEYS = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
 const CIPHER_GRID_MARK_PRIORITY: Record<CipherGridMark, number> = { absent: 0, present: 1, correct: 2 };
 const RELAY_RUSH_INPUT_GUARD_MS = 120;
 const OUTPOST_RUN_COOLDOWN_MS = OUTPOST_RUN_MIN_MOVE_INTERVAL_MS + 40;
+const ECHO_ARRAY_COOLDOWN_MS = ECHO_ARRAY_MIN_INPUT_INTERVAL_MS + 40;
+const SIGNAL_SHIFT_COOLDOWN_MS = SIGNAL_SHIFT_MIN_MOVE_INTERVAL_MS + 40;
+const CIRCUIT_FORGE_COOLDOWN_MS = CIRCUIT_FORGE_MIN_ROTATION_INTERVAL_MS + 40;
 const ECHO_ARRAY_NODE_META: Record<EchoArrayNode, { label: string; key: string }> = {
   north: { label: "North array", key: "1" }, east: { label: "East array", key: "2" }, south: { label: "South array", key: "3" }, west: { label: "West array", key: "4" },
 };
@@ -42,6 +45,36 @@ const ECHO_ARRAY_NODE_ORDER: EchoArrayNode[] = ["north", "east", "south", "west"
 const OUTPOST_RUN_DIRECTION_META: Record<OutpostRunDirection, { label: string; icon: typeof ArrowUp }> = {
   north: { label: "Move north", icon: ArrowUp }, east: { label: "Move east", icon: ArrowRight }, south: { label: "Move south", icon: ArrowDown }, west: { label: "Move west", icon: ArrowLeft },
 };
+
+function useTransientActionCooldown(duration: number) {
+  const [notice, setNotice] = useState("");
+  const [cooldown, setCooldown] = useState(false);
+  const cooldownTimer = useRef<number | null>(null);
+
+  const clearCooldown = useCallback(() => {
+    if (cooldownTimer.current !== null) window.clearTimeout(cooldownTimer.current);
+    cooldownTimer.current = null;
+    setNotice("");
+    setCooldown(false);
+  }, []);
+
+  const startCooldown = useCallback((message: string) => {
+    if (cooldownTimer.current !== null) window.clearTimeout(cooldownTimer.current);
+    setNotice(message);
+    setCooldown(true);
+    cooldownTimer.current = window.setTimeout(() => {
+      cooldownTimer.current = null;
+      setNotice("");
+      setCooldown(false);
+    }, duration);
+  }, [duration]);
+
+  useEffect(() => () => {
+    if (cooldownTimer.current !== null) window.clearTimeout(cooldownTimer.current);
+  }, []);
+
+  return { notice, cooldown, clearCooldown, startCooldown };
+}
 
 export function GamesHub() {
   const [payload, setPayload] = useState<HubPayload | null>(null);
@@ -523,7 +556,8 @@ function RelayRushPanel({ now, onProgress }: { now: number; onProgress: () => vo
   const game = payload?.game;
   const clockNow = Math.max(now, relayNow, payload?.serverTime ?? 0);
   const available = Boolean(payload) && !error;
-  const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
+  const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow &&
+    (!game.nextAt || clockNow < game.nextAt + RELAY_RUSH_PULSE_INTERVAL_MS));
   const targetOpen = Boolean(active && game?.nextAt && clockNow >= game.nextAt && clockNow < game.nextAt + RELAY_RUSH_PULSE_INTERVAL_MS - RELAY_RUSH_INPUT_GUARD_MS);
   const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5000);
   const submitPulse = useCallback((lane: RelayRushLane) => {
@@ -581,6 +615,15 @@ function EchoArrayPanel({ now, onProgress }: { now: number; onProgress: () => vo
   const [error, setError] = useState("");
   const [litNode, setLitNode] = useState<EchoArrayNode | null>(null);
   const generation = useRef(0);
+  const serverClock = useRef({ time: 0, measuredAt: 0 });
+  const [echoNow, setEchoNow] = useState(0);
+  const { notice, cooldown, clearCooldown, startCooldown } = useTransientActionCooldown(ECHO_ARRAY_COOLDOWN_MS);
+
+  const receivePayload = useCallback((result: EchoArrayPayload) => {
+    serverClock.current = { time: result.serverTime, measuredAt: performance.now() };
+    setEchoNow(result.serverTime);
+    setPayload(result);
+  }, []);
 
   const load = useCallback(async () => {
     const sequence = ++generation.current;
@@ -588,56 +631,67 @@ function EchoArrayPanel({ now, onProgress }: { now: number; onProgress: () => vo
       const response = await fetch("/api/games/echo-array", { credentials: "include", cache: "no-store" });
       const result = await response.json() as EchoArrayPayload & { error?: string };
       if (!response.ok) throw new Error(result.error || "DZN Echo Array is unavailable.");
-      if (sequence === generation.current) { setPayload(result); setError(""); }
+      if (sequence === generation.current) { receivePayload(result); clearCooldown(); setError(""); }
     } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Echo Array is unavailable."); }
     finally { if (sequence === generation.current) setBusy(false); }
-  }, []);
+  }, [clearCooldown, receivePayload]);
 
   useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
 
   const mutate = useCallback(async (body: Record<string, unknown>) => {
-    if (busy) return;
+    if (busy || cooldown) return;
     const sequence = ++generation.current; setBusy(true); setError("");
     try {
       const response = await fetch("/api/games/echo-array", { method: "POST", credentials: "include", cache: "no-store",
         headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = await response.json() as EchoArrayPayload & { error?: string };
-      if (!response.ok) { setError(result.error || "That echo input could not be recorded."); if (response.status === 409) void load(); return; }
+      if (!response.ok) {
+        if (response.status === 429) { startCooldown(result.error || "Take a moment before selecting the next node."); return; }
+        setError(result.error || "That echo input could not be recorded."); if (response.status === 409) void load(); return;
+      }
       if (sequence !== generation.current) return;
-      setPayload(result); onProgress();
+      receivePayload(result); clearCooldown(); onProgress();
     } catch { if (sequence === generation.current) setError("That echo input could not be recorded. Refresh before retrying."); }
     finally { if (sequence === generation.current) setBusy(false); }
-  }, [busy, load, onProgress]);
+  }, [busy, clearCooldown, cooldown, load, onProgress, receivePayload, startCooldown]);
+
+  useEffect(() => {
+    if (!payload?.game) return;
+    const timer = window.setInterval(() => {
+      const clock = serverClock.current;
+      setEchoNow(clock.time + performance.now() - clock.measuredAt);
+    }, 50);
+    return () => window.clearInterval(timer);
+  }, [payload?.game, payload?.serverTime]);
 
   const game = payload?.game;
-  const clockNow = Math.max(now, payload?.serverTime ?? 0);
+  const clockNow = Math.max(now, echoNow, payload?.serverTime ?? 0);
   const available = Boolean(payload) && !error;
   const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
   const revealing = Boolean(active && game && clockNow < game.cueEndsAt);
   const inputOpen = active && !revealing;
   const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5000);
   const submitNode = useCallback((node: EchoArrayNode) => {
-    if (!game || !inputOpen || busy) return;
+    if (!game || !inputOpen || busy || cooldown) return;
     void mutate({ action: "tap", gameId: game.id, version: game.version, node });
-  }, [busy, game, inputOpen, mutate]);
+  }, [busy, cooldown, game, inputOpen, mutate]);
 
   useEffect(() => {
     const cue = game?.cue;
     const cueStartedAt = game?.cueStartedAt;
-    if (!cue || cueStartedAt === undefined || !revealing || !payload) {
+    if (!cue || cueStartedAt === undefined || !revealing) {
       const clear = window.setTimeout(() => setLitNode(null), 0);
       return () => window.clearTimeout(clear);
     }
-    const receivedAt = performance.now();
     const update = () => {
-      const serverNow = payload.serverTime + performance.now() - receivedAt;
+      const serverNow = Math.max(now, serverClock.current.time + performance.now() - serverClock.current.measuredAt);
       const index = Math.floor((serverNow - cueStartedAt - ECHO_ARRAY_CUE_LEAD_MS) / ECHO_ARRAY_CUE_INTERVAL_MS);
       setLitNode(index >= 0 && index < cue.length ? cue[index] : null);
     };
     update();
     const timer = window.setInterval(update, 60);
     return () => window.clearInterval(timer);
-  }, [game?.cue, game?.cueStartedAt, payload, revealing]);
+  }, [game?.cue, game?.cueStartedAt, now, revealing]);
 
   useEffect(() => {
     if (!game || !revealing) return;
@@ -652,19 +706,19 @@ function EchoArrayPanel({ now, onProgress }: { now: number; onProgress: () => vo
       if (source instanceof Element && source.closest("input, textarea, select, [contenteditable=true]")) return;
       const node = event.key === "1" || event.key === "ArrowUp" ? "north" : event.key === "2" || event.key === "ArrowRight" ? "east"
         : event.key === "3" || event.key === "ArrowDown" ? "south" : event.key === "4" || event.key === "ArrowLeft" ? "west" : null;
-      if (!node || !inputOpen || busy) return;
+      if (!node || !inputOpen || busy || cooldown) return;
       event.preventDefault(); submitNode(node);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy, inputOpen, submitNode]);
+  }, [busy, cooldown, inputOpen, submitNode]);
 
   return <section aria-labelledby="echo-array-title" className={styles.echoArrayPanel}>
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>07 / MEMORY RELAY</span><h2 id="echo-array-title">DZN Echo Array</h2></div><Microchip size={24} /></div>
-    {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Echo Array" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
+    {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Echo Array" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
     <div className={styles.echoArrayTools}>
       <div><strong>{game ? `Stage ${game.stage} / ${game.totalStages}` : "Three escalating signal echoes"}</strong><span>{game ? `${game.maxErrors - game.errors} calibration retries remaining` : "Watch the pattern, then replay it from memory."}</span></div>
-      <button className={styles.primary} disabled={busy || !available || active || restartCoolingDown}
+      <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
         title={restartCoolingDown && !active ? "New echo available five seconds after the last start" : undefined}
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Echo in progress" : game ? "New echo" : "Start echo"}</button>
     </div>
@@ -674,7 +728,7 @@ function EchoArrayPanel({ now, onProgress }: { now: number; onProgress: () => vo
         <div className={styles.echoArrayReadout}><span>{active ? revealing ? "WATCH THE ARRAY" : "REPLAY THE ARRAY" : game.status === "won" ? "ARRAY SYNCHRONISED" : "ARRAY CLOSED"}</span><strong>{active ? revealing ? "Commit the pulse pattern" : "Repeat the stored signal" : game.status === "won" ? "Network echo restored" : game.status === "failed" ? "Signal memory lost" : "Signal window expired"}</strong></div>
         <div className={styles.echoArrayNodes} role="group" aria-label="Echo Array signal nodes">
           {ECHO_ARRAY_NODE_ORDER.map(node => { const meta = ECHO_ARRAY_NODE_META[node]; const lit = revealing && litNode === node; return <button type="button" key={node} className={styles.echoArrayNode}
-            data-node={node} data-lit={lit} disabled={busy || !inputOpen} onClick={() => submitNode(node)}
+            data-node={node} data-lit={lit} disabled={busy || cooldown || !inputOpen} onClick={() => submitNode(node)}
             aria-label={`${meta.label} (${meta.key})${lit ? ", signal live" : ""}`}><span>{meta.key}</span><strong>{meta.label.replace(" array", "")}</strong><small>{lit ? "Pulse live" : revealing ? "Observe" : inputOpen ? "Select" : "Stand down"}</small></button>; })}
         </div>
         <p className={styles.echoArrayHint}>Keyboard: 1 to 4 or the arrow keys. The server records every stage, retry and reward.</p>
@@ -805,6 +859,7 @@ function SignalShiftPanel({ now, onProgress }: { now: number; onProgress: () => 
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const generation = useRef(0);
+  const { notice, cooldown, clearCooldown, startCooldown } = useTransientActionCooldown(SIGNAL_SHIFT_COOLDOWN_MS);
 
   const load = useCallback(async () => {
     const sequence = ++generation.current;
@@ -812,26 +867,29 @@ function SignalShiftPanel({ now, onProgress }: { now: number; onProgress: () => 
       const response = await fetch("/api/games/signal-shift", { credentials: "include", cache: "no-store" });
       const result = await response.json() as SignalShiftPayload & { error?: string };
       if (!response.ok) throw new Error(result.error || "DZN Signal Shift is unavailable.");
-      if (sequence === generation.current) { setPayload(result); setError(""); }
+      if (sequence === generation.current) { setPayload(result); clearCooldown(); setError(""); }
     } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Signal Shift is unavailable."); }
     finally { if (sequence === generation.current) setBusy(false); }
-  }, []);
+  }, [clearCooldown]);
 
   useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
 
   const mutate = useCallback(async (body: Record<string, unknown>) => {
-    if (busy) return;
+    if (busy || cooldown) return;
     const sequence = ++generation.current; setBusy(true); setError("");
     try {
       const response = await fetch("/api/games/signal-shift", { method: "POST", credentials: "include", cache: "no-store",
         headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = await response.json() as SignalShiftPayload & { error?: string };
-      if (!response.ok) { setError(result.error || "That Signal Shift command could not be recorded."); if (response.status === 409) void load(); return; }
+      if (!response.ok) {
+        if (response.status === 429) { startCooldown(result.error || "Route one sector at a time."); return; }
+        setError(result.error || "That Signal Shift command could not be recorded."); if (response.status === 409) void load(); return;
+      }
       if (sequence !== generation.current) return;
-      setPayload(result); onProgress();
+      setPayload(result); clearCooldown(); onProgress();
     } catch { if (sequence === generation.current) setError("That Signal Shift command could not be recorded. Refresh before retrying."); }
     finally { if (sequence === generation.current) setBusy(false); }
-  }, [busy, load, onProgress]);
+  }, [busy, clearCooldown, cooldown, load, onProgress, startCooldown]);
 
   const game = payload?.game;
   const clockNow = Math.max(now, payload?.serverTime ?? 0);
@@ -846,16 +904,16 @@ function SignalShiftPanel({ now, onProgress }: { now: number; onProgress: () => 
     return Math.abs(row - blankRow) + Math.abs(column - blankColumn) === 1;
   };
   const move = useCallback((tile: number) => {
-    if (!game || !active || busy) return;
+    if (!game || !active || busy || cooldown) return;
     void mutate({ action: "move", gameId: game.id, version: game.version, tile });
-  }, [active, busy, game, mutate]);
+  }, [active, busy, cooldown, game, mutate]);
 
   return <section aria-labelledby="signal-shift-title" className={styles.signalShiftPanel}>
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>09 / TACTICAL ROUTING</span><h2 id="signal-shift-title">DZN Signal Shift</h2></div><Target size={24} /></div>
-    {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Signal Shift" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
+    {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Signal Shift" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
     <div className={styles.signalShiftTools}>
       <div><strong>{game ? `${game.moves} / ${game.maxMoves} sector shifts` : "Four-by-four tactical routing"}</strong><span>{game ? "Move sectors into the open relay slot to rebuild the signal line." : "The verified DZN server owns the route, move count, reward, and daily cap."}</span></div>
-      <button className={styles.primary} disabled={busy || !available || active || restartCoolingDown}
+      <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
         title={restartCoolingDown && !active ? "New Signal Shift board available five seconds after the last start" : undefined}
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Route in progress" : game ? "New route" : "Start routing"}</button>
     </div>
@@ -869,7 +927,7 @@ function SignalShiftPanel({ now, onProgress }: { now: number; onProgress: () => 
             const row = Math.floor(index / game.gridSize) + 1;
             const column = index % game.gridSize + 1;
             return <button type="button" key={`${tile}:${index}`} role="gridcell" className={styles.signalShiftTile}
-              data-blank={tile === 0} data-adjacent={movable} disabled={!movable || busy}
+              data-blank={tile === 0} data-adjacent={movable} disabled={!movable || busy || cooldown}
               aria-label={tile === 0 ? `Open relay slot, row ${row}, column ${column}` : `Sector ${tile}, row ${row}, column ${column}${movable ? ", available to shift" : ""}`}
               onClick={() => move(tile)}>{tile === 0 ? <span>CORE</span> : <><small>SECTOR</small><strong>{String(tile).padStart(2, "0")}</strong></>}</button>;
           })}
@@ -891,6 +949,7 @@ function CircuitForgePanel({ now, onProgress }: { now: number; onProgress: () =>
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const generation = useRef(0);
+  const { notice, cooldown, clearCooldown, startCooldown } = useTransientActionCooldown(CIRCUIT_FORGE_COOLDOWN_MS);
 
   const load = useCallback(async () => {
     const sequence = ++generation.current;
@@ -898,26 +957,29 @@ function CircuitForgePanel({ now, onProgress }: { now: number; onProgress: () =>
       const response = await fetch("/api/games/circuit-forge", { credentials: "include", cache: "no-store" });
       const result = await response.json() as CircuitForgePayload & { error?: string };
       if (!response.ok) throw new Error(result.error || "DZN Circuit Forge is unavailable.");
-      if (sequence === generation.current) { setPayload(result); setError(""); }
+      if (sequence === generation.current) { setPayload(result); clearCooldown(); setError(""); }
     } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Circuit Forge is unavailable."); }
     finally { if (sequence === generation.current) setBusy(false); }
-  }, []);
+  }, [clearCooldown]);
 
   useEffect(() => { const initial = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(initial); }, [load]);
 
   const mutate = useCallback(async (body: Record<string, unknown>) => {
-    if (busy) return;
+    if (busy || cooldown) return;
     const sequence = ++generation.current; setBusy(true); setError("");
     try {
       const response = await fetch("/api/games/circuit-forge", { method: "POST", credentials: "include", cache: "no-store",
         headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = await response.json() as CircuitForgePayload & { error?: string };
-      if (!response.ok) { setError(result.error || "That Circuit Forge rotation could not be recorded."); if (response.status === 409) void load(); return; }
+      if (!response.ok) {
+        if (response.status === 429) { startCooldown(result.error || "Rotate one relay at a time."); return; }
+        setError(result.error || "That Circuit Forge rotation could not be recorded."); if (response.status === 409) void load(); return;
+      }
       if (sequence !== generation.current) return;
-      setPayload(result); onProgress();
+      setPayload(result); clearCooldown(); onProgress();
     } catch { if (sequence === generation.current) setError("That Circuit Forge rotation could not be recorded. Refresh before retrying."); }
     finally { if (sequence === generation.current) setBusy(false); }
-  }, [busy, load, onProgress]);
+  }, [busy, clearCooldown, cooldown, load, onProgress, startCooldown]);
 
   const game = payload?.game;
   const clockNow = Math.max(now, payload?.serverTime ?? 0);
@@ -925,16 +987,16 @@ function CircuitForgePanel({ now, onProgress }: { now: number; onProgress: () =>
   const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow);
   const restartCoolingDown = Boolean(game && clockNow < game.startedAt + 5_000);
   const rotate = useCallback((index: number) => {
-    if (!game || !active || busy || game.tiles[index]?.core) return;
+    if (!game || !active || busy || cooldown || game.tiles[index]?.core) return;
     void mutate({ action: "rotate", gameId: game.id, version: game.version, index });
-  }, [active, busy, game, mutate]);
+  }, [active, busy, cooldown, game, mutate]);
 
   return <section aria-labelledby="circuit-forge-title" className={styles.circuitForgePanel}>
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>10 / RELAY WORKSHOP</span><h2 id="circuit-forge-title">DZN Circuit Forge</h2></div><Settings2 size={24} /></div>
-    {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Circuit Forge" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
+    {(error || notice) && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error || notice}</span>{error && <button className={styles.iconButton} title="Refresh Circuit Forge" onClick={() => void load()}><RefreshCw size={17} /></button>}</div>}
     <div className={styles.circuitForgeTools}>
       <div><strong>{game ? `${game.rotations} / ${game.maxRotations} relay rotations` : "Five-by-five power-grid rebuild"}</strong><span>{game ? `${game.poweredCount} / ${game.tiles.length} relays connected to the core.` : "The verified DZN server owns every relay state, win, reward, and daily cap."}</span></div>
-      <button className={styles.primary} disabled={busy || !available || active || restartCoolingDown}
+      <button className={styles.primary} disabled={busy || cooldown || !available || active || restartCoolingDown}
         title={restartCoolingDown && !active ? "New Circuit Forge board available five seconds after the last start" : undefined}
         onClick={() => void mutate({ action: "start" })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Grid online" : game ? "New grid" : "Start rebuild"}</button>
     </div>
@@ -946,7 +1008,7 @@ function CircuitForgePanel({ now, onProgress }: { now: number; onProgress: () =>
           {game.tiles.map((tile, index) => {
             const rotatable = active && !tile.core;
             return <button type="button" key={index} role="gridcell" className={styles.circuitForgeTile}
-              data-core={tile.core} data-powered={tile.powered} data-rotatable={rotatable} disabled={!rotatable || busy}
+              data-core={tile.core} data-powered={tile.powered} data-rotatable={rotatable} disabled={!rotatable || busy || cooldown}
               title={tile.core ? "Command core" : "Rotate relay clockwise"}
               aria-label={tile.core ? `Command core, ${tile.powered ? "powered" : "offline"}` : `Relay ${String(index + 1).padStart(2, "0")}, ${tile.powered ? "powered" : "offline"}, rotate clockwise`}
               onClick={() => rotate(index)}>

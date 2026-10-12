@@ -48,8 +48,13 @@ async function run() {
   assert.match(gamesHubSource, /const selectedPlayGame = availableGames\[playGame\] \? playGame : "minefield"/, "Games Hub must safely fall back when the server disables the currently selected mode.");
   assert.match(gamesHubSource, /availableGames\["relay-rush"\]/, "Games Hub must not render Relay Rush until the server reports it available.");
   assert.match(gamesHubSource, /clockNow < game\.nextAt \+ RELAY_RUSH_PULSE_INTERVAL_MS - RELAY_RUSH_INPUT_GUARD_MS/, "Relay Rush must stop accepting visible input before the server pulse window closes.");
+  assert.match(gamesHubSource, /game\.nextAt \+ RELAY_RUSH_PULSE_INTERVAL_MS\)\);/, "Relay Rush must end the client run when its server pulse deadline passes.");
   assert.match(gamesHubSource, /setInterval\(\(\) => \{\s+const clock = serverClock\.current;\s+setRelayNow\(/, "Relay Rush must render from a sub-second server-aligned clock.");
   assert.match(gamesHubSource, /response\.status === 429\) \{ startCooldown/, "Outpost Run must preserve a live run during its brief command cooldown.");
+  assert.match(gamesHubSource, /useTransientActionCooldown\(ECHO_ARRAY_COOLDOWN_MS\)/, "Echo Array must preserve active puzzles through a transient rate limit.");
+  assert.match(gamesHubSource, /useTransientActionCooldown\(SIGNAL_SHIFT_COOLDOWN_MS\)/, "Signal Shift must preserve active puzzles through a transient rate limit.");
+  assert.match(gamesHubSource, /useTransientActionCooldown\(CIRCUIT_FORGE_COOLDOWN_MS\)/, "Circuit Forge must preserve active puzzles through a transient rate limit.");
+  assert.match(gamesHubSource, /Math\.max\(now, serverClock\.current\.time \+ performance\.now\(\) - serverClock\.current\.measuredAt\)/, "Echo Array cues must render from the synchronized current server clock.");
   assert.match(gamesHubSource, /aria-label=\{item\.label\} title=\{item\.label\}/, "Compact Games Hub tabs must keep an accessible text name when their label is hidden on the narrowest phones.");
   await test("equipment collection unlocks only at verified XP and assembly thresholds", async () => {
     assert.deepEqual(HUB_EQUIPMENT.filter(item => hubEquipmentUnlocked(item, { xp: 0, assemblies: 0 })).map(item => item.id), []);
