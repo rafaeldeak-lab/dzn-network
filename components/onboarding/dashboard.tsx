@@ -5752,6 +5752,12 @@ function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessRes
   const publicFallbackCopy = readiness.publicFallbackPriceVarsDetected?.length
     ? ` Public fallback aliases detected: ${readiness.publicFallbackPriceVarsDetected.join(", ")}.`
     : "";
+  const renderReadinessMetadata = (tone: "warning" | "note") => (
+    <p className={tone === "warning" ? "mt-1 text-[11px] leading-5 text-amber-100/80" : "mt-1 text-[11px] leading-5 text-cyan-50/80"}>
+      Mode hint: {formatStripeModeHint(readiness.modeHint)}.{legacyCopy}{publicFallbackCopy} Secret values and Price IDs are never shown here.
+      {readiness.humanApprovalRequiredForLiveBilling ? " Live Stripe changes still require explicit human approval." : ""}
+    </p>
+  );
   return (
     <>
       {shouldShowWarning ? (
@@ -5784,10 +5790,7 @@ function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessRes
                   ))}
                 </div>
               ) : null}
-              <p className="mt-1 text-[11px] leading-5 text-amber-100/80">
-                Mode hint: {formatStripeModeHint(readiness.modeHint)}.{legacyCopy}{publicFallbackCopy} Secret values and Price IDs are never shown here.
-                {readiness.humanApprovalRequiredForLiveBilling ? " Live Stripe changes still require explicit human approval." : ""}
-              </p>
+              {renderReadinessMetadata("warning")}
             </div>
           </div>
         </div>
@@ -5805,6 +5808,7 @@ function BillingReadinessWarning({ readiness }: { readiness: BillingReadinessRes
                   </p>
                 ))}
               </div>
+              {renderReadinessMetadata("note")}
             </div>
           </div>
         </div>

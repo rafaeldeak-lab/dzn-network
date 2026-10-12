@@ -208,6 +208,11 @@ assert.match(
   /const actionableFailedChecks = readiness\.readinessChecks\?\.filter\(\(check\) => !check\.ok && check\.severity !== "info"\) \?\? \[\];/,
   "Informational readiness notes must not be rendered as checkout warnings.",
 );
+assert.equal(
+  dashboardSource.includes('renderReadinessMetadata("note")'),
+  true,
+  "Informational readiness notes must retain the safe Stripe mode and legacy-variable context.",
+);
 
 const configCheckSource = readFileSync("scripts/check-billing-config.ts", "utf8");
 for (const snippet of [
