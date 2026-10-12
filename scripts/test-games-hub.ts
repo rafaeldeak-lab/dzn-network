@@ -57,6 +57,7 @@ async function run() {
       DZN_GAMES_HIDE_SEEK_ENABLED: "true",
       DZN_GAMES_RELAY_RUSH_ENABLED: "false",
       DZN_GAMES_CIPHER_GRID_ENABLED: "false",
+      DZN_GAMES_ECHO_ARRAY_ENABLED: "false",
       DZN_SERVER_REVIEW_OWNER_REPLIES_ENABLED: "true",
     });
     assert.deepEqual({ ...preview.vars }, {});
