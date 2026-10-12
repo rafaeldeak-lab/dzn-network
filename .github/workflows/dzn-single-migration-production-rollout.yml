@@ -148,9 +148,7 @@ jobs:
       - name: Record D1 recovery bookmark
         run: |
           set -euo pipefail
-          BOOKMARK_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           npx wrangler d1 time-travel info "${PRODUCTION_D1_DATABASE_NAME}" \
-            --timestamp "${BOOKMARK_TIMESTAMP}" \
             --json > "${MIGRATION_STAGE}/time-travel-before.json"
           MIGRATION_STAGE="${MIGRATION_STAGE}" node <<'NODE'
           const fs = require("node:fs");

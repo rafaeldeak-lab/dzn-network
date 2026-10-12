@@ -44,6 +44,11 @@ assert.deepEqual(
 );
 assert.doesNotMatch(workflow, /CLOUDFLARE_API_TOKEN_FALLBACK/);
 assert.match(workflow, /d1 time-travel info/);
+assert.doesNotMatch(
+  workflow,
+  /d1 time-travel info[\s\S]*?--timestamp/,
+  "The recovery bookmark must use Cloudflare's current bookmark rather than a truncated client timestamp.",
+);
 assert.match(workflow, /verify-ledger/);
 assert.match(workflow, /verify-baseline/);
 assert.match(workflow, /verify-schema/);
