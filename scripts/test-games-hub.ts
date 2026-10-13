@@ -43,7 +43,9 @@ function seedParts(f: Fixture, count = 12) {
 async function run() {
   assert.match(gamesHubSource, /href="\/community"/, "Games Hub must retain a direct route to DZN Community chat and help.");
   assert.match(gamesHubSource, /MessageCircle/, "The Games Hub Community route must remain visually identifiable.");
-  assert.match(gamesHubSource, /Eleven field games\. One earned record\./, "Signed-out visitors must see a truthful Games Hub entry point instead of an empty loading surface.");
+  assert.match(gamesHubSource, /Field games\. One earned record\./, "Signed-out visitors must see a truthful Games Hub entry point instead of an empty loading surface.");
+  assert.match(gamesHubSource, /modes currently enabled for this launch/, "Signed-out visitors must not be told catalogue games are all enabled before the server evaluates the launch flags.");
+  assert.match(gamesHubSource, /DZN Games Hub game catalogue/, "The signed-out mode list must be described as a catalogue rather than a live availability claim.");
   assert.match(gamesHubSource, /href="\/login\?returnTo=%2Fgames"/, "The public Games Hub briefing must provide the account-bound Discord sign-in route.");
   assert.match(gamesHubSource, /Rewards are validated server-side\. They have no cash value/, "Public Games Hub copy must not imply cash rewards or a paid-plan advantage.");
   assert.match(gamesHubSource, /Signal Shift/, "Games Hub must retain the server-verified Signal Shift route.");

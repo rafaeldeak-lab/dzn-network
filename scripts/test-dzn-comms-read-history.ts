@@ -94,6 +94,8 @@ assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED/, "The /co
 assert.match(shell, /const productionRuntimeProbeEnabled = process\.env\.NODE_ENV === "production"/, "A deployed browser must use the same-origin server capability response rather than a Pages runtime secret.");
 assert.match(shell, /const historyProbeEnabled = historyUiEnabled \|\| liveUiEnabled \|\| productionRuntimeProbeEnabled/, "Production history probing must be explicit while local development stays default-off.");
 assert.doesNotMatch(historyClient, /cdn\.discordapp\.com/, "The history client must reject raw Discord CDN avatar URLs.");
+assert.match(shell, /historyReady \? recentVisibleSpeakers\(visibleMessages\) : \[\]/, "Static and fallback sample rows must never be presented as recent live speakers.");
+assert.match(shell, /failedAvatarUrl !== message\.author_avatar_url/, "A recovered or updated consented avatar URL must be retried for the same chat row.");
 assert.match(shell, /if \(!historyProbeEnabled\) return;/, "The history route must remain dormant outside an explicit local switch or deployed client.");
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_PRIVATE_GROUPS_UI_ENABLED/, "Private channel controls must have a separate public UI switch.");
 assert.match(shell, /loadCommsHistory\(controller.signal, \{ channelSlug: selectedChannel \}\)/, "The UI must use the bounded history client for the selected channel.");

@@ -231,8 +231,8 @@ export function DznCommsShell() {
     () => mergeDeletionNotices(payload.messages, deletionNotices, deletedMessageIds, payload.channel.slug),
     [deletedMessageIds, deletionNotices, payload.channel.slug, payload.messages],
   );
-  const recentSpeakers = useMemo(() => recentVisibleSpeakers(visibleMessages), [visibleMessages]);
   const historyReady = history.status === "ready";
+  const recentSpeakers = useMemo(() => historyReady ? recentVisibleSpeakers(visibleMessages) : [], [historyReady, visibleMessages]);
   const sendingEnabled = historyReady && payload.feature_flags.sending_enabled;
   const reportActionsEnabled = historyReady && payload.feature_flags.report_actions_enabled;
   const selfDeleteUiEnabled = historyReady && payload.feature_flags.self_delete_enabled;
@@ -706,12 +706,12 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionUiEnabled, 
 }
 
 function MessageAvatar({ message, muted }: { message: CommsHistoryMessage; muted: boolean }) {
-  const [imageFailed, setImageFailed] = useState(false);
-  const avatarUrl = !muted && !imageFailed ? message.author_avatar_url : null;
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
+  const avatarUrl = !muted && failedAvatarUrl !== message.author_avatar_url ? message.author_avatar_url : null;
 
   return (
     <span className={`grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border text-sm font-black ${muted ? "border-amber-200/25 bg-amber-300/10 text-amber-100" : "border-cyan-300/20 bg-cyan-300/10 text-cyan-100"}`}>
-      {avatarUrl ? <Image src={avatarUrl} alt="" width={40} height={40} unoptimized className="h-full w-full object-cover" onError={() => setImageFailed(true)} /> : initials(message.author_display_name)}
+      {avatarUrl ? <Image src={avatarUrl} alt="" width={40} height={40} unoptimized className="h-full w-full object-cover" onError={() => setFailedAvatarUrl(message.author_avatar_url ?? null)} /> : initials(message.author_display_name)}
     </span>
   );
 }
