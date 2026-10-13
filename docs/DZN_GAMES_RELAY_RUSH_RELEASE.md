@@ -4,7 +4,7 @@
 
 This release adds Relay Rush as an original fifth playable title in the DZN Games Hub. Players follow a short server-generated sequence of left, centre, and right signal pulses. A completed run has twelve pulses and permits up to three misses.
 
-Relay Rush remains unavailable unless both `DZN_GAMES_HUB_ENABLED` and `DZN_GAMES_RELAY_RUSH_ENABLED` are exactly `true`. The Relay Rush switch is deliberately `false` in the production configuration delivered by this source release.
+Relay Rush is available only when both `DZN_GAMES_HUB_ENABLED` and `DZN_GAMES_RELAY_RUSH_ENABLED` are exactly `true`. Migration `0096_games_hub_relay_rush.sql` was applied and independently verified in production before this release. This release sets only `DZN_GAMES_RELAY_RUSH_ENABLED` to `true` in the production configuration; it does not enable any other future Games Hub title.
 
 ## Security And Fairness
 
@@ -27,11 +27,11 @@ Production migration application and feature activation are separate, controlled
 2. Confirm the intended database and migration ledger state, including any preceding approved migrations.
 3. Apply only `0096_games_hub_relay_rush.sql`.
 4. Verify its ledger entry, the two tables, the history index, all CHECK constraints, both foreign keys, and a zero-row baseline.
-5. Enable only `DZN_GAMES_RELAY_RUSH_ENABLED` after that verification passes.
-6. Run authenticated start, timed pulse, wrong-lane, replay, concurrent-version, daily-reward, account-deletion, Hub-history, Workshop, desktop, and phone checks against the intended environment.
-7. Disable the Relay Rush switch if any live verification fails. Do not alter other Games Hub, Discord, payment, or competitive-system controls as part of this operation.
+5. Merge and deploy the reviewed source release that sets only `DZN_GAMES_RELAY_RUSH_ENABLED` to `true`.
+6. Run authenticated start, timed pulse, wrong-lane, replay, concurrent-version, daily-reward, account-deletion, Hub-history, Workshop, desktop, phone, and injected-network-delay checks against the intended environment.
+7. Set the Relay Rush switch back to `false` in source and deploy that change if any live verification fails. Do not alter other Games Hub, Discord, payment, or competitive-system controls as part of this operation.
 
-No production database write, feature-switch change, Discord message, payment action, customer charge, Nitrado action, or server restart is part of the source release.
+No production database write, Discord message, payment action, customer charge, Nitrado action, or server restart is part of the source release. The only production configuration change in this release is the reviewed Relay Rush switch.
 
 ## Local Verification
 

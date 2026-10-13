@@ -274,7 +274,7 @@ export function GamesHub() {
           {view === "play" && availableGames.trivia && selectedPlayGame === "trivia" && <TriviaPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["word-chain"] && selectedPlayGame === "word-chain" && <WordChainPanel onProgress={() => void refresh()} />}
           {view === "play" && availableGames["hide-seek"] && selectedPlayGame === "hide-seek" && <HideSeekPanel now={now} onProgress={() => void refresh()} />}
-          {view === "play" && availableGames["relay-rush"] && selectedPlayGame === "relay-rush" && <RelayRushPanel now={now} onProgress={() => void refresh()} />}
+          {view === "play" && availableGames["relay-rush"] && selectedPlayGame === "relay-rush" && <RelayRushPanel onProgress={() => void refresh()} />}
           {view === "play" && availableGames["cipher-grid"] && selectedPlayGame === "cipher-grid" && <CipherGridPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["echo-array"] && selectedPlayGame === "echo-array" && <EchoArrayPanel now={now} onProgress={() => void refresh()} />}
           {view === "play" && availableGames["outpost-run"] && selectedPlayGame === "outpost-run" && <OutpostRunPanel now={now} onProgress={() => void refresh()} />}
@@ -530,7 +530,7 @@ function HideSeekPanel({ now, onProgress }: { now: number; onProgress: () => voi
   </section>;
 }
 
-function RelayRushPanel({ now, onProgress }: { now: number; onProgress: () => void }) {
+function RelayRushPanel({ onProgress }: { onProgress: () => void }) {
   const [payload, setPayload] = useState<RelayRushPayload | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
@@ -539,8 +539,12 @@ function RelayRushPanel({ now, onProgress }: { now: number; onProgress: () => vo
   const [relayNow, setRelayNow] = useState(0);
 
   const receivePayload = useCallback((result: RelayRushPayload) => {
-    serverClock.current = { time: result.serverTime, measuredAt: performance.now() };
-    setRelayNow(result.serverTime);
+    // The timestamp is written as DZN prepares its response. Treat it as a
+    // safe lower bound instead of projecting the previous request duration
+    // forward: the next request can arrive much faster than the last one.
+    const estimatedServerNow = result.serverTime;
+    serverClock.current = { time: estimatedServerNow, measuredAt: performance.now() };
+    setRelayNow(estimatedServerNow);
     setPayload(result);
   }, []);
 
@@ -564,7 +568,11 @@ function RelayRushPanel({ now, onProgress }: { now: number; onProgress: () => vo
       const response = await fetch("/api/games/relay-rush", { method: "POST", credentials: "include", cache: "no-store",
         headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = await response.json() as RelayRushPayload & { error?: string };
-      if (!response.ok) { setError(result.error || "That signal pulse could not be recorded."); if (response.status === 409) void load(); return; }
+      if (!response.ok) {
+        setError(result.error || "That signal pulse could not be recorded.");
+        if (response.status === 409 || (response.status === 429 && body.action === "pulse")) void load();
+        return;
+      }
       if (sequence !== generation.current) return;
       receivePayload(result); onProgress();
     } catch { if (sequence === generation.current) setError("That signal pulse could not be recorded. Refresh before retrying."); }
@@ -581,7 +589,7 @@ function RelayRushPanel({ now, onProgress }: { now: number; onProgress: () => vo
   }, [payload?.game, payload?.serverTime]);
 
   const game = payload?.game;
-  const clockNow = Math.max(now, relayNow, payload?.serverTime ?? 0);
+  const clockNow = Math.max(relayNow, payload?.serverTime ?? 0);
   const available = Boolean(payload) && !error;
   const active = Boolean(available && game?.status === "playing" && game.expiresAt > clockNow &&
     (!game.nextAt || clockNow < game.nextAt + RELAY_RUSH_PULSE_INTERVAL_MS));

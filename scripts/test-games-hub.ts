@@ -53,6 +53,10 @@ async function run() {
   assert.match(gamesHubSource, /Ranger Range/, "Games Hub must retain the server-verified Ranger Range route.");
   assert.match(gamesHubSource, /const selectedPlayGame = availableGames\[playGame\] \? playGame : "minefield"/, "Games Hub must safely fall back when the server disables the currently selected mode.");
   assert.match(gamesHubSource, /availableGames\["relay-rush"\]/, "Games Hub must not render Relay Rush until the server reports it available.");
+  assert.match(gamesHubSource, /const estimatedServerNow = result\.serverTime;/, "Relay Rush must begin each display clock estimate from the server timestamp instead of projecting the previous request duration.");
+  assert.doesNotMatch(gamesHubSource, /result\.serverTime \+ Math\.max\(0, Math\.round\(roundTripMs\)\)/, "Relay Rush must not make the next pulse appear early from a prior slow request.");
+  assert.doesNotMatch(gamesHubSource, /Math\.max\(now, relayNow/, "Relay Rush must not let a separate Hub response clock open its server-timed pulse early.");
+  assert.match(gamesHubSource, /response\.status === 409 \|\| \(response\.status === 429 && body\.action === "pulse"\)\) void load\(\)/, "An early Relay Rush pulse must reload authoritative state instead of stranding the run.");
   assert.match(gamesHubSource, /clockNow < game\.nextAt \+ RELAY_RUSH_PULSE_INTERVAL_MS - RELAY_RUSH_INPUT_GUARD_MS/, "Relay Rush must stop accepting visible input before the server pulse window closes.");
   assert.match(gamesHubSource, /game\.nextAt \+ RELAY_RUSH_PULSE_INTERVAL_MS\)\);/, "Relay Rush must end the client run when its server pulse deadline passes.");
   assert.match(gamesHubSource, /setInterval\(\(\) => \{\s+const clock = serverClock\.current;\s+setRelayNow\(/, "Relay Rush must render from a sub-second server-aligned clock.");
@@ -78,7 +82,7 @@ async function run() {
       DZN_GAMES_TRIVIA_ENABLED: "true",
       DZN_GAMES_WORD_CHAIN_ENABLED: "true",
       DZN_GAMES_HIDE_SEEK_ENABLED: "true",
-      DZN_GAMES_RELAY_RUSH_ENABLED: "false",
+      DZN_GAMES_RELAY_RUSH_ENABLED: "true",
       DZN_GAMES_CIPHER_GRID_ENABLED: "false",
       DZN_GAMES_ECHO_ARRAY_ENABLED: "false",
       DZN_GAMES_OUTPOST_RUN_ENABLED: "false",
