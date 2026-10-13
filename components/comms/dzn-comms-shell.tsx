@@ -231,18 +231,7 @@ export function DznCommsShell() {
     () => mergeDeletionNotices(payload.messages, deletionNotices, deletedMessageIds, payload.channel.slug),
     [deletedMessageIds, deletionNotices, payload.channel.slug, payload.messages],
   );
-  const recentSpeakers = useMemo(() => {
-    const seen = new Set<string>();
-    return visibleMessages
-      .filter((message) => message.visibility_state === "visible")
-      .filter((message) => {
-        const key = `${message.author_display_name}:${message.author_role_label}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .slice(0, 5);
-  }, [visibleMessages]);
+  const recentSpeakers = useMemo(() => recentVisibleSpeakers(visibleMessages), [visibleMessages]);
   const historyReady = history.status === "ready";
   const sendingEnabled = historyReady && payload.feature_flags.sending_enabled;
   const reportActionsEnabled = historyReady && payload.feature_flags.report_actions_enabled;
@@ -585,6 +574,23 @@ export function DznCommsShell() {
       </section>
     </main>
   );
+}
+
+export function recentVisibleSpeakers(messages: readonly CommsHistoryMessage[]) {
+  const seen = new Set<string>();
+  const newestDistinct = [...messages]
+    .reverse()
+    .filter((message) => message.visibility_state === "visible")
+    .filter((message) => {
+      const key = `${message.author_display_name}:${message.author_role_label}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 5);
+
+  // Keep the compact rail chronological after selecting the five latest speakers.
+  return newestDistinct.reverse();
 }
 
 function MessageRow({ message, reportEnabled, deleteEnabled, reactionUiEnabled, reactionWriteEnabled, reactionLoginRequired, onReactionChange, onMessageDeleted }: {

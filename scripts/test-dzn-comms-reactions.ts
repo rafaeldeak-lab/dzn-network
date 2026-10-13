@@ -31,6 +31,9 @@ async function fixture(includeReactionMigration = true) {
     INSERT INTO users VALUES
       ('player','100','Player',NULL), ('other','200','Other',NULL),
       ('outsider','300','Outsider',NULL), ('owner','999','Owner',NULL);`);
+  sqlite.exec(readFileSync("migrations/0062_player_profile_privacy_preferences.sql", "utf8"));
+  sqlite.exec(readFileSync("migrations/0063_player_public_profiles.sql", "utf8"));
+  sqlite.exec(readFileSync("migrations/0076_public_profile_discord_identity_consent.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0065_dzn_comms_read_history.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0071_dzn_comms_live_moderation.sql", "utf8"));
   sqlite.exec(readFileSync("migrations/0072_dzn_comms_private_rate_ledgers.sql", "utf8"));

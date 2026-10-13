@@ -224,15 +224,9 @@ export function parseCommsHistory(value: unknown): CommsHistoryPayload {
 }
 
 function discordAvatarUrl(value: unknown) {
-  if (typeof value !== "string" || value.length > 300) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && url.hostname === "cdn.discordapp.com" && /^\/avatars\/\d{5,25}\/[A-Za-z0-9_]{1,128}\.webp$/.test(url.pathname)
-      ? url.toString()
-      : null;
-  } catch {
-    return null;
-  }
+  return typeof value === "string" && /^\/api\/public\/players\/[a-z0-9][a-z0-9-]{1,46}[a-z0-9]\/avatar$/.test(value)
+    ? value
+    : null;
 }
 
 async function readResponse(response: Response, signal: AbortSignal): Promise<CommsHistoryPayload> {

@@ -58,8 +58,8 @@ assert.deepEqual(helperWriteTargets, [], "DZN Comms read-history helper must con
 const helperSqlTargets = [...helper.matchAll(/\b(?:FROM|JOIN)\s+([a-z_]+)/gi)].map((match) => match[1]).sort();
 assert.deepEqual(
   [...new Set(helperSqlTargets)],
-  ["dzn_comms_channels", "dzn_comms_messages", "dzn_comms_private_group_members", "users"],
-  "DZN Comms read-history helper may only read Comms data and the linked Discord-avatar projection.",
+  ["dzn_comms_channels", "dzn_comms_messages", "dzn_comms_private_group_members", "player_profile_privacy_preferences", "player_public_discord_identity_preferences", "player_public_profiles"],
+  "DZN Comms read-history helper may only read Comms data and the explicitly consented public-avatar projection.",
 );
 assert.match(helper, /request\.method !== "GET"/, "DZN Comms message history route must be GET-only.");
 assert.match(helper, /DZN_COMMS_MESSAGE_HISTORY_READ_ENABLED/, "Route must require an explicit server-side flag.");
@@ -79,6 +79,11 @@ assert.match(helper, /const selfDeleteEnabled = flags\.writeFeaturesEnabled && r
 assert.match(helper, /self_delete_enabled: selfDeleteEnabled/, "History feature flags must report the same availability used for delete controls.");
 assert.match(helper, /reactions_enabled: reactionFlags\.readEnabled/, "Route payload must derive reaction reads from their separate server flag.");
 assert.match(helper, /reactions_write_enabled: reactionFlags\.writeEnabled/, "Route payload must derive reaction writes from their separate server flag.");
+assert.match(helper, /player_public_profiles AS public_profile[\s\S]*public_profile\.status = 'active'/, "Avatar projection must require an active public profile.");
+assert.match(helper, /player_profile_privacy_preferences AS profile_privacy[\s\S]*profile_privacy\.public_profile_enabled = 1/, "Avatar projection must require a public-profile preference.");
+assert.match(helper, /player_public_discord_identity_preferences AS discord_identity[\s\S]*discord_identity\.enabled = 1/, "Avatar projection must require explicit Discord identity consent.");
+assert.match(helper, /\/api\/public\/players\/\$\{encodeURIComponent\(handle\)\}\/avatar/, "Avatar projection must use the same-origin public-profile proxy.");
+assert.doesNotMatch(helper, /cdn\.discordapp\.com|\bauthor_discord_id\b|\bauthor_avatar\b/, "Read history must never project raw Discord avatar sources or identifiers.");
 assert.match(helper, /ai_assist_runtime_enabled: false/, "Route payload must report AI support runtime disabled.");
 assert.match(helper, /durable_objects_or_websockets_enabled: false/, "Route payload must report WebSocket/Durable Object runtime disabled.");
 assert.doesNotMatch(helper + route, /\b(?:\.run\(|batch\(|exec\(|fetch\(|WebSocket|DurableObject|EventSource|navigator|sendBeacon|localStorage|sessionStorage|STRIPE_SECRET|DZN_LIVE_CHECKOUT_ENABLED|OPENAI_API_KEY|AI_GATEWAY|VECTORIZE|R2_BUCKET)\b/i, "Comms route/helper must not write, call providers, use browser storage, or touch payment/AI/storage runtimes.");
@@ -88,6 +93,7 @@ assert.match(communityPage, /DznCommsShell/, "The /community route must render t
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_MESSAGE_HISTORY_UI_ENABLED/, "The /community shell must retain an explicit public history switch for development and controlled previews.");
 assert.match(shell, /const productionRuntimeProbeEnabled = process\.env\.NODE_ENV === "production"/, "A deployed browser must use the same-origin server capability response rather than a Pages runtime secret.");
 assert.match(shell, /const historyProbeEnabled = historyUiEnabled \|\| liveUiEnabled \|\| productionRuntimeProbeEnabled/, "Production history probing must be explicit while local development stays default-off.");
+assert.doesNotMatch(historyClient, /cdn\.discordapp\.com/, "The history client must reject raw Discord CDN avatar URLs.");
 assert.match(shell, /if \(!historyProbeEnabled\) return;/, "The history route must remain dormant outside an explicit local switch or deployed client.");
 assert.match(shell, /NEXT_PUBLIC_DZN_COMMS_PRIVATE_GROUPS_UI_ENABLED/, "Private channel controls must have a separate public UI switch.");
 assert.match(shell, /loadCommsHistory\(controller.signal, \{ channelSlug: selectedChannel \}\)/, "The UI must use the bounded history client for the selected channel.");
@@ -303,6 +309,7 @@ async function testRuntimeContracts() {
   assert.equal(publicPayload.messages.some((message) => message.id === "later-1"), false, "Rows after the before cursor must not appear.");
   assert.equal(publicPayload.messages.find((message) => message.id === "hidden-1")?.body, "Message hidden by DZN Safety.");
   assert.equal(publicPayload.messages.find((message) => message.id === "quarantined-1")?.body.includes("unavailable"), true);
+  assert.equal(publicPayload.messages.find((message) => message.id === "visible-1")?.author_avatar_url, "/api/public/players/visible-chat-player/avatar", "A visible author with both public-profile and Discord-identity consent may receive only the same-origin avatar proxy.");
   const publicJson = JSON.stringify(publicPayload);
   for (const forbidden of ["author_user_id", "member-user", "other-user", "discord_id", "checkout_session", "ranking_score", "xp_award", "server_war", "ctf_tournament"]) {
     assert.equal(publicJson.includes(forbidden), false, `Public Comms payload must not expose ${forbidden}.`);
@@ -429,7 +436,7 @@ function seededDb() {
     is_readable: 1,
   });
   db.messages.push(
-    message({ id: "visible-1", channelId: "channel-global", authorDisplayName: "Rafael DZN", body: "Welcome everyone.", createdAt: "2026-09-01T10:12:00.000Z" }),
+    message({ id: "visible-1", channelId: "channel-global", authorUserId: "visible-user", authorDisplayName: "Rafael DZN", body: "Welcome everyone.", createdAt: "2026-09-01T10:12:00.000Z" }),
     message({ id: "hidden-1", channelId: "channel-global", authorDisplayName: "Bad Row", body: "Should not leak.", visibilityState: "hidden", createdAt: "2026-09-01T10:15:00.000Z" }),
     message({ id: "deleted-1", channelId: "channel-global", authorDisplayName: "Deleted Row", body: "Should not leak.", visibilityState: "deleted", createdAt: "2026-09-01T10:18:00.000Z" }),
     message({ id: "quarantined-1", channelId: "channel-global", authorDisplayName: "Quarantine Row", body: "Should not leak.", visibilityState: "quarantined", createdAt: "2026-09-01T10:20:00.000Z" }),
@@ -437,6 +444,9 @@ function seededDb() {
     message({ id: "later-1", channelId: "channel-global", authorDisplayName: "Later Row", body: "Should not appear with cursor.", createdAt: "2026-09-01T10:40:00.000Z" }),
     message({ id: "private-1", channelId: "channel-private", authorDisplayName: "NovaRift", body: "Private group read history.", createdAt: "2026-09-01T10:16:00.000Z" }),
   );
+  db.publicProfiles.set("visible-user", { handle: "visible-chat-player", status: "active" });
+  db.publicProfilePreferences.set("visible-user", 1);
+  db.discordIdentityPreferences.set("visible-user", 1);
   db.sessionUsers.set("member-token", { id: "member-user", discord_id: "discord-member", username: "Member", avatar: null });
   db.sessionUsers.set("other-token", { id: "other-user", discord_id: "discord-other", username: "Other", avatar: null });
   db.privateGroupMembers.set("channel-private:member-user", { role: "member", membershipState: "active" });
@@ -447,6 +457,7 @@ function message(input: Partial<FakeMessageInput> & { id: string; channelId: str
   return {
     id: input.id,
     channel_id: input.channelId,
+    author_user_id: input.authorUserId ?? null,
     author_display_name: input.authorDisplayName ?? "DZN Player",
     author_role_label: input.authorRoleLabel ?? "Member",
     body: input.body,
@@ -511,6 +522,7 @@ type CommsPayload = {
   messages: Array<{
     id: string;
     author_display_name: string;
+    author_avatar_url?: string | null;
     body: string;
   }>;
   page: {
@@ -540,6 +552,7 @@ type FakeChannel = {
 };
 
 type FakeMessageInput = {
+  authorUserId: string | null;
   authorDisplayName: string;
   authorRoleLabel: string;
   visibilityState: "visible" | "hidden" | "deleted" | "quarantined" | "expired";
@@ -550,6 +563,7 @@ type FakeMessageInput = {
 type FakeMessage = {
   id: string;
   channel_id: string;
+  author_user_id: string | null;
   author_display_name: string;
   author_role_label: string;
   body: string;
@@ -569,6 +583,9 @@ type FakeSessionUser = {
 class FakeD1Database {
   readonly channels = new Map<string, FakeChannel>();
   readonly messages: FakeMessage[] = [];
+  readonly publicProfiles = new Map<string, { handle: string; status: "active" | "disabled" }>();
+  readonly publicProfilePreferences = new Map<string, number>();
+  readonly discordIdentityPreferences = new Map<string, number>();
   readonly sessionUsers = new Map<string, FakeSessionUser>();
   readonly privateGroupMembers = new Map<string, { role: "owner" | "moderator" | "member"; membershipState: "active" | "removed" }>();
   readonly queries: string[] = [];
@@ -664,10 +681,18 @@ class FakeD1PreparedStatement {
       const sqlite = new DatabaseSync(":memory:");
       try {
         sqlite.exec(`CREATE TABLE dzn_comms_messages (id TEXT, channel_id TEXT, author_user_id TEXT, author_display_name TEXT, author_role_label TEXT, body TEXT, visibility_state TEXT, created_at TEXT, edited_at TEXT, expires_at TEXT);
-          CREATE TABLE users (id TEXT, discord_id TEXT, username TEXT, avatar TEXT);
+          CREATE TABLE player_public_profiles (user_id TEXT, handle TEXT, status TEXT);
+          CREATE TABLE player_profile_privacy_preferences (user_id TEXT, public_profile_enabled INTEGER);
+          CREATE TABLE player_public_discord_identity_preferences (user_id TEXT, enabled INTEGER);
           CREATE TABLE dzn_comms_private_group_members (channel_id TEXT, user_id TEXT, role TEXT, membership_state TEXT);`);
         const insert = sqlite.prepare("INSERT INTO dzn_comms_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        for (const row of this.db.messages) insert.run(row.id, row.channel_id, null, row.author_display_name, row.author_role_label, row.body, row.visibility_state, row.created_at, row.edited_at, row.expires_at);
+        for (const row of this.db.messages) insert.run(row.id, row.channel_id, row.author_user_id, row.author_display_name, row.author_role_label, row.body, row.visibility_state, row.created_at, row.edited_at, row.expires_at);
+        const insertPublicProfile = sqlite.prepare("INSERT INTO player_public_profiles VALUES (?, ?, ?)");
+        for (const [userId, profile] of this.db.publicProfiles) insertPublicProfile.run(userId, profile.handle, profile.status);
+        const insertProfilePreference = sqlite.prepare("INSERT INTO player_profile_privacy_preferences VALUES (?, ?)");
+        for (const [userId, enabled] of this.db.publicProfilePreferences) insertProfilePreference.run(userId, enabled);
+        const insertDiscordIdentityPreference = sqlite.prepare("INSERT INTO player_public_discord_identity_preferences VALUES (?, ?)");
+        for (const [userId, enabled] of this.db.discordIdentityPreferences) insertDiscordIdentityPreference.run(userId, enabled);
         const insertMember = sqlite.prepare("INSERT INTO dzn_comms_private_group_members VALUES (?, ?, ?, ?)");
         for (const [key, member] of this.db.privateGroupMembers) {
           const separator = key.indexOf(":");
