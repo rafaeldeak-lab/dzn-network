@@ -856,18 +856,22 @@ function OutpostRunPanel({ now, onProgress }: { now: number; onProgress: () => v
       <div className={styles.outpostRunMeta}><span><ShieldCheck size={14} />{game.energy} / {game.maxEnergy} stamina</span><span><Map size={14} />{game.moves} / {game.maxMoves} field moves</span><span><Clock3 size={14} />{clock(game.expiresAt - clockNow)}</span></div>
       <div className={styles.outpostRunStage} data-status={game.status}>
         <div className={styles.outpostRunReadout}><span>{active ? "FIELD SIGNAL / UNVERIFIED" : game.status === "won" ? "RELAY / SECURED" : "FIELD SIGNAL / CLOSED"}</span><strong>{active ? "Trace the emergency relay" : game.status === "won" ? "Extraction route completed" : game.status === "failed" ? "Field pack exhausted" : "Signal window expired"}</strong></div>
-        <div className={styles.outpostRunGrid} role="grid" aria-label="Outpost Run fog grid">
-          {Array.from({ length: game.gridSize * game.gridSize }, (_, index) => {
-            const row = Math.floor(index / game.gridSize); const column = index % game.gridSize;
-            const terrain = revealed.get(`${row}:${column}`);
-            const player = game.row === row && game.column === column;
-            const label = player ? "You" : terrain === "relay" ? "Emergency relay" : terrain === "hazard" ? "Hazard" : terrain === "start" ? "Field entry" : terrain === "clear" ? "Surveyed ground" : "Unknown terrain";
-            return <div key={`${row}:${column}`} role="gridcell" aria-label={`${label}, row ${row + 1}, column ${column + 1}`}
-              className={styles.outpostRunCell} data-terrain={terrain ?? "unknown"} data-player={player}>
-              {terrain === "relay" ? <Radio size={18} /> : terrain === "hazard" ? <Zap size={18} /> : terrain === "start" ? <Flag size={18} /> : terrain === "clear" ? <Check size={16} /> : <span>?</span>}
-              {player && <ShieldCheck className={styles.outpostRunPlayer} size={19} />}
-            </div>;
-          })}
+        <div className={styles.outpostRunMapShell} data-active={active}>
+          <span className={styles.outpostRunCoordinate} aria-hidden="true">DZN / FIELD-05</span>
+          <span className={styles.outpostRunSweep} aria-hidden="true" />
+          <div className={styles.outpostRunGrid} role="grid" aria-label="Outpost Run fog grid">
+            {Array.from({ length: game.gridSize * game.gridSize }, (_, index) => {
+              const row = Math.floor(index / game.gridSize); const column = index % game.gridSize;
+              const terrain = revealed.get(`${row}:${column}`);
+              const player = game.row === row && game.column === column;
+              const label = player ? "You" : terrain === "relay" ? "Emergency relay" : terrain === "hazard" ? "Hazard" : terrain === "start" ? "Field entry" : terrain === "clear" ? "Surveyed ground" : "Unknown terrain";
+              return <div key={`${row}:${column}`} role="gridcell" aria-label={`${label}, row ${row + 1}, column ${column + 1}`}
+                className={styles.outpostRunCell} data-terrain={terrain ?? "unknown"} data-player={player}>
+                {terrain === "relay" ? <Radio size={18} /> : terrain === "hazard" ? <Zap size={18} /> : terrain === "start" ? <Flag size={18} /> : terrain === "clear" ? <Check size={16} /> : <span>?</span>}
+                {player && <ShieldCheck className={styles.outpostRunPlayer} size={19} />}
+              </div>;
+            })}
+          </div>
         </div>
         <div className={styles.outpostRunCommand}>
           <button className={styles.outpostRunScan} disabled={busy || cooldown || !active || !game.scanAvailable}
