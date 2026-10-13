@@ -21,7 +21,7 @@ const profanityPattern = /\b(?:arsehole|bastard|bitch|bullshit|cunt|dickhead|fuc
 // A separate expression catches only the common, deliberately separated forms.
 // It does not collapse arbitrary words, which avoids false matches in ordinary
 // words such as "Scunthorpe".
-const obfuscatedProfanityPattern = /\b(?:f[\W_]*u[\W_]*c[\W_]*k|s[\W_]*h[\W_]*[i1!][\W_]*t|b[\W_]*[i1!][\W_]*t[\W_]*c[\W_]*h|c[\W_]*u[\W_]*n[\W_]*t)\b/i;
+const obfuscatedProfanityPattern = /\b(?:f[\W_]*u[\W_]*c[\W_]*k(?:[\W_]*(?:er|ing|ed|s))?|s[\W_]*h[\W_]*[i1!][\W_]*t(?:[\W_]*(?:ty|head))?|b[\W_]*[i1!][\W_]*t[\W_]*c[\W_]*h|c[\W_]*u[\W_]*n[\W_]*t)\b/i;
 
 type SendInput = { channelSlug?: unknown; clientRequestId?: unknown; body?: unknown };
 type ReportInput = { messageId?: unknown; reason?: unknown };

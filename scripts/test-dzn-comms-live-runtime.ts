@@ -839,7 +839,9 @@ function testAutomaticLanguageFilter() {
   const filtered = moderateDznCommsBody("This is bullshit");
   assert.deepEqual(filtered, { decision: "block", code: "LANGUAGE_FILTERED", body: "" });
   assert.equal(moderateDznCommsBody("What the f.u.c.k happened?").decision, "block", "Punctuation must not bypass the language filter.");
+  assert.equal(moderateDznCommsBody("He keeps f.u.c.king about.").decision, "block", "Obfuscated profanity suffixes must not bypass the language filter.");
   assert.equal(moderateDznCommsBody("s h 1 t happens").decision, "block", "Spaced leetspeak must not bypass the language filter.");
+  assert.equal(moderateDznCommsBody("This is s.h.i.tty weather.").decision, "block", "Obfuscated profanity suffixes must not bypass the language filter.");
   assert.equal(moderateDznCommsBody("Scunthorpe convoy is online").decision, "allow", "Ordinary words must not become false positives.");
   assert.equal(moderateDznCommsBody("Please kill yourself").decision, "timeout", "Severe abuse remains the stricter timeout path.");
 }
