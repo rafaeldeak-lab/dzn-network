@@ -858,6 +858,9 @@ function testAutomaticLanguageFilter() {
   ]) {
     assert.equal(moderateDznCommsBody(body).decision, "block", `Separated profanity must not bypass the language filter: ${body}`);
   }
+  for (const body of ["_f_u_c_k_", "__b.i.t.c.h__"]) {
+    assert.equal(moderateDznCommsBody(body).decision, "block", `Underscore-wrapped profanity must not bypass the language filter: ${body}`);
+  }
   assert.equal(moderateDznCommsBody("s h 1 t happens").decision, "block", "Spaced leetspeak must not bypass the language filter.");
   assert.equal(moderateDznCommsBody("This is s.h.i.tty weather.").decision, "block", "Obfuscated profanity suffixes must not bypass the language filter.");
   assert.equal(moderateDznCommsBody("Scunthorpe convoy is online").decision, "allow", "Ordinary words must not become false positives.");
