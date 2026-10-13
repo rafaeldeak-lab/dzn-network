@@ -446,11 +446,28 @@ function WordChainPanel({ onProgress }: { onProgress: () => void }) {
     <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>03 / NETWORK RELAY</span><h2 id="word-chain-title">DZN Word Chain</h2></div><Radio size={24} /></div>
     {error && <div className={styles.wordChainNotice} role="status"><ShieldCheck size={20} /><span>{error}</span><button className={styles.iconButton} title="Refresh Word Chain" onClick={() => void load()}><RefreshCw size={17} /></button></div>}
     {payload && <>
-      <div className={styles.chainCurrent}><span>Current signal</span><strong>{payload.round.currentWord}</strong><div>Next word starts with <b>{required}</b></div></div>
+      <div className={styles.chainBriefing} data-complete={payload.round.completed}>
+        <Image className={styles.chainBriefingImage} src="/images/games/field-relay.png" alt="" width={1536} height={1024} aria-hidden="true" />
+        <div className={styles.chainBriefingCopy}>
+          <span>DAILY / COMMUNITY RELAY</span>
+          <strong>{payload.round.completed ? "Signal secured" : "Channel open"}</strong>
+          <small>{payload.round.completed ? "This shared relay is complete. A new signal begins tomorrow." : "Take the next valid word and keep the transmission moving."}</small>
+        </div>
+        <div className={styles.chainBriefingStatus}>
+          <span>RELAY STATE</span>
+          <strong>{payload.round.completed ? "COMPLETE" : "LIVE"}</strong>
+          <small>TURN {payload.round.version + 1}</small>
+        </div>
+      </div>
+      <div className={styles.chainCurrent}>
+        <span>Current signal</span>
+        <strong>{payload.round.currentWord}</strong>
+        <div>Next word starts with <b aria-label={`Required starting letter ${required}`}>{required}</b></div>
+      </div>
       <form className={styles.chainForm} onSubmit={event => { event.preventDefault(); void play(); }}>
-        <label htmlFor="word-chain-entry">Your word</label><div><input id="word-chain-entry" value={word} maxLength={18} autoComplete="off" spellCheck
+        <label htmlFor="word-chain-entry">Transmit your word</label><div><input id="word-chain-entry" value={word} maxLength={18} autoComplete="off" spellCheck
           placeholder={`${required.toLowerCase()}...`} disabled={busy || !payload.round.canPlay} onChange={event => setWord(event.target.value.replace(/[^a-zA-Z]/g, "").slice(0, 18))} />
-        <button className={styles.primary} disabled={busy || !payload.round.canPlay || word.length < 3}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <ArrowRight size={17} />}Send turn</button></div>
+        <button className={styles.primary} disabled={busy || !payload.round.canPlay || word.length < 3}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <ArrowRight size={17} />}Transmit turn</button></div>
         <small>{payload.round.completed ? "Signal complete. A new shared chain starts tomorrow." : payload.round.canPlay ? "Real words only. Used words cannot repeat." : "Another player must take the next turn."}</small>
       </form>
       <div className={styles.chainReward}><ShieldCheck size={18} /><div><strong>{payload.rewardedToday ? "Daily relay reward earned" : `First accepted turn: +${WORD_CHAIN_REWARD.xp} XP and +${WORD_CHAIN_REWARD.parts} part`}</strong><span>Game words stay in this game feed and are not posted to Global Chat.</span></div></div>

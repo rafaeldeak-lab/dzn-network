@@ -29,6 +29,8 @@ try {
     const state = await loadResponse.json();
     await page.getByRole("heading", { name: "DZN Word Chain" }).waitFor();
     await page.getByText(state.round.currentWord, { exact: true }).first().waitFor();
+    await page.getByText(/DAILY \/ COMMUNITY RELAY/).waitFor();
+    await page.getByText(state.round.completed ? "Signal secured" : "Channel open", { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     if (index === 0) {
       const dictionary = ["ability", "access", "action", "active", "adapt", "eager", "early", "earth", "knife", "label", "ocean", "radio", "scale", "table"];
@@ -37,7 +39,7 @@ try {
       await page.getByLabel("Your word").fill(word);
       const [playResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/word-chain") && response.request().method() === "POST"),
-        page.getByRole("button", { name: "Send turn" }).click(),
+        page.getByRole("button", { name: "Transmit turn" }).click(),
       ]);
       assert.equal(playResponse.status(), 200, await playResponse.text());
       await page.getByText(word, { exact: true }).first().waitFor();
