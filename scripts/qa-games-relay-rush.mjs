@@ -18,15 +18,24 @@ let browser;
 try {
   const origin = await waitForOrigin();
   browser = await chromium.launch({ headless: true });
-  for (const [index, viewport] of [{ name: "desktop-delayed-link", width: 1440, height: 1000, requestDelay: 360 }, { name: "phone", width: 390, height: 844 }].entries()) {
+  for (const viewport of [
+    { name: "desktop-delayed-link", width: 1440, height: 1000, requestDelay: 360, exercisePulse: false },
+    { name: "desktop-latency-downshift", width: 1440, height: 1000, initialStartDelay: 360, exercisePulse: true },
+    { name: "phone", width: 390, height: 844 },
+  ]) {
     const context = await browser.newContext({ viewport, reducedMotion: "reduce" });
     const page = await context.newPage();
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
     page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
-    if (viewport.requestDelay) {
+    if (viewport.requestDelay || viewport.initialStartDelay) {
+      let initialStartDelayed = false;
       await page.route("**/api/games/relay-rush", async route => {
-        await new Promise(resolve => setTimeout(resolve, viewport.requestDelay));
+        const request = route.request();
+        const isInitialStart = request.method() === "POST" && request.postData()?.includes('"action":"start"') && !initialStartDelayed;
+        const delay = viewport.requestDelay ?? (isInitialStart ? viewport.initialStartDelay : 0);
+        if (isInitialStart) initialStartDelayed = true;
+        if (delay) await new Promise(resolve => setTimeout(resolve, delay));
         await route.continue();
       });
     }
@@ -37,7 +46,7 @@ try {
     ]);
     assert.equal(loadResponse.status(), 200, await loadResponse.text());
     await page.getByRole("heading", { name: "DZN Relay Rush" }).waitFor();
-    if (index === 0) {
+    if (viewport.exercisePulse) {
       const startRun = page.getByRole("button", { name: "Start run" });
       for (let attempt = 0; attempt < 20 && !(await startRun.isEnabled()); attempt++) await page.waitForTimeout(50);
       assert.equal(await startRun.isEnabled(), true, "Relay Rush must become startable after a delayed state response settles.");
@@ -45,9 +54,17 @@ try {
         page.waitForResponse(response => response.url().endsWith("/api/games/relay-rush") && response.request().method() === "POST"),
         startRun.click(),
       ]);
-      assert.equal(startResponse.status(), 200, await startResponse.text());
-      const liveLane = page.locator('button[data-target="true"]');
+      const started = await startResponse.json();
+      assert.equal(startResponse.status(), 200, JSON.stringify(started));
+      const relayPanel = page.locator("section").filter({ has: page.getByRole("heading", { name: "DZN Relay Rush" }) });
+      const liveLane = relayPanel.locator('button[data-target="true"]');
       await liveLane.waitFor();
+      const observedOpenAt = await page.evaluate(() => Date.now());
+      assert.ok(observedOpenAt >= started.game.nextAt, `Relay Rush lane opened before DZN: ${JSON.stringify({ observedOpenAt, serverTime: started.serverTime, nextAt: started.game.nextAt })}`);
+      // The real client cannot produce a zero-millisecond keypress. Keep a
+      // small reaction margin so the test detects the old 360 ms early lane
+      // without racing React's 50 ms display-clock interval at the boundary.
+      if (viewport.initialStartDelay) await page.waitForTimeout(120);
       const lane = await liveLane.getAttribute("data-lane");
       const key = lane === "left" ? "KeyA" : lane === "centre" ? "KeyS" : "KeyD";
       const [pulseResponse] = await Promise.all([
@@ -56,16 +73,14 @@ try {
       ]);
       assert.equal(pulseResponse.status(), 200, await pulseResponse.text());
       await page.getByText("1 / 12 pulses", { exact: true }).waitFor();
-      assert.equal(await page.getByRole("group", { name: "Relay Rush signal lanes" }).locator('button[disabled]').count(), 3);
-    } else {
-      await page.getByRole("group", { name: "Relay Rush signal lanes" }).waitFor();
+      assert.equal(await relayPanel.getByRole("group", { name: "Relay Rush signal lanes" }).locator('button[disabled]').count(), 3);
     }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
     await page.screenshot({ path: path.join(output, `${viewport.name}.png`), fullPage: true });
     assert.deepEqual(errors, []);
     await context.close();
   }
-  console.log("DZN Relay Rush desktop, phone and injected-delay rendered QA passed.");
+  console.log("DZN Relay Rush desktop, phone, sustained-delay and latency-downshift rendered QA passed.");
 } finally {
   await browser?.close();
   preview.kill();
