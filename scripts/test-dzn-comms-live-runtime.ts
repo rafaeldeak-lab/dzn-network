@@ -838,6 +838,32 @@ function testAutomaticLanguageFilter() {
   assert.equal(moderateDznCommsBody("A friendly patrol report").decision, "allow");
   const filtered = moderateDznCommsBody("This is bullshit");
   assert.deepEqual(filtered, { decision: "block", code: "LANGUAGE_FILTERED", body: "" });
+  assert.equal(moderateDznCommsBody("What the f.u.c.k happened?").decision, "block", "Punctuation must not bypass the language filter.");
+  assert.equal(moderateDznCommsBody("He keeps f.u.c.king about.").decision, "block", "Obfuscated profanity suffixes must not bypass the language filter.");
+  for (const body of ["f.u.c.ki.n.g", "f.u.c.ke.r", "s.h.i.t.t.y", "s.h.i.th.e.a.d"]) {
+    assert.equal(moderateDznCommsBody(body).decision, "block", `Separated profanity suffixes must not bypass the language filter: ${body}`);
+  }
+  for (const body of [
+    "a.r.s.e.h.o.l.e",
+    "b.a.s.t.a.r.d",
+    "b.i.t.c.h",
+    "b.u.l.l.s.h.1.t",
+    "c.u.n.t",
+    "d.i.c.k.h.e.a.d",
+    "f.u.c.k",
+    "m.o.t.h.e.r.f.u.c.k.e.r",
+    "p.r.i.c.k",
+    "s.h.i.t",
+    "w.a.n.k.e.r",
+  ]) {
+    assert.equal(moderateDznCommsBody(body).decision, "block", `Separated profanity must not bypass the language filter: ${body}`);
+  }
+  for (const body of ["_f_u_c_k_", "__b.i.t.c.h__"]) {
+    assert.equal(moderateDznCommsBody(body).decision, "block", `Underscore-wrapped profanity must not bypass the language filter: ${body}`);
+  }
+  assert.equal(moderateDznCommsBody("s h 1 t happens").decision, "block", "Spaced leetspeak must not bypass the language filter.");
+  assert.equal(moderateDznCommsBody("This is s.h.i.tty weather.").decision, "block", "Obfuscated profanity suffixes must not bypass the language filter.");
+  assert.equal(moderateDznCommsBody("Scunthorpe convoy is online").decision, "allow", "Ordinary words must not become false positives.");
   assert.equal(moderateDznCommsBody("Please kill yourself").decision, "timeout", "Severe abuse remains the stricter timeout path.");
 }
 
