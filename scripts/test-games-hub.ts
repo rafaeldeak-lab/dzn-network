@@ -53,6 +53,8 @@ async function run() {
   assert.match(gamesHubSource, /Ranger Range/, "Games Hub must retain the server-verified Ranger Range route.");
   assert.match(gamesHubSource, /const selectedPlayGame = availableGames\[playGame\] \? playGame : "minefield"/, "Games Hub must safely fall back when the server disables the currently selected mode.");
   assert.match(gamesHubSource, /availableGames\["relay-rush"\]/, "Games Hub must not render Relay Rush until the server reports it available.");
+  assert.match(gamesHubSource, /const estimatedServerNow = result\.serverTime \+ Math\.max\(0, Math\.round\(roundTripMs\)\)/, "Relay Rush must conservatively compensate its display clock for measured request delay.");
+  assert.match(gamesHubSource, /const requestedAt = performance\.now\(\);/, "Relay Rush must measure request duration before accepting a timing response.");
   assert.match(gamesHubSource, /clockNow < game\.nextAt \+ RELAY_RUSH_PULSE_INTERVAL_MS - RELAY_RUSH_INPUT_GUARD_MS/, "Relay Rush must stop accepting visible input before the server pulse window closes.");
   assert.match(gamesHubSource, /game\.nextAt \+ RELAY_RUSH_PULSE_INTERVAL_MS\)\);/, "Relay Rush must end the client run when its server pulse deadline passes.");
   assert.match(gamesHubSource, /setInterval\(\(\) => \{\s+const clock = serverClock\.current;\s+setRelayNow\(/, "Relay Rush must render from a sub-second server-aligned clock.");

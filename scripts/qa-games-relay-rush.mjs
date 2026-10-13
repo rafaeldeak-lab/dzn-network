@@ -18,12 +18,18 @@ let browser;
 try {
   const origin = await waitForOrigin();
   browser = await chromium.launch({ headless: true });
-  for (const [index, viewport] of [{ name: "desktop", width: 1440, height: 1000 }, { name: "phone", width: 390, height: 844 }].entries()) {
+  for (const [index, viewport] of [{ name: "desktop-delayed-link", width: 1440, height: 1000, requestDelay: 360 }, { name: "phone", width: 390, height: 844 }].entries()) {
     const context = await browser.newContext({ viewport, reducedMotion: "reduce" });
     const page = await context.newPage();
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
     page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
+    if (viewport.requestDelay) {
+      await page.route("**/api/games/relay-rush", async route => {
+        await new Promise(resolve => setTimeout(resolve, viewport.requestDelay));
+        await route.continue();
+      });
+    }
     await page.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
     const [loadResponse] = await Promise.all([
       page.waitForResponse(response => response.url().endsWith("/api/games/relay-rush") && response.request().method() === "GET"),
@@ -32,9 +38,12 @@ try {
     assert.equal(loadResponse.status(), 200, await loadResponse.text());
     await page.getByRole("heading", { name: "DZN Relay Rush" }).waitFor();
     if (index === 0) {
+      const startRun = page.getByRole("button", { name: "Start run" });
+      for (let attempt = 0; attempt < 20 && !(await startRun.isEnabled()); attempt++) await page.waitForTimeout(50);
+      assert.equal(await startRun.isEnabled(), true, "Relay Rush must become startable after a delayed state response settles.");
       const [startResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith("/api/games/relay-rush") && response.request().method() === "POST"),
-        page.getByRole("button", { name: "Start run" }).click(),
+        startRun.click(),
       ]);
       assert.equal(startResponse.status(), 200, await startResponse.text());
       const liveLane = page.locator('button[data-target="true"]');
@@ -56,7 +65,7 @@ try {
     assert.deepEqual(errors, []);
     await context.close();
   }
-  console.log("DZN Relay Rush desktop and phone rendered QA passed.");
+  console.log("DZN Relay Rush desktop, phone and injected-delay rendered QA passed.");
 } finally {
   await browser?.close();
   preview.kill();

@@ -538,19 +538,24 @@ function RelayRushPanel({ now, onProgress }: { now: number; onProgress: () => vo
   const serverClock = useRef({ time: 0, measuredAt: 0 });
   const [relayNow, setRelayNow] = useState(0);
 
-  const receivePayload = useCallback((result: RelayRushPayload) => {
-    serverClock.current = { time: result.serverTime, measuredAt: performance.now() };
-    setRelayNow(result.serverTime);
+  const receivePayload = useCallback((result: RelayRushPayload, roundTripMs: number) => {
+    // A pulse is judged when the following request reaches DZN, not when this
+    // response reached the browser. Advancing by the observed round trip keeps
+    // the visible deadline conservative on slower links.
+    const estimatedServerNow = result.serverTime + Math.max(0, Math.round(roundTripMs));
+    serverClock.current = { time: estimatedServerNow, measuredAt: performance.now() };
+    setRelayNow(estimatedServerNow);
     setPayload(result);
   }, []);
 
   const load = useCallback(async () => {
     const sequence = ++generation.current;
+    const requestedAt = performance.now();
     try {
       const response = await fetch("/api/games/relay-rush", { credentials: "include", cache: "no-store" });
       const result = await response.json() as RelayRushPayload & { error?: string };
       if (!response.ok) throw new Error(result.error || "DZN Relay Rush is unavailable.");
-      if (sequence === generation.current) { receivePayload(result); setError(""); }
+      if (sequence === generation.current) { receivePayload(result, performance.now() - requestedAt); setError(""); }
     } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : "DZN Relay Rush is unavailable."); }
     finally { if (sequence === generation.current) setBusy(false); }
   }, [receivePayload]);
@@ -560,13 +565,14 @@ function RelayRushPanel({ now, onProgress }: { now: number; onProgress: () => vo
   const mutate = useCallback(async (body: Record<string, unknown>) => {
     if (busy) return;
     const sequence = ++generation.current; setBusy(true); setError("");
+    const requestedAt = performance.now();
     try {
       const response = await fetch("/api/games/relay-rush", { method: "POST", credentials: "include", cache: "no-store",
         headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = await response.json() as RelayRushPayload & { error?: string };
       if (!response.ok) { setError(result.error || "That signal pulse could not be recorded."); if (response.status === 409) void load(); return; }
       if (sequence !== generation.current) return;
-      receivePayload(result); onProgress();
+      receivePayload(result, performance.now() - requestedAt); onProgress();
     } catch { if (sequence === generation.current) setError("That signal pulse could not be recorded. Refresh before retrying."); }
     finally { if (sequence === generation.current) setBusy(false); }
   }, [busy, load, onProgress, receivePayload]);
