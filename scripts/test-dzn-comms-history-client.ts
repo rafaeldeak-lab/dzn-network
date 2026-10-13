@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { addCommsReaction, COMMS_HISTORY_MAX_BYTES, loadCommsHistory, parseCommsHistory, removeCommsReaction, sendCommsMessage } from "../components/comms/comms-history-client";
+import { recentVisibleSpeakers } from "../components/comms/dzn-comms-shell";
 import { commsHistoryFixture } from "./fixtures/comms-history";
 
 const encoder = new TextEncoder();
@@ -21,6 +22,45 @@ test("accepts the current Global Chat projection and strips unknown properties a
   assert.equal(parsed.messages[0].body, "Local history fixture");
   assert.equal("secret" in parsed, false); assert.equal("owner_id" in parsed.channel, false);
   assert.equal("author_id" in parsed.messages[0], false); assert.equal("raw_body" in parsed.messages[0], false);
+});
+
+test("projects only a consent-safe same-origin avatar route for a visible message", () => {
+  const input = commsHistoryFixture();
+  Object.assign(input.messages[0], { author_avatar_url: "/api/public/players/visible-player/avatar" });
+  const parsed = parseCommsHistory(input);
+  assert.equal(parsed.messages[0].author_avatar_url, "/api/public/players/visible-player/avatar");
+
+  const hidden = commsHistoryFixture();
+  Object.assign(hidden.messages[0], { visibility_state: "hidden", author_avatar_url: "/api/public/players/visible-player/avatar" });
+  assert.equal(parseCommsHistory(hidden).messages[0].author_avatar_url, undefined);
+
+  for (const unsafeUrl of [
+    "https://cdn.discordapp.com/avatars/123456789012345678/avatar_hash.webp",
+    "https://example.test/avatar.webp",
+    "/api/public/players/../avatar",
+    "/api/public/players/visible-player/avatar?size=128",
+  ]) {
+    const untrusted = commsHistoryFixture();
+    Object.assign(untrusted.messages[0], { author_avatar_url: unsafeUrl });
+    assert.equal(parseCommsHistory(untrusted).messages[0].author_avatar_url, undefined);
+  }
+});
+
+test("selects the latest distinct visible speakers while keeping their display order chronological", () => {
+  const message = (id: string, author: string, visibility_state: "visible" | "hidden" = "visible") => ({
+    ...parseCommsHistory(commsHistoryFixture()).messages[0],
+    id,
+    author_display_name: author,
+    visibility_state,
+  });
+  const speakers = recentVisibleSpeakers([
+    message("older-raven", "Raven"),
+    message("ash", "Ash"),
+    message("newer-raven", "Raven"),
+    message("hidden-echo", "Echo", "hidden"),
+    message("echo", "Echo"),
+  ]);
+  assert.deepEqual(speakers.map((row) => row.author_display_name), ["Ash", "Raven", "Echo"]);
 });
 
 test("accepts only a membership-scoped private group projection", async () => {

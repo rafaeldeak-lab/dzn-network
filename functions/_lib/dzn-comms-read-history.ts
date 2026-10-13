@@ -33,6 +33,9 @@ type DznCommsMessageRow = {
   author_user_id: string | null;
   author_display_name: string | null;
   author_role_label: string | null;
+  author_public_handle: string | null;
+  author_public_profile_enabled: number | null;
+  author_discord_identity_enabled: number | null;
   body: string | null;
   visibility_state: "visible" | "hidden" | "deleted" | "quarantined" | "expired" | null;
   created_at: string | null;
@@ -411,15 +414,28 @@ async function readMessages(
 ): Promise<DznCommsMessageRow[]> {
   const result = await db
     .prepare(
-      `SELECT id, author_user_id, author_display_name, author_role_label, body, visibility_state, created_at, edited_at, expires_at
+       `SELECT messages.id, messages.author_user_id, messages.author_display_name, messages.author_role_label,
+         public_profile.handle AS author_public_handle,
+         profile_privacy.public_profile_enabled AS author_public_profile_enabled,
+         discord_identity.enabled AS author_discord_identity_enabled,
+        messages.body, messages.visibility_state, messages.created_at, messages.edited_at, messages.expires_at
        FROM dzn_comms_messages AS messages
+        LEFT JOIN player_public_profiles AS public_profile
+          ON public_profile.user_id = messages.author_user_id
+          AND public_profile.status = 'active'
+        LEFT JOIN player_profile_privacy_preferences AS profile_privacy
+          ON profile_privacy.user_id = messages.author_user_id
+          AND profile_privacy.public_profile_enabled = 1
+        LEFT JOIN player_public_discord_identity_preferences AS discord_identity
+          ON discord_identity.user_id = messages.author_user_id
+          AND discord_identity.enabled = 1
        WHERE messages.channel_id = ?
-         AND julianday(created_at) IS NOT NULL
-         AND id IS NOT NULL AND length(id) BETWEEN 1 AND 120
-         AND (? IS NULL OR julianday(created_at) < julianday(?) OR (julianday(created_at) = julianday(?) AND id < ?))
-         AND (? IS NULL OR julianday(created_at) < julianday(?))
-         AND visibility_state NOT IN ('deleted', 'expired')
-         AND (expires_at IS NULL OR expires_at = '' OR julianday(expires_at) > julianday('now'))
+         AND julianday(messages.created_at) IS NOT NULL
+         AND messages.id IS NOT NULL AND length(messages.id) BETWEEN 1 AND 120
+         AND (? IS NULL OR julianday(messages.created_at) < julianday(?) OR (julianday(messages.created_at) = julianday(?) AND messages.id < ?))
+         AND (? IS NULL OR julianday(messages.created_at) < julianday(?))
+         AND messages.visibility_state NOT IN ('deleted', 'expired')
+         AND (messages.expires_at IS NULL OR messages.expires_at = '' OR julianday(messages.expires_at) > julianday('now'))
          AND (? IS NULL OR EXISTS (
            SELECT 1
            FROM dzn_comms_private_group_members AS membership
@@ -427,7 +443,7 @@ async function readMessages(
              AND membership.user_id = ?
              AND membership.membership_state = 'active'
          ))
-       ORDER BY julianday(created_at) DESC, id DESC
+       ORDER BY julianday(messages.created_at) DESC, messages.id DESC
        LIMIT ?`,
     )
     .bind(
@@ -455,6 +471,9 @@ function publicSafeMessage(row: DznCommsMessageRow, reactions: DznCommsReactionS
     id: cleanText(row.id, 120),
     author_display_name: visible ? cleanText(row.author_display_name, 60) || "DZN Player" : "DZN Safety",
     author_role_label: visible ? cleanText(row.author_role_label, 24) || "Member" : "System",
+    author_avatar_url: visible
+      ? publicDiscordAvatarUrl(row.author_public_handle, row.author_public_profile_enabled, row.author_discord_identity_enabled)
+      : null,
     body: visible ? cleanText(row.body, 2000) : placeholderForState(visibilityState),
     visibility_state: visibilityState,
     created_at: cleanNullableText(row.created_at, 40),
@@ -464,6 +483,11 @@ function publicSafeMessage(row: DznCommsMessageRow, reactions: DznCommsReactionS
     can_delete: visible && selfDeleteEnabled && currentUserId !== null && row.author_user_id === currentUserId,
     ...(visible && reactions ? { reactions } : {}),
   };
+}
+
+function publicDiscordAvatarUrl(handle: string | null, publicProfileEnabled: number | null, discordIdentityEnabled: number | null) {
+  if (publicProfileEnabled !== 1 || discordIdentityEnabled !== 1 || !handle || !/^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$/.test(handle)) return null;
+  return `/api/public/players/${encodeURIComponent(handle)}/avatar`;
 }
 
 function placeholderForState(state: DznCommsMessageRow["visibility_state"]) {

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 import { hmacSha256 } from "../functions/_lib/crypto";
-import { handleDznCommsModeration, handleDznCommsOwnerArchive, handleDznCommsReport, handleDznCommsSelfDelete, handleDznCommsSend, runDznCommsRetention } from "../functions/_lib/dzn-comms-live";
+import { handleDznCommsModeration, handleDznCommsOwnerArchive, handleDznCommsReport, handleDznCommsSelfDelete, handleDznCommsSend, moderateDznCommsBody, runDznCommsRetention } from "../functions/_lib/dzn-comms-live";
 import type { Env } from "../functions/_lib/types";
 
 type Row = Record<string, unknown>;
@@ -834,10 +834,18 @@ function testPrivateLedgerMigrationRejectsActiveQuotas() {
   }
 }
 
+function testAutomaticLanguageFilter() {
+  assert.equal(moderateDznCommsBody("A friendly patrol report").decision, "allow");
+  const filtered = moderateDznCommsBody("This is bullshit");
+  assert.deepEqual(filtered, { decision: "block", code: "LANGUAGE_FILTERED", body: "" });
+  assert.equal(moderateDznCommsBody("Please kill yourself").decision, "timeout", "Severe abuse remains the stricter timeout path.");
+}
+
 async function main() {
   testPrivateLedgerMigrationRejectsUnexpiredReceipts();
   testPrivateLedgerMigrationRejectsActiveQuotas();
   testPrivateLedgerMigrationRuntime();
+  testAutomaticLanguageFilter();
   await testSendRuntime();
   await testPrivateGroupSendRuntime();
   await testReportAndModerationRuntime();

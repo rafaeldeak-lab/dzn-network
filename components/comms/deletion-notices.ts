@@ -5,6 +5,13 @@ export type DeletionNotice = {
   message: CommsHistoryMessage;
 };
 
+function isDeletedNotice(message: CommsHistoryMessage) {
+  return message.visibility_state === "deleted"
+    || (message.author_display_name === "DZN Safety"
+      && message.author_role_label === "System"
+      && message.body === "Message deleted.");
+}
+
 function historyTimestamp(value: string | null) {
   if (value === null) return null;
   const normalized = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)
@@ -51,7 +58,10 @@ export function mergeDeletionNotices(
       merged.push(notice);
       continue;
     }
-    if (!deletedMessageIds.has(message.id) && message.visibility_state !== "deleted") merged.push(message);
+    // Older deployments represented a deletion as a visible system message.
+    // Suppress that legacy shape too, so a refresh cannot grow the chat with
+    // stale deletion rows after the transient two-second notice is gone.
+    if (!deletedMessageIds.has(message.id) && !isDeletedNotice(message)) merged.push(message);
   }
 
   for (const [messageId, notice] of channelNotices) {

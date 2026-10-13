@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import {
   AlertTriangle,
   Bot,
@@ -231,6 +232,7 @@ export function DznCommsShell() {
     [deletedMessageIds, deletionNotices, payload.channel.slug, payload.messages],
   );
   const historyReady = history.status === "ready";
+  const recentSpeakers = useMemo(() => historyReady ? recentVisibleSpeakers(visibleMessages) : [], [historyReady, visibleMessages]);
   const sendingEnabled = historyReady && payload.feature_flags.sending_enabled;
   const reportActionsEnabled = historyReady && payload.feature_flags.report_actions_enabled;
   const selfDeleteUiEnabled = historyReady && payload.feature_flags.self_delete_enabled;
@@ -440,7 +442,14 @@ export function DznCommsShell() {
             </div>
           </div>
 
-          <div className="grid gap-0 lg:grid-cols-[250px_minmax(0,1fr)_300px]">
+          <div className="border-b border-white/10 bg-black/20 px-5 py-3 sm:px-6">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <span className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400"><span className="h-2 w-2 rounded-full bg-emerald-300" /> Recent in this channel</span>
+              {recentSpeakers.length > 0 ? recentSpeakers.map((member) => <span key={`${member.author_display_name}:${member.author_role_label}`} className="inline-flex items-center gap-2 text-xs font-bold text-zinc-200"><span className="grid h-6 w-6 place-items-center rounded-full border border-violet-300/35 bg-violet-400/15 text-[10px] text-violet-100">{initials(member.author_display_name)}</span>{member.author_display_name}</span>) : <span className="text-xs font-semibold text-zinc-500">Conversation is quiet.</span>}
+            </div>
+          </div>
+
+          <div className="grid gap-0 lg:grid-cols-[224px_minmax(0,1fr)_260px]">
             <aside className="border-b border-white/10 bg-black/18 p-4 lg:border-b-0 lg:border-r">
               <PanelTitle icon={Hash} label="Channels" />
               <div className="mt-4 space-y-2">
@@ -489,7 +498,7 @@ export function DznCommsShell() {
                 </span>
               </div>
 
-              <div role="status" aria-live="polite" className="mt-4 rounded-lg border border-cyan-300/18 bg-cyan-300/8 px-4 py-3">
+              <div role="status" aria-live="polite" className="mt-4 rounded-md border border-cyan-300/18 bg-cyan-300/8 px-4 py-3">
                 <p className="text-sm font-bold leading-6 text-cyan-50">{history.message}</p>
               </div>
 
@@ -497,7 +506,7 @@ export function DznCommsShell() {
                 role="log"
                 aria-live="polite"
                 aria-relevant="additions text"
-                className="mt-4 max-h-[58svh] space-y-3 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable] lg:max-h-[42rem]"
+                className="mt-4 max-h-[52svh] divide-y divide-white/8 overflow-y-auto overscroll-contain rounded-md border border-white/8 bg-black/15 px-3 [scrollbar-gutter:stable] lg:max-h-[38rem]"
               >
                 {visibleMessages.map((message) => (
                   <MessageRow
@@ -514,7 +523,7 @@ export function DznCommsShell() {
                 ))}
               </div>
 
-              <form onSubmit={handleSend} className="mt-5 flex items-center gap-2 rounded-lg border border-white/10 bg-black/28 p-2" aria-label="DZN Comms message composer">
+              <form onSubmit={handleSend} className="mt-4 flex items-center gap-2 rounded-md border border-white/10 bg-black/35 p-2" aria-label="DZN Comms message composer">
                 <button
                   type="button"
                   disabled
@@ -567,6 +576,23 @@ export function DznCommsShell() {
   );
 }
 
+export function recentVisibleSpeakers(messages: readonly CommsHistoryMessage[]) {
+  const seen = new Set<string>();
+  const newestDistinct = [...messages]
+    .reverse()
+    .filter((message) => message.visibility_state === "visible")
+    .filter((message) => {
+      const key = `${message.author_display_name}:${message.author_role_label}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 5);
+
+  // Keep the compact rail chronological after selecting the five latest speakers.
+  return newestDistinct.reverse();
+}
+
 function MessageRow({ message, reportEnabled, deleteEnabled, reactionUiEnabled, reactionWriteEnabled, reactionLoginRequired, onReactionChange, onMessageDeleted }: {
   message: CommsHistoryMessage;
   reportEnabled: boolean;
@@ -617,11 +643,9 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionUiEnabled, 
   }
 
   return (
-    <article className={`rounded-lg border p-4 ${muted ? "border-amber-300/18 bg-amber-300/6" : "border-white/10 bg-black/22"}`}>
+    <article className={`py-4 ${muted ? "bg-amber-300/[0.035]" : ""}`}>
       <div className="flex items-start gap-3">
-        <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-md border text-sm font-black ${muted ? "border-amber-200/25 bg-amber-300/10 text-amber-100" : "border-cyan-300/20 bg-cyan-300/10 text-cyan-100"}`}>
-          {initials(message.author_display_name)}
-        </span>
+        <MessageAvatar message={message} muted={muted} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-black text-white [overflow-wrap:anywhere]">{message.author_display_name}</h3>
@@ -678,6 +702,17 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionUiEnabled, 
         </div>
       </div>
     </article>
+  );
+}
+
+function MessageAvatar({ message, muted }: { message: CommsHistoryMessage; muted: boolean }) {
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
+  const avatarUrl = !muted && failedAvatarUrl !== message.author_avatar_url ? message.author_avatar_url : null;
+
+  return (
+    <span className={`grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border text-sm font-black ${muted ? "border-amber-200/25 bg-amber-300/10 text-amber-100" : "border-cyan-300/20 bg-cyan-300/10 text-cyan-100"}`}>
+      {avatarUrl ? <Image src={avatarUrl} alt="" width={40} height={40} unoptimized className="h-full w-full object-cover" onError={() => setFailedAvatarUrl(message.author_avatar_url ?? null)} /> : initials(message.author_display_name)}
+    </span>
   );
 }
 
