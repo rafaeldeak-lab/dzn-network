@@ -51,11 +51,23 @@ export function DznAssist() {
       clearScroll?.();
       clearScroll = revealAndScroll();
     };
+    const onAssistLinkClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const link = target.closest<HTMLAnchorElement>("a[href]");
+      if (link?.hash !== "#dzn-assist" || link.pathname !== window.location.pathname) return;
+
+      // A second click on the active fragment does not produce a hashchange event.
+      clearScroll?.();
+      clearScroll = revealAndScroll();
+    };
     window.addEventListener("hashchange", onHashChange);
+    window.addEventListener("click", onAssistLinkClick);
     return () => {
       cancelled = true;
       clearScroll?.();
       window.removeEventListener("hashchange", onHashChange);
+      window.removeEventListener("click", onAssistLinkClick);
     };
   }, []);
 

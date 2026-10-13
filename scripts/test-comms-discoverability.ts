@@ -53,6 +53,8 @@ assert.equal(assistSource.includes('id="dzn-assist"'), true, "DZN Assist must ke
 assert.equal(assistSource.includes('window.location.hash !== "#dzn-assist"'), true, "DZN Assist must restore direct-anchor position after hydration.");
 assert.equal(assistSource.includes('scrollIntoView({ block: "start" })'), true, "DZN Assist must move the direct-linked panel into view after hydration.");
 assert.equal(assistSource.includes("document.fonts?.ready.then(scrollToAssist)"), true, "DZN Assist must restore the anchor after web fonts settle.");
+assert.equal(assistSource.includes('window.addEventListener("click", onAssistLinkClick)'), true, "DZN Assist must reopen when the same direct-link fragment is activated again.");
+assert.equal(assistSource.includes('link?.hash !== "#dzn-assist"'), true, "DZN Assist must limit repeated direct-link handling to its own anchor.");
 assert.equal(assistSource.includes("Your search stays in this browser."), true, "DZN Assist must explain its local-only search boundary.");
 assert.equal(assistSource.includes('normalizedQuery.split(/\\s+/).every((term) => searchableGuide.includes(term))'), true, "DZN Assist must match every search term across the guide's combined searchable fields.");
 assert.equal(assistSource.includes("DZN_SUPPORT_EMAIL_HREF"), true, "DZN Assist must provide a private human-support route.");
