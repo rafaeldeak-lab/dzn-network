@@ -23,7 +23,7 @@ try {
   for (const viewport of [
     { name: "desktop-delayed-link", width: 1440, height: 1000, requestDelay: 360, exercisePulse: true },
     { name: "desktop-latency-downshift", width: 1440, height: 1000, initialStartDelay: 360, exercisePulse: true },
-    { name: "phone", width: 390, height: 844 },
+    { name: "phone", width: 390, height: 844, exercisePulse: true },
   ]) {
     const { preview, readLog } = startPreview();
     let context;
