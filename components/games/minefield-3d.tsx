@@ -35,8 +35,8 @@ export function Minefield3D({ game, tool, disabled, motionRunning, onMove }: Min
 
     const size = game.cells.length;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x03080d);
-    scene.fog = new THREE.FogExp2(0x03080d, 0.026);
+    scene.background = new THREE.Color(0x02070b);
+    scene.fog = new THREE.FogExp2(0x02070b, 0.022);
 
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 180);
     camera.position.set(size * 0.74, size * 0.9, size * 0.98);
@@ -70,9 +70,33 @@ export function Minefield3D({ game, tool, disabled, motionRunning, onMove }: Min
     platform.position.y = -0.38;
     field.add(platform);
 
+    const platformEdges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(platform.geometry),
+      new THREE.LineBasicMaterial({ color: 0x4ae6ff, transparent: true, opacity: 0.55 }),
+    );
+    platformEdges.position.copy(platform.position);
+    field.add(platformEdges);
+
     const grid = new THREE.GridHelper(size + 0.3, size, 0x27e8ff, 0x17343e);
     grid.position.y = -0.14;
     field.add(grid);
+
+    const sectorBeacons = new THREE.Group();
+    const beaconGeometry = new THREE.OctahedronGeometry(0.16, 1);
+    const beaconMaterial = new THREE.MeshStandardMaterial({ color: 0x6ff4ff, emissive: 0x087b95, emissiveIntensity: 1.6, metalness: 0.72, roughness: 0.25 });
+    const beaconLights: THREE.PointLight[] = [];
+    const beaconRadius = size * 0.63;
+    for (const [index, [x, z]] of [[-1, -1], [1, -1], [1, 1], [-1, 1]].entries()) {
+      const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
+      beacon.position.set(x * beaconRadius, 0.25, z * beaconRadius);
+      beacon.rotation.y = index * Math.PI / 4;
+      sectorBeacons.add(beacon);
+      const beaconLight = new THREE.PointLight(index % 2 ? 0xa66cff : 0x50ecff, 2.6, size * 0.86, 2);
+      beaconLight.position.set(beacon.position.x, 0.38, beacon.position.z);
+      field.add(beaconLight);
+      beaconLights.push(beaconLight);
+    }
+    field.add(sectorBeacons);
 
     const tileGeometry = new THREE.BoxGeometry(0.82, 0.18, 0.82);
     const tileMeshes: THREE.Mesh[] = [];
@@ -130,6 +154,12 @@ export function Minefield3D({ game, tool, disabled, motionRunning, onMove }: Min
     scan.rotation.x = -Math.PI / 2;
     scan.position.set(0, 0.25, -size / 2);
     field.add(scan);
+
+    const scannerMaterial = new THREE.MeshBasicMaterial({ color: 0x42eaff, transparent: true, opacity: 0.23, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    const scanner = new THREE.Mesh(new THREE.RingGeometry(size * 0.13, size * 0.15, 48), scannerMaterial);
+    scanner.rotation.x = -Math.PI / 2;
+    scanner.position.y = 0.18;
+    field.add(scanner);
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -205,6 +235,11 @@ export function Minefield3D({ game, tool, disabled, motionRunning, onMove }: Min
         scan.position.z = ((elapsed * 1.65) % (size + 1)) - size / 2;
         scanMaterial.opacity = 0.12 + Math.sin(elapsed * 2.4) * 0.05;
         warningLight.intensity = 16 + Math.sin(elapsed * 2.1) * 3;
+        scanner.scale.setScalar(0.72 + ((Math.sin(elapsed * 2.1) + 1) * 0.16));
+        scanner.rotation.z = elapsed * 0.4;
+        scannerMaterial.opacity = 0.13 + Math.sin(elapsed * 2.1) * 0.08;
+        sectorBeacons.rotation.y = elapsed * 0.1;
+        beaconLights.forEach((light, index) => { light.intensity = 1.9 + Math.sin(elapsed * 2.5 + index * 0.9) * 0.7; });
       }
       renderer.render(scene, camera);
       renderer.domElement.dataset.renderFrames = String(Number(renderer.domElement.dataset.renderFrames ?? 0) + 1);
@@ -219,10 +254,10 @@ export function Minefield3D({ game, tool, disabled, motionRunning, onMove }: Min
       renderer.domElement.removeEventListener("pointerleave", onPointerLeave);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("contextmenu", onContextMenu);
-      tileGeometry.dispose(); scanGeometry.dispose(); platform.geometry.dispose();
+      tileGeometry.dispose(); scanGeometry.dispose(); scanner.geometry.dispose(); platform.geometry.dispose(); platformEdges.geometry.dispose(); beaconGeometry.dispose();
       tileMaterials.forEach(material => material.dispose()); markerMaterials.forEach(material => material.dispose());
       markerGeometries.forEach(geometry => geometry.dispose()); labelTextures.forEach(texture => texture.dispose());
-      (platform.material as THREE.Material).dispose(); scanMaterial.dispose(); renderer.dispose(); renderer.domElement.remove();
+      (platform.material as THREE.Material).dispose(); (platformEdges.material as THREE.Material).dispose(); beaconMaterial.dispose(); scanMaterial.dispose(); scannerMaterial.dispose(); renderer.dispose(); renderer.domElement.remove();
     };
   }, [game, motionRunning]);
 
