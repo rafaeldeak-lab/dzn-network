@@ -1171,7 +1171,12 @@ function RangerRangePanel({ now, onProgress }: { now: number; onProgress: () => 
       <div className={styles.rangerRangeStage} data-status={game.status} data-live={targetOpen}>
         <div className={styles.rangerRangeReadout} aria-live="polite"><span>{active ? targetOpen ? "TARGET / LIVE" : "BOW / NOCKED" : game.status === "won" ? "RANGE / CLEAR" : "RANGE / CLOSED"}</span><strong>{active ? targetOpen ? "Release on the lit plate" : "Hold while the next target crosses the range" : game.status === "won" ? "Perfect range clear" : game.status === "failed" ? "Range run lost" : "Target window expired"}</strong></div>
         <div className={styles.rangerRangeField} role="group" aria-label="Ranger Range targets">
-          <div className={styles.rangerRangeBow} aria-hidden="true"><span /><i /><b /></div>
+          <div className={styles.rangerRangeBow} data-live={targetOpen} aria-hidden="true">
+            <span className={styles.rangerRangeBowString} />
+            <span className={styles.rangerRangeArrow}><i /><b /></span>
+            <span className={styles.rangerRangeGrip} />
+            <span className={styles.rangerRangeBowLabel}>RANGE / 02</span>
+          </div>
           {RANGER_RANGE_TARGETS.map(target => {
             const meta = RANGER_RANGE_TARGET_META[target];
             const live = targetOpen && game.target === target;
