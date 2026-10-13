@@ -387,9 +387,13 @@ function TriviaPanel({ now, onProgress }: { now: number; onProgress: () => void 
         <button className={styles.primary} disabled={busy || active} onClick={() => void mutate({ action: "start", difficulty })}>{busy ? <LoaderCircle className={styles.spinner} size={17} /> : <Play size={17} />}{active ? "Round in progress" : game ? "New round" : "Start round"}</button>
       </div>
       {game?.question && active ? <div className={styles.triviaQuestion}>
+        <div className={styles.triviaBriefing}>
+          <div><span>FIELD BRIEF / {TRIVIA_DIFFICULTIES[game.difficulty].label.toUpperCase()}</span><strong>Survival intelligence</strong></div>
+          <div className={styles.triviaProgress}><span>Round progress</span><progress value={game.question.number} max={game.question.total} aria-label={`Question ${game.question.number} of ${game.question.total}`} /><strong>{game.question.number} / {game.question.total}</strong></div>
+        </div>
         <div className={styles.triviaMeta}><span>Question {game.question.number} / {game.question.total}</span><span>{game.correct} correct</span><span><Clock3 size={14} />{clock(game.expiresAt - now)}</span></div>
         <h3>{game.question.prompt}</h3>
-        <div className={styles.triviaChoices}>{game.question.choices.map((choice, index) => <button key={choice} disabled={busy} onClick={() => void mutate({ action: "answer", gameId: game.id, version: game.version, answer: index })}><span>{String.fromCharCode(65 + index)}</span>{choice}</button>)}</div>
+        <div className={styles.triviaChoices}>{game.question.choices.map((choice, index) => <button key={choice} disabled={busy} onClick={() => void mutate({ action: "answer", gameId: game.id, version: game.version, answer: index })}><span aria-hidden="true">{String.fromCharCode(65 + index)}</span><div><small>Transmit response</small><strong>{choice}</strong></div></button>)}</div>
       </div> : game && <div className={`${styles.result} ${game.status === "passed" ? styles.won : ""}`} role="status">
         {game.status === "passed" ? <><ShieldCheck size={22} /><div><strong>Briefing passed</strong><span>{payload.rewardedToday.includes(game.difficulty) ? `${TRIVIA_DIFFICULTIES[game.difficulty].label} reward recorded for today.` : "Round complete."}</span></div></> : game.status === "failed" ? <><Target size={22} /><div><strong>Briefing incomplete</strong><span>{game.correct} of 5 correct. Four correct answers are required.</span></div></> : <><Clock3 size={22} /><div><strong>Briefing expired</strong><span>Start a new round when you are ready.</span></div></>}
       </div>}
