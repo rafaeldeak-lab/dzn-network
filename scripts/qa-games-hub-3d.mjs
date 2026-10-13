@@ -86,7 +86,7 @@ try {
       const move = writes.map(entry => entry.body).find(body => body?.action === "move");
       assert.deepEqual(Object.keys(move).sort(), ["action", "gameId", "tool", "version", "x", "y"], "3D interaction must use the existing bounded move contract");
       assert.equal(move.tool, "reveal");
-      await page.getByRole("button", { name: /Tactical grid/i }).click();
+      await page.getByRole("button", { name: "Tactical grid", exact: true }).click();
       await page.getByRole("group", { name: /Minesweeper board/i }).waitFor();
     }
 
