@@ -56,6 +56,31 @@ try {
     assert.deepEqual(errors, []);
     await context.close();
   }
+  const motionContext = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "no-preference" });
+  const motionPage = await motionContext.newPage();
+  await motionPage.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
+  await motionPage.getByRole("button", { name: /Outpost Run/ }).click();
+  await motionPage.getByRole("grid", { name: "Outpost Run fog grid" }).waitFor();
+  await motionPage.waitForFunction(() => document.querySelector('main[data-motion="running"]') !== null);
+  const sweepName = await readSweep(motionPage, "animation-name");
+  assert.match(sweepName, /outpost-run-sweep/);
+  const sweepPositions = [];
+  for (let sample = 0; sample < 7; sample++) {
+    sweepPositions.push(Number.parseFloat(await readSweep(motionPage, "top")));
+    await motionPage.waitForTimeout(400);
+  }
+  assert.ok(Math.max(...sweepPositions) - Math.min(...sweepPositions) > 100, "The tactical scanner should cross the map, not only its own line height.");
+  await motionContext.close();
+
+  const pausedContext = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "no-preference" });
+  await pausedContext.addInitScript(() => localStorage.setItem("dzn.games.motion", "paused"));
+  const pausedPage = await pausedContext.newPage();
+  await pausedPage.goto(`${origin}/__local-login`, { waitUntil: "networkidle" });
+  await pausedPage.getByRole("button", { name: /Outpost Run/ }).click();
+  await pausedPage.getByRole("grid", { name: "Outpost Run fog grid" }).waitFor();
+  await pausedPage.waitForFunction(() => document.querySelector('main[data-motion="paused"]') !== null);
+  assert.equal(await readSweep(pausedPage, "animation-name"), "none");
+  await pausedContext.close();
   console.log("DZN Outpost Run desktop and phone rendered QA passed.");
 } finally {
   await browser?.close();
@@ -71,4 +96,12 @@ async function waitForOrigin() {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   throw new Error(`Games preview did not start: ${previewLog}`);
+}
+
+async function readSweep(page, property) {
+  return page.getByRole("grid", { name: "Outpost Run fog grid" }).evaluate((grid, propertyName) => {
+    const sweep = [...(grid.parentElement?.querySelectorAll('span[aria-hidden="true"]') ?? [])].find(element => !element.textContent);
+    if (!sweep) throw new Error("Outpost Run scanner sweep was not rendered.");
+    return getComputedStyle(sweep, "::after").getPropertyValue(propertyName);
+  }, property);
 }
