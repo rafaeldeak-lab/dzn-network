@@ -31,7 +31,6 @@ export function DznAssist() {
     let cancelled = false;
     const scrollToAssist = () => {
       if (!cancelled && window.location.hash === "#dzn-assist") {
-        setExpanded(true);
         document.getElementById("dzn-assist")?.scrollIntoView({ block: "start" });
       }
     };
