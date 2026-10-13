@@ -55,6 +55,14 @@ const RANGER_RANGE_TARGET_META: Record<RangerRangeTarget, { label: string; key: 
   tower: { label: "Tower", key: "5", detail: "Watchtower plate" },
   ravine: { label: "Ravine", key: "6", detail: "Ravine plate" },
 };
+const ARCADE_BRIEFING = [
+  { name: "Minefield", detail: "3D tactical sweep", icon: Target },
+  { name: "Relay Rush", detail: "Server-timed reactions", icon: Zap },
+  { name: "Outpost Run", detail: "Fog-grid extraction", icon: Map },
+  { name: "Ranger Range", detail: "Bow target drill", icon: Crosshair },
+  { name: "Cipher Grid", detail: "Field-code puzzle", icon: KeyRound },
+  { name: "Circuit Forge", detail: "Power-grid rebuild", icon: Settings2 },
+] as const;
 
 function useTransientActionCooldown(duration: number) {
   const [notice, setNotice] = useState("");
@@ -214,9 +222,15 @@ export function GamesHub() {
 
     {phase !== "ready" ? <section className={styles.gate} aria-busy={phase === "loading"}>
       <div className={styles.gateArt}><Insignia position="100% 100%" /></div>
-      <div><span className={styles.eyebrow}>MINESWEEPER / FIELD OPERATIONS</span><h2>{phase === "loading" ? "Opening your Games Hub" : phase === "login" ? "Your next mission starts here" : "Games Hub unavailable"}</h2>
-        {phase === "loading" ? <LoaderCircle className={styles.spinner} /> : <p>{error}</p>}
-        {phase === "login" ? <Link className={styles.primary} href="/login?returnTo=%2Fgames" prefetch={false}><LogIn size={18} />Sign in with Discord</Link> : phase === "unavailable" && <button className={styles.primary} onClick={() => void refresh()}><RefreshCw size={18} />Retry</button>}
+      <div className={styles.gateCopy}>
+        <span className={styles.eyebrow}>DZN / PLAYER ARCADE</span>
+        <h2>{phase === "loading" ? "Opening your Games Hub" : phase === "login" ? "Eleven field games. One earned record." : "Games Hub unavailable"}</h2>
+        {phase === "loading" ? <LoaderCircle className={styles.spinner} /> : phase === "login" ? <>
+          <p>Sign in with Discord to play DZN field games, earn verified website XP and build your personal workshop collection. Your rewards are saved to your own account.</p>
+          <div className={styles.gateActions}><Link className={styles.primary} href="/login?returnTo=%2Fgames" prefetch={false}><LogIn size={18} />Sign in with Discord</Link><Link className={styles.secondary} href="/community" prefetch={false}><MessageCircle size={17} />Visit the Lounge</Link></div>
+          <ul className={styles.arcadeBriefing} aria-label="Available DZN Games Hub modes">{ARCADE_BRIEFING.map(game => <li key={game.name}><game.icon size={17} aria-hidden="true" /><span><strong>{game.name}</strong><small>{game.detail}</small></span></li>)}</ul>
+          <p className={styles.gateBoundary}><ShieldCheck size={16} aria-hidden="true" />Rewards are validated server-side. They have no cash value and never change DayZ statistics, subscriptions or competitive eligibility.</p>
+        </> : <><p>{error}</p><button className={styles.primary} onClick={() => void refresh()}><RefreshCw size={18} />Retry</button></>}
       </div>
     </section> : <>
       {error && <div className={styles.error} role="alert"><span>{error}</span><button title="Refresh saved progress" disabled={busy} onClick={() => void refresh()}><RefreshCw size={18} /></button></div>}
