@@ -18,6 +18,10 @@ const moderationActions = new Set(["hide", "restore", "delete", "resolve_report"
 // Keep the automatic language check deliberately narrow. Severe abuse remains a
 // timeout case below; ordinary profanity is rejected without retaining its text.
 const profanityPattern = /\b(?:arsehole|bastard|bitch|bullshit|cunt|dickhead|fuck(?:er|ing|ed|s)?|motherfucker|prick|shit(?:ty|head)?|wanker)\b/i;
+// A separate expression catches only the common, deliberately separated forms.
+// It does not collapse arbitrary words, which avoids false matches in ordinary
+// words such as "Scunthorpe".
+const obfuscatedProfanityPattern = /\b(?:f[\W_]*u[\W_]*c[\W_]*k|s[\W_]*h[\W_]*[i1!][\W_]*t|b[\W_]*[i1!][\W_]*t[\W_]*c[\W_]*h|c[\W_]*u[\W_]*n[\W_]*t)\b/i;
 
 type SendInput = { channelSlug?: unknown; clientRequestId?: unknown; body?: unknown };
 type ReportInput = { messageId?: unknown; reason?: unknown };
@@ -75,7 +79,7 @@ export function moderateDznCommsBody(value: unknown) {
   if (/\b(?:kill yourself|kys|doxx?|swat(?:ting)?|rape threat)\b/i.test(compact)) {
     return { decision: "timeout" as const, code: "SAFETY_TIMEOUT", body: "" };
   }
-  if (profanityPattern.test(compact)) {
+  if (profanityPattern.test(compact) || obfuscatedProfanityPattern.test(body)) {
     return { decision: "block" as const, code: "LANGUAGE_FILTERED", body: "" };
   }
   return { decision: "allow" as const, code: "MESSAGE_ALLOWED", body };
