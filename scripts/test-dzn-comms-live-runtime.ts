@@ -840,6 +840,9 @@ function testAutomaticLanguageFilter() {
   assert.deepEqual(filtered, { decision: "block", code: "LANGUAGE_FILTERED", body: "" });
   assert.equal(moderateDznCommsBody("What the f.u.c.k happened?").decision, "block", "Punctuation must not bypass the language filter.");
   assert.equal(moderateDznCommsBody("He keeps f.u.c.king about.").decision, "block", "Obfuscated profanity suffixes must not bypass the language filter.");
+  for (const body of ["f.u.c.ki.n.g", "f.u.c.ke.r", "s.h.i.t.t.y", "s.h.i.th.e.a.d"]) {
+    assert.equal(moderateDznCommsBody(body).decision, "block", `Separated profanity suffixes must not bypass the language filter: ${body}`);
+  }
   for (const body of [
     "a.r.s.e.h.o.l.e",
     "b.a.s.t.a.r.d",

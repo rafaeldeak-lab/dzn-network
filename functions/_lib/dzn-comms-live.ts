@@ -22,7 +22,7 @@ const profanityPattern = /\b(?:arsehole|bastard|bitch|bullshit|cunt|dickhead|fuc
 // letters are deliberately separated. It never collapses arbitrary words, so
 // ordinary text such as "Scunthorpe" remains safe from false matches.
 const obfuscatedProfanityPattern =
-  /\b(?:a[\W_]*r[\W_]*s[\W_]*e[\W_]*h[\W_]*o[\W_]*l[\W_]*e|b[\W_]*a[\W_]*s[\W_]*t[\W_]*a[\W_]*r[\W_]*d|b[\W_]*[i1!][\W_]*t[\W_]*c[\W_]*h|b[\W_]*u[\W_]*l[\W_]*l[\W_]*s[\W_]*h[\W_]*[i1!][\W_]*t|c[\W_]*u[\W_]*n[\W_]*t|d[\W_]*[i1!][\W_]*c[\W_]*k[\W_]*h[\W_]*e[\W_]*a[\W_]*d|f[\W_]*u[\W_]*c[\W_]*k(?:[\W_]*(?:er|ing|ed|s))?|m[\W_]*o[\W_]*t[\W_]*h[\W_]*e[\W_]*r[\W_]*f[\W_]*u[\W_]*c[\W_]*k[\W_]*e[\W_]*r|p[\W_]*r[\W_]*[i1!][\W_]*c[\W_]*k|s[\W_]*h[\W_]*[i1!][\W_]*t(?:[\W_]*(?:ty|head))?|w[\W_]*a[\W_]*n[\W_]*k[\W_]*e[\W_]*r)\b/i;
+  /\b(?:a[\W_]*r[\W_]*s[\W_]*e[\W_]*h[\W_]*o[\W_]*l[\W_]*e|b[\W_]*a[\W_]*s[\W_]*t[\W_]*a[\W_]*r[\W_]*d|b[\W_]*[i1!][\W_]*t[\W_]*c[\W_]*h|b[\W_]*u[\W_]*l[\W_]*l[\W_]*s[\W_]*h[\W_]*[i1!][\W_]*t|c[\W_]*u[\W_]*n[\W_]*t|d[\W_]*[i1!][\W_]*c[\W_]*k[\W_]*h[\W_]*e[\W_]*a[\W_]*d|f[\W_]*u[\W_]*c[\W_]*k(?:[\W_]*(?:e[\W_]*r|i[\W_]*n[\W_]*g|e[\W_]*d|s))?|m[\W_]*o[\W_]*t[\W_]*h[\W_]*e[\W_]*r[\W_]*f[\W_]*u[\W_]*c[\W_]*k[\W_]*e[\W_]*r|p[\W_]*r[\W_]*[i1!][\W_]*c[\W_]*k|s[\W_]*h[\W_]*[i1!][\W_]*t(?:[\W_]*(?:t[\W_]*y|h[\W_]*e[\W_]*a[\W_]*d))?|w[\W_]*a[\W_]*n[\W_]*k[\W_]*e[\W_]*r)\b/i;
 
 type SendInput = { channelSlug?: unknown; clientRequestId?: unknown; body?: unknown };
 type ReportInput = { messageId?: unknown; reason?: unknown };
