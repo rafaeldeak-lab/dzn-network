@@ -43,7 +43,7 @@ try {
     { name: "unbroken-text", width: 320, kind: "long" }, { name: "oversize", width: 390, kind: "oversize" },
     { name: "unauthorized", width: 390, kind: "401" }, { name: "forbidden", width: 390, kind: "403" },
     { name: "offline", width: 390, kind: "offline" }, { name: "timeout", width: 390, kind: "timeout" },
-    { name: "full-unicode-page", width: 390, kind: "unicode" },
+    { name: "full-unicode-page", width: 390, kind: "unicode" }, { name: "assist-anchor", width: 390, kind: "assist-anchor" },
   ]) {
     const context = await browser.newContext({ viewport: { width: scenario.width, height: 900 }, reducedMotion: "reduce", serviceWorkers: "block" });
     const page = await context.newPage(), errors: string[] = [], prohibited: string[] = [], sockets: string[] = [];
@@ -68,9 +68,9 @@ try {
       if (scenario.kind === "oversize") body += " ".repeat(COMMS_HISTORY_MAX_BYTES + 1);
       return route.fulfill({ status: 200, contentType: "application/json", body });
     });
-    await page.goto(`${base}/community`);
-    const success = ["ready", "empty", "hidden", "long", "unicode"].includes(scenario.kind);
-    await page.getByText(success ? "Local/test read-history payload loaded. Sending remains disabled."
+    await page.goto(`${base}${scenario.kind === "assist-anchor" ? "/community#dzn-assist" : "/community"}`);
+    const success = ["ready", "empty", "hidden", "long", "unicode", "assist-anchor"].includes(scenario.kind);
+    await page.getByText(success ? "Message history is available. Sending is not enabled yet."
       : "Message history could not be reached, so DZN is showing the static read-only fallback.", { exact: true }).waitFor({ timeout: 9_000 });
     await page.evaluate(() => document.fonts.ready);
     const metrics = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth,
@@ -81,9 +81,13 @@ try {
     assert.equal(metrics.disabledComposer, true); assert.deepEqual(metrics.brokenImages, []);
     assert.equal(reads, 1); assert.deepEqual(errors, []); assert.deepEqual(prohibited, []); assert.deepEqual(sockets, []);
     assert.doesNotMatch(await page.locator("main").innerText(), /PRIVATE-LEAK-SENTINEL|PRIVATE-AUTHOR|must not render/);
-    if (scenario.kind === "empty") assert.equal(await page.locator("main article").count(), 0);
+    if (scenario.kind === "empty") assert.equal(await page.locator('[role="log"] article').count(), 0);
     if (scenario.kind === "hidden") assert.equal(await page.getByText("Message hidden by DZN Safety.", { exact: true }).count(), 1);
-    if (scenario.kind === "unicode") assert.equal(await page.locator("main article").count(), 30);
+    if (scenario.kind === "unicode") assert.equal(await page.locator('[role="log"] article').count(), 30);
+    if (scenario.kind === "assist-anchor") {
+      await page.getByRole("heading", { name: "Find the right next step" }).waitFor();
+      assert.equal(await page.locator("#dzn-assist details[open]").count(), 1, "The direct DZN Assist link must expand its guidance panel.");
+    }
     await page.screenshot({ path: path.join(output, `${scenario.name}.png`), fullPage: scenario.kind !== "unicode" });
     results.push({ scenario, metrics, reads, errors, prohibited, sockets });
     console.log(`PASS ${scenario.name}`);

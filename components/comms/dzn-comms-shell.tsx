@@ -402,8 +402,8 @@ export function DznCommsShell() {
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#03050d] pb-24 pt-4 text-zinc-100 sm:pt-6">
-      <section className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 sm:px-6 lg:px-8">
-        <nav aria-label="DZN communication tools" className={`grid gap-2 rounded-lg border border-white/10 bg-[#060a15]/95 p-2 ${ownerDiscordAccessUiEnabled ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2"}`}>
+      <section className="mx-auto flex w-full max-w-[84rem] flex-col gap-3 px-4 sm:px-6 lg:px-8">
+        <nav aria-label="DZN communication tools" className={`grid gap-2 rounded-md border border-white/10 bg-[#060a15]/95 p-2 ${ownerDiscordAccessUiEnabled ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2"}`}>
           <a href="#global-chat" className="group flex min-h-14 items-center gap-3 rounded-md border border-cyan-300/35 bg-cyan-300/10 px-3 py-2">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-cyan-300/30 bg-cyan-300/10 text-cyan-100"><MessageCircle className="h-5 w-5" aria-hidden="true" /></span>
             <span className="min-w-0 flex-1"><span className="block text-sm font-black uppercase text-white">DZN Comms</span><span className="block text-xs font-bold text-emerald-200">{selectedChannelAccessLabel}</span></span>
@@ -421,38 +421,38 @@ export function DznCommsShell() {
           </a> : null}
         </nav>
 
-        <div id="global-chat" className="scroll-mt-6 overflow-hidden rounded-lg border border-cyan-400/20 bg-[radial-gradient(circle_at_18%_10%,rgba(34,211,238,0.18),transparent_28%),radial-gradient(circle_at_88%_0%,rgba(168,85,247,0.16),transparent_30%),rgba(5,9,22,0.88)] shadow-[0_26px_80px_rgba(0,0,0,0.42)]">
-          <div className="flex flex-col gap-5 border-b border-white/10 px-5 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex min-w-0 items-center gap-4">
-              <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg border border-cyan-300/30 bg-cyan-400/10 text-cyan-100 shadow-[0_0_28px_rgba(34,211,238,0.22)]">
-                <MessageCircle className="h-7 w-7" aria-hidden="true" />
+        <div id="global-chat" className="scroll-mt-6 overflow-hidden rounded-md border border-cyan-400/20 bg-[radial-gradient(circle_at_18%_0%,rgba(34,211,238,0.16),transparent_32%),radial-gradient(circle_at_88%_0%,rgba(168,85,247,0.13),transparent_28%),rgba(5,9,22,0.92)] shadow-[0_22px_70px_rgba(0,0,0,0.38)]">
+          <div className="flex flex-col gap-4 border-b border-white/10 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-md border border-cyan-300/30 bg-cyan-400/10 text-cyan-100 shadow-[0_0_24px_rgba(34,211,238,0.18)]">
+                <MessageCircle className="h-6 w-6" aria-hidden="true" />
               </span>
               <div className="min-w-0">
-                <p className="text-xs font-black uppercase tracking-[0.28em] text-cyan-200">DZN Comms</p>
-                <h1 className="mt-1 text-3xl font-black uppercase leading-none text-white sm:text-4xl">{payload.channel.name}</h1>
-                <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-zinc-300">
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-cyan-200">DZN Comms</p>
+                <h1 className="mt-1 text-2xl font-black uppercase leading-none text-white sm:text-3xl">{payload.channel.name}</h1>
+                <p className="mt-1.5 max-w-2xl text-sm font-semibold leading-5 text-zinc-300">
                   {payload.channel.description ?? "Discord-authenticated members can talk in this moderated DZN channel."}
                 </p>
               </div>
             </div>
-            <div className={presenceUiEnabled ? "grid gap-2 sm:grid-cols-3 lg:w-[500px]" : "grid gap-2 sm:grid-cols-2 lg:w-[330px]"}>
+            <div className={presenceUiEnabled ? "grid gap-2 sm:grid-cols-3 lg:w-[420px]" : "grid gap-2 sm:grid-cols-2 lg:w-[280px]"}>
               <StatusPill label="History" value={statusLabel} tone={history.status === "ready" ? "cyan" : "violet"} />
               <StatusPill label="Runtime" value={sendingEnabled ? "Live" : "Read Only"} tone={sendingEnabled ? "cyan" : "gold"} />
               {presenceUiEnabled ? <DznLivePresenceCounter /> : null}
             </div>
           </div>
 
-          <div className="border-b border-white/10 bg-black/20 px-5 py-3 sm:px-6">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <span className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400"><span className="h-2 w-2 rounded-full bg-emerald-300" /> Recent in this channel</span>
-              {recentSpeakers.length > 0 ? recentSpeakers.map((member) => <span key={`${member.author_display_name}:${member.author_role_label}`} className="inline-flex items-center gap-2 text-xs font-bold text-zinc-200"><span className="grid h-6 w-6 place-items-center rounded-full border border-violet-300/35 bg-violet-400/15 text-[10px] text-violet-100">{initials(member.author_display_name)}</span>{member.author_display_name}</span>) : <span className="text-xs font-semibold text-zinc-500">Conversation is quiet.</span>}
+          <div className="border-b border-white/10 bg-black/20 px-4 py-2.5 sm:px-5">
+            <div className="flex items-center gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <span className="inline-flex shrink-0 items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-zinc-400"><span className="h-2 w-2 rounded-full bg-emerald-300" /> Recent</span>
+              {recentSpeakers.length > 0 ? recentSpeakers.map((member) => <span key={`${member.author_display_name}:${member.author_role_label}`} className="inline-flex shrink-0 items-center gap-2 text-xs font-bold text-zinc-200"><span className="grid h-6 w-6 place-items-center rounded-full border border-violet-300/35 bg-violet-400/15 text-[10px] text-violet-100">{initials(member.author_display_name)}</span>{member.author_display_name}</span>) : <span className="text-xs font-semibold text-zinc-500">Conversation is quiet.</span>}
             </div>
           </div>
 
-          <div className="grid gap-0 lg:grid-cols-[224px_minmax(0,1fr)_260px]">
-            <aside className="border-b border-white/10 bg-black/18 p-4 lg:border-b-0 lg:border-r">
+          <div className="grid gap-0 lg:grid-cols-[200px_minmax(0,1fr)_226px]">
+            <aside className="border-b border-white/10 bg-black/18 p-3 lg:border-b-0 lg:border-r">
               <PanelTitle icon={Hash} label="Channels" />
-              <div className="mt-4 space-y-2">
+              <div className="mt-3 space-y-2">
                 {payload.available_channels
                   .filter((channel) => channel.kind === "public" || privateGroupsUiEnabled)
                   .map((channel) => (
@@ -479,7 +479,7 @@ export function DznCommsShell() {
                   ? <ChannelButton icon={LockKeyhole} label="Private Groups" meta="Unavailable" />
                   : null}
               </div>
-              <div className="mt-5 rounded-lg border border-amber-300/20 bg-amber-300/8 p-3">
+              <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/8 p-3">
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-200">Community Safety</p>
                 <p className="mt-2 text-xs font-semibold leading-5 text-zinc-300">
                   Do not post invites, secrets, threats or personal information. Report abuse instead of replying to it.
@@ -487,8 +487,8 @@ export function DznCommsShell() {
               </div>
             </aside>
 
-            <section className="min-w-0 border-b border-white/10 p-4 lg:border-b-0 lg:border-r">
-              <div className="flex flex-col gap-3 border-b border-white/10 pb-4 sm:flex-row sm:items-center sm:justify-between">
+            <section className="min-w-0 border-b border-white/10 p-3 sm:p-4 lg:border-b-0 lg:border-r">
+              <div className="flex flex-col gap-2 border-b border-white/10 pb-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.22em] text-cyan-200">#{payload.channel.slug}</p>
                   <h2 className="mt-1 text-xl font-black uppercase text-white">{payload.channel.name}</h2>
@@ -498,15 +498,15 @@ export function DznCommsShell() {
                 </span>
               </div>
 
-              <div role="status" aria-live="polite" className="mt-4 rounded-md border border-cyan-300/18 bg-cyan-300/8 px-4 py-3">
-                <p className="text-sm font-bold leading-6 text-cyan-50">{history.message}</p>
+              <div role="status" aria-live="polite" className="mt-3 border-l-2 border-cyan-300/55 bg-cyan-300/6 px-3 py-2">
+                <p className="text-xs font-bold leading-5 text-cyan-50">{history.message}</p>
               </div>
 
               <div
                 role="log"
                 aria-live="polite"
                 aria-relevant="additions text"
-                className="mt-4 max-h-[52svh] divide-y divide-white/8 overflow-y-auto overscroll-contain rounded-md border border-white/8 bg-black/15 px-3 [scrollbar-gutter:stable] lg:max-h-[38rem]"
+                className="mt-3 max-h-[50svh] divide-y divide-white/8 overflow-y-auto overscroll-contain rounded-md border border-white/8 bg-black/20 px-3 [scrollbar-gutter:stable] lg:max-h-[32rem]"
               >
                 {visibleMessages.map((message) => (
                   <MessageRow
@@ -523,7 +523,7 @@ export function DznCommsShell() {
                 ))}
               </div>
 
-              <form onSubmit={handleSend} className="mt-4 flex items-center gap-2 rounded-md border border-white/10 bg-black/35 p-2" aria-label="DZN Comms message composer">
+              <form onSubmit={handleSend} className="mt-3 flex items-center gap-2 rounded-md border border-white/10 bg-[#060b14]/92 p-2" aria-label="DZN Comms message composer">
                 <button
                   type="button"
                   disabled
@@ -551,22 +551,22 @@ export function DznCommsShell() {
               {composerMessage ? <p role="alert" className="mt-2 text-sm font-bold text-amber-200">{composerMessage}</p> : null}
             </section>
 
-            <aside className="bg-black/18 p-4">
+            <aside className="bg-black/18 p-3">
               <PanelTitle icon={ShieldCheck} label="Safety Contract" />
-              <div className="mt-4 space-y-3">
+              <div className="mt-3 space-y-2">
                 <SafetyCard icon={ShieldCheck} label="Authenticated" value="Discord login required to send" />
                 <SafetyCard icon={AlertTriangle} label="Moderation" value="Filters, reports and owner actions" />
                 <SafetyCard icon={Bot} label="DZN Assist" value="Guided public help is available below." />
                 <SafetyCard icon={Users} label="Private groups" value="Membership proof required" />
               </div>
-              <div className="mt-5 rounded-lg border border-violet-300/18 bg-violet-400/8 p-4">
-                <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-200">Fair Boundary</p>
+              <details className="mt-4 rounded-md border border-violet-300/18 bg-violet-400/8 p-3">
+                <summary className="cursor-pointer text-xs font-black uppercase tracking-[0.16em] text-violet-200">Fair boundary</summary>
                 <ul className="mt-3 space-y-2 text-xs font-semibold leading-5 text-zinc-300">
                   {payload.fairness_boundary.slice(0, 4).map((line) => (
                     <li key={line}>{line}</li>
                   ))}
                 </ul>
-              </div>
+              </details>
             </aside>
           </div>
         </div>
@@ -643,7 +643,7 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionUiEnabled, 
   }
 
   return (
-    <article className={`py-4 ${muted ? "bg-amber-300/[0.035]" : ""}`}>
+    <article className={`py-3 ${muted ? "bg-amber-300/[0.035]" : ""}`}>
       <div className="flex items-start gap-3">
         <MessageAvatar message={message} muted={muted} />
         <div className="min-w-0 flex-1">
@@ -655,7 +655,7 @@ function MessageRow({ message, reportEnabled, deleteEnabled, reactionUiEnabled, 
             <CommsMessageTime value={message.created_at} />
             {canDelete ? <button type="button" disabled={deleteState === "deleting"} onClick={() => void deleteMessage()} className="ml-auto inline-grid h-7 w-7 place-items-center rounded-md border border-white/10 text-zinc-400 hover:border-red-300/40 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-60" title="Delete your message" aria-label="Delete your message"><Trash2 className="h-3.5 w-3.5" aria-hidden="true" /></button> : null}
           </div>
-          <p className={`mt-2 text-sm font-semibold leading-6 [overflow-wrap:anywhere] ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
+          <p className={`mt-1.5 text-sm font-semibold leading-6 [overflow-wrap:anywhere] ${muted ? "text-amber-100/82" : "text-zinc-200"}`}>{message.body}</p>
           {deleteState === "error" ? <p role="alert" className="mt-2 text-xs font-bold text-amber-200">Message could not be deleted. Try again.</p> : null}
           {reactionUiEnabled && message.reactions && !muted ? (
             <div className="mt-3 flex flex-wrap items-center gap-2" aria-label="Message reactions">

@@ -15,6 +15,7 @@ const ownerDiscordAccessUiEnabled = process.env.NEXT_PUBLIC_DZN_OWNER_DISCORD_AC
 export function DznAssist() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<AssistCategory>("All");
+  const [expanded, setExpanded] = useState(false);
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const guides = useMemo(() => DZN_ASSIST_GUIDES.filter((guide) => {
     if (guide.id === "server-owner-discord-access" && !ownerDiscordAccessUiEnabled) return false;
@@ -27,38 +28,53 @@ export function DznAssist() {
   }), [category, normalizedQuery]);
 
   useEffect(() => {
-    if (window.location.hash !== "#dzn-assist") return;
     let cancelled = false;
     const scrollToAssist = () => {
       if (!cancelled && window.location.hash === "#dzn-assist") {
+        setExpanded(true);
         document.getElementById("dzn-assist")?.scrollIntoView({ block: "start" });
       }
     };
-    const frame = window.requestAnimationFrame(() => window.requestAnimationFrame(scrollToAssist));
-    const settledLayoutTimer = window.setTimeout(scrollToAssist, 400);
-    void document.fonts?.ready.then(scrollToAssist);
+    const revealAndScroll = () => {
+      if (window.location.hash !== "#dzn-assist") return;
+      setExpanded(true);
+      const frame = window.requestAnimationFrame(() => window.requestAnimationFrame(scrollToAssist));
+      const settledLayoutTimer = window.setTimeout(scrollToAssist, 400);
+      void document.fonts?.ready.then(scrollToAssist);
+      return () => {
+        window.cancelAnimationFrame(frame);
+        window.clearTimeout(settledLayoutTimer);
+      };
+    };
+    let clearScroll = revealAndScroll();
+    const onHashChange = () => {
+      clearScroll?.();
+      clearScroll = revealAndScroll();
+    };
+    window.addEventListener("hashchange", onHashChange);
     return () => {
       cancelled = true;
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(settledLayoutTimer);
+      clearScroll?.();
+      window.removeEventListener("hashchange", onHashChange);
     };
   }, []);
 
   return (
     <section id="dzn-assist" aria-labelledby="dzn-assist-title" className="scroll-mt-6 overflow-hidden rounded-lg border border-violet-300/20 bg-[#070817] shadow-[0_22px_70px_rgba(0,0,0,0.35)]">
-      <div className="grid gap-5 border-b border-white/10 px-5 py-5 sm:px-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-        <div className="flex min-w-0 items-start gap-4">
-          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-md border border-violet-300/30 bg-violet-300/10 text-violet-100"><Bot className="h-6 w-6" aria-hidden="true" /></span>
-          <div className="min-w-0">
-            <p className="text-xs font-black uppercase tracking-[0.22em] text-violet-200">DZN Assist</p>
-            <h2 id="dzn-assist-title" className="mt-1 text-2xl font-black uppercase text-white sm:text-3xl">Find the right next step</h2>
-            <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-zinc-300">Search trusted DZN guidance for accounts, player links, server setup, billing and community tools.</p>
+      <details open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)} className="group">
+        <summary className="grid cursor-pointer list-none gap-4 border-b border-white/10 px-4 py-4 outline-none transition hover:bg-white/[0.025] focus-visible:ring-2 focus-visible:ring-violet-200/70 sm:px-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center [&::-webkit-details-marker]:hidden">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-violet-300/30 bg-violet-300/10 text-violet-100"><Bot className="h-5 w-5" aria-hidden="true" /></span>
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-violet-200">DZN Assist</p>
+              <h2 id="dzn-assist-title" className="mt-1 text-xl font-black uppercase text-white sm:text-2xl">Find the right next step</h2>
+              <p className="mt-1 max-w-3xl text-sm font-semibold leading-5 text-zinc-300">Guidance for accounts, players, servers, billing and community tools.</p>
+            </div>
           </div>
-        </div>
-        <span className="inline-flex w-fit items-center gap-2 rounded-md border border-emerald-300/25 bg-emerald-300/10 px-3 py-2 text-xs font-black uppercase text-emerald-100"><span className="h-2 w-2 rounded-full bg-emerald-300" aria-hidden="true" /> Guided help live</span>
-      </div>
+          <span className="inline-flex w-fit items-center gap-2 rounded-md border border-emerald-300/25 bg-emerald-300/10 px-3 py-2 text-xs font-black uppercase text-emerald-100"><span className="h-2 w-2 rounded-full bg-emerald-300" aria-hidden="true" /> Guided help <ChevronRight className="h-4 w-4 transition group-open:rotate-90" aria-hidden="true" /></span>
+        </summary>
 
-      <div className="grid gap-5 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+      <div className="grid gap-5 p-4 sm:p-5 lg:grid-cols-[minmax(0,1fr)_280px]">
         <div className="min-w-0">
           <label htmlFor="dzn-assist-search" className="text-xs font-black uppercase tracking-[0.16em] text-zinc-300">What do you need help with?</label>
           <div className="mt-2 flex min-h-12 items-center gap-3 rounded-md border border-white/12 bg-black/30 px-3 focus-within:border-violet-300/50 focus-within:ring-2 focus-within:ring-violet-300/15">
@@ -90,6 +106,7 @@ export function DznAssist() {
           {ownerDiscordAccessUiEnabled ? <div className="rounded-md border border-cyan-300/20 bg-cyan-300/7 p-4"><div className="flex items-center gap-2 text-sm font-black uppercase text-white"><ShieldCheck className="h-5 w-5 text-cyan-200" aria-hidden="true" /> Server owner?</div><p className="mt-2 text-xs font-semibold leading-5 text-zinc-300">Already linked an active DZN server? Request the restricted owner Discord area here. Approval stays manual and is checked against that exact server.</p><Link href="/login?returnTo=%2Fdiscord-owner-access" className="mt-3 flex min-h-10 items-center justify-between rounded-md border border-cyan-300/25 bg-cyan-300/8 px-3 text-xs font-black text-cyan-100 hover:border-cyan-200/55 hover:text-white">Request owner access <ChevronRight className="h-4 w-4" aria-hidden="true" /></Link></div> : null}
         </aside>
       </div>
+      </details>
     </section>
   );
 }
